@@ -1147,3 +1147,56 @@ test('drains indexed queues and packed deques with time to spare', () => {
     '<?php $a=range(1,6000);next($a);$s=0;while($a)$s+=array_shift($a);echo $s,"|";$a=range(1,8000);unset($a[3]);$s=0;while($a)$s+=array_shift($a);echo $s,"|";$a=range(1,6000);$s=0;while($a){$s+=array_pop($a);if($a)$s+=array_shift($a);}echo $s;';
   expect(run(source)).toMatchObject({ kind: 'executed', stdout: '18003000|32003996|18003000' });
 });
+
+test.each(['"01"', '"+1"', '"-0"', '" 1"', '"1 "', '"1x"', '"1ex"'])(
+  'folds PHP compile-time string offsets: %s',
+  (offset) => {
+    const result = run(`<?php echo 'never';function f(int $x="abc"[${offset}]){}f(1);`);
+    expect(result.kind).toBe('compileError');
+    expect(JSON.stringify(result)).toContain('Cannot use string as default value');
+  }
+);
+
+test.each(['0.0', '1.0', '-1.0', 'false', 'true', 'null', '"1.0"', '"1e0x"', '-1', '"-1x"'])(
+  'defers PHP runtime string offsets when the default is unused: %s',
+  (offset) => {
+    expect(run(`<?php echo 'run';function f(int $x="abc"[${offset}]){}f(1);echo 'ok';`)).toMatchObject({
+      kind: 'executed',
+      stdout: 'runok',
+    });
+  }
+);
+
+test.each(['0.0', 'false', 'true', 'null'])(
+  'defers noninteger array offsets when the default is unused: %s',
+  (offset) => {
+    expect(run(`<?php function f(string $x=[1,2][${offset}]){}f('ok');echo 'ok';`)).toMatchObject({
+      kind: 'executed',
+      stdout: 'ok',
+    });
+  }
+);
+
+test.each(['1.5<=>"x"', '"x"<=>1.5', '1.5=="x"', '1.5<"x"', '1.5>"x"', '1.5==""', '1.5<=>"1x"'])(
+  'validates folded float/string comparisons before executing: %s',
+  (value) => {
+    expect(run(`<?php echo 'never';function f(string $x=${value}){}`).kind).toBe('compileError');
+    expect(run(`<?php echo 'never';class C{public string $x=${value};}`).kind).toBe('compileError');
+  }
+);
+
+test('folds float/string comparisons inside spread defaults', () => {
+  expect(run('<?php echo "never";function f(true $x=![...((1.5<"x")?[1]:[])]){}').kind).toBe('compileError');
+});
+
+test.each([6, 14].flatMap((flags) => ['a', '0', '1', ' '].map((text) => [flags, text] as const)))(
+  'interrupts natural multisort byte walks (flags: %s, text: %s)',
+  (flags, text) => {
+    expect(
+      run(`<?php $a=array_fill(0,2000,str_repeat('${text}',256));array_multisort($a,${flags});echo 'never';`)
+    ).toEqual({
+      kind: 'limitExceeded',
+      limit: 'operations',
+    });
+  }
+);

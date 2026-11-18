@@ -12,7 +12,7 @@ import { decodeHtml, escapeHtml, nextChar, translationTable } from './htmlEntiti
 import { isStream } from './libCore';
 import { ctypeUpper, isCtypeAlpha, isUtf8Ctype } from './libLocale';
 import { defineAlias, defineConstant, defineFunction, markInlined } from './native';
-import { toStr } from './operators';
+import { toInt, toStr } from './operators';
 import { rt } from './runtime';
 import { formatPrintf } from './sprintf';
 import { incrementString } from './strings';
@@ -357,17 +357,31 @@ defineFunction(
 );
 defineFunction(
   'substr_replace(array|string $string, array|string $replace, array|int $offset, array|int|null $length = null): string|array',
-  // code-gauge-allow functionCognitiveComplexity 21 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+  // code-gauge-allow functionCognitiveComplexity 30 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
   ({ args }) => {
     const [text, replace, offset, length] = args;
+    if (!(text instanceof PhpArray)) {
+      if (offset instanceof PhpArray)
+        throwError(
+          'TypeError',
+          'substr_replace(): Argument #3 ($offset) cannot be an array when working on a single string'
+        );
+      if (length instanceof PhpArray)
+        throwError(
+          'TypeError',
+          'substr_replace(): Argument #4 ($length) cannot be an array when working on a single string'
+        );
+    }
+    const replacements = replace instanceof PhpArray ? replace.values() : undefined;
+    const offsets = offset instanceof PhpArray ? offset.values() : undefined;
+    const lengths = length instanceof PhpArray ? length.values() : undefined;
     const one = (subject: string, index: number): string => {
-      const pick = (value: Value): Value => (value instanceof PhpArray ? (value.values()[index] ?? null) : value);
-      const replacement = replace instanceof PhpArray ? toStr(replace.values()[index] ?? '') : toStr(replace);
-      let start = Number(pick(offset) ?? 0n);
-      const lengthValue = pick(length ?? null);
+      const replacement = toStr(replacements ? (replacements[index] ?? '') : replace);
+      let start = Number(toInt(offsets ? (offsets[index] ?? null) : offset));
+      const lengthValue = lengths ? (lengths[index] ?? null) : length;
       if (start < 0) start = Math.max(subject.length + start, 0);
       if (start > subject.length) start = subject.length;
-      let end = lengthValue === null || lengthValue === undefined ? subject.length : Number(lengthValue);
+      let end = lengthValue === null || lengthValue === undefined ? subject.length : Number(toInt(lengthValue));
       if (lengthValue !== null && lengthValue !== undefined)
         end = end < 0 ? Math.max(subject.length + end, start) : Math.min(start + end, subject.length);
       rt().ensureStringFits(start + replacement.length + subject.length - Math.max(end, start));
@@ -416,6 +430,7 @@ function isSpace(code: number): boolean {
 /** Compares two runs of digits that start with a zero as fractions: the first different digit decides. */
 function compareLeft(a: string, ap: number, b: string, bp: number): { result: number; ap: number; bp: number } {
   for (; ; ap++, bp++) {
+    rt().spend();
     const da = ap < a.length && isDigit(byteAt(a, ap));
     const db = bp < b.length && isDigit(byteAt(b, bp));
     if (!da && !db) return { result: 0, ap, bp };
@@ -430,6 +445,7 @@ function compareLeft(a: string, ap: number, b: string, bp: number): { result: nu
 function compareRight(a: string, ap: number, b: string, bp: number): { result: number; ap: number; bp: number } {
   let bias = 0;
   for (; ; ap++, bp++) {
+    rt().spend();
     const da = ap < a.length && isDigit(byteAt(a, ap));
     const db = bp < b.length && isDigit(byteAt(b, bp));
     if (!da && !db) return { result: bias, ap, bp };
@@ -440,20 +456,33 @@ function compareRight(a: string, ap: number, b: string, bp: number): { result: n
 }
 
 /** Compares strings in natural order, as PHP's strnatcmp_ex does. */
-// code-gauge-allow functionNcss 46 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 51 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function naturalCompare(a: string, b: string, insensitive: boolean): number {
   if (a.length === 0 || b.length === 0) return a.length === b.length ? 0 : a.length > b.length ? 1 : -1;
   let ap = 0;
   let bp = 0;
   let leading = true;
   for (;;) {
+    rt().spend();
     let ca = byteAt(a, ap);
     let cb = byteAt(b, bp);
-    while (leading && ca === 48 && ap + 1 < a.length && isDigit(byteAt(a, ap + 1))) ca = byteAt(a, ++ap);
-    while (leading && cb === 48 && bp + 1 < b.length && isDigit(byteAt(b, bp + 1))) cb = byteAt(b, ++bp);
+    while (leading && ca === 48 && ap + 1 < a.length && isDigit(byteAt(a, ap + 1))) {
+      rt().spend();
+      ca = byteAt(a, ++ap);
+    }
+    while (leading && cb === 48 && bp + 1 < b.length && isDigit(byteAt(b, bp + 1))) {
+      rt().spend();
+      cb = byteAt(b, ++bp);
+    }
     leading = false;
-    while (isSpace(ca)) ca = byteAt(a, ++ap);
-    while (isSpace(cb)) cb = byteAt(b, ++bp);
+    while (isSpace(ca)) {
+      rt().spend();
+      ca = byteAt(a, ++ap);
+    }
+    while (isSpace(cb)) {
+      rt().spend();
+      cb = byteAt(b, ++bp);
+    }
     if (isDigit(ca) && isDigit(cb)) {
       const run = ca === 48 || cb === 48 ? compareLeft(a, ap, b, bp) : compareRight(a, ap, b, bp);
       ({ ap, bp } = run);

@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { floatFitsInt, valueName } from './conversions';
 import { deprecated, throwError } from './errors';
 import { cPow } from './floatPow';
-import { defineAlias, defineConstant, defineFunction } from './native';
+import { defineAlias, defineConstant, defineFunction, markInlined } from './native';
 import { arithmetic, compare } from './operators';
 import { rt } from './runtime';
 import { fixedDigits, phpRound, type RoundMode } from './strings';
@@ -88,20 +88,22 @@ defineFunction('intdiv(int $num1, int $num2): int', ({ args }) => {
 });
 defineFunction('fmod(float $num1, float $num2): float', ({ args }) => (args[0] as number) % (args[1] as number));
 defineFunction('fdiv(float $num1, float $num2): float', ({ args }) => (args[0] as number) / (args[1] as number));
-defineFunction('max(mixed $value, mixed ...$values): mixed', ({ args }) => extreme('max', args, 1));
-defineFunction('min(mixed $value, mixed ...$values): mixed', ({ args }) => extreme('min', args, -1));
+defineFunction('max(mixed $value, mixed ...$values): mixed', ({ args, row }) =>
+  extreme('max', args, 1, row !== undefined)
+);
+defineFunction('min(mixed $value, mixed ...$values): mixed', ({ args, row }) =>
+  extreme('min', args, -1, row !== undefined)
+);
 
-/**
- * Picks the smallest (`direction` -1) or largest (1) value as PHP does, which keeps a different one of two equal values
- * depending on the form of the call: an array keeps the first, two arguments go through the compiled two-argument
- * version, which keeps the second for `min` and the first for `max`, and more arguments keep the first.
- */
-function extreme(name: string, args: Value[], direction: number): Value {
-  if (args.length === 2) {
+markInlined('max');
+markInlined('min');
+
+function extreme(name: string, args: Value[], direction: number, compiled: boolean): Value {
+  if (compiled && args.length === 2) {
     const result = compare(args[0], args[1]);
     return (direction > 0 ? result >= 0 : result < 0) ? args[0] : args[1];
   }
-  if (args.length > 2) {
+  if (args.length > 1) {
     let best = args[0];
     for (const value of args.slice(1)) if (compare(value, best) * direction > 0) best = value;
     return best;

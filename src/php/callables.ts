@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 427 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 483 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
@@ -9,7 +9,6 @@ import { canCall, classScopeMessage, lookupMethod, requireClass } from './classe
 import { debugType, valueName } from './conversions';
 import { deprecated, notice, probe, ProbeFailure, throwError, warn } from './errors';
 import { type Chain, ev, evChain, iterate, resolveClassRef, SHORT } from './interp';
-import { toStr } from './operators';
 import { ElementPlace, share, VarPlace, writableContainer } from './places';
 import { type Frame, rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
@@ -32,6 +31,15 @@ import {
 export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | undefined): ArgValue[] {
   const runtime = rt();
   const values: ArgValue[] = [];
+  let positional = 0;
+  const add = (value: ArgValue): void => {
+    values.push(value);
+    if (value.name === undefined) value.position = positional++;
+    else {
+      const index = fn?.params.findIndex((param) => param.name === value.name && !param.variadic) ?? -1;
+      if (index >= 0) positional = Math.max(positional, index + 1);
+    }
+  };
   const frame = runtime.frame;
   for (const [index, arg] of args.entries()) {
     const mark = frame.temporaries.length;
@@ -40,35 +48,55 @@ export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | u
       if (arg.spread) {
         const source = fn?.params.some((param) => param.byRef) && arg.e.k === 'var' ? placeOf(arg.e) : undefined;
         let value = source ? source.get() : ev(arg.e);
+        if (value instanceof PhpArray) frame.temporaries.push(value);
         if (value instanceof PhpArray && source) value = writableContainer(source);
-        else if (value instanceof PhpArray && fn?.params.some((param) => param.byRef)) value = value.copy();
+        else if (value instanceof PhpArray && fn?.params.some((param) => param.byRef)) {
+          value = value.copy();
+          frame.temporaries.push(value);
+        }
+        let named = false;
+        const unpackName = (key: Value): string | undefined => {
+          if (typeof key === 'string') {
+            named = true;
+            return key;
+          }
+          if (typeof key !== 'bigint') throwError('Error', 'Keys must be of type int|string during argument unpacking');
+          if (named) throwError('Error', 'Cannot use positional argument after named argument during unpacking');
+          return undefined;
+        };
         if (value instanceof PhpArray) {
           for (const [key, item] of value.entries()) {
-            const argumentName = typeof key === 'string' ? key : undefined;
-            if (argumentName === undefined && values.some((other) => other.name !== undefined)) {
-              throwError('Error', 'Cannot use positional argument after named argument during unpacking');
-            }
-            const position = argumentName === undefined ? values.length : -1;
+            const argumentName = unpackName(key);
+            const position = argumentName === undefined ? positional : -1;
             if (fn && paramIsByRef(fn, position, argumentName)) {
               const ref = new ElementPlace(value, key).ref();
-              values.push({ v: ref.v, ref, name: argumentName });
-            } else values.push({ v: share(item), name: argumentName });
+              add({ v: ref.v, ref, name: argumentName });
+            } else add({ v: share(item), name: argumentName });
           }
         } else if (value instanceof PhpObject) {
           for (const [key, item] of iterate(value)) {
-            if (typeof key === 'string') values.push({ v: share(item), name: key });
-            else values.push({ v: share(item) });
+            const argumentName = unpackName(key);
+            const position = argumentName === undefined ? positional : -1;
+            if (fn && paramIsByRef(fn, position, argumentName)) {
+              const namedIndex = fn.params.findIndex((param) => param.name === argumentName);
+              const parameter = position === -1 ? namedIndex : position;
+              const number = parameter >= 0 ? parameter + 1 : fn.params.length;
+              warn(
+                `Cannot pass by-reference argument ${number} of ${name ?? fn.name}() by unpacking a Traversable, passing by-value instead`
+              );
+            }
+            add({ v: share(item), name: argumentName });
           }
         } else throwError('TypeError', 'Only arrays and Traversables can be unpacked');
         continue;
       }
-      const position = arg.name === undefined ? values.length : -1;
+      const position = arg.name === undefined ? positional : -1;
       const byRef = fn ? paramIsByRef(fn, position, arg.name) : false;
       if (byRef) {
         const e = arg.e;
         if (['var', 'varvar', 'idx', 'prop', 'sprop'].includes(e.k)) {
           const ref = placeOf(e).ref();
-          values.push({ v: ref.v, ref, name: arg.name });
+          add({ v: ref.v, ref, name: arg.name });
           continue;
         }
         runtime.lastReturnRef = undefined;
@@ -76,17 +104,17 @@ export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | u
         const returned = runtime.lastReturnRef as Ref | undefined;
         runtime.lastReturnRef = undefined;
         if (returned && (e.k === 'call' || e.k === 'mcall' || e.k === 'scall')) {
-          values.push({ v: returned.v, ref: returned, name: arg.name });
+          add({ v: returned.v, ref: returned, name: arg.name });
           continue;
         }
         const param = fn?.params[Math.min(position === -1 ? 0 : position, (fn?.params.length ?? 1) - 1)];
         if (param?.preferRef) {
-          values.push({ v: value, name: arg.name });
+          add({ v: value, name: arg.name });
           continue;
         }
-        if (e.k === 'call' || e.k === 'mcall' || e.k === 'scall') {
+        if (e.k === 'call' || e.k === 'mcall' || e.k === 'scall' || e.k === 'new' || e.k === 'newAnon') {
           notice('Only variables should be passed by reference');
-          values.push({ v: value, ref: new Ref(value), name: arg.name });
+          add({ v: value, ref: new Ref(value), name: arg.name });
           continue;
         }
         const label = name ?? fn?.name ?? '';
@@ -97,7 +125,7 @@ export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | u
       }
       const value = ev(arg.e);
       frame.temporaries.push(value);
-      values.push({ v: value, name: arg.name });
+      add({ v: value, name: arg.name });
     } finally {
       claimArgumentTemporaries(frame, values, first, mark);
     }
@@ -163,10 +191,7 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>): Chain {
   if (name !== undefined) methodName = name;
   else {
     const value = ev(e.name as Expr);
-    if (value instanceof PhpObject && isClosure(value)) {
-      throwError('Error', 'Method name must be a string');
-    }
-    methodName = toStr(value);
+    methodName = dynamicMethodName(value);
   }
   runtime.row = e.row;
   if (!(object instanceof PhpObject) || object.isResource) {
@@ -174,6 +199,12 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>): Chain {
   }
   runtime.frame.temporaries.push(object);
   const scope = runtime.frame.scope;
+  if (isClosure(object) && lower(methodName) === '__invoke') {
+    const target = closureTarget(object);
+    if (e.fcc) return object;
+    const args = evalArgs(e.args, target.fn, functionNameFor(target));
+    return invoke(target, args, e.row);
+  }
   const method = lookupMethod(object.cls, lower(methodName), scope);
   if (method && !method.isAbstract && canCall(method, scope)) {
     const target: CallTarget = method.isStatic
@@ -185,12 +216,6 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>): Chain {
     const result = invoke(target, args, e.row);
     runtime.frame.temporaries.push(result);
     return result;
-  }
-  if (isClosure(object) && lower(methodName) === '__invoke') {
-    const target = closureTarget(object);
-    if (e.fcc) return object;
-    const args = evalArgs(e.args, target.fn, functionNameFor(target));
-    return invoke(target, args, e.row);
   }
   const magic = object.cls.findMethod('__call');
   if (magic) {
@@ -210,6 +235,11 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>): Chain {
     );
   }
   throwError('Error', `Call to undefined method ${object.cls.name}::${methodName}()`);
+}
+
+function dynamicMethodName(value: Value): string {
+  if (typeof value !== 'string') throwError('Error', 'Method name must be a string');
+  return value;
 }
 
 function argsArray(args: ArgValue[]): PhpArray {
@@ -255,7 +285,7 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>): Value {
   const frame = runtime.frame;
   runtime.row = e.row;
   const cls = resolveClassRef(e.cls);
-  const methodName = typeof e.name === 'string' ? e.name : toStr(ev(e.name));
+  const methodName = typeof e.name === 'string' ? e.name : dynamicMethodName(ev(e.name));
   runtime.row = e.row;
   const scope = frame.scope;
   const method = lookupMethod(cls, lower(methodName), scope);
@@ -432,7 +462,6 @@ function resolveCallable(value: Value, mode: 'direct' | 'callback', emitScopeWar
   throw new CallableFailure(`Value of type ${debugType(value)} is not callable`, 'no array or string given');
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function arrayCallable(
   value: PhpArray,
   scope: PhpClass | undefined,
@@ -443,8 +472,12 @@ function arrayCallable(
     const target = value.get(0n);
     const method = value.get(1n);
     if (typeof method === 'string' && target instanceof PhpObject) {
-      const found = lookupMethod(target.cls, lower(method.replace(/^parent::/i, '')), scope);
+      if (isClosure(target) && lower(method) === '__invoke') return closureTarget(target);
+      const qualified = mode === 'callback' ? qualifiedObjectMethod(target.cls, method, scope) : undefined;
+      const found = lookupMethod(qualified?.cls ?? target.cls, lower(qualified?.name ?? method), scope);
       if (found && canCall(found, scope)) {
+        if (qualified && emitScopeWarning)
+          deprecated(`Callables of the form ["${target.cls.name}", "${method}"] are deprecated`);
         return found.isStatic
           ? { fn: found.fn, scope: found.scope, staticClass: target.cls, method: found }
           : { fn: found.fn, thisObj: target, scope: found.scope, staticClass: target.cls, method: found };
@@ -475,6 +508,37 @@ function arrayCallable(
       ? 'first array member is not a valid class name or object'
       : 'second array member is not a valid method'
   );
+}
+
+function qualifiedObjectMethod(
+  target: PhpClass,
+  method: string,
+  scope: PhpClass | undefined
+): { cls: PhpClass; name: string } | undefined {
+  const separator = method.indexOf('::');
+  if (separator === -1) return undefined;
+  const qualifier = method.slice(0, separator);
+  const word = lower(qualifier);
+  let cls: PhpClass;
+  if (word === 'self') cls = target;
+  else if (word === 'parent') {
+    if (!target.parent)
+      throw new CallableFailure(
+        'Cannot access "parent" when current class scope has no parent',
+        'cannot access "parent" when current class scope has no parent'
+      );
+    cls = target.parent;
+  } else if (word === 'static') {
+    if (!scope)
+      throw new CallableFailure(classScopeMessage(word), 'cannot access "static" when no class scope is active');
+    cls = rt().frame.staticClass ?? scope;
+  } else cls = callableClass(qualifier);
+  if (!target.isSubclassOf(cls))
+    throw new CallableFailure(
+      `Class ${target.name} is not a subclass of ${cls.name}`,
+      `class ${target.name} is not a subclass of ${cls.name}`
+    );
+  return { cls, name: method.slice(separator + 2) };
 }
 
 function magicTarget(object: PhpObject, magic: Method, name: string): CallTarget {
@@ -650,11 +714,13 @@ function newClosure(fn: UserFunction, bound: Map<string, Ref>, isStatic: boolean
 
 // Function bodies ----------------------------------------------------------------------------------------------------
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function inlineCall(fn: Callable, args: Arg[]): boolean {
   if (fn.kind !== 'native' || args.some((arg) => arg.spread || arg.name !== undefined)) return false;
   const name = lower(fn.name);
   if (['strval', 'floatval', 'doubleval', 'boolval'].includes(name)) return args.length === 1;
   if (name === 'intval') return args.length === 1;
+  if (name === 'min' || name === 'max') return args.length === 2;
   if (name === 'sprintf') {
     const format = args[0]?.e;
     if (format?.k !== 'lit' || typeof format.v !== 'string') return false;

@@ -19,7 +19,7 @@ export function foldedDefaultType(expression: Expr): string | undefined {
   return typeof value === 'boolean' ? String(value) : 'string';
 }
 
-// code-gauge-allow functionNcss 57 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 58 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function fold(expression: Expr): Folded {
   switch (expression.k) {
     case 'lit': {
@@ -42,12 +42,17 @@ function fold(expression: Expr): Folded {
     case 'idx': {
       const base = fold(expression.base);
       const index = expression.index ? fold(expression.index) : UNKNOWN;
-      const key = constantKey(index);
-      if (base === UNKNOWN || key === UNKNOWN) return UNKNOWN;
+      if (base === UNKNOWN) return UNKNOWN;
+      const key =
+        base instanceof Map
+          ? typeof index === 'bigint' || typeof index === 'string'
+            ? constantKey(index)
+            : UNKNOWN
+          : stringOffset(index);
+      if (key === UNKNOWN) return UNKNOWN;
       if (base instanceof Map) return base.get(key) ?? (base.has(key) ? null : UNKNOWN);
       if (typeof base !== 'string' || typeof key !== 'bigint') return UNKNOWN;
-      const offset = key < 0n ? BigInt(base.length) + key : key;
-      return offset >= 0n && offset < BigInt(base.length) ? base[Number(offset)] : UNKNOWN;
+      return key >= 0n && key < BigInt(base.length) ? base[Number(key)] : UNKNOWN;
     }
     case 'array': {
       return arrayConstant(expression);
@@ -107,6 +112,13 @@ function arrayConstant(expression: Extract<Expr, { k: 'array' }>): Folded {
     } else if (!append(value)) return UNKNOWN;
   }
   return result;
+}
+
+function stringOffset(value: Folded): bigint | typeof UNKNOWN {
+  if (typeof value === 'bigint') return value;
+  if (typeof value !== 'string') return UNKNOWN;
+  const parsed = numericPrefix(value);
+  return parsed && typeof parsed.value === 'bigint' ? parsed.value : UNKNOWN;
 }
 
 function constantKey(value: Folded): Key | typeof UNKNOWN {
@@ -218,11 +230,6 @@ function compareConstant(left: Constant, right: Constant, strict: boolean): numb
     return Number(truth(left)) - Number(truth(right));
   if (left instanceof Map) return 1;
   if (right instanceof Map) return -1;
-  if (
-    (typeof left === 'number' && typeof right === 'string' && numericConstant(right) === UNKNOWN) ||
-    (typeof right === 'number' && typeof left === 'string' && numericConstant(left) === UNKNOWN)
-  )
-    return UNKNOWN;
   return compareScalar(left, right);
 }
 

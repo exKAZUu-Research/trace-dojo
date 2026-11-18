@@ -1,0 +1,5 @@
+
+Fatal error: Uncaught ErrorException: bad in other.php:42
+Stack trace:
+#0 {main}
+  thrown in other.php on line 42

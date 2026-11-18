@@ -1,0 +1,36 @@
+hi|direct:B;callback:B;check:bool(true)
+
+parent::hi|direct:Call to undefined method B::parent::hi();callback:
+Deprecated: Callables of the form ["B", "parent::hi"] are deprecated in /main.php on line 3
+A;check:
+Deprecated: Callables of the form ["B", "parent::hi"] are deprecated in /main.php on line 3
+bool(true)
+
+self::hi|direct:Call to undefined method B::self::hi();callback:
+Deprecated: Callables of the form ["B", "self::hi"] are deprecated in /main.php on line 3
+B;check:
+Deprecated: Callables of the form ["B", "self::hi"] are deprecated in /main.php on line 3
+bool(true)
+
+static::hi|direct:Call to undefined method B::static::hi();callback:
+Deprecated: Callables of the form ["B", "static::hi"] are deprecated in /main.php on line 3
+B;check:
+Deprecated: Callables of the form ["B", "static::hi"] are deprecated in /main.php on line 3
+bool(true)
+
+A::hi|direct:Call to undefined method B::A::hi();callback:
+Deprecated: Callables of the form ["B", "A::hi"] are deprecated in /main.php on line 3
+A;check:
+Deprecated: Callables of the form ["B", "A::hi"] are deprecated in /main.php on line 3
+bool(true)
+
+B::hi|direct:Call to undefined method B::B::hi();callback:
+Deprecated: Callables of the form ["B", "B::hi"] are deprecated in /main.php on line 3
+B;check:
+Deprecated: Callables of the form ["B", "B::hi"] are deprecated in /main.php on line 3
+bool(true)
+
+stdClass::hi|direct:Call to undefined method B::stdClass::hi();callback:call_user_func(): Argument #1 ($callback) must be a valid callback, class B is not a subclass of stdClass;check:bool(false)
+
+Missing::hi|direct:Call to undefined method B::Missing::hi();callback:call_user_func(): Argument #1 ($callback) must be a valid callback, class "Missing" not found;check:bool(false)
+

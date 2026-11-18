@@ -92,6 +92,7 @@ export function nestedBodies(statement: Stmt): [Stmt[], boolean][] {
 }
 
 /** The variables top-level code names, in order of first appearance, skipping function and class bodies. */
+// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function collectMainVars(body: Stmt[]): Set<string> {
   const found = new Set<string>();
   const visit = (value: unknown): void => {
@@ -100,8 +101,19 @@ export function collectMainVars(body: Stmt[]): Set<string> {
       for (const item of value) visit(item);
       return;
     }
-    const node = value as { k?: string; name?: unknown; uses?: { name: string }[]; fn?: FunctionDecl; decl?: unknown };
-    if (node.k === 'func' || node.k === 'class' || node.k === 'newAnon') return;
+    const node = value as {
+      k?: string;
+      name?: unknown;
+      uses?: { name: string }[];
+      fn?: FunctionDecl;
+      decl?: unknown;
+      args?: Arg[];
+    };
+    if (node.k === 'func' || node.k === 'class') return;
+    if (node.k === 'newAnon') {
+      visit(node.args);
+      return;
+    }
     if (node.k === 'var' && typeof node.name === 'string') {
       if (node.name !== 'this') found.add(node.name);
       return;
@@ -188,7 +200,8 @@ class ReadValidator {
       case 'call':
       case 'mcall':
       case 'scall':
-      case 'new': {
+      case 'new':
+      case 'newAnon': {
         for (const [key, child] of Object.entries(node)) {
           if (key === 'args') {
             this.arguments(node as unknown as Expr, child as Arg[]);

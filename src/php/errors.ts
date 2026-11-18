@@ -9,11 +9,14 @@ export function setThrowableFormatter(format: typeof formatThrowable): void {
 
 export function reportUncaughtWarning(object: PhpObject): void {
   const runtime = rt();
-  const line = object.props.get('line');
   if (runtime.silence === 0 && (runtime.errorReporting & E_WARNING) !== 0n)
-    runtime.echo(
-      `\nWarning: Uncaught ${formatThrowable(object)}\n  thrown in ${SCRIPT_PATH} on line ${typeof line === 'bigint' ? line : 0}\n`
-    );
+    runtime.echo(`\nWarning: Uncaught ${formatThrowable(object)}\n  thrown in ${throwableLocation(object)}\n`);
+}
+
+export function throwableLocation(object: PhpObject): string {
+  const file = object.props.get('file');
+  const line = object.props.get('line');
+  return `${typeof file === 'string' ? file : SCRIPT_PATH} on line ${typeof line === 'bigint' ? line : 0}`;
 }
 
 /** Creates a throwable of a builtin class with a message, which the interpreter provides. */

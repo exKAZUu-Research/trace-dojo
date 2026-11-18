@@ -6,6 +6,7 @@ import type { ProgramInput } from '../interpreter/programIo';
 import { bootstrap } from './bootstrap';
 import { callValue } from './callables';
 import { asInternal, type CallRecord, HostStackExhaustion, invoke, resetCallStack } from './calls';
+import { throwableLocation } from './errors';
 import { throwableText, traceText } from './exceptions';
 import { holderCounts } from './garbage';
 import { type ParsedProgram, parsePhp } from './parse';
@@ -126,8 +127,7 @@ function printUncaught(runtime: Runtime, object: PhpObject): string {
     if (error instanceof PhpThrow) text = throwableText(error.object);
     else throw error;
   }
-  const line = object.props.get('line');
-  const message = `Fatal error: Uncaught ${text}\n  thrown in ${SCRIPT_PATH} on line ${typeof line === 'bigint' ? line : 0}`;
+  const message = `Fatal error: Uncaught ${text}\n  thrown in ${throwableLocation(object)}`;
   runtime.echo(`\n${message}\n`);
   return message;
 }

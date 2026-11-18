@@ -76,7 +76,11 @@ defineClass({
 
 // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function bindClosure(closure: PhpObject, newThis: Value, newScope: Value | undefined): Value {
+function closureBinding(
+  closure: PhpObject,
+  newThis: Value,
+  newScope: Value | undefined
+): Pick<ClosureData, 'thisObj' | 'scope' | 'calledClass'> | undefined {
   const data = closure.internal as ClosureData;
   let scope = data.scope;
   if (newScope !== undefined && newScope !== 'static') {
@@ -84,46 +88,50 @@ function bindClosure(closure: PhpObject, newThis: Value, newScope: Value | undef
     else if (newScope === null) scope = undefined;
     else scope = requireClass(newScope as string);
   }
-  if (newThis !== null && !(newThis instanceof PhpObject)) return null;
+  if (newThis !== null && !(newThis instanceof PhpObject)) return undefined;
   if (
     newThis instanceof PhpObject &&
     data.isStatic &&
     (data.method || (data.fn.kind === 'user' && data.fn.decl.isClosure))
   ) {
     warn('Cannot bind an instance to a static closure, this will be an error in PHP 9');
-    return null;
+    return undefined;
   }
   const anonymous = data.fn.kind === 'user' && data.fn.decl.isClosure;
   const methodScope = !anonymous ? data.scope : undefined;
   if (methodScope && !data.isStatic && newThis === null) {
     warn('Cannot unbind $this of method, this will be an error in PHP 9');
-    return null;
+    return undefined;
   }
   if (methodScope && newThis instanceof PhpObject && !newThis.cls.isSubclassOf(methodScope)) {
     warn(
       `Cannot bind method ${methodScope.name}::${data.method?.name ?? data.fn.name}() to object of class ${newThis.cls.name}, this will be an error in PHP 9`
     );
-    return null;
+    return undefined;
   }
   if (scope && !scope.decl && scope !== data.scope) {
     warn(`Cannot bind closure to scope of internal class ${scope.name}, this will be an error in PHP 9`);
-    return null;
+    return undefined;
   }
   if (!anonymous && scope !== data.scope) {
     warn(
       `Cannot rebind scope of closure created from ${methodScope ? 'method' : 'function'}, this will be an error in PHP 9`
     );
-    return null;
+    return undefined;
   }
   if (!scope && newThis instanceof PhpObject && data.fn.kind === 'user') scope = closure.cls;
-  const runtime = rt();
-  const bound = runtime.newObject(closure.cls);
-  bound.internal = {
-    ...copyClosureData(data),
+  return {
     thisObj: newThis instanceof PhpObject && (data.fn.kind === 'user' || data.method) ? newThis : undefined,
     scope,
     calledClass: newThis instanceof PhpObject ? newThis.cls : scope,
-  } satisfies ClosureData;
+  };
+}
+
+function bindClosure(closure: PhpObject, newThis: Value, newScope: Value | undefined): Value {
+  const binding = closureBinding(closure, newThis, newScope);
+  if (!binding) return null;
+  const bound = rt().newObject(closure.cls);
+  bound.internal = { ...copyClosureData(closure.internal as ClosureData), ...binding } satisfies ClosureData;
   return bound;
 }
 
@@ -144,10 +152,11 @@ defineClass({
       signature: 'call(object $newThis, mixed ...$args): mixed',
       impl: ({ thisObj, args }) => {
         const [newThis, ...rest] = args;
-        const object = newThis as PhpObject;
+        const binding = closureBinding(thisObj, newThis, newThis);
+        if (!binding) return null;
         const target = closureTarget(thisObj);
         return invoke(
-          { ...target, thisObj: object, scope: object.cls, staticClass: object.cls },
+          { ...target, thisObj: binding.thisObj, scope: binding.scope, staticClass: binding.calledClass },
           rest.map((v) => ({ v })),
           undefined
         );

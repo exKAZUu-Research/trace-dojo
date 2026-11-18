@@ -1,0 +1,30 @@
+read0
+read1
+Cannot use positional argument after named argument during unpacking
+array(2) {
+  [0]=>
+  int(2)
+  ["x"]=>
+  int(1)
+}
+array(2) {
+  [0]=>
+  int(2)
+  ["x"]=>
+  int(1)
+}
+
+Warning: Cannot pass by-reference argument 1 of mutate() by unpacking a Traversable, passing by-value instead in /main.php on line 16
+int(1)
+
+Warning: Cannot pass by-reference argument 1 of mutate() by unpacking a Traversable, passing by-value instead in /main.php on line 19
+
+Warning: Cannot pass by-reference argument 2 of mutate() by unpacking a Traversable, passing by-value instead in /main.php on line 19
+int(2)
+int(3)
+
+Fatal error: Uncaught ArgumentCountError: reorder(): Argument #1 ($first) not passed in /main.php:21
+Stack trace:
+#0 /main.php(23): reorder(NULL, 0)
+#1 {main}
+  thrown in /main.php on line 21

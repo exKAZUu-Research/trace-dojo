@@ -609,26 +609,31 @@ function numericOf(text: string): bigint | number | undefined {
 
 defineFunction(
   'compact($var_name, ...$var_names): array',
+  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   ({ args }) => {
     const frame = rt().frame;
     const result = new PhpArray();
     const active = new Set<PhpArray>();
-    const visit = (value: Value): void => {
+    const visit = (value: Value, argument: number): void => {
       rt().spend();
       if (value instanceof PhpArray) {
         if (active.has(value)) throwError('Error', 'Recursion detected');
         active.add(value);
-        for (const item of value.values()) visit(item);
+        for (const item of value.values()) visit(item, argument);
         active.delete(value);
         return;
       }
-      const name = toStr(value);
+      if (typeof value !== 'string') {
+        warn(`compact(): Argument #${argument} must be string or array of strings, ${valueName(value)} given`);
+        return;
+      }
+      const name = value;
       const ref = frame.vars.get(name);
       if (name === 'this' && frame.thisObj) result.set('this', frame.thisObj);
       else if (ref) result.set(normalizeKeyString(name), share(ref.v));
       else warn(`compact(): Undefined variable $${name}`);
     };
-    for (const value of args) visit(value);
+    for (const [index, value] of args.entries()) visit(value, index + 1);
     return result;
   },
   true
@@ -1295,6 +1300,7 @@ defineFunction('array_multisort(&~$array, &~...$rest): bool', (ctx) => {
   const rows = columns.map((column) => [...(column.ref.v as PhpArray).map]);
   const order = Array.from({ length: size }, (_, index) => index);
   zendSort(order, (a, b) => {
+    rt().spend();
     for (const [index, column] of columns.entries()) {
       const comparator = sortComparator(column.flags);
       const result = comparator(valueOf(rows[index][a][1]), valueOf(rows[index][b][1])) * column.order;

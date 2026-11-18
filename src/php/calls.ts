@@ -41,6 +41,7 @@ export interface ArgValue {
   v: Value;
   ref?: Ref;
   name?: string;
+  position?: number;
 }
 
 /** What a call runs and on behalf of whom. */
@@ -166,7 +167,7 @@ function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], 
   const inline = target.inline && row !== undefined;
   const strict = callerIsStrict();
   if (!inline) {
-    const passed = args.filter((arg) => arg.name === undefined).map((arg) => arg.ref?.v ?? arg.v);
+    const passed = positionalArguments(args).map((arg) => arg.ref?.v ?? arg.v);
     for (const arg of args) {
       if (arg.name === undefined) continue;
       const index = fn.params.findIndex((param) => param.name === arg.name && !param.variadic);
@@ -275,9 +276,9 @@ function bindNative(
   const named = checkNamedArgs(params, args);
   const variadic = params.at(-1)?.variadic ? params.at(-1) : undefined;
   const fixed = variadic ? params.length - 1 : params.length;
-  const positional = args.filter((arg) => arg.name === undefined);
+  const positional = positionalArguments(args);
   const required = params.filter((param) => !param.optional && !param.variadic).length;
-  const given = positional.length + args.filter((arg) => arg.name !== undefined && !named?.has(arg.name)).length;
+  const given = args.filter((arg) => arg.name === undefined || !named?.has(arg.name)).length;
   if (positional.length < required && args.every((arg) => arg.name === undefined)) {
     throwError('ArgumentCountError', argumentCountMessage(name, required, variadic ? -1 : fixed, given));
   }
@@ -421,7 +422,7 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
   );
   const closure = target.closure?.internal as ClosureData | undefined;
   const strict = runtime.strictTypes && nativeDepth === 0;
-  const positional = args.filter((arg) => arg.name === undefined);
+  const positional = positionalArguments(args);
   const params = fn.params;
   checkNamedArgs(params, args);
   frame.args = positional.map((arg) => arg.ref?.v ?? arg.v);
@@ -544,7 +545,7 @@ function recordBoundArgs(
   args: ArgValue[],
   positional: number
 ): void {
-  if (args.length > positional) tracedNamedArgs(record, params, frame, args, positional);
+  if (args.some((arg) => arg.name !== undefined)) tracedNamedArgs(record, params, frame, args, positional);
   for (const [index, param] of params.entries()) {
     if (param.variadic || index >= record.args.length) break;
     record.args[index] = frame.vars.get(param.name)?.v ?? null;
@@ -617,20 +618,30 @@ function implicitCallRow(): number | undefined {
   return nativeDepth === 0 && !runtime.shuttingDown ? runtime.row : undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function positionalArguments(args: ArgValue[]): ArgValue[] {
+  const result: ArgValue[] = [];
+  for (const arg of args) if (arg.name === undefined) result[arg.position ?? result.length] = arg;
+  return result;
+}
+
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function checkNamedArgs(params: Param[], args: ArgValue[]): Map<string, Value> | undefined {
   const variadic = params.at(-1)?.variadic;
   const names = new Set<string>();
-  let positional = 0;
+  const positions = new Set<number>();
+  let nextPosition = 0;
   let named: Map<string, Value> | undefined;
   for (const arg of args) {
     if (arg.name === undefined) {
-      if (names.size > 0) throwError('Error', 'Cannot use positional argument after named argument');
-      positional++;
+      if (arg.position === undefined && names.size > 0)
+        throwError('Error', 'Cannot use positional argument after named argument');
+      const position = arg.position ?? nextPosition;
+      positions.add(position);
+      nextPosition = position + 1;
       continue;
     }
     const index = params.findIndex((param) => param.name === arg.name && !param.variadic);
-    if (names.has(arg.name) || (index !== -1 && index < positional))
+    if (names.has(arg.name) || (index !== -1 && positions.has(index)))
       throwError('Error', `Named parameter $${arg.name} overwrites previous argument`);
     names.add(arg.name);
     if (index === -1) {
@@ -649,7 +660,7 @@ export function setDefaultEvaluator(run: (decl: FunctionDecl, index: number, fra
   evaluateDefault = run;
 }
 
-// code-gauge-allow functionNcss 45 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
+// code-gauge-allow functionNcss 48 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 // code-gauge-allow functionParameterCount 7 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function bindParams(
   frame: Frame,
@@ -686,11 +697,15 @@ function bindParams(
       }
       break;
     }
-    const arg = index < positional.length ? positional[index] : args.find((candidate) => candidate.name === param.name);
+    const arg = positional[index] ?? args.find((candidate) => candidate.name === param.name);
     if (arg === undefined) {
       if (!param.optional) {
         const anyNamed = args.some((candidate) => candidate.name !== undefined);
-        if (anyNamed) throwError('ArgumentCountError', `${name}(): Argument #${index + 1} ($${param.name}) not passed`);
+        if (anyNamed) {
+          const record = callStack.at(-1);
+          if (record) record.args = record.args.slice(0, params.length);
+          throwError('ArgumentCountError', `${name}(): Argument #${index + 1} ($${param.name}) not passed`);
+        }
         const hasOptional = params.some((other) => other.optional && !other.variadic) || params.at(-1)?.variadic;
         const where = callRow === undefined ? '' : ` in ${SCRIPT_PATH} on line ${callRow + 1}`;
         const expectation = hasOptional ? 'at least' : 'exactly';
