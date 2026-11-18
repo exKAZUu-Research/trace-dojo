@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 661 -- One native per method of the standard library.
 import { normalize } from '../infer';
 import type { Interpreter } from '../interpreter';
 import {
@@ -54,7 +55,7 @@ export function sliceIter(slice: Value, places: boolean): IterValue {
 }
 
 /** The iterator `for` uses for a value of a type, as `IntoIterator` makes it. */
-// code-gauge-allow functionCognitiveComplexity 40 -- One case per iterable type.
+// code-gauge-allow duplicateLines 16 -- Borrowed and owned collections iterate alike, yielding references or values.
 export function toIterator(interp: Interpreter, value: Value, from: Type): Value {
   const t = normalize(shallow(from));
   if (value instanceof IterValue) return value;
@@ -243,7 +244,6 @@ function truthy(value: Value): boolean {
   return deref(value) as boolean;
 }
 
-// code-gauge-allow functionNcss 300 -- One native per Iterator method.
 define({
   'Iter<_>::next': ([self]) => {
     const iter = iterOf(self);
@@ -739,6 +739,7 @@ function cloneIter(iter: IterValue, type: Type): IterValue {
   return adapter(iter, () => take(nextOf(iter)), iter.nextBack && (() => take(iter.nextBack!())), iter.remaining);
 }
 
+// code-gauge-allow duplicateLines 15 -- Flattening and flat_map walk nested iterators alike, from different sources.
 function flatten(ctx: NativeContext, iter: IterValue, inner: (item: Value) => IterValue): IterValue {
   let current: IterValue | undefined;
   return adapter(iter, () => {
@@ -784,6 +785,7 @@ function extremeByKey(ctx: NativeContext, iter: IterValue, f: Value, keyType: Ty
   return option(ctx, best === DONE ? undefined : best, best !== DONE);
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- One native per method of the standard library.
 function sumOrProduct(ctx: NativeContext, iter: IterValue, type: Type, op: '+' | '*'): Value {
   const t = normalize(shallow(type));
   if (t.kind === 'float') {
@@ -808,7 +810,8 @@ function sumOrProduct(ctx: NativeContext, iter: IterValue, type: Type, op: '+' |
 }
 
 /** Collects elements into a collection of the type `collect` was asked for. */
-// code-gauge-allow functionCognitiveComplexity 40 -- One case per collection.
+// code-gauge-allow functionCognitiveComplexity 23 -- One native per method of the standard library.
+// code-gauge-allow functionNcss 52 -- One native per method of the standard library.
 export function collectInto(ctx: NativeContext, items: Value[], target: Type, item: Type): Value {
   const t = normalize(shallow(target));
   if (t.kind !== 'adt') throw new Error('collect into a non-collection');

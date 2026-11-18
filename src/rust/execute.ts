@@ -10,6 +10,7 @@ import { ControlSignal, type Frame, ProcessExit, Runtime, RustPanic, StackOverfl
 import { resolve, shallow } from './types';
 import { EnumValue } from './values';
 
+// code-gauge-allow duplicateLines 15 -- Each language reports how its program ended alike.
 export function executeRustProgram(source: string, input?: ProgramInput): ProgramExecution {
   let built: BuiltProgram;
   try {

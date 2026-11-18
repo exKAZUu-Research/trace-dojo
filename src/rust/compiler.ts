@@ -1,7 +1,7 @@
 import type { Annotations, Coercion, FnContext, LocalVar, MethodRes, PathRes, ReceiverAdjust } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, MacroCall, Pattern, Span, Stmt } from './ast';
+import { forEachDirect, patternBindings } from './astWalk';
 import type { Checker } from './checker';
-import { forEachChild } from './checker';
 import { escapeDebug, type Formatter, type Spec } from './fmt';
 import { normalize } from './infer';
 import type { Program } from './items';
@@ -284,7 +284,6 @@ export class Compiler {
    * Matches a value against a pattern, binding its variables when it matches. `place` gives where the value lives, for
    * bindings that bind by mutable reference.
    */
-  // code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of pattern.
   compileMatcher(pattern: Pattern): (frame: Frame, value: Value, place: (() => Place) | undefined) => boolean {
     const type = resolve(pattern.ty ?? { kind: 'tuple', elems: [] }, true);
     switch (pattern.kind) {
@@ -369,39 +368,7 @@ export class Compiler {
 
   /** The slots of the variables a pattern binds, which go out of scope with the pattern. */
   private patternSlots(pattern: Pattern): number[] {
-    const slots: number[] = [];
-    const visit = (p: Pattern): void => {
-      const local = this.annotations.bindings.get(p);
-      if (local && !slots.includes(local.slot)) slots.push(local.slot);
-      switch (p.kind) {
-        case 'binding': {
-          if (p.sub) visit(p.sub);
-          break;
-        }
-        case 'tuple':
-        case 'tupleStruct': {
-          for (const elem of p.elems) visit(elem);
-          break;
-        }
-        case 'struct': {
-          for (const field of p.fields) visit(field.pattern);
-          break;
-        }
-        case 'ref': {
-          visit(p.pattern);
-          break;
-        }
-        case 'or': {
-          for (const alternative of p.alternatives) visit(alternative);
-          break;
-        }
-        default: {
-          break;
-        }
-      }
-    };
-    visit(pattern);
-    return slots;
+    return patternBindings(pattern, this.annotations).map((local) => local.slot);
   }
 
   private constMatcher(res: PathRes, type: Type): (frame: Frame, value: Value) => boolean {
@@ -447,6 +414,7 @@ export class Compiler {
     return coerced;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of expression, statement, or pattern.
   private coerce(read: Eval, coercion: Coercion, expr: Expr): Eval {
     switch (coercion.kind) {
       case 'deref': {
@@ -480,7 +448,6 @@ export class Compiler {
   }
 
   /** An expression's value as it is: a place's value without copying it, as borrows and reads see it. */
-  // code-gauge-allow functionCognitiveComplexity 60 -- One case per kind of expression.
   read(expr: Expr): Eval {
     switch (expr.kind) {
       case 'int': {
@@ -620,6 +587,7 @@ export class Compiler {
     }
   }
 
+  // code-gauge-allow functionNcss 39 -- One case per kind of expression, statement, or pattern.
   private path(expr: Extract<Expr, { kind: 'path' }>): Eval {
     const res = this.annotations.paths.get(expr);
     if (!res) throw new Error('Unresolved path');
@@ -670,7 +638,6 @@ export class Compiler {
   }
 
   /** The place a place expression denotes, which assignments and `&mut` borrows write through. */
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of place.
   place(expr: Expr): PlaceEval {
     switch (expr.kind) {
       case 'path': {
@@ -784,7 +751,7 @@ export class Compiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per indexable container.
+  // code-gauge-allow functionNcss 33 -- One case per kind of expression, statement, or pattern.
   private index(expr: Extract<Expr, { kind: 'index' }>): Eval {
     const res = this.annotations.indexes.get(expr);
     if (!res) throw new Error('Unresolved index');
@@ -898,7 +865,8 @@ export class Compiler {
     return (frame) => intArith('-', name, 0n, derefAll(operand(frame)) as bigint, span);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per operator.
+  // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of expression, statement, or pattern.
+  // code-gauge-allow functionNcss 37 -- One case per kind of expression, statement, or pattern.
   private binary(expr: Extract<Expr, { kind: 'binary' }>): Eval {
     const { op } = expr;
     if (op === '&&' || op === '||') {
@@ -978,6 +946,7 @@ export class Compiler {
     };
   }
 
+  // code-gauge-allow functionNcss 32 -- One case per kind of expression, statement, or pattern.
   private compoundAssign(expr: Extract<Expr, { kind: 'compoundAssign' }>): Eval {
     const place = this.place(expr.target);
     const value = this.value(expr.value);
@@ -1022,7 +991,6 @@ export class Compiler {
   // -------------------------------------------------------------------------------------------------------------------
   // Calls
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of callee.
   private call(expr: Extract<Expr, { kind: 'call' }>): Eval {
     const { callee } = expr;
     const args = expr.args.map((arg) => this.value(arg));
@@ -1125,6 +1093,8 @@ export class Compiler {
     return read;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of expression, statement, or pattern.
+  // code-gauge-allow functionNcss 33 -- One case per kind of expression, statement, or pattern.
   private closure(expr: Extract<Expr, { kind: 'closure' }>): Eval {
     const info = this.annotations.closures.get(expr);
     if (!info) throw new Error('Unchecked closure');
@@ -1259,6 +1229,7 @@ export class Compiler {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of expression, statement, or pattern.
   private loop(expr: Extract<Expr, { kind: 'loop' }>): Eval {
     const body = this.compileBlock(expr.body);
     const label = expr.label;
@@ -1304,6 +1275,8 @@ export class Compiler {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 28 -- One case per kind of expression, statement, or pattern.
+  // code-gauge-allow functionNcss 36 -- One case per kind of expression, statement, or pattern.
   private forExpr(expr: Extract<Expr, { kind: 'for' }>): Eval {
     const loopInfo = this.annotations.loops.get(expr);
     if (!loopInfo) throw new Error('Unchecked for');
@@ -1352,7 +1325,6 @@ export class Compiler {
   // -------------------------------------------------------------------------------------------------------------------
   // Macros
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- One case per macro.
   private macro(expr: Expr, macro: MacroCall): Eval {
     const span = expr.span;
     switch (macro.kind) {
@@ -1675,10 +1647,12 @@ export function setSourceForMessages(source: string): void {
   sourceLines = source.split('\n');
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of expression, statement, or pattern.
+// code-gauge-allow functionNcss 34 -- One case per kind of expression, statement, or pattern.
 function sourceText(expr: Expr): string {
   const start = expr.span;
   let end = start;
-  forEachChild(expr, (child) => {
+  forEachDirect(expr, (child) => {
     if (child.span.row > end.row || (child.span.row === end.row && child.span.col > end.col)) end = child.span;
   });
   const line = sourceLines[start.row] ?? '';

@@ -93,6 +93,7 @@ export function fixedFloat(value: number, precision: number): string {
 }
 
 /** A float's exact value as a fraction of bigints. */
+// code-gauge-allow duplicateLines 16 -- Each language decodes a float's bits for its own exact formatting.
 function exactFraction(value: number): { numerator: bigint; denominator: bigint } {
   const view = new DataView(new ArrayBuffer(8));
   view.setFloat64(0, value);
@@ -115,6 +116,7 @@ function pow(n: number): bigint {
 }
 
 /** The first `count` significant digits of a float's exact value, rounded half to even. */
+// code-gauge-allow functionCognitiveComplexity 18 -- Computes exact decimal digits of floats, as std::fmt does.
 function exactDigitsSignificant(value: number, count: number): { digits: string; exponent: number } {
   if (value === 0) return { digits: '0'.repeat(count), exponent: 1 };
   const { numerator, denominator } = exactFraction(value);

@@ -1,4 +1,4 @@
-import { type AdtDef, intType, shallow, type Type, type TypeVar } from './types';
+import { type AdtDef, childTypes, intType, mapChildren, shallow, type Type, type TypeVar } from './types';
 
 /** Binds type variables so that types become equal, recording the bindings so that a failed attempt can undo them. */
 export class Unifier {
@@ -28,7 +28,8 @@ export class Unifier {
     this.trail.push(v);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of type.
+  // code-gauge-allow functionCognitiveComplexity 26 -- One case per kind of type.
+  // code-gauge-allow functionNcss 59 -- One case per kind of type.
   unify(a: Type, b: Type): boolean {
     const x = normalize(shallow(a));
     const y = normalize(shallow(b));
@@ -115,30 +116,9 @@ export class Unifier {
 
 function occurs(v: TypeVar, type: Type): boolean {
   const t = shallow(type);
-  switch (t.kind) {
-    case 'var': {
-      return t.v === v;
-    }
-    case 'tuple': {
-      return t.elems.some((elem) => occurs(v, elem));
-    }
-    case 'array':
-    case 'slice': {
-      return occurs(v, t.elem);
-    }
-    case 'ref': {
-      return occurs(v, t.target);
-    }
-    case 'adt': {
-      return t.args.some((arg) => occurs(v, arg));
-    }
-    case 'fn': {
-      return t.params.some((p) => occurs(v, p)) || occurs(v, t.ret);
-    }
-    default: {
-      return false;
-    }
-  }
+  if (t.kind === 'var') return t.v === v;
+  if (t.kind === 'closure' || t.kind === 'opaque' || t.kind === 'dyn') return false;
+  return childTypes(t).some((child) => occurs(v, child));
 }
 
 /** The types of the standard library's pseudo-types, once their arguments are known. */
@@ -167,25 +147,6 @@ function isPseudo(def: AdtDef): boolean {
 /** Resolves a type deeply, normalizing pseudo-types. */
 export function deepNormalize(type: Type): Type {
   const t = normalize(shallow(type));
-  switch (t.kind) {
-    case 'tuple': {
-      return { kind: 'tuple', elems: t.elems.map(deepNormalize) };
-    }
-    case 'array': {
-      return { kind: 'array', elem: deepNormalize(t.elem), len: t.len };
-    }
-    case 'slice': {
-      return { kind: 'slice', elem: deepNormalize(t.elem) };
-    }
-    case 'ref': {
-      return { kind: 'ref', mutable: t.mutable, target: deepNormalize(t.target) };
-    }
-    case 'adt': {
-      if (t.args.length === 0) return t;
-      return { kind: 'adt', def: t.def, args: t.args.map(deepNormalize) };
-    }
-    default: {
-      return t;
-    }
-  }
+  if (t.kind === 'dyn' || t.kind === 'fn') return t;
+  return mapChildren(t, deepNormalize);
 }

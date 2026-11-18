@@ -9,7 +9,6 @@ function formatError(span: Span, message: string): never {
  * Parses a format string as `format_args!` does, resolving each placeholder to an argument; a name that no argument
  * has captures the variable of that name, as Rust 2021 does.
  */
-// code-gauge-allow functionCognitiveComplexity 60 -- Transcribes std::fmt's grammar.
 export function parseFormatString(
   text: string,
   args: Expr[],

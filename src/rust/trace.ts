@@ -28,7 +28,6 @@ import {
   type Value,
 } from './values';
 
-// code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceRustProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const built = buildProgram(program, new Set(trace.atomicAnnotations.keys()));
   const runtime = new Runtime(input);
@@ -127,7 +126,6 @@ function elementType(t: Type): Type | undefined {
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of type.
 function scalarOf(value: Value, type: Type): Scalar | typeof NOT_SCALAR {
   const t = derefType(type);
   const v = deref(value);
@@ -189,7 +187,7 @@ function hasScalarElements(type: Type): boolean {
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows a missing value as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
-// code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of value.
+// code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of value the trace shows.
 function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNode | undefined {
   const t = derefType(type);
   const v = deref(value);
@@ -216,7 +214,6 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per container.
 function containerNodeOf(v: Value, t: Type, seen: Set<unknown>): DisplayNode | undefined {
   const elem = elementType(t);
   if (elem && (Array.isArray(v) || v instanceof SliceView)) {

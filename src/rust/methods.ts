@@ -74,6 +74,7 @@ const RANGE_ITERATORS = new Set(['Range', 'RangeInclusive', 'RangeFrom']);
  * Finds a method as rustc's method probe does: for each type the receiver derefs to, a method that takes it by value,
  * then by shared reference, then by mutable reference; inherent methods before trait methods.
  */
+// code-gauge-allow functionCognitiveComplexity 18 -- Follows rustc's method probe step by step.
 export function lookupMethod(
   program: Program,
   solver: TraitSolver,

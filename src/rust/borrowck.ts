@@ -1,5 +1,7 @@
+// code-gauge-allow-file fileNcss 614 -- Follows the borrow checking rules case by case.
 import type { Annotations, FnContext, LocalVar } from './annotations';
 import type { Block, Condition, Expr, FnItem, FormatArgs, Pattern, Span, Stmt } from './ast';
+import { forEachDirect, patternBindings, walkBlock } from './astWalk';
 import { normalize } from './infer';
 import { compileError } from './items';
 import type { TraitSolver } from './traits';
@@ -72,6 +74,7 @@ export class BorrowChecker {
   // -------------------------------------------------------------------------------------------------------------------
   // Liveness
 
+  // code-gauge-allow functionCognitiveComplexity 24 -- Follows the borrow checking rules case by case.
   private collectUses(block: Block): void {
     const visitExpr = (expr: Expr): void => {
       if (expr.kind === 'path') {
@@ -101,7 +104,7 @@ export class BorrowChecker {
         for (const arg of format?.args ?? []) visitExpr(arg);
         return;
       }
-      walkChildren(expr, visitExpr);
+      forEachDirect(expr, visitExpr);
     };
     walkBlock(block, visitExpr);
   }
@@ -168,7 +171,6 @@ export class BorrowChecker {
    * Checks an expression. `mode` tells what happens to its value when it is a place: moved (or copied), read without
    * moving (borrowed as `&`), or borrowed mutably.
    */
-  // code-gauge-allow functionCognitiveComplexity 60 -- One case per kind of expression.
   private expr(expr: Expr, state: State, mode: 'move' | 'read' | 'mut'): State {
     if (state === BOTTOM) return BOTTOM;
     switch (expr.kind) {
@@ -595,6 +597,7 @@ export class BorrowChecker {
   }
 
   /** Rejects a use of a place that a live loan of another variable conflicts with. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Follows the borrow checking rules case by case.
   private checkLoans(place: PlacePath, span: Span, mode: 'move' | 'read' | 'mut'): void {
     const at = position(span);
     for (const loan of this.loans) {
@@ -618,6 +621,8 @@ export class BorrowChecker {
   }
 
   /** Assigns a place; `value` is the assigned expression of a plain assignment (`=`), or undefined for `+=` and kin. */
+  // code-gauge-allow functionCognitiveComplexity 23 -- Follows the borrow checking rules case by case.
+  // code-gauge-allow functionNcss 32 -- Follows the borrow checking rules case by case.
   private assign(target: Expr, state: State, span: Span, value: Expr | undefined): State {
     const whole = value !== undefined;
     const place = this.placeOf(target);
@@ -680,6 +685,8 @@ export class BorrowChecker {
   }
 
   /** The place an expression denotes, rooted in a variable of the function, or undefined for other expressions. */
+  // code-gauge-allow functionCognitiveComplexity 18 -- Follows the borrow checking rules case by case.
+  // code-gauge-allow functionNcss 31 -- Follows the borrow checking rules case by case.
   private placeOf(expr: Expr): PlacePath | undefined {
     switch (expr.kind) {
       case 'path': {
@@ -733,7 +740,6 @@ export class BorrowChecker {
   }
 
   /** The places an expression's value borrows from: `&x`, a method that returns a borrow of its receiver, or a holder. */
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of borrowing expression.
   private borrowsOf(expr: Expr): Omit<Loan, 'holder'>[] {
     switch (expr.kind) {
       case 'ref': {
@@ -803,39 +809,7 @@ export class BorrowChecker {
   // Helpers
 
   private bindingsOf(pattern: Pattern): LocalVar[] {
-    const locals: LocalVar[] = [];
-    const visit = (p: Pattern): void => {
-      const local = this.annotations.bindings.get(p);
-      if (local && !locals.includes(local)) locals.push(local);
-      switch (p.kind) {
-        case 'binding': {
-          if (p.sub) visit(p.sub);
-          break;
-        }
-        case 'tuple':
-        case 'tupleStruct': {
-          for (const elem of p.elems) visit(elem);
-          break;
-        }
-        case 'struct': {
-          for (const field of p.fields) visit(field.pattern);
-          break;
-        }
-        case 'ref': {
-          visit(p.pattern);
-          break;
-        }
-        case 'or': {
-          for (const alternative of p.alternatives) visit(alternative);
-          break;
-        }
-        default: {
-          break;
-        }
-      }
-    };
-    visit(pattern);
-    return locals;
+    return patternBindings(pattern, this.annotations);
   }
 
   private isCopy(type: Type | undefined): boolean {
@@ -909,170 +883,6 @@ function containsReference(type: Type | undefined): boolean {
     }
     default: {
       return false;
-    }
-  }
-}
-
-function walkBlock(block: Block, visit: (expr: Expr) => void): void {
-  for (const stmt of block.stmts) {
-    if (stmt.kind === 'let') {
-      if (stmt.init) visit(stmt.init);
-      if (stmt.else) walkBlock(stmt.else, visit);
-    } else if (stmt.kind === 'expr') visit(stmt.expr);
-  }
-  if (block.tail) visit(block.tail);
-}
-
-function walkChildren(expr: Expr, visit: (expr: Expr) => void): void {
-  forEachDirect(expr, visit);
-}
-
-/** Calls `visit` on the expressions directly inside an expression, in evaluation order. */
-// code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of expression.
-export function forEachDirect(expr: Expr, visit: (expr: Expr) => void): void {
-  switch (expr.kind) {
-    case 'unary':
-    case 'ref':
-    case 'cast':
-    case 'try':
-    case 'field': {
-      visit(expr.operand);
-      return;
-    }
-    case 'binary': {
-      visit(expr.left);
-      visit(expr.right);
-      return;
-    }
-    case 'assign':
-    case 'compoundAssign': {
-      visit(expr.value);
-      visit(expr.target);
-      return;
-    }
-    case 'call': {
-      visit(expr.callee);
-      for (const arg of expr.args) visit(arg);
-      return;
-    }
-    case 'methodCall': {
-      visit(expr.receiver);
-      for (const arg of expr.args) visit(arg);
-      return;
-    }
-    case 'index': {
-      visit(expr.operand);
-      visit(expr.index);
-      return;
-    }
-    case 'range': {
-      if (expr.start) visit(expr.start);
-      if (expr.end) visit(expr.end);
-      return;
-    }
-    case 'tuple':
-    case 'array': {
-      for (const elem of expr.elems) visit(elem);
-      return;
-    }
-    case 'arrayRepeat': {
-      visit(expr.value);
-      visit(expr.count);
-      return;
-    }
-    case 'struct': {
-      for (const field of expr.fields) visit(field.value);
-      if (expr.base) visit(expr.base);
-      return;
-    }
-    case 'block': {
-      walkBlock(expr, visit);
-      return;
-    }
-    case 'if': {
-      visit(expr.cond.kind === 'expr' ? expr.cond.expr : expr.cond.value);
-      walkBlock(expr.consequent, visit);
-      if (expr.else) visit(expr.else);
-      return;
-    }
-    case 'match': {
-      visit(expr.scrutinee);
-      for (const arm of expr.arms) visit(arm.body);
-      return;
-    }
-    case 'loop': {
-      walkBlock(expr.body, visit);
-      return;
-    }
-    case 'while': {
-      visit(expr.cond.kind === 'expr' ? expr.cond.expr : expr.cond.value);
-      walkBlock(expr.body, visit);
-      return;
-    }
-    case 'for': {
-      visit(expr.iterable);
-      walkBlock(expr.body, visit);
-      return;
-    }
-    case 'break':
-    case 'return': {
-      if (expr.value) visit(expr.value);
-      return;
-    }
-    case 'closure': {
-      visit(expr.body);
-      return;
-    }
-    case 'macro': {
-      const { macro } = expr;
-      const format = (f: FormatArgs | undefined): void => {
-        for (const arg of f?.args ?? []) visit(arg);
-      };
-      switch (macro.kind) {
-        case 'print':
-        case 'panic':
-        case 'format': {
-          format(macro.format);
-          return;
-        }
-        case 'write': {
-          visit(macro.target);
-          format(macro.format);
-          return;
-        }
-        case 'assert': {
-          visit(macro.cond);
-          format(macro.format);
-          return;
-        }
-        case 'assertEq': {
-          visit(macro.left);
-          visit(macro.right);
-          format(macro.format);
-          return;
-        }
-        case 'vec': {
-          for (const elem of macro.elems) visit(elem);
-          return;
-        }
-        case 'vecRepeat': {
-          visit(macro.value);
-          visit(macro.count);
-          return;
-        }
-        case 'matches': {
-          visit(macro.value);
-          return;
-        }
-        case 'dbg': {
-          for (const arg of macro.args) visit(arg);
-          return;
-        }
-      }
-      return;
-    }
-    default: {
-      return;
     }
   }
 }

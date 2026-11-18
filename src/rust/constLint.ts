@@ -1,6 +1,6 @@
 import type { Annotations, LocalVar } from './annotations';
 import type { Block, Expr, Stmt } from './ast';
-import { forEachDirect } from './borrowck';
+import { forEachDirect } from './astWalk';
 import { normalize } from './infer';
 import { compileError } from './items';
 import { castValue, wrap } from './ops';
@@ -41,7 +41,6 @@ export class ConstLint {
   }
 
   /** Checks an expression's operations, returning its value when it is a constant. */
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of constant expression.
   private expr(expr: Expr): Known | undefined {
     switch (expr.kind) {
       case 'int': {
@@ -128,6 +127,7 @@ export class ConstLint {
     return new ConstLint(this.annotations).expr(expr);
   }
 
+  // code-gauge-allow functionNcss 35 -- One case per kind of constant expression.
   private binary(expr: Extract<Expr, { kind: 'binary' }>): Known | undefined {
     const left = this.expr(expr.left);
     const right = this.expr(expr.right);
@@ -177,6 +177,7 @@ export class ConstLint {
     }
   }
 
+  // code-gauge-allow duplicateLines 21 -- Each language compares its own constants, as its operators define.
   private comparison(expr: Extract<Expr, { kind: 'binary' }>): Known | undefined {
     const left = this.expr(expr.left);
     const right = this.expr(expr.right);

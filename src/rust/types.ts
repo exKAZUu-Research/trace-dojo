@@ -258,48 +258,29 @@ export function shallow(type: Type): Type {
   return current;
 }
 
-/** Replaces every bound type variable in a type, and unbound literal variables with their defaults when asked. */
-export function resolve(type: Type, defaults = false): Type {
-  const t = shallow(type);
+/** A type with each type directly inside it replaced by `f`'s result; closures and opaque types stay as they are. */
+export function mapChildren(t: Type, f: (child: Type) => Type): Type {
   switch (t.kind) {
-    case 'var': {
-      if (defaults && t.v.literal) {
-        t.v.binding = t.v.literal === 'int' ? I32 : F64;
-        return t.v.binding;
-      }
-      return t;
-    }
     case 'tuple': {
-      return { kind: 'tuple', elems: t.elems.map((elem) => resolve(elem, defaults)) };
+      return { kind: 'tuple', elems: t.elems.map(f) };
     }
     case 'array': {
-      return { kind: 'array', elem: resolve(t.elem, defaults), len: t.len };
+      return { kind: 'array', elem: f(t.elem), len: t.len };
     }
     case 'slice': {
-      return { kind: 'slice', elem: resolve(t.elem, defaults) };
+      return { kind: 'slice', elem: f(t.elem) };
     }
     case 'ref': {
-      return { kind: 'ref', mutable: t.mutable, target: resolve(t.target, defaults) };
+      return { kind: 'ref', mutable: t.mutable, target: f(t.target) };
     }
     case 'adt': {
-      if (t.args.length === 0) return t;
-      return { kind: 'adt', def: t.def, args: t.args.map((arg) => resolve(arg, defaults)) };
+      return t.args.length === 0 ? t : { kind: 'adt', def: t.def, args: t.args.map(f) };
     }
     case 'fn': {
-      return { kind: 'fn', params: t.params.map((p) => resolve(p, defaults)), ret: resolve(t.ret, defaults) };
-    }
-    case 'closure': {
-      const { closure } = t;
-      closure.params = closure.params.map((p) => resolve(p, defaults));
-      closure.ret = resolve(closure.ret, defaults);
-      return t;
+      return { kind: 'fn', params: t.params.map(f), ret: f(t.ret) };
     }
     case 'dyn': {
-      return { kind: 'dyn', trait: resolveTraitRef(t.trait, defaults) };
-    }
-    case 'opaque': {
-      if (t.opaque.hidden) t.opaque.hidden = resolve(t.opaque.hidden, defaults);
-      return t;
+      return { kind: 'dyn', trait: mapTraitRef(t.trait, f) };
     }
     default: {
       return t;
@@ -307,50 +288,81 @@ export function resolve(type: Type, defaults = false): Type {
   }
 }
 
-export function resolveTraitRef(ref: TraitRef, defaults = false): TraitRef {
+function mapTraitRef(ref: TraitRef, f: (type: Type) => Type): TraitRef {
   return {
     trait: ref.trait,
-    args: ref.args.map((arg) => resolve(arg, defaults)),
-    fnSig: ref.fnSig && {
-      params: ref.fnSig.params.map((p) => resolve(p, defaults)),
-      ret: resolve(ref.fnSig.ret, defaults),
-    },
+    args: ref.args.map(f),
+    fnSig: ref.fnSig && { params: ref.fnSig.params.map(f), ret: f(ref.fnSig.ret) },
   };
+}
+
+/** The types directly inside a type, including a closure's signature and an opaque type's hidden type. */
+export function childTypes(t: Type): Type[] {
+  switch (t.kind) {
+    case 'tuple': {
+      return t.elems;
+    }
+    case 'array':
+    case 'slice': {
+      return [t.elem];
+    }
+    case 'ref': {
+      return [t.target];
+    }
+    case 'adt': {
+      return t.args;
+    }
+    case 'fn': {
+      return [...t.params, t.ret];
+    }
+    case 'closure': {
+      return [...t.closure.params, t.closure.ret];
+    }
+    case 'dyn': {
+      return [...t.trait.args, ...(t.trait.fnSig?.params ?? [])];
+    }
+    case 'opaque': {
+      return t.opaque.hidden ? [t.opaque.hidden] : [];
+    }
+    default: {
+      return [];
+    }
+  }
+}
+
+/** Replaces every bound type variable in a type, and unbound literal variables with their defaults when asked. */
+export function resolve(type: Type, defaults = false): Type {
+  const t = shallow(type);
+  if (t.kind === 'var') {
+    if (defaults && t.v.literal) {
+      t.v.binding = t.v.literal === 'int' ? I32 : F64;
+      return t.v.binding;
+    }
+    return t;
+  }
+  if (t.kind === 'closure') {
+    const { closure } = t;
+    closure.params = closure.params.map((p) => resolve(p, defaults));
+    closure.ret = resolve(closure.ret, defaults);
+    return t;
+  }
+  if (t.kind === 'opaque') {
+    if (t.opaque.hidden) t.opaque.hidden = resolve(t.opaque.hidden, defaults);
+    return t;
+  }
+  return mapChildren(t, (child) => resolve(child, defaults));
+}
+
+export function resolveTraitRef(ref: TraitRef, defaults = false): TraitRef {
+  return mapTraitRef(ref, (type) => resolve(type, defaults));
 }
 
 /** Whether a type still has an unbound variable after resolving. */
 export function hasVars(type: Type): boolean {
   const t = shallow(type);
-  switch (t.kind) {
-    case 'var': {
-      return true;
-    }
-    case 'tuple': {
-      return t.elems.some(hasVars);
-    }
-    case 'array':
-    case 'slice': {
-      return hasVars(t.elem);
-    }
-    case 'ref': {
-      return hasVars(t.target);
-    }
-    case 'adt': {
-      return t.args.some(hasVars);
-    }
-    case 'fn': {
-      return t.params.some(hasVars) || hasVars(t.ret);
-    }
-    case 'closure': {
-      return t.closure.params.some(hasVars) || hasVars(t.closure.ret);
-    }
-    case 'dyn': {
-      return t.trait.args.some(hasVars) || (t.trait.fnSig?.params.some(hasVars) ?? false);
-    }
-    default: {
-      return false;
-    }
-  }
+  if (t.kind === 'var') return true;
+  if (t.kind === 'opaque') return false;
+  return childTypes(t).some(hasVars);
 }
 
 export type Subst = Map<TypeParam, Type>;
@@ -359,92 +371,27 @@ export type Subst = Map<TypeParam, Type>;
 export function substitute(type: Type, subst: Subst): Type {
   if (subst.size === 0) return type;
   const t = shallow(type);
-  switch (t.kind) {
-    case 'param': {
-      return subst.get(t.param) ?? t;
-    }
-    case 'tuple': {
-      return { kind: 'tuple', elems: t.elems.map((elem) => substitute(elem, subst)) };
-    }
-    case 'array': {
-      return { kind: 'array', elem: substitute(t.elem, subst), len: t.len };
-    }
-    case 'slice': {
-      return { kind: 'slice', elem: substitute(t.elem, subst) };
-    }
-    case 'ref': {
-      return { kind: 'ref', mutable: t.mutable, target: substitute(t.target, subst) };
-    }
-    case 'adt': {
-      if (t.args.length === 0) return t;
-      return { kind: 'adt', def: t.def, args: t.args.map((arg) => substitute(arg, subst)) };
-    }
-    case 'fn': {
-      return { kind: 'fn', params: t.params.map((p) => substitute(p, subst)), ret: substitute(t.ret, subst) };
-    }
-    case 'dyn': {
-      return { kind: 'dyn', trait: substituteTraitRef(t.trait, subst) };
-    }
-    case 'opaque': {
-      if (!t.opaque.hidden) return t;
-      return { kind: 'opaque', opaque: { ...t.opaque, hidden: substitute(t.opaque.hidden, subst) } };
-    }
-    default: {
-      return t;
-    }
+  if (t.kind === 'param') return subst.get(t.param) ?? t;
+  if (t.kind === 'opaque') {
+    if (!t.opaque.hidden) return t;
+    return { kind: 'opaque', opaque: { ...t.opaque, hidden: substitute(t.opaque.hidden, subst) } };
   }
+  return mapChildren(t, (child) => substitute(child, subst));
 }
 
 export function substituteTraitRef(ref: TraitRef, subst: Subst): TraitRef {
   if (subst.size === 0) return ref;
-  return {
-    trait: ref.trait,
-    args: ref.args.map((arg) => substitute(arg, subst)),
-    fnSig: ref.fnSig && {
-      params: ref.fnSig.params.map((p) => substitute(p, subst)),
-      ret: substitute(ref.fnSig.ret, subst),
-    },
-  };
+  return mapTraitRef(ref, (type) => substitute(type, subst));
 }
 
 export function hasParams(type: Type): boolean {
   const t = shallow(type);
-  switch (t.kind) {
-    case 'param': {
-      return true;
-    }
-    case 'tuple': {
-      return t.elems.some(hasParams);
-    }
-    case 'array':
-    case 'slice': {
-      return hasParams(t.elem);
-    }
-    case 'ref': {
-      return hasParams(t.target);
-    }
-    case 'adt': {
-      return t.args.some(hasParams);
-    }
-    case 'fn': {
-      return t.params.some(hasParams) || hasParams(t.ret);
-    }
-    case 'closure': {
-      return t.closure.params.some(hasParams) || hasParams(t.closure.ret);
-    }
-    case 'dyn': {
-      return t.trait.args.some(hasParams) || (t.trait.fnSig?.params.some(hasParams) ?? false);
-    }
-    case 'opaque': {
-      return t.opaque.hidden ? hasParams(t.opaque.hidden) : false;
-    }
-    default: {
-      return false;
-    }
-  }
+  if (t.kind === 'param') return true;
+  return childTypes(t).some(hasParams);
 }
 
 /** Whether two resolved types are the same type. */
+// code-gauge-allow functionNcss 40 -- One case per kind of type.
 export function sameType(a: Type, b: Type): boolean {
   const x = shallow(a);
   const y = shallow(b);
@@ -507,7 +454,8 @@ export function sameType(a: Type, b: Type): boolean {
 // Printing
 
 /** A type as rustc writes it in messages, with `{integer}` and `_` for variables. */
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of type.
+// code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of type.
+// code-gauge-allow functionNcss 40 -- One case per kind of type.
 export function typeToString(type: Type): string {
   const t = shallow(type);
   switch (t.kind) {

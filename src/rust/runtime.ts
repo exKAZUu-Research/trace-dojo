@@ -126,6 +126,7 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   /** Removes the turtles that no variable or value in use reaches, as dropping them in Rust does. */
+  // code-gauge-allow duplicateLines 16 -- Each language's runtime collects the turtles its values no longer reach alike.
   collectGarbage(): void {
     const reached = new Set<unknown>();
     const stack: unknown[] = [];
@@ -150,7 +151,7 @@ export class Runtime implements TracedRuntime<Frame> {
 
 export class StackOverflow {}
 
-// code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of value.
+// code-gauge-allow functionNcss 31 -- One case per kind of value.
 function pushChildren(item: object, stack: unknown[]): void {
   if (Array.isArray(item)) {
     stack.push(...item);

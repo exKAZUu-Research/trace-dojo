@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 408 -- One native per method of the standard library.
 import { normalize } from '../infer';
 import { strSliceBytes } from '../interpreter';
 import { shallow, type Type } from '../types';
@@ -48,6 +49,7 @@ function charIndex(text: string, offset: number): number {
 }
 
 /** A matcher of the patterns `str` methods take: a char, a string, chars, or a closure over chars. */
+// code-gauge-allow functionCognitiveComplexity 22 -- One native per method of the standard library.
 function patternMatcher(
   ctx: NativeContext,
   pattern: Value

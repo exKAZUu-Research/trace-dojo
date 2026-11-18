@@ -60,7 +60,6 @@ export function parseStringLiteral(text: string): string | undefined {
   return unescape(text.slice(1, -1), false);
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per escape.
 function unescape(body: string, isChar: boolean): string | undefined {
   let result = '';
   for (let index = 0; index < body.length; index++) {

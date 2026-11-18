@@ -99,7 +99,7 @@ function selfType(ctx: NativeContext): Type {
 }
 
 /** The default value of a type, as `Default::default` gives it. */
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of type.
+// code-gauge-allow functionNcss 48 -- One native per method of the standard library.
 export function defaultValue(ctx: NativeContext, type: Type): Value {
   const t = normalize(shallow(type));
   switch (t.kind) {
@@ -334,7 +334,8 @@ function rangeContains(ctx: NativeContext, range: RangeValue, item: Value): bool
 }
 
 /** `T::from(value)` for the conversions of the standard library. */
-// code-gauge-allow functionCognitiveComplexity 25 -- One case per conversion.
+// code-gauge-allow functionCognitiveComplexity 28 -- One native per method of the standard library.
+// code-gauge-allow functionNcss 36 -- One native per method of the standard library.
 export function convert(ctx: NativeContext, value: Value, from: Type, to: Type): Value {
   const source = normalize(shallow(from));
   const target = normalize(shallow(to));

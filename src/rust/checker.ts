@@ -12,6 +12,7 @@ import type {
   Stmt,
   TypeAst,
 } from './ast';
+import { forEachDirect } from './astWalk';
 import { BorrowChecker } from './borrowck';
 import { ConstLint } from './constLint';
 import { isIrrefutable, lowerPattern, missingPattern } from './exhaustiveness';
@@ -263,6 +264,7 @@ export class Checker {
     void span;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Follows the type checking rules of rustc case by case.
   private solveObligations(final: boolean): void {
     let progress = true;
     while (progress) {
@@ -398,7 +400,8 @@ export class Checker {
     this.coerce(expr, actual, target);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per coercion.
+  // code-gauge-allow functionCognitiveComplexity 30 -- Follows the type checking rules of rustc case by case.
+  // code-gauge-allow functionNcss 33 -- Follows the type checking rules of rustc case by case.
   private coerce(expr: Expr, actual: Type, target: Type): void {
     const a = normalize(shallow(actual));
     const t = normalize(shallow(target));
@@ -459,7 +462,8 @@ export class Checker {
   }
 
   /** The element type a `for` loop over a value of this type binds, as `IntoIterator` gives it. */
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per iterable type.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Follows the type checking rules of rustc case by case.
+  // code-gauge-allow functionNcss 50 -- Follows the type checking rules of rustc case by case.
   intoIterItem(type: Type): Type | undefined {
     const t = normalize(shallow(type));
     if (t.kind === 'array') return t.elem;
@@ -623,14 +627,12 @@ export class Checker {
   // Expressions
 
   /** Checks an expression, whose type `expected` may guide (the type of a literal, a closure's parameters). */
-  // code-gauge-allow functionCognitiveComplexity 60 -- One case per kind of expression.
   expr(expr: Expr, expected: Type | undefined): Type {
     const type = this.exprInner(expr, expected);
     expr.ty = type;
     return type;
   }
 
-  // code-gauge-allow functionNcss 120 -- One case per kind of expression.
   private exprInner(expr: Expr, expected: Type | undefined): Type {
     switch (expr.kind) {
       case 'int': {
@@ -974,6 +976,7 @@ export class Checker {
     return UNIT;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Follows the type checking rules of rustc case by case.
   private range(expr: Extract<Expr, { kind: 'range' }>, expected: Type | undefined): Type {
     let elem: Type = freshVar();
     const e = expected ? normalize(shallow(expected)) : undefined;
@@ -1052,7 +1055,6 @@ export class Checker {
     return written.map((arg) => this.lowerType(arg));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- Follows Rust's resolution of value paths.
   resolveValuePath(path: PathAst, span: Span): PathRes {
     const segments = path.segments;
     const names = segments.map((segment) => segment.name);
@@ -1463,7 +1465,6 @@ export class Checker {
     });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Follows rustc's method call checking.
   private methodCall(expr: Extract<Expr, { kind: 'methodCall' }>, expected: Type | undefined): Type {
     const receiverType = this.expr(expr.receiver, undefined);
     const resolvedReceiver = normalize(shallow(receiverType));
@@ -1606,7 +1607,8 @@ export class Checker {
   }
 
   /** What a place expression is rooted in, looking through fields, indexes, and derefs. */
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of place.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Follows the type checking rules of rustc case by case.
+  // code-gauge-allow functionNcss 31 -- Follows the type checking rules of rustc case by case.
   private placeRoot(
     place: Expr
   ): { kind: 'local'; local: LocalVar } | { kind: 'mutRef' } | { kind: 'sharedRef' } | { kind: 'temporary' } {
@@ -1667,6 +1669,7 @@ export class Checker {
   // -------------------------------------------------------------------------------------------------------------------
   // Operators
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- Follows the type checking rules of rustc case by case.
   private unary(expr: Extract<Expr, { kind: 'unary' }>, expected: Type | undefined): Type {
     if (expr.op === '*') {
       const type = normalize(shallow(this.expr(expr.operand, undefined)));
@@ -1701,7 +1704,6 @@ export class Checker {
     return t;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- Follows Rust's impls of the operator traits.
   private binary(expr: Extract<Expr, { kind: 'binary' }>, expected: Type | undefined): Type {
     const { op } = expr;
     if (op === '&&' || op === '||') {
@@ -1836,6 +1838,7 @@ export class Checker {
     return UNIT;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 22 -- Follows the type checking rules of rustc case by case.
   private compoundAssign(expr: Extract<Expr, { kind: 'compoundAssign' }>): Type {
     const targetType = this.expr(expr.target, undefined);
     if (!this.isPlaceExpr(expr.target))
@@ -1880,7 +1883,7 @@ export class Checker {
     return ref(type, expr.mutable);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Follows Rust's rules for `as`.
+  // code-gauge-allow functionCognitiveComplexity 16 -- Follows the type checking rules of rustc case by case.
   private cast(expr: Extract<Expr, { kind: 'cast' }>): Type {
     const target = this.lowerType(expr.type);
     const sourceType = this.expr(expr.operand, undefined);
@@ -1922,6 +1925,7 @@ export class Checker {
   // -------------------------------------------------------------------------------------------------------------------
   // Fields, indexes, structs
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Follows the type checking rules of rustc case by case.
   private field(expr: Extract<Expr, { kind: 'field' }>): Type {
     const operandType = this.expr(expr.operand, undefined);
     for (const step of autoderefSteps(this.program, operandType)) {
@@ -1972,7 +1976,6 @@ export class Checker {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per indexable type.
   private index(expr: Extract<Expr, { kind: 'index' }>): Type {
     const operandType = this.expr(expr.operand, undefined);
     let previous: Type | undefined;
@@ -2035,7 +2038,6 @@ export class Checker {
     return compileError(expr.span, `${typeToString(resolve(operandType))} は [ ] で要素を取り出せません。`);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Follows Rust's checks of struct expressions.
   private structExpr(expr: Extract<Expr, { kind: 'struct' }>, expected: Type | undefined): Type {
     const { def, variant, typeArgs } = this.resolveStructPath(expr.path, expr.span);
     const self = adt(def, typeArgs);
@@ -2208,7 +2210,6 @@ export class Checker {
   // -------------------------------------------------------------------------------------------------------------------
   // Macros
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per macro.
   private macro(expr: Expr, macro: MacroCall, expected: Type | undefined): Type {
     switch (macro.kind) {
       case 'print': {
@@ -2342,7 +2343,6 @@ export class Checker {
    * Checks a pattern against the type of the value it matches, declaring its bindings. Matching a reference with a
    * pattern that is not a reference pattern looks through it and binds by reference, as Rust's match ergonomics do.
    */
-  // code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of pattern.
   checkPattern(pattern: Pattern, type: Type, mode: LocalVar['mode']): void {
     pattern.ty = type;
     let t = normalize(shallow(type));
@@ -2525,7 +2525,8 @@ export class Checker {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of ADT pattern.
+  // code-gauge-allow functionCognitiveComplexity 27 -- Follows the type checking rules of rustc case by case.
+  // code-gauge-allow functionNcss 49 -- Follows the type checking rules of rustc case by case.
   private adtPattern(
     pattern: Extract<Pattern, { kind: 'tupleStruct' | 'struct' | 'path' }>,
     t: Type,
@@ -2685,6 +2686,7 @@ function isIntegral(type: Type): boolean {
 }
 
 /** The closure trait a closure implements, from how its body uses the variables it captures. */
+// code-gauge-allow functionCognitiveComplexity 29 -- Follows the type checking rules of rustc case by case.
 function closureKindOf(
   fn: FnContext,
   body: Expr,
@@ -2724,177 +2726,11 @@ function closureKindOf(
         if (!solver.isCopy(type)) kind = 'FnOnce';
       }
     }
-    forEachChild(expr, visit);
+    forEachDirect(expr, visit);
   };
   visit(body);
   void closureKindAtLeast;
   return kind;
-}
-
-/** Calls `visit` on each expression directly inside `expr`, without entering nested closures. */
-// code-gauge-allow functionCognitiveComplexity 60 -- One case per kind of expression.
-export function forEachChild(expr: Expr, visit: (child: Expr) => void): void {
-  const block = (b: Block): void => {
-    for (const stmt of b.stmts) {
-      if (stmt.kind === 'let') {
-        if (stmt.init) visit(stmt.init);
-        if (stmt.else) block(stmt.else);
-      } else if (stmt.kind === 'expr') visit(stmt.expr);
-    }
-    if (b.tail) visit(b.tail);
-  };
-  const condition = (cond: Condition): void => visit(cond.kind === 'expr' ? cond.expr : cond.value);
-  const format = (f: FormatArgs | undefined): void => {
-    for (const arg of f?.args ?? []) visit(arg);
-  };
-  switch (expr.kind) {
-    case 'unary':
-    case 'ref':
-    case 'cast':
-    case 'try': {
-      visit(expr.operand);
-      return;
-    }
-    case 'field': {
-      visit(expr.operand);
-      return;
-    }
-    case 'binary': {
-      visit(expr.left);
-      visit(expr.right);
-      return;
-    }
-    case 'assign':
-    case 'compoundAssign': {
-      visit(expr.target);
-      visit(expr.value);
-      return;
-    }
-    case 'call': {
-      visit(expr.callee);
-      for (const arg of expr.args) visit(arg);
-      return;
-    }
-    case 'methodCall': {
-      visit(expr.receiver);
-      for (const arg of expr.args) visit(arg);
-      return;
-    }
-    case 'index': {
-      visit(expr.operand);
-      visit(expr.index);
-      return;
-    }
-    case 'range': {
-      if (expr.start) visit(expr.start);
-      if (expr.end) visit(expr.end);
-      return;
-    }
-    case 'tuple':
-    case 'array': {
-      for (const elem of expr.elems) visit(elem);
-      return;
-    }
-    case 'arrayRepeat': {
-      visit(expr.value);
-      visit(expr.count);
-      return;
-    }
-    case 'struct': {
-      for (const field of expr.fields) visit(field.value);
-      if (expr.base) visit(expr.base);
-      return;
-    }
-    case 'block': {
-      block(expr);
-      return;
-    }
-    case 'if': {
-      condition(expr.cond);
-      block(expr.consequent);
-      if (expr.else) visit(expr.else);
-      return;
-    }
-    case 'match': {
-      visit(expr.scrutinee);
-      for (const arm of expr.arms) visit(arm.body);
-      return;
-    }
-    case 'loop': {
-      block(expr.body);
-      return;
-    }
-    case 'while': {
-      condition(expr.cond);
-      block(expr.body);
-      return;
-    }
-    case 'for': {
-      visit(expr.iterable);
-      block(expr.body);
-      return;
-    }
-    case 'break':
-    case 'return': {
-      if (expr.value) visit(expr.value);
-      return;
-    }
-    case 'closure': {
-      visit(expr.body);
-      return;
-    }
-    case 'macro': {
-      const { macro } = expr;
-      switch (macro.kind) {
-        case 'print':
-        case 'panic': {
-          format(macro.format);
-          return;
-        }
-        case 'format': {
-          format(macro.format);
-          return;
-        }
-        case 'write': {
-          visit(macro.target);
-          format(macro.format);
-          return;
-        }
-        case 'assert': {
-          visit(macro.cond);
-          format(macro.format);
-          return;
-        }
-        case 'assertEq': {
-          visit(macro.left);
-          visit(macro.right);
-          format(macro.format);
-          return;
-        }
-        case 'vec': {
-          for (const elem of macro.elems) visit(elem);
-          return;
-        }
-        case 'vecRepeat': {
-          visit(macro.value);
-          visit(macro.count);
-          return;
-        }
-        case 'matches': {
-          visit(macro.value);
-          return;
-        }
-        case 'dbg': {
-          for (const arg of macro.args) visit(arg);
-          return;
-        }
-      }
-      return;
-    }
-    default: {
-      return;
-    }
-  }
 }
 
 export { hasParams, deepNormalize, allSupertraits, derefOnce };

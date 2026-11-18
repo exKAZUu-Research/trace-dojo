@@ -94,7 +94,7 @@ export class Formatter {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of type.
+  // code-gauge-allow functionNcss 37 -- Follows std::fmt's formatting rules case by case.
   display(value: Value, type: Type, spec: Spec): string {
     const t = this.concrete(type);
     const v = deref(value);
@@ -158,7 +158,7 @@ export class Formatter {
    * `{:?}` of a value; `indent` is the nesting depth of `{:#?}`, or undefined for the compact form. Containers pass the
    * placeholder's options on to the values in them, as Rust's builders do.
    */
-  // code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of type.
+  // code-gauge-allow functionNcss 39 -- Follows std::fmt's formatting rules case by case.
   debug(value: Value, type: Type, spec: Spec, indent: number | undefined): string {
     const t = this.concrete(type);
     const v = deref(value);
@@ -210,7 +210,7 @@ export class Formatter {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per builtin type.
+  // code-gauge-allow functionNcss 55 -- Follows std::fmt's formatting rules case by case.
   private debugAdt(v: Value, t: Type & { kind: 'adt' }, spec: Spec, indent: number | undefined): string {
     const user = this.hooks.userFmt('Debug', t, v, { ...spec, alternate: indent !== undefined });
     if (user !== undefined) return user;
@@ -315,7 +315,7 @@ export class Formatter {
     return entries;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per radix.
+  // code-gauge-allow functionCognitiveComplexity 16 -- Follows std::fmt's formatting rules case by case.
   private radix(trait: FormatSpec['trait'], value: Value, type: Type, spec: Spec): string {
     let t = this.concrete(type);
     while (t.kind === 'ref') t = this.concrete(t.target);
@@ -348,6 +348,7 @@ export class Formatter {
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Follows std::fmt's formatting rules case by case.
 function intExp(value: bigint, precision: number | undefined, letter: string, plus: boolean): string {
   const negative = value < 0n;
   let digits = (negative ? -value : value).toString();
