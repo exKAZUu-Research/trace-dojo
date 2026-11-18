@@ -9,9 +9,10 @@ type Scalar = Extract<Expr, { k: 'lit' }>['v'];
 type Constant = Scalar | Map<Key, Constant>;
 const UNKNOWN = Symbol('unevaluated default');
 type Folded = Constant | typeof UNKNOWN;
+type FoldContext = 'default' | 'compiler';
 
-export function foldedDefaultType(expression: Expr): string | undefined {
-  const value = fold(expression);
+export function foldedDefaultType(expression: Expr, context: FoldContext = 'default'): string | undefined {
+  const value = fold(expression, context);
   if (value === UNKNOWN) return undefined;
   if (value instanceof Map) return 'array';
   if (value === null) return 'null';
@@ -20,7 +21,7 @@ export function foldedDefaultType(expression: Expr): string | undefined {
   return typeof value === 'boolean' ? String(value) : 'string';
 }
 
-function fold(expression: Expr): Folded {
+function fold(expression: Expr, context: FoldContext): Folded {
   switch (expression.k) {
     case 'lit': {
       return expression.v;
@@ -30,9 +31,10 @@ function fold(expression: Expr): Folded {
       return value === undefined || value instanceof PhpArray || value instanceof PhpObject ? UNKNOWN : value;
     }
     case 'interp': {
+      if (context === 'compiler') return UNKNOWN;
       let result = '';
       for (const part of expression.parts) {
-        const value = typeof part === 'string' ? part : fold(part);
+        const value = typeof part === 'string' ? part : fold(part, context);
         if (value === UNKNOWN || value instanceof Map) return UNKNOWN;
         const text = scalarString(value);
         if (text === UNKNOWN) return UNKNOWN;
@@ -44,8 +46,9 @@ function fold(expression: Expr): Folded {
       return expression.name.toLowerCase() === 'class' && expression.cls.k === 'named' ? expression.cls.name : UNKNOWN;
     }
     case 'idx': {
-      const base = fold(expression.base);
-      const index = expression.index ? fold(expression.index) : UNKNOWN;
+      if (context === 'compiler') return UNKNOWN;
+      const base = fold(expression.base, context);
+      const index = expression.index ? fold(expression.index, context) : UNKNOWN;
       if (base === UNKNOWN) return UNKNOWN;
       const key =
         base instanceof Map
@@ -59,28 +62,30 @@ function fold(expression: Expr): Folded {
       return key >= 0n && key < BigInt(base.length) ? base[Number(key)] : UNKNOWN;
     }
     case 'array': {
-      return arrayConstant(expression);
+      return arrayConstant(expression, context);
     }
     case 'unary': {
-      return unaryConstant(expression.op, fold(expression.e));
+      return unaryConstant(expression.op, fold(expression.e, context));
     }
     case 'bin': {
-      const left = fold(expression.l);
+      const left = fold(expression.l, context);
       if (left === UNKNOWN) return UNKNOWN;
-      if (expression.op === '??') return left ?? fold(expression.r);
+      if (expression.op === '??') return context === 'compiler' ? UNKNOWN : (left ?? fold(expression.r, context));
       if (['&&', 'and'].includes(expression.op) && !truth(left)) return false;
       if (['||', 'or'].includes(expression.op) && truth(left)) return true;
-      return binaryConstant(expression.op, left, fold(expression.r));
+      return binaryConstant(expression.op, left, fold(expression.r, context));
     }
     case 'cond': {
-      const test = fold(expression.test);
+      if (context === 'compiler') return UNKNOWN;
+      const test = fold(expression.test, context);
       if (test === UNKNOWN) return UNKNOWN;
-      if (!truth(test)) return fold(expression.alternate);
-      if (expression.consequent) return fold(expression.consequent);
+      if (!truth(test)) return fold(expression.alternate, context);
+      if (expression.consequent) return fold(expression.consequent, context);
       return test;
     }
     case 'cast': {
-      return castConstant(expression.type, fold(expression.e));
+      if (context === 'compiler') return UNKNOWN;
+      return castConstant(expression.type, fold(expression.e, context));
     }
     default: {
       return UNKNOWN;
@@ -90,7 +95,7 @@ function fold(expression: Expr): Folded {
 
 // code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function arrayConstant(expression: Extract<Expr, { k: 'array' }>): Folded {
+function arrayConstant(expression: Extract<Expr, { k: 'array' }>, context: FoldContext): Folded {
   const result = new Map<Key, Constant>();
   let next = INT_MIN;
   const append = (value: Constant): boolean => {
@@ -100,7 +105,7 @@ function arrayConstant(expression: Extract<Expr, { k: 'array' }>): Folded {
     return true;
   };
   for (const item of expression.items) {
-    const value = fold(item.value);
+    const value = fold(item.value, context);
     if (value === UNKNOWN || item.byRef) return UNKNOWN;
     if (item.spread) {
       if (!(value instanceof Map)) return UNKNOWN;
@@ -109,7 +114,7 @@ function arrayConstant(expression: Extract<Expr, { k: 'array' }>): Folded {
         else if (!append(slot)) return UNKNOWN;
       }
     } else if (item.key) {
-      const key = constantKey(fold(item.key));
+      const key = constantKey(fold(item.key, context));
       if (key === UNKNOWN) return UNKNOWN;
       result.set(key, value);
       if (typeof key === 'bigint' && key >= next) next = key + 1n;

@@ -925,7 +925,7 @@ class PatternConverter {
     const set = this.setEscape(letter);
     if (set) return set;
     if (letter === 'b') return { text: String.raw`\x08`, value: 8 };
-    if (letter === 'g' || letter === 'k') return { text: letter, value: letter.codePointAt(0) as number };
+    if ('gk89'.includes(letter)) return { text: letter, value: letter.codePointAt(0) as number };
     if (/[1-7]/.test(letter)) {
       const value = this.octalEscape(letter);
       return { text: this.characterText(value), value };

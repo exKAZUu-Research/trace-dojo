@@ -840,8 +840,8 @@ export class Converter extends DeclarationConverter {
         const name = this.nameText(nameNode);
         const literal = lower(name) === 'class' && cls.k === 'expr' ? parserScalar(cls.e) : undefined;
         if (literal !== undefined && typeof literal !== 'string') this.error(scope, 'Illegal class name');
-        if (lower(name) === 'class' && cls.k === 'expr' && literal === undefined && compilerClassConstant(cls.e)) {
-          const type = foldedDefaultType(cls.e);
+        if (lower(name) === 'class' && cls.k === 'expr' && literal === undefined) {
+          const type = foldedDefaultType(cls.e, 'compiler');
           if (type !== undefined) this.error(scope, `Cannot use "::class" on ${type}`);
         }
         if (literal === undefined) return { k: 'cconst', cls, name, row };
@@ -1169,6 +1169,7 @@ export class Converter extends DeclarationConverter {
     const rightNode = node.childForFieldName('right') as Node;
     const l = this.expr(leftNode);
     if (lower(operator) === 'instanceof') {
+      if (foldedDefaultType(l, 'compiler') !== undefined) return { k: 'lit', v: false, row };
       const cls =
         rightNode.type === 'name' || rightNode.type === 'qualified_name' || rightNode.type === 'relative_name'
           ? this.classRef(rightNode)
@@ -1498,24 +1499,6 @@ function encodingLiteral(node: Node, value: Expr): boolean {
     encodingLiteral(node.childForFieldName('left') as Node, value.l) &&
     encodingLiteral(node.childForFieldName('right') as Node, value.r)
   );
-}
-
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function compilerClassConstant(expression: Expr): boolean {
-  if (expression.k === 'lit' || expression.k === 'cconst' || expression.k === 'const') return true;
-  if (expression.k === 'unary') return compilerClassConstant(expression.e);
-  if (expression.k === 'bin') {
-    if (expression.op === '??' || !compilerClassConstant(expression.l)) return false;
-    const left = foldedDefaultType(expression.l);
-    if (['&&', 'and'].includes(expression.op) && (left === 'false' || left === 'null')) return true;
-    if (['||', 'or'].includes(expression.op) && left === 'true') return true;
-    return compilerClassConstant(expression.r);
-  }
-  if (expression.k === 'array')
-    return expression.items.every(
-      (item) => !item.byRef && (!item.key || compilerClassConstant(item.key)) && compilerClassConstant(item.value)
-    );
-  return false;
 }
 
 function parserScalar(expression: Expr): string | bigint | number | undefined {

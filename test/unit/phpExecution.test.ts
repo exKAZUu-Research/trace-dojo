@@ -1310,3 +1310,18 @@ test('keeps runtime-defined class receivers catchable', () => {
     run('<?php define("VV","X");echo "start;";try{var_dump((VV . "")::class);}catch(Throwable $e){echo "caught;";}')
   ).toMatchObject({ kind: 'executed', stdout: 'start;caught;' });
 });
+
+test.each([
+  '0&&missing()',
+  '1||missing()',
+  '-1||missing()',
+  '""&&missing()',
+  '"a"||missing()',
+  '"0"&&missing()',
+  '[]&&missing()',
+  '[1]||missing()',
+])('rejects short-circuit class receivers after folding PHP truthiness: %s', (receiver) => {
+  expect(run(`<?php echo 'never';try{var_dump((${receiver})::class);}catch(Throwable $e){echo 'caught';}`).kind).toBe(
+    'compileError'
+  );
+});

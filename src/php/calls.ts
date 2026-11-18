@@ -370,7 +370,7 @@ function bindNative(
     const index = values.length;
     values.push(value as Value);
     refs.push(ref);
-    if (record && index < record.args.length && value !== undefined) record.args[index] = value;
+    if (record && index < record.args.length && typeof value === 'string') record.args[index] = value;
   };
   const named = checkNamedArgs(params, args);
   const variadic = params.at(-1)?.variadic ? params.at(-1) : undefined;

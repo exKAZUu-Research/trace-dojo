@@ -28,7 +28,7 @@ import {
   throwError,
   warn,
 } from './errors';
-import { traceArg } from './exceptions';
+import { traceLine } from './exceptions';
 import { collectGarbage } from './garbage';
 import { cast, cloneObject, deprecatedConstant, iterate } from './interp';
 import { defineAlias, defineConstant, defineFunction, defineRuntimeConstant, markInlined } from './native';
@@ -56,13 +56,13 @@ const errorConstants: [string, bigint][] = [
   ['E_USER_ERROR', E_USER_ERROR],
   ['E_USER_WARNING', E_USER_WARNING],
   ['E_USER_NOTICE', E_USER_NOTICE],
-  ['E_STRICT', E_STRICT],
   ['E_RECOVERABLE_ERROR', E_RECOVERABLE_ERROR],
   ['E_DEPRECATED', E_DEPRECATED],
   ['E_USER_DEPRECATED', E_USER_DEPRECATED],
   ['E_ALL', E_ALL],
 ];
 for (const [name, value] of errorConstants) defineConstant(name, value);
+defineConstant('E_STRICT', E_STRICT, 'Constant E_STRICT is deprecated since 8.4, the error level was removed');
 defineConstant('PHP_EOL', '\n');
 defineConstant('PHP_INT_MAX', 9_223_372_036_854_775_807n);
 defineConstant('PHP_INT_MIN', -9_223_372_036_854_775_808n);
@@ -185,7 +185,7 @@ defineFunction(
 defineFunction('is_resource(mixed $value): bool', ({ args }) => isStream(args[0]));
 defineFunction('intval(mixed $value, int $base = 10): int', ({ args }) => {
   const [value, base = 10n] = args;
-  if (typeof value === 'string' && base !== 10n) return parseIntBase(value, Number(base));
+  if (typeof value === 'string' && base !== 10n) return parseIntBase(value, Number(BigInt.asIntN(32, base as bigint)));
   return toInt(value);
 });
 defineFunction('floatval(mixed $value): float', ({ args }) => toFloat(args[0]));
@@ -635,14 +635,7 @@ defineFunction('debug_print_backtrace(int $options = 0, int $limit = 0): void', 
   const options = Number(args[0] ?? 0n);
   const limit = backtraceLimit(args[1] as bigint | undefined);
   const records = callStack.toReversed().slice(1, limit + 1);
-  rt().echo(
-    records
-      .map(
-        (record, index) =>
-          `#${index} ${record.row === undefined ? '[internal function]' : `/main.php(${record.row + 1})`}: ${record.className ? `${record.className}${record.type}` : ''}${record.name}(${options & 2 ? '' : [...record.args.map(traceArg), ...(record.named ?? []).map(([name, value]) => `${name}: ${traceArg(value)}`)].join(', ')})\n`
-      )
-      .join('')
-  );
+  rt().echo(records.map((record, index) => traceLine(record, index, (options & 2) !== 0) + '\n').join(''));
   return null;
 });
 

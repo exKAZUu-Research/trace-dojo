@@ -20,3 +20,13 @@ ValueError: str_pad(): Argument #3 ($pad_string) must not be empty in /main.php:
 Stack trace:
 #0 /main.php(10): str_pad('a', 4, '', 99)
 #1 {main}
+#0 /main.php(11): preg_match('/a/', 'a', Array, '2')
+#1 {main}
+#0 /main.php(12): preg_match('/a/', 'a', Array, '2')
+#1 {main}
+#0 /main.php(13): str_pad('a', '3', '2', '99')
+#1 {main}
+#0 /main.php(14): str_pad('a', '3', ' ', 99.0)
+#1 {main}
+#0 /main.php(15): json_decode('[]', NULL, '0')
+#1 {main}

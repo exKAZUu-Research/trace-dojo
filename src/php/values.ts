@@ -131,7 +131,7 @@ export class PhpArray {
   private readonly knownParents = new WeakSet<PhpArray>();
   map: ArrayTable;
   /** One more than the largest integer key so far, or INT_MIN before any, as PHP's nNextFreeElement. */
-  nextFree = INT_MIN;
+  private nextFree = INT_MIN;
   /** Whether more than one holder may see this array, so that a write must copy it first. */
   shared = false;
   persistentHolder = false;
@@ -188,7 +188,6 @@ export class PhpArray {
       slot.assign(value);
     } else {
       this.insert(key, value);
-      if (typeof key === 'bigint' && key >= this.nextFree) this.nextFree = key === INT_MAX ? INT_MAX : key + 1n;
     }
     if (value !== null && typeof value === 'object') this.composite = true;
     if (!(slot instanceof Ref)) dropped(slot);
@@ -198,7 +197,7 @@ export class PhpArray {
     const old = this.map.get(key);
     if (old instanceof Ref && old !== slot) old.rc--;
     this.insert(key, slot);
-    if (typeof key === 'bigint' && key >= this.nextFree) this.nextFree = key === INT_MAX ? INT_MAX : key + 1n;
+
     if (slot !== null && typeof slot === 'object') this.composite = true;
     dropped(old);
   }
@@ -212,7 +211,6 @@ export class PhpArray {
     const key = this.appendKey;
     if (this.map.has(key)) return false;
     this.insert(key, value);
-    this.nextFree = key === INT_MAX ? INT_MAX : key + 1n;
     if (value !== null && typeof value === 'object') this.composite = true;
     return true;
   }
@@ -229,10 +227,25 @@ export class PhpArray {
     this.invalidate();
     this.trackSlot(key, slot);
     this.map.set(key, slot);
+    this.advanceAppendKey(key);
     this.order?.insert(key);
   }
 
-  replaceTable(entries: Iterable<readonly [Key, Value | Ref]>, nextFree: bigint, packed = false): void {
+  private advanceAppendKey(key: Key): void {
+    if (typeof key === 'bigint' && key >= this.nextFree) this.nextFree = key >= INT_MAX ? INT_MAX : key + 1n;
+  }
+
+  pop(): Value {
+    const last = this.lastKey();
+    if (last === undefined) return null;
+    const value = this.get(last) as Value;
+    this.delete(last);
+    if (last === this.nextFree - 1n) this.nextFree = last;
+    this.pointer = null;
+    return value;
+  }
+
+  replaceTable(entries: Iterable<readonly [Key, Value | Ref]>, packed = false): void {
     const previousSize = this.map.size;
     this.capacityHint = Math.max(this.capacityHint, previousSize);
     this.map = this.table(entries);
@@ -240,11 +253,12 @@ export class PhpArray {
     this.order?.replace(this.map.keys(), packed);
     this.orderPacked = packed;
     this.composite = false;
+    this.nextFree = INT_MIN;
     for (const [key, slot] of this.map) {
       this.trackSlot(key, slot);
+      this.advanceAppendKey(key);
       if (slot !== null && typeof slot === 'object') this.composite = true;
     }
-    this.nextFree = nextFree > INT_MAX ? INT_MAX : nextFree;
     this.invalidate();
   }
 

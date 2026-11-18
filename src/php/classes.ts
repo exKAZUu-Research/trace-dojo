@@ -1104,8 +1104,7 @@ function setterAccessLabel(property: PropDecl): string {
 }
 
 /** The reference a property holds, creating it, for `=&`, by-reference arguments, and nested writes. */
-// code-gauge-allow functionCognitiveComplexity 29 -- Follows PHP's class linking and property access rules in their order of checks.
-// code-gauge-allow functionNcss 40 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss 43 -- Follows PHP's class linking and property access rules in their order of checks.
 export function propRef(
   object: PhpObject,
   name: string,
@@ -1120,7 +1119,12 @@ export function propRef(
     if (overloaded) return overloaded;
     throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
   }
-  if (decl?.hooks?.get && !object.guards?.has(`hook:${name}`)) return hookedPropertyReference(object, decl, scope);
+  const getter = decl?.hooks?.get;
+  if (decl && getter && !object.guards?.has(`hook:${name}`)) {
+    if (mode === 'foreach' && !(getter.kind === 'user' && getter.decl.byRefReturn))
+      throwError('Error', `Cannot create reference to property ${decl.cls.name}::$${name}`);
+    return hookedPropertyReference(object, decl, scope);
+  }
   let slot = object.props.get(key);
   const value = slot instanceof Ref ? slot.v : slot;
   if (mode === 'foreach' && decl?.isReadonly)

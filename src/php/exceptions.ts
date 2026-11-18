@@ -50,16 +50,20 @@ function traceArray(records: CallRecord[]): PhpArray {
   return trace;
 }
 
-/** Formats a stack trace as `getTraceAsString` does, from records innermost first. */
 export function traceText(records: CallRecord[]): string {
-  const lines = records.map((record, index) => {
-    const where = record.row === undefined ? '[internal function]' : `${SCRIPT_PATH}(${record.row + 1})`;
-    const name = record.className ? `${record.className}${record.type}${record.name}` : record.name;
-    const named = callNamedArguments(record).map(([key, arg]) => `${key}: ${traceArg(arg)}`);
-    return `#${index} ${where}: ${name}(${[...callArguments(record).map((arg) => traceArg(arg)), ...named].join(', ')})`;
-  });
-  lines.push(`#${records.length} {main}`);
-  return lines.join('\n');
+  return [...records.map((record, index) => traceLine(record, index)), `#${records.length} {main}`].join('\n');
+}
+
+export function traceLine(record: CallRecord, index: number, ignoreArguments = false): string {
+  const where = record.row === undefined ? '[internal function]' : `${SCRIPT_PATH}(${record.row + 1})`;
+  const name = record.className ? `${record.className}${record.type}${record.name}` : record.name;
+  const args = ignoreArguments
+    ? []
+    : [
+        ...callArguments(record).map(traceArg),
+        ...callNamedArguments(record).map(([key, value]) => `${key}: ${traceArg(value)}`),
+      ];
+  return `#${index} ${where}: ${name}(${args.join(', ')})`;
 }
 
 function traceArrayText(trace: Value): string {

@@ -83,18 +83,15 @@ function rebuild(entries: [Key, Value | Ref][], renumber: boolean, target?: PhpA
   const array = target ?? new PhpArray();
   if (target) {
     let position = 0n;
-    let nextFree = INT_MIN;
     function* renamed(): Generator<[Key, Value | Ref]> {
       let work = 0;
       for (const [key, slot] of entries) {
         const newKey = renumber && typeof key === 'bigint' ? position++ : key;
-        if (typeof newKey === 'bigint' && newKey >= nextFree) nextFree = newKey + 1n;
         if (++work % 64 === 0) rt().spend();
         yield [newKey, slot];
       }
     }
-    array.replaceTable(renamed(), INT_MIN, renumber);
-    array.nextFree = nextFree;
+    array.replaceTable(renamed(), renumber);
     return array;
   }
   for (const [key, source] of entries) {
@@ -163,14 +160,7 @@ defineFunction('array_push(array &$array, mixed ...$values): int', (ctx) => {
 });
 defineFunction('array_pop(array &$array): mixed', (ctx) => {
   checkArrayRef(ctx, 0, 'array_pop', 'array');
-  const array = writableArray(ctx, 0);
-  const last = array.lastKey();
-  if (last === undefined) return null;
-  const value = array.get(last) as Value;
-  array.delete(last);
-  if (last === array.nextFree - 1n) array.nextFree = last;
-  array.pointer = null;
-  return value;
+  return writableArray(ctx, 0).pop();
 });
 defineFunction('array_shift(array &$array): mixed', (ctx) => {
   checkArrayRef(ctx, 0, 'array_shift', 'array');
