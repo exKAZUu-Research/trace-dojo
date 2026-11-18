@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 543 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 554 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../../interpreter/diagnostics';
@@ -81,7 +81,8 @@ interface Diagnostic extends SourceDiagnostic {
   index: number;
 }
 
-/** Type-checks a program as `tsc --strict` does, collecting the errors it reports. */
+const diagnosticPrimitives = new Set(['string', 'number', 'bigint', 'symbol']);
+
 export class Checker {
   readonly diagnostics: Diagnostic[] = [];
   /** While positive, errors are not reported, as when inferring a function's return type ahead of checking it. */
@@ -914,10 +915,23 @@ export class Checker {
     return regularOf(type);
   }
 
-  /**
-   * The source type a relation message shows: a literal source generalized to its primitive unless the target could
-   * hold a literal, as TypeScript's `reportRelationError` does.
-   */
+  typesForMessage(source: Type, target: Type): { source: Type; target: Type } {
+    const regular = regularOf(source);
+    const primitive =
+      regular === booleanType ||
+      regular.kind === 'literal' ||
+      (regular.kind === 'intrinsic' && diagnosticPrimitives.has(regular.name));
+    let shownTarget = target;
+    if (primitive && target.kind === 'union') {
+      this.budget.spend(target.types.length);
+      const nonNullish = target.types.filter(
+        (member) => !isIntrinsic(member, 'null') && !isIntrinsic(member, 'undefined')
+      );
+      if (nonNullish.length === 1) shownTarget = nonNullish[0];
+    }
+    return { source: this.widenLiteralForMessage(regular, shownTarget), target: shownTarget };
+  }
+
   widenLiteralForMessage(source: Type, target: Type): Type {
     const regular = regularOf(source);
     if (!isLiteralType(regular) || this.couldHaveTopLevelSingletonTypes(target)) return regular;

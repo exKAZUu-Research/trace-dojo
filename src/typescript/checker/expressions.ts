@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 503 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss 504 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -677,9 +677,10 @@ export class ExpressionChecker {
    */
   reportNotAssignable(node: TreeNode, source: Type, target: Type, expression?: TreeNode): void {
     if (this.elaboration.report(expression ?? node, source, target)) return;
+    const types = this.c.typesForMessage(source, target);
     this.c.error(
       node,
-      `型 '${this.c.print(this.c.widenLiteralForMessage(source, target))}' を型 '${this.c.print(target)}' に代入することはできません。${this.elaborate(source, target)}`
+      `型 '${this.c.print(types.source)}' を型 '${this.c.print(types.target)}' に代入することはできません。${this.elaborate(source, target)}`
     );
   }
 

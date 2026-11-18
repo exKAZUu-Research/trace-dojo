@@ -1,0 +1,21 @@
+const text: string | undefined = 3;
+const number: number | undefined = 's';
+const nullable: string | null = 3;
+const literal: 'a' = 3;
+const literalUnion: 'a' | 'b' = 3;
+const nullableLiteral: 'a' | undefined = 3;
+const boolean: boolean | undefined = 3;
+const mixed: string | number | undefined = false;
+const nullableLiteralText: 'a' | null = 's';
+const notNull: string | undefined = null;
+const notUndefined: string | null = undefined;
+const notVoid: string | undefined = undefined as void;
+function argument(value: string | undefined) {}
+argument(3);
+function result(): string | undefined {return 3;}
+class Item {value: string | undefined = 3;}
+function defaulted<T extends string | undefined = 3>() {}
+const tuple: [string | undefined] = [3];
+const array: (string | undefined)[] = [3];
+function compound(value: number | null) {const target: string | undefined = value;}
+function booleanSource(value: boolean) {const target: number | undefined = value;}

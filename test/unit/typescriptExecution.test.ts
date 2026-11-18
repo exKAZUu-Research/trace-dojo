@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+
 import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
@@ -466,4 +468,31 @@ target.apply(undefined, Object('ab') as any);`;
       'length\nvalueOf\nown\ninherited\ncall 2 first second\nempty length\ncall 0 undefined undefined\ncall 0 undefined undefined\ncall 0 undefined undefined\ncall 2 a b\n',
     uncaughtException: undefined,
   });
+});
+
+test('nullable assignment diagnostics retain the source and target types reported by TypeScript', () => {
+  const fixture = new URL(
+    '../fixtures/typescriptTypeErrors/rejects-nullable-assignment-message-types.ts.txt',
+    import.meta.url
+  );
+  const reference = fs.readFileSync(
+    new URL('../fixtures/typescriptTypeErrors/rejects-nullable-assignment-message-types.out', import.meta.url),
+    'utf8'
+  );
+  const expected = reference.split('\n').flatMap((line) => {
+    const match =
+      /^\((\d+),\d+\).*?[Tt]ype '(.+?)' (?:is not assignable to (?:type|parameter of type)|does not satisfy the constraint) '(.+?)'\./.exec(
+        line
+      );
+    return match ? [{ row: Number(match[1]) - 1, source: match[2], target: match[3] }] : [];
+  });
+  const execution = executeProgram('typescript', fs.readFileSync(fixture, 'utf8'));
+  if (execution.kind !== 'compileError') throw new Error(`not rejected: ${JSON.stringify(execution)}`);
+  expect(execution.diagnostics.map((diagnostic) => diagnostic.row)).toEqual(
+    expected.map((diagnostic) => diagnostic.row)
+  );
+  for (const [index, diagnostic] of execution.diagnostics.entries()) {
+    const reported = /^型 '(.+?)' (?:を型|の引数を型|は制約) '(.+?)'/.exec(diagnostic.message);
+    expect(reported?.slice(1)).toEqual([expected[index].source, expected[index].target]);
+  }
 });

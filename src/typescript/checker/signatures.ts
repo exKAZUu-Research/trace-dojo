@@ -492,11 +492,13 @@ export class Signatures {
     if (!constraint) return;
     // Only the parameter itself stands for its default; the constraint may still refer to the other parameters.
     const instantiated = this.c.instantiate(constraint, new Map([[parameter.id, defaultType]]));
-    if (!this.c.relations.isAssignable(defaultType, instantiated))
+    if (!this.c.relations.isAssignable(defaultType, instantiated)) {
+      const types = this.c.typesForMessage(defaultType, instantiated);
       this.c.error(
         defaultTypeNode,
-        `型 '${this.c.print(this.c.widenLiteralForMessage(defaultType, instantiated))}' は制約 '${this.c.print(instantiated)}' を満たしていません。`
+        `型 '${this.c.print(types.source)}' は制約 '${this.c.print(types.target)}' を満たしていません。`
       );
+    }
   }
 
   /**
