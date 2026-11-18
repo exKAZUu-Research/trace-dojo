@@ -1658,6 +1658,23 @@ test.each([
   });
 });
 
+test.each([
+  ['struct{x:u8,y:u8}', 'u8', '?S', '3', '.{.x=7,.y=8}', '.?.x', '.{.x=11,.y=8}'],
+  ['struct{x:u16}', 'u16', '?S', '2', '.{.x=7}', '.?.x', '.{.x=11}'],
+  ['[2]u8', 'u8', '?S', '3', '.{7,8}', '.?[0]', '.{11,8}'],
+  ['struct{x:u8,y:u8}', 'u8', '??S', '4', '@as(?S,.{.x=7,.y=8})', '.?.?.x', '@as(?S,.{.x=11,.y=8})'],
+])(
+  'optional %s field addresses agree with their integer views (%s, %s)',
+  (shape, scalar, optional, length, initial, field, replacement) => {
+    const source = `const std=@import("std");const S=${shape};const O=${optional};const U=extern union{o:*O,b:*[${length}]${scalar}};pub fn main()!void{var o:O=${initial};const p=&o${field};const alias=U{.o=&o};const q=&alias.b[0];var map=std.AutoHashMap(*${scalar},u8).init(std.heap.page_allocator);defer map.deinit();try map.put(p,42);std.debug.print("{} {} {}|{any}|",.{p==q,p.*,q.*,map.get(q)});q.*=9;std.debug.print("{} {}|",.{p.*,o${field}});o=${replacement};std.debug.print("{} {} {any}",.{p.*,q.*,map.get(q)});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'true 7 7|42|9 9|11 11 42',
+      uncaughtException: undefined,
+    });
+  }
+);
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;

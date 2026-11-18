@@ -308,6 +308,7 @@ function sourceLocation(pointer: Pointer, type: Type, offset: number): { storage
       return sourceLocation(source, region.type, offset - region.offset);
     }
   }
+  if (type.kind === 'optional') return optionalSourceLocation(pointer, type.child, offset);
   if (type.kind === 'error_union') return errorSourceLocation(pointer, type, offset);
   if (type.kind === 'union') {
     const union = physicalUnion(type, pointer.load() as ZUnion);
@@ -316,6 +317,18 @@ function sourceLocation(pointer: Pointer, type: Type, offset: number): { storage
   }
   const location = pointer.storageLocation();
   return { storage: location.storage, index: location.index + offset / (8 * Math.max(1, sizeOf(type))) };
+}
+
+function optionalSourceLocation(pointer: Pointer, child: Type, offset: number): { storage: object; index: number } {
+  if (optionalNicheBits(child)) return sourceLocation(pointer, child, offset);
+  if (
+    offset < sizeOf(child) * 8 &&
+    (Pointer.optionalProjection(pointer.target, pointer.index) || pointer.load() !== NULL)
+  ) {
+    const payload = pointer.project('optional').withFieldLocation(pointer, 0);
+    return sourceLocation(payload, child, offset);
+  }
+  return pointer.fieldLocation(offset / 8);
 }
 
 function errorSourceLocation(
