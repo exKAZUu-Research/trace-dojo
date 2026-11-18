@@ -4,3 +4,6 @@ identity.apply(null,['g']).toUpperCase();
 function constrained<T extends number>(value:T):T{return value;}
 constrained.call(null,'bad');
 constrained.apply(null,['bad']);
+
+type GenericRest = <A extends string[]>(...values:A)=>A;
+const wrong:GenericRest=<T extends string[]>(...values:T):string=>values.join(',');

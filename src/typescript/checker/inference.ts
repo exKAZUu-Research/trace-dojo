@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 404 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import type { Checker, Mapper } from './checker';
 import { applicableIndex, isIndexKeyOf, isPropertyKeyOf, keyedIndexes } from './indexInfos';
 import {
@@ -8,6 +9,7 @@ import {
   isIntrinsic,
   literalType,
   type ObjectType,
+  type Parameter,
   regularOf,
   type Signature,
   type Structure,
@@ -487,7 +489,7 @@ export class TypeInference {
     };
     const mapper = this.partialMapper(run.parameters, run.inferences, fixes, fixes);
     const context = mapper ? this.c.instantiateSignature(target, mapper) : target;
-    return this.instantiateToFit(generic, context);
+    return this.instantiateToFit(generic, context, true);
   }
 
   private isArrayLike(type: ObjectType): boolean {
@@ -552,16 +554,11 @@ export class TypeInference {
   }
 
   /** A generic signature instantiated to compare with `target`, inferring from the target's parameters. */
-  instantiateToFit(source: Signature, target: Signature): Signature {
+  instantiateToFit(source: Signature, target: Signature, contextual = false): Signature {
     const run = newInferenceRun(source.typeParameters, true);
     if (source.thisType && target.thisType) this.inferTypes(run, target.thisType, source.thisType, true);
     for (const [index, parameter] of source.parameters.entries()) {
-      const last = target.parameters.at(-1);
-      if (last?.rest && index >= target.parameters.length - 1 && this.c.relations.isGenericRestType(last.type))
-        continue;
-      const targetType = parameter.rest
-        ? this.c.tupleType(target.parameters.slice(index).map(({ type, optional, rest }) => ({ type, optional, rest })))
-        : this.c.expressions.calls.parameterTypeAt(target, index);
+      const targetType = this.inferenceParameterType(parameter, target, index, contextual);
       if (targetType) this.inferTypes(run, targetType, parameter.type, true);
     }
     const mapper: Mapper = new Map();
@@ -574,6 +571,31 @@ export class TypeInference {
     }
     this.constrainInferences(source.typeParameters, mapper);
     return { ...this.c.instantiateSignature(source, mapper), typeParameters: [] };
+  }
+
+  private inferenceParameterType(
+    parameter: Parameter,
+    target: Signature,
+    index: number,
+    contextual: boolean
+  ): Type | undefined {
+    const last = target.parameters.at(-1);
+    if (
+      (contextual || !parameter.rest) &&
+      last?.rest &&
+      index >= target.parameters.length - 1 &&
+      this.c.relations.isGenericRestType(last.type)
+    )
+      return undefined;
+    const declared = target.parameters[index];
+    const tail = target.parameters.slice(index);
+    return parameter.rest
+      ? tail.length === 1 && tail[0].rest
+        ? tail[0].type
+        : this.c.tupleType(tail.map(({ type, optional, rest }) => ({ type, optional, rest })))
+      : declared && !declared.rest
+        ? declared.type
+        : this.c.expressions.calls.parameterTypeAt(target, index);
   }
 
   private constrainInferences(parameters: TypeParameter[], mapper: Mapper, outer?: Mapper): void {
