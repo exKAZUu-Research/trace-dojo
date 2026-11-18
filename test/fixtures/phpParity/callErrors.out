@@ -1,4 +1,10 @@
 
+Warning: Array to string conversion in /main.php on line 55
+
+Warning: Array to string conversion in /main.php on line 56
+
+Warning: Array to string conversion in /main.php on line 57
+
 Warning: array_sum(): Addition is not supported on type string in /main.php on line 2
 
 Warning: A non-numeric value encountered in /main.php on line 2
@@ -44,3 +50,10 @@ string(7) "default"
 
 Warning: Undefined variable $unboundName in /main.php on line 52
 bool(false)
+constant property;NULL
+string(22) "constant variable name"
+
+Warning: Attempt to read property "" on int in /main.php on line 61
+Object of class stdClass could not be converted to string
+Attempt to assign property "" on int;Object of class stdClass could not be converted to string
+68:Call to undefined method BracedMembers::missingMethod()

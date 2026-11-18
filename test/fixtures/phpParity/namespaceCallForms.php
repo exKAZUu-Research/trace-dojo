@@ -72,3 +72,7 @@ class ImportedLiteral {
     public $value = null;
 }
 var_dump(IMPORTED, ImportedLiteral::CHOICE, (new ImportedLiteral)->value);
+
+function writesReference(&$value) { echo $value, "\n"; }
+class ReferenceArgument { public $value = 'namespaced argument'; }
+writesReference((new ReferenceArgument())->value);

@@ -2,10 +2,17 @@ import { type Behavior, type Comparisons, type Entry, sortedSetEntries, SortedWa
 import { argumentCountMessage, callableProblem } from './calls';
 import { compareBytes } from './conversions';
 import { throwError } from './errors';
-import { checkSetArguments, comparisonSign, consumeComparisonResult, userComparisonCaller } from './libArray';
+import {
+  checkSetArgument,
+  checkSetArguments,
+  comparisonSign,
+  consumeComparisonResult,
+  userComparisonCaller,
+} from './libArray';
 import { isCallable } from './libCore';
 import { defineFunction } from './native';
 import { toStr } from './operators';
+import { rt } from './runtime';
 import { copyValueSlot, deref, PhpArray, type Value } from './values';
 import { zendSort } from './zendSort';
 
@@ -53,8 +60,9 @@ function sortedOperation(operation: SortedOperation, args: Value[]): PhpArray {
   const comparisons = comparisonsFor(operation, callbacks);
   const lists: Entry[][] = [];
   for (const [index, array] of arrays.entries()) {
-    checkSetArguments(name, arrays.slice(0, index + 1));
-    const list = sortedSetEntries(array as PhpArray);
+    rt().spend();
+    checkSetArgument(name, array, index + 1);
+    const list = sortedSetEntries(array);
     if (list.length > 1) zendSort(list, behavior === 'normal' ? comparisons.data : comparisons.key);
     lists.push(list);
   }

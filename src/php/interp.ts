@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 983 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 989 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -519,14 +519,17 @@ function preparePropertyRead(e: Extract<Expr, { k: 'prop' }>, mode: ReadMode): R
 }
 
 function readPropertyOperand(object: Value, name: Value, row: number, mode: ReadMode): Value {
-  if (mode !== 'read' && !(object instanceof PhpObject)) return mode === 'isset' ? false : null;
-  const key = toStr(name);
   const runtime = rt();
-  runtime.row = row;
   if (!(object instanceof PhpObject)) {
-    warn(`Attempt to read property "${key}" on ${valueName(object)}`);
-    return null;
+    if (mode !== 'read') return mode === 'isset' ? false : null;
+    return withPropertyName(name, (key) => {
+      runtime.row = row;
+      warn(`Attempt to read property "${key}" on ${valueName(object)}`);
+      return null;
+    });
   }
+  const key = toStr(name);
+  runtime.row = row;
   if (mode === 'isset') return issetProp(object, key, runtime.frame.scope);
   return readProp(object, key, runtime.frame.scope, mode);
 }
@@ -635,8 +638,16 @@ function readStringOffset(text: string, index: Value, mode: OffsetRead): Value {
   return text[position];
 }
 
-export function memberName(name: string | Expr): string {
-  return typeof name === 'string' ? name : toStr(ev(name));
+export function withPropertyName<T>(name: Value, diagnose: (key: string) => T): T {
+  let key: string;
+  try {
+    key = toStr(name);
+  } catch (error) {
+    if (!(error instanceof PhpThrow)) throw error;
+    withPendingException(rt(), error, () => diagnose(''));
+    throw error;
+  }
+  return diagnose(key);
 }
 
 const compileTimeConstants = new Set(builtinNames.constants);

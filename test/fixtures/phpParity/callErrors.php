@@ -50,3 +50,21 @@ var_dump(isset($missingBase->$name), empty($missingBase[0]->$name), $missingBase
 $name = new stdClass();
 var_dump(isset($missingBase->$name), $missingBase->$name ?? 'default');
 var_dump(isset($missingBase->$unboundName));
+echo 'constant property;';
+$missingMembers = null;
+var_dump($missingMembers?->{[]});
+${[1]} = 'constant variable name';
+var_dump(${[]});
+
+$badPropertyName = new stdClass();
+$scalar = 1;
+try { echo $scalar->$badPropertyName; }
+catch (Error $error) { echo $error->getMessage(), "\n"; }
+try { $scalar->$badPropertyName = 2; }
+catch (Error $error) { echo $error->getMessage(), ';', $error->getPrevious()->getMessage(), "\n"; }
+$prefix = 'missing';
+try { $members->{
+    $prefix .
+    'Method'
+}(); }
+catch (Error $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }

@@ -1539,6 +1539,18 @@ test.each([
 });
 
 test.each([
+  ['namespace {\n  class G {}\n}\ninterface I {}\nnamespace Q {}', 'No code may exist outside of namespace {}'],
+  ['namespace P;\nclass A {}\n\nnamespace Q { class B {} }', 'Cannot mix bracketed namespace declarations'],
+])('reports the offending namespace statement: %s', (source, message) => {
+  const result = run(`<?php\n${source}`);
+  expect(result.kind).toBe('compileError');
+  if (result.kind === 'compileError') {
+    expect(result.diagnostics[0]?.row).toBe(4);
+    expect(result.diagnostics[0]?.message).toContain(message);
+  }
+});
+
+test.each([
   ['echo $a[];', 'Cannot use [] for reading'],
   ['unset($a[]);', 'Cannot use [] for unsetting'],
   ['function readIt() { echo $a[]; }', 'Cannot use [] for reading'],

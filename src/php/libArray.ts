@@ -1158,7 +1158,7 @@ export function checkSetArguments(name: string, arrays: Value[]): void {
   for (const [index, value] of arrays.entries()) checkSetArgument(name, value, index + 1);
 }
 
-function checkSetArgument(name: string, value: Value, position: number): asserts value is PhpArray {
+export function checkSetArgument(name: string, value: Value, position: number): asserts value is PhpArray {
   if (!(value instanceof PhpArray)) {
     throwError(
       'TypeError',

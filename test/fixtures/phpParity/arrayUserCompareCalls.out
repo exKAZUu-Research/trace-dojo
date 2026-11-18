@@ -173,3 +173,4 @@ array(1) {
 }
 int(0)
 int(1)
+cmp(2,1) array_udiff(): Argument #3 must be of type array, string given

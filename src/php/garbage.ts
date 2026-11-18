@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 997 -- Holds object ownership, reachability and release with their shared helpers.
+// code-gauge-allow-file fileNcss 999 -- Holds object ownership, reachability and release with their shared helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type CleanupException, withCleanupExceptions, withPendingException } from './errors';
 import { ExitSignal, type Frame, PhpThrow, type Runtime } from './runtime';
@@ -212,12 +212,13 @@ export function releaseDropped(
   runtime: Runtime,
   dropped: unknown[],
   fromNative: boolean,
-  mode: ReleaseMode = 'ordinary'
+  mode: ReleaseMode = 'ordinary',
+  initialFailure?: CleanupException
 ): void {
   if (runtime.shuttingDown || runtime.exhausted) return;
   const collectible = releaseCollectionDescendants(runtime, dropped);
   try {
-    releaseDroppedNow(runtime, dropped, fromNative, mode);
+    releaseDroppedNow(runtime, dropped, fromNative, mode, initialFailure);
   } finally {
     for (const object of collectible)
       if (runtime.objects.get(object.id) === object) runtime.collectingObjects.add(object);
@@ -273,7 +274,13 @@ function releaseCollectionDescendants(runtime: Runtime, dropped: unknown[]): Php
 
 // code-gauge-allow functionNcss 53 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function releaseDroppedNow(runtime: Runtime, dropped: unknown[], fromNative: boolean, mode: ReleaseMode): void {
+function releaseDroppedNow(
+  runtime: Runtime,
+  dropped: unknown[],
+  fromNative: boolean,
+  mode: ReleaseMode,
+  initialFailure?: CleanupException
+): void {
   if (runtime.shuttingDown || runtime.exhausted) return;
   dropped = dropped.filter(
     (value) =>
@@ -313,7 +320,7 @@ function releaseDroppedNow(runtime: Runtime, dropped: unknown[], fromNative: boo
   let failure: unknown;
   let failed = false;
   try {
-    release.values(dropped);
+    release.values(dropped, initialFailure);
   } catch (error) {
     failed = true;
     failure = error;
@@ -342,7 +349,7 @@ class ReleaseFinish {
   constructor(readonly object: PhpObject) {}
 }
 
-export type ReleaseMode = 'ordinary' | 'shutdown' | 'bulk-removal';
+export type ReleaseMode = 'ordinary' | 'shutdown' | 'complete';
 
 class Release {
   readonly active: PhpObject[] = [];
@@ -361,7 +368,7 @@ class Release {
     for (const object of freed) this.track(object);
   }
 
-  values(values: unknown[]): void {
+  values(values: unknown[], initialFailure?: CleanupException): void {
     const pending: unknown[] = [];
     this.enqueue(pending, values);
     let work = 0;
@@ -369,6 +376,7 @@ class Release {
       withCleanupExceptions(
         this.runtime,
         (onFailure) => {
+          if (initialFailure) onFailure(initialFailure);
           while (pending.length > 0) {
             if ((++work & 255) === 0) this.runtime.budget.checkClock();
             const item = pending.pop();
@@ -376,7 +384,7 @@ class Release {
             this.releaseValue(item, pending, onFailure);
           }
         },
-        this.mode === 'bulk-removal' ? 'latest' : 'prefer-exit'
+        this.mode === 'complete' ? 'latest' : 'prefer-exit'
       );
     } finally {
       for (const item of pending) {
@@ -551,7 +559,7 @@ class Release {
 }
 
 function recoverableReleaseFailure(mode: ReleaseMode, error: unknown): error is CleanupException {
-  return mode !== 'shutdown' && (error instanceof PhpThrow || (mode === 'bulk-removal' && error instanceof ExitSignal));
+  return mode !== 'shutdown' && (error instanceof PhpThrow || (mode === 'complete' && error instanceof ExitSignal));
 }
 
 /** How many releases are running, during which a collection would free their objects out of order. */

@@ -630,14 +630,20 @@ export class Converter extends DeclarationConverter {
     const first = statements.indexOf(namespaces[0]);
     if (this.hasLeadingText(root) || statements.slice(0, first).some((child) => child.type !== 'declare_statement'))
       this.error(
-        namespaces[0],
+        namespaceDiagnosticRow(namespaces[0]),
         'Namespace declaration statement has to be the very first statement or after any declare call in the script'
       );
     const bracketed = namespaces[0].childForFieldName('body') !== null;
-    if (namespaces.some((child) => (child.childForFieldName('body') !== null) !== bracketed))
-      this.error(namespaces[0], 'Cannot mix bracketed namespace declarations with unbracketed namespace declarations');
-    if (bracketed && statements.slice(first).some((child) => child.type !== 'namespace_definition'))
-      this.error(namespaces[0], 'No code may exist outside of namespace {}');
+    for (let index = first + 1; index < statements.length; index++) {
+      const statement = statements[index];
+      if (statement.type === 'namespace_definition') {
+        if ((statement.childForFieldName('body') !== null) !== bracketed)
+          this.error(
+            namespaceDiagnosticRow(statement),
+            'Cannot mix bracketed namespace declarations with unbracketed namespace declarations'
+          );
+      } else if (bracketed) this.error(namespaceDiagnosticRow(statement), 'No code may exist outside of namespace {}');
+    }
   }
 
   private hasLeadingText(root: Node): boolean {
@@ -656,7 +662,8 @@ export class Converter extends DeclarationConverter {
   }
 
   private namespaceDefinition(node: Node): Stmt[] {
-    if (node.parent?.type !== 'program') this.error(node, 'Namespace declarations cannot be nested');
+    if (node.parent?.type !== 'program')
+      this.error(namespaceDiagnosticRow(node), 'Namespace declarations cannot be nested');
     const nameNode = node.childForFieldName('name');
     const body = node.childForFieldName('body');
     const name = nameNode ? this.nameText(nameNode) : '';
@@ -908,7 +915,7 @@ export class Converter extends DeclarationConverter {
             row,
           });
         }
-        if (inner.type === 'name') return { k: 'var', name: enc(inner.text), row };
+        if (interpolating && inner.type === 'name') return { k: 'var', name: enc(inner.text), row };
         if (interpolating && indexedName) {
           return {
             k: 'idx',
@@ -917,7 +924,7 @@ export class Converter extends DeclarationConverter {
             row,
           };
         }
-        const name = this.expr(inner);
+        const name = this.compileStringName(this.expr(inner), inner);
         const constant = interpolating
           ? undefined
           : foldedConstant(name, { compiler: true, preserveNamedConstants: true, budget: this.compileBudget });
@@ -963,13 +970,14 @@ export class Converter extends DeclarationConverter {
       case 'member_access_expression':
       case 'nullsafe_member_access_expression': {
         const obj = this.expr(node.childForFieldName('object') as Node);
-        const name = node.childForFieldName('name') as Node;
+        const nameNode = node.childForFieldName('name') as Node;
+        const name = this.propertyName(nameNode);
         return {
           k: 'prop',
           obj,
-          name: this.memberName(name),
+          name,
           nullsafe: node.type.startsWith('nullsafe'),
-          row: name.startPosition.row,
+          row: this.memberOperandRow(name, nameNode),
         };
       }
       case 'member_call_expression':
@@ -988,24 +996,25 @@ export class Converter extends DeclarationConverter {
           args,
           nullsafe,
           fcc,
-          row: nameNode.startPosition.row,
+          row: this.memberOperandRow(name, nameNode),
         };
       }
       case 'scoped_property_access_expression': {
         const cls = this.classRef(node.childForFieldName('scope') as Node);
         const nameNode = node.childForFieldName('name') as Node;
+        const operand = nameNode.type === 'dynamic_variable_name' ? semanticChildren(nameNode)[0] : nameNode;
         const name =
           nameNode.type === 'variable_name'
             ? this.variableName(nameNode)
-            : this.expr(nameNode.type === 'dynamic_variable_name' ? semanticChildren(nameNode)[0] : nameNode);
-        return { k: 'sprop', cls, name, row: nameNode.startPosition.row };
+            : this.compileStringName(this.expr(operand), operand);
+        return { k: 'sprop', cls, name, row: this.memberOperandRow(name, operand) };
       }
       case 'scoped_call_expression': {
         const cls = this.classRef(node.childForFieldName('scope') as Node);
         const nameNode = node.childForFieldName('name') as Node;
         const name = this.methodName(nameNode);
         const { args, fcc } = this.args(node.childForFieldName('arguments') as Node);
-        return { k: 'scall', cls, name, args, fcc, row: nameNode.startPosition.row };
+        return { k: 'scall', cls, name, args, fcc, row: this.memberOperandRow(name, nameNode) };
       }
       case 'class_constant_access_expression': {
         return this.classConstantExpression(node, row);
@@ -1204,6 +1213,34 @@ export class Converter extends DeclarationConverter {
     while (preceding?.type === 'comment') preceding = preceding.previousSibling;
     if (node.type === 'name' && preceding?.type !== '{') return this.nameText(node);
     return this.expr(node);
+  }
+
+  private propertyName(node: Node): string | Expr {
+    const name = this.memberName(node);
+    return typeof name === 'string' ? name : this.compileStringName(name, node);
+  }
+
+  private compileStringName(name: Expr, node: Node): Expr {
+    if (this.preserveSyntax) return name;
+    const literal = this.compiledValue(name, name.k === 'array');
+    if (literal instanceof Map) {
+      const row = arrayFoldRow(unparenthesizedNode(node));
+      this.notices.push({ level: 'Warning', message: 'Array to string conversion', row });
+      return { k: 'lit', v: 'Array', row };
+    }
+    if (typeof literal === 'number' && Number.isNaN(literal)) {
+      const row = compiledOperandRow(name);
+      this.notices.push({ level: 'Warning', message: NAN_STRING_WARNING, row });
+      return { k: 'lit', v: 'NAN', row };
+    }
+    return name;
+  }
+
+  private memberOperandRow(name: string | Expr, node: Node): number {
+    if (typeof name === 'string') return node.startPosition.row;
+    const value = unparenthesizedNode(node);
+    if (name.k === 'bin' && name.op === '.' && directiveLiteral(value, name)) return followingTokenRow(value);
+    return compiledOperandRow(name);
   }
 
   // code-gauge-allow functionCognitiveComplexity 19 -- Classifies literal, named and magic constants in order.
@@ -1963,9 +2000,7 @@ export class Converter extends DeclarationConverter {
         return { k: 'idx', base: this.expr(baseNode), index: { k: 'lit', v: enc(indexNode.text), row }, row };
       }
       if (indexNode?.type === 'integer' || indexNode?.type === 'unary_op_expression') {
-        const text = indexNode.text.replaceAll(/\s+/g, '');
-        // PHP reads a decimal key without leading zeros as an int and any other digits as a string.
-        const value = /^-?(0|[1-9]\d*)$/.test(text) ? BigInt(text) : enc(text);
+        const value = normalizeKeyString(enc(indexNode.text));
         return { k: 'idx', base: this.expr(baseNode), index: { k: 'lit', v: value, row }, row };
       }
     }
@@ -2052,6 +2087,18 @@ function followingTokenRow(node: Node): number {
     if (sibling) return sibling.startPosition.row;
   }
   return node.endPosition.row;
+}
+
+function namespaceDiagnosticRow(statement: Node): number {
+  const named = statement.childForFieldName('name');
+  if (named) return named.startPosition.row;
+  const operand = statement.childForFieldName('condition');
+  if (operand) return unparenthesizedNode(operand).startPosition.row;
+  if (statement.type === 'namespace_definition')
+    return statement.childForFieldName('body')?.startPosition.row ?? statement.startPosition.row;
+  if (statement.type === 'echo_statement' || statement.type === 'return_statement')
+    return semanticChildren(statement)[0]?.startPosition.row ?? statement.startPosition.row;
+  return statement.startPosition.row;
 }
 
 function arrayFoldRow(node: Node): number {

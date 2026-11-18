@@ -67,9 +67,12 @@ foreach (['removeAll', 'removeAllExcept'] as $operation) {
 }
 
 class OverwrittenInfo {
+    function __construct(private string $mode = 'normal') {}
     function __destruct() {
         foreach (debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS) as $call)
             echo ($call['class'] ?? ''), ($call['type'] ?? ''), $call['function'], ':', $call['line'] ?? 'internal', ';';
+        if ($this->mode === 'exit') exit(5);
+        if ($this->mode === 'throw') throw new Exception('overwritten info');
     }
 }
 $storage = new HashCleanupStorage();
@@ -78,3 +81,12 @@ $storage[$key] = new OverwrittenInfo();
 $storage->mode = 'cleanup';
 try { $storage->offsetSet($key, 'new'); }
 catch (Throwable $error) { echo $error->getMessage(), "\n"; }
+foreach ([new SplObjectStorage(), new HashCleanupStorage()] as $storage) {
+    $storage[$key] = [new OverwrittenInfo('exit'), new OverwrittenInfo('throw')];
+    if ($storage instanceof HashCleanupStorage) $storage->mode = 'cleanup';
+    try { $storage[$key] = 'new'; }
+    catch (Throwable $error) {
+        echo $error->getMessage(), ';';
+        var_dump($error->getPrevious());
+    }
+}

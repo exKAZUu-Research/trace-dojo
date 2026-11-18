@@ -5,4 +5,7 @@ Deprecated: Using ${var} in strings is deprecated, use {$var} instead in /main.p
 
 Deprecated: Using ${var} in strings is deprecated, use {$var} instead in /main.php on line 5
 x y
-6
+6negative zero;zero;padded;negative
+
+Warning: Undefined array key "-0" in /main.php on line 10
+ab

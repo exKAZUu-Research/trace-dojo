@@ -11,4 +11,6 @@ body;1;removed;
 exit;throw;removed;cleanup;0;
 body;1;removed;
 exit;throw;removed;cleanup;0;
-exit;throw;OverwrittenInfo->__destruct:internal;SplObjectStorage->offsetSet:79;cleanup
+exit;throw;OverwrittenInfo->__destruct:internal;SplObjectStorage->offsetSet:82;cleanup
+OverwrittenInfo->__destruct:87;OverwrittenInfo->__destruct:87;overwritten info;NULL
+exit;throw;OverwrittenInfo->__destruct:internal;SplObjectStorage->offsetSet:87;OverwrittenInfo->__destruct:internal;SplObjectStorage->offsetSet:87;overwritten info;NULL

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 922 -- Holds assignment and offset access modes with their shared helpers.
+// code-gauge-allow-file fileNcss 923 -- Holds assignment and offset access modes with their shared helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -22,7 +22,6 @@ import {
   ev,
   isArrayAccess,
   isCompiledVariable,
-  memberName,
   missingCompiledOperand,
   prepareOperand,
   readIndex,
@@ -30,6 +29,7 @@ import {
   resolveClassRef,
   stringOffset,
   stringOffsetIndex,
+  withPropertyName,
 } from './interp';
 import { compiledOperandRow, dimensionWriteRow } from './opcodeRows';
 import { arithmetic, bitwise, concat, toKey, toStr } from './operators';
@@ -195,18 +195,21 @@ function instancePropertyPlace(e: Extract<Expr, { k: 'prop' }>, mode: PlaceMode,
   const parent = placeOf(e.obj, mode, true);
   const property = e.name;
   let readName = typeof property === 'string' ? () => property : prepareOperand(property);
-  const locate = (name: string, object: Value, writeMode: WriteMode, unbound?: boolean): Place => {
+  const locate = (name: Value, object: Value, writeMode: WriteMode, unbound?: boolean): Place => {
     rt().row = e.row;
     if (!(object instanceof PhpObject)) {
       const action = through ? 'modify' : writeMode === 'incdec' ? 'increment/decrement' : 'assign';
-      const error = (): never => throwError('Error', `Attempt to ${action} property "${name}" on ${valueName(object)}`);
+      const error = (): never =>
+        withPropertyName(name, (key) =>
+          throwError('Error', `Attempt to ${action} property "${key}" on ${valueName(object)}`)
+        );
       if (writeMode === 'write' && !through) return invalidWriteTarget(error);
       return error();
     }
-    return propPlace(object, name, unbound && !hasStoredObject(rt(), object));
+    return propPlace(object, toStr(name), unbound && !hasStoredObject(rt(), object));
   };
   const resolve = (writeMode: WriteMode): Place => {
-    const name = toStr(readName());
+    const name = readName();
     const receiver = nestedPlace(parent, writeMode);
     return locate(name, propertyReceiver(e.obj, receiver, writeMode), writeMode, receiver.unbound);
   };
@@ -227,7 +230,7 @@ function instancePropertyPlace(e: Extract<Expr, { k: 'prop' }>, mode: PlaceMode,
     place.assign = (readValue) => {
       const object = propertyReceiver(e.obj, nestedPlace(parent, 'write'), 'write');
       const value = readValue();
-      return locate(toStr(readName()), object, 'write').set(value);
+      return locate(readName(), object, 'write').set(value);
     };
   }
   return place;
@@ -597,7 +600,8 @@ function writeOffset(object: PhpObject, key: Value | undefined, value: Value): v
   const setter = object.cls.findMethod('offsetset');
   if (key === undefined && setter?.fn.kind === 'native' && setter.scope.lname === 'splfixedarray')
     throwError('Error', '[] operator not supported for SplFixedArray');
-  callMethod(object, 'offsetSet', [key ?? null, value], rt().row);
+  const inline = object.cls.lname === 'splobjectstorage';
+  callMethod(object, 'offsetSet', [key ?? null, value], rt().row, { inline });
 }
 
 function writesOffsetWithException(object: PhpObject, key: Value | undefined): boolean {
@@ -864,10 +868,12 @@ export function bindRef(target: Expr, ref: Ref): void {
   if (target.k === 'prop') {
     const receiver = nestedPlace(placeOf(target.obj, 'write', true), 'write');
     const object = propertyReceiver(target.obj, receiver, 'write');
-    const name = memberName(target.name);
+    const name = typeof target.name === 'string' ? target.name : ev(target.name);
     if (!(object instanceof PhpObject))
-      throwError('Error', `Attempt to modify property "${name}" on ${valueName(object)}`);
-    classesModule.bindPropertyReference(object, name, ref, rt().frame.scope);
+      return withPropertyName(name, (key) =>
+        throwError('Error', `Attempt to modify property "${key}" on ${valueName(object)}`)
+      );
+    classesModule.bindPropertyReference(object, toStr(name), ref, rt().frame.scope);
     return;
   }
   if (target.k === 'sprop') {

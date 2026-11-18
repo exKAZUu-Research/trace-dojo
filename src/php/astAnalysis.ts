@@ -1,5 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
-import type { Arg, ClassDecl, Expr, FunctionDecl, Stmt } from './ast';
+import type { Arg, ClassDecl, Expr, FunctionDecl, MethodDeclAst, Stmt } from './ast';
 import { lower } from './bytes';
 import { nativeMethodParameters, nativeParameters } from './native';
 import type { Param } from './values';
@@ -154,10 +154,10 @@ export function nestedBodies(statement: Stmt): [Stmt[], boolean][] {
  * assignments, references, foreach targets, and arguments a function may take by reference.
  */
 export function invalidRead(body: Stmt[]): { index: number; error: CompileError } | undefined {
-  const validator = new ReadValidator(body);
+  const validator = new ReadValidator();
   for (const [index, statement] of body.entries()) {
     try {
-      validator.visit(statement, false);
+      validator.statement(statement);
     } catch (error) {
       if (!(error instanceof CompileError)) throw error;
       return { index, error };
@@ -166,13 +166,14 @@ export function invalidRead(body: Stmt[]): { index: number; error: CompileError 
 }
 
 class ReadValidator {
-  private readonly functions: Map<string, Param[]>;
-  constructor(private readonly body: Stmt[]) {
-    this.functions = new Map(
-      body.flatMap((statement) =>
-        statement.k === 'func' ? [[lower(statement.decl.name), statement.decl.params] as const] : []
-      )
-    );
+  private readonly functions = new Map<string, Param[]>();
+  private readonly classes = new Map<string, ClassDecl>();
+  private activeClass?: { decl: ClassDecl; methods: Map<string, MethodDeclAst> };
+
+  statement(statement: Stmt): void {
+    this.visit(statement, false);
+    if (statement.k === 'func') this.functions.set(lower(statement.decl.name), statement.decl.params);
+    if (statement.k === 'class') this.classes.set(lower(statement.decl.name), statement.decl);
   }
   // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   visit(value: unknown, writing: boolean): void {
@@ -183,6 +184,10 @@ class ReadValidator {
     }
     const node = value as Record<string, unknown> & { k?: string; row?: number };
     switch (node.k) {
+      case 'class': {
+        this.classMembers(node.decl as ClassDecl);
+        return;
+      }
       case 'prop': {
         this.visit(node.obj, writing);
         this.visit(node.name, false);
@@ -265,6 +270,22 @@ class ReadValidator {
     }
   }
 
+  private classMembers(decl: ClassDecl): void {
+    const previous = this.activeClass;
+    const methods = new Map<string, MethodDeclAst>();
+    this.activeClass = { decl, methods };
+    try {
+      this.visit(decl.consts, false);
+      this.visit(decl.props, false);
+      for (const method of decl.methods) {
+        this.visit(method.fn, false);
+        methods.set(lower(method.fn.name), method);
+      }
+    } finally {
+      this.activeClass = previous;
+    }
+  }
+
   private assignment(node: Extract<Expr, { k: 'assign' | 'assignOp' }>): void {
     this.visit(node.target, node.k === 'assign' || node.op !== '??');
     const target = node.target;
@@ -293,28 +314,38 @@ class ReadValidator {
     }
   }
   private parametersOf(expression: Expr): Param[] | undefined {
-    if (expression.k === 'scall' && expression.cls.k === 'named' && typeof expression.name === 'string') {
-      const methodName = lower(expression.name);
-      let className: string | undefined = expression.cls.name;
-      const seen = new Set<string>();
-      while (className && !seen.has(lower(className))) {
-        seen.add(lower(className));
-        const cls = this.body.find(
-          (statement) => statement.k === 'class' && lower(statement.decl.name) === lower(className as string)
-        );
-        if (cls?.k !== 'class') return nativeMethodParameters(className, methodName);
-        const method = cls.decl.methods.find((method) => lower(method.fn.name) === methodName);
-        if (method) return method.fn.params;
-        className = cls.decl.parent;
-      }
-      return;
+    if (expression.k === 'scall' && typeof expression.name === 'string') return this.staticMethodParameters(expression);
+    if (expression.k === 'mcall' && expression.obj.k === 'var' && expression.obj.name === 'this') {
+      const method = typeof expression.name === 'string' && this.activeClass?.methods.get(lower(expression.name));
+      return method && (method.visibility === 'private' || method.isFinal) ? method.fn.params : undefined;
     }
-    if (expression.k !== 'call' || 'k' in expression.fn) return;
-    return (
-      this.functions.get(lower(expression.fn.name)) ??
-      nativeParameters(expression.fn.name) ??
-      (expression.fn.fallback ? nativeParameters(expression.fn.fallback) : undefined)
-    );
+    if (expression.k !== 'call' || 'k' in expression.fn || expression.fn.fallback) return;
+    return this.functions.get(lower(expression.fn.name)) ?? nativeParameters(expression.fn.name);
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 19 -- Follows available class and method declarations in PHP's resolution order.
+  private staticMethodParameters(expression: Extract<Expr, { k: 'scall' }>): Param[] | undefined {
+    const { cls, name } = expression;
+    if (typeof name !== 'string') return;
+    const methodName = lower(name);
+    let className = cls.k === 'named' ? cls.name : cls.k === 'self' ? this.activeClass?.decl.name : undefined;
+    const seen = new Set<string>();
+    while (className && !seen.has(lower(className))) {
+      const key = lower(className);
+      seen.add(key);
+      const active = this.activeClass;
+      if (active && active.decl.kind !== 'trait' && lower(active.decl.name) === key) {
+        const method = active.methods.get(methodName);
+        if (method) return method.fn.params;
+        className = active.decl.parent;
+        continue;
+      }
+      const current = this.classes.get(key);
+      if (!current) return nativeMethodParameters(className, methodName);
+      const method = current.methods.find((method) => lower(method.fn.name) === methodName);
+      if (method) return method.visibility === 'public' ? method.fn.params : undefined;
+      className = current.parent;
+    }
   }
 }
 

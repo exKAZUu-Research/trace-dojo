@@ -1,8 +1,10 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callMethod } from './callables';
+import { implicitCallRow } from './calls';
 import { objectToArray } from './classes';
 import { valueName } from './conversions';
 import { type CleanupException, deprecated, throwError, withCleanupExceptions, withPendingException } from './errors';
+import { releaseDropped } from './garbage';
 import { magicSerializationMethods, serializationMethods } from './libArrayObject';
 import { defineClass, type NativeMethod } from './native';
 import { strictEquals, toKey } from './operators';
@@ -16,9 +18,7 @@ interface StorageEntry {
   slot: number;
 }
 
-interface BulkCleanup {
-  capture?: (error: CleanupException) => void;
-}
+type CaptureCleanup = (error: CleanupException) => void;
 
 class ObjectStorage {
   readonly nativeValues = new NativeValueIndex();
@@ -63,10 +63,10 @@ class ObjectStorage {
   }
 
   attach(object: PhpObject, info: Value): void {
-    this.withHash(object, (hash) => this.attachEntry(hash, object, info));
+    this.withHash(object, (hash, pending) => this.attachEntry(hash, object, info, pending));
   }
 
-  private attachEntry(hash: string | PhpObject, object: PhpObject, info: Value): void {
+  private attachEntry(hash: string | PhpObject, object: PhpObject, info: Value, pending?: CleanupException): void {
     info = share(info);
     const entry = this.entries.get(hash);
     if (entry) {
@@ -74,7 +74,7 @@ class ObjectStorage {
       entry.info = info;
       this.nativeValues.add(info);
       this.nativeValues.delete(old);
-      this.releaseRemoved([old]);
+      this.releaseRemoved([old], undefined, pending);
     } else {
       rt().allocate(1);
       const slot = this.insertionBucket(hash);
@@ -114,11 +114,11 @@ class ObjectStorage {
     for (const [slot, entry] of this.slots.entries()) if (entry) entry.slot = slot;
   }
 
-  detach(object: PhpObject, cleanup?: BulkCleanup): boolean {
-    return this.withHash(object, (hash) => this.detachEntry(hash, cleanup));
+  detach(object: PhpObject, capture?: CaptureCleanup): boolean {
+    return this.withHash(object, (hash, pending) => this.detachEntry(hash, capture, pending));
   }
 
-  private detachEntry(hash: string | PhpObject, cleanup?: BulkCleanup): boolean {
+  private detachEntry(hash: string | PhpObject, capture?: CaptureCleanup, pending?: CleanupException): boolean {
     const entry = this.entries.get(hash);
     if (!entry) return false;
     this.entries.delete(hash);
@@ -127,18 +127,17 @@ class ObjectStorage {
     this.slots[entry.slot] = undefined;
     if (entry.slot === this.slots.length - 1)
       while (this.slots.length > 0 && this.slots.at(-1) === undefined) this.slots.pop();
-    this.releaseRemoved([entry.object, entry.info], cleanup);
+    this.releaseRemoved([entry.object, entry.info], capture, pending);
     return true;
   }
 
-  private releaseRemoved(values: Value[], cleanup?: BulkCleanup): void {
+  private releaseRemoved(values: Value[], capture?: CaptureCleanup, pending?: CleanupException): void {
     const runtime = rt();
     try {
-      runtime.release(values);
-      runtime.flushReleases(true, cleanup ? 'bulk-removal' : 'ordinary');
+      releaseDropped(runtime, values, implicitCallRow() === undefined, 'complete', pending);
     } catch (error) {
-      if (!cleanup?.capture || !(error instanceof PhpThrow || error instanceof ExitSignal)) throw error;
-      cleanup.capture(error);
+      if (!capture || !(error instanceof PhpThrow || error instanceof ExitSignal)) throw error;
+      capture(error);
     }
   }
 
@@ -161,9 +160,9 @@ class ObjectStorage {
   get(object: PhpObject): Value {
     return this.withHash(object, (hash, pending) => {
       const entry = this.entries.get(hash);
-      if (!entry && pending instanceof ExitSignal) return null;
-      if (!entry) throwError('UnexpectedValueException', 'Object not found');
-      return entry.info;
+      if (entry) return entry.info;
+      if (pending instanceof ExitSignal) return null;
+      return withPendingException(rt(), pending, () => throwError('UnexpectedValueException', 'Object not found'));
     });
   }
   currentInfo(): Value {
@@ -187,7 +186,7 @@ class ObjectStorage {
     let hash: Value;
     let pending: CleanupException | undefined;
     try {
-      hash = runtime.withNativeReleaseMode('bulk-removal', () =>
+      hash = runtime.withNativeReleaseMode('complete', () =>
         callMethod(this.holder, 'getHash', [object], undefined, {
           captureReturn: (value) => {
             returned = value;
@@ -199,32 +198,32 @@ class ObjectStorage {
       hash = returned;
       pending = error;
     }
-    const result = withPendingException(runtime, pending instanceof PhpThrow ? pending : undefined, () => {
-      if (typeof hash !== 'string')
+    if (typeof hash !== 'string')
+      return withPendingException(runtime, pending instanceof PhpThrow ? pending : undefined, () =>
         throwError(
           'TypeError',
           `${this.holder.cls.name}::getHash(): Return value must be of type string, ${valueName(hash)} returned`
-        );
-      return consume(hash, pending);
-    });
+        )
+      );
+    const result = consume(hash, pending);
     if (pending) throw pending;
     return result;
   }
 
   removeAll(other: ObjectStorage): bigint {
-    return this.bulkRemove(this.hashKeys, (cleanup) => {
+    return this.bulkRemove(this.hashKeys, (capture) => {
       let position = 0;
       while (position < other.slots.length) {
         rt().spend();
         const entry = other.slots[position];
-        if (!entry || !this.detach(entry.object, cleanup)) position++;
+        if (!entry || !this.detach(entry.object, capture)) position++;
       }
     });
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Pins a key through membership, detach and pending-exception cleanup.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Pins a key through membership, detach and pending-exception cleanup.
   removeAllExcept(other: ObjectStorage): bigint {
-    return this.bulkRemove(this.hashKeys || other.hashKeys, (cleanup) => {
+    return this.bulkRemove(this.hashKeys || other.hashKeys, (capture) => {
       for (let slot = 0; slot < this.slots.length; slot++) {
         const runtime = rt();
         runtime.spend();
@@ -236,23 +235,25 @@ class ObjectStorage {
         let pending: PhpThrow | undefined;
         try {
           other.checkMembership(object, (present, pending) => {
-            if (!present && !(pending && this.hashKeys)) this.detach(object, cleanup);
+            if (present) return;
+            if (!pending) this.detach(object, capture);
+            else if (!this.hashKeys) this.detachEntry(object, capture, pending);
           });
         } catch (error) {
           if (error instanceof PhpThrow) pending = error;
           throw error;
         } finally {
           runtime.held.splice(holder, 1);
-          withPendingException(runtime, pending, () => this.releaseRemoved([object], cleanup));
+          withPendingException(runtime, pending, () => this.releaseRemoved([object], capture));
         }
       }
     });
   }
 
-  private bulkRemove(callsHash: boolean, remove: (cleanup: BulkCleanup) => void): bigint {
+  private bulkRemove(callsHash: boolean, remove: (capture?: CaptureCleanup) => void): bigint {
     return this.rewindAfter(() => {
-      if (callsHash) remove({});
-      else withCleanupExceptions(rt(), (capture) => remove({ capture }), 'latest');
+      if (callsHash) remove();
+      else withCleanupExceptions(rt(), remove, 'latest');
       return BigInt(this.entries.size);
     });
   }

@@ -19,3 +19,5 @@ var_dump(array_uintersect_assoc(['a' => 1, 'b' => 2], ['a' => true], fn($x, $y) 
 $r = array_udiff([5 => 1, 6 => 2], [2], 'cmp'); $r[] = 9; var_dump($r);
 $r = array_udiff_assoc([5 => 1, 6 => 2], [6 => 2], 'cmp'); $r[] = 9; var_dump($r);
 var_dump(array_change_key_case(['A' => 1, 'b' => 2, 3 => 'x', 'B' => 5, 'ÄbC' => 1], CASE_UPPER), array_change_key_case(['A' => 1, 'a' => 2]), CASE_LOWER, CASE_UPPER);
+try { array_udiff([2, 1], [], 'invalid array', 'cmp'); }
+catch (TypeError $error) { echo $error->getMessage(), "\n"; }
