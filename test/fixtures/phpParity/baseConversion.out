@@ -53,9 +53,9 @@ int(3)
 int(-255)
 int(255)
 int(255)
+ValueError: An infinite value cannot be converted to base 10
 
-Fatal error: Uncaught ValueError: An infinite value cannot be converted to base 10 in /main.php:8
-Stack trace:
-#0 /main.php(8): base_convert('zzzzzzzzzzzzzzz...', 36, 10)
-#1 {main}
-  thrown in /main.php on line 8
+Deprecated: Invalid characters passed for attempted conversion, these have been ignored in /main.php on line 10
+string(3) "255"
+string(1) "0"
+string(2) "73"

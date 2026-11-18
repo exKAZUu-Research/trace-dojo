@@ -10,8 +10,22 @@ array (
    'protected' => 4,
    'other' => 7,
 ))
-
-Fatal error: Uncaught Error: Cannot unset hooked property Properties::$stored in /main.php:15
-Stack trace:
-#0 {main}
-  thrown in /main.php on line 15
+Error: Cannot unset hooked property Properties::$stored
+{"stored":null,"virtual":13,"other":7}
+array (
+  'stored' => NULL,
+  'virtual' => 13,
+  'other' => 7,
+)
+#0 [internal function]: Traced->$value::get()
+#1 /main.php(36): get_object_vars(Object(Traced))
+#2 {main}
+#0 [internal function]: Traced->$value::get()
+#1 /main.php(37): array_column(Array, 'value')
+#2 {main}
+#0 [internal function]: Traced->__isset('fallback')
+#1 /main.php(38): array_column(Array, 'fallback')
+#2 {main}
+#0 [internal function]: Traced->__get('fallback')
+#1 /main.php(38): array_column(Array, 'fallback')
+#2 {main}

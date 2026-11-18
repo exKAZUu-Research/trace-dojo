@@ -35,6 +35,8 @@ export interface SpliceRange {
   inserted: number;
 }
 
+export type ArrayRebuild = SpliceRange | 'shift' | { prepend: number };
+
 interface CursorFamily {
   generation: number;
 }
@@ -99,8 +101,12 @@ export class ArrayOrder {
 
   cursor(key = this.first?.key, family?: CursorFamily): ArrayCursor {
     const cursor = new ArrayCursor(this, key === undefined ? undefined : this.get(key), family);
-    this.cursors.add(new WeakRef(cursor));
+    this.cursors.add(cursor.registration);
     return cursor;
+  }
+
+  unregisterCursor(cursor: ArrayCursor): void {
+    this.cursors.delete(cursor.registration);
   }
 
   resumeCursor(key: Key | undefined, previous: ArrayCursor, retainPosition: boolean): ArrayCursor {
@@ -253,10 +259,10 @@ export class ArrayOrder {
     for (const cursor of this.liveCursors()) cursor.clamp(this.nextIndex);
   }
 
-  replace(keys: Iterable<Key>, packed: boolean, splice?: SpliceRange): void {
+  replace(keys: Iterable<Key>, packed: boolean, rebuild?: ArrayRebuild): void {
     const orderedKeys = [...keys];
     const cursors = [...this.liveCursors()].map((cursor) => ({ cursor, index: cursor.index }));
-    if (splice && cursors.length > 0) this.remapSplice(splice, cursors);
+    if (rebuild !== undefined && cursors.length > 0) this.remapRebuild(rebuild, cursors);
     this.entries.clear();
     this.first = undefined;
     this.last = undefined;
@@ -270,6 +276,18 @@ export class ArrayOrder {
     const entries = [...this.orderedEntries()];
     for (const { cursor, index } of cursors)
       cursor.setPosition(index === undefined ? undefined : entries[index], index);
+  }
+
+  private remapRebuild(rebuild: ArrayRebuild, cursors: CursorPosition[]): void {
+    if (rebuild === 'shift') {
+      const positions = new Map([...this.orderedEntries()].map((entry, ordinal) => [entry.index, ordinal]));
+      for (const state of cursors) {
+        const index = state.index;
+        if (index !== undefined) state.index = positions.get(index) ?? index;
+      }
+    } else if ('prepend' in rebuild) {
+      for (const state of cursors) if (state.index !== undefined) state.index += rebuild.prepend;
+    } else this.remapSplice(rebuild, cursors);
   }
 
   private remapSplice(splice: SpliceRange, cursors: CursorPosition[]): void {
@@ -332,6 +350,8 @@ export class ArrayCursor {
   private current: ArrayEntry | undefined;
   private rawPosition: number | undefined;
   generation: number | undefined;
+  private closed = false;
+  readonly registration = new WeakRef(this);
 
   constructor(
     private readonly order: ArrayOrder,
@@ -343,10 +363,12 @@ export class ArrayCursor {
   }
 
   get active(): boolean {
-    return this.generation === this.family?.generation;
+    return !this.closed && this.generation === this.family?.generation;
   }
   close(): void {
     if (this.family && this.active) this.family.generation++;
+    this.closed = true;
+    this.order.unregisterCursor(this);
   }
   get entry(): ArrayEntry | undefined {
     return this.current;

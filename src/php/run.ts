@@ -134,11 +134,12 @@ function printUncaught(runtime: Runtime, object: PhpObject): string | undefined 
   }
 }
 
-/** Destroys the objects that remain, as PHP's shutdown does: global variables first, newest first, then the rest. */
+/** Releases file-scope statics, symbol-table objects, then the remaining object handles. */
 function shutdown(runtime: Runtime): string | undefined {
   if (runtime.shuttingDown || runtime.exhausted) return undefined;
   return guard(runtime, () => {
     runtime.frames.length = 1;
+    releaseMainStatics(runtime);
     runtime.releasingGlobalsAtShutdown = true;
     try {
       destroyGlobals(runtime);
@@ -159,6 +160,13 @@ function shutdown(runtime: Runtime): string | undefined {
     }
     runtime.shuttingDown = true;
   });
+}
+
+function releaseMainStatics(runtime: Runtime): void {
+  const statics = [...runtime.globalStatics.values()];
+  runtime.globalStatics.clear();
+  for (const ref of statics) ref.rc--;
+  runtime.release(statics);
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.

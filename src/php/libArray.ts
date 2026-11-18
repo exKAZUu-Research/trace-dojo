@@ -1,7 +1,9 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
-import type { SpliceRange } from './arrayOrder';
+import type { ArrayRebuild } from './arrayOrder';
 import { type Comparisons, type Entry, setEntries, SortedWalk } from './arraySetWalk';
+import type { FunctionDecl } from './ast';
+import { collectScopeVars } from './astAnalysis';
 import { lower, upper } from './bytes';
 import { callCallback, callCallbackRefs, callMethod, consumeCallbackResult } from './callables';
 import type { ArgValue } from './calls';
@@ -24,7 +26,7 @@ import {
   withStringConversionErrors,
 } from './operators';
 import { arrayIsShared, ElementPlace, share, VarPlace } from './places';
-import { PhpThrow, rt } from './runtime';
+import { type Frame, PhpThrow, rt } from './runtime';
 import {
   copyValueSlot,
   deref,
@@ -90,7 +92,12 @@ function checkArrayRef(ctx: NativeContext, index: number, name: string, paramete
 }
 
 // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function rebuild(entries: [Key, Value | Ref][], renumber: boolean, target?: PhpArray, splice?: SpliceRange): PhpArray {
+function rebuild(
+  entries: [Key, Value | Ref][],
+  renumber: boolean,
+  target?: PhpArray,
+  mutation?: ArrayRebuild
+): PhpArray {
   const array = target ?? new PhpArray();
   if (target) {
     let position = 0n;
@@ -102,7 +109,7 @@ function rebuild(entries: [Key, Value | Ref][], renumber: boolean, target?: PhpA
         yield [newKey, slot];
       }
     }
-    array.replaceTable(renamed(), renumber, splice);
+    array.replaceTable(renamed(), renumber, mutation);
     return array;
   }
   for (const [key, source] of entries) {
@@ -181,7 +188,7 @@ defineFunction('array_shift(array &$array): mixed', (ctx) => {
   if (first.done) return null;
   const value = array.get(first.value) as Value;
   array.delete(first.value);
-  rebuild([...array.map], true, array);
+  rebuild([...array.map], true, array, 'shift');
   array.pointer = null;
   return value;
 });
@@ -193,7 +200,7 @@ defineFunction('array_unshift(array &$array, mixed ...$values): int', (ctx) => {
     ...ctx.args.slice(1).map((value): [Key, Value] => [0n, share(value)]),
     ...array.map,
   ];
-  rebuild(entries, true, array);
+  rebuild(entries, true, array, { prepend: ctx.args.length - 1 });
   array.pointer = null;
   return BigInt(array.size);
 });
@@ -653,6 +660,7 @@ defineFunction(
 );
 defineFunction(
   'extract(array &~$array, int $flags = EXTR_OVERWRITE, string $prefix = UNKNOWN): int',
+  // code-gauge-allow functionCognitiveComplexity 16 -- The extraction loop shares the source and bindings across modes.
   ({ args, refs }) => {
     const flags = (args[1] as bigint | undefined) ?? 0n;
     const mode = Number(flags & 0xffn);
@@ -665,9 +673,13 @@ defineFunction(
       if (refs[0]) refs[0].v = array;
     }
     const frame = rt().frame;
+    const compiledNames = mode === 5 ? compiledExtractNames(frame) : undefined;
     let count = 0n;
     for (const key of array.keys()) {
-      const name = extractedName(key, mode, `${prefix ?? ''}_`, (candidate) => frame.vars.has(candidate));
+      const name =
+        typeof key === 'string' && compiledNames?.has(key) && !frame.vars.has(key)
+          ? key
+          : extractedName(key, mode, `${prefix ?? ''}_`, (candidate) => frame.vars.has(candidate));
       if (name === undefined) continue;
       if (name === 'this') throwError('Error', 'Cannot re-assign $this');
       const place = new VarPlace(frame, name);
@@ -679,6 +691,20 @@ defineFunction(
   },
   true
 );
+
+const extractNamesByFunction = new WeakMap<FunctionDecl, Set<string>>();
+
+function compiledExtractNames(frame: Frame): ReadonlySet<string> {
+  const decl = frame.decl;
+  if (!decl) return new Set(rt().program?.mainVars);
+  let names = extractNamesByFunction.get(decl);
+  if (!names) {
+    names = collectScopeVars(decl.body);
+    for (const name of decl.captures ?? []) names.add(name);
+    extractNamesByFunction.set(decl, names);
+  }
+  return names;
+}
 
 function checkExtractArguments(mode: number, prefix: string | undefined): void {
   if (mode > 6) throwError('ValueError', 'extract(): Argument #2 ($flags) must be a valid extract type');
@@ -801,14 +827,15 @@ for (const name of ['array_walk', 'array_walk_recursive']) {
 function walkValues(ref: Ref, ctx: NativeContext, recursive: boolean, active: Set<PhpArray | PhpObject>): void {
   let container = walkContainer(ref, active);
   active.add(container);
+  let keys = walkKeys(container);
   try {
-    let keys = walkKeys(container);
     for (;;) {
       const key = keys.next().value;
       if (key === undefined) return;
       rt().spend();
       visitWalkSlot(container, key, ctx, recursive, active);
       if (ref.v !== container) {
+        keys.return(undefined);
         active.delete(container);
         container = walkContainer(ref, active);
         active.add(container);
@@ -816,6 +843,7 @@ function walkValues(ref: Ref, ctx: NativeContext, recursive: boolean, active: Se
       }
     }
   } finally {
+    keys.return(undefined);
     active.delete(container);
   }
 }
@@ -837,10 +865,14 @@ function walkContainer(ref: Ref, active: Set<PhpArray | PhpObject>): PhpArray | 
 function* walkKeys(container: PhpArray | PhpObject): Generator<Key, undefined> {
   if (container instanceof PhpArray) {
     const cursor = container.cursor();
-    while (cursor.key !== undefined) {
-      const key = cursor.key;
-      cursor.next();
-      yield key;
+    try {
+      while (cursor.key !== undefined) {
+        const key = cursor.key;
+        cursor.next();
+        yield key;
+      }
+    } finally {
+      cursor.close();
     }
   } else yield* container.props.keys();
   return undefined;

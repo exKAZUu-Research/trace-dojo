@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 913 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 925 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -990,8 +990,7 @@ export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
   }
   const copy = runtime.newObject(original.cls);
   runtime.frame.temporaries.push(copy);
-  copyCloneProperties(original, copy);
-  copy.internal = cloneInternal(original, copy);
+  cloneObjectContents(original, copy);
   if (original.turtle) runtime.attachTurtle(copy, runtime.world.clone(original.turtle));
   copy.cloning = true;
   try {
@@ -1021,8 +1020,26 @@ export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
   return copy;
 }
 
+function cloneObjectContents(original: PhpObject, copy: PhpObject): void {
+  const internal = original.internal as { cloneWithDefaults?: (copy: PhpObject) => unknown } | undefined;
+  if (typeof internal?.cloneWithDefaults === 'function') {
+    classesModule.initializeObjectProperties(copy);
+    copy.internal = internal.cloneWithDefaults(copy);
+    copyCloneProperties(original, copy);
+  } else {
+    copyCloneProperties(original, copy);
+    copy.internal = cloneInternal(original, copy);
+  }
+}
+
+// code-gauge-allow functionCognitiveComplexity 18 -- Replaces slots and transfers reference constraints in source member order.
 function copyCloneProperties(original: PhpObject, copy: PhpObject): void {
   for (const [key, slot] of original.props) {
+    const previous = copy.props.get(key);
+    if (previous instanceof Ref) {
+      previous.rc--;
+      if (previous.typedBy) previous.typedBy = previous.typedBy.filter(({ object }) => object !== copy);
+    }
     if (!(slot instanceof Ref) || slot.rc <= 1) {
       const value = slot instanceof Ref ? slot.v : slot;
       copy.props.set(key, typeof value === 'symbol' ? value : share(value));
@@ -1033,7 +1050,7 @@ function copyCloneProperties(original: PhpObject, copy: PhpObject): void {
     const decl = classesModule.declForKey(copy.cls, key);
     if (decl?.type) classesModule.attachPropertyReference(slot, decl, copy);
   }
-  if (original.unsetProperties) copy.unsetProperties = new Set(original.unsetProperties);
+  copy.unsetProperties = original.unsetProperties && new Set(original.unsetProperties);
 }
 
 function cloneInternal(original: PhpObject, copy: PhpObject): unknown {

@@ -9,6 +9,10 @@ import { enc, lower } from './bytes';
 import { unsupportedMessage } from './unsupported';
 import type { TypeDecl } from './values';
 
+export function semanticChildren(node: Node): Node[] {
+  return node.namedChildren.filter((child) => child.type !== 'comment');
+}
+
 /** A notice PHP prints when it compiles the program, before running it. */
 export interface CompileNotice {
   level: 'Deprecated' | 'Warning';
@@ -209,7 +213,7 @@ export abstract class ConverterBase {
 
   protected variableName(node: Node): string {
     if (node.type === 'variable_name') {
-      const name = enc(node.namedChildren[0]?.text ?? node.text.replace(/^\$/, ''));
+      const name = enc(semanticChildren(node)[0]?.text ?? node.text.replace(/^\$/, ''));
       this.checkVariableAvailability(node, name);
       return name;
     }

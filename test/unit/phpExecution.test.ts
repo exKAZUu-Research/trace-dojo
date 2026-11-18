@@ -1261,6 +1261,14 @@ test.each([
   expect(run(`<?php ${source}`)).toMatchObject({ kind: 'executed', stdout });
 });
 
+test.each(['array_walk', 'array_walk_recursive'])('repeated %s releases cursors before array mutations', (walk) => {
+  expect(
+    run(
+      `<?php function visit(&$value){$value++;}$a=[1];for($i=0;$i<10000;$i++){${walk}($a,'visit');$a[]=0;array_pop($a);}echo $a[0];`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '10001' });
+});
+
 test('completes object churn with buffered cyclic containers within the operation limit', () => {
   const source = `<?php gc_disable();class Node{public $prev;public $next;public $data;function __construct($v){$this->data=['v'=>$v,'tag'=>new stdClass];}}function build($n){$head=new Node(0);$cur=$head;for($i=1;$i<$n;$i++){$x=new Node($i);$x->prev=$cur;$cur->next=$x;$cur=$x;}$s=0;for($c=$head;$c;$c=$c->next)$s+=$c->data['v'];return $s;}$t=0;for($k=0;$k<120;$k++)$t+=build(100);echo $t,":",gc_enabled()?1:0,":";$sum=0;for($i=0;$i<20000;$i++){$p=new stdClass;$p->v=$i;$sum+=$p->v;}echo $sum;`;
   expect(run(source)).toMatchObject({ kind: 'executed', stdout: '594000:0:199990000' });

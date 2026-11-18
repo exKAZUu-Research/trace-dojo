@@ -22,9 +22,8 @@ Warning: Cannot pass by-reference argument 1 of mutate() by unpacking a Traversa
 Warning: Cannot pass by-reference argument 2 of mutate() by unpacking a Traversable, passing by-value instead in /main.php on line 19
 int(2)
 int(3)
-
-Fatal error: Uncaught ArgumentCountError: reorder(): Argument #1 ($first) not passed in /main.php:21
-Stack trace:
-#0 /main.php(23): reorder(NULL, 0, 5)
-#1 {main}
-  thrown in /main.php on line 21
+ArgumentCountError: reorder(): Argument #1 ($first) not passed
+array(1) {
+  ["second"]=>
+  int(0)
+}

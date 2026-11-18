@@ -17,7 +17,8 @@ var_dump($array[replaceArray()], $object->{replaceObject()});
 $array = [];
 $i = 0;
 $array[$i] = $i++;
-$array[$i++][$i] = $i++;
+try { $array[$i++][$i] = $i++; }
+catch (Throwable $error) { echo get_class($error), ": ", $error->getMessage(), "\n"; }
 var_dump($array);
 $array = [];
 $i = 0;

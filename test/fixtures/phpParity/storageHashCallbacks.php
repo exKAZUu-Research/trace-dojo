@@ -1,0 +1,36 @@
+<?php
+error_reporting(E_ALL & ~E_DEPRECATED);
+class HashCallbacks extends SplObjectStorage {
+    public string $label = 'default';
+    public int $failAt = 0;
+    public int $calls = 0;
+    public mixed $hash = 'object';
+    public function getHash(object $object) {
+        echo $this->label, ':', count($this), ':', ++$this->calls, "\n";
+        if ($this->calls === $this->failAt) throw new RuntimeException('getHash');
+        return $this->hash;
+    }
+    public function __clone() { echo 'clone:', $this->label, ':', $this->calls, "\n"; }
+}
+$object = new stdClass();
+$storage = new HashCallbacks();
+$storage[$object] = 42;
+$storage->label = 'changed';
+$clone = clone $storage;
+var_dump(count($clone), $clone[$object]);
+$other = new SplObjectStorage();
+$other[$object] = 'unused';
+$clone->failAt = $clone->calls + 2;
+try { $clone->removeAll($other); }
+catch (Throwable $error) { echo $error->getMessage(), "\n"; }
+var_dump(count($clone));
+var_dump($storage->removeAll($storage));
+foreach ([23, null, false] as $hash) {
+    $storage->hash = $hash;
+    var_dump($storage->getHash($object));
+    foreach (['offsetSet', 'offsetExists', 'offsetUnset'] as $method) {
+        try { $storage->$method($object); }
+        catch (TypeError $error) { echo $error->getMessage(), "\n"; }
+    }
+    var_dump(count($storage));
+}

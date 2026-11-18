@@ -12,7 +12,8 @@ var_export(get_object_vars($object));
 echo "\n";
 var_export($object);
 echo "\n";
-unset($object->stored);
+try { unset($object->stored); }
+catch (Throwable $error) { echo get_class($error), ": ", $error->getMessage(), "\n"; }
 echo json_encode($object), "\n";
 var_export(get_object_vars($object));
 echo "\n";

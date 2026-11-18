@@ -898,15 +898,19 @@ export function createObject(cls: PhpClass): PhpObject {
   const runtime = rt();
   initializeClassDefaults(cls);
   const object = runtime.newObject(cls);
-  for (const decl of cls.props) {
+  initializeObjectProperties(object);
+  if (cls.createInternal) object.internal = cls.createInternal(object);
+  return object;
+}
+
+export function initializeObjectProperties(object: PhpObject): void {
+  for (const decl of object.cls.props) {
     if (decl.isVirtual && decl.hooks) continue;
     let value: Slot;
     if (decl.defaultValue) value = decl.defaultValue();
     else value = decl.type ? UNINIT : null;
     object.props.set(decl.key, value);
   }
-  if (cls.createInternal) object.internal = cls.createInternal(object);
-  return object;
 }
 
 function checkInstantiable(cls: PhpClass): void {
@@ -1119,9 +1123,7 @@ function readOverloadedProp(
   if (isset && !object.guards?.has(`isset:${name}`)) {
     const present = (): boolean => toBool(callMagic(object, isset, [name]));
     if (mode === 'empty')
-      return guarded(object, `isset:${name}`, () =>
-        present() ? readOverloadedProp(object, name, 'quiet', unset) : null
-      );
+      return guarded(object, `isset:${name}`, () => (present() ? readOverloadedProp(object, name, 'quiet') : null));
     if (!guarded(object, `isset:${name}`, present)) return null;
   }
   if (mode === 'empty') return null;
@@ -1137,7 +1139,7 @@ function checkUnsetGetterValue(value: Value, unset: PropDecl | undefined, return
   if (result === NO_MATCH)
     throwError(
       'TypeError',
-      `Value of type ${valueName(value)} returned from ${unset.cls.name}::__get() must be compatible with unset property ${unset.cls.name}::$${unset.name} of type ${describePropertyType(unset)}`
+      `Value of type ${typeof value === 'boolean' ? 'bool' : valueName(value)} returned from ${unset.cls.name}::__get() must be compatible with unset property ${unset.cls.name}::$${unset.name} of type ${describePropertyType(unset)}`
     );
   returned?.assign(result);
   return result;

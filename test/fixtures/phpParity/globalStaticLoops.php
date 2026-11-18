@@ -21,3 +21,14 @@ if ($i++ === 0) {
     goto start;
 }
 var_dump($value instanceof Held);
+
+class ShutdownValue {
+    public $child;
+    function __construct(public $name) {}
+    function __destruct() { echo $this->name, "\n"; }
+}
+static $unbound = new ShutdownValue('unbound static');
+$unbound->child = new ShutdownValue('static child');
+$global = new ShutdownValue('global');
+unset($unbound);
+echo "end\n";

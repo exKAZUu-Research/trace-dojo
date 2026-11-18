@@ -162,6 +162,7 @@ export class ArrayStorage {
     const key = mode === 'copy' ? this.iteratorCursor?.key : undefined;
     const index = this.iteratorCursor?.index;
     const initialized = this.iteratorCursor !== undefined;
+    this.iteratorCursor?.close();
     this.cursorArray = array;
     this.iteratorCursor = array.cursor();
     if (initialized)

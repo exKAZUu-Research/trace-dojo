@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 832 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 833 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -24,6 +24,7 @@ import {
   explicitlyQualifiedName,
   isReservedClassName,
   relativeClassName,
+  semanticChildren,
 } from './converterBase';
 import { decodeLiteral, decodeSingleQuoted } from './literals';
 import { SCRIPT_PATH } from './runtime';
@@ -415,7 +416,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         return this.builtinType(node.text);
       }
       case 'named_type': {
-        const inner = node.namedChildren[0];
+        const inner = semanticChildren(node)[0];
         return this.typeName(inner, parameter);
       }
       case 'name':
@@ -424,32 +425,29 @@ export abstract class DeclarationConverter extends ConverterBase {
         return this.typeName(node, parameter);
       }
       case 'optional_type': {
-        const inner = this.typeDecl(node.namedChildren[0], parameter);
+        const inner = this.typeDecl(semanticChildren(node)[0], parameter);
         return inner.k === 'named' ? { ...inner, nullable: true } : inner;
       }
       case 'union_type':
       case 'disjunctive_normal_form_type': {
         return {
           k: 'union',
-          types: node.namedChildren
-            .filter((child) => child.type !== 'comment')
-            .map((child) => this.typeDecl(child, parameter)),
+          types: semanticChildren(node).map((child) => this.typeDecl(child, parameter)),
         };
       }
       case 'intersection_type': {
         return {
           k: 'inter',
-          types: node.namedChildren
-            .filter((child) => child.type !== 'comment')
-            .map((child) => this.typeDecl(child, parameter)),
+          types: semanticChildren(node).map((child) => this.typeDecl(child, parameter)),
         };
       }
       case 'type_list': {
-        return { k: 'union', types: node.namedChildren.map((child) => this.typeDecl(child, parameter)) };
+        return { k: 'union', types: semanticChildren(node).map((child) => this.typeDecl(child, parameter)) };
       }
       default: {
-        if (node.namedChildren.length === 1) return this.typeDecl(node.namedChildren[0], parameter);
-        return { k: 'union', types: node.namedChildren.map((child) => this.typeDecl(child, parameter)) };
+        const children = semanticChildren(node);
+        if (children.length === 1) return this.typeDecl(children[0], parameter);
+        return { k: 'union', types: children.map((child) => this.typeDecl(child, parameter)) };
       }
     }
   }
@@ -1330,8 +1328,8 @@ export abstract class DeclarationConverter extends ConverterBase {
         let trait: string | undefined;
         let method: string;
         if (target.type === 'class_constant_access_expression') {
-          trait = this.namedClass(target.namedChildren[0], '', 'trait');
-          method = this.nameText(target.namedChildren[1]);
+          trait = this.namedClass(semanticChildren(target)[0], '', 'trait');
+          method = this.nameText(semanticChildren(target)[1]);
         } else method = this.nameText(target);
         const visibilityNode = rest.find((child) => child.type === 'visibility_modifier');
         const aliasNode = rest.find((child) => child.type === 'name');

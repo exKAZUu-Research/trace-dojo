@@ -4,4 +4,8 @@ ab
 abb
 unbound
 bool(true)
+end
+unbound static
+static child
+global
 destroyed

@@ -12,5 +12,6 @@ class Hooks extends ParentHooks {
 }
 $object = new Hooks();
 echo json_encode($object), "\n";
-unset($object->backed);
+try { unset($object->backed); }
+catch (Throwable $error) { echo get_class($error), ": ", $error->getMessage(), "\n"; }
 echo json_encode($object), "\n";

@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss 825 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
-import { type ArrayCursor, ArrayOrder, type SpliceRange } from './arrayOrder';
+import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
 import { ArrayTable } from './arrayTable';
 import type { ClassDecl, Expr, FunctionDecl, PropertyDeclAst } from './ast';
 import { lower } from './bytes';
@@ -253,12 +253,12 @@ export class PhpArray {
     return value;
   }
 
-  replaceTable(entries: Iterable<readonly [Key, Value | Ref]>, packed = false, splice?: SpliceRange): void {
+  replaceTable(entries: Iterable<readonly [Key, Value | Ref]>, packed = false, rebuild?: ArrayRebuild): void {
     const previousSize = this.map.size;
     this.capacityHint = Math.max(this.capacityHint, previousSize);
     this.map = this.table(entries);
     allocationHandler(Math.max(0, this.size - previousSize), this.size);
-    this.order?.replace(this.map.keys(), packed, splice);
+    this.order?.replace(this.map.keys(), packed, rebuild);
     this.orderPacked = packed;
     this.composite = false;
     this.nextFree = INT_MIN;
@@ -298,7 +298,7 @@ export class PhpArray {
     const key = this.map.keys().next().value as string;
     const slot = this.map.get(key) as Value | Ref;
     this.map.delete(key);
-    this.order?.replace(this.map.keys(), false);
+    this.order?.delete(key);
     this.orderPacked = false;
     this.nextFree = 0n;
     this.pointer = null;

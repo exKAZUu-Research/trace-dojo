@@ -20,5 +20,6 @@ mutate(...$items);
 var_dump($items["value"], $items["tail"]);
 function reorder($first, &$second) {}
 $first = ["second" => 0];
-reorder(...$first, ...[5]);
+try { reorder(...$first, ...[5]); }
+catch (Throwable $error) { echo get_class($error), ": ", $error->getMessage(), "\n"; }
 var_dump($first);

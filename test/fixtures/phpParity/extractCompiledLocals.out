@@ -1,0 +1,30 @@
+int(3)
+int(11)
+int(12)
+int(13)
+array(4) {
+  ["unset"]=>
+  int(11)
+  ["initialized"]=>
+  int(12)
+  ["caught"]=>
+  int(13)
+  ["absent"]=>
+  int(14)
+}
+int(3)
+int(11)
+int(12)
+int(13)
+array(4) {
+  ["unset"]=>
+  &int(21)
+  ["initialized"]=>
+  &int(22)
+  ["caught"]=>
+  &int(13)
+  ["absent"]=>
+  int(14)
+}
+int(1)
+int(42)

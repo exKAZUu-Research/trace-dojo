@@ -35,7 +35,7 @@ class ObjectStorage {
     return [...this.entries.values()].flatMap(({ object, info }) => [object, info]);
   }
 
-  clone(holder: PhpObject): ObjectStorage {
+  cloneWithDefaults(holder: PhpObject): ObjectStorage {
     const copy = new ObjectStorage(holder, this.hashKeys);
     holder.internal = copy;
     for (const { object, info } of this.entries.values()) copy.attach(object, info);
@@ -113,7 +113,13 @@ class ObjectStorage {
 
   private hash(object: PhpObject): string | PhpObject {
     if (!this.hashKeys) return object;
-    return callMethod(this.holder, 'getHash', [object]) as string;
+    const hash = callMethod(this.holder, 'getHash', [object]);
+    if (typeof hash !== 'string')
+      throwError(
+        'TypeError',
+        `${this.holder.cls.name}::getHash(): Return value must be of type string, ${valueName(hash)} returned`
+      );
+    return hash;
   }
 
   rewind(): void {
@@ -225,7 +231,13 @@ defineClass({
       signature: 'removeAll(SplObjectStorage $storage): int',
       impl: ({ thisObj, args }) => {
         const storage = storageOf(thisObj);
-        for (const object of storageOf(args[0] as PhpObject).objects()) storage.detach(object);
+        const other = storageOf(args[0] as PhpObject);
+        let position = 0;
+        while (position < other.slots.length) {
+          rt().spend();
+          const entry = other.slots[position];
+          if (!entry || !storage.detach(entry.object)) position++;
+        }
         storage.rewind();
         return BigInt(storage.entries.size);
       },

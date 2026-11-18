@@ -17,36 +17,69 @@ export function isObjectCreation(e: Expr): boolean {
   return e.k === 'new' || e.k === 'newAnon';
 }
 
-/** The variables an arrow function's body reads, which it captures by value from where it is defined. */
-// code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 export function collectVariables(e: Expr, params: Set<string>, found = new Set<string>()): Set<string> {
-  const visit = (value: unknown): void => {
-    if (!value || typeof value !== 'object') return;
-    if (Array.isArray(value)) {
-      for (const item of value) visit(item);
-      return;
-    }
-    const node = value as { k?: string; name?: unknown; fn?: FunctionDecl; uses?: { name: string }[]; args?: Arg[] };
-    if (node.k === 'var' && typeof node.name === 'string') {
-      if (!params.has(node.name) && node.name !== 'this') found.add(node.name);
-      return;
-    }
-    if (node.k === 'closure') {
-      for (const use of node.uses ?? []) if (!params.has(use.name)) found.add(use.name);
-      return;
-    }
-    if (node.k === 'arrow' && node.fn) {
-      for (const name of node.fn.captures ?? []) if (!params.has(name)) found.add(name);
-      return;
-    }
-    if (node.k === 'newAnon') {
-      visit(node.args);
-      return;
-    }
-    for (const [key, child] of Object.entries(node)) if (key !== 'row') visit(child);
-  };
-  visit(e);
+  collectScopeNames(e, (name) => {
+    if (!params.has(name)) found.add(name);
+  });
   return found;
+}
+
+export function collectScopeVars(body: Stmt[]): Set<string> {
+  const found = new Set<string>();
+  collectScopeNames(body, (name) => found.add(name));
+  return found;
+}
+
+// code-gauge-allow functionCognitiveComplexity 22 -- One traversal selects variable names while respecting scope boundaries.
+// code-gauge-allow functionNcss 38 -- Traversal and scope dispatch share the same visitor.
+function collectScopeNames(value: unknown, add: (name: string) => void): void {
+  if (!value || typeof value !== 'object') return;
+  if (Array.isArray(value)) {
+    for (const item of value) collectScopeNames(item, add);
+    return;
+  }
+  const node = value as {
+    k?: string;
+    name?: unknown;
+    uses?: { name: string }[];
+    fn?: FunctionDecl;
+    vars?: { name: string; init?: Expr }[];
+    varName?: string;
+    args?: Arg[];
+  };
+  switch (node.k) {
+    case 'func':
+    case 'class': {
+      return;
+    }
+    case 'var': {
+      if (typeof node.name === 'string' && node.name !== 'this') add(node.name);
+      return;
+    }
+    case 'closure': {
+      for (const use of node.uses ?? []) add(use.name);
+      return;
+    }
+    case 'arrow': {
+      for (const name of node.fn?.captures ?? []) add(name);
+      return;
+    }
+    case 'newAnon': {
+      collectScopeNames(node.args, add);
+      return;
+    }
+    case 'static': {
+      for (const variable of node.vars ?? []) {
+        add(variable.name);
+        collectScopeNames(variable.init, add);
+      }
+      return;
+    }
+    default: {
+      if (node.varName) add(node.varName);
+      for (const [key, child] of Object.entries(node)) if (key !== 'row') collectScopeNames(child, add);
+    }
+  }
 }
 
 /** Whether a label sits inside a loop or switch of the statements, which `goto` may not jump into. */
@@ -94,47 +127,6 @@ export function nestedBodies(statement: Stmt): [Stmt[], boolean][] {
       return [];
     }
   }
-}
-
-/** The variables top-level code names, in order of first appearance, skipping function and class bodies. */
-// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-export function collectMainVars(body: Stmt[]): Set<string> {
-  const found = new Set<string>();
-  const visit = (value: unknown): void => {
-    if (!value || typeof value !== 'object') return;
-    if (Array.isArray(value)) {
-      for (const item of value) visit(item);
-      return;
-    }
-    const node = value as {
-      k?: string;
-      name?: unknown;
-      uses?: { name: string }[];
-      fn?: FunctionDecl;
-      decl?: unknown;
-      args?: Arg[];
-    };
-    if (node.k === 'func' || node.k === 'class') return;
-    if (node.k === 'newAnon') {
-      visit(node.args);
-      return;
-    }
-    if (node.k === 'var' && typeof node.name === 'string') {
-      if (node.name !== 'this') found.add(node.name);
-      return;
-    }
-    if (node.k === 'closure') {
-      for (const use of node.uses ?? []) found.add(use.name);
-      return;
-    }
-    if (node.k === 'arrow') {
-      for (const name of node.fn?.captures ?? []) found.add(name);
-      return;
-    }
-    for (const [key, child] of Object.entries(node)) if (key !== 'row') visit(child);
-  };
-  visit(body);
-  return found;
 }
 
 /**

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 922 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 943 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { withCleanupExceptions, withPendingException } from './errors';
 import { type Frame, PhpThrow, type Runtime } from './runtime';
@@ -53,6 +53,8 @@ function gcTemporaries(runtime: Runtime): (PhpArray | PhpObject)[] {
     );
 }
 
+// code-gauge-allow functionCognitiveComplexity 26 -- The first pass collects the same live snapshots for both release paths.
+// code-gauge-allow functionNcss 44 -- Shares mark results, roots and release order across both release paths.
 function collectGarbageNow(runtime: Runtime, cycles: boolean): number {
   // While a release runs destructors, it frees the rest of what it released itself, in PHP's order.
   if ((runtime.objects.size === 0 && runtime.arrayCycles.size === 0) || (releasing > 0 && !cycles)) {
@@ -100,40 +102,81 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean): number {
     retainTurtles(runtime, mark(runtime));
     return collected;
   }
+  return collectAfterDestruction(runtime, owners, handles, destructible, arrayCandidates, arrayStorage);
+}
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Captures destructor exceptions while releasing the rest of the batch.
+function collectAfterDestruction(
+  runtime: Runtime,
+  owners: PhpObject[],
+  handles: PhpObject[],
+  destructible: PhpObject[],
+  arrayCandidates: PhpArray[],
+  arrayStorage: Set<PhpArray>
+): number {
   let count = 0;
+  const destructedInBuffer = new Set<PhpObject>();
   withCleanupExceptions(runtime, (capture) => {
-    // A destructor may store its object somewhere reachable again, so each object is freed only if it stays garbage.
     for (const object of owners) {
-      if (object.destructed) continue;
-      if (object.cls.findMethod('__destruct')) {
-        object.destructed = true;
-        runtime.destructibles--;
+      if (object.destructed || !object.cls.findMethod('__destruct')) continue;
+      destructedInBuffer.add(object);
+      object.destructed = true;
+      runtime.destructibles--;
+      try {
+        runtime.held.push(object);
         try {
           destruct(object);
-        } catch (error) {
-          if (!(error instanceof PhpThrow)) throw error;
-          capture(error);
+        } finally {
+          runtime.held.pop();
         }
+      } catch (error) {
+        if (!(error instanceof PhpThrow)) throw error;
+        capture(error);
       }
     }
     const afterArrays = new Set<PhpArray>();
     const after = mark(runtime, false, afterArrays);
-    const remaining = freed.filter((object) => !after.has(object));
-    const cyclic = cyclicObjects(new CollectionGraph(remaining, runtime), remaining);
-    const protectedObjects = collectibleGraph(
-      destructible.filter((object) => cyclic.has(object)),
-      new Set(),
-      new Set(),
-      new Set(remaining)
-    ).objects;
-    const excluded = new Set(destructible.filter((object) => !protectedObjects.has(object)));
-    const graph = collectibleGraph([...cyclic, ...arrayCandidates], afterArrays, excluded, new Set(remaining));
-    for (const object of handles) if (!after.has(object)) runtime.freeObject(object);
+    const remaining = handles.filter((object) => runtime.objects.get(object.id) === object && !after.has(object));
+    count = countAfterDestruction(runtime, remaining, destructible, destructedInBuffer, arrayCandidates, afterArrays);
+    const children: unknown[] = [];
+    for (const object of remaining) {
+      pushObject(object, children);
+      runtime.freeObject(object);
+    }
     finishArrayCollection(runtime, arrayStorage);
-    retainTurtles(runtime, after);
-    count = graph.objects.size + graph.arrays.size;
+    releaseDropped(runtime, children, true);
+    retainTurtles(runtime, mark(runtime));
   });
   return count;
+}
+
+function countAfterDestruction(
+  runtime: Runtime,
+  remaining: PhpObject[],
+  destructible: PhpObject[],
+  destructedInBuffer: Set<PhpObject>,
+  arrayCandidates: PhpArray[],
+  afterArrays: Set<PhpArray>
+): number {
+  const allowed = new Set(remaining);
+  const graph = new CollectionGraph(
+    remaining,
+    runtime,
+    (value) => !(value instanceof PhpArray && afterArrays.has(value))
+  );
+  const cyclic = cyclicObjects(graph, remaining);
+  const referenced = referencedGarbage(graph, [...remaining, ...arrayCandidates]);
+  // Zend drops the last temporary reference to the current destructor's receiver without freeing it.
+  for (const object of destructedInBuffer) if (allowed.has(object) && !referenced.has(object)) cyclic.add(object);
+  const protectedObjects = collectibleGraph(
+    destructible.filter((object) => cyclic.has(object)),
+    afterArrays,
+    new Set(),
+    allowed
+  ).objects;
+  const excluded = new Set(destructible.filter((object) => !protectedObjects.has(object)));
+  const counted = collectibleGraph([...cyclic, ...arrayCandidates], afterArrays, excluded, allowed);
+  return counted.objects.size + counted.arrays.size;
 }
 
 /**
@@ -145,7 +188,18 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean): number {
 // code-gauge-allow functionNcss 48 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function releaseDropped(runtime: Runtime, dropped: unknown[], fromNative: boolean): void {
   if (runtime.shuttingDown || runtime.exhausted) return;
-  releaseDroppedNow(runtime, dropped, fromNative);
+  const collectible =
+    runtime.collectingObjects.size > 0
+      ? dropped.filter(
+          (value): value is PhpObject => value instanceof PhpObject && runtime.collectingObjects.delete(value)
+        )
+      : [];
+  try {
+    releaseDroppedNow(runtime, dropped, fromNative);
+  } finally {
+    for (const object of collectible)
+      if (runtime.objects.get(object.id) === object) runtime.collectingObjects.add(object);
+  }
   const candidates = [...runtime.pendingGcRoots];
   runtime.pendingGcRoots.clear();
   if (runtime.collectingCycles) return;
@@ -812,7 +866,7 @@ function cyclicObjects(graph: CollectionGraph, garbage: PhpObject[]): Set<PhpObj
 
 /** Owner order follows retained slots; a handle is freed after its owner's children. */
 // code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function releaseOrder(
   freed: PhpObject[],
   previousOrder: Map<PhpObject, number>,
@@ -821,7 +875,9 @@ function releaseOrder(
 ): { owners: PhpObject[]; handles: PhpObject[] } {
   const graph = new CollectionGraph(freed, runtime);
   const referenced = referencedGarbage(graph, freed);
-  const owners: PhpObject[] = [];
+  const owners = new Set(
+    buffered?.filter((node): node is PhpObject => node instanceof PhpObject && graph.accepts(node))
+  );
   const handles: PhpObject[] = [];
   const visited = new Set<CollectionNode>();
   const visit = (root: CollectionNode): void => {
@@ -836,7 +892,7 @@ function releaseOrder(
       if (visited.has(node)) continue;
       visited.add(node);
       if (node instanceof PhpObject) {
-        owners.push(node);
+        owners.add(node);
         pending.push({ node, finish: true });
       }
       const children = graph.children(node);
@@ -852,13 +908,13 @@ function releaseOrder(
     .toSorted((a, b) => position(a) - position(b) || a.id - b.id);
   for (const root of roots) visit(root);
   for (const object of freed) visit(object);
-  return { owners, handles };
+  return { owners: [...owners], handles };
 }
 
-function referencedGarbage(graph: CollectionGraph, objects: PhpObject[]): Set<PhpObject> {
+function referencedGarbage(graph: CollectionGraph, roots: CollectionNode[]): Set<PhpObject> {
   const referenced = new Set<PhpObject>();
   const visited = new Set<CollectionNode>();
-  const pending: CollectionNode[] = [...objects];
+  const pending = [...roots];
   while (pending.length > 0) {
     graph.spend();
     const node = pending.pop() as CollectionNode;

@@ -5,7 +5,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
 import type { Arg, ArrayItem, CatchClause, Expr, ListItem, MatchArm, Program, Stmt, SwitchCase } from './ast';
 import {
-  collectMainVars,
+  collectScopeVars,
   collectVariables,
   hasNullsafeReceiver,
   hasReferenceItem,
@@ -22,6 +22,7 @@ import {
   MAGIC_RUNTIME,
   relativeClassName,
   reservedIdentifierToken,
+  semanticChildren,
 } from './converterBase';
 import { DeclarationConverter } from './declarationConverter';
 import { exportExpr, UnexportableSyntax } from './export';
@@ -68,7 +69,7 @@ export class Converter extends DeclarationConverter {
     this.checkGotos(this.fn, this.body);
     return {
       ...this.compiledPrefix(),
-      mainVars: [...collectMainVars(this.body)],
+      mainVars: [...collectScopeVars(this.body)],
     };
   }
 
@@ -281,14 +282,14 @@ export class Converter extends DeclarationConverter {
         return [{ k: 'const', items, row }];
       }
       case 'named_label_statement': {
-        const name = this.nameText(node.namedChildren[0]);
+        const name = this.nameText(semanticChildren(node)[0]);
         if (this.fn.labels.has(name))
           this.error(node, `ラベル「${name}」は、すでに使われています（Label '${name}' already defined）。`);
         this.fn.labels.add(name);
         return [{ k: 'label', name, row }];
       }
       case 'goto_statement': {
-        const label = this.nameText(node.namedChildren[0]);
+        const label = this.nameText(semanticChildren(node)[0]);
         this.fn.gotos.push({ label, row, offset: node.startIndex });
         return [{ k: 'goto', label, row, offset: node.startIndex }];
       }
@@ -400,7 +401,7 @@ export class Converter extends DeclarationConverter {
     let byRef = false;
     if (valueNode.type === 'by_ref') {
       byRef = true;
-      valueNode = valueNode.namedChildren[0];
+      valueNode = semanticChildren(valueNode)[0];
     }
     const value = ['list_literal', 'array_creation_expression'].includes(valueNode.type)
       ? this.listLiteral(valueNode)
@@ -528,7 +529,7 @@ export class Converter extends DeclarationConverter {
         const types = typeList.namedChildren
           .filter((type) => type.type !== 'comment')
           .map((type) => {
-            const name = type.type === 'named_type' ? type.namedChildren[0] : type;
+            const name = type.type === 'named_type' ? semanticChildren(type)[0] : type;
             const raw = this.nameText(name);
             if (relativeClassName(raw)) this.error(type, 'Bad class name in the catch statement');
             return this.namedClass(name);
@@ -981,7 +982,7 @@ export class Converter extends DeclarationConverter {
         const name =
           nameNode.type === 'variable_name'
             ? this.variableName(nameNode)
-            : this.expr(nameNode.type === 'dynamic_variable_name' ? nameNode.namedChildren[0] : nameNode);
+            : this.expr(nameNode.type === 'dynamic_variable_name' ? semanticChildren(nameNode)[0] : nameNode);
         return { k: 'sprop', cls, name, row: nameNode.startPosition.row };
       }
       case 'scoped_call_expression': {
@@ -1101,7 +1102,7 @@ export class Converter extends DeclarationConverter {
         return { k: 'cast', type, e: this.expr(node.childForFieldName('value') as Node), row };
       }
       case 'error_suppression_expression': {
-        return { k: 'silence', e: this.expr(node.namedChildren[0]), row };
+        return { k: 'silence', e: this.expr(semanticChildren(node)[0]), row };
       }
       case 'clone_expression': {
         const argumentsNode = node.childForFieldName('arguments');
@@ -1112,7 +1113,7 @@ export class Converter extends DeclarationConverter {
         return { k: 'clone', e: this.expr(node.namedChildren.find((child) => child.type !== 'comment') as Node), row };
       }
       case 'throw_expression': {
-        return { k: 'throw', e: this.expr(node.namedChildren[0]), row };
+        return { k: 'throw', e: this.expr(semanticChildren(node)[0]), row };
       }
       case 'anonymous_function': {
         return this.closure(node);
@@ -1127,7 +1128,7 @@ export class Converter extends DeclarationConverter {
         return this.match(node);
       }
       case 'print_intrinsic': {
-        return { k: 'print', e: this.expr(node.namedChildren[0]), row };
+        return { k: 'print', e: this.expr(semanticChildren(node)[0]), row };
       }
       case 'exit_expression': {
         return { k: 'call', fn: { name: 'exit' }, args: [], fcc: false, row };
@@ -1348,7 +1349,7 @@ export class Converter extends DeclarationConverter {
             child,
             '名前付き引数の後に ... は書けません（Cannot use argument unpacking after named arguments）。'
           );
-        args.push({ e: this.expr(valueNode.namedChildren[0]), spread: true });
+        args.push({ e: this.expr(semanticChildren(valueNode)[0]), spread: true });
         continue;
       }
       if (nameNode) {
@@ -1499,7 +1500,7 @@ export class Converter extends DeclarationConverter {
       .filter((child) => child.type === 'variable_name' || child.type === 'by_ref')
       .map((child) => {
         const byRef = child.type === 'by_ref';
-        const variable = byRef ? child.namedChildren[0] : child;
+        const variable = byRef ? semanticChildren(child)[0] : child;
         const name = this.variableName(variable);
         if (name === 'this' || name === 'GLOBALS') this.error(child, `Cannot use $${name} as lexical variable`);
         return { name, byRef };
@@ -1578,7 +1579,7 @@ export class Converter extends DeclarationConverter {
       if (child.type !== 'array_element_initializer') continue;
       const parts = child.namedChildren.filter((part) => part.type !== 'comment');
       if (parts.length === 1 && parts[0].type === 'variadic_unpacking') {
-        items.push({ value: this.expr(parts[0].namedChildren[0]), byRef: false, spread: true });
+        items.push({ value: this.expr(semanticChildren(parts[0])[0]), byRef: false, spread: true });
         continue;
       }
       items.push(this.arrayItem(parts));
@@ -1600,7 +1601,7 @@ export class Converter extends DeclarationConverter {
     const keyNotices = this.notices.length;
     const valueNode = parts.at(-1)!;
     const byRef = valueNode.type === 'by_ref';
-    const value = byRef ? this.writable(valueNode.namedChildren[0]) : this.expr(valueNode);
+    const value = byRef ? this.writable(semanticChildren(valueNode)[0]) : this.expr(valueNode);
     if (keyNotices > start) this.orderArrayFoldNotices(start, keyNotices);
     return { key, value, byRef, spread: false };
   }
@@ -1620,19 +1621,18 @@ export class Converter extends DeclarationConverter {
     const items: (ListItem | undefined)[] = [];
     let expectingItem = true;
     let pendingKey: Expr | undefined;
-    for (const child of node.children.flatMap((child) =>
-      child.type === 'array_element_initializer' ? child.children : [child]
-    )) {
+    const children = node.children
+      .flatMap((child) => (child.type === 'array_element_initializer' ? child.children : [child]))
+      .filter((child) => child.type !== 'comment');
+    for (const [index, child] of children.entries()) {
       if (child.type === ',') {
         if (expectingItem) items.push(undefined);
         expectingItem = true;
         continue;
       }
       if (child.type === '=>') continue;
-      if (!child.isNamed || child.type === 'comment') continue;
-      // A key is followed by `=>`.
-      const next = child.nextSibling;
-      if (next?.type === '=>') {
+      if (!child.isNamed) continue;
+      if (children[index + 1]?.type === '=>') {
         pendingKey = this.expr(child);
         continue;
       }
@@ -1640,7 +1640,7 @@ export class Converter extends DeclarationConverter {
       let target = child;
       if (child.type === 'by_ref') {
         byRef = true;
-        target = child.namedChildren[0];
+        target = semanticChildren(child)[0];
       }
       const converted = ['list_literal', 'array_creation_expression'].includes(target.type)
         ? this.listLiteral(target)
