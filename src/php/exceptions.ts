@@ -3,7 +3,7 @@ import { callMethod, callValue } from './callables';
 import { asInternal, callArguments, callNamedArguments, type CallRecord, callStack } from './calls';
 import { createObject, findClass } from './classes';
 import { formatFloat } from './conversions';
-import { setErrorFactories, setThrowableFormatter } from './errors';
+import { setErrorFactories, setThrowableFormatter, throwableKey } from './errors';
 import { type ClassDefinition, defineClass, type NativeMethod } from './native';
 import { toStr } from './operators';
 import { rt, SCRIPT_PATH } from './runtime';
@@ -14,19 +14,8 @@ function initThrowable(object: PhpObject): undefined {
   const runtime = rt();
   object.props.set('file', SCRIPT_PATH);
   object.props.set('line', BigInt(runtime.row + 1));
-  object.props.set(`\0${baseClassOf(object.cls).name}\0trace`, traceArray(callStack.toReversed()));
+  object.props.set(throwableKey(object, 'trace'), traceArray(callStack.toReversed()));
   return undefined;
-}
-
-/** Exception or Error, whose private properties every throwable shares. */
-function baseClassOf(cls: PhpClass): PhpClass {
-  let current = cls;
-  while (current.parent) current = current.parent;
-  return current;
-}
-
-function privateKey(object: PhpObject, name: string): string {
-  return `\0${baseClassOf(object.cls).name}\0${name}`;
 }
 
 function traceArray(records: CallRecord[]): PhpArray {
@@ -136,23 +125,35 @@ function escapeTraceString(text: string): string {
 /** The text of a throwable as `__toString` gives it, which an uncaught exception prints. */
 export function throwableText(object: PhpObject): string {
   const method = object.cls.findMethod('__tostring');
-  if (method && method.fn.kind === 'user') return asInternal(() => toStr(callMethod(object, '__toString', [])));
-  return defaultThrowableText(object);
+  const text =
+    method?.fn.kind === 'user'
+      ? asInternal(() => toStr(callMethod(object, '__toString', [])))
+      : defaultThrowableText(object);
+  return storeThrowableText(object, text);
+}
+
+function storeThrowableText(object: PhpObject, text: string): string {
+  object.props.set(throwableKey(object, 'string'), text);
+  return text;
 }
 
 function defaultThrowableText(object: PhpObject): string {
-  const parts: string[] = [];
-  const chain: PhpObject[] = [];
-  for (let current: Value = object; current instanceof PhpObject && chain.length < 64;) {
-    if (chain.includes(current)) break;
-    chain.push(current);
-    current = current.props.get(privateKey(current, 'previous')) as Value;
+  const runtime = rt();
+  const chain = new Set<PhpObject>();
+  for (let current: Value = object; current instanceof PhpObject && !chain.has(current);) {
+    runtime.spend();
+    chain.add(current);
+    current = slotValue(current, throwableKey(current, 'previous'));
   }
-  for (const item of chain.toReversed()) {
+  const parts: string[] = [];
+  let length = 0;
+  for (const item of [...chain].toReversed()) {
     const message = describedMessage(item);
     const header = message === '' ? item.cls.name : `${item.cls.name}: ${message}`;
-    const line = item.props.get('line');
-    const text = `${header} in ${toStr(item.props.get('file') as Value)}:${toStr(line as Value)}\nStack trace:\n${traceArrayText(item.props.get(privateKey(item, 'trace')) as Value)}`;
+    const line = slotValue(item, 'line');
+    const text = `${header} in ${toStr(slotValue(item, 'file'))}:${toStr(line)}\nStack trace:\n${traceArrayText(slotValue(item, throwableKey(item, 'trace')))}`;
+    length += text.length + (parts.length > 0 ? '\n\nNext '.length : 0);
+    runtime.ensureStringFits(length);
     parts.push(text);
   }
   return parts.join('\n\nNext ');
@@ -217,7 +218,10 @@ const throwableMethods = (base: string): NativeMethod[] => [
     isFinal: true,
     impl: ({ thisObj }) => traceArrayText(slotValue(thisObj, `\0${base}\0trace`)),
   },
-  { signature: '__toString(): string', impl: ({ thisObj }) => defaultThrowableText(thisObj) },
+  {
+    signature: '__toString(): string',
+    impl: ({ thisObj }) => storeThrowableText(thisObj, defaultThrowableText(thisObj)),
+  },
 ];
 
 function slotValue(object: PhpObject, key: string): Value {

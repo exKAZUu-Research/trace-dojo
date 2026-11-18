@@ -438,10 +438,16 @@ function tryCatchStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string
     if (!handler) throw error;
     const runtime = rt();
     runtime.row = handler.row;
-    runtime.frame.temporaries.push(error.object);
+    const frame = runtime.frame;
+    const mark = frame.temporaries.length;
+    frame.temporaries.push(error.object);
     runtime.thrown = undefined;
-    collectBeforeAllocation(runtime);
-    if (handler.varName !== undefined) new VarPlace(runtime.frame, handler.varName).set(error.object);
+    try {
+      collectBeforeAllocation(runtime);
+      if (handler.varName !== undefined) new VarPlace(frame, handler.varName).set(error.object);
+    } finally {
+      runtime.dropTemporaries(frame, mark);
+    }
     return execList(handler.body);
   }
 }

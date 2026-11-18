@@ -47,8 +47,8 @@ function compile(name: string, pattern: string): Compiled | undefined {
     try {
       compiled = translate(pattern);
     } catch (error) {
-      if (error instanceof UnsupportedFeatureError) throw error;
-      compiled = error instanceof PatternError ? error.message : `Compilation failed: ${(error as Error).message}`;
+      if (!(error instanceof PatternError)) throw error;
+      compiled = error.message;
     }
     if (cache.size >= CACHE_LIMIT) cache.delete(cache.keys().next().value as string);
     cache.set(pattern, compiled);

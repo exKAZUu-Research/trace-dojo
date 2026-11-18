@@ -1295,6 +1295,14 @@ test.each([
   expect(run(program)).toMatchObject({ kind: 'executed', stdout: '6000' });
 });
 
+test('a timed-out pattern compilation does not affect the next run', () => {
+  const pattern = `/${'b'.repeat(256)}${crypto.randomUUID()}/`;
+  const program = `<?php var_dump(preg_match('${pattern}', 'no match'));`;
+  vi.mocked(performance.now).mockReturnValueOnce(0).mockReturnValueOnce(3000);
+  expect(run(program)).toEqual({ kind: 'limitExceeded', limit: 'time' });
+  expect(run(program)).toMatchObject({ kind: 'executed', stdout: 'int(0)\n' });
+});
+
 test.each(['PHP_EOL', 'PHP_EOL . "A"', 'PHP_INT_MAX', 'PHP_INT_MAX + 1'])(
   'rejects compile-time native constants as class receivers: %s',
   (value) => {

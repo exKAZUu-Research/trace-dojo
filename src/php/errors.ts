@@ -9,8 +9,30 @@ export function setThrowableFormatter(format: typeof formatThrowable): void {
 
 export function reportUncaughtWarning(object: PhpObject): void {
   const runtime = rt();
-  if (runtime.silence === 0 && (runtime.errorReporting & E_WARNING) !== 0n)
-    runtime.echo(`\nWarning: Uncaught ${formatThrowable(object)}\n  thrown in ${throwableLocation(object)}\n`);
+  const show = (): boolean => runtime.silence === 0 && (runtime.errorReporting & E_WARNING) !== 0n;
+  const suspended = runtime.thrown;
+  runtime.held.push(object);
+  runtime.thrown = undefined;
+  try {
+    let text: string;
+    try {
+      text = formatThrowable(object);
+    } catch (error) {
+      if (!(error instanceof PhpThrow)) throw error;
+      if (show()) {
+        runtime.echo(
+          `\nWarning: Uncaught ${error.object.cls.name} in exception handling during call to ${object.cls.name}::__toString() in ${throwableLocation(error.object)}\n`
+        );
+      }
+      const stored = object.props.get(throwableKey(object, 'string'));
+      const value = stored instanceof Ref ? stored.v : stored;
+      text = typeof value === 'string' ? value : '';
+    }
+    if (show()) runtime.echo(`\nWarning: Uncaught ${text}\n  thrown in ${throwableLocation(object)}\n`);
+  } finally {
+    runtime.thrown = suspended === object ? undefined : suspended;
+    runtime.held.pop();
+  }
 }
 
 export function throwableLocation(object: PhpObject): string {
@@ -160,7 +182,7 @@ export function setPrevious(exception: PhpObject, previous: PhpObject): void {
     }
     const next = previousOf(current);
     if (!(next instanceof PhpObject)) {
-      current.props.set(previousKey(current), previous);
+      current.props.set(throwableKey(current, 'previous'), previous);
       return;
     }
     current = next;
@@ -207,14 +229,13 @@ export function withCleanupExceptions(runtime: Runtime, cleanup: (capture: (erro
 }
 
 function previousOf(exception: PhpObject): PhpObject | undefined {
-  const slot = exception.props.get(previousKey(exception));
+  const slot = exception.props.get(throwableKey(exception, 'previous'));
   const value = slot instanceof Ref ? slot.v : slot;
   return value instanceof PhpObject ? value : undefined;
 }
 
-/** The key of the private `previous` property, which Exception or Error declares. */
-function previousKey(exception: PhpObject): string {
+export function throwableKey(exception: PhpObject, name: string): string {
   let base = exception.cls;
   while (base.parent) base = base.parent;
-  return `\0${base.name}\0previous`;
+  return `\0${base.name}\0${name}`;
 }

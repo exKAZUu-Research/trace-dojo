@@ -119,19 +119,20 @@ function restoreStack(runtime: Runtime): void {
   resetCallStack();
 }
 
-function printUncaught(runtime: Runtime, object: PhpObject): string {
-  let text: string;
-  try {
-    text = throwableText(object);
-  } catch (error) {
-    if (error instanceof PhpThrow) {
+function printUncaught(runtime: Runtime, object: PhpObject): string | undefined {
+  for (;;) {
+    try {
+      const text = throwableText(object);
+      const message = `Fatal error: Uncaught ${text}\n  thrown in ${throwableLocation(object)}`;
+      runtime.echo(`\n${message}\n`);
+      return message;
+    } catch (error) {
+      if (error instanceof FatalError || error instanceof ExitSignal) return report(runtime, error);
+      if (!(error instanceof PhpThrow)) throw error;
+      runtime.spend();
       object = error.object;
-      text = throwableText(object);
-    } else throw error;
+    }
   }
-  const message = `Fatal error: Uncaught ${text}\n  thrown in ${throwableLocation(object)}`;
-  runtime.echo(`\n${message}\n`);
-  return message;
 }
 
 /** Destroys the objects that remain, as PHP's shutdown does: global variables first, newest first, then the rest. */

@@ -344,10 +344,13 @@ function arrayAccessNestedPlace(object: PhpObject, key: Value | undefined): Plac
   return new RefPlace(Ref.temporary(value));
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function stringOffsetPlace(parent: Place, text: string, key: Value | undefined): Place {
   return {
     get: (operation) => {
+      if (key === undefined) throwError('Error', '[] operator not supported for strings');
+      stringOffset(text, key, false);
       const message =
         operation === 'assignOp'
           ? 'Cannot use assign-op operators with string offsets'

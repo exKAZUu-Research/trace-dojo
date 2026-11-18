@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 654 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 658 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -813,7 +813,7 @@ export function setDefaultEvaluator(run: (decl: FunctionDecl, index: number, fra
   evaluateDefault = run;
 }
 
-// code-gauge-allow functionNcss 49 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
+// code-gauge-allow functionNcss 50 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 // code-gauge-allow functionParameterCount 7 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function bindParams(
   frame: Frame,
@@ -825,6 +825,22 @@ function bindParams(
   callRow: number | undefined
 ): void {
   const params = fn.params;
+  let holderIndices: Map<ArgValue, number> | undefined;
+  const bindSupplied = (arg: ArgValue, param: Param, index: number, assign: (slot: Value | Ref) => void): void => {
+    const ref = param.byRef ? bindRef(arg) : undefined;
+    if (ref) assign(ref);
+    const original = ref ? ref.v : share(arg.v);
+    const value = checkParam(original, param, index, name, strict, frame, callRow);
+    if (ref) {
+      if (value !== original) ref.v = value;
+    } else assign(value);
+    if (!(original instanceof PhpObject) || value === original) return;
+    holderIndices ??= new Map(args.map((argument, position) => [argument, position]));
+    const holder = holderIndices.get(arg)!;
+    const held = frame.argumentHolders[holder];
+    frame.argumentHolders[holder] = value;
+    rt().release([original, held]);
+  };
   const required = params.filter((param) => !param.optional && !param.variadic).length;
   for (let index = 0; index < params.length; index++) {
     const param = params[index];
@@ -833,20 +849,12 @@ function bindParams(
       frame.vars.set(param.name, new Ref(rest));
       for (let at = index; at < positional.length; at++) {
         const arg = positional[at];
-        if (param.byRef) {
-          const ref = bindRef(arg);
-          rest.append(ref);
-          ref.v = checkParam(ref.v, param, at, name, strict, frame, callRow);
-        } else rest.append(checkParam(arg.v, param, at, name, strict, frame, callRow));
+        bindSupplied(arg, param, at, (slot) => rest.append(slot));
       }
       for (const arg of args) {
-        if (arg.name !== undefined && !params.some((other) => other.name === arg.name && !other.variadic)) {
-          if (param.byRef) {
-            const ref = bindRef(arg);
-            rest.setSlot(arg.name, ref);
-            ref.v = checkParam(ref.v, param, index, name, strict, frame, callRow);
-          } else rest.set(arg.name, checkParam(arg.v, param, index, name, strict, frame, callRow));
-        }
+        const argName = arg.name;
+        if (argName !== undefined && !params.some((other) => other.name === argName && !other.variadic))
+          bindSupplied(arg, param, index, (slot) => rest.setSlot(argName, slot));
       }
       break;
     }
@@ -870,15 +878,7 @@ function bindParams(
       frame.vars.set(param.name, new Ref(value));
       continue;
     }
-    if (param.byRef) {
-      const ref = bindRef(arg);
-      frame.vars.set(param.name, ref);
-      if (param.type && !(ref.v === null && param.implicitNullable)) {
-        ref.v = checkParam(ref.v, param, index, name, strict, frame, callRow);
-      }
-    } else {
-      frame.vars.set(param.name, new Ref(checkParam(share(arg.v), param, index, name, strict, frame, callRow)));
-    }
+    bindSupplied(arg, param, index, (slot) => frame.vars.set(param.name, slot instanceof Ref ? slot : new Ref(slot)));
   }
 }
 
