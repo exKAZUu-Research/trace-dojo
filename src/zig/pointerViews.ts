@@ -1,18 +1,26 @@
 import { BufferMemory, type BufferMemorySpace, physicalUnion } from './bufferMemory';
 import { BigFloat } from './floats';
-import { bitSizeOf, errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
+import {
+  bitSizeOf,
+  errorUnionOffsets,
+  fieldOffsets,
+  optionalNicheBits,
+  sizeOf,
+  unionOffsets,
+  usesFieldLayout,
+} from './layout';
 import { spendMemory } from './memoryAccounting';
 import { sparseBytes } from './sparseBytes';
-import { arrayOf, type StructType, type Type, typeId } from './types';
+import { arrayOf, type StructType, type Type, typeId, U8, U16 } from './types';
 import {
   Cell,
   ErrorValue,
   FnValue,
   hasAggregateStorage,
   NULL,
+  optionalSome,
   Pointer,
   registerStorageLocation,
-  type Slots,
   storeInto,
   type Value,
   ZArray,
@@ -69,7 +77,7 @@ function firstField(source: Pointer, sourceType: Type, type: Type): { pointer: P
     rememberPointerType(pointer, sourceType.child);
     return { pointer };
   }
-  if (sourceType.kind === 'struct' && sourceType.layout !== 'packed') {
+  if (sourceType.kind === 'struct' && sourceType.layout !== 'packed' && usesFieldLayout(sourceType)) {
     const offsets = fieldOffsets(sourceType);
     for (const [index, field] of (sourceType.fields ?? []).entries()) {
       spendMemory();
@@ -151,50 +159,108 @@ function synchronizeRegion(
   write: boolean
 ): void {
   const { source, type, cache } = storage;
-  visitRegion(source, type, { start: offset, end: offset + bits, offset: 0 }, (pointer, child, start, packed) => {
-    const payload = retainedPayload(pointer, child);
-    if (write) {
-      const value = memory.read(child, start, packed);
-      storeInto(pointer.target, pointer.index, value);
-      if (payload?.inactive(value)) storeInto(payload.storage, 0, memory.read(payload.type, start + payload.offset));
-      cache.delete(start);
-      return;
+  visitRegion(
+    source,
+    type,
+    { start: offset, end: offset + bits, offset: 0 },
+    {
+      value(pointer, child, start, packed) {
+        if (write) {
+          storeInto(pointer.target, pointer.index, memory.read(child, start, packed));
+          cache.delete(start);
+          return;
+        }
+        const value = pointer.load();
+        if (cache.has(start) && Object.is(cache.get(start)!.value, value)) return;
+        memory.write(child, start, value, packed);
+        if (
+          typeof value !== 'object' ||
+          value instanceof BigFloat ||
+          value instanceof Pointer ||
+          value instanceof ErrorValue ||
+          value instanceof FnValue ||
+          value === NULL
+        )
+          cache.set(start, { value });
+      },
+      tag(pointer, wrapper, start) {
+        if (write) restoreWrapperTag(memory, pointer, wrapper, start);
+        else writeWrapperTag(memory, pointer, wrapper, start);
+      },
     }
-    const value = pointer.load();
-    if (!payload && cache.has(start) && Object.is(cache.get(start)!.value, value)) return;
-    if (payload?.inactive(value)) memory.write(payload.type, start + payload.offset, payload.storage.slots[0]);
-    memory.write(child, start, value, packed);
-    if (
-      typeof value !== 'object' ||
-      value instanceof BigFloat ||
-      value instanceof Pointer ||
-      value instanceof ErrorValue ||
-      value instanceof FnValue ||
-      value === NULL
-    )
-      cache.set(start, { value });
-  });
+  );
 }
 
-function retainedPayload(
-  pointer: Pointer,
-  type: Type
-): { storage: Slots; type: Type; offset: number; inactive: (value: Value) => boolean } | undefined {
+interface WrapperRegion {
+  type: Extract<Type, { kind: 'optional' | 'error_union' }>;
+  child: Type;
+  payloadOffset: number;
+  tagOffset: number;
+  tagBits: number;
+}
+
+function wrapperRegion(type: Type): WrapperRegion | undefined {
   if (type.kind === 'optional' && !optionalNicheBits(type.child)) {
-    const storage = Pointer.optionalProjection(pointer.target, pointer.index);
-    if (storage) return { storage, type: type.child, offset: 0, inactive: (value) => value === NULL };
+    return { type, child: type.child, payloadOffset: 0, tagOffset: sizeOf(type.child) * 8, tagBits: 8 };
   }
   if (type.kind === 'error_union') {
-    const storage = Pointer.errorProjection(pointer.target, pointer.index);
-    if (storage) {
-      const offset = errorUnionOffsets(type.payload).payload * 8;
-      return { storage, type: type.payload, offset, inactive: (value) => value instanceof ErrorValue };
-    }
+    const { payload, error } = errorUnionOffsets(type.payload);
+    return { type, child: type.payload, payloadOffset: payload * 8, tagOffset: error * 8, tagBits: 16 };
   }
   return undefined;
 }
 
-type RegionVisitor = (pointer: Pointer, type: Type, offset: number, packed: number | undefined) => void;
+function wrapperPayload(pointer: Pointer, wrapper: WrapperRegion): Pointer | undefined {
+  const { type, payloadOffset } = wrapper;
+  if (type.kind === 'optional') {
+    if (pointer.load() === NULL && !Pointer.optionalProjection(pointer.target, pointer.index)) return undefined;
+    return pointer.project('optional').withFieldLocation(pointer, 0);
+  }
+  if (pointer.load() instanceof ErrorValue && !Pointer.errorProjection(pointer.target, pointer.index)) return undefined;
+  return pointer.projectErrorPayload(payloadOffset / 8).withFieldLocation(pointer, payloadOffset / 8);
+}
+
+function restoreWrapperTag(memory: BufferMemory, pointer: Pointer, wrapper: WrapperRegion, offset: number): void {
+  const { type, child, tagOffset, payloadOffset } = wrapper;
+  const at = offset + tagOffset;
+  const value = pointer.load();
+  if (type.kind === 'optional' && ((memory.read(U8, at) as bigint) & 1n) === 0n) {
+    if (value !== NULL) {
+      wrapperPayload(pointer, wrapper);
+      pointer.target.slots[pointer.index] = NULL;
+    }
+    return;
+  }
+  if (type.kind === 'error_union' && memory.read(U16, at) !== 0n) {
+    wrapperPayload(pointer, wrapper);
+    pointer.target.slots[pointer.index] = memory.read(type.errorSet, at);
+    return;
+  }
+  const inactive = type.kind === 'optional' ? value === NULL : value instanceof ErrorValue;
+  if (!inactive) return;
+  const payload = wrapperPayload(pointer, wrapper);
+  if (payload) {
+    const restored = payload.load();
+    pointer.target.slots[pointer.index] = type.kind === 'optional' ? optionalSome(restored, child) : restored;
+  } else {
+    const restored = memory.read(child, offset + payloadOffset);
+    storeInto(pointer.target, pointer.index, type.kind === 'optional' ? optionalSome(restored, child) : restored);
+  }
+}
+
+function writeWrapperTag(memory: BufferMemory, pointer: Pointer, wrapper: WrapperRegion, offset: number): void {
+  const { type, tagOffset } = wrapper;
+  const at = offset + tagOffset;
+  const value = pointer.load();
+  if (type.kind === 'optional') memory.write(U8, at, value === NULL ? 0n : 1n);
+  else if (value instanceof ErrorValue) memory.write(type.errorSet, at, value);
+  else memory.write(U16, at, 0n);
+}
+
+interface RegionVisitor {
+  value: (pointer: Pointer, type: Type, offset: number, packed: number | undefined) => void;
+  tag: (pointer: Pointer, wrapper: WrapperRegion, offset: number) => void;
+}
 
 interface BitRegion {
   start: number;
@@ -207,6 +273,11 @@ function visitRegion(pointer: Pointer, type: Type, range: BitRegion, visit: Regi
   const { start, end, offset, packed } = range;
   spendMemory();
   if (start >= end) return;
+  const wrapper = wrapperRegion(type);
+  if (wrapper) {
+    visitWrapper(pointer, wrapper, range, visit);
+    return;
+  }
   if (type.kind === 'array') {
     const stride = sizeOf(type.child) * 8;
     if (stride === 0) return;
@@ -228,7 +299,7 @@ function visitRegion(pointer: Pointer, type: Type, range: BitRegion, visit: Regi
     }
     return;
   }
-  if (type.kind === 'struct' && type.native?.storageSlots === undefined && type.native?.kind !== 'allocator') {
+  if (type.kind === 'struct' && usesFieldLayout(type)) {
     const struct = pointer.load() as ZStruct;
     for (const region of intersectingFields(type, start, end)) {
       visitRegion(
@@ -245,7 +316,20 @@ function visitRegion(pointer: Pointer, type: Type, range: BitRegion, visit: Regi
     }
     return;
   }
-  visit(pointer, type, offset, packed);
+  visit.value(pointer, type, offset, packed);
+}
+
+function visitWrapper(pointer: Pointer, wrapper: WrapperRegion, range: BitRegion, visit: RegionVisitor): void {
+  const { start, end, offset } = range;
+  const { child, payloadOffset, tagOffset, tagBits } = wrapper;
+  const payloadStart = Math.max(0, start - payloadOffset);
+  const payloadEnd = Math.min(sizeOf(child) * 8, end - payloadOffset);
+  if (payloadStart < payloadEnd) {
+    const payload = wrapperPayload(pointer, wrapper);
+    if (payload)
+      visitRegion(payload, child, { start: payloadStart, end: payloadEnd, offset: offset + payloadOffset }, visit);
+  }
+  if (start < tagOffset + tagBits && end > tagOffset) visit.tag(pointer, wrapper, offset);
 }
 
 interface StructRegion {
@@ -301,15 +385,16 @@ function sourceLocation(pointer: Pointer, type: Type, offset: number): { storage
     const source = hasAggregateStorage(type.child) ? element.withFieldLocation(pointer, (index * stride) / 8) : element;
     return sourceLocation(source, type.child, offset - index * stride);
   }
-  if (type.kind === 'struct' && type.layout !== 'packed') {
+  if (type.kind === 'struct' && type.layout !== 'packed' && usesFieldLayout(type)) {
     for (const region of intersectingFields(type, offset, offset + 1)) {
       const field = new Pointer(pointer.load() as ZStruct, region.index);
       const source = hasAggregateStorage(region.type) ? field.withFieldLocation(pointer, region.offset / 8) : field;
       return sourceLocation(source, region.type, offset - region.offset);
     }
   }
-  if (type.kind === 'optional') return optionalSourceLocation(pointer, type.child, offset);
-  if (type.kind === 'error_union') return errorSourceLocation(pointer, type, offset);
+  const wrapper = wrapperRegion(type);
+  if (wrapper) return wrapperSourceLocation(pointer, wrapper, offset);
+  if (type.kind === 'optional') return sourceLocation(pointer, type.child, offset);
   if (type.kind === 'union') {
     const union = physicalUnion(type, pointer.load() as ZUnion);
     const payload = new Pointer(union.fieldView!(0), 0).storageLocation();
@@ -319,31 +404,15 @@ function sourceLocation(pointer: Pointer, type: Type, offset: number): { storage
   return { storage: location.storage, index: location.index + offset / (8 * Math.max(1, sizeOf(type))) };
 }
 
-function optionalSourceLocation(pointer: Pointer, child: Type, offset: number): { storage: object; index: number } {
-  if (optionalNicheBits(child)) return sourceLocation(pointer, child, offset);
-  if (
-    offset < sizeOf(child) * 8 &&
-    (Pointer.optionalProjection(pointer.target, pointer.index) || pointer.load() !== NULL)
-  ) {
-    const payload = pointer.project('optional').withFieldLocation(pointer, 0);
-    return sourceLocation(payload, child, offset);
-  }
-  return pointer.fieldLocation(offset / 8);
-}
-
-function errorSourceLocation(
+function wrapperSourceLocation(
   pointer: Pointer,
-  type: Extract<Type, { kind: 'error_union' }>,
+  wrapper: WrapperRegion,
   offset: number
-): { storage: object; index: number } {
-  const payloadOffset = errorUnionOffsets(type.payload).payload;
-  const within = offset - payloadOffset * 8;
-  if (
-    within >= 0 &&
-    within < sizeOf(type.payload) * 8 &&
-    (Pointer.errorProjection(pointer.target, pointer.index) || !(pointer.load() instanceof ErrorValue))
-  ) {
-    return sourceLocation(pointer.projectErrorPayload(payloadOffset), type.payload, within);
+): ReturnType<Pointer['storageLocation']> {
+  const within = offset - wrapper.payloadOffset;
+  if (within >= 0 && within < sizeOf(wrapper.child) * 8) {
+    const payload = wrapperPayload(pointer, wrapper);
+    if (payload) return sourceLocation(payload, wrapper.child, within);
   }
   return pointer.fieldLocation(offset / 8);
 }

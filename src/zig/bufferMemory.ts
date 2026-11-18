@@ -4,7 +4,15 @@ import { panic } from './arith';
 import { enumLookup } from './enumLookup';
 import { decodeFloat, encodeFloat } from './floatEncoding';
 import type { AnyFloat } from './floats';
-import { bitSizeOf, errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
+import {
+  bitSizeOf,
+  errorUnionOffsets,
+  fieldOffsets,
+  optionalNicheBits,
+  sizeOf,
+  unionOffsets,
+  usesFieldLayout,
+} from './layout';
 import { memorySpace, reserveMemory, spendMemory } from './memoryAccounting';
 import { rememberPointerType, viewPointer } from './pointerViews';
 import { copyForStorage, undefinedValue } from './semaBase';
@@ -293,8 +301,7 @@ export class BufferMemory {
   private readAggregate(type: Extract<Type, { kind: 'array' | 'struct' | 'union' }>, offset: number): Value {
     const key = `${typeId(type)} ${offset}`;
     if (type.kind === 'struct' && type.native?.kind === 'writer') return this.writerView(type, offset);
-    if (type.kind === 'struct' && (type.native?.storageSlots !== undefined || type.native?.kind === 'allocator'))
-      return this.reference(offset, type);
+    if (type.kind === 'struct' && !usesFieldLayout(type)) return this.reference(offset, type);
     const cached = this.views.get(key);
     if (cached) return cached;
     let value: Value;
@@ -533,7 +540,7 @@ export class BufferMemory {
           this.writeWriter(type, offset, value as ZStruct);
           return;
         }
-        if (type.native?.storageSlots !== undefined || type.native?.kind === 'allocator') {
+        if (!usesFieldLayout(type)) {
           this.writeReference(offset, value, type);
           return;
         }

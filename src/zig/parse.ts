@@ -20,7 +20,7 @@ export function parseZig(source: string, budget = new ExecutionBudget()): Source
   budget.spend(1 + Math.floor(source.length / 64));
   const file = parseSource(parser, source, MISSING_TOKEN_NAMES, (root) => convertFile(root, budget), {
     locateErrors: (root, errors) => zigSyntaxErrors(root, source, errors),
-    progress: () => budget.spend(),
+    progress: (cost) => budget.spend(cost),
   });
   budget.spend();
   return file;

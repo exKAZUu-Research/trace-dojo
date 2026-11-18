@@ -9,15 +9,19 @@ function fail(node: Node, message: string): never {
   throw new CompileError([{ row: node.startPosition.row, message }]);
 }
 
-export function validateCommentText(root: Node): void {
-  const source = root.text;
+export function validateCommentText(root: Node, source: string, budget: ExecutionBudget): void {
   const pending = [root];
+  budget.spend();
   while (pending.length > 0) {
     const node = pending.pop() as Node;
     if (node.type === 'comment' || node.type === 'doc_comment' || node.type === 'container_doc_comment') {
-      const text = node.text.endsWith('\r') && source[node.endIndex] === '\n' ? node.text.slice(0, -1) : node.text;
-      validateRawText(text.replaceAll(/\r?\n/g, ''), node);
+      const end = node.endIndex;
+      budget.spend(end - node.startIndex);
+      const text = node.text;
+      const content = text.endsWith('\r') && source[end] === '\n' ? text.slice(0, -1) : text;
+      validateRawText(content.replaceAll(/\r?\n/g, ''), node);
     } else {
+      budget.spend(node.namedChildCount);
       for (const child of node.namedChildren) pending.push(child);
     }
   }

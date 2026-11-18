@@ -2,7 +2,12 @@ import { spawnSync } from 'node:child_process';
 
 import { describe, expect, test } from 'vitest';
 
+import { ExecutionBudget, LIMITS } from '../../src/interpreter/limits';
 import { executeProgram } from '../../src/interpreter/program';
+import { compileSource } from '../../src/zig/compiler';
+import { runProgram } from '../../src/zig/execute';
+import { parseZig } from '../../src/zig/parse';
+import { Runtime } from '../../src/zig/runtime';
 
 test('std.debug.print writes to standard error and a stdout writer only what it flushed', () => {
   const program = `const std = @import("std");
@@ -1676,6 +1681,57 @@ test.each([
 );
 
 test.each([
+  ['u8', '10000', '?S', '@as(S,@splat(1))', '[10001]u8', '0', 'v.?', ''],
+  ['u16', '5000', '??S', '@as(?S,@as(S,@splat(1)))', '[5002]u16', '0', 'v.?.?', ''],
+  ['u8', '10000', 'error{Oops}!S', '@as(S,@splat(1))', '[10002]u8', '2', '(try v)', ''],
+  ['u16', '5000', 'error{Oops}!S', '@as(S,@splat(1))', '[5001]u16', '0', '(try v)', ''],
+  [
+    'u8',
+    '10000',
+    '?S',
+    '@as(S,@splat(1))',
+    '[10001]u8',
+    '10000',
+    'v.?',
+    'p.*=0;std.debug.print("{}|",.{v==null});p.*=1;',
+  ],
+])(
+  'byte views synchronize a scalar region of %s array storage (%s %s)',
+  (scalar, length, type, initial, bytes, index, payload, tagEdit) => {
+    const write = tagEdit || 'p.*=9;';
+    const expected = tagEdit ? 'true|100 1 1' : '100 9 1';
+    const source = `const std=@import("std");const S=[${length}]${scalar};const W=${type};const U=extern union{a:*W,b:*${bytes}};pub fn main()!void{var v:W=${initial};const alias=U{.a=&v};const p=&alias.b[${index}];var sum:usize=0;for(0..100)|_|sum+=p.*;${write}std.debug.print("{} {} {}",.{sum,${payload}[0],${payload}[${length}-1]});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: expected,
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([
+  [
+    'fixed',
+    '_=init;var writer=std.Io.Writer.fixed(&first);var other=std.Io.Writer.fixed(&second);',
+    '&writer',
+    '&other',
+  ],
+  [
+    'file',
+    'var writer=std.Io.File.stdout().writer(init.io,&first);var other=std.Io.File.stdout().writer(init.io,&second);',
+    '&writer.interface',
+    '&other.interface',
+  ],
+])('word aliases use the native layout of a %s writer', (_kind, construct, writer, other) => {
+  const source = `const std=@import("std");const U=extern union{writer:*std.Io.Writer,words:*[2]usize};pub fn main(init:std.process.Init)void{var first:[8]u8=@splat(1);var second:[4]u8=@splat(2);${construct}const a=U{.writer=${writer}};const b=U{.writer=${other}};a.words[1]=b.words[1];a.writer.buffer[0]=9;std.debug.print("{} {} {} {}",.{a.writer.buffer.len,a.writer.end,first[0],second[0]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '8 0 1 9',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
   ['u16', '0x1234', 'u', '129a'],
   ['u16', '0x1234', 'identity(u)', '129a'],
   ['u32', '0x12345678', 'u', '1234569a'],
@@ -1963,6 +2019,13 @@ test('all comment kinds reject raw controls while ordinary whitespace and CRLF r
   expect(executeProgram('zig', 'pub fn main() void {\n\tconst\tx: u8 = 1; // valid\n\t_ = x;\n}').kind).toBe(
     'executed'
   );
+});
+
+test.each(['//', '///', '//!'])('the Zig parser charges nested %s comment text to the supplied budget', (prefix) => {
+  const source = `const S=struct{\n${prefix} ${'comment '.repeat(40)}\nconst x=1;\n};pub fn main()void{_=S;}\n`;
+  const budget = new ExecutionBudget();
+  budget.spend(LIMITS.maxOperations - 200);
+  expect(() => parseZig(source, budget)).toThrow(expect.objectContaining({ limit: 'operations' }));
 });
 
 test('UTF-8 counting preserves decoding errors and validation reports failure', () => {
@@ -6971,6 +7034,20 @@ test.each(['u32768', 'i32768'])('weighted random rejects auxiliary integer overf
 test.each(['u32767', 'i32767'])('weighted random supports the auxiliary integer boundary for %s', (type) => {
   const source = `const std=@import("std");pub fn main()void{var p=std.Random.DefaultPrng.init(0);const r=p.random();const n=r.weightedIndex(${type},&.{1});std.debug.print("{}",.{n});}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '0', uncaughtException: undefined });
+});
+
+test.each(['f32', 'f64'])('weighted random charges sum and selection visits for %s', (type) => {
+  const source = `const std=@import("std");const weights=[_]${type}{${'0,'.repeat(127)}1};pub fn main()void{var p=std.Random.DefaultPrng.init(0);const index=p.random().weightedIndex(${type},&weights);std.debug.print("{}",.{index});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '127',
+    uncaughtException: undefined,
+  });
+  const budget = new ExecutionBudget();
+  budget.spend(LIMITS.maxOperations - 225);
+  expect(() => runProgram(new Runtime(undefined, budget), compileSource(source))).toThrow(
+    expect.objectContaining({ limit: 'operations' })
+  );
 });
 
 test.each([

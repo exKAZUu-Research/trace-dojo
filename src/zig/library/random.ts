@@ -1,6 +1,7 @@
 import { PANIC, panic } from '../arith';
 import type { Span } from '../ast';
 import { spendIntegerOperation, spendIntegerShift, spendIntegerWidth } from '../integerWork';
+import { MemoryFault } from '../memoryFault';
 import type { Frame } from '../runtime';
 import { copyForStorage, known, runtime, type SemaApi, type TExpr } from '../semaBase';
 import {
@@ -23,7 +24,7 @@ import {
   VOID,
   wrapInt,
 } from '../types';
-import { NativeHandle, type Pointer, type Slice, type Value, ZArray, ZStruct } from '../values';
+import { isUndefinedMemory, NativeHandle, type Pointer, type Slice, type Value, ZArray, ZStruct } from '../values';
 import { nativeTransferCost, storeSliceValue } from './common';
 import { addMembers, compileArgs, expectArgs, fnMember, type Member, nativeStruct } from './native';
 
@@ -162,7 +163,7 @@ function intRange(
 }
 
 /** `weightedIndex` with integer proportions: a point below their sum, found in the running totals. */
-function weightedIntIndex(state: RandomSource, type: IntType, proportions: bigint[]): bigint {
+function weightedIntIndex(state: RandomSource, type: IntType, proportions: Slice): bigint {
   state.spend(Math.ceil(type.bits / 64) * (type.signed ? 2 : 1));
   const minimum = minInt(type),
     maximum = maxInt(type);
@@ -175,11 +176,11 @@ function weightedIntIndex(state: RandomSource, type: IntType, proportions: bigin
     return result;
   };
   let sum = 0n;
-  for (const proportion of proportions) sum = accumulate(sum, proportion);
+  for (let index = 0; index < proportions.length; index++) sum = accumulate(sum, proportions.get(index) as bigint);
   const point = type.signed ? intRange(state, type, 0n, sum, false) : uintLessThan(state, type, sum);
   let accumulator = 0n;
-  for (const [index, proportion] of proportions.entries()) {
-    accumulator = accumulate(accumulator, proportion);
+  for (let index = 0; index < proportions.length; index++) {
+    accumulator = accumulate(accumulator, proportions.get(index) as bigint);
     spendIntegerOperation(point, accumulator, 'read', state.spend);
     if (point < accumulator) return BigInt(index);
   }
@@ -197,16 +198,20 @@ function rangeLessThan(state: RandomSource, left: bigint, right: bigint): boolea
 }
 
 /** `weightedIndex` with float proportions: `@min(r.float(T) * sum, sum - floatEps(T))`, as Zig computes in `T`. */
-function weightedFloatIndex(state: RandomSource, bits: 32 | 64, proportions: number[]): bigint {
+function weightedFloatIndex(state: RandomSource, bits: 32 | 64, proportions: Slice): bigint {
   const round = (value: number): number => (bits === 32 ? Math.fround(value) : value);
   let sum = 0;
-  for (const proportion of proportions) sum = round(sum + proportion);
+  for (let index = 0; index < proportions.length; index++) {
+    state.spend(1);
+    sum = round(sum + (proportions.get(index) as number));
+  }
   const epsilon = bits === 32 ? 2 ** -23 : 2 ** -52;
   const point = Math.min(round(randomFloat(state, bits) * sum), round(sum - epsilon));
   if (!(point < sum)) panic(PANIC.unreachable);
   let accumulator = 0;
-  for (const [index, proportion] of proportions.entries()) {
-    accumulator = round(accumulator + proportion);
+  for (let index = 0; index < proportions.length; index++) {
+    state.spend(1);
+    accumulator = round(accumulator + (proportions.get(index) as number));
     if (point < accumulator) return BigInt(index);
   }
   return panic(PANIC.unreachable);
@@ -455,11 +460,12 @@ addMembers(RANDOM, {
       USIZE,
       (frame) => {
         const generator = state(frame);
-        const values = (evaluate(frame) as Slice).values();
-        frame.runtime.spend(1 + values.length);
+        const values = evaluate(frame) as Slice;
+        if (values.lengthValue !== 0n && isUndefinedMemory(values)) throw new MemoryFault();
+        frame.runtime.spend();
         return type.kind === 'int'
-          ? weightedIntIndex(generator, type, values as bigint[])
-          : weightedFloatIndex(generator, type.bits as 32 | 64, values as number[]);
+          ? weightedIntIndex(generator, type, values)
+          : weightedFloatIndex(generator, type.bits as 32 | 64, values);
       },
       call.span
     );

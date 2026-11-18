@@ -10,6 +10,10 @@ export function alignOf(type: Type): number {
   return layoutOf(type).align;
 }
 
+export function usesFieldLayout(type: StructType): boolean {
+  return type.native?.storageSlots === undefined && type.native?.kind !== 'allocator';
+}
+
 export function fieldOffsets(type: StructType): number[] {
   return resolvedFields.get(type) ?? calculateFieldOffsets(type, new LayoutQuery());
 }
