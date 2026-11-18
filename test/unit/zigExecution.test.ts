@@ -1330,6 +1330,15 @@ test('source-sized plain, quoted, and base64 output follows the output limit', (
     expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'output' });
 });
 
+test.each([
+  'fn make()!std.ArrayList(u8){return .empty;}pub fn main()!void{const list=try make();std.debug.print("{}",.{list.items.len});}',
+  'fn make()!S{return .zero;}pub fn main()!void{std.debug.print("{}",.{(try make()).x});}',
+  'pub fn main()void{const a:??S=.zero;std.debug.print("{}",.{a.?.?.x});}',
+])('declaration literals resolve through enclosing result types: %s', (body) => {
+  const source = `const std=@import("std");const S=struct{x:u8,const zero:S=.{.x=0};};${body}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '0', uncaughtException: undefined });
+});
+
 test('base64 formats ordinary and sentinel-terminated byte arrays', () => {
   const source = `const std=@import("std");pub fn main()void{std.debug.print("{b64} {b64}",.{[_]u8{97,98},[_:0]u8{97,98}});}`;
   expect(executeProgram('zig', source)).toMatchObject({

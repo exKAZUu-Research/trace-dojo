@@ -323,7 +323,7 @@ export abstract class ExpressionCompiler extends SemaBase {
   private enumLiteral(name: string, span: Span, resultType: Type | undefined): TExpr {
     const literal = known(ENUM_LITERAL, EnumLiteral.of(name), span);
     if (!resultType) return literal;
-    const target = resultType.kind === 'optional' ? resultType.child : resultType;
+    const target = unwrapResult(resultType);
     if (target.kind === 'enum' || target.kind === 'union') return this.coerce(literal, target, span);
     // A declaration literal, such as `.empty` or `.init`, names a declaration of the result type.
     if (target.kind === 'struct') {
