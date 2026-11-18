@@ -534,12 +534,11 @@ export class Flow {
    * classes, not by shape; a type that is not a class of the program, as a library one, is compared by its shape.
    */
   private isDerivedFrom(source: Type, target: Type): boolean {
-    if (source.kind === 'union') return source.types.some((member) => this.isDerivedFrom(member, target));
+    if (source.kind === 'union') return source.types.every((member) => this.isDerivedFrom(member, target));
+    if (source.kind === 'intersection') return source.types.some((member) => this.isDerivedFrom(member, target));
     if (target.kind === 'union') return target.types.some((member) => this.isDerivedFrom(source, member));
-    if (source.kind === 'typeParameter') {
-      const constraint = this.c.constraintOf(source);
-      return constraint !== undefined && this.isDerivedFrom(constraint, target);
-    }
+    const constraint = this.c.baseConstraint(source);
+    if (constraint !== source) return this.isDerivedFrom(constraint, target);
     const targetClass = target.kind === 'object' && !target.isClassStatic ? target.classInfo : undefined;
     if (!targetClass) return this.c.relations.isAssignable(source, target);
     let info = source.kind === 'object' && !source.isClassStatic ? source.classInfo : undefined;

@@ -566,8 +566,8 @@ export class TypeOperators {
       inferTypeParameters.some((parameter) => !inferences.has(parameter.id))
     )
       return undefined;
-    for (const parameter of inferTypeParameters) {
-      inferred.set(parameter.id, inferences.get(parameter.id) ?? parameter.constraint?.() ?? unknownType);
+    for (const [id, type] of this.c.inference.completeInference(inferTypeParameters, inferences, mapper)) {
+      inferred.set(id, type);
     }
     return inferred;
   }

@@ -551,13 +551,31 @@ export class TypeInference {
   }
 
   private constrainInferences(parameters: TypeParameter[], mapper: Mapper, outer?: Mapper): void {
+    const context = this.completeInference(parameters, mapper, outer);
     for (const parameter of parameters) {
       const inferred = mapper.get(parameter.id);
+      if (!inferred) continue;
       const constraint = parameter.constraint?.();
-      if (!inferred || !constraint) continue;
-      const instantiated = this.c.instantiate(outer ? this.c.instantiate(constraint, outer) : constraint, mapper);
-      if (!this.c.relations.isAssignable(inferred, instantiated)) mapper.set(parameter.id, instantiated);
+      if (!constraint) continue;
+      const instantiated = this.c.instantiate(outer ? this.c.instantiate(constraint, outer) : constraint, context);
+      if (this.c.relations.isAssignable(inferred, instantiated)) continue;
+      mapper.set(parameter.id, instantiated);
+      context.set(parameter.id, instantiated);
     }
+  }
+
+  completeInference(parameters: TypeParameter[], mapper: Mapper, outer?: Mapper): Mapper {
+    const context = new Map(parameters.map((parameter) => [parameter.id, mapper.get(parameter.id) ?? unknownType]));
+    for (const parameter of parameters.toReversed()) {
+      if (mapper.has(parameter.id)) continue;
+      const constraint = parameter.constraint?.();
+      if (!constraint) continue;
+      context.set(
+        parameter.id,
+        this.c.instantiate(outer ? this.c.instantiate(constraint, outer) : constraint, context)
+      );
+    }
+    return context;
   }
 }
 
