@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 736 -- Keeps call binding, completion and frame cleanup together.
+// code-gauge-allow-file fileNcss 741 -- Keeps call binding, completion and frame cleanup together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -40,7 +40,7 @@ import {
 export interface ArgValue {
   temporaryCount?: number;
   heldReference?: boolean;
-  nativeTransfer?: { values: unknown[]; count: number; value?: Value };
+  nativeTransfer?: { values: unknown[]; count: number; container?: PhpArray };
   v: Value;
   ref?: Ref;
   name?: string;
@@ -789,25 +789,26 @@ function releaseCallValues(runtime: Runtime, values: unknown[], pending?: PhpThr
  * Takes the arguments of a user function call off the caller's temporaries once the callee's parameters hold them, as
  * PHP moves a temporary argument into the callee's frame, which frees it with the callee's other variables.
  */
-// code-gauge-allow functionCognitiveComplexity 18 -- Transfers both value and reference arguments to their actual call owner.
 export function handOverArgs(caller: Frame, args: ArgValue[], callee?: Frame): void {
   for (const arg of args) {
     if (arg.heldReference && arg.ref) transferArgumentReference(caller, arg.ref, callee);
-    if (arg.nativeTransfer) {
-      const { values, count, value = arg.v } = arg.nativeTransfer;
-      for (let index = count - 1; index >= 0; index--) {
-        if (values[index] === value) {
-          values[index] = undefined;
-          break;
-        }
-      }
-    }
+    if (arg.nativeTransfer) transferNativeArgument(arg.nativeTransfer, arg.v);
 
     for (let count = arg.temporaryCount ?? 0; count > 0; count--) {
       const index = caller.temporaries.lastIndexOf(arg.v);
       if (index === -1) break;
       caller.temporaries.splice(index, 1);
     }
+  }
+}
+
+function transferNativeArgument(transfer: NonNullable<ArgValue['nativeTransfer']>, fallback: Value): void {
+  const { values, count, container } = transfer;
+  for (let index = count - 1; index >= 0; index--) {
+    if (values[index] !== (container ?? fallback)) continue;
+    values[index] = undefined;
+    if (container) rt().release([container]);
+    return;
   }
 }
 

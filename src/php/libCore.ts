@@ -379,7 +379,8 @@ defineFunction(
     const array = args[1] as PhpArray;
     const forwarded = callbackArrayArguments(array);
     const last = forwarded.at(-1);
-    if (last) last.nativeTransfer = { values: rt().nativeHeld.at(-1)!, count: args.length, value: array };
+    if (last && row !== undefined)
+      last.nativeTransfer = { values: rt().nativeHeld.at(-1)!, count: args.length, container: array };
     return callValue(args[0], forwarded, row, 'callback', discardResult, compiledCallback);
   }
 );

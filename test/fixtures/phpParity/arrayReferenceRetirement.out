@@ -58,3 +58,27 @@ array(1) {
     int(2)
   }
 }
+array(1) {
+  ["key"]=>
+  string(2) "Ar"
+}
+array(1) {
+  ["key"]=>
+  string(1) "Z"
+}
+array(1) {
+  ["key"]=>
+  string(2) "Ar"
+}
+array(1) {
+  ["key"]=>
+  string(1) "Z"
+}
+array(1) {
+  ["key"]=>
+  &string(1) "Z"
+}
+array(1) {
+  ["key"]=>
+  &string(1) "Z"
+}
