@@ -19,10 +19,6 @@ codec.registerCustom<TraceNameRecord, [string, SuperJSONValue][]>(
   },
   'trace-name-record'
 );
-const marker = z
-  .object({ meta: z.object({ values: z.array(z.unknown()).min(1) }) })
-  .parse(serialize({ constructor: 0 }));
-export const traceRecordAnnotationCharacters = JSON.stringify(marker.meta.values).length + 4;
 
 export default { serialize, deserialize };
 

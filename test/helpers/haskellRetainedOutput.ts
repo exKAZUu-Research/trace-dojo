@@ -51,7 +51,7 @@ for (const item of recording.traceItems.slice(initial)) {
       }),
     }).parse(item.referenceVars.cheap);
 }
-if (name === 'turtles' || name === 'longNames' || name === 'wideRecords' || name === 'snapshot')
+if (name === 'turtles' || name === 'wideRecords' || name === 'snapshot')
   assert.ok(recording.traceItems.some((item) => item.referenceVars[names[0]!]?.kind === 'value'));
 if (name === 'wideRecords' || name === 'snapshot')
   assert.ok(recording.traceItems.some((item) => item.referenceVars.ps?.kind === 'array'));

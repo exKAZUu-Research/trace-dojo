@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 
+import { z } from 'zod';
+
 import { ExecutionLimitError } from '../../src/interpreter/limits';
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
-import { stringify } from '../../src/interpreter/traceTransport';
+import { parse, stringify } from '../../src/interpreter/traceTransport';
 
 const source = `import Control.Monad
 data T=Leaf|T T T T
@@ -19,8 +21,19 @@ assert.equal(recording.traceItems.filter((item) => item.line === 8).length, 1000
 assert.ok(recording.traceItems.some((item) => item.referenceVars.x?.kind === 'object'));
 assert.equal(recording.traceItems.at(-1)?.vars.cheap, 42);
 assert.equal(recording.finalVars.cheap, 42);
-const bytes = Buffer.byteLength(JSON.stringify(recording));
-const transportBytes = Buffer.byteLength(stringify(recording));
+const wire = stringify(recording);
+const decoded = z
+  .object({
+    stdout: z.string(),
+    traceItems: z.array(z.object({ vars: z.record(z.string(), z.unknown()) })),
+    finalVars: z.record(z.string(), z.unknown()),
+  })
+  .parse(parse(wire));
+assert.equal(decoded.stdout, recording.stdout);
+assert.equal(decoded.traceItems.length, recording.traceItems.length);
+assert.equal(decoded.traceItems.at(-1)?.vars.cheap, 42);
+assert.equal(decoded.finalVars.cheap, 42);
+const transportBytes = Buffer.byteLength(wire);
 
 const turtles = `import Control.Monad
 main=do
@@ -36,4 +49,4 @@ assert.throws(
   () => traceProgram('haskell', turtles, turtles),
   (error) => error instanceof ExecutionLimitError && error.limit === 'trace'
 );
-process.stdout.write(JSON.stringify({ bytes, transportBytes, stateLimited: true }));
+process.stdout.write(JSON.stringify({ transportBytes, stateLimited: true }));

@@ -62,7 +62,6 @@ test(
       .array(
         z.object({
           name: z.string(),
-          bytes: z.number(),
           transportBytes: z.number(),
           hadFullArray: z.boolean(),
           strings: z.boolean(),
@@ -87,7 +86,6 @@ test(
       'selfField',
     ]);
     for (const result of results) {
-      expect(result.bytes).toBeLessThan(64 * 1024 * 1024);
       expect(result.transportBytes).toBeLessThan(64 * 1024 * 1024);
       expect(result.stdout).toBe(
         `${result.outer}\n${result.strings ? result.inner : (result.inner * (result.inner + 1)) / 2}\n${Array.from({ length: result.loops }, (_, i) => `${i + 1}\n`).join('')}`
@@ -102,10 +100,26 @@ test(
   }
 );
 
+test('shared text stays bounded when a snapshot is expanded', { timeout: 30_000 }, () => {
+  const [result] = z
+    .tuple([
+      z.object({
+        transportBytes: z.number(),
+        stdout: z.string(),
+        answers: z.array(z.string()),
+        finalAnswers: z.array(z.string()),
+      }),
+    ])
+    .parse(runHelper('test/helpers/haskellScalarOutput.ts', 256, ['sharedText']));
+  expect(result.transportBytes).toBeLessThan(32 * 1024 * 1024);
+  expect(result.stdout).toBe('1000\n4\n1\n2\n3\n4\n5\n');
+  expect(result.answers).toContain('cheap');
+  expect(result.finalAnswers).toContain('cheap');
+});
+
 test('reference recordings and mandatory world snapshots stay bounded', { timeout: 30_000 }, () => {
   const output = runHelper('test/helpers/haskellRecordingOutput.ts', 256);
-  const result = z.object({ bytes: z.number(), transportBytes: z.number(), stateLimited: z.boolean() }).parse(output);
-  expect(result.bytes).toBeLessThan(64 * 1024 * 1024);
+  const result = z.object({ transportBytes: z.number(), stateLimited: z.boolean() }).parse(output);
   expect(result.transportBytes).toBeLessThan(64 * 1024 * 1024);
   expect(result.stateLimited).toBe(true);
 });
@@ -149,6 +163,18 @@ test.each(['records', 'reverseOrder', 'turtles', 'longNames', 'wideRecords', 'sn
       .parse(runHelper('test/helpers/haskellRetainedOutput.ts', 256, [name]));
     expect(result.bytes).toBeLessThan(32 * 1024 * 1024);
     expect(result.items).toBeGreaterThan(name === 'snapshot' ? 0 : 2000);
+  }
+);
+
+test.each(['fourTurtles', 'fiveTurtles', 'sevenLists', 'sixteenLists', 'records', 'tuples', 'growing'])(
+  'optional output leaves capacity for complete traces and small roots: %s',
+  { timeout: 30_000 },
+  (name) => {
+    const result = z
+      .object({ bytes: z.number(), items: z.number(), loops: z.number() })
+      .parse(runHelper('test/helpers/haskellOutputAdmission.ts', 256, [name]));
+    expect(result.bytes).toBeLessThan(32 * 1024 * 1024);
+    expect(result.items).toBeGreaterThan(result.loops * 2);
   }
 );
 

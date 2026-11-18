@@ -1,4 +1,9 @@
+import assert from 'node:assert/strict';
+
+import { z } from 'zod';
+
 import { traceProgram } from '../../src/interpreter/program';
+import { parse, stringify } from '../../src/interpreter/traceTransport';
 
 const summaries = [1000, 1001, 5000].map((length) => {
   const source = `main=do
@@ -24,6 +29,7 @@ loop i xs ys zs
     first: result.traceItems.find((item) => item.referenceVars.xs?.kind === 'array')?.referenceVars.xs?.kind,
     last: result.traceItems.at(-1)?.referenceVars?.xs?.kind,
     exception: result.uncaughtException,
+    ...transportSize(result),
   };
 });
 const pairs = `main=do
@@ -47,5 +53,19 @@ summaries.push({
   first: pairResult.traceItems.find((item) => item.referenceVars.xs?.kind === 'array')?.referenceVars.xs?.kind,
   last: pairResult.traceItems.at(-1)?.referenceVars?.xs?.kind,
   exception: pairResult.uncaughtException,
+  ...transportSize(pairResult),
 });
 process.stdout.write(JSON.stringify(summaries));
+
+function transportSize(result: ReturnType<typeof traceProgram>): { bytes: number; decodedAnswers: number } {
+  const wire = stringify(result);
+  const decoded = z
+    .object({ stdout: z.string(), traceItems: z.array(z.object({ vars: z.record(z.string(), z.unknown()) })) })
+    .parse(parse(wire));
+  assert.equal(decoded.stdout, result.stdout);
+  assert.equal(decoded.traceItems.length, result.traceItems.length);
+  return {
+    bytes: Buffer.byteLength(wire),
+    decodedAnswers: decoded.traceItems.filter((item) => Object.hasOwn(item.vars, 'k')).length,
+  };
+}

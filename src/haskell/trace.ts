@@ -46,7 +46,7 @@ export function traceHaskellProgram(program: string, trace: TraceOptions, input?
   const run = runProgram(runtime, compiled, (frame) => {
     if (frame) finalVars = output.bound({ vars: variablesOf(runtime, frame).vars, referenceVars: {} }).vars;
   });
-  return { traceItems: recorder.traceItems, finalVars, ...run };
+  return { traceItems: recorder.traceItems, finalVars, ...output.finish(run) };
 }
 
 type VariableDisplay = Pick<TraceVariables, 'vars'> & Partial<Pick<TraceVariables, 'referenceVars'>>;
@@ -64,7 +64,6 @@ function slotDisplaysAnswer(runtime: Runtime, name: string, slot: Slot, type: Ty
   return Object.values(variables.vars).some((value) => typeof value !== 'object');
 }
 
-/** The variables a frame's running statement sees: its parameters and the variables bound before it, in order. */
 function variablesOf(runtime: Runtime, frame: TraceFrame): TraceVariables {
   const variables: TraceVariables = { vars: Object.create(null), referenceVars: Object.create(null) };
   const context = frame.contexts.at(-1);
@@ -161,7 +160,6 @@ function displayAttempt<T>(runtime: Runtime, work: () => T): T | undefined {
   }
 }
 
-/** Evaluates a value for display, leaving it unevaluated when that fails or takes too long. */
 function forceForDisplay(runtime: Runtime, slot: Slot): Value | undefined {
   slot = untypedSlot(slot);
   if (slot instanceof Thunk) runtime.trackPreview(slot);
@@ -188,7 +186,6 @@ function addVariable(runtime: Runtime, variables: VariableDisplay, name: string,
   const scalar = scalarForDisplay(runtime, value, type);
   if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
   if (!variables.referenceVars) return;
-  // Lists also appear as references so that learners can expand their elements.
   if (scalar !== NOT_SCALAR && !isListValue(value, type)) return;
   try {
     const node = new DisplayNodes(runtime).build(value, type, 0);
@@ -213,7 +210,6 @@ function scalarForDisplay(runtime: Runtime, value: Value, type: Type): ReturnTyp
   }
 }
 
-/** Functions, actions, and `()` are not variables to learners. */
 function isHidden(value: Value, type: Type): boolean {
   if (isFunction(value) || isIOAction(value) || value instanceof Dict) return true;
   if (value instanceof ConValue && value.con === UNIT_CON) return true;
@@ -237,7 +233,6 @@ function isStringType(type: Type, value: Value): boolean {
     const elem = prune(args[0]);
     if (elem.tag === 'tcon') return elem.entity === CHAR_TYPE;
   }
-  // Without a known element type, a list of characters is a string.
   return value instanceof ConValue && value.con === CONS_CON && typeof peek(value.fields[0]) === 'string';
 }
 
@@ -272,7 +267,6 @@ interface ListView {
 const listViews = new WeakMap<ConValue, WeakMap<Type, ListView>>();
 const oversizedLists = new WeakSet<ConValue>();
 
-/** The elements of a list, forcing it as far as display allows. */
 function listItems(runtime: Runtime, value: ConValue, type: Type): ListItem[] | undefined {
   if (oversizedLists.has(value)) return undefined;
   const cached = listViews.get(value)?.get(type);
@@ -477,7 +471,6 @@ class DisplayNodes {
     if (con.type.traceKind === 'bool') return { kind: 'value', value: con.tag === 1 };
     if (con === CONS_CON || con === NIL_CON) return this.listNodeOf(value, type, depth);
     if (con.type.traceKind === 'maybe') {
-      // A Maybe shows as what it holds, or as null, as a Java reference does.
       if (con.name === 'Nothing') return NULL_NODE;
       const inner = this.force(value.fields[0]);
       return inner === undefined ? undefined : this.build(inner, elementType(type, 0), depth + 1);
@@ -540,7 +533,6 @@ class DisplayNodes {
     return { kind: 'value', value: '…' };
   }
 
-  /** A tuple shows as an array, and a constructor with fields as an object of them, by name in a record. */
   private dataNodeOf(value: ConValue, type: Type, depth: number): DisplayNode {
     const { con } = value;
     const entries: Record<string, DisplayNode> = Object.create(null);

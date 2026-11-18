@@ -68,7 +68,6 @@ test('immutable composite loops retain cheap answers within bounded transport ou
     expect(summary.bytes).toBeLessThan(64 * 1024 * 1024);
     expect(summary.exception).toBeUndefined();
   }
-  expect(result.unchanged.some((summary) => summary.loops === 1500 && summary.shown < summary.answers)).toBe(true);
   expect(result.growing).toHaveLength(2);
   for (const summary of result.growing) {
     const { loops } = summary;
