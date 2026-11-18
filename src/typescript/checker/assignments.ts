@@ -11,9 +11,11 @@ import {
   anyType,
   bigintType,
   errorType,
+  intersectionOf,
   isAnyLike,
   isIntrinsic,
   isPropertyKeyLiteral,
+  type LiteralType,
   literalType,
   neverType,
   numberType,
@@ -382,10 +384,14 @@ export class AssignmentChecker {
     const objectType = this.c.members.checkNonNullable(objectNode, this.c.expressions.check(objectNode));
     const indexType = this.c.expressions.check(indexNode);
     if (this.isReadonlyArrayLike(objectType)) return this.reportReadonlyIndex(expression, objectType);
-    if (isPropertyKeyLiteral(indexType) && this.isReadonlyProperty(expression, objectType, String(indexType.value))) {
+    const keys = literalKeys(indexType);
+    const readonlyKey = keys
+      ?.filter((key) => isPropertyKeyLiteral(key))
+      .find((key) => this.isReadonlyProperty(expression, objectType, String(key.value)));
+    if (readonlyKey) {
       this.c.error(
         indexNode,
-        `${printedPropertyName(String(indexType.value))} は読み取り専用のプロパティなので、代入できません。`
+        `${printedPropertyName(String(readonlyKey.value))} は読み取り専用のプロパティなので、代入できません。`
       );
       return errorType;
     }
@@ -402,14 +408,18 @@ export class AssignmentChecker {
       return this.reportReadonlyIndex(expression, objectType);
     const narrowed = compound ? this.narrowedType(expression) : undefined;
     if (narrowed) return narrowed;
-    if (indexType.kind === 'literal')
-      return unionOf(
-        (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>
-          this.namedWriteType(member, String(indexType.value))
+    if (!keys) return readType;
+    // A write must suit every key it may select, but any member of an object union.
+    return intersectionOf(
+      keys.map((key) =>
+        unionOf(
+          (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>
+            this.namedWriteType(member, String(key.value))
+          )
         )
-      );
-
-    return readType;
+      ),
+      this.c.budget
+    );
   }
 
   /** Whether `expression`, an element access by a literal key, names a property that it cannot write. */
@@ -449,4 +459,10 @@ export class AssignmentChecker {
     this.c.error(expression, `型 '${this.c.print(objectType)}' のインデックスは読み取り専用です。`);
     return errorType;
   }
+}
+
+/** The literals that an index type consists of, or `undefined` when it admits other keys. */
+function literalKeys(indexType: Type): LiteralType[] | undefined {
+  const members = indexType.kind === 'union' ? indexType.types : [indexType];
+  return members.every((member): member is LiteralType => member.kind === 'literal') ? members : undefined;
 }
