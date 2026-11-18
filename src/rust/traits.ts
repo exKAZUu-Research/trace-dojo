@@ -406,6 +406,16 @@ export class TraitSolver {
       case 'FromIterator': {
         return this.fromIterator(t, ref.args[0]);
       }
+      case 'Extend': {
+        // Collections of `Copy` elements also extend from references to them.
+        const item = shallow(ref.args[0]);
+        if (item.kind === 'ref' && t.kind === 'adt' && t.args.length === 1) {
+          const snapshot = this.unifier.snapshot();
+          if (this.unifier.unify(item.target, t.args[0]) && this.isCopy(item.target)) return 'yes';
+          this.unifier.rollback(snapshot);
+        }
+        return this.fromIterator(t, ref.args[0]);
+      }
       case 'Sum':
       case 'Product': {
         const [item] = ref.args;

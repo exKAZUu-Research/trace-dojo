@@ -398,29 +398,30 @@ function unwrapDyn(receiver: Value): { type: Type; receiver: Value } {
   throw new Error('A trait object call without a trait object');
 }
 
-/** `&s[start..end]` of a string by byte offsets, panicking as Rust does at offsets inside a character. */
+/** `&s[start..end]` of a string by byte offsets, panicking as Rust does out of bounds or inside a character. */
 export function strSliceBytes(text: string, start: number | undefined, end: number | undefined, span: Span): string {
-  const encoder = new TextEncoder();
-  const bytes = encoder.encode(text);
+  const bytes = new TextEncoder().encode(text);
   const from = start ?? 0;
   const to = end ?? bytes.length;
-  const describe = (): string => (text.length > 40 ? `${[...text].slice(0, 40).join('')}[...]` : text);
-  if (from > bytes.length || to > bytes.length) {
-    const index = from > bytes.length ? from : to;
-    throw new RustPanic(`byte index ${index} is out of bounds of \`${describe()}\``, span);
+  if (to > bytes.length) {
+    throw new RustPanic(`end byte index ${to} is out of bounds for string of length ${bytes.length}`, span);
   }
-  if (from > to) throw new RustPanic(`begin <= end (${from} <= ${to}) when slicing \`${describe()}\``, span);
-  for (const index of [from, to]) {
+  if (from > bytes.length) {
+    throw new RustPanic(`start byte index ${from} is out of bounds for string of length ${bytes.length}`, span);
+  }
+  if (from > to) throw new RustPanic(`byte range starts at ${from} but ends at ${to}`, span);
+  for (const [index, which] of [
+    [from, 'start'],
+    [to, 'end'],
+  ] as const) {
     if (index < bytes.length && (bytes[index] & 0xc0) === 0x80) {
-      // Find the character around the offset.
       let charStart = index;
       while (charStart > 0 && (bytes[charStart] & 0xc0) === 0x80) charStart--;
-      const decoder = new TextDecoder();
       let charEnd = charStart + 1;
       while (charEnd < bytes.length && (bytes[charEnd] & 0xc0) === 0x80) charEnd++;
-      const char = decoder.decode(bytes.slice(charStart, charEnd));
+      const char = new TextDecoder().decode(bytes.slice(charStart, charEnd));
       throw new RustPanic(
-        `byte index ${index} is not a char boundary; it is inside '${char}' (bytes ${charStart}..${charEnd}) of \`${describe()}\``,
+        `${which} byte index ${index} is not a char boundary; it is inside '${char}' (bytes ${charStart}..${charEnd} of string)`,
         span
       );
     }

@@ -888,7 +888,10 @@ export class Converter {
       case 'reference_expression': {
         if (/^&\s*raw\b/.test(node.text)) unavailable(span, '&raw');
         const mutable = node.namedChildren.some((child) => child.type === 'mutable_specifier');
-        return { kind: 'ref', mutable, operand: this.expr(this.field(node, 'value')), span };
+        const ref: Expr = { kind: 'ref', mutable, operand: this.expr(this.field(node, 'value')), span };
+        // `&&x` is one token, which stands for two borrows.
+        if (node.children[0]?.type === '&&') return { kind: 'ref', mutable: false, operand: ref, span };
+        return ref;
       }
       case 'type_cast_expression': {
         return {
@@ -1286,7 +1289,10 @@ export class Converter {
         const mutable = node.namedChildren.some((child) => child.type === 'mutable_specifier');
         const inner = node.namedChildren.find((child) => child.type !== 'mutable_specifier' && !isComment(child));
         if (!inner) syntaxError(span, 'パターンの書き方に誤りがあります。');
-        return { kind: 'ref', mutable, pattern: this.pattern(inner), span };
+        const pattern: Pattern = { kind: 'ref', mutable, pattern: this.pattern(inner), span };
+        // `&&x` is one token, which stands for two reference patterns.
+        if (node.children[0]?.type === '&&') return { kind: 'ref', mutable: false, pattern, span };
+        return pattern;
       }
       case 'or_pattern': {
         const alternatives: Pattern[] = [];

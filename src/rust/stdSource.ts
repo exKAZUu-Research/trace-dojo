@@ -549,6 +549,7 @@ pub mod iter {
     pub trait Iterator {}
     pub trait IntoIterator {}
     pub trait FromIterator<A> {}
+    pub trait Extend<A> {}
     pub trait Sum<A> {}
     pub trait Product<A> {}
     pub trait DoubleEndedIterator {}
@@ -600,7 +601,7 @@ pub mod iter {
         pub fn min_by_key<B: Ord, F: FnMut(&T) -> B>(self, f: F) -> Option<T>;
         pub fn max_by<F: FnMut(&T, &T) -> Ordering>(self, compare: F) -> Option<T>;
         pub fn min_by<F: FnMut(&T, &T) -> Ordering>(self, compare: F) -> Option<T>;
-        pub fn partition<B: FromIterator<T>, F: FnMut(&T) -> bool>(self, f: F) -> (B, B);
+        pub fn partition<B: Extend<T>, F: FnMut(&T) -> bool>(self, f: F) -> (B, B);
         pub fn eq(self, other: Iter<T>) -> bool where T: PartialEq;
         pub fn is_sorted(self) -> bool where T: PartialOrd;
         pub fn into_iter(self) -> Iter<T>;

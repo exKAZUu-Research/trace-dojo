@@ -13,6 +13,7 @@ import type {
   TypeAst,
 } from './ast';
 import { BorrowChecker } from './borrowck';
+import { ConstLint } from './constLint';
 import { isIrrefutable, lowerPattern, missingPattern } from './exhaustiveness';
 import { deepNormalize, normalize, Unifier } from './infer';
 import {
@@ -206,6 +207,7 @@ export class Checker {
     this.finishBody(item.span);
     this.requireKnownTypes();
     new BorrowChecker(this.annotations, this.solver).checkFn(item, this.body.fn);
+    new ConstLint(this.annotations).check(item.body);
   }
 
   /** Coerces the value a function's body ends with to its result type. */
@@ -1007,8 +1009,9 @@ export class Checker {
         return res.local.type;
       }
       case 'fn': {
-        const sig = this.instantiate(res.fn, res.typeArgs);
-        return { kind: 'fn', params: sig.params, ret: sig.ret };
+        const sig = this.instantiate(res.fn, res.typeArgs, span);
+        const params = res.fn.selfMode ? [this.selfParamType(res.fn, sig.subst), ...sig.params] : sig.params;
+        return { kind: 'fn', params, ret: sig.ret };
       }
       case 'ctor': {
         const variant = res.def.variants[res.variant];

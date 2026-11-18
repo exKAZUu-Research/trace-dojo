@@ -114,6 +114,15 @@ function splitBy(ctx: NativeContext, text: string, pattern: Value, limit = Numbe
   return parts;
 }
 
+/** The text before a byte offset, which `String`'s methods assert is at a character boundary. */
+function headAtBoundary(ctx: NativeContext, text: string, offset: number, name: string): string {
+  const bytes = encoder.encode(text);
+  if (offset > bytes.length || (offset < bytes.length && (bytes[offset] & 0xc0) === 0x80)) {
+    panic(ctx, `assertion failed: self.is_char_boundary(${name})`);
+  }
+  return new TextDecoder().decode(bytes.slice(0, offset));
+}
+
 function strIter(items: string[]): IterValue {
   return arrayIter(items);
 }
@@ -440,15 +449,14 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   insert: ([self, idx, c], ctx) => {
     const place = placeOf(self);
     const text = place.get() as string;
-    const offset = Number(idx as bigint);
-    const head = strSliceBytes(text, 0, offset, { ...ctx.span });
+    const head = headAtBoundary(ctx, text, Number(idx as bigint), 'idx');
     place.set(head + (c as string) + text.slice(head.length));
     return UNIT_VALUE;
   },
   insert_str: ([self, idx, s], ctx) => {
     const place = placeOf(self);
     const text = place.get() as string;
-    const head = strSliceBytes(text, 0, Number(idx as bigint), ctx.span);
+    const head = headAtBoundary(ctx, text, Number(idx as bigint), 'idx');
     place.set(head + str(s) + text.slice(head.length));
     return UNIT_VALUE;
   },
@@ -456,17 +464,18 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     const place = placeOf(self);
     const text = place.get() as string;
     const offset = Number(idx as bigint);
-    if (offset >= byteLength(text)) panic(ctx, 'cannot remove a char from the end of a string');
-    const head = strSliceBytes(text, 0, offset, ctx.span);
-    const char = String.fromCodePoint(text.codePointAt(head.length)!);
-    place.set(head + text.slice(head.length + char.length));
+    const rest = strSliceBytes(text, offset, undefined, ctx.span);
+    if (rest.length === 0) panic(ctx, 'cannot remove a char from the end of a string');
+    const head = text.slice(0, text.length - rest.length);
+    const char = String.fromCodePoint(rest.codePointAt(0)!);
+    place.set(head + rest.slice(char.length));
     return char;
   },
   truncate: ([self, len], ctx) => {
     const place = placeOf(self);
     const text = place.get() as string;
     const length = Number(len as bigint);
-    if (length < byteLength(text)) place.set(strSliceBytes(text, 0, length, ctx.span));
+    if (length < byteLength(text)) place.set(headAtBoundary(ctx, text, length, 'new_len'));
     return UNIT_VALUE;
   },
   clear: ([self]) => {
@@ -495,7 +504,7 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   split_off: ([self, at], ctx) => {
     const place = placeOf(self);
     const text = place.get() as string;
-    const head = strSliceBytes(text, 0, Number(at as bigint), ctx.span);
+    const head = headAtBoundary(ctx, text, Number(at as bigint), 'at');
     place.set(head);
     return text.slice(head.length);
   },
