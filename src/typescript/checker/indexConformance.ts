@@ -1,7 +1,14 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { isIndexKeyOf, isPropertyKeyOf, isSameKeyType, isSamePattern, keyedIndexes } from './indexInfos';
+import {
+  applicableIndex,
+  isIndexKeyOf,
+  isPropertyKeyOf,
+  isSameKeyType,
+  isSamePattern,
+  keyedIndexes,
+} from './indexInfos';
 import { isWithin, named } from './syntax';
 import {
   isSymbolName,
@@ -74,6 +81,20 @@ function checkIndexFitsOthers(c: Checker, index: KeyedIndexInfo, indexes: KeyedI
       `'${c.print(index.keyType)}' のインデックスの型 '${c.print(index.type)}' は、'${c.print(other.keyType)}' のインデックスの型 '${c.print(other.type)}' に代入できません。`
     );
   }
+}
+
+/**
+ * Why the index signatures of an interface do not fit those of a base, or `undefined` when they do: as TypeScript relates
+ * the interface to each base, every index signature of the base must hold the signatures of the interface applying to
+ * its keys, whether the interface declares them or inherits them from any base.
+ */
+export function baseIndexMismatch(c: Checker, structure: Structure, base: Structure): string | undefined {
+  for (const baseIndex of keyedIndexes(base)) {
+    const index = applicableIndex(c, structure, baseIndex.keyType);
+    if (index && !c.relations.isAssignable(index.type, baseIndex.type))
+      return `'${c.print(baseIndex.keyType)}' のインデックス シグネチャの型が合いません。`;
+  }
+  return undefined;
 }
 
 /** The name of an interface whose two conflicting inherited members no single base carries together. */

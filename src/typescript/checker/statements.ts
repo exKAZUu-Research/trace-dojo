@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 573 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 575 -- Follows the flow of control through each kind of statement.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -9,7 +9,7 @@ import {
   checkTypeMemberDuplicates,
 } from './declarations';
 import { FlowState, type State } from './flow';
-import { checkDuplicateIndexSignatures, checkIndexConformance } from './indexConformance';
+import { baseIndexMismatch, checkDuplicateIndexSignatures, checkIndexConformance } from './indexConformance';
 import type { Scope, Sym } from './scopes';
 import { arrayLiteralLength, hasToken, named, skipParentheses } from './syntax';
 import {
@@ -233,7 +233,7 @@ export class StatementChecker {
       const base = this.c.typeNodes.typeFromNode(baseNode);
       const mismatch = holdsTypeParameter(base)
         ? this.typeParameterBaseMismatch(symbol, base)
-        : this.propertyBaseMismatch(body, structure, base);
+        : this.structuralBaseMismatch(body, structure, base);
       if (mismatch === undefined) continue;
       const name = node.childForFieldName('name');
       this.c.error(
@@ -253,9 +253,16 @@ export class StatementChecker {
     return this.c.relations.isAssignable(this.c.typeNodes.declaredTypeOf(symbol), base) ? undefined : '';
   }
 
+  /** Why an interface does not fit a base that holds no type parameter, or `undefined` when it does. */
+  private structuralBaseMismatch(body: TreeNode, structure: Structure, base: Type): string | undefined {
+    if (isAnyLike(base) || (base.kind !== 'object' && base.kind !== 'intersection')) return undefined;
+    return (
+      this.propertyBaseMismatch(body, structure, base) ?? baseIndexMismatch(this.c, structure, this.c.structureOf(base))
+    );
+  }
+
   /** Why a property an interface body declares does not fit the same property of a base, or `undefined` if none. */
   private propertyBaseMismatch(body: TreeNode, structure: Structure, base: Type): string | undefined {
-    if (isAnyLike(base) || (base.kind !== 'object' && base.kind !== 'intersection')) return undefined;
     for (const property of structure.properties.values()) {
       if (property.declaration?.parent?.id !== body.id) continue;
       const baseProperty = this.c.propertyOf(base, property.name);
