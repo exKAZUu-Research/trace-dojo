@@ -1095,8 +1095,8 @@ defineFunction('array_intersect_assoc(array $array, array ...$arrays): array', (
   setOperation('array_intersect_assoc', args, true, sameAssoc)
 );
 defineFunction('array_find(array $array, callable $callback): mixed', ({ args }) => {
-  for (const [key, value] of arr(args[0]).entries())
-    if (consumeCallbackResult(args[1], [value, key], conversionsModule.toBool)) return value;
+  for (const [key, slot] of arr(args[0]).map)
+    if (consumeCallbackResult(args[1], [valueOf(slot), key], conversionsModule.toBool)) return valueOf(slot);
   return null;
 });
 defineFunction('array_find_key(array $array, callable $callback): mixed', ({ args }) => {

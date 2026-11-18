@@ -75,9 +75,22 @@ interface Match {
  * finds them: after an empty match, PCRE looks for a non-empty one at the same place before moving on. Sets the PCRE
  * error and yields nothing for a bad subject or offset.
  */
-// code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function* matchesOf(compiled: Compiled, subject: string, offset = 0, status?: { error: number }): Generator<Match> {
+function matchesOf(compiled: Compiled, subject: string, offset = 0, status?: { error: number }): Generator<Match> {
+  return scanMatches(compiled, subject, offset, toMatch, status);
+}
+
+function* scanMatches<T>(
+  compiled: Compiled,
+  subject: string,
+  offset: number,
+  project: (
+    compiled: Compiled,
+    result: RegExpExecArray & { indices: RegExpIndicesArray },
+    bounds: [number, number],
+    byteOffset: (index: number) => number
+  ) => T,
+  status?: { error: number }
+): Generator<T> {
   const prepared = prepareSubject(compiled, subject, offset);
   if (!prepared) {
     if (status) status.error = rt().lastPregError;
@@ -110,7 +123,7 @@ function* matchesOf(compiled: Compiled, subject: string, offset = 0, status?: { 
     if ([...compiled.byteCaselessReferences].some((name) => /[\u0080-\u00FF]/.test(result.groups?.[name] ?? '')))
       throw new UnsupportedFeatureError('非 ASCII バイトを大文字・小文字を区別せずに後方参照する正規表現');
     const [matchStart, matchEnd] = matchBounds(compiled, result);
-    yield toMatch(compiled, result, [matchStart, matchEnd], byteOffset);
+    yield project(compiled, result, [matchStart, matchEnd], byteOffset);
     position = matchEnd;
     retry = matchStart === matchEnd;
   }
@@ -247,49 +260,57 @@ defineFunction(
   ({ args, refs }) => {
     const compiled = compile('preg_match_all', args[0] as string);
     if (!compiled) return false;
-    if (refs[2]) refs[2].v = new PhpArray();
+    const resultRef = args[2] === undefined ? undefined : refs[2];
+    if (resultRef) resultRef.v = new PhpArray();
     let flags = (args[3] as bigint | undefined) ?? 0n;
     if ((flags & 0xffn) > 2n) {
       throwError('ValueError', 'preg_match_all(): Argument #4 ($flags) must be a PREG_* constant');
     }
     rt().lastPregError = 0;
     if ((flags & 3n) === 0n) flags |= 1n;
-    const offsetCapture = (flags & 256n) !== 0n;
-    const unmatchedAsNull = (flags & 512n) !== 0n;
-    const matches = [...matchesOf(compiled, args[1] as string, Number((args[4] as bigint | undefined) ?? 0n))];
-    if (refs[2]) {
-      let result = new PhpArray();
-      if ((flags & 2n) !== 0n) {
-        for (const match of matches) result.append(matchArray(compiled, match, offsetCapture, unmatchedAsNull, true));
-      } else if (rt().lastPregError !== 1) {
-        // An offset past the end fails before PHP fills in the empty groups.
-        result = patternOrder(compiled, matches, offsetCapture, unmatchedAsNull);
-      }
-      refs[2].v = result;
-    }
-    return rt().lastPregError === 0 ? BigInt(matches.length) : false;
+    const subject = args[1] as string;
+    const offset = Number((args[4] as bigint | undefined) ?? 0n);
+    const count = resultRef
+      ? collectMatches(compiled, matchesOf(compiled, subject, offset), resultRef, flags)
+      : countMatches(scanMatches(compiled, subject, offset, () => {}));
+    return rt().lastPregError === 0 ? BigInt(count) : false;
   }
 );
 
-/** Builds `preg_match_all`'s matches by group (`PREG_PATTERN_ORDER`), with named groups before their numbers. */
-function patternOrder(
-  compiled: Compiled,
-  matches: Match[],
-  offsetCapture: boolean,
-  unmatchedAsNull: boolean
-): PhpArray {
-  const result = new PhpArray();
-  for (let group = 0; group <= compiled.groupCount; group++) {
-    const column = new PhpArray();
+function countMatches(matches: Iterator<unknown>): number {
+  let count = 0;
+  while (!matches.next().done) count++;
+  return count;
+}
+
+function collectMatches(compiled: Compiled, matches: Generator<Match>, output: Ref, flags: bigint): number {
+  const result = output.v as PhpArray;
+  const offsetCapture = (flags & 256n) !== 0n;
+  const unmatchedAsNull = (flags & 512n) !== 0n;
+  let count = 0;
+  if ((flags & 2n) !== 0n) {
     for (const match of matches) {
+      result.append(matchArray(compiled, match, offsetCapture, unmatchedAsNull, true));
+      count++;
+    }
+    return count;
+  }
+  const columns = Array.from({ length: compiled.groupCount + 1 }, () => new PhpArray());
+  for (const match of matches) {
+    count++;
+    for (const [group, column] of columns.entries()) {
       const value: Value = match.texts[group] ?? (unmatchedAsNull ? null : '');
       column.append(offsetCapture ? PhpArray.list([value, BigInt(match.starts[group])]) : value);
     }
+  }
+  // An offset past the end fails before PHP fills in the empty groups.
+  if (rt().lastPregError === 1) return count;
+  for (const [group, column] of columns.entries()) {
     const name = compiled.names[group];
     if (name !== undefined) result.set(name, column);
     result.set(BigInt(group), name === undefined ? column : column.copy());
   }
-  return result;
+  return count;
 }
 
 /** Expands `$1`, `\1`, and `${1}` in a replacement, where a backslash before `\` or `$` makes it literal. */

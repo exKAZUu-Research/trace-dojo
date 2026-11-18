@@ -1473,6 +1473,12 @@ test('bounds combined allowed tags before strip_tags builds the list', () => {
   });
 });
 
+test('counts matches without spending slots on omitted preg_match_all output', () => {
+  vi.restoreAllMocks();
+  const result = run(`<?php echo preg_match_all('/(a)()()()()()/', str_repeat('a', 200000));`);
+  expect(result).toMatchObject({ kind: 'executed', stdout: '200000' });
+});
+
 test('advances linked object and array heads while their nodes share an otherwise unheld object', () => {
   vi.restoreAllMocks();
   const result = run(`<?php
