@@ -21,6 +21,7 @@ import {
   filterType,
   isAnyLike,
   isIntrinsic,
+  isPropertyKeyLiteral,
   neverType,
   nullType,
   regularOf,
@@ -117,11 +118,10 @@ export class ConditionChecker {
       return { whenTrue: this.chainEvaluated(whenTrue, left), whenFalse, type };
     }
     const key = operator === 'in' ? this.c.silently(() => this.c.expressions.check(left)) : undefined;
-    if (key?.kind === 'literal' && (typeof key.value === 'string' || typeof key.value === 'number')) {
+    if (key && isPropertyKeyLiteral(key)) {
       const type = this.c.expressions.check(expression);
-      const name = String(key.value);
       return {
-        ...this.narrowed(right, (current, assumeTrue) => this.c.flow.narrowByIn(current, name, assumeTrue)),
+        ...this.narrowed(right, (current, assumeTrue) => this.c.flow.narrowByIn(current, key, assumeTrue)),
         type,
       };
     }
@@ -370,13 +370,7 @@ export class ConditionChecker {
   ): void {
     const expression = skipParentheses(reference);
     const source = this.destructuredFrom(expression);
-    const { object, name } =
-      expression.type === 'member_expression'
-        ? {
-            object: expression.childForFieldName('object') as TreeNode,
-            name: expression.childForFieldName('property')?.text ?? '',
-          }
-        : (source ?? {});
+    const { object, name } = this.discriminantReference(expression) ?? source ?? {};
     if (name === undefined || (!object && !source?.type)) return;
     const objectType = source?.type ?? this.c.expressions.checkReferenceSilently(object!);
     const nonNull = this.c.relations.removeNullish(objectType);
@@ -404,6 +398,19 @@ export class ConditionChecker {
     };
     apply(whenTrue, true);
     apply(whenFalse, false);
+  }
+
+  private discriminantReference(expression: TreeNode): { object: TreeNode; name: string } | undefined {
+    const object = expression.childForFieldName('object');
+    if (!object) return undefined;
+    const index = expression.type === 'subscript_expression' ? expression.childForFieldName('index') : undefined;
+    const name =
+      expression.type === 'member_expression'
+        ? expression.childForFieldName('property')?.text
+        : index
+          ? this.c.flow.constantIndexName(index)
+          : undefined;
+    return name === undefined ? undefined : { object, name };
   }
 
   /** The type of a reference without its own narrowing in the current flow. */

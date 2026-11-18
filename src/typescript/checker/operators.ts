@@ -2,7 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { nonNullableType, nullishConstraint } from './nullishConstraints';
-import { named, numberValue, skipParentheses } from './syntax';
+import { isConstAssertion, named, numberValue, skipParentheses } from './syntax';
 import {
   anyType,
   bigintType,
@@ -85,10 +85,14 @@ export class OperatorChecker {
       return numberType;
     }
     if (operator === '+') {
-      if (this.isBigintLike(type)) this.c.error(argument, "演算子 '+' は型 'bigint' には使えません。");
+      const constraint = this.c.baseConstraint(type);
+      const members = constraint.kind === 'union' ? constraint.types : [constraint];
+      if (members.some((member) => this.isBigintLike(member)))
+        this.c.error(argument, "演算子 '+' は型 'bigint' には使えません。");
       return numberType;
     }
-    return this.isBigintLike(type) ? bigintType : numberType;
+    const members = type.kind === 'union' ? type.types : [type];
+    return unionOf(members.map((member) => (this.isBigintLike(member) ? bigintType : numberType)));
   }
 
   /**
@@ -500,7 +504,7 @@ export class OperatorChecker {
   assertion(node: TreeNode): Type {
     const expression = node.type === 'type_assertion' ? (named(node).at(-1) as TreeNode) : named(node)[0];
     const typeNode = node.type === 'type_assertion' ? named(named(node)[0])[0] : named(node)[1];
-    if (!typeNode || node.children.some((child) => child?.type === 'const') || typeNode.text === 'const') {
+    if (!typeNode || isConstAssertion(node)) {
       const operand = skipParentheses(expression);
       const signedLiteral =
         operand.type === 'unary_expression' &&

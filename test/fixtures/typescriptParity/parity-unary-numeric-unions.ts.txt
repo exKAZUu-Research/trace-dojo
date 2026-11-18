@@ -1,0 +1,7 @@
+function negate(value:number|bigint){return -value;}
+function invert(value:number|bigint){return ~value;}
+function generic<T extends number|bigint>(value:T){return -value;}
+function genericInvert<T extends number|bigint>(value:T){return ~value;}
+for(const result of [negate(1n),invert(1n),generic(2n),genericInvert(2n)]){if(typeof result==='bigint')console.log(result.toString());else console.log(result.toFixed());}
+console.log(negate(2),invert(2),generic(3),genericInvert(3));
+const exact:-3=-3;console.log(exact,+3);

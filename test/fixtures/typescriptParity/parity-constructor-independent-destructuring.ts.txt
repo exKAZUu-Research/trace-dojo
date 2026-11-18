@@ -1,0 +1,18 @@
+function fixed():[number]{return [2];}
+class Explicit{x;constructor(){[this.x]=[1] as [number];}}
+class FunctionCall{x;constructor(){[this.x]=fixed();}}
+class Variable{x;constructor(input:[number]){[this.x]=input;}}
+class Conditional{x;constructor(flag:boolean,a:[number],b:[number]){[this.x]=flag?a:b;}}
+class ObjectValue{x;constructor(){({x:this.x}={x:3} as {x:number});}}
+const a:number=new Explicit().x;
+const b:number=new FunctionCall().x;
+const c:number=new Variable([4]).x;
+const d:number=new Conditional(false,[5],[6]).x;
+const e:number=new ObjectValue().x;
+console.log(a,b,c,d,e);
+function identity<T>(value:T):T{return value;}
+class ExplicitGeneric{x;constructor(){[this.x]=identity<[number]>([7]);}}
+class ExplicitArray{x;constructor(){[this.x]=Array.of<number>(8);}}
+const f:number=new ExplicitGeneric().x;
+const g:number=new ExplicitArray().x;
+console.log(f,g);

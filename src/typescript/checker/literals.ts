@@ -3,7 +3,15 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { applicableIndex, isSamePattern } from './indexInfos';
-import { arrayLiteralLength, arrayPatternElements, hasToken, isNumericName, named, propertyNameText } from './syntax';
+import {
+  arrayLiteralLength,
+  arrayPatternElements,
+  hasToken,
+  isConstAssertion,
+  isNumericName,
+  named,
+  propertyNameText,
+} from './syntax';
 import {
   anonymousObject,
   anyType,
@@ -227,11 +235,13 @@ export class LiteralChecker {
   /** Whether an expression is in a `const` context, inside `as const`. */
   isConstContext(node: TreeNode): boolean {
     let current: TreeNode | null = node.parent;
-    let child: TreeNode = node;
+    let child = node;
     while (current) {
-      if (current.type === 'as_expression')
-        return current.children.some((part) => part?.type === 'const') && named(current)[0]?.id === child.id;
-      if (current.type === 'type_assertion') return named(current)[0]?.text === 'const';
+      if (current.type === 'as_expression' || current.type === 'type_assertion')
+        return (
+          isConstAssertion(current) &&
+          (current.type === 'as_expression' ? named(current)[0] : named(current).at(-1))?.id === child.id
+        );
       if (
         ![
           'parenthesized_expression',

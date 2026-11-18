@@ -1,0 +1,4 @@
+type Head=`\u{110000}${number}`;
+type Tail=`${number}\u{110000}`;
+type Middle=`${number}\xGG${string}`;
+type Numeric=`\1${number}`;

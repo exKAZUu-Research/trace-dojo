@@ -6,7 +6,14 @@ import { defaultedTarget, isEmptyPattern } from './patterns';
 import { printedPropertyName } from './print';
 import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
-import { arrayPatternElements, isOptionalChain, named, skipParentheses, withoutAssertions } from './syntax';
+import {
+  arrayPatternElements,
+  isConstAssertion,
+  isOptionalChain,
+  named,
+  skipParentheses,
+  withoutAssertions,
+} from './syntax';
 import {
   anyType,
   bigintType,
@@ -180,10 +187,55 @@ export class AssignmentChecker {
     assign(pattern, type);
   }
 
-  assignmentValueType(expression: TreeNode): Type {
+  assignmentValueType(expression: TreeNode, pattern?: TreeNode): Type {
     const value = skipParentheses(expression);
     const right = value.type === 'assignment_expression' ? value.childForFieldName('right') : undefined;
-    return right ? this.assignmentValueType(right) : this.c.expressions.check(expression);
+    if (right) return this.assignmentValueType(right);
+    const context = pattern && this.needsPatternContext(value) ? this.patternContext(pattern) : undefined;
+    return this.c.expressions.check(expression, context);
+  }
+
+  private needsPatternContext(node: TreeNode): boolean {
+    this.c.budget.spend();
+    const value = skipParentheses(node);
+    switch (value.type) {
+      case 'array':
+      case 'object': {
+        return true;
+      }
+      case 'ternary_expression': {
+        return ['consequence', 'alternative'].some((field) => {
+          const branch = value.childForFieldName(field);
+          return branch !== null && this.needsPatternContext(branch);
+        });
+      }
+      case 'binary_expression': {
+        return (
+          ['&&', '||', '??'].includes(value.childForFieldName('operator')?.text ?? '') &&
+          named(value).some((child) => this.needsPatternContext(child))
+        );
+      }
+      case 'non_null_expression': {
+        return this.needsPatternContext(named(value)[0]);
+      }
+      case 'as_expression':
+      case 'type_assertion': {
+        const expression = value.type === 'type_assertion' ? (named(value).at(-1) as TreeNode) : named(value)[0];
+        return isConstAssertion(value) && this.needsPatternContext(expression);
+      }
+      case 'call_expression':
+      case 'new_expression': {
+        if (value.childForFieldName('type_arguments')) return false;
+        const callee = value.childForFieldName(value.type === 'call_expression' ? 'function' : 'constructor');
+        if (!callee) return false;
+        const type = this.c.expressions.check(callee);
+        const kind = value.type === 'call_expression' ? 'call' : 'construct';
+        return this.c.signaturesOf(type, kind).some((signature) => signature.typeParameters.length > 0);
+      }
+      default: {
+        return false;
+      }
+    }
   }
 
   private destructuringArrayAssignment(

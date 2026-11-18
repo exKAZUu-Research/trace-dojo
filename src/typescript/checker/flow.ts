@@ -19,7 +19,8 @@ import {
   type IntersectionType,
   isAnyLike,
   isIntrinsic,
-  literalType,
+  isPropertyKeyLiteral,
+  type LiteralType,
   mapType,
   neverType,
   nonPrimitiveType,
@@ -192,12 +193,13 @@ export class Flow {
 
   /** The property an element access always reads: a literal key, or a constant holding a literal. */
   constantIndexName(index: TreeNode): string | undefined {
+    index = skipParentheses(index);
     if (index.type === 'string' || index.type === 'number') return propertyNameText(index);
     if (index.type !== 'identifier') return undefined;
     const symbol = this.c.scopeOf(index).lookupValue(index.text);
     if (symbol?.valueKind !== 'const') return undefined;
     const type = this.c.silently(() => this.c.expressions.check(index));
-    return type.kind === 'literal' && typeof type.value !== 'boolean' ? String(type.value) : undefined;
+    return isPropertyKeyLiteral(type) ? String(type.value) : undefined;
   }
 
   /** The key of a reference that narrowing applies to: a variable, `this`, or a property path of one. */
@@ -313,8 +315,8 @@ export class Flow {
     );
   }
 
-  /** The part of a type that `typeof value === name` keeps (or, with `assumeTrue` false, that the opposite keeps). */
   // code-gauge-allow functionCognitiveComplexity 22 -- Follows TypeScript's narrowing of each kind of type by a `typeof` result.
+  /** The part of a type that `typeof value === name` keeps (or, with `assumeTrue` false, that the opposite keeps). */
   narrowByTypeof(type: Type, name: string, assumeTrue: boolean): Type {
     if (assumeTrue) {
       if (isAnyLike(type) || isIntrinsic(type, 'unknown')) {
@@ -347,8 +349,8 @@ export class Flow {
       : narrowed;
   }
 
+  // code-gauge-allow functionNcss 36 -- One case per `typeof` result.
   /** Whether `typeof` a value of the type gives `name`: always, never, or maybe. */
-  // code-gauge-allow functionNcss 37 -- One case per `typeof` result.
   private typeofMatches(type: Type, name: string): boolean | 'maybe' {
     switch (type.kind) {
       case 'literal': {
@@ -431,8 +433,8 @@ export class Flow {
     return name === 'object' && !isFunction;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Follows TypeScript's narrowing of each kind of type by truthiness.
   /** The part of a type that a truthy (or falsy) value has. */
-  // code-gauge-allow functionCognitiveComplexity 28 -- Follows TypeScript's narrowing of each kind of type by truthiness.
   narrowByTruthiness(type: Type, assumeTrue: boolean): Type {
     if (assumeTrue) {
       if (isIntrinsic(type, 'unknown')) return emptyObjectType;
@@ -519,8 +521,8 @@ export class Flow {
     return nullish ? withoutNullishUnit(this.c, unequal, other) : unequal;
   }
 
-  /** The part of a type that `value instanceof C` keeps, given the instance type of `C`. */
   // code-gauge-allow functionCognitiveComplexity 16 -- Preserves generic identity and filters concrete nominal alternatives.
+  /** The part of a type that `value instanceof C` keeps, given the instance type of `C`. */
   narrowByInstanceof(type: Type, instance: Type, assumeTrue: boolean): Type {
     if (assumeTrue) {
       if (isAnyLike(type) || isIntrinsic(type, 'unknown')) return instance;
@@ -553,19 +555,20 @@ export class Flow {
   }
 
   /** The part of a type that `name in value` keeps, as TypeScript's `narrowTypeByInKeyword` decides. */
-  narrowByIn(type: Type, name: string, assumeTrue: boolean): Type {
+  narrowByIn(type: Type, key: LiteralType, assumeTrue: boolean): Type {
     if (isAnyLike(type)) return type;
     const members = type.kind === 'union' ? type.types : [type];
-    if (members.some((member) => this.isPresencePossible(member, name, true)))
-      return filterType(type, (member) => this.isPresencePossible(member, name, assumeTrue));
+    if (members.some((member) => this.isPresencePossible(member, key, true)))
+      return filterType(type, (member) => this.isPresencePossible(member, key, assumeTrue));
     if (!assumeTrue) return type;
+    const name = String(key.value);
     // A type that no member declares the property in gains it as `unknown`, as `object` becomes `object & Record<"a", unknown>`.
     return intersectionOf(
       [
         type,
         anonymousObject(() => ({
           ...emptyStructure(),
-          properties: new Map([[name, simpleProperty(name, unknownType)]]),
+          properties: new Map([[name, simpleProperty(name, unknownType, { nameType: key })]]),
         })),
       ],
       this.c.budget
@@ -573,10 +576,10 @@ export class Flow {
   }
 
   /** Whether a value of a type may have (or, with `assumeTrue` false, lack) a property, as its members and index signatures say. */
-  private isPresencePossible(type: Type, name: string, assumeTrue: boolean): boolean {
-    const property = this.c.propertyOf(type, name);
+  private isPresencePossible(type: Type, key: LiteralType, assumeTrue: boolean): boolean {
+    const property = this.c.propertyOf(type, String(key.value));
     if (property) return property.optional || assumeTrue;
-    return applicableIndex(this.c, this.c.structureOf(type), literalType(name)) !== undefined || !assumeTrue;
+    return applicableIndex(this.c, this.c.structureOf(type), key) !== undefined || !assumeTrue;
   }
 
   /** The members of a union whose property `name` may be `value`, as `x.kind === "a"` narrows `x`. */
@@ -594,7 +597,7 @@ export class Flow {
   isDiscriminant(type: Type, name: string): boolean {
     if (type.kind !== 'union') return false;
     return type.types.some((member) => {
-      if (member.kind !== 'object') return false;
+      if (member.kind !== 'object' && member.kind !== 'intersection') return false;
       const property = this.c.propertyOf(member, name);
       if (!property) return false;
       const propertyType = property.type();

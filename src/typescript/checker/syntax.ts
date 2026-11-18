@@ -200,6 +200,12 @@ export function templateFragmentText(node: TreeNode): string {
   return node.text.replaceAll(/\r\n?/g, '\n');
 }
 
+export function isConstAssertion(node: TreeNode): boolean {
+  if (node.type !== 'as_expression' && node.type !== 'type_assertion') return false;
+  const type = node.type === 'type_assertion' ? named(named(node)[0])[0] : named(node)[1];
+  return !type || hasToken(node, 'const') || type.text === 'const';
+}
+
 export function isRawTypeTemplateFragment(node: TreeNode): boolean {
   const parent = node.parent;
   return parent?.type === 'template_literal_type' && !named(parent).some((child) => child.type === 'template_type');

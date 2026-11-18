@@ -578,7 +578,7 @@ export class ClassChecker {
             this.c.silently(() =>
               this.c.assignments.assignmentTargets(
                 pattern,
-                this.c.assignments.assignmentValueType(right),
+                this.c.assignments.assignmentValueType(right, pattern),
                 (target, type) => assign(target, this.c.widen(type)),
                 evaluate,
                 true
