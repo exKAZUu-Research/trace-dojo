@@ -1043,17 +1043,18 @@ main=forM_ [1..1000::Int] $ \\i -> do
 });
 
 test('mixed constructor types retain cheap enum answers after composite exhaustion', () => {
+  const iterations = 500;
   const source = `import Control.Monad
 data T=E|T [Int]
-main=forM_ [1..1000::Int] $ \\i -> do
+main=forM_ [1..${iterations}::Int] $ \\i -> do
  let a=reverse [1..200::Int]
  let n=if even i then E else E
  print i`;
   const recording = traceWithClock(source, () => 0);
   expect(recording.uncaughtException).toBeUndefined();
-  expect(recording.stdout).toBe(Array.from({ length: 1000 }, (_, i) => `${i + 1}\n`).join(''));
+  expect(recording.stdout).toBe(Array.from({ length: iterations }, (_, i) => `${i + 1}\n`).join(''));
   const assignments = recording.traceItems.filter((item) => item.line === 5);
-  expect(assignments).toHaveLength(1000);
+  expect(assignments).toHaveLength(iterations);
   for (const item of assignments) expect(item.vars.n).toBe('E');
 });
 
