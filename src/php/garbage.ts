@@ -932,7 +932,7 @@ export function releaseGlobalObject(runtime: Runtime, object: PhpObject): boolea
 function objectHasOwnedValues(runtime: Runtime, object: PhpObject): boolean {
   for (const property of object.props.values()) {
     runtime.spend();
-    if (property instanceof PhpObject || property instanceof PhpArray || property instanceof Ref) return true;
+    if (mayHoldObject(property instanceof Ref ? property.v : property, runtime)) return true;
   }
   return false;
 }

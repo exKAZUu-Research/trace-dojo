@@ -138,7 +138,6 @@ function checkTraitConstant(cls: PhpClass, conflict: TraitConstantConflict, row:
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function classConstant(
   cls: PhpClass,
   name: string,

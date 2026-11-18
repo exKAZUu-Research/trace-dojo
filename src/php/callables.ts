@@ -1,9 +1,9 @@
-// code-gauge-allow-file fileNcss 583 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 596 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
 import { hasNullsafeReceiver } from './astAnalysis';
-import { usesSimpleSprintf } from './builtinCompiler';
+import { simpleSprintfFormat } from './builtinCompiler';
 import builtinNames from './builtinNames.json';
 import { lower } from './bytes';
 import {
@@ -31,6 +31,7 @@ import {
 } from './interp';
 import { ElementPlace, share, VarPlace, writableContainer } from './places';
 import { type Frame, PhpThrow, rt } from './runtime';
+import { renderSimpleSprintf } from './sprintf';
 import { UnsupportedFeatureError } from './unsupported';
 import {
   type Callable,
@@ -186,7 +187,8 @@ function claimArgumentTemporaries(frame: Frame, args: ArgValue[], first: number,
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = false): Value {
   const runtime = rt();
   runtime.row = e.row;
@@ -201,6 +203,12 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = 
       throwError('Error', `Call to undefined function ${name.name}()`);
     }
     if (e.fcc) return closureFromCallable({ fn });
+    const format =
+      fn.kind === 'native' && !name.fallback && lower(fn.name) === 'sprintf' ? simpleSprintfFormat(e.args) : undefined;
+    if (format !== undefined) {
+      const reads = e.args.slice(1).map((arg) => prepareOperand(arg.e));
+      return renderSimpleSprintf(format, reads, e.row);
+    }
     const specialized = specializedCall(fn, e.args);
     const directOverload = specialized && fn.kind === 'native' && fn.shortParamsDirectOnly;
     const deferred = specialized && hasDeferredNativeOperands(fn.name);
@@ -714,8 +722,10 @@ function staticCallable(
     throw inaccessibleStaticMethod(cls, methodName, method, scope, mode === 'callback' && !thisObj);
   }
   if (method.isAbstract) {
-    const description = `abstract method ${method.scope.name}::${method.name}()`;
-    throw new CallableFailure(`Cannot call ${description}`, `cannot call ${description}`);
+    throw new CallableFailure(
+      `Cannot call abstract method ${method.scope.name}::${method.name}()`,
+      `cannot call abstract method ${cls.name}::${method.name}()`
+    );
   }
   if (!method.isStatic) {
     if (!thisObj) throw nonStaticCallable(method);
@@ -929,7 +939,6 @@ function specializedCall(fn: Callable, args: Arg[]): boolean {
   if (name === 'implode') return args.length === 1 || args.length === 2;
   if (name === 'strtr') return args.length === 2 || args.length === 3;
   if (name === 'substr') return args.length === 2 || args.length === 3;
-  if (name === 'sprintf') return usesSimpleSprintf(args);
   if (!fn.inlined) return false;
   if (name === 'array_key_exists') return args.length === 2;
   if (name === 'get_class') return args.length <= 1;

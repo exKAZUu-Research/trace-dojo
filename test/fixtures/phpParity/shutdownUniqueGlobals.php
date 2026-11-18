@@ -1,9 +1,12 @@
 <?php
 class Destructible {
+    public array $empty = [];
+    public array $values;
+    function __construct(int $value) { $this->values = [[$value]]; }
     function __destruct() {}
 }
 $objects = [];
-for ($i = 0; $i < 3000; $i++) $objects[] = new Destructible;
+for ($i = 0; $i < 3000; $i++) $objects[] = new Destructible($i);
 extract($objects, EXTR_PREFIX_ALL, 'obj');
 unset($objects);
 echo "ok\n";

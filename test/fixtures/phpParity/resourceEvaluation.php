@@ -1,5 +1,5 @@
 <?php
-foreach ([STDIN, STDOUT, STDERR, 2, 1.999, '2', '2x', 'abc', '', null, true, false, [], [1], new stdClass] as $value)
+foreach ([STDIN, STDOUT, STDERR, NAN, 2, 1.999, '2', '2x', 'abc', '', null, true, false, [], [1], new stdClass] as $value)
     echo gettype($value), ':', STDOUT <=> $value, ',', $value <=> STDOUT, ';', STDOUT == $value ? 'true' : 'false', "\n";
 var_dump((object)STDOUT, (array)STDOUT);
 var_dump(var_export(STDOUT, true), var_export([STDERR], true));
@@ -16,3 +16,5 @@ function printStreamTrace($stream) {
     debug_print_backtrace();
 }
 printStreamTrace(STDOUT);
+
+var_dump(NAN < STDERR, STDERR < NAN, NAN >= STDOUT, STDOUT >= NAN);

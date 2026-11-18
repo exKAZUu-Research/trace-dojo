@@ -5,3 +5,5 @@ first,new
 first,new
 string(11) "first,  new"
 string(9) "first,old"
+operand;convert;first,%new,last
+operand;convert;first,%old,last

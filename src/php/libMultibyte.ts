@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 832 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 836 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/text-encoding-identifier-case -- mbstring names its encodings in this case.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
@@ -860,7 +860,7 @@ const NON_ENCODINGS = new Set(
 );
 
 /** The codecs of a list of encoding names, as php_mb_parse_encoding_list and php_mb_parse_encoding_array read it. */
-// code-gauge-allow functionCognitiveComplexity 19 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function encodingList(
   value: Value,
   functionName: string,

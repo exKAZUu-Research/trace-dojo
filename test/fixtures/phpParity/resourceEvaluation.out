@@ -1,6 +1,7 @@
 resource:1,-1;false
 resource:0,0;true
 resource:-1,1;false
+double:1,1;false
 integer:0,0;true
 double:1,-1;false
 string:0,0;true
@@ -33,3 +34,7 @@ Class name must be a valid object or a string
 #0 /main.php(18): printStreamTrace(Resource id #2)
 #1 {main}
 #0 /main.php(18): printStreamTrace(Resource id #2)
+bool(false)
+bool(false)
+bool(false)
+bool(false)

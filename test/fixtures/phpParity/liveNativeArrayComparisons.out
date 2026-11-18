@@ -58,3 +58,47 @@ array(2) {
 }
 string(1) "a"
 string(1) "z"
+array(2) {
+  [0]=>
+  &string(1) "b"
+  [2]=>
+  object(ChangeValue)#1 (2) {
+    ["result":"ChangeValue":private]=>
+    string(1) "a"
+    ["newValue":"ChangeValue":private]=>
+    string(1) "b"
+  }
+}
+array(2) {
+  [0]=>
+  &string(1) "b"
+  [2]=>
+  object(ChangeValue)#1 (2) {
+    ["result":"ChangeValue":private]=>
+    string(1) "a"
+    ["newValue":"ChangeValue":private]=>
+    string(1) "b"
+  }
+}
+array(2) {
+  [0]=>
+  &string(1) "b"
+  [2]=>
+  object(ChangeValue)#1 (2) {
+    ["result":"ChangeValue":private]=>
+    string(1) "a"
+    ["newValue":"ChangeValue":private]=>
+    string(1) "b"
+  }
+}
+array(2) {
+  [0]=>
+  &string(1) "b"
+  [2]=>
+  object(ChangeValue)#1 (2) {
+    ["result":"ChangeValue":private]=>
+    string(1) "a"
+    ["newValue":"ChangeValue":private]=>
+    string(1) "b"
+  }
+}

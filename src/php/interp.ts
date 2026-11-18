@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 875 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 880 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -385,8 +385,7 @@ function evaluateRead(e: Expr, mode: ReadMode): Chain {
   return plan === SHORT ? SHORT : plan();
 }
 
-// code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function prepareRead(e: Expr, mode: ReadMode): ReadPlan {
   const runtime = rt();
   switch (e.k) {
@@ -707,7 +706,7 @@ function immutableArrayContents(array: PhpArray): boolean {
   return true;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function spreadInto(array: PhpArray, value: Value): void {
   if (value instanceof PhpArray) {
     for (const [key, slot] of value.map) {

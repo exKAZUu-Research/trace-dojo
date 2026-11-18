@@ -1,10 +1,15 @@
 import type { Arg } from './ast';
 
-export function usesSimpleSprintf(args: Arg[]): boolean {
+export function simpleSprintfFormat(args: Arg[]): string | undefined {
+  if (args.some((arg) => arg.spread || arg.name !== undefined)) return;
   const format = args[0]?.e;
-  if (format?.k !== 'lit' || typeof format.v !== 'string') return false;
-  const conversions = format.v.match(/%[sd]/g) ?? [];
-  return !format.v.replaceAll(/%[sd]/g, '').includes('%') && args.length === conversions.length + 1;
+  if (format?.k !== 'lit' || typeof format.v !== 'string' || format.v.length >= 256) return;
+  let operands = 0;
+  for (const part of format.v.matchAll(/%[sd%]|%/g)) {
+    if (part[0] === '%') return;
+    if (part[0] !== '%%') operands++;
+  }
+  return operands + 1 === args.length ? format.v : undefined;
 }
 
 export const oneArgumentBuiltinOpcodes = new Set([

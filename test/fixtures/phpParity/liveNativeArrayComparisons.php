@@ -28,3 +28,7 @@ $value = 'c';
 var_dump(min([new ChangeValue('z', 'a'), 'b', &$value]));
 $value = 'a';
 var_dump(max([&$value, new ChangeValue('b', 'z')]));
+foreach ([SORT_NATURAL, SORT_REGULAR, SORT_LOCALE_STRING, SORT_NATURAL | SORT_FLAG_CASE] as $flag) {
+    $value = 'i';
+    var_dump(array_unique([&$value, 'b', new ChangeValue('a', 'b')], $flag));
+}

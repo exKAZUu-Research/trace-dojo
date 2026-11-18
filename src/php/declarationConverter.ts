@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 740 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 765 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -76,6 +76,8 @@ export abstract class DeclarationConverter extends ConverterBase {
     return this.withClassContext(undefined, () => this.convertFunction(node, false));
   }
 
+  // code-gauge-allow functionNcss 43 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private convertFunction(node: Node, isClosure: boolean, className?: string): FunctionDecl {
     const attributes = node.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -745,7 +747,6 @@ export abstract class DeclarationConverter extends ConverterBase {
     this.currentClassHasParent = decl?.parent !== undefined;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected memberModifiers(member: Node): {
     visibility?: Visibility;
     setVisibility?: Visibility;
@@ -775,6 +776,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private checkMemberModifiers(member: Node, modifiers: Node[]): void {
     const varModifier = modifiers.find((node) => node.type === 'var_modifier');
     if (varModifier) {

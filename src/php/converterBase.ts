@@ -254,7 +254,7 @@ export abstract class ConverterBase {
 const BARE_KEYWORDS = new Set(
   `__halt_compiler __class__ __dir__ __file__ __function__ __line__ __method__ __namespace__ __property__ __trait__
    abstract and array as break callable case catch class clone const continue declare default do echo else elseif empty
-   enddeclare endfor endforeach endif endswitch endwhile enum eval exit extends final finally fn for foreach function global
+   enddeclare endfor endforeach endif endswitch endwhile eval exit extends final finally fn for foreach function global
    goto if implements include include_once instanceof insteadof interface isset list match namespace new or print private
    protected public readonly require require_once return static switch throw trait try unset use var while xor yield`.split(
     /\s+/

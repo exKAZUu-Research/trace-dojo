@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 492 -- PHP operators share coercion and comparison helpers.
+// code-gauge-allow-file fileNcss 506 -- PHP operators share coercion and comparison helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import {
   boolValue,
@@ -546,7 +546,7 @@ function hasDynamicProps(object: PhpObject): boolean {
   return [...object.props.keys()].some((key) => !key.startsWith('\0') && !object.cls.propByName.has(key));
 }
 
-// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 38 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function compareScalar(left: ComparisonOperand, right: ComparisonOperand, tryString?: ObjectString): number {
   const a = deref(left);
   const b = deref(right);
@@ -563,8 +563,8 @@ export function compareScalar(left: ComparisonOperand, right: ComparisonOperand,
     const y = boolValue(b);
     return x === y ? 0 : x ? 1 : -1;
   }
-  if (a instanceof PhpObject && a.isResource) return compareResource(a, b);
-  if (b instanceof PhpObject && b.isResource) return -compareResource(b, a);
+  if (a instanceof PhpObject && a.isResource) return compareResource(a, b, true);
+  if (b instanceof PhpObject && b.isResource) return compareResource(b, a, false);
   if (
     (typeof a === 'number' &&
       Number.isNaN(a) &&
@@ -583,12 +583,14 @@ export function compareScalar(left: ComparisonOperand, right: ComparisonOperand,
   return 1;
 }
 
-function compareResource(resource: PhpObject, value: Value): number {
-  if (value instanceof PhpArray) return -1;
-  if (value instanceof PhpObject) return value.isResource ? compareNumbers(resource.id, value.id) : -1;
-  const number =
-    typeof value === 'string' ? (numericPrefix(value)?.value ?? 0n) : typeof value === 'number' ? value : toInt(value);
-  return compareNumbers(BigInt(resource.id), number);
+function compareResource(resource: PhpObject, value: Value, resourceOnLeft: boolean): number {
+  const id = BigInt(resource.id);
+  if (value instanceof PhpArray || (value instanceof PhpObject && !value.isResource)) return resourceOnLeft ? -1 : 1;
+  let number: bigint | number;
+  if (value instanceof PhpObject) number = BigInt(value.id);
+  else if (typeof value === 'string') number = numericPrefix(value)?.value ?? 0n;
+  else number = typeof value === 'number' ? value : toInt(value);
+  return resourceOnLeft ? compareNumbers(id, number) : compareNumbers(number, id);
 }
 
 function compareStringNumber(text: string, number: bigint | number): number {

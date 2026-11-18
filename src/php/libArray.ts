@@ -939,33 +939,12 @@ defineFunction(
 defineFunction('array_reverse(array $array, bool $preserve_keys = false): array', ({ args }) =>
   rebuild([...arr(args[0]).map].toReversed(), args[1] !== true)
 );
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 defineFunction('array_unique(array $array, int $flags = SORT_STRING): array', ({ args }) => {
   const array = arr(args[0]);
   if (array.size <= 1) return share(array);
   const flags = (args[1] as bigint | undefined) ?? 2n;
+  if (flags !== 2n) return uniqueSortedArray(array, flags);
   const result = new PhpArray();
-  if (flags !== 2n) {
-    const compare = sortComparator(flags);
-    const entries = [...array.map].map(([key, slot], position) => ({ key, slot, position }));
-    zendSort(entries, (a, b) => {
-      rt().spend();
-      return compare(a.slot, b.slot) || a.position - b.position;
-    });
-    const retained = new Set<number>();
-    let previous: (typeof entries)[number] | undefined;
-    for (const entry of entries) {
-      rt().spend();
-      if (!previous || compare(previous.slot, entry.slot) !== 0) {
-        retained.add(entry.position);
-        previous = entry;
-      }
-    }
-    let position = 0;
-    for (const [key, slot] of array.map) if (retained.has(position++)) result.setSlot(key, copyValueSlot(slot));
-    return result;
-  }
   const strings = new Set<string>();
   for (const [key, value] of array.entries()) {
     rt().spend();
@@ -976,6 +955,44 @@ defineFunction('array_unique(array $array, int $flags = SORT_STRING): array', ({
   }
   return result;
 });
+
+function uniqueSortedArray(array: PhpArray, flags: bigint): PhpArray {
+  const result = array.copy();
+  const entries = setEntries(array).map((entry, position) => ({ ...entry, position }));
+  const runtime = rt();
+  withStringConversionErrors((convert, reportWarning, hold, tryConvert) => {
+    const compare = sortComparator(flags, convert, reportWarning, tryConvert);
+    zendSort(entries, (a, b) => {
+      runtime.spend();
+      try {
+        return compare(a.slot, b.slot);
+      } catch (error) {
+        hold(error);
+        return 0;
+      }
+    });
+    if (!runtime.nativeStringConversionPending) removeSortedDuplicates(entries, result, compare);
+  });
+  return result;
+}
+
+function removeSortedDuplicates(
+  entries: (Entry & { position: number })[],
+  result: PhpArray,
+  compare: (a: Value | Ref, b: Value | Ref) => number
+): void {
+  let retained = entries[0];
+  for (let index = 1; index < entries.length; index++) {
+    rt().spend();
+    const candidate = entries[index];
+    if (compare(retained.slot, candidate.slot) !== 0) retained = candidate;
+    else if (retained.position < candidate.position) result.delete(candidate.key);
+    else {
+      result.delete(retained.key);
+      retained = candidate;
+    }
+  }
+}
 defineFunction('array_sum(array $array): int|float', ({ args }) => {
   let sum: Value = 0n;
   for (const value of arr(args[0]).iterValues()) sum = accumulate('array_sum', '+', 'Addition', sum, value);

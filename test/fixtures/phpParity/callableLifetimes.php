@@ -1,6 +1,7 @@
 <?php
 abstract class HasAbstract { abstract static function f(); }
-foreach (['HasAbstract::f', ['HasAbstract', 'f']] as $callback) {
+abstract class InheritsAbstract extends HasAbstract {}
+foreach (['HasAbstract::f', ['HasAbstract', 'f'], 'InheritsAbstract::f', ['InheritsAbstract', 'f']] as $callback) {
     var_dump(is_callable($callback));
     foreach ([fn() => $callback(), fn() => call_user_func($callback), fn() => Closure::fromCallable($callback)] as $call) {
         try { $call(); } catch (Throwable $error) { echo $error->getMessage(), "\n"; }

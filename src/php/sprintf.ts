@@ -2,7 +2,7 @@
 import { callStack } from './calls';
 import { floatFitsInt, formatFloatRepr, numericPrefix } from './conversions';
 import { fatal, notice, throwError, warn } from './errors';
-import { toFloat, toInt, withStringConversionErrors } from './operators';
+import { toFloat, toInt, toStr, withStringConversionErrors } from './operators';
 import { rt } from './runtime';
 import { exponentialText, fixedDigits, generalText } from './strings';
 import { deref, PhpArray, type Ref, type Value } from './values';
@@ -12,6 +12,32 @@ const INT_LIMIT = 2_147_483_647;
 const NEXT_ARG = -1;
 const FLOAT_SPECIFIERS = new Set('eEfFgGhH');
 const RADIXES: Record<string, number | undefined> = { o: 8, x: 16, X: 16, b: 2 };
+
+export function renderSimpleSprintf(format: string, reads: ((row: number) => Value)[], row: number): string {
+  const runtime = rt();
+  const parts: string[] = [];
+  let index = 0;
+  let cursor = 0;
+  let length = 0;
+  for (const match of format.matchAll(/%([sd%])/g)) {
+    parts.push(format.slice(cursor, match.index));
+    length += match.index - cursor;
+    cursor = match.index + 2;
+    const specifier = match[1];
+    let text = '%';
+    if (specifier !== '%') {
+      runtime.row = row;
+      const value = reads[index++](row);
+      text = specifier === 's' ? toStr(value) : String(toInt(value));
+    }
+    length += text.length;
+    runtime.ensureStringFits(length);
+    parts.push(text);
+  }
+  runtime.ensureStringFits(length + format.length - cursor);
+  parts.push(format.slice(cursor));
+  return parts.join('');
+}
 
 interface Parser {
   format: string;

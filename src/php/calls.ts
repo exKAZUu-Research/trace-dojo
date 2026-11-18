@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 675 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 678 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -541,6 +541,7 @@ function callerIsStrict(): boolean {
 
 // User functions -----------------------------------------------------------------------------------------------------
 
+// code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function invokeUser(
   target: CallTarget,
   fn: UserFunction,

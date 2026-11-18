@@ -24,3 +24,20 @@ var_dump(vsprintf('%s,%*s', [new ChangesArgument, &$width, &$value]));
 $value = 'old';
 $format = '%s,%s';
 var_dump(sprintf($format, new ChangesArgument, $value));
+
+class SprintfChangingValue {
+    function __toString(): string {
+        echo 'convert;';
+        $GLOBALS['part'] = 'new';
+        return 'first';
+    }
+}
+function sprintfOperand(): string {
+    echo 'operand;';
+    return 'last';
+}
+$part = 'old';
+echo sprintf('%s,%%%s,%s', new SprintfChangingValue, $part, sprintfOperand()), "\n";
+$part = 'old';
+$pattern = '%s,%%%s,%s';
+echo sprintf($pattern, new SprintfChangingValue, $part, sprintfOperand()), "\n";

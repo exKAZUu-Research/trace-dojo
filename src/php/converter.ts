@@ -11,7 +11,7 @@ import {
   invalidRead,
   onlyCalls,
 } from './astAnalysis';
-import { oneArgumentBuiltinOpcodes, usesSimpleSprintf } from './builtinCompiler';
+import { oneArgumentBuiltinOpcodes, simpleSprintfFormat } from './builtinCompiler';
 import { enc, lower } from './bytes';
 import { type Constant, constantTruth, constantTypeName, foldedConstant } from './constantDefaults';
 import { formatFloat, isNumericString, NAN_BOOL_WARNING, NAN_STRING_WARNING } from './conversions';
@@ -530,7 +530,7 @@ export class Converter extends DeclarationConverter {
     return { k: 'try', body, catches, fin, row };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private declareStatement(node: Node, topLevel: boolean): Stmt[] {
     for (const directive of node.namedChildren.filter((child) => child.type === 'declare_directive')) {
       const name = (directive.childForFieldName('name') as Node).text;
@@ -652,7 +652,6 @@ export class Converter extends DeclarationConverter {
     return [];
   }
 
-  // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private useDeclaration(node: Node): void {
     const kindNode = node.childForFieldName('type');
     const kind = kindNode ? lower(kindNode.text) : 'class';
@@ -800,7 +799,7 @@ export class Converter extends DeclarationConverter {
     if (name === 'get_called_class') return args.length === 0;
     if (name === 'func_num_args' || name === 'func_get_args') return this.fn.isFunction === true && args.length === 0;
     if (name === 'array_key_exists') return args.length === 2;
-    if (name === 'sprintf') return usesSimpleSprintf(args);
+    if (name === 'sprintf') return simpleSprintfFormat(args) !== undefined;
     if (name === 'defined') {
       const value = args[0]?.e;
       return args.length === 1 && value?.k === 'lit' && (typeof value.v !== 'string' || !/[\\:]/.test(value.v));
@@ -1532,7 +1531,6 @@ export class Converter extends DeclarationConverter {
       this.error(node, `Only arrays and Traversables can be unpacked, ${constantTypeName(invalid)} given`);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private arrayItems(node: Node): ArrayItem[] {
     const items: ArrayItem[] = [];
     for (const child of node.namedChildren) {
