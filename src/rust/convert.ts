@@ -217,6 +217,7 @@ export class Converter {
 
   private fnItem(node: Node, allowMissingBody = false): FnItem {
     const span = this.span(node);
+    checkNotReserved(this.field(node, 'name').text, span);
     const modifiers = node.namedChildren.find((child) => child.type === 'function_modifiers');
     if (modifiers) {
       const text = modifiers.text;
@@ -1210,8 +1211,9 @@ export class Converter {
     if (/^\s*(static|async)\b/.test(node.text)) unavailable(span, `${node.text.split(/\s/)[0]} クロージャ`);
     const isMove = node.children.some((child) => child.type === 'move');
     const params: { pattern: Pattern; type: TypeAst | undefined; span: Span }[] = [];
-    for (const child of this.field(node, 'parameters').namedChildren) {
-      if (isComment(child)) continue;
+    // `_` is an anonymous token among the parameters.
+    for (const child of this.field(node, 'parameters').children) {
+      if (isComment(child) || (!child.isNamed && child.type !== '_')) continue;
       if (child.type === 'parameter') {
         let pattern = this.pattern(this.field(child, 'pattern'));
         if (child.namedChildren.some((c) => c.type === 'mutable_specifier') && pattern.kind === 'binding') {
@@ -1237,6 +1239,7 @@ export class Converter {
     switch (node.type) {
       case 'identifier': {
         if (node.text === '_') return { kind: 'wild', span };
+        checkNotReserved(node.text, span);
         return { kind: 'binding', name: node.text, mutable: false, sub: undefined, span };
       }
       case 'scoped_identifier': {
@@ -1545,6 +1548,32 @@ export class Converter {
     if (!child) syntaxError(this.span(node), '書き方に誤りがあります。');
     return child;
   }
+}
+
+/** Words that edition 2024 reserves, which tree-sitter's grammar still reads as names. */
+const RESERVED_WORDS = new Set([
+  'abstract',
+  'async',
+  'await',
+  'become',
+  'box',
+  'do',
+  'dyn',
+  'final',
+  'gen',
+  'macro',
+  'override',
+  'priv',
+  'try',
+  'typeof',
+  'unsized',
+  'virtual',
+  'yield',
+]);
+
+function checkNotReserved(name: string, span: Span): void {
+  if (RESERVED_WORDS.has(name))
+    syntaxError(span, `${name} は予約語なので、名前に使えません（r#${name} と書くか、名前を変えてください）。`);
 }
 
 function isComment(node: Node): boolean {

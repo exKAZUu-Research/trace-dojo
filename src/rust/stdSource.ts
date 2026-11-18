@@ -164,7 +164,7 @@ pub mod vec {
         pub fn capacity(&self) -> usize;
         pub fn reserve(&mut self, additional: usize);
         pub fn shrink_to_fit(&mut self);
-        pub fn extend(&mut self, iter: Iter<T>);
+        pub fn extend<A: ExtendInto<T>>(&mut self, iter: Iter<A>);
         pub fn extend_from_slice(&mut self, other: &[T]) where T: Clone;
         pub fn append(&mut self, other: &mut Vec<T>);
         pub fn drain<R: RangeBounds<usize>>(&mut self, range: R) -> Iter<T>;
@@ -233,6 +233,15 @@ pub mod slice {
         pub fn copy_from_slice(&mut self, src: &[T]) where T: Copy;
         pub fn clone_from_slice(&mut self, src: &[T]) where T: Clone;
         pub fn repeat(&self, n: usize) -> Vec<T> where T: Copy;
+    }
+    impl<T> [T] {
+        pub fn into_iter(self) -> Iter<T>;
+    }
+    impl<T> &[T] {
+        pub fn into_iter(self) -> Iter<&T>;
+    }
+    impl<T> &mut [T] {
+        pub fn into_iter(self) -> Iter<&mut T>;
     }
     impl [String] {
         pub fn join(&self, sep: &str) -> String;
@@ -552,8 +561,8 @@ pub mod convert {
     pub enum Infallible {}
     pub trait From<T> { fn from(value: T) -> Self; }
     pub trait Into<T> { fn into(self) -> T; }
-    pub trait TryFrom<T> {}
-    pub trait TryInto<T> {}
+    pub trait TryFrom<T> { fn try_from(value: T) -> Result<Self, TryFromIntError>; }
+    pub trait TryInto<T> { fn try_into(self) -> Result<T, TryFromIntError>; }
     pub trait AsRef<T> {}
     pub fn identity<T>(x: T) -> T;
 }
@@ -765,7 +774,7 @@ pub mod collections {
         pub fn is_superset(&self, other: &HashSet<T>) -> bool;
         pub fn is_disjoint(&self, other: &HashSet<T>) -> bool;
         pub fn retain<F: FnMut(&T) -> bool>(&mut self, f: F);
-        pub fn extend(&mut self, iter: Iter<T>) where T: Eq + Hash;
+        pub fn extend<A: ExtendInto<T>>(&mut self, iter: Iter<A>) where T: Eq + Hash;
         pub fn drain(&mut self) -> Iter<T>;
         pub fn into_iter(self) -> Iter<T>;
     }
@@ -792,7 +801,7 @@ pub mod collections {
         pub fn is_subset(&self, other: &BTreeSet<T>) -> bool;
         pub fn is_superset(&self, other: &BTreeSet<T>) -> bool;
         pub fn retain<F: FnMut(&T) -> bool>(&mut self, f: F);
-        pub fn extend(&mut self, iter: Iter<T>) where T: Ord;
+        pub fn extend<A: ExtendInto<T>>(&mut self, iter: Iter<A>) where T: Ord;
         pub fn into_iter(self) -> Iter<T>;
     }
     impl<T> &BTreeSet<T> {
@@ -819,7 +828,7 @@ pub mod collections {
         pub fn iter_mut(&mut self) -> Iter<&mut T>;
         pub fn insert(&mut self, index: usize, value: T);
         pub fn remove(&mut self, index: usize) -> Option<T>;
-        pub fn extend(&mut self, iter: Iter<T>);
+        pub fn extend<A: ExtendInto<T>>(&mut self, iter: Iter<A>);
         pub fn retain<F: FnMut(&T) -> bool>(&mut self, f: F);
         pub fn truncate(&mut self, len: usize);
         pub fn swap(&mut self, i: usize, j: usize);
@@ -847,7 +856,7 @@ pub mod collections {
         pub fn iter(&self) -> Iter<&T>;
         pub fn into_vec(self) -> Vec<T>;
         pub fn into_sorted_vec(self) -> Vec<T> where T: Ord;
-        pub fn extend(&mut self, iter: Iter<T>) where T: Ord;
+        pub fn extend<A: ExtendInto<T>>(&mut self, iter: Iter<A>) where T: Ord;
         pub fn into_iter(self) -> Iter<T>;
     }
     impl<T> &BinaryHeap<T> {
@@ -968,6 +977,7 @@ pub mod pseudo {
     pub trait FromStrTarget {}
     pub trait StringPart {}
     pub trait RangeBounds<T> {}
+    pub trait ExtendInto<T> {}
     pub struct ParseError<F>;
     pub struct Unsigned<N>;
     pub struct Utf8Error;

@@ -6,6 +6,7 @@ import type { DisplayNode, TraceItemVariable, TraceScalar } from '../problems/tr
 import { buildProgram } from './build';
 import { runProgram } from './execute';
 import { debugFloat, displayFloat } from './floatFormat';
+import { DEFAULT_SPEC, Formatter } from './fmt';
 import { normalize } from './infer';
 import { fieldTypes } from './interpreter';
 import { compareValues } from './ops';
@@ -269,10 +270,17 @@ function containerNodeOf(v: Value, t: Type, seen: Set<unknown>): DisplayNode | u
   return undefined;
 }
 
+/** Writes map keys that are no scalars as `{:?}` does, without running the program's own `Debug` impls. */
+const keyFormatter = new Formatter({
+  userFmt: () => {},
+  fieldTypes,
+  concrete: (type) => type,
+});
+
 function keyLabel(key: Value, type: Type): string {
   const scalar = scalarOf(key, type);
   if (scalar !== NOT_SCALAR) return String(scalar);
-  return JSON.stringify(key);
+  return keyFormatter.debug(key, type, DEFAULT_SPEC, undefined);
 }
 
 export { debugFloat };

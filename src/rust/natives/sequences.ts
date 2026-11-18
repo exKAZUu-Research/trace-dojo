@@ -1,6 +1,6 @@
 import { sliceRange } from '../compiler';
 import { cloneValue, compareValues, copyValue, valuesEqual } from '../ops';
-import type { Type } from '../types';
+import { shallow, type Type } from '../types';
 import {
   DONE,
   ElementPlace,
@@ -32,6 +32,10 @@ import {
 } from './support';
 
 /** The array a `&mut self` or `&self` receiver of a `Vec` holds. */
+function isRefType(type: Type | undefined): boolean {
+  return type !== undefined && shallow(type).kind === 'ref';
+}
+
 function vec(self: Value): Value[] {
   return deref(self) as Value[];
 }
@@ -380,12 +384,14 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   extend: ([self, iter], ctx) => {
     const items = vec(self);
     const iterator = deref(iter) as IterValue;
+    // Extending from references copies the `Copy` values they refer to.
+    const fromRefs = isRefType(ctx.typeArgs[1]);
     for (;;) {
       ctx.runtime.spend();
       const item = iterator.next();
       if (item === DONE) break;
       ctx.runtime.allocate(1);
-      items.push(item);
+      items.push(fromRefs ? copyValue(deref(item)) : item);
     }
     return UNIT_VALUE;
   },
@@ -421,7 +427,9 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   },
   retain_mut: ([self, f], ctx) => {
     const items = vec(self);
-    const kept = items.filter((_, index) => deref(call(ctx, f, [new ElementPlace(items, index)])) as boolean);
+    // The closure may change each element before deciding, so the kept elements are read after it runs.
+    const keep = items.map((_, index) => deref(call(ctx, f, [new ElementPlace(items, index)])) as boolean);
+    const kept = items.filter((_, index) => keep[index]);
     items.length = 0;
     items.push(...kept);
     return UNIT_VALUE;
@@ -571,6 +579,9 @@ for (const [name, native] of Object.entries(sliceNatives)) natives[`[_]::${name}
 for (const [name, native] of Object.entries(vecNatives)) natives[`Vec<_>::${name}`] = native;
 for (const [name, native] of Object.entries(dequeNatives)) natives[`VecDeque<_>::${name}`] = native;
 for (const [name, native] of Object.entries(heapNatives)) natives[`BinaryHeap<_>::${name}`] = native;
+natives['[_]::into_iter'] = ([self]) => arrayIter(sliceItems(deref(self)));
+natives['&[_]::into_iter'] = ([self]) => sliceIter(deref(self), false);
+natives['&mut [_]::into_iter'] = ([self]) => sliceIter(deref(self), true);
 natives['&Vec<_>::into_iter'] = ([self]) => sliceIter(deref(self), false);
 natives['&mut Vec<_>::into_iter'] = ([self]) => sliceIter(deref(self), true);
 natives['&VecDeque<_>::into_iter'] = ([self]) => sliceIter(deref(self), false);

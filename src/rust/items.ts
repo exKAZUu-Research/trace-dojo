@@ -480,6 +480,12 @@ export class ItemCollector {
       }
       addWherePredicates(item.generics, scope);
       if (item.trait) {
+        const binding = resolveTypePath(
+          item.trait.segments.map((segment) => segment.name),
+          module,
+          item.trait.span
+        );
+        if (binding.kind === 'trait') this.checkStdTraitImpl(item, impl, binding.def);
         const trait = resolveTraitPath(item.trait, scope);
         impl.trait = trait;
         this.checkTraitImpl(item, impl, trait.trait);
@@ -495,7 +501,8 @@ export class ItemCollector {
     });
   }
 
-  private checkTraitImpl(item: ImplItem, impl: ImplDef, trait: TraitDef): void {
+  /** Rejects impls of the standard library's traits that learning programs do not implement here. */
+  private checkStdTraitImpl(item: ImplItem, impl: ImplDef, trait: TraitDef): void {
     const traitModule = trait.module as Module;
     if (traitModule.isStd && !(impl.module as Module).isStd && !STD_TRAITS_LEARNERS_IMPLEMENT.has(trait.name)) {
       const operators = [
@@ -518,6 +525,9 @@ export class ItemCollector {
         : `標準ライブラリのトレイト ${trait.name} の実装`;
       compileError(item.span, `${what}は、この採点環境では使えません。`);
     }
+  }
+
+  private checkTraitImpl(item: ImplItem, impl: ImplDef, trait: TraitDef): void {
     for (const method of item.methods) {
       if (!trait.methods.has(method.name)) {
         compileError(method.span, `メソッド ${method.name} は、トレイト ${trait.name} にありません。`);

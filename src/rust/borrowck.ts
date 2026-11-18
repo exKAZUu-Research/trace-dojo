@@ -439,6 +439,46 @@ export class BorrowChecker {
     return current;
   }
 
+  /**
+   * Checks a formatting macro's arguments, which all live until the macro has formatted them: a later argument may not
+   * move or mutably borrow what an earlier one borrows (`println!("{} {}", v, v.pop())`).
+   */
+  private formatArgs(format: FormatArgs | undefined, state: State, macro: Expr): State {
+    let current = state;
+    const holder = {
+      name: '{format}',
+      mutable: false,
+      type: { kind: 'tuple', elems: [] },
+      slot: -1,
+      span: macro.span,
+      owner: undefined as never,
+      mode: 'move',
+      id: -1,
+    } as LocalVar;
+    // The temporaries live until the macro's end, which no position inside it passes.
+    this.uses.set(holder, [Number.MAX_SAFE_INTEGER]);
+    const added: Loan[] = [];
+    try {
+      for (const arg of format?.args ?? []) {
+        current = this.expr(arg, current, 'read');
+        const place = this.placeOf(arg);
+        const loans: Omit<Loan, 'holder'>[] =
+          place && !place.indirect && place.root.mode === 'move' && !isReference(place.root.type)
+            ? [{ root: place.root, path: place.path, mutable: false, span: arg.span }]
+            : this.borrowsOf(arg);
+        for (const loan of loans) {
+          const full = { ...loan, holder };
+          added.push(full);
+          this.loans.push(full);
+        }
+      }
+    } finally {
+      this.loans = this.loans.filter((loan) => !added.includes(loan));
+      this.uses.delete(holder);
+    }
+    return current;
+  }
+
   /** Checks a closure's body on its own, where its parameters and captured variables hold values. */
   private checkClosureBody(expr: Extract<Expr, { kind: 'closure' }>, context: FnContext): void {
     const checker = new BorrowChecker(this.annotations, this.solver);
@@ -456,11 +496,7 @@ export class BorrowChecker {
 
   private macro(expr: Extract<Expr, { kind: 'macro' }>, state: State): State {
     const { macro } = expr;
-    const format = (f: FormatArgs | undefined, s: State): State => {
-      let current = s;
-      for (const arg of f?.args ?? []) current = this.expr(arg, current, 'read');
-      return current;
-    };
+    const format = (f: FormatArgs | undefined, s: State): State => this.formatArgs(f, s, expr);
     switch (macro.kind) {
       case 'print':
       case 'format': {
@@ -507,7 +543,9 @@ export class BorrowChecker {
     return this.usePlaceAt(place, expr, state, mode);
   }
 
-  private usePlaceAt(place: PlacePath, expr: Expr, state: State, mode: 'move' | 'read' | 'mut'): State {
+  private usePlaceAt(place: PlacePath, expr: Expr, state: State, requested: 'move' | 'read' | 'mut'): State {
+    // Using a `Copy` value by value copies it, which only reads the place.
+    const mode = requested === 'move' && this.isCopy(expr.ty) ? 'read' : requested;
     const varState = state.get(place.root);
     if (varState) this.checkUsable(place.root, varState, expr.span, mode, place.path);
     this.checkLoans(place, expr.span, mode);

@@ -351,6 +351,13 @@ export class TraitSolver {
       }
       case 'Pattern': {
         if (t.kind === 'char') return 'yes';
+        if (t.kind === 'fn') {
+          return t.params.length === 1 &&
+            this.unifier.tryUnify(t.params[0], { kind: 'char' }) &&
+            this.unifier.tryUnify(t.ret, { kind: 'bool' })
+            ? 'yes'
+            : 'no';
+        }
         if (t.kind === 'closure') {
           return this.implements(t, {
             trait: this.program.traitDef('FnMut'),
@@ -406,6 +413,17 @@ export class TraitSolver {
       case 'FromIterator': {
         return this.fromIterator(t, ref.args[0]);
       }
+      case 'ExtendInto': {
+        // A collection of `T` extends from `T`s, and from `&T`s when `T` is `Copy`.
+        const [target] = ref.args;
+        if (this.unifier.tryUnify(t, target)) return 'yes';
+        if (t.kind === 'ref' && !t.mutable) {
+          const snapshot = this.unifier.snapshot();
+          if (this.unifier.unify(t.target, target) && this.isCopy(t.target)) return 'yes';
+          this.unifier.rollback(snapshot);
+        }
+        return 'no';
+      }
       case 'Extend': {
         // Collections of `Copy` elements also extend from references to them.
         const item = shallow(ref.args[0]);
@@ -428,6 +446,14 @@ export class TraitSolver {
       case 'From':
       case 'Into': {
         return this.fromInto(t, ref);
+      }
+      case 'TryFrom':
+      case 'TryInto': {
+        // Integers convert to each other, failing out of range.
+        const other = normalize(shallow(ref.args[0]));
+        if (t.kind !== 'int') return 'no';
+        if (other.kind === 'var') return other.v.literal === 'float' ? 'no' : 'unknown';
+        return other.kind === 'int' ? 'yes' : 'no';
       }
       default: {
         return 'no';

@@ -822,9 +822,7 @@ export function collectInto(ctx: NativeContext, items: Value[], target: Type, it
       return items;
     }
     case 'BinaryHeap': {
-      const heap: Value[] = [];
-      for (const element of items) heapPush(heap, element, t.args[0]);
-      return heap;
+      return heapify([...items], t.args[0]);
     }
     case 'String': {
       return items.map((element) => deref(element) as string).join('');
@@ -873,6 +871,34 @@ export function collectInto(ctx: NativeContext, items: Value[], target: Type, it
       throw new Error(`collect into ${t.def.name}`);
     }
   }
+}
+
+/** Builds a max-heap from elements as `BinaryHeap::from(vec)` does: sifting down from the last parent to the root. */
+export function heapify(heap: Value[], type: Type): Value[] {
+  const end = heap.length;
+  for (let index = Math.floor(end / 2) - 1; index >= 0; index--) siftDownRange(heap, index, end, type);
+  return heap;
+}
+
+function siftDownRange(heap: Value[], start: number, end: number, type: Type): void {
+  const element = heap[start];
+  let hole = start;
+  let child = 2 * hole + 1;
+  while (child <= end - 2) {
+    if ((compareValues(type, heap[child], heap[child + 1]) ?? 0) <= 0) child++;
+    if ((compareValues(type, element, heap[child]) ?? 0) >= 0) {
+      heap[hole] = element;
+      return;
+    }
+    heap[hole] = heap[child];
+    hole = child;
+    child = 2 * hole + 1;
+  }
+  if (child === end - 1 && (compareValues(type, element, heap[child]) ?? 0) < 0) {
+    heap[hole] = heap[child];
+    hole = child;
+  }
+  heap[hole] = element;
 }
 
 /** Pushes onto a binary max-heap as `BinaryHeap::push` does (sift up), so that its order matches Rust's. */

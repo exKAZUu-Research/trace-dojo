@@ -371,16 +371,71 @@ function powi(base: number, exponent: number): number {
   return exponent < 0 ? 1 / result : result;
 }
 
-/** A fused multiply-add, computed exactly with bigints and rounded once. */
+/** A fused multiply-add, computed exactly with bigints and rounded once, as `f64::mul_add` does. */
 function fma(a: number, b: number, c: number): number {
-  if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c)) return a * b + c;
-  const product = a * b;
-  if (product === 0 || c === 0) return product + c;
-  // Fall back to the double rounding of separate operations when exact arithmetic is not needed.
-  return product + c;
+  if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c) || a === 0 || b === 0) return a * b + c;
+  const [ma, ea] = decompose(a);
+  const [mb, eb] = decompose(b);
+  let mantissa = ma * mb;
+  let exponent = ea + eb;
+  if (c !== 0) {
+    const [mc, ec] = decompose(c);
+    if (ec >= exponent) {
+      mantissa += mc << BigInt(ec - exponent);
+    } else {
+      mantissa = (mantissa << BigInt(exponent - ec)) + mc;
+      exponent = ec;
+    }
+  }
+  if (mantissa === 0n) return a * b + c;
+  return roundToDouble(mantissa, exponent);
 }
 
-const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
+/** A finite double as an integer mantissa and a power of two. */
+function decompose(value: number): [bigint, number] {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, value);
+  const bits = view.getBigUint64(0);
+  const sign = bits >> 63n ? -1n : 1n;
+  const exponentBits = Number((bits >> 52n) & 0x7_ffn);
+  let mantissa = bits & ((1n << 52n) - 1n);
+  if (exponentBits === 0) return [sign * mantissa, -1074];
+  mantissa |= 1n << 52n;
+  return [sign * mantissa, exponentBits - 1075];
+}
+
+/** The double nearest to `mantissa × 2^exponent`, ties to even. */
+function roundToDouble(mantissa: bigint, exponent: number): number {
+  const negative = mantissa < 0n;
+  let m = negative ? -mantissa : mantissa;
+  let e = exponent;
+  const length = m.toString(2).length;
+  // Keep 53 significant bits, or fewer for subnormal results.
+  let shift = length - 53;
+  if (e + shift < -1074) shift = -1074 - e;
+  if (shift > 0) {
+    const half = 1n << BigInt(shift - 1);
+    const remainder = m & ((1n << BigInt(shift)) - 1n);
+    m >>= BigInt(shift);
+    if (remainder > half || (remainder === half && (m & 1n) === 1n)) m++;
+    e += shift;
+  }
+  const result = Number(m) * 2 ** e;
+  return negative ? -result : result;
+}
+
+/** `T::try_from(value)` between integer types: the value when it fits, or `TryFromIntError`. */
+function tryConvert(ctx: NativeContext, value: Value, to: Type): Value {
+  const target = normalize(shallow(to)) as { name: IntName };
+  const number = deref(value) as bigint;
+  if (inRange(target.name, number)) return ok(ctx, number);
+  return err(ctx, new StructValue(ctx.interp.program.adtDef('TryFromIntError'), []));
+}
+
+const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
+  'TryFrom::try_from': ([value], ctx) => tryConvert(ctx, value, ctx.typeArgs[0]),
+  'TryInto::try_into': ([value], ctx) => tryConvert(ctx, value, ctx.typeArgs[1]),
+};
 for (const [name, native] of Object.entries(integer)) natives[`Integer::${name}`] = native;
 for (const [name, native] of Object.entries(floating)) natives[`Float::${name}`] = native;
 define(natives);
