@@ -718,12 +718,13 @@ export abstract class StatementCompiler extends CallCompiler {
       const stores = value.elements.map((element, index) =>
         this.slotStore(element, type.kind === 'array' ? type.child : (tupleTypes as Type[])[index], unionPayload)
       );
+      if (type.kind === 'array' && type.sentinel !== undefined) {
+        stores.push(this.valueStore(type.child, known(type.child, type.sentinel.value, value), unionPayload));
+      }
       return (frame, holder, index) => {
         const aggregate = holder.slots[index] as ZArray | ZStruct;
         const offset = aggregate instanceof ZArray ? aggregate.offset : 0;
         for (const [position, store] of stores.entries()) store(frame, aggregate, offset + position);
-        if (type.kind === 'array' && type.sentinel !== undefined)
-          storeInto(aggregate, offset + value.elements.length, type.sentinel.value);
       };
     }
     if (value.kind === 'structInit' && !value.type && type.kind === 'union' && value.fields.length === 1) {
@@ -871,14 +872,14 @@ export abstract class StatementCompiler extends CallCompiler {
       return (frame, holder, index) => storeInto(holder, index, evaluate(frame));
     const locate = value.place?.locate;
     return (frame, holder, index) => {
-      const views = memorySpace().typedViews;
-      const target = views.get(holder.slots);
+      const space = memorySpace();
+      const target = space.typedViews.get(holder.slots);
       if (!target) return storeInto(holder, index, evaluate(frame));
       const source = locate?.(frame);
-      const backing = source && views.get(source.target.slots);
+      const backing = source && space.pointerRegion(source);
       const offset = target.offset(index);
-      if (source && backing) {
-        backing.memory.copyPayloadTo(type, backing.offset(source.index), target.memory, offset);
+      if (backing) {
+        backing.memory.copyPayloadTo(type, backing.offset, target.memory, offset);
         return;
       }
       const evaluated = source ? source.load() : evaluate(frame);

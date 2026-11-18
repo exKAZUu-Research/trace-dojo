@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 697 -- Keeps byte codecs, typed views, alias-safe copying, and reference recovery together.
+// code-gauge-allow-file fileNcss 704 -- Keeps byte codecs, typed views, alias-safe copying, and reference recovery together.
 import { transferCost } from './allocation';
 import { PANIC, panic } from './arith';
 import { enumLookup } from './enumLookup';
@@ -74,6 +74,14 @@ export class BufferMemorySpace {
   readonly errorReferenceIds = new WeakMap<object, bigint>();
   nextErrorReferenceId = 1n;
   private readonly writerVtables = new Map<string, object>();
+
+  pointerRegion(pointer: Pointer): { memory: BufferMemory; offset: number } | undefined {
+    const view = this.typedViews.get(pointer.target.slots);
+    if (view) return { memory: view.memory, offset: view.offset(pointer.index) };
+    const { storage, index } = pointer.storageLocation();
+    const memory = this.memories.get(storage as Value[]);
+    return memory && { memory, offset: index * 8 };
+  }
 
   reference(key: string): object | undefined {
     return this.references.get(key);

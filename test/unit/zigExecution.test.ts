@@ -1830,6 +1830,23 @@ test.each([
 });
 
 test.each([
+  ['', 'u.o[0..3].*', '1200340056007800'],
+  ['', '(blk:{const q=u.o[0..3];break :blk q;}).*', '1200340056007800'],
+  ['const V=extern union{w:*u64,a:*[4]?u8};const view=V{.w=p};', 'view.a[1..4].*', '1200120034005600'],
+])('union result locations preserve bytes through the array pointer %s%s', (setup, value, stderr) => {
+  const source = `const std=@import("std");const U=union(enum){o:[3]?u8,w:u64};pub fn main()void{var u:U=.{.w=0x1200340056007800};const p=&u.w;${setup}u=.{.o=${value}};std.debug.print("{x}",.{p.*});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr, uncaughtException: undefined });
+});
+
+test.each([
+  ['[1:null]?u8', 'u32', '0x12345678'],
+  ['[1:null]?u16', 'u64', '0x123456789abcdef0'],
+])('union result locations encode the full sentinel of %s within %s', (type, wide, initial) => {
+  const source = `const std=@import("std");const U=union(enum){o:${type},w:${wide}};pub fn main()void{var u:U=.{.w=${initial}};const p=&u.w;u=.{.o=.{null}};std.debug.print("{x}",.{p.*});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '0', uncaughtException: undefined });
+});
+
+test.each([
   ['', 'std.debug.print("{}",.{p.a});', 'invalid enum value'],
   ['p.*=.{.a=7};bytes[0]=255;', 'std.debug.print("{t}",.{p.*});', 'invalid enum value'],
   ['p.*=.{.a=7};bytes[0]=255;', 'std.debug.print("{any}",.{p.*});', 'invalid enum value'],
