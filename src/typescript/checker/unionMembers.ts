@@ -43,6 +43,12 @@ export function unionProperty(c: Checker, types: Type[], name: string): Property
     properties.push(property);
   }
   const [first] = properties;
+  // A private or protected property exists on a union only when every member has that same declaration.
+  if (
+    properties.some((property) => property.visibility !== 'public') &&
+    properties.some((property) => !property.declaration || property.declaration.id !== first.declaration?.id)
+  )
+    return undefined;
   const hasWriteType = properties.some((property) => property.writeType !== undefined);
   return {
     ...first,

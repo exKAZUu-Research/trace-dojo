@@ -1,0 +1,28 @@
+class Box<T> {
+  private item: T;
+  constructor(item: T) {
+    this.item = item;
+  }
+  peek<U extends Box<number> | Box<string>>(other: U) {
+    return other.item;
+  }
+}
+class Animal {
+  private sound = "...";
+  private legs = 4;
+  describe<T extends Dog | Cat>(pet: T) {
+    return `${pet.sound} on ${pet.legs} legs`;
+  }
+}
+class Dog extends Animal {
+  bark() {
+    return "woof";
+  }
+}
+class Cat extends Animal {
+  meow() {
+    return "meow";
+  }
+}
+console.log(new Box(1).peek(new Box("a")));
+console.log(new Animal().describe(new Cat()));
