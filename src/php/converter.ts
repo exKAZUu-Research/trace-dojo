@@ -28,7 +28,7 @@ import { DeclarationConverter } from './declarationConverter';
 import { exportExpr, UnexportableSyntax } from './export';
 import { decodeLiteral, decodeSingleQuoted, parseIntegerLiteral } from './literals';
 import { builtinLiteralKey } from './native';
-import { compiledOperandRow } from './opcodeRows';
+import { compiledOperandRow, constantAstRow } from './opcodeRows';
 
 export type { CompileNotice } from './converterBase';
 
@@ -867,11 +867,9 @@ export class Converter extends DeclarationConverter {
       case 'float': {
         return { k: 'lit', v: Number.parseFloat(node.text.replaceAll('_', '')), row };
       }
-      case 'boolean': {
-        return { k: 'lit', v: lower(node.text) === 'true', row };
-      }
+      case 'boolean':
       case 'null': {
-        return { k: 'lit', v: null, row };
+        return this.constant(node);
       }
       case 'string': {
         return { k: 'lit', v: this.singleQuoted(node), row };
@@ -1227,7 +1225,8 @@ export class Converter extends DeclarationConverter {
     const name = this.nameText(nameNode);
     const className = lower(name) === 'class' ? (this.constantInitializer ? 'initializer' : true) : undefined;
     const cls = this.classRef(scope, !className && this.constantInitializer, className ? 'name' : 'constant');
-    if (!className || cls.k !== 'expr') return { k: 'cconst', cls, name, className, row: nameNode.startPosition.row };
+    if (!className || cls.k !== 'expr')
+      return { k: 'cconst', cls, name, className, scopeRow: scope.startPosition.row, row: nameNode.startPosition.row };
     const literal = parserScalar(cls.e);
     if (literal === undefined) {
       const type = this.compiledType(cls.e);
@@ -1255,7 +1254,13 @@ export class Converter extends DeclarationConverter {
       const literal = parserScalar(cls.e);
       if (typeof literal === 'string') cls = { k: 'named', name: literal };
     }
-    return { k: 'cconst', cls, name: typeof literal === 'string' ? literal : name, row: name.row };
+    return {
+      k: 'cconst',
+      cls,
+      name: typeof literal === 'string' ? literal : name,
+      scopeRow: scope.startPosition.row,
+      row: name.row,
+    };
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
@@ -1649,13 +1654,13 @@ export class Converter extends DeclarationConverter {
   }
 
   private resultOpcodeRow(value: Expr, node: Node): number {
-    if (value.k === 'bin' && this.compiledValue(value) !== undefined) {
-      if (value.op !== '.') return value.row;
+    if (value.k === 'bin' && this.compiledValue(value, true) !== undefined) {
+      if (value.op !== '.') return constantAstRow(value);
       return parserScalar(value.l) !== undefined && parserScalar(value.r) !== undefined
         ? (node.parent?.nextSibling?.startPosition.row ?? node.endPosition.row)
         : value.row;
     }
-    if (value.k === 'idx' && value.index?.k === 'lit') return value.base.row;
+    if (value.k === 'idx' && value.index?.k === 'lit') return constantAstRow(value);
     if (value.k === 'cond') {
       const test = this.compiledValue(value.test);
       if (test !== undefined)

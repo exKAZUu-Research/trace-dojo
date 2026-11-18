@@ -822,7 +822,7 @@ function bindClosureVars(frame: Frame, closure: ClosureData): void {
 /** The row a call the engine makes for the program's code (a magic method, a conversion) shows: that code's. */
 function implicitCallRow(): number | undefined {
   const runtime = rt();
-  return nativeDepth === 0 && !runtime.shuttingDown ? runtime.row : undefined;
+  return nativeDepth === 0 && !runtime.shuttingDown ? runtime.instructionRow : undefined;
 }
 
 function positionalArguments(args: ArgValue[]): ArgValue[] {

@@ -133,7 +133,7 @@ export function clearLastError(): void {
 }
 
 /** Reports a non-fatal error as PHP's CLI does: through a user handler, or printed to standard output. */
-export function emitError(level: bigint, message: string, row = rt().row, skipMatchingHandler = false): void {
+export function emitError(level: bigint, message: string, row = rt().diagnosticRow, skipMatchingHandler = false): void {
   const runtime = rt();
   runtime.constantEvaluationEpoch++;
   const current = runtime.errorHandlers.at(-1);
@@ -159,7 +159,7 @@ export function emitError(level: bigint, message: string, row = rt().row, skipMa
 }
 
 export function warn(message: string, pending = false): void {
-  emitError(E_WARNING, message, rt().row, pending);
+  emitError(E_WARNING, message, rt().diagnosticRow, pending);
 }
 
 export function notice(message: string): void {
@@ -172,7 +172,7 @@ export function deprecated(message: string): void {
 
 /** Ends the program with a fatal error that no handler can catch. */
 export function fatal(message: string): never {
-  throw new FatalError(message, rt().row);
+  throw new FatalError(message, rt().diagnosticRow);
 }
 
 export function isThrowable(value: Value): value is PhpObject {
@@ -213,6 +213,7 @@ export function withPendingException(runtime: Runtime, pending: PhpThrow | undef
 
 export type CleanupException = PhpThrow | ExitSignal;
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Captures cleanup failures and their ownership in propagation order.
 export function withCleanupExceptions(
   runtime: Runtime,
   cleanup: (capture: (error: CleanupException) => void) => void
@@ -220,10 +221,15 @@ export function withCleanupExceptions(
   const heldMark = runtime.held.length;
   let failure: CleanupException | undefined;
   const capture = (error: CleanupException): void => {
-    if (failure instanceof ExitSignal) return;
+    if (failure instanceof ExitSignal) {
+      if (error instanceof PhpThrow && runtime.thrown === error.object) runtime.thrown = undefined;
+      return;
+    }
     if (error instanceof PhpThrow) {
       if (failure) setPrevious(error.object, failure.object);
       runtime.held.push(error.object);
+    } else if (failure && runtime.thrown === failure.object) {
+      runtime.thrown = undefined;
     }
     failure = error;
   };

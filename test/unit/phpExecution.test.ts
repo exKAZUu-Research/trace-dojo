@@ -12,6 +12,23 @@ afterEach(() => {
 
 const run = (program: string): ReturnType<typeof executeProgram> => executeProgram('php', program);
 
+test.each([
+  ['object properties', '$held = (object) ["a" => new D(1), "b" => new D(2), "c" => new D(3)];'],
+  ['storage entries', '$held = new SplObjectStorage; for ($i = 1; $i <= 3; $i++) $held[new stdClass] = new D($i);'],
+])('continues object shutdown after a detached static fails through %s', (_description, setup) => {
+  const program = `<?php
+    error_reporting(0);
+    class D {
+      function __construct(public $id) {}
+      function __destruct() { echo $this->id, ';'; if ($this->id === 1) throw new Exception('stop batch'); }
+    }
+    static $held;
+    ${setup}
+    unset($held);
+    echo 'done;';`;
+  expect(run(program)).toMatchObject({ kind: 'executed', stdout: 'done;1;2;3;' });
+});
+
 test('resolves namespace-relative literal constants in the global namespace', () => {
   expect(run(String.raw`<?php var_dump(namespace\TrUe, namespace\false, namespace\NULL);`)).toMatchObject({
     kind: 'executed',

@@ -77,3 +77,14 @@ bool(false)
 bool(true)
 int(5)
 bool(true)
+int(7)
+bool(true)
+bool(false)
+int(0)
+string(12) "aliased null"
+NULL
+bool(true)
+int(7)
+int(7)
+int(0)
+string(12) "aliased null"

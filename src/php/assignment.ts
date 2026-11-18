@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 869 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 876 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -125,20 +125,27 @@ function namedPlace(name: Expr | string, mode: PlaceMode, locate: (name: string)
   return mode === 'deferred' || mode === 'coalesce' ? deferredPlace(resolve, () => readForIsset(resolve())) : resolve();
 }
 
+// code-gauge-allow functionNcss 34 -- Shares operand evaluation and parent writes across assignment modes.
 // code-gauge-allow functionCognitiveComplexity 24 -- Shares operand evaluation and parent writes across assignment modes.
 function dimensionPlace(e: Extract<Expr, { k: 'idx' }>, mode: PlaceMode): Place {
   const parent = placeOf(e.base, mode, true);
   const readKey = e.index === undefined ? undefined : prepareOperand(e.index);
   const resolve = (writeMode: WriteMode, beforeOffsetGet?: BeforeOffsetGet, warning?: UpdateWarning): Place => {
-    const parentWrite = mode === 'coalesce' ? nestedPlace(parent, writeMode) : undefined;
-    const { key, keyWarning } = readDimensionKey(readKey, warning);
     const row = dimensionWriteRow(e);
-    rt().row = row;
-    const fetch = parentWrite ?? nestedPlace(parent, writeMode);
-    rt().row = row;
     const lookupRow =
       e.base.k === 'idx' || e.base.k === 'prop' || e.base.k === 'sprop' ? compiledOperandRow(e.base) : undefined;
-    const container = writableContainer(fetch, undefined, writeMode !== 'write', lookupRow);
+    let fetch: Place | undefined;
+    let container: PhpArray | PhpObject | string | undefined;
+    if (mode === 'coalesce') {
+      fetch = nestedPlace(parent, writeMode);
+      rt().row = row;
+      container = writableContainer(fetch, undefined, writeMode !== 'write', lookupRow);
+    }
+    const { key, keyWarning } = readDimensionKey(readKey, warning);
+    rt().row = row;
+    fetch ??= nestedPlace(parent, writeMode);
+    rt().row = row;
+    container ??= writableContainer(fetch, undefined, writeMode !== 'write', lookupRow);
     if (container instanceof PhpObject) {
       if (beforeOffsetGet && !isArrayAccess(container)) {
         beforeOffsetGet();
@@ -200,7 +207,7 @@ function instancePropertyPlace(e: Extract<Expr, { k: 'prop' }>, mode: PlaceMode,
     rt().row = e.row;
     return object instanceof PhpObject ? readProp(object, name, rt().frame.scope, 'coalesce') : undefined;
   });
-  if (mode === 'deferred' && typeof property !== 'string' && !through) {
+  if (typeof property !== 'string' && !through) {
     place.readCompoundName = (warning) => {
       const name = readOperandWithWarning(property, readName, warning, e.row);
       readName = () => name;
@@ -744,7 +751,7 @@ export function assignExpression(target: Expr, valueExpr: Expr): Value {
         new VarPlace(runtime.frame, target.name),
         valueExpr,
         prepareOperand(valueExpr),
-        valueExpr.row
+        target.row
       );
     const value = share(ev(valueExpr));
     const frame = runtime.frame;
@@ -963,7 +970,8 @@ function destructuredReference(value: Value, key: Key, writable: boolean): Ref {
   return Ref.temporary(null);
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionNcss 31 -- Keeps the read and write phases of compound assignment together.
+// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the read and write phases of compound assignment together.
 export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
   const runtime = rt();
   if (e.op === '??') {
@@ -972,6 +980,7 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
     if (current !== undefined && current !== null && current !== UNDEFINED_RESULT) return current;
     const read = prepareOperand(e.value);
     const row = e.target.k === 'var' ? e.target.row : compoundWriteRow(e.target, e.value);
+    if (dimensionWritesOwnVariable(e.target, e.value)) return place.set(share(read(row)));
     return assignPlace(place, () => share(read(row)));
   }
   const place = placeOf(e.target, 'deferred');

@@ -34,3 +34,27 @@ Cannot assign string to class constant RuntimeTypedConstant::NUMBER of type int
 65:#0 /main.php(74): coercedRest('1', extra: 2, invalid: 'text')
 #1 /main.php(76): {closure:/main.php:74}()
 #2 {main}
+85:Undefined constant self::UNKNOWN
+#0 /main.php(84): [constant expression]()
+#1 /main.php(112): MissingValueDefaults->missing()
+#2 /main.php(118): {closure:/main.php:112}()
+#3 {main}
+89:Division by zero
+#0 /main.php(88): [constant expression]()
+#1 /main.php(113): MissingValueDefaults->divide()
+#2 /main.php(118): {closure:/main.php:113}()
+#3 {main}
+95:NeedsInteger::__construct(): Argument #1 ($value) must be of type int, string given, called in /main.php on line 93
+#0 /main.php(99): [constant expression]()
+#1 /main.php(93): NeedsInteger->__construct('bad')
+#2 /main.php(114): MissingValueDefaults->construct()
+#3 /main.php(118): {closure:/main.php:114}()
+#4 {main}
+103:Division by zero
+#0 /main.php(115): [constant expression]()
+#1 /main.php(118): {closure:/main.php:115}()
+#2 {main}
+107:Division by zero
+#0 /main.php(116): freeDefaultFailure()
+#1 /main.php(118): {closure:/main.php:116}()
+#2 {main}

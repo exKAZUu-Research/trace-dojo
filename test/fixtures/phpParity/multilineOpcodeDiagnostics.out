@@ -153,3 +153,41 @@ Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.p
 Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 280
 
 Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 285
+
+Warning: Undefined variable $undefinedAssignment in /main.php on line 289
+
+Warning: Undefined variable $undefinedChain in /main.php on line 292
+299:Class "MissingClass" not found
+302:Class "MissingClass" not found
+305:Class name must be a valid object or a string
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 312
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 318
+array(1) {
+  ["x"]=>
+  array(1) {
+    ["y"]=>
+    array(0) {
+    }
+  }
+}
+
+Warning: Undefined variable $missingName in /main.php on line 327
+
+Warning: Undefined variable $missingValue in /main.php on line 327
+
+Warning: Undefined variable $missingName in /main.php on line 327
+
+Warning: Undefined variable $missingOffset in /main.php on line 329
+Cannot use a scalar value as an array
+
+Warning: Undefined variable $missingOffset in /main.php on line 329
+
+Deprecated: Automatic conversion of false to array is deprecated in /main.php on line 329
+
+Warning: Undefined variable $missingOffset in /main.php on line 329
+
+Deprecated: Using null as an array offset is deprecated, use an empty string instead in /main.php on line 329
+
+Warning: Undefined variable $missingValue in /main.php on line 329

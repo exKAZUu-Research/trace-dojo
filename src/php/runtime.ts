@@ -166,6 +166,15 @@ export class Runtime {
   strictTypes = false;
   /** The 0-based row being run, which warnings and new exceptions report. */
   row = 0;
+  constantAstRow?: number;
+
+  get instructionRow(): number {
+    return this.frame.initializerOpcodeRow ?? this.row;
+  }
+
+  get diagnosticRow(): number {
+    return this.constantAstRow ?? this.instructionRow;
+  }
   /** How many `@` operators are active. */
   silence = 0;
   errorReporting = 30_719n;

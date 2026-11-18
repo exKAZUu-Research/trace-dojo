@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 959 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 973 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -48,7 +48,7 @@ import * as conversionsModule from './conversions';
 import { deprecated, throwError, type UpdateWarning, warn, withOperandWarnings, withPendingException } from './errors';
 import { acquireIterator } from './iteratorAcquisition';
 import { constantDeprecation } from './native';
-import { compiledOperandRow } from './opcodeRows';
+import { compiledOperandRow, constantAstRow } from './opcodeRows';
 import {
   bitwiseNot,
   compare,
@@ -63,7 +63,7 @@ import {
   unaryPlus,
 } from './operators';
 import { readElement, share } from './places';
-import { PhpThrow, rt } from './runtime';
+import { PhpThrow, rt, type Runtime } from './runtime';
 import { constantKey } from './statements';
 import { UnsupportedFeatureError } from './unsupported';
 import {
@@ -111,6 +111,18 @@ export function evReturn(e: Expr): Value | Ref {
 
 export function ev(e: Expr, discardResult = false): Value {
   const runtime = rt();
+  if (!runtime.frame.constantExpression || !runtime.frame.scope || e.k === 'const')
+    return evaluateValue(runtime, e, discardResult);
+  const outer = runtime.constantAstRow;
+  runtime.constantAstRow = constantAstRow(e);
+  try {
+    return evaluateValue(runtime, e, discardResult);
+  } finally {
+    runtime.constantAstRow = outer;
+  }
+}
+
+function evaluateValue(runtime: Runtime, e: Expr, discardResult: boolean): Value {
   const constant = compileTimeValue(e);
   const literals = runtime.literalArrays.get(e);
   const scope = scopedCompileTimeValues.expression.get(e) ? runtime.frame.scope : undefined;
@@ -232,14 +244,16 @@ export function evChain(e: Expr, discardResult = false): Chain {
       return keepingResult(() => {
         runtime.row = e.row;
         const cls = resolveClassRef(e.cls);
-        return instantiate(cls, () => constructorArgs(cls, e.args, e.row), e.row, runtime.frame.scope);
+        const callRow = runtime.instructionRow;
+        return instantiate(cls, () => constructorArgs(cls, e.args, callRow), callRow, runtime.frame.scope);
       });
     }
     case 'newAnon': {
       return keepingResult(() => {
         runtime.row = e.row;
         const cls = anonymousClass(e.decl, e.row);
-        return instantiate(cls, () => constructorArgs(cls, e.args, e.row), e.row, runtime.frame.scope);
+        const callRow = runtime.instructionRow;
+        return instantiate(cls, () => constructorArgs(cls, e.args, callRow), callRow, runtime.frame.scope);
       });
     }
     case 'assign': {
@@ -322,6 +336,7 @@ export function evChain(e: Expr, discardResult = false): Chain {
       const value = ev(e.e);
       if (e.cls.k === 'expr') {
         const right = ev(e.cls.e);
+        runtime.row = e.cls.e.row;
         if (right instanceof PhpObject && !right.isResource)
           return value instanceof PhpObject && !value.isResource && value.cls.isSubclassOf(right.cls);
         if (typeof right === 'string') {
@@ -928,7 +943,8 @@ export function resolveClassRef(ref: ClassRef): PhpClass {
       return requireClassScope(frame.staticClass, 'static');
     }
     case 'expr': {
-      return classOfOperand(ev(ref.e), ref.e);
+      const row = rt().row;
+      return classOfOperand(ev(ref.e), ref.e, row);
     }
   }
 }
@@ -938,12 +954,14 @@ export function resolveStaticClass(
   evaluate: (expression: Expr) => Chain = evChain
 ): PhpClass | typeof SHORT {
   if (ref.k !== 'expr') return resolveClassRef(ref);
+  const row = rt().row;
   const value = evaluate(ref.e);
-  return value === SHORT ? SHORT : classOfOperand(value, ref.e);
+  return value === SHORT ? SHORT : classOfOperand(value, ref.e, row);
 }
 
-function classOfOperand(value: Value, expression: Expr): PhpClass {
-  rt().row = expression.row;
+function classOfOperand(value: Value, expression: Expr, opcodeRow: number): PhpClass {
+  const folded = expression.k === 'lit' || (expression.k === 'bin' && expression.foldedString !== undefined);
+  rt().row = folded ? opcodeRow : expression.row;
   return classOfValue(value);
 }
 

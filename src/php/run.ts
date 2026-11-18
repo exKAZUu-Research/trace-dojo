@@ -139,9 +139,10 @@ function printUncaught(runtime: Runtime, object: PhpObject): string | undefined 
 /** Releases file-scope statics, symbol-table objects, then the remaining object handles. */
 function shutdown(runtime: Runtime): string | undefined {
   if (runtime.shuttingDown || runtime.exhausted) return undefined;
-  return guard(runtime, () => {
-    runtime.frames.length = 1;
-    releaseMainStatics(runtime);
+  runtime.frames.length = 1;
+  const staticFailure = guard(runtime, () => releaseMainStatics(runtime));
+  if (runtime.shuttingDown || runtime.exhausted) return staticFailure;
+  const objectFailure = guard(runtime, () => {
     runtime.releasingGlobalsAtShutdown = true;
     try {
       destroyGlobals(runtime);
@@ -162,6 +163,7 @@ function shutdown(runtime: Runtime): string | undefined {
     }
     runtime.shuttingDown = true;
   });
+  return objectFailure ?? staticFailure;
 }
 
 function releaseMainStatics(runtime: Runtime): void {

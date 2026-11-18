@@ -14,8 +14,11 @@ import { enumCaseName, PhpArray, type PhpClass, PhpObject, Ref, type Value } fro
 function initThrowable(object: PhpObject): undefined {
   const runtime = rt();
   object.props.set('file', SCRIPT_PATH);
-  object.props.set('line', BigInt(runtime.row + 1));
-  object.props.set(throwableKey(object, 'trace'), traceArray(callStack.toReversed()));
+  object.props.set('line', BigInt(runtime.diagnosticRow + 1));
+  const records = callStack.toReversed();
+  if (runtime.constantAstRow !== undefined && runtime.constantAstRow !== runtime.instructionRow)
+    records.unshift({ name: '[constant expression]', args: [], row: runtime.instructionRow });
+  object.props.set(throwableKey(object, 'trace'), traceArray(records));
   return undefined;
 }
 
@@ -32,9 +35,11 @@ function traceArray(records: CallRecord[]): PhpArray {
       frame.set('class', record.className);
       frame.set('type', record.type ?? '::');
     }
-    const args = PhpArray.list(callArguments(record));
-    for (const [name, value] of callNamedArguments(record)) args.set(name, value);
-    frame.set('args', args);
+    if (record.name !== '[constant expression]') {
+      const args = PhpArray.list(callArguments(record));
+      for (const [name, value] of callNamedArguments(record)) args.set(name, value);
+      frame.set('args', args);
+    }
     trace.append(frame);
   }
   return trace;

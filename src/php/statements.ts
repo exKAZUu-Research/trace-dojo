@@ -6,7 +6,7 @@ import type { Expr, FunctionDecl, Program, Stmt } from './ast';
 import { foreachReferences, nestedBodies } from './astAnalysis';
 import { lower } from './bytes';
 import { callMethod } from './callables';
-import { asInternal, callStack, invoke, setBodyRunner, setDefaultEvaluator } from './calls';
+import { asInternal, invoke, setBodyRunner, setDefaultEvaluator } from './calls';
 import {
   canDeclareEarly,
   declareClass,
@@ -755,28 +755,29 @@ function containsDefaultAllocation(node: unknown): boolean {
 
 function evaluateInitializer(expression: Expr, frame: Frame, row: number | undefined): Value {
   const outer = frame.initializerOpcodeRow;
+  const wasConstant = frame.constantExpression;
   frame.initializerOpcodeRow = row;
+  frame.constantExpression = true;
   try {
     return ev(expression);
   } finally {
     frame.initializerOpcodeRow = outer;
+    frame.constantExpression = wasConstant;
   }
 }
 
 setDefaultEvaluator(parameterDefault);
 setClassEvaluator((e, cls) => {
   const runtime = rt();
-  const trigger = runtime.row;
+  const trigger = runtime.instructionRow;
+  const previousRow = runtime.row;
   const frame = new Frame(undefined, undefined, false, undefined, cls, cls);
-  frame.constantExpression = true;
-  const trace = !runtime.frame.constantExpression && e.k !== 'const' && trigger !== e.row;
-  if (trace) callStack.push({ name: '[constant expression]', args: [], row: trigger });
   runtime.frames.push(frame);
   try {
-    return ev(e.k === 'const' ? { ...e, row: trigger } : e);
+    return evaluateInitializer(e, frame, trigger);
   } finally {
     runtime.frames.pop();
-    if (trace) callStack.pop();
+    runtime.row = previousRow;
   }
 });
 

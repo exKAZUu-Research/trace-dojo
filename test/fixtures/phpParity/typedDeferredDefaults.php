@@ -78,3 +78,45 @@ foreach ([
         echo $error->getLine(), ':', $error->getTraceAsString(), "\n";
     }
 }
+
+class MissingValueDefaults {
+    function missing(
+        $value =
+            self::UNKNOWN
+    ) {}
+    function divide(
+        $value =
+            1 /
+            0
+    ) {}
+    function construct(
+        $value =
+            new
+            NeedsInteger('bad')
+    ) {}
+}
+class NeedsInteger {
+    function __construct(int $value) {}
+}
+class ClassInitializerError {
+    const BAD =
+        1 /
+        0;
+}
+function freeDefaultFailure(
+    $value =
+        1 /
+        0
+) {}
+foreach ([
+    fn () => (new MissingValueDefaults)->missing(),
+    fn () => (new MissingValueDefaults)->divide(),
+    fn () => (new MissingValueDefaults)->construct(),
+    fn () => ClassInitializerError::BAD,
+    fn () => freeDefaultFailure(),
+] as $call) {
+    try { $call(); }
+    catch (Throwable $error) {
+        echo $error->getLine(), ':', $error->getMessage(), "\n", $error->getTraceAsString(), "\n";
+    }
+}

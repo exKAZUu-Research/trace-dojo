@@ -52,7 +52,7 @@ export type Expr = { row: number } & (
   | { k: 'idx'; base: Expr; index?: Expr }
   | { k: 'prop'; obj: Expr; name: string | Expr; nullsafe: boolean }
   | { k: 'sprop'; cls: ClassRef; name: string | Expr }
-  | { k: 'cconst'; cls: ClassRef; name: string | Expr; className?: true | 'initializer' }
+  | { k: 'cconst'; cls: ClassRef; name: string | Expr; className?: true | 'initializer'; scopeRow?: number }
   | { k: 'const'; name: ResolvedName }
   | { k: 'magic'; name: '__CLASS__' | '__FUNCTION__' | '__METHOD__' | '__TRAIT__' }
   | { k: 'call'; fn: ResolvedName | Expr; args: Arg[]; fcc: boolean; initRow?: number }

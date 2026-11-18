@@ -54,3 +54,21 @@ foreach (['True', 'fAlSe', 'NULL', '\true', '\FALSE', '\null', 'Lesson\TRUE'] as
     if (defined($spelling)) var_dump(constant($spelling));
 }
 var_dump(define('\true', 5), constant(str_repeat(chr(92), 2) . 'true'), constant('\true'));
+
+namespace LiteralSource;
+const YES = 7;
+const NO = 0;
+const EMPTY_STRING = 'aliased null';
+
+namespace LiteralUser;
+use const LiteralSource\{YES as true, NO as FALSE};
+use LiteralSource\{const EMPTY_STRING as null};
+function literalAliasDefault(int $value = true) { var_dump($value); }
+var_dump(true, TRUE, false, FALSE, null, NULL, \true);
+literalAliasDefault();
+const IMPORTED = true;
+class ImportedLiteral {
+    const CHOICE = FALSE;
+    public $value = null;
+}
+var_dump(IMPORTED, ImportedLiteral::CHOICE, (new ImportedLiteral)->value);

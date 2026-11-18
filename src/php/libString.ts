@@ -10,7 +10,7 @@ import { debugType, valueName } from './conversions';
 import { deprecated, throwError, warn } from './errors';
 import { decodeHtml, escapeHtml, nextChar, translationTable } from './htmlEntities';
 import { writeStream } from './libCore';
-import { ctypeUpper, isCtypeAlpha, isUtf8Ctype } from './libLocale';
+import { ctypeUpper, isCtypeAlpha, isCtypeSpace, isUtf8Ctype } from './libLocale';
 import { defineAlias, defineConstant, defineFunction, defineOverloadedFunction, markInlined } from './native';
 import { toInt, toStr, withStringConversionErrors } from './operators';
 import { rt } from './runtime';
@@ -444,10 +444,6 @@ function isDigit(code: number): boolean {
   return code >= 48 && code <= 57;
 }
 
-function isSpace(code: number): boolean {
-  return code === 32 || (code >= 9 && code <= 13);
-}
-
 /** Compares two runs of digits that start with a zero as fractions: the first different digit decides. */
 function compareLeft(a: string, ap: number, b: string, bp: number): { result: number; ap: number; bp: number } {
   for (; ; ap++, bp++) {
@@ -496,11 +492,11 @@ export function naturalCompare(a: string, b: string, insensitive: boolean): numb
       cb = byteAt(b, ++bp);
     }
     leading = false;
-    while (isSpace(ca)) {
+    while (isCtypeSpace(ca)) {
       rt().spend();
       ca = byteAt(a, ++ap);
     }
-    while (isSpace(cb)) {
+    while (isCtypeSpace(cb)) {
       rt().spend();
       cb = byteAt(b, ++bp);
     }
@@ -515,8 +511,8 @@ export function naturalCompare(a: string, b: string, insensitive: boolean): numb
       cb = byteAt(b, bp);
     }
     if (insensitive) {
-      ca = upper(String.fromCharCode(ca)).charCodeAt(0);
-      cb = upper(String.fromCharCode(cb)).charCodeAt(0);
+      ca = ctypeUpper(String.fromCharCode(ca)).charCodeAt(0);
+      cb = ctypeUpper(String.fromCharCode(cb)).charCodeAt(0);
     }
     if (ca < cb) return -1;
     if (ca > cb) return 1;

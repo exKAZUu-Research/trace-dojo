@@ -1,5 +1,37 @@
 import type { Expr } from './ast';
 
+export function constantAstRow(expression: Expr): number {
+  for (;;) {
+    switch (expression.k) {
+      case 'bin': {
+        expression = expression.l;
+        break;
+      }
+      case 'cond': {
+        expression = expression.test;
+        break;
+      }
+      case 'idx': {
+        expression = expression.base;
+        break;
+      }
+      case 'prop': {
+        expression = expression.obj;
+        break;
+      }
+      case 'array': {
+        return expression.initializerRow ?? expression.row;
+      }
+      case 'cconst': {
+        return expression.scopeRow ?? expression.row;
+      }
+      default: {
+        return expression.row;
+      }
+    }
+  }
+}
+
 export function compiledOperandRow(expression: Expr): number {
   for (;;) {
     const last = lastCompiledOperand(expression);

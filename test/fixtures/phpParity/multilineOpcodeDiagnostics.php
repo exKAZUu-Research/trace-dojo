@@ -285,3 +285,47 @@ $array = [
         PHP_EOL .
         "a"
 ];
+
+$plain =
+    $undefinedAssignment;
+$first =
+    $second =
+        $undefinedChain;
+
+$invalidClassName = 1;
+foreach ([
+    fn () => ('Missing'
+        . 'Class')
+        ::$value,
+    fn () => ('MissingClass'
+        )
+        ::$value,
+    fn () => new stdClass
+        instanceof
+        $invalidClassName,
+] as $read) {
+    try { $read(); }
+    catch (Error $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }
+}
+$array = [
+    1.5 =>
+        [1]
+        [0]
+        + 1
+];
+$array = [
+    1.5 =>
+        "a"
+        [0]
+        [0]
+];
+
+$array = [];
+$array['x']['y'] ??= $array;
+var_dump($array);
+$object = new stdClass;
+$object->{$missingName} ??= $missingValue;
+foreach ([1, false] as $scalar) {
+    try { $scalar[$missingOffset] ??= $missingValue; }
+    catch (Error $error) { echo $error->getMessage(), "\n"; }
+}
