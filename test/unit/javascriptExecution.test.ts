@@ -1579,6 +1579,12 @@ for (const f of [() => o.a(), () => o.b(), () => o.\\u{63}(), () => o?.d(), () =
 }`,
   ],
   [
+    'collection tables ignore the selection',
+    `console.table(new Map([["a", 1]]), [{ toString() { console.log("side effect"); return "x"; } }]);
+console.table(new Set([1]), [{ toString() { console.log("side effect"); return "x"; } }]);
+console.table(new Map([["a", 1]]).entries(), [{ toString() { console.log("side effect"); return "x"; } }]);`,
+  ],
+  [
     'console.table selections converted at each use',
     `const s = Symbol("x");
 console.table([{ a: 1, [s]: 2 }], [s, "a"]);
