@@ -213,7 +213,13 @@ const m${index}: keyof Partial<M${index}> = "0000";`
   expect(executeProgram('typescript', heavyTypes)).toMatchObject({ kind: 'limitExceeded' });
 });
 
-test('nested loops are checked once per loop, not once per pass of every enclosing loop', () => {
+test('template literal types that double their text stop at the type-checking budget', () => {
+  const aliases = Array.from({ length: 24 }, (_, index) => `type A${index + 1} = \`\${A${index}}\${A${index}}\`;`);
+  const source = `type A0 = "x";\n${aliases.join('\n')}\nconst value: A24 = "x";`;
+  expect(executeProgram('typescript', source)).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('nested loops are checked once per loop,not once per pass of every enclosing loop', () => {
   const depth = 40;
   const loops = Array.from({ length: depth }, (_, index) => `for (let i${index} = 0; i${index} < 1; i${index}++) {`);
   const source = `let x: number | string = 1;\n${loops.join('\n')}\nx = x === 1 ? "a" : 1;\n${'}'.repeat(depth)}\nconsole.log(x);`;

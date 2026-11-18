@@ -34,7 +34,11 @@ export class Printer {
     if (this.depth > 4) return '...';
     this.depth++;
     try {
-      return this.printType(type);
+      const printed = this.printType(type);
+      // As TypeScript's `typeToString`, a whole printed type is cut short at twice its length limit.
+      return this.depth === 1 && printed.length >= MAX_PRINTED_LENGTH * 2
+        ? `${printed.slice(0, MAX_PRINTED_LENGTH * 2 - 3)}...`
+        : printed;
     } finally {
       this.depth--;
     }

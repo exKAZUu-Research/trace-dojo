@@ -5,11 +5,13 @@ import { conditionalBranch, isGenericObjectOrIndexType, mappedOptionality } from
 import { applicableIndex, isPatternKey } from './indexInfos';
 import { printedPropertyName } from './print';
 import { named, templateFragmentText } from './syntax';
-import { appendEach, isSpelledLiteral, placeholderTemplate, splicedSpans } from './templateSpans';
+import { literalCombinations, mapText, placeholderTemplate, splicedSpans, type StringMapping } from './templateSpans';
 import { tupleElementBeyond } from './tupleIndexes';
 import {
   anonymousObject,
   anyType,
+  bigintType,
+  booleanType,
   type ConditionalType,
   emptyStructure,
   errorType,
@@ -22,6 +24,7 @@ import {
   type MappedInfo,
   neverType,
   newTypeId,
+  nullType,
   numberType,
   type ObjectType,
   type Property,
@@ -34,6 +37,17 @@ import {
   unionOf,
   unknownType,
 } from './types';
+
+const propertyKeys = unionOf([stringType, numberType, symbolType]);
+/** The types TypeScript's `templateConstraintType` allows in a template literal type's placeholder. */
+const templatePlaceholders = unionOf([stringType, numberType, bigintType, booleanType, nullType, undefinedType]);
+/** The type parameter `S extends string` that the declarations of `Uppercase<S>` and its kin take. */
+const stringMappingParameter: TypeParameter = {
+  kind: 'typeParameter',
+  id: newTypeId(),
+  name: 'S',
+  constraint: () => stringType,
+};
 
 /** Resolves the type operators: `keyof`, indexed access, conditional, mapped, and template literal types. */
 export class TypeOperators {
@@ -166,35 +180,46 @@ export class TypeOperators {
 
   mappedTypeFromNode(signature: TreeNode): Type {
     const clause = signature.namedChildren.find((child) => child?.type === 'mapped_type_clause') as TreeNode;
-    const parameter = this.mappedParameterOf(clause);
     const constraintNode = clause.childForFieldName('type');
     const aliasNode = clause.childForFieldName('alias');
     const typeNode = signature.childForFieldName('type');
-    const tokens = signature.children.filter((child) => child !== null && !child.isNamed).map((child) => child?.type);
-    const readonlyIndex = tokens.indexOf('readonly');
-    const readonlyModifier = readonlyIndex === -1 ? undefined : tokens[readonlyIndex - 1] === '-' ? '-' : '+';
-    let optionalModifier: '+' | '-' | undefined;
-    if (typeNode?.type === 'omitting_type_annotation') optionalModifier = '-';
-    else if (typeNode?.type === 'adding_type_annotation' || typeNode?.type === 'opting_type_annotation')
-      optionalModifier = '+';
     const constraint = constraintNode ? this.c.typeNodes.typeFromNode(constraintNode) : neverType;
-    let source: Type | undefined;
-    if (constraintNode?.type === 'index_type_query') source = this.c.typeNodes.typeFromNode(named(constraintNode)[0]);
-    else if (constraint.kind === 'typeParameter') {
-      const outer = constraint.constraint?.();
-      if (outer?.kind === 'keyof') source = outer.type;
-    }
+    const nameType = aliasNode ? this.c.typeNodes.typeFromNode(aliasNode) : undefined;
+    // As TypeScript's `checkMappedType`, a name type, or else the keys, must be property keys.
+    const keysNode = aliasNode ?? constraintNode;
+    if (keysNode) this.reportUnlessAssignable(keysNode, nameType ?? constraint, propertyKeys);
     const checker = this.c;
     return this.mappedType({
-      typeParameter: parameter,
-      source,
+      typeParameter: this.mappedParameterOf(clause),
+      source: this.homomorphicSource(constraintNode, constraint),
       constraint,
-      nameType: aliasNode ? this.c.typeNodes.typeFromNode(aliasNode) : undefined,
+      nameType,
       get template() {
         return checker.typeNodes.annotationType(typeNode) ?? anyType;
       },
-      readonlyModifier,
-      optionalModifier,
+      ...mappedModifiers(signature, typeNode),
+    });
+  }
+
+  /** The type whose keys a mapped type maps: `T` for keys `keyof T` or a type parameter constrained to them. */
+  private homomorphicSource(constraintNode: TreeNode | null, constraint: Type): Type | undefined {
+    if (constraintNode?.type === 'index_type_query') return this.c.typeNodes.typeFromNode(named(constraintNode)[0]);
+    if (constraint.kind !== 'typeParameter') return undefined;
+    const outer = constraint.constraint?.();
+    return outer?.kind === 'keyof' ? outer.type : undefined;
+  }
+
+  /**
+   * Reports a type written at `node` that is not assignable to `target`, once the types being resolved are complete, and
+   * even while a check that resolves it on demand is silent, as TypeScript checks every type node.
+   */
+  private reportUnlessAssignable(node: TreeNode, type: Type, target: Type): void {
+    this.c.typeNodes.interfaceBases.afterResolving(() => {
+      if (this.c.relations.isAssignable(type, target)) return;
+      this.c.errorWhileResolving(
+        node,
+        `型 '${this.c.print(type)}' を型 '${this.c.print(target)}' に代入することはできません。`
+      );
     });
   }
 
@@ -556,7 +581,10 @@ export class TypeOperators {
     for (const child of node.namedChildren) {
       if (!child) continue;
       if (child.type === 'template_type') {
-        types.push(this.c.typeNodes.typeFromNode(named(child)[0]));
+        const placeholder = this.c.typeNodes.typeFromNode(named(child)[0]);
+        // As TypeScript's `checkTemplateLiteralType`, each placeholder must be a type a template can spell.
+        this.reportUnlessAssignable(named(child)[0], placeholder, templatePlaceholders);
+        types.push(placeholder);
         texts.push('');
       } else {
         texts[texts.length - 1] += templateFragmentText(child);
@@ -566,7 +594,7 @@ export class TypeOperators {
   }
 
   templateLiteral(spelledTexts: string[], spelledTypes: Type[], node?: TreeNode): Type {
-    const { texts, types } = splicedSpans(spelledTexts, spelledTypes);
+    const { texts, types } = splicedSpans(spelledTexts, spelledTypes, this.c.budget);
     // Each union expands into one literal per member, up to the size TypeScript represents.
     const size = types.reduce((product, type) => product * (type.kind === 'union' ? type.types.length : 1), 1);
     if (size >= 100_000) {
@@ -574,7 +602,7 @@ export class TypeOperators {
       return errorType;
     }
     if (types.some((type) => isIntrinsic(type, 'never'))) return neverType;
-    const combinations = this.literalCombinations(texts, types);
+    const combinations = literalCombinations(texts, types, this.c.budget);
     if (combinations) return unionOf(combinations.map((text) => literalType(text)));
     const union = types.find((type) => type.kind === 'union');
     if (union?.kind === 'union')
@@ -586,34 +614,31 @@ export class TypeOperators {
     return placeholderTemplate(texts, types);
   }
 
-  /** The strings a template spells when each placeholder is a literal or a union of them, else `undefined`. */
-  private literalCombinations(texts: string[], types: Type[]): string[] | undefined {
-    let combinations: string[] = [texts[0]];
-    for (const [index, type] of types.entries()) {
-      const members = type.kind === 'union' ? type.types : [type];
-      if (!members.every(isSpelledLiteral)) return undefined;
-      this.c.budget.spend(combinations.length * members.length);
-      combinations = appendEach(combinations, members, texts[index + 1]);
-    }
-    return combinations;
+  /** `Uppercase<T>` and its kin written at `node`, whose argument must be a string as their declarations constrain it. */
+  stringMappingFromNode(node: TreeNode, mapping: StringMapping, argument: Type): Type {
+    this.c.typeNodes.interfaceBases.afterResolving(() =>
+      this.c.typeNodes.checkTypeArgumentConstraints(node, [stringMappingParameter], [argument])
+    );
+    return this.stringMapping(mapping, argument);
   }
 
   /** `Uppercase<T>` and its kin, which TypeScript pushes into a template literal's texts and placeholders. */
   stringMapping(mapping: StringMapping, type: Type): Type {
     if (type.kind === 'union') return unionOf(type.types.map((member) => this.stringMapping(mapping, member)));
-    if (type.kind === 'literal' && typeof type.value === 'string') return literalType(mapText(mapping, type.value));
+    if (type.kind === 'literal' && typeof type.value === 'string')
+      return literalType(mapText(this.c.budget, mapping, type.value));
     if (type.kind === 'templateLiteral') {
       const { texts, types } = type;
       if (mapping === 'Uppercase' || mapping === 'Lowercase') {
         return this.templateLiteral(
-          texts.map((text) => mapText(mapping, text)),
+          texts.map((text) => mapText(this.c.budget, mapping, text)),
           types.map((member) => this.stringMapping(mapping, member))
         );
       }
       // Capitalizing changes only the first character, which the first text or else the first placeholder holds.
       return texts[0] === ''
         ? this.templateLiteral(texts, [this.stringMapping(mapping, types[0]), ...types.slice(1)])
-        : this.templateLiteral([mapText(mapping, texts[0]), ...texts.slice(1)], types);
+        : this.templateLiteral([mapText(this.c.budget, mapping, texts[0]), ...texts.slice(1)], types);
     }
     if (type.kind === 'stringMapping' && type.mapping === mapping) return type;
     if (isAnyLike(type)) return type;
@@ -624,23 +649,17 @@ export class TypeOperators {
   }
 }
 
-type StringMapping = 'Uppercase' | 'Lowercase' | 'Capitalize' | 'Uncapitalize';
-
-function mapText(mapping: StringMapping, text: string): string {
-  switch (mapping) {
-    case 'Uppercase': {
-      return text.toUpperCase();
-    }
-    case 'Lowercase': {
-      return text.toLowerCase();
-    }
-    case 'Capitalize': {
-      return text.charAt(0).toUpperCase() + text.slice(1);
-    }
-    default: {
-      return text.charAt(0).toLowerCase() + text.slice(1);
-    }
-  }
+/** The `readonly` and `?` modifiers that a mapped type's signature adds (`+`) or removes (`-`). */
+function mappedModifiers(
+  signature: TreeNode,
+  typeNode: TreeNode | null
+): Pick<MappedInfo, 'readonlyModifier' | 'optionalModifier'> {
+  const tokens = signature.children.filter((child) => child !== null && !child.isNamed).map((child) => child?.type);
+  const readonlyIndex = tokens.indexOf('readonly');
+  const readonlyModifier = readonlyIndex === -1 ? undefined : tokens[readonlyIndex - 1] === '-' ? '-' : '+';
+  if (typeNode?.type === 'omitting_type_annotation') return { readonlyModifier, optionalModifier: '-' };
+  const adds = typeNode?.type === 'adding_type_annotation' || typeNode?.type === 'opting_type_annotation';
+  return { readonlyModifier, optionalModifier: adds ? '+' : undefined };
 }
 
 /** A modified property's flag: `+` sets it, `-` clears it, and no modifier keeps the source's. */

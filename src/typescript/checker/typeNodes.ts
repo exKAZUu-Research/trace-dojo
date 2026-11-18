@@ -390,11 +390,9 @@ export class TypeNodes {
       typeArguments.length === 1 &&
       !this.c.scopeOf(nameNode).lookupType(name)?.typeDeclarations.length
     )
-      return this.c.typeOperators.stringMapping(name as 'Uppercase', typeArguments[0]);
+      return this.c.typeOperators.stringMappingFromNode(node, name as 'Uppercase', typeArguments[0]);
     const symbol = this.c.scopeOf(nameNode).lookupType(name);
     if (!symbol) {
-      if (stringMappings.has(name) && typeArguments.length === 1)
-        return this.c.typeOperators.stringMapping(name as 'Uppercase', typeArguments[0]);
       const value = this.c.scopeOf(nameNode).lookupValue(name);
       this.c.error(
         nameNode,

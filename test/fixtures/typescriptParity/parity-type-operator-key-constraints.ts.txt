@@ -1,0 +1,22 @@
+const tag = Symbol("tag");
+class Tagged { [k: symbol]: number; [tag] = 1; }
+interface Box { [k: symbol]: number | string; [tag]: number; }
+type Getters<T> = { [K in keyof T as `get${Capitalize<string & K>}`]: () => T[K] };
+type WithoutA<T> = { [P in keyof T as Exclude<P, "a">]: T[P] };
+type Methods<T> = { [P in keyof T as T[P] extends Function ? P : never]: T[P] };
+type Join<T extends unknown[]> = T extends [infer F extends string, ...infer R] ? `${F}${Join<R>}` : "";
+type Dot<A extends string, B extends number | bigint | boolean | null | undefined> = `${A}.${B}`;
+type Keys<T> = `x${keyof T & string}`;
+type Loud<T extends string> = Uppercase<`${T}!`>;
+type Calm<T> = Lowercase<T & string>;
+const getters: Getters<{ name: string; age: number }> = { getName: () => "Ada", getAge: () => 36 };
+const rest: WithoutA<{ a: 1; b: 2 }> = { b: 2 };
+const methods: Methods<{ run(): string; size: number }> = { run: () => "ran" };
+const joined: Join<["a", "b", "c"]> = "abc";
+const dotted: Dot<"v", 1> = "v.1";
+const key: Keys<{ id: 1 }> = "xid";
+const loud: Loud<"hi"> = "HI!";
+const calm: Calm<"QUIET"> = "quiet";
+const box: Box = { [tag]: 2 };
+console.log(new Tagged()[tag], box[tag], getters.getName(), getters.getAge(), rest.b, methods.run());
+console.log(joined, dotted, key, loud, calm);

@@ -319,6 +319,9 @@ export class Relations {
       return true;
     if (t === booleanType && s.kind === 'literal' && typeof s.value === 'boolean') return true;
     if (t.types.some((member) => this.isRelated(s, member, relation))) return true;
+    // Another generic type is related to a union its constraint is related to as a whole, as `keyof T` is to `PropertyKey`.
+    if (s.kind === 'indexedAccess' || s.kind === 'keyof' || s.kind === 'conditional')
+      return this.genericSourceRelated(s, t, relation);
     // An object can be assignable to a union of objects only as a whole, as a discriminated one is.
     return s.kind === 'object' && this.isRelatedToDiscriminatedUnion(s, t.types, relation);
   }
