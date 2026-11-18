@@ -1,9 +1,10 @@
-// code-gauge-allow-file fileNcss 434 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 453 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
 import type { Checker, Mapper, UnionAlias } from './checker';
 import { BROWSER_INTERFACES } from './domGlobals';
+import { isGenericObjectOrIndexType } from './genericTypes';
 import { IndexedAccessKeys } from './indexedAccessKeys';
 import { isPatternKey, isSameKeyType } from './indexInfos';
 import { InterfaceBases } from './interfaceBases';
@@ -570,8 +571,8 @@ export class TypeNodes {
   }
 
   /**
-   * Adds the index signature of each key type an index signature declares, as `[k: string | symbol]` declares two,
-   * unless an earlier one declares it.
+   * Adds the index signature of each valid key type an index signature declares, as `[k: string | symbol]` declares
+   * two, unless an earlier one declares it.
    */
   addIndexSignature(structure: Structure, member: TreeNode): void {
     if (isMappedMember(member)) {
@@ -586,13 +587,10 @@ export class TypeNodes {
       readonly: member.children.some((child) => child?.type === 'readonly'),
     };
     const keyType = indexType ? this.typeFromNode(indexType) : stringType;
-    for (const key of keyType.kind === 'union' ? keyType.types : [keyType]) {
-      if (isIntrinsic(key, 'number')) structure.numberIndex ??= info;
-      else if (isIntrinsic(key, 'symbol')) structure.symbolIndex ??= info;
-      else if (!isPatternKey(key)) structure.stringIndex ??= info;
-      else if (!structure.patternIndexes?.some((existing) => isSameKeyType(existing.keyType, key)))
-        structure.patternIndexes = [...(structure.patternIndexes ?? []), { ...info, keyType: key }];
-    }
+    const keyError = indexKeyTypeError(keyType);
+    if (keyError) this.c.errorWhileResolving(member.childForFieldName('name') ?? member, keyError);
+    for (const key of keyType.kind === 'union' ? keyType.types : [keyType])
+      if (isValidIndexKeyType(key)) addIndexInfo(structure, key, info);
   }
 
   /** The name of a member, which a computed key gives by its literal type, as a constant's. */
@@ -737,6 +735,32 @@ export class TypeNodes {
 }
 
 const mappedTypeMembersMessage = 'マップ型には、プロパティやメソッドを宣言できません。';
+
+function addIndexInfo(structure: Structure, key: Type, info: IndexInfo): void {
+  if (isIntrinsic(key, 'number')) structure.numberIndex ??= info;
+  else if (isIntrinsic(key, 'symbol')) structure.symbolIndex ??= info;
+  else if (!isPatternKey(key)) structure.stringIndex ??= info;
+  else if (!structure.patternIndexes?.some((existing) => isSameKeyType(existing.keyType, key)))
+    structure.patternIndexes = [...(structure.patternIndexes ?? []), { ...info, keyType: key }];
+}
+
+/** The grammar error TypeScript reports on an index signature's key type, which only valid key types escape. */
+function indexKeyTypeError(keyType: Type): string | undefined {
+  const keys = keyType.kind === 'union' ? keyType.types : [keyType];
+  const literal = keys.some((key) => key.kind === 'literal' && typeof key.value !== 'boolean');
+  if (literal || isGenericObjectOrIndexType(keyType))
+    return 'インデックスシグネチャの引数の型に、リテラル型やジェネリック型は使えません。マップ型を使ってください。';
+  if (!keys.every((key) => isValidIndexKeyType(key)))
+    return "インデックスシグネチャの引数の型は、'string'、'number'、'symbol'、テンプレートリテラル型のいずれかでなければいけません。";
+  return undefined;
+}
+
+/** As TypeScript's `isValidIndexKeyType`, whether an index signature may have a key type. */
+function isValidIndexKeyType(key: Type): boolean {
+  if (isIntrinsic(key, 'string') || isIntrinsic(key, 'number') || isIntrinsic(key, 'symbol') || isPatternKey(key))
+    return true;
+  return key.kind === 'intersection' && !isGenericObjectOrIndexType(key) && key.types.some(isValidIndexKeyType);
+}
 
 function isIndexSignature(member: TreeNode): boolean {
   return member.type === 'index_signature';
