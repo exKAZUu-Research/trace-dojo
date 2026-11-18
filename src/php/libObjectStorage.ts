@@ -88,7 +88,7 @@ class ObjectStorage {
   }
 
   unsetOffset(value: Value): void {
-    if (this.hashKeys || !(value instanceof PhpObject) || value.isResource) {
+    if (this.holder.cls.lname !== 'splobjectstorage' || !(value instanceof PhpObject) || value.isResource) {
       callMethod(this.holder, 'offsetUnset', [value], rt().row);
       return;
     }

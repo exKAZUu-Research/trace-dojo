@@ -605,6 +605,15 @@ test('retains participating empty captures', () => {
   });
 });
 
+test('preserves PHP stdout bytes alongside decoded text for malformed UTF-8', () => {
+  const result = run('<?php echo "prefix ", chr(206), chr(177), "|", chr(128), strrev("aα"), "|", chr(200);');
+  expect(result).toMatchObject({
+    kind: 'executed',
+    stdout: 'prefix α|���a|�',
+    stdoutBytes: Uint8Array.of(112, 114, 101, 102, 105, 120, 32, 206, 177, 124, 128, 177, 206, 97, 124, 200),
+  });
+});
+
 test('object allocation and destructor bookkeeping stay within learner budgets', () => {
   vi.restoreAllMocks();
   expect(run('<?php class P{public $x=1;}$s=0;for($i=0;$i<30000;$i++){$q=new P;$s+=$q->x;}echo $s;')).toMatchObject({

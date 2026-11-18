@@ -27,3 +27,14 @@ $inner = $fixed->getIterator();
 var_dump(spl_object_id($inner), iterator_to_array($inner));
 unset($inner);
 printFreshHandle();
+
+foreach ([false, true] as $proceed) {
+    $applying = new ArrayIterator([1, 2]);
+    echo iterator_apply($applying, fn () => $proceed), ':';
+    printFreshHandle();
+    unset($applying);
+}
+try {
+    iterator_apply(new ArrayIterator([1, 2]), function () { throw new Exception('stop'); });
+} catch (Exception $error) { echo $error->getMessage(), "\n"; }
+printFreshHandle();

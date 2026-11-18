@@ -6,7 +6,7 @@ import { StepTracker } from '../interpreter/stepTracker';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import type { Expr, FunctionDecl, Program } from './ast';
 import { collectScopeVars } from './astAnalysis';
-import { dec } from './bytes';
+import { dec, enc, stringToBytes } from './bytes';
 import type { CompileNotice } from './converter';
 import { arrayIsShared, collectGarbage, GC_THRESHOLD_DEFAULT, releaseDropped } from './garbage';
 import { GcRoots } from './gcRoots';
@@ -188,6 +188,7 @@ export class Runtime {
   releasingGlobalsAtShutdown = false;
   assignmentWarning?: { frame: Frame; exception: PhpThrow };
   exhausted = false;
+  private rawOutput?: string;
   private pendingOutput = '';
   /** The classes a program declared, in declaration order, whose static properties the trace shows. */
   readonly userClasses: PhpClass[] = [];
@@ -399,12 +400,25 @@ export class Runtime {
     const text = this.pendingOutput + bytes;
     const cut = completePrefix(text);
     this.pendingOutput = text.slice(cut);
-    if (cut > 0) this.io.stdout.write(dec(text.slice(0, cut)));
+    if (cut > 0) this.writeOutput(text.slice(0, cut));
   }
 
   flush(): void {
-    if (this.pendingOutput) this.io.stdout.write(dec(this.pendingOutput));
+    if (this.pendingOutput) this.writeOutput(this.pendingOutput);
     this.pendingOutput = '';
+  }
+
+  get stdoutBytes(): Uint8Array | undefined {
+    return this.rawOutput === undefined ? undefined : stringToBytes(this.rawOutput);
+  }
+
+  private writeOutput(bytes: string): void {
+    const channel = this.io.stdout;
+    if (channel.isClosed) return;
+    const text = dec(bytes);
+    if (this.rawOutput !== undefined || (text.includes('�') && enc(text) !== bytes))
+      this.rawOutput = (this.rawOutput ?? enc(channel.text)) + bytes;
+    channel.write(text);
   }
 
   /** Writes to standard error, which the grader accepts without showing. */

@@ -52,11 +52,13 @@ export function runProgram(runtime: Runtime, parsed: ParsedProgram, onEnd?: (fra
     } finally {
       runtime.flush();
     }
+    const stdoutBytes = runtime.stdoutBytes;
     return {
       finalBoard: runtime.world.boardText(),
       finalTurtles: runtime.world.turtleTraces(true),
       uncaughtException,
       ...runtime.io.output(),
+      ...(stdoutBytes === undefined ? {} : { stdoutBytes }),
     };
   });
 }

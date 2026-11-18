@@ -183,6 +183,7 @@ function inherit(cls: PhpClass, parent: PhpClass): void {
   for (const [name, constant] of parent.consts) cls.consts.set(name, constant);
   cls.createInternal = parent.createInternal;
   cls.compare = parent.compare;
+  cls.isCloneable = parent.isCloneable;
 }
 
 function propertyKey(cls: PhpClass, name: string, visibility: Visibility): string {

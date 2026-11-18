@@ -167,7 +167,6 @@ function buildClass(definition: ClassDefinition): PhpClass {
   const cls = new PhpClass(definition.name, definition.kind ?? 'class');
   cls.isAbstract = definition.isAbstract ?? false;
   cls.isFinal = definition.isFinal ?? false;
-  cls.isCloneable = definition.isCloneable ?? true;
   if (definition.parent) {
     const parent = runtime.classes.get(lower(definition.parent));
     if (!parent) throw new Error(`Unknown builtin parent ${definition.parent}`);
@@ -177,6 +176,7 @@ function buildClass(definition: ClassDefinition): PhpClass {
     for (const [name, constant] of parent.consts) cls.consts.set(name, constant);
     cls.createInternal = parent.createInternal;
   }
+  cls.isCloneable = definition.isCloneable ?? cls.parent?.isCloneable ?? true;
   // A builtin class lists every interface it implements in PHP's order; a subclass without any inherits them reversed.
   for (const name of definition.interfaces ?? []) {
     const iface = runtime.classes.get(lower(name));

@@ -75,7 +75,9 @@ foreach ([Exception::class, Error::class] as $kind) {
     unset($source);
 }
 
-foreach ([new SplObjectStorage, new HashCallbacks] as $dimension) {
+class InheritsHash extends SplObjectStorage {}
+class InheritsUnset extends InheritsHash {}
+foreach ([new SplObjectStorage, new InheritsHash, new InheritsUnset, new HashCallbacks] as $dimension) {
     foreach ([false, true] as $fail) {
         $one = (object)['id' => 1];
         $two = (object)['id' => 2];

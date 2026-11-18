@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 961 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 978 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { withCleanupExceptions, withPendingException } from './errors';
 import { type Frame, PhpThrow, type Runtime } from './runtime';
@@ -293,8 +293,7 @@ function releaseDroppedNow(runtime: Runtime, dropped: unknown[], fromNative: boo
     return;
   }
   const release = new Release(runtime, freed, roots, fromNative);
-  const active = [...freed];
-  for (const object of active) activeReleaseObjects.set(object, release);
+  const active = release.active;
   releasing++;
   let failure: unknown;
   let failed = false;
@@ -329,6 +328,7 @@ class ReleaseFinish {
 }
 
 class Release {
+  readonly active: PhpObject[] = [];
   private readonly visited = new Set<PhpObject>();
   private readonly visitedArrays = new Set<PhpArray>();
   private unreachable = new Set<object>();
@@ -339,7 +339,9 @@ class Release {
     private readonly freed: Set<PhpObject>,
     private roots: Set<unknown>,
     private readonly fromNative: boolean
-  ) {}
+  ) {
+    for (const object of freed) this.track(object);
+  }
 
   values(values: unknown[]): void {
     const pending: unknown[] = [];
@@ -441,11 +443,15 @@ class Release {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Release eligibility and resurrection use the same ownership state.
+  // code-gauge-allow functionNcss 32 -- Runs one destructor and resolves its effects before releasing its children.
   private prepare(object: PhpObject, onFailure: (error: PhpThrow) => void): ReleaseFinish | undefined {
-    if (!this.freed.has(object) || this.visited.has(object) || this.runtime.objects.get(object.id) !== object)
-      return undefined;
+    if (this.visited.has(object) || this.runtime.objects.get(object.id) !== object) return undefined;
     if (ownedReachable(object, this.roots, this.runtime, this.unreachable, this.retainedBefore)) return undefined;
+    if (!this.freed.has(object)) {
+      this.addDetachedDescendants(object);
+      if (!this.freed.has(object)) return undefined;
+    }
     this.visited.add(object);
     pendingReleaseObjects.set(object, ++releaseSequence);
     if (!object.destructed && object.cls.findMethod('__destruct')) {
@@ -472,6 +478,22 @@ class Release {
       }
     }
     return new ReleaseFinish(object);
+  }
+
+  private addDetachedDescendants(root: PhpObject): void {
+    const detached = (value: Ref | PhpArray | PhpObject): boolean =>
+      !ownedReachable(value, this.roots, this.runtime, this.unreachable, this.retainedBefore);
+    const garbage = objectsWithin([root], detached);
+    for (const object of freeable(garbage, this.runtime, detached)) {
+      this.freed.add(object);
+      this.track(object);
+    }
+    for (const object of garbage) if (!this.freed.has(object)) this.runtime.objectCycles.add(object);
+  }
+
+  private track(object: PhpObject): void {
+    this.active.push(object);
+    activeReleaseObjects.set(object, this);
   }
 
   private revived(changes: OwnershipChange[], roots: Set<unknown>): boolean {

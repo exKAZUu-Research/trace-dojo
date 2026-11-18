@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 698 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 699 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -1076,7 +1076,8 @@ function splitParams(text: string): string[] {
 
 export function parseTypeText(text: string): TypeDecl {
   if (text.includes('|')) return { k: 'union', types: text.split('|').map((part) => parseTypeText(part)) };
-  if (text.startsWith('?')) return { k: 'named', name: lower(text.slice(1)), nullable: true };
+  const nullable = text.startsWith('?');
+  const name = nullable ? text.slice(1) : text;
   const builtin = [
     'int',
     'float',
@@ -1095,7 +1096,8 @@ export function parseTypeText(text: string): TypeDecl {
     'static',
     'self',
   ];
-  return { k: 'named', name: builtin.includes(lower(text)) ? lower(text) : text };
+  const normalized = lower(name);
+  return { k: 'named', name: builtin.includes(normalized) ? normalized : name, nullable: nullable || undefined };
 }
 
 export function closureFunction(decl: FunctionDecl): UserFunction {

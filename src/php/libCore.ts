@@ -27,6 +27,7 @@ import {
   emitError,
   throwError,
   warn,
+  withPendingException,
 } from './errors';
 import { traceLine } from './exceptions';
 import { collectGarbage } from './garbage';
@@ -43,7 +44,7 @@ import {
 import { toFloat, toInt, toKey, toStr } from './operators';
 import { printR, varDump, varExport } from './output';
 import { share } from './places';
-import { ExitSignal, rt } from './runtime';
+import { ExitSignal, PhpThrow, rt } from './runtime';
 import { formatPrintf } from './sprintf';
 import { constantKey, defineConstant as defineUserConstant } from './statements';
 import { setCallableCheck } from './types';
@@ -577,12 +578,20 @@ defineFunction('iterator_count(Traversable|array $iterator): int', ({ args }) =>
 defineFunction('iterator_apply(Traversable $iterator, callable $callback, ?array $args = null): int', ({ args }) => {
   let count = 0n;
   const iterator = iterate(args[0], 'none');
-  while (!iterator.next().done) {
-    count++;
-    const extra = args[2] instanceof PhpArray ? callbackArrayArguments(args[2]) : [];
-    if (!toBool(callValue(args[1], extra, undefined))) break;
+  let failure: PhpThrow | undefined;
+  try {
+    while (!iterator.next().done) {
+      count++;
+      const extra = args[2] instanceof PhpArray ? callbackArrayArguments(args[2]) : [];
+      if (!toBool(callValue(args[1], extra, undefined))) break;
+    }
+    return count;
+  } catch (error) {
+    if (error instanceof PhpThrow) failure = error;
+    throw error;
+  } finally {
+    withPendingException(rt(), failure, () => iterator.return(undefined));
   }
-  return count;
 });
 
 function classOf(value: Value): PhpClass | undefined {
