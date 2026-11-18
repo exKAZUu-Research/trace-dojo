@@ -226,8 +226,9 @@ export class AssignmentChecker {
       case 'call_expression':
       case 'new_expression': {
         if (value.childForFieldName('type_arguments')) return false;
-        const callee = value.childForFieldName(value.type === 'call_expression' ? 'function' : 'constructor');
-        if (!callee) return false;
+        const callee = value.childForFieldName(
+          value.type === 'call_expression' ? 'function' : 'constructor'
+        ) as TreeNode;
         const type = this.c.expressions.check(callee);
         const kind = value.type === 'call_expression' ? 'call' : 'construct';
         return this.c.signaturesOf(type, kind).some((signature) => signature.typeParameters.length > 0);
