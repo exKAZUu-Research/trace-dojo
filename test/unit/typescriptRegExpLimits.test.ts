@@ -33,3 +33,14 @@ test.each(['/a/.test("abc")', '"abc".match(/a/) !== null'])(
     });
   }
 );
+
+test.each(['name', 'message'])('uncaught error %s getters respect the execution deadline', (property) => {
+  const source = `const error = new Error("x"); Object.defineProperty(error, "${property}", {
+    get() { /^(a+)+$/.test("a".repeat(32) + "!"); return "Error"; }
+  }); throw error;`;
+  expect(executeProgram('typescript', source)).toEqual({ kind: 'limitExceeded', limit: 'time' });
+  expect(executeProgram('typescript', 'throw new Error("next");')).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'Error: next',
+  });
+});

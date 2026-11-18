@@ -56,20 +56,22 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (scope: S
   });
   runtime.pushFrame(scope, undefined, false);
   try {
-    let uncaughtException: string | undefined;
-    try {
-      boundedHostWork(runtime.budget, () => runtime.evaluator.runProgram(program));
-    } catch (error) {
-      uncaughtException = describeUncaught(runtime, error);
-    }
-    onEnd?.(scope);
-    runtime.collectGarbage();
-    return {
-      finalBoard: runtime.world.boardText(),
-      finalTurtles: runtime.world.turtleTraces(),
-      uncaughtException,
-      ...runtime.io.output(),
-    };
+    return boundedHostWork(runtime.budget, () => {
+      let uncaughtException: string | undefined;
+      try {
+        runtime.evaluator.runProgram(program);
+      } catch (error) {
+        uncaughtException = describeUncaught(runtime, error);
+      }
+      onEnd?.(scope);
+      runtime.collectGarbage();
+      return {
+        finalBoard: runtime.world.boardText(),
+        finalTurtles: runtime.world.turtleTraces(),
+        uncaughtException,
+        ...runtime.io.output(),
+      };
+    });
   } finally {
     runtime.popFrame();
   }

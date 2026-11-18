@@ -2,6 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { isUnchangedVariable } from './constantReferences';
+import { isGenericObjectOrIndexType } from './genericTypes';
 import { applicableIndex } from './indexInfos';
 import { nonNullableType, withoutNullishUnit } from './nullishConstraints';
 import { named, propertyNameText, skipParentheses } from './syntax';
@@ -519,7 +520,7 @@ export class Flow {
     if (assumeTrue) {
       if (isAnyLike(type) || isIntrinsic(type, 'unknown')) return instance;
       const related = mapType(type, (member) => {
-        if (member.kind === 'typeParameter') return intersectionOf([member, instance], this.c.budget);
+        if (isGenericObjectOrIndexType(member)) return intersectionOf([member, instance], this.c.budget);
         if (this.isDerivedFrom(member, instance)) return member;
         return this.isDerivedFrom(instance, member) ? instance : neverType;
       });
