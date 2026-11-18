@@ -1,10 +1,10 @@
 import { checkOutputSize } from './allocation';
-// code-gauge-allow-file fileNcss 812 -- Keeps format parsing and rendering with their shared specifiers.
+// code-gauge-allow-file fileNcss 817 -- Keeps format parsing and rendering with their shared specifiers.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
  */
-import { PANIC, panic } from './arith';
+import { checked, PANIC, panic } from './arith';
 import { physicalUnion } from './bufferMemory';
 import {
   type AnyFloat,
@@ -37,7 +37,7 @@ export interface Options {
   fill: number;
   alignment: Alignment;
   width?: bigint;
-  precision?: number;
+  precision?: bigint;
 }
 
 /** A width or precision: a number, or the index of the argument that gives it. */
@@ -931,23 +931,24 @@ function isPowerOf10(value: bigint): boolean {
 
 /** `std.fmt.float.round`, which rounds the shortest decimal's digits, half up. */
 // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
-function roundDecimal(decimal: Decimal, mode: 'decimal' | 'scientific', precision: number): Decimal {
-  let roundDigit = 0;
+function roundDecimal(decimal: Decimal, mode: 'decimal' | 'scientific', precision: bigint): Decimal {
+  let roundDigit = 0n;
   let output = decimal.mantissa;
   let exponent = decimal.exponent;
   const olength = decimalLength(output);
   if (mode === 'decimal') {
     if (decimal.exponent > 0) {
-      roundDigit = olength - 1 + precision + decimal.exponent;
+      roundDigit = checked(BigInt(olength - 1 + decimal.exponent) + precision, USIZE);
     } else {
-      const minExpRequired = -decimal.exponent;
-      if (precision + olength > minExpRequired) roundDigit = precision + olength - minExpRequired;
+      const minExpRequired = BigInt(-decimal.exponent);
+      const required = checked(precision + BigInt(olength), USIZE);
+      if (required > minExpRequired) roundDigit = required - minExpRequired;
     }
   } else {
-    roundDigit = 1 + precision;
+    roundDigit = checked(1n + precision, USIZE);
   }
   if (roundDigit < olength) {
-    for (let index = roundDigit + 1; index < olength; index++) {
+    for (let index = Number(roundDigit) + 1; index < olength; index++) {
       output /= 10n;
       exponent++;
     }
@@ -970,12 +971,13 @@ function special(decimal: Decimal): string {
 }
 
 /** `std.fmt.float.formatScientific`. */
-function formatScientific(input: Decimal, precision: number | undefined): string {
+function formatScientific(input: Decimal, requested: bigint | undefined): string {
   if (input.special) return special(input);
-  const decimal = precision === undefined ? input : roundDecimal(input, 'scientific', precision);
+  const decimal = requested === undefined ? input : roundDecimal(input, 'scientific', requested);
+  if (requested !== undefined && checked(8n + requested, USIZE) > FLOAT_BUFFER_SIZE) return TOO_LONG;
+  const precision = requested === undefined ? undefined : Number(requested);
   const digits = decimal.mantissa.toString();
   const olength = digits.length;
-  if (precision !== undefined && 8 + precision > FLOAT_BUFFER_SIZE) return TOO_LONG;
   let text = decimal.sign ? '-' : '';
   text += digits[0];
   let fraction = digits.slice(1);
@@ -996,17 +998,21 @@ const FLOAT_BUFFER_SIZE = 347;
 const TOO_LONG = '(float)';
 
 /** `std.fmt.float.formatDecimal`. */
-// code-gauge-allow functionCognitiveComplexity 21 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
-function formatDecimal(input: Decimal, precision: number | undefined): string {
+// code-gauge-allow functionCognitiveComplexity 24 -- Keeps checked sizing and the three decimal point positions together.
+// code-gauge-allow functionNcss 32 -- Keeps checked sizing and the three decimal point positions together.
+function formatDecimal(input: Decimal, requested: bigint | undefined): string {
   if (input.special) return special(input);
-  const decimal = precision === undefined ? input : roundDecimal(input, 'decimal', precision);
+  const decimal = requested === undefined ? input : roundDecimal(input, 'decimal', requested);
   const digits = decimal.mantissa.toString();
   const olength = digits.length;
-  const needed =
-    decimal.exponent >= 0
-      ? 2 + decimal.exponent + olength + (precision ?? 0)
-      : 2 + Math.max(-decimal.exponent + olength, precision ?? 0);
+  const prefix = BigInt(Math.abs(decimal.exponent) + olength);
+  const requestedBytes = requested ?? 0n;
+  const needed = checked(
+    2n + (decimal.exponent >= 0 ? prefix + requestedBytes : requestedBytes > prefix ? requestedBytes : prefix),
+    USIZE
+  );
   if (needed > FLOAT_BUFFER_SIZE) return TOO_LONG;
+  const precision = requested === undefined ? undefined : Number(requested);
   let text = decimal.sign ? '-' : '';
   const pointOffset = decimal.exponent + olength;
   if (pointOffset <= 0) {
@@ -1034,17 +1040,18 @@ function formatDecimal(input: Decimal, precision: number | undefined): string {
 }
 
 /** `printFloatHex`: a float as `0x1.8p1`. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the precision guard with the special and finite encodings.
 function printFloatHex(out: FormatOutput, value: AnyFloat, bits: FloatBits, upper: boolean, options: Options): void {
   const big = asBigFloat(value);
-  if (big.kind === 'finite') checkPrecisionSize(out, options.precision);
+  const precision = options.precision === undefined ? undefined : Number(options.precision);
+  if (big.kind === 'finite') checkPrecisionSize(out, precision);
   let text = big.sign ? '-' : '';
   if (big.kind === 'nan') text += upper ? 'NAN' : 'nan';
   else if (big.kind === 'inf') text += upper ? 'INF' : 'inf';
   else if (big.isZero) {
-    const zeros =
-      options.precision === undefined ? '.0' : options.precision > 0 ? `.${'0'.repeat(options.precision)}` : '';
+    const zeros = precision === undefined ? '.0' : precision > 0 ? `.${'0'.repeat(precision)}` : '';
     text += `0x0${zeros}p0`;
-  } else text += hexFloatDigits(big, bits, upper, options.precision);
+  } else text += hexFloatDigits(big, bits, upper, precision);
   alignBuffer(out, utf8(text), options);
 }
 

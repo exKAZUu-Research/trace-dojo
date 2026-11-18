@@ -253,12 +253,11 @@ function appendSegments(
       writeFormatted(frame, destination, segment.bytes);
       continue;
     }
-    const precision = formatOption(segment.precision, argValue);
     const options: Options = {
       fill: segment.fill,
       alignment: segment.alignment,
       width: formatOption(segment.width, argValue),
-      precision: precision === undefined ? undefined : Number(precision),
+      precision: formatOption(segment.precision, argValue),
     };
     if (segment.spec === 'f') {
       formatWithMethod(segment.arg, argValue(segment.arg));

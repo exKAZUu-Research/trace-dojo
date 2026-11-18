@@ -8519,6 +8519,19 @@ test.each([
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr, uncaughtException: undefined });
 });
 
+test.each([
+  'std.debug.print("{e:.18446744073709551615}",.{@as(f64,-1.5)});',
+  'std.debug.print("{d:.18446744073709551615}",.{@as(f64,1.5)});',
+  'var precision:usize=18446744073709551615;_=&precision;std.debug.print("{[value]e:.[precision]}",.{.value=@as(f64,1.5),.precision=precision});',
+])('float rendering checks precision arithmetic before falling back: %s', (body) => {
+  const source = `const std=@import("std");pub fn main()void{${body}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '',
+    uncaughtException: 'panic: integer overflow',
+  });
+});
+
 test('bufPrint reports a full buffer before charging unused padding', () => {
   const source = `const std=@import("std");pub fn main()void{var b:[1]u8=undefined;if(std.fmt.bufPrint(&b,"{d:1000001}",.{1})) |_| unreachable else |err| std.debug.print("{t} {}",.{err,b[0]});}`;
   expect(executeProgram('zig', source)).toMatchObject({
