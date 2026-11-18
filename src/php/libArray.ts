@@ -1045,7 +1045,7 @@ function accumulate(name: string, op: string, word: string, total: Value, value:
 }
 
 defineFunction(
-  'array_column(array $array, int|string|null $column_key, int|string|null $index_key = null): array',
+  'array_column(array $array, string|int|null $column_key, string|int|null $index_key = null): array',
   ({ args }) => {
     const [rows, column, index] = args;
     const result = new PhpArray();

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 429 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 431 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { codePointBytes, enc, utf8Length } from './bytes';
@@ -18,7 +18,7 @@ import { newThrowable, throwError } from './errors';
 import { nextChar } from './htmlEntities';
 import { defineConstant, defineFunction } from './native';
 import { PhpThrow, rt } from './runtime';
-import { PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
+import { PhpArray, type PhpClass, PhpObject, Ref, UNDEFINED_RESULT, type Value } from './values';
 
 const FLAGS: [string, bigint][] = [
   ['JSON_HEX_TAG', 1n],
@@ -105,11 +105,12 @@ class JsonEncoder {
     private readonly maxDepth: number
   ) {}
 
-  // code-gauge-allow functionNcss 37 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss 39 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   encode(value: Value, level: number): string {
     rt().spend();
     if (value === null) return 'null';
+    if (value === UNDEFINED_RESULT) return this.fail(8);
     switch (typeof value) {
       case 'boolean': {
         return value ? 'true' : 'false';

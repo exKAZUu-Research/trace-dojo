@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 950 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 952 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -76,6 +76,7 @@ import {
   type PhpClass,
   PhpObject,
   Ref,
+  UNDEFINED_RESULT,
   type Value,
 } from './values';
 
@@ -389,7 +390,7 @@ function isThrowableObject(object: PhpObject): boolean {
 /** Evaluates an expression without the warnings an undefined variable or key would raise, as `??` and `empty` do. */
 export function evQuiet(e: Expr, mode: 'empty' | 'coalesce' = 'empty'): Value {
   const result = evaluateRead(e, mode);
-  return result === SHORT ? null : result;
+  return result === SHORT || result === UNDEFINED_RESULT ? null : result;
 }
 
 type ReadMode = 'read' | 'empty' | 'coalesce' | 'isset';
@@ -415,7 +416,7 @@ function prepareRead(e: Expr, mode: ReadMode): ReadPlan {
       const name = prepareOperand(e.name);
       return () => {
         const key = toStr(name());
-        const value = mode === 'read' ? readVar(key, e.row) : (runtime.frame.vars.get(key)?.v ?? null);
+        const value = mode === 'read' ? readVar(key, e.row) : definedOrNull(runtime.frame.vars.get(key)?.v);
         return mode === 'isset' ? value !== null : value;
       };
     }
@@ -443,7 +444,7 @@ function prepareRead(e: Expr, mode: ReadMode): ReadPlan {
       const value = e.k === 'mcall' || e.k === 'scall' ? evChain(e) : ev(e);
       if (value === SHORT) return SHORT;
       if (value instanceof PhpArray || value instanceof PhpObject) runtime.frame.temporaries.push(value);
-      return () => (mode === 'isset' ? value !== null : value);
+      return () => (mode === 'isset' ? definedOrNull(value) !== null : value);
     }
   }
 }
@@ -452,7 +453,7 @@ function variableRead(e: Extract<Expr, { k: 'var' }>, mode: ReadMode): Value {
   const runtime = rt();
   if (e.name === 'GLOBALS') return globalsArray();
   if (mode === 'read' || (e.name === 'this' && mode === 'coalesce')) return readVar(e.name, e.row);
-  return e.name === 'this' ? (runtime.frame.thisObj ?? null) : (runtime.frame.vars.get(e.name)?.v ?? null);
+  return e.name === 'this' ? (runtime.frame.thisObj ?? null) : definedOrNull(runtime.frame.vars.get(e.name)?.v);
 }
 
 function prepareOffsetRead(e: Extract<Expr, { k: 'idx' }>, mode: ReadMode): ReadPlan {
@@ -480,8 +481,8 @@ function globalOffsetRead(key: Value, row: number, mode: ReadMode): Value {
   const runtime = rt();
   runtime.row = row;
   const ref = runtime.globalFrame.vars.get(name);
-  if (mode === 'isset') return ref !== undefined && ref.v !== null;
-  if (ref) return ref.v;
+  if (mode === 'isset') return definedOrNull(ref?.v) !== null;
+  if (ref?.isDefinedBinding) return ref.v;
   if (mode === 'read') warn(`Undefined global variable $${name}`);
   return null;
 }
@@ -529,7 +530,7 @@ function readVar(name: string, row: number): Value {
     throwError('Error', 'Using $this when not in object context');
   }
   const ref = frame.vars.get(name);
-  if (ref) return ref.v;
+  if (ref?.isDefinedBinding) return ref.v;
   runtime.row = row;
   warn(`Undefined variable $${name}`);
   return null;
@@ -537,7 +538,7 @@ function readVar(name: string, row: number): Value {
 
 function globalsArray(): PhpArray {
   const array = new PhpArray();
-  for (const [name, ref] of rt().variableBindings(rt().globalFrame)) array.set(toKey(name), share(ref.v));
+  for (const [name, ref] of rt().variableBindings(rt().globalFrame)) array.setSlot(toKey(name), copyValueSlot(ref));
   return array;
 }
 
@@ -1137,7 +1138,11 @@ function binary(e: Extract<Expr, { k: 'bin' }>): Value {
 }
 
 export function missingCompiledOperand(e: Expr): boolean {
-  return e.k === 'var' && isCompiledVariable(e) && !rt().frame.vars.has(e.name);
+  return e.k === 'var' && isCompiledVariable(e) && !rt().frame.vars.get(e.name)?.isDefinedBinding;
+}
+
+function definedOrNull(value: Value | undefined): Value {
+  return value === UNDEFINED_RESULT ? null : (value ?? null);
 }
 
 export function readOperandWithWarning(

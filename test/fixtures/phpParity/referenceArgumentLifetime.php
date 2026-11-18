@@ -20,3 +20,15 @@ echo "done\n";
 $array = [new RefArgumentLifetime(11)];
 try { inspectAlias($array[0], removeElement(true)); }
 catch (Exception $error) { echo $error->getMessage(), "\n"; }
+
+function readSentReference(&$value, $snapshot) {
+    $value = 2;
+    var_dump($snapshot['sent']);
+}
+$sent = 1;
+readSentReference($sent, get_defined_vars());
+function inspectLocalReference() {
+    $sent = 1;
+    readSentReference(value: $sent, snapshot: get_defined_vars());
+}
+inspectLocalReference();

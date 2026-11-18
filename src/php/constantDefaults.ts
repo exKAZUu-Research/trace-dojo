@@ -4,7 +4,7 @@ import type { ClassRef, Expr } from './ast';
 import { boolValue, floatFitsInt, formatFloat, normalizeKeyString, numericPrefix } from './conversions';
 import { compileConstant } from './native';
 import { arithmetic, bitwise, compareScalar, toFloat, toInt } from './operators';
-import { INT_MAX, INT_MIN, type Key, PhpArray, PhpObject } from './values';
+import { INT_MAX, INT_MIN, type Key, PhpArray, PhpObject, UNDEFINED_RESULT } from './values';
 
 type Scalar = Extract<Expr, { k: 'lit' }>['v'];
 export type Constant = Scalar | Map<Key, Constant>;
@@ -75,7 +75,12 @@ function fold(expression: Expr, context: BoundedFoldContext): Folded {
     case 'const': {
       if (context.preserveNamedConstants) return UNKNOWN;
       const value = compileConstant(expression.name.name);
-      return value === undefined || value instanceof PhpArray || value instanceof PhpObject ? UNKNOWN : value;
+      return value === undefined ||
+        value === UNDEFINED_RESULT ||
+        value instanceof PhpArray ||
+        value instanceof PhpObject
+        ? UNKNOWN
+        : value;
     }
     case 'interp': {
       return interpolatedConstant(expression.parts, context);

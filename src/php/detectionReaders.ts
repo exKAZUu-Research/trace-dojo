@@ -1,5 +1,6 @@
 // oxlint-disable unicorn/prefer-code-point -- Each code unit is one PHP byte.
-import { detectionCodePoint } from './detectionDecodeTables';
+import { detectionCodePoint, mobileDetectionTable } from './detectionDecodeTables';
+import { readJisEncoding } from './jisDetectionReader';
 import { rt } from './runtime';
 
 const BAD = -1;
@@ -7,15 +8,29 @@ const TABLE_REPLACEMENT = 0xff_fd;
 const PLANE_WIDTH = 94;
 const PLANE_SIZE = PLANE_WIDTH * PLANE_WIDTH;
 const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const IMAP_BASE64 = BASE64.slice(0, -1) + ',';
+const MOBILE_CARRIERS = ['DOCOMO', 'KDDI-A', 'KDDI-B', 'SOFTBANK'];
 type Decode = (bytes: string) => number[];
 
+export function encodingValidator(name: string, utf16: Decode): ((bytes: string) => boolean) | undefined {
+  if (name === 'UTF-7' || name === 'UTF7-IMAP') {
+    return (bytes) => !decodeShiftedUtf16(bytes, name === 'UTF7-IMAP', utf16, true).includes(BAD);
+  }
+  if (name === 'JIS' || name === 'ISO-2022-JP') return (bytes) => readJisEncoding(bytes, name === 'ISO-2022-JP').valid;
+}
+
+// code-gauge-allow functionNcss 31 -- Keeps the encoding dispatch and its codec-specific reader construction together.
 export function extraEncodingReader(name: string, utf8: Decode, utf16: Decode): Decode | undefined {
-  if (name.startsWith('UTF-8-Mobile#')) return utf8;
+  if (name.startsWith('UTF-8-Mobile#')) return mobileReader(name, utf8);
   if (name.startsWith('UCS-')) {
     const size = name[4] === '2' ? 2 : 4;
     return (bytes) => decodeFixedWidth(bytes, size, name.endsWith('LE'), name.length === 5);
   }
   switch (name) {
+    case 'JIS':
+    case 'ISO-2022-JP': {
+      return (bytes) => readJisEncoding(bytes).codes;
+    }
     case 'ArmSCII-8':
     case 'CP850': {
       const offset = name === 'CP850' ? 256 : 0;
@@ -46,6 +61,11 @@ export function extraEncodingReader(name: string, utf8: Decode, utf16: Decode): 
   return undefined;
 }
 
+function mobileReader(name: string, utf8: Decode): Decode {
+  const table = mobileDetectionTable(MOBILE_CARRIERS.indexOf(name.slice('UTF-8-Mobile#'.length)));
+  return (bytes) => utf8(bytes).flatMap((code) => table.get(code) ?? code);
+}
+
 function decodeFixedWidth(bytes: string, size: 2 | 4, little: boolean, useBom: boolean): number[] {
   const buffer = Buffer.from(bytes, 'latin1');
   let index = 0;
@@ -58,8 +78,10 @@ function decodeFixedWidth(bytes: string, size: 2 | 4, little: boolean, useBom: b
   }
   const values: number[] = [];
   rt().spend(Math.ceil(bytes.length / 64));
-  for (; index + size <= bytes.length; index += size)
-    values.push(little ? buffer.readUIntLE(index, size) : buffer.readUIntBE(index, size));
+  for (; index + size <= bytes.length; index += size) {
+    const code = little ? buffer.readUIntLE(index, size) : buffer.readUIntBE(index, size);
+    values.push(code === 0xff_ff_ff_ff ? BAD : code);
+  }
   if (index !== bytes.length) values.push(BAD);
   return values;
 }
@@ -121,19 +143,19 @@ function decodeShiftJis(bytes: string, offset: number, extended: boolean): numbe
   return values;
 }
 
-function decodeShiftedUtf16(bytes: string, imap: boolean, utf16: Decode): number[] {
+function decodeShiftedUtf16(bytes: string, imap: boolean, utf16: Decode, validating = false): number[] {
   rt().spend(Math.ceil(bytes.length / 64));
   const shift = imap ? '&' : '+';
   const values: number[] = [];
   for (let index = 0; index < bytes.length;) {
     const char = bytes[index++];
     if (char !== shift) {
-      values.push(directUtf7Code(char, imap));
+      values.push(directUtf7Code(char, imap, validating));
     } else if (bytes[index] === '-') {
       values.push(shift.charCodeAt(0));
       index++;
     } else {
-      const section = shiftedUtf16Section(bytes, index, imap, utf16);
+      const section = shiftedUtf16Section(bytes, index, imap, utf16, validating);
       for (const code of section.values) values.push(code);
       index = section.end;
     }
@@ -141,36 +163,43 @@ function decodeShiftedUtf16(bytes: string, imap: boolean, utf16: Decode): number
   return values;
 }
 
-function directUtf7Code(char: string, imap: boolean): number {
+function directUtf7Code(char: string, imap: boolean, validating: boolean): number {
   const code = char.charCodeAt(0);
-  const valid = imap ? code >= 0x20 && code < 0x7f : code === 0 || (/[\t\r\n -\u007D]/.test(char) && char !== '\\');
-  return valid ? code : BAD;
+  if (imap) return code >= 0x20 && code < 0x7f ? code : BAD;
+  if (!validating) return code < 0x80 ? code : BAD;
+  return code === 0 || (/[\t\r\n -\u007D]/.test(char) && char !== '\\') ? code : BAD;
 }
 
+// code-gauge-allow functionCognitiveComplexity 21 -- The ending byte determines both the section validity and the next byte to decode.
 function shiftedUtf16Section(
   bytes: string,
   start: number,
   imap: boolean,
-  utf16: Decode
+  utf16: Decode,
+  validating: boolean
 ): { end: number; values: number[] } {
-  const alphabet = imap ? BASE64.slice(0, -1) + ',' : BASE64;
+  const alphabet = imap ? IMAP_BASE64 : BASE64;
   let index = start;
   while (index < bytes.length && alphabet.includes(bytes[index])) index++;
   const section = bytes.slice(start, index);
-  const closing = bytes[index] === '-';
-  if (closing) index++;
-  if (section === '' && !imap && index === bytes.length) return { end: index, values: [] };
-  const padding = (section.length * 6) % 16;
-  if (
-    (imap && !closing) ||
-    section.length < 3 ||
-    padding >= 6 ||
-    (alphabet.indexOf(section.at(-1) ?? '') & ((1 << padding) - 1)) !== 0
-  )
-    return { end: index, values: [BAD] };
+  const terminator = bytes[index];
+  const closing = terminator === '-';
+  const invalidTerminator =
+    terminator !== undefined && !closing && directUtf7Code(terminator, imap, validating) === BAD;
+  const consume = closing || (terminator !== undefined && (imap || terminator.charCodeAt(0) >= 0x80));
+  const end = index + Number(consume);
   const encoded = imap ? section.replaceAll(',', '/') : section;
-  const values = utf16(Buffer.from(encoded, 'base64').toString('latin1'));
-  return { end: index, values: imap ? values.map((code) => (code >= 0x20 && code < 0x7f ? BAD : code)) : values };
+  const decoded = Buffer.from(encoded, 'base64');
+  const values = utf16(decoded.subarray(0, decoded.length & ~1).toString('latin1'));
+  const padding = (section.length * 6) % 16;
+  const incomplete = padding >= 6 || (alphabet.indexOf(section.at(-1) ?? '') & ((1 << padding) - 1)) !== 0;
+  if (incomplete) values.push(BAD);
+  if (imap && !closing) values.push(BAD);
+  if (!imap && (invalidTerminator || (validating && section === '' && terminator !== undefined))) values.push(BAD);
+  return {
+    end,
+    values: imap ? values.map((code) => (code >= 0x20 && code < 0x7f && code !== 0x26 ? BAD : code)) : values,
+  };
 }
 
 // code-gauge-allow functionCognitiveComplexity 27 -- Maintains the escape and shifted-byte state of the two transport encodings.

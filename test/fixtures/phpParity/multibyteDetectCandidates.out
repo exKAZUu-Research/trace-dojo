@@ -36,3 +36,48 @@ string(5) "CP932"
 string(5) "CP932"
 string(5) "CP932"
 bool(false)
+string(5) "ASCII"
+bool(false)
+string(5) "ASCII"
+bool(false)
+string(5) "ASCII"
+bool(false)
+string(5) "ASCII"
+bool(false)
+string(5) "ASCII"
+bool(false)
+string(5) "ASCII"
+bool(false)
+string(5) "ASCII"
+string(5) "ASCII"
+bool(false)
+string(5) "ASCII"
+string(3) "JIS"
+string(3) "JIS"
+string(3) "JIS"
+string(3) "JIS"
+string(3) "JIS"
+string(3) "JIS"
+bool(false)
+string(5) "ASCII"
+string(11) "ISO-2022-JP"
+string(11) "ISO-2022-JP"
+bool(false)
+string(5) "ASCII"
+bool(false)
+string(11) "ISO-2022-JP"
+bool(false)
+string(5) "UCS-4"
+bool(false)
+string(7) "UCS-4BE"
+bool(false)
+string(7) "UCS-4LE"
+string(8) "UTF-16BE"
+string(5) "UTF-8"
+string(5) "UTF-8"
+string(5) "UTF-8"
+string(5) "UTF-8"
+string(5) "UTF-8"
+string(5) "UTF-8"
+string(5) "UTF-8"
+string(5) "UTF-8"

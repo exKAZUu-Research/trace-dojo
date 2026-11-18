@@ -7,3 +7,8 @@ int(12)
 change(): Argument #1 ($value) could not be passed by reference
 Attempt to assign property "property" on array
 bool(false)
+string(6) "before"
+int(2)
+int(2)
+int(3)
+int(3)

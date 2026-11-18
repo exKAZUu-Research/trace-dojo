@@ -11,3 +11,8 @@ df78 => KS
 636166e9 => KF
 e9636f6c65 => KL
 6e61ef7665 => NF
+string(7) "C.UTF-8"
+string(5) "UTF-8"
+bool(true)
+string(7) "C.UTF-8"
+string(7) "C.UTF-8"

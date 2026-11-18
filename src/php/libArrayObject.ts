@@ -375,7 +375,9 @@ function sortStorage(object: PhpObject, name: string, args: Value[]): Value {
   let result: Value = null;
   withCleanupExceptions(rt(), (capture) => {
     try {
-      result = storage.runSort(() => invoke({ fn }, [{ v: ref.v, ref }, ...args.map((v) => ({ v }))], undefined));
+      result = storage.runSort(() =>
+        invoke({ fn }, [{ v: ref.v, ref }, ...args.map((v) => ({ v }) as const)], undefined)
+      );
     } catch (error) {
       if (!(error instanceof PhpThrow)) throw error;
       capture(error);

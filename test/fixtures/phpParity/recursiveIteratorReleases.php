@@ -49,3 +49,28 @@ try {
 } catch (Exception $error) { echo 'caught:', $observed->getDepth(), "\n"; }
 foreach ($observed as $value) echo 'value:', $value, ';';
 echo 'done:', $observed->getDepth(), "\n";
+
+class ReportsClearedChild extends RecursiveArrayIterator {
+    function __construct($items, private bool $child = false) { parent::__construct($items); }
+    function getChildren(): ?RecursiveArrayIterator { return new self($this->current(), true); }
+    function __destruct() {
+        if (!$this->child) return;
+        global $observed;
+        echo 'cleared at ', $observed->getDepth(), ':';
+        var_dump($observed->getSubIterator() === null, $observed->getInnerIterator() === null);
+        var_dump($observed->getSubIterator());
+        $missing = $observed->getSubIterator();
+        echo $missing;
+        $replaced = 'old';
+        $replaced = $observed->getInnerIterator();
+        echo $replaced;
+        $alias = &$replaced;
+        $alias = $observed->getInnerIterator();
+        echo $replaced, $observed->getInnerIterator() ?? 'fallback;';
+        $alias = 'new;';
+        echo $replaced;
+    }
+}
+$observed = new RecursiveIteratorIterator(new ReportsClearedChild([[1], 2]));
+foreach ($observed as $value) echo "value:$value;";
+echo "end;\n";

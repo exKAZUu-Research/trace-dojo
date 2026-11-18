@@ -67,7 +67,8 @@ function sortedOperation(operation: SortedOperation, args: Value[]): PhpArray {
 
 function comparisonsFor(operation: SortedOperation, callbacks: Value[]): Comparisons {
   const userCompare = userComparisonCaller(operation.name);
-  const [dataCallback, keyCallback] = [callbacks[0], callbacks.at(-1) as Value];
+  const dataCallback = callbacks[0];
+  const keyCallback = callbacks.at(-1) as Value;
   let current = operation.userKey && operation.behavior !== 'normal' ? keyCallback : dataCallback;
   return {
     data: operation.userData

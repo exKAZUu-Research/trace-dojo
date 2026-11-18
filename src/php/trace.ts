@@ -9,7 +9,7 @@ import { canAccessProp, declForKey, type LazyRef, lookupProp, propNameOf } from 
 import { parsePhp } from './parse';
 import { runProgram } from './run';
 import { type Frame, rt, Runtime } from './runtime';
-import { isClosure, type Key, PhpArray, PhpObject, Ref, UNINIT, type Value } from './values';
+import { isClosure, type Key, PhpArray, PhpObject, Ref, UNDEFINED_RESULT, UNINIT, type Value } from './values';
 
 export function tracePhpProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const parsed = parsePhp(program, trace);
@@ -139,6 +139,7 @@ const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: number }): DisplayNode | undefined {
   if (budget.remaining-- <= 0) return { kind: 'value', value: '…' };
   rt().spend();
+  if (value === UNDEFINED_RESULT) return undefined;
   if (value === null) return NULL_NODE;
   if (typeof value === 'bigint') return { kind: 'value', value: traceInt(value) };
   if (typeof value === 'string') return { kind: 'value', value: dec(value) };

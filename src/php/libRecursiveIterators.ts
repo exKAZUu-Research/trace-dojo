@@ -5,7 +5,7 @@ import { throwError, withCleanupExceptions } from './errors';
 import { InnerIterator, innerIteratorOf } from './libIterators';
 import { defineClass, type NativeMethod } from './native';
 import { PhpThrow, rt } from './runtime';
-import { nativeOwnershipChanged, type PhpClass, PhpObject, type Value } from './values';
+import { nativeOwnershipChanged, type PhpClass, PhpObject, UNDEFINED_RESULT, type Value } from './values';
 
 const LEAVES_ONLY = 0;
 const SELF_FIRST = 1;
@@ -260,8 +260,8 @@ function appendChild(object: PhpObject, state: RecursiveState, child: Value): Le
   return level;
 }
 
-function visibleIterator(level: Level): PhpObject | null {
-  return level.retiring === 'advance' ? null : level.object;
+function visibleIterator(level: Level): PhpObject | typeof UNDEFINED_RESULT {
+  return level.retiring === 'advance' ? UNDEFINED_RESULT : level.object;
 }
 
 const recursiveMethods: NativeMethod[] = [

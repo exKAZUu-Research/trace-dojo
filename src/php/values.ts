@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 836 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 845 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
@@ -7,11 +7,13 @@ import type { ClassDecl, Expr, FunctionDecl, PropertyDeclAst } from './ast';
 import { lower } from './bytes';
 import { OwnerLinks } from './ownerLinks';
 
+export const UNDEFINED_RESULT = Symbol('undefined native result');
+
 /**
  * A PHP value. Strings are byte strings: each UTF-16 code unit holds one byte (0–255), so that lengths and offsets
  * count bytes as PHP's do. Integers are bigints within the 64-bit range and floats are numbers.
  */
-export type Value = null | boolean | bigint | number | string | PhpArray | PhpObject;
+export type Value = null | boolean | bigint | number | string | PhpArray | PhpObject | typeof UNDEFINED_RESULT;
 
 export type Key = bigint | string;
 
@@ -78,6 +80,10 @@ export class Ref {
     this.value = this.typedBy ? referenceTypeCheck(this, value) : value;
     trackOwner(this.value, this);
     dropped(old);
+  }
+
+  get isDefinedBinding(): boolean {
+    return this.value !== UNDEFINED_RESULT || this.isRef;
   }
 
   /** Writes a value, converting or rejecting it for the type of the property the reference was taken from. */
@@ -630,6 +636,11 @@ export class PhpClass {
   staticProps = new Map<string, { ref: Ref; decl: PropDecl }>();
   /** The instance property declarations, in the order an object's table holds them. */
   props: PropDecl[] = [];
+  private instanceKeys?: Set<string>;
+  hasReservedProperty(key: string): boolean {
+    this.instanceKeys ??= new Set(this.props.map((property) => property.key));
+    return this.instanceKeys.has(key);
+  }
   /** The declaration that code outside the class sees for each property name. */
   propByName = new Map<string, PropDecl>();
   /** Private property declarations by name, for code of this class. */
@@ -951,6 +962,7 @@ class PropertyMap extends Map<string, Slot> {
   }
   override set(key: string, value: Slot): this {
     const old = this.get(key);
+    if (old === undefined && !this.owner.cls.hasReservedProperty(key)) allocationHandler(1, this.size + 1);
     if (value === UNINIT) this.advancePointerOnRemoval(key);
     else if (old === undefined && this.pointer === undefined) this.pointer = key;
     super.set(key, value);

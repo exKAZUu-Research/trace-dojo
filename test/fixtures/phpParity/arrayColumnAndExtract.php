@@ -22,3 +22,8 @@ function g() {
   var_dump(extract(['k' => 5], EXTR_REFS), $k);
 }
 g();
+
+foreach ( [[[], [], null], [[], 'key', []]] as $args) {
+    try { array_column(...$args); }
+    catch (TypeError $error) { echo $error->getMessage(), "\n"; }
+}

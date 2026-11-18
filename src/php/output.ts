@@ -25,6 +25,7 @@ import {
   PhpObject,
   Ref,
   type Slot,
+  UNDEFINED_RESULT,
   UNINIT,
   type Value,
 } from './values';
@@ -225,7 +226,8 @@ function previewConstant(ref: ClassRef, name: string, data: ClosureData): Consta
   const entry = cls?.findConst(name);
   if (!entry || !canAccessConstant(entry, data.scope)) return undefined;
   const value = entry.value;
-  if (value !== undefined && !(value instanceof PhpObject || value instanceof PhpArray)) return value;
+  if (value !== undefined && value !== UNDEFINED_RESULT && !(value instanceof PhpObject || value instanceof PhpArray))
+    return value;
   return entry.initializer ? foldedConstant(entry.initializer, {}) : undefined;
 }
 
@@ -325,13 +327,14 @@ export function varDump(values: Value[]): void {
   });
 }
 
-// code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 37 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function dumpValue(value: Value, level: number, state: Inspection, write: (text: string) => void, slot?: Slot): void {
   const indent = level > 1 ? ' '.repeat(level - 1) : '';
   const reference = slot instanceof Ref && slot.rc > 1 ? '&' : '';
   const pad = indent + reference;
   if (value === null) return write(`${pad}NULL\n`);
+  if (value === UNDEFINED_RESULT) return write(`${pad}UNKNOWN:0\n`);
   switch (typeof value) {
     case 'boolean': {
       return write(`${pad}bool(${value})\n`);

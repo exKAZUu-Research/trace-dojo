@@ -69,7 +69,8 @@ export class VarPlace implements Place {
   ) {}
 
   get(): Value | undefined {
-    return this.frame.vars.get(this.name)?.v;
+    const ref = this.frame.vars.get(this.name);
+    return ref?.isDefinedBinding ? ref.v : undefined;
   }
 
   warnUndefined(): void {
@@ -87,9 +88,12 @@ export class VarPlace implements Place {
 
   set(value: Value): Value {
     const ref = this.frame.vars.get(this.name);
-    if (ref) ref.assign(value);
-    else this.frame.vars.set(this.name, new Ref(value));
-    return this.get() as Value;
+    if (ref) {
+      ref.assign(value);
+      return ref.v;
+    }
+    this.frame.vars.set(this.name, new Ref(value));
+    return value;
   }
 
   typeSources(): Ref['typedBy'] {

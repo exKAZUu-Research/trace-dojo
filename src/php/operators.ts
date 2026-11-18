@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 528 -- PHP operators share coercion and comparison helpers.
+// code-gauge-allow-file fileNcss 531 -- PHP operators share coercion and comparison helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import {
   boolValue,
@@ -27,6 +27,7 @@ import {
   PhpArray,
   PhpObject,
   type Ref,
+  UNDEFINED_RESULT,
   UNINIT,
   type Value,
 } from './values';
@@ -45,7 +46,7 @@ export function toStr(value: Value): string {
 
 function stringify(value: Value, reportWarning: (message: string) => void): string {
   if (typeof value === 'string') return value;
-  if (value === null) return '';
+  if (value === null || value === UNDEFINED_RESULT) return '';
   switch (typeof value) {
     case 'boolean': {
       return value ? '1' : '';
@@ -578,10 +579,15 @@ function hasDynamicProps(object: PhpObject): boolean {
   return [...object.props.keys()].some((key) => !key.startsWith('\0') && !object.cls.propByName.has(key));
 }
 
-// code-gauge-allow functionNcss 38 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 41 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function compareScalar(left: ComparisonOperand, right: ComparisonOperand, tryString?: ObjectString): number {
   const a = deref(left);
   const b = deref(right);
+  if (a === UNDEFINED_RESULT || b === UNDEFINED_RESULT) {
+    warn('Undefined variable $');
+    // oxlint-disable-next-line unicorn/no-null -- The comparison reads an undefined operand as PHP null.
+    return compareScalar(a === UNDEFINED_RESULT ? null : left, b === UNDEFINED_RESULT ? null : right, tryString);
+  }
   if ((typeof a === 'bigint' || typeof a === 'number') && (typeof b === 'bigint' || typeof b === 'number')) {
     return compareNumbers(a, b);
   }

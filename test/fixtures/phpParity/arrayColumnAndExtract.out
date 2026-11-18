@@ -64,3 +64,5 @@ extract(): Argument #3 ($prefix) is required when using this extract type
 extract(): Argument #3 ($prefix) must be a valid identifier
 int(1)
 int(5)
+array_column(): Argument #2 ($column_key) must be of type string|int|null, array given
+array_column(): Argument #3 ($index_key) must be of type string|int|null, array given

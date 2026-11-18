@@ -288,6 +288,27 @@ test('running out of memory cannot be caught', () => {
   expect(execution.kind === 'executed' && execution.stdout).toMatch(/^\nFatal error: Allowed memory size/);
 });
 
+test.each([
+  [
+    'dynamic property writes',
+    '$fill = array_fill(0, 999_995, 0); $object = new stdClass; ' +
+      'for ($i = 0; $i < 20; $i++) $object->{"field$i"} = $i;',
+  ],
+  ['array-to-object casts', '$fill = array_fill(0, 999_000, 0); $object = (object) array_fill(0, 500, 0);'],
+])('%s count toward the slot limit', (_name, contents) => {
+  const execution = run(`<?php ${contents} echo 'done';`);
+  expect(execution.kind === 'executed' && execution.stdout).toMatch(/^\nFatal error: Allowed memory size/);
+});
+
+test('declared slots and replacement writes use their existing allocation', () => {
+  const execution = run(
+    '<?php class C { public $x; } $fill = array_fill(0, 999_000, 0); ' +
+      'for ($i = 0; $i < 400; $i++) { $object = new C; $object->x = 1; unset($object->x); $object->x = 2; } ' +
+      'echo $object->x;'
+  );
+  expect(execution.kind === 'executed' && execution.stdout).toBe('2');
+});
+
 test('walking arrays that share their elements stops at the execution limit', () => {
   const execution = run(
     '<?php\n$a = [1];\nfor ($i = 0; $i < 40; $i++) $a = [$a, $a];\necho count($a, COUNT_RECURSIVE);'

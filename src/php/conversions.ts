@@ -1,6 +1,6 @@
 import { warn } from './errors';
 import { trimmedSignificantDigits } from './strings';
-import { INT_MAX, INT_MIN, type Key, PhpArray, type PhpObject, type Value } from './values';
+import { INT_MAX, INT_MIN, type Key, PhpArray, type PhpObject, UNDEFINED_RESULT, type Value } from './values';
 
 /** Formats a float as PHP's `echo` does, with 14 significant digits (`precision=14`). */
 export function formatFloat(value: number, precision = 14): string {
@@ -117,7 +117,7 @@ export function toBool(value: Value): boolean {
 }
 
 export function boolValue(value: Value): boolean {
-  if (value === null) return false;
+  if (value === null || value === UNDEFINED_RESULT) return false;
   switch (typeof value) {
     case 'boolean': {
       return value;
@@ -152,6 +152,7 @@ const SCALAR_TYPE_NAMES = {
 /** The PHP type name of a value, as `gettype` reports it. */
 export function getType(value: Value): string {
   if (value === null) return 'NULL';
+  if (value === UNDEFINED_RESULT) return 'unknown type';
   if (typeof value !== 'object') return SCALAR_TYPE_NAMES[typeof value as keyof typeof SCALAR_TYPE_NAMES].gettype;
   if (value instanceof PhpArray) return 'array';
   return value.isResource ? 'resource' : 'object';
@@ -160,6 +161,7 @@ export function getType(value: Value): string {
 /** The type name in error messages and `get_debug_type`. */
 export function debugType(value: Value): string {
   if (value === null) return 'null';
+  if (value === UNDEFINED_RESULT) return 'unknown';
   if (typeof value !== 'object') return SCALAR_TYPE_NAMES[typeof value as keyof typeof SCALAR_TYPE_NAMES].debug;
   if (value instanceof PhpArray) return 'array';
   const object = value as PhpObject;

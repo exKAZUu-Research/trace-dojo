@@ -74,7 +74,6 @@ export function isUtf8Ctype(): boolean {
   return currentLocales()[1] === 'C.UTF-8';
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 defineFunction('setlocale(int $category, $locales, ...$rest): string|false', ({ args }) => {
   const category = n(args[0]);
   for (const [index, value] of args.slice(1).entries()) {
@@ -87,7 +86,8 @@ defineFunction('setlocale(int $category, $locales, ...$rest): string|false', ({ 
     }
   }
   for (const value of args.slice(1)) {
-    for (const name of value instanceof PhpArray ? value.values() : [value]) {
+    const names: Iterable<Value> = value instanceof PhpArray ? value.values() : [value];
+    for (const name of names) {
       const result = trySetLocale(category, toStr(name));
       if (result !== undefined) return result;
     }
@@ -110,7 +110,7 @@ function trySetLocale(category: number, name: string): string | undefined {
   if (category < 0 || category > 6) return undefined;
   const current = currentLocales();
   if (name === '0') return category === 0 ? localeOfAll(current) : current[category - 1];
-  const locale = name === '' ? 'C' : name;
+  const locale = name === '' ? 'C.UTF-8' : name;
   // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- macOS names its UTF-8 LC_CTYPE locale `UTF-8`.
   if (MACOS_LOCALES.has(locale.split('.')[0]) || (locale === 'UTF-8' && category === 2)) {
     throw new UnsupportedFeatureError('C 以外のロケール（setlocale）');

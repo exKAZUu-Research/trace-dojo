@@ -38,3 +38,35 @@ foreach (['SJIS', 'CP932'] as $candidate) {
     foreach (["\x80", "\xFA\x40", "\x81\x60", "\xA6", "\x81\x7F"] as $bytes)
         var_dump(mb_detect_encoding($bytes, $candidate, true));
 }
+
+foreach (['UTF-7', 'UTF7-IMAP'] as $candidate) {
+    foreach (["\x82 ", "\x82@", "\x82\x80"] as $bytes) {
+        var_dump(mb_detect_encoding($bytes, [$candidate, 'ASCII', 'UTF-8']));
+        var_dump(mb_detect_encoding($bytes, $candidate, true));
+    }
+}
+foreach (['UTF-7' => '+Jjo', 'UTF7-IMAP' => '&Jjo-'] as $candidate => $bytes) {
+    var_dump(mb_detect_encoding($bytes, [$candidate, 'ASCII'], true));
+}
+foreach (['JIS', 'ISO-2022-JP'] as $candidate) {
+    foreach (["\x1b\x24B\x24\x22", "\x1b\x24B\x24\x22\x1b(B", "\x0e\x21\x0f", "\xa6"] as $bytes) {
+        var_dump(mb_detect_encoding($bytes, $candidate, true));
+        var_dump(mb_detect_encoding($bytes, [$candidate, 'ASCII']));
+    }
+}
+foreach (['UCS-4', 'UCS-4BE', 'UCS-4LE'] as $candidate) {
+    var_dump(mb_detect_encoding("\xff\xff\xff\xff", $candidate, true));
+    var_dump(mb_detect_encoding("\xff\xff\xff\xfe", $candidate, true));
+}
+var_dump(mb_detect_encoding("\xff\xff\xff\xff", ['UCS-4BE', 'UTF-16BE']));
+
+foreach ([
+    'DOCOMO' => ["\u{E643}", "\u{E644}"],
+    'KDDI-A' => ["\u{E468}", "\u{E469}"],
+    'KDDI-B' => ["\u{EC40}", "\u{EC41}"],
+    'SOFTBANK' => ["\u{E001}", "\u{E002}"],
+] as $carrier => $samples) {
+    foreach ($samples as $bytes) {
+        var_dump(mb_detect_encoding($bytes, ['UTF-8-Mobile#' . $carrier, 'UTF-8'], true));
+    }
+}

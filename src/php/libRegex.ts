@@ -400,7 +400,7 @@ function pregReplace(
   runtime.lastPregError = 0;
   const [pattern, , subject, limitValue] = args;
   const limit = limitValue === undefined ? -1 : Number(limitValue);
-  const patterns = pattern instanceof PhpArray ? [...pattern.map.values()] : [pattern];
+  const patterns: (Value | Ref)[] = pattern instanceof PhpArray ? [...pattern.map.values()] : [pattern];
   let result: Value = null;
   withCleanupExceptions(runtime, (capture) => {
     const state: ReplacementState = { value: 0, callbackFailed: false, capture };

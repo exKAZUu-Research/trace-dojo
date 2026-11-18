@@ -4,7 +4,7 @@ import { canBindClass } from './astAnalysis';
 import { lower } from './bytes';
 import { type ClassConstantLookup, type Constant, constantTypeName, foldedConstant } from './constantDefaults';
 import { nativeClassDefinition } from './native';
-import { PhpArray, PhpObject, type TypeDecl } from './values';
+import { PhpArray, PhpObject, type TypeDecl, UNDEFINED_RESULT } from './values';
 
 export class CompileClassConstants {
   private readonly bound = new Map<string, ClassDecl>();
@@ -96,7 +96,7 @@ export class CompileClassConstants {
     ) {
       const value = definition.consts?.[name];
       if (value === undefined) continue;
-      if (value instanceof PhpArray || value instanceof PhpObject) return;
+      if (value === UNDEFINED_RESULT || value instanceof PhpArray || value instanceof PhpObject) return;
       return value;
     }
   }

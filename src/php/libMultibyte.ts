@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 879 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 884 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/text-encoding-identifier-case -- mbstring names its encodings in this case.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
@@ -8,7 +8,7 @@ import { inflateRawSync } from 'node:zlib';
 import { eastAsianWidth } from 'get-east-asian-width';
 
 import { codePointBytes, dec, enc, lower } from './bytes';
-import { extraEncodingReader } from './detectionReaders';
+import { encodingValidator, extraEncodingReader } from './detectionReaders';
 import { deprecated, throwError, warn } from './errors';
 import { padUnits } from './libString';
 import { encodingNames } from './multibyteEncodingNames';
@@ -919,7 +919,7 @@ defineFunction(
   }
 );
 
-type EncodingReader = Pick<Codec, 'name' | 'decode'>;
+type EncodingReader = Pick<Codec, 'name' | 'decode'> & { validate?: (bytes: string) => boolean };
 const detectionReaders = new Map<string, EncodingReader>();
 
 function encodingReader(name: string): EncodingReader {
@@ -930,7 +930,11 @@ function encodingReader(name: string): EncodingReader {
     const special = extraEncodingReader(name, decodeUtf8, (bytes) => decodeUtf16(bytes, false));
     const decoder = special ? undefined : legacyTextDecoder(name);
     if (!special && !decoder) throw new UnsupportedFeatureError(`文字コード ${name} の判定（mb_detect_encoding）`);
-    reader = { name, decode: special ?? ((text) => decodeLegacy(text, decoder!)) };
+    reader = {
+      name,
+      decode: special ?? ((text) => decodeLegacy(text, decoder!)),
+      validate: encodingValidator(name, (bytes) => decodeUtf16(bytes, false)),
+    };
     detectionReaders.set(name, reader);
   }
   return reader;
@@ -963,17 +967,23 @@ function decodeLegacy(text: string, decoder: TextDecoder): number[] {
  * Picks the encoding that reads a string with the fewest demerits as mb_guess_encoding_for_strings does: invalid input
  * costs 1000 (or rules a candidate out when strict), and a rare code point costs more than a common one.
  */
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 22 -- Maintains candidate weighting, validation and strict rejection in one pass.
 function guessEncoding(text: string, candidates: EncodingReader[], strict: boolean): EncodingReader | undefined {
-  if (candidates.length === 1) return strict && candidates[0].decode(text).includes(BAD) ? undefined : candidates[0];
+  if (candidates.length === 1) {
+    const [codec] = candidates;
+    const valid = !strict || (codec.validate?.(text) ?? !codec.decode(text).includes(BAD));
+    return valid ? codec : undefined;
+  }
   if (text === '') return candidates[0];
   let best: { codec: EncodingReader; demerits: number } | undefined;
   for (const [index, codec] of candidates.entries()) {
     rt().spend();
+    const invalid = codec.validate?.(text) === false;
+    if (strict && invalid) continue;
     const codes = codec.decode(withoutBom(text, codec));
     if (strict && codes.includes(BAD)) continue;
     const multiplier = 1 + (0.3 * index) / candidates.length;
-    let score = 0;
+    let score = invalid ? 500 : 0;
     for (let code = 0; code < codes.length; code++) {
       if ((code & 127) === 0) rt().spend(2);
       score += codeDemerits(codes[code]);

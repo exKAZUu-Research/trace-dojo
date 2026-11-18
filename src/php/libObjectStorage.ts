@@ -71,7 +71,7 @@ class ObjectStorage {
     } else {
       rt().allocate(1);
       const slot = this.insertionBucket(hash);
-      const entry = { object, info, slot };
+      const entry: StorageEntry = { object, info, slot };
       this.entries.set(hash, entry);
       this.slots[slot] = entry;
       this.nativeValues.add(object);

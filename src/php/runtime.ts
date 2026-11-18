@@ -224,9 +224,11 @@ export class Runtime {
     const names = this.compiledNames(frame);
     for (const name of names) {
       const ref = frame.vars.get(name);
-      if (ref) yield [name, ref];
+      if (ref?.isDefinedBinding) yield [name, ref];
     }
-    for (const entry of frame.vars) if (!names.has(entry[0])) yield entry;
+    for (const entry of frame.vars) {
+      if (!names.has(entry[0]) && entry[1].isDefinedBinding) yield entry;
+    }
   }
 
   get frame(): Frame {

@@ -21,3 +21,11 @@ bool(false)
 depth:1;bool(false)
 bool(false)
 done:0
+value:1;cleared at 1:bool(false)
+bool(false)
+UNKNOWN:0
+
+Warning: Undefined variable $missing in /main.php on line 63
+
+Warning: Undefined variable $replaced in /main.php on line 66
+fallback;new;value:2;end;

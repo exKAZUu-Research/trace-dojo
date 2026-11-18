@@ -338,7 +338,7 @@ class HeapStorage {
       position = (position - 1) >> 1;
     }
     this.elements[position] = element;
-    for (const value of isEntry(element) ? [element.data, element.priority] : [element]) this.nativeValues.add(value);
+    for (const value of heapValues(element)) this.nativeValues.add(value);
     this.finishSift();
   }
 
@@ -360,7 +360,7 @@ class HeapStorage {
     }
     this.elements[parent] = bottom;
     this.elements.length = count;
-    const removed = isEntry(top) ? [top.data, top.priority] : [top];
+    const removed = heapValues(top);
     for (const value of removed) this.nativeValues.delete(value);
     rt().release(removed, true);
     this.finishSift();
@@ -388,7 +388,11 @@ class HeapStorage {
   }
 }
 
-function isEntry(element: Value | QueueEntry): element is QueueEntry {
+function heapValues(element: HeapElement): Value[] {
+  return isEntry(element) ? [element.data, element.priority] : [element];
+}
+
+function isEntry(element: HeapElement): element is QueueEntry {
   return (
     element !== null && typeof element === 'object' && !(element instanceof PhpArray) && !(element instanceof PhpObject)
   );
