@@ -12,10 +12,10 @@ An educational web app for training program tracing skills.
 
 Haskell type constructors and classes use inferred monomorphic kinds. These uses receive the Japanese unsupported-feature diagnostic:
 
-| Feature           | Unsupported use                                                                                           |
-| ----------------- | --------------------------------------------------------------------------------------------------------- |
-| `PolyKinds`       | Instantiating a type or class at a different kind from its inferred or defaulted kind.                    |
-| `ConstraintKinds` | Using class constructors as type arguments, constraint synonyms, or constraints headed by type variables. |
+| Feature           | Unsupported use                                                                                                                        |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `PolyKinds`       | Instantiating a type or class at a different kind from its inferred or defaulted kind.                                                 |
+| `ConstraintKinds` | Using class constructors as type arguments, constraint synonyms (including deriving aliases), or constraints headed by type variables. |
 
 ## Releases
 

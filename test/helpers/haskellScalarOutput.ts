@@ -23,9 +23,9 @@ const scenarios = [
   { name: 'sharedText', outer: 1000, inner: 4, loops: 5, binding: '', strings: true, text: true },
   { name: 'selfField', outer: 1000, inner: 200, loops: 5, binding: 'let this=Record xs (7::Int)' },
 ];
-const selected = z.literal('sharedText').optional().parse(process.argv[2]);
+const selected = z.enum(scenarios.map(({ name }) => name)).parse(process.argv[2]);
 const results = scenarios
-  .filter(({ name }) => (selected === undefined ? name !== 'sharedText' : name === selected))
+  .filter(({ name }) => name === selected)
   .map(({ name, outer, inner, loops, binding, strings, escaped, text }) => {
     const source = `import Control.Monad
 data Record=Record{payload::[[Int]],small::Int}

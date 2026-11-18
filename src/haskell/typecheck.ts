@@ -8,7 +8,7 @@ import { compileError, unsupportedError } from './errors';
 import { type Builtins, Checker, newDictParam, typeParamKinds, typeVarNames } from './infer';
 import { inferKinds } from './kindCheck';
 import { TypePrinter } from './prettyType';
-import type { RBinding } from './rast';
+import { directClassConstraint, type RBinding } from './rast';
 import type { RClassDecl, RDataDecl, RInstanceDecl, RModule } from './rename';
 import type { Span } from './syntax';
 import {
@@ -97,8 +97,9 @@ function defineConstructors(decl: RDataDecl): void {
 
 function defineClassMethods(decl: RClassDecl): void {
   const supers = decl.supers.map((sup) => {
-    assert.ok('cls' in sup);
-    return sup;
+    const direct = directClassConstraint(sup);
+    assert.ok(direct);
+    return direct;
   });
   decl.entity.supers = supers.map((sup) => sup.cls);
   for (const sup of supers) {
@@ -134,7 +135,7 @@ function declareInstance(checker: Checker, decl: RInstanceDecl, moduleName: stri
   const vars = new Map<string, Type>(names.map((name, index) => [name, { tag: 'tgen', index }]));
   const varKinds = new Map<string, Kind>(names.map((name, index) => [name, kinds[index]]));
   const head = checker.convertType(decl.type, vars, varKinds, checker.classKind(decl.cls, decl.span));
-  const context = decl.context.map((constraint) => checker.convertConstraint(constraint, vars, varKinds));
+  const context = checker.convertConstraints(decl.context, vars, varKinds);
   if (splitApp(head).head.tag !== 'tcon') {
     throw unsupportedError(decl.span, '型変数だけを型に書いたインスタンス');
   }
@@ -292,6 +293,7 @@ function deriveInstances(checker: Checker, module: RModule, options: TypecheckOp
   const pending: { decl: RDataDecl; cls: ClassEntity; info: InstanceInfo; span: Span }[] = [];
   for (const decl of module.dataDecls) {
     for (const { cls, span } of decl.deriving) {
+      assert.ok(cls);
       if (!options.builtins.derivableClasses.has(cls)) {
         if (['Functor', 'Foldable', 'Traversable', 'Generic', 'Data', 'Lift'].includes(cls.name)) {
           throw unsupportedError(span, `${cls.name} の deriving`);

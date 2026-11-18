@@ -4,19 +4,9 @@ import { compileError } from './errors';
 import type { Checker } from './infer';
 import { checkSchemeAmbiguity, typeVarNames } from './infer';
 import { rememberKind } from './kindTemplates';
-import type { RConstraint, RType } from './rast';
+import type { RType } from './rast';
 import type { RClassDecl, RDataDecl, RModule, RSynonymDecl } from './rename';
-import {
-  defaultKind,
-  freshKindVar,
-  type Kind,
-  kindArrow,
-  type Pred,
-  type Scheme,
-  STAR,
-  type Type,
-  unifyKinds,
-} from './types';
+import { defaultKind, freshKindVar, type Kind, kindArrow, type Pred, type Scheme, STAR, type Type } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 
 type KindDeclaration =
@@ -39,6 +29,9 @@ export function inferKinds(checker: Checker, module: RModule): void {
       indices.map((index) => declarations[index])
     );
   defaultDeclarations(declarations);
+  for (const decl of module.dataDecls)
+    for (const derivation of decl.deriving) derivation.cls = checker.derivingClass(derivation.type);
+  checker.checkKinds();
 }
 
 function prepareDeclarations(module: RModule): KindDeclaration[] {
@@ -63,21 +56,12 @@ function prepareDeclarations(module: RModule): KindDeclaration[] {
 function kindDependencies(entry: KindDeclaration): Set<object> {
   const found = new Set<object>();
   const work: RType[] = [];
-  const contexts: RConstraint[] = [];
   if (entry.kind === 'data') {
     for (const con of entry.decl.cons) work.push(...con.fields);
   } else if (entry.kind === 'synonym') work.push(entry.decl.rhs);
   else {
-    contexts.push(...entry.decl.supers);
-    for (const method of entry.decl.methods) {
-      work.push(method.sig.type);
-      contexts.push(...method.sig.context);
-    }
-  }
-  for (const constraint of contexts) {
-    if ('cls' in constraint) found.add(constraint.cls);
-    else work.push(constraint.head);
-    work.push(constraint.type);
+    work.push(...entry.decl.supers);
+    for (const method of entry.decl.methods) work.push(method.sig.type, ...method.sig.context);
   }
   for (const entity of typeEntities(work)) found.add(entity);
   return found;
@@ -122,19 +106,11 @@ function inferTypeDeclaration(checker: Checker, entry: Exclude<KindDeclaration, 
 }
 
 function inferClass(checker: Checker, decl: RClassDecl): void {
-  for (const sup of decl.supers) {
-    if (!('cls' in sup)) {
-      checker.convertConstraint(
-        sup,
-        new Map([[decl.param, { tag: 'tgen', index: 0 }]]),
-        new Map([[decl.param, decl.entity.tyvarKind]])
-      );
-      continue;
-    }
-    if (!unifyKinds(decl.entity.tyvarKind, checker.classKind(sup.cls, sup.span))) {
-      throw compileError(sup.span, `スーパークラス ${sup.cls.name} の型変数と、種類（カインド）が合いません。`);
-    }
-  }
+  checker.convertConstraints(
+    decl.supers,
+    new Map([[decl.param, { tag: 'tgen', index: 0 }]]),
+    new Map([[decl.param, decl.entity.tyvarKind]])
+  );
   for (const method of decl.methods) method.entity.scheme = methodScheme(checker, decl, method.sig);
 }
 
@@ -183,18 +159,13 @@ function* synonymDependencies(type: RType, byEntity: ReadonlyMap<TypeEntity, RSy
 }
 
 function methodScheme(checker: Checker, decl: RClassDecl, sig: RClassDecl['methods'][number]['sig']): Scheme {
-  const names = [
-    decl.param,
-    ...typeVarNames([sig.type, ...sig.context.map((constraint) => constraint.type)]).filter(
-      (name) => name !== decl.param
-    ),
-  ];
+  const names = [decl.param, ...typeVarNames([sig.type, ...sig.context]).filter((name) => name !== decl.param)];
   const kinds: Kind[] = names.map((_, index) => (index === 0 ? decl.entity.tyvarKind : freshKindVar()));
   const vars = new Map<string, Type>(names.map((name, index) => [name, { tag: 'tgen', index }]));
   const varKinds = new Map<string, Kind>(names.map((name, index) => [name, kinds[index]]));
   const type = checker.convertType(sig.type, vars, varKinds, STAR);
   const preds: Pred[] = [{ cls: decl.entity, type: { tag: 'tgen', index: 0 } }];
-  for (const constraint of sig.context) preds.push(checker.convertConstraint(constraint, vars, varKinds));
+  for (const pred of checker.convertConstraints(sig.context, vars, varKinds)) preds.push(pred);
   const scheme = { kinds, names, preds, type };
   checkSchemeAmbiguity(scheme, sig.span);
   return scheme;

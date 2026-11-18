@@ -32,10 +32,10 @@ import type {
   RType,
   VarRef,
 } from './rast';
+import { directClassConstraint } from './rast';
 import { RecursionBudget } from './recursionBudget';
 import type {
   Alt,
-  Constraint,
   Decl,
   Expr,
   FieldBind,
@@ -60,7 +60,7 @@ export interface RDataDecl {
   entity: TypeEntity;
   params: string[];
   cons: { con: ConInfo; fields: RType[] }[];
-  deriving: { cls: ClassEntity; span: Span }[];
+  deriving: { type: RType; cls?: ClassEntity; span: Span }[];
   span: Span;
 }
 
@@ -580,7 +580,7 @@ class Renamer {
       const fields = conDecl.fields.map((field) => this.renameType(field, params));
       return { con, fields };
     });
-    const deriving = decl.deriving.map((name) => ({ cls: this.lookupClass(name), span: name.span }));
+    const deriving = decl.deriving.map((name) => ({ type: this.renameTypeName(name), span: name.span }));
     this.dataDecls.push({ entity, params: decl.params.map((param) => param.name), cons, deriving, span: decl.span });
   }
 
@@ -596,14 +596,15 @@ class Renamer {
   }
 
   // code-gauge-allow functionCognitiveComplexity 22 -- Class declarations combine signatures, defaults, and fixities.
-  // code-gauge-allow functionNcss 37 -- Class declarations combine signatures, defaults, and fixities.
+  // code-gauge-allow functionNcss 38 -- Class declarations combine signatures, defaults, and fixities.
   private renameClass(decl: Extract<Decl, { kind: 'class' }>): void {
     const like = this.ownTypes.get(decl.name.name) as { kind: 'class'; entity: ClassEntity };
     const entity = like.entity;
     const param = decl.param.name;
     const supers = decl.context.map((constraint) => {
-      const renamed = this.renameConstraint(constraint, new Set([param]));
-      if (renamed.type.k !== 'var' || renamed.type.name !== param) {
+      const renamed = this.renameType(constraint, new Set([param]));
+      const direct = directClassConstraint(renamed);
+      if (direct && (direct.type.k !== 'var' || direct.type.name !== param)) {
         throw compileError(constraint.span, 'スーパークラスの制約には、クラスの型変数だけを書いてください。');
       }
       return renamed;
@@ -651,7 +652,7 @@ class Renamer {
     const vars = new Set<string>();
     collectTypeVars(decl.type, vars);
     const type = this.renameType(decl.type, vars);
-    const context = decl.context.map((constraint) => this.renameConstraint(constraint, vars));
+    const context = decl.context.map((constraint) => this.renameType(constraint, vars));
     for (const member of decl.decls) {
       if (member.kind === 'sig') throw unsupportedError(member.span, 'インスタンスの中の型シグネチャ（InstanceSigs）');
       if (member.kind === 'fixity') throw compileError(member.span, 'インスタンスの中には、結合性を宣言できません。');
@@ -1102,27 +1103,12 @@ class Renamer {
   renameSigType(sig: SigType): RSigType {
     const vars = new Set<string>();
     collectTypeVars(sig.type, vars);
-    for (const constraint of sig.context) for (const type of constraint.types) collectTypeVars(type, vars);
+    for (const constraint of sig.context) collectTypeVars(constraint, vars);
     return {
-      context: sig.context.map((constraint) => this.renameConstraint(constraint, vars)),
+      context: sig.context.map((constraint) => this.renameType(constraint, vars)),
       type: this.renameType(sig.type, vars),
       span: sig.span,
     };
-  }
-
-  private renameConstraint(constraint: Constraint, vars: Set<string>): RConstraint {
-    return {
-      ...this.renameConstraintHead(constraint.cls),
-      type: this.renameType(constraint.types[0], vars),
-      span: constraint.span,
-    };
-  }
-
-  private renameConstraintHead(name: QName): { cls: ClassEntity } | { head: RType } {
-    const found = this.lookupType(name);
-    return found.kind === 'class'
-      ? { cls: found.entity }
-      : { head: { k: 'con', entity: found.entity, span: name.span } };
   }
 
   renameType(type: TypeExpr, vars: ReadonlySet<string>): RType {

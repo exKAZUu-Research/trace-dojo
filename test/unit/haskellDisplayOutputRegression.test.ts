@@ -53,52 +53,43 @@ test('shared reference views serialize and render within a bounded heap', { time
   });
 });
 
-test(
-  'shared scalar answer arrays keep complete recordings serializable within a bounded heap',
-  { timeout: 30_000 },
-  () => {
-    const output = runHelper('test/helpers/haskellScalarOutput.ts', 256);
-    const results = z
-      .array(
-        z.object({
-          name: z.string(),
-          transportBytes: z.number(),
-          hadFullArray: z.boolean(),
-          strings: z.boolean(),
-          stdout: z.string(),
-          answers: z.array(z.string()),
-          finalAnswers: z.array(z.string()),
-          loops: z.number(),
-          outer: z.number(),
-          inner: z.number(),
-        })
-      )
-      .parse(output);
-    expect(results.map((item) => item.name)).toEqual([
-      'small',
-      'manySnapshots',
-      'wideSnapshots',
-      'strings',
-      'escapedStrings',
-      'million',
-      'repeated',
-      'aliases',
-      'selfField',
-    ]);
-    for (const result of results) {
-      expect(result.transportBytes).toBeLessThan(64 * 1024 * 1024);
-      expect(result.stdout).toBe(
-        `${result.outer}\n${result.strings ? result.inner : (result.inner * (result.inner + 1)) / 2}\n${Array.from({ length: result.loops }, (_, i) => `${i + 1}\n`).join('')}`
-      );
-      expect(result.answers).toContain('cheap');
-      expect(result.finalAnswers).toContain('cheap');
-      if (result.name === 'aliases') {
-        expect(result.hadFullArray).toBe(true);
-        expect(result.answers).not.toContain('alias19');
-      }
-    }
+test.each([
+  'small',
+  'manySnapshots',
+  'wideSnapshots',
+  'strings',
+  'escapedStrings',
+  'million',
+  'repeated',
+  'aliases',
+  'selfField',
+])('shared scalar answer arrays round-trip within a bounded heap: %s', { timeout: 30_000 }, (name) => {
+  const [result] = z
+    .tuple([
+      z.object({
+        transportBytes: z.number(),
+        hadFullArray: z.boolean(),
+        strings: z.boolean(),
+        stdout: z.string(),
+        answers: z.array(z.string()),
+        finalAnswers: z.array(z.string()),
+        loops: z.number(),
+        outer: z.number(),
+        inner: z.number(),
+      }),
+    ])
+    .parse(runHelper('test/helpers/haskellScalarOutput.ts', 256, [name]));
+  expect(result.transportBytes).toBeLessThan(64 * 1024 * 1024);
+  expect(result.stdout).toBe(
+    `${result.outer}\n${result.strings ? result.inner : (result.inner * (result.inner + 1)) / 2}\n${Array.from({ length: result.loops }, (_, i) => `${i + 1}\n`).join('')}`
+  );
+  expect(result.answers).toContain('cheap');
+  expect(result.finalAnswers).toContain('cheap');
+  if (name === 'aliases') {
+    expect(result.hadFullArray).toBe(true);
+    expect(result.answers).not.toContain('alias19');
   }
-);
+});
 
 test('shared text stays bounded when a snapshot is expanded', { timeout: 30_000 }, () => {
   const [result] = z

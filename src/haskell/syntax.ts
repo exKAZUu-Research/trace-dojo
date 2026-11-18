@@ -84,11 +84,7 @@ export type TypeExpr =
   | { kind: 'tlist'; elem: TypeExpr; span: Span }
   | { kind: 'ttuple'; elems: TypeExpr[]; span: Span };
 
-export interface Constraint {
-  cls: QName;
-  types: TypeExpr[];
-  span: Span;
-}
+export type Constraint = TypeExpr;
 
 export interface SigType {
   context: Constraint[];

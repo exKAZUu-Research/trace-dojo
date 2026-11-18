@@ -84,6 +84,15 @@ const constraintKinds = [
   ['userClassType', 'class C a where c::a->String\ndata P a=P\nx::P C\nx=P\nmain=putStrLn "ok"'],
   ['nestedConstraintTuple', 'type C a=((Show a,Eq a),Ord a)\nf::C a=>a->String\nf=show\nmain=putStrLn(f 1)'],
   ['constraintSynonymApply', 'type Id a=a\ntype C a=Id(Show a)\nf::C a=>a->String\nf=show\nmain=putStrLn(f 1)'],
+  ['bareShowDeriving', 'type C=Show\ndata T=T deriving C\nmain=print T'],
+  ['bareEqDeriving', 'type E=Eq\ndata T=T deriving(E,Show)\nmain=print(T==T)'],
+  ['bareOrdDeriving', 'type O=Ord\ndata T=T deriving(Eq,O,Show)\nmain=print(compare T T)'],
+  ['forwardDeriving', 'data T=T deriving C\ntype C=Show\nmain=print T'],
+  ['parenthesizedDeriving', 'type C=(Show)\ndata T=T deriving C\nmain=print T'],
+  ['aliasChainDeriving', 'type A=Show\ntype B=A\ndata T=T deriving B\nmain=print T'],
+  ['zeroConstraintAlias', 'type C=Show Int\nf::C=>Int\nf=1\nmain=print f'],
+  ['manyConstraintAlias', 'type C a b=(Show a,Eq b)\nf::C a b=>a->b->String\nf a _=show a\nmain=putStrLn(f 1 True)'],
+  ['bareVariableConstraint', 'data P a=P\ng::c=>P c->Int\ng _=1\nmain=print 1'],
 ] as const;
 
 test.each(constraintKinds)('well-kinded constraint uses have an environment diagnostic: %s', (_name, source) => {
@@ -113,13 +122,26 @@ const kindMisuses = [
   ['bareAliasInstance', 'type C=Show\ndata D=D\ninstance C D where show _="D"\nmain=print D'],
   ['aliasDeriving', 'type C a=Show a\ndata D=D deriving C\nmain=print D'],
   ['tupleBareClass', 'type T a=(Show,a)\nmain=print 1'],
+  ['concreteDeriving', 'type C=Show Int\ndata T=T deriving C\nmain=print T'],
+  ['ordinaryDeriving', 'type C=Maybe\ndata T=T deriving C\nmain=print T'],
+  ['missingClassArg', 'f::Show=>a->String\nf=undefined\nmain=putStrLn "ok"'],
+  ['extraClassArg', 'f::Show a b=>a->b\nf=undefined\nmain=putStrLn "ok"'],
+  ['pairConstraint', 'type Pair a b=(a,b)\nf::Pair a b=>a->b\nf=undefined\nmain=putStrLn "ok"'],
+  ['eitherConstraint', 'f::Either a b=>a->b\nf=undefined\nmain=putStrLn "ok"'],
+  ['nameConstraint', 'type Name=String\nf::Name=>Int\nf=1\nmain=print f'],
+  ['shapeConstraint', 'data Shape=Shape\nf::Shape=>Int\nf=1\nmain=print f'],
+  ['intConstraint', 'f::Int=>Int\nf=1\nmain=print f'],
+  ['variableHeadKind', 'f::a Show=>a->String\nf=undefined\nmain=putStrLn "ok"'],
+  ['variableArgumentKind', 'f::m a=>m->a\nf=undefined\nmain=putStrLn "ok"'],
+  ['crossContextKinds', 'data P a=P\ng::(c a,Show c)=>P c->a->Int\ng _ _=1\nmain=print 1'],
+  ['bareVariableKind', 'f::a=>a\nf=undefined\nmain=putStrLn "ok"'],
 ] as const;
 
 test.each(kindMisuses)('invalid type and class uses keep ordinary diagnostics: %s', (_name, source) => {
   const result = executeProgram('haskell', source);
   expect(result.kind).toBe('compileError');
   if (result.kind === 'compileError') {
-    expect(result.diagnostics[0]?.message).toMatch(/カインド|クラスではありません/);
+    expect(result.diagnostics[0]?.message).toMatch(/カインド|クラスではありません|型引数/);
     expect(result.diagnostics[0]?.message).not.toContain('使えません');
   }
 });

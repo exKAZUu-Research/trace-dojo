@@ -799,20 +799,9 @@ function constraintsOf(node: Node): Constraint[] {
     }
     case 'apply':
     case 'name':
-    case 'qualified': {
-      const type = convertType(node);
-      let head: TypeExpr = type;
-      const args: TypeExpr[] = [];
-      while (head.kind === 'tapp') {
-        args.unshift(head.arg);
-        head = head.fn;
-      }
-      if (head.kind === 'tvar') throw unsupportedError(spanOf(node), '型変数の制約（ConstraintKinds）');
-      if (head.kind !== 'tcon') throw syntaxError(spanOf(node), '制約には、クラスの名前を書いてください。');
-      if (args.length !== 1) {
-        throw unsupportedError(spanOf(node), args.length === 0 ? '引数のない制約' : '多引数の型クラス');
-      }
-      return [{ cls: head.name, types: args, span: spanOf(node) }];
+    case 'qualified':
+    case 'variable': {
+      return [convertType(node)];
     }
     case 'infix_chain': {
       throw unsupportedError(spanOf(node), '型の等しさの制約（~）');

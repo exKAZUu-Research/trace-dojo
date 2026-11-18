@@ -2,7 +2,7 @@ import { FUNCTION_TYPE, tupleType } from './builtinTypes';
 import type { ClassEntity } from './entities';
 import { compileError, unsupportedError } from './errors';
 import { freshKind, instantiateKind } from './kindTemplates';
-import type { RConstraint, RType } from './rast';
+import { directClassConstraint, type RConstraint, type RType } from './rast';
 import type { Span } from './syntax';
 import {
   CONSTRAINT,
@@ -26,19 +26,32 @@ export class TypeConversion {
   private kindInstances: { kind: Kind; expected: Kind; span: Span }[] = [];
   private constraintSpan: Span | undefined;
 
-  predicate(constraint: RConstraint, vars: ReadonlyMap<string, Type>, varKinds: ReadonlyMap<string, Kind>): Pred {
-    if ('cls' in constraint)
-      return {
-        cls: constraint.cls,
-        type: this.convert(constraint.type, vars, varKinds, this.classKind(constraint.cls, constraint.span)),
-      };
-    this.convert(
-      { k: 'app', fn: constraint.head, arg: constraint.type, span: constraint.span },
-      vars,
-      varKinds,
-      CONSTRAINT
-    );
-    throw unsupportedError(constraint.span, '制約の型シノニム（ConstraintKinds）');
+  predicates(
+    context: readonly RConstraint[],
+    vars: ReadonlyMap<string, Type>,
+    varKinds: ReadonlyMap<string, Kind>
+  ): Pred[] {
+    const predicates: Pred[] = [];
+    for (const constraint of context) {
+      const direct = directClassConstraint(constraint);
+      if (direct)
+        predicates.push({
+          cls: direct.cls,
+          type: this.convert(direct.type, vars, varKinds, this.classKind(direct.cls, direct.span)),
+        });
+      else {
+        this.convert(constraint, vars, varKinds, CONSTRAINT);
+        this.constraintSpan ??= constraint.span;
+      }
+    }
+    return predicates;
+  }
+
+  derivingClass(type: RType): ClassEntity | undefined {
+    if (type.k === 'class') return type.entity;
+    this.convert(type, new Map(), new Map(), kindArrow(freshKindVar(), CONSTRAINT));
+    this.constraintSpan ??= type.span;
+    return;
   }
 
   convert(type: RType, vars: ReadonlyMap<string, Type>, varKinds: ReadonlyMap<string, Kind>, expected: Kind): Type {
@@ -59,7 +72,8 @@ export class TypeConversion {
       }
     }
     this.kindInstances = [];
-    if (this.constraintSpan) throw unsupportedError(this.constraintSpan, '制約を型として扱う機能（ConstraintKinds）');
+    if (!specialize && this.constraintSpan)
+      throw unsupportedError(this.constraintSpan, '制約を型として扱う機能（ConstraintKinds）');
   }
 
   private convertTypeKind(

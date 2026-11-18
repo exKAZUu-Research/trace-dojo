@@ -80,7 +80,7 @@ export type RType =
   | { k: 'app'; fn: RType; arg: RType; span: Span }
   | { k: 'fun'; from: RType; to: RType; span: Span };
 
-export type RConstraint = ({ cls: ClassEntity } | { head: RType }) & { type: RType; span: Span };
+export type RConstraint = RType;
 
 export interface RSigType {
   context: RConstraint[];
@@ -144,4 +144,9 @@ export type RBinding =
 
 export interface RBindGroup {
   bindings: RBinding[];
+}
+
+export function directClassConstraint(constraint: RType): { cls: ClassEntity; type: RType; span: Span } | undefined {
+  if (constraint.k !== 'app' || constraint.fn.k !== 'class') return;
+  return { cls: constraint.fn.entity, type: constraint.arg, span: constraint.span };
 }

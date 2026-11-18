@@ -306,9 +306,7 @@ export class Checker {
   }
 
   sigToScheme(sig: RSigType): Scheme {
-    const names = typeVarNames([sig.type, ...sig.context.map((constraint) => constraint.type)]).filter(
-      (name) => !this.scopedTypes.has(name)
-    );
+    const names = typeVarNames([sig.type, ...sig.context]).filter((name) => !this.scopedTypes.has(name));
     const kinds: Kind[] = names.map(() => freshKindVar());
     const vars = new Map<string, Type>(this.scopedTypes);
     const varKinds = new Map<string, Kind>([...this.scopedTypes].map(([name, type]) => [name, kindOfType(type)]));
@@ -317,7 +315,7 @@ export class Checker {
       varKinds.set(name, kinds[index]);
     }
     const type = this.convertType(sig.type, vars, varKinds, STAR);
-    const preds = sig.context.map((constraint) => this.convertConstraint(constraint, vars, varKinds));
+    const preds = this.convertConstraints(sig.context, vars, varKinds);
     this.checkKinds();
     const scheme = { kinds: kinds.map(defaultKind), names, preds, type };
     checkSchemeAmbiguity(scheme, sig.span);
@@ -328,12 +326,16 @@ export class Checker {
     return this.typeConversion.convert(type, vars, varKinds, expected);
   }
 
-  convertConstraint(
-    constraint: RConstraint,
+  convertConstraints(
+    context: readonly RConstraint[],
     vars: ReadonlyMap<string, Type>,
     varKinds: ReadonlyMap<string, Kind>
-  ): Pred {
-    return this.typeConversion.predicate(constraint, vars, varKinds);
+  ): Pred[] {
+    return this.typeConversion.predicates(context, vars, varKinds);
+  }
+
+  derivingClass(type: RType): ClassEntity | undefined {
+    return this.typeConversion.derivingClass(type);
   }
 
   typeOfRef(ref: VarRef, span: Span, name: string, expr: Extract<RExpr, { k: 'var' }>): Type {
