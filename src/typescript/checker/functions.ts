@@ -16,7 +16,6 @@ import {
 } from './syntax';
 import {
   anyType,
-  filterType,
   functionType,
   isAnyLike,
   isIntrinsic,
@@ -64,6 +63,8 @@ export class FunctionChecker {
   readonly parameterTypes = new Map<number, Type>();
   private readonly inferring = new Set<number>();
   private readonly inferredReturns = new Map<number, Type>();
+  /** The flow at the `return` statements of each checked function body whose end no path reaches, by function. */
+  private readonly returnFlows = new Map<number, FlowState>();
 
   constructor(private readonly c: Checker) {}
 
@@ -110,13 +111,16 @@ export class FunctionChecker {
   }
 
   /**
-   * The type predicate TypeScript 5.5 infers for a function that only returns a boolean condition on a parameter, as
-   * `(x) => x !== null` is `(x) => x is T` when the condition is false exactly where the parameter is not a `T`.
+   * The type predicate TypeScript 5.5 infers for a function whose only return gives a boolean condition on a parameter,
+   * as `(x) => x !== null` is `(x) => x is T`: the condition, checked after the flow up to the return, is true only
+   * where the parameter is a `T`, which it is false of nowhere.
    */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Follows TypeScript 5.5's conditions for inferring a type predicate.
   inferredPredicate(node: TreeNode, signature: Signature): Signature['predicate'] {
     const returned = this.singleReturnedExpression(node);
     if (!returned || !isBooleanLike(this.c.silently(() => signature.returnType()))) return undefined;
+    // An expression body starts where the function does; a `return` follows the flow of the body before it.
+    const start = returned.parent?.type === 'return_statement' ? this.returnFlows.get(node.id) : new FlowState();
+    if (!start) return undefined;
     const parametersNode = node.childForFieldName('parameters');
     const names = parametersNode
       ? named(parametersNode).map((parameter) => parameter.childForFieldName('pattern') ?? parameter)
@@ -126,34 +130,51 @@ export class FunctionChecker {
       if (name?.type !== 'identifier' || !parameter || parameter.rest) continue;
       const symbol = this.c.scopeOf(name).lookupValue(name.text);
       if (!symbol || symbol.isReassigned) continue;
-      const declared = parameter.type;
-      const key = `s${symbol.id}`;
-      const outer = this.c.flow.current;
-      this.c.flow.current = new FlowState();
-      let whenTrue: State;
-      let whenFalse: State;
-      try {
-        ({ whenTrue, whenFalse } = this.c.silently(() => this.c.conditions.condition(returned, false)));
-      } finally {
-        this.c.flow.current = outer;
-      }
-      const trueType = whenTrue ? (whenTrue.entries.get(key)?.type ?? declared) : neverType;
-      const falseType = whenFalse ? (whenFalse.entries.get(key)?.type ?? declared) : neverType;
-      if (this.c.relations.identical(trueType, declared)) continue;
-      const rest = filterType(declared, (member) => !this.c.relations.isAssignable(member, trueType));
-      if (this.c.relations.identical(rest, falseType)) return { index, type: trueType };
+      const trueType = this.refinedType(returned, start, `s${symbol.id}`, parameter.type);
+      if (trueType) return { index, type: trueType };
     }
     return undefined;
   }
 
-  /** The expression a function returns when that is all it does: an arrow's expression body or a lone `return`. */
+  /** TypeScript's `checkIfExpressionRefinesParameter`: what a reference is where `condition` is true, if only that. */
+  private refinedType(condition: TreeNode, start: FlowState, key: string, declared: Type): Type | undefined {
+    const trueType = this.narrowedByCondition(condition, start, key, declared, true);
+    if (this.c.relations.identical(trueType, declared)) return undefined;
+    const trueStart = start.clone();
+    trueStart.entries.set(key, { type: trueType, assigned: true });
+    const falseType = this.narrowedByCondition(condition, trueStart, key, trueType, false);
+    return isIntrinsic(falseType, 'never') ? trueType : undefined;
+  }
+
+  /** The type of the reference `key` where `condition`, checked from `start`, is `assumeTrue`. */
+  private narrowedByCondition(
+    condition: TreeNode,
+    start: FlowState,
+    key: string,
+    type: Type,
+    assumeTrue: boolean
+  ): Type {
+    const outer = this.c.flow.current;
+    this.c.flow.current = start.clone();
+    try {
+      const { whenTrue, whenFalse } = this.c.silently(() => this.c.conditions.condition(condition, false));
+      const state = assumeTrue ? whenTrue : whenFalse;
+      return state ? (state.entries.get(key)?.type ?? type) : neverType;
+    } finally {
+      this.c.flow.current = outer;
+    }
+  }
+
+  /**
+   * The expression a function returns when that is all it returns, from which TypeScript infers a type predicate: an
+   * arrow's expression body, or that of the only `return` of a body.
+   */
   private singleReturnedExpression(node: TreeNode): TreeNode | undefined {
     const body = node.childForFieldName('body');
     if (!body) return undefined;
     if (body.type !== 'statement_block') return body;
-    const statements = named(body);
-    if (statements.length !== 1 || statements[0].type !== 'return_statement') return undefined;
-    return named(statements[0])[0];
+    const returns = returnStatements(body);
+    return returns.length === 1 ? named(returns[0])[0] : undefined;
   }
 
   private anySignature(): Signature {
@@ -273,14 +294,9 @@ export class FunctionChecker {
     try {
       if (!body) return anyType;
       this.checkBody(body, context);
+      this.recordReturnFlow(context);
       if (declaredReturn) this.checkMissingReturn(node, context, declaredReturn);
-      if (this.circular.has(node.id) && this.c.silent === 0) {
-        const name = node.childForFieldName('name');
-        this.c.error(
-          name ?? node,
-          `${name?.text ?? 'この関数'} は、戻り値の式で自分自身を参照しているため、戻り値の型が暗黙に any になります。戻り値の型を書いてください。`
-        );
-      }
+      if (this.circular.has(node.id) && this.c.silent === 0) this.reportCircularReturn(node);
       if (context.isConstructor && node.parent?.parent) {
         this.c.classDeclarations.checkPropertyInitialization(
           node.parent.parent,
@@ -295,6 +311,25 @@ export class FunctionChecker {
       this.contexts.pop();
       this.capturedTypes.pop();
     }
+  }
+
+  private reportCircularReturn(node: TreeNode): void {
+    const name = node.childForFieldName('name');
+    this.c.error(
+      name ?? node,
+      `${name?.text ?? 'この関数'} は、戻り値の式で自分自身を参照しているため、戻り値の型が暗黙に any になります。戻り値の型を書いてください。`
+    );
+  }
+
+  private recordReturnFlow(context: FunctionContext): void {
+    if (context.endReachable) {
+      this.returnFlows.delete(context.node.id);
+      return;
+    }
+    // A loop checks its body again, which gives a `return` in it a state for each pass; a silent check of a loop that
+    // reuses the exits of an earlier one sees no `return`, so the earlier check's flow stays.
+    const state = this.c.flow.merge(context.returnStates);
+    if (state) this.returnFlows.set(context.node.id, state);
   }
 
   /** A parameter named by an identifier starts without `undefined` when its default value cannot be `undefined`. */
@@ -580,6 +615,24 @@ function isBooleanLike(type: Type): boolean {
     (member) => member.kind === 'literal' && typeof member.value === 'boolean'
   );
 }
+
+/** The `return` statements of a function body, without those of the functions and classes in it. */
+function returnStatements(node: TreeNode): TreeNode[] {
+  if (node.type === 'return_statement') return [node];
+  return named(node).flatMap((child) => (ownsReturns.has(child.type) ? [] : returnStatements(child)));
+}
+
+const ownsReturns = new Set([
+  'function_declaration',
+  'function_expression',
+  'generator_function_declaration',
+  'generator_function',
+  'arrow_function',
+  'method_definition',
+  'class_declaration',
+  'class',
+  'class_static_block',
+]);
 
 function mayBeUndefined(type: Type): boolean {
   return (type.kind === 'union' ? type.types : [type]).some(
