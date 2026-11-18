@@ -213,7 +213,8 @@ export class AssignmentChecker {
         }
         case 'spread_element':
         case 'rest_pattern': {
-          assign(named(element)[0], this.c.patterns.restObject(type, used));
+          const target = named(element)[0];
+          assign(target, this.objectRestAssignmentType(target, type, used));
           break;
         }
         default: {
@@ -221,6 +222,13 @@ export class AssignmentChecker {
         }
       }
     }
+  }
+
+  private objectRestAssignmentType(target: TreeNode, source: Type, omitted: Type[]): Type {
+    const identifier = skipParentheses(target);
+    const symbol =
+      identifier.type === 'identifier' ? this.c.scopeOf(identifier).lookupValue(identifier.text) : undefined;
+    return symbol && this.isAutoTyped(symbol) ? anyType : this.c.patterns.restObject(source, omitted);
   }
 
   compoundAssignment(node: TreeNode): Type {

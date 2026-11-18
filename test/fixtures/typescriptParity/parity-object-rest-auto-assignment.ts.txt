@@ -1,0 +1,6 @@
+function removed<T extends object,K extends keyof T>(o:T,k:K){let rest;let value;({[k]:value,...rest}=o);return rest[k]===undefined;}
+function kind<T extends object,K extends keyof T>(o:T,k:K){var rest;var value;({[k]:value,...rest}=o);return typeof rest[k];}
+let changed;changed=1;({...changed}={a:3});console.log(changed.a);
+let nested;({a:{...nested}}={a:{b:4}});console.log(nested.b);
+let parenthesized;({... (parenthesized)}={c:5});console.log(parenthesized.c);
+console.log(removed({x:1,y:2},"x"),kind({x:1,y:2},"x"));
