@@ -227,9 +227,8 @@ export class OperatorChecker {
       case '>':
       case '<=':
       case '>=': {
-        if (!this.checkNullishOperands(left, right, leftType, rightType)) return booleanType;
-        const l = this.baseOfLiterals(this.c.relations.removeNullish(leftType));
-        const r = this.baseOfLiterals(this.c.relations.removeNullish(rightType));
+        const l = this.baseOfLiterals(this.nonNullOperand(left, leftType));
+        const r = this.baseOfLiterals(this.nonNullOperand(right, rightType));
         // Both operands are numbers, or neither is and they are comparable, as `string | number >= 1` is not.
         const leftNumeric = this.isNumberLike(l) || this.isBigintLike(l);
         const rightNumeric = this.isNumberLike(r) || this.isBigintLike(r);
@@ -238,7 +237,7 @@ export class OperatorChecker {
           isAnyLike(r) ||
           (leftNumeric && rightNumeric) ||
           (!leftNumeric && !rightNumeric && this.c.relations.isComparable(l, r));
-        if (!ok) this.reportOperator(node, operator, leftType, rightType);
+        if (!ok) this.reportOperator(node, operator, l, r);
         return booleanType;
       }
       case '+': {
@@ -256,28 +255,29 @@ export class OperatorChecker {
   }
 
   private plus(node: TreeNode, left: TreeNode, right: TreeNode, leftType: Type, rightType: Type): Type {
-    for (const [operand, type] of [
-      [left, leftType],
-      [right, rightType],
-    ] as const) {
-      if (this.c.expressions.isSymbolLike(type)) {
-        this.c.error(operand, "演算子 '+' は 'symbol' 型には使えません。");
-        return errorType;
-      }
-    }
-    if (this.isStringLike(leftType) || this.isStringLike(rightType)) {
-      this.c.expressions.checkFunctionText(left, leftType);
-      this.c.expressions.checkFunctionText(right, rightType);
+    if (this.reportsSymbolOperand(left, right, leftType, rightType)) return errorType;
+    const concatenates = this.isStringLike(leftType) || this.isStringLike(rightType);
+    if (!concatenates && (isAnyLike(leftType) || isAnyLike(rightType))) return anyType;
+    const l = concatenates ? leftType : this.nonNullOperand(left, leftType);
+    const r = concatenates ? rightType : this.nonNullOperand(right, rightType);
+    if (this.isStringLike(l) || this.isStringLike(r)) {
+      this.c.expressions.checkFunctionText(left, l);
+      this.c.expressions.checkFunctionText(right, r);
       return stringType;
     }
-    if (isAnyLike(leftType) || isAnyLike(rightType)) return anyType;
-    if (!this.checkNullishOperands(left, right, leftType, rightType)) return numberType;
-    const l = this.c.relations.removeNullish(leftType);
-    const r = this.c.relations.removeNullish(rightType);
+    if (isAnyLike(l) || isAnyLike(r)) return anyType;
     if (this.isNumberLike(l) && this.isNumberLike(r)) return numberType;
     if ([l, r].every((type) => this.isBigintLike(type) || isIntrinsic(type, 'never'))) return bigintType;
-    this.reportOperator(node, '+', leftType, rightType);
+    this.reportOperator(node, '+', l, r);
     return errorType;
+  }
+
+  private reportsSymbolOperand(left: TreeNode, right: TreeNode, leftType: Type, rightType: Type): boolean {
+    const operand = [left, right].find((_, index) =>
+      this.c.expressions.isSymbolLike(index === 0 ? leftType : rightType)
+    );
+    if (operand) this.c.error(operand, "演算子 '+' は 'symbol' 型には使えません。");
+    return operand !== undefined;
   }
 
   private arithmetic(
@@ -288,9 +288,8 @@ export class OperatorChecker {
     leftType: Type,
     rightType: Type
   ): Type {
-    if (!this.checkNullishOperands(left, right, leftType, rightType)) return numberType;
-    const l = this.c.relations.removeNullish(leftType);
-    const r = this.c.relations.removeNullish(rightType);
+    const l = this.nonNullOperand(left, leftType);
+    const r = this.nonNullOperand(right, rightType);
     const leftOk = this.isNumberLike(l) || this.isBigintLike(l);
     const rightOk = this.isNumberLike(r) || this.isBigintLike(r);
     if (!leftOk)
@@ -302,7 +301,7 @@ export class OperatorChecker {
     const rightBig = this.isBigintLike(r);
     // `any` and `never` take the kind of the other operand.
     if (leftBig !== rightBig && [l, r].every((type) => !isAnyLike(type) && !isIntrinsic(type, 'never'))) {
-      this.reportOperator(node, operator, leftType, rightType);
+      this.reportOperator(node, operator, l, r);
       return errorType;
     }
     const big = leftBig || rightBig;
@@ -312,22 +311,16 @@ export class OperatorChecker {
     return big ? bigintType : numberType;
   }
 
-  /** Reports operands that are or may be `null` or `undefined`, returning whether both are usable. */
-  private checkNullishOperands(left: TreeNode, right: TreeNode, leftType: Type, rightType: Type): boolean {
-    let ok = true;
-    for (const [operand, type] of [
-      [left, leftType],
-      [right, rightType],
-    ] as const) {
-      if (isIntrinsic(type, 'null') || isIntrinsic(type, 'undefined')) {
-        this.c.error(operand, `値 '${this.c.print(type)}' はここでは使えません。`);
-        ok = false;
-      } else if (!isAnyLike(type) && this.c.relations.isNullable(type)) {
-        this.c.members.checkNonNullable(operand, type);
-        ok = false;
-      }
+  /**
+   * An operand's type without `null` and `undefined`, reporting an operand that is or may be either, as TypeScript's
+   * `checkNonNullType` does. A `void` operand stays, so the operator's own check rejects it.
+   */
+  private nonNullOperand(operand: TreeNode, type: Type): Type {
+    if (isIntrinsic(type, 'null') || isIntrinsic(type, 'undefined')) {
+      this.c.error(operand, `値 '${this.c.print(type)}' はここでは使えません。`);
+      return errorType;
     }
-    return ok;
+    return this.c.members.checkNonNullable(operand, type);
   }
 
   private reportOperator(node: TreeNode, operator: string, leftType: Type, rightType: Type): void {
