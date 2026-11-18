@@ -5,6 +5,7 @@ import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
 import { StepTracker } from '../interpreter/stepTracker';
 import { type TurtleState, TurtleWorld } from '../interpreter/turtleWorld';
 import type { Expr, FunctionDecl, Program } from './ast';
+import { collectScopeVars } from './astAnalysis';
 import { dec } from './bytes';
 import type { CompileNotice } from './converter';
 import { arrayIsShared, collectGarbage, GC_THRESHOLD_DEFAULT, releaseDropped } from './garbage';
@@ -119,7 +120,8 @@ export class Frame {
   }
 }
 
-/** The order in which a program declared its global variables, which PHP's shutdown follows. */
+const variableNamesByFunction = new WeakMap<FunctionDecl, Set<string>>();
+
 export class Runtime {
   // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- PHP returns this canonical encoding name.
   mbEncoding = 'UTF-8';
@@ -176,6 +178,7 @@ export class Runtime {
   /** Values held by native code (such as the array a sort is sorting), which garbage collection must keep. */
   readonly held: Value[] = [];
   program?: Program;
+  private mainVariableNames?: ReadonlySet<string>;
   notices: CompileNotice[] = [];
   /** The reference the last call to a function returning by reference returned, for `$x = &f()`. */
   lastReturnRef: Ref | undefined;
@@ -200,6 +203,20 @@ export class Runtime {
 
   get pendingAssignmentWarning(): PhpThrow | undefined {
     return this.assignmentWarning?.frame === this.frame ? this.assignmentWarning.exception : undefined;
+  }
+
+  compiledNames(frame = this.frame): ReadonlySet<string> {
+    const decl = frame.decl;
+    if (!decl) return (this.mainVariableNames ??= new Set(this.program?.mainVars));
+    let names = variableNamesByFunction.get(decl);
+    if (!names) {
+      names = new Set(decl.params.map((parameter) => parameter.name));
+      const closure = frame.closure?.internal as ClosureData | undefined;
+      for (const name of closure?.bound.keys() ?? []) names.add(name);
+      for (const name of collectScopeVars(decl.body)) names.add(name);
+      variableNamesByFunction.set(decl, names);
+    }
+    return names;
   }
 
   get frame(): Frame {

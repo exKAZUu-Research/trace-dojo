@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 561 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 570 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { byteAt, lower, untilNul } from './bytes';
 import { callValue, checkCallable, explainCallable } from './callables';
@@ -725,8 +725,19 @@ defineFunction('fprintf(resource $stream, string $format, mixed ...$values): int
 defineFunction(
   'get_defined_vars(): array',
   () => {
+    const runtime = rt();
     const array = new PhpArray();
-    for (const [name, ref] of rt().frame.vars) array.setSlot(normalizeKeyString(name), copyValueSlot(ref));
+    const vars = runtime.frame.vars;
+    const names = runtime.compiledNames();
+    for (const name of names) {
+      runtime.spend();
+      const ref = vars.get(name);
+      if (ref) array.setSlot(normalizeKeyString(name), copyValueSlot(ref));
+    }
+    for (const [name, ref] of vars) {
+      runtime.spend();
+      if (!names.has(name)) array.setSlot(normalizeKeyString(name), copyValueSlot(ref));
+    }
     return array;
   },
   true

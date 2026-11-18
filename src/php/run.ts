@@ -197,7 +197,7 @@ function destroyGlobals(runtime: Runtime): void {
 
 /** The global variables in the order PHP's symbol table holds them: the program's variables in order of appearance. */
 function globalOrder(runtime: Runtime): string[] {
-  const order = new Set(runtime.program?.mainVars);
+  const order = new Set(runtime.compiledNames(runtime.globalFrame));
   for (const name of runtime.globalFrame.vars.keys()) {
     runtime.spend();
     order.add(name);

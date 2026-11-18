@@ -2,8 +2,6 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import type { ArrayRebuild } from './arrayOrder';
 import { type Comparisons, type Entry, setEntries, SortedWalk } from './arraySetWalk';
-import type { FunctionDecl } from './ast';
-import { collectScopeVars } from './astAnalysis';
 import { lower, upper } from './bytes';
 import { callCallback, callCallbackRefs, callMethod, consumeCallbackResult } from './callables';
 import type { ArgValue } from './calls';
@@ -26,7 +24,7 @@ import {
   withStringConversionErrors,
 } from './operators';
 import { arrayIsShared, ElementPlace, share, VarPlace } from './places';
-import { type Frame, PhpThrow, rt } from './runtime';
+import { PhpThrow, rt } from './runtime';
 import {
   copyValueSlot,
   deref,
@@ -672,8 +670,9 @@ defineFunction(
       array = array.copy();
       if (refs[0]) refs[0].v = array;
     }
-    const frame = rt().frame;
-    const compiledNames = mode === 5 ? compiledExtractNames(frame) : undefined;
+    const runtime = rt();
+    const frame = runtime.frame;
+    const compiledNames = mode === 5 ? runtime.compiledNames(frame) : undefined;
     let count = 0n;
     for (const key of array.keys()) {
       const name =
@@ -691,20 +690,6 @@ defineFunction(
   },
   true
 );
-
-const extractNamesByFunction = new WeakMap<FunctionDecl, Set<string>>();
-
-function compiledExtractNames(frame: Frame): ReadonlySet<string> {
-  const decl = frame.decl;
-  if (!decl) return new Set(rt().program?.mainVars);
-  let names = extractNamesByFunction.get(decl);
-  if (!names) {
-    names = collectScopeVars(decl.body);
-    for (const name of decl.captures ?? []) names.add(name);
-    extractNamesByFunction.set(decl, names);
-  }
-  return names;
-}
 
 function checkExtractArguments(mode: number, prefix: string | undefined): void {
   if (mode > 6) throwError('ValueError', 'extract(): Argument #2 ($flags) must be a valid extract type');

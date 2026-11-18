@@ -28,3 +28,81 @@ array(4) {
 }
 int(1)
 int(42)
+array(8) {
+  [0]=>
+  string(9) "parameter"
+  [1]=>
+  string(5) "flags"
+  [2]=>
+  string(11) "dynamicName"
+  [3]=>
+  string(5) "count"
+  [4]=>
+  string(5) "first"
+  [5]=>
+  string(1) "x"
+  [6]=>
+  string(7) "dynamic"
+  [7]=>
+  string(11) "p_parameter"
+}
+int(42)
+array(8) {
+  [0]=>
+  string(9) "parameter"
+  [1]=>
+  string(5) "flags"
+  [2]=>
+  string(11) "dynamicName"
+  [3]=>
+  string(5) "count"
+  [4]=>
+  string(5) "first"
+  [5]=>
+  string(1) "x"
+  [6]=>
+  string(7) "dynamic"
+  [7]=>
+  string(11) "p_parameter"
+}
+int(3)
+int(3)
+array(8) {
+  [0]=>
+  string(9) "parameter"
+  [1]=>
+  string(5) "flags"
+  [2]=>
+  string(11) "dynamicName"
+  [3]=>
+  string(5) "count"
+  [4]=>
+  string(5) "first"
+  [5]=>
+  string(1) "x"
+  [6]=>
+  string(7) "dynamic"
+  [7]=>
+  string(11) "p_parameter"
+}
+int(42)
+array(8) {
+  [0]=>
+  string(9) "parameter"
+  [1]=>
+  string(5) "flags"
+  [2]=>
+  string(11) "dynamicName"
+  [3]=>
+  string(5) "count"
+  [4]=>
+  string(5) "first"
+  [5]=>
+  string(1) "x"
+  [6]=>
+  string(7) "dynamic"
+  [7]=>
+  string(11) "p_parameter"
+}
+int(3)
+int(3)
