@@ -88,6 +88,10 @@ export function storageLocation(storage: object, index: number): { storage: obje
 const pointerLocations = new WeakMap<object, (index: number) => { storage: object; index: number }>();
 const interiorLocations = new WeakMap<object, Map<number, object>>();
 const aggregateLocations = new WeakMap<object, WeakValueMap<number, object>>();
+const arrayLocations = new WeakMap<
+  object,
+  { start: number; stride: number; origin: { storage: object; index: number } }
+>();
 
 export function registerPointerLocation(
   storage: object,
@@ -289,9 +293,18 @@ export class Pointer {
     return { storage: origin.storage, index: origin.index + offset };
   }
 
+  withFieldLocation(parent: Pointer, offset: number): Pointer {
+    return new Pointer(this.target, this.index, parent.fieldLocation(offset));
+  }
+
   private aggregateLocation(): { storage: object; index: number } {
     const slots = this.target.slots;
     if (storageLocations.has(slots) || pointerLocations.has(slots)) return this.storageLocation();
+    const array = arrayLocations.get(slots);
+    if (array) {
+      const { storage, index } = array.origin;
+      return { storage, index: index + (this.index - array.start) * array.stride };
+    }
     const location = this.slotLocation();
     let fields = aggregateLocations.get(location.storage);
     if (!fields) {
@@ -411,10 +424,16 @@ export function isUndefinedMemory(value: Value): boolean {
   return value instanceof FnValue && value.isUndefined;
 }
 
-export function arrayPointerView(value: Pointer, type: Extract<Type, { kind: 'array' }>): ZArray {
-  return isUndefinedMemory(value)
-    ? new ZArray(UNDEFINED_MEMORY.slots, 0, type.length, type.sentinel !== undefined)
-    : (value.load() as ZArray);
+export function arrayPointerView(value: Pointer, type: Extract<Type, { kind: 'array' }>, stride: number): ZArray {
+  if (isUndefinedMemory(value)) return new ZArray(UNDEFINED_MEMORY.slots, 0, type.length, type.sentinel !== undefined);
+  const array = value.load() as ZArray;
+  if (stride !== 0 && hasAggregateStorage(type.child) && !arrayLocations.has(array.slots))
+    arrayLocations.set(array.slots, { start: array.offset, stride, origin: value.fieldLocation(0) });
+  return array;
+}
+
+export function hasAggregateStorage(type: Type): boolean {
+  return type.kind === 'array' || type.kind === 'struct' || type.kind === 'union' || type.kind === 'optional';
 }
 
 export type NativeState = { turtle?: TurtleState } & Record<string, unknown>;

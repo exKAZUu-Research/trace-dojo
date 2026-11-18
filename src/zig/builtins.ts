@@ -1087,7 +1087,7 @@ function elementAccessor(type: Type):
       child: type.child.child,
       isConst: type.isConst,
       view: (value) => {
-        const array = arrayPointerView(value as Pointer, arrayType);
+        const array = arrayPointerView(value as Pointer, arrayType, sizeOf(arrayType.child));
         return { slots: array, start: array.offset, length: array.lengthValue };
       },
     };

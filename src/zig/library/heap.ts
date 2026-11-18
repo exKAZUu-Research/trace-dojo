@@ -229,7 +229,7 @@ function allocatedSlice(
     (frame) => {
       const value = compiled.eval(frame);
       if (array) {
-        const target = arrayPointerView(value as Pointer, array);
+        const target = arrayPointerView(value as Pointer, array, sizeOf(child));
         return new Slice(target, target.offset, array.length + emptyLength);
       }
       const slice = value as Slice;

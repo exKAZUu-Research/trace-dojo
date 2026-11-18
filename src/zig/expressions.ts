@@ -101,6 +101,7 @@ import {
   EnumLiteral,
   ErrorValue,
   FnValue,
+  hasAggregateStorage,
   markConstantStorage,
   NULL,
   optionalPayload,
@@ -554,14 +555,12 @@ export abstract class ExpressionCompiler extends SemaBase {
     const comptime = this.requiresComptime(base.type, base.span);
     if (comptime) return project;
     const zero = sizeOf(child) === 0;
-    const aggregate = child.kind === 'struct' || child.kind === 'union';
-    if (!zero && !aggregate) return project;
+    if (!zero && !hasAggregateStorage(child)) return project;
     const offset = offsetOf();
     if (sizeOf(base.type) === 0) return (parent) => this.zeroPointerAt(parent.fieldLocation(offset), child);
     return (parent) => {
       const target = project(parent);
-      const origin = parent.fieldLocation(offset);
-      return zero ? this.zeroPointerAt(origin, child) : new Pointer(target.target, target.index, origin);
+      return zero ? this.zeroPointerAt(parent.fieldLocation(offset), child) : target.withFieldLocation(parent, offset);
     };
   }
 
@@ -749,7 +748,9 @@ export abstract class ExpressionCompiler extends SemaBase {
   }
 
   protected optionalPayloadPointer(pointer: Pointer, child: Type): Pointer {
-    return optionalNicheBits(child) ? pointer : pointer.project('optional');
+    if (optionalNicheBits(child)) return pointer;
+    const payload = pointer.project('optional');
+    return hasAggregateStorage(child) ? payload.withFieldLocation(pointer, 0) : payload;
   }
 
   // Indexing and slicing ----------------------------------------------------------------------------------------------
@@ -765,35 +766,30 @@ export abstract class ExpressionCompiler extends SemaBase {
     const child = indexableChild(type);
     if (!child) return this.error(expression, `${typeName(type)} 型には、添字が使えません。`);
     this.resolveStorage(child, expression);
+    const stride = sizeOf(child);
     if (type.kind === 'pointer' && type.size === 'slice') this.checkMemoryHeader(object, expression);
-    if (sizeOf(child) !== 0) this.checkMemoryOperand(object, expression);
-    const zero = sizeOf(child) === 0 && !this.requiresComptime(child, expression);
+    if (stride !== 0) this.checkMemoryOperand(object, expression);
+    const zero = stride === 0 && !this.requiresComptime(child, expression);
     const length = knownLengthOf(object);
     if (index.known && length !== undefined && (index.value as bigint) >= length + (hasSentinel(type) ? 1n : 0n)) {
       this.error(expression.index, `添字 ${index.value as bigint} は、長さ ${length} の範囲の外です。`);
     }
     const isConst = isConstIndexable(type, object.place);
-    const elementPointer = ({ slots, position }: { slots: Slots; position: number }, source: Value): Pointer => {
-      const pointer = new Pointer(slots, position);
+    const access = this.elementAccess(type, stride);
+    const projectElement = (source: Value, position: bigint): Pointer => {
+      const value =
+        type.kind === 'array' && source instanceof Pointer ? arrayPointerView(source, type, stride) : source;
+      const element = access(value, position);
+      const pointer = new Pointer(element.slots, element.position);
       return zero ? this.zeroPointer(pointer, child, source) : pointer;
     };
     const arrayAddress = index.known && type.kind === 'array' ? this.knownAddress(object) : undefined;
     if (index.known && (arrayAddress || (object.known && type.kind !== 'array' && isConstantData(object.value)))) {
-      const source = arrayAddress ? arrayAddress.load() : object.value;
-      const elements = elementSlots(source, type);
-      const pointer = elementPointer(
-        { slots: { slots: elements.slots }, position: elements.start + Number(index.value) },
-        arrayAddress ?? source
-      );
+      const pointer = projectElement(arrayAddress ?? object.value, index.value as bigint);
       return knownAt(child, pointer, expression);
     }
     const base = this.deferredLoad(object);
     const evaluateObject = base.operand.eval;
-    const access = this.elementAccess(type);
-    const projectElement = (source: Value, position: bigint): Pointer => {
-      const value = type.kind === 'array' ? base.read(source) : source;
-      return elementPointer(access(value, position), source);
-    };
     const locatePointer = (frame: Frame): Pointer => {
       const value = evaluateObject(frame);
       return withHeldValues(
@@ -849,7 +845,10 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   /** Locates the element at an index of an array, a pointer to one, or a slice, checking the bounds. */
   // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  private elementAccess(type: Type): (value: Value, index: bigint) => { slots: Slots; position: number } {
+  private elementAccess(
+    type: Type,
+    stride: number
+  ): (value: Value, index: bigint) => { slots: Slots; position: number } {
     if (type.kind === 'array') {
       const limit = type.length + (type.sentinel === undefined ? 0n : 1n);
       return (value, index) => {
@@ -862,7 +861,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       const array = type.child;
       const limit = array.length + (array.sentinel === undefined ? 0n : 1n);
       return (value, index) => {
-        const target = arrayPointerView(value as Pointer, array);
+        const target = arrayPointerView(value as Pointer, array, stride);
         if (index >= limit) indexOutOfBounds(index, array.length);
         return { slots: target, position: target.offset + Number(index) };
       };
@@ -955,7 +954,7 @@ export abstract class ExpressionCompiler extends SemaBase {
         const pointer = value as Pointer;
         const array = zero
           ? (this.zeroPointerAt(pointer.slotLocation(), arrayType).load() as ZArray)
-          : arrayPointerView(pointer, arrayType);
+          : arrayPointerView(pointer, arrayType, sizeOf(child));
         target = array;
         offset = array.offset;
         length = staticLen as bigint;
@@ -2033,16 +2032,6 @@ function isConstIndexable(type: Type, place: Place | undefined): boolean {
 
 function isConstantData(value: Value): boolean {
   return (value instanceof Pointer || value instanceof Slice) && compileTimeReadable(value);
-}
-
-function elementSlots(value: Value, type: Type): { slots: Value[]; start: number } {
-  if (type.kind === 'array') return { slots: (value as ZArray).slots, start: (value as ZArray).offset };
-  if (value instanceof Pointer) {
-    const array = value.load() as ZArray;
-    return { slots: array.slots, start: array.offset };
-  }
-  const slice = value as Slice;
-  return { slots: slice.target.slots, start: slice.start };
 }
 
 /** The type that a result type asks an initializer for, looking through optionals and error unions. */

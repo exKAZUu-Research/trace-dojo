@@ -1057,7 +1057,7 @@ export abstract class SemaBase implements SemaApi {
       const { length } = array;
       return {
         ...this.derived(expression, to, (value) => {
-          const view = arrayPointerView(value as Pointer, array);
+          const view = arrayPointerView(value as Pointer, array, sizeOf(array.child));
           return new Slice(view, view.offset, length);
         }),
         knownLength: expression.known ? length : expression.knownLength,

@@ -1433,6 +1433,15 @@ test('nested zero-sized fields retain offsets through nonempty aggregate fields'
   });
 });
 
+test('zero-sized fields retain array offsets through indexing, views and captures', () => {
+  const source = `const std=@import("std");const U=union(enum(u64)){only:void=7};const I=struct{n:u8,u:U};const O=struct{items:[2]I,u:U};fn get(n:*usize,o:*O)*O{n.*+=1;return o;}pub fn main()void{var o:O=undefined;var n:usize=0;const s=get(&n,&o);s.items[1].n=7;const outer=&get(&n,&o).u.only;const first=&s.items[0].u.only;const direct=&s.items[1].u.only;const fixed=&s.items[1..][0].u.only;const ptr=&(&s.items)[1].u.only;const implicit:[]I=&s.items;const dynamic=s.items[0..n];var count:usize=0;for(&s.items)|*item|{if(&item.u.only==outer)count+=1;}std.debug.print("{} {} {} {} {} {} {} {} {}",.{n,first==outer,direct==outer,fixed==outer,ptr==outer,&implicit[1].u.only==outer,&dynamic[1].u.only==outer,count,s.items[1].n});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '2 false true true true true true 1 7',
+    uncaughtException: undefined,
+  });
+});
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;

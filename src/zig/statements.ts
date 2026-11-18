@@ -1763,7 +1763,7 @@ export abstract class StatementCompiler extends CallCompiler {
       isConst = type.isConst;
       staticLength = arrayType.length;
       viewOf = (value) => {
-        const array = arrayPointerView(value as Pointer, arrayType);
+        const array = arrayPointerView(value as Pointer, arrayType, sizeOf(arrayType.child));
         return { slots: array, start: array.offset, length: array.lengthValue };
       };
     } else if (type.kind === 'pointer' && type.size === 'slice') {
