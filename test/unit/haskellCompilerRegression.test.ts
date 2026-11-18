@@ -1310,3 +1310,55 @@ test.each([
   expect(traced.stdout).toBe(stdout);
   expect(traced.uncaughtException).toBeUndefined();
 });
+
+test.each([
+  ['unusedPrint', 'greet name=do\n putStrLn name\n print 42\nmain=putStrLn "hi"', 'hi\n'],
+  ['usedPrint', 'greet name=do\n putStrLn name\n print 42\nmain=greet "hi"', 'hi\n42\n'],
+  ['unusedFractional', 'label x=show 1.5\nmain=putStrLn "hi"', 'hi\n'],
+  ['usedFractional', 'label x=show 1.5\nmain=putStrLn(label ())', '1.5\n'],
+  ['unusedEquality', 'h x=1==2\nmain=putStrLn "hi"', 'hi\n'],
+  ['usedEquality', 'h x=1==2\nmain=print(h ())', 'False\n'],
+  ['unusedConversion', 'h x=show(fromIntegral x)\nmain=putStrLn "hi"', 'hi\n'],
+  ['usedConversion', 'h x=show(fromIntegral x)\nmain=print(h(3::Int),h(4::Integer))', '("3","4")\n'],
+  ['unusedWhere', 'f n=n+1 where unused y=show 2\nmain=print(f(2::Int))', '3\n'],
+  ['unusedLet', 'main=do\n let unused y=show 2\n putStrLn "hi"', 'hi\n'],
+  ['usedLet', 'main=do\n let label y=show 2\n putStrLn(label True)\n putStrLn(label(1::Int))', '2\n2\n'],
+  [
+    'capturedPolymorphism',
+    'outer x=let local y=(x,y,show 2) in(local True,local(1::Int))\nmain=print(outer(3::Int))',
+    '((3,True,"2"),(3,1,"2"))\n',
+  ],
+  ['returnedNumeric', 'value x=42\nmain=print(value ()::Int,value True::Double)', '(42,42.0)\n'],
+  ['restrictedNumeric', 'main=do\n let value=42\n print(value::Double)', '42.0\n'],
+  [
+    'userClassAnnotated',
+    'class C a where c::a->String\ninstance C Integer where c _="integer"\nf x=c(1::Integer)\nmain=putStrLn(f ())',
+    'integer\n',
+  ],
+  ['partialVisible', 'f x=(x,show 42)\nmain=print(f True,f(3::Int))', '((True,"42"),(3,"42"))\n'],
+])('internal numeric defaulting preserves helper usage and polymorphism: %s', (_name, source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  const traced = traceProgram('haskell', source, source);
+  expect(traced.stdout).toBe(stdout);
+  expect(traced.uncaughtException).toBeUndefined();
+});
+
+test.each([
+  ['nondefaultableHidden', 'f x=show []\nmain=putStrLn "hi"'],
+  [
+    'userClassHidden',
+    'class C a where c::a->String\ninstance C Integer where c _="integer"\nf x=c 1\nmain=putStrLn "hi"',
+  ],
+  [
+    'mixedHiddenUnused',
+    'data Proxy f=Proxy(f Int)\nclass C a where c::a->Bool\ninstance C(Maybe a) where c _=True\nmk::Proxy f->a->f a\nmk _ _=undefined\nf p=c(mk p 1)\nmain=putStrLn "hi"',
+  ],
+  [
+    'mixedHiddenUsed',
+    'data Proxy f=Proxy(f Int)\nclass C a where c::a->Bool\ninstance C(Maybe a) where c _=True\nmk::Proxy f->a->f a\nmk _ _=undefined\nf p=c(mk p 1)\nmain=print(f(Proxy(undefined::Maybe Int)))',
+  ],
+])('hidden nondefaultable constraints stay ambiguous even when the helper is used: %s', (_name, source) => {
+  const result = executeProgram('haskell', source);
+  expect(result.kind).toBe('compileError');
+  if (result.kind === 'compileError') expect(result.diagnostics[0]?.message).toContain('曖昧');
+});

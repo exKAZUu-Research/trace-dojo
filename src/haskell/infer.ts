@@ -239,15 +239,10 @@ export class Checker {
       const { retained } = this.simplify(this.wanted, -1);
       this.wanted = [];
       if (retained.length === 0) return;
-      const byVar = new Map<TVar, EvidenceHole[]>();
       for (const hole of retained) {
-        const type = prune(hole.pred.type);
-        if (type.tag !== 'tvar') this.ambiguous(hole);
-        const list = byVar.get(type) ?? [];
-        list.push(hole);
-        byVar.set(type, list);
+        if (prune(hole.pred.type).tag !== 'tvar') this.ambiguous(hole);
       }
-      for (const [variable, holes] of byVar) {
+      for (const [variable, holes] of holesByVariable(retained)) {
         const chosen = this.defaultFor(
           variable,
           holes.map((hole) => hole.pred)
@@ -266,33 +261,6 @@ export class Checker {
       typeError(hole.span, `${new TypePrinter().showPred(hole.pred)} のインスタンスが重複しています。`);
     }
     return found;
-  }
-
-  private defaultFor(variable: TVar, preds: readonly Pred[]): TypeEntity | undefined {
-    if (pruneKind(variable.kind).tag !== 'star' && pruneKind(variable.kind).tag !== 'kvar') return undefined;
-    const classes = preds.map((pred) => pred.cls);
-    if (!classes.some((cls) => this.builtins.numericClasses.has(cls))) return undefined;
-    if (!classes.every((cls) => this.builtins.standardClasses.has(cls))) return undefined;
-    for (const candidate of [this.builtins.integer, this.builtins.double]) {
-      if (classes.every((cls) => this.solvable({ cls, type: tcon(candidate) }))) return candidate;
-    }
-    return undefined;
-  }
-
-  private solvable(pred: Pred): boolean {
-    const found = this.env.findInstance(pred);
-    if (typeof found === 'string') return false;
-    return found.instance.context.every((contextPred) =>
-      this.solvable({ cls: contextPred.cls, type: instantiateType(contextPred.type, found.args) })
-    );
-  }
-
-  ambiguous(hole: EvidenceHole): never {
-    const printer = new TypePrinter();
-    typeError(
-      hole.span,
-      `型が曖昧です。${printer.showPred(hole.pred)} の型が決まりません（${hole.origin}）。型の注釈を付けてください。`
-    );
   }
 
   withScopedTypes<T>(types: ReadonlyMap<string, Type>, run: () => T): T {
@@ -773,7 +741,6 @@ export class Checker {
     return monoTypes;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- The monomorphism restriction and defaulting decide together which predicates stay.
   private keepGeneralizable(
     bindings: RBinding[],
     monoTypes: ReadonlyMap<RBinding, Type>,
@@ -782,17 +749,19 @@ export class Checker {
     outer: number
   ): EvidenceHole[] {
     const restricted = bindings.some((binding) => binding.k === 'pat' || binding.clauses[0].pats.length === 0);
+    const types = bindings.flatMap((binding) =>
+      binding.k === 'pat' ? binding.binders.map((local) => local.type as Type) : [monoTypes.get(binding) as Type]
+    );
     const bindingTypes = new Set<TVar>();
-    for (const binding of bindings) {
-      const types =
-        binding.k === 'pat' ? binding.binders.map((local) => local.type as Type) : [monoTypes.get(binding) as Type];
-      for (const type of types)
-        for (const variable of typeVarsOf(type)) if (variable.level > outer) bindingTypes.add(variable);
-    }
+    for (const type of types) for (const variable of typeVarsOf(type)) bindingTypes.add(variable);
+    if (!restricted) this.defaultInternalVariables(retained, bindingTypes, outer);
+    const classified = retained.map((hole) => ({
+      hole,
+      vars: [...typeVarsOf(hole.pred.type)].filter((variable) => variable.level > outer),
+    }));
     const kept: EvidenceHole[] = [];
-    for (const hole of retained) {
-      const vars = [...typeVarsOf(hole.pred.type)].filter((variable) => variable.level > outer);
-      if (!restricted && vars.every((variable) => bindingTypes.has(variable))) {
+    for (const { hole, vars } of classified) {
+      if (!restricted && vars.length > 0 && vars.every((variable) => bindingTypes.has(variable))) {
         kept.push(hole);
         continue;
       }
@@ -800,6 +769,19 @@ export class Checker {
       deferred.push(hole);
     }
     return kept;
+  }
+
+  private defaultInternalVariables(holes: EvidenceHole[], visible: ReadonlySet<TVar>, outer: number): void {
+    for (const [variable, constraints] of holesByVariable(holes)) {
+      if (variable.level <= outer || visible.has(variable)) continue;
+      if (!constraints.every((hole) => prune(hole.pred.type) === variable)) this.ambiguous(constraints[0]);
+      const chosen = this.defaultFor(
+        variable,
+        constraints.map((hole) => hole.pred)
+      );
+      if (!chosen) this.ambiguous(constraints[0]);
+      this.unify(variable, tcon(chosen), constraints[0].span);
+    }
   }
 
   private generalizeBinding(binding: RBinding, monoType: Type, params: DictParam[], outer: number): void {
@@ -860,6 +842,33 @@ export class Checker {
     return scheme;
   }
 
+  private defaultFor(variable: TVar, preds: readonly Pred[]): TypeEntity | undefined {
+    if (pruneKind(variable.kind).tag !== 'star' && pruneKind(variable.kind).tag !== 'kvar') return undefined;
+    const classes = preds.map((pred) => pred.cls);
+    if (!classes.some((cls) => this.builtins.numericClasses.has(cls))) return undefined;
+    if (!classes.every((cls) => this.builtins.standardClasses.has(cls))) return undefined;
+    for (const candidate of [this.builtins.integer, this.builtins.double]) {
+      if (classes.every((cls) => this.solvable({ cls, type: tcon(candidate) }))) return candidate;
+    }
+    return undefined;
+  }
+
+  private solvable(pred: Pred): boolean {
+    const found = this.env.findInstance(pred);
+    if (typeof found === 'string') return false;
+    return found.instance.context.every((contextPred) =>
+      this.solvable({ cls: contextPred.cls, type: instantiateType(contextPred.type, found.args) })
+    );
+  }
+
+  ambiguous(hole: EvidenceHole): never {
+    const printer = new TypePrinter();
+    typeError(
+      hole.span,
+      `型が曖昧です。${printer.showPred(hole.pred)} の型が決まりません（${hole.origin}）。型の注釈を付けてください。`
+    );
+  }
+
   checkAgainstScheme(
     scheme: Scheme,
     check: (type: Type, skolems: readonly Type[]) => void,
@@ -912,6 +921,18 @@ export class Checker {
   checkKinds(specialize = false): void {
     this.typeConversion.checkKinds(specialize);
   }
+}
+
+function holesByVariable(holes: readonly EvidenceHole[]): Map<TVar, EvidenceHole[]> {
+  const byVar = new Map<TVar, EvidenceHole[]>();
+  for (const hole of holes) {
+    for (const variable of typeVarsOf(hole.pred.type)) {
+      const constraints = byVar.get(variable) ?? [];
+      constraints.push(hole);
+      byVar.set(variable, constraints);
+    }
+  }
+  return byVar;
 }
 
 function argumentContext(fn: RExpr): string {
