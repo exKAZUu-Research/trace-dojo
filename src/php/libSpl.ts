@@ -665,8 +665,6 @@ defineClass({
       {
         signature: 'offsetSet($index, mixed $value): void',
         impl: ({ thisObj, args }) => {
-          // `$array[] = $value` passes null, which PHP rejects before converting the offset.
-          if (args[0] === null) throwError('Error', '[] operator not supported for SplFixedArray');
           fixedOf(thisObj).set(fixedIndex(thisObj, args[0]), args[1]);
           return null;
         },

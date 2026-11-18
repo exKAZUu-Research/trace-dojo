@@ -73,6 +73,7 @@ export interface FunctionContext {
   isClosure?: boolean;
   /** The function's name in the names of the closures it defines, such as `A::m()`; undefined at the top level. */
   displayName?: string;
+  name?: string;
   propertyName?: string;
 }
 

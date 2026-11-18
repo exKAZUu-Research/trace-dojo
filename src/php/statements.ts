@@ -378,13 +378,13 @@ function switchStatement(statement: Extract<Stmt, { k: 'switch' }>): Completion 
 
 function staticDeclaration(statement: Extract<Stmt, { k: 'static' }>, frame: Frame): void {
   const fn = frame.fn;
-  const statics = fn?.kind === 'user' ? fn.statics : rt().globalFrame.vars;
+  const statics = fn?.kind === 'user' ? fn.statics : rt().globalStatics;
   for (const { name, init } of statement.vars) {
-    let ref = fn?.kind === 'user' ? statics.get(name) : undefined;
+    let ref = statics.get(name);
     if (!ref) {
       ref = new Ref(init ? share(ev(init)) : null);
       ref.isRef = true;
-      if (fn?.kind === 'user') statics.set(name, ref);
+      statics.set(name, ref);
     }
     new VarPlace(frame, name).bind(ref);
   }

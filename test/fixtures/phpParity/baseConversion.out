@@ -46,9 +46,16 @@ float(1.1805916207174113E+21)
 int(511)
 float(3.777893186295716E+22)
 int(5)
+int(0)
+int(0)
+int(63)
+int(3)
+int(-255)
+int(255)
+int(255)
 
-Fatal error: Uncaught ValueError: An infinite value cannot be converted to base 10 in /main.php:6
+Fatal error: Uncaught ValueError: An infinite value cannot be converted to base 10 in /main.php:8
 Stack trace:
-#0 /main.php(6): base_convert('zzzzzzzzzzzzzzz...', 36, 10)
+#0 /main.php(8): base_convert('zzzzzzzzzzzzzzz...', 36, 10)
 #1 {main}
-  thrown in /main.php on line 6
+  thrown in /main.php on line 8

@@ -130,6 +130,7 @@ export class Runtime {
   readonly steps = new StepTracker();
   readonly frames: Frame[] = [];
   readonly globalFrame: Frame;
+  readonly globalStatics = new Map<string, Ref>();
   readonly userFunctions: UserFunction[] = [];
   readonly rootConstants = new Set<Value>();
   readonly literalArrays = new WeakMap<Expr, Map<PhpClass | undefined, PhpArray>>();

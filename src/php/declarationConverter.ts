@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 816 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 832 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -72,13 +72,34 @@ export abstract class DeclarationConverter extends ConverterBase {
     return value === undefined ? undefined : constantTypeName(value);
   }
 
-  protected compiledValue(expression: Expr): Constant | undefined {
+  protected compiledValue(expression: Expr, classConstantName = false): Constant | undefined {
     return foldedConstant(expression, {
-      compiler: true,
+      compiler: !classConstantName,
+      magic: classConstantName ? (token) => this.compiledMagic(token) : undefined,
       budget: this.compileBudget,
       classConstant: this.compileClasses.lookup(this.activeClass, this.fn.isClosure),
       className: (cls) => this.compileClasses.className(cls, this.activeClass, this.fn.isClosure),
     });
+  }
+
+  private compiledMagic(token: Extract<Expr, { k: 'magic' }>['name']): string | undefined {
+    switch (token) {
+      case '__CLASS__': {
+        if (this.activeClass?.isAnonymous || this.currentClassKind === 'trait') return undefined;
+        return this.fn.className ?? this.currentClass ?? '';
+      }
+      case '__TRAIT__': {
+        return this.currentClassKind === 'trait' ? this.currentClass : '';
+      }
+      case '__FUNCTION__': {
+        return this.fn.name ?? '';
+      }
+      case '__METHOD__': {
+        if (!this.fn.name || !this.fn.isMethod) return this.fn.name ?? '';
+        if (this.activeClass?.isAnonymous) return undefined;
+        return `${this.fn.className}::${this.fn.name}`;
+      }
+    }
   }
 
   protected functionDecl(node: Node, isClosure: boolean, className?: string): FunctionDecl {
@@ -119,6 +140,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       isMethod: className !== undefined,
       isFunction: true,
       isClosure,
+      name,
       displayName: isClosure ? name : `${className === undefined ? '' : `${className}::`}${name}()`,
     };
     this.loop = { depth: 0, switches: [] };
@@ -1043,6 +1065,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         labels: new Set(),
         gotos: [],
         className,
+        name: `$${prop.name}::${kind}`,
         propertyName: prop.name,
         isMethod: true,
         returnType: kind === 'set' ? { k: 'named', name: 'void' } : prop.type,

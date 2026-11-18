@@ -210,3 +210,56 @@ $o->r[0][1] += 1;
 $o->s[0] = 1;
 $o->t[0] ??= 1;
 reportOperation(fn()=>$o->a->b += 1);
+
+class NestedTypedSlots {
+    public int $number;
+    public ?array $array;
+    public mixed $mixed;
+    public ?stdClass $object;
+    public static array $shared;
+}
+$typed = new NestedTypedSlots;
+reportOperation(fn()=>$typed->number[0] += 1);
+reportOperation(fn()=>$typed->array[0]++);
+reportOperation(fn()=>$typed->mixed[0] .= 'a');
+reportOperation(fn()=>$typed->object->key += 1);
+reportOperation(fn()=>NestedTypedSlots::$shared[0] += 1);
+$typed->array[0] ??= 3;
+NestedTypedSlots::$shared[0] = 2;
+var_dump($typed->array,NestedTypedSlots::$shared);
+
+class FixedDelegation extends SplFixedArray {
+    function offsetGet($offset): mixed { return parent::offsetGet($offset); }
+}
+$fixedChild=new FixedDelegation(1);
+reportOperation(fn()=>$fixedChild[4] += 1);
+reportOperation(fn()=>$fixedChild[4] /= 0);
+reportOperation(fn()=>$fixed[] += 1);
+reportOperation(fn()=>$fixed[]++);
+reportOperation(fn()=>$fixed[null] = 1);
+reportOperation(fn()=>$forward[] += 1);
+class DefaultOffset extends ArrayObject {
+    function offsetGet($key = 'default'): mixed {
+        var_dump($key, func_num_args(), func_get_args());
+        return 2;
+    }
+}
+$withDefault = new DefaultOffset;
+$withDefault[] += 1;
+var_dump($withDefault->getArrayCopy());
+
+set_error_handler(function($level,$message) { echo $message,"\n"; throw new ErrorException($message); });
+reportOperation(fn()=>$target[$missingKey] += 1);
+reportOperation(fn()=>$target[$missingKey] /= 0);
+reportOperation(fn()=>$fixed[$missingKey] += 1);
+$native = new ArrayObject([''=>3]);
+reportOperation(fn()=>$native[$missingKey] += 1);
+reportOperation(fn()=>$native[5.5]++);
+reportOperation(fn()=>$native[0.5]++);
+reportOperation(fn()=>$native['nested']['key'] += 1);
+reportOperation(fn()=>$native[7.5]['key'] = 1);
+var_dump($native->getArrayCopy());
+$empty = new ArrayObject;
+reportOperation(fn()=>$empty[null]++);
+var_dump($empty->getArrayCopy());
+restore_error_handler();

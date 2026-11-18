@@ -48,3 +48,7 @@ echo "continued\n";
 foreach (['(?R(<n>))', "(?R('n'))", '(?&n(1))', '(?P>n(1))', '(?<n>x)(?&n(<m>))'] as $source) {
     preg_match('/'.$source.'/', 'x');
 }
+
+foreach (['(x)(?2(1))', '(x)(?2(<n>))', '(x)(?+1(1))', '(?2(1))(x)'] as $source) {
+    preg_match('/'.$source.'/', 'x');
+}

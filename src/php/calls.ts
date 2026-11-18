@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 682 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 684 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -43,6 +43,7 @@ export interface ArgValue {
   ref?: Ref;
   name?: string;
   position?: number;
+  omitted?: boolean;
 }
 
 /** What a call runs and on behalf of whom. */
@@ -902,11 +903,11 @@ function bindParams(
       break;
     }
     const arg = positional[index] ?? args.find((candidate) => candidate.name === param.name);
-    if (arg === undefined) {
+    if (arg === undefined || arg.omitted) {
       if (!param.optional) {
         const anyNamed = args.some((candidate) => candidate.name !== undefined);
         const passed = callStack.at(-1)?.args.length ?? positional.length;
-        if (anyNamed && passed >= required) {
+        if (arg?.omitted || (anyNamed && passed >= required)) {
           throwError('ArgumentCountError', `${name}(): Argument #${index + 1} ($${param.name}) not passed`);
         }
         const hasOptional = params.some((other) => other.optional && !other.variadic);

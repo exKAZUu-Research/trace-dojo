@@ -444,9 +444,31 @@ function reportStaticTraitCall(cls: PhpClass, name: string): void {
     );
 }
 
+export function readOffset(object: PhpObject, key: Value | undefined): Value {
+  const getter = object.cls.findMethod('offsetget');
+  const owner = getter?.scope.lname;
+  if (key === undefined && getter?.fn.kind === 'native' && owner === 'splfixedarray')
+    throwError('Error', '[] operator not supported for SplFixedArray');
+  const inline = owner === 'splobjectstorage' && key instanceof PhpObject && !key.isResource;
+  const classArrayObject = rt().classes.get('arrayobject');
+  const classArrayIterator = rt().classes.get('arrayiterator');
+  const omitted =
+    key === undefined &&
+    getter?.fn.kind === 'user' &&
+    ((classArrayObject && object.cls.isSubclassOf(classArrayObject)) ||
+      (classArrayIterator && object.cls.isSubclassOf(classArrayIterator)));
+  return callMethod(object, 'offsetGet', [key ?? null], rt().row, { inline, omittedOffset: omitted });
+}
+
 /** Calls a method of an object by name, as native code calls `offsetGet` or `__toString`. */
-export function callMethod(object: PhpObject, name: string, args: Value[], row?: number, dimensionRead = false): Value {
-  const method = object.cls.findMethod(lower(name));
+export function callMethod(
+  object: PhpObject,
+  name: string,
+  args: Value[],
+  row?: number,
+  options?: { inline?: boolean; omittedOffset?: boolean; lookupClass?: PhpClass }
+): Value {
+  const method = (options?.lookupClass ?? object.cls).findMethod(lower(name));
   if (!method) {
     const magic = object.cls.findMethod('__call');
     if (magic) {
@@ -468,9 +490,9 @@ export function callMethod(object: PhpObject, name: string, args: Value[], row?:
       inline:
         row !== undefined &&
         method.fn.kind === 'native' &&
-        (dimensionRead || ['splfixedarray', 'arrayobject', 'arrayiterator'].includes(method.scope.lname)),
+        (options?.inline || ['splfixedarray', 'arrayobject', 'arrayiterator'].includes(method.scope.lname)),
     },
-    args.map((v) => ({ v })),
+    args.map((v) => ({ v, omitted: options?.omittedOffset })),
     row
   );
 }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 921 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 922 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { withCleanupExceptions, withPendingException } from './errors';
 import { type Frame, PhpThrow, type Runtime } from './runtime';
@@ -1023,6 +1023,7 @@ function ownershipRoots(runtime: Runtime): Set<unknown> {
 function ownershipRootSlots(runtime: Runtime): unknown[] {
   const roots: unknown[] = [];
   for (const frame of runtime.frames) pushFrame(frame, roots);
+  appendValues(roots, runtime.globalStatics.values());
   for (const fn of runtime.userFunctions) appendValues(roots, fn.statics.values());
   for (const cls of runtime.userClasses) {
     for (const { ref } of cls.staticProps.values()) roots.push(ref);

@@ -1,0 +1,10 @@
+
+Fatal error: Uncaught OutOfRangeException: SplDoublyLinkedList::offsetGet(): Argument #1 ($index) is out of range in /main.php:3
+Stack trace:
+#0 /main.php(3): SplDoublyLinkedList->offsetGet(3)
+#1 {main}
+
+Next Error: Cannot use object of type SplQueue as array in /main.php:3
+Stack trace:
+#0 {main}
+  thrown in /main.php on line 3

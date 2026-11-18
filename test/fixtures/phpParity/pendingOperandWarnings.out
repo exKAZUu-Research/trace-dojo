@@ -279,3 +279,66 @@ Warning: Undefined array key 1 in /main.php on line 209
 
 Warning: Undefined property: stdClass::$a in /main.php on line 212
 Error: Attempt to assign property "b" on null ()
+Error: Typed property NestedTypedSlots::$number must not be accessed before initialization ()
+Error: Typed property NestedTypedSlots::$array must not be accessed before initialization ()
+Error: Typed property NestedTypedSlots::$mixed must not be accessed before initialization ()
+Error: Typed property NestedTypedSlots::$object must not be accessed before initialization ()
+Error: Typed static property NestedTypedSlots::$shared must not be accessed before initialization ()
+array(1) {
+  [0]=>
+  int(3)
+}
+array(1) {
+  [0]=>
+  int(2)
+}
+OutOfBoundsException: Index invalid or out of range (Index invalid or out of range)
+DivisionByZeroError: Division by zero (Index invalid or out of range)
+Error: Cannot use object of type SplFixedArray as array ([] operator not supported for SplFixedArray)
+Error: [] operator not supported for SplFixedArray ()
+TypeError: Cannot access offset of type null on SplFixedArray ()
+ArgumentCountError: ForwardingOffsets::offsetGet(): Argument #1 ($key) not passed ()
+string(7) "default"
+int(1)
+array(1) {
+  [0]=>
+  string(7) "default"
+}
+array(1) {
+  [0]=>
+  int(3)
+}
+Undefined variable $missingKey
+Error: Cannot use object of type OperatorTarget as array (Undefined variable $missingKey)
+Undefined variable $missingKey
+Error: Cannot use object of type OperatorTarget as array (Undefined variable $missingKey)
+Undefined variable $missingKey
+Error: Cannot use object of type SplFixedArray as array (Cannot access offset of type null on SplFixedArray)
+Undefined variable $missingKey
+ErrorException: Undefined variable $missingKey ()
+Implicit conversion from float 5.5 to int loses precision
+ErrorException: Implicit conversion from float 5.5 to int loses precision ()
+Implicit conversion from float 0.5 to int loses precision
+ErrorException: Implicit conversion from float 0.5 to int loses precision ()
+Undefined array key "nested"
+ErrorException: Undefined array key "nested" ()
+Implicit conversion from float 7.5 to int loses precision
+ErrorException: Implicit conversion from float 7.5 to int loses precision ()
+array(5) {
+  [""]=>
+  int(3)
+  [0]=>
+  int(4)
+  [5]=>
+  NULL
+  ["nested"]=>
+  NULL
+  [7]=>
+  NULL
+}
+Using null as an array offset is deprecated, use an empty string instead
+ErrorException: Using null as an array offset is deprecated, use an empty string instead ()
+array(1) {
+  [""]=>
+  NULL
+}

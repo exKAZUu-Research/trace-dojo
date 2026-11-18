@@ -1975,3 +1975,25 @@ test('decodes PHP exception bytes for the user-facing error summary', () => {
     stdout: expect.stringContaining('RuntimeException: 前に進めない！'),
   });
 });
+
+test.each([
+  "1 ? 'K' : 'L'",
+  "null ?? 'K'",
+  '__FUNCTION__',
+  String.raw`__CLASS__ === "N\\C" ? "K" : "L"`,
+  String.raw`\PHP_EOL`,
+  'self::S',
+  'D::S',
+  '["K"][0]',
+  '(string)"K"',
+])('checks the relative namespace spelling after folding a braced constant name: %s', (name) => {
+  const program = String.raw`<?php
+namespace N;
+class D { const S = 'K'; }
+class C { const S = 'K', K = 1; function f() { return namespace\self::{${name}}; } }
+`;
+  expect(run(program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 3, message: String.raw`'namespace\self' is an invalid class name` }],
+  });
+});

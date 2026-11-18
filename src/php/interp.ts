@@ -23,6 +23,7 @@ import {
   createClosure,
   evalArgs,
   methodCallExpression,
+  readOffset,
   staticCallExpression,
 } from './callables';
 import { type ArgValue, copyClosureData, invoke } from './calls';
@@ -539,7 +540,7 @@ export function readIndex(base: Value, index: Value, mode: OffsetRead = 'read'):
   if (base instanceof PhpObject && !base.isResource) {
     if (base.cls.findMethod('offsetget') && isArrayAccess(base)) {
       if (quiet && !toBool(callMethod(base, 'offsetExists', [index], rt().row))) return null;
-      return callMethod(base, 'offsetGet', [index], rt().row);
+      return readOffset(base, index);
     }
     throwError('Error', `Cannot use object of type ${base.cls.name} as array`);
   }

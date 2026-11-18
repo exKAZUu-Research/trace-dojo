@@ -1233,11 +1233,7 @@ export class Converter extends DeclarationConverter {
 
   private bracedClassConstant(scope: Node, nameExpression: Node): Expr {
     const name = this.expr(nameExpression);
-    const literal = foldedConstant(name, {
-      compiler: true,
-      preserveNamedConstants: true,
-      budget: this.compileBudget,
-    });
+    const literal = this.compiledValue(name, true);
     let cls = this.classRef(
       scope,
       this.constantInitializer || typeof literal !== 'string',

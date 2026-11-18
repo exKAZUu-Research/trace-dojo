@@ -323,7 +323,12 @@ function aggregateIterator(object: PhpObject, className: Value): PhpObject {
   let cls = object.cls;
   if (className !== null) {
     const cast = findClass(className as string);
-    if (!cast || !cls.isSubclassOf(cast) || !cast.isSubclassOf(runtime.classes.get('traversable') as PhpClass))
+    if (
+      !cast ||
+      cast.kind === 'interface' ||
+      !cls.isSubclassOf(cast) ||
+      !cast.isSubclassOf(runtime.classes.get('traversable') as PhpClass)
+    )
       throwError(
         'LogicException',
         'Class to downcast to not found or not base class or does not implement Traversable'
@@ -331,7 +336,7 @@ function aggregateIterator(object: PhpObject, className: Value): PhpObject {
     cls = cast;
   }
   if (!cls.isSubclassOf(runtime.classes.get('iteratoraggregate') as PhpClass)) return object;
-  const iterator = callMethod(object, 'getIterator', []);
+  const iterator = callMethod(object, 'getIterator', [], undefined, { lookupClass: cls });
   if (!(iterator instanceof PhpObject) || !iterator.cls.isSubclassOf(runtime.classes.get('traversable') as PhpClass))
     throwError('LogicException', `${cls.name}::getIterator() must return an object that implements Traversable`);
   return iterator;

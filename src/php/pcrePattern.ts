@@ -862,11 +862,10 @@ class PatternConverter {
       if (next >= this.source.length) this.fail('missing closing parenthesis', next);
       this.fail('digit expected after (?+', next + 1);
     }
-    const group = this.groupNumber(digits, this.index);
+    this.subroutine(this.groupNumber(digits, this.index), this.index);
     if (this.source[this.index] === '(') this.readSubroutineCaptures();
     if (this.source[this.index] !== ')') this.fail('missing closing parenthesis', this.index);
     this.index++;
-    this.subroutine(group, this.index - 1);
   }
 
   private readSubroutineCaptures(): void {

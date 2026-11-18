@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss 561 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { lower, untilNul } from './bytes';
+import { byteAt, lower, untilNul } from './bytes';
 import { callValue, checkCallable, explainCallable } from './callables';
 import { type ArgValue, backtraceLimit, callStack, frameArguments, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
@@ -31,6 +31,7 @@ import {
 import { traceLine } from './exceptions';
 import { collectGarbage } from './garbage';
 import { cast, cloneObject, deprecatedConstant, iterate } from './interp';
+import { isCtypeSpace } from './libLocale';
 import { defineAlias, defineConstant, defineFunction, defineRuntimeConstant, markInlined } from './native';
 import { toFloat, toInt, toKey, toStr } from './operators';
 import { printR, varDump, varExport } from './output';
@@ -211,7 +212,13 @@ defineFunction('settype(mixed &$var, string $type): bool', ({ args, refs }) => {
 // code-gauge-allow functionNcss 45 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function parseIntBase(text: string, base: number): bigint {
   if (base !== 0 && (base < 2 || base > 36)) return 0n;
-  let rest = text.trimStart();
+  const runtime = rt();
+  let start = 0;
+  while (isCtypeSpace(byteAt(text, start))) {
+    runtime.spend();
+    start++;
+  }
+  let rest = text.slice(start);
   let negative = false;
   if (rest.startsWith('-') || rest.startsWith('+')) {
     negative = rest.startsWith('-');
@@ -225,14 +232,10 @@ function parseIntBase(text: string, base: number): bigint {
     } else if (/^0[bB]/.test(rest)) {
       radix = 2;
       rest = rest.slice(2);
-    } else if (/^0[oO]/.test(rest)) {
-      radix = 8;
-      rest = rest.slice(2);
     } else if (rest.startsWith('0')) radix = 8;
     else radix = 10;
   } else if (radix === 16 && /^0[xX]/.test(rest)) rest = rest.slice(2);
   else if (radix === 2 && /^0[bB]/.test(rest)) rest = rest.slice(2);
-  else if (radix === 8 && /^0[oO]/.test(rest)) rest = rest.slice(2);
   let value = 0n;
   const big = BigInt(radix);
   for (const char of rest) {

@@ -5,7 +5,7 @@ import { describePropertyType } from './types';
 import { dropped, type Key, PhpArray, PhpObject, type PropDecl, Ref, type Value } from './values';
 import { isSubtype } from './variance';
 
-export type PlaceOperation = 'assignOp' | 'incdec' | 'nested' | 'receiver';
+export type PlaceOperation = 'assignOp' | 'incdec' | 'nested' | 'nestedUpdate' | 'receiver' | 'receiverUpdate';
 export type NestMode = 'write' | 'update' | 'unset';
 export type BeforeOffsetGet = () => PhpThrow | undefined;
 
@@ -157,8 +157,7 @@ export class ElementPlace implements Place {
   constructor(
     readonly array: PhpArray,
     /** The key, or undefined to append. */
-    public key: Key | undefined,
-    readonly preserveMissingOnIncrement = false
+    public key: Key | undefined
   ) {}
 
   get(): Value | undefined {
@@ -247,9 +246,10 @@ export class ValuePlace implements Place {
  */
 export function writableContainer(
   place: Place,
-  value = place.get('nested'),
+  value: Value | undefined = undefined,
   update = false
 ): PhpArray | PhpObject | string {
+  if (value === undefined) value = place.get(update ? 'nestedUpdate' : 'nested');
   if (value instanceof PhpArray) {
     if (arrayIsShared(value)) {
       const copy = value.copy();
