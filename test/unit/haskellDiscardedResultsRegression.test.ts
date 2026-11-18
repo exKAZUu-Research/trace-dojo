@@ -85,3 +85,56 @@ main=do
   });
   if (execution.kind === 'executed') expect(execution.finalTurtles).toHaveLength(retained ? 2 : 1);
 });
+
+test.each([
+  { name: 'direct final action', statement: 'newTurtleAt 0 1', declarations: '' },
+  { name: 'final helper', statement: 'make 1', declarations: makeTurtle },
+  { name: 'final atomic helper', statement: 'make 1', declarations: makeAtomicTurtle },
+  { name: 'nested final block', statement: 'do {newTurtleAt 0 1}', declarations: '' },
+  { name: 'conditional final block', statement: 'if True then do {newTurtleAt 0 1} else newTurtle', declarations: '' },
+  { name: 'sequenced helper', statement: 'make 1 >> pure ()', declarations: makeTurtle },
+  { name: 'ignored traversal', statement: 'mapM_ make [1,2]', declarations: makeTurtle },
+  { name: 'lazy ignored result', statement: 'pure(error "unused"::Turtle)', declarations: '' },
+])('discarded final IO results leave no extra turtle in the last trace: $name', ({ statement, declarations }) => {
+  const source = `${declarations}
+main=do
+ t<-newTurtle
+ ${statement}`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.finalTurtles).toEqual([expect.objectContaining({ x: 0, y: 0 })]);
+  expect(result.traceItems.at(-1)?.turtles).toEqual(result.finalTurtles);
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: undefined,
+    finalTurtles: result.finalTurtles,
+  });
+});
+
+test.each([
+  { name: 'named helper result', statement: 'u<-make 1\n pure u', declarations: makeTurtle, count: 2 },
+  { name: 'named atomic result', statement: 'u<-make 1\n pure u', declarations: makeAtomicTurtle, count: 2 },
+  {
+    name: 'pattern result',
+    statement: 'Just u<-make\n pure u',
+    declarations: 'make=do {v<-newTurtleAt 0 1;pure(Just v)}',
+    count: 2,
+  },
+  { name: 'traversal result', statement: 'ts<-mapM make [1,2]\n print(length ts)', declarations: makeTurtle, count: 3 },
+])('pending IO results survive until a visible binding receives them: $name', ({ statement, declarations, count }) => {
+  const source = `${declarations}
+main=do
+ t<-newTurtle
+ ${statement}`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.finalTurtles).toHaveLength(count);
+  expect(result.traceItems.at(-1)?.turtles).toEqual(result.finalTurtles);
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: count === 3 ? '2\n' : '',
+    uncaughtException: undefined,
+    finalTurtles: result.finalTurtles,
+  });
+});

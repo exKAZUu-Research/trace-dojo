@@ -14,6 +14,7 @@ export interface DoFrame {
   traceFrame: TraceFrame;
   pushedTraceFrame: boolean;
   prefix: PreparedBlock;
+  discardResult: boolean;
   tailCalled?: boolean;
   silent?: boolean;
   result?: Slot;
@@ -41,6 +42,7 @@ export function runBlock(machine: Machine, state: RunState, action: IODo): void 
     traceFrame,
     pushedTraceFrame: pushed,
     prefix,
+    discardResult: ioResultIsDiscarded(machine),
   };
   frame.traceFrame.contexts.push({ env, prefixEnv: prefix.env, visible: action.code.entryVisible, row: undefined });
   machine.stack.push(frame);
@@ -108,6 +110,18 @@ function markSilentCaller(machine: Machine, top: TraceFrame): void {
   if (caller?.k !== 'do' || caller.traceFrame !== top || caller.index !== caller.code.stmts.length - 1) return;
   const stmt = caller.code.stmts[caller.index];
   if (stmt.kind === 'exp' && stmt.onlyCalls) caller.silent = true;
+}
+
+function ioResultIsDiscarded(machine: Machine): boolean {
+  for (let index = machine.stack.length - 1; index >= 0; index--) {
+    const frame = machine.stack[index];
+    if (frame.k === 'ioScope') continue;
+    if (frame.k === 'base' || frame.k === 'ioThen') return true;
+    if (frame.k !== 'do') return false;
+    const stmt = frame.code.stmts[frame.index];
+    return stmt.kind === 'exp' && (frame.index + 1 < frame.code.stmts.length || frame.discardResult);
+  }
+  return false;
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- One stack walk checks tail statements through their owning call scope.

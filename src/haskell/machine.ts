@@ -143,8 +143,8 @@ export class Machine {
     return this.run({ mode: 'apply', fn, args }) as Value;
   }
 
-  runIO(action: Slot): Slot {
-    return this.run({ mode: 'runSlotIO', slot: action });
+  runIO(action: Slot): void {
+    this.run({ mode: 'runSlotIO', slot: action });
   }
 
   makeSlot(code: Core, env: Env | undefined): Slot {
