@@ -78,3 +78,17 @@ test.each([
     diagnostics: [{ message: expect.stringContaining('関数やクラスの文字列への変換') }],
   });
 });
+
+test.each([
+  'type Box<in out T>={value:T};const a:Box<string>={value:"hi"};const b:Box<string|number>=a;console.log(b.value);',
+  'type Getter<in T>=()=>T;const get:Getter<number>=()=>3;console.log(get());',
+  'interface Producer<out T>{readonly value:T}const p:Producer<number>={value:1};console.log(p.value);',
+  'class Consumer<in T>{accept(value:T){console.log(value)}}new Consumer<number>().accept(1);',
+])('explicit generic variance is unavailable: %s', (source) => {
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [
+      { message: expect.stringContaining('型パラメーターの in / out による分散指定は、この採点環境では使えません。') },
+    ],
+  });
+});

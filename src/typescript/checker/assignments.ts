@@ -106,14 +106,14 @@ export class AssignmentChecker {
     if (declared === errorType) return;
     const accessor = this.assignedAccessorType(target);
     if (accessor) {
-      this.c.flow.set(key, { type: accessor, assigned: true });
+      this.c.flow.set(key, { type: accessor, assigned: true }, target);
       return;
     }
     const entry = this.c.flow.entry(key);
     const symbol = target.type === 'identifier' ? this.c.scopeOf(target).lookupValue(target.text) : undefined;
     const isAuto = symbol !== undefined && this.isAutoTyped(symbol);
     const type = isAuto ? this.c.widen(assigned) : this.c.flow.assignmentReduced(declared, regularOf(assigned));
-    this.c.flow.set(key, { type, assigned: true, evolving: entry?.evolving });
+    this.c.flow.set(key, { type, assigned: true, evolving: entry?.evolving }, target);
   }
 
   private assignedAccessorType(target: TreeNode): Type | undefined {

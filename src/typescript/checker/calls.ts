@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 539 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 556 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -30,6 +30,11 @@ interface Resolution {
   returnType: Type;
 }
 
+interface InferenceArgument {
+  node: TreeNode;
+  spread?: TupleElement;
+}
+
 interface CallableShape {
   signatures: Signature[];
   untyped: boolean;
@@ -51,24 +56,28 @@ export class Calls {
     this.unionSignatures = new UnionSignatures(c);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
-  // code-gauge-allow functionNcss 40 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
+  // code-gauge-allow functionNcss 43 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
   call(node: TreeNode, contextual?: Type): Type {
     const callee = node.childForFieldName('function') as TreeNode;
     const argumentsNode = node.childForFieldName('arguments');
     if (argumentsNode?.type === 'template_string') return this.taggedTemplate(callee, argumentsNode);
     const args = argumentsNode ? named(argumentsNode) : [];
+    const typeArguments = this.explicitTypeArguments(node);
     if (callee.type === 'super') return this.c.classes.superCall(node, args);
     if (callee.type === 'import') return this.checkArgumentsOnly(args, anyType);
     const optional = node.childForFieldName('optional_chain') !== null;
-    if (this.isEvolvingPush(callee)) return this.evolvingPush(callee, args);
+    if (this.isEvolvingPush(callee)) {
+      if (typeArguments) this.c.error(node, '型引数は 0 個にしてください。');
+      return this.evolvingPush(callee, args);
+    }
     const chained = this.c.members.chainedCalleeType(callee);
     const checkedCallee = chained ?? this.c.expressions.check(callee, this.immediateCallContext(callee, args));
     if (optional) this.c.members.continueChain(callee);
     if (checkedCallee === errorType) return this.checkArgumentsOnly(args, errorType);
     const shortCircuits = chained !== undefined || (optional && this.c.relations.isNullable(checkedCallee));
     const calleeType = this.nonNullableCallee(callee, checkedCallee, optional);
-    if (isAnyLike(calleeType)) return this.checkArgumentsOnly(args, anyType);
+    if (isAnyLike(calleeType)) return this.untypedCall(node, args, typeArguments);
     if (isIntrinsic(calleeType, 'unknown')) {
       this.c.error(
         callee,
@@ -80,14 +89,14 @@ export class Calls {
     const signatures = this.withImmediateCallOptionals(callee, args, callable.signatures);
     if (signatures.length === 0) {
       for (const arg of args) this.c.expressions.check(arg);
-      return callable.untyped ? anyType : this.uncallableType(callee, calleeType);
+      return callable.untyped ? this.untypedCall(node, [], typeArguments) : this.uncallableType(callee, calleeType);
     }
     const resolution = this.resolve(
       node,
       callee,
       signatures,
       args,
-      this.explicitTypeArguments(node),
+      typeArguments,
       contextual,
       this.receiverType(callee)
     );
@@ -138,6 +147,11 @@ export class Calls {
   private checkArgumentsOnly(args: TreeNode[], result: Type): Type {
     for (const arg of args) this.c.expressions.check(arg);
     return result;
+  }
+
+  private untypedCall(node: TreeNode, args: TreeNode[], typeArguments: Type[] | undefined): Type {
+    if (typeArguments) this.c.error(node, '型が付いていない関数の呼び出しに型引数は指定できません。');
+    return this.checkArgumentsOnly(args, anyType);
   }
 
   /** The callee's type without `null` and `undefined`, reporting them unless the call is optional. */
@@ -277,10 +291,11 @@ export class Calls {
     const callee = node.childForFieldName('constructor') as TreeNode;
     const argumentsNode = node.childForFieldName('arguments');
     const args = argumentsNode ? named(argumentsNode) : [];
+    const typeArguments = this.explicitTypeArguments(node);
     const calleeType = this.c.expressions.check(callee);
     if (calleeType === errorType || isAnyLike(calleeType)) {
       for (const arg of args) this.c.expressions.check(arg);
-      return calleeType === errorType ? errorType : anyType;
+      return calleeType === errorType ? errorType : this.untypedCall(node, [], typeArguments);
     }
     const signatures = this.constructSignatures(calleeType);
     if (signatures.length === 0) {
@@ -295,7 +310,7 @@ export class Calls {
     if ((calleeType.kind === 'union' ? calleeType.types : [calleeType]).some((member) => this.isAbstractClass(member)))
       this.c.error(node, '抽象クラスのインスタンスは作れません。');
     this.c.classes.checkConstructorAccessibility(node, signatures[0]);
-    const resolution = this.resolve(node, callee, signatures, args, this.explicitTypeArguments(node), contextual);
+    const resolution = this.resolve(node, callee, signatures, args, typeArguments, contextual);
     return resolution?.returnType ?? errorType;
   }
 
@@ -624,7 +639,7 @@ export class Calls {
     if (report)
       for (const [index, arg] of args.entries())
         this.c.expressions.check(arg.type === 'spread_element' ? named(arg)[0] : arg, contexts[index]);
-    const tuple = this.argumentTuple(args, false, contexts);
+    const tuple = this.argumentTuple(args, contexts);
     if (this.c.relations.isAssignable(tuple, restType)) return true;
     if (report && at)
       this.c.error(
@@ -642,27 +657,14 @@ export class Calls {
     report: boolean
   ): { count: number; fits: boolean } {
     const spreadType = this.c.expressions.check(named(arg)[0]);
-    if (spreadType.kind === 'object' && spreadType.objectKind === 'tuple') {
-      // An optional element passes `undefined` when the tuple is shorter.
-      const elements = (spreadType.tuple?.elements ?? []).map((element) => {
-        // A rest element passes its elements, each checked as the argument at its position.
-        if (element.rest) return this.c.restElementType(element.type);
-        return element.optional ? unionOf([element.type, undefinedType]) : element.type;
-      });
-      const misfit = elements.findIndex((element, offset) => {
-        const parameterType = this.parameterTypeAt(signature, index + offset);
-        return parameterType && !this.c.relations.isAssignable(element, parameterType);
-      });
-      // TypeScript reports the first element that does not fit.
-      if (report && misfit !== -1)
-        this.reportArgument(arg, elements[misfit], this.parameterTypeAt(signature, index + misfit) as Type);
-      return { count: elements.length, fits: misfit === -1 };
-    }
-    const element = this.c.patterns.iteratedType(arg, spreadType);
-    const parameterType = this.parameterTypeAt(signature, index);
-    if (!parameterType || this.c.relations.isAssignable(element, parameterType)) return { count: 1, fits: true };
-    if (report) this.reportArgument(arg, element, parameterType);
-    return { count: 1, fits: false };
+    const elements = this.spreadElements(arg, spreadType).map((element) => this.spreadValueType(element));
+    const misfit = elements.findIndex((element, offset) => {
+      const parameterType = this.parameterTypeAt(signature, index + offset);
+      return parameterType && !this.c.relations.isAssignable(element, parameterType);
+    });
+    if (report && misfit !== -1)
+      this.reportArgument(arg, elements[misfit], this.parameterTypeAt(signature, index + misfit) as Type);
+    return { count: elements.length, fits: misfit === -1 };
   }
 
   private reportArgument(arg: TreeNode, argType: Type, parameterType: Type): void {
@@ -698,25 +700,35 @@ export class Calls {
     const parameters = signature.typeParameters;
     const run = newInferenceRun(parameters);
     const restIndex = this.genericRestIndex(signature);
-    this.recordImpliedArity(run, signature, args);
+    const arguments_ = this.inferenceArguments(args);
+    const parameterTypes = this.inferenceParameterTypes(signature, arguments_);
+    this.recordImpliedArity(run, signature, arguments_);
     // A `this` parameter infers from the object the method is called on.
     if (receiver && signature.thisType) this.c.inference.inferTypes(run, receiver, signature.thisType, true);
     // Context-insensitive arguments infer first; functions without parameter annotations then see what they inferred.
-    const sensitive = args.map((arg) => this.isContextSensitive(arg));
+    const sensitive = arguments_.map((arg) => !arg.spread && this.isContextSensitive(arg.node));
+    for (const [index, arg] of arguments_.entries()) {
+      if (restIndex !== undefined && index >= restIndex) continue;
+      if (!sensitive[index])
+        this.inferFromArgument(
+          run,
+          arg,
+          parameterTypes[index],
+          this.c.inference.partialMapper(parameters, run.inferences)
+        );
+    }
     // `...args: T` infers `T` as the tuple of the arguments it takes.
     if (restIndex !== undefined)
       this.c.inference.inferTypes(
         run,
-        this.argumentTuple(args.slice(restIndex), true),
+        this.inferenceTuple(
+          arguments_.slice(restIndex),
+          parameterTypes.slice(restIndex),
+          this.c.inference.partialMapper(parameters, run.inferences)
+        ),
         (signature.parameters.at(-1) as Parameter).type,
         true
       );
-    for (const [index, arg] of args.entries()) {
-      if (restIndex !== undefined && index >= restIndex) continue;
-      if (arg.type === 'spread_element') this.inferFromSpread(run, signature, arg, index);
-      else if (!sensitive[index])
-        this.inferFromArgument(run, signature, arg, index, this.c.inference.partialMapper(parameters, run.inferences));
-    }
     if (contextual)
       this.c.inference.inferTypes(
         { ...run, priority: InferencePriority.ReturnType },
@@ -724,19 +736,18 @@ export class Calls {
         signature.returnType(),
         true
       );
-    for (const [index, arg] of args.entries()) {
+    for (const [index, arg] of arguments_.entries()) {
       if (!sensitive[index]) continue;
       // A callback's parameters fix what they mention, while its return type keeps the rest to infer from it.
-      const parameterType = this.parameterTypeAt(signature, index);
+      const parameterType = parameterTypes[index];
       const callbacks = parameterType ? this.c.signaturesOf(parameterType, 'call') : [];
       const typesCallbackParameter = (parameter: TypeParameter): boolean =>
         callbacks.some((callback) => callback.parameters.some((p) => this.c.inference.mentions(p.type, parameter)));
       const fixes = (parameter: TypeParameter): boolean => callbacks.length === 0 || typesCallbackParameter(parameter);
       this.inferFromArgument(
         run,
-        signature,
         arg,
-        index,
+        parameterType,
         this.c.inference.partialMapper(parameters, run.inferences, fixes, typesCallbackParameter)
       );
     }
@@ -745,29 +756,66 @@ export class Calls {
   }
 
   /** Records how many arguments `...args: A` takes, which splits what `A` infers from `[...A, ...B]`. */
-  private recordImpliedArity(run: InferenceRun, signature: Signature, args: TreeNode[]): void {
+  private recordImpliedArity(run: InferenceRun, signature: Signature, args: InferenceArgument[]): void {
     const restIndex = this.genericRestIndex(signature);
     if (restIndex === undefined) return;
-    const lengths = args.slice(restIndex).map((arg) => this.arity.spreadLength(arg));
-    if (lengths.includes(undefined)) return;
+    const rest = args.slice(restIndex);
+    if (rest.some((arg) => arg.spread?.rest)) return;
     const restType = (signature.parameters.at(-1) as Parameter).type;
     const inference = run.inferences.get(restType.id);
-    if (inference) inference.impliedArity = (lengths as number[]).reduce((sum, length) => sum + length, 0);
+    if (inference) inference.impliedArity = rest.length;
+  }
+
+  private inferenceArguments(args: TreeNode[]): InferenceArgument[] {
+    return args.flatMap((node): InferenceArgument[] => {
+      if (node.type !== 'spread_element') return [{ node }];
+      const type = this.c.silently(() => this.c.expressions.check(named(node)[0]));
+      return this.c.silently(() => this.spreadElements(node, type)).map((spread) => ({ node, spread }));
+    });
+  }
+
+  private inferenceParameterTypes(signature: Signature, args: InferenceArgument[]): (Type | undefined)[] {
+    const types = args.map((_, index) => this.parameterTypeAt(signature, index));
+    if (!isTrailingRestTuple(signature)) return types;
+    const restIndex = signature.parameters.length - 1;
+    const tail = tupleArgumentContexts(
+      this.c,
+      signature.parameters[restIndex].type,
+      args.slice(restIndex).map((arg) => (arg.spread?.rest ? undefined : 1))
+    );
+    return [...types.slice(0, restIndex), ...tail];
+  }
+
+  private inferenceTuple(args: InferenceArgument[], contexts: (Type | undefined)[], mapper: Mapper | undefined): Type {
+    const lastRequired = args.findLastIndex((arg) => !arg.spread || (!arg.spread.optional && !arg.spread.rest));
+    return this.c.tupleType(
+      args.map((arg, index) => {
+        if (arg.spread)
+          return arg.spread.optional && index < lastRequired
+            ? { ...arg.spread, type: this.spreadValueType(arg.spread), optional: false }
+            : arg.spread;
+        const parameterType = contexts[index];
+        const context = parameterType && mapper ? this.c.instantiate(parameterType, mapper) : parameterType;
+        return {
+          type: this.c.widenLiteral(this.c.silently(() => this.c.expressions.check(arg.node, context))),
+          optional: false,
+          rest: false,
+        };
+      })
+    );
   }
 
   /** The tuple of what arguments pass, a spread one passing its tuple's elements or, for an array, a rest element. */
-  private argumentTuple(args: TreeNode[], widen: boolean, contexts: (Type | undefined)[] = []): Type {
+  private argumentTuple(args: TreeNode[], contexts: (Type | undefined)[] = []): Type {
     const check = (node: TreeNode, context?: Type): Type =>
       this.c.silently(() => this.c.expressions.check(node, context));
     const elements = args.flatMap((arg, index): TupleElement[] => {
       if (arg.type !== 'spread_element') {
         const type = check(arg, contexts[index]);
-        return [{ type: widen ? this.c.widenLiteral(type) : type, optional: false, rest: false }];
+        return [{ type, optional: false, rest: false }];
       }
       const spreadType = check(named(arg)[0]);
-      if (spreadType.kind === 'object' && spreadType.objectKind === 'tuple') return spreadType.tuple?.elements ?? [];
-      const element = this.c.silently(() => this.c.patterns.iteratedType(undefined, spreadType));
-      return [{ type: this.c.arrayType(element), optional: false, rest: true }];
+      return this.c.silently(() => this.spreadElements(arg, spreadType));
     });
     return this.c.tupleType(elements);
   }
@@ -786,31 +834,29 @@ export class Calls {
     return generic ? signature.parameters.length - 1 : undefined;
   }
 
-  private inferFromSpread(run: InferenceRun, signature: Signature, arg: TreeNode, index: number): void {
-    const spreadType = this.c.silently(() => this.c.expressions.check(named(arg)[0]));
-    const tuple = spreadType.kind === 'object' ? spreadType.tuple : undefined;
-    const elements =
-      tuple && !tuple.elements.some((element) => element.rest || element.optional)
-        ? tuple.elements.map((element) => element.type)
-        : [this.c.silently(() => this.c.patterns.iteratedType(undefined, spreadType))];
-    for (const [offset, element] of elements.entries()) {
-      const parameterType = this.parameterTypeAt(signature, index + offset);
-      if (parameterType) this.c.inference.inferTypes(run, element, parameterType, true);
-    }
-  }
-
   private inferFromArgument(
     run: InferenceRun,
-    signature: Signature,
-    arg: TreeNode,
-    index: number,
+    arg: InferenceArgument,
+    parameterType: Type | undefined,
     mapper: Mapper | undefined
   ): void {
-    const parameterType = this.parameterTypeAt(signature, index);
     if (!parameterType) return;
     const context = mapper ? this.c.instantiate(parameterType, mapper) : parameterType;
-    const argType = this.c.silently(() => this.c.expressions.check(arg, context));
+    const argType = arg.spread
+      ? this.spreadValueType(arg.spread)
+      : this.c.silently(() => this.c.expressions.check(arg.node, context));
     this.c.inference.inferTypes(run, argType, parameterType, true);
+  }
+
+  private spreadElements(arg: TreeNode, type: Type): TupleElement[] {
+    if (type.kind === 'object' && type.objectKind === 'tuple') return type.tuple?.elements ?? [];
+    const element = this.c.patterns.iteratedType(arg, type);
+    return [{ type: this.c.arrayType(element), rest: true, optional: false }];
+  }
+
+  private spreadValueType(element: TupleElement): Type {
+    if (element.rest) return this.c.restElementType(element.type);
+    return element.optional ? unionOf([element.type, undefinedType]) : element.type;
   }
 
   private isContextSensitive(arg: TreeNode): boolean {
@@ -863,13 +909,17 @@ function restTupleContexts(
   args: TreeNode[],
   lengthOf: (arg: TreeNode) => number | undefined
 ): (Type | undefined)[] {
+  const contexts = tupleArgumentContexts(c, restType, args.map(lengthOf));
+  return contexts.map((context, index) => (args[index].type === 'spread_element' ? undefined : context));
+}
+
+function tupleArgumentContexts(c: Checker, restType: Type, lengths: (number | undefined)[]): (Type | undefined)[] {
   const elements = restType.kind === 'object' ? (restType.tuple?.elements ?? []) : [];
   const restIndex = elements.findIndex((element) => element.rest);
   const trailing = restIndex === -1 ? 0 : elements.length - 1 - restIndex;
-  const fromStart = offsets(args, lengthOf);
-  const fromEnd = offsets(args.toReversed(), lengthOf).toReversed();
-  return args.map((arg, index) => {
-    if (arg.type === 'spread_element') return;
+  const fromStart = offsets(lengths);
+  const fromEnd = offsets(lengths.toReversed()).toReversed();
+  return lengths.map((_, index) => {
     const start = fromStart[index];
     if (start !== undefined && (restIndex === -1 || start < restIndex)) return elements[start]?.type;
     const end = fromEnd[index];
@@ -880,11 +930,10 @@ function restTupleContexts(
 }
 
 /** How many values precede each argument, until a spread of unknown length. */
-function offsets(args: TreeNode[], lengthOf: (arg: TreeNode) => number | undefined): (number | undefined)[] {
+function offsets(lengths: (number | undefined)[]): (number | undefined)[] {
   let offset: number | undefined = 0;
-  return args.map((arg) => {
+  return lengths.map((length) => {
     const current = offset;
-    const length = lengthOf(arg);
     offset = offset === undefined || length === undefined ? undefined : offset + length;
     return current;
   });

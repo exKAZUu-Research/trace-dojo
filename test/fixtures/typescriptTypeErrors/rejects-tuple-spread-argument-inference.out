@@ -1,0 +1,22 @@
+(8,7): error TS2322: Type 'boolean' is not assignable to type 'string'.
+(9,7): error TS2322: Type 'string' is not assignable to type 'number'.
+(10,33): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+(11,7): error TS2322: Type '{ value: number; }' is not assignable to type '{ value: string; }'.
+  Types of property 'value' are incompatible.
+    Type 'number' is not assignable to type 'string'.
+(12,7): error TS2322: Type '[boolean, number]' is not assignable to type '[string, number]'.
+  Type at position 0 in source is not compatible with type at position 0 in target.
+    Type 'boolean' is not assignable to type 'string'.
+(14,7): error TS2322: Type '[boolean, number]' is not assignable to type '[boolean, string]'.
+  Type at position 1 in source is not compatible with type at position 1 in target.
+    Type 'number' is not assignable to type 'string'.
+(17,7): error TS2322: Type 'boolean' is not assignable to type 'number'.
+(20,7): error TS2322: Type 'string' is not assignable to type 'number'.
+(21,23): error TS2554: Expected 3 arguments, but got 4.
+(22,1): error TS2554: Expected 3 arguments, but got 2.
+(27,7): error TS2322: Type 'string' is not assignable to type 'number'.
+(28,35): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+(30,7): error TS2322: Type '[number, string | undefined, boolean]' is not assignable to type '[number, string, boolean]'.
+  Type at position 1 in source is not compatible with type at position 1 in target.
+    Type 'string | undefined' is not assignable to type 'string'.
+      Type 'undefined' is not assignable to type 'string'.

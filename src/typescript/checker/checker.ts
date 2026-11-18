@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 538 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 543 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../../interpreter/diagnostics';
@@ -247,11 +247,17 @@ export class Checker {
   }
 
   isArrayType(type: Type): boolean {
-    return type.kind === 'object' && type.objectKind === 'reference' && type.target?.name === 'Array';
+    return type.kind === 'object' && type.objectKind === 'reference' && this.isLibraryType(type, 'Array');
   }
 
   isReadonlyArrayType(type: Type): boolean {
-    return type.kind === 'object' && type.objectKind === 'reference' && type.target?.name === 'ReadonlyArray';
+    return type.kind === 'object' && type.objectKind === 'reference' && this.isLibraryType(type, 'ReadonlyArray');
+  }
+
+  isLibraryType(type: Type, name: string): boolean {
+    if (type.kind !== 'object') return false;
+    const declared = type.objectKind === 'reference' ? type.target : type;
+    return declared?.name === name && declared === this.globalType(name);
   }
 
   isArrayOrTuple(type: Type): boolean {

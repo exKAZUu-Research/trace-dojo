@@ -662,27 +662,23 @@ export class Relations {
   }
 
   private arrayLikeRelated(source: ObjectType, target: ObjectType, relation: Relation): boolean | undefined {
-    // References to the same generic type compare their type arguments, as arrays do.
     if (source.objectKind === 'reference' && target.objectKind === 'reference' && source.target === target.target) {
-      const sourceArguments = source.typeArguments ?? [];
-      const targetArguments = target.typeArguments ?? [];
-      const covariant = sourceArguments.every((argument, index) =>
-        this.isRelated(argument, targetArguments[index], relation)
-      );
-      // The library's collections are covariant; another generic type may use a type argument where it is
-      // contravariant, as a function-typed property does, so its structures decide.
-      if (covariantLibraryTypes.has(source.target?.name ?? '')) return covariant;
-      if (!covariant) return undefined;
+      const name = source.target?.name;
+      if (name && covariantLibraryTypes.has(name) && this.c.isLibraryType(source, name)) {
+        const targetArguments = target.typeArguments ?? [];
+        return (source.typeArguments ?? []).every((argument, index) =>
+          this.isRelated(argument, targetArguments[index], relation)
+        );
+      }
     }
     if (source.objectKind === 'tuple' && target.objectKind === 'tuple')
       return this.tupleRelated(source, target, relation);
     if (
       this.c.isArrayOrTuple(source) &&
       target.objectKind === 'reference' &&
-      ['ReadonlyArray', 'ArrayLike', 'Array'].includes(target.target?.name ?? '')
+      ['ReadonlyArray', 'ArrayLike', 'Array'].some((name) => this.c.isLibraryType(target, name))
     ) {
-      if (target.target?.name === 'Array' && (this.c.isReadonlyArrayType(source) || source.tuple?.readonly))
-        return false;
+      if (this.c.isArrayType(target) && (this.c.isReadonlyArrayType(source) || source.tuple?.readonly)) return false;
       return this.isRelated(this.c.elementTypeOf(source), target.typeArguments?.[0] ?? unknownType, relation);
     }
     return undefined;

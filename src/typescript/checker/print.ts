@@ -123,8 +123,8 @@ export class Printer {
     switch (type.objectKind) {
       case 'reference': {
         const args = type.typeArguments ?? [];
-        if (type.target?.name === 'Array') return `${this.wrap(args[0])}[]`;
-        if (type.target?.name === 'ReadonlyArray') return `readonly ${this.wrap(args[0])}[]`;
+        if (this.c.isArrayType(type)) return `${this.wrap(args[0])}[]`;
+        if (this.c.isReadonlyArrayType(type)) return `readonly ${this.wrap(args[0])}[]`;
         return `${type.name}<${args.map((argument) => this.print(argument)).join(', ')}>`;
       }
       case 'interface': {

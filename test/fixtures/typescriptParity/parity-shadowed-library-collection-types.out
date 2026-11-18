@@ -1,0 +1,8 @@
+array hi
+readonly there
+key 3
+set item
+iterator step
+one 2 true
+[object Object]
+Numbers(2) [ 1, 2 ] [ 3, 4 ] 5 true { value: 6, done: false }

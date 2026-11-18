@@ -66,6 +66,8 @@ export function rejectUnsupportedSyntax(root: TreeNode): void {
 /** A feature that a node of a supported type spells with a keyword or a form this interpreter does not run. */
 function unsupportedForm(node: TreeNode): string | undefined {
   const tokens = new Set(node.children.filter((child) => child !== null && !child.isNamed).map((child) => child?.type));
+  if (node.type === 'type_parameter' && ['in', 'out'].some((token) => tokens.has(token)))
+    return '型パラメーターの in / out による分散指定';
   if (node.type === 'predefined_type' && tokens.has('unique symbol')) return 'unique symbol';
   if (functionTypes.has(node.type) && tokens.has('async')) return 'async 関数';
   if (node.type === 'method_definition' && tokens.has('*')) return 'ジェネレータ関数';

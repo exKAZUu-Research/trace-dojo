@@ -1,0 +1,38 @@
+function choose<T>(a: number, b: string, value: T): T { return value; }
+function convert<T>(a: number, b: string, callback: (value: number) => T): T { return callback(a); }
+function capture<T extends unknown[]>(a: number, b: string, ...values: T): T { return values; }
+const pair: [number, string] = [1, 'x'];
+const first: [number] = [2];
+const second: [string] = ['y'];
+const empty: [] = [];
+const result = choose(...pair, true);
+const converted = convert(...pair, value => value.toFixed(1));
+const multiple = choose(...first, ...second, ...empty, {value: 3});
+const rest = capture(...pair, true, 4);
+const inside: [number, string, boolean, number] = [3, 'z', false, 5];
+const crossing = capture(...inside);
+const b: boolean = result;
+const s: string = converted;
+const n: number = multiple.value;
+const tail: [boolean, number] = rest;
+const crossed: [boolean, number] = crossing;
+function optional<T>(a: number, b: string | undefined, value: T): T { return value; }
+const maybe: [number, string?] = [1, 'present'];
+const optionalResult = optional(...maybe, true);
+const ob: boolean = optionalResult;
+function arrayTail<T>(a: number, ...values: T[]): T { return values[0]; }
+const strings = ['a', 'b'];
+const arrayResult = arrayTail(...first, ...strings);
+const as: string = arrayResult;
+console.log(b, s, n, tail, crossed, ob, as);
+function suffix<T>(...args: [...string[], (value: number) => T]): T {
+  const callback = args[args.length - 1] as (value: number) => T;
+  return callback(2);
+}
+const trailing = suffix(...strings, value => value.toFixed(2));
+const trailingText: string = trailing;
+console.log(trailingText);
+function all<T extends unknown[]>(...values: T): T { return values; }
+const optionalTail = all(...maybe, true);
+const optionalTuple: [number, string | undefined, boolean] = optionalTail;
+console.log(optionalTuple);

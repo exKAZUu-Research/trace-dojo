@@ -1,5 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { CompileError } from '../../interpreter/diagnostics';
+
 /** The named children of a node, without comments. */
 export function named(node: TreeNode): TreeNode[] {
   return node.namedChildren.filter((child): child is TreeNode => child !== null && child.type !== 'comment');
@@ -188,30 +190,47 @@ export function stringValue(node: TreeNode): string {
   for (const child of node.namedChildren) {
     if (!child) continue;
     if (child.type === 'string_fragment') value += child.text;
-    else if (child.type === 'escape_sequence') value += decodeEscape(child.text);
+    else if (child.type === 'escape_sequence') value += decodeEscape(child);
   }
   return value;
 }
 
-/** The text a part of a template spells: an escape sequence decoded, and a line break as `\n`. */
 export function templateFragmentText(node: TreeNode): string {
-  if (node.type === 'escape_sequence') {
-    if (node.parent?.type === 'template_literal_type' && hasInvalidUnicodeEscape(node)) return node.text;
-    return decodeEscape(node.text);
-  }
+  if (node.type === 'escape_sequence') return decodeEscape(node);
   return node.text.replaceAll(/\r\n?/g, '\n');
 }
 
-export function hasInvalidUnicodeEscape(node: TreeNode): boolean {
-  if (node.type !== 'escape_sequence' || !node.text.startsWith(String.raw`\u{`)) return false;
-  const digits = node.text.slice(3, -1);
-  return !/^[\da-f]+$/i.test(digits) || Number.parseInt(digits, 16) > 0x10_ff_ff;
+export function isRawTypeTemplateFragment(node: TreeNode): boolean {
+  const parent = node.parent;
+  return parent?.type === 'template_literal_type' && !named(parent).some((child) => child.type === 'template_type');
+}
+
+export function hasInvalidCharacterEscape(node: TreeNode): boolean {
+  if (node.type !== 'escape_sequence') return false;
+  const body = node.text.slice(1);
+  if (body.startsWith('u{'))
+    return !/^u\{[\da-f]+\}$/i.test(body) || Number.parseInt(body.slice(2, -1), 16) > 0x10_ff_ff;
+  if (body.startsWith('u')) return !/^u[\da-f]{4}$/i.test(body);
+  if (body.startsWith('x')) return !/^x[\da-f]{2}$/i.test(body);
+  return false;
 }
 
 const simpleEscapes: Record<string, string> = { n: '\n', t: '\t', r: '\r', b: '\b', f: '\f', v: '\v', '0': '\0' };
 
-function decodeEscape(text: string): string {
+function decodeEscape(node: TreeNode): string {
+  const { text } = node;
   const body = text.slice(1);
+  if (
+    isRawTypeTemplateFragment(node) &&
+    (hasInvalidCharacterEscape(node) ||
+      /^[1-9]/.test(body) ||
+      (body.startsWith('0') && (body.length > 1 || /[0-9]/.test(node.nextSibling?.text[0] ?? ''))))
+  )
+    return text;
+  if (hasInvalidCharacterEscape(node))
+    throw new CompileError([
+      { row: node.startPosition.row, message: 'エスケープシーケンスの書き方に誤りがあります。' },
+    ]);
   if (body in simpleEscapes) return simpleEscapes[body];
   if (body.startsWith('x')) return String.fromCodePoint(Number.parseInt(body.slice(1), 16));
   if (body.startsWith('u{')) return String.fromCodePoint(Number.parseInt(body.slice(2, -1), 16));

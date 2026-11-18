@@ -104,8 +104,8 @@ export class StatementChecker {
     }
   }
 
-  /** Checks statements in order, calling `afterEach` with the state after each one that is reached. */
-  checkBlockStatements(statements: TreeNode[], afterEach?: (state: State) => void): void {
+  /** Checks statements in order, following their reachable paths. */
+  checkBlockStatements(statements: TreeNode[]): void {
     for (const statement of statements) {
       const current = this.c.flow.current;
       if (!current) {
@@ -114,7 +114,6 @@ export class StatementChecker {
       }
       if (current.dead) current.dead = 'after';
       this.check(statement);
-      afterEach?.(this.c.flow.current?.clone());
     }
   }
 
@@ -816,32 +815,29 @@ export class StatementChecker {
     const body = node.childForFieldName('body') as TreeNode;
     const handler = node.childForFieldName('handler');
     const finalizer = node.childForFieldName('finalizer');
-    // The try block changes the current state in place, while the catch block starts from any state the try block
-    // passed through, as an exception may leave it after any statement.
-    const entry = this.c.flow.current?.clone();
-    const passed: State[] = [entry];
-    this.checkBlockStatements(named(body), (state) => passed.push(state));
+    const passed = this.c.flow.exceptions.collect(body, () => this.checkBlockStatements(named(body)));
     const tryEnd = this.c.flow.current;
     let catchEnd: State;
+    let catchPassed: State;
     if (handler) {
-      this.c.flow.current = this.c.flow.merge([...passed, tryEnd]);
+      this.c.flow.current = passed;
       this.bindCatchParameter(handler);
       const handlerBody = handler.childForFieldName('body') as TreeNode;
-      this.checkBlockStatements(named(handlerBody));
+      catchPassed = this.c.flow.exceptions.collect(handlerBody, () => this.checkBlockStatements(named(handlerBody)));
       catchEnd = this.c.flow.current;
     }
     const after = handler ? this.c.flow.merge([tryEnd, catchEnd!]) : tryEnd;
-    if (finalizer) {
-      this.c.flow.current = this.c.flow.merge([entry, tryEnd, handler ? catchEnd! : undefined]);
-      const finalBody = finalizer.childForFieldName('body') ?? named(finalizer)[0];
-      if (finalBody) this.checkBlockStatements(named(finalBody));
-      if (!this.c.flow.isReachable) return;
-      // Past the statement, the finally block ran after the try or catch block completed normally.
+    if (!finalizer) {
       this.c.flow.current = after;
-      if (finalBody && after) this.c.silently(() => this.checkBlockStatements(named(finalBody)));
       return;
     }
+    this.c.flow.current = this.c.flow.merge([passed, tryEnd, catchPassed!, handler ? catchEnd! : undefined]);
+    const finalBody = finalizer.childForFieldName('body') ?? named(finalizer)[0];
+    if (finalBody) this.checkBlockStatements(named(finalBody));
+    this.c.flow.exceptions.include(this.c.flow.current);
+    if (!this.c.flow.isReachable) return;
     this.c.flow.current = after;
+    if (finalBody && after) this.c.silently(() => this.checkBlockStatements(named(finalBody)));
   }
 
   private bindCatchParameter(handler: TreeNode): void {

@@ -272,7 +272,7 @@ export class TypeInference {
     // An iterable or array-like target infers its element from what iterating the source gives, as a string's characters.
     if (
       target.objectKind === 'reference' &&
-      ['Iterable', 'ArrayLike', 'IterableIterator'].includes(target.target?.name ?? '') &&
+      ['Iterable', 'ArrayLike', 'IterableIterator'].some((name) => this.c.isLibraryType(target, name)) &&
       !(source.kind === 'object' && source.objectKind === 'reference' && source.target === target.target)
     ) {
       const element = this.c.silently(() => this.c.patterns.iteratedType(undefined, source));
@@ -474,8 +474,8 @@ export class TypeInference {
   }
 
   private isArrayLike(type: ObjectType): boolean {
-    return ['Array', 'ReadonlyArray', 'Iterable', 'ArrayLike', 'IterableIterator', 'Iterator'].includes(
-      type.target?.name ?? ''
+    return ['Array', 'ReadonlyArray', 'Iterable', 'ArrayLike', 'IterableIterator', 'Iterator'].some((name) =>
+      this.c.isLibraryType(type, name)
     );
   }
 

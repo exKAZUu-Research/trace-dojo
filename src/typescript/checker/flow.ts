@@ -2,6 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { isUnchangedVariable } from './constantReferences';
+import { ExceptionFlow } from './exceptionFlow';
 import { isGenericObjectOrIndexType } from './genericTypes';
 import { applicableIndex } from './indexInfos';
 import { nonNullableType, nullishConstraint, withoutNullishUnit } from './nullishConstraints';
@@ -80,11 +81,12 @@ export type State = FlowState | undefined;
 /** The flow of a program's control, which narrows its references and tracks its assignments. */
 export class Flow {
   current: State = new FlowState();
+  readonly exceptions: ExceptionFlow;
   /** While set, only the references it accepts narrow, and their keys are collected, as for an aliased condition. */
   narrowingScope?: { accepts: (node: TreeNode) => boolean; keys: Set<string> };
-  /** `{}`, what `unknown` narrows to where it is neither `null` nor `undefined`. */
-
-  constructor(private readonly c: Checker) {}
+  constructor(private readonly c: Checker) {
+    this.exceptions = new ExceptionFlow(c, this, (types) => this.joinTypes(types));
+  }
 
   merge(states: State[]): State {
     const defined = states.filter((state): state is FlowState => state !== undefined);
@@ -171,11 +173,12 @@ export class Flow {
     return this.current?.entries.get(key);
   }
 
-  set(key: string, entry: FlowEntry): void {
+  set(key: string, entry: FlowEntry, assignment?: TreeNode): void {
     if (!this.current) return;
     // tsc gives a reference assigned where no path reaches its declared type.
     if (this.current.dead && entry.assigned) this.current.entries.delete(key);
     else this.current.entries.set(key, entry);
+    if (!this.current.dead) this.exceptions.record(key, entry, assignment);
   }
 
   /** Forgets what was known about the properties of a reference that is assigned. */

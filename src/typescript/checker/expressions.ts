@@ -132,7 +132,7 @@ export class ExpressionChecker {
     if (isAnyLike(type)) return;
     const isFunction = (member: Type): boolean =>
       member.kind === 'object' &&
-      (member.name === 'Function' ||
+      (this.c.isLibraryType(member, 'Function') ||
         this.c.signaturesOf(member, 'call').length > 0 ||
         this.c.signaturesOf(member, 'construct').length > 0);
     if ((type.kind === 'union' ? type.types : [type]).some(isFunction)) {
@@ -417,11 +417,13 @@ export class ExpressionChecker {
     if (evolving && this.isEvolvingUse(node)) return declared;
     const assignedLater =
       closure !== undefined && symbol.assignmentOffsets.some((offset) => offset > closure.startIndex);
-    // A function declaration can be called before anything narrows, as it is hoisted.
-    const hoisted = closure?.type === 'function_declaration' || closure?.type === 'generator_function_declaration';
+    const deferred =
+      closure?.type === 'function_declaration' ||
+      closure?.type === 'generator_function_declaration' ||
+      (closure?.type === 'method_definition' && closure.parent?.type === 'class_body');
     if (
       !evolving &&
-      !hoisted &&
+      !deferred &&
       (symbol.valueKind === 'const' || (symbol.scope !== this.c.binder.moduleScope && !assignedLater))
     ) {
       const captured = this.c.functions.capturedTypes.at(-1)?.get(`s${symbol.id}`);

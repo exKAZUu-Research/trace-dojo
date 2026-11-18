@@ -420,10 +420,7 @@ export class TypeNodes {
       return declared;
     }
     const required = parameters.filter((parameter) => !parameter.default).length;
-    if (
-      (typeArguments.length < required || typeArguments.length > parameters.length) &&
-      !(typeArguments.length === 0 && this.insideOwnDeclaration(node, symbol))
-    ) {
+    if (typeArguments.length < required || typeArguments.length > parameters.length) {
       this.c.error(
         node,
         required === parameters.length
@@ -494,13 +491,6 @@ export class TypeNodes {
         );
       }
     }
-  }
-
-  private insideOwnDeclaration(node: TreeNode, symbol: Sym): boolean {
-    for (let current: TreeNode | null = node; current; current = current.parent) {
-      if (symbol.typeDeclarations.some((declaration) => declaration.id === current?.id)) return true;
-    }
-    return false;
   }
 
   private objectTypeLiteral(node: TreeNode): Type {
