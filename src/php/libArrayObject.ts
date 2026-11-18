@@ -1,4 +1,5 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+import type { ArrayCursor } from './arrayOrder';
 import { setNativeArrayStorage } from './assignment';
 import { callMethod } from './callables';
 import { invoke } from './calls';
@@ -10,16 +11,7 @@ import { arrayIsShared, share } from './places';
 import './splInterfaces';
 import { PhpThrow, rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
-import {
-  type ArrayCursor,
-  type Key,
-  NativeValueIndex,
-  PhpArray,
-  type PhpClass,
-  PhpObject,
-  Ref,
-  type Value,
-} from './values';
+import { type Key, NativeValueIndex, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
 
 const STD_PROP_LIST = 1;
 const ARRAY_AS_PROPS = 2;

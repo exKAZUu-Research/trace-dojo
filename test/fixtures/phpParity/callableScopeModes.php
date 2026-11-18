@@ -24,3 +24,26 @@ class CallableChild extends CallableParent {
  }
 }
 CallableChild::exercise();
+
+class CallbackBase {
+    public static function printScope() { echo self::class, ':', static::class, "\n"; }
+    public static function __callStatic($name,$args) { echo $name, ':', self::class, ':', static::class, "\n"; }
+    public static function fromBase() {
+        call_user_func('self::printScope');
+        call_user_func('static::printScope');
+        call_user_func('self::unknownInBase');
+        $closure = Closure::fromCallable('self::printScope');
+        $closure();
+    }
+}
+class CallbackMiddle extends CallbackBase {
+    public static function fromMiddle() {
+        call_user_func(['parent','printScope']);
+        call_user_func(['parent','unknownInParent']);
+        Closure::fromCallable(['parent','printScope'])();
+        call_user_func([CallbackBase::class, 'printScope']);
+    }
+}
+class CallbackLeaf extends CallbackMiddle {}
+CallbackLeaf::fromBase();
+CallbackLeaf::fromMiddle();

@@ -311,7 +311,7 @@ const randomizerMethods: NativeMethod[] = [
     impl: ({ thisObj }) => Number(draw(algoOf(thisObj), 64) >> 11n) * 2 ** -53,
   },
   {
-    signature: 'getFloat(float $min, float $max)',
+    signature: String.raw`getFloat(float $min, float $max, Random\IntervalBoundary $boundary = Random\IntervalBoundary::ClosedOpen): float`,
     impl: ({ thisObj, args }) => {
       const [min, max] = args as [number, number];
       if (!Number.isFinite(min))

@@ -857,7 +857,7 @@ export function setDefaultEvaluator(run: (decl: FunctionDecl, index: number, fra
   evaluateDefault = run;
 }
 
-// code-gauge-allow functionNcss 50 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
+// code-gauge-allow functionNcss 52 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 // code-gauge-allow functionParameterCount 7 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function bindParams(
   frame: Frame,
@@ -893,6 +893,7 @@ function bindParams(
       frame.vars.set(param.name, new Ref(rest));
       for (let at = index; at < positional.length; at++) {
         const arg = positional[at];
+        if (arg.omitted) throwError('ArgumentCountError', `${name}(): Argument #${at + 1} not passed`);
         bindSupplied(arg, param, at, (slot) => rest.append(slot));
       }
       for (const arg of args) {

@@ -1,5 +1,7 @@
+// code-gauge-allow-file fileNcss 825 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
+import { type ArrayCursor, ArrayOrder, type SpliceRange } from './arrayOrder';
 import { ArrayTable } from './arrayTable';
 import type { ClassDecl, Expr, FunctionDecl, PropertyDeclAst } from './ast';
 import { lower } from './bytes';
@@ -165,6 +167,12 @@ export class PhpArray {
     return this.ordered().cursor();
   }
 
+  foreachCursor(previous?: ArrayCursor, retainPosition = false): ArrayCursor {
+    const order = this.ordered();
+    if (!previous) return order.cursor(order.first?.key, { generation: 0 });
+    return order.resumeCursor(this.currentKey(), previous, retainPosition);
+  }
+
   prepareSort(): void {
     this.ordered().unpack();
   }
@@ -245,12 +253,12 @@ export class PhpArray {
     return value;
   }
 
-  replaceTable(entries: Iterable<readonly [Key, Value | Ref]>, packed = false): void {
+  replaceTable(entries: Iterable<readonly [Key, Value | Ref]>, packed = false, splice?: SpliceRange): void {
     const previousSize = this.map.size;
     this.capacityHint = Math.max(this.capacityHint, previousSize);
     this.map = this.table(entries);
     allocationHandler(Math.max(0, this.size - previousSize), this.size);
-    this.order?.replace(this.map.keys(), packed);
+    this.order?.replace(this.map.keys(), packed, splice);
     this.orderPacked = packed;
     this.composite = false;
     this.nextFree = INT_MIN;
@@ -276,7 +284,7 @@ export class PhpArray {
     for (const slot of removed) if (slot instanceof Ref) slot.rc--;
     for (let index = 0; index < replacement.length; index++) this.trackSlot(BigInt(start + index), replacement[index]);
     if (replacement.some((slot) => slot !== null && typeof slot === 'object')) this.composite = true;
-    this.order?.replace(this.map.keys(), true);
+    this.order?.replace(this.map.keys(), true, { start, end: start + count, inserted: replacement.length });
     this.orderPacked = true;
     this.nextFree = BigInt(this.size);
     this.pointer = null;
@@ -686,279 +694,6 @@ export class PhpClass {
     if (this === other) return true;
     for (let cls: PhpClass | undefined = this.parent; cls; cls = cls.parent) if (cls === other) return true;
     return this.interfaces.includes(other);
-  }
-}
-
-class ArrayEntry {
-  rawKey!: Key;
-  private rawIndex!: number;
-  previous?: ArrayEntry;
-  next?: ArrayEntry;
-
-  constructor(
-    private readonly order: ArrayOrder,
-    key: Key,
-    index: number
-  ) {
-    this.key = key;
-    this.index = index;
-  }
-
-  get key(): Key {
-    return typeof this.rawKey === 'bigint' ? this.rawKey - this.order.keyOffset : this.rawKey;
-  }
-  set key(key: Key) {
-    this.rawKey = typeof key === 'bigint' ? key + this.order.keyOffset : key;
-  }
-  get index(): number {
-    return this.rawIndex - this.order.indexOffset;
-  }
-  set index(index: number) {
-    this.rawIndex = index + this.order.indexOffset;
-  }
-}
-
-class ArrayOrder {
-  private readonly entries = new Map<Key, ArrayEntry>();
-  first: ArrayEntry | undefined;
-  last: ArrayEntry | undefined;
-  keyOffset = 0n;
-  indexOffset = 0;
-  private listLayout = false;
-  private nextIndex = 0;
-  private capacity = 8;
-  private packed: boolean | undefined;
-  private readonly cursors = new Set<WeakRef<ArrayCursor>>();
-
-  constructor(keys: Iterable<Key>, capacityHint = 8) {
-    while (this.capacity < capacityHint) this.capacity *= 2;
-    for (const key of keys) this.insert(key);
-  }
-
-  get(key: Key): ArrayEntry | undefined {
-    return this.entries.get(typeof key === 'bigint' ? key + this.keyOffset : key);
-  }
-
-  hasDensePackedStorage(): boolean {
-    return Boolean(this.packed && this.nextIndex === this.entries.size);
-  }
-
-  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
-  sampleKey(draw: (max: number) => number): Key {
-    if (this.entries.size === this.nextIndex || this.entries.size < this.nextIndex - (this.nextIndex >> 1)) {
-      let index = draw(this.entries.size - 1);
-      for (const entry of this.orderedEntries()) {
-        if (index-- === 0) return entry.key;
-      }
-    } else if (this.packed) {
-      for (;;) {
-        const key = BigInt(draw(this.nextIndex - 1));
-        if (this.get(key)) return key;
-      }
-    } else {
-      const buckets: (Key | undefined)[] = [];
-      for (const entry of this.orderedEntries()) buckets[entry.index] = entry.key;
-      for (;;) {
-        const key = buckets[draw(this.nextIndex - 1)];
-        if (key !== undefined) return key;
-      }
-    }
-    throw new Error('Invalid array sampling index');
-  }
-
-  cursor(): ArrayCursor {
-    const cursor = new ArrayCursor(this);
-    this.cursors.add(new WeakRef(cursor));
-    return cursor;
-  }
-
-  copy(): ArrayOrder {
-    const copy = new ArrayOrder([], this.capacity);
-    for (const entry of this.orderedEntries()) copy.appendEntry(entry.key, entry.index);
-    copy.nextIndex = this.nextIndex;
-    copy.packed = this.packed;
-    copy.listLayout = this.listLayout;
-    if (copy.entries.size === 0) {
-      copy.capacity = 8;
-      copy.packed = undefined;
-      copy.listLayout = false;
-    } else if (!copy.packed) copy.compact();
-    return copy;
-  }
-
-  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  insert(key: Key): void {
-    if (this.get(key)) return;
-    const numeric = typeof key === 'bigint' && key >= 0n && key < BigInt(Number.MAX_SAFE_INTEGER);
-    const position = numeric ? Number(key) : -1;
-    this.packed ??= numeric && position < this.capacity;
-    if (this.packed) {
-      if (!numeric || position < this.nextIndex) this.toMixed();
-      else if (position >= this.capacity) {
-        if (position < this.capacity * 2 && this.entries.size > this.capacity / 2) this.capacity *= 2;
-        else this.toMixed();
-      }
-    }
-    if (!this.packed && this.nextIndex >= this.capacity) {
-      if (this.nextIndex > this.entries.size + (this.entries.size >> 5)) this.compact();
-      else this.capacity *= 2;
-    }
-    if (key !== BigInt(this.entries.size)) this.listLayout = false;
-    const index = this.packed ? position : this.nextIndex;
-    this.nextIndex = index + 1;
-    const entry = this.appendEntry(key, index);
-    for (const cursor of this.liveCursors()) cursor.entry ??= entry;
-  }
-
-  unpack(): void {
-    if (this.packed) this.replace(this.keys(), false);
-  }
-
-  private toMixed(): void {
-    if (this.nextIndex >= this.capacity) this.capacity *= 2;
-    this.packed = false;
-    this.compact();
-  }
-
-  private compact(): void {
-    let index = 0;
-    for (const entry of this.orderedEntries()) entry.index = index++;
-    this.nextIndex = index;
-    for (const cursor of this.liveCursors()) cursor.refreshPosition();
-  }
-
-  private appendEntry(key: Key, index: number): ArrayEntry {
-    const entry = new ArrayEntry(this, key, index);
-    entry.previous = this.last;
-    if (this.last) this.last.next = entry;
-    else this.first = entry;
-    this.last = entry;
-    this.entries.set(entry.rawKey, entry);
-    return entry;
-  }
-
-  shiftList(): void {
-    this.normalizeList();
-    if (this.first) this.delete(this.first.key);
-    this.keyOffset++;
-    this.indexOffset++;
-    this.nextIndex = this.entries.size;
-    this.listLayout = true;
-  }
-
-  prependList(count: number): void {
-    this.normalizeList();
-    this.keyOffset -= BigInt(count);
-    this.indexOffset -= count;
-    for (let index = count - 1; index >= 0; index--) {
-      const entry = new ArrayEntry(this, BigInt(index), index);
-      entry.next = this.first;
-      if (this.first) this.first.previous = entry;
-      else this.last = entry;
-      this.first = entry;
-      this.entries.set(entry.rawKey, entry);
-    }
-    this.nextIndex = this.entries.size;
-    this.capacity = 8;
-    while (this.capacity < this.nextIndex) this.capacity *= 2;
-    this.packed = true;
-  }
-
-  private normalizeList(): void {
-    if (this.listLayout) return;
-    const previous = [...this.orderedEntries()];
-    this.entries.clear();
-    this.keyOffset = 0n;
-    this.indexOffset = 0;
-    for (const [index, entry] of previous.entries()) {
-      entry.key = BigInt(index);
-      entry.index = index;
-      this.entries.set(entry.rawKey, entry);
-    }
-    this.nextIndex = previous.length;
-    for (const cursor of this.liveCursors()) cursor.refreshPosition();
-    this.listLayout = true;
-  }
-
-  delete(key: Key): void {
-    const entry = this.get(key);
-    if (!entry) return;
-    if (entry !== this.last) this.listLayout = false;
-    for (const cursor of this.liveCursors()) cursor.deleteEntry(entry);
-    if (entry.previous) entry.previous.next = entry.next;
-    else this.first = entry.next;
-    if (entry.next) entry.next.previous = entry.previous;
-    else {
-      this.last = entry.previous;
-      this.nextIndex = (this.last?.index ?? -1) + 1;
-    }
-    this.entries.delete(entry.rawKey);
-  }
-
-  replace(keys: Iterable<Key>, packed: boolean): void {
-    const orderedKeys = [...keys];
-    const cursors = [...this.liveCursors()].map((cursor) => ({ cursor, index: cursor.index }));
-    this.entries.clear();
-    this.first = undefined;
-    this.last = undefined;
-    this.keyOffset = 0n;
-    this.indexOffset = 0;
-    for (const key of orderedKeys) this.appendEntry(key, this.entries.size);
-    this.nextIndex = this.entries.size;
-    while (this.capacity < this.nextIndex) this.capacity *= 2;
-    this.listLayout = orderedKeys.every((key, index) => key === BigInt(index));
-    this.packed = packed && this.listLayout;
-    const entries = [...this.orderedEntries()];
-    for (const { cursor, index } of cursors) cursor.entry = index === undefined ? undefined : entries[index];
-  }
-
-  private *keys(): Generator<Key> {
-    for (const entry of this.orderedEntries()) yield entry.key;
-  }
-
-  private *orderedEntries(): Generator<ArrayEntry> {
-    for (let entry = this.first; entry; entry = entry.next) yield entry;
-  }
-
-  private *liveCursors(): Generator<ArrayCursor> {
-    for (const reference of this.cursors) {
-      const cursor = reference.deref();
-      if (cursor) yield cursor;
-      else this.cursors.delete(reference);
-    }
-  }
-}
-
-export class ArrayCursor {
-  private current: ArrayEntry | undefined;
-  private rawPosition: number | undefined;
-  get entry(): ArrayEntry | undefined {
-    return this.current;
-  }
-  set entry(value: ArrayEntry | undefined) {
-    this.current = value;
-    this.refreshPosition();
-  }
-  refreshPosition(): void {
-    this.rawPosition = this.current ? this.current.index + this.order.indexOffset : undefined;
-  }
-  deleteEntry(entry: ArrayEntry): void {
-    if (this.current === entry) this.current = entry.next;
-  }
-  constructor(private readonly order: ArrayOrder) {
-    this.rewind();
-  }
-  get key(): Key | undefined {
-    return this.current?.key;
-  }
-  get index(): number | undefined {
-    return this.rawPosition === undefined ? undefined : Math.max(0, this.rawPosition - this.order.indexOffset);
-  }
-  rewind(): void {
-    this.entry = this.order.first;
-  }
-  next(): void {
-    this.entry = this.entry?.next;
   }
 }
 

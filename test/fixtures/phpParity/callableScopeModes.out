@@ -85,3 +85,25 @@ array(2) {
   int(2)
 }
 Class "self" not found
+
+Deprecated: Use of "self" in callables is deprecated in /main.php on line 32
+CallbackBase:CallbackLeaf
+
+Deprecated: Use of "static" in callables is deprecated in /main.php on line 33
+CallbackBase:CallbackLeaf
+
+Deprecated: Use of "self" in callables is deprecated in /main.php on line 34
+unknownInBase:CallbackBase:CallbackLeaf
+
+Deprecated: Use of "self" in callables is deprecated in /main.php on line 35
+CallbackBase:CallbackLeaf
+
+Deprecated: Use of "parent" in callables is deprecated in /main.php on line 41
+CallbackBase:CallbackLeaf
+
+Deprecated: Use of "parent" in callables is deprecated in /main.php on line 42
+unknownInParent:CallbackBase:CallbackLeaf
+
+Deprecated: Use of "parent" in callables is deprecated in /main.php on line 43
+CallbackBase:CallbackLeaf
+CallbackBase:CallbackBase

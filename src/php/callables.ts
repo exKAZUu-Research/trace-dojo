@@ -449,7 +449,7 @@ export function readOffset(object: PhpObject, key: Value | undefined): Value {
   const owner = getter?.scope.lname;
   if (key === undefined && getter?.fn.kind === 'native' && owner === 'splfixedarray')
     throwError('Error', '[] operator not supported for SplFixedArray');
-  const inline = owner === 'splobjectstorage' && key instanceof PhpObject && !key.isResource;
+  const inline = object.cls.lname === 'splobjectstorage' && key instanceof PhpObject && !key.isResource;
   const classArrayObject = rt().classes.get('arrayobject');
   const classArrayIterator = rt().classes.get('arrayiterator');
   const omitted =
@@ -712,6 +712,7 @@ function magicTarget(receiver: PhpObject | undefined, calledClass: PhpClass, met
 }
 
 // code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function staticCallable(
   className: string,
   methodName: string,
@@ -722,6 +723,7 @@ function staticCallable(
   const frame = rt().frame;
   const word = lower(className);
   let cls: PhpClass;
+  let calledClass: PhpClass | undefined;
   if (mode === 'callback' && (word === 'self' || word === 'static' || word === 'parent')) {
     if (!frame.scope) {
       const message = classScopeMessage(word);
@@ -733,15 +735,15 @@ function staticCallable(
         'Cannot access "parent" when current class scope has no parent',
         'cannot access "parent" when current class scope has no parent'
       );
-    cls = (
-      word === 'self' ? frame.scope : word === 'parent' ? frame.scope.parent : (frame.staticClass ?? frame.scope)
-    ) as PhpClass;
+    calledClass = frame.staticClass ?? frame.scope;
+    cls = (word === 'self' ? frame.scope : word === 'parent' ? frame.scope.parent : calledClass) as PhpClass;
   } else cls = callableClass(className);
+  calledClass ??= cls;
   const thisObj = frame.thisObj && frame.thisObj.cls.isSubclassOf(cls) ? frame.thisObj : undefined;
   const method = lookupMethod(cls, lower(methodName), scope);
   if (!method || !canCall(method, scope)) {
     const magic = cls.findMethod('__callstatic');
-    if (magic) return magicTarget(undefined, cls, magic, methodName);
+    if (magic) return magicTarget(undefined, calledClass, magic, methodName);
     throw inaccessibleStaticMethod(cls, methodName, method, scope, mode === 'callback' && !thisObj);
   }
   if (method.isAbstract) {
@@ -754,7 +756,7 @@ function staticCallable(
     if (!thisObj) throw nonStaticCallable(method);
     return { fn: method.fn, thisObj, scope: method.scope, staticClass: thisObj.cls, method };
   }
-  return { fn: method.fn, scope: method.scope, staticClass: cls, method };
+  return { fn: method.fn, scope: method.scope, staticClass: calledClass, method };
 }
 
 function inaccessibleStaticMethod(

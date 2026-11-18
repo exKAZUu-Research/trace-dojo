@@ -1109,7 +1109,6 @@ export function readProp(
   return null;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function readOverloadedProp(
   object: PhpObject,
   name: string,
@@ -1129,14 +1128,18 @@ function readOverloadedProp(
   const magic = object.cls.findMethod('__get');
   if (!magic || object.guards?.has(`get:${name}`)) return;
   const value = guarded(object, `get:${name}`, () => callMagic(object, magic, [name], mode === 'native'));
+  return checkUnsetGetterValue(value, unset, rt().lastReturnRef);
+}
+
+function checkUnsetGetterValue(value: Value, unset: PropDecl | undefined, returned: Ref | undefined): Value {
   if (!unset?.type) return value;
   const result = coerce(value, unset.type, { strict: rt().strictTypes, internal: false, scope: unset.cls });
   if (result === NO_MATCH)
     throwError(
       'TypeError',
-      `Value of type ${valueName(value)} returned from ${unset.cls.name}::__get() must be compatible with unset property ${unset.cls.name}::$${name} of type ${describePropertyType(unset)}`
+      `Value of type ${valueName(value)} returned from ${unset.cls.name}::__get() must be compatible with unset property ${unset.cls.name}::$${unset.name} of type ${describePropertyType(unset)}`
     );
-  rt().lastReturnRef?.assign(result);
+  returned?.assign(result);
   return result;
 }
 
@@ -1361,7 +1364,7 @@ export function propRef(
   let slot = object.props.get(key);
   if (slot instanceof Ref) return slot;
   if (object.unsetProperties?.has(key)) {
-    const overloaded = overloadedPropertyReference(object, name);
+    const overloaded = overloadedPropertyReference(object, name, decl);
     if (overloaded) return overloaded;
   }
   if (slot === undefined && !decl) {
@@ -1413,18 +1416,21 @@ export function hookedPropertyReference(object: PhpObject, decl: PropDecl, scope
   }
 }
 
-function overloadedPropertyReference(object: PhpObject, name: string): Ref | undefined {
+function overloadedPropertyReference(object: PhpObject, name: string, decl?: PropDecl): Ref | undefined {
   const magic = object.cls.findMethod('__get');
   if (!magic || object.guards?.has(`get:${name}`)) return;
   const runtime = rt();
   runtime.lastReturnRef = undefined;
-  const value = guarded(object, `get:${name}`, () => callMagic(object, magic, [name]));
-  const returned = runtime.lastReturnRef;
-  runtime.lastReturnRef = undefined;
-  if (returned) return returned;
-  if (!(value instanceof PhpObject))
-    notice(`Indirect modification of overloaded property ${object.cls.name}::$${name} has no effect`);
-  return Ref.temporary(value);
+  try {
+    const value = guarded(object, `get:${name}`, () => callMagic(object, magic, [name]));
+    const returned = runtime.lastReturnRef;
+    if (!returned && !(value instanceof PhpObject))
+      notice(`Indirect modification of overloaded property ${object.cls.name}::$${name} has no effect`);
+    const checked = checkUnsetGetterValue(value, decl, returned);
+    return returned ?? Ref.temporary(checked);
+  } finally {
+    runtime.lastReturnRef = undefined;
+  }
 }
 
 // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.

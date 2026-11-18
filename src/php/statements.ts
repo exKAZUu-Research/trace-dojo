@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 560 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 582 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
@@ -23,7 +23,7 @@ import { E_DEPRECATED, E_WARNING, emitError, setPrevious, throwError, warn } fro
 import { collectBeforeAllocation, setDestructor } from './garbage';
 import { consumeExpression, ev, evBool, evQuiet, evReturn, prepareOperand } from './interp';
 import { looseEquals, setObjectToString, toStr } from './operators';
-import { ElementPlace, RefPlace, share, VarPlace, writableContainer } from './places';
+import { ElementPlace, RefPlace, share, ValuePlace, VarPlace, writableContainer } from './places';
 import { FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
 import { type Callable, type Key, PhpArray, PhpClass, PhpObject, Ref, type UserFunction, type Value } from './values';
 
@@ -461,6 +461,8 @@ function catches(object: PhpObject, name: string): boolean {
   return cls !== undefined && object.cls.isSubclassOf(cls);
 }
 
+// code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completion {
   const runtime = rt();
   const frame = runtime.frame;
@@ -473,7 +475,9 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
       warn(`foreach() argument must be of type array|object, ${valueName(container ?? null)} given`);
       return undefined;
     }
-    return foreachArrayByRef(statement, writableContainer(place, container) as PhpArray);
+    const subject = place instanceof ValuePlace ? Ref.temporary(container) : place.ref();
+    runtime.holdTemporaryReference(subject);
+    return foreachArrayByRef(statement, writableContainer(new RefPlace(subject), container) as PhpArray, subject);
   }
   const subject = ev(statement.subject);
   if (subject instanceof PhpObject && !subject.isResource) return foreachObject(statement, subject);
@@ -493,20 +497,52 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
   return undefined;
 }
 
-function foreachArrayByRef(statement: Extract<Stmt, { k: 'foreach' }>, array: PhpArray): Completion {
+interface NativeForeachStorage {
+  readonly array: PhpArray;
+  writable(): PhpArray;
+}
+
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+function foreachArrayByRef(
+  statement: Extract<Stmt, { k: 'foreach' }>,
+  array: PhpArray,
+  subject: Ref | NativeForeachStorage
+): Completion {
   const runtime = rt();
-  const cursor = array.cursor();
-  while (cursor.key !== undefined) {
-    runtime.spend();
-    const key = cursor.key;
-    const ref = new ElementPlace(array, key).ref();
-    cursor.next();
-    bindForeachRef(statement.value, ref);
-    if (statement.key) assignTo(statement.key, key);
-    runtime.steps.stepBinding(statement.row, true);
-    const result = loopBody(statement.body);
-    if (result !== 'next') return result;
+  let cursor = array.foreachCursor();
+  try {
+    for (;;) {
+      const next = subject instanceof Ref ? subject.v : subject.array;
+      if (next !== array) {
+        if (!(next instanceof PhpArray)) return foreachReplacement(statement, next);
+        array =
+          subject instanceof Ref ? (writableContainer(new RefPlace(subject), next) as PhpArray) : subject.writable();
+        cursor = array.foreachCursor(cursor, !(subject instanceof Ref));
+      }
+      const key = cursor.key;
+      if (key === undefined) return undefined;
+      runtime.spend();
+      const ref = new ElementPlace(array, key).ref();
+      cursor.next();
+      bindForeachRef(statement.value, ref);
+      if (statement.key) assignTo(statement.key, key);
+      runtime.steps.stepBinding(statement.row, true);
+      const result = loopBody(statement.body);
+      if (result !== 'next') return result;
+    }
+  } finally {
+    cursor.close();
   }
+}
+
+function foreachReplacement(statement: Extract<Stmt, { k: 'foreach' }>, value: Value): Completion {
+  if (value instanceof PhpObject && !value.isResource) {
+    const traversable = rt().classes.get('traversable') as PhpClass;
+    if (!value.cls.isSubclassOf(traversable)) return foreachObject(statement, value, true);
+    return undefined;
+  }
+  rt().row = statement.row;
+  warn(`foreach() argument must be of type array|object, ${valueName(value)} given`);
   return undefined;
 }
 
@@ -544,9 +580,9 @@ function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpOb
   const runtime = rt();
   const iterator = iteratorOf(object);
   // PHP's own array iterators let foreach change their elements by reference.
-  const storage = iterator?.internal as { writable?: () => PhpArray } | undefined;
+  const storage = iterator?.internal as NativeForeachStorage | undefined;
   if (iterator && byRef && typeof storage?.writable === 'function') {
-    return foreachArrayByRef(statement, storage.writable());
+    return foreachArrayByRef(statement, storage.writable(), storage);
   }
   if (iterator) {
     if (byRef) throwError('Error', 'An iterator cannot be used with foreach by reference');

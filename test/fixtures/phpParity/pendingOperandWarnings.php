@@ -263,3 +263,33 @@ $empty = new ArrayObject;
 reportOperation(fn()=>$empty[null]++);
 var_dump($empty->getArrayCopy());
 restore_error_handler();
+
+class BadTypedGetter {
+    public int $number;
+    public array $array;
+    public string $text;
+    function __get($name): mixed { return null; }
+}
+$typedGetter = new BadTypedGetter;
+unset($typedGetter->number, $typedGetter->array, $typedGetter->text);
+reportOperation(fn()=>$typedGetter->number);
+reportOperation(fn()=>$typedGetter->number[0] += 1);
+reportOperation(fn()=>$typedGetter->number[0]++);
+reportOperation(fn()=>$typedGetter->number->key += 1);
+reportOperation(fn()=>$typedGetter->array[0] = 1);
+reportOperation(fn()=>$typedGetter->text[0] = 'a');
+reportOperation(function()use($typedGetter){$alias =& $typedGetter->array;});
+reportOperation(function()use($typedGetter){foreach ($typedGetter->array as &$item) {}});
+reportOperation(function()use($typedGetter){unset($typedGetter->array[0]);});
+
+class VariadicObject extends ArrayObject {
+    function offsetGet(...$arguments): mixed { echo 'unexpected getter'; return 1; }
+}
+class VariadicIterator extends ArrayIterator {
+    function offsetGet(...$arguments): mixed { echo 'unexpected getter'; return 1; }
+}
+$varObject = new VariadicObject;
+$varIterator = new VariadicIterator;
+reportOperation(fn()=>$varObject[] += 1);
+reportOperation(fn()=>$varIterator[] += 1);
+var_dump(count($varObject), count($varIterator));

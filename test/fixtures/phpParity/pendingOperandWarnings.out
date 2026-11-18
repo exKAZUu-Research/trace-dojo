@@ -342,3 +342,32 @@ array(1) {
   [""]=>
   NULL
 }
+TypeError: Value of type null returned from BadTypedGetter::__get() must be compatible with unset property BadTypedGetter::$number of type int ()
+
+Notice: Indirect modification of overloaded property BadTypedGetter::$number has no effect in /main.php on line 276
+TypeError: Value of type null returned from BadTypedGetter::__get() must be compatible with unset property BadTypedGetter::$number of type int ()
+
+Notice: Indirect modification of overloaded property BadTypedGetter::$number has no effect in /main.php on line 277
+TypeError: Value of type null returned from BadTypedGetter::__get() must be compatible with unset property BadTypedGetter::$number of type int ()
+
+Notice: Indirect modification of overloaded property BadTypedGetter::$number has no effect in /main.php on line 278
+TypeError: Value of type null returned from BadTypedGetter::__get() must be compatible with unset property BadTypedGetter::$number of type int ()
+
+Notice: Indirect modification of overloaded property BadTypedGetter::$array has no effect in /main.php on line 279
+TypeError: Value of type null returned from BadTypedGetter::__get() must be compatible with unset property BadTypedGetter::$array of type array ()
+
+Notice: Indirect modification of overloaded property BadTypedGetter::$text has no effect in /main.php on line 280
+TypeError: Value of type null returned from BadTypedGetter::__get() must be compatible with unset property BadTypedGetter::$text of type string ()
+
+Notice: Indirect modification of overloaded property BadTypedGetter::$array has no effect in /main.php on line 281
+TypeError: Value of type null returned from BadTypedGetter::__get() must be compatible with unset property BadTypedGetter::$array of type array ()
+
+Notice: Indirect modification of overloaded property BadTypedGetter::$array has no effect in /main.php on line 282
+TypeError: Value of type null returned from BadTypedGetter::__get() must be compatible with unset property BadTypedGetter::$array of type array ()
+
+Notice: Indirect modification of overloaded property BadTypedGetter::$array has no effect in /main.php on line 283
+TypeError: Value of type null returned from BadTypedGetter::__get() must be compatible with unset property BadTypedGetter::$array of type array ()
+ArgumentCountError: VariadicObject::offsetGet(): Argument #1 not passed ()
+ArgumentCountError: VariadicIterator::offsetGet(): Argument #1 not passed ()
+int(1)
+int(1)

@@ -1,0 +1,385 @@
+import type { Key } from './values';
+
+class ArrayEntry {
+  rawKey!: Key;
+  private rawIndex!: number;
+  previous?: ArrayEntry;
+  next?: ArrayEntry;
+
+  constructor(
+    private readonly order: ArrayOrder,
+    key: Key,
+    index: number
+  ) {
+    this.key = key;
+    this.index = index;
+  }
+
+  get key(): Key {
+    return typeof this.rawKey === 'bigint' ? this.rawKey - this.order.keyOffset : this.rawKey;
+  }
+  set key(key: Key) {
+    this.rawKey = typeof key === 'bigint' ? key + this.order.keyOffset : key;
+  }
+  get index(): number {
+    return this.rawIndex - this.order.indexOffset;
+  }
+  set index(index: number) {
+    this.rawIndex = index + this.order.indexOffset;
+  }
+}
+
+export interface SpliceRange {
+  start: number;
+  end: number;
+  inserted: number;
+}
+
+interface CursorFamily {
+  generation: number;
+}
+
+interface CursorPosition {
+  cursor: ArrayCursor;
+  index: number | undefined;
+}
+
+export class ArrayOrder {
+  private readonly entries = new Map<Key, ArrayEntry>();
+  first: ArrayEntry | undefined;
+  last: ArrayEntry | undefined;
+  keyOffset = 0n;
+  indexOffset = 0;
+  private listLayout = false;
+  private nextIndex = 0;
+  private capacity = 8;
+  private packed: boolean | undefined;
+  private readonly cursors = new Set<WeakRef<ArrayCursor>>();
+  private readonly cursorCopies = new WeakMap<CursorFamily, ArrayCursor>();
+
+  constructor(keys: Iterable<Key>, capacityHint = 8) {
+    while (this.capacity < capacityHint) this.capacity *= 2;
+    for (const key of keys) this.insert(key);
+  }
+
+  get(key: Key): ArrayEntry | undefined {
+    return this.entries.get(typeof key === 'bigint' ? key + this.keyOffset : key);
+  }
+
+  hasDensePackedStorage(): boolean {
+    return Boolean(this.packed && this.nextIndex === this.entries.size);
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  sampleKey(draw: (max: number) => number): Key {
+    if (this.entries.size === this.nextIndex || this.entries.size < this.nextIndex - (this.nextIndex >> 1)) {
+      let index = draw(this.entries.size - 1);
+      for (const entry of this.orderedEntries()) {
+        if (index-- === 0) return entry.key;
+      }
+    } else if (this.packed) {
+      for (;;) {
+        const key = BigInt(draw(this.nextIndex - 1));
+        if (this.get(key)) return key;
+      }
+    } else {
+      const buckets: (Key | undefined)[] = [];
+      for (const entry of this.orderedEntries()) buckets[entry.index] = entry.key;
+      for (;;) {
+        const key = buckets[draw(this.nextIndex - 1)];
+        if (key !== undefined) return key;
+      }
+    }
+    throw new Error('Invalid array sampling index');
+  }
+
+  get endPosition(): number {
+    return this.nextIndex;
+  }
+
+  cursor(key = this.first?.key, family?: CursorFamily): ArrayCursor {
+    const cursor = new ArrayCursor(this, key === undefined ? undefined : this.get(key), family);
+    this.cursors.add(new WeakRef(cursor));
+    return cursor;
+  }
+
+  resumeCursor(key: Key | undefined, previous: ArrayCursor, retainPosition: boolean): ArrayCursor {
+    const family = previous.family!;
+    const saved = this.cursorCopies.get(family);
+    const cursor = saved?.active ? saved : this.cursor(key, family);
+    if (!saved?.active) {
+      if (retainPosition) {
+        const index = previous.index ?? 0;
+        let entry = this.first;
+        while (entry && entry.index < index) entry = entry.next;
+        cursor.setPosition(entry, index);
+      } else if (key === undefined) cursor.setPosition(undefined, this.nextIndex);
+    }
+    cursor.generation = ++family.generation;
+    this.cursorCopies.delete(family);
+    return cursor;
+  }
+
+  copy(): ArrayOrder {
+    const copy = new ArrayOrder([], this.capacity);
+    for (const entry of this.orderedEntries()) copy.appendEntry(entry.key, entry.index);
+    copy.nextIndex = this.nextIndex;
+    copy.packed = this.packed;
+    copy.listLayout = this.listLayout;
+    if (copy.entries.size === 0) {
+      copy.capacity = 8;
+      copy.packed = undefined;
+      copy.listLayout = false;
+    } else if (!copy.packed) copy.compact();
+    for (const cursor of this.liveCursors()) {
+      if (!cursor.family) continue;
+      const cloned = copy.cursor(cursor.key, cursor.family);
+      if (cursor.key === undefined) cloned.setPosition(undefined, copy.nextIndex);
+      else if (copy.packed) cloned.setPosition(cloned.entry, cursor.index);
+      copy.cursorCopies.set(cursor.family, cloned);
+    }
+    return copy;
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  insert(key: Key): void {
+    if (this.get(key)) return;
+    const numeric = typeof key === 'bigint' && key >= 0n && key < BigInt(Number.MAX_SAFE_INTEGER);
+    const position = numeric ? Number(key) : -1;
+    this.packed ??= numeric && position < this.capacity;
+    if (this.packed) {
+      if (!numeric || position < this.nextIndex) this.toMixed();
+      else if (position >= this.capacity) {
+        if (position < this.capacity * 2 && this.entries.size > this.capacity / 2) this.capacity *= 2;
+        else this.toMixed();
+      }
+    }
+    if (!this.packed && this.nextIndex >= this.capacity) {
+      if (this.nextIndex > this.entries.size + (this.entries.size >> 5)) this.compact();
+      else this.capacity *= 2;
+    }
+    if (key !== BigInt(this.entries.size)) this.listLayout = false;
+    const index = this.packed ? position : this.nextIndex;
+    this.nextIndex = index + 1;
+    const entry = this.appendEntry(key, index);
+    for (const cursor of this.liveCursors()) {
+      if (!cursor.entry && (!cursor.family || index >= (cursor.index ?? 0))) cursor.setPosition(entry, cursor.index);
+    }
+  }
+
+  unpack(): void {
+    if (this.packed) this.replace(this.keys(), false);
+  }
+
+  private toMixed(): void {
+    if (this.nextIndex >= this.capacity) this.capacity *= 2;
+    this.packed = false;
+    this.compact();
+  }
+
+  private compact(): void {
+    let index = 0;
+    for (const entry of this.orderedEntries()) entry.index = index++;
+    this.nextIndex = index;
+    for (const cursor of this.liveCursors()) cursor.refreshPosition();
+  }
+
+  private appendEntry(key: Key, index: number): ArrayEntry {
+    const entry = new ArrayEntry(this, key, index);
+    entry.previous = this.last;
+    if (this.last) this.last.next = entry;
+    else this.first = entry;
+    this.last = entry;
+    this.entries.set(entry.rawKey, entry);
+    return entry;
+  }
+
+  shiftList(): void {
+    this.normalizeList();
+    if (this.first) this.delete(this.first.key);
+    this.keyOffset++;
+    this.indexOffset++;
+    this.nextIndex = this.entries.size;
+    this.listLayout = true;
+  }
+
+  prependList(count: number): void {
+    this.normalizeList();
+    this.keyOffset -= BigInt(count);
+    this.indexOffset -= count;
+    for (let index = count - 1; index >= 0; index--) {
+      const entry = new ArrayEntry(this, BigInt(index), index);
+      entry.next = this.first;
+      if (this.first) this.first.previous = entry;
+      else this.last = entry;
+      this.first = entry;
+      this.entries.set(entry.rawKey, entry);
+    }
+    this.nextIndex = this.entries.size;
+    this.capacity = 8;
+    while (this.capacity < this.nextIndex) this.capacity *= 2;
+    this.packed = true;
+  }
+
+  private normalizeList(): void {
+    if (this.listLayout) return;
+    const previous = [...this.orderedEntries()];
+    this.entries.clear();
+    this.keyOffset = 0n;
+    this.indexOffset = 0;
+    for (const [index, entry] of previous.entries()) {
+      entry.key = BigInt(index);
+      entry.index = index;
+      this.entries.set(entry.rawKey, entry);
+    }
+    this.nextIndex = previous.length;
+    for (const cursor of this.liveCursors()) cursor.refreshPosition();
+    this.listLayout = true;
+  }
+
+  delete(key: Key): void {
+    const entry = this.get(key);
+    if (!entry) return;
+    if (entry !== this.last) this.listLayout = false;
+    for (const cursor of this.liveCursors()) cursor.deleteEntry(entry);
+    if (entry.previous) entry.previous.next = entry.next;
+    else this.first = entry.next;
+    if (entry.next) entry.next.previous = entry.previous;
+    else {
+      this.last = entry.previous;
+      this.nextIndex = (this.last?.index ?? -1) + 1;
+    }
+    this.entries.delete(entry.rawKey);
+    for (const cursor of this.liveCursors()) cursor.clamp(this.nextIndex);
+  }
+
+  replace(keys: Iterable<Key>, packed: boolean, splice?: SpliceRange): void {
+    const orderedKeys = [...keys];
+    const cursors = [...this.liveCursors()].map((cursor) => ({ cursor, index: cursor.index }));
+    if (splice && cursors.length > 0) this.remapSplice(splice, cursors);
+    this.entries.clear();
+    this.first = undefined;
+    this.last = undefined;
+    this.keyOffset = 0n;
+    this.indexOffset = 0;
+    for (const key of orderedKeys) this.appendEntry(key, this.entries.size);
+    this.nextIndex = this.entries.size;
+    while (this.capacity < this.nextIndex) this.capacity *= 2;
+    this.listLayout = orderedKeys.every((key, index) => key === BigInt(index));
+    this.packed = packed && this.listLayout;
+    const entries = [...this.orderedEntries()];
+    for (const { cursor, index } of cursors)
+      cursor.setPosition(index === undefined ? undefined : entries[index], index);
+  }
+
+  private remapSplice(splice: SpliceRange, cursors: CursorPosition[]): void {
+    const { start, end } = splice;
+    const entries = [...this.orderedEntries()];
+    let used = this.nextIndex;
+    let next = lowestPosition(cursors, 0, used);
+    for (const [ordinal, entry] of entries.entries()) {
+      const index = entry.index;
+      const removing = ordinal >= start && ordinal < end;
+      if (removing && index + 1 === used) {
+        used = start ? entries[start - 1].index + 1 : 0;
+        clampPositions(cursors, used);
+      }
+      if (!this.packed && ordinal === end) next = lowestPosition(cursors, next, used);
+      if (index !== next || (removing && !this.packed)) continue;
+      const position = splicePosition(splice, ordinal, removing);
+      movePositions(cursors, index, position);
+      next = lowestPosition(cursors, next + 1, used);
+    }
+  }
+
+  private *keys(): Generator<Key> {
+    for (const entry of this.orderedEntries()) yield entry.key;
+  }
+
+  private *orderedEntries(): Generator<ArrayEntry> {
+    for (let entry = this.first; entry; entry = entry.next) yield entry;
+  }
+
+  private *liveCursors(): Generator<ArrayCursor> {
+    for (const reference of this.cursors) {
+      const cursor = reference.deref();
+      if (cursor?.active) yield cursor;
+      else this.cursors.delete(reference);
+    }
+  }
+}
+
+function splicePosition({ start, end, inserted }: SpliceRange, ordinal: number, removing: boolean): number {
+  if (removing) return end;
+  return ordinal < start ? ordinal : ordinal - (end - start) + inserted;
+}
+
+function clampPositions(cursors: CursorPosition[], used: number): void {
+  for (const cursor of cursors) if (cursor.index !== undefined) cursor.index = Math.min(cursor.index, used);
+}
+
+function movePositions(cursors: CursorPosition[], index: number, position: number): void {
+  for (const cursor of cursors) if (cursor.index === index) cursor.index = position;
+}
+
+function lowestPosition(cursors: CursorPosition[], minimum: number, used: number): number {
+  let lowest = used;
+  for (const { index } of cursors) if (index !== undefined && index >= minimum && index < lowest) lowest = index;
+  return lowest;
+}
+
+export class ArrayCursor {
+  private current: ArrayEntry | undefined;
+  private rawPosition: number | undefined;
+  generation: number | undefined;
+
+  constructor(
+    private readonly order: ArrayOrder,
+    entry: ArrayEntry | undefined,
+    readonly family?: CursorFamily
+  ) {
+    this.generation = family?.generation;
+    this.entry = entry;
+  }
+
+  get active(): boolean {
+    return this.generation === this.family?.generation;
+  }
+  close(): void {
+    if (this.family && this.active) this.family.generation++;
+  }
+  get entry(): ArrayEntry | undefined {
+    return this.current;
+  }
+  set entry(value: ArrayEntry | undefined) {
+    this.setPosition(value);
+  }
+  setPosition(value: ArrayEntry | undefined, index = value?.index): void {
+    this.current = value;
+    const position = this.family ? (index ?? this.order.endPosition) : value?.index;
+    this.rawPosition = position === undefined ? undefined : position + this.order.indexOffset;
+  }
+  refreshPosition(): void {
+    this.setPosition(this.current);
+  }
+  deleteEntry(entry: ArrayEntry): void {
+    if (this.current === entry) this.current = entry.next;
+  }
+  clamp(end: number): void {
+    const index = this.index;
+    if (this.family && index !== undefined && index > end) this.setPosition(this.current, end);
+  }
+  get key(): Key | undefined {
+    return this.current?.key;
+  }
+  get index(): number | undefined {
+    return this.rawPosition === undefined ? undefined : Math.max(0, this.rawPosition - this.order.indexOffset);
+  }
+  rewind(): void {
+    this.setPosition(this.order.first, this.family ? 0 : undefined);
+  }
+  next(): void {
+    const entry = this.current;
+    if (entry) this.setPosition(entry.next, entry.index + 1);
+  }
+}

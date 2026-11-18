@@ -1,5 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
+import type { SpliceRange } from './arrayOrder';
 import { type Comparisons, type Entry, setEntries, SortedWalk } from './arraySetWalk';
 import { lower, upper } from './bytes';
 import { callCallback, callCallbackRefs, callMethod, consumeCallbackResult } from './callables';
@@ -89,7 +90,7 @@ function checkArrayRef(ctx: NativeContext, index: number, name: string, paramete
 }
 
 // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function rebuild(entries: [Key, Value | Ref][], renumber: boolean, target?: PhpArray): PhpArray {
+function rebuild(entries: [Key, Value | Ref][], renumber: boolean, target?: PhpArray, splice?: SpliceRange): PhpArray {
   const array = target ?? new PhpArray();
   if (target) {
     let position = 0n;
@@ -101,7 +102,7 @@ function rebuild(entries: [Key, Value | Ref][], renumber: boolean, target?: PhpA
         yield [newKey, slot];
       }
     }
-    array.replaceTable(renamed(), renumber);
+    array.replaceTable(renamed(), renumber, splice);
     return array;
   }
   for (const [key, source] of entries) {
@@ -930,7 +931,8 @@ defineFunction(
     rebuild(
       [...entries.slice(0, start), ...inserted.map((slot): [Key, Value | Ref] => [0n, slot]), ...entries.slice(end)],
       true,
-      array
+      array,
+      { start, end, inserted: inserted.length }
     );
     array.pointer = null;
     return removed;
