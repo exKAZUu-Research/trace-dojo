@@ -6714,6 +6714,17 @@ test('byte-backed pointer union views preserve signed reads and mutations', () =
   });
 });
 
+test.each(['[2]u8', '[2]u4', '[0]u8', 'enum{a,b}', 'struct{x:u8}', '*u8', '?u8', 'packed struct{inner:[2]u4}'])(
+  'packed structs require bit-packed field types: %s',
+  (fieldType) => {
+    const source = `const P=packed struct{a:${fieldType}};pub fn main()void{var p:P=undefined;_=&p;}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ message: expect.stringContaining('packed struct') }],
+    });
+  }
+);
+
 test.each([
   ['v.u.a=2;', '2'],
   ['v.u.b=3;', '3'],

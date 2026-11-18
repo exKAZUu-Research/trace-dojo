@@ -535,7 +535,8 @@ export abstract class SemaBase implements SemaApi {
   // Container fields ------------------------------------------------------------------------------------------------
 
   /** The fields of a struct, resolving their types and default values on first use. */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the field layout and default-value checks in one pass.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Keeps field type, layout and default-value checks in one pass.
+  // code-gauge-allow functionNcss 31 -- Keeps field type, layout and default-value checks in one pass.
   structFields(type: StructType, span: Span): StructField[] {
     if (type.fields) return type.fields;
     const syntax = type.namespace.syntax;
@@ -549,6 +550,7 @@ export abstract class SemaBase implements SemaApi {
         if (field.name === undefined && !type.isTuple)
           this.error(field, '構造体のフィールドには名前を書いてください。');
         const fieldType = this.compileType(field.type);
+        if (type.layout === 'packed') this.checkPackedField(fieldType, 'struct', field);
         let defaultValue: Value | undefined;
         if (field.value) {
           const compiled = this.coerce(this.compile(field.value, fieldType), fieldType, field.value);
@@ -621,17 +623,33 @@ export abstract class SemaBase implements SemaApi {
     let width: number | undefined;
     for (const field of fields) {
       this.spendCompilation();
-      if (
-        !['int', 'float', 'bool', 'void', 'enum', 'struct', 'union'].includes(field.type.kind) ||
-        (field.type.kind === 'enum' && field.type.namespace.syntax?.argument === undefined) ||
-        ((field.type.kind === 'struct' || field.type.kind === 'union') && field.type.layout !== 'packed')
-      )
-        this.error(span, `${typeName(field.type)} 型は、packed union のフィールドにできません。`);
+      this.checkPackedField(field.type, 'union', span);
       const bits = bitSizeOf(field.type);
       if (width !== undefined && width !== bits)
         this.error(span, 'packed union のフィールドのビット数をそろえてください。');
       width = bits;
     }
+  }
+
+  private checkPackedField(type: Type, container: 'struct' | 'union', span: Span): void {
+    switch (type.kind) {
+      case 'int':
+      case 'float':
+      case 'bool':
+      case 'void': {
+        return;
+      }
+      case 'enum': {
+        if (type.namespace.syntax?.argument !== undefined) return;
+        break;
+      }
+      case 'struct':
+      case 'union': {
+        if (type.layout === 'packed') return;
+        break;
+      }
+    }
+    this.error(span, `${typeName(type)} 型は、packed ${container} のフィールドにできません。`);
   }
 
   /** Whether a value of `type` contains a `target` in place, not behind a pointer, which would have no size. */
