@@ -125,12 +125,19 @@ test.each([
   'singletonLists',
   'singletonStrings',
   'deepEmpty',
+  'protectedName',
 ])('transport graphs round-trip within a bounded heap: %s', { timeout: 30_000 }, (name) => {
   const result = z
     .object({ bytes: z.number(), loops: z.number() })
     .parse(runHelper('test/helpers/haskellTransportOutput.ts', 256, [name]));
   expect(result.bytes).toBeLessThan(32 * 1024 * 1024);
   expect(result.loops).toBe(name === 'control' || name === 'equalityControl' ? 5 : 1200);
+});
+
+test('legal learner names round-trip through a fresh configured client', { timeout: 30_000 }, () => {
+  const encoded = runHelper('test/helpers/haskellReservedNamesEncode.ts', 256);
+  const decoded = runHelper('test/helpers/haskellReservedNamesDecode.ts', 256, [JSON.stringify(encoded)]);
+  expect(decoded).toHaveLength(8);
 });
 
 function runHelper(path: string, heap: number, args: string[] = []): unknown {

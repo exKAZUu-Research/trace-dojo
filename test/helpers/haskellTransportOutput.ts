@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 
-import { parse, stringify } from 'superjson';
 import { z } from 'zod';
 
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
+import { parse, stringify } from '../../src/interpreter/traceTransport';
 
 const name = z
   .enum([
@@ -21,6 +21,7 @@ const name = z
     'singletonLists',
     'singletonStrings',
     'deepEmpty',
+    'protectedName',
   ])
   .parse(process.argv[2]);
 const values = {
@@ -37,18 +38,19 @@ const values = {
   emptyLists: 'replicate 1000 ([]::[Int])',
   singletonLists: 'replicate 1000 [0::Int]',
   singletonStrings: 'replicate 1000 [""::String]',
+  protectedName: 'replicate 1000 ([]::[Int])',
   deepEmpty: `${'replicate 1 ('.repeat(10)}replicate 200 ([]::[Int])${')'.repeat(10)}`,
 };
 const loops = name === 'control' || name === 'equalityControl' ? 5 : 1200;
 const source = `import Control.Monad
 data R=R{specialFloatingPointValuesCollectedForTheCurrentIteration::[Double]}
 main=do
- let xs=${values[name]}
+ let ${name === 'protectedName' ? 'constructor' : 'xs'}=${values[name]}
  ${name === 'selfField' ? 'let this=R xs' : ''}
  let cheap=42::Int
  let later=(-0.0::Double)
  let big=(10^30::Integer)
- ${name === 'mixed' ? 'print(sum xs)' : 'print(length xs)'}
+ ${name === 'mixed' ? 'print(sum xs)' : `print(length ${name === 'protectedName' ? 'constructor' : 'xs'})`}
  forM_ [1..${loops}::Int] $ \\i->do
   print i`;
 const recording = traceProgram('haskell', source, source);
@@ -74,9 +76,11 @@ assert.ok(last);
 assert.equal(last.vars.cheap, 42);
 assert.ok(Object.is(last.vars.later, -0));
 assert.equal(last.vars.big, 10n ** 30n);
-const displayed = decoded.traceItems.find((item) => Array.isArray(item.vars.xs));
+const displayed = decoded.traceItems.find((item) =>
+  Array.isArray(item.vars[name === 'protectedName' ? 'constructor' : 'xs'])
+);
 assert.ok(displayed);
-let leaf: unknown = displayed.vars.xs;
+let leaf: unknown = displayed.vars[name === 'protectedName' ? 'constructor' : 'xs'];
 while (Array.isArray(leaf)) leaf = leaf[0];
 if (name === 'control' || name === 'negativeZero') assert.ok(Object.is(leaf, -0));
 else if (name === 'nan' || name === 'selfField') assert.ok(Number.isNaN(leaf));

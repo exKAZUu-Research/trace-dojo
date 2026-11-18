@@ -1,7 +1,11 @@
-import { serialize } from 'superjson';
-
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { TraceVariables } from '../interpreter/traceRecorder';
+import {
+  encodeTraceNameRecord,
+  requiresTraceKeyEncoding,
+  serialize,
+  traceRecordAnnotationCharacters,
+} from '../interpreter/traceTransport';
 import type { TraceItem } from '../problems/trace';
 import { TRUNCATED_DISPLAY } from './displayOutput';
 import { DISPLAY_OPERATIONS, DisplayAbort } from './previewBudget';
@@ -23,6 +27,7 @@ interface OutputCost {
 
 const RECORDING_CHARACTERS = LIMITS.maxSlots * 32;
 const STEP_CHARACTERS = 256;
+const ENCODED_STEP_CHARACTERS = 512;
 const IDENTITY_ENTRY_CHARACTERS = 8;
 const truncated = {
   node: TRUNCATED_DISPLAY,
@@ -41,6 +46,8 @@ export class RecordingOutput {
   private transportNodesRemaining = MAX_DISPLAY_NODES;
   private transportWorkRemaining = LIMITS.maxSlots;
   private recordedItems = 1;
+  private readonly transportValues = new WeakMap<object, object>();
+  private readonly encodedRecords = new WeakSet<object>();
   private readonly sizes = new WeakMap<object, OutputSize>();
   private readonly stringSizes = new Map<string, number>();
   private readonly scalarSizes = new Map<unknown, OutputSize>();
@@ -71,39 +78,51 @@ export class RecordingOutput {
     fallback?: { node: T; size: OutputSize }
   ): Record<string, T> {
     const bounded: Record<string, T> = Object.create(null);
-    let smallRemaining = STEP_CHARACTERS;
-    for (const [name, node] of Object.entries(roots)) {
-      const cost = this.outputCost(node, name, path);
+    const encoded = requiresTraceKeyEncoding(roots);
+    let smallRemaining = encoded
+      ? ENCODED_STEP_CHARACTERS - (2 + IDENTITY_ENTRY_CHARACTERS + traceRecordAnnotationCharacters + path.length * 2)
+      : STEP_CHARACTERS;
+    for (const [index, [name, node]] of Object.entries(roots).entries()) {
+      const encodedIndex = encoded ? index : undefined;
+      const cost = this.outputCost(node, name, path, encodedIndex);
       if (cost && cost.characters <= smallRemaining) {
         bounded[name] = node;
         smallRemaining -= cost.characters;
       } else if (cost && this.admit(cost)) {
         bounded[name] = node;
-      } else if (fallback && this.admit(this.rootCost(fallback.size, name, path))) {
+      } else if (
+        fallback &&
+        this.admit(
+          this.rootCost(encoded ? this.pairSize(fallback.size, name) : fallback.size, name, path, encodedIndex)
+        )
+      ) {
         bounded[name] = fallback.node;
       }
     }
     return bounded;
   }
 
-  private outputCost(node: unknown, name: string, path: string): OutputCost | undefined {
+  private outputCost(node: unknown, name: string, path: string, encodedIndex?: number): OutputCost | undefined {
     try {
       const size = this.size(node);
-      return this.rootCost(size, name, path);
+      return this.rootCost(encodedIndex === undefined ? size : this.pairSize(size, name), name, path, encodedIndex);
     } catch (error) {
       if (!(error instanceof DisplayAbort)) throw error;
       return;
     }
   }
 
-  private rootCost(size: OutputSize, name: string, path: string): OutputCost {
+  private rootCost(size: OutputSize, name: string, path: string, encodedIndex?: number): OutputCost {
+    const prefix = Math.max(
+      path.length + this.pathSegmentSize(name),
+      encodedIndex === undefined ? 0 : `${path}.${encodedIndex}`.length
+    );
     return {
       characters:
         size.characters +
         size.transportPaths +
-        size.transportNodes * (path.length + this.pathSegmentSize(name)) +
-        this.stringSize(name) +
-        2,
+        size.transportNodes * prefix +
+        (encodedIndex === undefined ? this.stringSize(name) + 2 : 1),
       transportNodes: size.transportNodes,
       work: size.transportWork + size.transportNodes * (path.split('.').length + 1),
     };
@@ -124,13 +143,14 @@ export class RecordingOutput {
 
   private size(value: unknown): OutputSize {
     if (typeof value !== 'object' || value === null) return this.scalarSize(value);
-    const cached = this.sizes.get(value);
+    const transported = this.transportValue(value);
+    const cached = this.sizes.get(transported);
     if (cached !== undefined) return cached;
     return this.runtime.withDisplayBudget(DISPLAY_OPERATIONS, () =>
       this.runtime.withRenderBudget('reference', () =>
         mapGraph<object, OutputSize>(
-          value,
-          (node) => node,
+          transported,
+          (node) => this.transportValue(node),
           (node) => this.unknownChildren(node),
           (node) => this.rememberSize(node)
         )
@@ -140,31 +160,52 @@ export class RecordingOutput {
 
   private unknownChildren(node: object): object[] {
     if (this.sizes.has(node)) return [];
-    return Object.values(node).filter(
-      (child): child is object => typeof child === 'object' && child !== null && !this.sizes.has(child)
-    );
+    return Object.values(node)
+      .filter((child): child is object => typeof child === 'object' && child !== null)
+      .map((child) => this.transportValue(child))
+      .filter((child) => !this.sizes.has(child));
   }
 
   private rememberSize(node: object): OutputSize {
+    const size: OutputSize = {
+      characters: 2 + IDENTITY_ENTRY_CHARACTERS + (this.encodedRecords.has(node) ? traceRecordAnnotationCharacters : 0),
+      transportNodes: this.encodedRecords.has(node) ? 2 : 1,
+      transportPaths: 0,
+      transportWork: 0,
+    };
+    const array = Array.isArray(node);
+    for (const [key, child] of Object.entries(node)) {
+      const weight =
+        typeof child === 'object' && child !== null
+          ? this.sizes.get(this.transportValue(child))!
+          : this.scalarSize(child);
+      this.addEntry(size, key, weight, array);
+    }
+    this.sizes.set(node, size);
+    return size;
+  }
+
+  private pairSize(value: OutputSize, name: string): OutputSize {
     const size: OutputSize = {
       characters: 2 + IDENTITY_ENTRY_CHARACTERS,
       transportNodes: 1,
       transportPaths: 0,
       transportWork: 0,
     };
-    const array = Array.isArray(node);
-    for (const [key, child] of Object.entries(node)) {
-      const weight = typeof child === 'object' && child !== null ? this.sizes.get(child)! : this.scalarSize(child);
-      size.characters = boundedSize(size.characters + weight.characters + 1 + (array ? 0 : this.stringSize(key) + 1));
-      size.transportNodes = boundedSize(size.transportNodes + weight.transportNodes);
-      size.transportPaths = boundedSize(
-        size.transportPaths + weight.transportPaths + weight.transportNodes * this.pathSegmentSize(key)
-      );
-      size.transportWork = boundedSize(size.transportWork + weight.transportWork + weight.transportNodes);
-    }
-    this.sizes.set(node, size);
+    this.addEntry(size, '0', this.scalarSize(name), true);
+    this.addEntry(size, '1', value, true);
     return size;
   }
+
+  private addEntry(size: OutputSize, key: string, weight: OutputSize, array: boolean): void {
+    size.characters = boundedSize(size.characters + weight.characters + 1 + (array ? 0 : this.stringSize(key) + 1));
+    size.transportNodes = boundedSize(size.transportNodes + weight.transportNodes);
+    size.transportPaths = boundedSize(
+      size.transportPaths + weight.transportPaths + weight.transportNodes * this.pathSegmentSize(key)
+    );
+    size.transportWork = boundedSize(size.transportWork + weight.transportWork + weight.transportNodes);
+  }
+
   private scalarSize(value: unknown): OutputSize {
     const key = Object.is(value, -0) ? negativeZero : value;
     let size = this.scalarSizes.get(key);
@@ -181,6 +222,16 @@ export class RecordingOutput {
       this.scalarSizes.set(key, size);
     }
     return size;
+  }
+
+  private transportValue(node: object): object {
+    let value = this.transportValues.get(node);
+    if (value === undefined) {
+      value = requiresTraceKeyEncoding(node) ? encodeTraceNameRecord(node) : node;
+      this.transportValues.set(node, value);
+      if (value !== node) this.encodedRecords.add(value);
+    }
+    return value;
   }
 
   private pathSegmentSize(key: string): number {
