@@ -4,6 +4,7 @@ import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
 import { FlowState, type State } from './flow';
+import { returnedLiteralType } from './returnLiterals';
 import type { Sym } from './scopes';
 import { isContextSensitiveFunction } from './signatures';
 import {
@@ -37,8 +38,6 @@ export interface FunctionContext {
   /** Whether the end of the body is reachable, where the function returns `undefined`. */
   endReachable: boolean;
   declaredReturn?: Type;
-  /** Whether returned literals keep their types, as when the declared or contextual return type has literals. */
-  keepsLiterals: boolean;
   isConstructor: boolean;
   hasReturnWithValue: boolean;
   /** Whether the body has a `return;`, even an unreachable one, which adds `undefined` to returned values. */
@@ -383,8 +382,6 @@ export class FunctionChecker {
       returnTypes: [],
       endReachable: true,
       declaredReturn,
-      keepsLiterals:
-        (declaredReturn ?? contextualReturn) !== undefined && this.hasLiterals(declaredReturn ?? contextualReturn),
       isConstructor: isClassConstructor(node),
       hasReturnWithValue: false,
       hasReturnWithoutValue: false,
@@ -402,27 +399,22 @@ export class FunctionChecker {
     return captured;
   }
 
-  private hasLiterals(type: Type | undefined): boolean {
-    if (!type) return false;
-    return (type.kind === 'union' ? type.types : [type]).some(
-      (member) => member.kind === 'literal' || member.kind === 'typeParameter'
-    );
-  }
-
   private returnTypeOf(context: FunctionContext): Type {
     if (context.declaredReturn) return context.declaredReturn;
-    const returned = this.c.literals.normalizeObjectLiterals(
+    const types = this.c.literals.normalizeObjectLiterals(
       context.returnTypes.flatMap((type) => (type.kind === 'union' ? type.types : [type]))
     );
-    const types = returned.map((type) => (context.keepsLiterals ? type : this.c.widenLiteral(type)));
     // A function expression or an object literal method that never returns returns `never`; a declaration `void`.
     if (types.length === 0 && !context.hasReturnWithoutValue && !context.endReachable && mayReturnNever(context.node))
       return neverType;
-    if (types.length === 0) return voidType;
-    if ((context.endReachable || context.hasReturnWithoutValue) && context.hasReturnWithValue)
-      types.push(undefinedType);
-    if (!context.hasReturnWithValue) return voidType;
-    return unionOf(types.map((type) => this.widenObjectLiteral(type)));
+    if (types.length === 0 || !context.hasReturnWithValue) return voidType;
+    if (context.endReachable || context.hasReturnWithoutValue) types.push(undefinedType);
+    const type = unionOf(
+      types.map((member) => this.widenObjectLiteral(member)),
+      true
+    );
+    // TypeScript widens only a returned unit type, and keeps fresh the literals of a union it returns.
+    return type.kind === 'literal' ? returnedLiteralType(this.c, type, context.contextualReturn) : type;
   }
 
   private widenObjectLiteral(type: Type): Type {

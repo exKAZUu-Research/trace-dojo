@@ -1,0 +1,35 @@
+type Tag = `#${number}`;
+const make: () => Tag = () => `#${1}`;
+console.log(make());
+
+const shout: () => Uppercase<string> = () => "OK";
+console.log(shout());
+
+const title: (name: string) => Capitalize<string> | number = (name) => (name ? "Hi" : 0);
+console.log(title("x"), title(""));
+
+interface Shape {
+  kind: "circle" | "square";
+}
+const pick: () => Shape["kind"] = () => "circle";
+console.log(pick());
+
+const keyOf: () => keyof Shape = () => "kind";
+console.log(keyOf());
+
+function choose(flag: boolean) {
+  if (flag) return "yes";
+  return "no";
+}
+const answer: "yes" | "no" = choose(true);
+console.log(answer);
+
+const sign = (n: number) => (n < 0 ? -1 : 1);
+const unit: -1 | 1 = sign(-5);
+console.log(unit);
+
+function maybe(flag: boolean) {
+  if (flag) return "found";
+}
+const found: "found" | undefined = maybe(false);
+console.log(found);

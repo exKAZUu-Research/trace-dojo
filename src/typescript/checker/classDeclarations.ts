@@ -187,7 +187,6 @@ export class ClassDeclarationChecker {
             node: member,
             returnTypes: [],
             endReachable: false,
-            keepsLiterals: false,
             isConstructor: false,
             hasReturnWithValue: false,
             hasReturnWithoutValue: false,
