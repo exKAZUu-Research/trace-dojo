@@ -416,26 +416,7 @@ export class Checker {
         );
       }
       case 'mapped': {
-        const mapped = type.mapped as MappedInfo;
-        const getTemplate = (): Type => this.instantiate(mapped.template, mapper);
-        const instantiated = this.typeOperators.mappedType({
-          typeParameter: mapped.typeParameter,
-          readonlyModifier: mapped.readonlyModifier,
-          optionalModifier: mapped.optionalModifier,
-          constraint: this.instantiate(mapped.constraint, mapper),
-          nameType: mapped.nameType && this.instantiate(mapped.nameType, mapper),
-          source: mapped.source && this.instantiate(mapped.source, mapper),
-          get template() {
-            return getTemplate();
-          },
-        });
-        return type.aliasName
-          ? withAlias(
-              instantiated,
-              type.aliasName,
-              (type.aliasArguments ?? []).map((argument) => this.instantiate(argument, mapper))
-            )
-          : instantiated;
+        return this.instantiateMapped(type, mapper);
       }
       case 'interface': {
         // A generic interface or class stands for itself applied to its own type parameters.
@@ -468,6 +449,36 @@ export class Checker {
     });
     this.instantiationCache.set(key, instantiated);
     return instantiated;
+  }
+
+  private instantiateMapped(type: ObjectType, mapper: Mapper): Type {
+    const mapped = type.mapped as MappedInfo;
+    const getTemplate = (): Type => this.instantiate(mapped.template, mapper);
+    const sourceVariable = mapped.source?.kind === 'typeParameter' ? mapped.source : undefined;
+    const withSource =
+      sourceVariable &&
+      ((source: Type): Type => this.instantiate(type, new Map([...mapper, [sourceVariable.id, source]])));
+    const instantiated = this.typeOperators.mappedType(
+      {
+        typeParameter: mapped.typeParameter,
+        readonlyModifier: mapped.readonlyModifier,
+        optionalModifier: mapped.optionalModifier,
+        constraint: this.instantiate(mapped.constraint, mapper),
+        nameType: mapped.nameType && this.instantiate(mapped.nameType, mapper),
+        source: mapped.source && this.instantiate(mapped.source, mapper),
+        get template() {
+          return getTemplate();
+        },
+      },
+      withSource
+    );
+    return type.aliasName
+      ? withAlias(
+          instantiated,
+          type.aliasName,
+          (type.aliasArguments ?? []).map((argument) => this.instantiate(argument, mapper))
+        )
+      : instantiated;
   }
 
   /**

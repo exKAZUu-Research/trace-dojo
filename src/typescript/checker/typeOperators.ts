@@ -3,6 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker, Mapper } from './checker';
 import { conditionalBranch, isGenericObjectOrIndexType, mappedOptionality } from './genericTypes';
 import { applicableIndex, isPatternKey } from './indexInfos';
+import { applyModifier, mappedArrayOrTuple, type WithMappedSource } from './mappedArrays';
 import { printedPropertyName } from './print';
 import { named, templateFragmentText } from './syntax';
 import { literalCombinations, mapText, placeholderTemplate, splicedSpans, type StringMapping } from './templateSpans';
@@ -26,7 +27,6 @@ import {
   newTypeId,
   nullType,
   numberType,
-  type ObjectType,
   type Property,
   stringType,
   type Structure,
@@ -223,8 +223,11 @@ export class TypeOperators {
     });
   }
 
-  /** A mapped type, resolved to an object type once its keys are known. */
-  mappedType(info: MappedInfo): Type {
+  /**
+   * A mapped type, resolved to an object type once its keys are known. `withSource` instantiates the generic mapped type
+   * that `info` instantiates, with another type for its source.
+   */
+  mappedType(info: MappedInfo, withSource?: WithMappedSource): Type {
     if (this.c.relations.isGeneric(info.constraint)) {
       return {
         kind: 'object',
@@ -236,27 +239,11 @@ export class TypeOperators {
     }
     const { source } = info;
     if (source && source.kind === 'object' && this.c.isArrayOrTuple(source) && !info.nameType) {
-      return this.mappedArrayOrTuple(info, source);
+      return mappedArrayOrTuple(this.c, info, source, withSource);
     }
     return anonymousObject(() => this.mappedStructure(info), {
       mappedKeys: info.nameType ? undefined : info.constraint,
     });
-  }
-
-  /** A homomorphic mapped type over an array or a tuple, which maps its elements. */
-  private mappedArrayOrTuple(info: MappedInfo, source: ObjectType): Type {
-    if (source.objectKind === 'tuple') {
-      return this.c.tupleType(
-        (source.tuple?.elements ?? []).map((element, index) => ({
-          ...element,
-          type: this.c.instantiate(info.template, new Map([[info.typeParameter.id, literalType(String(index))]])),
-          optional: applyModifier(info.optionalModifier, element.optional),
-        })),
-        applyModifier(info.readonlyModifier, source.tuple?.readonly ?? false)
-      );
-    }
-    const element = this.c.instantiate(info.template, new Map([[info.typeParameter.id, numberType]]));
-    return this.c.arrayType(element, applyModifier(info.readonlyModifier, this.c.isReadonlyArrayType(source)));
   }
 
   private mappedStructure(info: MappedInfo): Structure {
@@ -660,11 +647,6 @@ function mappedModifiers(
   if (typeNode?.type === 'omitting_type_annotation') return { readonlyModifier, optionalModifier: '-' };
   const adds = typeNode?.type === 'adding_type_annotation' || typeNode?.type === 'opting_type_annotation';
   return { readonlyModifier, optionalModifier: adds ? '+' : undefined };
-}
-
-/** A modified property's flag: `+` sets it, `-` clears it, and no modifier keeps the source's. */
-function applyModifier(modifier: '+' | '-' | undefined, inherited: boolean): boolean {
-  return modifier === '+' || (modifier !== '-' && inherited);
 }
 
 /** The key types that the index signatures of a structure give its `keyof`, where a string index takes numbers too. */

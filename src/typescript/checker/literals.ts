@@ -108,7 +108,7 @@ export class LiteralChecker {
       const type = this.c.expressions.check(element, context);
       return { type: isConstContext ? type : this.widenForMutableLocation(type, context), spread: false };
     });
-    if (tupleContext || isConstContext || isSpreadIntoCall(node)) {
+    if (isConstContext || this.isInTupleContext(node, contextual)) {
       return this.tupleOfElements(node, elements, types, isConstContext);
     }
     const elementTypes = types.map(({ type, spread }, index) =>
@@ -165,9 +165,30 @@ export class LiteralChecker {
     return node !== undefined && property.declaration?.parent?.id === node.id;
   }
 
+  /** Whether an array literal is a tuple by where it is written, as TypeScript's `checkArrayLiteral` decides. */
+  private isInTupleContext(node: TreeNode, contextual: Type | undefined): boolean {
+    return (
+      (contextual !== undefined &&
+        (this.tupleContext(contextual) !== undefined || this.isGenericHomomorphicMapped(contextual))) ||
+      isSpreadIntoCall(node)
+    );
+  }
+
   private tupleContext(contextual: Type): ObjectType | undefined {
     const members = contextual.kind === 'union' ? contextual.types : [contextual];
     return members.find((member): member is ObjectType => member.kind === 'object' && member.objectKind === 'tuple');
+  }
+
+  /** Whether `contextual` has a generic homomorphic mapped type, which TypeScript takes as a tuple context. */
+  private isGenericHomomorphicMapped(contextual: Type): boolean {
+    return (contextual.kind === 'union' ? contextual.types : [contextual]).some(
+      (member) =>
+        member.kind === 'object' &&
+        member.objectKind === 'mapped' &&
+        member.mapped?.source !== undefined &&
+        !member.mapped.nameType &&
+        this.c.relations.isGeneric(member)
+    );
   }
 
   private tupleElementContext(tuple: ObjectType, index: number): Type | undefined {
