@@ -63,30 +63,28 @@ function next(state: ZArray): bigint {
 }
 
 /** `Xoshiro256.fill`: little-endian bytes of `next()`, a fresh one for a partial last word. */
-function fill(state: RandomSource, count: number): number[] {
+function fill(state: RandomSource, count: number, store: (index: number, byte: bigint) => void): void {
   state.spend(count);
-  const bytes: number[] = [];
-  while (bytes.length < count) {
+  let index = 0;
+  while (index < count) {
     let n = state.next();
-    const take = Math.min(8, count - bytes.length);
-    for (let index = 0; index < take; index++) {
-      bytes.push(Number(n & 0xffn));
+    const end = Math.min(index + 8, count);
+    for (; index < end; index++) {
+      store(index, n & 0xffn);
       n >>= 8n;
     }
   }
-  return bytes;
 }
 
 /** `Random.int(T)`. */
 function randomInt(state: RandomSource, type: IntType): bigint {
   const bytes = Math.ceil(type.bits / 8);
-  const raw = fill(state, bytes);
   state.spend(bytes * 4);
-  const hexadecimal = raw
-    .toReversed()
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
-  const value = bytes === 0 ? 0n : BigInt(`0x${hexadecimal}`);
+  const hexadecimal: string[] = [];
+  fill(state, bytes, (index, byte) => {
+    hexadecimal[bytes - 1 - index] = byte.toString(16).padStart(2, '0');
+  });
+  const value = bytes === 0 ? 0n : BigInt(`0x${hexadecimal.join('')}`);
   return wrapInt(BigInt.asUintN(type.bits, value), type);
 }
 
@@ -419,7 +417,7 @@ addMembers(RANDOM, {
           const generator = state(frame);
           const slice = evaluate(frame) as Slice;
           frame.runtime.spend(1 + slice.length);
-          for (const [index, byte] of fill(generator, slice.length).entries()) slice.set(index, BigInt(byte));
+          fill(generator, slice.length, (index, byte) => slice.set(index, byte));
           return;
         },
         call.span

@@ -4733,6 +4733,14 @@ test('random byte generation and stores share the operation budget', () => {
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
 
+test.each([
+  [9, '11248385728467113498 7668670033295519312|8552596455757867860'],
+  [32, '295533844432769175 15310123613228853899|18016174260457637409'],
+])('random byte generation writes %s aliased bytes before advancing again', (length, stderr) => {
+  const source = `const std=@import("std");const U=extern union{a:*[4]u64,b:*[32]u8};pub fn main()void{var p=std.Random.DefaultPrng.init(1);const u=U{.a=&p.s};p.random().bytes(u.b[0..${length}]);std.debug.print("{} {}|",.{p.s[0],p.s[1]});std.debug.print("{}",.{p.next()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr, uncaughtException: undefined });
+});
+
 test.each(['order(true,false)', 'compare(true,.eq,false)', 'order(.a,.b)', 'compare("a",.lt,"b")'])(
   'native mathematical comparisons reject nonnumeric operands: %s',
   (call) => {
