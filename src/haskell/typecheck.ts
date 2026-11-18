@@ -1,27 +1,13 @@
 import { FUNCTION_TYPE } from './builtinTypes';
 import type { ClassEnv } from './classEnv';
 import { deriveInstance } from './deriving';
-import {
-  type ClassEntity,
-  type Evidence,
-  type InstanceInfo,
-  nextId,
-  type TypeEntity,
-  type ValueEntity,
-} from './entities';
+import { type ClassEntity, type Evidence, type InstanceInfo, nextId, type ValueEntity } from './entities';
 import { compileError, unsupportedError } from './errors';
-import {
-  type Builtins,
-  Checker,
-  checkSchemeAmbiguity,
-  newDictParam,
-  typeError,
-  typeParamKinds,
-  typeVarNames,
-} from './infer';
+import { type Builtins, Checker, newDictParam, typeParamKinds, typeVarNames } from './infer';
+import { inferKinds } from './kindCheck';
 import { TypePrinter } from './prettyType';
-import type { RBinding, RType } from './rast';
-import type { RClassDecl, RDataDecl, RInstanceDecl, RModule, RSynonymDecl } from './rename';
+import type { RBinding } from './rast';
+import type { RClassDecl, RDataDecl, RInstanceDecl, RModule } from './rename';
 import type { Span } from './syntax';
 import {
   defaultKind,
@@ -29,7 +15,6 @@ import {
   freshSkolem,
   instantiateType,
   type Kind,
-  kindArrow,
   mapType,
   matchType,
   type Pred,
@@ -41,7 +26,6 @@ import {
   tap,
   tcon,
   type Type,
-  unifyKinds,
   zonk,
 } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
@@ -72,7 +56,7 @@ export interface TypecheckOptions {
 export function typecheckModule(module: RModule, options: TypecheckOptions): TypecheckResult {
   const checker = new Checker(options.env, options.builtins);
   inferKinds(checker, module);
-  for (const decl of module.dataDecls) defineConstructors(checker, decl);
+  for (const decl of module.dataDecls) defineConstructors(decl);
   for (const decl of module.classes) defineClassMethods(decl);
   const instanceDecls = module.instances.map((decl) => declareInstance(checker, decl, module.name));
   const derived = deriveInstances(checker, module, options);
@@ -89,144 +73,7 @@ export function typecheckModule(module: RModule, options: TypecheckOptions): Typ
   return { instances, defaults, main };
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Kind inference covers data types, synonyms, and classes in one dependency-ordered pass.
-// code-gauge-allow functionNcss 43 -- Kind inference covers data types, synonyms, and classes in one dependency-ordered pass.
-function inferKinds(checker: Checker, module: RModule): void {
-  const dataParamKinds = new Map<TypeEntity, Kind[]>();
-  for (const decl of module.dataDecls) {
-    const kinds = decl.params.map(() => freshKindVar() as Kind);
-    dataParamKinds.set(decl.entity, kinds);
-    decl.entity.kind = arrowKind(kinds, STAR);
-  }
-  const synonymParamKinds = new Map<TypeEntity, Kind[]>();
-  for (const decl of module.synonyms) {
-    const kinds = decl.params.map(() => freshKindVar() as Kind);
-    synonymParamKinds.set(decl.entity, kinds);
-    decl.entity.kind = arrowKind(kinds, freshKindVar());
-  }
-  for (const decl of module.classes) decl.entity.tyvarKind = freshKindVar();
-  for (const decl of orderSynonyms(module.synonyms)) {
-    const kinds = synonymParamKinds.get(decl.entity) as Kind[];
-    const vars = new Map<string, Type>(decl.params.map((name, index) => [name, { tag: 'tgen', index }]));
-    const varKinds = new Map<string, Kind>(decl.params.map((name, index) => [name, kinds[index]]));
-    let resultKind = decl.entity.kind;
-    for (let index = 0; index < decl.params.length; index++) {
-      const pruned = resultKind as { tag: 'arrow'; to: Kind };
-      resultKind = pruned.to;
-    }
-    decl.entity.synonym = checker.convertType(decl.rhs, vars, varKinds, resultKind);
-  }
-  for (const decl of module.dataDecls) {
-    const kinds = dataParamKinds.get(decl.entity) as Kind[];
-    const vars = new Map<string, Type>(decl.params.map((name, index) => [name, { tag: 'tgen', index }]));
-    const varKinds = new Map<string, Kind>(decl.params.map((name, index) => [name, kinds[index]]));
-    for (const { con, fields } of decl.cons) {
-      con.fieldTypes = fields.map((field) => checker.convertType(field, vars, varKinds, STAR));
-    }
-  }
-  for (const decl of module.classes) {
-    for (const sup of decl.supers) {
-      if (!unifyKinds(decl.entity.tyvarKind, sup.cls.tyvarKind)) {
-        typeError(sup.span, `スーパークラス ${sup.cls.name} の型変数と、種類（カインド）が合いません。`);
-      }
-    }
-    for (const method of decl.methods) {
-      method.entity.scheme = methodScheme(checker, decl, method.sig);
-    }
-  }
-  for (const decl of module.dataDecls) decl.entity.kind = defaultKind(decl.entity.kind);
-  for (const decl of module.synonyms) decl.entity.kind = defaultKind(decl.entity.kind);
-  for (const decl of module.classes) {
-    decl.entity.tyvarKind = defaultKind(decl.entity.tyvarKind);
-    for (const method of decl.methods) {
-      const scheme = method.entity.scheme as Scheme;
-      scheme.kinds = scheme.kinds.map(defaultKind);
-    }
-  }
-}
-
-function arrowKind(params: readonly Kind[], result: Kind): Kind {
-  let kind = result;
-  for (const param of params.toReversed()) kind = kindArrow(param, kind);
-  return kind;
-}
-
-function orderSynonyms(decls: RSynonymDecl[]): RSynonymDecl[] {
-  const byEntity = new Map(decls.map((decl) => [decl.entity, decl]));
-  const ordered: RSynonymDecl[] = [];
-  const state = new Map<RSynonymDecl, 'visiting' | 'done'>();
-  const frames: { decl: RSynonymDecl; dependencies: Generator<RSynonymDecl> }[] = [];
-  const enter = (decl: RSynonymDecl): void => {
-    state.set(decl, 'visiting');
-    frames.push({ decl, dependencies: synonymDependencies(decl.rhs, byEntity) });
-  };
-  for (const root of decls) {
-    if (state.has(root)) continue;
-    enter(root);
-    while (frames.length > 0) {
-      const frame = frames.at(-1)!;
-      const next = frame.dependencies.next();
-      if (next.done) {
-        state.set(frame.decl, 'done');
-        ordered.push(frame.decl);
-        frames.pop();
-        continue;
-      }
-      const dependency = next.value;
-      const current = state.get(dependency);
-      if (current === 'visiting')
-        throw compileError(dependency.span, `型シノニム ${dependency.entity.name} が循環しています。`);
-      if (current !== 'done') enter(dependency);
-    }
-  }
-  return ordered;
-}
-
-function* synonymDependencies(type: RType, byEntity: ReadonlyMap<TypeEntity, RSynonymDecl>): Generator<RSynonymDecl> {
-  const work = [type];
-  while (work.length > 0) {
-    chargeTypeWork();
-    const node = work.pop()!;
-    if (node.k === 'con') {
-      const dependency = byEntity.get(node.entity);
-      if (dependency) yield dependency;
-    } else if (node.k === 'app') work.push(node.arg, node.fn);
-    else if (node.k === 'fun') work.push(node.to, node.from);
-  }
-}
-
-function methodScheme(checker: Checker, decl: RClassDecl, sig: RClassDecl['methods'][number]['sig']): Scheme {
-  const names: string[] = [decl.param];
-  const collect = (type: RType): void => {
-    if (type.k === 'var' && !names.includes(type.name)) names.push(type.name);
-    else if (type.k === 'app') {
-      collect(type.fn);
-      collect(type.arg);
-    } else if (type.k === 'fun') {
-      collect(type.from);
-      collect(type.to);
-    }
-  };
-  collect(sig.type);
-  for (const constraint of sig.context) collect(constraint.type);
-  const kinds: Kind[] = names.map((_, index) => (index === 0 ? decl.entity.tyvarKind : freshKindVar()));
-  const vars = new Map<string, Type>(names.map((name, index) => [name, { tag: 'tgen', index }]));
-  const varKinds = new Map<string, Kind>(names.map((name, index) => [name, kinds[index]]));
-  const type = checker.convertType(sig.type, vars, varKinds, STAR);
-  const preds: Pred[] = [{ cls: decl.entity, type: { tag: 'tgen', index: 0 } }];
-  for (const constraint of sig.context) {
-    preds.push({
-      cls: constraint.cls,
-      type: checker.convertType(constraint.type, vars, varKinds, constraint.cls.tyvarKind),
-    });
-  }
-  const scheme = { kinds, names, preds, type };
-  checkSchemeAmbiguity(scheme, sig.span);
-  return scheme;
-}
-
-function defineConstructors(checker: Checker, decl: RDataDecl): void {
-  void checker;
+function defineConstructors(decl: RDataDecl): void {
   for (const field of decl.entity.fields.values()) {
     const types = [...field.positions.entries()].map(([con, position]) => con.fieldTypes[position]);
     const first = types[0];
@@ -280,14 +127,15 @@ function declareInstance(checker: Checker, decl: RInstanceDecl, moduleName: stri
   const kinds: Kind[] = names.map(() => freshKindVar());
   const vars = new Map<string, Type>(names.map((name, index) => [name, { tag: 'tgen', index }]));
   const varKinds = new Map<string, Kind>(names.map((name, index) => [name, kinds[index]]));
-  const head = checker.convertType(decl.type, vars, varKinds, decl.cls.tyvarKind);
+  const head = checker.convertType(decl.type, vars, varKinds, checker.classKind(decl.cls, decl.span));
   const context: Pred[] = decl.context.map((constraint) => ({
     cls: constraint.cls,
-    type: checker.convertType(constraint.type, vars, varKinds, constraint.cls.tyvarKind),
+    type: checker.convertType(constraint.type, vars, varKinds, checker.classKind(constraint.cls, constraint.span)),
   }));
   if (splitApp(head).head.tag !== 'tcon') {
     throw unsupportedError(decl.span, '型変数だけを型に書いたインスタンス');
   }
+  checker.checkKinds();
   const info = makeInstance(decl.cls, kinds.map(defaultKind), head, context, moduleName, decl.span);
   validateInstanceTermination(info, decl.span);
   registerInstance(checker, info, decl.span);
@@ -312,48 +160,6 @@ function instanceTypeSize(type: Type, vars: Map<number, number>): number {
   if (current.tag === 'tgen') vars.set(current.index, (vars.get(current.index) ?? 0) + 1);
   if (current.tag === 'tap') return instanceTypeSize(current.fn, vars) + instanceTypeSize(current.arg, vars);
   return 1;
-}
-
-export function makeInstance(
-  cls: ClassEntity,
-  kinds: Kind[],
-  head: Type,
-  context: Pred[],
-  moduleName: string,
-  span?: Span
-): InstanceInfo {
-  return {
-    id: nextId(),
-    cls,
-    kinds,
-    head,
-    context,
-    equalities: [],
-    methods: Array.from<ValueEntity | undefined>({ length: cls.methods.length }),
-    supers: [],
-    contextParams: [],
-    module: moduleName,
-    span,
-  };
-}
-
-function registerInstance(checker: Checker, info: InstanceInfo, span: Span): void {
-  for (const existing of checker.env.instancesOf(info.cls)) {
-    if (matchType(existing.head, info.head, []) && matchType(info.head, existing.head, [])) {
-      const printer = new TypePrinter();
-      throw compileError(
-        span,
-        `${info.cls.name} ${printer.show(
-          instantiateType(
-            info.head,
-            info.kinds.map((_, index) => freshSkolem(STAR, 0, `t${index}`))
-          ),
-          2
-        )} のインスタンスが重複しています。`
-      );
-    }
-  }
-  checker.env.add(info);
 }
 
 function checkInstanceSupers(checker: Checker, info: InstanceInfo, span: Span): void {
@@ -436,21 +242,6 @@ function shiftGens(type: Type, replacement: Type): Type {
   );
 }
 
-function checkClauses(checker: Checker, binding: Extract<RBinding, { k: 'fun' }>, type: Type): void {
-  binding.type = type;
-  for (const clause of binding.clauses) {
-    let remaining = type;
-    for (const pat of clause.pats) {
-      const param = checker.freshVar();
-      const result = checker.freshVar();
-      checker.unify(remaining, tap(tcon(FUNCTION_TYPE), param, result), clause.span, 'メソッドの引数');
-      checker.inferPat(pat, param);
-      remaining = result;
-    }
-    checker.checkRhs(clause.rhs, remaining);
-  }
-}
-
 function checkDefaults(checker: Checker, decl: RClassDecl): RBinding[] {
   const result: RBinding[] = [];
   for (const binding of decl.defaults) {
@@ -476,6 +267,21 @@ function checkDefaults(checker: Checker, decl: RClassDecl): RBinding[] {
     result.push(implementationBinding);
   }
   return result;
+}
+
+function checkClauses(checker: Checker, binding: Extract<RBinding, { k: 'fun' }>, type: Type): void {
+  binding.type = type;
+  for (const clause of binding.clauses) {
+    let remaining = type;
+    for (const pat of clause.pats) {
+      const param = checker.freshVar();
+      const result = checker.freshVar();
+      checker.unify(remaining, tap(tcon(FUNCTION_TYPE), param, result), clause.span, 'メソッドの引数');
+      checker.inferPat(pat, param);
+      remaining = result;
+    }
+    checker.checkRhs(clause.rhs, remaining);
+  }
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- Each branch checks one condition GHC places on a derivable class.
@@ -515,6 +321,48 @@ function deriveInstances(checker: Checker, module: RModule, options: TypecheckOp
     bindings: deriveInstance(item.decl, item.cls, options.derivingSupport),
     span: item.span,
   }));
+}
+
+export function makeInstance(
+  cls: ClassEntity,
+  kinds: Kind[],
+  head: Type,
+  context: Pred[],
+  moduleName: string,
+  span?: Span
+): InstanceInfo {
+  return {
+    id: nextId(),
+    cls,
+    kinds,
+    head,
+    context,
+    equalities: [],
+    methods: Array.from<ValueEntity | undefined>({ length: cls.methods.length }),
+    supers: [],
+    contextParams: [],
+    module: moduleName,
+    span,
+  };
+}
+
+function registerInstance(checker: Checker, info: InstanceInfo, span: Span): void {
+  for (const existing of checker.env.instancesOf(info.cls)) {
+    if (matchType(existing.head, info.head, []) && matchType(info.head, existing.head, [])) {
+      const printer = new TypePrinter();
+      throw compileError(
+        span,
+        `${info.cls.name} ${printer.show(
+          instantiateType(
+            info.head,
+            info.kinds.map((_, index) => freshSkolem(STAR, 0, `t${index}`))
+          ),
+          2
+        )} のインスタンスが重複しています。`
+      );
+    }
+  }
+  checker.env.add(info);
 }
 
 function checkDerivable(decl: RDataDecl, cls: ClassEntity, span: Span): void {

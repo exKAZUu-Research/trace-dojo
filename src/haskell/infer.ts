@@ -1,10 +1,11 @@
-// code-gauge-allow-file fileNcss 746 -- The type checker keeps its inference rules beside the substitution state they share.
+// code-gauge-allow-file fileNcss 762 -- The type checker keeps its inference rules beside the substitution state they share.
 import { LIMITS } from '../interpreter/limits';
 import { CHAR_TYPE, FUNCTION_TYPE, LIST_TYPE, tupleCon } from './builtinTypes';
 import { type ClassEnv, entailByGivens, hasConstructorHead, isSubclassOf, predsEqual } from './classEnv';
 import { dependencyOrder } from './dependencies';
 import type { ClassEntity, ConInfo, DictParam, Evidence, EvidenceHole, TypeEntity, ValueEntity } from './entities';
-import { compileError } from './errors';
+import { compileError, unsupportedError } from './errors';
+import { freshKind, instantiateKind } from './kindTemplates';
 import { TypePrinter } from './prettyType';
 import type {
   Binder,
@@ -95,6 +96,7 @@ export class Checker {
 
   readonly globalMono = new Map<ValueEntity, Type>();
   private reductionsRemaining = LIMITS.maxOperations;
+  private kindInstances: { kind: Kind; expected: Kind; span: Span }[] = [];
   private scopedTypes: ReadonlyMap<string, Type> = new Map();
 
   constructor(
@@ -316,8 +318,9 @@ export class Checker {
     const type = this.convertType(sig.type, vars, varKinds, STAR);
     const preds = sig.context.map((constraint) => ({
       cls: constraint.cls,
-      type: this.convertType(constraint.type, vars, varKinds, constraint.cls.tyvarKind),
+      type: this.convertType(constraint.type, vars, varKinds, this.classKind(constraint.cls, constraint.span)),
     }));
+    this.checkKinds();
     const scheme = { kinds: kinds.map(defaultKind), names, preds, type };
     checkSchemeAmbiguity(scheme, sig.span);
     return scheme;
@@ -374,7 +377,8 @@ export class Checker {
         typeError(type.span, `型シノニム ${entity.name} には ${entity.arity} 個の型引数が要ります。`);
       }
       const synonymArgs = args.slice(0, entity.arity).map((arg) => this.convertTypeKind(arg, vars, varKinds));
-      const paramKinds = synonymParamKinds(entity);
+      const appliedKind = this.instantiateKind(entity, entity.kind, head.span);
+      const paramKinds = parameterKinds(appliedKind).slice(0, entity.arity);
       for (const [index, arg] of synonymArgs.entries()) {
         if (!unifyKinds(arg.kind, paramKinds[index])) {
           typeError(args[index].span, `型の種類（カインド）が合いません（${entity.name} の型引数）。`);
@@ -384,7 +388,7 @@ export class Checker {
         entity.synonym as Type,
         synonymArgs.map((arg) => arg.type)
       );
-      let resultKind = entity.kind;
+      let resultKind = appliedKind;
       for (let index = 0; index < entity.arity; index++) {
         resultKind = (pruneKind(resultKind) as { tag: 'arrow'; to: Kind }).to;
       }
@@ -392,7 +396,7 @@ export class Checker {
     }
     const converted =
       head.k === 'con'
-        ? { type: tcon(head.entity) as Type, kind: head.entity.kind }
+        ? { type: tcon(head.entity) as Type, kind: this.instantiateKind(head.entity, head.entity.kind, head.span) }
         : this.convertTypeKind(head, vars, varKinds);
     return this.applyTypeArgs(converted, args, vars, varKinds);
   }
@@ -983,6 +987,25 @@ export class Checker {
     this.wanted.push(...deferred);
     return params;
   }
+
+  classKind(entity: ClassEntity, span: Span): Kind {
+    return this.instantiateKind(entity, entity.tyvarKind, span);
+  }
+
+  checkKinds(specialize = false): void {
+    for (const { kind, expected, span } of this.kindInstances) {
+      if (!unifyKinds(specialize ? expected : freshKind(expected).kind, kind)) {
+        throw unsupportedError(span, '多相カインド（PolyKinds）');
+      }
+    }
+    this.kindInstances = [];
+  }
+
+  private instantiateKind(owner: object, kind: Kind, span: Span): Kind {
+    const instance = instantiateKind(owner, kind);
+    if (instance.variables.length > 0) this.kindInstances.push({ kind: instance.kind, expected: kind, span });
+    return instance.kind;
+  }
 }
 
 function argumentContext(fn: RExpr): string {
@@ -1006,25 +1029,25 @@ function setBinderScheme(binder: Binder, scheme: Scheme): void {
   else binder.entity.scheme = scheme;
 }
 
-export function typeParamKinds(type: TypeEntity): Kind[] {
-  const kinds: Kind[] = [];
-  let kind = pruneKind(type.kind);
-  while (kind.tag === 'arrow') {
-    kinds.push(kind.from);
-    kind = pruneKind(kind.to);
-  }
-  return kinds;
-}
-
-function synonymParamKinds(type: TypeEntity): Kind[] {
-  return typeParamKinds(type).slice(0, type.arity);
-}
-
 export function conScheme(con: ConInfo): Scheme {
   const kinds = typeParamKinds(con.type);
   let type: Type = tap(tcon(con.type), ...kinds.map((_, index): Type => ({ tag: 'tgen', index })));
   for (const field of con.fieldTypes.toReversed()) type = fnType(field, type);
   return { kinds, preds: [], type };
+}
+
+export function typeParamKinds(type: TypeEntity): Kind[] {
+  return parameterKinds(type.kind);
+}
+
+function parameterKinds(initial: Kind): Kind[] {
+  const kinds: Kind[] = [];
+  let kind = pruneKind(initial);
+  while (kind.tag === 'arrow') {
+    kinds.push(kind.from);
+    kind = pruneKind(kind.to);
+  }
+  return kinds;
 }
 
 export function isFailable(pat: RPat): boolean {

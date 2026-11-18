@@ -52,6 +52,7 @@ import type {
   Stmt,
   TypeExpr,
 } from './syntax';
+import { checkTypeParams, typeConstructorNames } from './typeNames';
 import { STAR } from './types';
 import { chargeTypeWork } from './typeWorkBudget';
 
@@ -99,28 +100,26 @@ export interface RModule {
 }
 
 export interface RenameOptions {
-  /** The modules the module may import, by name. */
   modules: ReadonlyMap<string, ExportTable>;
-  /** Tells why a module this environment knows but does not provide cannot be imported. */
+
   unsupportedModule?: (name: string) => string | undefined;
-  /** Whether to import `Prelude` unless the module imports it explicitly. */
+
   implicitPrelude: boolean;
-  /** Modules every module of the library sees unqualified, without importing them. */
+
   ambient?: readonly ExportTable[];
-  /** Values a program sees in addition to its imports, which its own definitions hide (the Turtle API). */
+
   weakValues?: ReadonlyMap<string, ValueEntity>;
-  /** Types a program sees in addition to its imports, which its own definitions hide (`Turtle`). */
+
   weakTypes?: ReadonlyMap<string, TypeEntity>;
-  /** Whether the module's own definitions hide imported ones of the same name, as the library's modules want. */
+
   ownShadowsImports?: boolean;
-  /** The original entities that desugaring refers to, such as `negate` for `-x`. */
+
   negate?: () => ValueEntity;
 }
 
 class Candidates<T> {
   readonly map = new Map<string, T[]>();
 
-  /** @param identity What makes two items the same, such as the entity a type's entry wraps. */
   constructor(private readonly identity: (item: T) => unknown = (item) => item) {}
 
   add(name: string, item: T): void {
@@ -134,7 +133,6 @@ class Candidates<T> {
   }
 }
 
-/** The names a module sees at its top level: its imports and its own definitions. */
 class GlobalScope {
   readonly values = new Candidates<ValueEntity>();
   readonly qualifiedValues = new Map<string, Candidates<ValueEntity>>();
@@ -185,7 +183,6 @@ function isOperatorName(name: string): boolean {
   return !/^[\p{L}_]/u.test(name);
 }
 
-/** Resolves the names of a module, producing its renamed declarations and its export table. */
 export function renameModule(module: Module, options: RenameOptions): RModule {
   return new Renamer(module, options).run();
 }
@@ -232,9 +229,6 @@ class Renamer {
       hasExportList: this.module.exports !== undefined,
     };
   }
-
-  // -------------------------------------------------------------------------------------------------------------
-  // Imports and exports
 
   private importModules(): void {
     const imports = [...this.module.imports];
@@ -401,9 +395,6 @@ class Renamer {
     });
   }
 
-  // -------------------------------------------------------------------------------------------------------------
-  // Top-level declarations
-
   // code-gauge-allow functionCognitiveComplexity 22 -- Each branch is one kind of type declaration.
   private declareTypes(decls: Decl[]): void {
     for (const decl of decls) {
@@ -521,7 +512,6 @@ class Renamer {
     this.ownTypeChildren.set(this.ownTypes.get(decl.name.name) as TypeLike, children);
   }
 
-  /** Declares the top-level functions and pattern-bound variables, grouping each function's clauses. */
   private declareValues(decls: Decl[]): RawBinding[] {
     const bindings = groupBindings(decls);
     for (const binding of bindings) {
@@ -584,7 +574,7 @@ class Renamer {
   private renameData(decl: Extract<Decl, { kind: 'data' }>): void {
     const like = this.ownTypes.get(decl.name.name) as { kind: 'type'; entity: TypeEntity };
     const entity = like.entity;
-    const params = this.checkTypeParams(decl.params);
+    const params = checkTypeParams(decl.params);
     const cons = decl.cons.map((conDecl, index) => {
       const con = entity.cons[index];
       const fields = conDecl.fields.map((field) => this.renameType(field, params));
@@ -594,18 +584,10 @@ class Renamer {
     this.dataDecls.push({ entity, params: decl.params.map((param) => param.name), cons, deriving, span: decl.span });
   }
 
-  private checkTypeParams(params: Name[]): Set<string> {
-    const names = new Set<string>();
-    for (const param of params) {
-      if (names.has(param.name)) throw compileError(param.span, `型変数 ${param.name} が重複しています。`);
-      names.add(param.name);
-    }
-    return names;
-  }
-
   private renameSynonym(decl: Extract<Decl, { kind: 'typeSyn' }>): void {
+    for (const name of typeConstructorNames(decl.type)) this.lookupTypeEntity(name, true);
     const like = this.ownTypes.get(decl.name.name) as { kind: 'type'; entity: TypeEntity };
-    const params = this.checkTypeParams(decl.params);
+    const params = checkTypeParams(decl.params);
     this.synonyms.push({
       entity: like.entity,
       params: decl.params.map((param) => param.name),
@@ -718,10 +700,6 @@ class Renamer {
     return { bindings };
   }
 
-  // -------------------------------------------------------------------------------------------------------------
-  // Bindings
-
-  /** Renames the type signatures of a declaration list, checking each names a binding of the list. */
   private collectSigs(decls: Decl[], raw: RawBinding[], exists: (name: string) => unknown): Map<string, RSigType> {
     const bound = new Set(raw.flatMap((binding) => binding.names.map((name) => name.name)));
     const sigs = new Map<string, RSigType>();
@@ -769,7 +747,6 @@ class Renamer {
     return result;
   }
 
-  /** Renames a `let` or `where` group, whose names scope over the group itself and `scope`'s new child. */
   // code-gauge-allow functionCognitiveComplexity 29 -- Local declarations combine signatures, fixities, and bindings in one scope.
   // code-gauge-allow functionNcss 37 -- Local declarations combine signatures, fixities, and bindings in one scope.
   renameLocalDecls(decls: Decl[], parent: LocalScope): { group: RBindGroup; scope: LocalScope } {
@@ -831,9 +808,6 @@ class Renamer {
     });
     return { body: { k: 'guarded', branches }, where, span: rhs.span };
   }
-
-  // -------------------------------------------------------------------------------------------------------------
-  // Expressions
 
   renameExpr(expr: Expr, scope: LocalScope): RExpr {
     return this.recursion.run(() => this.renameExprCore(expr, scope));
@@ -955,7 +929,6 @@ class Renamer {
     }
   }
 
-  /** `a op b` as `op a b`, and `-x` as Prelude's `negate x` whatever the program's scope holds. */
   private renameOperatorApplication(expr: Extract<Expr, { kind: 'binop' | 'neg' }>, scope: LocalScope): RExpr {
     const { span } = expr;
     if (expr.kind === 'neg') {
@@ -1034,9 +1007,6 @@ class Renamer {
     return { stmts: result, scope };
   }
 
-  // -------------------------------------------------------------------------------------------------------------
-  // Fixity resolution
-
   private fixityOf(op: Operator, scope: LocalScope): Fixity {
     if (!op.qualifier && !op.isConstructor) {
       const local = scope.lookup(op.name);
@@ -1045,9 +1015,6 @@ class Renamer {
     const entity = op.isConstructor ? this.lookupCon(op).entity : this.lookupValue(op, true);
     return entity.fixity ?? DEFAULT_FIXITY;
   }
-
-  // -------------------------------------------------------------------------------------------------------------
-  // Patterns
 
   renamePat(pat: Pat, binders: Map<string, LocalVar>): RPat {
     return this.recursion.run(() => ({ ...this.renamePatCore(pat, binders), span: pat.span, surface: pat }));
@@ -1133,9 +1100,6 @@ class Renamer {
     return local;
   }
 
-  // -------------------------------------------------------------------------------------------------------------
-  // Types
-
   renameSigType(sig: SigType): RSigType {
     const vars = new Set<string>();
     collectTypeVars(sig.type, vars);
@@ -1182,9 +1146,6 @@ class Renamer {
     }
   }
 
-  // -------------------------------------------------------------------------------------------------------------
-  // Lookup
-
   private resolveVar(name: QName, scope: LocalScope): VarRef {
     if (!name.qualifier) {
       const local = scope.lookup(name.name);
@@ -1195,7 +1156,6 @@ class Renamer {
     return { kind: 'global', entity };
   }
 
-  /** Looks up a top-level value, with `variablesOnly` excluding constructors. */
   private lookupValue(name: QName, variablesOnly: boolean): ValueEntity {
     let candidates: ValueEntity[];
     if (name.qualifier) {
@@ -1313,7 +1273,7 @@ class Renamer {
     return picked.candidate;
   }
 
-  private lookupTypeEntity(name: QName): TypeEntity {
+  private lookupTypeEntity(name: QName, constraintSynonym = false): TypeEntity {
     if (!name.qualifier) {
       if (name.name === '()') return UNIT_TYPE;
       if (name.name === '[]') return LIST_TYPE;
@@ -1322,13 +1282,19 @@ class Renamer {
       if (tuple) return tupleType(tuple[1].length + 1);
     }
     const found = this.lookupType(name);
-    if (found.kind !== 'type') throw compileError(name.span, `${describeName(name)} はクラスで、型ではありません。`);
+    if (found.kind !== 'type')
+      throw constraintSynonym
+        ? unsupportedError(name.span, '制約を表す型シノニム（ConstraintKinds）')
+        : compileError(name.span, `${describeName(name)} はクラスで、型ではありません。`);
     return found.entity;
   }
 
   private lookupClass(name: QName): ClassEntity {
     const found = this.lookupType(name);
-    if (found.kind !== 'class') throw compileError(name.span, `${describeName(name)} は型で、クラスではありません。`);
+    if (found.kind !== 'class')
+      throw found.entity.sort === 'synonym'
+        ? unsupportedError(name.span, '制約を表す型シノニム（ConstraintKinds）')
+        : compileError(name.span, `${describeName(name)} は型で、クラスではありません。`);
     return found.entity;
   }
 }
@@ -1347,7 +1313,6 @@ function patternSignatures(
 
 const STAR_TYPE = { tag: 'tgen', index: 0 } as const;
 
-/** A function's clauses or a pattern binding, before renaming. */
 interface RawBinding {
   kind: 'fun' | 'pat';
   names: Name[];
@@ -1357,7 +1322,6 @@ interface RawBinding {
   entities: ValueEntity[];
 }
 
-/** Groups adjacent clauses of the same function into one binding, as Haskell requires them to be adjacent. */
 // code-gauge-allow functionCognitiveComplexity 29 -- Grouping clauses into bindings checks each of GHC's conditions on adjacent clauses.
 // code-gauge-allow functionNcss 35 -- Grouping clauses into bindings checks each of GHC's conditions on adjacent clauses.
 function groupBindings(decls: Decl[]): RawBinding[] {
@@ -1447,7 +1411,6 @@ function collectPatNames(pat: Pat, into: Name[]): void {
   }
 }
 
-/** Replaces a pattern binding's fresh variables by the ones its group declared, which other bindings refer to. */
 function replacePatLocals(pat: RPat, scope: LocalScope): void {
   const pending = [pat];
   while (pending.length > 0) {

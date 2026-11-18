@@ -3,7 +3,6 @@ import type { LocalVar, RBinding, RExpr, RRhs } from './rast';
 
 type Key = LocalVar | ValueEntity;
 
-/** Orders implicitly typed bindings into strongly connected components, each after those it depends on. */
 export function dependencyOrder(bindings: RBinding[]): RBinding[][] {
   const owner = new Map<Key, number>();
   for (const [index, binding] of bindings.entries()) {
@@ -28,7 +27,7 @@ export function dependencyOrder(bindings: RBinding[]): RBinding[][] {
 
 // code-gauge-allow functionCognitiveComplexity 26 -- Explicit DFS enter, edge and exit phases share Tarjan's low-link state.
 // code-gauge-allow functionNcss 45 -- The traversal and component completion keep one set of graph state.
-function stronglyConnected(edges: readonly number[][]): number[][] {
+export function stronglyConnected(edges: readonly number[][]): number[][] {
   const indexOf = Array.from({ length: edges.length }, () => -1);
   const lowLink = Array.from({ length: edges.length }, () => 0);
   const onStack = Array.from({ length: edges.length }, () => false);
@@ -96,7 +95,6 @@ function collectRhsRefs(rhs: RRhs, visit: (key: Key) => void): void {
   }
 }
 
-/** Visits every variable an expression refers to. */
 export function collectExprRefs(expr: RExpr, visit: (key: Key) => void): void {
   if (expr.k === 'var') visit(expr.ref.kind === 'local' ? expr.ref.local : expr.ref.entity);
   const { exprs, bindings, rhss } = childrenOf(expr);
@@ -105,7 +103,6 @@ export function collectExprRefs(expr: RExpr, visit: (key: Key) => void): void {
   for (const rhs of rhss) collectRhsRefs(rhs, visit);
 }
 
-/** The expressions, bindings, and right-hand sides nested directly in an expression. */
 // code-gauge-allow functionNcss 32 -- One case per expression kind that nests others.
 function childrenOf(expr: RExpr): { exprs: RExpr[]; bindings: RBinding[]; rhss: RRhs[] } {
   const none = { exprs: [] as RExpr[], bindings: [] as RBinding[], rhss: [] as RRhs[] };
