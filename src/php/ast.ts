@@ -13,7 +13,7 @@ export type ClassRef =
   | { k: 'self' }
   | { k: 'parent' }
   | { k: 'static' }
-  | { k: 'expr'; e: Expr };
+  | { k: 'expr'; e: Expr; fetchRow?: number };
 
 export interface Arg {
   e: Expr;

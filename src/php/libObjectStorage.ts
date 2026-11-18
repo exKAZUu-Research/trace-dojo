@@ -210,7 +210,7 @@ class ObjectStorage {
   private bulkRemove(callsHash: boolean, remove: (capture?: (error: CleanupException) => void) => void): bigint {
     return this.rewindAfter(() => {
       if (callsHash) remove();
-      else withCleanupExceptions(rt(), remove);
+      else withCleanupExceptions(rt(), remove, 'latest');
       return BigInt(this.entries.size);
     });
   }

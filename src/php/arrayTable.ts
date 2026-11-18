@@ -1,10 +1,12 @@
-import type { Key, Ref, Value } from './values';
+import { type Key, type Ref, UNDEFINED_RESULT, type Value } from './values';
 
 type Slot = Value | Ref;
 
 export class ArrayTable extends Map<Key, Slot> {
   private packed?: Slot[];
   private integerKeys = 0;
+  mayHaveUndefinedSlots = false;
+  removedUndefinedSlots = 0;
   private readonly holders = new Map<object, number>();
 
   constructor(
@@ -14,6 +16,7 @@ export class ArrayTable extends Map<Key, Slot> {
     super();
     if (entries)
       for (const [key, slot] of entries) {
+        if (slot === UNDEFINED_RESULT) this.mayHaveUndefinedSlots = true;
         if (typeof key === 'bigint' && !super.has(key)) this.integerKeys++;
         super.set(key, slot);
       }
@@ -50,6 +53,7 @@ export class ArrayTable extends Map<Key, Slot> {
   }
 
   private pack(): boolean {
+    if (this.mayHaveUndefinedSlots || this.removedUndefinedSlots) return false;
     if (this.packed) return true;
     let index = 0n;
     for (const key of super.keys()) if (key !== index++) return false;
@@ -75,7 +79,7 @@ export class ArrayTable extends Map<Key, Slot> {
   }
 
   override get size(): number {
-    return this.packed?.length ?? super.size;
+    return (this.packed?.length ?? super.size) + this.removedUndefinedSlots;
   }
 
   override get(key: Key): Slot | undefined {
@@ -87,6 +91,7 @@ export class ArrayTable extends Map<Key, Slot> {
   }
 
   override set(key: Key, value: Slot): this {
+    if (value === UNDEFINED_RESULT) this.mayHaveUndefinedSlots = true;
     if (this.packed && typeof key === 'bigint' && key >= 0n && key <= BigInt(this.packed.length)) {
       const index = Number(key);
       const old = this.packed[index];
@@ -115,6 +120,8 @@ export class ArrayTable extends Map<Key, Slot> {
     this.packed = undefined;
     this.holders.clear();
     this.integerKeys = 0;
+    this.mayHaveUndefinedSlots = false;
+    this.removedUndefinedSlots = 0;
     super.clear();
   }
 
@@ -128,20 +135,35 @@ export class ArrayTable extends Map<Key, Slot> {
     this.onMaterialize?.();
   }
 
-  override *entries(): MapIterator<[Key, Slot]> {
+  *physicalEntries(): MapIterator<[Key, Slot]> {
     const values = this.packed;
     if (values) for (let index = 0; index < values.length; index++) yield [BigInt(index), values[index]];
     else yield* super.entries();
   }
 
-  override *keys(): MapIterator<Key> {
+  *physicalKeys(): MapIterator<Key> {
     const values = this.packed;
     if (values) for (let index = 0; index < values.length; index++) yield BigInt(index);
     else yield* super.keys();
   }
 
+  override entries(): MapIterator<[Key, Slot]> {
+    if (this.mayHaveUndefinedSlots) return this.visibleEntries();
+    return this.packed ? this.physicalEntries() : super.entries();
+  }
+
+  private *visibleEntries(): MapIterator<[Key, Slot]> {
+    for (const entry of this.physicalEntries()) if (entry[1] !== UNDEFINED_RESULT) yield entry;
+  }
+
+  override *keys(): MapIterator<Key> {
+    if (!this.mayHaveUndefinedSlots) yield* this.physicalKeys();
+    else for (const [key] of this) yield key;
+  }
+
   override *values(): MapIterator<Slot> {
-    yield* this.packed ?? super.values();
+    if (!this.mayHaveUndefinedSlots) yield* this.packed ?? super.values();
+    else for (const [, slot] of this) yield slot;
   }
 
   override [Symbol.iterator](): MapIterator<[Key, Slot]> {

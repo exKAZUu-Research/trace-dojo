@@ -502,7 +502,7 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
   if (!(subject instanceof PhpArray)) return warnForeachSubject(statement, subject);
   subject.shared = true;
   frame.temporaries.push(subject);
-  for (const [key, slot] of subject.definedSlots()) {
+  for (const [key, slot] of subject.map) {
     runtime.spend();
     const value = slot instanceof Ref ? slot.v : slot;
     const completion = foreachIteration(statement, key, value);

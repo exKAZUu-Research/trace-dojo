@@ -1,0 +1,7 @@
+exit;throw;normal;cleanup;0;NULL
+throw;exit;throw;cleanup;0;NULL
+exit;exit;throw;cleanup;0;NULL
+exit;throw;normal;cleanup;0;NULL
+throw;exit;throw;cleanup;0;NULL
+exit;exit;throw;cleanup;0;NULL
+done

@@ -893,7 +893,7 @@ export function assignReference(target: Expr, source: Expr): Value {
 export function destructureAssignment(target: Extract<Expr, { k: 'list' }>, expression: Expr): Value {
   const runtime = rt();
   const row = isCompiledVariable(expression) ? target.row : compiledOperandRow(expression);
-  if (!hasReferenceItem(target)) return destructure(target, ev(expression), undefined, row);
+  if (!hasReferenceItem(target)) return destructure(target, prepareOperand(expression)(row), undefined, row);
   if (foreachSubjectWritable(expression)) {
     const source = nestedPlace(placeOf(expression, 'write', true), 'write');
     return destructure(target, source.get('nested') ?? null, source, row);

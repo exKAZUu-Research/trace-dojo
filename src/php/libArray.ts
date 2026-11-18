@@ -35,6 +35,7 @@ import {
   PhpArray,
   PhpObject,
   Ref,
+  UNDEFINED_RESULT,
   UNINIT,
   type Value,
 } from './values';
@@ -234,6 +235,10 @@ defineFunction('array_last(array $array): mixed', ({ args }) => arr(args[0]).las
 defineFunction('array_keys(array $array, mixed $filter_value = UNKNOWN, bool $strict = false): array', ({ args }) => {
   const array = arr(args[0]);
   const keys = new PhpArray();
+  if (args.length < 2 && array.map.mayHaveUndefinedSlots && array.hasDensePackedStorage()) {
+    for (const key of array.map.physicalKeys()) keys.append(key);
+    return keys;
+  }
   for (const [key, value] of array.entries()) {
     if (args.length >= 2) {
       const matches = args[2] === true ? strictEquals(value, args[1]) : looseEquals(value, args[1]);
@@ -246,9 +251,9 @@ defineFunction('array_keys(array $array, mixed $filter_value = UNKNOWN, bool $st
 defineFunction('array_values(array $array): array', ({ args }) => {
   const array = arr(args[0]);
   // PHP returns a list as it is, sharing it with its internal pointer.
-  if (array.isList()) return share(array);
+  if (array.keepsValuesTable()) return share(array);
   return rebuild(
-    Array.from(array.definedSlots(), ([, slot]): [Key, Value | Ref] => [0n, slot]),
+    Array.from(array.map, ([, slot]): [Key, Value | Ref] => [0n, slot]),
     true
   );
 });
@@ -859,7 +864,7 @@ function* walkKeys(container: PhpArray | PhpObject): Generator<Key, undefined> {
       while (cursor.key !== undefined) {
         const key = cursor.key;
         cursor.next();
-        yield key;
+        if (container.map.get(key) !== UNDEFINED_RESULT) yield key;
       }
     } finally {
       cursor.close();
@@ -909,13 +914,20 @@ function walkSlot(container: PhpArray | PhpObject, key: Key): [Ref, Key] | undef
 defineFunction(
   'array_slice(array $array, int $offset, ?int $length = null, bool $preserve_keys = false): array',
   ({ args }) => {
-    const entries = [...arr(args[0]).map];
+    const array = arr(args[0]);
     const { start, end } = sliceBounds(
-      entries.length,
+      array.size,
       Number(args[1]),
       args[2] === undefined || args[2] === null ? undefined : Number(args[2])
     );
-    return rebuild(entries.slice(start, end), args[3] !== true);
+    const sliced =
+      array.map.mayHaveUndefinedSlots && array.hasDenseSlots()
+        ? [...array.map.physicalEntries()]
+            .slice(start)
+            .filter(([, slot]) => slot !== UNDEFINED_RESULT)
+            .slice(0, end - start)
+        : [...array.map].slice(start, end);
+    return rebuild(sliced, args[3] !== true);
   }
 );
 

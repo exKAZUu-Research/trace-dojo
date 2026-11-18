@@ -525,8 +525,8 @@ function comparisonStep(
 }
 
 function* arrayComparisonPairs(a: PhpArray, b: PhpArray, mode: ComparisonMode): Generator<ComparisonPair, number> {
-  const right = mode === 'strict' ? b.map.entries() : undefined;
-  for (const [key, value] of a.map) {
+  const right = mode === 'strict' ? b.map.physicalEntries() : undefined;
+  for (const [key, value] of a.map.physicalEntries()) {
     if (right) {
       const item = right.next();
       if (item.done || item.value[0] !== key) return 1;

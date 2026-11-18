@@ -182,7 +182,9 @@ export function linkInterfaces(parent: PhpClass | undefined, own: PhpClass[]): P
 function inherit(cls: PhpClass, parent: PhpClass): void {
   cls.props = [...parent.props];
   for (const [name, decl] of parent.propByName) cls.propByName.set(name, decl);
-  for (const [name, constant] of parent.consts) cls.consts.set(name, constant);
+  for (const [name, constant] of parent.consts) {
+    if (constant.visibility !== 'private') cls.consts.set(name, constant);
+  }
   cls.createInternal = parent.createInternal;
   cls.compare = parent.compare;
   cls.isCloneable = parent.isCloneable;

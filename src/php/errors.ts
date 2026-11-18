@@ -213,22 +213,23 @@ export function withPendingException(runtime: Runtime, pending: PhpThrow | undef
 
 export type CleanupException = PhpThrow | ExitSignal;
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Captures cleanup failures and their ownership in propagation order.
+// code-gauge-allow functionCognitiveComplexity 19 -- Captures cleanup failures and their ownership in propagation order.
 export function withCleanupExceptions(
   runtime: Runtime,
-  cleanup: (capture: (error: CleanupException) => void) => void
+  cleanup: (capture: (error: CleanupException) => void) => void,
+  order: 'prefer-exit' | 'latest' = 'prefer-exit'
 ): void {
   const heldMark = runtime.held.length;
   let failure: CleanupException | undefined;
   const capture = (error: CleanupException): void => {
-    if (failure instanceof ExitSignal) {
+    if (failure instanceof ExitSignal && order === 'prefer-exit') {
       if (error instanceof PhpThrow && runtime.thrown === error.object) runtime.thrown = undefined;
       return;
     }
     if (error instanceof PhpThrow) {
-      if (failure) setPrevious(error.object, failure.object);
+      if (failure instanceof PhpThrow) setPrevious(error.object, failure.object);
       runtime.held.push(error.object);
-    } else if (failure && runtime.thrown === failure.object) {
+    } else if (failure instanceof PhpThrow && runtime.thrown === failure.object) {
       runtime.thrown = undefined;
     }
     failure = error;

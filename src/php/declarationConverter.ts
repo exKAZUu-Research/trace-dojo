@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 896 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 899 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -27,6 +27,7 @@ import {
   semanticChildren,
 } from './converterBase';
 import { decodeLiteral, decodeSingleQuoted } from './literals';
+import { compiledOperandRow } from './opcodeRows';
 import { SCRIPT_PATH } from './runtime';
 import { describeType, typeToString } from './types';
 import { type TypeDecl, type Visibility, visibilityRank } from './values';
@@ -77,6 +78,14 @@ export abstract class DeclarationConverter extends ConverterBase {
     if (!this.preserveSyntax && use !== 'name' && ref.k === 'expr') {
       const value = this.compiledValue(ref.e);
       if (value !== undefined && typeof value !== 'string') this.error(node, 'Illegal class name');
+      if (
+        node.type === 'parenthesized_expression' &&
+        (value === undefined || node.parent?.type !== 'object_creation_expression')
+      )
+        ref.fetchRow =
+          value === undefined
+            ? compiledOperandRow(ref.e)
+            : (node.nextSibling?.startPosition.row ?? node.endPosition.row);
     }
     return ref;
   }

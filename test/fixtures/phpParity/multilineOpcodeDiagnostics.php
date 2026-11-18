@@ -329,3 +329,39 @@ foreach ([1, false] as $scalar) {
     try { $scalar[$missingOffset] ??= $missingValue; }
     catch (Error $error) { echo $error->getMessage(), "\n"; }
 }
+
+[$missingItem] =
+    $missingList;
+$missingClass = 1;
+try { var_dump($unreadObject instanceof
+    $missingClass); }
+catch (Throwable $error) { echo $error->getMessage(), ' at ', $error->getLine(), "\n"; }
+$missingClass = stdClass::class;
+var_dump($readObject instanceof
+    $missingClass);
+
+$classPrefix = 'Missing';
+try { ($classPrefix .
+    'Class')
+    ::method(); }
+catch (Throwable $error) { echo $error->getMessage(), ' at ', $error->getLine(), "\n"; }
+try { (PHP_EOL
+    )
+    ::$property; }
+catch (Throwable $error) { echo $error->getMessage(), ' at ', $error->getLine(), "\n"; }
+
+$floatKeys = [
+    1.5 =>
+    null ??
+    2,
+    2.5 =>
+    __LINE__ .
+    "x",
+    3.5 =>
+    fn() =>
+    1,
+    4.5 =>
+    <<<TEXT
+    value
+    TEXT,
+];

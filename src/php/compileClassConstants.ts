@@ -58,6 +58,7 @@ export class CompileClassConstants {
     return undefined;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Resolves lexical scope and inherited visibility in lookup order.
   private get(cls: ClassRef, name: string, scope: ClassDecl | undefined, closure: boolean): Constant | undefined {
     const knownScope = !closure && scope?.kind !== 'trait';
     if (cls.k === 'self') return knownScope && scope ? this.own(scope, name, scope) : undefined;
@@ -69,7 +70,8 @@ export class CompileClassConstants {
       const decl = this.bound.get(key);
       if (!decl) return this.nativeConstant(key, name);
       this.budget().spend(1 + Math.ceil(decl.consts.length / 64));
-      if (decl.consts.some((constant) => constant.name === name)) return this.own(decl, name, scope);
+      const constant = decl.consts.find((item) => item.name === name);
+      if (constant && (key === classKey || constant.visibility !== 'private')) return this.own(decl, name, scope);
       key = decl.parent && lower(decl.parent);
     }
   }

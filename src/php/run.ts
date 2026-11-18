@@ -155,10 +155,12 @@ function shutdown(runtime: Runtime): string | undefined {
       object.destructed = true;
       if (!destructor) continue;
       runtime.destructibles--;
-      invoke(
-        { fn: destructor.fn, thisObj: object, scope: destructor.scope, staticClass: object.cls, method: destructor },
-        [],
-        undefined
+      asInternal(() =>
+        invoke(
+          { fn: destructor.fn, thisObj: object, scope: destructor.scope, staticClass: object.cls, method: destructor },
+          [],
+          undefined
+        )
       );
     }
     runtime.shuttingDown = true;

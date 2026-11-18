@@ -1472,7 +1472,7 @@ export class Converter extends DeclarationConverter {
   private instanceOf(l: Expr, right: Node, row: number): Expr {
     if (!this.preserveSyntax && this.compiledType(l) !== undefined) return { k: 'lit', v: false, row };
     const cls = this.classRef(right);
-    return { k: 'instanceof', e: l, cls, row };
+    return { k: 'instanceof', e: l, cls, row: compiledOperandRow(cls.k === 'expr' ? cls.e : l) };
   }
 
   private compileBinary(expression: Extract<Expr, { k: 'bin' }>): Expr {
@@ -1654,19 +1654,42 @@ export class Converter extends DeclarationConverter {
   }
 
   private resultOpcodeRow(value: Expr, node: Node): number {
-    if (value.k === 'bin' && this.compiledValue(value, true) !== undefined) {
-      if (value.op !== '.') return constantAstRow(value);
-      return parserScalar(value.l) !== undefined && parserScalar(value.r) !== undefined
-        ? (node.parent?.nextSibling?.startPosition.row ?? node.endPosition.row)
-        : value.row;
-    }
-    if (value.k === 'idx' && value.index?.k === 'lit') return constantAstRow(value);
-    if (value.k === 'cond') {
-      const test = this.compiledValue(value.test);
-      if (test !== undefined)
-        return compiledOperandRow(constantTruth(test) ? (value.consequent ?? value.test) : value.alternate);
+    if (node.type === 'heredoc' || node.type === 'nowdoc') return node.startPosition.row + 1;
+    switch (value.k) {
+      case 'arrow': {
+        return node.parent?.nextSibling?.startPosition.row ?? node.endPosition.row;
+      }
+      case 'closure': {
+        return node.endPosition.row;
+      }
+      case 'bin': {
+        return this.binaryOpcodeRow(value, node);
+      }
+      case 'idx': {
+        if (value.index?.k === 'lit') return constantAstRow(value);
+        break;
+      }
+      case 'cond': {
+        const test = this.compiledValue(value.test);
+        if (test !== undefined)
+          return compiledOperandRow(constantTruth(test) ? (value.consequent ?? value.test) : value.alternate);
+        break;
+      }
     }
     return compiledOperandRow(value);
+  }
+
+  private binaryOpcodeRow(value: Extract<Expr, { k: 'bin' }>, node: Node): number {
+    if (value.op === '??') {
+      const left = this.compiledValue(value.l);
+      return compiledOperandRow(left === undefined || left === null ? value.r : value.l);
+    }
+    if (value.op === '+' && value.l.k === 'array' && value.r.k === 'array') return compiledOperandRow(value.l);
+    if (this.compiledValue(value, true) === undefined) return compiledOperandRow(value);
+    if (value.op !== '.') return constantAstRow(value);
+    if (directiveLiteral(node, value)) return node.parent?.nextSibling?.startPosition.row ?? node.endPosition.row;
+    const arrayNode = node.parent?.parent;
+    return arrayNode ? arrayFoldRow(arrayNode) : constantAstRow(value);
   }
 
   private orderArrayFoldNotices(start: number, keyEnd: number): void {

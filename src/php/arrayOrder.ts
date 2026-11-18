@@ -68,8 +68,12 @@ export class ArrayOrder {
     return this.entries.get(typeof key === 'bigint' ? key + this.keyOffset : key);
   }
 
+  get isPacked(): boolean {
+    return this.packed === true;
+  }
+
   hasDensePackedStorage(): boolean {
-    return Boolean(this.packed && this.nextIndex === this.entries.size);
+    return this.isPacked && this.nextIndex === this.entries.size;
   }
 
   // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.

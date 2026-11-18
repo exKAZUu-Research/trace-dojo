@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 973 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 981 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -333,24 +333,7 @@ export function evChain(e: Expr, discardResult = false): Chain {
       return createArrow(e);
     }
     case 'instanceof': {
-      const value = ev(e.e);
-      if (e.cls.k === 'expr') {
-        const right = ev(e.cls.e);
-        runtime.row = e.cls.e.row;
-        if (right instanceof PhpObject && !right.isResource)
-          return value instanceof PhpObject && !value.isResource && value.cls.isSubclassOf(right.cls);
-        if (typeof right === 'string') {
-          const cls = findClass(right);
-          return value instanceof PhpObject && !value.isResource && cls !== undefined && value.cls.isSubclassOf(cls);
-        }
-        throwError('Error', 'Class name must be a valid object or a string');
-      }
-      if (!(value instanceof PhpObject) || value.isResource) return false;
-      if (e.cls.k === 'named') {
-        const cls = findClass(e.cls.name);
-        return cls !== undefined && value.cls.isSubclassOf(cls);
-      }
-      return value.cls.isSubclassOf(resolveClassRef(e.cls));
+      return instanceOfExpression(e);
     }
     case 'match': {
       return matchExpression(e);
@@ -925,6 +908,22 @@ function magicConstant(name: Extract<Expr, { k: 'magic' }>['name']): Value {
 
 // Classes ------------------------------------------------------------------------------------------------------------
 
+function instanceOfExpression(e: Extract<Expr, { k: 'instanceof' }>): boolean {
+  const readObject = prepareOperand(e.e);
+  let target: PhpClass | undefined;
+  if (e.cls.k === 'expr') {
+    const right = ev(e.cls.e);
+    rt().row = e.cls.e.row;
+    if (right instanceof PhpObject && !right.isResource) target = right.cls;
+    else if (typeof right === 'string') target = findClass(right);
+    else throwError('Error', 'Class name must be a valid object or a string');
+  } else if (e.cls.k === 'named') target = findClass(e.cls.name);
+  const object = readObject(e.row);
+  if (!(object instanceof PhpObject) || object.isResource) return false;
+  if (e.cls.k === 'self' || e.cls.k === 'parent' || e.cls.k === 'static') target = resolveClassRef(e.cls);
+  return target !== undefined && object.cls.isSubclassOf(target);
+}
+
 export function resolveClassRef(ref: ClassRef): PhpClass {
   const frame = rt().frame;
   switch (ref.k) {
@@ -944,7 +943,7 @@ export function resolveClassRef(ref: ClassRef): PhpClass {
     }
     case 'expr': {
       const row = rt().row;
-      return classOfOperand(ev(ref.e), ref.e, row);
+      return classOfOperand(ev(ref.e), ref, row);
     }
   }
 }
@@ -956,12 +955,13 @@ export function resolveStaticClass(
   if (ref.k !== 'expr') return resolveClassRef(ref);
   const row = rt().row;
   const value = evaluate(ref.e);
-  return value === SHORT ? SHORT : classOfOperand(value, ref.e, row);
+  return value === SHORT ? SHORT : classOfOperand(value, ref, row);
 }
 
-function classOfOperand(value: Value, expression: Expr, opcodeRow: number): PhpClass {
+function classOfOperand(value: Value, ref: Extract<ClassRef, { k: 'expr' }>, opcodeRow: number): PhpClass {
+  const expression = ref.e;
   const folded = expression.k === 'lit' || (expression.k === 'bin' && expression.foldedString !== undefined);
-  rt().row = folded ? opcodeRow : expression.row;
+  rt().row = ref.fetchRow ?? (folded ? opcodeRow : expression.row);
   return classOfValue(value);
 }
 

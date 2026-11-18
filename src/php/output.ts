@@ -293,7 +293,7 @@ function printRValue(value: Value, indent: number, state: Inspection): string {
 }
 
 function* printableArrayEntries(array: PhpArray): Generator<[string, Value]> {
-  for (const [key, slot] of array.definedSlots()) yield [String(key), slotValue(slot)];
+  for (const [key, slot] of array.map) yield [String(key), slotValue(slot)];
 }
 
 function* printableDebugEntries(entries: Iterable<DebugEntry>): Generator<[string, Value]> {
@@ -359,7 +359,7 @@ function dumpValue(value: Value, level: number, state: Inspection, write: (text:
   try {
     if (value instanceof PhpArray) {
       write(`${pad}array(${value.size}) {\n`);
-      for (const [key, item] of value.definedSlots()) {
+      for (const [key, item] of value.map) {
         write(`${' '.repeat(level + 1)}[${typeof key === 'bigint' ? key : `"${key}"`}]=>\n`);
         dumpValue(slotValue(item), level + 2, state, write, item);
       }

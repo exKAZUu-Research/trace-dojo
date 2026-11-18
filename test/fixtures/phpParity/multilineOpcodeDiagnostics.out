@@ -191,3 +191,20 @@ Warning: Undefined variable $missingOffset in /main.php on line 329
 Deprecated: Using null as an array offset is deprecated, use an empty string instead in /main.php on line 329
 
 Warning: Undefined variable $missingValue in /main.php on line 329
+
+Warning: Undefined variable $missingList in /main.php on line 333
+Class name must be a valid object or a string at 337
+
+Warning: Undefined variable $readObject in /main.php on line 341
+bool(false)
+Class "MissingClass" not found at 345
+Class "
+" not found at 350
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 356
+
+Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.php on line 355
+
+Deprecated: Implicit conversion from float 3.5 to int loses precision in /main.php on line 362
+
+Deprecated: Implicit conversion from float 4.5 to int loses precision in /main.php on line 365

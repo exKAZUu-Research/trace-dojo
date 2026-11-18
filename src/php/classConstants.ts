@@ -60,7 +60,7 @@ export function linkInterfaceConstants(cls: PhpClass, row: number): void {
   for (const iface of cls.interfaces) {
     for (const [name, constant] of iface.consts) {
       const existing = cls.consts.get(name);
-      if (!existing || (existing.visibility === 'private' && existing.cls !== cls)) cls.consts.set(name, constant);
+      if (!existing) cls.consts.set(name, constant);
       else if (existing !== constant) {
         if (constant.isFinal) checkConstantOverride(cls, existing, constant, row);
         if (existing.cls !== constant.cls && existing.cls !== cls) {
