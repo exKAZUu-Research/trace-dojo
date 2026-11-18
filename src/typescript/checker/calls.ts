@@ -692,15 +692,15 @@ export class Calls {
       // A callback's parameters fix what they mention, while its return type keeps the rest to infer from it.
       const parameterType = this.parameterTypeAt(signature, index);
       const callbacks = parameterType ? this.c.signaturesOf(parameterType, 'call') : [];
-      const fixes = (parameter: TypeParameter): boolean =>
-        callbacks.length === 0 ||
+      const typesCallbackParameter = (parameter: TypeParameter): boolean =>
         callbacks.some((callback) => callback.parameters.some((p) => this.c.inference.mentions(p.type, parameter)));
+      const fixes = (parameter: TypeParameter): boolean => callbacks.length === 0 || typesCallbackParameter(parameter);
       this.inferFromArgument(
         run,
         signature,
         arg,
         index,
-        this.c.inference.partialMapper(parameters, run.inferences, fixes)
+        this.c.inference.partialMapper(parameters, run.inferences, fixes, typesCallbackParameter)
       );
     }
     const mapper = this.c.inference.finalMapper(signature, parameters, run.inferences);

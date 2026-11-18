@@ -42,6 +42,8 @@ export interface Inference {
   topLevel: boolean;
   /** How many arguments a rest parameter typed by this parameter takes, as `A` in `...args: A` does. */
   impliedArity?: number;
+  /** The type a callback's parameters fixed the parameter to, which later candidates no longer change. */
+  fixed?: Type;
 }
 
 /** The inferences for the type parameters of one call or comparison, which each inference step adds to. */
@@ -59,22 +61,28 @@ export class TypeInference {
 
   /**
    * The type arguments inferred so far, with each parameter `fixes` selects fixed to its constraint or `unknown` when
-   * nothing was inferred for it; the others stay type parameters.
+   * nothing was inferred for it; the others stay type parameters. A parameter `keepsFixed` selects keeps that type, as
+   * TypeScript fixes a parameter once a callback's parameter types it.
    */
   partialMapper(
     parameters: TypeParameter[],
     inferences: Map<number, Inference>,
-    fixes: (parameter: TypeParameter) => boolean = () => false
+    fixes: (parameter: TypeParameter) => boolean = () => false,
+    keepsFixed: (parameter: TypeParameter) => boolean = () => false
   ): Mapper | undefined {
     const mapper: Mapper = new Map();
     for (const parameter of parameters) {
       const inference = inferences.get(parameter.id);
-      if (inference && (inference.candidates.length > 0 || inference.contravariant.length > 0)) {
+      const fixed = fixes(parameter);
+      let type: Type | undefined;
+      if (inference?.fixed) type = inference.fixed;
+      else if (inference && (inference.candidates.length > 0 || inference.contravariant.length > 0))
         // A parameter fixed for a callback's parameters takes its widened type, as `0` gives `number`.
-        mapper.set(parameter.id, this.inferredType(parameter, inference, fixes(parameter)));
-      } else if (fixes(parameter)) {
-        mapper.set(parameter.id, parameter.constraint?.() ?? unknownType);
-      }
+        type = this.inferredType(parameter, inference, fixed);
+      else if (fixed) type = parameter.constraint?.() ?? unknownType;
+      if (!type) continue;
+      mapper.set(parameter.id, type);
+      if (fixed && inference && keepsFixed(parameter)) inference.fixed = type;
     }
     return mapper.size > 0 ? mapper : undefined;
   }
@@ -85,9 +93,10 @@ export class TypeInference {
       const inference = inferences.get(parameter.id) as Inference;
       mapper.set(
         parameter.id,
-        inference.candidates.length > 0 || inference.contravariant.length > 0
-          ? this.inferredType(parameter, inference, !this.isTopLevelInReturn(signature, parameter))
-          : this.c.instantiate(parameter.default?.() ?? parameter.constraint?.() ?? unknownType, mapper)
+        inference.fixed ??
+          (inference.candidates.length > 0 || inference.contravariant.length > 0
+            ? this.inferredType(parameter, inference, !this.isTopLevelInReturn(signature, parameter))
+            : this.c.instantiate(parameter.default?.() ?? parameter.constraint?.() ?? unknownType, mapper))
       );
     }
     // A constraint may mention the parameters themselves, as `T extends Comparable<T>` does, so it sees them all.
@@ -235,7 +244,7 @@ export class TypeInference {
     topLevel: boolean
   ): void {
     const inference = run.inferences.get(target.id);
-    if (!inference || source === errorType || isIntrinsic(source, 'never')) return;
+    if (!inference || inference.fixed || isIntrinsic(source, 'never')) return;
     if (inference.candidates.length > 0 && run.priority > inference.priority) return;
     if (!covariant) {
       inference.contravariant.push(source);
