@@ -13,6 +13,19 @@ import { rejectUnsupportedSyntax } from './unsupported';
 /** The members that may be a get or set accessor: in a class, an object literal, an interface, or an object type. */
 const accessorTypes = new Set(['method_definition', 'method_signature', 'abstract_method_signature']);
 
+const assignmentOperandParentTypes = new Set([
+  'binary_expression',
+  'unary_expression',
+  'update_expression',
+  'type_assertion',
+]);
+const assignmentTypes = new Set(['assignment_expression', 'augmented_assignment_expression']);
+const optionalAnnotationTypes = new Set([
+  'opting_type_annotation',
+  'omitting_type_annotation',
+  'adding_type_annotation',
+]);
+
 const parser = await loadParser('@willbooster/tree-sitter-typescript/tree-sitter-typescript.wasm');
 
 /**
@@ -92,6 +105,8 @@ function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagno
   const visit = (node: Node): void => {
     const message = numericEscapeError(node, source) ?? optionalAccessorError(node);
     if (message) errors.push({ row: node.startPosition.row, message });
+    const located = exponentiationBaseError(node) ?? operandAssignmentError(node) ?? optionalIndexSignatureError(node);
+    if (located) errors.push(located);
     for (const child of node.children) if (child) visit(child);
   };
   visit(root);
@@ -104,6 +119,39 @@ function numericEscapeError(node: Node, source: string): string | undefined {
   const tagged = template?.type === 'template_string' && template.parent?.type === 'call_expression';
   const nullEscape = node.text === String.raw`\0` && !/[0-9]/.test(source[node.endIndex] ?? '');
   return tagged || nullEscape ? undefined : '8進数や10進数のエスケープシーケンスは使えません。';
+}
+
+/** An unparenthesized unary, `await`, or type assertion expression as the base of `**`, which tsc's parser rejects. */
+function exponentiationBaseError(node: Node): SourceDiagnostic | undefined {
+  const base = node.type === 'binary_expression' ? node.childForFieldName('left') : undefined;
+  if (!base || node.childForFieldName('operator')?.type !== '**') return undefined;
+  const row = base.startPosition.row;
+  if (base.type === 'type_assertion')
+    return { row, message: '** の左辺に型アサーションを書くときは、括弧で囲んでください。' };
+  if (base.type !== 'unary_expression' && base.type !== 'await_expression') return undefined;
+  const operator = base.firstChild?.type ?? '';
+  return { row, message: `** の左辺に ${operator} 演算子を使った式を書くときは、括弧で囲んでください。` };
+}
+
+/**
+ * An unparenthesized assignment as an operand of another operator, such as `a > 0 && b = 1`, which tsc's parser
+ * rejects, while the tree-sitter grammar reads it as `a > 0 && (b = 1)`.
+ */
+function operandAssignmentError(node: Node): SourceDiagnostic | undefined {
+  if (!assignmentOperandParentTypes.has(node.type)) return undefined;
+  const assignment = node.children.find((child) => child && assignmentTypes.has(child.type));
+  const operator = assignment?.childForFieldName('left')?.nextSibling;
+  if (!operator) return undefined;
+  return { row: operator.startPosition.row, message: '括弧で囲まない代入式は、演算子の対象にできません。' };
+}
+
+/** A `?`, `-?`, or `+?` after an index signature that is not a mapped type's, which tsc's parser rejects. */
+function optionalIndexSignatureError(node: Node): SourceDiagnostic | undefined {
+  if (node.type !== 'index_signature' || node.children.some((child) => child?.type === 'mapped_type_clause'))
+    return undefined;
+  const annotation = node.childForFieldName('type');
+  if (!annotation || !optionalAnnotationTypes.has(annotation.type)) return undefined;
+  return { row: annotation.startPosition.row, message: 'インデックスシグネチャに ? は付けられません。' };
 }
 
 /** A `?` after an accessor's name, which tsc's parser rejects wherever an accessor may appear. */
