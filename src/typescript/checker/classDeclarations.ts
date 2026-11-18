@@ -190,7 +190,7 @@ export class ClassDeclarationChecker {
             keepsLiterals: false,
             isConstructor: false,
             hasReturnWithValue: false,
-            hasReturn: false,
+            hasReturnWithoutValue: false,
             returnStates: [],
           });
           this.c.functions.capturedTypes.push(new Map());

@@ -823,7 +823,6 @@ export class StatementChecker {
       this.c.flow.current = undefined;
       return;
     }
-    context.hasReturn = true;
     if (expression) {
       const declared = context.declaredReturn;
       context.inReturn = true;
@@ -832,9 +831,12 @@ export class StatementChecker {
       if (declared && !context.isConstructor) this.c.expressions.checkReturnValue(expression, type, declared);
       context.returnTypes.push(type);
       context.hasReturnWithValue = true;
-    } else if (context.declaredReturn && !context.isConstructor) {
+    } else {
+      context.hasReturnWithoutValue = true;
       const declared = context.declaredReturn;
       if (
+        declared &&
+        !context.isConstructor &&
         !isAnyLike(declared) &&
         !isIntrinsic(declared, 'void') &&
         !this.c.relations.isAssignable(undefinedType, declared)

@@ -40,8 +40,8 @@ export interface FunctionContext {
   keepsLiterals: boolean;
   isConstructor: boolean;
   hasReturnWithValue: boolean;
-  /** Whether the body has a `return` statement, with or without a value. */
-  hasReturn: boolean;
+  /** Whether the body has a `return;`, even an unreachable one, which adds `undefined` to returned values. */
+  hasReturnWithoutValue: boolean;
   /** The flow states at its `return` statements. */
   returnStates: State[];
   contextualReturn?: Type;
@@ -354,7 +354,7 @@ export class FunctionChecker {
         (declaredReturn ?? contextualReturn) !== undefined && this.hasLiterals(declaredReturn ?? contextualReturn),
       isConstructor: isClassConstructor(node),
       hasReturnWithValue: false,
-      hasReturn: false,
+      hasReturnWithoutValue: false,
       returnStates: [],
       contextualReturn,
     };
@@ -383,10 +383,11 @@ export class FunctionChecker {
     );
     const types = returned.map((type) => (context.keepsLiterals ? type : this.c.widenLiteral(type)));
     // A function expression or an object literal method that never returns returns `never`; a declaration `void`.
-    if (types.length === 0 && !context.hasReturn && !context.endReachable && mayReturnNever(context.node))
+    if (types.length === 0 && !context.hasReturnWithoutValue && !context.endReachable && mayReturnNever(context.node))
       return neverType;
     if (types.length === 0) return voidType;
-    if (context.endReachable && context.hasReturnWithValue) types.push(undefinedType);
+    if ((context.endReachable || context.hasReturnWithoutValue) && context.hasReturnWithValue)
+      types.push(undefinedType);
     if (!context.hasReturnWithValue) return voidType;
     return unionOf(types.map((type) => this.widenObjectLiteral(type)));
   }
@@ -568,7 +569,7 @@ export class FunctionChecker {
       this.c.error(returnNode, "戻り値の型が 'never' の関数は、最後まで実行されて終わってはいけません。");
       return;
     }
-    if (!context.hasReturn) {
+    if (!context.hasReturnWithValue && !context.hasReturnWithoutValue) {
       this.c.error(
         returnNode,
         "宣言した戻り値の型が 'undefined'、'void'、'any' のどれでもない関数は、値を返さなければいけません。"
