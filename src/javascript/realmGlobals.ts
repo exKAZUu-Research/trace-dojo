@@ -695,6 +695,6 @@ function turtleStateOf(turtle: JsObject): NonNullable<JsObject['turtle']> {
 }
 
 /** `console.dir`'s `sorted` option: a comparator or other truthy value as given, which Node.js passes to its sort. */
-function sortedOption(value: Value): boolean | Value {
+function sortedOption(value: Value): Value {
   return toBoolean(value) && value !== true ? value : toBoolean(value);
 }

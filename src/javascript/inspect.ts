@@ -74,7 +74,7 @@ interface Context {
   /** As `util.inspect`'s option, which `%o` sets: an array also shows its `[length]`. */
   showHidden: boolean;
   /** As `util.inspect`'s options of the same names; `sorted` is `true`, `false`, or the comparator the program gave. */
-  sorted: boolean | Value;
+  sorted: Value;
   getters: boolean | 'get' | 'set';
   numericSeparator: boolean;
   maxStringLength: number;
@@ -87,7 +87,7 @@ export interface InspectOptions {
   compact?: number | boolean;
   maxArrayLength?: number;
   showHidden?: boolean;
-  sorted?: boolean | Value;
+  sorted?: Value;
   getters?: boolean | 'get' | 'set';
   numericSeparator?: boolean;
   maxStringLength?: number;
