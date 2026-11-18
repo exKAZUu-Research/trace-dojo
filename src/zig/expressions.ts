@@ -579,7 +579,9 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (sizeOf(base) === 0) return (parent) => this.zeroPointerAt(parent.fieldLocation(offset), child);
     return (parent, value) => {
       const target = project(parent, value);
-      return zero ? this.zeroPointerAt(parent.fieldLocation(offset), child) : target.withFieldLocation(parent, offset);
+      return zero
+        ? this.zeroPointerAt(target.projectedLocation() ?? parent.fieldLocation(offset), child)
+        : target.withFieldLocation(parent, offset);
     };
   }
 

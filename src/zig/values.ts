@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 423 -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
+// code-gauge-allow-file fileNcss 426 -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { BigFloat, compareFloats } from './floats';
@@ -296,8 +296,8 @@ export class Pointer {
 
   storageLocation(): { storage: object; index: number } {
     const slots = this.target.slots;
-    const projected = pointerLocations.get(slots)?.(this.index);
-    if (projected) return pointerLocation(projected);
+    const projected = this.projectedLocation(slots);
+    if (projected) return projected;
     const location = storageLocation(slots, this.index);
     if (storageLocations.has(slots) || location.storage === UNDEFINED_MEMORY.slots) return location;
     const value = (storageAliases.get(slots) ?? slots)[this.index];
@@ -306,6 +306,11 @@ export class Pointer {
       this.target instanceof OptionalSlots || this.target instanceof SliceLength ? this.target : this.target.slots,
       this.index
     );
+  }
+
+  projectedLocation(slots = this.target.slots): { storage: object; index: number } | undefined {
+    const location = pointerLocations.get(slots)?.(this.index);
+    return location && pointerLocation(location);
   }
 
   slotLocation(): { storage: object; index: number } {

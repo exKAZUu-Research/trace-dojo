@@ -1598,6 +1598,18 @@ test('tagged union copies preserve references in retained inactive fields', () =
   });
 });
 
+test.each([
+  ['void', '{}'],
+  ['struct{}', '.{}'],
+])('zero-sized fields projected through a reinterpreted aggregate share locations for %s', (child, initial) => {
+  const source = `const std=@import("std");const Z=${child};const U=union(enum(u16)){a:Z,b:u8};const V=struct{x:u16,z:Z};const P=extern union{u:*U,v:*V};pub fn main()!void{var u:U=.{.a=${initial}};const p=&u.a;const alias=P{.u=&u};const q=&alias.v.z;var map=std.AutoHashMap(*Z,u8).init(std.heap.page_allocator);defer map.deinit();try map.put(p,42);std.debug.print("{} {any}|",.{p==q,map.get(q)});u=.{.b=9};std.debug.print("{} {any} {}",.{p==&alias.v.z,map.get(&alias.v.z),u.b});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 42|true 42 9',
+    uncaughtException: undefined,
+  });
+});
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;
