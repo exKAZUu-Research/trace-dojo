@@ -1513,6 +1513,15 @@ test.each([
   });
 });
 
+test.each(['u7', 'u8', 'u16'])('byte-backed nested optional pointers retain live payloads for %s', (scalar) => {
+  const source = `const std=@import("std");const E=error{Oops}!?${scalar};pub fn main()!void{var buf:[32]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&buf);const e=try f.allocator().create(E);e.*=@as(?${scalar},7);if(e.*)|*p|{const q=&p.*.?;e.*=@as(?${scalar},11);std.debug.print("{} {}|",.{q.*,p.*.?});e.*=error.Oops;q.*=9;const failed=if(e.*)|_| false else |_| true;std.debug.print("{} {}|",.{failed,q.*});e.*=null;q.*=10;std.debug.print("{} {}|",.{p.*==null,q.*});e.*=@as(?${scalar},13);std.debug.print("{} {}",.{q.*,p.*.?});}else |_|unreachable;}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '11 11|true 9|true 10|13 13',
+    uncaughtException: undefined,
+  });
+});
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;

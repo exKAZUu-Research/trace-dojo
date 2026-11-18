@@ -765,7 +765,7 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   protected optionalPayloadPointer(pointer: Pointer, child: Type): Pointer {
     if (optionalNicheBits(child)) return pointer;
-    const payload = pointer.project('optional');
+    const payload = this.taggedPayloadPointer(pointer, child, 0, (parent) => parent.project('optional'));
     return hasAggregateStorage(child) ? payload.withFieldLocation(pointer, 0) : payload;
   }
 
@@ -777,12 +777,20 @@ export abstract class ExpressionCompiler extends SemaBase {
     const { payload } = type;
     const offset = errorUnionOffsets(payload).payload;
     if (sizeOf(payload) === 0) return (parent) => this.zeroPointerAt(parent.fieldLocation(offset), payload);
-    return (parent) => {
-      const backing = memorySpace().typedViews.get(parent.target.slots);
-      return backing
-        ? new Pointer(backing.memory.arrayView(payload, 1n, backing.offset(parent.index) + offset * 8), 0)
-        : parent.projectErrorPayload(offset);
-    };
+    return (parent) =>
+      this.taggedPayloadPointer(parent, payload, offset, (pointer) => pointer.projectErrorPayload(offset));
+  }
+
+  private taggedPayloadPointer(
+    parent: Pointer,
+    child: Type,
+    offset: number,
+    logical: (pointer: Pointer) => Pointer
+  ): Pointer {
+    const backing = memorySpace().typedViews.get(parent.target.slots);
+    return backing
+      ? new Pointer(backing.memory.arrayView(child, 1n, backing.offset(parent.index) + offset * 8), 0)
+      : logical(parent);
   }
 
   // Indexing and slicing ----------------------------------------------------------------------------------------------
