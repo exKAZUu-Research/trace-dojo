@@ -87,6 +87,10 @@ class ObjectStorage {
     return true;
   }
 
+  unsetOffset(value: Value): void {
+    this.detach(storageKey(value, 'offsetUnset'));
+  }
+
   has(object: PhpObject): boolean {
     return this.entries.has(this.hash(object));
   }
@@ -296,7 +300,7 @@ defineClass({
     },
     {
       signature: 'offsetUnset($object): void',
-      impl: ({ thisObj, args }) => (storageOf(thisObj).detach(storageKey(args[0], 'offsetUnset')), null),
+      impl: ({ thisObj, args }) => (detachAndRewind(thisObj, storageKey(args[0], 'offsetUnset')), null),
     },
     {
       signature: 'getHash(object $object): string',

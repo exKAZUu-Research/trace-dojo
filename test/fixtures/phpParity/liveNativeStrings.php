@@ -1,0 +1,26 @@
+<?php
+class ChangesArgument {
+    function __toString() {
+        global $value, $width;
+        $value = 'new';
+        $width = 5;
+        return 'first';
+    }
+}
+$value = 'old';
+$members = [new ChangesArgument, &$value];
+var_dump(implode(',', $members));
+$value = 'old';
+var_dump(join($members));
+$value = 'old';
+var_dump(vsprintf('%s,%s', $members));
+$value = 'old';
+vprintf("%s,%s\n", $members);
+$value = 'old';
+vfprintf(STDOUT, "%s,%s\n", $members);
+$value = 'old';
+$width = 3;
+var_dump(vsprintf('%s,%*s', [new ChangesArgument, &$width, &$value]));
+$value = 'old';
+$format = '%s,%s';
+var_dump(sprintf($format, new ChangesArgument, $value));

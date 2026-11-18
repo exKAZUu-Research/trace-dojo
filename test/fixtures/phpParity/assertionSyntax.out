@@ -1,0 +1,19 @@
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 16
+"assert(false && missing())"
+"assert(assertion: false)"
+"assert(assertion: $x === 1)"
+"assert($x += 0)"
+"assert($x ??= 0)"
+"assert($x =& $y)"
+"assert(match ($x) {\n    0 => false,\n    default => true,\n})"
+"assert(__LINE__ === 0)"
+"assert(__FUNCTION__ === 'x')"
+"assert(\\clone(new stdClass()) === null)"
+"assert(NAN xor true)"
+"given"
+registered
+live
+"assert(false)"
+dropped
+done

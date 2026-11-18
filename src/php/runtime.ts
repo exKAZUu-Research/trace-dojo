@@ -164,6 +164,7 @@ export class Runtime {
   nativeStringConversionPending = false;
   errorHandlers: { handler: Value; mask: bigint }[] = [];
   exceptionHandler: Value = null;
+  assertionCallback: Value | undefined;
   /** The handlers `set_exception_handler` replaced, latest last, which `restore_exception_handler` brings back. */
   replacedExceptionHandlers: Value[] = [];
   readonly mt = new MersenneTwister();
@@ -256,10 +257,15 @@ export class Runtime {
 
   /** Frees what letting go of some values frees, as {@link releaseDropped} describes, when that is safe now. */
   release(dropped: unknown[], durable = false): void {
-    if (durable) for (const value of dropped) this.pendingGcRoots.add(value instanceof Ref ? value.v : value);
+    if (durable) {
+      this.durableReleaseVersion++;
+      for (const value of dropped) this.pendingGcRoots.add(value instanceof Ref ? value.v : value);
+    }
     for (const value of dropped) this.pendingReleases.push(value);
     if (this.nativeCalls === 0) this.flushReleases();
   }
+
+  durableReleaseVersion = 0;
 
   flushReleases(): void {
     if (this.pendingReleases.length === 0) return;

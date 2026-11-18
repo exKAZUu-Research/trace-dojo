@@ -7,7 +7,7 @@ import { defineConstant, defineFunction } from './native';
 import { toStr } from './operators';
 import { PhpThrow, rt, SCRIPT_PATH } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
-import { PhpArray, PhpObject, type Value } from './values';
+import { PhpArray, PhpObject } from './values';
 
 // Errors -------------------------------------------------------------------------------------------------------------
 
@@ -72,7 +72,6 @@ interface AssertOptions {
   bail: boolean;
   warning: boolean;
   exception: boolean;
-  callback: Value | undefined;
 }
 
 const assertOptions = new WeakMap<object, AssertOptions>();
@@ -80,7 +79,7 @@ const assertOptions = new WeakMap<object, AssertOptions>();
 function currentAssertOptions(): AssertOptions {
   let options = assertOptions.get(rt());
   if (!options) {
-    options = { active: true, bail: false, warning: true, exception: true, callback: undefined };
+    options = { active: true, bail: false, warning: true, exception: true };
     assertOptions.set(rt(), options);
   }
   return options;
@@ -103,8 +102,12 @@ defineFunction('assert_options(int $option, mixed $value = UNKNOWN): mixed', ({ 
     throwError('ValueError', 'assert_options(): Argument #1 ($option) must be an ASSERT_* constant');
   const options = currentAssertOptions();
   if (name === 'callback') {
-    const previous = options.callback ?? null;
-    if (args.length > 1) options.callback = args[1] ?? undefined;
+    const runtime = rt();
+    const previous = runtime.assertionCallback ?? null;
+    if (args.length > 1) {
+      runtime.nativeHeld.at(-1)?.push(previous);
+      runtime.assertionCallback = args[1] ?? undefined;
+    }
     return previous;
   }
   const previous = BigInt(options[name]);
@@ -125,9 +128,10 @@ defineFunction('assert(mixed $assertion, Throwable|string|null $description = nu
   if (description instanceof PhpObject) throw new PhpThrow(description);
   if (options.bail) throw new UnsupportedFeatureError('assert_options() の ASSERT_BAIL');
   const text = typeof description === 'string' ? description : undefined;
-  if (options.callback !== undefined) {
+  const callback = rt().assertionCallback;
+  if (callback !== undefined) {
     const line = BigInt((row ?? rt().row) + 1);
-    callCallback(options.callback, text === undefined ? [SCRIPT_PATH, line, null] : [SCRIPT_PATH, line, null, text]);
+    callCallback(callback, text === undefined ? [SCRIPT_PATH, line, null] : [SCRIPT_PATH, line, null, text]);
   }
   if (options.exception) throwError('AssertionError', text ?? '');
   if (options.warning) warn(`assert(): ${text ?? 'Assertion'} failed`);

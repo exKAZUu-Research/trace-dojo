@@ -30,7 +30,7 @@ const INTERNAL_FLAGS = 0xff_ff_00_00;
 /** The storage of an ArrayObject or ArrayIterator: its own array, or the ArrayObject whose storage it uses. */
 export class ArrayStorage {
   readonly nativeValues = new NativeValueIndex();
-  private sorting = false;
+  private sorting = 0;
   private cursorArray: PhpArray | undefined;
   private iteratorCursor: ArrayCursor | undefined;
   private readonly watchers = new Set<WeakRef<ArrayStorage>>();
@@ -109,18 +109,17 @@ export class ArrayStorage {
   }
 
   checkMutation(): void {
-    if (this.chain().some((storage) => storage.sorting))
+    if (this.chain().some((storage) => storage.sorting > 0))
       throwError('Error', 'Modification of ArrayObject during sorting is prohibited');
   }
 
   runSort(run: () => Value): Value {
-    this.checkMutation();
     const root = this.chain().at(-1) as ArrayStorage;
-    root.sorting = true;
+    root.sorting++;
     try {
       return run();
     } finally {
-      root.sorting = false;
+      root.sorting--;
     }
   }
 

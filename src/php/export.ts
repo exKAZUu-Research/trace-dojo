@@ -33,7 +33,6 @@ const BINARY: Record<string, [number, number, number]> = {
 };
 
 /** Writes an expression back as PHP code, as the message of a failed `assert` shows it. */
-// code-gauge-allow functionNcss 57 -- One case per expression kind, as PHP's zend_ast_export writes each.
 export function exportExpr(e: Expr, priority = 0): string {
   const wrap = (own: number, text: string): string => (priority > own ? `(${text})` : text);
   switch (e.k) {
@@ -103,8 +102,16 @@ export function exportExpr(e: Expr, priority = 0): string {
     case 'cast': {
       return wrap(240, `(${e.type})${exportExpr(e.e, 241)}`);
     }
-    case 'assign': {
-      return wrap(90, `${exportExpr(e.target, 91)} = ${exportExpr(e.value, 90)}`);
+    case 'assign':
+    case 'assignOp':
+    case 'assignRef': {
+      return wrap(90, exportAssignment(e));
+    }
+    case 'clone': {
+      return `\\clone(${exportExpr(e.e)})`;
+    }
+    case 'match': {
+      return exportMatch(e);
     }
     case 'incdec': {
       const op = e.inc ? '++' : '--';
@@ -114,6 +121,21 @@ export function exportExpr(e: Expr, priority = 0): string {
       return '...';
     }
   }
+}
+
+function exportAssignment(e: Extract<Expr, { k: 'assign' | 'assignOp' | 'assignRef' }>): string {
+  const target = exportExpr(e.target, 91);
+  if (e.k === 'assignRef') return `${target} =& ${exportExpr(e.source, 90)}`;
+  const operator = e.k === 'assignOp' ? `${e.op}=` : '=';
+  return `${target} ${operator} ${exportExpr(e.value, 90)}`;
+}
+
+function exportMatch(e: Extract<Expr, { k: 'match' }>): string {
+  const arms = e.arms.map(({ conditions, body }) => {
+    const label = conditions ? conditions.map((condition) => exportExpr(condition)).join(', ') : 'default';
+    return `    ${label} => ${exportExpr(body)},\n`;
+  });
+  return `match (${exportExpr(e.subject)}) {\n${arms.join('')}}`;
 }
 
 function exportArgs(args: Arg[]): string {

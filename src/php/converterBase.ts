@@ -73,7 +73,6 @@ export abstract class ConverterBase {
   protected fn: FunctionContext = { isGenerator: false, labels: new Set(), gotos: [], isMethod: false };
   protected strictTypes = false;
   protected declaredFunctions = new Map<string, number>();
-  /** The classes declared at run time so far (anonymous ones and those inside blocks), which number anonymous classes. */
   protected currentClass?: string;
   protected currentClassKind?: 'class' | 'interface' | 'trait';
   protected currentClassHasParent = false;

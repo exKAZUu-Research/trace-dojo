@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 489 -- PHP operators share coercion and comparison helpers.
+// code-gauge-allow-file fileNcss 492 -- PHP operators share coercion and comparison helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import {
   boolValue,
@@ -60,7 +60,8 @@ export function withStringConversionErrors(
   continuation: (
     convert: (value: Value) => string,
     reportWarning: (message: string) => void,
-    hold: (error: unknown) => void
+    hold: (error: unknown) => void,
+    tryConvert: (value: Value) => string | undefined
   ) => void
 ): void {
   const runtime = rt();
@@ -79,16 +80,16 @@ export function withStringConversionErrors(
           hold(error);
         }
       };
-      const convert = (value: Value): string => {
-        if (runtime.nativeStringConversionPending && value instanceof PhpObject && !value.isResource) return '';
+      const tryConvert = (value: Value): string | undefined => {
+        if (runtime.nativeStringConversionPending && value instanceof PhpObject && !value.isResource) return undefined;
         try {
           return stringify(value, reportWarning);
         } catch (error) {
           hold(error);
-          return '';
+          return undefined;
         }
       };
-      continuation(convert, reportWarning, hold);
+      continuation((value) => tryConvert(value) ?? '', reportWarning, hold, tryConvert);
     });
   } finally {
     runtime.nativeStringConversionPending = pending;
@@ -398,6 +399,7 @@ function compareNumericStrings(a: string, b: string): number | undefined {
 }
 
 type ComparisonMode = 'order' | 'strict';
+type ObjectString = (object: PhpObject) => string | undefined;
 type ComparisonPair = [Value, Value, ComparisonMode];
 interface ComparisonFrame {
   owner: PhpArray | PhpObject;
@@ -405,8 +407,8 @@ interface ComparisonFrame {
 }
 
 /** The result of PHP's `<=>`, where 1 also stands for values PHP cannot order. */
-export function compare(a: Value, b: Value): number {
-  return walkComparison(a, b, 'order');
+export function compare(a: Value, b: Value, tryString?: ObjectString): number {
+  return walkComparison(a, b, 'order', tryString);
 }
 
 export function looseEquals(a: Value, b: Value): boolean {
@@ -418,14 +420,14 @@ export function strictEquals(a: Value, b: Value): boolean {
 }
 
 // code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function walkComparison(a: Value, b: Value, mode: ComparisonMode): number {
+function walkComparison(a: Value, b: Value, mode: ComparisonMode, tryString?: ObjectString): number {
   const stack: ComparisonFrame[] = [];
   const active = new Set<PhpArray | PhpObject>();
   let pair: ComparisonPair | undefined = [a, b, mode];
   for (;;) {
     if (pair) {
       rt().spend();
-      const result = comparisonStep(...pair);
+      const result = comparisonStep(...pair, tryString);
       if (typeof result === 'number') {
         if (result !== 0) return result;
       } else {
@@ -446,21 +448,22 @@ function walkComparison(a: Value, b: Value, mode: ComparisonMode): number {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function comparisonStep(a: Value, b: Value, mode: ComparisonMode): number | ComparisonFrame {
+// code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function comparisonStep(a: Value, b: Value, mode: ComparisonMode, tryString?: ObjectString): number | ComparisonFrame {
   if (a === b) return typeof a === 'number' && Number.isNaN(a) ? 1 : 0;
   if (a instanceof PhpArray && b instanceof PhpArray) {
     if (a.size !== b.size) return a.size < b.size ? -1 : 1;
     return { owner: a, pairs: arrayComparisonPairs(a, b, mode) };
   }
   if (mode === 'strict') return 1;
+  if ((a instanceof PhpObject && a.isResource) || (b instanceof PhpObject && b.isResource)) return compareScalar(a, b);
   if (a instanceof PhpObject && b instanceof PhpObject) {
     const native = a.cls.compare && a.cls.compare === b.cls.compare ? a.cls.compare(a, b) : undefined;
     if (typeof native === 'number') return native;
     if (native === undefined && a.cls !== b.cls) return 1;
     return { owner: a, pairs: objectComparisonPairs(a, b, native) };
   }
-  return compareScalar(a, b);
+  return compareScalar(a, b, tryString);
 }
 
 function* arrayComparisonPairs(a: PhpArray, b: PhpArray, mode: ComparisonMode): Generator<ComparisonPair, number> {
@@ -518,8 +521,8 @@ function hasDynamicProps(object: PhpObject): boolean {
   return [...object.props.keys()].some((key) => !key.startsWith('\0') && !object.cls.propByName.has(key));
 }
 
-// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-export function compareScalar(a: Value, b: Value): number {
+// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+export function compareScalar(a: Value, b: Value, tryString?: ObjectString): number {
   if ((typeof a === 'bigint' || typeof a === 'number') && (typeof b === 'bigint' || typeof b === 'number')) {
     return compareNumbers(a, b);
   }
@@ -533,6 +536,8 @@ export function compareScalar(a: Value, b: Value): number {
     const y = boolValue(b);
     return x === y ? 0 : x ? 1 : -1;
   }
+  if (a instanceof PhpObject && a.isResource) return compareResource(a, b);
+  if (b instanceof PhpObject && b.isResource) return -compareResource(b, a);
   if (
     (typeof a === 'number' &&
       Number.isNaN(a) &&
@@ -544,11 +549,19 @@ export function compareScalar(a: Value, b: Value): number {
     return 1;
   if (typeof a === 'string' && (typeof b === 'bigint' || typeof b === 'number')) return compareStringNumber(a, b);
   if (typeof b === 'string' && (typeof a === 'bigint' || typeof a === 'number')) return -compareStringNumber(b, a);
-  if (a instanceof PhpObject) return compareObjectScalar(a, b);
-  if (b instanceof PhpObject) return -compareObjectScalar(b, a);
+  if (a instanceof PhpObject) return compareObjectScalar(a, b, tryString);
+  if (b instanceof PhpObject) return -compareObjectScalar(b, a, tryString);
   if (a instanceof PhpArray) return 1;
   if (b instanceof PhpArray) return -1;
   return 1;
+}
+
+function compareResource(resource: PhpObject, value: Value): number {
+  if (value instanceof PhpArray) return -1;
+  if (value instanceof PhpObject) return value.isResource ? compareNumbers(resource.id, value.id) : -1;
+  const number =
+    typeof value === 'string' ? (numericPrefix(value)?.value ?? 0n) : typeof value === 'number' ? value : toInt(value);
+  return compareNumbers(BigInt(resource.id), number);
 }
 
 function compareStringNumber(text: string, number: bigint | number): number {
@@ -562,8 +575,11 @@ function compareStringNumber(text: string, number: bigint | number): number {
  * Compares an object with a value of another type as PHP's zend_std_compare_objects does: the object is converted to
  * the value's type, and an object that cannot be converted is greater.
  */
-function compareObjectScalar(object: PhpObject, other: Value): number {
-  if (typeof other === 'string' && object.cls.findMethod('__tostring')) return compare(objectToString(object), other);
+function compareObjectScalar(object: PhpObject, other: Value, tryString: ObjectString = objectToString): number {
+  if (typeof other === 'string' && object.cls.findMethod('__tostring')) {
+    const text = tryString(object);
+    return text === undefined ? 1 : compareStrings(text, other);
+  }
   if (typeof other === 'bigint' || typeof other === 'number') {
     const kind = typeof other === 'bigint' ? 'int' : 'float';
     notice(`Object of class ${object.cls.name} could not be converted to ${kind}`);

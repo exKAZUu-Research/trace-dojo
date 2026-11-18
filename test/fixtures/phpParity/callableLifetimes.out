@@ -1,0 +1,15 @@
+bool(false)
+Cannot call abstract method HasAbstract::f()
+call_user_func(): Argument #1 ($callback) must be a valid callback, cannot call abstract method HasAbstract::f()
+Failed to create closure from callable: cannot call abstract method HasAbstract::f()
+bool(false)
+Cannot call abstract method HasAbstract::f()
+call_user_func(): Argument #1 ($callback) must be a valid callback, cannot call abstract method HasAbstract::f()
+Failed to create closure from callable: cannot call abstract method HasAbstract::f()
+1
+3
+4
+
+Deprecated: Calling get_class() without arguments is deprecated in /main.php on line 23
+bool(true)
+bool(true)

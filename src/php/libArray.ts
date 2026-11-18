@@ -1195,7 +1195,12 @@ defineFunction('shuffle(array &$array): true', (ctx) => {
 // Sorting ------------------------------------------------------------------------------------------------------------
 
 /** The comparison a sort flag selects. */
-function sortComparator(flags: bigint, convert = toStr, reportWarning = warn): (a: Value, b: Value) => number {
+function sortComparator(
+  flags: bigint,
+  convert = toStr,
+  reportWarning = warn,
+  tryConvert?: (value: Value) => string | undefined
+): (a: Value, b: Value) => number {
   const caseless = (flags & 8n) !== 0n;
   switch (flags & ~8n) {
     case 1n: {
@@ -1211,7 +1216,7 @@ function sortComparator(flags: bigint, convert = toStr, reportWarning = warn): (
       return (a, b) => naturalCompare(convert(a), convert(b), caseless);
     }
     default: {
-      return compare;
+      return (a, b) => compare(a, b, tryConvert);
     }
   }
 }
@@ -1265,8 +1270,8 @@ function sortArray(
   }
 ): true {
   checkArrayRef(ctx, 0, name, 'array');
-  withStringConversionErrors((convert, reportWarning, hold) => {
-    const compareValues = sortComparator(flags, convert, reportWarning);
+  withStringConversionErrors((convert, reportWarning, hold, tryConvert) => {
+    const compareValues = sortComparator(flags, convert, reportWarning, tryConvert);
     const compareEntries = (a: [Key, Value | Ref], b: [Key, Value | Ref]): number => {
       const x = byKey ? a[0] : valueOf(a[1]);
       const y = byKey ? b[0] : valueOf(b[1]);

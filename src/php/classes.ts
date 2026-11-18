@@ -1487,6 +1487,15 @@ export function objectPropertyKeys(object: PhpObject): string[] {
   return [...new Set([...object.cls.props.map((decl) => decl.key), ...object.props.keys()])];
 }
 
+export function snapshotDynamicProperties(object: PhpObject): PhpArray {
+  const snapshot = new PhpArray();
+  for (const [key, slot] of object.props) {
+    rt().spend();
+    if (!declForKey(object.cls, key) && slot !== UNINIT) snapshot.setSlot(key, copyValueSlot(slot));
+  }
+  return snapshot;
+}
+
 export function* visiblePropertyKeys(
   object: PhpObject,
   scope: PhpClass | undefined,
@@ -1497,8 +1506,7 @@ export function* visiblePropertyKeys(
     const slot = object.props.get(key);
     const decl = declForKey(object.cls, key);
     if ((!includeVirtual || !decl?.hooks?.get) && (slot === UNINIT || slot === undefined)) continue;
-    if (decl && !canAccessProp(decl, scope)) continue;
-    if (decl && decl.visibility === 'private' && scope !== decl.cls) continue;
+    if (decl && !isVisibleProperty(object, decl, scope)) continue;
     yield key;
   }
 }
@@ -1515,6 +1523,10 @@ export function visibleProps(object: PhpObject, scope: PhpClass | undefined): [s
     const slot = object.props.get(key) as Value | Ref;
     return [propNameOf(key), slot instanceof Ref ? slot.v : slot];
   });
+}
+
+export function isVisibleProperty(object: PhpObject, decl: PropDecl, scope: PhpClass | undefined): boolean {
+  return !decl.isStatic && canAccessProp(decl, scope) && lookupProp(object.cls, decl.name, scope) === decl;
 }
 
 export function nativePropertySlot(

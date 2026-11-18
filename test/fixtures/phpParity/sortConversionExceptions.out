@@ -12,3 +12,4 @@ callback
 2,1,0,3,4
 Modification of ArrayObject during sorting is prohibited
 3,4,5,2,1
+cast;caught;2,1,0

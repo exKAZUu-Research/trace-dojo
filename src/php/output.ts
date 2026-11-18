@@ -3,7 +3,14 @@ import type { ClassRef, Expr, FunctionDecl, Stmt } from './ast';
 import { nestedBodies } from './astAnalysis';
 import { callMethod } from './callables';
 import { canAccessConstant } from './classConstants';
-import { declForKey, findClass, nativePropertySlot, objectPropertyKeys, propNameOf } from './classes';
+import {
+  declForKey,
+  findClass,
+  nativePropertySlot,
+  objectPropertyKeys,
+  propNameOf,
+  snapshotDynamicProperties,
+} from './classes';
 import { type Constant, foldedConstant } from './constantDefaults';
 import { formatFloat, formatFloatRepr } from './conversions';
 import { deprecated, E_ERROR, reportUncaughtWarning, warn } from './errors';
@@ -12,10 +19,11 @@ import { FatalError, PhpThrow, rt } from './runtime';
 import { describePropertyType } from './types';
 import { type ClosureData, isClosure, PhpArray, PhpObject, Ref, type Slot, UNINIT, type Value } from './values';
 
-/** The properties an object shows to `var_dump` and `print_r`: `__debugInfo`'s array, or its property table. */
-// code-gauge-allow functionCognitiveComplexity 30 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function debugEntries(object: PhpObject): [string | bigint, Slot, string][] {
+type DebugEntry = [string | bigint, Slot, string];
+
+// code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function debugEntries(object: PhpObject): { entries: Iterable<DebugEntry>; initialized: number } {
   if (object.cls.findMethod('__debuginfo')) {
     let info: Value;
     try {
@@ -27,29 +35,50 @@ function debugEntries(object: PhpObject): [string | bigint, Slot, string][] {
     }
     if (info === null) {
       deprecated(`Returning null from ${object.cls.name}::__debugInfo() is deprecated, return an empty array instead`);
-      return [];
+      return { entries: [], initialized: 0 };
     }
     if (!(info instanceof PhpArray)) failDebugInfo();
-    return [...info.entries()].map(([key, value]) => [key, value, typeof key === 'string' ? `"${key}"` : `${key}`]);
+    const entries: DebugEntry[] = [...info.map].map(([key, slot]) => [
+      key,
+      slot,
+      typeof key === 'string' ? `"${key}"` : `${key}`,
+    ]);
+    return { entries, initialized: entries.length };
   }
-  if (isClosure(object)) return closureDebug(object);
+  if (isClosure(object)) {
+    const entries = closureDebug(object);
+    return { entries, initialized: entries.length };
+  }
   const internal = object.internal as { debugEntries?: () => [string | bigint, Value][] } | undefined;
   if (internal?.debugEntries) {
-    return internal
+    const entries: DebugEntry[] = internal
       .debugEntries()
       .map(([key, value]) => [typeof key === 'string' ? propNameOf(key) : key, value, debugLabel(key)]);
+    return { entries, initialized: entries.length };
   }
-  const entries: [string | bigint, Slot, string][] = [];
+  const keys: string[] = [];
+  let initialized = 0;
   for (const [key, slot] of object.props) {
+    rt().spend();
+    keys.push(key);
+    if (slot !== UNINIT) initialized++;
+  }
+  return { entries: debugPropertyEntries(object, keys), initialized };
+}
+
+function* debugPropertyEntries(object: PhpObject, keys: string[]): Generator<DebugEntry> {
+  for (const [key, slot] of propertyEntries(object, keys, (key) => object.props.get(key))) {
+    if (slot === UNINIT && !declForKey(object.cls, key)?.type) continue;
     const name = propNameOf(key);
     const decl = declForKey(object.cls, key);
-    if (slot === UNINIT && !decl?.type) continue;
-    let label = `"${name}"`;
-    if (decl?.visibility === 'protected') label = `"${name}":protected`;
-    else if (decl?.visibility === 'private') label = `"${name}":"${decl.cls.name}":private`;
-    entries.push([name, slot, label]);
+    const label =
+      decl?.visibility === 'protected'
+        ? `"${name}":protected`
+        : decl?.visibility === 'private'
+          ? `"${name}":"${decl.cls.name}":private`
+          : `"${name}"`;
+    yield [name, slot, label];
   }
-  return entries;
 }
 
 function failDebugInfo(withTrace = true): never {
@@ -200,8 +229,7 @@ function printRValue(value: Value, indent: number, active: Set<object>): string 
     if (active.has(value)) return 'Array\n *RECURSION*';
     active.add(value);
     try {
-      const entries = [...value.entries()].map(([key, item]): [string, Value] => [String(key), item]);
-      return `Array\n${printHash(entries, indent, active)}`;
+      return `Array\n${printHash(printableArrayEntries(value), indent, active)}`;
     } finally {
       active.delete(value);
     }
@@ -212,16 +240,23 @@ function printRValue(value: Value, indent: number, active: Set<object>): string 
     if (active.has(value)) return `${header} *RECURSION*`;
     active.add(value);
     try {
-      const entries = debugEntries(value)
-        .filter(([, slot]) => slot !== UNINIT)
-        .map(([key, slot, label]): [string, Value] => [printRLabel(key, label), slotValue(slot)]);
-      return header + printHash(entries, indent, active);
+      return header + printHash(printableDebugEntries(debugEntries(value).entries), indent, active);
     } finally {
       active.delete(value);
     }
   }
   if (typeof value === 'number') return formatFloat(value);
   return toStr(value);
+}
+
+function* printableArrayEntries(array: PhpArray): Generator<[string, Value]> {
+  for (const [key, slot] of array.map) yield [String(key), slotValue(slot)];
+}
+
+function* printableDebugEntries(entries: Iterable<DebugEntry>): Generator<[string, Value]> {
+  for (const [key, slot, label] of entries) {
+    if (slot !== UNINIT) yield [printRLabel(key, label), slotValue(slot)];
+  }
 }
 
 function printRLabel(key: string | bigint, label: string): string {
@@ -232,7 +267,7 @@ function printRLabel(key: string | bigint, label: string): string {
   return key;
 }
 
-function printHash(entries: [string, Value][], indent: number, active: Set<object>): string {
+function printHash(entries: Iterable<[string, Value]>, indent: number, active: Set<object>): string {
   let text = `${' '.repeat(indent)}(\n`;
   for (const [key, item] of entries) {
     text = grown(`${text}${' '.repeat(indent + 4)}[${key}] => ${printRValue(item, indent + 8, active)}\n`);
@@ -295,9 +330,8 @@ function dumpObject(
   write: (text: string) => void,
   reference: string
 ): void {
-  const entries = debugEntries(object);
-  const count = entries.filter(([, slot]) => slot !== UNINIT).length;
-  write(`${reference}object(${object.cls.name})#${object.id} (${count}) {\n`);
+  const { entries, initialized } = debugEntries(object);
+  write(`${reference}object(${object.cls.name})#${object.id} (${initialized}) {\n`);
   const indent = ' '.repeat(level + 1);
   for (const [key, slot, label] of entries) {
     write(`${indent}[${typeof key === 'bigint' ? key : label}]=>\n`);
@@ -324,10 +358,10 @@ function quoteExport(text: string): string {
   return `'${text.replaceAll(/['\\]/g, String.raw`\$&`).replaceAll('\0', `' . "\\0" . '`)}'`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 26 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 // code-gauge-allow functionNcss 39 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function exportValue(value: Value, level: number, active: Set<object>): string {
-  if (value === null) return 'NULL';
+  if (value === null || (value instanceof PhpObject && value.isResource)) return 'NULL';
   switch (typeof value) {
     case 'boolean': {
       return value ? 'true' : 'false';
@@ -377,20 +411,39 @@ function exportValue(value: Value, level: number, active: Set<object>): string {
   }
 }
 
-function exportedProps(object: PhpObject): Iterable<[string | bigint, Slot]> {
+function* exportedProps(object: PhpObject): Generator<[string | bigint, Slot]> {
   const storage = object.internal as
     | {
         properties?: () => PhpArray;
         exportEntries?: () => [bigint, Value][];
       }
     | undefined;
-  if (storage?.properties) return storage.properties().map;
-  const entries: [string | bigint, Slot][] = storage?.exportEntries?.() ?? [];
-  for (const key of objectPropertyKeys(object)) {
-    const slot = nativePropertySlot(object, key, declForKey(object.cls, key));
-    if (slot !== undefined) entries.push([key, slot]);
+  if (storage?.properties) {
+    yield* storage.properties().map;
+    return;
   }
-  return entries;
+  yield* storage?.exportEntries?.() ?? [];
+  yield* propertyEntries(object, objectPropertyKeys(object), (key, decl) => nativePropertySlot(object, key, decl));
+}
+
+function* propertyEntries(
+  object: PhpObject,
+  keys: string[],
+  readDeclared: (key: string, decl: NonNullable<ReturnType<typeof declForKey>>) => Slot | undefined
+): Generator<[string, Slot]> {
+  const dynamic = snapshotDynamicProperties(object);
+  const runtime = rt();
+  runtime.held.push(dynamic);
+  try {
+    for (const key of keys) {
+      const decl = declForKey(object.cls, key);
+      const slot = decl ? readDeclared(key, decl) : dynamic.map.get(key);
+      if (slot !== undefined) yield [key, slot];
+    }
+  } finally {
+    runtime.held.pop();
+    runtime.release([dynamic]);
+  }
 }
 
 function circularExport(): string {

@@ -24,3 +24,27 @@ function &replaceReference() {
 }
 $replacement = &replaceReference();
 var_dump($replacement, $value);
+function nestedReturns(): int {
+    try { return 1; }
+    finally {
+        try {
+            try { return 2; }
+            finally { throw new Exception('canceled'); }
+        } catch (Exception $error) {}
+    }
+}
+var_dump(nestedReturns());
+function &nestedReference() {
+    global $value;
+    try { return $value; }
+    finally {
+        try {
+            try { $other = 'discarded'; return $other; }
+            finally { throw new Exception('canceled'); }
+        } catch (Exception $error) { $value = 'kept'; }
+    }
+}
+$ref = &nestedReference();
+var_dump($ref);
+$ref = 'live';
+var_dump($value);

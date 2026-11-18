@@ -1,7 +1,7 @@
-// code-gauge-allow-file fileNcss 645 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 663 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
-import { foreachSubjectWritable } from './astAnalysis';
+import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
 import { callMethod } from './callables';
 import { propRef, readProp, staticPropRef, unsetProp, writeProp } from './classes';
 import * as classesModule from './classes';
@@ -403,7 +403,10 @@ function arrayAccessPlace(object: PhpObject, key: Value | undefined): Place {
     },
     ref: () => arrayAccessNestedPlace(object, key).ref(),
     unset: () => {
-      callMethod(object, 'offsetUnset', [key ?? null], rt().row);
+      const storage = object.internal as { unsetOffset?: (value: Value) => void } | undefined;
+      if (storage?.unsetOffset && object.cls.findMethod('offsetunset')?.fn.kind === 'native')
+        storage.unsetOffset(key ?? null);
+      else callMethod(object, 'offsetUnset', [key ?? null], rt().row);
     },
   };
 }
@@ -607,7 +610,28 @@ export function assignReference(target: Expr, source: Expr): Value {
   return ref.v;
 }
 
-export function destructure(target: Extract<Expr, { k: 'list' }>, value: Value): void {
+export function destructureAssignment(target: Extract<Expr, { k: 'list' }>, expression: Expr): Value {
+  const runtime = rt();
+  if (!hasReferenceItem(target)) return destructure(target, ev(expression));
+  if (foreachSubjectWritable(expression)) {
+    const source = nestedPlace(placeOf(expression, 'write', true), 'write');
+    return destructure(target, source.get('nested') ?? null, source);
+  }
+  const call = expression.k === 'call' || expression.k === 'mcall' || expression.k === 'scall';
+  runtime.lastReturnRef = undefined;
+  const value = ev(expression);
+  const returned = call ? runtime.lastReturnRef : undefined;
+  runtime.lastReturnRef = undefined;
+  if (call && !returned) notice('Attempting to set reference to non referenceable value');
+  return destructure(target, value, returned ? new RefPlace(returned) : undefined);
+}
+
+export function destructure(target: Extract<Expr, { k: 'list' }>, value: Value, source?: Place): Value {
+  if (hasReferenceItem(target) && (value instanceof PhpArray || (source && (value === null || value === false)))) {
+    const place = source ?? new RefPlace(Ref.temporary(share(value)));
+    value = writableContainer(place, value === false ? null : value);
+  }
+  rt().frame.temporaries.push(value);
   let position = 0n;
   for (const item of target.items) {
     if (item === undefined) {
@@ -615,24 +639,14 @@ export function destructure(target: Extract<Expr, { k: 'list' }>, value: Value):
       continue;
     }
     const key = item.key === undefined ? position++ : toKey(ev(item.key));
-    destructureItem(item, value, key);
+    destructureItem(item, value, key, source !== undefined);
   }
+  return value;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function destructureItem(item: ListItem, value: Value, key: Key): void {
+function destructureItem(item: ListItem, value: Value, key: Key, writable: boolean): void {
   if (item.byRef) {
-    if (!(value instanceof PhpArray)) {
-      if (value === null) throwError('Error', 'Cannot assign reference to non referenceable value');
-      throwError(
-        'Error',
-        typeof value === 'string'
-          ? 'Cannot create references to/from string offsets'
-          : 'Cannot use a scalar value as an array'
-      );
-    }
-    const ref = new ElementPlace(value, key).ref();
-    bindRef(item.target, ref);
+    bindRef(item.target, destructuredReference(value, key, writable));
     return;
   }
   let element: Value;
@@ -644,8 +658,19 @@ function destructureItem(item: ListItem, value: Value, key: Key): void {
     if (value !== null) warn(`Cannot use ${debugType(value)} as array`);
     element = null;
   }
-  if (item.target.k === 'list') destructure(item.target, element);
-  else placeOf(item.target).set(share(element));
+  if (item.target.k === 'list') {
+    const source = value instanceof PhpArray ? new ElementPlace(value, key) : undefined;
+    destructure(item.target, element, source);
+  } else placeOf(item.target).set(share(element));
+}
+
+function destructuredReference(value: Value, key: Key, writable: boolean): Ref {
+  if (value instanceof PhpArray) return new ElementPlace(value, key).ref();
+  if (value instanceof PhpObject) return arrayAccessPlace(value, key).ref();
+  if (typeof value === 'string') throwError('Error', 'Cannot create references to/from string offsets');
+  if (writable && value !== null) throwError('Error', 'Cannot use a scalar value as an array');
+  if (value !== null) warn(`Cannot use ${debugType(value)} as array`);
+  return Ref.temporary(null);
 }
 
 export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
@@ -907,7 +932,7 @@ export function issetOffset(base: Value, index: Value): boolean {
     const position = stringOffset(base, index, 'isset');
     return position !== undefined && position >= 0;
   }
-  return base instanceof PhpObject && issetArrayAccess(base, index);
+  return base instanceof PhpObject && !base.isResource && issetArrayAccess(base, index);
 }
 
 function issetArrayAccess(object: PhpObject, index: Value): boolean {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 576 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 583 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
@@ -231,7 +231,6 @@ function functionNameFor(target: CallTarget): string {
   return target.method ? `${target.method.scope.name}::${target.method.name}` : target.fn.name;
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 // code-gauge-allow functionNcss 48 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>, discardResult = false): Chain {
   const runtime = rt();
@@ -239,6 +238,7 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>, discardRe
   const deferred = isCompiledVariable(e.obj) && typeof member !== 'string';
   const earlyObject = !deferred || e.nullsafe ? evChain(e.obj) : undefined;
   if (earlyObject === SHORT || (e.nullsafe && earlyObject === null)) return SHORT;
+  if (!deferred && earlyObject instanceof PhpObject) runtime.frame.temporaries.push(earlyObject);
   const readName = typeof member === 'string' ? undefined : prepareOperand(member);
   const object = deferred ? ev(e.obj) : (earlyObject ?? null);
   const methodName = readName ? dynamicMethodName(readName()) : (member as string);
@@ -660,7 +660,7 @@ function magicTarget(receiver: PhpObject | undefined, calledClass: PhpClass, met
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function staticCallable(
   className: string,
   methodName: string,
@@ -690,15 +690,11 @@ function staticCallable(
   if (!method || !canCall(method, scope)) {
     const magic = cls.findMethod('__callstatic');
     if (magic) return magicTarget(undefined, cls, magic, methodName);
-    if (!method)
-      throw new CallableFailure(
-        `Call to undefined method ${cls.name}::${methodName}()`,
-        `class ${cls.name} does not have a method "${methodName}"`
-      );
-    throw new CallableFailure(
-      `Call to ${method.visibility} method ${method.scope.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`,
-      `cannot access ${method.visibility} method ${cls.name}::${method.name}()`
-    );
+    throw inaccessibleStaticMethod(cls, methodName, method, scope);
+  }
+  if (method.isAbstract) {
+    const description = `abstract method ${method.scope.name}::${method.name}()`;
+    throw new CallableFailure(`Cannot call ${description}`, `cannot call ${description}`);
   }
   if (!method.isStatic) {
     const thisObj = frame.thisObj && frame.thisObj.cls.isSubclassOf(cls) ? frame.thisObj : undefined;
@@ -710,6 +706,23 @@ function staticCallable(
     return { fn: method.fn, thisObj, scope: method.scope, staticClass: thisObj.cls, method };
   }
   return { fn: method.fn, scope: method.scope, staticClass: cls, method };
+}
+
+function inaccessibleStaticMethod(
+  cls: PhpClass,
+  methodName: string,
+  method: Method | undefined,
+  scope: PhpClass | undefined
+): CallableFailure {
+  if (!method)
+    return new CallableFailure(
+      `Call to undefined method ${cls.name}::${methodName}()`,
+      `class ${cls.name} does not have a method "${methodName}"`
+    );
+  return new CallableFailure(
+    `Call to ${method.visibility} method ${method.scope.name}::${method.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`,
+    `cannot access ${method.visibility} method ${cls.name}::${method.name}()`
+  );
 }
 
 function callableClass(name: string): PhpClass {

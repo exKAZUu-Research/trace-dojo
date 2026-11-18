@@ -5,14 +5,13 @@ import {
   assignExpression,
   assignReference,
   compoundAssign,
-  destructure,
+  destructureAssignment,
   incDec,
   issetOffset,
   nativeIteratorSlot,
   placeOf,
 } from './assignment';
 import type { Arg, ClassDecl, ClassRef, Expr } from './ast';
-import { hasReferenceItem } from './astAnalysis';
 import builtinNames from './builtinNames.json';
 import { lower } from './bytes';
 import {
@@ -235,15 +234,7 @@ export function evChain(e: Expr, discardResult = false): Chain {
       });
     }
     case 'assign': {
-      if (e.target.k === 'list') {
-        const value = ev(e.value);
-        runtime.frame.temporaries.push(value);
-        if (['call', 'mcall', 'scall'].includes(e.value.k) && hasReferenceItem(e.target)) {
-          notice('Attempting to set reference to non referenceable value');
-        }
-        destructure(e.target, value);
-        return value;
-      }
+      if (e.target.k === 'list') return destructureAssignment(e.target, e.value);
       return assignExpression(e.target, e.value);
     }
     case 'assignRef': {
@@ -318,14 +309,15 @@ export function evChain(e: Expr, discardResult = false): Chain {
       const value = ev(e.e);
       if (e.cls.k === 'expr') {
         const right = ev(e.cls.e);
-        if (right instanceof PhpObject) return value instanceof PhpObject && value.cls.isSubclassOf(right.cls);
+        if (right instanceof PhpObject && !right.isResource)
+          return value instanceof PhpObject && !value.isResource && value.cls.isSubclassOf(right.cls);
         if (typeof right === 'string') {
           const cls = findClass(right);
-          return value instanceof PhpObject && cls !== undefined && value.cls.isSubclassOf(cls);
+          return value instanceof PhpObject && !value.isResource && cls !== undefined && value.cls.isSubclassOf(cls);
         }
         throwError('Error', 'Class name must be a valid object or a string');
       }
-      if (!(value instanceof PhpObject)) return false;
+      if (!(value instanceof PhpObject) || value.isResource) return false;
       if (e.cls.k === 'named') {
         const cls = findClass(e.cls.name);
         return cls !== undefined && value.cls.isSubclassOf(cls);
@@ -478,14 +470,17 @@ function globalOffsetRead(key: Value, row: number, mode: ReadMode): Value {
   return null;
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function preparePropertyRead(e: Extract<Expr, { k: 'prop' }>, mode: ReadMode): ReadPlan {
   let receiver = prepareRead(e.obj, mode === 'read' ? 'read' : 'coalesce');
   if (receiver === SHORT) return SHORT;
   if (e.nullsafe) {
     const object = receiver();
     if (object === SHORT || object === null) return SHORT;
-    if (!isCompiledVariable(e.obj)) receiver = () => object;
+    if (!isCompiledVariable(e.obj)) {
+      if (object instanceof PhpObject) rt().frame.temporaries.push(object);
+      receiver = () => object;
+    }
   }
   const name = readMemberOperand(e.name);
   return () => {
@@ -536,7 +531,7 @@ export function readIndex(base: Value, index: Value, mode: OffsetRead = 'read'):
   const quiet = mode !== 'read';
   if (base instanceof PhpArray) return readElement(base, toKey(index, mode === 'isset' ? 'isset' : 'access'), quiet);
   if (typeof base === 'string') return readStringOffset(base, index, mode);
-  if (base instanceof PhpObject) {
+  if (base instanceof PhpObject && !base.isResource) {
     if (base.cls.findMethod('offsetget') && isArrayAccess(base)) {
       if (quiet && !toBool(callMethod(base, 'offsetExists', [index], rt().row))) return null;
       return callMethod(base, 'offsetGet', [index], rt().row);
@@ -717,20 +712,24 @@ function spreadInto(array: PhpArray, value: Value): void {
     for (const [key, slot] of value.map) {
       const item = copyValueSlot(slot);
       if (typeof key === 'string') array.setSlot(key, item);
-      else if (!array.append(item))
-        throwError('Error', 'Cannot add element to the array as the next element is already occupied');
+      else appendSpreadValue(array, item);
     }
     return;
   }
   if (value instanceof PhpObject && value.cls.isSubclassOf(rt().classes.get('traversable') as PhpClass)) {
     for (const [key, item] of iterate(value)) {
       if (typeof key === 'string') array.set(key, share(item));
-      else if (typeof key === 'bigint') array.append(share(item));
+      else if (typeof key === 'bigint') appendSpreadValue(array, share(item));
       else throwError('Error', 'Keys must be of type int|string during array unpacking');
     }
     return;
   }
   throwError('TypeError', `Only arrays and Traversables can be unpacked, ${valueName(value)} given`);
+}
+
+function appendSpreadValue(array: PhpArray, value: Value | Ref): void {
+  if (!array.append(value))
+    throwError('Error', 'Cannot add element to the array as the next element is already occupied');
 }
 
 /** Iterates over an array or a Traversable object, as `foreach` would. */
@@ -873,7 +872,7 @@ export function resolveClassRef(ref: ClassRef): PhpClass {
     }
     case 'expr': {
       const value = ev(ref.e);
-      if (value instanceof PhpObject) return value.cls;
+      if (value instanceof PhpObject && !value.isResource) return value.cls;
       if (typeof value === 'string') return requireClass(value);
       throwError('Error', 'Class name must be a valid object or a string');
     }
@@ -902,7 +901,8 @@ function resolveClassName(ref: ClassRef): string {
   if (ref.k === 'named') return ref.name;
   if (ref.k === 'expr') {
     const value = ev(ref.e);
-    if (!(value instanceof PhpObject)) throwError('TypeError', `Cannot use "::class" on ${valueName(value)}`);
+    if (!(value instanceof PhpObject) || value.isResource)
+      throwError('TypeError', `Cannot use "::class" on ${valueName(value)}`);
     return value.cls.fullName;
   }
   requireClassScope(rt().frame.scope, ref.k, 'className');
@@ -1094,7 +1094,7 @@ function compareForOrder(left: Value, right: Value): number {
   return compare(left, right);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionCognitiveComplexity 19 -- One case per expression kind, as PHP evaluates each kind differently.
 // code-gauge-allow functionNcss 33 -- One case per expression kind, as PHP evaluates each kind differently.
 export function cast(type: string, value: Value): Value {
   switch (type) {
@@ -1113,12 +1113,12 @@ export function cast(type: string, value: Value): Value {
     case 'array': {
       if (value instanceof PhpArray) return value;
       if (value === null) return new PhpArray();
-      if (value instanceof PhpObject) return objectToArrayCast(value);
+      if (value instanceof PhpObject && !value.isResource) return objectToArrayCast(value);
       if (Number.isNaN(value)) warn('unexpected NAN value was coerced to array');
       return PhpArray.list([value]);
     }
     case 'object': {
-      if (value instanceof PhpObject) return value;
+      if (value instanceof PhpObject && !value.isResource) return value;
       const object = createObject(rt().classes.get('stdclass') as PhpClass);
       if (value instanceof PhpArray) {
         for (const [key, slot] of value.map) {

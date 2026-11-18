@@ -198,7 +198,10 @@ class ReadValidator {
       }
       case 'foreach': {
         const subject = node.subject as Expr;
-        this.visit(subject, Boolean(node.byRef) && foreachSubjectWritable(subject));
+        this.visit(
+          subject,
+          foreachReferences(node.value as Expr, Boolean(node.byRef)) && foreachSubjectWritable(subject)
+        );
         this.visit(node.key, true);
         this.visit(node.value, true);
         this.visit(node.body, false);
@@ -322,6 +325,10 @@ export function foreachSubjectWritable(expression: Expr): boolean {
   while (base.k === 'idx' || base.k === 'prop') base = base.k === 'idx' ? base.base : base.obj;
   if (base === expression && (base.k === 'call' || base.k === 'mcall' || base.k === 'scall')) return false;
   return ['var', 'varvar', 'sprop', 'call', 'mcall', 'scall'].includes(base.k);
+}
+
+export function foreachReferences(target: Expr, byRef: boolean): boolean {
+  return byRef || (target.k === 'list' && hasReferenceItem(target));
 }
 
 export function canBindClass(decl: ClassDecl, parentIsBound: (name: string) => boolean): boolean {

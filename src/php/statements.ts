@@ -1,9 +1,9 @@
-// code-gauge-allow-file fileNcss 548 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 553 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
 import type { Expr, FunctionDecl, Program, Stmt } from './ast';
-import { nestedBodies } from './astAnalysis';
+import { foreachReferences, nestedBodies } from './astAnalysis';
 import { lower } from './bytes';
 import { callMethod } from './callables';
 import { asInternal, invoke, setBodyRunner, setDefaultEvaluator } from './calls';
@@ -23,14 +23,14 @@ import { E_DEPRECATED, E_WARNING, emitError, setPrevious, throwError, warn } fro
 import { collectBeforeAllocation, setDestructor } from './garbage';
 import { consumeExpression, ev, evBool, evQuiet, evReturn, prepareOperand } from './interp';
 import { looseEquals, setObjectToString, toStr } from './operators';
-import { ElementPlace, share, VarPlace, writableContainer } from './places';
+import { ElementPlace, RefPlace, share, VarPlace, writableContainer } from './places';
 import { FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
 import { type Callable, type Key, PhpArray, PhpClass, PhpObject, Ref, type UserFunction, type Value } from './values';
 
 type Completion =
   | undefined
   | { t: 'break' | 'continue'; depth: number }
-  | { t: 'return' }
+  | { t: 'return'; slot: Value | Ref; row: number }
   | { t: 'goto'; label: string };
 
 // Program --------------------------------------------------------------------------------------------------------------
@@ -212,9 +212,10 @@ function execStmt(statement: Stmt, seek?: string): Completion {
       }
       case 'return': {
         const value = statement.e ? evReturn(statement.e) : null;
-        frame.returning = value instanceof Ref ? value : share(value);
-        frame.returnRow = statement.e?.row ?? statement.row;
-        return { t: 'return' };
+        const slot = value instanceof Ref ? value : share(value);
+        const row = statement.e?.row ?? statement.row;
+        frame.returning = slot;
+        return { t: 'return', slot, row };
       }
       case 'block': {
         return execList(statement.body);
@@ -409,7 +410,7 @@ function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Co
 function runFinally(body: Stmt[], seek: string | undefined, completion: Completion, pending?: PhpThrow): Completion {
   const runtime = rt();
   const frame = runtime.frame;
-  const returning = completion?.t === 'return' ? frame.returning : undefined;
+  const returning = completion?.t === 'return' ? completion.slot : undefined;
   if (returning instanceof Ref) runtime.holdTemporaryReference(returning);
   else if (returning !== undefined) frame.temporaries.push(returning);
   if (pending) frame.temporaries.push(pending.object);
@@ -423,6 +424,7 @@ function runFinally(body: Stmt[], seek: string | undefined, completion: Completi
   }
   if (result) return result;
   if (pending) throw pending;
+  if (completion?.t === 'return') frame.returning = completion.slot;
   return completion;
 }
 
@@ -462,10 +464,10 @@ function catches(object: PhpObject, name: string): boolean {
 function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completion {
   const runtime = rt();
   const frame = runtime.frame;
-  if (statement.byRef) {
+  if (foreachReferences(statement.value, statement.byRef)) {
     const place = foreachSubjectPlace(statement.subject);
     const container = place.get();
-    if (container instanceof PhpObject) return foreachObject(statement, container);
+    if (container instanceof PhpObject && !container.isResource) return foreachObject(statement, container, true);
     if (!(container instanceof PhpArray)) {
       warn(`foreach() argument must be of type array|object, ${valueName(container ?? null)} given`);
       return undefined;
@@ -473,7 +475,7 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
     return foreachArrayByRef(statement, writableContainer(place, container) as PhpArray);
   }
   const subject = ev(statement.subject);
-  if (subject instanceof PhpObject) return foreachObject(statement, subject);
+  if (subject instanceof PhpObject && !subject.isResource) return foreachObject(statement, subject);
   if (!(subject instanceof PhpArray)) {
     warn(`foreach() argument must be of type array|object, ${valueName(subject)} given`);
     return undefined;
@@ -526,7 +528,8 @@ function storesAnswer(value: Value): boolean {
 }
 
 function bindForeachRef(target: Expr, ref: Ref): void {
-  if (target.k === 'var') new VarPlace(rt().frame, target.name).bind(ref);
+  if (target.k === 'list') destructure(target, ref.v, new RefPlace(ref));
+  else if (target.k === 'var') new VarPlace(rt().frame, target.name).bind(ref);
   else bindRef(target, ref);
 }
 
@@ -535,16 +538,16 @@ const FOREACH_ITERATOR = new PhpClass('InternalIterator');
 
 // code-gauge-allow functionCognitiveComplexity 27 -- One case per statement kind, as PHP runs each kind differently.
 // code-gauge-allow functionNcss 44 -- One case per statement kind, as PHP runs each kind differently.
-function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpObject): Completion {
+function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpObject, byRef = false): Completion {
   const runtime = rt();
   const iterator = iteratorOf(object);
   // PHP's own array iterators let foreach change their elements by reference.
   const storage = iterator?.internal as { writable?: () => PhpArray } | undefined;
-  if (iterator && statement.byRef && typeof storage?.writable === 'function') {
+  if (iterator && byRef && typeof storage?.writable === 'function') {
     return foreachArrayByRef(statement, storage.writable());
   }
   if (iterator) {
-    if (statement.byRef) throwError('Error', 'An iterator cannot be used with foreach by reference');
+    if (byRef) throwError('Error', 'An iterator cannot be used with foreach by reference');
     // PHP's engine wraps the iterator in an iterator object of its own, which takes an object handle while the loop
     // runs and releases the iterator before itself.
     const handle = runtime.newObject(FOREACH_ITERATOR);
@@ -564,7 +567,7 @@ function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpOb
   const scope = runtime.frame.scope;
   for (const key of visiblePropertyKeys(object, scope, true)) {
     const name = propNameOf(key);
-    if (statement.byRef) {
+    if (byRef) {
       const ref = propRef(object, name, scope, 'foreach');
       bindForeachRef(statement.value, ref);
       if (statement.key) assignTo(statement.key, name);
@@ -585,11 +588,16 @@ export function iteratorOf(object: PhpObject): PhpObject | undefined {
   const iteratorClass = runtime.classes.get('iterator') as PhpClass;
   const aggregate = runtime.classes.get('iteratoraggregate') as PhpClass;
   let current = object;
-  for (let depth = 0; depth < 32; depth++) {
+  for (;;) {
+    runtime.spend();
     if (current.cls.isSubclassOf(iteratorClass)) return current;
-    if (!current.cls.isSubclassOf(aggregate)) return depth === 0 ? undefined : current;
+    if (!current.cls.isSubclassOf(aggregate)) return undefined;
     const next = callMethod(current, 'getIterator', []);
-    if (!(next instanceof PhpObject) || !next.cls.isSubclassOf(runtime.classes.get('traversable') as PhpClass)) {
+    if (
+      !(next instanceof PhpObject) ||
+      next === current ||
+      !next.cls.isSubclassOf(runtime.classes.get('traversable') as PhpClass)
+    ) {
       throwError(
         'Exception',
         `Objects returned by ${current.cls.name}::getIterator() must be traversable or implement interface Iterator`
@@ -597,7 +605,6 @@ export function iteratorOf(object: PhpObject): PhpObject | undefined {
     }
     current = next;
   }
-  return current;
 }
 
 function runBody(decl: FunctionDecl, frame: Frame): Value {
@@ -612,10 +619,8 @@ function runBody(decl: FunctionDecl, frame: Frame): Value {
   } else {
     const completion = execList(decl.body);
     if (completion?.t === 'goto') throw new Error(`Unresolved goto ${completion.label}`);
-    if (completion?.t !== 'return') {
-      frame.returning = undefined;
-      frame.returnRow = undefined;
-    }
+    frame.returning = completion?.t === 'return' ? completion.slot : undefined;
+    frame.returnRow = completion?.t === 'return' ? completion.row : undefined;
   }
   const result = frame.returning;
   return result instanceof Ref ? result.v : (result ?? null);

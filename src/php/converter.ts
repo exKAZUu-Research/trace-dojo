@@ -42,7 +42,8 @@ export class Converter extends DeclarationConverter {
   constructor(
     source: string,
     atomicRows: ReadonlySet<number>,
-    private readonly ignoredPrefix: number
+    private readonly ignoredPrefix: number,
+    private readonly preserveSyntax = false
   ) {
     super(source, atomicRows);
   }
@@ -1141,6 +1142,7 @@ export class Converter extends DeclarationConverter {
     if (node.type === 'name' && word === 'default') this.error(node, 'syntax error, unexpected token "default"');
     if (word === 'true' || word === 'false') return { k: 'lit', v: word === 'true', row };
     if (word === 'null') return { k: 'lit', v: null, row };
+    if (this.preserveSyntax) return { k: 'const', name: { name: raw }, row };
     if (raw === '__LINE__') return { k: 'lit', v: BigInt(row + 1), row };
     if (raw === '__FILE__') return { k: 'lit', v: '/main.php', row };
     if (raw === '__DIR__') return { k: 'lit', v: '/', row };
@@ -1153,6 +1155,10 @@ export class Converter extends DeclarationConverter {
   private classConstantExpression(node: Node, row: number): Expr {
     const [scope, nameNode] = node.namedChildren.filter((child) => child.type !== 'comment');
     const nameExpression = node.childForFieldName('name_expression');
+    if (this.preserveSyntax) {
+      const name = nameExpression ? this.expr(nameExpression) : this.nameText(nameNode);
+      return { k: 'cconst', cls: this.classRef(scope), name, row };
+    }
     if (nameExpression) return this.bracedClassConstant(scope, nameExpression);
     const name = this.nameText(nameNode);
     const className = lower(name) === 'class' ? true : undefined;
@@ -1184,35 +1190,14 @@ export class Converter extends DeclarationConverter {
     return { k: 'cconst', cls, name: typeof literal === 'string' ? literal : name, row: name.row };
   }
 
-  // code-gauge-allow functionNcss 36 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private functionCall(node: Node): Expr {
     const row = node.startPosition.row;
     const fnNode = node.childForFieldName('function') as Node;
     const argumentsNode = node.childForFieldName('arguments') as Node;
     if (fnNode.type === 'name') {
       const word = lower(fnNode.text);
-      if (word === 'isset' || word === 'empty') {
-        const items = argumentsNode.namedChildren
-          .filter((child) => child.type === 'argument')
-          .map((child) => {
-            const inner = child.namedChildren.at(-1) as Node;
-            return this.expr(inner);
-          });
-        if (word === 'empty') {
-          if (items.length !== 1) this.error(node, 'empty() には1つの式を書いてください。');
-          return { k: 'empty', e: items[0], row };
-        }
-        if (items.length === 0) this.error(node, 'isset() には式を書いてください。');
-        for (const item of items) {
-          if (!['var', 'varvar', 'idx', 'prop', 'sprop'].includes(item.k)) {
-            this.error(
-              node,
-              'Cannot use isset() on the result of an expression (you can use "null !== expression" instead)'
-            );
-          }
-        }
-        return { k: 'isset', items, row };
-      }
+      if (word === 'isset' || word === 'empty') return this.quietCheck(node, argumentsNode, word, row);
       if (word === 'eval') this.unsupported(node, 'eval');
       if (word === 'die' || word === 'exit') {
         const { args, fcc } = this.args(argumentsNode);
@@ -1222,14 +1207,65 @@ export class Converter extends DeclarationConverter {
     }
     const { args, fcc } = this.args(argumentsNode);
     if (fnNode.type === 'name' || fnNode.type === 'qualified_name' || fnNode.type === 'relative_name') {
-      const name = this.resolveFunctionName(this.nameText(fnNode));
-      // PHP passes `assert` the source of its assertion, as code it writes back from the syntax tree.
-      if (lower(name.fallback ?? name.name) === 'assert' && args.length === 1 && !args[0].spread && !args[0].name) {
-        args.push({ e: { k: 'lit', v: `assert(${exportExpr(args[0].e)})`, row }, spread: false });
+      const raw = this.nameText(fnNode);
+      if (this.preserveSyntax) return { k: 'call', fn: { name: raw }, args, fcc, row };
+      const name = this.resolveFunctionName(raw);
+      if (lower(name.fallback ?? name.name) === 'assert') {
+        this.addAssertionDescription(argumentsNode, args, row);
       }
       return { k: 'call', fn: name, args, fcc, row };
     }
     return { k: 'call', fn: this.expr(fnNode), args, fcc, row };
+  }
+
+  private quietCheck(node: Node, argumentsNode: Node, word: 'isset' | 'empty', row: number): Expr {
+    const items = argumentsNode.namedChildren
+      .filter((child) => child.type === 'argument')
+      .map((child) => {
+        const inner = child.namedChildren.at(-1) as Node;
+        return this.expr(inner);
+      });
+    if (word === 'empty') {
+      if (items.length !== 1) this.error(node, 'empty() には1つの式を書いてください。');
+      return { k: 'empty', e: items[0], row };
+    }
+    if (items.length === 0) this.error(node, 'isset() には式を書いてください。');
+    for (const item of items) {
+      if (!['var', 'varvar', 'idx', 'prop', 'sprop'].includes(item.k)) {
+        this.error(
+          node,
+          'Cannot use isset() on the result of an expression (you can use "null !== expression" instead)'
+        );
+      }
+    }
+    return { k: 'isset', items, row };
+  }
+
+  private addAssertionDescription(argumentsNode: Node, args: Arg[], row: number): void {
+    if (args.length !== 1 || args[0].spread || (args[0].name && args[0].name !== 'assertion')) return;
+    const argument = argumentsNode.namedChildren.find((child) => child.type === 'argument');
+    const expression = argument?.namedChildren.findLast((child) => child.type !== 'comment');
+    if (!expression) return;
+    const label = args[0].name ? 'assertion: ' : '';
+    const name = args[0].name ? 'description' : undefined;
+    const value = `assert(${label}${this.renderAssertionExpression(expression)})`;
+    args.push({ e: { k: 'lit', v: value, row }, spread: false, name });
+  }
+
+  private renderAssertionExpression(node: Node): string {
+    // Use separate converter state so skipped operands cannot add notices or declarations to the program.
+    const syntax = new Converter(this.source, new Set(), this.ignoredPrefix, true);
+    try {
+      const rendered = exportExpr(syntax.expr(node));
+      return rendered === '...' ? enc(node.text) : rendered;
+    } catch (error) {
+      if (!(error instanceof CompileError)) throw error;
+      return enc(node.text);
+    }
+  }
+
+  protected override resolveClassName(raw: string): string {
+    return this.preserveSyntax ? raw : super.resolveClassName(raw);
   }
 
   // code-gauge-allow functionCognitiveComplexity 29 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
@@ -1318,7 +1354,7 @@ export class Converter extends DeclarationConverter {
     if (invalid) this.error(invalid, `syntax error, unexpected token "${invalid.text}"`);
     const l = this.expr(leftNode);
     if (op === 'instanceof') return this.instanceOf(l, rightNode, row);
-    if (op === '&&' || op === 'and' || op === '||' || op === 'or') {
+    if (!this.preserveSyntax && (op === '&&' || op === 'and' || op === '||' || op === 'or')) {
       return this.shortCircuit(op, l, rightNode, row);
     }
     const r = this.expr(rightNode);
@@ -1328,11 +1364,13 @@ export class Converter extends DeclarationConverter {
       return { k: 'pipe', l, r, row };
     }
     const expression = { k: 'bin' as const, op: op === '<>' ? '!=' : op, l, r, row };
-    return this.initializerContext?.kind === 'deferred' ? expression : this.compileBinary(expression);
+    return this.preserveSyntax || this.initializerContext?.kind === 'deferred'
+      ? expression
+      : this.compileBinary(expression);
   }
 
   private instanceOf(l: Expr, right: Node, row: number): Expr {
-    if (this.compiledType(l) !== undefined) return { k: 'lit', v: false, row };
+    if (!this.preserveSyntax && this.compiledType(l) !== undefined) return { k: 'lit', v: false, row };
     const cls = ['name', 'qualified_name', 'relative_name'].includes(right.type)
       ? this.classRef(right)
       : { k: 'expr' as const, e: this.expr(right) };

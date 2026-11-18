@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 898 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 921 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { withCleanupExceptions, withPendingException } from './errors';
 import { type Frame, PhpThrow, type Runtime } from './runtime';
@@ -152,7 +152,7 @@ export function releaseDropped(runtime: Runtime, dropped: unknown[]): void {
   let roots: Set<unknown> | undefined;
   for (const value of candidates) {
     if (value instanceof PhpObject) {
-      if (value.isResource || runtime.objects.get(value.id) !== value) continue;
+      if (value.isResource || runtime.collectingObjects.has(value) || runtime.objects.get(value.id) !== value) continue;
     } else if (value instanceof PhpArray) {
       if (value.uncollectable) continue;
       roots ??= ownershipRoots(runtime);
@@ -183,11 +183,15 @@ export function releaseDropped(runtime: Runtime, dropped: unknown[]): void {
 }
 
 // code-gauge-allow functionNcss 53 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function releaseDroppedNow(runtime: Runtime, dropped: unknown[]): void {
   if (runtime.shuttingDown || runtime.exhausted) return;
   dropped = dropped.filter(
-    (value) => !(value instanceof PhpObject && activeReleaseObjects.get(value)?.hasVisited(value))
+    (value) =>
+      !(
+        value instanceof PhpObject &&
+        (runtime.collectingObjects.has(value) || activeReleaseObjects.get(value)?.hasVisited(value))
+      )
   );
   if (!dropped.some((value) => mayHoldObject(value, runtime))) return;
   const roots = ownershipRoots(runtime);
@@ -868,6 +872,7 @@ function referencedGarbage(graph: CollectionGraph, objects: PhpObject[]): Set<Ph
 }
 
 /** Counts the holders of each reachable object: variables, elements, and properties that refer to it. */
+// code-gauge-allow functionNcss 49 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function holderCounts(runtime: Runtime): Map<PhpObject, number> {
   const counts = new Map<PhpObject, number>();
   const visitedArrays = new Set<PhpArray>();
@@ -880,14 +885,7 @@ export function holderCounts(runtime: Runtime): Map<PhpObject, number> {
     if (value instanceof PhpObject) counts.set(value, (counts.get(value) ?? 0) + 1);
     if (typeof value === 'object' && value !== null) pending.push(value);
   };
-  for (const frame of runtime.frames) {
-    for (const ref of frame.vars.values()) count(ref);
-    for (const value of [...frame.temporaries, ...frame.argumentHolders]) count(value);
-  }
-  for (const cls of runtime.classes.values()) for (const { ref } of cls.staticProps.values()) count(ref);
-  for (const fn of runtime.functions.values())
-    if (fn.kind === 'user') for (const ref of fn.statics.values()) count(ref);
-  for (const value of runtime.held) count(value);
+  for (const value of ownershipRootSlots(runtime)) count(value);
   while (pending.length > 0) {
     const item = pending.pop();
     if (item instanceof Ref) {
@@ -912,6 +910,67 @@ export function holderCounts(runtime: Runtime): Map<PhpObject, number> {
     }
   }
   return counts;
+}
+
+/** Releases a unique global, retaining the index when no other object's ownership can have changed. */
+export function releaseGlobalObject(runtime: Runtime, object: PhpObject): boolean {
+  if (object.internal !== undefined || objectHasOwnedValues(runtime, object)) {
+    collectGarbage(runtime);
+    return false;
+  }
+  if (!object.destructed && object.cls.findMethod('__destruct')) {
+    const changed = runGlobalDestructor(runtime, object);
+    if (changed) {
+      collectGarbage(runtime);
+      return false;
+    }
+  }
+  runtime.freeObject(object);
+  return true;
+}
+
+function objectHasOwnedValues(runtime: Runtime, object: PhpObject): boolean {
+  for (const property of object.props.values()) {
+    runtime.spend();
+    if (property instanceof PhpObject || property instanceof PhpArray || property instanceof Ref) return true;
+  }
+  return false;
+}
+
+function runGlobalDestructor(runtime: Runtime, object: PhpObject): boolean {
+  const roots = callbackRoots(runtime);
+  const constants = runtime.rootConstants.size;
+  const releases = runtime.durableReleaseVersion;
+  let newOwners = false;
+  const stop = observeOwnership(() => {
+    newOwners = true;
+  });
+  object.destructed = true;
+  runtime.destructibles--;
+  runtime.collectingObjects.add(object);
+  try {
+    destruct(object);
+  } finally {
+    stop();
+    runtime.collectingObjects.delete(object);
+  }
+  const after = callbackRoots(runtime);
+  return (
+    newOwners ||
+    runtime.durableReleaseVersion !== releases ||
+    runtime.rootConstants.size !== constants ||
+    roots.length !== after.length ||
+    roots.some((root, index) => root !== after[index])
+  );
+}
+
+function callbackRoots(runtime: Runtime): unknown[] {
+  return [
+    runtime.exceptionHandler,
+    runtime.assertionCallback,
+    ...runtime.replacedExceptionHandlers,
+    ...runtime.errorHandlers.map(({ handler }) => handler),
+  ];
 }
 
 const objectFreeArrays = new WeakMap<PhpArray, number>();
@@ -952,6 +1011,14 @@ export function arrayIsShared(runtime: Runtime, target: PhpArray): boolean {
 }
 
 function ownershipRoots(runtime: Runtime): Set<unknown> {
+  return new Set(
+    ownershipRootSlots(runtime).filter(
+      (value) => value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject
+    )
+  );
+}
+
+function ownershipRootSlots(runtime: Runtime): unknown[] {
   const roots: unknown[] = [];
   for (const frame of runtime.frames) pushFrame(frame, roots);
   for (const fn of runtime.userFunctions) appendValues(roots, fn.statics.values());
@@ -961,18 +1028,9 @@ function ownershipRoots(runtime: Runtime): Set<unknown> {
     for (const method of cls.methods.values())
       if (method.fn.kind === 'user') appendValues(roots, [...method.fn.statics.values()]);
   }
-  roots.push(
-    ...runtime.rootConstants,
-    ...runtime.held,
-    runtime.exceptionHandler,
-    ...runtime.replacedExceptionHandlers,
-    runtime.thrown
-  );
+  roots.push(...runtime.rootConstants, ...runtime.held, ...callbackRoots(runtime), runtime.thrown);
   for (const held of runtime.nativeHeld) appendValues(roots, [...held]);
-  for (const { handler } of runtime.errorHandlers) roots.push(handler);
-  return new Set(
-    roots.filter((value) => value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject)
-  );
+  return roots;
 }
 
 // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.

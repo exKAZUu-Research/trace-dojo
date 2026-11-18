@@ -188,7 +188,8 @@ function implode({ args, directOverload }: NativeContext): string {
   }
   let result = '';
   let first = true;
-  for (const item of (array as PhpArray).values()) {
+  for (const item of (array as PhpArray).iterValues()) {
+    rt().spend();
     if (!first) result += separator as string;
     first = false;
     result += toStr(item);
@@ -998,7 +999,7 @@ defineFunction(
 );
 defineFunction('vfprintf(resource $stream, string $format, array $values): int', ({ args }) => {
   const stream = args[0] as PhpObject;
-  const text = formatPrintf(s(args[1]), (args[2] as PhpArray).values(), true, (output) => writeStream(stream, output));
+  const text = formatPrintf(s(args[1]), args[2] as PhpArray, (output) => writeStream(stream, output));
   return BigInt(text.length);
 });
 defineFunction('metaphone(string $string, int $max_phonemes = 0): string', ({ args }) => {

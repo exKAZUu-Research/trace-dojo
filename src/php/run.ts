@@ -8,7 +8,7 @@ import { callValue } from './callables';
 import { asInternal, type CallRecord, HostStackExhaustion, invoke, resetCallStack } from './calls';
 import { E_DEPRECATED, emitError, throwableLocation } from './errors';
 import { throwableText, traceText } from './exceptions';
-import { holderCounts } from './garbage';
+import { holderCounts, releaseGlobalObject } from './garbage';
 import { type ParsedProgram, parsePhp } from './parse';
 import { ExitSignal, FatalError, type Frame, PhpThrow, Runtime, SCRIPT_PATH, withRuntime } from './runtime';
 import { runStatements } from './statements';
@@ -155,7 +155,7 @@ function shutdown(runtime: Runtime): string | undefined {
   });
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function destroyGlobals(runtime: Runtime): void {
   if (runtime.destructibles === 0) return;
   const order = globalOrder(runtime);
@@ -172,9 +172,10 @@ function destroyGlobals(runtime: Runtime): void {
       counts ??= holderCounts(runtime);
       if (counts.get(value) !== 1) continue;
       runtime.globalFrame.vars.delete(name);
+      ref.rc--;
       removed = true;
-      runtime.collectGarbage();
-      counts = undefined;
+      if (releaseGlobalObject(runtime, value)) counts.delete(value);
+      else counts = undefined;
     }
     if (!removed) break;
   }

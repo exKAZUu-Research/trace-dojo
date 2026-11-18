@@ -41,3 +41,9 @@ foreach (['ArrayObject', 'ArrayIterator'] as $class) {
     catch (Error $error) { echo $error->getMessage(), "\n"; }
     echo implode(',', $object->getArrayCopy()), "\n";
 }
+class RegularSortValue {
+    function __toString() { echo 'cast;'; throw new Exception('stop'); }
+}
+$values = [new RegularSortValue, 'b', 'a'];
+try { asort($values, SORT_REGULAR); } catch (Exception $error) { echo 'caught;'; }
+echo implode(',', array_keys($values)), "\n";

@@ -1,0 +1,65 @@
+array(1) {
+  [0]=>
+  &int(2)
+}
+array(1) {
+  [0]=>
+  int(1)
+}
+array(1) {
+  [0]=>
+  &int(2)
+}
+array(1) {
+  [0]=>
+  int(1)
+}
+array(1) {
+  [0]=>
+  array(1) {
+    [0]=>
+    &int(3)
+  }
+}
+array(1) {
+  [0]=>
+  array(1) {
+    [0]=>
+    int(1)
+  }
+}
+array(1) {
+  [0]=>
+  array(1) {
+    [0]=>
+    &int(3)
+  }
+}
+array(1) {
+  [0]=>
+  array(1) {
+    [0]=>
+    &int(4)
+  }
+}
+array(1) {
+  [0]=>
+  array(1) {
+    [0]=>
+    int(1)
+  }
+}
+array(1) {
+  [0]=>
+  int(1)
+}
+array(1) {
+  [0]=>
+  int(1)
+}
+NULL
+array(1) {
+  [0]=>
+  &NULL
+}
+int(6)

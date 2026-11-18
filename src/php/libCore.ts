@@ -40,7 +40,7 @@ import { formatPrintf } from './sprintf';
 import { constantKey, defineConstant as defineUserConstant } from './statements';
 import { setCallableCheck } from './types';
 import { UnsupportedFeatureError } from './unsupported';
-import { copyValueSlot, PhpArray, PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
+import { copyValueSlot, PhpArray, PhpClass, PhpObject, Ref, type Value } from './values';
 
 // Constants ------------------------------------------------------------------------------------------------------------
 
@@ -106,17 +106,17 @@ defineFunction('var_export(mixed $value, bool $return = false): ?string', ({ arg
   return null;
 });
 defineFunction('printf(string $format, mixed ...$values): int', ({ args }) => {
-  const text = formatPrintf(args[0] as string, args.slice(1), false, (output) => rt().echo(output));
+  const text = formatPrintf(args[0] as string, args.slice(1), (output) => rt().echo(output));
   return BigInt(text.length);
 });
 defineFunction('sprintf(string $format, mixed ...$values): string', ({ args }) =>
   formatPrintf(args[0] as string, args.slice(1))
 );
 defineFunction('vsprintf(string $format, array $values): string', ({ args }) =>
-  formatPrintf(args[0] as string, (args[1] as PhpArray).values(), true)
+  formatPrintf(args[0] as string, args[1] as PhpArray)
 );
 defineFunction('vprintf(string $format, array $values): int', ({ args }) => {
-  const text = formatPrintf(args[0] as string, (args[1] as PhpArray).values(), true, (output) => rt().echo(output));
+  const text = formatPrintf(args[0] as string, args[1] as PhpArray, (output) => rt().echo(output));
   return BigInt(text.length);
 });
 
@@ -386,7 +386,7 @@ defineFunction('get_class(object $object = UNKNOWN): string', ({ args }) => {
     const scope = rt().frame.scope;
     if (!scope) throwError('Error', 'get_class() without arguments must be called from within a class');
     deprecated('Calling get_class() without arguments is deprecated');
-    return scope.name;
+    return scope.fullName;
   }
   const object = args[0] as PhpObject;
   return object.cls.fullName;
@@ -405,21 +405,20 @@ defineFunction('get_parent_class(mixed $object_or_class = UNKNOWN): string|false
 defineFunction('get_called_class(): string', () => {
   const cls = rt().frame.staticClass;
   if (!cls) throwError('Error', 'get_called_class() must be called from within a class');
-  return cls.name;
+  return cls.fullName;
 });
 defineFunction('get_object_vars(object $object): array', ({ args }) => {
   const object = args[0] as PhpObject;
   const scope = rt().frame.scope;
   const array = new PhpArray();
-  const declaredKeys = new Set(object.cls.props.map((decl) => decl.key));
+  const dynamic = classesModule.snapshotDynamicProperties(object);
+  rt().nativeHeld.at(-1)?.push(dynamic, array);
   for (const decl of object.cls.props) {
-    if (decl.isStatic || !classesModule.canAccessProp(decl, scope)) continue;
+    if (!classesModule.isVisibleProperty(object, decl, scope)) continue;
     const slot = classesModule.nativePropertySlot(object, decl.key, decl);
     if (slot !== undefined) array.setSlot(toKey(decl.name), copyValueSlot(slot));
   }
-  for (const [key, slot] of object.props) {
-    if (!declaredKeys.has(key) && slot !== UNINIT) array.setSlot(toKey(key), copyValueSlot(slot));
-  }
+  for (const [key, slot] of dynamic.map) array.setSlot(toKey(key), copyValueSlot(slot));
   return array;
 });
 defineFunction('get_class_methods(object|string $object_or_class): array', ({ args }) => {
@@ -704,7 +703,7 @@ defineFunction('fwrite(resource $stream, string $data, ?int $length = null): int
 defineAlias('fputs', 'fwrite');
 defineFunction('fprintf(resource $stream, string $format, mixed ...$values): int', ({ args }) => {
   const stream = args[0] as PhpObject;
-  return BigInt(formatPrintf(args[1] as string, args.slice(2), false, (output) => writeStream(stream, output)).length);
+  return BigInt(formatPrintf(args[1] as string, args.slice(2), (output) => writeStream(stream, output)).length);
 });
 defineFunction(
   'get_defined_vars(): array',

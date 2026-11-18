@@ -101,6 +101,7 @@ export function traceArg(value: Value): string {
     }
   }
   if (value instanceof PhpArray) return 'Array';
+  if (value instanceof PhpObject && value.isResource) return `Resource id #${value.id}`;
   return `Object(${(value as PhpObject).cls.name})`;
 }
 

@@ -1,0 +1,35 @@
+resource:1,-1;false
+resource:0,0;true
+resource:-1,1;false
+integer:0,0;true
+double:1,-1;false
+string:0,0;true
+string:0,0;true
+string:1,-1;false
+string:1,-1;false
+NULL:1,-1;false
+boolean:0,0;true
+boolean:1,-1;false
+array:-1,1;false
+array:-1,1;false
+object:-1,1;false
+object(stdClass)#2 (1) {
+  ["scalar"]=>
+  resource(2) of type (stream)
+}
+array(1) {
+  [0]=>
+  resource(2) of type (stream)
+}
+string(4) "NULL"
+string(22) "array (
+  0 => NULL,
+)"
+Cannot use "::class" on resource
+Class name must be a valid object or a string
+Class name must be a valid object or a string
+Class name must be a valid object or a string
+Class name must be a valid object or a string
+#0 /main.php(18): printStreamTrace(Resource id #2)
+#1 {main}
+#0 /main.php(18): printStreamTrace(Resource id #2)

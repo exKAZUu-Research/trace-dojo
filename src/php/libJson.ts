@@ -3,14 +3,22 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { codePointBytes, enc, utf8Length } from './bytes';
 import { callMethod } from './callables';
-import { canAccessProp, createObject, declForKey, nativePropertySlot, objectPropertyKeys, propNameOf } from './classes';
+import {
+  canAccessProp,
+  createObject,
+  declForKey,
+  nativePropertySlot,
+  objectPropertyKeys,
+  propNameOf,
+  snapshotDynamicProperties,
+} from './classes';
 import * as conversionsModule from './conversions';
 import { formatFloatRepr } from './conversions';
 import { newThrowable, throwError } from './errors';
 import { nextChar } from './htmlEntities';
 import { defineConstant, defineFunction } from './native';
 import { PhpThrow, rt } from './runtime';
-import { copyValueSlot, PhpArray, type PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
+import { PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
 
 const FLAGS: [string, bigint][] = [
   ['JSON_HEX_TAG', 1n],
@@ -191,9 +199,7 @@ class JsonEncoder {
       return;
     }
     const keys = objectPropertyKeys(object);
-    const dynamic = new PhpArray();
-    for (const [key, slot] of object.props)
-      if (!declForKey(object.cls, key) && slot !== UNINIT) dynamic.setSlot(key, copyValueSlot(slot));
+    const dynamic = snapshotDynamicProperties(object);
     const runtime = rt();
     runtime.held.push(dynamic);
     try {

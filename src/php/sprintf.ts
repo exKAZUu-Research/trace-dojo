@@ -5,7 +5,7 @@ import { fatal, notice, throwError, warn } from './errors';
 import { toFloat, toInt, withStringConversionErrors } from './operators';
 import { rt } from './runtime';
 import { exponentialText, fixedDigits, generalText } from './strings';
-import type { Value } from './values';
+import { deref, PhpArray, type Ref, type Value } from './values';
 
 const MAX_FLOAT_PRECISION = 53;
 const INT_LIMIT = 2_147_483_647;
@@ -16,7 +16,7 @@ const RADIXES: Record<string, number | undefined> = { o: 8, x: 16, X: 16, b: 2 }
 interface Parser {
   format: string;
   index: number;
-  args: Value[];
+  args: readonly (Value | Ref)[];
   currentArg: number;
   maxMissingArg: number;
 }
@@ -39,16 +39,27 @@ interface Spec {
  * A conversion whose argument is missing is skipped, and the error naming the largest missing argument is thrown at the
  * end, after the errors of the later conversions.
  */
-export function formatPrintf(format: string, args: Value[], fromArray = false, write?: (text: string) => void): string {
+export function formatPrintf(
+  format: string,
+  args: readonly Value[] | PhpArray,
+  write?: (text: string) => void
+): string {
   let result = '';
+  const fromArray = args instanceof PhpArray;
+  const slots = fromArray ? [...args.map.values()] : args;
   withStringConversionErrors((stringArg) => {
-    result = formatValues(format, args, fromArray, stringArg);
+    result = formatValues(format, slots, fromArray, stringArg);
     write?.(result);
   });
   return result;
 }
 
-function formatValues(format: string, args: Value[], fromArray: boolean, stringArg: (value: Value) => string): string {
+function formatValues(
+  format: string,
+  args: readonly (Value | Ref)[],
+  fromArray: boolean,
+  stringArg: (value: Value) => string
+): string {
   const name = callStack.at(-1)?.name ?? 'sprintf';
   const parser: Parser = { format, index: 0, args, currentArg: 0, maxMissingArg: -1 };
   let result = '';
@@ -67,7 +78,7 @@ function formatValues(format: string, args: Value[], fromArray: boolean, stringA
     }
     const spec = parseSpec(parser);
     if (!spec) continue;
-    result += convert(spec, format[parser.index], args[spec.argIndex], result.length, name, stringArg);
+    result += convert(spec, format[parser.index], deref(args[spec.argIndex]), result.length, name, stringArg);
     parser.index++;
   }
   if (parser.maxMissingArg >= 0) {
@@ -179,7 +190,7 @@ function readStarArg(parser: Parser, what: 'Width' | 'Precision', min: number): 
   let argIndex = readArgIndex(parser);
   if (argIndex === NEXT_ARG) argIndex = parser.currentArg++;
   if (!hasArg(parser, argIndex)) return undefined;
-  const value = parser.args[argIndex];
+  const value = deref(parser.args[argIndex]);
   if (typeof value !== 'bigint') throwError('ValueError', `${what} must be an integer`);
   if (value < BigInt(min) || value > BigInt(INT_LIMIT))
     throwError('ValueError', `${what} must be between ${min} and ${INT_LIMIT}`);
