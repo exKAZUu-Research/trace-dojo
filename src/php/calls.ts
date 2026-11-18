@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 658 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 664 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -362,7 +362,8 @@ function bindNative(
   strict: boolean,
   record?: CallRecord
 ): { values: Value[]; refs: (Ref | undefined)[]; named?: Map<string, Value> } {
-  const params = fn.params;
+  const positional = positionalArguments(args);
+  const params = nativeOverloadParams(fn, args, positional.length);
   const values: Value[] = [];
   const refs: (Ref | undefined)[] = [];
   if (record) record.argumentRefs = refs;
@@ -375,7 +376,6 @@ function bindNative(
   const named = checkNamedArgs(params, args);
   const variadic = params.at(-1)?.variadic ? params.at(-1) : undefined;
   const fixed = variadic ? params.length - 1 : params.length;
-  const positional = positionalArguments(args);
   let lastGiven = positional.length - 1;
   for (const arg of args)
     lastGiven = Math.max(
@@ -442,13 +442,20 @@ function bindNative(
   return { values, refs, named };
 }
 
+function nativeOverloadParams(fn: NativeFunction, args: ArgValue[], positional: number): Param[] {
+  const short = fn.shortParams;
+  if (!short || positional > short.length) return fn.params;
+  const extraNames = new Set(fn.params.slice(short.length).map((param) => param.name));
+  return args.some((arg) => arg.name !== undefined && extraNames.has(arg.name)) ? fn.params : short;
+}
+
 function coerceArg(param: Param, index: number, value: Value, strict: boolean, name: string): Value {
   if (!param.type) return value;
   const coerced = coerce(value, param.type, {
     strict,
     internal: true,
     nullDeprecation: () =>
-      `${name}(): Passing null to parameter #${index + 1} ($${param.name}) of type ${typeToString(param.type as TypeDecl)} is deprecated`,
+      `${name}(): Passing null to parameter #${index + 1} ($${param.name}) of type ${param.nativeNullType ?? typeToString(param.type as TypeDecl)} is deprecated`,
   });
   if (coerced === NO_MATCH) {
     // PHP names no parameter for an argument a variadic parameter collects.

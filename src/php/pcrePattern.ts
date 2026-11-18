@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP pattern strings contain bytes; UTF-8 validation reads each byte separately.
-// code-gauge-allow-file fileNcss 766 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 778 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import propertyAliases from 'unicode-property-value-aliases-ecmascript';
 
 import { dec, enc, utf8Length } from './bytes';
@@ -144,6 +144,7 @@ function applyModifier(options: PatternOptions, modifier: string): void {
 interface CharacterSet {
   content: string;
   negated: boolean;
+  excluded?: string;
   /** Whether caseless matching leaves the class as it is, as it does PCRE's `[:upper:]` and `[:lower:]` under UCP. */
   exact?: boolean;
 }
@@ -225,6 +226,7 @@ const BYTE_POSIX_CLASSES = new Map([
   ['graph', '!-~'],
 ]);
 const UCP_GRAPH = String.raw`\p{L}\p{M}\p{N}\p{P}\p{S}\p{Cf}`;
+const UCP_NONPRINTING_FORMATS = String.raw`\u061C\u2066-\u2069`;
 const UCP_POSIX_CLASSES = new Map([
   ['alpha', String.raw`\p{L}`],
   ['digit', String.raw`\p{Nd}`],
@@ -908,14 +910,21 @@ class PatternConverter {
     return true;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private classAtom(): ClassCharacter | CharacterSet {
     const posix = /^\[:(\^?)([A-Za-z]+):\]/.exec(this.source.slice(this.index));
     if (posix) {
       this.index += posix[0].length;
       const content = (this.options.utf8 ? UCP_POSIX_CLASSES : BYTE_POSIX_CLASSES).get(posix[2]);
       if (content === undefined) this.fail('unknown POSIX class name', this.index);
+      const negated = posix[1] === '^';
+      if (!this.options.utf8) return { content, negated };
+      if (posix[2] === 'graph' || posix[2] === 'print') {
+        const excluded = posix[2] === 'graph' ? String.raw`${UCP_NONPRINTING_FORMATS}\u180E` : UCP_NONPRINTING_FORMATS;
+        return { content, negated, excluded };
+      }
       const cased = posix[2] === 'upper' || posix[2] === 'lower';
-      return { content, negated: posix[1] === '^', exact: cased && this.options.utf8 && this.options.caseless };
+      return { content, negated, exact: cased && this.options.caseless };
     }
     if (this.source[this.index] === '\\') return this.classEscape();
     const char = String.fromCodePoint(this.source.codePointAt(this.index) as number);
@@ -953,7 +962,10 @@ function classLiteral(char: string): string {
 
 function addClassAtom(members: ClassMembers, atom: ClassCharacter | CharacterSet): void {
   if ('value' in atom) members.content += atom.text;
-  else if (atom.exact) members.alternatives.push(`(?-i:[${atom.negated ? '^' : ''}${atom.content}])`);
+  else if (atom.excluded) {
+    const match = `(?![${atom.excluded}])[${atom.content}]`;
+    members.alternatives.push(atom.negated ? `(?!${match})${ANY}` : match);
+  } else if (atom.exact) members.alternatives.push(`(?-i:[${atom.negated ? '^' : ''}${atom.content}])`);
   else if (atom.negated) members.alternatives.push(`[^${atom.content}]`);
   else members.content += atom.content;
 }

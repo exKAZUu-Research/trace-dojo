@@ -478,6 +478,7 @@ export interface Param {
   /** Whether a null default makes the type nullable implicitly, as `int $x = null` does. */
   implicitNullable?: boolean;
   nativeDefault?: string;
+  nativeNullType?: string;
 }
 
 export type TypeDecl =
@@ -503,6 +504,7 @@ export interface NativeFunction {
   kind: 'native';
   name: string;
   params: Param[];
+  shortParams?: Param[];
   returnType?: TypeDecl;
   impl: (ctx: NativeContext) => Value;
   /** Whether the function reads its caller's variables (compact, extract, func_get_args). */

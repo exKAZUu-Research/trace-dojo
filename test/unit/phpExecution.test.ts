@@ -1441,3 +1441,15 @@ test.each([
     uncaughtException: `ファイルの読み書き（${name}）は、この採点環境では使えません。`,
   });
 });
+
+test.each([
+  ["$text = str_repeat('a', 600000); echo strspn($text, str_repeat('b', 599999).'a');", '600000'],
+  ["$text = str_repeat('a', 600000); echo strcspn($text, str_repeat('b', 600000));", '600000'],
+  ["var_dump(strpbrk(str_repeat('a', 600000), str_repeat('b', 600000)));", 'bool(false)\n'],
+  ["echo strlen(ucwords(str_repeat('a', 600000), str_repeat('b', 600000)));", '600000'],
+  ["echo strlen(wordwrap(str_repeat('a', 900000), 900000, str_repeat('a', 450000).'b'));", '900000'],
+  ["echo strlen(strip_tags(str_repeat('<a>', 200000), str_repeat('x', 600000).'<b>'));", '0'],
+])('bounds native byte scan work: %s', (source, stdout) => {
+  vi.restoreAllMocks();
+  expect(run(`<?php ${source}`)).toMatchObject({ kind: 'executed', stdout });
+});

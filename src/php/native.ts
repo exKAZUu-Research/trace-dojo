@@ -26,6 +26,18 @@ export function defineFunction(signature: string, impl: (ctx: NativeContext) => 
   functions.push({ kind: 'native', name, params, returnType, impl, needsCaller });
 }
 
+export function defineOverloadedFunction(
+  shortSignature: string,
+  signature: string,
+  impl: (ctx: NativeContext) => Value,
+  nullTypes: Record<number, string>
+): void {
+  const { name, params, returnType } = parseSignature(signature);
+  for (const [index, param] of params.entries()) param.nativeNullType = nullTypes[index];
+  const shortParams = parseSignature(shortSignature).params;
+  functions.push({ kind: 'native', name, params, shortParams, returnType, impl });
+}
+
 /** Marks a native function whose direct calls PHP compiles away, as {@link NativeFunction.inlined} says. */
 export function markInlined(name: string): void {
   const fn = functions.find((candidate) => candidate.name === name);

@@ -1,11 +1,11 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { callStack } from './calls';
 import { floatFitsInt, formatFloatRepr, numericPrefix } from './conversions';
-import { fatal, notice, throwError, warn } from './errors';
+import { fatal, notice, throwError, warn, withCleanupExceptions } from './errors';
 import { toFloat, toInt, toStr } from './operators';
-import { rt } from './runtime';
+import { PhpThrow, rt } from './runtime';
 import { exponentialText, fixedDigits, generalText } from './strings';
-import type { Value } from './values';
+import { PhpArray, PhpObject, type Value } from './values';
 
 const MAX_FLOAT_PRECISION = 53;
 const INT_LIMIT = 2_147_483_647;
@@ -39,7 +39,28 @@ interface Spec {
  * A conversion whose argument is missing is skipped, and the error naming the largest missing argument is thrown at the
  * end, after the errors of the later conversions.
  */
-export function formatPrintf(format: string, args: Value[], fromArray = false): string {
+export function formatPrintf(format: string, args: Value[], fromArray = false, write?: (text: string) => void): string {
+  let result = '';
+  withCleanupExceptions(rt(), (capture) => {
+    let conversionFailed = false;
+    const stringArg = (value: Value): string => {
+      if (conversionFailed && value instanceof PhpObject && !value.isResource) return '';
+      try {
+        return toStr(value);
+      } catch (error) {
+        if (!(error instanceof PhpThrow)) throw error;
+        capture(error);
+        conversionFailed = true;
+        return value instanceof PhpArray ? 'Array' : '';
+      }
+    };
+    result = formatValues(format, args, fromArray, stringArg);
+    write?.(result);
+  });
+  return result;
+}
+
+function formatValues(format: string, args: Value[], fromArray: boolean, stringArg: (value: Value) => string): string {
   const name = callStack.at(-1)?.name ?? 'sprintf';
   const parser: Parser = { format, index: 0, args, currentArg: 0, maxMissingArg: -1 };
   let result = '';
@@ -58,7 +79,7 @@ export function formatPrintf(format: string, args: Value[], fromArray = false): 
     }
     const spec = parseSpec(parser);
     if (!spec) continue;
-    result += convert(spec, format[parser.index], args[spec.argIndex], result.length, name);
+    result += convert(spec, format[parser.index], args[spec.argIndex], result.length, name, stringArg);
     parser.index++;
   }
   if (parser.maxMissingArg >= 0) {
@@ -183,10 +204,17 @@ function hasArg(parser: Parser, argIndex: number): boolean {
   return false;
 }
 
-function convert(spec: Spec, specifier: string | undefined, arg: Value, position: number, name: string): string {
+function convert(
+  spec: Spec,
+  specifier: string | undefined,
+  arg: Value,
+  position: number,
+  name: string,
+  stringArg: (value: Value) => string
+): string {
   switch (specifier) {
     case 's': {
-      return fitField(toStr(arg), spec, position, { maxLength: spec.cutsText ? spec.precision : undefined });
+      return fitField(stringArg(arg), spec, position, { maxLength: spec.cutsText ? spec.precision : undefined });
     }
     case 'd': {
       const value = intArg(arg);

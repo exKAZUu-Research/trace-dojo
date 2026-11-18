@@ -1,5 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP null is represented by JavaScript null.
-import { lower } from './bytes';
+import { lower, untilNul } from './bytes';
+import { literalMatches, spendScan } from './byteSearch';
 import { toStr } from './operators';
 import { PhpArray, type Value } from './values';
 
@@ -12,10 +13,11 @@ export function allowedTags(value: Value): string {
           .map((item) => `<${toStr(item)}>`)
           .join('')
       : toStr(value);
-  return lower(text);
+  return lower(untilNul(text));
 }
 
 export function stripTags(text: string, allowed: string): string {
+  const allows = indexAllowedTags(allowed);
   let result = '';
   let tag = '';
   let state: 'text' | 'tag' | 'php' | 'declaration' | 'comment' = 'text';
@@ -25,6 +27,7 @@ export function stripTags(text: string, allowed: string): string {
   let brackets = 0;
   let xml = false;
   for (let index = 0; index < text.length; index++) {
+    spendScan(index);
     const char = text[index];
     if (state === 'text') {
       if (char === '\0') continue;
@@ -45,7 +48,7 @@ export function stripTags(text: string, allowed: string): string {
         if (depth > 0) depth--;
         else if (!quote && !(xml && text[index - 1] === '-')) {
           tag += '>';
-          if (allowed.includes(normalizeTag(tag))) result += tag;
+          if (allows(normalizeTag(tag))) result += tag;
           tag = '';
           state = 'text';
           xml = false;
@@ -100,6 +103,28 @@ export function stripTags(text: string, allowed: string): string {
     }
   }
   return result;
+}
+
+function indexAllowedTags(allowed: string): (tag: string) => boolean {
+  const tags = new Set<string>();
+  let open = -1;
+  for (let index = 0; index < allowed.length; index++) {
+    spendScan(index);
+    if (allowed[index] === '<') open = index;
+    else if (allowed[index] === '>' && open !== -1) {
+      tags.add(allowed.slice(open, index + 1));
+      open = -1;
+    }
+  }
+  const nested = new Map<string, boolean>();
+  return (tag) => {
+    if (!tag.includes('<', 1)) return tags.has(tag);
+    const cached = nested.get(tag);
+    if (cached !== undefined) return cached;
+    const found = literalMatches(allowed, tag).next().done === false;
+    nested.set(tag, found);
+    return found;
+  };
 }
 
 function space(char: string): boolean {

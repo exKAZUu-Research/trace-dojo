@@ -1,24 +1,25 @@
-// code-gauge-allow-file fileNcss 970 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 989 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { createHash, createHmac } from 'node:crypto';
 
 import { byteAt, charAt, enc, lower, untilNul, upper } from './bytes';
+import { byteMembership, literalMatches, spendScan } from './byteSearch';
 import { callStack } from './calls';
 import { debugType, valueName } from './conversions';
 import { deprecated, throwError, warn, withCleanupExceptions } from './errors';
 import { decodeHtml, escapeHtml, nextChar, translationTable } from './htmlEntities';
-import { isStream } from './libCore';
+import { writeStream } from './libCore';
 import { ctypeUpper, isCtypeAlpha, isUtf8Ctype } from './libLocale';
-import { defineAlias, defineConstant, defineFunction, markInlined } from './native';
+import { defineAlias, defineConstant, defineFunction, defineOverloadedFunction, markInlined } from './native';
 import { toInt, toStr } from './operators';
 import { PhpThrow, rt } from './runtime';
 import { formatPrintf } from './sprintf';
 import { incrementString } from './strings';
 import { allowedTags, stripTags } from './stripTags';
 import { UnsupportedFeatureError } from './unsupported';
-import { PhpArray, PhpObject, type Ref, type Value } from './values';
+import { PhpArray, PhpObject, Ref, type Value } from './values';
 
 defineConstant('STR_PAD_RIGHT', 1n);
 defineConstant('STR_PAD_LEFT', 0n);
@@ -58,12 +59,14 @@ defineFunction('strtolower(string $string): string', ({ args }) => lower(s(args[
 defineFunction('ucfirst(string $string): string', ({ args }) => upper(s(args[0]).slice(0, 1)) + s(args[0]).slice(1));
 defineFunction('lcfirst(string $string): string', ({ args }) => lower(s(args[0]).slice(0, 1)) + s(args[0]).slice(1));
 defineFunction(String.raw`ucwords(string $string, string $separators = " \t\r\n\f\v"): string`, ({ args }) => {
-  const separators = args[1] === undefined ? ' \t\r\n\f\v' : s(args[1]);
+  const separators = byteMembership(args[1] === undefined ? ' \t\r\n\f\v' : s(args[1]));
+  const text = s(args[0]);
   let result = '';
   let capitalize = true;
-  for (const char of s(args[0])) {
-    result += capitalize ? upper(char) : char;
-    capitalize = separators.includes(char);
+  for (let index = 0; index < text.length; index++) {
+    spendScan(index);
+    result += capitalize ? upper(text[index]) : text[index];
+    capitalize = separators[text.charCodeAt(index)] === 1;
   }
   return result;
 });
@@ -553,45 +556,69 @@ defineFunction('strrchr(string $haystack, string $needle, bool $before_needle = 
   if (index === -1) return false;
   return args[2] === true ? haystack.slice(0, index) : haystack.slice(index);
 });
-// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-defineFunction('strtr(string $string, string|array $from, ?string $to = null): string', ({ args }) => {
+defineOverloadedFunction(
+  'strtr(string $string, array $from): string',
+  'strtr(string $string, string $from, string $to): string',
+  ({ args }) => translate(args),
+  { 1: 'array|string', 2: '?string' }
+);
+
+function translate(args: Value[]): string {
   const text = s(args[0]);
   const from = args[1];
-  if (from instanceof PhpArray) {
-    if (text === '') return text;
-    if (from.map.has('')) warn('strtr(): Ignoring replacement of empty string');
-    const pairs: (readonly [string, string])[] = [];
-    for (const [key, value] of from.entries()) {
-      if (key !== '') pairs.push([String(key), toStr(value)]);
-    }
-    if (pairs.length === 0) return text;
-    const sorted = pairs.toSorted((x, y) => y[0].length - x[0].length);
-    let result = '';
-    let index = 0;
-    outer: while (index < text.length) {
-      for (const [key, value] of sorted) {
-        rt().spend();
-        if (text.startsWith(key, index)) {
-          result += value;
-          index += key.length;
-          continue outer;
-        }
-      }
-      result += text[index++];
-    }
-    return result;
-  }
-  if (args[2] === undefined || args[2] === null) {
-    throwError('TypeError', 'strtr(): Argument #2 ($from) must be of type array, string given');
-  }
-  const source = toStr(from);
+  if (from instanceof PhpArray) return translatePairs(text, from);
+  const source = s(from);
   const target = s(args[2]);
   const length = Math.min(source.length, target.length);
   const map = new Map<string, string>();
   for (let index = 0; index < length; index++) map.set(source[index], target[index]);
   return [...text].map((char) => map.get(char) ?? char).join('');
-});
+}
+
+function translatePairs(text: string, replacements: PhpArray): string {
+  if (text === '') return text;
+  if (replacements.map.has('')) warn('strtr(): Ignoring replacement of empty string');
+  const pairs: (readonly [string, Value | Ref])[] = [];
+  for (const [key, value] of replacements.map) {
+    const needle = String(key);
+    if (needle !== '' && needle.length <= text.length) pairs.push([needle, value]);
+  }
+  if (pairs.length === 0) return text;
+  const sorted = pairs.toSorted((x, y) => y[0].length - x[0].length);
+  let result = '';
+  for (let index = 0; index < text.length;) {
+    const match = translationAt(text, index, sorted);
+    if (!match) {
+      result += text[index++];
+      continue;
+    }
+    const [key, value] = match;
+    const replacement = toStr(value instanceof Ref ? value.v : value);
+    rt().ensureStringFits(result.length + replacement.length);
+    result += replacement;
+    index += key.length;
+  }
+  return result;
+}
+
+function translationAt(
+  text: string,
+  index: number,
+  pairs: readonly (readonly [string, Value | Ref])[]
+): readonly [string, Value | Ref] | undefined {
+  const runtime = rt();
+  for (const pair of pairs) {
+    const key = pair[0];
+    if (text[index] !== key[0] || text.length - index < key.length) {
+      runtime.spend();
+      continue;
+    }
+    runtime.spend(Math.ceil(key.length / 64));
+    if (text.startsWith(key, index)) return pair;
+  }
+  return undefined;
+}
+
 defineFunction('chr(int $codepoint): string', ({ args }) => {
   const code = args[0] as bigint;
   if (code < 0n || code > 255n) {
@@ -621,40 +648,48 @@ defineFunction(
 );
 
 // code-gauge-allow functionCognitiveComplexity 17 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 37 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 44 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function wordwrap(text: string, width: number, breakText: string, cut: boolean): string {
   if (text === '') return '';
   if (breakText === '') throwError('ValueError', 'wordwrap(): Argument #3 ($break) must not be empty');
   if (width === 0 && cut)
     throwError('ValueError', 'wordwrap(): Argument #4 ($cut_long_words) cannot be true when argument #2 ($width) is 0');
   const breakLength = breakText.length;
+  const breaks = literalMatches(text, breakText);
+  let nextBreak = breaks.next().value;
   let result = '';
   let lastStart = 0;
   let lastSpace = 0;
+  const append = (end: number, suffix = ''): void => {
+    rt().ensureStringFits(result.length + end - lastStart + suffix.length);
+    result += text.slice(lastStart, end) + suffix;
+  };
   for (let current = 0; current < text.length; current++) {
+    spendScan(current);
     const char = text[current];
-    if (char === breakText[0] && current + breakLength <= text.length && text.startsWith(breakText, current)) {
-      result += text.slice(lastStart, current + breakLength);
+    if (current === nextBreak) {
+      append(current + breakLength);
+      nextBreak = breaks.next().value;
       current += breakLength - 1;
       lastStart = current + 1;
       lastSpace = lastStart;
     } else if (char === ' ') {
       if (current - lastStart >= width) {
-        result += text.slice(lastStart, current) + breakText;
+        append(current, breakText);
         lastStart = current + 1;
       }
       lastSpace = current;
     } else if (current - lastStart >= width && cut && lastStart >= lastSpace) {
-      result += text.slice(lastStart, current) + breakText;
+      append(current, breakText);
       lastStart = current;
       lastSpace = current;
     } else if (current - lastStart >= width && lastStart < lastSpace) {
-      result += text.slice(lastStart, lastSpace) + breakText;
+      append(lastSpace, breakText);
       lastStart = lastSpace + 1;
       lastSpace = lastStart;
     }
   }
-  if (lastStart !== text.length) result += text.slice(lastStart);
+  if (lastStart !== text.length) append(text.length);
   return result;
 }
 
@@ -821,7 +856,11 @@ defineFunction('strpbrk(string $string, string $characters): string|false', ({ a
   const text = s(args[0]);
   const characters = s(args[1]);
   if (characters === '') throwError('ValueError', 'strpbrk(): Argument #2 ($characters) must be a non-empty string');
-  for (let index = 0; index < text.length; index++) if (characters.includes(text[index])) return text.slice(index);
+  const bytes = byteMembership(characters);
+  for (let index = 0; index < text.length; index++) {
+    spendScan(index);
+    if (bytes[text.charCodeAt(index)]) return text.slice(index);
+  }
   return false;
 });
 defineFunction(
@@ -946,15 +985,9 @@ defineFunction(
     return BigInt(previous[b.length]);
   }
 );
-defineFunction('vfprintf($stream, string $format, array $values): int', ({ args }) => {
-  const stream = args[0];
-  if (!isStream(stream)) {
-    throwError('TypeError', `vfprintf(): Argument #1 ($stream) must be of type resource, ${valueName(stream)} given`);
-  }
-  const text = formatPrintf(s(args[1]), (args[2] as PhpArray).values(), true);
-  if (stream.internal === 'STDIN') throw new UnsupportedFeatureError('標準入力への書き込み');
-  if (stream.internal === 'STDOUT') rt().echo(text);
-  else rt().echoError(text);
+defineFunction('vfprintf(resource $stream, string $format, array $values): int', ({ args }) => {
+  const stream = args[0] as PhpObject;
+  const text = formatPrintf(s(args[1]), (args[2] as PhpArray).values(), true, (output) => writeStream(stream, output));
   return BigInt(text.length);
 });
 defineFunction('metaphone(string $string, int $max_phonemes = 0): string', ({ args }) => {
@@ -1229,9 +1262,13 @@ function span(args: Value[], inSet: boolean): bigint {
     args[2] === undefined ? 0 : n(args[2]),
     args[3] === undefined || args[3] === null ? undefined : n(args[3])
   );
-  const set = s(args[1]);
+  const bytes = byteMembership(s(args[1]));
+  const matching = Number(inSet);
   let count = 0;
-  while (count < text.length && set.includes(text[count]) === inSet) count++;
+  while (count < text.length && bytes[text.charCodeAt(count)] === matching) {
+    spendScan(count);
+    count++;
+  }
   return BigInt(count);
 }
 

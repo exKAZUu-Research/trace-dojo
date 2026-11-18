@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss 554 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { lower } from './bytes';
+import { lower, untilNul } from './bytes';
 import { callValue, checkCallable, explainCallable } from './callables';
 import { type ArgValue, backtraceLimit, callStack, frameArguments, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
@@ -73,7 +73,8 @@ defineConstant('PHP_FLOAT_MIN', 2.2250738585072014e-308);
 defineConstant('PHP_FLOAT_DIG', 15n);
 defineConstant('NAN', Number.NaN);
 defineConstant('INF', Number.POSITIVE_INFINITY);
-defineConstant('PHP_VERSION', '8.5.12');
+const PHP_VERSION = '8.5.12';
+defineConstant('PHP_VERSION', PHP_VERSION);
 defineConstant('PHP_MAJOR_VERSION', 8n);
 defineConstant('PHP_MINOR_VERSION', 5n);
 defineConstant('PHP_RELEASE_VERSION', 12n);
@@ -105,8 +106,7 @@ defineFunction('var_export(mixed $value, bool $return = false): ?string', ({ arg
   return null;
 });
 defineFunction('printf(string $format, mixed ...$values): int', ({ args }) => {
-  const text = formatPrintf(args[0] as string, args.slice(1));
-  rt().echo(text);
+  const text = formatPrintf(args[0] as string, args.slice(1), false, (output) => rt().echo(output));
   return BigInt(text.length);
 });
 defineFunction('sprintf(string $format, mixed ...$values): string', ({ args }) =>
@@ -116,8 +116,7 @@ defineFunction('vsprintf(string $format, array $values): string', ({ args }) =>
   formatPrintf(args[0] as string, (args[1] as PhpArray).values(), true)
 );
 defineFunction('vprintf(string $format, array $values): int', ({ args }) => {
-  const text = formatPrintf(args[0] as string, (args[1] as PhpArray).values(), true);
-  rt().echo(text);
+  const text = formatPrintf(args[0] as string, (args[1] as PhpArray).values(), true, (output) => rt().echo(output));
   return BigInt(text.length);
 });
 
@@ -620,7 +619,11 @@ defineFunction('exit(string|int $status = 0): never', ({ args }) => {
   throw new ExitSignal(typeof status === 'string' ? 0 : Number(status));
 });
 defineAlias('die', 'exit');
-defineFunction('phpversion(?string $extension = null): string|false', ({ args }) => (args[0] ? false : '8.5.12'));
+const versionedExtensions = new Set(['core', 'ctype', 'hash', 'json', 'mbstring', 'pcre', 'random', 'spl', 'standard']);
+defineFunction('phpversion(?string $extension = null): string|false', ({ args }) => {
+  const extension = args[0];
+  return typeof extension !== 'string' || versionedExtensions.has(lower(untilNul(extension))) ? PHP_VERSION : false;
+});
 defineFunction('php_sapi_name(): string|false', () => 'cli');
 defineFunction('sleep(int $seconds): int', ({ args }) => {
   checkDelay(args[0] as bigint, 'sleep', 'seconds');
@@ -653,7 +656,7 @@ defineFunction('debug_print_backtrace(int $options = 0, int $limit = 0): void', 
 const streamClass = new PhpClass('(stream)');
 
 /** A standard stream, which PHP's CLI predefines as the resources STDIN, STDOUT, and STDERR. */
-export function isStream(value: Value): value is PhpObject {
+function isStream(value: Value): value is PhpObject {
   return value instanceof PhpObject && value.cls === streamClass;
 }
 
@@ -670,25 +673,23 @@ for (const [name, id] of streams) {
   });
 }
 
-function writeStream(stream: Value, text: string, name: string): Value {
-  if (!isStream(stream))
-    throwError('TypeError', `${name}(): Argument #1 ($stream) must be of type resource, ${valueName(stream)} given`);
+export function writeStream(stream: PhpObject, text: string): bigint {
   if (stream.internal === 'STDOUT') rt().echo(text);
   else if (stream.internal === 'STDERR') rt().echoError(text);
   else throw new UnsupportedFeatureError('標準入力への書き込み');
   return BigInt(text.length);
 }
 
-defineFunction('fwrite($stream, string $data, ?int $length = null): int|false', ({ args }) => {
-  const data = args[0] === undefined ? '' : (args[1] as string);
+defineFunction('fwrite(resource $stream, string $data, ?int $length = null): int|false', ({ args }) => {
+  const stream = args[0] as PhpObject;
+  const data = args[1] as string;
   const length = args[2] === undefined || args[2] === null ? data.length : Number(args[2]);
-  return writeStream(args[0], data.slice(0, Math.max(length, 0)), 'fwrite');
+  return writeStream(stream, data.slice(0, Math.max(length, 0)));
 });
 defineAlias('fputs', 'fwrite');
-defineFunction('fprintf($stream, string $format, mixed ...$values): int', ({ args }) => {
-  const text = formatPrintf(args[1] as string, args.slice(2));
-  writeStream(args[0], text, 'fprintf');
-  return BigInt(text.length);
+defineFunction('fprintf(resource $stream, string $format, mixed ...$values): int', ({ args }) => {
+  const stream = args[0] as PhpObject;
+  return BigInt(formatPrintf(args[1] as string, args.slice(2), false, (output) => writeStream(stream, output)).length);
 });
 defineFunction(
   'get_defined_vars(): array',

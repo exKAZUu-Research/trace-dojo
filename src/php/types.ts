@@ -88,6 +88,9 @@ const NO_MATCH = Symbol('noMatch');
  * even in strict mode.
  */
 export function coerce(value: Value, type: TypeDecl, context: CoercionContext): Value | typeof NO_MATCH {
+  if (context.internal && type.k === 'named' && type.name === 'resource') {
+    return value instanceof PhpObject && value.isResource ? value : NO_MATCH;
+  }
   if (matches(value, type, context)) return value;
   if (value === null) {
     if (!context.strict && context.internal && context.nullDeprecation && scalarTarget(type)) {
