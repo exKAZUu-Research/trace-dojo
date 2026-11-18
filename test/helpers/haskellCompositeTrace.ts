@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 
-import { parse, stringify } from 'superjson';
 import { z } from 'zod';
 
 import { traceProgram } from '../../src/interpreter/program';
+import { parse, stringify } from '../../src/interpreter/traceTransport';
 
 const cases = [
   { name: 'pairs', type: '[(Int,Int)]', value: '[(k,k*2)|k<-[1..20]]', size: 20 },

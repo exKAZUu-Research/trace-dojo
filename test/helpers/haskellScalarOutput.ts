@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 
-import { stringify } from 'superjson';
-
 import { traceProgram } from '../../src/interpreter/program';
+import { stringify } from '../../src/interpreter/traceTransport';
 
 const scenarios = [
   { name: 'small', outer: 100, inner: 100, loops: 5, binding: '' },

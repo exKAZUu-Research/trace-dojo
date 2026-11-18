@@ -1,11 +1,4 @@
-import {
-  deserialize as deserializeSuperjson,
-  parse as parseSuperjson,
-  registerCustom,
-  serialize,
-  stringify,
-  type SuperJSONValue,
-} from 'superjson';
+import { SuperJSON, type SuperJSONValue } from 'superjson';
 import { z } from 'zod';
 
 type TraceNameRecord = Record<string, SuperJSONValue>;
@@ -14,8 +7,11 @@ class EncodedTraceRecord extends Map<string, SuperJSONValue> {
 }
 const protectedNames = ['constructor', '__proto__', 'prototype'];
 const recordEntries = z.array(z.tuple([z.string(), z.unknown()]));
+const codec = new SuperJSON({ dedupe: true });
+export const serialize = codec.serialize.bind(codec);
+export const stringify = codec.stringify.bind(codec);
 
-registerCustom<TraceNameRecord, [string, SuperJSONValue][]>(
+codec.registerCustom<TraceNameRecord, [string, SuperJSONValue][]>(
   {
     isApplicable: requiresTraceKeyEncoding,
     serialize: encodeTraceNameRecord,
@@ -28,7 +24,6 @@ const marker = z
   .parse(serialize({ constructor: 0 }));
 export const traceRecordAnnotationCharacters = JSON.stringify(marker.meta.values).length + 4;
 
-export { serialize, stringify };
 export default { serialize, deserialize };
 
 export function requiresTraceKeyEncoding(value: unknown): value is TraceNameRecord {
@@ -44,11 +39,11 @@ export function encodeTraceNameRecord(value: TraceNameRecord): [string, SuperJSO
 }
 
 export function parse(value: string): unknown {
-  return restoreRecords(parseSuperjson(value));
+  return restoreRecords(codec.parse(value));
 }
 
-function deserialize(value: Parameters<typeof deserializeSuperjson>[0]): unknown {
-  return restoreRecords(deserializeSuperjson(value));
+function deserialize(value: Parameters<typeof codec.deserialize>[0]): unknown {
+  return restoreRecords(codec.deserialize(value));
 }
 
 function restoreRecords(value: unknown): unknown {

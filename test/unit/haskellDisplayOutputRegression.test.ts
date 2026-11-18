@@ -140,6 +140,23 @@ test('legal learner names round-trip through a fresh configured client', { timeo
   expect(decoded).toHaveLength(8);
 });
 
+test.each(['records', 'reverseOrder', 'turtles', 'longNames', 'wideRecords', 'snapshot'])(
+  'visible reference roots remain represented in long traces: %s',
+  { timeout: 30_000 },
+  (name) => {
+    const result = z
+      .object({ bytes: z.number(), items: z.number() })
+      .parse(runHelper('test/helpers/haskellRetainedOutput.ts', 256, [name]));
+    expect(result.bytes).toBeLessThan(32 * 1024 * 1024);
+    expect(result.items).toBeGreaterThan(name === 'snapshot' ? 0 : 2000);
+  }
+);
+
+test('trace stops when visible-name metadata exceeds export capacity', { timeout: 30_000 }, () => {
+  const result = z.object({ limited: z.boolean() }).parse(runHelper('test/helpers/haskellMinimumOutput.ts', 256));
+  expect(result.limited).toBe(true);
+});
+
 function runHelper(path: string, heap: number, args: string[] = []): unknown {
   let bundle = bundles.get(path);
   if (bundle === undefined) {

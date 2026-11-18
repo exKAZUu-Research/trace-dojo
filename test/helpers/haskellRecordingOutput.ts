@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict';
 
-import { stringify } from 'superjson';
-
 import { ExecutionLimitError } from '../../src/interpreter/limits';
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
+import { stringify } from '../../src/interpreter/traceTransport';
 
 const source = `import Control.Monad
 data T=Leaf|T T T T

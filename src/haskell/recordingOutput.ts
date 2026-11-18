@@ -10,13 +10,15 @@ import type { TraceItem } from '../problems/trace';
 import { TRUNCATED_DISPLAY } from './displayOutput';
 import { DISPLAY_OPERATIONS, DisplayAbort } from './previewBudget';
 import { MAX_DISPLAY_NODES, type Runtime } from './runtime';
-import { mapGraph } from './typeGraph';
+import { mapGraph, walkGraph } from './typeGraph';
 
 interface OutputSize {
   characters: number;
   transportNodes: number;
   transportPaths: number;
   transportWork: number;
+  maxTransportPath: number;
+  maxTransportDepth: number;
 }
 
 interface OutputCost {
@@ -26,8 +28,17 @@ interface OutputCost {
 }
 
 const RECORDING_CHARACTERS = LIMITS.maxSlots * 32;
-const STEP_CHARACTERS = 256;
-const ENCODED_STEP_CHARACTERS = 512;
+const STEP_CAPACITY: OutputCost = { characters: 1024, transportNodes: 12, work: 64 };
+
+interface OutputCandidate {
+  cost: OutputCost;
+  minimum: OutputCost;
+  admitted: boolean;
+  scalar: boolean;
+  reserveEligible: boolean;
+  accept: () => void;
+}
+const emptyCost: OutputCost = { characters: 0, transportNodes: 0, work: 0 };
 const IDENTITY_ENTRY_CHARACTERS = 8;
 const truncated = {
   node: TRUNCATED_DISPLAY,
@@ -36,19 +47,28 @@ const truncated = {
     transportNodes: 1,
     transportPaths: 0,
     transportWork: 0,
+    maxTransportPath: 0,
+    maxTransportDepth: 0,
   },
 };
 const negativeZero = Symbol();
 
 export class RecordingOutput {
-  private remaining = RECORDING_CHARACTERS;
+  private remaining = RECORDING_CHARACTERS / 2;
+  private readonly essential: OutputCost = {
+    characters: RECORDING_CHARACTERS / 2,
+    transportNodes: MAX_DISPLAY_NODES / 2,
+    work: LIMITS.maxSlots / 2,
+  };
   private stateRemaining = LIMITS.maxSlots * 8;
-  private transportNodesRemaining = MAX_DISPLAY_NODES;
-  private transportWorkRemaining = LIMITS.maxSlots;
+  private transportNodesRemaining = MAX_DISPLAY_NODES / 2;
+  private transportWorkRemaining = LIMITS.maxSlots / 2;
   private recordedItems = 1;
   private readonly transportValues = new WeakMap<object, object>();
   private readonly encodedRecords = new WeakSet<object>();
   private readonly sizes = new WeakMap<object, OutputSize>();
+  private readonly uniqueSizes = new WeakMap<object, OutputSize>();
+  private readonly emittedRoots = new WeakSet<object>();
   private readonly stringSizes = new Map<string, number>();
   private readonly scalarSizes = new Map<unknown, OutputSize>();
 
@@ -62,44 +82,109 @@ export class RecordingOutput {
   }
 
   bound(variables: TraceVariables, path?: string): TraceVariables {
-    return this.runtime.withDisplayBudget(DISPLAY_OPERATIONS, () => ({
-      vars: this.boundRoots(variables.vars, path ? `${path}.vars` : 'finalVars'),
-      referenceVars: this.boundRoots(
+    return this.runtime.withDisplayBudget(DISPLAY_OPERATIONS, () => {
+      const capacity = { ...STEP_CAPACITY };
+      const candidates: OutputCandidate[] = [];
+      const vars = this.prepareRoots(variables.vars, path ? `${path}.vars` : 'finalVars', capacity, candidates);
+      const referenceVars = this.prepareRoots(
         variables.referenceVars,
         path ? `${path}.referenceVars` : 'referenceVars',
+        capacity,
+        candidates,
         truncated
-      ),
-    }));
+      );
+      this.fundEssential(candidates, capacity);
+      this.upgradeCandidates(candidates, capacity);
+      this.rememberRoots(vars);
+      this.rememberRoots(referenceVars);
+      return { vars, referenceVars };
+    });
   }
 
-  private boundRoots<T>(
+  private fundEssential(candidates: OutputCandidate[], capacity: OutputCost): void {
+    for (const candidate of candidates) {
+      if (!isEssential(candidate)) continue;
+      this.reserveMinimum(candidate.cost, capacity);
+      candidate.admitted = true;
+    }
+  }
+
+  private upgradeCandidates(candidates: OutputCandidate[], capacity: OutputCost): void {
+    capacity.characters = Math.min(capacity.characters, this.essential.characters);
+    capacity.transportNodes = Math.min(capacity.transportNodes, this.essential.transportNodes);
+    capacity.work = Math.min(capacity.work, this.essential.work);
+    const initial = { ...capacity };
+    const bulkCapacity = { ...emptyCost };
+    for (const candidate of candidates
+      .filter((item) => !item.admitted)
+      .toSorted(
+        (left, right) =>
+          Number(isSmall(right)) - Number(isSmall(left)) || outputPriority(left.cost) - outputPriority(right.cost)
+      )) {
+      candidate.admitted = this.admit(candidate.cost, isSmall(candidate) ? capacity : bulkCapacity, candidate.minimum);
+    }
+    for (const candidate of candidates) if (candidate.admitted) candidate.accept();
+    this.essential.characters -= initial.characters - capacity.characters;
+    this.essential.transportNodes -= initial.transportNodes - capacity.transportNodes;
+    this.essential.work -= initial.work - capacity.work;
+    this.remaining += bulkCapacity.characters;
+    this.transportNodesRemaining += bulkCapacity.transportNodes;
+    this.transportWorkRemaining += bulkCapacity.work;
+  }
+
+  private prepareRoots<T>(
     roots: Record<string, T>,
     path: string,
+    capacity: OutputCost,
+    candidates: OutputCandidate[],
     fallback?: { node: T; size: OutputSize }
   ): Record<string, T> {
     const bounded: Record<string, T> = Object.create(null);
-    const encoded = requiresTraceKeyEncoding(roots);
-    let smallRemaining = encoded
-      ? ENCODED_STEP_CHARACTERS - (2 + IDENTITY_ENTRY_CHARACTERS + traceRecordAnnotationCharacters + path.length * 2)
-      : STEP_CHARACTERS;
+    const encoded = this.reserveEncoding(roots, path, capacity);
     for (const [index, [name, node]] of Object.entries(roots).entries()) {
       const encodedIndex = encoded ? index : undefined;
-      const cost = this.outputCost(node, name, path, encodedIndex);
-      if (cost && cost.characters <= smallRemaining) {
-        bounded[name] = node;
-        smallRemaining -= cost.characters;
-      } else if (cost && this.admit(cost)) {
-        bounded[name] = node;
-      } else if (
-        fallback &&
-        this.admit(
-          this.rootCost(encoded ? this.pairSize(fallback.size, name) : fallback.size, name, path, encodedIndex)
-        )
-      ) {
+      const minimum = fallback
+        ? this.rootCost(encoded ? this.pairSize(fallback.size, name) : fallback.size, name, path, encodedIndex)
+        : emptyCost;
+      if (fallback) {
+        this.reserveMinimum(minimum, capacity);
         bounded[name] = fallback.node;
       }
+      const cost = this.outputCost(node, name, path, encodedIndex);
+      if (cost)
+        candidates.push({
+          cost,
+          minimum,
+          admitted: false,
+          scalar: fallback === undefined,
+          reserveEligible: !Array.isArray(node),
+          accept: () => {
+            bounded[name] = node;
+          },
+        });
     }
     return bounded;
+  }
+
+  private reserveEncoding(roots: object, path: string, capacity: OutputCost): boolean {
+    const encoded = requiresTraceKeyEncoding(roots);
+    if (encoded)
+      this.reserveMinimum(
+        {
+          characters: 2 + IDENTITY_ENTRY_CHARACTERS + traceRecordAnnotationCharacters + path.length * 2,
+          transportNodes: 2,
+          work: path.split('.').length * 2,
+        },
+        capacity
+      );
+    return encoded;
+  }
+
+  private reserveMinimum(cost: OutputCost, capacity: OutputCost): void {
+    if (!this.admit(cost, this.essential)) throw new ExecutionLimitError('trace');
+    capacity.characters = Math.max(0, capacity.characters - cost.characters);
+    capacity.transportNodes = Math.max(0, capacity.transportNodes - cost.transportNodes);
+    capacity.work = Math.max(0, capacity.work - cost.work);
   }
 
   private outputCost(node: unknown, name: string, path: string, encodedIndex?: number): OutputCost | undefined {
@@ -128,25 +213,33 @@ export class RecordingOutput {
     };
   }
 
-  private admit(cost: OutputCost): boolean {
+  private admit(cost: OutputCost, capacity: OutputCost, minimum = emptyCost): boolean {
+    const characters = cost.characters - minimum.characters;
+    const nodes = cost.transportNodes - minimum.transportNodes;
+    const work = cost.work - minimum.work;
+    const bulkCharacters = Math.max(0, characters - capacity.characters);
+    const bulkNodes = Math.max(0, nodes - capacity.transportNodes);
+    const bulkWork = Math.max(0, work - capacity.work);
     if (
-      cost.characters > this.remaining ||
-      cost.transportNodes > this.transportNodesRemaining ||
-      cost.work > this.transportWorkRemaining
+      bulkCharacters > this.remaining ||
+      bulkNodes > this.transportNodesRemaining ||
+      bulkWork > this.transportWorkRemaining
     )
       return false;
-    this.remaining -= cost.characters;
-    this.transportNodesRemaining -= cost.transportNodes;
-    this.transportWorkRemaining -= cost.work;
+    this.remaining -= bulkCharacters;
+    this.transportNodesRemaining -= bulkNodes;
+    this.transportWorkRemaining -= bulkWork;
+    capacity.characters -= characters - bulkCharacters;
+    capacity.transportNodes -= nodes - bulkNodes;
+    capacity.work -= work - bulkWork;
     return true;
   }
 
   private size(value: unknown): OutputSize {
     if (typeof value !== 'object' || value === null) return this.scalarSize(value);
     const transported = this.transportValue(value);
-    const cached = this.sizes.get(transported);
-    if (cached !== undefined) return cached;
-    return this.runtime.withDisplayBudget(DISPLAY_OPERATIONS, () =>
+    let size = this.sizes.get(transported);
+    size ??= this.runtime.withDisplayBudget(DISPLAY_OPERATIONS, () =>
       this.runtime.withRenderBudget('reference', () =>
         mapGraph<object, OutputSize>(
           transported,
@@ -156,6 +249,39 @@ export class RecordingOutput {
         )
       )
     );
+    if (this.emittedRoots.has(value)) return { ...size, transportNodes: 1, transportPaths: 0, transportWork: 0 };
+    return this.uniqueSize(transported, size);
+  }
+
+  private uniqueSize(root: object, size: OutputSize): OutputSize {
+    let unique = this.uniqueSizes.get(root);
+    if (unique === undefined) {
+      let nodes = 1;
+      for (const node of walkGraph(
+        root,
+        (value) => this.transportValue(value),
+        (value) => Object.values(value).filter((child): child is object => typeof child === 'object' && child !== null)
+      )) {
+        if (this.encodedRecords.has(node)) nodes++;
+        for (const child of Object.values(node)) {
+          nodes += typeof child === 'object' && child !== null ? 1 : this.scalarSize(child).transportNodes;
+        }
+      }
+      unique = {
+        ...size,
+        transportNodes: nodes,
+        transportPaths: nodes * size.maxTransportPath,
+        transportWork: nodes * size.maxTransportDepth,
+      };
+      this.uniqueSizes.set(root, unique);
+    }
+    return unique;
+  }
+
+  private rememberRoots(roots: Record<string, unknown>): void {
+    for (const value of Object.values(roots)) {
+      if (typeof value === 'object' && value !== null) this.emittedRoots.add(value);
+    }
   }
 
   private unknownChildren(node: object): object[] {
@@ -172,6 +298,8 @@ export class RecordingOutput {
       transportNodes: this.encodedRecords.has(node) ? 2 : 1,
       transportPaths: 0,
       transportWork: 0,
+      maxTransportPath: 0,
+      maxTransportDepth: 0,
     };
     const array = Array.isArray(node);
     for (const [key, child] of Object.entries(node)) {
@@ -191,6 +319,8 @@ export class RecordingOutput {
       transportNodes: 1,
       transportPaths: 0,
       transportWork: 0,
+      maxTransportPath: 0,
+      maxTransportDepth: 0,
     };
     this.addEntry(size, '0', this.scalarSize(name), true);
     this.addEntry(size, '1', value, true);
@@ -204,6 +334,10 @@ export class RecordingOutput {
       size.transportPaths + weight.transportPaths + weight.transportNodes * this.pathSegmentSize(key)
     );
     size.transportWork = boundedSize(size.transportWork + weight.transportWork + weight.transportNodes);
+    if (weight.transportNodes > 0) {
+      size.maxTransportPath = Math.max(size.maxTransportPath, weight.maxTransportPath + this.pathSegmentSize(key));
+      size.maxTransportDepth = Math.max(size.maxTransportDepth, weight.maxTransportDepth + 1);
+    }
   }
 
   private scalarSize(value: unknown): OutputSize {
@@ -218,6 +352,8 @@ export class RecordingOutput {
         transportNodes: annotation ? 1 : 0,
         transportPaths: 0,
         transportWork: 0,
+        maxTransportPath: 0,
+        maxTransportDepth: 0,
       };
       this.scalarSizes.set(key, size);
     }
@@ -247,6 +383,22 @@ export class RecordingOutput {
     }
     return size;
   }
+}
+
+function isEssential(candidate: OutputCandidate): boolean {
+  return candidate.scalar && isSmall(candidate);
+}
+
+function isSmall(candidate: OutputCandidate): boolean {
+  return candidate.reserveEligible && outputPriority(candidate.cost) <= 1;
+}
+
+function outputPriority(cost: OutputCost): number {
+  return Math.max(
+    cost.characters / STEP_CAPACITY.characters,
+    cost.transportNodes / STEP_CAPACITY.transportNodes,
+    cost.work / STEP_CAPACITY.work
+  );
 }
 
 function boundedSize(size: number): number {

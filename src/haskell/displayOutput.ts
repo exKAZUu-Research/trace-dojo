@@ -1,3 +1,4 @@
+import { ExecutionLimitError } from '../interpreter/limits';
 import type { TraceVariables } from '../interpreter/traceRecorder';
 import type { DisplayNode, TraceArray, TraceScalar } from '../problems/trace';
 import { DISPLAY_OPERATIONS, DisplayAbort } from './previewBudget';
@@ -23,24 +24,39 @@ function boundRoots<T extends OutputNode>(
   fallback?: T
 ): Record<string, T> {
   const bounded: Record<string, T> = Object.create(null);
-  let remaining = MAX_DISPLAY_NODES;
-  for (const [name, node] of Object.entries(roots)) {
-    if (remaining === 0) break;
-    let size: number | undefined;
+  const entries = Object.entries(roots);
+  const reserved = fallback === undefined ? 0 : 1;
+  let remaining = MAX_DISPLAY_NODES - entries.length * reserved;
+  if (remaining < 0) throw new ExecutionLimitError('trace');
+  const selected = new Set<string>();
+  for (const { name, size } of measureRoots(runtime, entries, kind).toSorted((left, right) => left.size - right.size)) {
+    const cost = size - reserved;
+    if (cost <= remaining) {
+      selected.add(name);
+      remaining -= cost;
+    }
+  }
+  for (const [name, node] of entries) {
+    if (selected.has(name)) bounded[name] = node;
+    else if (fallback !== undefined) bounded[name] = fallback;
+  }
+  return bounded;
+}
+
+function measureRoots<T extends OutputNode>(
+  runtime: Runtime,
+  entries: [string, T][],
+  kind: 'answer' | 'reference'
+): { name: string; size: number }[] {
+  const measured = [];
+  for (const [name, node] of entries) {
     try {
-      size = expandedSize(runtime, node, kind);
+      measured.push({ name, size: expandedSize(runtime, node, kind) });
     } catch (error) {
       if (!(error instanceof DisplayAbort)) throw error;
     }
-    if (size !== undefined && size <= remaining) {
-      bounded[name] = node;
-      remaining -= size;
-    } else if (fallback !== undefined) {
-      bounded[name] = fallback;
-      remaining--;
-    }
   }
-  return bounded;
+  return measured;
 }
 
 function expandedSize(runtime: Runtime, root: OutputNode, kind: 'answer' | 'reference'): number {
