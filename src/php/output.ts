@@ -435,7 +435,7 @@ function exportValue(value: Value, level: number, state: Inspection): string {
   state.active.add(object);
   try {
     const isStd = object.cls.name === 'stdClass';
-    let text = isStd ? `${lead}(object) array(\n` : `${lead}\\${object.cls.name}::__set_state(array(\n`;
+    let text = isStd ? `${lead}(object) array(\n` : `${lead}\\${object.cls.fullName}::__set_state(array(\n`;
     for (const [key, slot] of exportedProps(object, state)) {
       if (slot === UNINIT) continue;
       const keyText = typeof key === 'bigint' ? String(key) : quoteExport(propNameOf(key));

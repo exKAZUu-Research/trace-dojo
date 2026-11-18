@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 684 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 687 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
-import { lower } from './bytes';
+import { lower, untilNul } from './bytes';
 import { valueName } from './conversions';
 import { notice, throwError, withPendingException } from './errors';
 import { decodeLiteral } from './literals';
@@ -160,18 +160,23 @@ export function resetCallStack(): void {
 /** The display name of a function in messages: `f`, `A::m`, or `{closure:A::m():3}`. */
 export function functionDisplayName(target: CallTarget): string {
   const { fn, method } = target;
-  if (method) return `${method.scope.name}::${method.name}`;
+  if (method) return classMethodLabel(method.scope, method.name);
   if (fn.kind === 'user' && fn.decl.isPropertyHook) return `${target.scope?.name ?? fn.decl.className}::${fn.name}`;
   if (fn.kind === 'user' && fn.decl.isClosure) return `${target.scope ? `${target.scope.name}::` : ''}${fn.decl.name}`;
   return fn.name;
 }
 
+export function classMethodLabel(scope: PhpClass, method: string): string {
+  return untilNul(`${scope.fullName}::${method}`);
+}
+
+// code-gauge-allow functionCognitiveComplexity 17 -- Emits PHP stack frames by callable kind.
 function recordFor(target: CallTarget, args: Value[], row: number | undefined): CallRecord {
   const { fn, method, thisObj } = target;
   if (method) {
     return {
       name: method.name,
-      className: method.scope.name,
+      className: method.scope.fullName,
       type: thisObj && !method.isStatic ? '->' : '::',
       thisObj,
       args,
@@ -190,8 +195,8 @@ function recordFor(target: CallTarget, args: Value[], row: number | undefined): 
   if (fn.kind === 'user' && fn.decl.isClosure) {
     const scope = target.scope;
     return {
-      name: fn.decl.name,
-      className: scope?.name,
+      name: scope?.isAnonymous ? fn.decl.name.replace(scope.name, scope.fullName) : fn.decl.name,
+      className: scope?.fullName,
       type: scope ? (thisObj ? '->' : '::') : undefined,
       thisObj,
       args,
@@ -246,7 +251,7 @@ function invokeNative(
     const dense = Array.from({ length: passed.length }, (_, index) =>
       index in passed ? passed[index] : nativeDefault(fn.params[index]?.nativeDefault)
     );
-    record = recordFor(target, dense, nativeDepth > 0 && row === undefined ? undefined : row);
+    record = recordFor(target, dense, row ?? implicitCallRow());
     callStack.push(record);
     nativeDepth++;
   }
@@ -716,7 +721,7 @@ function releaseFrame(
   releaseCallValues(
     runtime,
     [
-      ...[...frame.vars.values()].map((ref) => ref.v),
+      ...Array.from(runtime.variableBindings(frame), ([, ref]) => ref.v),
       ...frame.argumentHolders,
       ...frame.temporaries,
       frame.returning,
@@ -857,7 +862,7 @@ export function setDefaultEvaluator(run: (decl: FunctionDecl, index: number, fra
   evaluateDefault = run;
 }
 
-// code-gauge-allow functionNcss 52 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
+// code-gauge-allow functionNcss 53 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 // code-gauge-allow functionParameterCount 7 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function bindParams(
   frame: Frame,
@@ -888,6 +893,7 @@ function bindParams(
   const required = params.filter((param) => !param.optional && !param.variadic).length;
   for (let index = 0; index < params.length; index++) {
     const param = params[index];
+    rt().row = fn.decl.params[index].row;
     if (param.variadic) {
       const rest = new PhpArray();
       frame.vars.set(param.name, new Ref(rest));

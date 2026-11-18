@@ -1,0 +1,20 @@
+array:
+Warning: Array to string conversion in /main.php on line 3
+Array
+7:Undefined constant "MISSING_ARRAY_CONSTANT"
+11:Undefined constant "MISSING_ARGUMENT"
+
+Warning: Undefined variable $undefined in /main.php on line 15
+18:Unsupported operand types: string + array
+
+Warning: Undefined array key 0 in /main.php on line 21
+
+Warning: Undefined array key 1 in /main.php on line 21
+
+Warning: Undefined array key 2 in /main.php on line 22
+
+Warning: Undefined variable $unboundOne in /main.php on line 25
+
+Warning: Undefined variable $unboundTwo in /main.php on line 26
+30:exit(): Argument #1 ($status) must be of type string|int, array given
+33:clone(): Argument #1 ($object) must be of type object, int given

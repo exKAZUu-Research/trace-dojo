@@ -151,6 +151,7 @@ export class Runtime {
   gcThreshold = GC_THRESHOLD_DEFAULT;
   gcEnabled = true;
   readonly collectingObjects = new Set<PhpObject>();
+  readonly destructedCollectionRoots = new Set<PhpObject>();
   readonly collectingArrays = new Set<PhpArray>();
   collectingCycles = false;
   readonly internalObjects = new Set<PhpObject>();
@@ -217,6 +218,15 @@ export class Runtime {
       variableNamesByFunction.set(decl, names);
     }
     return names;
+  }
+
+  *variableBindings(frame = this.frame): Generator<[string, Ref]> {
+    const names = this.compiledNames(frame);
+    for (const name of names) {
+      const ref = frame.vars.get(name);
+      if (ref) yield [name, ref];
+    }
+    for (const entry of frame.vars) if (!names.has(entry[0])) yield entry;
   }
 
   get frame(): Frame {

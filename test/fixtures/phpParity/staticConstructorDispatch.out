@@ -1,0 +1,4 @@
+Cannot call constructor
+magic __construct
+Cannot call constructor
+Cannot call private PrivateParent::__construct()

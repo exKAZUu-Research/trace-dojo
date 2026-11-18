@@ -1,2 +1,6 @@
 gc:n1;n2;child;1;after;0
 gc:n2;n1;1;after;0
+gc:second;first;2;after;0
+gc:second;first;2;after;0
+gc:c;a;b;child;3;after;0
+gc:c;a;b;child;4;after;0

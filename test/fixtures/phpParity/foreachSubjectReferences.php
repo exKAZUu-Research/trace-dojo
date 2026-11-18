@@ -36,3 +36,17 @@ function undefinedSubject() {
     var_dump(array_key_exists('dynamic', get_defined_vars()));
 }
 undefinedSubject();
+
+foreach ([[7, 8], (object)['z' => 7], null] as $replacement) {
+    $subject = [10, 20];
+    $iteration = 0;
+    foreach ($subject as $key => &$value) {
+        echo "$key:$value;";
+        if ($iteration === 0) $subject = (object)['x' => 3, 'y' => 4];
+        elseif ($iteration === 1) $subject = $replacement;
+        $iteration++;
+    }
+    unset($value);
+    echo "\n";
+}
+echo "loop done\n";

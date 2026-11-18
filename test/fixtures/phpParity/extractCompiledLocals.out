@@ -106,3 +106,8 @@ array(8) {
 }
 int(3)
 int(3)
+source,left,right,start,init,body,update,step,condition,inside,check,table,item,key
+onetwothree
+head
+tail
+middle

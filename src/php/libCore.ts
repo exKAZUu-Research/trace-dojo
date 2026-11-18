@@ -727,16 +727,9 @@ defineFunction(
   () => {
     const runtime = rt();
     const array = new PhpArray();
-    const vars = runtime.frame.vars;
-    const names = runtime.compiledNames();
-    for (const name of names) {
+    for (const [name, ref] of runtime.variableBindings()) {
       runtime.spend();
-      const ref = vars.get(name);
-      if (ref) array.setSlot(normalizeKeyString(name), copyValueSlot(ref));
-    }
-    for (const [name, ref] of vars) {
-      runtime.spend();
-      if (!names.has(name)) array.setSlot(normalizeKeyString(name), copyValueSlot(ref));
+      array.setSlot(normalizeKeyString(name), copyValueSlot(ref));
     }
     return array;
   },

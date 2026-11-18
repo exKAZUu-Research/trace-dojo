@@ -407,7 +407,7 @@ export class Converter extends DeclarationConverter {
       ? this.listLiteral(valueNode)
       : this.writable(valueNode);
     const body = this.loopBody(() => this.controlBody(node));
-    return { k: 'foreach', subject, key, value, byRef, body, row };
+    return { k: 'foreach', subject, subjectEndRow: parts[0].endPosition.row, key, value, byRef, body, row };
   }
 
   // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
@@ -1258,7 +1258,7 @@ export class Converter extends DeclarationConverter {
       if (word === 'eval') this.unsupported(node, 'eval');
       if (word === 'die' || word === 'exit') {
         const { args, fcc } = this.args(argumentsNode);
-        return { k: 'call', fn: { name: 'exit' }, args, fcc, row };
+        return { k: 'call', fn: { name: 'exit' }, args, fcc, row: node.endPosition.row };
       }
       if (word === '__halt_compiler') this.unsupported(node, '__halt_compiler');
     }
@@ -1503,7 +1503,7 @@ export class Converter extends DeclarationConverter {
         const variable = byRef ? semanticChildren(child)[0] : child;
         const name = this.variableName(variable);
         if (name === 'this' || name === 'GLOBALS') this.error(child, `Cannot use $${name} as lexical variable`);
-        return { name, byRef };
+        return { name, byRef, row: variable.startPosition.row };
       });
     const fn = this.functionDecl(node, true);
     if (new Set(uses.map((use) => use.name)).size !== uses.length)

@@ -104,3 +104,9 @@ caught
 int(1)
 int(0)
 int(3)
+drop:Exception
+caught:Exception
+drop:Exception
+drop:Error
+caught:Error
+drop:Error

@@ -1,0 +1,9 @@
+3
+#0 /main.php(5): [constant expression]()
+#1 {main}
+#0 /main.php(10): [constant expression]()
+#1 {main}
+#0 /main.php(15): [constant expression]()
+#1 {main}
+#0 {main}
+#0 {main}

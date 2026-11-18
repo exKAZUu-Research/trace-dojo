@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 943 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 952 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { withCleanupExceptions, withPendingException } from './errors';
 import { type Frame, PhpThrow, type Runtime } from './runtime';
@@ -39,6 +39,7 @@ export function collectGarbage(runtime: Runtime, cycles = false): number {
     runtime.collectingCycles = false;
     runtime.collectingArrays.clear();
     runtime.collectingObjects.clear();
+    runtime.destructedCollectionRoots.clear();
     if (cycles) for (const value of gcTemporaries(runtime)) runtime.gcRoots.add(value);
   }
 }
@@ -106,6 +107,7 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean): number {
 }
 
 // code-gauge-allow functionCognitiveComplexity 16 -- Captures destructor exceptions while releasing the rest of the batch.
+// code-gauge-allow functionNcss 31 -- Destructor dispatch and cleanup use the same collection batch.
 function collectAfterDestruction(
   runtime: Runtime,
   owners: PhpObject[],
@@ -133,6 +135,7 @@ function collectAfterDestruction(
         if (!(error instanceof PhpThrow)) throw error;
         capture(error);
       }
+      retainCollectionReceiver(runtime, object);
     }
     const afterArrays = new Set<PhpArray>();
     const after = mark(runtime, false, afterArrays);
@@ -148,6 +151,15 @@ function collectAfterDestruction(
     retainTurtles(runtime, mark(runtime));
   });
   return count;
+}
+
+function retainCollectionReceiver(runtime: Runtime, object: PhpObject): void {
+  if (!runtime.collectingObjects.delete(object)) return;
+  try {
+    if (!ownedReachable(object, ownershipRoots(runtime), runtime)) runtime.destructedCollectionRoots.add(object);
+  } finally {
+    runtime.collectingObjects.add(object);
+  }
 }
 
 function countAfterDestruction(
@@ -191,7 +203,10 @@ export function releaseDropped(runtime: Runtime, dropped: unknown[], fromNative:
   const collectible =
     runtime.collectingObjects.size > 0
       ? dropped.filter(
-          (value): value is PhpObject => value instanceof PhpObject && runtime.collectingObjects.delete(value)
+          (value): value is PhpObject =>
+            value instanceof PhpObject &&
+            !runtime.destructedCollectionRoots.has(value) &&
+            runtime.collectingObjects.delete(value)
         )
       : [];
   try {

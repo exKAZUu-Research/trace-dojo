@@ -1,4 +1,5 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+import { untilNul } from './bytes';
 import { callMethod, callValue } from './callables';
 import { asInternal, callArguments, callNamedArguments, type CallRecord, callStack } from './calls';
 import { createObject, findClass } from './classes';
@@ -45,7 +46,8 @@ export function traceText(records: CallRecord[]): string {
 
 export function traceLine(record: CallRecord, index: number, ignoreArguments = false): string {
   const where = record.row === undefined ? '[internal function]' : `${SCRIPT_PATH}(${record.row + 1})`;
-  const name = record.className ? `${record.className}${record.type}${record.name}` : record.name;
+  const functionName = untilNul(record.name);
+  const name = record.className ? `${untilNul(record.className)}${record.type}${functionName}` : functionName;
   const args = ignoreArguments
     ? []
     : [
@@ -65,10 +67,11 @@ function traceArrayText(trace: Value): string {
     const line = frame.get('line');
     const where = file === undefined ? '[internal function]' : `${toStr(file)}(${toStr(line ?? null)})`;
     const className = frame.get('class');
+    const functionName = untilNul(toStr(frame.get('function') ?? ''));
     const name =
       className === undefined
-        ? toStr(frame.get('function') ?? '')
-        : `${toStr(className)}${toStr(frame.get('type') ?? '')}${toStr(frame.get('function') ?? '')}`;
+        ? functionName
+        : `${untilNul(toStr(className))}${toStr(frame.get('type') ?? '')}${functionName}`;
     const args = frame.get('args');
     const argsText =
       args instanceof PhpArray
@@ -151,7 +154,7 @@ function defaultThrowableText(object: PhpObject): string {
   let length = 0;
   for (const item of [...chain].toReversed()) {
     const message = describedMessage(item);
-    const header = message === '' ? item.cls.name : `${item.cls.name}: ${message}`;
+    const header = message === '' ? item.cls.fullName : `${item.cls.fullName}: ${message}`;
     const line = slotValue(item, 'line');
     const text = `${header} in ${toStr(slotValue(item, 'file'))}:${toStr(line)}\nStack trace:\n${traceArrayText(slotValue(item, throwableKey(item, 'trace')))}`;
     length += text.length + (parts.length > 0 ? '\n\nNext '.length : 0);

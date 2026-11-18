@@ -51,3 +51,26 @@ foreach ([false, true] as $same) {
         var_dump(count($target), $target->key(), $target->getInfo());
     }
 }
+
+class FailingClone extends SplObjectStorage {
+    public string $label = 'default';
+    public bool $fail = true;
+    public function __destruct() { echo 'drop:', $this->label, "\n"; }
+    public function __clone() { echo "unexpected clone hook\n"; }
+    public function getHash(object $object): string {
+        if ($this->fail) {
+            $class = $object->kind;
+            throw new $class('hash failed');
+        }
+        return 'stable';
+    }
+}
+foreach ([Exception::class, Error::class] as $kind) {
+    $source = new FailingClone;
+    $source->label = $kind;
+    $source->fail = false;
+    $source[(object)['kind' => $kind]] = 1;
+    try { $copy = clone $source; }
+    catch (Throwable $error) { echo 'caught:', get_class($error), "\n"; }
+    unset($source);
+}

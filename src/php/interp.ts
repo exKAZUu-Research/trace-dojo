@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 935 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 943 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -26,7 +26,7 @@ import {
   readOffset,
   staticCallExpression,
 } from './callables';
-import { type ArgValue, copyClosureData, invoke } from './calls';
+import { type ArgValue, classMethodLabel, copyClosureData, invoke } from './calls';
 import {
   canCall,
   classConstant,
@@ -202,6 +202,7 @@ export function evChain(e: Expr, discardResult = false): Chain {
       return classConstantOf(e);
     }
     case 'const': {
+      runtime.row = e.row;
       return readConstant(e.name.name, e.name.fallback);
     }
     case 'magic': {
@@ -528,7 +529,7 @@ function readVar(name: string, row: number): Value {
 
 function globalsArray(): PhpArray {
   const array = new PhpArray();
-  for (const [name, ref] of rt().globalFrame.vars) array.set(toKey(name), share(ref.v));
+  for (const [name, ref] of rt().variableBindings(rt().globalFrame)) array.set(toKey(name), share(ref.v));
   return array;
 }
 
@@ -965,7 +966,11 @@ function resolveClassName(ref: ClassRef, initializer: boolean): string {
 /** Evaluates the arguments of `new`, which PHP does after it has created the object. */
 function constructorArgs(cls: PhpClass, args: Arg[], row: number): ArgValue[] {
   const constructor = cls.findMethod('__construct');
-  const values = evalArgs(args, constructor?.fn, constructor ? `${constructor.scope.name}::__construct` : undefined);
+  const values = evalArgs(
+    args,
+    constructor?.fn,
+    constructor ? classMethodLabel(constructor.scope, '__construct') : undefined
+  );
   rt().row = row;
   return values;
 }
@@ -984,7 +989,7 @@ function anonymousClass(decl: ClassDecl, row: number): PhpClass {
 function cloneExpression(e: Extract<Expr, { k: 'clone' }>): Value {
   const runtime = rt();
   const value = ev(e.e);
-  runtime.row = e.row;
+  runtime.row = e.e.row;
   if (!(value instanceof PhpObject)) {
     throwError('TypeError', `clone(): Argument #1 ($object) must be of type object, ${valueName(value)} given`);
   }
@@ -1042,8 +1047,15 @@ function cloneObjectContents(original: PhpObject, copy: PhpObject): void {
   const internal = original.internal as { cloneWithDefaults?: (copy: PhpObject) => unknown } | undefined;
   if (typeof internal?.cloneWithDefaults === 'function') {
     classesModule.initializeObjectProperties(copy);
-    copy.internal = internal.cloneWithDefaults(copy);
-    copyCloneProperties(original, copy);
+    let failure: PhpThrow | undefined;
+    try {
+      copy.internal = internal.cloneWithDefaults(copy);
+    } catch (error) {
+      if (!(error instanceof PhpThrow)) throw error;
+      failure = error;
+    }
+    withPendingException(rt(), failure, () => copyCloneProperties(original, copy));
+    if (failure) throw failure;
   } else {
     copyCloneProperties(original, copy);
     copy.internal = cloneInternal(original, copy);

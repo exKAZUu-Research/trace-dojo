@@ -72,7 +72,7 @@ export type Expr = { row: number } & (
   | { k: 'throw'; e: Expr }
   | { k: 'isset'; items: Expr[] }
   | { k: 'empty'; e: Expr }
-  | { k: 'closure'; fn: FunctionDecl; uses: { name: string; byRef: boolean }[]; isStatic: boolean }
+  | { k: 'closure'; fn: FunctionDecl; uses: { name: string; byRef: boolean; row: number }[]; isStatic: boolean }
   | { k: 'arrow'; fn: FunctionDecl; isStatic: boolean; parenthesized?: true }
   | { k: 'instanceof'; e: Expr; cls: ClassRef }
   | { k: 'match'; subject: Expr; arms: MatchArm[]; jumpTable?: boolean }
@@ -108,6 +108,7 @@ export type Stmt = { row: number } & (
   | {
       k: 'foreach';
       subject: Expr;
+      subjectEndRow: number;
       key?: Expr;
       value: Expr;
       byRef: boolean;

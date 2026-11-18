@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 582 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 598 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
@@ -6,7 +6,7 @@ import type { Expr, FunctionDecl, Program, Stmt } from './ast';
 import { foreachReferences, nestedBodies } from './astAnalysis';
 import { lower } from './bytes';
 import { callMethod } from './callables';
-import { asInternal, invoke, setBodyRunner, setDefaultEvaluator } from './calls';
+import { asInternal, callStack, invoke, setBodyRunner, setDefaultEvaluator } from './calls';
 import {
   canDeclareEarly,
   declareClass,
@@ -173,7 +173,9 @@ function execStmt(statement: Stmt, seek?: string): Completion {
       case 'echo': {
         const mark = runtime.steps.statementMark();
         for (const arg of statement.args) {
-          runtime.echo(toStr(ev(arg)));
+          const value = ev(arg);
+          runtime.row = arg.row;
+          runtime.echo(toStr(value));
           runtime.dropTemporaries(frame, held);
         }
         runtime.steps.completeStatement(statement.row, true, mark);
@@ -471,31 +473,13 @@ function catches(object: PhpObject, name: string): boolean {
   return cls !== undefined && object.cls.isSubclassOf(cls);
 }
 
-// code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completion {
   const runtime = rt();
   const frame = runtime.frame;
-  if (foreachReferences(statement.value, statement.byRef)) {
-    const place = foreachSubjectPlace(statement.subject);
-    const container = place.get();
-    if (container instanceof PhpObject && !container.isResource) return foreachObject(statement, container, true);
-    if (!(container instanceof PhpArray)) {
-      runtime.row = statement.subject.row;
-      warn(`foreach() argument must be of type array|object, ${valueName(container ?? null)} given`);
-      return undefined;
-    }
-    const subject = place instanceof ValuePlace ? Ref.temporary(container) : place.ref();
-    runtime.holdTemporaryReference(subject);
-    return foreachArrayByRef(statement, writableContainer(new RefPlace(subject), container) as PhpArray, subject);
-  }
+  if (foreachReferences(statement.value, statement.byRef)) return foreachReferenceSubject(statement);
   const subject = ev(statement.subject);
   if (subject instanceof PhpObject && !subject.isResource) return foreachObject(statement, subject);
-  if (!(subject instanceof PhpArray)) {
-    runtime.row = statement.subject.row;
-    warn(`foreach() argument must be of type array|object, ${valueName(subject)} given`);
-    return undefined;
-  }
+  if (!(subject instanceof PhpArray)) return warnForeachSubject(statement, subject);
   subject.shared = true;
   frame.temporaries.push(subject);
   for (const [key, slot] of subject.map) {
@@ -505,6 +489,34 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
     if (completion !== 'next') return completion;
   }
   return undefined;
+}
+
+const FOREACH_REPLACED = Symbol();
+type ForeachCompletion = Completion | typeof FOREACH_REPLACED;
+
+// code-gauge-allow functionCognitiveComplexity 19 -- Both container kinds share the same subject and completion state.
+function foreachReferenceSubject(statement: Extract<Stmt, { k: 'foreach' }>): Completion {
+  const runtime = rt();
+  const place = foreachSubjectPlace(statement.subject);
+  const initial = place.get();
+  if (!(initial instanceof PhpArray || (initial instanceof PhpObject && !initial.isResource)))
+    return warnForeachSubject(statement, initial);
+  const reference = place instanceof ValuePlace ? Ref.temporary(initial) : place.ref();
+  runtime.holdTemporaryReference(reference);
+  const traversable = runtime.classes.get('traversable') as PhpClass;
+  for (;;) {
+    const container = reference.v;
+    let result: ForeachCompletion;
+    if (container instanceof PhpArray) {
+      const array = writableContainer(new RefPlace(reference), container) as PhpArray;
+      result = foreachArrayByRef(statement, array, reference);
+    } else if (container instanceof PhpObject && !container.isResource) {
+      if (container.cls.isSubclassOf(traversable))
+        return container === initial ? foreachObject(statement, container, true) : undefined;
+      result = foreachPropertyByRef(statement, container, reference);
+    } else return warnForeachSubject(statement, container);
+    if (result !== FOREACH_REPLACED) return result;
+  }
 }
 
 interface NativeForeachStorage {
@@ -517,14 +529,14 @@ function foreachArrayByRef(
   statement: Extract<Stmt, { k: 'foreach' }>,
   array: PhpArray,
   subject: Ref | NativeForeachStorage
-): Completion {
+): ForeachCompletion {
   const runtime = rt();
   let cursor = array.foreachCursor();
   try {
     for (;;) {
       const next = subject instanceof Ref ? subject.v : subject.array;
       if (next !== array) {
-        if (!(next instanceof PhpArray)) return foreachReplacement(statement, next);
+        if (!(next instanceof PhpArray)) return FOREACH_REPLACED;
         array =
           subject instanceof Ref ? (writableContainer(new RefPlace(subject), next) as PhpArray) : subject.writable();
         cursor = array.foreachCursor(cursor, !(subject instanceof Ref));
@@ -545,14 +557,30 @@ function foreachArrayByRef(
   }
 }
 
-function foreachReplacement(statement: Extract<Stmt, { k: 'foreach' }>, value: Value): Completion {
-  if (value instanceof PhpObject && !value.isResource) {
-    const traversable = rt().classes.get('traversable') as PhpClass;
-    if (!value.cls.isSubclassOf(traversable)) return foreachObject(statement, value, true);
-    return undefined;
+function foreachPropertyByRef(
+  statement: Extract<Stmt, { k: 'foreach' }>,
+  object: PhpObject,
+  subject: Ref
+): ForeachCompletion {
+  const runtime = rt();
+  const scope = runtime.frame.scope;
+  const keys = visiblePropertyKeys(object, scope, true);
+  for (const key of keys) {
+    const name = propNameOf(key);
+    const ref = propRef(object, name, scope, 'foreach');
+    bindForeachRef(statement.value, ref);
+    if (statement.key) assignTo(statement.key, name);
+    runtime.steps.stepBinding(statement.row, true);
+    const result = loopBody(statement.body);
+    if (result !== 'next') return result;
+    if (subject.v !== object) return FOREACH_REPLACED;
   }
-  rt().row = statement.row;
-  warn(`foreach() argument must be of type array|object, ${valueName(value)} given`);
+  return undefined;
+}
+
+function warnForeachSubject(statement: Extract<Stmt, { k: 'foreach' }>, value: Value | undefined): undefined {
+  rt().row = statement.subject.row;
+  warn(`foreach() argument must be of type array|object, ${valueName(value ?? null)} given`);
   return undefined;
 }
 
@@ -585,6 +613,7 @@ function bindForeachRef(target: Expr, ref: Ref): void {
 // code-gauge-allow functionNcss 42 -- Both iteration modes share the statement binding and completion path.
 function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpObject, byRef = false): Completion {
   const runtime = rt();
+  runtime.row = statement.subjectEndRow;
   const acquired = acquireIterator(object, byRef);
   if (acquired) {
     const { iterator, handle } = acquired;
@@ -592,7 +621,8 @@ function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpOb
     try {
       if (byRef) {
         const storage = iterator.internal as NativeForeachStorage;
-        return foreachArrayByRef(statement, storage.writable(), storage);
+        const result = foreachArrayByRef(statement, storage.writable(), storage);
+        return result === FOREACH_REPLACED ? undefined : result;
       }
       callMethod(iterator, 'rewind', []);
       while (toBool(callMethod(iterator, 'valid', []))) {
@@ -601,6 +631,7 @@ function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpOb
         const key = statement.key ? callMethod(iterator, 'key', []) : null;
         const completion = foreachIteration(statement, key, value);
         if (completion !== 'next') return completion;
+        runtime.row = statement.subjectEndRow;
         callMethod(iterator, 'next', []);
       }
     } catch (error) {
@@ -614,15 +645,6 @@ function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpOb
   const scope = runtime.frame.scope;
   for (const key of visiblePropertyKeys(object, scope, true)) {
     const name = propNameOf(key);
-    if (byRef) {
-      const ref = propRef(object, name, scope, 'foreach');
-      bindForeachRef(statement.value, ref);
-      if (statement.key) assignTo(statement.key, name);
-      runtime.steps.stepBinding(statement.row, true);
-      const result = loopBody(statement.body);
-      if (result !== 'next') return result;
-      continue;
-    }
     const completion = foreachIteration(statement, name, readProp(object, name, scope, 'quiet'));
     if (completion !== 'next') return completion;
   }
@@ -685,6 +707,7 @@ function parameterDefault(decl: FunctionDecl, index: number, frame: Frame): Valu
   const values = runtime.parameterDefaults.get(expression);
   const stored = values?.get(frame.scope);
   if (stored !== undefined) return share(stored);
+  runtime.row = expression.row;
   const value = share(ev(expression));
   if ((value === null || typeof value !== 'object') && !containsDefaultAllocation(expression)) {
     const cache = values ?? new Map<PhpClass | undefined, Value>();
@@ -704,13 +727,17 @@ function containsDefaultAllocation(node: unknown): boolean {
 setDefaultEvaluator(parameterDefault);
 setClassEvaluator((e, cls) => {
   const runtime = rt();
+  const trigger = runtime.row;
   const frame = new Frame(undefined, undefined, false, undefined, cls, cls);
   frame.constantExpression = true;
+  const trace = cls !== undefined && trigger !== e.row;
+  if (trace) callStack.push({ name: '[constant expression]', args: [], row: trigger });
   runtime.frames.push(frame);
   try {
     return ev(e);
   } finally {
     runtime.frames.pop();
+    if (trace) callStack.pop();
   }
 });
 

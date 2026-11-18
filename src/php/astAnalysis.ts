@@ -30,8 +30,8 @@ export function collectScopeVars(body: Stmt[]): Set<string> {
   return found;
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- One traversal selects variable names while respecting scope boundaries.
-// code-gauge-allow functionNcss 38 -- Traversal and scope dispatch share the same visitor.
+// code-gauge-allow functionCognitiveComplexity 24 -- One traversal selects variable names while respecting scope boundaries.
+// code-gauge-allow functionNcss 54 -- Traversal and scope dispatch share the same visitor.
 function collectScopeNames(value: unknown, add: (name: string) => void): void {
   if (!value || typeof value !== 'object') return;
   if (Array.isArray(value)) {
@@ -73,6 +73,26 @@ function collectScopeNames(value: unknown, add: (name: string) => void): void {
         add(variable.name);
         collectScopeNames(variable.init, add);
       }
+      return;
+    }
+    case 'foreach': {
+      const { subject, value: binding, key, body } = value as Extract<Stmt, { k: 'foreach' }>;
+      collectScopeNames([subject, binding, key, body], add);
+      return;
+    }
+    case 'while': {
+      const { body, cond } = value as Extract<Stmt, { k: 'while' }>;
+      collectScopeNames([body, cond], add);
+      return;
+    }
+    case 'for': {
+      const { init, body, update, cond } = value as Extract<Stmt, { k: 'for' }>;
+      collectScopeNames([init, body, update, cond], add);
+      return;
+    }
+    case 'assign': {
+      const { target, value: source } = value as Extract<Expr, { k: 'assign' }>;
+      collectScopeNames(target.k === 'list' ? [source, target] : [target, source], add);
       return;
     }
     default: {

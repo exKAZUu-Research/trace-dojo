@@ -130,7 +130,7 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
     }
   }
   for (const constant of decl.consts) addConst(cls, constant);
-  for (const prop of decl.props) addProperty(cls, prop);
+  addDeclaredProperties(cls, decl.props);
   for (const method of decl.methods) addMethod(cls, method);
   applyTraits(cls, decl);
   linkInterfaceConstants(cls, row);
@@ -189,51 +189,71 @@ function propertyKey(cls: PhpClass, name: string, visibility: Visibility): strin
   return visibility === 'private' ? `\0${cls.name}\0${name}` : name;
 }
 
-// code-gauge-allow functionNcss 56 -- Follows PHP's class linking and property access rules in their order of checks.
-function addProperty(cls: PhpClass, ast: PropertyDeclAst, declarationScope = cls): void {
-  const inherited = cls.propByName.get(ast.name);
-  if (inherited && inherited.cls !== cls && inherited.isFinal)
-    throw new FatalError(`Cannot override final property ${inherited.cls.name}::$${ast.name}`, ast.row);
-  if (ast.isFinal && ast.visibility === 'private' && !ast.promoted)
-    throw new FatalError('Property cannot be both final and private', ast.row);
-  if (inherited && inherited.cls !== cls && inherited.visibility !== 'private') {
-    if (inherited.isStatic !== ast.isStatic) {
-      throw new FatalError(
-        ast.isStatic
-          ? `Cannot redeclare non static ${inherited.cls.name}::$${ast.name} as static ${cls.name}::$${ast.name}`
-          : `Cannot redeclare static ${inherited.cls.name}::$${ast.name} as non static ${cls.name}::$${ast.name}`,
-        ast.row
-      );
-    }
-    if (visibilityRank(ast.visibility) < visibilityRank(inherited.visibility)) {
-      throw new FatalError(
-        `Access level to ${cls.name}::$${ast.name} must be ${inherited.visibility === 'public' ? 'public' : 'protected'} (as in class ${inherited.cls.name})${inherited.visibility === 'protected' ? ' or weaker' : ''}`,
-        ast.row
-      );
-    }
-    if (inherited.isReadonly !== ast.isReadonly)
-      throw new FatalError(
-        `Cannot redeclare ${inherited.isReadonly ? 'readonly' : 'non-readonly'} property ${inherited.cls.name}::$${ast.name} as ${ast.isReadonly ? 'readonly' : 'non-readonly'} ${cls.name}::$${ast.name}`,
-        ast.row
-      );
-    const setter = effectiveSetVisibility(ast);
-    const parentSetter = effectiveSetVisibility(inherited);
-    if (visibilityRank(setter) < visibilityRank(parentSetter)) {
-      throw new FatalError(
-        `Set access level of ${cls.name}::$${ast.name} must be ${parentSetter === 'public' ? 'omitted' : `${parentSetter}(set)`} (as in class ${inherited.cls.name})${parentSetter === 'protected' ? ' or weaker' : ''}`,
-        ast.row
-      );
-    }
-    if (inherited.type && !propertyTypeCompatible(inherited, ast, cls, declarationScope)) {
-      propertyTypeError(inherited, cls, ast.name, ast.row);
-    }
-    if (!inherited.type && ast.type && !propertyTypeCompatible(inherited, ast, cls, declarationScope)) {
-      throw new FatalError(
-        `Type of ${cls.name}::$${ast.name} must not be defined (as in class ${inherited.cls.name})`,
-        ast.row
-      );
+function addDeclaredProperties(cls: PhpClass, properties: PropertyDeclAst[]): void {
+  if (cls.parent) {
+    const byName = new Map(properties.map((property) => [property.name, property]));
+    for (const inherited of cls.parent.propByName.values()) {
+      const property = byName.get(inherited.name);
+      if (property) checkPropertyOverride(cls, inherited, property, cls);
     }
   }
+  for (const property of properties) addProperty(cls, property);
+}
+
+// code-gauge-allow functionCognitiveComplexity 24 -- Applies PHP property override checks in diagnostic order.
+function checkPropertyOverride(
+  cls: PhpClass,
+  inherited: PropDecl,
+  ast: PropertyDeclAst,
+  declarationScope: PhpClass
+): void {
+  if (inherited.isFinal)
+    throw new FatalError(`Cannot override final property ${inherited.cls.name}::$${ast.name}`, cls.declaredRow);
+  if (inherited.visibility === 'private') return;
+  if (inherited.isStatic !== ast.isStatic) {
+    throw new FatalError(
+      ast.isStatic
+        ? `Cannot redeclare non static ${inherited.cls.name}::$${ast.name} as static ${cls.name}::$${ast.name}`
+        : `Cannot redeclare static ${inherited.cls.name}::$${ast.name} as non static ${cls.name}::$${ast.name}`,
+      cls.declaredRow
+    );
+  }
+  if (visibilityRank(ast.visibility) < visibilityRank(inherited.visibility)) {
+    throw new FatalError(
+      `Access level to ${cls.name}::$${ast.name} must be ${inherited.visibility === 'public' ? 'public' : 'protected'} (as in class ${inherited.cls.name})${inherited.visibility === 'protected' ? ' or weaker' : ''}`,
+      cls.declaredRow
+    );
+  }
+  if (inherited.isReadonly !== ast.isReadonly)
+    throw new FatalError(
+      `Cannot redeclare ${inherited.isReadonly ? 'readonly' : 'non-readonly'} property ${inherited.cls.name}::$${ast.name} as ${ast.isReadonly ? 'readonly' : 'non-readonly'} ${cls.name}::$${ast.name}`,
+      cls.declaredRow
+    );
+  const setter = effectiveSetVisibility(ast);
+  const parentSetter = effectiveSetVisibility(inherited);
+  if (visibilityRank(setter) < visibilityRank(parentSetter)) {
+    throw new FatalError(
+      `Set access level of ${cls.name}::$${ast.name} must be ${parentSetter === 'public' ? 'omitted' : `${parentSetter}(set)`} (as in class ${inherited.cls.name})${parentSetter === 'protected' ? ' or weaker' : ''}`,
+      cls.declaredRow
+    );
+  }
+  if (inherited.type && !propertyTypeCompatible(inherited, ast, cls, declarationScope)) {
+    propertyTypeError(inherited, cls, ast.name, cls.declaredRow);
+  }
+  if (!inherited.type && ast.type && !propertyTypeCompatible(inherited, ast, cls, declarationScope)) {
+    throw new FatalError(
+      `Type of ${cls.name}::$${ast.name} must not be defined (as in class ${inherited.cls.name})`,
+      cls.declaredRow
+    );
+  }
+}
+
+// code-gauge-allow functionCognitiveComplexity 27 -- Populates property slots, defaults and hooks together.
+// code-gauge-allow functionNcss 35 -- The storage variants share property metadata and defaults.
+function addProperty(cls: PhpClass, ast: PropertyDeclAst, declarationScope = cls): void {
+  const inherited = cls.propByName.get(ast.name);
+  if (ast.isFinal && ast.visibility === 'private' && !ast.promoted)
+    throw new FatalError('Property cannot be both final and private', ast.row);
   const decl: PropDecl = {
     declarationScope,
     declarationAst: ast,
@@ -271,8 +291,7 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst, declarationScope = cls
     return;
   }
   const index = cls.props.findIndex((existing) => existing.name === ast.name && existing.visibility !== 'private');
-  if (index !== -1 && decl.visibility !== 'private') cls.props[index] = decl;
-  else if (index !== -1 && decl.visibility === 'private') cls.props[index] = decl;
+  if (index !== -1) cls.props[index] = decl;
   else cls.props.push(decl);
   cls.propByName.set(ast.name, decl);
   if (decl.visibility === 'private') cls.privateProps.set(ast.name, decl);
@@ -535,6 +554,7 @@ function usedTrait(cls: PhpClass, name: string, row: number): PhpClass {
   return trait;
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Checks same-name properties before linking trait properties.
 function applyTraitProperties(cls: PhpClass, trait: PhpClass, origins: Map<string, string>, row: number): void {
   for (const source of trait.propByName.values()) {
     const prop = source.declarationAst;
@@ -554,6 +574,8 @@ function applyTraitProperties(cls: PhpClass, trait: PhpClass, origins: Map<strin
         );
       continue;
     }
+    const inherited = cls.propByName.get(prop.name);
+    if (inherited && inherited.cls !== cls) checkPropertyOverride(cls, inherited, prop, declarationScope);
     addProperty(cls, prop, declarationScope);
     origins.set(prop.name, trait.name);
   }
@@ -592,7 +614,7 @@ function copyFunction(fn: Callable): Callable {
   return { ...fn, statics: new Map() };
 }
 
-// code-gauge-allow functionNcss 46 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 48 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function checkInheritance(cls: PhpClass, row: number): void {
   const ancestors: PhpClass[] = [];
   for (let parent = cls.parent; parent; parent = parent.parent) ancestors.push(parent);
@@ -641,10 +663,11 @@ function checkInheritance(cls: PhpClass, row: number): void {
     const allNames = [...missing.map((method) => `${method.cls.name}::${method.name}`), ...hooks];
     const names = allNames.slice(0, 3);
     const count = allNames.length;
-    throw new FatalError(
-      `Class ${cls.name} contains ${count} abstract method${count === 1 ? '' : 's'} and must therefore be declared abstract or implement the remaining method${count === 1 ? '' : 's'} (${names.join(', ')}${count > 3 ? ', ...' : ''})`,
-      row
-    );
+    const methods = count === 1 ? 'method' : 'methods';
+    const requirement = cls.isAnonymous
+      ? `must implement ${count} abstract ${methods}`
+      : `contains ${count} abstract ${methods} and must therefore be declared abstract or implement the remaining ${methods}`;
+    throw new FatalError(`Class ${cls.name} ${requirement} (${names.join(', ')}${count > 3 ? ', ...' : ''})`, row);
   }
 }
 

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 834 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 837 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -886,13 +886,16 @@ export function destructure(target: Extract<Expr, { k: 'list' }>, value: Value, 
   }
   rt().frame.temporaries.push(value);
   let position = 0n;
+  let fetchRow = target.row;
   for (const item of target.items) {
     if (item === undefined) {
       position++;
       continue;
     }
     const key = item.key === undefined ? position++ : toKey(ev(item.key));
+    rt().row = item.key?.row ?? fetchRow;
     destructureItem(item, value, key, source !== undefined);
+    fetchRow = item.target.row;
   }
   return value;
 }
@@ -943,16 +946,16 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
     place.readCompoundName?.(warning);
     let readAfterFetch = e.target.k === 'idx' && isCompiledVariable(e.value);
     let value = readAfterFetch ? null : readUpdateValue(e, read, warning);
-    runtime.row = e.row;
+    runtime.row = e.value.row;
     const fetched = readCompound(place, warning, () => {
       if (readAfterFetch && missingCompiledOperand(e.value)) {
-        value = readOperandWithWarning(e.value, read, warning, e.row);
+        value = readOperandWithWarning(e.value, read, warning, e.value.row);
         readAfterFetch = false;
       }
       return warningPending();
     });
     if (fetched === SKIP_COMPOUND) return null;
-    if (readAfterFetch) value = readOperandWithWarning(e.value, read, warning, e.row);
+    if (readAfterFetch) value = readOperandWithWarning(e.value, read, warning, e.value.row);
     return storeCompoundResult(e.op, place, fetched, value, warningPending());
   });
 }
@@ -963,7 +966,7 @@ function readUpdateValue(
   warning: UpdateWarning
 ): Value {
   if (e.target.k !== 'var' && e.target.k !== 'prop') return read();
-  return readOperandWithWarning(e.value, read, warning, e.row);
+  return readOperandWithWarning(e.value, read, warning, e.value.row);
 }
 
 function storeCompoundResult(

@@ -1,0 +1,15 @@
+array_pop(): Argument #1 ($array) could not be passed by reference
+end(): Argument #1 ($array) could not be passed by reference
+byReference(): Argument #1 ($value) could not be passed by reference
+byReference(): Argument #1 ($value) could not be passed by reference
+
+Notice: Only variables should be passed by reference in /main.php on line 15
+string(4) "1.00"
+
+Notice: Only variables should be passed by reference in /main.php on line 16
+array(2) {
+  [0]=>
+  string(1) "e"
+  [1]=>
+  string(5) "ample"
+}

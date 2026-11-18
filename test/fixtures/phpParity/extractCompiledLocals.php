@@ -27,3 +27,33 @@ function extractOrder($parameter, $flags) {
 }
 extractOrder(0, 0);
 extractOrder(0, EXTR_REFS);
+
+function compiledTraversalOrder() {
+    if (false) {
+        [$left, $right] = $source;
+        for ($start = $init; $condition; $update = $step) $body;
+        while ($check) $inside;
+    }
+    $table = ['key' => 7];
+    foreach ($table as $key => $item) {}
+    extract(array_fill_keys(['left', 'right', 'source', 'start', 'init', 'condition', 'update', 'step', 'body', 'check', 'inside'], 1));
+    echo implode(',', array_keys(get_defined_vars())), "\n";
+}
+compiledTraversalOrder();
+
+class LocalLifetime {
+    function __construct(public $label) {}
+    function __destruct() { echo $this->label; }
+}
+function releaseInSlotOrder() {
+    $one = isset($two) ? null : new LocalLifetime('one');
+    $three = new LocalLifetime('three');
+    $two = new LocalLifetime('two');
+}
+releaseInSlotOrder();
+echo "\n";
+$head = isset($tail);
+$middle = 2;
+$tail = 3;
+foreach ($GLOBALS as $key => $value)
+    if (in_array($key, ['head', 'middle', 'tail'], true)) echo $key, "\n";
