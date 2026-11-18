@@ -240,7 +240,7 @@ defineFunction('array_values(array $array): array', ({ args }) => {
 defineFunction('array_is_list(array $array): bool', ({ args }) => arr(args[0]).isList());
 defineFunction('in_array(mixed $needle, array $haystack, bool $strict = false): bool', ({ args }) => {
   const [needle, haystack, strict] = args;
-  for (const value of arr(haystack).values()) {
+  for (const value of arr(haystack).iterValues()) {
     rt().spend();
     if (strict === true ? strictEquals(value, needle) : looseEquals(value, needle)) return true;
   }
@@ -358,16 +358,17 @@ defineFunction('array_replace_recursive(array $array, array ...$replacements): a
   return result;
 });
 defineFunction('array_combine(array $keys, array $values): array', ({ args }) => {
-  const keys = arr(args[0]).values();
+  const keys = arr(args[0]);
   const values = [...arr(args[1]).map.values()];
-  if (keys.length !== values.length) {
+  if (keys.size !== values.length) {
     throwError(
       'ValueError',
       'array_combine(): Argument #1 ($keys) and argument #2 ($values) must have the same number of elements'
     );
   }
   const result = new PhpArray();
-  for (const [index, key] of keys.entries()) result.setSlot(toKey(toStrKey(key)), copyValueSlot(values[index]));
+  let index = 0;
+  for (const key of keys.iterValues()) result.setSlot(toKey(toStrKey(key)), copyValueSlot(values[index++]));
   return result;
 });
 
@@ -408,7 +409,7 @@ defineFunction('array_fill(int $start_index, int $count, mixed $value): array', 
 });
 defineFunction('array_fill_keys(array $keys, mixed $value): array', ({ args }) => {
   const result = new PhpArray();
-  for (const key of arr(args[0]).values()) result.set(toKey(toStrKey(key)), share(args[1]));
+  for (const key of arr(args[0]).iterValues()) result.set(toKey(toStrKey(key)), share(args[1]));
   return result;
 });
 defineFunction('array_pad(array $array, int $length, mixed $value): array', ({ args }) => {
@@ -609,7 +610,7 @@ defineFunction(
       if (value instanceof PhpArray) {
         if (active.has(value)) throwError('Error', 'Recursion detected');
         active.add(value);
-        for (const item of value.values()) visit(item, argument);
+        for (const item of value.iterValues()) visit(item, argument);
         active.delete(value);
         return;
       }
@@ -760,7 +761,7 @@ defineFunction('array_reduce(array $array, callable $callback, mixed $initial = 
   const start = runtime.nativeHeld.at(-1)?.length ?? 0;
   let carry = args[2] ?? null;
   let owned = false;
-  for (const value of arr(args[0]).values()) {
+  for (const value of arr(args[0]).iterValues()) {
     const previous = carry;
     carry = callCallback(args[1], [carry, value]);
     if (owned) runtime.discardNativeResult(previous, start);
@@ -910,12 +911,12 @@ defineFunction('array_unique(array $array, int $flags = SORT_STRING): array', ({
 });
 defineFunction('array_sum(array $array): int|float', ({ args }) => {
   let sum: Value = 0n;
-  for (const value of arr(args[0]).values()) sum = accumulate('array_sum', '+', 'Addition', sum, value);
+  for (const value of arr(args[0]).iterValues()) sum = accumulate('array_sum', '+', 'Addition', sum, value);
   return sum;
 });
 defineFunction('array_product(array $array): int|float', ({ args }) => {
   let product: Value = 1n;
-  for (const value of arr(args[0]).values())
+  for (const value of arr(args[0]).iterValues())
     product = accumulate('array_product', '*', 'Multiplication', product, value);
   return product;
 });
@@ -942,7 +943,7 @@ defineFunction(
   ({ args }) => {
     const [rows, column, index] = args;
     const result = new PhpArray();
-    for (const row of arr(rows).values()) {
+    for (const row of arr(rows).iterValues()) {
       const value = column === null ? row : columnField(row, column);
       if (value === undefined) continue;
       const indexValue = index === null || index === undefined ? undefined : columnField(row, index);
@@ -985,7 +986,7 @@ defineFunction('array_chunk(array $array, int $length, bool $preserve_keys = fal
 });
 defineFunction('array_count_values(array $array): array', ({ args }) => {
   const result = new PhpArray();
-  for (const value of arr(args[0]).values()) {
+  for (const value of arr(args[0]).iterValues()) {
     if (typeof value !== 'bigint' && typeof value !== 'string') {
       warn('array_count_values(): Can only count string and integer values, entry skipped');
       continue;

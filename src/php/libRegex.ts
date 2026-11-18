@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 405 -- The regex functions share matching, offsets, capture handling, and error state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { dec, enc } from './bytes';
 import { consumeCallbackResult } from './callables';
@@ -79,6 +80,7 @@ function matchesOf(compiled: Compiled, subject: string, offset = 0, status?: { e
   return scanMatches(compiled, subject, offset, toMatch, status);
 }
 
+// code-gauge-allow functionCognitiveComplexity 21 -- Empty matches retry at the same position before advancing by a code point.
 function* scanMatches<T>(
   compiled: Compiled,
   subject: string,
@@ -101,17 +103,7 @@ function* scanMatches<T>(
   let retry = false;
   while (position <= text.length) {
     rt().spend();
-    const regex = retry ? compiled.retry : compiled.regex;
-    regex.lastIndex = position;
-    let result: (RegExpExecArray & { indices: RegExpIndicesArray }) | null;
-    try {
-      result = regex.exec(text) as typeof result;
-    } catch (error) {
-      if (error instanceof SyntaxError) throw new UnsupportedFeatureError('ホストエンジンの制限を超える正規表現');
-      throw error;
-    }
-    // The host's engine cannot be interrupted and may backtrack for seconds before giving up.
-    rt().budget.checkClock();
+    const result = executeMatch(retry ? compiled.retry : compiled.regex, text, position);
     if (!result) {
       if (!retry || position >= text.length) return;
       retry = false;
@@ -126,6 +118,23 @@ function* scanMatches<T>(
     yield project(compiled, result, [matchStart, matchEnd], byteOffset);
     position = matchEnd;
     retry = matchStart === matchEnd;
+  }
+}
+
+function executeMatch(
+  regex: RegExp,
+  text: string,
+  position: number
+): (RegExpExecArray & { indices: RegExpIndicesArray }) | null {
+  regex.lastIndex = position;
+  try {
+    const result = regex.exec(text) as (RegExpExecArray & { indices: RegExpIndicesArray }) | null;
+    // The host's engine cannot be interrupted and may backtrack for seconds before giving up.
+    rt().budget.checkClock();
+    return result;
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new UnsupportedFeatureError('ホストエンジンの制限を超える正規表現');
+    throw error;
   }
 }
 
@@ -261,7 +270,7 @@ defineFunction(
     const compiled = compile('preg_match_all', args[0] as string);
     if (!compiled) return false;
     const resultRef = args[2] === undefined ? undefined : refs[2];
-    if (resultRef) resultRef.v = new PhpArray();
+    if (refs[2]) refs[2].v = new PhpArray();
     let flags = (args[3] as bigint | undefined) ?? 0n;
     if ((flags & 0xffn) > 2n) {
       throwError('ValueError', 'preg_match_all(): Argument #4 ($flags) must be a PREG_* constant');
@@ -287,15 +296,24 @@ function collectMatches(compiled: Compiled, matches: Generator<Match>, output: R
   const result = output.v as PhpArray;
   const offsetCapture = (flags & 256n) !== 0n;
   const unmatchedAsNull = (flags & 512n) !== 0n;
+  if ((flags & 2n) === 0n) return collectMatchColumns(compiled, matches, result, offsetCapture, unmatchedAsNull);
   let count = 0;
-  if ((flags & 2n) !== 0n) {
-    for (const match of matches) {
-      result.append(matchArray(compiled, match, offsetCapture, unmatchedAsNull, true));
-      count++;
-    }
-    return count;
+  for (const match of matches) {
+    result.append(matchArray(compiled, match, offsetCapture, unmatchedAsNull, true));
+    count++;
   }
+  return count;
+}
+
+function collectMatchColumns(
+  compiled: Compiled,
+  matches: Generator<Match>,
+  result: PhpArray,
+  offsetCapture: boolean,
+  unmatchedAsNull: boolean
+): number {
   const columns = Array.from({ length: compiled.groupCount + 1 }, () => new PhpArray());
+  let count = 0;
   for (const match of matches) {
     count++;
     for (const [group, column] of columns.entries()) {

@@ -1159,6 +1159,17 @@ test('drains indexed queues and packed deques with time to spare', () => {
   expect(run(source)).toMatchObject({ kind: 'executed', stdout: '18003000|32003996|18003000' });
 });
 
+test.each([
+  "'9223372036854775808' == '9223372036854775809'",
+  "'1e999' == '2e999'",
+  "[['1e999']] == [['2e999']]",
+  "'9223372036854775807' == '9223372036854775808'",
+])('folds overflowing numeric string comparisons in parameter defaults: %s', (condition) => {
+  const result = run(`<?php echo 'never'; function f(int $x = (${condition}) ? 1 : 'x') {} f();`);
+  expect(result.kind).toBe('compileError');
+  expect(JSON.stringify(result)).toContain('Cannot use string as default value for parameter $x of type int');
+});
+
 test.each(['"01"', '"+1"', '"-0"', '" 1"', '"1 "', '"1x"', '"1ex"'])(
   'folds PHP compile-time string offsets: %s',
   (offset) => {

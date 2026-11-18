@@ -381,9 +381,11 @@ export class PhpArray {
   }
 
   values(): Value[] {
-    const values: Value[] = [];
-    for (const slot of this.map.values()) values.push(slot instanceof Ref ? slot.v : slot);
-    return values;
+    return [...this.iterValues()];
+  }
+
+  *iterValues(): Generator<Value> {
+    for (const slot of this.map.values()) yield deref(slot);
   }
 
   *entries(): Generator<[Key, Value]> {

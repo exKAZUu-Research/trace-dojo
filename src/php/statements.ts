@@ -21,20 +21,10 @@ import { toBool, valueName } from './conversions';
 import { E_DEPRECATED, E_WARNING, emitError, setPrevious, throwError, warn } from './errors';
 import { collectBeforeAllocation, setDestructor } from './garbage';
 import { consumeExpression, ev, evBool, evQuiet, evReturn } from './interp';
-import { looseEquals, setObjectConversions, toStr } from './operators';
+import { looseEquals, setObjectToString, toStr } from './operators';
 import { ElementPlace, share, VarPlace, writableContainer } from './places';
 import { FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
-import {
-  type Callable,
-  type Key,
-  PhpArray,
-  PhpClass,
-  PhpObject,
-  Ref,
-  UNINIT,
-  type UserFunction,
-  type Value,
-} from './values';
+import { type Callable, type Key, PhpArray, PhpClass, PhpObject, Ref, type UserFunction, type Value } from './values';
 
 type Completion =
   | undefined
@@ -630,22 +620,16 @@ setDestructor((object, row) => {
   if (row === undefined) asInternal(run);
   else run();
 });
-setObjectConversions(
-  (object) => {
-    const method = object.cls.findMethod('__tostring');
-    if (!method) throwError('Error', `Object of class ${object.cls.name} could not be converted to string`);
-    const result = invoke(
-      { fn: method.fn, thisObj: object, scope: method.scope, staticClass: object.cls, method },
-      [],
-      undefined
-    );
-    return result as string;
-  },
-  (object) =>
-    [...object.props]
-      .filter(([, slot]) => slot !== UNINIT)
-      .map(([key, slot]) => [key, slot instanceof Ref ? slot.v : (slot as Value)])
-);
+setObjectToString((object) => {
+  const method = object.cls.findMethod('__tostring');
+  if (!method) throwError('Error', `Object of class ${object.cls.name} could not be converted to string`);
+  const result = invoke(
+    { fn: method.fn, thisObj: object, scope: method.scope, staticClass: object.cls, method },
+    [],
+    undefined
+  );
+  return result as string;
+});
 function parameterDefault(decl: FunctionDecl, index: number, frame: Frame): Value {
   const expression = decl.params[index].defaultExpr;
   if (!expression) return null;

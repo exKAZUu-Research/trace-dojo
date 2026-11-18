@@ -265,7 +265,6 @@ function compareConstant(left: Constant, right: Constant, strict: boolean): numb
 
 // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function castConstant(type: string, value: Folded): Folded {
-  // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   if (value === UNKNOWN) return UNKNOWN;
   if (type === 'array') return value instanceof Map ? value : value === null ? new Map() : new Map([[0n, value]]);
   if (type === 'bool') return foldBool(value);

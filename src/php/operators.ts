@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 467 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 478 -- PHP operators share coercion and comparison helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import {
   boolValue,
@@ -18,19 +18,13 @@ import {
 import { deprecated, notice, throwError, warn, withCleanupExceptions } from './errors';
 import { cPow } from './floatPow';
 import { PhpThrow, rt } from './runtime';
-import { copyValueSlot, INT_MAX, INT_MIN, type Key, PhpArray, PhpObject, type Value } from './values';
+import { copyValueSlot, deref, INT_MAX, INT_MIN, type Key, PhpArray, PhpObject, UNINIT, type Value } from './values';
 
 /** Converts an object to a string through `__toString`, which the interpreter provides. */
 let objectToString: (object: PhpObject) => string = () => '';
-/** Compares two objects of the same class property by property, which the interpreter provides. */
-let objectProps: (object: PhpObject) => [string, Value][] = () => [];
 
-export function setObjectConversions(
-  toString: (object: PhpObject) => string,
-  props: (object: PhpObject) => [string, Value][]
-): void {
+export function setObjectToString(toString: (object: PhpObject) => string): void {
   objectToString = toString;
-  objectProps = props;
 }
 
 /** Converts a value to a byte string, as PHP's string conversion does. */
@@ -391,16 +385,23 @@ export function unaryPlus(value: Value): Value {
 
 /** Compares two strings as PHP 8 does: numerically when both are numeric, otherwise by bytes. */
 function compareStrings(a: string, b: string): number {
-  if (a === b) return 0;
-  const x = numericValue(a);
-  if (x !== undefined) {
-    const y = numericValue(b);
-    if (y !== undefined) return compareNumbers(x, y);
-  }
-  return Math.sign(compareBytes(a, b));
+  return a === b ? 0 : (compareNumericStrings(a, b) ?? Math.sign(compareBytes(a, b)));
 }
 
-type ComparisonMode = 'order' | 'loose' | 'strict';
+function compareNumericStrings(a: string, b: string): number | undefined {
+  const x = numericValue(a);
+  const y = numericValue(b);
+  if (x === undefined || y === undefined) return;
+  const order = compareNumbers(x, y);
+  if (order !== 0) return order;
+  const xOverflow = typeof x === 'number' && isIntegerText(a);
+  const yOverflow = typeof y === 'number' && isIntegerText(b);
+  if (xOverflow && typeof y === 'bigint') return Math.sign(x);
+  if (yOverflow && typeof x === 'bigint') return -Math.sign(y);
+  if (!(xOverflow && yOverflow) && Number.isFinite(Number(x))) return 0;
+}
+
+type ComparisonMode = 'order' | 'strict';
 type ComparisonPair = [Value, Value, ComparisonMode];
 interface ComparisonFrame {
   owner: PhpArray | PhpObject;
@@ -413,7 +414,7 @@ export function compare(a: Value, b: Value): number {
 }
 
 export function looseEquals(a: Value, b: Value): boolean {
-  return walkComparison(a, b, 'loose') === 0;
+  return compare(a, b) === 0;
 }
 
 export function strictEquals(a: Value, b: Value): boolean {
@@ -461,7 +462,6 @@ function comparisonStep(a: Value, b: Value, mode: ComparisonMode): number | Comp
     if (a.cls !== b.cls) return 1;
     return { owner: a, pairs: objectComparisonPairs(a, b) };
   }
-  if (mode === 'loose' && typeof a === 'string' && typeof b === 'string') return looseStringEquals(a, b) ? 0 : 1;
   return compareScalar(a, b);
 }
 
@@ -481,15 +481,35 @@ function* arrayComparisonPairs(a: PhpArray, b: PhpArray, mode: ComparisonMode): 
 }
 
 function* objectComparisonPairs(a: PhpObject, b: PhpObject): Generator<ComparisonPair, number> {
-  const left = objectProps(a);
-  const right = new Map(objectProps(b));
-  if (left.length !== right.size && (hasDynamicProps(a) || hasDynamicProps(b)))
-    return left.length > right.size ? 1 : -1;
-  for (const [name, value] of left) {
-    if (!right.has(name)) return 1;
-    yield [value, right.get(name) as Value, 'order'];
+  const dynamic = hasDynamicProps(a) || hasDynamicProps(b);
+  if (dynamic) {
+    const leftCount = presentPropertyCount(a);
+    const rightCount = presentPropertyCount(b);
+    if (leftCount !== rightCount) return Math.sign(leftCount - rightCount);
+  }
+  const names = dynamic ? [...a.props.keys()] : new Set([...a.props.keys(), ...b.props.keys()]);
+  for (const name of names) {
+    const left = comparisonProperty(a, name);
+    const right = comparisonProperty(b, name);
+    if (left === undefined) {
+      if (!dynamic && right !== undefined) return 1;
+      continue;
+    }
+    if (right === undefined) return 1;
+    yield [left, right, 'order'];
   }
   return 0;
+}
+
+function comparisonProperty(object: PhpObject, name: string): Value | undefined {
+  const slot = object.props.get(name);
+  return slot === undefined || slot === UNINIT ? undefined : deref(slot);
+}
+
+function presentPropertyCount(object: PhpObject): number {
+  let count = 0;
+  for (const slot of object.props.values()) if (slot !== UNINIT) count++;
+  return count;
 }
 
 function hasDynamicProps(object: PhpObject): boolean {
@@ -548,18 +568,6 @@ function compareObjectScalar(object: PhpObject, other: Value): number {
     return compareNumbers(1n, other);
   }
   return 1;
-}
-
-/** `==` on two strings: numeric strings compare as numbers, others as text. */
-function looseStringEquals(a: string, b: string): boolean {
-  if (a === b) return true;
-  const x = numericValue(a);
-  if (x === undefined) return false;
-  const y = numericValue(b);
-  if (y === undefined) return false;
-  // Numbers too large for their type compare as text, since converting both lost what tells them apart.
-  if (typeof x === 'number' && x === y && (!Number.isFinite(x) || (isIntegerText(a) && isIntegerText(b)))) return false;
-  return compareNumbers(x, y) === 0;
 }
 
 /** Whether a numeric string is written as an integer, which a float holds only when the integer overflows. */
