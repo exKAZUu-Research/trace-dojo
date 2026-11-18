@@ -55,3 +55,13 @@ show(fn()=>assert(false && function(){
         function describe((Countable&Iterator)|null $source): (Countable&Iterator)|null { return $source; }
     }
 }));
+show(fn()=>assert(false && function(){
+    class IterableTypes {
+        public iterable $items;
+        public ?iterable $nullable;
+        public iterable|null $union;
+        public iterable|int $mixed;
+        function consume(iterable $items, ?iterable $more): iterable|int { return $items; }
+    }
+    return fn(iterable $items): ?iterable => $items;
+}));

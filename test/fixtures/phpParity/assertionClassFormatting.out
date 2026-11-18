@@ -172,3 +172,17 @@ assert(false && function () {
     }
 
 })
+assert(false && function () {
+    class IterableTypes {
+        public iterable $items;
+        public ?iterable $nullable;
+        public iterable|null $union;
+        public iterable|int $mixed;
+        public function consume(iterable $items, ?iterable $more): iterable|int {
+            return $items;
+        }
+
+    }
+
+    return fn(iterable $items): ?iterable => $items;
+})

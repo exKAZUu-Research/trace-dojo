@@ -11,7 +11,6 @@ import type {
   TraitRule,
 } from './ast';
 import { formatFloatRepr } from './conversions';
-import { typeToString } from './types';
 import type { TypeDecl } from './values';
 
 export class UnexportableSyntax extends Error {}
@@ -282,7 +281,8 @@ function exportReturnType(fn: FunctionDecl): string {
 }
 
 function exportType(type: TypeDecl): string {
-  return type.k === 'named' ? typeToString(type) : type.types.map(exportType).join(type.k === 'union' ? '|' : '&');
+  if (type.k === 'named') return type.nullable ? `?${type.name}` : type.name;
+  return type.types.map(exportType).join(type.k === 'union' ? '|' : '&');
 }
 
 function exportParameter(param: ParamDecl, depth: number): string {
