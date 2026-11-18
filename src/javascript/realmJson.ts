@@ -91,8 +91,10 @@ export function jsonStringify(
 function propertyListOf(runtime: Runtime, replacer: JsArray): string[] {
   // A Set keeps the first occurrence of each key in order, without searching the keys kept so far.
   const keys = new Set<string>();
-  runtime.scan(replacer.elements.length);
-  for (const element of replacer.elements) {
+  const length = replacer.elements.length;
+  runtime.scan(length);
+  for (let index = 0; index < length; index++) {
+    const element = runtime.get(replacer, String(index));
     if (typeof element === 'string' || typeof element === 'number') keys.add(String(element));
     else if (
       element instanceof JsObject &&

@@ -759,7 +759,7 @@ function formatProperty(ctx: Context, object: JsObject, recurseTimes: number, ke
   if (property && !isAccessor(property)) {
     // The compact layout indents an object's values one more and moves a value too wide for a line to the next.
     const diff = ctx.compact === true && !(object instanceof JsArray) ? 3 : 2;
-    text = formatIndented(ctx, property.value, recurseTimes, diff);
+    text = formatIndented(ctx, ctx.runtime.readPropertyValue(property), recurseTimes, diff);
     if (diff === 3 && ctx.breakLength < text.length) separator = `\n${' '.repeat(ctx.indentationLvl + diff)}`;
   } else if (property && isAccessor(property)) {
     text = formatAccessor(ctx, receiver, property, recurseTimes);

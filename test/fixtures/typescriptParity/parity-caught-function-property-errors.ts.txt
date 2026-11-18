@@ -1,0 +1,15 @@
+'use strict';
+const frozenFunctions:any[]=[()=>{}, function named() {}, class NamedClass {}];
+const caughtErrors:any[]=[];
+for (const fn of frozenFunctions) {
+  Object.freeze(fn);
+  try { fn.name='changed'; } catch (error) { console.log(error instanceof TypeError, (error as Error).name); caughtErrors.push(error); }
+  try { delete fn.name; } catch (error) { console.log(error instanceof TypeError, (error as Error).name); }
+}
+const allocatedObjects=Array.from({length:1000}, (_,i)=>({i}));
+Object.freeze(caughtErrors[0]);
+console.log(caughtErrors[0].name, allocatedObjects.length);
+caughtErrors[1].message='replacement';
+console.log(caughtErrors[1].message, Object.getOwnPropertyDescriptor(caughtErrors[1], 'message')?.value);
+delete caughtErrors[2].message;
+console.log(caughtErrors[2].message, Object.hasOwn(caughtErrors[2], 'message'));

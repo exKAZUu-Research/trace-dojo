@@ -1,0 +1,36 @@
+(2,7): error TS2322: Type '(...args: [...string[], number]) => void' is not assignable to type '(args_0: number, ...args: string[]) => void'.
+  Types of parameters 'args' and 'args_0' are incompatible.
+    Type '[number, ...string[]]' is not assignable to type '[...string[], number]'.
+      Type at position 0 in source is not compatible with type at position 0 in target.
+        Type 'number' is not assignable to type 'string'.
+(5,7): error TS2322: Type '(...args: [...string[], number]) => void' is not assignable to type '(n: number, text: string) => void'.
+  Types of parameters 'args' and 'n' are incompatible.
+    Type '[n: number, text: string]' is not assignable to type '[...string[], number]'.
+      Type at position 0 in source is not compatible with type at position 0 in target.
+        Type 'number' is not assignable to type 'string'.
+(9,7): error TS2322: Type '(x: string | number) => void' is not assignable to type '(...args: [...string[], number]) => void'.
+  Types of parameters 'x' and 'args' are incompatible.
+    Type '[...string[], number]' is not assignable to type '[x: string | number]'.
+      Target allows only 1 element(s) but source may have more.
+(11,7): error TS2322: Type '(x: string | number, y: string | number) => void' is not assignable to type '(...args: [...string[], number]) => void'.
+  Types of parameters 'x' and 'args' are incompatible.
+    Type '[...string[], number]' is not assignable to type '[x: string | number, y: string | number]'.
+      Target requires 2 element(s) but source may have fewer.
+(13,7): error TS2322: Type '(x: string) => void' is not assignable to type '(...args: [string, ...number[], boolean]) => void'.
+  Types of parameters 'x' and 'args_0' are incompatible.
+    Type '[string, ...number[], boolean]' is not assignable to type '[x: string]'.
+      Source has 2 element(s) but target allows only 1.
+(17,7): error TS2322: Type '(x: string | number, y?: string | number) => void' is not assignable to type '(...args: [...string[], number]) => void'.
+  Types of parameters 'x' and 'args' are incompatible.
+    Type '[...string[], number]' is not assignable to type '[x: string | number, y?: string | number | undefined]'.
+      Target allows only 2 element(s) but source may have more.
+(20,7): error TS2322: Type '(...args: [...string[], boolean]) => void' is not assignable to type '(args_0: boolean, ...args: string[]) => void'.
+  Types of parameters 'args' and 'args_0' are incompatible.
+    Type '[boolean, ...string[]]' is not assignable to type '[...string[], boolean]'.
+      Type at position 0 in source is not compatible with type at position 0 in target.
+        Type 'boolean' is not assignable to type 'string'.
+(22,7): error TS2322: Type '(start: number, ...args: [...string[], boolean]) => void' is not assignable to type '(start: number, ...args: [...string[], number]) => void'.
+  Types of parameters 'args' and 'args' are incompatible.
+    Type '[...string[], number]' is not assignable to type '[...string[], boolean]'.
+      Type at position 1 in source is not compatible with type at position 1 in target.
+        Type 'number' is not assignable to type 'boolean'.

@@ -1,0 +1,9 @@
+(1,133): error TS2542: Index signature in type '{ readonly [k: `x${string}`]: number; } | { readonly [k: `x${string}`]: string; }' only permits reading.
+(2,132): error TS2542: Index signature in type '{ readonly [k: `x${string}`]: number; } | { readonly [k: `x${string}`]: string; }' only permits reading.
+(3,126): error TS2542: Index signature in type '{ readonly [k: `x${string}`]: number; } | { [k: `x${string}`]: string; }' only permits reading.
+(4,126): error TS7053: Element implicitly has an 'any' type because expression of type '`x${string}`' can't be used to index type '{ readonly [k: `x${string}`]: number; } | { readonly [k: string]: string; }'.
+(5,135): error TS7053: Element implicitly has an 'any' type because expression of type '`x${number}`' can't be used to index type '{ readonly [k: `x${string}`]: number; } | { readonly [k: `x${number}`]: string; }'.
+(6,117): error TS2322: Type 'string | number' is not assignable to type 'number'.
+  Type 'string' is not assignable to type 'number'.
+(7,115): error TS7053: Element implicitly has an 'any' type because expression of type '`x${string}`' can't be used to index type '{ [k: `x${string}`]: number; } | { [k: `y${string}`]: string; }'.
+(8,123): error TS7053: Element implicitly has an 'any' type because expression of type '`x${number}`' can't be used to index type '{ [k: `x${string}`]: number; } | { [k: `x${number}`]: string; }'.

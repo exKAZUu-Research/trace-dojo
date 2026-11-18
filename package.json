@@ -78,7 +78,7 @@
     "@willbooster/tree-sitter-javascript": "26.0.0",
     "@willbooster/tree-sitter-python": "21.0.0",
     "@willbooster/tree-sitter-ruby": "20.0.0",
-    "@willbooster/tree-sitter-typescript": "30.0.0",
+    "@willbooster/tree-sitter-typescript": "31.0.0",
     "@willbooster/wb": "23.3.4",
     "@willbooster/web-tree-sitter": "23.0.0",
     "at-decorators": "7.1.3",

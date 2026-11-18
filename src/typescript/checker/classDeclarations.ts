@@ -44,10 +44,20 @@ export class ClassDeclarationChecker {
     if (!ctor) this.checkPropertyInitialization(node, undefined, new FlowState(), []);
     else if (clause) this.checkSuperCallPresence(node, ctor);
     this.checkImplements(node, info);
-    checkIndexConformance(this.c, this.c.classes.membersOf(node, info, false));
+    this.checkIndexes(node, info);
     this.checkAbstractMembers(node, info);
     this.checkBaseCompatibility(node, info);
     this.checkStaticCompatibility(node, info);
+  }
+
+  private checkIndexes(node: TreeNode, info: ClassInfo): void {
+    const body = node.childForFieldName('body');
+    const base = this.c.classes.baseInstanceType(node);
+    checkIndexConformance(this.c, info.instanceType.resolve(), {
+      bodies: body ? [body] : [],
+      name: node.childForFieldName('name') ?? undefined,
+      bases: base ? [base] : [],
+    });
   }
 
   /** Resolves the types written in the class, so that they report the names they cannot find. */

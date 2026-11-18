@@ -1,7 +1,9 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
-import type { Node } from '../javascript/convertNodes';
+import { nameOf, type Node } from '../javascript/convertNodes';
 import { isConstructorDefinition } from '../javascript/programConverter';
+import { Binder } from './checker/binder';
+import { Scope } from './checker/scopes';
 import { isParameterProperty } from './checker/syntax';
 
 /**
@@ -83,39 +85,47 @@ const modifiedTypes = new Set([
  * parameter properties become fields that the constructor assigns.
  */
 export function javaScriptViewOf(root: TreeNode): Node {
-  return view(root);
+  const binder = new Binder(root, new Scope('global', undefined, undefined));
+  for (const scope of binder.allScopes)
+    for (const symbol of scope.values.values()) {
+      const name = symbol.valueEntries[0]?.name;
+      if (name) scope.values.set(nameOf(name), symbol);
+    }
+  return view(root, binder);
 }
 
-function view(node: TreeNode): ViewNode {
-  if (assertionTypes.has(node.type)) return view(assertedExpression(node));
+function view(node: TreeNode, binder: Binder): ViewNode {
+  if (assertionTypes.has(node.type)) return view(assertedExpression(node), binder);
   switch (node.type) {
     case 'required_parameter':
     case 'optional_parameter': {
-      return parameter(node);
+      return parameter(node, binder);
     }
     case 'class_heritage': {
-      return heritage(node);
+      return heritage(node, binder);
     }
     case 'class_body': {
-      return classBody(node);
+      return classBody(node, binder);
     }
     case 'abstract_class_declaration': {
-      return generic(node, 'class_declaration');
+      return generic(node, 'class_declaration', binder);
     }
     case 'field_definition': {
-      return generic(node, 'field_definition');
+      return generic(node, 'field_definition', binder);
     }
     case 'parenthesized_expression': {
       // tsx's esbuild drops parentheses around a name, which V8 then prints without them in errors.
       const inner = unwrappedName(node);
-      return inner ? view(inner) : generic(node, node.type);
+      return inner ? view(inner, binder) : generic(node, node.type, binder);
     }
-    case 'undefined': {
-      // tsx's esbuild emits `undefined` as `(void 0)`, which V8 then names in errors.
-      return leaf(node, 'undefined', '(void 0)');
+    case 'identifier': {
+      // esbuild only lowers the unbound global to void 0; local bindings retain their values and assignment targets.
+      return nameOf(node) === 'undefined' && !binder.scopeOf(node).lookupValue('undefined')
+        ? leaf(node, 'undefined', '(void 0)')
+        : generic(node, node.type, binder);
     }
     default: {
-      return typeDeclarations.has(node.type) ? leaf(node, 'empty_statement') : generic(node, node.type);
+      return typeDeclarations.has(node.type) ? leaf(node, 'empty_statement') : generic(node, node.type, binder);
     }
   }
 }
@@ -140,18 +150,19 @@ function assertedExpression(node: TreeNode): TreeNode {
   return (node.type === 'type_assertion' ? children.at(-1) : children[0]) as TreeNode;
 }
 
-function generic(node: TreeNode, type: string): ViewNode {
+function generic(node: TreeNode, type: string, binder: Binder): ViewNode {
   const parts: Part[] = [];
   for (const [index, child] of node.children.entries()) {
     if (!child) continue;
     const fieldName = node.fieldNameForChild(index);
-    if (!isErased(node, type, child, fieldName ?? undefined)) parts.push({ node: view(child), fieldName });
+    if (!isErased(node, type, child, fieldName ?? undefined)) parts.push({ node: view(child, binder), fieldName });
   }
   return assemble(node, type, parts);
 }
 
 /** Whether a child is TypeScript-only syntax, which the JavaScript view leaves out. */
 function isErased(node: TreeNode, type: string, child: TreeNode, fieldName: string | undefined): boolean {
+  if ((type === 'program' || type === 'statement_block') && typeDeclarations.has(child.type)) return true;
   if (fieldName && typeFields.has(fieldName)) return true;
   if (typeOnlyNodes.has(child.type)) return true;
   if (!child.isNamed && modifiedTypes.has(node.type) && memberModifiers.has(child.type)) return true;
@@ -186,25 +197,25 @@ function isThisParameter(node: TreeNode): boolean {
 }
 
 /** A parameter as JavaScript spells it: its pattern, with its default value as an assignment pattern. */
-function parameter(node: TreeNode): ViewNode {
-  const pattern = view(node.childForFieldName('pattern') as TreeNode);
+function parameter(node: TreeNode, binder: Binder): ViewNode {
+  const pattern = view(node.childForFieldName('pattern') as TreeNode, binder);
   const value = node.childForFieldName('value');
   if (!value) return pattern;
   return assemble(node, 'assignment_pattern', [
     { node: pattern, fieldName: 'left' },
     { node: leaf(node, '=', '=', false), fieldName: undefined },
-    { node: view(value), fieldName: 'right' },
+    { node: view(value, binder), fieldName: 'right' },
   ]);
 }
 
 /** A class heritage as JavaScript spells it: `extends` and the superclass, without `implements` or type arguments. */
-function heritage(node: TreeNode): ViewNode {
+function heritage(node: TreeNode, binder: Binder): ViewNode {
   const extendsClause = node.namedChildren.find((child) => child?.type === 'extends_clause');
   const value = extendsClause?.childForFieldName('value');
   if (!extendsClause || !value) return assemble(node, 'class_heritage', []);
   return assemble(node, 'class_heritage', [
     { node: leaf(extendsClause, 'extends', 'extends', false), fieldName: undefined },
-    { node: view(value), fieldName: undefined },
+    { node: view(value, binder), fieldName: undefined },
   ]);
 }
 
@@ -212,12 +223,14 @@ function heritage(node: TreeNode): ViewNode {
  * A class body without its type-only members, where each parameter property of the constructor becomes a field
  * declared before the others, which the constructor assigns once `this` exists.
  */
-function classBody(node: TreeNode): ViewNode {
+function classBody(node: TreeNode, binder: Binder): ViewNode {
   const parts: Part[] = [];
   const parameterProperties: ViewNode[] = [];
   for (const [index, child] of node.children.entries()) {
     if (!child || typeMembers.has(child.type) || isTypeOnlyField(child)) continue;
-    const viewed = isConstructorDefinition(child) ? constructorWithProperties(child, parameterProperties) : view(child);
+    const viewed = isConstructorDefinition(child)
+      ? constructorWithProperties(child, parameterProperties, binder)
+      : view(child, binder);
     parts.push({ node: viewed, fieldName: node.fieldNameForChild(index) });
   }
   // Fields go after the opening brace, before the members the body declares.
@@ -245,8 +258,8 @@ function parameterPropertiesOf(constructorNode: TreeNode): TreeNode[] {
   );
 }
 
-function constructorWithProperties(node: TreeNode, fields: ViewNode[]): ViewNode {
-  const viewed = view(node);
+function constructorWithProperties(node: TreeNode, fields: ViewNode[], binder: Binder): ViewNode {
+  const viewed = view(node, binder);
   const properties = parameterPropertiesOf(node);
   if (properties.length === 0) return viewed;
   const assignments: ViewNode[] = [];

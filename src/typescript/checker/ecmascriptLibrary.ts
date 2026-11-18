@@ -687,6 +687,7 @@ interface IterableIterator<T, TReturn = any, TNext = any> extends Iterator<T, TR
 interface IteratorObject<T, TReturn = unknown, TNext = unknown> extends Iterator<T, TReturn, TNext> {
     [Symbol.iterator](): IteratorObject<T, TReturn, TNext>;
 }
+type NoInfer<T> = intrinsic;
 type BuiltinIteratorReturn = intrinsic;
 interface ArrayIterator<T> extends IteratorObject<T, BuiltinIteratorReturn, unknown> {
     [Symbol.iterator](): ArrayIterator<T>;

@@ -383,7 +383,7 @@ function descriptorObject(runtime: Runtime, property: Property | undefined): Val
     runtime.createDataProperty(result, 'get', property.get);
     runtime.createDataProperty(result, 'set', property.set);
   } else {
-    runtime.createDataProperty(result, 'value', property.value);
+    runtime.createDataProperty(result, 'value', runtime.readPropertyValue(property));
     runtime.createDataProperty(result, 'writable', property.writable);
   }
   runtime.createDataProperty(result, 'enumerable', property.enumerable);

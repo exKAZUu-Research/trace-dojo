@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 688 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 703 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -676,11 +676,10 @@ export class Relations {
     }
     if (source.objectKind === 'tuple' && target.objectKind === 'tuple')
       return this.tupleRelated(source, target, relation);
-    // An array or a tuple is a read-only array, an iterable, and an array-like of its elements.
     if (
       this.c.isArrayOrTuple(source) &&
       target.objectKind === 'reference' &&
-      ['ReadonlyArray', 'Iterable', 'ArrayLike', 'Array'].includes(target.target?.name ?? '')
+      ['ReadonlyArray', 'ArrayLike', 'Array'].includes(target.target?.name ?? '')
     ) {
       if (target.target?.name === 'Array' && (this.c.isReadonlyArrayType(source) || source.tuple?.readonly))
         return false;
@@ -939,6 +938,18 @@ export class Relations {
     bivariant: boolean,
     inCallback: boolean
   ): boolean {
+    if (
+      source.parameters.length > 0 &&
+      target.parameters.length > 0 &&
+      (hasRestTupleTail(source) || hasRestTupleTail(target))
+    )
+      return this.parameterRelated(
+        this.parameterTuple(source),
+        this.parameterTuple(target),
+        relation,
+        bivariant,
+        inCallback
+      );
     const count = Math.max(source.parameters.length, target.parameters.length);
     for (let index = 0; index < count; index++) {
       const sourceType = this.parameterTypeAt(source, index);
@@ -947,6 +958,16 @@ export class Relations {
         return false;
     }
     return true;
+  }
+
+  private parameterTuple(signature: Signature): ObjectType {
+    const elements: TupleElement[] = [];
+    for (const parameter of signature.parameters) {
+      const tuple = parameter.rest && parameter.type.kind === 'object' ? parameter.type.tuple : undefined;
+      if (tuple) elements.push(...tuple.elements);
+      else elements.push({ type: parameter.type, optional: parameter.optional, rest: parameter.rest });
+    }
+    return this.c.tupleType(elements);
   }
 
   private parameterRelated(
@@ -1032,9 +1053,6 @@ export class Relations {
 const covariantLibraryTypes = new Set([
   'Array',
   'ReadonlyArray',
-  'Iterable',
-  'IterableIterator',
-  'Iterator',
   'ArrayIterator',
   'MapIterator',
   'SetIterator',
@@ -1044,6 +1062,12 @@ const covariantLibraryTypes = new Set([
   'ReadonlyMap',
   'ReadonlySet',
 ]);
+
+function hasRestTupleTail(signature: Signature): boolean {
+  const last = signature.parameters.at(-1);
+  const elements = last?.rest && last.type.kind === 'object' ? last.type.tuple?.elements : undefined;
+  return elements?.slice(0, -1).some((element) => element.rest) ?? false;
+}
 
 /**
  * The text each placeholder of a template literal type takes from a string, as TypeScript splits it without

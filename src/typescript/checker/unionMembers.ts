@@ -1,5 +1,5 @@
 import type { Checker } from './checker';
-import { applicableIndex } from './indexInfos';
+import { applicableIndex, isSameKeyType } from './indexInfos';
 import {
   type IndexInfo,
   literalType,
@@ -28,6 +28,14 @@ export function unionStructure(c: Checker, types: Type[]): Structure {
     stringIndex: unitedIndex(structures.map((structure) => structure.stringIndex)),
     numberIndex: unitedIndex(structures.map((structure) => structure.numberIndex)),
     symbolIndex: unitedIndex(structures.map((structure) => structure.symbolIndex)),
+    patternIndexes: structures[0]?.patternIndexes?.flatMap((pattern) => {
+      const index = unitedIndex(
+        structures.map((structure) =>
+          structure.patternIndexes?.find((other) => isSameKeyType(pattern.keyType, other.keyType))
+        )
+      );
+      return index ? [{ ...index, keyType: pattern.keyType }] : [];
+    }),
   };
 }
 

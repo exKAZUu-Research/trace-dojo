@@ -681,7 +681,7 @@ export class StatementChecker {
     const [type, union] = this.c.signatures.typeParametersOfSymbol(extract);
     return this.c.instantiate(
       this.c.typeNodes.declaredTypeOf(extract),
-      new Map([
+      new Map<number, Type>([
         [type.id, keys],
         [union.id, stringType],
       ])

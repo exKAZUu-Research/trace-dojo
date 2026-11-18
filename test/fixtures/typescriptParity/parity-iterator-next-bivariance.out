@@ -1,0 +1,3 @@
+{ value: 1, done: false } { value: 2, done: false }
+object object
+{ value: 4, done: false }

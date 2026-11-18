@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 458 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 464 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -677,8 +677,13 @@ export class TypeNodes {
   }
 
   private aliasType(symbol: Sym): Type {
+    const declaration = symbol.typeDeclarations[0];
+    const value = declaration.childForFieldName('value');
+    if (value?.text === 'intrinsic' && this.c.isLibrary(declaration)) {
+      if (symbol.name === 'BuiltinIteratorReturn') return undefinedType;
+      if (symbol.name === 'NoInfer') return { ...this.c.signatures.typeParametersOfSymbol(symbol)[0], noInfer: true };
+    }
     symbol.resolving = true;
-    const value = symbol.typeDeclarations[0].childForFieldName('value');
     const pending: UnionType | undefined =
       value?.type === 'union_type' ? { kind: 'union', id: newTypeId(), types: [] } : undefined;
     if (pending) this.c.registerAliasUnion(pending, unionAlias(symbol));

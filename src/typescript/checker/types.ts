@@ -3,7 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { ExecutionBudget } from '../../interpreter/limits';
 
 /** A TypeScript type, as the checker represents it. */
-export type Type =
+export type Type = (
   | IntrinsicType
   | LiteralType
   | UnionType
@@ -14,7 +14,8 @@ export type Type =
   | KeyofType
   | ConditionalType
   | TemplateLiteralType
-  | StringMappingType;
+  | StringMappingType
+) & { noInfer?: boolean };
 
 let nextTypeId = 1;
 
@@ -421,20 +422,7 @@ function unionSortKey(type: Type): number {
 // code-gauge-allow functionNcss 42 -- Flattens, deduplicates, and reduces members as TypeScript's unions do.
 // code-gauge-allow functionCognitiveComplexity 30 -- Flattens, deduplicates, and reduces members as TypeScript's unions do.
 export function unionOf(types: Type[], keepFresh = false): Type {
-  const flat: Type[] = [];
-  const seen = new Set<number>();
-  const add = (type: Type): void => {
-    if (type.kind === 'union') {
-      for (const member of type.types) add(member);
-      return;
-    }
-    const member = keepFresh ? type : regularOf(type);
-    if (member.kind === 'intrinsic' && member.name === 'never') return;
-    if (seen.has(member.id)) return;
-    seen.add(member.id);
-    flat.push(member);
-  };
-  for (const type of types) add(type);
+  const flat = flattenedMembers(types, 'union', keepFresh).filter((type) => !isIntrinsic(type, 'never'));
   if (flat.some((type) => type === anyType || type === errorType)) return flat.find((type) => isAnyLike(type)) as Type;
   if (flat.some((type) => isIntrinsic(type, 'unknown'))) return unknownType;
   const primitives = new Set<IntrinsicName>(flat.filter((type) => type.kind === 'intrinsic').map((type) => type.name));
@@ -449,7 +437,7 @@ export function unionOf(types: Type[], keepFresh = false): Type {
   if (reduced.length === 0) return neverType;
   if (reduced.length === 1) return reduced[0];
   reduced.sort((a, b) => unionSortKey(a) - unionSortKey(b));
-  const key = reduced.map((type) => type.id).join('|');
+  const key = reduced.map((type) => `${type.id}${type.noInfer ? '!' : ''}`).join('|');
   let union = unionCache.get(key);
   if (!union) {
     if (key === booleanUnionKey) return booleanType;
@@ -463,15 +451,7 @@ export function unionOf(types: Type[], keepFresh = false): Type {
 // code-gauge-allow functionCognitiveComplexity 28 -- Flattens and reduces members as TypeScript's intersections do.
 export function intersectionOf(types: Type[], budget: ExecutionBudget): Type {
   budget.spend(types.length);
-  const flat: Type[] = [];
-  const add = (type: Type): void => {
-    if (type.kind === 'intersection') {
-      for (const member of type.types) add(member);
-      return;
-    }
-    if (!flat.some((existing) => existing.id === type.id)) flat.push(type);
-  };
-  for (const type of types) add(type);
+  const flat = flattenedMembers(types, 'intersection', true, budget);
   if (flat.some((type) => isIntrinsic(type, 'never'))) return neverType;
   if (flat.some((type) => isAnyLike(type))) return anyType;
   const members = flat.filter((type) => !isIntrinsic(type, 'unknown'));
@@ -504,6 +484,29 @@ export function intersectionOf(types: Type[], budget: ExecutionBudget): Type {
   );
   if (reduced.length === 1) return reduced[0];
   return { kind: 'intersection', id: newTypeId(), types: reduced };
+}
+
+function flattenedMembers(
+  types: Type[],
+  kind: 'union' | 'intersection',
+  keepFresh: boolean,
+  budget?: ExecutionBudget
+): Type[] {
+  const members = new Map<number, Type>();
+  const add = (type: Type, noInfer = false): void => {
+    budget?.spend();
+    const blocked = noInfer || type.noInfer === true;
+    if (type.kind === kind) {
+      for (const member of type.types) add(member, blocked);
+      return;
+    }
+    const member = keepFresh ? type : regularOf(type);
+    const existing = members.get(member.id);
+    if (existing && (!existing.noInfer || blocked)) return;
+    members.set(member.id, blocked ? { ...member, noInfer: true } : member);
+  };
+  for (const type of types) add(type);
+  return [...members.values()];
 }
 
 function isPrimitive(type: Type): boolean {

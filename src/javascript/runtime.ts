@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 748 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 764 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -70,6 +70,8 @@ type Primitive = undefined | null | boolean | number | bigint | string | symbol;
 const readOnlyLengthMessage = "Cannot assign to read only property 'length' of object '[object Array]'";
 
 export class Runtime {
+  private readonly unavailableValues = new WeakMap<symbol, CompileError>();
+  private readonly functionConstructor: Value;
   readonly world = new TurtleWorld();
   readonly budget = new ExecutionBudget();
   readonly regExpStatics = new Map<string, string>();
@@ -94,6 +96,7 @@ export class Runtime {
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
     this.realm = createRealm(this);
+    this.functionConstructor = this.realm.globals.lookup('Function')?.value;
     this.evaluator = new Evaluator(this);
   }
 
@@ -161,6 +164,13 @@ export class Runtime {
     return error;
   }
 
+  readPropertyValue(property: DataProperty): Value {
+    const { value } = property;
+    const unavailable = typeof value === 'symbol' ? this.unavailableValues.get(value) : undefined;
+    if (unavailable) throw unavailable;
+    return value;
+  }
+
   // code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of exotic object whose own properties are not stored as properties.
   getOwnProperty(object: JsObject, key: Key): Property | undefined {
     if (typeof object.primitive === 'string') {
@@ -202,7 +212,7 @@ export class Runtime {
     for (let current: JsObject | null = this.objectFor(value, key); current; current = current.proto) {
       const property = this.getOwnProperty(current, key);
       if (!property) continue;
-      if (!isAccessor(property)) return property.value;
+      if (!isAccessor(property)) return this.readPropertyValue(property);
       return property.get ? this.call(property.get, receiver, [], this.currentRow) : undefined;
     }
     this.checkUnavailableMember(value, key);
@@ -295,12 +305,12 @@ export class Runtime {
    */
   functionSource(fn: JsFunction): string {
     const { behavior } = fn;
-    if (behavior.kind === 'native') return `function ${this.functionName(fn)}() { [native code] }`;
     if (this.rejectsFunctionText) {
       throw new CompileError([
         { row: this.currentRow ?? 0, message: '関数やクラスの文字列への変換は、この採点環境では使えません。' },
       ]);
     }
+    if (behavior.kind === 'native') return `function ${this.functionName(fn)}() { [native code] }`;
     return behavior.node.source;
   }
 
@@ -335,7 +345,8 @@ export class Runtime {
     const read = (key: string, fallback: string): string => {
       const property = this.findProperty(error, key);
       if (!property) return fallback;
-      return !isAccessor(property) && typeof property.value === 'string' ? property.value : fallback;
+      const value = isAccessor(property) ? undefined : this.readPropertyValue(property);
+      return typeof value === 'string' ? value : fallback;
     };
     const name = read('name', 'Error');
     const message = read('message', '');
@@ -344,7 +355,17 @@ export class Runtime {
 
   /** Throws the TypeError of a refused assignment or deletion in strict mode code, which other code ignores. */
   private refuse(strict: boolean, message: string | (() => string)): void {
-    if (strict) this.throwError('TypeError', typeof message === 'string' ? message : message());
+    if (!strict) return;
+    try {
+      this.throwError('TypeError', typeof message === 'string' ? message : message());
+    } catch (error) {
+      if (!(error instanceof CompileError)) throw error;
+      const pending = Symbol('unavailable error message');
+      this.unavailableValues.set(pending, error);
+      const exception = this.newError('TypeError', '');
+      defineHidden(exception, 'message', pending);
+      throw new JsThrow(exception);
+    }
   }
 
   /** Sets an element or the length of an array, returning false for any other property. */
@@ -655,6 +676,7 @@ export class Runtime {
   // Calls -------------------------------------------------------------------------------------------------------------
 
   call(fn: Value, thisValue: Value, args: Value[], callRow?: number): Value {
+    this.checkCallableAvailability(fn, callRow);
     if (!isCallable(fn)) return this.throwError('TypeError', `${this.describe(fn)} is not a function`);
     this.spend();
     const { behavior } = fn;
@@ -719,6 +741,7 @@ export class Runtime {
   }
 
   construct(fn: Value, args: Value[], newTarget: Value = fn, callRow?: number): JsObject {
+    this.checkCallableAvailability(fn, callRow);
     if (!(fn instanceof JsFunction) || !fn.isConstructor) {
       return this.throwError('TypeError', `${this.describe(fn)} is not a constructor`);
     }
@@ -738,6 +761,11 @@ export class Runtime {
     const thisValue = this.newInstance(target);
     const result = this.evaluator.callFunction(fn, behavior, thisValue, args, callRow, target);
     return this.returnedToBuiltin(frame, isObject(result) ? result : thisValue);
+  }
+
+  private checkCallableAvailability(fn: Value, row: number | undefined): void {
+    if (this.unavailableMember && fn === this.functionConstructor)
+      rejectUnavailableMember('Function コンストラクタ', row ?? this.currentRow);
   }
 
   /** What String, Number, or Boolean returns: the primitive when called, and its box when constructed with `new`. */

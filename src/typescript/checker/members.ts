@@ -455,7 +455,7 @@ export class MemberChecker {
     if (objectType.kind !== 'typeParameter' || objectType.isThisType) return false;
     if (key.kind === 'union') return key.types.some((member) => this.isGenericIndexWrite(objectType, member));
     const apparent = this.c.apparentType(objectType);
-    if (apparent.kind !== 'object' && apparent.kind !== 'intersection') return false;
+    if (apparent.kind !== 'object' && apparent.kind !== 'intersection' && apparent.kind !== 'union') return false;
     if (isPropertyKeyLiteral(key) && this.c.propertyOf(apparent, String(key.value))) return false;
     const structure = this.c.structureOf(apparent);
     const index = applicableIndex(this.c, structure, key);
@@ -484,7 +484,7 @@ export class MemberChecker {
       const type = this.literalIndexedType(access, objectType, index.value, indexType);
       if (type) return type;
     }
-    return this.computedIndexedType(access, objectType, index, indexType);
+    return this.computedIndexedType(access, objectType, index);
   }
 
   /**
@@ -532,14 +532,13 @@ export class MemberChecker {
     return property.optional ? unionOf([property.type(), undefinedType]) : property.type();
   }
 
-  private computedIndexedType(access: IndexAccess, objectType: Type, index: Type, indexType: Type): Type {
+  private computedIndexedType(access: IndexAccess, objectType: Type, index: Type): Type {
     // A key may mix kinds, as `0 | "a"`, so long as each member is a string, a number, or a symbol.
     const keyTypes = unionOf([stringType, numberType, symbolType, this.c.globalType('Symbol')]);
     if (!this.c.relations.isAssignable(index, keyTypes)) {
       this.c.error(access.indexNode, `型 '${this.c.print(index)}' はインデックスに使えません。`);
       return errorType;
     }
-    if (objectType.kind === 'union') return this.indexedTypeOfMembers(access, objectType, indexType);
     const structure = this.c.structureOf(objectType);
     const applicable = applicableIndex(this.c, structure, index);
     if (applicable) return applicable.type;

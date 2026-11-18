@@ -1,0 +1,29 @@
+function f(undefined: number) {
+  console.log(undefined.toFixed());
+  undefined += 1;
+  return undefined;
+}
+console.log(f(3));
+function g(undefined: number | undefined) {
+  if (typeof undefined === 'number') console.log(undefined.toFixed());
+  return undefined;
+}
+g(5);
+console.log(g(void 0));
+function h([undefined]: number[]) {
+  const read = () => undefined;
+  undefined++;
+  return read();
+}
+console.log(h([8]));
+{
+  let undefined = 7;
+  console.log(undefined);
+}
+console.log(undefined);
+
+function escaped(\u0075ndefined: number) {
+  undefined += 2;
+  return \u0075ndefined;
+}
+console.log(escaped(5));

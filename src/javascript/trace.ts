@@ -10,6 +10,7 @@ import { dateValueOf, inspectDate } from './realmDate';
 import { runProgram } from './run';
 import { Runtime } from './runtime';
 import {
+  type AccessorProperty,
   type Binding,
   type DataProperty,
   isAccessor,
@@ -58,11 +59,12 @@ class Snapshotter {
   /** The variables visible from `scope`, followed by static fields and the fields of `this` when `withThis`. */
   variablesOf(scope: Scope, withThis: boolean): Variables {
     const variables: Variables = { vars: {}, referenceVars: {} };
-    for (const [name, value] of this.visibleBindings(scope)) addVariable(variables, name, value);
+    for (const [name, value] of this.visibleBindings(scope)) addVariable(variables, name, value, this.runtime);
     if (withThis && this.showsStatics) this.addStatics(variables, scope);
     const frame = scope.nearestFunctionFrame();
     const thisValue = frame?.hasImplicitThis ? undefined : frame?.thisValue;
-    if (withThis && thisValue instanceof JsObject && !(thisValue instanceof JsFunction)) addThis(variables, thisValue);
+    if (withThis && thisValue instanceof JsObject && !(thisValue instanceof JsFunction))
+      addThis(variables, thisValue, this.runtime);
     return variables;
   }
 
@@ -75,7 +77,8 @@ class Snapshotter {
       const cls = binding.value;
       if (!(cls instanceof JsFunction) || cls.behavior.kind !== 'class') continue;
       // Its private static fields show as instance ones do.
-      for (const [key, value] of displayedEntries(cls)) addVariable(variables, `${className}.${key}`, value);
+      for (const [key, value] of displayedEntries(cls, this.runtime))
+        addVariable(variables, `${className}.${key}`, value, this.runtime);
     }
   }
 
@@ -109,21 +112,21 @@ function isVariable(binding: Binding): boolean {
 
 type Variables = TraceVariables;
 
-function addVariable(variables: Variables, name: string, value: Value): void {
+function addVariable(variables: Variables, name: string, value: Value, runtime: Runtime): void {
   const scalar = scalarOf(value, new Set());
   if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
   // Arrays also appear as references so that learners can expand their elements.
   if (scalar !== NOT_SCALAR && !(value instanceof JsArray)) return;
-  const node = displayNodeOf(value, new Set());
+  const node = displayNodeOf(value, new Set(), runtime);
   if (node) variables.referenceVars[name] = node;
 }
 
-function addThis(variables: Variables, self: JsObject): void {
-  for (const [key, value] of displayedEntries(self)) {
+function addThis(variables: Variables, self: JsObject, runtime: Runtime): void {
+  for (const [key, value] of displayedEntries(self, runtime)) {
     const scalar = scalarOf(value, new Set());
     if (scalar !== NOT_SCALAR) variables.vars[`this.${key}`] = scalar;
   }
-  const node = displayNodeOf(self, new Set());
+  const node = displayNodeOf(self, new Set(), runtime);
   if (node) variables.referenceVars.this = node;
 }
 
@@ -132,6 +135,7 @@ function scalarOf(value: Value, seen: Set<JsArray>): Scalar | typeof NOT_SCALAR 
   if (typeof value === 'bigint' || typeof value === 'symbol') return displayedPrimitive(value);
   if (value instanceof JsObject && value.primitive !== undefined) return scalarOf(value.primitive, seen);
   if (!(value instanceof JsArray)) return NOT_SCALAR;
+  for (const property of value.definedElements?.values() ?? []) if (isAccessor(property)) return NOT_SCALAR;
   return scalarItems(value, value.elements.map(valueOfElement), seen, (element) =>
     // oxlint-disable-next-line unicorn/no-null -- The trace format shows null and undefined as null.
     element === undefined || element === null ? null : scalarOf(element, seen)
@@ -141,8 +145,8 @@ function scalarOf(value: Value, seen: Set<JsArray>): Scalar | typeof NOT_SCALAR 
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows null and undefined as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
-// code-gauge-allow functionCognitiveComplexity 19 -- One check per kind of value, as learners see each.
-function displayNodeOf(value: Value, seen: Set<JsObject>): DisplayNode | undefined {
+// code-gauge-allow functionCognitiveComplexity 24 -- One check per displayed value kind, including array accessor descriptors without getter evaluation.
+function displayNodeOf(value: Value, seen: Set<JsObject>, runtime: Runtime): DisplayNode | undefined {
   if (value === undefined || value === null) return NULL_NODE;
   if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean')
     return { kind: 'value', value };
@@ -155,14 +159,15 @@ function displayNodeOf(value: Value, seen: Set<JsObject>): DisplayNode | undefin
       entries: { x: { kind: 'value', value: value.turtle.x }, y: { kind: 'value', value: value.turtle.y } },
     };
   }
-  const builtin = builtinNodeOf(value, seen);
+  const builtin = builtinNodeOf(value, seen, runtime);
   if (builtin) return builtin;
   seen.add(value);
   const entries: Record<string, DisplayNode> = {};
   for (const [key, item] of value instanceof JsArray
     ? value.elements.map(valueOfElement).entries()
-    : displayedEntries(value)) {
-    const node = displayNodeOf(item, seen);
+    : displayedEntries(value, runtime)) {
+    const property = value instanceof JsArray ? value.definedElements?.get(Number(key)) : undefined;
+    const node = property && isAccessor(property) ? accessorNode(property) : displayNodeOf(item, seen, runtime);
     if (node) entries[key] = node;
     else if (value instanceof JsArray) entries[key] = NULL_NODE;
   }
@@ -170,13 +175,18 @@ function displayNodeOf(value: Value, seen: Set<JsObject>): DisplayNode | undefin
   return { kind: value instanceof JsArray ? 'array' : 'object', entries };
 }
 
+function accessorNode(property: AccessorProperty): DisplayNode {
+  const label = property.get ? (property.set ? 'Getter/Setter' : 'Getter') : 'Setter';
+  return { kind: 'value', value: `[${label}]`, verbatim: true };
+}
+
 /**
  * How a builtin object holding state of its own shows: a boxed primitive as its primitive, a Date or a RegExp as the
  * text console.log prints, a Set as an array of its values, and a Map as an object keyed by its keys' text, or as an
  * array of key-value pairs when keys are objects, integers, or show alike.
  */
-function builtinNodeOf(object: JsObject, seen: Set<JsObject>): DisplayNode | undefined {
-  if (object.primitive !== undefined) return displayNodeOf(object.primitive, seen);
+function builtinNodeOf(object: JsObject, seen: Set<JsObject>, runtime: Runtime): DisplayNode | undefined {
+  if (object.primitive !== undefined) return displayNodeOf(object.primitive, seen, runtime);
   const time = dateValueOf(object);
   if (time !== undefined) return { kind: 'value', value: inspectDate(time), verbatim: true };
   if (object.regexp) return { kind: 'value', value: String(object.regexp), verbatim: true };
@@ -184,7 +194,7 @@ function builtinNodeOf(object: JsObject, seen: Set<JsObject>): DisplayNode | und
   if (!collection || collection.isWeak) return undefined;
   seen.add(object);
   const items = collection.entries.filter((entry) => entry !== undefined);
-  const node = (value: Value): DisplayNode => displayNodeOf(value, seen) ?? NULL_NODE;
+  const node = (value: Value): DisplayNode => displayNodeOf(value, seen, runtime) ?? NULL_NODE;
   let result: DisplayNode;
   if (collection.kind === 'Set') {
     result = { kind: 'array', entries: Object.fromEntries(items.map((entry, index) => [index, node(entry.key)])) };
@@ -237,11 +247,11 @@ function privateLabels(keys: string[]): string[] {
 }
 
 /** The fields learners see in an object: its own enumerable data properties and private fields. */
-function displayedEntries(object: JsObject): [string, Value][] {
+function displayedEntries(object: JsObject, runtime: Runtime): [string, Value][] {
   const entries: [string, Value][] = [];
   // Errors keep their message in a non-enumerable property.
   const message = object.isError ? object.properties.get('message') : undefined;
-  if (message && !isAccessor(message)) entries.push(['message', message.value]);
+  if (message && !isAccessor(message)) entries.push(['message', runtime.readPropertyValue(message)]);
   for (const [key, property] of object.properties) {
     if (
       typeof key === 'string' &&
@@ -249,13 +259,14 @@ function displayedEntries(object: JsObject): [string, Value][] {
       !isAccessor(property) &&
       !(property.value instanceof JsFunction)
     )
-      entries.push([key, property.value]);
+      entries.push([key, runtime.readPropertyValue(property)]);
   }
   const fields = [...(object.privateMembers ?? [])].filter(
     ([, property]) => !isAccessor(property) && !(property.value instanceof JsFunction)
   );
   const labels = privateLabels(fields.map(([key]) => key));
-  for (const [index, [, property]] of fields.entries()) entries.push([labels[index], (property as DataProperty).value]);
+  for (const [index, [, property]] of fields.entries())
+    entries.push([labels[index], runtime.readPropertyValue(property as DataProperty)]);
   return entries;
 }
 

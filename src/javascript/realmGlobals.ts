@@ -164,12 +164,8 @@ function collectProperties(runtime: Runtime, value: Value, entry: (key: string, 
 function defineFunction(builder: RealmBuilder): void {
   const { functionPrototype } = builder.realm;
   defineFunctionProperties(functionPrototype as JsFunction, '', 0);
-  builder.defineClass(
-    'Function',
-    1,
-    functionPrototype,
-    ({ runtime }) => runtime.throwError('TypeError', 'Function() is not supported'),
-    false
+  builder.defineClass('Function', 1, functionPrototype, ({ runtime }) =>
+    runtime.throwError('TypeError', 'Function() is not supported')
   );
   builder.method(functionPrototype, 'call', 1, ({ runtime, thisValue, args, callRow }) =>
     runtime.call(thisValue, args[0], args.slice(1), callRow)

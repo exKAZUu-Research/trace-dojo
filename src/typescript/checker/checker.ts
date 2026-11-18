@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 522 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 525 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../../interpreter/diagnostics';
@@ -305,7 +305,8 @@ export class Checker {
     if (this.instantiationDepth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
     this.instantiationDepth++;
     try {
-      return this.instantiateType(type, mapper);
+      const instantiated = this.instantiateType(type, mapper);
+      return type.noInfer ? { ...instantiated, noInfer: true } : instantiated;
     } finally {
       this.instantiationDepth--;
     }
@@ -638,6 +639,7 @@ export class Checker {
   }
 
   restElementType(type: Type): Type {
+    if (type.kind === 'union') return unionOf(type.types.map((member) => this.restElementType(member)));
     if (type.kind === 'object' && this.isArrayOrTuple(type)) return this.elementTypeOf(type);
     return anyType;
   }
@@ -658,12 +660,12 @@ export class Checker {
       return structure;
     }
     if (apparent.kind === 'intersection') return this.intersectionStructure(apparent.types);
-    if (apparent.kind === 'union' && apparent !== type) return unionStructure(this, apparent.types);
+    if (apparent.kind === 'union') return unionStructure(this, apparent.types);
     return emptyStructure();
   }
 
   /** The type whose members a value of `type` has: its boxing interface for a primitive, its constraint for a type parameter. */
-  // code-gauge-allow functionNcss 41 -- One case per kind of type that boxes to an interface.
+  // code-gauge-allow functionNcss 35 -- One case per kind of type that boxes to an interface.
   apparentType(type: Type): Type {
     switch (type.kind) {
       case 'intrinsic': {
@@ -822,7 +824,7 @@ export class Checker {
     const own = structure.properties.get(name);
     if (own) return own;
     const apparent = this.apparentType(type);
-    if (apparent.kind === 'union' && apparent !== type) return unionProperty(this, apparent.types, name);
+    if (apparent.kind === 'union') return unionProperty(this, apparent.types, name);
     if (apparent.kind !== 'object' && apparent.kind !== 'intersection') return undefined;
     const functionInterface =
       structure.callSignatures.length > 0

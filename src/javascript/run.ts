@@ -3,6 +3,7 @@ import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { Program } from './ast';
+import { boundedHostWork } from './boundedHostWork';
 import { errorHeadline, inspect } from './inspect';
 import { parseJavaScript } from './parse';
 import { Runtime } from './runtime';
@@ -57,7 +58,7 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (scope: S
   try {
     let uncaughtException: string | undefined;
     try {
-      runtime.evaluator.runProgram(program);
+      boundedHostWork(runtime.budget, () => runtime.evaluator.runProgram(program));
     } catch (error) {
       uncaughtException = describeUncaught(runtime, error);
     }

@@ -187,9 +187,9 @@ export class TypeInference {
   }
 
   /** Collects the types `source` gives the type parameters that `target` mentions. */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Infers through each target form, including literal strings matched against template placeholders.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Infers through each target form, including literal strings matched against template placeholders.
   inferTypes(run: InferenceRun, source: Type, target: Type, covariant: boolean, depth = 0): void {
-    if (depth > 8) return;
+    if (depth > 8 || target.noInfer) return;
     const recurse: Recurse = (s, t, isCovariant = covariant, priority = run.priority) =>
       this.inferTypes({ ...run, priority }, s, t, isCovariant, depth + 1);
     if (target.kind === 'typeParameter') {
@@ -484,7 +484,7 @@ export class TypeInference {
 
   /** Whether a type mentions a type parameter, looking into the members of object types a few levels deep. */
   mentions(type: Type, parameter: TypeParameter, depth = 0): boolean {
-    if (depth > 3) return false;
+    if (depth > 3 || type.noInfer) return false;
     const next = (member: Type): boolean => this.mentions(member, parameter, depth + 1);
     switch (type.kind) {
       case 'typeParameter': {

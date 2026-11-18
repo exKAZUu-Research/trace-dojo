@@ -1,0 +1,8 @@
+(2,13): error TS18048: 'arrayValue' is possibly 'undefined'.
+(4,7): error TS2322: Type 'number | undefined' is not assignable to type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+(6,13): error TS18048: 'mapValue' is possibly 'undefined'.
+(8,13): error TS18048: 'regexValue' is possibly 'undefined'.
+(10,26): error TS2345: Argument of type '"blue"' is not assignable to parameter of type '"green" | "red" | undefined'.
+(14,12): error TS2322: Type 'string' is not assignable to type '1'.
+(16,13): error TS2345: Argument of type '"wrong"' is not assignable to parameter of type '1'.
