@@ -1,6 +1,8 @@
 import { panic } from './arith';
+import { reserveMemory, spendMemory } from './memoryAccounting';
+import { propertyIndex } from './sparseBytes';
 import type { Type } from './types';
-import { aliasStorage, type Slots, type Value, ZArray, ZStruct, ZUnion } from './values';
+import { aliasStorage, type Slots, type Value, ZArray, zeroArrayElement, ZStruct, ZUnion } from './values';
 
 let evaluationDepth = 0;
 
@@ -18,43 +20,65 @@ export function rejectRuntimeEffect(): void {
 }
 
 export function markRuntimeStorage(storage: Slots, type: Type): void {
-  protectSlots(storage, [type]);
+  spendMemory();
+  protectValue(storage.slots[0], type);
+  protectSlots(storage, (index) => (index === 0 ? type : undefined));
 }
 
 function protectValue(value: Value, type: Type): void {
   if (value instanceof ZArray && type.kind === 'array') {
-    protectSlots(
-      value,
-      Array.from({ length: value.slots.length }, () => type.child)
-    );
+    protectArray(value, type.child);
   } else if (value instanceof ZStruct && type.kind === 'struct') {
-    protectSlots(value, type.fields?.map((field) => field.type) ?? []);
+    const fields = type.fields ?? [];
+    spendMemory(fields.length);
+    for (const [index, field] of fields.entries()) {
+      if (isAggregate(field.type)) protectValue(value.slots[index], field.type);
+    }
+    protectSlots(value, (index) => fields[index]?.type);
   } else if (value instanceof ZUnion && type.kind === 'union') {
-    protectSlots(value, [type.fields?.[value.tag]?.type]);
-    let tag = value.tag;
-    Object.defineProperty(value, 'tag', {
-      get: () => {
-        rejectRuntimeEffect();
-        return tag;
-      },
-      set: (next: number) => {
-        rejectRuntimeEffect();
-        tag = next;
-      },
-    });
+    protectUnion(value, type);
   }
 }
 
-function protectSlots(storage: Slots, types: readonly (Type | undefined)[]): void {
+function protectArray(array: ZArray, child: Type): void {
+  const length = array.slots.length;
+  if (isAggregate(child) && length > 0) {
+    const singleton = zeroArrayElement(array);
+    if (singleton) protectValue(singleton.value, child);
+    else {
+      spendMemory(length);
+      for (let index = 0; index < length; index++) protectValue(array.slots[index], child);
+    }
+  }
+  protectSlots(array, (index) => (index < length ? child : undefined));
+}
+
+function protectUnion(union: ZUnion, type: Extract<Type, { kind: 'union' }>): void {
+  const payload = type.fields?.[union.tag]?.type;
+  if (payload && isAggregate(payload)) protectValue(union.slots[0], payload);
+  protectSlots(union, (index) => (index === 0 ? payload : undefined));
+  let tag = union.tag;
+  Object.defineProperty(union, 'tag', {
+    get: () => {
+      rejectRuntimeEffect();
+      return tag;
+    },
+    set: (next: number) => {
+      rejectRuntimeEffect();
+      tag = next;
+    },
+  });
+}
+
+function protectSlots(storage: Slots, typeAt: (index: number) => Type | undefined): void {
+  reserveMemory(1);
+  spendMemory();
   const original = storage.slots;
-  for (const [index, type] of types.entries()) if (type) protectValue(original[index], type);
   const proxy = new Proxy(original, {
     get: (target, key, receiver) => {
-      if (typeof key === 'string' && /^\d+$/.test(key)) {
-        const type = types[Number(key)];
-        if (type?.kind !== 'array' && type?.kind !== 'struct' && type?.kind !== 'union' && type?.kind !== 'void')
-          rejectRuntimeEffect();
-      }
+      const index = propertyIndex(key);
+      const type = index === undefined ? undefined : typeAt(index);
+      if (index !== undefined && (!type || (type.kind !== 'void' && !isAggregate(type)))) rejectRuntimeEffect();
       return Reflect.get(target, key, receiver);
     },
     set: (target, key, value, receiver) => {
@@ -64,4 +88,8 @@ function protectSlots(storage: Slots, types: readonly (Type | undefined)[]): voi
   });
   aliasStorage(proxy, original);
   storage.slots = proxy;
+}
+
+function isAggregate(type: Type): boolean {
+  return type.kind === 'array' || type.kind === 'struct' || type.kind === 'union';
 }

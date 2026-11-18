@@ -179,7 +179,7 @@ export class TurtleReachability {
       }
     }
     if (union.backingReferences) {
-      for (const reference of union.backingReferences()) push(reference);
+      for (const { value, type } of union.backingReferences()) push(value, type);
       return;
     }
     const active = type?.fields?.[union.tag];
@@ -203,7 +203,9 @@ export class TurtleReachability {
 
   private sequence(value: ZArray | Slice, child: Type, push: Push): void {
     if (!this.mayContainTurtles(child)) return;
-    for (let index = 0; BigInt(index) < value.lengthValue; index++) {
+    const extent = value instanceof Slice ? value.target.slots.length - value.start : value.length;
+    const length = Math.min(value.length, extent);
+    for (let index = 0; index < length; index++) {
       this.spend();
       push(value.get(index), child);
     }

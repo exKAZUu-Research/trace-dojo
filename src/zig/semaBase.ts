@@ -15,11 +15,11 @@ import type {
 import { unionTagValue } from './bufferMemory';
 import { markRuntimeStorage } from './comptimeMemory';
 import { enumLookup } from './enumLookup';
+import { decodeFloat } from './floatEncoding';
 import {
   type AnyFloat,
   asBigFloat,
   BigFloat,
-  bigFloatOf,
   compareFloats,
   floatFromBigInt,
   floatOf,
@@ -1703,7 +1703,7 @@ function buildUndefinedValue(type: Type): Value {
       return undefinedInteger(type);
     }
     case 'float': {
-      return floatFromPattern(type.bits);
+      return decodeFloat(undefinedBitPattern(type.bits), type.bits);
     }
     case 'bool': {
       return true;
@@ -1761,34 +1761,15 @@ function buildUndefinedValue(type: Type): Value {
 function undefinedInteger(type: IntType): bigint {
   let value = undefinedIntegers.get(type);
   if (value === undefined) {
-    const bits = BigInt(Math.ceil(type.bits / 8) * 8);
-    const pattern = (((1n << bits) - 1n) / 255n) * 170n;
+    const pattern = undefinedBitPattern(Math.ceil(type.bits / 8) * 8);
     value = type.signed ? BigInt.asIntN(type.bits, pattern) : BigInt.asUintN(type.bits, pattern);
     undefinedIntegers.set(type, value);
   }
   return value;
 }
 
-function floatFromPattern(bits: 16 | 32 | 64 | 80 | 128): Value {
-  if (bits === 16) return bitsToFloat16(0xaa_aa);
-  if (bits === 32) {
-    const view = new DataView(new ArrayBuffer(4));
-    view.setUint32(0, 0xaa_aa_aa_aa);
-    return view.getFloat32(0);
-  }
-  const view = new DataView(new ArrayBuffer(8));
-  view.setBigUint64(0, 0xaa_aa_aa_aa_aa_aa_aa_aan);
-  const value = view.getFloat64(0);
-  return bits === 64 ? value : roundTo(bigFloatOf(value), bits);
-}
-
-function bitsToFloat16(bits: number): number {
-  const sign = bits >> 15 ? -1 : 1;
-  const exponent = (bits >> 10) & 0x1f;
-  const fraction = bits & 0x3_ff;
-  if (exponent === 0) return sign * fraction * 2 ** -24;
-  if (exponent === 31) return fraction ? Number.NaN : sign * Infinity;
-  return sign * (1 + fraction / 1024) * 2 ** (exponent - 15);
+function undefinedBitPattern(bits: number): bigint {
+  return (((1n << BigInt(bits)) - 1n) / 255n) * 170n;
 }
 
 export function nullUnwrapPanic(): never {

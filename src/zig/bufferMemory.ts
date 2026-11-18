@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 688 -- Keeps byte codecs, typed views, alias-safe copying, and reference recovery together.
+// code-gauge-allow-file fileNcss 697 -- Keeps byte codecs, typed views, alias-safe copying, and reference recovery together.
 import { transferCost } from './allocation';
 import { PANIC, panic } from './arith';
 import { enumLookup } from './enumLookup';
@@ -31,6 +31,7 @@ import {
   ErrorValue,
   FnValue,
   NativeHandle,
+  type NativeReference,
   NULL,
   Pointer,
   registerPointerLocation,
@@ -340,10 +341,7 @@ export class BufferMemory {
         return type.tagType?.signed ? BigInt.asIntN(bits, value) : BigInt.asUintN(bits, value);
       }
       case 'pointer': {
-        const pointer = this.reference(offset, type);
-        if (type.size !== 'slice') return pointer;
-        const length = this.readBits(offset + SLICE_LENGTH_BIT_OFFSET, 64);
-        return pointer instanceof Pointer ? new Slice(pointer.target, pointer.index, length) : undefinedValue(type);
+        return this.pointerValue(type, offset, this.rawReference(offset)) ?? undefinedValue(type);
       }
       case 'optional': {
         const niche = optionalNicheBits(type.child);
@@ -492,32 +490,40 @@ export class BufferMemory {
     union.copyBackingTo = (destination, start) => this.copyRegion(destination as BufferMemory, offset, start, bits);
   }
 
-  private unionReferences(type: Extract<Type, { kind: 'union' }>, offset: number, bits: number): Value[] {
-    if (!this.space.hasReferences) return [];
+  // code-gauge-allow functionCognitiveComplexity 18 -- Resolves typed projections and retains untyped roots in uncovered byte ranges.
+  private *unionReferences(
+    type: Extract<Type, { kind: 'union' }>,
+    offset: number,
+    bits: number
+  ): Iterable<NativeReference> {
+    if (!this.space.hasReferences) return;
     const known = this.sparseReferences(offset, offset, bits);
-    const locations = new Set(known.map((reference) => reference.offset));
-    const values = known.map((reference) => reference.value as Value);
-    for (const at of this.referenceLocations(type, offset)) {
+    const locations = new Set<string>();
+    const recovered = new Set<number>();
+    for (const { offset: at, type: field } of this.referenceLocations(type, offset)) {
       this.spend();
-      if (at < offset || at + 64 > offset + bits || locations.has(at)) continue;
-      locations.add(at);
-      const id = this.readBits(at, 64);
-      const key = referenceKey(id, 64);
-      const value = this.space.reference(key);
+      const width = field.kind === 'pointer' && field.size === 'slice' ? 128 : 64;
+      if (at < offset || at + width > offset + bits) continue;
+      const location = `${at} ${typeId(field)}`;
+      if (locations.has(location)) continue;
+      locations.add(location);
+      const value = this.rawReference(at);
       if (!value) continue;
-      this.referenceOffsets.set(at, { key, value, id, bits: 64 });
-      values.push(value as Value);
+      yield field.kind === 'pointer' && value instanceof Pointer
+        ? { value: this.pointerValue(field, at, value), type: field }
+        : { value };
+      recovered.add(at);
     }
-    return values;
+    for (const { offset: at, value } of known) if (!recovered.has(at)) yield { value };
   }
 
   // code-gauge-allow functionNcss 31 -- Traverses the shared physical layout for each reference-bearing type.
-  private *referenceLocations(type: Type, offset: number): IterableIterator<number> {
+  private *referenceLocations(type: Type, offset: number): IterableIterator<FieldLocation> {
     if (!encodesReferences(type, this.space.referenceTypes, this.spend)) return;
     this.spend();
     switch (type.kind) {
       case 'pointer': {
-        yield offset;
+        yield { offset, type };
         return;
       }
       case 'optional': {
@@ -539,7 +545,7 @@ export class BufferMemory {
       }
       case 'struct': {
         if (!usesFieldLayout(type)) {
-          yield offset;
+          yield { offset, type };
           return;
         }
         const fields = fieldOffsets(type);
@@ -550,7 +556,10 @@ export class BufferMemory {
     }
   }
 
-  private *arrayReferenceLocations(type: Extract<Type, { kind: 'array' }>, offset: number): IterableIterator<number> {
+  private *arrayReferenceLocations(
+    type: Extract<Type, { kind: 'array' }>,
+    offset: number
+  ): IterableIterator<FieldLocation> {
     const stride = sizeOf(type.child) * 8;
     const length = Number(type.length + (type.sentinel === undefined ? 0n : 1n));
     if (stride === 0 || length === 0) return;
@@ -869,7 +878,18 @@ export class BufferMemory {
     });
   }
 
+  private pointerValue(type: Extract<Type, { kind: 'pointer' }>, offset: number, value: object | undefined): Value {
+    if (!(value instanceof Pointer)) return type.size === 'slice' ? undefined : (value as Value);
+    const pointer = viewPointer(value, type.child, this.space);
+    if (type.size !== 'slice') return pointer;
+    return new Slice(pointer.target, pointer.index, this.readBits(offset + SLICE_LENGTH_BIT_OFFSET, 64));
+  }
+
   private reference(offset: number, type: Type, bits = 64): Value {
+    return (this.rawReference(offset, bits) as Value) ?? undefinedValue(type);
+  }
+
+  private rawReference(offset: number, bits = 64): object | undefined {
     const id = this.readBits(offset, bits);
     const key = referenceKey(id, bits);
     const stored = this.referenceOffsets.get(offset);
@@ -879,9 +899,7 @@ export class BufferMemory {
       this.referenceHolds.set(key, value);
       this.referenceOffsets.set(offset, { key, value, id, bits });
     }
-    return value instanceof Pointer && type.kind === 'pointer'
-      ? viewPointer(value, type.child, this.space)
-      : ((value as Value) ?? undefinedValue(type));
+    return value;
   }
 
   private writeReference(offset: number, value: Value, type: Type, bits = 64, identity?: object): void {

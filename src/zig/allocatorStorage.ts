@@ -1,13 +1,15 @@
 import { LIMITS } from '../interpreter/limits';
+import { checked } from './arith';
 import { bindBufferMemory } from './bufferMemory';
 import { spendMemory } from './memoryAccounting';
 import { type Frame, StackOverflow } from './runtime';
-import type { Type } from './types';
+import { type Type, USIZE } from './types';
 import { NativeHandle, NULL, type Pointer, type Slice, type Slots, storageLocation, ZArray, ZStruct } from './values';
 
 export interface AllocatorState extends Record<string, unknown> {
   name: string;
   owner?: Pointer;
+  debugPageSize?: number;
 }
 
 export interface ByteRegion {
@@ -27,6 +29,7 @@ interface Allocation {
   end: number;
   region?: ByteRegion;
   arenaNode?: NativeHandle;
+  alignment?: number;
   live: boolean;
 }
 
@@ -71,9 +74,43 @@ export function reserveAllocatorBytes(
   }
   if (owner instanceof ZStruct && state?.name === 'arena')
     return reserveArena(frame, state, owner, length, alignment, prior, depth);
-  if (owner instanceof ZStruct && state?.name === 'debug' && !prior?.live)
-    owner.slots[0] = (owner.slots[0] as bigint) + 1n;
+  if (owner instanceof ZStruct && state?.name === 'debug')
+    return reserveDebugBytes(state, owner, length, alignment, prior);
   return reservation({ state, start: 0, end: length, live: true });
+}
+
+function reserveDebugBytes(
+  state: AllocatorState,
+  owner: ZStruct,
+  length: number,
+  alignment: number,
+  previous: Allocation | undefined
+): ByteReservation | undefined {
+  const prior = previous?.live && previous.state?.owner?.load() === owner ? previous : undefined;
+  const oldLength = prior ? prior.end - prior.start : 0;
+  const inPlace = prior && debugCanResize(state, oldLength, length, alignment);
+  if (!changeDebugTotal(owner, inPlace ? length - oldLength : length)) return undefined;
+  if (!inPlace && prior) changeDebugTotal(owner, -oldLength);
+  if (prior) prior.live = false;
+  else owner.slots[0] = (owner.slots[0] as bigint) + 1n;
+  return reservation({ state, start: 0, end: length, alignment, live: true });
+}
+
+function changeDebugTotal(owner: ZStruct, bytes: number): boolean {
+  const current = owner.slots[1];
+  if (typeof current !== 'bigint') return true;
+  const total = checked(current + BigInt(bytes), USIZE);
+  if (bytes > 0 && total > (owner.slots[2] as bigint)) return false;
+  owner.slots[1] = total;
+  return true;
+}
+
+function debugCanResize(state: AllocatorState, oldSize: number, size: number, alignment: number): boolean {
+  const oldClass = Math.ceil(Math.log2(Math.max(oldSize, alignment)));
+  const newClass = Math.ceil(Math.log2(Math.max(size, alignment)));
+  const large = Math.log2(state.debugPageSize ?? 131_072) - 1;
+  if (oldClass < large) return oldClass === newClass;
+  return newClass >= large && alignTo(size, 16_384) <= alignTo(oldSize, 16_384);
 }
 
 export function bindAllocatorBytes(
@@ -108,6 +145,7 @@ export function freeAllocatorMemory(state: AllocatorState | undefined, memory: o
     if (record.end === Number(owner.slots[0] as bigint)) owner.slots[0] = BigInt(record.start);
   } else if (owner instanceof ZStruct && state?.name === 'debug') {
     owner.slots[0] = (owner.slots[0] as bigint) - 1n;
+    changeDebugTotal(owner, record.start - record.end);
   } else if (owner instanceof ZStruct && state?.name === 'arena') {
     const first = arenaHeader(owner).slots[0];
     if (first instanceof NativeHandle && first === record.arenaNode) {
@@ -280,20 +318,14 @@ function arenaReservation(state: AllocatorState, handle: NativeHandle, start: nu
   return reservation({ state, start, end: start + length, region, arenaNode: handle, live: true });
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Applies the distinct in-place resize rules of each allocator.
-// code-gauge-allow functionNcss 33 -- Keeps allocation record updates after the allocator-specific resize decisions.
+// code-gauge-allow functionCognitiveComplexity 25 -- Applies each allocator's in-place resize rules before updating its allocation record.
+// code-gauge-allow functionNcss 32 -- Updates allocation records at the same boundary as allocator-specific resize checks.
 function resizeAllocatorBytes(state: AllocatorState | undefined, memory: object, size: number): boolean {
   const record = allocationOf(memory);
   if (!record?.live) return false;
   const owner = state?.owner?.load();
   if (owner instanceof ZStruct && state?.name === 'fixed') {
-    const buffer = owner.slots[1] as Slice;
-    if (record.end !== Number(owner.slots[0] as bigint)) {
-      if (size > record.end - record.start) return false;
-    } else {
-      if (record.start + size > buffer.length) return false;
-      owner.slots[0] = BigInt(record.start + size);
-    }
+    if (!resizeFixedBytes(owner, record, size)) return false;
   } else if (owner instanceof ZStruct && state?.name === 'arena') {
     const first = arenaHeader(owner).slots[0];
     if (!(first instanceof NativeHandle) || first !== record.arenaNode) return size <= record.end - record.start;
@@ -301,12 +333,25 @@ function resizeAllocatorBytes(state: AllocatorState | undefined, memory: object,
     if (record.end !== node.end) return size <= record.end - record.start;
     if (record.start + size > node.size - NODE_SIZE) return false;
     node.end = record.start + size;
+  } else if (owner instanceof ZStruct && state?.name === 'debug') {
+    const current = record.end - record.start;
+    if (!debugCanResize(state, current, size, record.alignment ?? 1) || !changeDebugTotal(owner, size - current))
+      return false;
   } else {
     const capacity = state?.name === 'page' ? alignTo(record.end - record.start, 16_384) : record.end - record.start;
     if (size > capacity) return false;
   }
   record.end = record.start + size;
   if (record.region) record.region.length = size;
+  return true;
+}
+
+function resizeFixedBytes(owner: ZStruct, record: Allocation, size: number): boolean {
+  if (record.end !== Number(owner.slots[0] as bigint)) return size <= record.end - record.start;
+  const buffer = owner.slots[1] as Slice;
+  const end = record.start + size;
+  if (end > buffer.length) return false;
+  owner.slots[0] = BigInt(end);
   return true;
 }
 

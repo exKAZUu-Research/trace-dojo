@@ -1954,6 +1954,16 @@ test.each([500, 1000])('reusable raw buffers do not accumulate work after %s dis
   });
 });
 
+test.each(['var y=x;', 'var y:U=undefined;for(x.bytes,0..)|v,i|y.bytes[i]=v;'])(
+  'a union pointer to an array retains each turtle after an element pointer is encoded through %s',
+  (copy) => {
+    const source = `const std=@import("std");const U=extern union{p:*[2]Turtle,bytes:[8]u8};const V=extern union{p:*Turtle,bytes:[8]u8};fn make(g:std.mem.Allocator)!U{const a=try g.create([2]Turtle);a.*=.{Turtle.init(4,4),Turtle.init(0,1)};const x=U{.p=a};${copy}const y_ptr=&y;const z=V{.p=&a[0]};_=z.bytes[0];return y_ptr.*;}pub fn main(init:std.process.Init)!void{const u=try make(init.gpa);const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});_=&u;}`;
+    const result = executeProgram('zig', source);
+    expect(result).toMatchObject({ kind: 'executed', stderr: 'false', uncaughtException: undefined });
+    if (result.kind === 'executed') expect(result.finalTurtles).toHaveLength(3);
+  }
+);
+
 test.each([
   ['1000001', '.a=1', '_=init;'],
   ['2000001', '.a=1', '_=init;'],
@@ -2538,18 +2548,28 @@ pub fn main()void{var n:u8=0;while(n<3):({n+=1;if(n==2)break;}){}std.debug.print
   });
 });
 
-test.each(['clearRetainingCapacity()', 'shrinkRetainingCapacity(0)', 'pop()'])(
-  'vacated list slots release turtles after %s',
-  (operation) => {
-    const statement = operation === 'pop()' ? '_ = list.pop();' : `list.${operation};`;
-    const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var list:std.ArrayList(Turtle)=.empty;defer list.deinit(init.gpa);try list.append(init.gpa,Turtle.init(0,1));${statement}const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});}`;
-    expect(executeProgram('zig', source)).toMatchObject({
-      kind: 'executed',
-      stderr: 'true',
-      uncaughtException: undefined,
-    });
-  }
-);
+test.each([
+  'list.clearRetainingCapacity();',
+  'list.shrinkRetainingCapacity(0);',
+  '_=list.pop();',
+  'try list.resize(init.gpa,0);',
+])('vacated list slots release turtles after %s', (statement) => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var list:std.ArrayList(Turtle)=.empty;defer list.deinit(init.gpa);try list.append(init.gpa,Turtle.init(0,1));${statement}const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true',
+    uncaughtException: undefined,
+  });
+});
+
+test('resizing a list within caller-supplied storage preserves its bytes', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var buf=[_]u8{0,0,0,0};var list=std.ArrayList(u8).initBuffer(&buf);try list.appendSlice(init.gpa,&.{1,42});try list.resize(init.gpa,0);std.debug.print("{} {}|",.{buf[0],buf[1]});try list.resize(init.gpa,2);std.debug.print("{} {}",.{list.items[0],list.items[1]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '1 42|1 42',
+    uncaughtException: undefined,
+  });
+});
 
 test('cleared maps release turtles while independently held values remain alive', () => {
   const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var map=std.AutoHashMap(u8,Turtle).init(init.gpa);defer map.deinit();const held=Turtle.init(0,2);try map.put(1,Turtle.init(0,1));try map.put(2,held);map.clearRetainingCapacity();const t=Turtle.init(0,0);std.debug.print("{} {}",.{t.canMoveForward(),held.canMoveForward()});}`;
@@ -3313,6 +3333,15 @@ test('zero-sized allocator replacements and empty allocations do not leak debug 
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
     stderr: '.ok',
+    uncaughtException: undefined,
+  });
+});
+
+test('configured debug allocators preserve the byte limit across failed growth, successful resizing, and free', () => {
+  const source = `const std=@import("std");pub fn main()!void{const config:std.heap.DebugAllocatorConfig=.{.enable_memory_limit=true};var d=std.heap.DebugAllocator(config).init;d.requested_memory_limit=6;const a=d.allocator();const old=try a.alloc(u8,4);old[0]=42;const rejected=a.realloc(old,6) catch {std.debug.print("{} {}|",.{d.total_requested_bytes,old[0]});a.free(old);const p=try a.alloc(u8,5);const q=try a.realloc(p,6);std.debug.print("{} {}|",.{d.total_requested_bytes,q.len});a.free(q);std.debug.print("{} {t}",.{d.total_requested_bytes,d.deinit()});return;};a.free(rejected);}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '4 42|6 6|0 ok',
     uncaughtException: undefined,
   });
 });
@@ -4189,6 +4218,14 @@ test('memory equality retains the reference self-address shortcut except for flo
     stderr: 'false',
     uncaughtException: undefined,
   });
+});
+
+test.each([
+  ['f80', '-0x1.5555555555555554p-5461'],
+  ['f128', '-0x1.aaaaaaaaaaaaaaaaaaaaaaaaaaaap-5461'],
+])('an undefined %s uses its own Debug byte pattern', (type, stderr) => {
+  const source = `const std=@import("std");pub fn main()void{var x:${type}=undefined;_=&x;std.debug.print("{x}",.{x});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr, uncaughtException: undefined });
 });
 
 test.each(['1.' + '0'.repeat(10_001), '1' + '0'.repeat(10_001) + 'e-10001', '0.' + '0'.repeat(10_001) + '1e10002'])(
@@ -5741,6 +5778,11 @@ test.each(['std.debug.print(&format,.{});', '_=std.fmt.count(&format,.{});'])(
     expect(() => compileSource(source, { budget })).toThrow(expect.objectContaining({ limit: 'operations' }));
   }
 );
+
+test('protecting a mutable global aggregate consumes compilation work', () => {
+  const source = 'const S=struct{x:u8,y:u8};var a:[150000]S=@splat(.{.x=1,.y=2});pub fn main()void{_=&a;}';
+  expect(() => compileSource(source)).toThrow(expect.objectContaining({ limit: 'operations' }));
+});
 
 test.each(['x'.repeat(100_000), '{{}}'.repeat(25_000)])(
   'shared large formats retain the output budget (%#)',

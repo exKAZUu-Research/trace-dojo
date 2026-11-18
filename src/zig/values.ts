@@ -199,7 +199,7 @@ export class ZUnion implements Slots {
   retainedPayloads?: { type: UnionType; values: ReadonlyMap<number, Value> };
   writeBacking?: (value: ZUnion) => void;
   backingKey?: () => string;
-  backingReferences?: () => Value[];
+  backingReferences?: () => Iterable<NativeReference>;
   fieldView?: (index: number) => Slots;
   copyBacking?: () => ZUnion;
   copyBackingTo?: (destination: unknown, offset: number) => void;

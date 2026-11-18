@@ -975,7 +975,10 @@ const MEMBERS: Record<string, () => Member> = {
     return known(TYPE, intFittingRange(low, high, sema, call.span), call.span);
   }),
   Log2Int: generic('std.math.Log2Int', 1, (sema, call, type) => {
+    if (type.kind === 'comptime_int') return known(TYPE, type, call.span);
     if (type.kind !== 'int') return sema.error(call.span, 'std.math.Log2Int には整数の型を渡してください。');
+    if (type.bits === 0)
+      return sema.error(call.span, 'std.math.Log2Int にはビット数が 1 以上の整数型を渡してください。');
     let bits = 0;
     while (2 ** bits < type.bits) bits++;
     return known(TYPE, intType(false, bits), call.span);

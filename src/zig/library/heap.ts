@@ -28,6 +28,7 @@ import {
   errorSetOf,
   errorUnionOf,
   fnType,
+  maxInt,
   pointerTo,
   sliceOf,
   type StructType,
@@ -318,7 +319,8 @@ function allocatorInstanceType(
   name: string,
   kind: string,
   fields: { name: string; type: Type; defaultValue?: Value }[],
-  members: Record<string, () => Member>
+  members: Record<string, () => Member>,
+  debugPageSize?: number
 ): StructType {
   const type = nativeStruct(
     name,
@@ -329,7 +331,7 @@ function allocatorInstanceType(
           expectArgs(sema, call, 0, 'allocator');
           const owner = instancePointer(sema, call, type);
           return nativeCall(ALLOCATOR, [owner], call.span, ([pointer]) => {
-            const state = { name: kind, owner: pointer as Pointer };
+            const state = { name: kind, owner: pointer as Pointer, debugPageSize };
             registerNativeReferences(state, () => [{ value: pointer, type: owner.type }]);
             return handle('allocator', state);
           });
@@ -356,29 +358,76 @@ function instanceValue(sema: SemaApi, call: NativeCall, type: StructType): TExpr
   return sema.error(call.span, `${type.namespace.name} の値に対して呼び出してください。`);
 }
 
-const DEBUG_ALLOCATOR: StructType = allocatorInstanceType(
-  'heap.DebugAllocator',
-  'debug',
-  [{ name: 'live', type: USIZE, defaultValue: 0n }],
-  {
-    init: () => ({ type: DEBUG_ALLOCATOR_TYPE(), value: new ZStruct([0n]) }),
-    deinit: fnMember(
-      'DebugAllocator.deinit',
-      (sema, call) => {
-        expectArgs(sema, call, 0, 'deinit');
-        const owner = instancePointer(sema, call, DEBUG_ALLOCATOR);
-        return nativeCall(CHECK, [owner], call.span, ([pointer]) => {
-          const struct = (pointer as Pointer).load() as ZStruct;
-          return (struct.slots[0] as bigint) > 0n ? 1n : 0n;
-        });
-      },
-      () => ({ type: fnType([pointerTo(DEBUG_ALLOCATOR, false)], CHECK), receiver: true })
-    ),
-  }
+const DEBUG_CONFIG_FIELDS = [
+  ['stack_trace_frames', USIZE, 6n],
+  ['enable_memory_limit', BOOL, false],
+  ['safety', BOOL, true],
+  ['thread_safe', BOOL, true],
+  ['never_unmap', BOOL, false],
+  ['retain_metadata', BOOL, false],
+  ['verbose_log', BOOL, false],
+  ['backing_allocator_zeroes', BOOL, true],
+  ['resize_stack_traces', BOOL, false],
+  ['canary', USIZE, 0x92_32_a6_ff_85_df_f1_0fn],
+  ['page_size', USIZE, 131_072n],
+] as const;
+const DEBUG_CONFIG = nativeStruct(
+  'heap.debug_allocator.Config',
+  {},
+  DEBUG_CONFIG_FIELDS.map(([name, type, defaultValue]) => ({ name, type, defaultValue, hasDefault: true }))
 );
+const debugTypes = new WeakMap<SemaApi, Map<string, StructType>>();
 
-function DEBUG_ALLOCATOR_TYPE(): StructType {
-  return DEBUG_ALLOCATOR;
+function debugAllocator(sema: SemaApi, call: NativeCall): TExpr {
+  const [argument] = expectArgs(sema, call, 1, 'std.heap.DebugAllocator');
+  const [config] = compileArgs(sema, [argument], [DEBUG_CONFIG]);
+  const value = sema.knownValue(config, 'DebugAllocator の設定') as ZStruct;
+  const settings = value.slots as (boolean | bigint)[];
+  sema.spendCompilation(settings.length);
+  const pageSize = settings[10] as bigint;
+  if (pageSize < 2n || (pageSize & (pageSize - 1n)) !== 0n)
+    return sema.error(argument, 'DebugAllocator の page_size は 2 以上の 2 のべき乗にしてください。');
+  let types = debugTypes.get(sema);
+  if (!types) debugTypes.set(sema, (types = new Map()));
+  const key = settings.join(',');
+  let type = types.get(key);
+  if (!type) {
+    type = debugAllocatorType(settings[1] === true, Number(pageSize));
+    types.set(key, type);
+  }
+  return known(TYPE, type, call.span);
+}
+
+function debugAllocatorType(limited: boolean, pageSize: number): StructType {
+  const counter = limited ? USIZE : VOID;
+  const initialTotal = limited ? 0n : undefined;
+  const initialLimit = limited ? maxInt(USIZE) : undefined;
+  const type: StructType = allocatorInstanceType(
+    'heap.DebugAllocator',
+    'debug',
+    [
+      { name: 'live', type: USIZE, defaultValue: 0n },
+      { name: 'total_requested_bytes', type: counter, defaultValue: initialTotal },
+      { name: 'requested_memory_limit', type: counter, defaultValue: initialLimit },
+    ],
+    {
+      init: () => ({ type, value: new ZStruct([0n, initialTotal, initialLimit]) }),
+      deinit: fnMember(
+        'DebugAllocator.deinit',
+        (sema, call) => {
+          expectArgs(sema, call, 0, 'deinit');
+          const owner = instancePointer(sema, call, type);
+          return nativeCall(CHECK, [owner], call.span, ([pointer]) => {
+            const struct = (pointer as Pointer).load() as ZStruct;
+            return (struct.slots[0] as bigint) > 0n ? 1n : 0n;
+          });
+        },
+        () => ({ type: fnType([pointerTo(type, false)], CHECK), receiver: true })
+      ),
+    },
+    pageSize
+  );
+  return type;
 }
 
 const ARENA_STATE = nativeStruct('heap.ArenaAllocator.State', {}, [], {
@@ -504,11 +553,8 @@ export function heapNamespace(): StructType {
   heap ??= nativeStruct('std.heap', {
     page_allocator: () => ({ type: ALLOCATOR, value: handle('allocator', { name: 'page' }) }),
     smp_allocator: () => ({ type: ALLOCATOR, value: handle('allocator', { name: 'smp' }) }),
-    DebugAllocator: fnMember('std.heap.DebugAllocator', (sema, call) => {
-      const [config] = expectArgs(sema, call, 1, 'std.heap.DebugAllocator');
-      sema.compile(config);
-      return known(TYPE, DEBUG_ALLOCATOR, call.span);
-    }),
+    DebugAllocator: fnMember('std.heap.DebugAllocator', debugAllocator),
+    DebugAllocatorConfig: typeMember(() => DEBUG_CONFIG),
     ArenaAllocator: typeMember(() => ARENA_ALLOCATOR),
     FixedBufferAllocator: typeMember(() => FIXED_BUFFER_ALLOCATOR),
     Check: typeMember(() => CHECK),

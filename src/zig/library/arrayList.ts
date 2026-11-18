@@ -163,19 +163,24 @@ function ensureTotalCapacity(frame: Frame, list: List, capacity: number | bigint
   return reallocate(frame, list, sizeOf(child) === 0 ? capacity : growCapacity(Number(capacity), child), child);
 }
 
-function setLength(list: List, length: number | bigint, poison = true): void {
-  if (BigInt(length) > MAX_CAPACITY || BigInt(length) < 0n) panic(PANIC.overflow);
-  const size = Number(length);
-  if (sizeOf(list.child) === 0) list.items = zeroSlice(list.items, BigInt(length), list.child);
-  else {
-    if (poison) {
-      spendTransfers(list, Math.max(0, list.items.length - size));
-      for (let index = size; index < list.items.length; index++)
-        list.items.target.slots[list.items.start + index] = undefinedValue(list.child);
-    }
-    list.items = new Slice(list.items.target, list.items.start, size);
-  }
+function setLength(list: List, length: number | bigint): void {
+  const size = BigInt(length);
+  if (size > MAX_CAPACITY || size < 0n) panic(PANIC.overflow);
+  list.items =
+    sizeOf(list.child) === 0
+      ? zeroSlice(list.items, size, list.child)
+      : new Slice(list.items.target, list.items.start, size);
   list.struct.slots[0] = list.items;
+}
+
+function discardItems(list: List, length: number | bigint): void {
+  if (sizeOf(list.child) !== 0) {
+    const size = Number(length);
+    spendTransfers(list, list.items.length - size);
+    for (let index = size; index < list.items.length; index++)
+      list.items.target.slots[list.items.start + index] = undefinedValue(list.child);
+  }
+  setLength(list, length);
 }
 
 function spendTransfers(list: List, count: number | bigint, copies = 1): void {
@@ -393,7 +398,7 @@ function defineMembers(type: StructType, child: Type): void {
       spendTransfers(list, list.items.lengthValue - (index as bigint) - 1n, 2);
       for (let at = position; at + 1 < list.items.length; at++)
         storeInto(list.items.target, list.items.start + at, list.items.get(at + 1));
-      setLength(list, list.items.lengthValue - 1n);
+      discardItems(list, list.items.lengthValue - 1n);
       return removed;
     }),
     swapRemove: method('swapRemove', { args: [USIZE], result: child }, (list, [index]) => {
@@ -402,14 +407,14 @@ function defineMembers(type: StructType, child: Type): void {
       spendTransfers(list, 1, 3);
       const removed = copyForStorage(list.items.get(position));
       storeInto(list.items.target, list.items.start + position, list.items.get(Number(list.items.lengthValue - 1n)));
-      setLength(list, list.items.lengthValue - 1n);
+      discardItems(list, list.items.lengthValue - 1n);
       return removed;
     }),
     pop: method('pop', { args: [], result: optionalOf(child) }, (list, _) => {
       if (list.items.length === 0) return NULL;
       spendTransfers(list, 1);
       const value = copyForStorage(list.items.get(Number(list.items.lengthValue - 1n)));
-      setLength(list, list.items.lengthValue - 1n);
+      discardItems(list, list.items.lengthValue - 1n);
       return optionalSome(value, child);
     }),
     getLast: method('getLast', { args: [], result: child, byValue: true }, (list) => {
@@ -423,7 +428,7 @@ function defineMembers(type: StructType, child: Type): void {
       list.items.length === 0 ? NULL : optionalSome(list.items.get(Number(list.items.lengthValue - 1n)), child)
     ),
     clearRetainingCapacity: method('clearRetainingCapacity', { args: [], result: VOID }, (list, _) => {
-      setLength(list, 0);
+      discardItems(list, 0);
       return;
     }),
     clearAndFree: method('clearAndFree', { args: [], result: VOID, allocator: true }, (list) => {
@@ -432,7 +437,7 @@ function defineMembers(type: StructType, child: Type): void {
     }),
     shrinkRetainingCapacity: method('shrinkRetainingCapacity', { args: [USIZE], result: VOID }, (list, [length]) => {
       if ((length as bigint) > list.items.lengthValue) panic(PANIC.unreachable);
-      setLength(list, length as bigint);
+      discardItems(list, length as bigint);
       return;
     }),
     orderedRemoveMany: fnMember(
@@ -454,7 +459,7 @@ function defineMembers(type: StructType, child: Type): void {
       (list, [length], frame) => {
         const size = length as bigint;
         if (size > list.items.lengthValue) panic(PANIC.unreachable);
-        setLength(list, size, false);
+        setLength(list, size);
         if (sizeOf(child) !== 0) reallocate(frame, list, size, child);
         return;
       }
