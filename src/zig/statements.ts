@@ -780,11 +780,13 @@ export abstract class StatementCompiler extends CallCompiler {
     const fieldType = fields[tag].type;
     const store = this.slotStore(init.value, fieldType);
     const slots = sizeOf(fieldType) === 0 ? 0 : valueSlots(fieldType);
+    const retainBytes = type.layout === 'auto' && !this.requiresComptime(type, value);
     return (frame, holder, index) => {
       const union = holder.slots[index] as ZUnion;
       const changed = union.tag !== tag;
       let payload: Value;
       if (changed) {
+        if (retainBytes && !union.fieldView && sizeOf(fields[union.tag].type) !== 0) union.retainPayload();
         frame.runtime.reserveStorage(slots);
         frame.runtime.spend(slots);
         payload = undefinedValue(fieldType);

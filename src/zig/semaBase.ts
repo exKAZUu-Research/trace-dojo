@@ -1670,7 +1670,7 @@ function copyStoredValue(
     reserve?.(1);
     return (
       value.copyBacking?.() ??
-      new ZUnion(value.tag, copy(value.slots[0], type?.kind === 'union' ? type.fields?.[value.tag]?.type : undefined))
+      value.withCopiedPayload(copy(value.slots[0], type?.kind === 'union' ? type.fields?.[value.tag]?.type : undefined))
     );
   }
   if (value instanceof Some) {

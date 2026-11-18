@@ -108,6 +108,7 @@ export function physicalUnion(type: Extract<Type, { kind: 'union' }>, value: ZUn
   const memory = new BufferMemory(bytes, spendMemory, memorySpace());
   memory.write(type, 0, value);
   const backing = memory.read(type, 0) as ZUnion;
+  value.priorPayloads = undefined;
   Object.defineProperty(value, 'tag', {
     get: () => backing.tag,
     set: (tag: number) => {
@@ -385,7 +386,13 @@ export class BufferMemory {
 
   private attachUnionBacking(union: ZUnion, type: Extract<Type, { kind: 'union' }>, offset: number): void {
     const bits = type.layout === 'packed' ? bitSizeOf(type) : sizeOf(type) * 8;
-    if (type.layout !== 'auto') this.attachRawUnionObservers(union, offset, bits);
+    if (type.layout !== 'auto') {
+      union.backingKey = () => {
+        spendMemory(Math.ceil(bits / 8));
+        return this.access(false, offset, bits, () => this.regionBytes(offset, bits).join(','));
+      };
+    }
+    union.backingReferences = () => this.sparseReferences(offset, 0, bits).map((reference) => reference.value as Value);
     union.copyBacking = () => {
       const memory = new BufferMemory(unionBytes(type, 0n), spendMemory, this.space);
       this.copyRegion(memory, offset, 0, bits);
@@ -396,22 +403,6 @@ export class BufferMemory {
     union.writeBacking = (value) =>
       this.write(type, offset, type.layout === 'auto' ? value : physicalUnion(type, value));
     union.copyBackingTo = (destination, start) => this.copyRegion(destination as BufferMemory, offset, start, bits);
-  }
-
-  private attachRawUnionObservers(union: ZUnion, offset: number, bits: number): void {
-    union.backingKey = () => {
-      spendMemory(Math.ceil(bits / 8));
-      return this.access(false, offset, bits, () => this.regionBytes(offset, bits).join(','));
-    };
-    union.backingReferences = () => {
-      spendMemory(bits);
-      const values: Value[] = [];
-      for (let bit = 0; bit < bits; bit++) {
-        const reference = this.currentReference(offset + bit);
-        if (reference) values.push(reference.value as Value);
-      }
-      return values;
-    };
   }
 
   arrayView(child: Type, length: bigint, offset: number, hasSentinel = false): ZArray {
@@ -568,8 +559,17 @@ export class BufferMemory {
       return;
     }
     target.tag = tag;
-    const field = unionFieldLocation(type, tag, offset + unionOffsets(type).payload * 8);
-    this.write(field.type, field.offset, value.slots[0], field.packed);
+    const payloadOffset = offset + unionOffsets(type).payload * 8;
+    for (const [index, payload] of value.priorPayloads ?? []) {
+      this.spend();
+      this.writeUnionPayload(type, index, payloadOffset, payload);
+    }
+    this.writeUnionPayload(type, tag, payloadOffset, value.slots[0]);
+  }
+
+  private writeUnionPayload(type: Extract<Type, { kind: 'union' }>, tag: number, offset: number, value: Value): void {
+    const field = unionFieldLocation(type, tag, offset);
+    this.write(field.type, offset, value, field.packed);
   }
 
   private copyRegion(destination: BufferMemory, offset: number, start: number, bits: number): void {

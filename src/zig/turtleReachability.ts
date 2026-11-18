@@ -127,11 +127,10 @@ export class TurtleReachability {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Dispatches typed edges while preserving opaque reference roots.
   // code-gauge-allow functionNcss 35 -- Covers each representation that can retain a turtle.
   private typedChildren(value: Value, type: Type, push: Push, turtles: Set<unknown>): void {
     if (value instanceof ZUnion && value.backingReferences) {
-      for (const reference of value.backingReferences()) push(reference);
+      this.unionChildren(value, push);
       return;
     }
     switch (type.kind) {
@@ -157,15 +156,25 @@ export class TurtleReachability {
         return;
       }
       case 'union': {
-        if (value instanceof ZUnion) {
-          const field = type.fields?.[value.tag];
-          if (field) push(value.slots[0], field.type);
-        }
+        if (value instanceof ZUnion) this.unionChildren(value, push, type);
         return;
       }
       default: {
         if (value && typeof value === 'object') this.children(value, push, turtles);
       }
+    }
+  }
+
+  private unionChildren(union: ZUnion, push: Push, type?: Extract<Type, { kind: 'union' }>): void {
+    if (union.backingReferences) {
+      for (const reference of union.backingReferences()) push(reference);
+      return;
+    }
+    const active = type?.fields?.[union.tag];
+    if (!type || active) push(union.slots[0], active?.type);
+    for (const [tag, payload] of union.priorPayloads ?? []) {
+      this.spend();
+      push(payload, type?.fields?.[tag]?.type);
     }
   }
 
@@ -193,12 +202,10 @@ export class TurtleReachability {
   }
 
   // code-gauge-allow functionCognitiveComplexity 24 -- Traverses untyped temporaries and native storage without recursive host calls.
-  // code-gauge-allow functionNcss 31 -- Keeps native handles, logical views and direct pointers in one root dispatcher.
   private children(item: object, push: Push, turtles: Set<unknown>): void {
-    if (item instanceof ZUnion && item.backingReferences) {
-      for (const reference of item.backingReferences()) push(reference);
-    } else if (item instanceof ZArray || item instanceof Slice) this.untypedSequence(item, push);
-    else if (item instanceof ZStruct || item instanceof ZUnion) {
+    if (item instanceof ZUnion) this.unionChildren(item, push);
+    else if (item instanceof ZArray || item instanceof Slice) this.untypedSequence(item, push);
+    else if (item instanceof ZStruct) {
       for (const value of item.slots) push(value);
     } else if (item instanceof Pointer) push(item.load());
     else if (item instanceof Some) push(item.value);

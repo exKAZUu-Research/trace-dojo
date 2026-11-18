@@ -1,8 +1,9 @@
-// code-gauge-allow-file fileNcss 426 -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
+// code-gauge-allow-file fileNcss 441 -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { BigFloat, compareFloats } from './floats';
 import type { FunctionInstance } from './functions';
+import { reserveMemory, spendMemory } from './memoryAccounting';
 import { MemoryFault, UNDEFINED_MEMORY } from './memoryFault';
 import type { Type } from './types';
 import { WeakValueMap } from './weakValueMap';
@@ -190,6 +191,7 @@ export class ZStruct implements Slots {
 
 export class ZUnion implements Slots {
   slots: Value[];
+  priorPayloads?: ReadonlyMap<number, Value>;
   writeBacking?: (value: ZUnion) => void;
   backingKey?: () => string;
   backingReferences?: () => Value[];
@@ -202,6 +204,22 @@ export class ZUnion implements Slots {
     payload: Value
   ) {
     this.slots = [payload];
+  }
+
+  retainPayload(): void {
+    const count = this.priorPayloads?.size ?? 0;
+    reserveMemory(count + 1);
+    spendMemory(count + 1);
+    const payloads = new Map(this.priorPayloads);
+    payloads.delete(this.tag);
+    payloads.set(this.tag, this.slots[0]);
+    this.priorPayloads = payloads;
+  }
+
+  withCopiedPayload(payload: Value): ZUnion {
+    const copy = new ZUnion(this.tag, payload);
+    copy.priorPayloads = this.priorPayloads;
+    return copy;
   }
 }
 
@@ -510,7 +528,7 @@ export function copyValue(value: Value): Value {
     return new ZArray(copied, 0, value.lengthValue, value.hasSentinel);
   }
   if (value instanceof ZStruct) return new ZStruct(value.slots.map((slot) => copyValue(slot)));
-  if (value instanceof ZUnion) return value.copyBacking?.() ?? new ZUnion(value.tag, copyValue(value.slots[0]));
+  if (value instanceof ZUnion) return value.copyBacking?.() ?? value.withCopiedPayload(copyValue(value.slots[0]));
   if (value instanceof Some) return new Some(copyValue(value.value));
   return value;
 }
@@ -524,6 +542,7 @@ export function storeInto(target: Slots, index: number, value: Value): void {
 }
 
 // code-gauge-allow functionCognitiveComplexity 21 -- Preserves existing aggregate locations when storing copied values.
+// code-gauge-allow functionNcss 31 -- Handles aggregate assignment and retained payloads at the storage boundary.
 function storeSnapshotInto(target: Slots, index: number, value: Value): void {
   value = valueWithRetainedPayload(target, index, value);
   if (storageLocations.has(target.slots)) {
@@ -554,6 +573,7 @@ function storeSnapshotInto(target: Slots, index: number, value: Value): void {
     current.tag === value.tag
   ) {
     storeSnapshotInto(current, 0, value.slots[0]);
+    current.priorPayloads = value.priorPayloads;
     return;
   }
   if (value instanceof Some && current instanceof Some) {

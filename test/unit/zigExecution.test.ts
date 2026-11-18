@@ -1589,6 +1589,22 @@ test.each([
   });
 });
 
+test.each([
+  ['.{.small=0x56}', 'u', '1256'],
+  ['.{.small=0x56}', 'identity(u)', '1256'],
+  ['U{.small=0x56}', 'u', '56'],
+])(
+  'union result-location stores preserve prior bytes before copying %s through %s',
+  (initializer, copied, expected) => {
+    const source = `const std=@import("std");const U=union(enum){wide:u16,small:u8};fn identity(u:U)U{return u;}pub fn main()void{var u:U=.{.wide=0x1234};u=${initializer};var v:U=.{.wide=0};const q=&v.wide;v=${copied};std.debug.print("{x} {t}",.{q.*,v});}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: `${expected} small`,
+      uncaughtException: undefined,
+    });
+  }
+);
+
 test('tagged union copies preserve references in retained inactive fields', () => {
   const source = `const std=@import("std");const U=union(enum){ptr:*u8,empty:void};fn identity(u:U)U{return u;}pub fn main()void{var first:u8=7;var second:u8=3;var a:U=.{.ptr=&first};const p=&a.ptr;a=.{.empty={}};var b:U=.{.ptr=&second};const q=&b.ptr;b=identity(a);q.*.*=9;std.debug.print("{} {} {} {t}",.{p.*==q.*,first,second,b});}`;
   expect(executeProgram('zig', source)).toMatchObject({
