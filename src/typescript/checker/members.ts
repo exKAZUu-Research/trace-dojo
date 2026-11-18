@@ -408,6 +408,21 @@ export class MemberChecker {
     return applicableIndex(this.c, this.c.structureOf(objectType), indexType)?.readonly === true;
   }
 
+  /**
+   * Whether writing a key of a type parameter goes through an index signature of its constraint other than the number
+   * index, which TypeScript forbids, as the parameter may stand for a type with a narrower property under that key.
+   */
+  isGenericIndexWrite(objectType: Type, key: Type): boolean {
+    if (objectType.kind !== 'typeParameter' || objectType.isThisType) return false;
+    if (key.kind === 'union') return key.types.some((member) => this.isGenericIndexWrite(objectType, member));
+    const apparent = this.c.apparentType(objectType);
+    if (apparent.kind !== 'object' && apparent.kind !== 'intersection') return false;
+    if (isPropertyKeyLiteral(key) && this.c.propertyOf(apparent, String(key.value))) return false;
+    const structure = this.c.structureOf(apparent);
+    const index = applicableIndex(this.c, structure, key);
+    return index !== undefined && index !== structure.numberIndex;
+  }
+
   indexedType(node: TreeNode, objectNode: TreeNode, indexNode: TreeNode, objectType: Type, indexType: Type): Type {
     return this.indexedTypeAt({ node, objectNode, indexNode }, objectType, indexType);
   }
@@ -415,12 +430,11 @@ export class MemberChecker {
   private indexedTypeAt(access: IndexAccess, objectType: Type, indexType: Type): Type {
     if (isAnyLike(objectType)) return anyType;
     const index = regularOf(indexType);
-    if (
-      ['typeParameter', 'keyof', 'conditional', 'indexedAccess'].includes(index.kind) ||
-      objectType.kind === 'typeParameter'
-    ) {
+    if (['typeParameter', 'keyof', 'conditional', 'indexedAccess'].includes(index.kind))
       return this.checkedGenericIndex(access, objectType, this.c.typeOperators.indexedAccess(objectType, index));
-    }
+    // A key that is not generic reads the object a type parameter stands for through its constraint.
+    if (objectType.kind === 'typeParameter')
+      return this.indexedTypeAt(access, this.c.apparentType(objectType), indexType);
     if (isPropertyKeyLiteral(index)) {
       const type = this.literalIndexedType(access, objectType, index.value, indexType);
       if (type) return type;

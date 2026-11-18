@@ -1,0 +1,32 @@
+function describe<T extends { name: string; [key: `tag${string}`]: string }>(item: T): string {
+  const name = item["name"];
+  const tag = item["tagColor"];
+  return `${name.toUpperCase()}:${tag.length}`;
+}
+
+function firstAndRename<T extends string[]>(items: T): string {
+  const first = items[0];
+  items[1] = first.repeat(2);
+  return items.join(",");
+}
+
+function pair<T extends [number, string]>(tuple: T): string {
+  return tuple[1].padStart(tuple[0], "*");
+}
+
+class Counter {
+  [key: number]: string;
+  count = 0;
+  remember(): void {
+    this[this.count] = `#${this.count}`;
+    this["count"] += 1;
+  }
+}
+
+console.log(describe({ name: "box", tagColor: "red" }));
+console.log(firstAndRename(["a", "b", "c"]));
+console.log(pair([5, "x"]));
+const counter = new Counter();
+counter.remember();
+counter.remember();
+console.log(counter[0], counter[1], counter.count);

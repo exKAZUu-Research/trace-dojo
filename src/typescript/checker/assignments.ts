@@ -366,6 +366,10 @@ export class AssignmentChecker {
     }
     if (this.c.members.isReadonlyIndex(objectType, literalType(propertyNode.text)))
       return this.reportReadonlyIndex(expression, objectType);
+    if (this.c.members.isGenericIndexWrite(objectType, literalType(propertyNode.text))) {
+      this.c.error(propertyNode, `プロパティ '${propertyNode.text}' は型 '${this.c.print(objectType)}' にありません。`);
+      return errorType;
+    }
     const type = this.c.members.propertyAccess(expression, objectNode, propertyNode, objectType, propertyNode.text);
     if (compound) {
       const key = this.c.flow.referenceKey(expression);
@@ -406,6 +410,13 @@ export class AssignmentChecker {
       }
     }
     if (this.c.members.isReadonlyIndex(objectType, indexType)) return this.reportReadonlyIndex(expression, objectType);
+    if (this.c.members.isGenericIndexWrite(objectType, regularOf(indexType))) {
+      this.c.error(
+        expression,
+        `型 '${this.c.print(objectType)}' はジェネリックなので、インデックスでは読み取りしかできません。`
+      );
+      return errorType;
+    }
     const readType = this.c.members.indexedType(expression, objectNode, indexNode, objectType, indexType);
     if (indexType.kind === 'literal')
       return unionOf(
