@@ -315,7 +315,12 @@ export function checkTypeMemberDuplicates(c: Checker, body: TreeNode): void {
 export function checkOverloadOptionality(c: Checker, body: TreeNode): void {
   const byKey = new Map<string, TreeNode[]>();
   for (const member of named(body)) {
-    if (!overloadableMethodTypes.has(member.type) || hasToken(member, 'get') || hasToken(member, 'set')) continue;
+    if (!overloadableMethodTypes.has(member.type)) continue;
+    if (hasToken(member, 'get') || hasToken(member, 'set')) {
+      // TypeScript's grammar has no optional accessor, which it reports as a syntax error at the name.
+      if (hasToken(member, '?')) c.error(memberNameNode(member), 'アクセサーに ? は付けられません。');
+      continue;
+    }
     const name = memberName(c, member);
     if (name === undefined) continue;
     const key = `${hasToken(member, 'static') ? 'static ' : ''}${name}`;
