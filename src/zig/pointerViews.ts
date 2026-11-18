@@ -385,7 +385,7 @@ function sourceLocation(pointer: Pointer, type: Type, offset: number): { storage
     const source = hasAggregateStorage(type.child) ? element.withFieldLocation(pointer, (index * stride) / 8) : element;
     return sourceLocation(source, type.child, offset - index * stride);
   }
-  if (type.kind === 'struct' && type.layout !== 'packed' && usesFieldLayout(type)) {
+  if (type.kind === 'struct' && type.layout !== 'packed' && (usesFieldLayout(type) || type.native?.kind === 'writer')) {
     for (const region of intersectingFields(type, offset, offset + 1)) {
       const field = new Pointer(pointer.load() as ZStruct, region.index);
       const source = hasAggregateStorage(region.type) ? field.withFieldLocation(pointer, region.offset / 8) : field;

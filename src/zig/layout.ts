@@ -19,6 +19,7 @@ export function fieldOffsets(type: StructType): number[] {
 }
 
 function calculateFieldOffsets(type: StructType, query: LayoutQuery): number[] {
+  if (type.native?.kind === 'writer') return [8 * 8, 24 * 8];
   const fields = type.fields ?? [];
   const offsets = fields.map(() => 0);
   const ordered = fields

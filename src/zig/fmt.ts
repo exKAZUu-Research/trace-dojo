@@ -69,7 +69,7 @@ export interface FormatOutput {
   readonly length: number;
   push: (...bytes: number[]) => number;
   checkSize?: (length: number) => void;
-  writeView?: (length: number, get: (index: number) => number) => void;
+  writeView?: (length: number, get: (index: number) => number, source?: Slice) => void;
   writeChunks?: (length: number, get: (index: number) => number, chunkSize: number) => void;
   repeat?: (byte: number, count: bigint) => void;
 }
@@ -778,14 +778,19 @@ function enumName(value: bigint, type: EnumType, info: TypeInfo): string | undef
 interface ByteView extends Iterable<number> {
   readonly length: number;
   readonly get: (index: number) => number;
+  readonly source?: Slice;
 }
 
 export function stringBytes(value: Value): ByteView {
   const source = value instanceof Pointer ? (value.load() as ZArray) : (value as Slice | ZArray);
-  return byteView(source.length, (index) => {
-    spendMemory();
-    return Number(source.get(index));
-  });
+  return byteView(
+    source.length,
+    (index) => {
+      spendMemory();
+      return Number(source.get(index));
+    },
+    source instanceof Slice ? source : new Slice(source, source.offset, source.lengthValue)
+  );
 }
 
 // code-gauge-allow functionCognitiveComplexity 16 -- Streams three input bytes per quartet with bounded lazy reads and explicit padding.
@@ -820,10 +825,11 @@ function base64Bytes(source: ByteView): ByteView {
   });
 }
 
-function byteView(length: number, get: (index: number) => number): ByteView {
+function byteView(length: number, get: (index: number) => number, source?: Slice): ByteView {
   return {
     length,
     get,
+    source,
     *[Symbol.iterator]() {
       for (let index = 0; index < length; index++) yield get(index);
     },
@@ -892,14 +898,21 @@ export function printInt(
   upper: boolean,
   options: Options
 ): void {
-  const signed = type.kind === 'int' && type.signed;
   const magnitude = value < 0n ? -value : value;
-  let digits = magnitude.toString(base);
-  if (upper) digits = digits.toUpperCase();
-  let text = digits;
-  if (value < 0n) text = `-${digits}`;
-  else if (signed && options.width !== undefined && options.width !== 0n) text = `+${digits}`;
-  alignBuffer(out, utf8(text), options);
+  const digits = magnitude.toString(base);
+  spendMemory(digits.length);
+  const paddedSigned = type.kind === 'int' && type.signed && options.width !== undefined && options.width !== 0n;
+  const sign = value < 0n ? 0x2d : paddedSigned ? 0x2b : undefined;
+  const prefix = sign === undefined ? 0 : 1;
+  alignBuffer(
+    out,
+    byteView(digits.length + prefix, (index) => {
+      if (sign !== undefined && index === 0) return sign;
+      const digit = digits.codePointAt(index - prefix)!;
+      return upper && digit >= 0x61 ? digit - 0x20 : digit;
+    }),
+    options
+  );
 }
 
 // Floats --------------------------------------------------------------------------------------------------------------
@@ -1115,7 +1128,7 @@ function hexFloatDigits(big: BigFloat, bits: FloatBits, upper: boolean, precisio
 function appendBuffer(out: FormatOutput, bytes: readonly number[] | ByteView, chunkSize?: number): void {
   const get = 'get' in bytes ? bytes.get : (index: number): number => bytes[index];
   if (chunkSize && out.writeChunks) out.writeChunks(bytes.length, get, chunkSize);
-  else if (out.writeView) out.writeView(bytes.length, get);
+  else if (out.writeView) out.writeView(bytes.length, get, 'source' in bytes ? bytes.source : undefined);
   else for (let index = 0; index < bytes.length; index++) out.push(get(index));
 }
 

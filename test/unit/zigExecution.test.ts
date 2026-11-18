@@ -1732,6 +1732,28 @@ test.each([
 });
 
 test.each([
+  [
+    'fixed',
+    '_=init;var writer=std.Io.Writer.fixed(&first);var other=std.Io.Writer.fixed(&second);',
+    '&writer',
+    '&other',
+  ],
+  [
+    'file',
+    'var writer=std.Io.File.stdout().writer(init.io,&first);var other=std.Io.File.stdout().writer(init.io,&second);',
+    '&writer.interface',
+    '&other.interface',
+  ],
+])('native %s writer word identities match live fields and equivalent headers', (_kind, construct, writer, other) => {
+  const source = `const std=@import("std");const U=extern union{writer:*std.Io.Writer,words:*[4]usize};pub fn main(init:std.process.Init)!void{var first:[8]u8=undefined;var second:[4]u8=undefined;${construct}const a=U{.writer=${writer}};const b=U{.writer=${other}};const tag=a.words[0];const p=&a.writer.end;const q=&a.words[3];var map=std.AutoHashMap(*usize,u8).init(std.heap.page_allocator);defer map.deinit();try map.put(p,42);q.*=2;std.debug.print("{} {} {} {any} {}",.{tag==a.words[0],tag==b.words[0],p==q,map.get(q),p.*});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true true true 42 2',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
   ['u16', '0x1234', 'u', '129a'],
   ['u16', '0x1234', 'identity(u)', '129a'],
   ['u32', '0x12345678', 'u', '1234569a'],
@@ -2364,6 +2386,43 @@ test('fixed writer errors preserve the prefix that fits for writes, repetitions 
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
     stderr: 'hel|hel|xxx|hel',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['1', '_=try w.write(b[0..2]);'],
+  ['1', 'try w.writeAll(b[0..2]);'],
+  ['1', 'try w.print("{s}",.{b[0..2]});'],
+  ['4', 'try w.writeAll(b[3..6]);'],
+  ['4', 'try w.splatBytesAll(b[3..6],2);'],
+  ['0', 'try w.splatBytesAll(b[3..5],2);'],
+])('fixed writer rejects overlap at end %s for %s', (end, write) => {
+  const source = `const std=@import("std");pub fn main()!void{var b=[_]u8{1,2,3,4,5,6};var w=std.Io.Writer.fixed(&b);w.end=${end};${write}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'panic: @memcpy arguments alias',
+  });
+});
+
+test.each([
+  ['w.end=5;w.writeAll(b[4..6]) catch {};', '{ 1, 2, 3, 4, 5, 5 }'],
+  ['w.end=2;try w.splatBytesAll(b[2..3],2);', '{ 1, 2, 3, 3, 5, 6 }'],
+  ['w.end=0;try w.splatBytesAll(b[4..6],2);', '{ 5, 6, 5, 6, 5, 6 }'],
+])('fixed writer allows non-overlapping copies and byte fills for %s', (write, expected) => {
+  const source = `const std=@import("std");pub fn main()!void{var b=[_]u8{1,2,3,4,5,6};var w=std.Io.Writer.fixed(&b);${write}std.debug.print("{any}",.{b});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
+
+test('file writer drains aliased slices without copying them into its backing buffer', () => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var b=[_]u8{'a','b','c','d'};var f=std.Io.File.stdout().writer(init.io,&b);f.interface.end=3;try f.interface.writeAll(b[2..4]);try f.interface.flush();}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'abccd',
     uncaughtException: undefined,
   });
 });
@@ -8971,6 +9030,26 @@ test.each(['s', 'b64'])('empty counted {%s} writes preserve exact public writer 
     stderr: '18446744073709551615|18446744073709551615',
     uncaughtException: undefined,
   });
+});
+
+test.each([
+  ['d', 1233],
+  ['x', 1024],
+  ['X', 1024],
+  ['b', 4096],
+  ['o', 1366],
+])('format count charges conversion as well as consumed digits in radix %s', (base, digits) => {
+  const source = `const std=@import("std");pub fn main()void{var x:u4096=1<<4095;_=&x;std.debug.print("{}",.{std.fmt.count("{${base}}",.{x})});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: String(digits),
+    uncaughtException: undefined,
+  });
+  const budget = new ExecutionBudget();
+  budget.spend(LIMITS.maxOperations - Math.floor(digits * 1.5));
+  expect(() => runProgram(new Runtime(undefined, budget), compileSource(source))).toThrow(
+    expect.objectContaining({ limit: 'operations' })
+  );
 });
 
 test.each([

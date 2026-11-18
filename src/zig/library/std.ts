@@ -51,6 +51,7 @@ import {
   writerState,
   writerValue,
   WriterWriteError,
+  writeSlice,
   writeTo,
 } from './writer';
 
@@ -321,8 +322,8 @@ function addWriterMembers(): void {
         const writer = writerOf(sema, call);
         const [bytes] = compileArgs(sema, expectArgs(sema, call, 1, 'writeAll'), [CONST_U8_SLICE]);
         return nativeStateCall(errorUnionOf(WRITE_ERROR, VOID), [bytes], call.span, writer, (state, [value], frame) => {
-          const data = writerBytes(frame, value);
-          return data.length === 0 ? undefined : writeTo(frame, state, data);
+          const data = value as Slice;
+          return data.lengthValue === 0n ? undefined : writeSlice(frame, state, data);
         });
       },
       () => ({
@@ -365,8 +366,8 @@ function addWriterMembers(): void {
         const writer = writerOf(sema, call);
         const args = compileArgs(sema, expectArgs(sema, call, 1, 'write'), [CONST_U8_SLICE]);
         return nativeStateCall(errorUnionOf(WRITE_ERROR, USIZE), args, call.span, writer, (state, [value], frame) => {
-          const data = writerBytes(frame, value);
-          return writeTo(frame, state, data) ?? BigInt(data.length);
+          const data = value as Slice;
+          return writeSlice(frame, state, data) ?? data.lengthValue;
         });
       },
       () => ({
@@ -384,7 +385,7 @@ function addWriterMembers(): void {
           args,
           call.span,
           writer,
-          (state, [bytes, count], frame) => writeRepeated(frame, state, writerBytes(frame, bytes), count as bigint)
+          (state, [bytes, count], frame) => writeRepeated(frame, state, bytes as Slice, count as bigint)
         );
       },
       () => ({

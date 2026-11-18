@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 525 -- Keeps the byte codecs, shared typed views, and reference-preserving copies together.
+// code-gauge-allow-file fileNcss 528 -- Keeps the byte codecs, shared typed views, and reference-preserving copies together.
 import { transferCost } from './allocation';
 import { panic } from './arith';
 import { enumLookup } from './enumLookup';
@@ -22,6 +22,7 @@ import { type Type, typeId } from './types';
 import {
   ErrorValue,
   FnValue,
+  NativeHandle,
   NULL,
   Pointer,
   registerPointerLocation,
@@ -61,6 +62,7 @@ export class BufferMemorySpace {
   nextReferenceId = 1n;
   readonly errorReferenceIds = new WeakMap<object, bigint>();
   nextErrorReferenceId = 1n;
+  private readonly writerVtables = new Map<string, object>();
 
   identityOf(value: object): bigint {
     let identity = this.referenceIds.get(value);
@@ -69,6 +71,17 @@ export class BufferMemorySpace {
       this.referenceIds.set(value, identity);
     }
     return identity;
+  }
+
+  writerVtable(writer: ZStruct): object {
+    const growth = writer.slots[4];
+    const kind = growth instanceof NativeHandle ? growth.kind : writer.slots[2] === undefined ? 'fixed' : 'file';
+    let vtable = this.writerVtables.get(kind);
+    if (!vtable) {
+      vtable = {};
+      this.writerVtables.set(kind, vtable);
+    }
+    return vtable;
   }
 }
 
@@ -331,9 +344,10 @@ export class BufferMemory {
     const cached = this.views.get(key);
     if (cached) return cached as ZStruct;
     const fields = type.fields!;
+    const [buffer, end] = fieldOffsets(type);
     const slots = this.slots([
-      { type: fields[0].type, offset: offset + 64 },
-      { type: fields[1].type, offset: offset + 192 },
+      { type: fields[0].type, offset: offset + buffer },
+      { type: fields[1].type, offset: offset + end },
     ]);
     for (let index = 2; index < 5; index++) {
       Object.defineProperty(slots, index, {
@@ -353,9 +367,10 @@ export class BufferMemory {
   private writeWriter(type: Extract<Type, { kind: 'struct' }>, offset: number, header: ZStruct): void {
     spendMemory(5);
     const snapshot = new ZStruct([...header.slots]);
-    this.writeReference(offset, snapshot, type);
-    this.write(type.fields![0].type, offset + 64, snapshot.slots[0]);
-    this.write(type.fields![1].type, offset + 192, snapshot.slots[1]);
+    this.writeReference(offset, snapshot, type, 64, this.space.writerVtable(snapshot));
+    const [buffer, end] = fieldOffsets(type);
+    this.write(type.fields![0].type, offset + buffer, snapshot.slots[0]);
+    this.write(type.fields![1].type, offset + end, snapshot.slots[1]);
   }
 
   private unionView(type: Extract<Type, { kind: 'union' }>, offset: number): ZUnion {
@@ -712,13 +727,13 @@ export class BufferMemory {
       : ((value as Value) ?? undefinedValue(type));
   }
 
-  private writeReference(offset: number, value: Value, type: Type, bits = 64): void {
+  private writeReference(offset: number, value: Value, type: Type, bits = 64, identity?: object): void {
     if (typeof value !== 'object') {
       this.writeBits(offset, bits, 0n);
       return;
     }
     if (this.addressOf) {
-      this.writeBits(offset, bits, this.addressOf(value));
+      this.writeBits(offset, bits, this.addressOf(identity ?? value));
       return;
     }
     let id: bigint;
@@ -730,7 +745,7 @@ export class BufferMemory {
       const location =
         value instanceof Pointer
           ? value.storageLocation()
-          : { storage: value instanceof FnValue ? value.fn : value, index: 0 };
+          : { storage: identity ?? (value instanceof FnValue ? value.fn : value), index: 0 };
       id = (this.space.identityOf(location.storage) << 32n) + BigInt(location.index * 8);
     }
     if (value instanceof Pointer && type.kind === 'pointer') rememberPointerType(value, type.child);

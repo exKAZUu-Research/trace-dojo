@@ -2,14 +2,17 @@ import { checkOutputSize } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import { byteValues } from '../builtins';
 import type { FormatOutput } from '../fmt';
+import { MemoryFault } from '../memoryFault';
 import type { Frame } from '../runtime';
 import { sliceOf, type StructType, U8, USIZE } from '../types';
 import {
   ErrorValue,
+  isUndefinedMemory,
   NativeHandle,
   Pointer,
   registerNativeReferences,
   Slice,
+  storageOverlaps,
   type Value,
   ZArray,
   ZStruct,
@@ -60,19 +63,21 @@ export class WriterFormatOutput implements FormatOutput {
     return this.length;
   }
 
-  writeView(length: number, get: (index: number) => number): void {
+  writeView(length: number, get: (index: number) => number, source?: Slice): void {
     if (length === 0) return;
     const state = this.destination;
     if (!isDiscardingWriter(state)) {
-      const result = writeTo(this.frame, state, { length, get });
+      const result = writeTo(this.frame, state, { length, get, source });
       if (result instanceof ErrorValue) throw new WriterWriteError(result);
       this.length += length;
       return;
     }
     const end = writerEndAfter(state, BigInt(length));
-    this.frame.runtime.spend(length);
-    const prefix = end <= state.capacity ? Array.from({ length }, (_, index) => get(index)) : [];
-    discardWritten(state, length, prefix);
+    if (end <= state.capacity) copyWriteBytes(this.frame, state, { length, get, source }, length);
+    else {
+      this.frame.runtime.spend(length);
+      discardOverflow(state, length);
+    }
     this.length += length;
   }
 
@@ -121,7 +126,7 @@ export function discardingWriter(): WriterState {
       count: 0n,
       drain: (frame: Frame, state: WriterState, bytes: readonly number[]) => {
         frame.runtime.spend(bytes.length);
-        discardWritten(state, bytes.length, bytes);
+        discardOverflow(state, bytes.length);
       },
     }),
   };
@@ -137,25 +142,20 @@ export function discardedBytes(state: WriterState): bigint {
   return result;
 }
 
-function discardRepeated(frame: Frame, state: WriterState, bytes: readonly number[], count: bigint): void {
-  const requested = BigInt(bytes.length) * count;
-  if (requested === 0n) return;
-  const end = writerEndAfter(state, requested);
-  const length = Number(requested);
-  frame.runtime.spend(length);
-  const prefix = end <= state.capacity ? Array.from({ length }, (_, index) => bytes[index % bytes.length]) : [];
-  discardWritten(state, length, prefix);
-}
-
-function discardWritten(state: WriterState, length: number, prefix: readonly number[]): void {
-  const end = writerEndAfter(state, BigInt(length));
-  if (end > state.capacity) {
-    addDiscarded(state, writerEnd(state) + BigInt(length));
-    state.end = 0;
+function discardRepeated(frame: Frame, state: WriterState, bytes: WriteBytes): void {
+  const length = Number(bytes.length);
+  if (length === 0) return;
+  if (writerEndAfter(state, BigInt(bytes.length)) <= state.capacity) {
+    copyWriteBytes(frame, state, bytes, length);
     return;
   }
-  for (let index = 0; index < length; index++) state.buffer.set(state.end + index, BigInt(prefix[index]));
-  state.end = end;
+  frame.runtime.spend(length);
+  discardOverflow(state, length);
+}
+
+function discardOverflow(state: WriterState, length: number): void {
+  addDiscarded(state, writerEnd(state) + BigInt(length));
+  state.end = 0;
 }
 
 function addDiscarded(state: WriterState, length: bigint): void {
@@ -242,20 +242,41 @@ export function bufferingWriter(): WriterState {
   return { fd: undefined, buffer: new Slice(new ZArray([]), 0, 0), end: 0, capacity: Infinity };
 }
 
-type WriteBytes = readonly number[] | { length: number | bigint; get: (index: number) => number };
+type WriteBytes =
+  | readonly number[]
+  | { length: number | bigint; get: (index: number) => number; source?: Slice; splat?: boolean };
 
-export function writeRepeated(frame: Frame, state: WriterState, bytes: readonly number[], count: bigint): Value {
-  if (isDiscardingWriter(state)) {
-    discardRepeated(frame, state, bytes, count);
-    return;
-  }
-  return writeTo(frame, state, { length: BigInt(bytes.length) * count, get: (index) => bytes[index % bytes.length] });
+export function writeSlice(frame: Frame, state: WriterState, slice: Slice): Value {
+  return writeTo(frame, state, sliceBytes(frame, slice));
 }
 
-// code-gauge-allow functionNcss 34 -- Keeps growth, drain, and buffered writes in their observable order.
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps growth and draining ahead of buffer mutation.
+export function writeRepeated(
+  frame: Frame,
+  state: WriterState,
+  bytes: readonly number[] | Slice,
+  count: bigint
+): Value {
+  const data =
+    bytes instanceof Slice
+      ? sliceBytes(frame, bytes, count)
+      : { length: BigInt(bytes.length) * count, get: (index: number) => bytes[index % bytes.length] };
+  if (isDiscardingWriter(state)) {
+    discardRepeated(frame, state, data);
+    return;
+  }
+  return writeTo(frame, state, data);
+}
+
+function sliceBytes(frame: Frame, source: Slice, count?: bigint): WriteBytes {
+  if (source.lengthValue !== 0n && isUndefinedMemory(source)) throw new MemoryFault();
+  const get = (index: number): number => {
+    frame.runtime.spend();
+    return Number(source.get(count === undefined ? index : index % source.length));
+  };
+  return { length: source.lengthValue * (count ?? 1n), get, source, splat: count !== undefined };
+}
+
 export function writeTo(frame: Frame, state: WriterState, bytes: WriteBytes): Value {
-  const get = 'get' in bytes ? bytes.get : (index: number): number => bytes[index];
   const length = Number(bytes.length);
   frame.runtime.spend();
   const end = writerEndAfter(state, BigInt(bytes.length));
@@ -270,9 +291,7 @@ export function writeTo(frame: Frame, state: WriterState, bytes: WriteBytes): Va
   if (end > state.capacity) {
     if (state.fd === undefined) {
       const available = writerRemaining(state);
-      frame.runtime.spend(available);
-      for (let index = 0; index < available; index++) state.buffer.set(state.end + index, BigInt(get(index)));
-      state.end += available;
+      copyWriteBytes(frame, state, bytes, available, true);
       return ErrorValue.of('WriteFailed');
     }
     checkOutputSize(end);
@@ -282,12 +301,40 @@ export function writeTo(frame: Frame, state: WriterState, bytes: WriteBytes): Va
     return undefined;
   }
   if (!Number.isFinite(state.capacity)) frame.runtime.reserveStorage(length);
-  frame.runtime.spend(length);
-  for (let index = 0; index < length; index++) state.buffer.set(state.end + index, BigInt(get(index)));
-  state.end = end;
+  copyWriteBytes(frame, state, bytes, length);
   if (!Number.isFinite(state.capacity))
     state.buffer = new Slice(state.buffer.target, state.buffer.start, Math.max(state.buffer.length, end));
   return undefined;
+}
+
+function copyWriteBytes(frame: Frame, state: WriterState, bytes: WriteBytes, length: number, drained = false): void {
+  if (length === 0) return;
+  const get = 'get' in bytes ? bytes.get : (index: number): number => bytes[index];
+  const source = 'get' in bytes ? bytes.source : undefined;
+  if (!source) {
+    copyWriterChunk(frame, state, length, get);
+    return;
+  }
+  if (source.length === 1 && (drained || ('get' in bytes && bytes.splat))) {
+    const byte = get(0);
+    copyWriterChunk(frame, state, length, () => byte);
+    return;
+  }
+  const destination = state.buffer;
+  for (let offset = 0; offset < length; offset += source.length) {
+    const size = Math.min(source.length, length - offset);
+    if (storageOverlaps(destination.target, destination.start + state.end, source.target, source.start, size, 1))
+      panic(PANIC.memcpyAlias);
+    copyWriterChunk(frame, state, size, (index) => get(offset + index));
+  }
+}
+
+function copyWriterChunk(frame: Frame, state: WriterState, length: number, get: (index: number) => number): void {
+  const buffer = state.buffer;
+  const start = state.end;
+  frame.runtime.spend(length);
+  for (let index = 0; index < length; index++) buffer.set(start + index, BigInt(get(index)));
+  state.end = start + length;
 }
 
 function materializeBytes(frame: Frame, bytes: WriteBytes): readonly number[] {
