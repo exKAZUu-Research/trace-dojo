@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 607 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 624 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -375,6 +375,12 @@ export class ClassChecker {
     const nameNode = member.childForFieldName('name');
     const names = nameNode ? this.c.silently(() => this.c.patterns.capturePropertyNames(nameNode)) : undefined;
     const name = names?.length === 1 ? names[0] : undefined;
+    if (name === undefined && nameNode) {
+      this.c.typeNodes.addComputedMemberIndex(members.structure, member, nameNode, () =>
+        this.computedMemberType(member, nameNode)
+      );
+      return;
+    }
     switch (member.type) {
       case 'field_definition': {
         if (name !== undefined && nameNode)
@@ -416,6 +422,14 @@ export class ClassChecker {
   }
 
   /** Records a method's signature or implementation, or an accessor, under its name. */
+  private computedMemberType(member: TreeNode, nameNode: TreeNode): Type {
+    if (member.type === 'field_definition') return this.fieldType(member, nameNode);
+    const signature = this.methodSignature(member);
+    if (hasToken(member, 'get')) return signature.returnType();
+    if (hasToken(member, 'set')) return signature.parameters[0]?.type ?? anyType;
+    return this.c.overloadedFunction([{ ...signature, isMethod: true }]);
+  }
+
   private addMethod(members: ClassMembers, name: string, member: TreeNode): void {
     if (hasToken(member, 'get') || hasToken(member, 'set')) {
       const entry = members.accessors.get(name) ?? {};
@@ -509,7 +523,7 @@ export class ClassChecker {
     return (modifier?.text as Property['visibility'] | undefined) ?? 'public';
   }
 
-  private fieldType(member: TreeNode, nameNode: TreeNode): Type {
+  fieldType(member: TreeNode, nameNode: TreeNode): Type {
     const annotation = this.c.typeNodes.annotationType(member.childForFieldName('type'));
     if (annotation) return annotation;
     const cached = this.fieldTypes.get(member.id);
@@ -517,6 +531,7 @@ export class ClassChecker {
     const resolving = this.resolvingFields.findIndex((field) => field.member.id === member.id);
     // Fields whose initializers read one another have no type to infer, as TypeScript reports for each of them.
     if (resolving !== -1) {
+      this.c.functions.markCircularReturn();
       for (const field of this.resolvingFields.slice(resolving)) {
         if (this.fieldTypes.has(field.member.id)) continue;
         this.fieldTypes.set(field.member.id, anyType);
@@ -574,6 +589,20 @@ export class ClassChecker {
           },
           skippedBy: (operator, type) => skippedType(this.c, operator, type),
           spend: () => this.c.budget.spend(),
+          iteration: (node, assign, evaluate) => {
+            const header = node.childForFieldName('header') ?? node;
+            const left = header.childForFieldName('left') as TreeNode;
+            const right = header.childForFieldName('right') as TreeNode;
+            this.c.silently(() =>
+              this.c.assignments.assignmentTargets(
+                left,
+                this.c.statements.loopElementType(node, this.c.expressions.check(right)),
+                (target, type) => assign(target, this.c.widen(type)),
+                evaluate,
+                true
+              )
+            );
+          },
           destructure: (pattern, right, assign, evaluate) =>
             this.c.silently(() =>
               this.c.assignments.assignmentTargets(

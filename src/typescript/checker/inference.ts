@@ -51,6 +51,7 @@ export interface InferenceRun {
   inferences: Map<number, Inference>;
   parameters: TypeParameter[];
   priority: number;
+  contextualSignatures: boolean;
 }
 
 type Recurse = (source: Type, target: Type, covariant?: boolean, priority?: number) => void;
@@ -291,7 +292,7 @@ export class TypeInference {
       return;
     }
     if (source.kind === 'object' && this.inferFromElements(run, source, target, recurse)) return;
-    this.inferFromMembers(source, target, recurse);
+    this.inferFromMembers(run, source, target, recurse);
   }
 
   /** Infers to an object from what a non-object source stands for, as TypeScript's `inferFromTypes` takes its apparent type. */
@@ -381,7 +382,7 @@ export class TypeInference {
     return true;
   }
 
-  private inferFromMembers(source: Type, target: ObjectType, recurse: Recurse): void {
+  private inferFromMembers(run: InferenceRun, source: Type, target: ObjectType, recurse: Recurse): void {
     const targetStructure = target.resolve();
     const sourceStructure = this.c.structureOf(source);
     for (const [name, property] of targetStructure.properties) {
@@ -393,12 +394,12 @@ export class TypeInference {
     if (targetSignatures.length > 0 && sourceSignatures.length > 0) {
       const sourceSignature = sourceSignatures.at(-1) as Signature;
       const targetSignature = targetSignatures.at(-1) as Signature;
-      this.inferFromSignatures(sourceSignature, targetSignature, recurse);
+      this.inferFromSignatures(run, sourceSignature, targetSignature, recurse);
     }
     const sourceConstruct = sourceStructure.constructSignatures;
     const targetConstruct = targetStructure.constructSignatures;
     if (sourceConstruct.length > 0 && targetConstruct.length > 0) {
-      this.inferFromSignatures(sourceConstruct.at(-1) as Signature, targetConstruct.at(-1) as Signature, recurse);
+      this.inferFromSignatures(run, sourceConstruct.at(-1) as Signature, targetConstruct.at(-1) as Signature, recurse);
     }
     this.inferFromIndexSignatures(source, sourceStructure, targetStructure, recurse);
   }
@@ -432,18 +433,8 @@ export class TypeInference {
   }
 
   // code-gauge-allow functionCognitiveComplexity 17 -- Infers callback this, parameters, rests, returns, and predicates, fitting generic guards to their target.
-  private inferFromSignatures(generic: Signature, target: Signature, recurse: Recurse): void {
-    const source =
-      generic.typeParameters.length === 0
-        ? generic
-        : generic.predicate
-          ? this.instantiateToFit(generic, target)
-          : this.c.instantiateSignature(
-              { ...generic, typeParameters: [] },
-              new Map(
-                generic.typeParameters.map((parameter) => [parameter.id, parameter.constraint?.() ?? unknownType])
-              )
-            );
+  private inferFromSignatures(run: InferenceRun, generic: Signature, target: Signature, recurse: Recurse): void {
+    const source = this.inferenceSignature(run, generic, target);
     if (source.thisType && target.thisType) recurse(source.thisType, target.thisType, false);
     const restIndex = target.parameters.findIndex((parameter) => parameter.rest);
     const count = Math.min(source.parameters.length, restIndex === -1 ? target.parameters.length : restIndex);
@@ -472,6 +463,31 @@ export class TypeInference {
     if (!isIntrinsic(targetReturn, 'void')) recurse(source.returnType(), targetReturn, true);
     else if (isIntrinsic(source.returnType(), 'void')) recurse(voidType, targetReturn, true);
     if (source.predicate && target.predicate) recurse(source.predicate.type, target.predicate.type, true);
+  }
+
+  private inferenceSignature(run: InferenceRun, generic: Signature, target: Signature): Signature {
+    return generic.typeParameters.length === 0
+      ? generic
+      : run.contextualSignatures || generic.predicate
+        ? this.instantiateCallback(run, generic, target)
+        : this.c.instantiateSignature(
+            { ...generic, typeParameters: [] },
+            new Map(generic.typeParameters.map((parameter) => [parameter.id, parameter.constraint?.() ?? unknownType]))
+          );
+  }
+
+  private instantiateCallback(run: InferenceRun, generic: Signature, target: Signature): Signature {
+    const fixes = (parameter: TypeParameter): boolean => {
+      const inference = run.inferences.get(parameter.id);
+      return (
+        !!inference &&
+        (inference.candidates.length > 0 || inference.contravariant.length > 0) &&
+        target.parameters.some((item) => this.mentions(item.type, parameter))
+      );
+    };
+    const mapper = this.partialMapper(run.parameters, run.inferences, fixes, fixes);
+    const context = mapper ? this.c.instantiateSignature(target, mapper) : target;
+    return this.instantiateToFit(generic, context);
   }
 
   private isArrayLike(type: ObjectType): boolean {
@@ -537,7 +553,7 @@ export class TypeInference {
 
   /** A generic signature instantiated to compare with `target`, inferring from the target's parameters. */
   instantiateToFit(source: Signature, target: Signature): Signature {
-    const run = newInferenceRun(source.typeParameters);
+    const run = newInferenceRun(source.typeParameters, true);
     if (source.thisType && target.thisType) this.inferTypes(run, target.thisType, source.thisType, true);
     const count = Math.min(source.parameters.length, target.parameters.length);
     for (let index = 0; index < count; index++) {
@@ -584,7 +600,7 @@ export class TypeInference {
   }
 }
 
-export function newInferenceRun(parameters: TypeParameter[]): InferenceRun {
+export function newInferenceRun(parameters: TypeParameter[], contextualSignatures = false): InferenceRun {
   return {
     inferences: new Map(
       parameters.map((parameter) => [
@@ -594,6 +610,7 @@ export function newInferenceRun(parameters: TypeParameter[]): InferenceRun {
     ),
     parameters,
     priority: InferencePriority.Direct,
+    contextualSignatures,
   };
 }
 

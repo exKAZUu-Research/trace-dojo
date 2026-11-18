@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 703 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 711 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -806,6 +806,7 @@ export class Relations {
    * Whether a tuple is related to another as TypeScript relates them: each source element is compared with the
    * target element at the same position from the start, or from the end, or else with the target's rest element.
    */
+  // code-gauge-allow functionCognitiveComplexity 24 -- Aligns fixed prefixes and suffixes while comparing the whole generic variadic middle.
   private tupleRelated(source: ObjectType, target: ObjectType, relation: Relation): boolean {
     const sourceElements = source.tuple?.elements ?? [];
     const targetElements = target.tuple?.elements ?? [];
@@ -816,12 +817,24 @@ export class Relations {
     if (targetRest === -1 && (sourceHasRest || targetElements.length < sourceElements.length)) return false;
     const startCount = targetRest === -1 ? targetElements.length : targetRest;
     const endCount = targetRest === -1 ? 0 : targetElements.length - targetRest - 1;
+    const restType = targetRest === -1 ? undefined : targetElements[targetRest].type;
+    const genericRest = this.isGenericRestType(restType);
+    if (genericRest) {
+      const middle = sourceElements.slice(startCount, Math.max(startCount, sourceElements.length - endCount));
+      const middleType = middle.length === 1 && middle[0].rest ? middle[0].type : this.c.tupleType(middle);
+      if (!this.isRelated(middleType, restType, relation)) return false;
+    }
     return sourceElements.every((element, index) => {
       const fromEnd = sourceElements.length - 1 - index;
+      if (genericRest && index >= startCount && fromEnd >= endCount) return true;
       const targetIndex =
         index < startCount ? index : fromEnd < endCount ? targetElements.length - 1 - fromEnd : targetRest;
       return this.tupleElementRelated(element, targetElements[targetIndex], relation);
     });
+  }
+
+  isGenericRestType(type: Type | undefined): type is Type {
+    return type !== undefined && this.isGeneric(type) && !this.c.isArrayType(type) && !this.c.isReadonlyArrayType(type);
   }
 
   /** The type a tuple element accepts: a rest element's elements, or `undefined` too when the element is optional. */

@@ -35,3 +35,7 @@ type SymbolTagged = ({[key]: 'ok'} & {value: string}) | ({[key]: 'error'} & {val
 function symbolTagged(value: SymbolTagged) {
   if (value[key] === 'ok') value.value.message;
 }
+function templateKeys(value: Result) {
+  if (value[`kind`] === 'ok') value.value.message;
+  if (value[`${'kind'}`] === 'ok') value.value.toUpperCase();
+}

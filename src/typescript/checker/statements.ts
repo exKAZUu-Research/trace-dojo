@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 615 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 618 -- Follows the flow of control through each kind of statement.
 import assert from 'node:assert/strict';
 
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
@@ -607,7 +607,7 @@ export class StatementChecker {
     const isOf = header.childForFieldName('operator')?.text === 'of';
     const kind = header.childForFieldName('kind')?.text;
     const rightType = this.c.expressions.check(right, isOf ? this.iterableContext(left) : undefined);
-    const elementType = isOf ? this.c.patterns.iteratedType(right, rightType) : this.forInKeyType(right, rightType);
+    const elementType = this.loopElementType(node, rightType);
     if (!isOf) this.forInObjectTypes.set(node.id, rightType);
     const body = node.childForFieldName('body') as TreeNode;
     this.loop(node, (target) => {
@@ -618,6 +618,14 @@ export class StatementChecker {
       this.c.flow.current = this.c.flow.merge([this.c.flow.current, ...target.continues]);
       return this.c.flow.merge([head, this.c.flow.current]);
     });
+  }
+
+  loopElementType(node: TreeNode, rightType: Type): Type {
+    const header = node.childForFieldName('header') ?? node;
+    const right = header.childForFieldName('right') as TreeNode;
+    return header.childForFieldName('operator')?.text === 'of'
+      ? this.c.patterns.iteratedType(right, rightType)
+      : this.forInKeyType(right, rightType);
   }
 
   /**

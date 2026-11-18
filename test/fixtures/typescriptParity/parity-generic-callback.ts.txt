@@ -1,0 +1,19 @@
+function identity<T>(value: T): T { return value; }
+const numbers = [1, 2].map(identity);
+const strings = ['a', 'b'].map(identity);
+function transform<A, B>(value: A, fn: (value: A) => B): B { return fn(value); }
+const transformed = transform(3, identity);
+function enclosing<T>(value: T): T { return transform(value, identity); }
+function wrap<T>(value:T): {value:T} {return {value};}
+const wrapped = transform('ok', wrap);
+function constrained<T extends {length:number}>(value:T):T {return value;}
+const resultLength = transform('hello', constrained).length;
+console.log(numbers[0].toFixed(), strings[0].toUpperCase(), transformed.toFixed(), enclosing('yes').toUpperCase(), wrapped.value.toUpperCase(), resultLength);
+function reverse<A,B>(fn:(value:A)=>B,value:A):B {return fn(value);}
+console.log(reverse(identity, 3).toFixed());
+
+function objectCallback<A,B>(callbacks:{fn:(value:A)=>B},value:A):B {return callbacks.fn(value);}
+function arrayCallback<A,B>(callbacks:[(value:A)=>B],value:A):B {return callbacks[0](value);}
+console.log(objectCallback({fn:identity},3).toFixed(), arrayCallback([identity],'hello').toUpperCase());
+function nestedEnclosing<T>(value:T):T {return objectCallback({fn:identity},value);}
+console.log(nestedEnclosing('ok').toUpperCase());

@@ -204,20 +204,55 @@ function checkMergedProperties(c: Checker, symbol: Sym): void {
   const properties = symbol.typeDeclarations.flatMap((declaration) =>
     propertyDeclarationsOf(c, withDomMembers(declaration))
   );
+  checkMergedMemberKinds(c, properties);
   // TypeScript binds computed names after the others, so a plain name declares the property first.
   const seen = new Map<string, TreeNode>();
   for (const member of [...properties.filter((member) => !isComputed(member)), ...properties.filter(isComputed)])
-    checkMergedProperty(c, member, seen);
+    if (!isMethodMember(member)) checkMergedProperty(c, member, seen);
+}
+
+function checkMergedMemberKinds(c: Checker, members: TreeNode[]): void {
+  const groups = new Map<string, TreeNode[]>();
+  for (const member of members) {
+    c.budget.spend();
+    const name = memberName(c, member);
+    if (name === undefined) continue;
+    const group = groups.get(name) ?? [];
+    group.push(member);
+    groups.set(name, group);
+  }
+  for (const [name, group] of groups) {
+    c.budget.spend(group.length);
+    const methods = group.filter(isMethodMember);
+    const conflicts =
+      methods.length > 0 && methods.length < group.length
+        ? group
+        : ['get', 'set'].flatMap((token) => {
+            c.budget.spend(group.length);
+            const accessors = group.filter((member) => hasToken(member, token));
+            return accessors.length > 1 ? accessors : [];
+          });
+    for (const member of conflicts) c.error(memberNameNode(member), `${name} はすでに宣言されています。`);
+  }
+}
+
+function isMethodMember(member: TreeNode): boolean {
+  return overloadableMethodTypes.has(member.type) && !isAccessor(member);
 }
 
 /** The instance property declarations of an interface or a class, including a class's parameter properties. */
 function propertyDeclarationsOf(c: Checker, declaration: TreeNode): TreeNode[] {
   const members = named(declaration.childForFieldName('body') ?? declaration);
   if (declaration.type === 'interface_declaration')
-    return members.filter((member) => member.type === 'property_signature');
+    return members.filter((member) => member.type === 'property_signature' || member.type === 'method_signature');
   const parameters = c.classes.constructorNode(declaration)?.childForFieldName('parameters');
   return [
-    ...members.filter((member) => member.type === 'field_definition' && !hasToken(member, 'static')),
+    ...members.filter(
+      (member) =>
+        (member.type === 'field_definition' ||
+          (member.type === 'method_definition' && !isConstructorName(member.childForFieldName('name')))) &&
+        !hasToken(member, 'static')
+    ),
     ...(parameters ? named(parameters).filter(isParameterProperty) : []),
   ];
 }
@@ -234,11 +269,12 @@ function checkMergedProperty(c: Checker, member: TreeNode, seen: Map<string, Tre
     seen.set(name, member);
     return;
   }
+  if (isAccessor(member)) return;
   const modifiersDiffer = ['?', 'readonly'].some(
     (modifier) => hasToken(previous, modifier) !== hasToken(member, modifier)
   );
   if (modifiersDiffer) {
-    for (const declaration of [previous, member])
+    for (const declaration of isAccessor(previous) ? [member] : [previous, member])
       c.error(memberNameNode(declaration), `プロパティ ${name} の宣言の修飾子は同じでなければいけません。`);
   }
   const before = declaredPropertyType(c, previous, name);
@@ -389,6 +425,12 @@ function memberNameNode(member: TreeNode): TreeNode {
 
 /** The type a property declaration gives, with `undefined` if it is optional; a class field may infer it. */
 function declaredPropertyType(c: Checker, declaration: TreeNode, name: string): Type | undefined {
+  if (isAccessor(declaration)) {
+    const signature = c.signatures.signatureOf(declaration);
+    return hasToken(declaration, 'get') ? signature.returnType() : signature.parameters[0]?.type;
+  }
+  if (declaration.type === 'field_definition')
+    return c.classes.fieldType(declaration, declaration.childForFieldName('name') as TreeNode);
   const annotated = c.typeNodes.annotationType(declaration.childForFieldName('type'));
   const classNode = declaringClassNode(declaration);
   const type =

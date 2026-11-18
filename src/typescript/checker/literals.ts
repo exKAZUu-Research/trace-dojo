@@ -1,6 +1,7 @@
-// code-gauge-allow-file fileNcss 610 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 589 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { spreadLength, tupleArgumentContexts } from './callArity';
 import type { Checker } from './checker';
 import { applicableIndex, isSamePattern } from './indexInfos';
 import {
@@ -101,11 +102,13 @@ export class LiteralChecker {
 
   constructor(private readonly c: Checker) {}
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps literal elements, holes, spreads and contextual tuple construction together.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps literal elements, holes, spreads and contextual tuple construction together.
   arrayLiteral(node: TreeNode, contextual?: Type): Type {
+    contextual = this.c.expressions.deferredContexts.typeOf(node) ?? contextual;
     this.literalContexts.set(node.id, contextual);
     const elements = arrayElements(node);
     const isConstContext = this.isConstContext(node, contextual);
+    const lengths = elements.map((element) => (element ? spreadLength(this.c, element) : 1));
     const types: { type: Type; spread: boolean }[] = elements.map((element, index) => {
       // A hole, as in `[, 1]`, reads as `undefined`.
       if (!element) return { type: undefinedType, spread: false };
@@ -113,7 +116,7 @@ export class LiteralChecker {
         const spread = this.c.expressions.check(named(element)[0]);
         return { type: spread, spread: true };
       }
-      const contexts = contextual ? this.arrayElementContexts(contextual, index, elements.length) : [];
+      const contexts = contextual ? this.arrayElementContexts(contextual, index, lengths) : [];
       const context = contexts.length > 0 ? unionOf(contexts) : undefined;
       const type = this.c.expressions.check(element, context);
       const literalContext = contexts.find((candidate) => this.expectsLiteral(candidate, type)) ?? context;
@@ -218,24 +221,14 @@ export class LiteralChecker {
     );
   }
 
-  private arrayElementContexts(contextual: Type, index: number, length: number): Type[] {
+  private arrayElementContexts(contextual: Type, index: number, lengths: (number | undefined)[]): Type[] {
     if (contextual.kind === 'union')
-      return contextual.types.flatMap((member) => this.arrayElementContexts(member, index, length));
+      return contextual.types.flatMap((member) => this.arrayElementContexts(member, index, lengths));
     const context =
       contextual.kind === 'object' && contextual.objectKind === 'tuple'
-        ? this.tupleElementContext(contextual, index, length)
+        ? tupleArgumentContexts(this.c, contextual, lengths)[index]
         : this.elementContext(contextual);
     return context === undefined ? [] : [context];
-  }
-
-  private tupleElementContext(tuple: ObjectType, index: number, length: number): Type | undefined {
-    const elements = tuple.tuple?.elements ?? [];
-    const restIndex = elements.findIndex((member) => member.rest);
-    if (restIndex === -1 || index < restIndex) return elements[index]?.type;
-    const tailLength = elements.length - restIndex - 1;
-    const tailStart = length - tailLength;
-    if (index >= tailStart) return elements[restIndex + 1 + index - tailStart]?.type;
-    return this.c.restElementType(elements[restIndex].type);
   }
 
   private elementContext(contextual: Type): Type | undefined {
@@ -291,8 +284,9 @@ export class LiteralChecker {
     );
   }
 
-  // code-gauge-allow functionNcss 31 -- Builds the common object-literal context before dispatching each member form.
+  // code-gauge-allow functionNcss 32 -- Builds the common object-literal context before dispatching each member form.
   objectLiteral(node: TreeNode, contextual?: Type): Type {
+    contextual = this.c.expressions.deferredContexts.typeOf(node) ?? contextual;
     this.literalContexts.set(node.id, contextual);
     const properties = new Map<string, Property>();
     const declarations = new Map<string, Property>();

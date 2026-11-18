@@ -85,23 +85,21 @@ export class Expandos {
     };
   }
 
-  /** Collects the assignment statements of a block, outside its nested functions, that add properties to a function. */
+  /** Collects assignments that add function properties in the same execution scope. */
   private collectAssignments(node: TreeNode, symbol: Sym, expandos: Map<string, TreeNode[]>): void {
+    this.c.budget.spend();
+    const left = node.type === 'assignment_expression' ? node.childForFieldName('left') : undefined;
+    const object = left?.childForFieldName('object');
+    const property = left ? expandoPropertyName(left) : undefined;
+    if (
+      object?.type === 'identifier' &&
+      property !== undefined &&
+      this.c.scopeOf(object).lookupValue(object.text) === symbol
+    ) {
+      expandos.set(property, [...(expandos.get(property) ?? []), node]);
+    }
     for (const child of named(node)) {
-      if (laterRunningTypes.has(child.type) || child.type === 'class_declaration') continue;
-      const assignment = child.type === 'expression_statement' ? named(child)[0] : undefined;
-      const left = assignment?.type === 'assignment_expression' ? assignment.childForFieldName('left') : undefined;
-      const object = left?.childForFieldName('object');
-      const property = left ? expandoPropertyName(left) : undefined;
-      if (
-        assignment &&
-        object?.type === 'identifier' &&
-        property !== undefined &&
-        this.c.scopeOf(object).lookupValue(object.text) === symbol
-      ) {
-        expandos.set(property, [...(expandos.get(property) ?? []), assignment]);
-        continue;
-      }
+      if (laterRunningTypes.has(child.type) || child.type === 'class_declaration' || child.type === 'class') continue;
       this.collectAssignments(child, symbol, expandos);
     }
   }

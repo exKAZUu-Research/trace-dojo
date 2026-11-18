@@ -320,6 +320,11 @@ export class FunctionChecker {
     }
   }
 
+  markCircularReturn(): void {
+    const context = this.contexts.at(-1);
+    if (context?.inReturn && !context.declaredReturn) this.circular.add(context.node.id);
+  }
+
   private reportCircularReturn(node: TreeNode): void {
     const name = node.childForFieldName('name');
     this.c.error(

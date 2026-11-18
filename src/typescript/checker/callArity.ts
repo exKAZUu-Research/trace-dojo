@@ -31,15 +31,7 @@ export class CallArity {
    * TypeScript counts them, or an unknown count.
    */
   spreadLength(arg: TreeNode): number | undefined {
-    if (arg.type !== 'spread_element') return 1;
-    const type = this.c.silently(() => this.c.expressions.check(named(arg)[0]));
-    if (
-      type.kind === 'object' &&
-      type.objectKind === 'tuple' &&
-      !(type.tuple?.elements ?? []).some((element) => element.rest)
-    )
-      return type.tuple?.elements.length;
-    return undefined;
+    return spreadLength(this.c, arg);
   }
 
   /** How many elements a spread tuple with a rest element passes before its rest, as `[number, ...string[]]`. */
@@ -118,4 +110,46 @@ export function minimumArguments(signature: Signature): number {
 /** Whether a parameter's type has `void` as itself or a union member, which lets callers omit it when it trails. */
 function acceptsVoid(type: Type): boolean {
   return (type.kind === 'union' ? type.types : [type]).some((member) => isIntrinsic(member, 'void'));
+}
+
+export function tupleArgumentContexts(
+  c: Checker,
+  restType: Type,
+  lengths: (number | undefined)[]
+): (Type | undefined)[] {
+  const elements = restType.kind === 'object' ? (restType.tuple?.elements ?? []) : [];
+  const restIndex = elements.findIndex((element) => element.rest);
+  const trailing = restIndex === -1 ? 0 : elements.length - 1 - restIndex;
+  const fromStart = offsets(lengths);
+  const fromEnd = offsets(lengths.toReversed()).toReversed();
+  return lengths.map((_, index) => {
+    const start = fromStart[index];
+    if (start !== undefined && (restIndex === -1 || start < restIndex)) return elements[start]?.type;
+    const end = fromEnd[index];
+    if (end !== undefined && end < trailing) return elements[elements.length - 1 - end].type;
+    if (restIndex === -1) return;
+    return c.restElementType(elements[restIndex].type);
+  });
+}
+
+/** How many values precede each argument, until a spread of unknown length. */
+function offsets(lengths: (number | undefined)[]): (number | undefined)[] {
+  let offset: number | undefined = 0;
+  return lengths.map((length) => {
+    const current = offset;
+    offset = offset === undefined || length === undefined ? undefined : offset + length;
+    return current;
+  });
+}
+
+export function spreadLength(c: Checker, arg: TreeNode): number | undefined {
+  if (arg.type !== 'spread_element') return 1;
+  const type = c.silently(() => c.expressions.check(named(arg)[0]));
+  if (
+    type.kind === 'object' &&
+    type.objectKind === 'tuple' &&
+    !(type.tuple?.elements ?? []).some((element) => element.rest)
+  )
+    return type.tuple?.elements.length;
+  return undefined;
 }

@@ -15,3 +15,6 @@
 (31,40): error TS2339: Property 'message' does not exist on type 'string'.
 (32,20): error TS2339: Property 'toUpperCase' does not exist on type 'Error'.
 (36,40): error TS2339: Property 'message' does not exist on type 'string'.
+(39,43): error TS2339: Property 'message' does not exist on type 'string'.
+(40,48): error TS2339: Property 'toUpperCase' does not exist on type 'string | Error'.
+  Property 'toUpperCase' does not exist on type 'Error'.

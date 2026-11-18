@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 468 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 487 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -517,11 +517,16 @@ export class TypeNodes {
         case 'property_signature': {
           const nameNode = member.childForFieldName('name') as TreeNode;
           const name = this.memberName(nameNode);
-          if (name === undefined) break;
           const typeNode = member.childForFieldName('type');
+          const type = (): Type => this.annotationType(typeNode) ?? this.implicitAnyMember(member, nameNode);
+          if (name === undefined) {
+            this.addComputedMemberIndex(structure, member, nameNode, type);
+            break;
+          }
           structure.properties.set(name, {
             name,
-            type: () => this.annotationType(typeNode) ?? this.implicitAnyMember(member, nameNode),
+            type,
+            nameType: this.memberKeyType(nameNode),
             optional: member.children.some((child) => child?.type === '?'),
             readonly: member.children.some((child) => child?.type === 'readonly'),
             isMethod: false,
@@ -533,7 +538,10 @@ export class TypeNodes {
         case 'method_signature': {
           const nameNode = member.childForFieldName('name') as TreeNode;
           const name = this.memberName(nameNode);
-          if (name === undefined) break;
+          if (name === undefined) {
+            this.addComputedMemberIndex(structure, member, nameNode, () => this.computedMethodType(member));
+            break;
+          }
           if (hasToken(member, 'get') || hasToken(member, 'set')) {
             this.addAccessorSignature(structure, member, name);
             break;
@@ -544,6 +552,7 @@ export class TypeNodes {
           if (!structure.properties.has(name) || methods.get(name)?.length === 1) {
             structure.properties.set(name, {
               name,
+              nameType: this.memberKeyType(nameNode),
               type: () => this.c.overloadedFunction(signatures),
               optional: member.children.some((child) => child?.type === '?'),
               readonly: false,
@@ -574,9 +583,35 @@ export class TypeNodes {
     return structure;
   }
 
+  addComputedMemberIndex(structure: Structure, member: TreeNode, nameNode: TreeNode, valueType: () => Type): void {
+    const keyType = this.memberKeyType(nameNode);
+    if (!keyType) return;
+    const constraint = this.c.baseConstraint(keyType);
+    const type = valueType();
+    const info = {
+      type: hasToken(member, '?') ? unionOf([type, undefinedType]) : type,
+      readonly: hasToken(member, 'readonly') || hasToken(member, 'get'),
+    };
+    for (const key of constraint.kind === 'union' ? constraint.types : [constraint])
+      if (isValidIndexKeyType(key)) addIndexInfo(structure, key, info);
+  }
+
+  private memberKeyType(nameNode: TreeNode): Type | undefined {
+    return nameNode.type === 'computed_property_name'
+      ? this.c.silently(() => this.c.expressions.check(named(nameNode)[0]))
+      : undefined;
+  }
+
+  private computedMethodType(member: TreeNode): Type {
+    const signature = this.c.signatures.signatureOf(member);
+    if (hasToken(member, 'get')) return signature.returnType();
+    if (hasToken(member, 'set')) return signature.parameters[0]?.type ?? anyType;
+    return this.c.overloadedFunction([{ ...signature, isMethod: true }]);
+  }
+
   /**
    * Adds the index signature of each valid key type an index signature declares, as `[k: string | symbol]` declares
-   * two, unless an earlier one declares it.
+   * two, combining the value types declared for the same key type.
    */
   addIndexSignature(structure: Structure, member: TreeNode): void {
     if (isMappedMember(member)) {
@@ -729,8 +764,7 @@ export class TypeNodes {
       const body = withDomMembers(declaration).childForFieldName('body');
       return body ? named(body) : [];
     });
-    // TypeScript merges the overloads of later declarations before those of earlier ones, but keeps the first index
-    // signature for a key type.
+    // TypeScript merges the overloads of later declarations before those of earlier ones.
     return this.membersStructure([
       ...members.toReversed().flatMap((list) => list.filter((member) => !isIndexSignature(member))),
       ...members.flat().filter(isIndexSignature),
@@ -741,11 +775,21 @@ export class TypeNodes {
 const mappedTypeMembersMessage = 'マップ型には、プロパティやメソッドを宣言できません。';
 
 function addIndexInfo(structure: Structure, key: Type, info: IndexInfo): void {
-  if (isIntrinsic(key, 'number')) structure.numberIndex ??= info;
-  else if (isIntrinsic(key, 'symbol')) structure.symbolIndex ??= info;
-  else if (!isPatternKey(key)) structure.stringIndex ??= info;
-  else if (!structure.patternIndexes?.some((existing) => isSameKeyType(existing.keyType, key)))
-    structure.patternIndexes = [...(structure.patternIndexes ?? []), { ...info, keyType: key }];
+  if (isIntrinsic(key, 'number')) structure.numberIndex = combinedIndexInfo(structure.numberIndex, info);
+  else if (isIntrinsic(key, 'symbol')) structure.symbolIndex = combinedIndexInfo(structure.symbolIndex, info);
+  else if (!isPatternKey(key)) structure.stringIndex = combinedIndexInfo(structure.stringIndex, info);
+  else {
+    const existing = structure.patternIndexes?.find((index) => isSameKeyType(index.keyType, key));
+    structure.patternIndexes = existing
+      ? structure.patternIndexes?.map((index) =>
+          index === existing ? { ...index, ...combinedIndexInfo(index, info) } : index
+        )
+      : [...(structure.patternIndexes ?? []), { ...info, keyType: key }];
+  }
+}
+
+function combinedIndexInfo(previous: IndexInfo | undefined, info: IndexInfo): IndexInfo {
+  return previous ? { type: unionOf([previous.type, info.type]), readonly: previous.readonly && info.readonly } : info;
 }
 
 /** The grammar error TypeScript reports on an index signature's key type, which only valid key types escape. */

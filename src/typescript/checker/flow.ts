@@ -195,9 +195,13 @@ export class Flow {
   constantIndexName(index: TreeNode): string | undefined {
     index = skipParentheses(index);
     if (index.type === 'string' || index.type === 'number') return propertyNameText(index);
-    if (index.type !== 'identifier') return undefined;
-    const symbol = this.c.scopeOf(index).lookupValue(index.text);
-    if (symbol?.valueKind !== 'const') return undefined;
+    const template =
+      index.type === 'template_string' && !named(index).some((child) => child.type === 'template_substitution');
+    if (!template) {
+      if (index.type !== 'identifier') return undefined;
+      const symbol = this.c.scopeOf(index).lookupValue(index.text);
+      if (symbol?.valueKind !== 'const') return undefined;
+    }
     const type = this.c.silently(() => this.c.expressions.check(index));
     return isPropertyKeyLiteral(type) ? String(type.value) : undefined;
   }

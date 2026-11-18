@@ -1,0 +1,5 @@
+(2,7): error TS2322: Type '[number, string, "bad"]' is not assignable to type '[number, string, "ok"]'.
+  Type at position 2 in source is not compatible with type at position 2 in target.
+    Type '"bad"' is not assignable to type '"ok"'.
+(3,73): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+(5,72): error TS2551: Property 'toFixed' does not exist on type 'string'. Did you mean 'fixed'?

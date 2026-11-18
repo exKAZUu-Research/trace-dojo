@@ -57,3 +57,8 @@ function optionalReceiver(value: Result | undefined) {
   if (value?.['kind'] === 'ok') console.log(value.value.toUpperCase());
 }
 optionalReceiver({kind: 'ok', value: 'optional'});
+function templateKeys(value: Result) {
+  if (value[`kind`] === 'ok') console.log(value.value.toUpperCase());
+  if (value[`ki\u006ed`] === 'ok') console.log(value.value.toLowerCase());
+}
+templateKeys({kind: 'ok', value: 'template'});

@@ -1,0 +1,20 @@
+function make(): symbol {return Symbol('made');}
+const key = make();
+const direct = Symbol('direct');
+const wronglyUnique: typeof direct = key;
+const item: {[key]: number} = {[key]: 'wrong'};
+interface Named {[key]: string;}
+const named: Named = {[key]: 2};
+const uniqueItem: {[direct]: number} = {};
+interface ReadonlyIndex {readonly [key]: number;}
+const readonly: ReadonlyIndex = {[key]: 3};
+readonly[key] = 4;
+class Keys {static readonly key = make();}
+class Holder {[Keys.key] = 4;}
+const wrongClass: string = new Holder()[Keys.key];
+const methods: {[key](value: number): string} = {[key](value) {return value.toFixed(1);}};
+methods[key]('wrong');
+const other: symbol = Symbol();
+interface Both {[key]: string; [other]: number;}
+const both: Both = {[key]: 'one', [other]: 2};
+const missingUnion: number = both[key];

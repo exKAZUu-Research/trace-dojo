@@ -1,9 +1,10 @@
-// code-gauge-allow-file fileNcss 500 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss 503 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
 import { Calls } from './calls';
 import type { Checker } from './checker';
+import { DeferredContexts } from './deferredContexts';
 import { arrayTargets, Elaboration, targetElementType } from './elaboration';
 import { Expandos, laterRunningTypes } from './expandos';
 import { ExpressionTypeCache } from './expressionTypeCache';
@@ -101,7 +102,10 @@ export class ExpressionChecker {
     ['spread_element', (node) => this.check(named(node)[0])],
   ]);
 
+  readonly deferredContexts: DeferredContexts;
+
   constructor(private readonly c: Checker) {
+    this.deferredContexts = new DeferredContexts(c);
     this.calls = new Calls(c);
     this.expandos = new Expandos(c);
     this.elaboration = new Elaboration(c);

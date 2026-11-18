@@ -8,12 +8,10 @@ type Value = object;
 /** The values at a point, or undefined where no path reaches it. */
 type Values = Value[] | undefined;
 
-type Destructure = (
-  pattern: TreeNode,
-  right: TreeNode,
-  assign: (target: TreeNode, value: Type) => void,
-  evaluate: (expression: TreeNode, conditional: boolean) => void
-) => void;
+type AssignValue = (target: TreeNode, value: Type) => void;
+type EvaluateValue = (expression: TreeNode, conditional: boolean) => void;
+
+type Destructure = (pattern: TreeNode, right: TreeNode, assign: AssignValue, evaluate: EvaluateValue) => void;
 
 interface ConstructorAssignments {
   assignedType: (value: TreeNode) => Type;
@@ -21,6 +19,7 @@ interface ConstructorAssignments {
   skippedBy: (operator: string, type: Type) => Type | undefined;
   spend: () => void;
   destructure: Destructure;
+  iteration: (node: TreeNode, assign: AssignValue, evaluate: EvaluateValue) => void;
 }
 
 interface LoopEntry {
@@ -55,7 +54,7 @@ export function typesAtConstructorExit(body: TreeNode, name: string, assignments
     (operator, value) => assignments.skippedBy(operator, value as Type),
     assignments.spend,
     undefined,
-    assignments.destructure
+    assignments
   );
   const end = flow.statement(body, [undefinedType]);
   return (merge([end, ...flow.returns]) ?? []).filter((value) => !isLoopEntry(value)) as Type[];
@@ -100,7 +99,7 @@ class AssignmentFlow {
     /** Charges the checker's budget for each statement followed, which bounds the paths through nested blocks. */
     private readonly spend: () => void,
     private readonly read?: TreeNode,
-    private readonly destructure?: Destructure
+    private readonly bindings?: Pick<ConstructorAssignments, 'destructure' | 'iteration'>
   ) {}
 
   statement(node: TreeNode, values: Values): Values {
@@ -225,7 +224,11 @@ class AssignmentFlow {
       return { tested, next: tested };
     }
     const tested = condition ? this.expression(condition, start) : start;
-    const end = merge([this.statement(body, tested), ...target.continues]);
+    const iteration =
+      node.type === 'for_in_statement' && this.bindings
+        ? this.bindValues(tested, (assign, evaluate) => this.bindings!.iteration(node, assign, evaluate))
+        : tested;
+    const end = merge([this.statement(body, iteration), ...target.continues]);
     const increment = (node.childForFieldName('header') ?? node)
       .childrenForFieldName('increment')
       .find((child) => child.isNamed);
@@ -329,15 +332,15 @@ class AssignmentFlow {
     const before = destructuring ? values : this.expression(left, values);
     const after = this.expression(right, before);
     if (!after) return after;
-    if (this.destructure && destructuring) return this.assignPattern(pattern, right, after, this.destructure);
+    if (this.bindings && destructuring)
+      return this.bindValues(after, (assign, evaluate) => this.bindings!.destructure(pattern, right, assign, evaluate));
     return this.isTarget(left) ? this.trackValue(this.assignedValue(right)) : after;
   }
 
-  private assignPattern(pattern: TreeNode, right: TreeNode, values: Value[], destructure: Destructure): Values {
-    let current: Values = values;
-    destructure(
-      pattern,
-      right,
+  private bindValues(values: Values, bind: (assign: AssignValue, evaluate: EvaluateValue) => void): Values {
+    let current = values;
+    if (!current) return current;
+    bind(
       (target, value) => {
         if (current && this.isTarget(target)) current = this.trackValue(value);
       },

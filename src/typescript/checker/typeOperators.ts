@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 420 -- Resolves related type operators sharing generic parameters and type construction.
+// code-gauge-allow-file fileNcss 427 -- Resolves related type operators sharing generic parameters and type construction.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
@@ -362,10 +362,13 @@ export class TypeOperators {
 
   /** The key type naming a property, as TypeScript's `getLiteralTypeFromProperty` gives it. */
   propertyKeyType(property: Property): Type {
-    return (
-      property.nameType ??
-      (this.isNumericKey(property) ? literalType(Number(property.name)) : literalType(property.name))
-    );
+    if (property.nameType) return property.nameType;
+    const name = property.declaration?.childForFieldName('name') ?? property.declaration?.childForFieldName('key');
+    if (name?.type === 'computed_property_name') {
+      const key = this.c.silently(() => this.c.expressions.check(named(name)[0]));
+      if (isPropertyKeyLiteral(key)) return key;
+    }
+    return this.isNumericKey(property) ? literalType(Number(property.name)) : literalType(property.name);
   }
 
   /**

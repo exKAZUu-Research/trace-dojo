@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 575 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 552 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
-import { CallArity, minimumArguments, tupleTypeAt } from './callArity';
+import { CallArity, minimumArguments, tupleArgumentContexts, tupleTypeAt } from './callArity';
 import type { Checker, Mapper } from './checker';
 import { InferencePriority, type InferenceRun, newInferenceRun } from './inference';
 import { named, skipParentheses, stringValue } from './syntax';
@@ -429,6 +429,7 @@ export class Calls {
   // Resolution ---------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionParameterCount 7 -- Tries each overload as TypeScript does, then reports the failure as it does.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Tries overloads before demanding the selected generic call context.
   private resolve(
     node: TreeNode,
     callee: TreeNode,
@@ -460,7 +461,11 @@ export class Calls {
         this.arity.instanceArityMatches(instantiated, candidate, args) &&
         this.c.silently(() => this.argumentsMatch(instantiated, args))
       ) {
-        const final = instantiate(candidate);
+        const deferred =
+          candidate.typeParameters.length > 0 && !typeArguments
+            ? this.c.expressions.deferredContexts.typeOf(node)
+            : undefined;
+        const final = this.instantiateFor(candidate, args, typeArguments, deferred ?? contextual, receiver);
         this.checkArguments(final, args, true, node);
         if (typeArguments)
           this.c.typeNodes.checkTypeArgumentConstraints(
@@ -579,7 +584,25 @@ export class Calls {
   /** Checks each argument against its parameter, reporting mismatches when `report`. */
   private checkArguments(signature: Signature, args: TreeNode[], report: boolean, call?: TreeNode): boolean {
     const restIndex = signature.parameters.length - 1;
-    if (isTrailingRestTuple(signature) && !args.slice(0, restIndex).some((arg) => arg.type === 'spread_element'))
+    const restType = signature.parameters[restIndex]?.rest ? signature.parameters[restIndex].type : undefined;
+    const genericRest = this.c.relations.isGenericRestType(restType);
+    if (genericRest && args.slice(0, restIndex).some((arg) => arg.type === 'spread_element'))
+      return this.checkRestTupleArguments(
+        this.c.tupleType(
+          signature.parameters.map((parameter) => ({
+            type: parameter.type,
+            optional: parameter.optional,
+            rest: parameter.rest,
+          }))
+        ),
+        args,
+        report,
+        args[0] ?? call
+      );
+    if (
+      (isTrailingRestTuple(signature) || genericRest) &&
+      !args.slice(0, restIndex).some((arg) => arg.type === 'spread_element')
+    )
       return (
         this.checkArguments(
           { ...signature, parameters: signature.parameters.slice(0, -1) },
@@ -626,8 +649,8 @@ export class Calls {
   }
 
   /**
-   * Checks the arguments a rest parameter whose tuple has elements after its rest element takes, as
-   * `...a: [...string[], number]`: TypeScript checks them as one tuple, reported where they start.
+   * Checks a generic rest parameter or a tuple with trailing elements against the whole argument list,
+   * preserving the type of a forwarded spread.
    */
   private checkRestTupleArguments(
     restType: Type,
@@ -640,7 +663,10 @@ export class Calls {
     if (report)
       for (const [index, arg] of args.entries())
         this.c.expressions.check(arg.type === 'spread_element' ? named(arg)[0] : arg, contexts[index]);
-    const tuple = this.argumentTuple(args, contexts);
+    const tuple =
+      args.length === 1 && args[0].type === 'spread_element'
+        ? this.c.silently(() => this.c.expressions.check(named(args[0])[0]))
+        : this.argumentTuple(args, contexts);
     if (this.c.relations.isAssignable(tuple, restType)) return true;
     if (report && at)
       this.c.error(
@@ -684,7 +710,7 @@ export class Calls {
 
   /** A signature with its type parameters replaced by the given or inferred type arguments. */
   // code-gauge-allow functionNcss 36 -- Follows TypeScript's inference passes: context-insensitive arguments, the contextual return, then callbacks.
-  // code-gauge-allow functionCognitiveComplexity 19 -- Follows TypeScript's inference passes: context-insensitive arguments, the contextual return, then callbacks.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Follows TypeScript's inference passes: context-insensitive arguments, the contextual return, then callbacks.
   private instantiateFor(
     signature: Signature,
     args: TreeNode[],
@@ -699,7 +725,7 @@ export class Calls {
       return { ...this.c.instantiateSignature(signature, mapper), typeParameters: [] };
     }
     const parameters = signature.typeParameters;
-    const run = newInferenceRun(parameters);
+    const run = newInferenceRun(parameters, true);
     const restIndex = this.genericRestIndex(signature);
     const arguments_ = this.inferenceArguments(args);
     const parameterTypes = this.inferenceParameterTypes(signature, arguments_);
@@ -828,6 +854,7 @@ export class Calls {
         return [{ type, optional: false, rest: false }];
       }
       const spreadType = check(named(arg)[0]);
+      if (this.c.relations.isGenericRestType(spreadType)) return [{ type: spreadType, optional: false, rest: true }];
       return this.c.silently(() => this.spreadElements(arg, spreadType));
     });
     return this.c.tupleType(elements);
@@ -872,8 +899,18 @@ export class Calls {
     return element.optional ? unionOf([element.type, undefinedType]) : element.type;
   }
 
+  private isGenericCallback(arg: TreeNode): boolean {
+    const expression = skipParentheses(arg);
+    if (expression.type === 'arrow_function' || expression.type === 'function_expression')
+      return expression.childForFieldName('type_parameters') !== null;
+    if (!['identifier', 'member_expression', 'subscript_expression'].includes(expression.type)) return false;
+    const type = this.c.silently(() => this.c.expressions.check(expression));
+    return this.c.signaturesOf(type, 'call').some((signature) => signature.typeParameters.length > 0);
+  }
+
   private isContextSensitive(arg: TreeNode): boolean {
     const expression = skipParentheses(arg);
+    if (this.isGenericCallback(expression)) return true;
     if (functionExpressionTypes.has(expression.type)) {
       const parametersNode = expression.childForFieldName('parameters');
       if (expression.childForFieldName('parameter')) return true;
@@ -924,30 +961,4 @@ function restTupleContexts(
 ): (Type | undefined)[] {
   const contexts = tupleArgumentContexts(c, restType, args.map(lengthOf));
   return contexts.map((context, index) => (args[index].type === 'spread_element' ? undefined : context));
-}
-
-function tupleArgumentContexts(c: Checker, restType: Type, lengths: (number | undefined)[]): (Type | undefined)[] {
-  const elements = restType.kind === 'object' ? (restType.tuple?.elements ?? []) : [];
-  const restIndex = elements.findIndex((element) => element.rest);
-  const trailing = restIndex === -1 ? 0 : elements.length - 1 - restIndex;
-  const fromStart = offsets(lengths);
-  const fromEnd = offsets(lengths.toReversed()).toReversed();
-  return lengths.map((_, index) => {
-    const start = fromStart[index];
-    if (start !== undefined && (restIndex === -1 || start < restIndex)) return elements[start]?.type;
-    const end = fromEnd[index];
-    if (end !== undefined && end < trailing) return elements[elements.length - 1 - end].type;
-    if (restIndex === -1) return;
-    return c.restElementType(elements[restIndex].type);
-  });
-}
-
-/** How many values precede each argument, until a spread of unknown length. */
-function offsets(lengths: (number | undefined)[]): (number | undefined)[] {
-  let offset: number | undefined = 0;
-  return lengths.map((length) => {
-    const current = offset;
-    offset = offset === undefined || length === undefined ? undefined : offset + length;
-    return current;
-  });
 }

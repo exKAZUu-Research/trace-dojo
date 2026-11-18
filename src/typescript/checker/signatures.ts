@@ -469,6 +469,12 @@ export class Signatures {
 
   private checkTypeParameterDeclaration(declaration: TreeNode, parameter: TypeParameter): void {
     this.checkTypeParameterOrder(declaration);
+    const owner = declaration.parent?.parent;
+    if (
+      hasToken(declaration, 'const') &&
+      (owner?.type === 'interface_declaration' || owner?.type === 'type_alias_declaration')
+    )
+      this.c.error(declaration, "'const' 修飾子は関数、メソッド、クラスの型パラメーターにのみ指定できます。");
     const constraintNode = declaration.childForFieldName('constraint');
     if (constraintNode) this.c.typeNodes.typeFromNode(named(constraintNode)[0]);
     const defaultNode = declaration.childForFieldName('value');
