@@ -1,8 +1,9 @@
 import type { Annotations, LocalVar } from './annotations';
 import type { Block, Condition, Expr, MatchArm, Pattern, Stmt } from './ast';
-import { forEachDirect } from './astWalk';
+import { forEachDirect, patternBindings } from './astWalk';
+import { type PropagationMode, propagationModes } from './constPropagation';
 import { normalize } from './infer';
-import { compileError } from './items';
+import { compileError, constInteger, type Module } from './items';
 import { castValue, wrap } from './ops';
 import { INT_NAMES, intMax, intMin, type IntName, resolve, shallow, type Type } from './types';
 
@@ -15,23 +16,40 @@ interface Aggregate {
 
 /**
  * Rejects operations that rustc's deny-by-default lints find always panic, by propagating constants through
- * literals, `const` items, and variables declared without `mut`: arithmetic that overflows (`arithmetic_overflow`),
- * division by zero and indexes of arrays out of bounds (`unconditional_panic`). Like rustc, which lints the reachable
- * code of the function after propagating constants, it skips what a known condition never reaches.
+ * literals, `const` items, aggregates, and variables as rustc's `KnownPanicsLint` does: arithmetic that overflows
+ * (`arithmetic_overflow`), division by zero and indexes of arrays out of bounds (`unconditional_panic`). Like rustc,
+ * which lints the reachable code of the function after propagating constants, it skips what a known condition never
+ * reaches.
  */
 export class ConstLint {
   private readonly known = new Map<LocalVar, Known>();
+  private modes = new Map<LocalVar, PropagationMode>();
   /** Whether the code checked last never finishes normally (`return`, `break`), so what follows is unreachable. */
   private diverged = false;
 
-  constructor(private readonly annotations: Annotations) {}
+  constructor(
+    private readonly annotations: Annotations,
+    private readonly module: Module
+  ) {}
 
   check(block: Block): void {
+    this.modes = propagationModes(block, this.annotations);
     this.block(block);
   }
 
   checkExpr(expr: Expr): void {
     this.expr(expr);
+  }
+
+  private setKnown(local: LocalVar, value: Known | undefined): void {
+    const mode = this.modes.get(local) ?? 'full';
+    if (value === undefined || mode === 'none' || local.mode !== 'move') this.known.delete(local);
+    else this.known.set(local, value);
+  }
+
+  /** Ends a basic block: a call, a checked operation, or a branch, after which rustc forgets reassigned variables. */
+  private endBlock(): void {
+    for (const local of this.known.keys()) if (this.modes.get(local) === 'block') this.known.delete(local);
   }
 
   private block(block: Block): Known | undefined {
@@ -51,14 +69,17 @@ export class ConstLint {
     }
   }
 
-  /** Records the constants that a pattern binds to variables declared without `mut`. */
+  /** Records the constants that a pattern binds. */
   private bind(pattern: Pattern, value: Known | undefined): void {
-    if (value === undefined) return;
     if (pattern.kind === 'binding') {
       const local = this.annotations.bindings.get(pattern);
-      if (local && !local.mutable && local.mode === 'move') this.known.set(local, value);
-    } else if (pattern.kind === 'tuple' && typeof value === 'object') {
-      for (const [index, elem] of pattern.elems.entries()) this.bind(elem, value.fields.get(String(index)));
+      if (local) this.setKnown(local, value);
+    } else if (pattern.kind === 'tuple' || pattern.kind === 'tupleStruct') {
+      for (const [index, elem] of pattern.elems.entries()) {
+        this.bind(elem, typeof value === 'object' ? value.fields.get(String(index)) : undefined);
+      }
+    } else {
+      for (const local of patternBindings(pattern, this.annotations)) this.setKnown(local, undefined);
     }
   }
 
@@ -86,8 +107,8 @@ export class ConstLint {
         if (res?.kind === 'local') return this.known.get(res.local);
         if (res?.kind === 'const') {
           const ast = res.def.ast as { value?: Expr };
-          // A constant's initializer may not be checked yet, so its literal value counts by the constant's type.
-          if (ast.value?.kind === 'int' && intTypeOf(res.def.type)) return ast.value.value;
+          // A constant's initializer may not be checked yet, so its value counts by the constant's type.
+          if (ast.value && intTypeOf(res.def.type)) return constInteger(ast.value, this.module);
           return ast.value ? this.constValue(ast.value) : undefined;
         }
         if (res?.kind === 'builtinConst') return integerConst(res.name);
@@ -98,11 +119,15 @@ export class ConstLint {
         if (expr.op !== '-' || typeof operand !== 'bigint') return undefined;
         const name = intTypeOf(expr.ty);
         if (!name) return undefined;
-        return this.checked(-operand, name, expr);
+        const negated = this.checked(-operand, name, expr);
+        this.endBlock();
+        return negated;
       }
       case 'binary': {
         if (['==', '!=', '<', '<=', '>', '>='].includes(expr.op)) return this.comparison(expr);
-        return this.binary(expr);
+        const result = this.binary(expr);
+        this.endBlock();
+        return result;
       }
       case 'cast': {
         const operand = this.expr(expr.operand);
@@ -110,20 +135,20 @@ export class ConstLint {
         return castValue(operand, resolve(expr.operand.ty!, true), resolve(expr.ty!, true)) as Known;
       }
       case 'index': {
-        this.expr(expr.operand);
-        const index = this.expr(expr.index);
-        const operand = normalize(shallow(resolve(expr.operand.ty!, true)));
-        const array = operand.kind === 'ref' ? normalize(shallow(operand.target)) : operand;
-        if (array.kind === 'array' && typeof index === 'bigint' && index >= BigInt(array.len)) {
-          compileError(
-            expr.span,
-            `この添字（${index}）は、長さ ${array.len} の配列の範囲外なので、実行すると必ず panic します。`
-          );
-        }
-        return undefined;
+        return this.index(expr);
       }
-      case 'tuple': {
-        return aggregate(expr.elems.map((elem, index) => [String(index), this.expr(elem)]));
+      case 'tuple':
+      case 'array': {
+        const elems = expr.elems.map((elem, index) => [String(index), this.expr(elem)] as const);
+        // rustc does not follow a tuple that holds an array, whose value is no immediate.
+        const holdsArray = expr.kind === 'tuple' && expr.elems.some((elem) => isArrayType(elem.ty));
+        return holdsArray ? undefined : aggregate(elems);
+      }
+      case 'call':
+      case 'methodCall':
+      case 'macro':
+      case 'try': {
+        return this.call(expr);
       }
       case 'struct': {
         const fields = expr.fields.map(({ name, value }) => [name, this.expr(value)] as const);
@@ -164,7 +189,8 @@ export class ConstLint {
         return undefined;
       }
       case 'closure': {
-        const lint = new ConstLint(this.annotations);
+        const lint = new ConstLint(this.annotations, this.module);
+        lint.modes = this.modes;
         for (const [local, value] of this.known) lint.known.set(local, value);
         if (expr.body.kind === 'block') lint.block(expr.body);
         else lint.expr(expr.body);
@@ -186,9 +212,40 @@ export class ConstLint {
     }
   }
 
+  /** An element of an array at an index, whose bound rustc checks from the array's type. */
+  private index(expr: Extract<Expr, { kind: 'index' }>): Known | undefined {
+    const operand = this.expr(expr.operand);
+    const index = this.expr(expr.index);
+    const type = normalize(shallow(resolve(expr.operand.ty!, true)));
+    const array = type.kind === 'ref' ? normalize(shallow(type.target)) : type;
+    if (array.kind === 'array' && typeof index === 'bigint' && index >= BigInt(array.len)) {
+      compileError(
+        expr.span,
+        `この添字（${index}）は、長さ ${array.len} の配列の範囲外なので、実行すると必ず panic します。`
+      );
+    }
+    this.endBlock();
+    return typeof operand === 'object' && typeof index === 'bigint' ? operand.fields.get(String(index)) : undefined;
+  }
+
+  /** A call ends a basic block; a tuple struct's or a variant's constructor builds its value. */
+  private call(expr: Extract<Expr, { kind: 'call' | 'methodCall' | 'macro' | 'try' }>): Known | undefined {
+    const res =
+      expr.kind === 'call' && expr.callee.kind === 'path' ? this.annotations.paths.get(expr.callee) : undefined;
+    if (expr.kind === 'call' && res?.kind === 'ctor') {
+      return aggregate(expr.args.map((arg, index) => [String(index), this.expr(arg)]));
+    }
+    forEachDirect(expr, (child) => {
+      this.expr(child);
+    });
+    this.endBlock();
+    return undefined;
+  }
+
   /** Checks the branches of an `if` that its condition may take; it diverges when every branch it takes does. */
   private ifExpr(expr: Extract<Expr, { kind: 'if' }>): void {
     const cond = this.condition(expr.cond);
+    this.endBlock();
     const then = cond === false ? undefined : this.branch(() => this.block(expr.consequent));
     const otherwise = cond === true || !expr.else ? undefined : this.branch(() => this.expr(expr.else!));
     if (cond === true) this.diverged = then!;
@@ -198,31 +255,34 @@ export class ConstLint {
 
   private condition(cond: Condition): Known | undefined {
     if (cond.kind === 'expr') return this.expr(cond.expr);
-    this.expr(cond.value);
+    const value = this.expr(cond.value);
+    if (patternMatches(cond.pattern, value, this.annotations) === true) this.bind(cond.pattern, value);
+    else this.bind(cond.pattern, undefined);
     return undefined;
   }
 
   /** Checks the arms a known scrutinee may reach: those before and at the first arm whose pattern surely matches. */
   private match(scrutinee: Known | undefined, arms: MatchArm[]): void {
+    this.endBlock();
     let allDiverge = true;
     for (const arm of arms) {
       const matches = patternMatches(arm.pattern, scrutinee, this.annotations);
       if (matches === false) continue;
+      this.bind(arm.pattern, matches === true ? scrutinee : undefined);
       allDiverge = this.branch(() => this.expr(arm.body)) && allDiverge;
       if (matches === true) break;
     }
     this.diverged = allDiverge && arms.length > 0;
   }
 
-  /** A variable declared without `mut` and without a value takes its one assignment as a constant. */
+  /** An assignment to a variable gives it a value, which its propagation mode may keep. */
   private assign(target: Expr, value: Known | undefined): void {
-    if (target.kind !== 'path' || value === undefined) return;
-    const res = this.annotations.paths.get(target);
-    if (res?.kind === 'local' && !res.local.mutable && res.local.mode === 'move') this.known.set(res.local, value);
+    const res = target.kind === 'path' ? this.annotations.paths.get(target) : undefined;
+    if (res?.kind === 'local') this.setKnown(res.local, value);
   }
 
   private constValue(expr: Expr): Known | undefined {
-    return new ConstLint(this.annotations).expr(expr);
+    return new ConstLint(this.annotations, this.module).expr(expr);
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of constant expression.
@@ -328,6 +388,10 @@ function intTypeOf(type: Type | undefined): IntName | undefined {
   if (!type) return undefined;
   const t = normalize(shallow(resolve(type, true)));
   return t.kind === 'int' ? t.name : undefined;
+}
+
+function isArrayType(type: Type | undefined): boolean {
+  return type !== undefined && normalize(shallow(type)).kind === 'array';
 }
 
 function bits(name: IntName): number {

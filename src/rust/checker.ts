@@ -237,7 +237,7 @@ export class Checker {
       this.coerceExpr(ast.value, def.type);
       this.finishBody(ast.span);
       // rustc evaluates constants before running, so one whose value overflows or divides by zero is an error.
-      new ConstLint(this.annotations).checkExpr(ast.value);
+      new ConstLint(this.annotations, module).checkExpr(ast.value);
     }
     const main = this.program.root.values.get('main');
     if (main?.binding.kind !== 'fn') {
@@ -318,7 +318,7 @@ export class Checker {
     this.finishBody(item.span);
     this.requireKnownTypes();
     new BorrowChecker(this.annotations, this.solver).checkFn(item, this.body.fn, this.body.retType);
-    new ConstLint(this.annotations).check(item.body);
+    new ConstLint(this.annotations, this.body.module).check(item.body);
   }
 
   /** Coerces the value a function's body ends with to its result type. */

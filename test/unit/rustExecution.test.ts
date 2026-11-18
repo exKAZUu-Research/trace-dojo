@@ -83,6 +83,11 @@ test.each([
     message:
       "panicked at src/main.rs:3:15:\nend byte index 2 is not a char boundary; it is inside 'é' (bytes 1..3 of string)",
   },
+  {
+    name: 'overflow on a borrowed variable, which rustc does not propagate before running',
+    body: '    let x: u8 = 255;\n    let y = x + 1;\n    println!("{} {}", x, y);',
+    message: 'panicked at src/main.rs:3:13:\nattempt to add with overflow',
+  },
 ])('panics end the program as rustc reports them: $name', ({ body, message }) => {
   const execution = executeProgram('rust', rustMain(body));
   expect(execution).toMatchObject({ kind: 'executed' });
@@ -268,6 +273,16 @@ test.each([
     'a closure that modifies through a captured &mut but is not declared mut',
     '    let mut v = vec![1];\n    let r = &mut v;\n    let c = || r.push(2);\n    c();',
     5,
+  ],
+  [
+    'arithmetic on a mut variable assigned once that always overflows',
+    '    let mut x: u8 = 255;\n    let y = x + 1;',
+    3,
+  ],
+  [
+    'arithmetic on a variable reassigned in the same basic block that always overflows',
+    '    let mut x: i32 = 0;\n    x = i32::MAX;\n    let y = x + 1;',
+    4,
   ],
   ['mismatched types', '    let x: i32 = "a";', 2],
 ])('rustc rejects %s before running', (_name, body, row, items = '') => {
