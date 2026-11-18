@@ -34,3 +34,5 @@ hook:1;ReportsIteratorFrames->__destruct:93;
 ReportsIteratorFrames->__destruct:internal;RecursiveIteratorIterator->next:93;
 ReportsIteratorFrames->__destruct:internal;iterator_to_array:95;
 Object is not initialized
+replace:destroy:child;destroy:old;stored;3;destroy:new;done;
+child;root;root/child;destroy:rejected;The RecursiveIteratorIterator instance wasn't initialized properly

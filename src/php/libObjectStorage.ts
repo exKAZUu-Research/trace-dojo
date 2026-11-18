@@ -267,7 +267,7 @@ class ObjectStorage {
   }
 
   rewind(): void {
-    this.position = 0;
+    this.position = this.validPosition(0);
     this.index = 0;
   }
 
@@ -277,7 +277,8 @@ class ObjectStorage {
   }
 
   next(): void {
-    this.position = this.validPosition() + 1;
+    const position = this.validPosition();
+    if (position < this.slots.length) this.position = this.validPosition(position + 1);
     this.index++;
   }
 
@@ -298,14 +299,34 @@ class ObjectStorage {
     while (this.index > offset) this.previous();
   }
 
-  private validPosition(): number {
-    let position = this.position;
-    while (position < this.slots.length && this.slots[position] === undefined) position++;
-    return position;
+  *entriesFromStart(): Generator<StorageEntry> {
+    this.rewind();
+    let entry: StorageEntry | undefined;
+    while ((entry = this.slots[this.validPosition()])) {
+      rt().spend();
+      yield entry;
+      this.next();
+    }
   }
 
-  objects(): PhpObject[] {
-    return [...this.entries.values()].map(({ object }) => object);
+  withIterator<T>(iterator: PhpObject, call: () => T): T {
+    const runtime = rt();
+    runtime.held.push(iterator);
+    let pending: PhpThrow | undefined;
+    try {
+      return call();
+    } catch (error) {
+      if (error instanceof PhpThrow) pending = error;
+      throw error;
+    } finally {
+      runtime.held.pop();
+      withPendingException(runtime, pending, () => this.releaseRemoved([iterator]));
+    }
+  }
+
+  private validPosition(position = this.position): number {
+    while (position < this.slots.length && this.slots[position] === undefined) position++;
+    return position;
   }
 }
 
@@ -477,8 +498,10 @@ const multipleMethods: NativeMethod[] = [
     impl: ({ thisObj, args }) => {
       const storage = storageOf(thisObj);
       const info = args[1] ?? null;
-      if (info !== null && [...storage.entries.values()].some((other) => strictEquals(other.info, info)))
-        throwError('InvalidArgumentException', 'Key duplication error');
+      if (info !== null) {
+        for (const other of storage.entriesFromStart())
+          if (strictEquals(other.info, info)) throwError('InvalidArgumentException', 'Key duplication error');
+      }
       storage.attach(args[0] as PhpObject, info);
       return null;
     },
@@ -499,8 +522,9 @@ const multipleMethods: NativeMethod[] = [
       const storage = storageOf(thisObj);
       if (storage.entries.size === 0) return false;
       const expect = (storage.flags & MIT_NEED_ALL) !== 0n;
-      for (const iterator of storage.objects()) {
-        if ((callMethod(iterator, 'valid', []) === true) !== expect) return !expect;
+      for (const { object: iterator } of storage.entriesFromStart()) {
+        const valid = storage.withIterator(iterator, () => callMethod(iterator, 'valid', []) === true);
+        if (valid !== expect) return !expect;
       }
       return expect;
     },
@@ -511,7 +535,9 @@ const multipleMethods: NativeMethod[] = [
 ];
 
 function callEach(object: PhpObject, method: string): void {
-  for (const iterator of storageOf(object).objects()) callMethod(iterator, method, []);
+  const storage = storageOf(object);
+  for (const { object: iterator } of storage.entriesFromStart())
+    storage.withIterator(iterator, () => callMethod(iterator, method, []));
 }
 
 /** Transcribes spl_multiple_iterator_get_all, which collects the current values or keys of the iterators. */
@@ -519,16 +545,42 @@ function getAll(object: PhpObject, method: 'current' | 'key'): PhpArray {
   const storage = storageOf(object);
   if (storage.entries.size === 0) throwError('RuntimeException', `Called ${method}() on an invalid iterator`);
   const result = new PhpArray();
-  for (const { object: iterator, info } of storage.entries.values()) {
-    let value: Value = null;
-    if (callMethod(iterator, 'valid', []) === true) value = callMethod(iterator, method, []);
-    else if (storage.flags & MIT_NEED_ALL)
-      throwError('RuntimeException', `Called ${method}() with non valid sub iterator`);
-    if (!(storage.flags & MIT_KEYS_ASSOC)) result.append(value);
-    else if (typeof info === 'bigint' || typeof info === 'string') result.set(toKey(info), value);
-    else throwError('InvalidArgumentException', 'Sub-Iterator is associated with NULL');
+  const runtime = rt();
+  runtime.held.push(result);
+  try {
+    for (const { object: iterator, info } of storage.entriesFromStart()) {
+      storage.withIterator(iterator, () => {
+        const value = iteratorValue(storage, iterator, method);
+        if (!(storage.flags & MIT_KEYS_ASSOC)) result.append(value);
+        else if (typeof info === 'bigint' || typeof info === 'string') result.set(toKey(info), value);
+        else throwError('InvalidArgumentException', 'Sub-Iterator is associated with NULL');
+      });
+    }
+    return result;
+  } finally {
+    runtime.held.pop();
   }
-  return result;
+}
+
+function iteratorValue(storage: ObjectStorage, iterator: PhpObject, method: 'current' | 'key'): Value {
+  let valid: boolean;
+  try {
+    valid = callMethod(iterator, 'valid', []) === true;
+  } catch (error) {
+    if (error instanceof PhpThrow && storage.flags & MIT_NEED_ALL)
+      throwError('RuntimeException', `Called ${method}() with non valid sub iterator`, error.object);
+    throw error;
+  }
+  if (!valid) {
+    if (storage.flags & MIT_NEED_ALL) throwError('RuntimeException', `Called ${method}() with non valid sub iterator`);
+    return null;
+  }
+  try {
+    return callMethod(iterator, method, []);
+  } catch (error) {
+    if (error instanceof PhpThrow) throwError('RuntimeException', 'Failed to call sub iterator method', error.object);
+    throw error;
+  }
 }
 
 defineClass({

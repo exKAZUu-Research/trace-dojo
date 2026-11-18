@@ -8,7 +8,7 @@ import { toStr } from './operators';
 import { MersenneTwister } from './random';
 import { rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
-import { type Key, PhpArray, type PhpClass, PhpObject, type Value } from './values';
+import { enumCaseIdentifier, type Key, PhpArray, type PhpClass, PhpObject, type Value } from './values';
 
 const MASK64 = (1n << 64n) - 1n;
 const MASK32 = 0xff_ff_ff_ffn;
@@ -321,7 +321,7 @@ const randomizerMethods: NativeMethod[] = [
     signature: String.raw`getFloat(float $min, float $max, Random\IntervalBoundary $boundary = Random\IntervalBoundary::ClosedOpen): float`,
     impl: ({ thisObj, args }) => {
       const [min, max, bounds] = args as [number, number, PhpObject | undefined];
-      const boundary = (bounds?.props.get('name') as string | undefined) ?? 'ClosedOpen';
+      const boundary = (bounds && enumCaseIdentifier(bounds)) ?? 'ClosedOpen';
       if (!Number.isFinite(min))
         throwError('ValueError', String.raw`Random\Randomizer::getFloat(): Argument #1 ($min) must be finite`);
       if (!Number.isFinite(max))

@@ -99,3 +99,25 @@ class UninitializedRecursiveIterator extends RecursiveIteratorIterator {
 try {
     foreach (new UninitializedRecursiveIterator() as $value) {}
 } catch (Error $error) { echo $error->getMessage(), "\n"; }
+
+$replacement = new RecursiveIteratorIterator(new DestructibleRecursive([[1], 2], 'old'));
+$replacement->rewind();
+echo 'replace:';
+$replacement->__construct(new DestructibleRecursive([3], 'new'));
+echo 'stored;', $replacement->current(), ';';
+unset($replacement);
+echo "done;\n";
+
+class ThrowingRecursive extends RecursiveArrayIterator {
+    function __construct($array, private $label) {parent::__construct($array);}
+    function getChildren(): ?RecursiveArrayIterator {return new self([1], 'child');}
+    function __destruct() {echo $this->label, ';'; throw new Exception($this->label);}
+}
+$replacement = new RecursiveIteratorIterator(new ThrowingRecursive([[1]], 'root'));
+$replacement->rewind();
+try {$replacement->__construct(new DestructibleRecursive([3], 'rejected'));}
+catch (Throwable $error) {
+    echo $error->getMessage(), '/', $error->getPrevious()?->getMessage(), ';';
+}
+try {var_dump($replacement->valid());}
+catch (Throwable $error) {echo $error->getMessage(), "\n";}

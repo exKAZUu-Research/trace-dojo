@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 953 -- Keeps PHP value storage and the ownership helpers it uses together.
+// code-gauge-allow-file fileNcss 957 -- Keeps PHP value storage and the ownership helpers it uses together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
@@ -902,7 +902,13 @@ export class PhpObject {
 }
 
 export function enumCaseName(object: PhpObject): string {
-  return `${object.cls.name}::${object.props.get('name') as string}`;
+  return `${object.cls.name}::${enumCaseIdentifier(object) ?? ''}`;
+}
+
+export function enumCaseIdentifier(object: PhpObject): string | undefined {
+  const slot = object.props.get('name');
+  const value = slot instanceof Ref ? slot.v : slot;
+  return typeof value === 'string' ? value : undefined;
 }
 
 /** The internal state of a closure object. */

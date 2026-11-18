@@ -352,6 +352,45 @@ test('an uncaught exception prints its fatal error and reports it', () => {
   );
 });
 
+test.each([
+  ['new Exception("walked")', 'array_walk($error, function (&$value) {});', '/main.php', 10],
+  ['new ReferencedLocation', '', 'example.php', 42],
+])('reports a referenced throwable location for %s', (exception, prepare, file, line) => {
+  const execution = run(`<?php
+class ReferencedLocation extends Exception {
+    function __construct() {
+        $file =& $this->file;
+        $file = 'example.php';
+        $line =& $this->line;
+        $line = 42;
+    }
+}
+$error = ${exception};
+${prepare}
+throw $error;`);
+  expect(execution).toMatchObject({
+    kind: 'executed',
+    stdout: expect.stringContaining(`  thrown in ${file} on line ${line}\n`),
+  });
+});
+
+test('a no-op reference walk preserves the behavior of native enum cases', () => {
+  const execution = run(String.raw`<?php
+$before = new Random\Randomizer(new Random\Engine\Mt19937(5));
+$after = new Random\Randomizer(new Random\Engine\Mt19937(5));
+foreach (Random\IntervalBoundary::cases() as $boundary) {
+    $expected = $before->getFloat(1, 2, $boundary);
+    array_walk($boundary, function (&$value) {});
+    var_dump($expected === $after->getFloat(1, 2, $boundary));
+}
+foreach (RoundingMode::cases() as $mode) {
+    $expected = round(1.25, 1, $mode);
+    array_walk($mode, function (&$value) {});
+    var_dump($expected === round(1.25, 1, $mode));
+}`);
+  expect(execution).toMatchObject({ kind: 'executed', stdout: 'bool(true)\n'.repeat(12) });
+});
+
 test('text outside the PHP tags is printed as it is', () => {
   expect(run('Title\n<?php echo 1 + 1 ?>\nmiddle <?= "x" ?>\nend\n')).toMatchObject({
     stdout: 'Title\n2middle xend\n',

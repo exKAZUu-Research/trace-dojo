@@ -2,10 +2,10 @@
 import { callMethod, consumeInvokedResult } from './callables';
 import { implicitCallRow } from './calls';
 import { toBool } from './conversions';
-import { throwError, withCleanupExceptions } from './errors';
+import { type CleanupException, throwError, withCleanupExceptions } from './errors';
 import { InnerIterator, innerIteratorOf } from './libIterators';
 import { defineClass, type NativeMethod } from './native';
-import { PhpThrow, rt } from './runtime';
+import { ExitSignal, PhpThrow, rt } from './runtime';
 import { nativeOwnershipChanged, type PhpClass, PhpObject, UNDEFINED_RESULT, type Value } from './values';
 
 const LEAVES_ONLY = 0;
@@ -38,6 +38,7 @@ class RecursiveState {
   flags = 0;
   maxDepth = -1;
   inIteration = false;
+  private failed = false;
 
   constructor(private readonly className: string) {}
 
@@ -55,20 +56,58 @@ class RecursiveState {
     const runtime = rt();
     runtime.held.push(object);
     try {
-      withCleanupExceptions(runtime, (capture) => {
-        while (this.depth > 0) {
-          try {
-            releaseLevel(object, this, 'teardown');
-          } catch (error) {
-            if (!(error instanceof PhpThrow)) throw error;
-            capture(error);
-          }
-        }
-      });
+      withCleanupExceptions(runtime, (capture) => this.releaseLevels(object, 1, capture));
     } finally {
       runtime.held.pop();
     }
     return true;
+  }
+
+  initialize(object: PhpObject, argument: PhpObject, mode: number, flags: number): void {
+    const runtime = rt();
+    const nativeMark = runtime.nativeHeld.at(-1)?.length ?? 0;
+    const temporaryMark = runtime.frame.temporaries.length;
+    const iterator = recursiveInput(argument);
+    withCleanupExceptions(
+      runtime,
+      (capture) => {
+        const failed = this.releaseLevels(object, 0, capture);
+        this.mode = mode;
+        this.flags = flags;
+        this.maxDepth = -1;
+        this.inIteration = false;
+        const inner = innerIteratorOf(iterator);
+        this.levels.push({ object: iterator, iterator: inner, step: Step.Start });
+        nativeOwnershipChanged(object);
+        runtime.discardNativeResult(inner.handle, Infinity, temporaryMark);
+        if (iterator !== argument) runtime.discardNativeResult(iterator, nativeMark, temporaryMark);
+        this.failed = failed;
+        if (failed) this.releaseLevels(object, 0, capture);
+      },
+      'latest'
+    );
+  }
+
+  private releaseLevels(object: PhpObject, minimumDepth: number, capture: (error: CleanupException) => void): boolean {
+    let failed = false;
+    while (this.depth >= minimumDepth) {
+      try {
+        releaseLevel(object, this, 'teardown');
+      } catch (error) {
+        if (!(error instanceof PhpThrow || error instanceof ExitSignal)) throw error;
+        capture(error);
+        failed = true;
+      }
+    }
+    return failed;
+  }
+
+  checkMethodReceiver(): void {
+    if (this.levels.length === 0) throwError('Error', `The ${this.className} instance wasn't initialized properly`);
+  }
+
+  reportedDepth(): number {
+    return this.failed ? this.depth : Math.max(this.depth, 0);
   }
 
   get top(): Level {
@@ -91,6 +130,26 @@ class RecursiveState {
 }
 
 const stateOf = (object: PhpObject): RecursiveState => object.internal as RecursiveState;
+
+function recursiveInput(argument: PhpObject): PhpObject {
+  const classes = rt().classes;
+  let iterator = argument;
+  if (argument.cls.isSubclassOf(classes.get('iteratoraggregate') as PhpClass)) {
+    const result = callMethod(argument, 'getIterator', []);
+    if (!(result instanceof PhpObject) || !result.cls.isSubclassOf(classes.get('traversable') as PhpClass))
+      throwError(
+        'LogicException',
+        `${argument.cls.name}::getIterator() must return an object that implements Traversable`
+      );
+    iterator = result;
+  }
+  if (!iterator.cls.isSubclassOf(classes.get('recursiveiterator') as PhpClass))
+    throwError(
+      'InvalidArgumentException',
+      'An instance of RecursiveIterator or IteratorAggregate creating it is required'
+    );
+  return iterator;
+}
 
 /** Calls a hook method that a subclass overrides; PHP skips the hooks RecursiveIteratorIterator itself declares. */
 function hook(object: PhpObject, name: string): Value | undefined {
@@ -162,7 +221,7 @@ function releaseLevel(object: PhpObject, state: RecursiveState, mode: Retirement
   const values = [level.iterator.handle, level.object];
   try {
     runtime.release(mode === 'advance' ? values.toReversed() : values, true);
-    runtime.flushReleases(fromNative);
+    runtime.flushReleases(fromNative, mode === 'teardown' ? 'complete' : 'ordinary');
   } finally {
     const index = state.levels.indexOf(level);
     if (index !== -1) state.levels.splice(index, 1);
@@ -273,28 +332,12 @@ const recursiveMethods: NativeMethod[] = [
   {
     signature: '__construct(Traversable $iterator, int $mode = RecursiveIteratorIterator::LEAVES_ONLY, int $flags = 0)',
     impl: ({ thisObj, args }) => {
-      let iterator = args[0] as PhpObject;
-      const classes = rt().classes;
-      if (iterator.cls.isSubclassOf(classes.get('iteratoraggregate') as PhpClass)) {
-        const result = callMethod(iterator, 'getIterator', []);
-        if (!(result instanceof PhpObject) || !result.cls.isSubclassOf(classes.get('traversable') as PhpClass))
-          throwError(
-            'LogicException',
-            `${iterator.cls.name}::getIterator() must return an object that implements Traversable`
-          );
-        iterator = result;
-      }
-      if (!iterator.cls.isSubclassOf(classes.get('recursiveiterator') as PhpClass))
-        throwError(
-          'InvalidArgumentException',
-          'An instance of RecursiveIterator or IteratorAggregate creating it is required'
-        );
-      const state = stateOf(thisObj);
-      state.levels = [{ object: iterator, iterator: innerIteratorOf(iterator), step: Step.Start }];
-      state.mode = Number(args[1] ?? 0n);
-      state.flags = Number(((args[2] as bigint | undefined) ?? 0n) & BigInt(CATCH_GET_CHILD));
-      state.maxDepth = -1;
-      state.inIteration = false;
+      stateOf(thisObj).initialize(
+        thisObj,
+        args[0] as PhpObject,
+        Number(args[1] ?? 0n),
+        Number(((args[2] as bigint | undefined) ?? 0n) & BigInt(CATCH_GET_CHILD))
+      );
       return null;
     },
   },
@@ -315,7 +358,7 @@ const recursiveMethods: NativeMethod[] = [
       null
     ),
   },
-  { signature: 'getDepth(): int', impl: ({ thisObj }) => BigInt(Math.max(stateOf(thisObj).depth, 0)) },
+  { signature: 'getDepth(): int', impl: ({ thisObj }) => BigInt(stateOf(thisObj).reportedDepth()) },
   {
     signature: 'getSubIterator(?int $level = null): ?RecursiveIterator',
     impl: ({ thisObj, args }) => {

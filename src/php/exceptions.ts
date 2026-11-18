@@ -4,11 +4,11 @@ import { callMethod, callValue } from './callables';
 import { asInternal, callArguments, callNamedArguments, type CallRecord, callStack } from './calls';
 import { createObject, findClass } from './classes';
 import { formatFloat } from './conversions';
-import { setErrorFactories, setThrowableFormatter, throwableKey } from './errors';
+import { readThrowableSlot, setErrorFactories, setThrowableFormatter, throwableKey } from './errors';
 import { type ClassDefinition, defineClass, type NativeMethod } from './native';
 import { toStr } from './operators';
 import { rt, SCRIPT_PATH } from './runtime';
-import { enumCaseName, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
+import { enumCaseName, PhpArray, type PhpClass, PhpObject, type Value } from './values';
 
 /** Sets the file, line, and trace of a new throwable, as PHP does when the object is created. */
 function initThrowable(object: PhpObject): undefined {
@@ -236,10 +236,7 @@ const throwableMethods = (base: string): NativeMethod[] => [
 ];
 
 function slotValue(object: PhpObject, key: string): Value {
-  const slot = object.props.get(key);
-  if (slot instanceof Ref) return slot.v;
-  if (slot === undefined || typeof slot === 'symbol') return null;
-  return slot;
+  return readThrowableSlot(object, key) ?? null;
 }
 
 function throwableProps(base: string): NonNullable<ClassDefinition['props']> {

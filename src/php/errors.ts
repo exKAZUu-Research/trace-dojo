@@ -24,8 +24,7 @@ export function reportUncaughtWarning(object: PhpObject): void {
           `\nWarning: Uncaught ${error.object.cls.name} in exception handling during call to ${object.cls.name}::__toString() in ${throwableLocation(error.object)}\n`
         );
       }
-      const stored = object.props.get(throwableKey(object, 'string'));
-      const value = stored instanceof Ref ? stored.v : stored;
+      const value = readThrowableSlot(object, throwableKey(object, 'string'));
       text = typeof value === 'string' ? value : '';
     }
     if (show()) runtime.echo(`\nWarning: Uncaught ${text}\n  thrown in ${throwableLocation(object)}\n`);
@@ -36,8 +35,8 @@ export function reportUncaughtWarning(object: PhpObject): void {
 }
 
 export function throwableLocation(object: PhpObject): string {
-  const file = object.props.get('file');
-  const line = object.props.get('line');
+  const file = readThrowableSlot(object, 'file');
+  const line = readThrowableSlot(object, 'line');
   return `${typeof file === 'string' ? file : SCRIPT_PATH} on line ${typeof line === 'bigint' ? line : 0}`;
 }
 
@@ -284,9 +283,13 @@ export function withOperandWarnings(
 }
 
 function previousOf(exception: PhpObject): PhpObject | undefined {
-  const slot = exception.props.get(throwableKey(exception, 'previous'));
-  const value = slot instanceof Ref ? slot.v : slot;
+  const value = readThrowableSlot(exception, throwableKey(exception, 'previous'));
   return value instanceof PhpObject ? value : undefined;
+}
+
+export function readThrowableSlot(exception: PhpObject, key: string): Value | undefined {
+  const slot = exception.props.get(key);
+  return slot instanceof Ref ? slot.v : typeof slot === 'symbol' ? undefined : slot;
 }
 
 export function throwableKey(exception: PhpObject, name: string): string {

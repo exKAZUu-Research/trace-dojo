@@ -8,7 +8,7 @@ import { defineAlias, defineConstant, defineFunction, defineUnitEnum } from './n
 import { arithmetic, compare } from './operators';
 import { rt } from './runtime';
 import { fixedDigits, phpRound, type RoundMode } from './strings';
-import { deref, PhpArray, PhpObject, type Value } from './values';
+import { deref, enumCaseIdentifier, PhpArray, PhpObject, type Value } from './values';
 
 const MATH_CONSTANTS: [string, number][] = [
   ['M_PI', Math.PI],
@@ -81,7 +81,7 @@ defineFunction(
     const places = Number(args[1] ?? 0n);
     const modeArg = args[2] ?? 1n;
     const mode = ROUNDING_MODES.get(
-      modeArg instanceof PhpObject ? (modeArg.props.get('name') as string) : (modeArg as bigint)
+      modeArg instanceof PhpObject ? (enumCaseIdentifier(modeArg) ?? '') : (modeArg as bigint)
     );
     if (!mode) throwError('ValueError', 'round(): Argument #3 ($mode) must be a valid rounding mode (RoundingMode::*)');
     if (typeof value === 'bigint') {

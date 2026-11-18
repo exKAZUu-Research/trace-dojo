@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 684 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 697 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr, ResolvedName } from './ast';
@@ -339,6 +339,7 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>, discardRe
   if (!(object instanceof PhpObject) || object.isResource) {
     throwError('Error', `Call to a member function ${methodName}() on ${valueName(object)}`);
   }
+  checkInstanceReceiver(e, object);
   runtime.frame.temporaries.push(object);
   const scope = runtime.frame.scope;
   if (isClosure(object) && lower(methodName) === '__invoke') {
@@ -378,6 +379,17 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>, discardRe
     );
   }
   throwError('Error', `Call to undefined method ${object.cls.name}::${methodName}()`);
+}
+
+const checkedInstanceReceivers = new WeakMap<Expr, PhpClass>();
+
+function checkInstanceReceiver(expression: Extract<Expr, { k: 'mcall' }>, object: PhpObject): void {
+  const internal = object.internal as { checkMethodReceiver?(): void } | undefined;
+  if (!internal?.checkMethodReceiver) return;
+  if (typeof expression.name !== 'string') return internal.checkMethodReceiver();
+  if (checkedInstanceReceivers.get(expression) === object.cls) return;
+  internal.checkMethodReceiver();
+  if (object.cls.findMethod(lower(expression.name))) checkedInstanceReceivers.set(expression, object.cls);
 }
 
 function dynamicMethodName(value: Value, row: number): string {
