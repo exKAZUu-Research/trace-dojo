@@ -519,8 +519,19 @@ function withRequiredPrefix(parameters: Parameter[], nodes: TreeNode[]): Paramet
 
 /** The names that a type node refers to, without the names it declares, as `U` in `<U>(u: U) => U` or `infer U`. */
 function typeReferencesIn(node: TreeNode): TreeNode[] {
-  if (node.type === 'type_identifier') return typeNameDeclarationParents.has(node.parent?.type ?? '') ? [] : [node];
+  if (node.type === 'type_identifier') return isDeclaredTypeName(node) ? [] : [node];
   return named(node).flatMap((child) => typeReferencesIn(child));
+}
+
+/** Whether a type name is the one a type parameter, mapped type key, or `infer` declares, not its constraint. */
+function isDeclaredTypeName(node: TreeNode): boolean {
+  const { parent } = node;
+  if (!parent || !typeNameDeclarationParents.has(parent.type)) return false;
+  const declared =
+    parent.type === 'infer_type'
+      ? parent.namedChildren.find((child) => child?.type === 'type_identifier')
+      : parent.childForFieldName('name');
+  return declared?.id === node.id;
 }
 
 /** The parameter declarations of a function-like node, a `this` parameter included. */
