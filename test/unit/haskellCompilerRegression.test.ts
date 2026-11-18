@@ -1,0 +1,1364 @@
+import { execFileSync } from 'node:child_process';
+
+import { expect, test } from 'vitest';
+import { z } from 'zod';
+
+import { executeProgram, traceProgram } from '../../src/interpreter/program';
+
+test.each([
+  [
+    'expression dictionaries',
+    'main = print (((+) :: Num a => a -> a -> a) 1 2, (show :: Show a => a -> String) True)',
+    '(3,"True")\n',
+  ],
+  ['pattern entry point', '(main,x) = (putStrLn "ok",1)', 'ok\n'],
+  ['constructor entry point', 'Just main = Just (putStrLn "ok")', 'ok\n'],
+  [
+    'method constraints',
+    'class C a where f :: Eq a => a -> a -> Bool\ninstance C Int where f = (==)\nmain = print (f (1::Int) 2)',
+    'False\n',
+  ],
+  [
+    'higher-kinded synonyms',
+    'type Id a = a\ntype App f a = Id f a\nmain = print (Just 1 :: App Maybe Int)',
+    'Just 1\n',
+  ],
+  ['given constraints', 'f :: Eq [a] => [a] -> Bool\nf xs = xs == xs\nmain = print (f [True])', 'True\n'],
+  [
+    'disjoint instance heads',
+    'class C a where c :: a -> Int\ninstance C (Either a a) where c _ = 1\ninstance C (Either Int Bool) where c _ = 2\nmain = print (c (Left 1 :: Either Int Bool))',
+    '2\n',
+  ],
+  ['readIO', 'main = do\n  x <- readIO "42" :: IO Int\n  y <- readIO "True" :: IO Bool\n  print (x,y)', '(42,True)\n'],
+])('%s executes with its inferred dictionaries and types', (_name, source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', uncaughtException: undefined, stdout });
+});
+
+test.each([
+  'f :: Show a => Int\nf = 1\nmain = print 2',
+  'main = do\n  let f :: Eq a => Bool\n      f = True\n  print 2',
+  'main = print (f 1 2)\n  where\n    infixl 4 `f`\n    infixr 5 `f`\n    f x y = x + y',
+  'module Main (main, Maybe(Nothing)) where\nimport Prelude hiding (Maybe(..))\nimport Data.Maybe (Maybe(Just))\nmain = print 1',
+  'class C a where c :: a -> Int\ninstance C (Either a a) where c _ = 1\ninstance C (Either Int Int) where c _ = 2\nmain = print (c (Left 1 :: Either Int Int))',
+])('invalid declarations produce compile diagnostics: %s', (source) => {
+  expect(executeProgram('haskell', source).kind).toBe('compileError');
+});
+
+test('ambiguous imported functions name public modules in the diagnostic', () => {
+  const result = executeProgram('haskell', 'import Data.Map\nmain = print (filter even [1,2])');
+  expect(result.kind).toBe('compileError');
+  if (result.kind === 'compileError') {
+    expect(result.diagnostics[0].message).toContain('Prelude.filter');
+    expect(result.diagnostics[0].message).toContain('Data.Map.filter');
+    expect(result.diagnostics[0].message).not.toContain('Internal');
+  }
+});
+
+test.each([
+  ['[x]', '([] :: [Int])', '[x]'],
+  ['(x:xs)', '([] :: [Int])', 'x : xs'],
+  ['[(),x]', '[]', '[(), x]'],
+  [String.raw`['\x41',x]`, '""', String.raw`['\x41', x]`],
+  ['[0x41,x]', '[]', '[0x41, x]'],
+])('pattern failures preserve %s syntax', (pattern, value, rendered) => {
+  const result = executeProgram('haskell', `main = print (let ${pattern} = ${value} in x)`);
+  expect(result).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: expect.stringContaining(`Non-exhaustive patterns in ${rendered}`),
+  });
+});
+
+test('single-action nested IO blocks retain their statement trace', () => {
+  const source = 'main = do\n  (do\n    print 1) >> print 2\n  print 3';
+  const recording = traceProgram('haskell', source, source);
+  expect(recording.stdout).toBe('1\n2\n3\n');
+  expect(recording.traceItems.map((item) => item.line)).toEqual([0, 3, 4]);
+});
+
+test('sum-type traces retain their constructors', () => {
+  const source =
+    'data Shape = Circle Double | Square Double\nmain = do\n  let a = Circle 2.0\n      b = Square 2.0\n      e = Left 3 :: Either Int Int\n  print 1';
+  const refs = traceProgram('haskell', source, source).traceItems.at(-1)?.referenceVars;
+  expect(refs?.a).toMatchObject({ kind: 'object', entries: { '<constructor>': { kind: 'value', value: 'Circle' } } });
+  expect(refs?.b).toMatchObject({ kind: 'object', entries: { '<constructor>': { kind: 'value', value: 'Square' } } });
+  expect(refs?.e).toMatchObject({ kind: 'object', entries: { '<constructor>': { kind: 'value', value: 'Left' } } });
+});
+
+test('strict map transformations evaluate their root before children', () => {
+  const source =
+    'import qualified Data.Map.Strict as M\nmain = print (M.size (M.mapWithKey (\\k _ -> error (show k)) (M.fromList [(1,1),(2,2),(3,3)])))';
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: '2' });
+});
+
+test('ascending sets keep the last equal representative', () => {
+  const source =
+    'import qualified Data.Set as S\ndata K = K Int Int deriving Show\ninstance Eq K where K a _ == K b _ = a == b\ninstance Ord K where compare (K a _) (K b _) = compare a b\nmain = print (S.fromAscList [K 1 10,K 1 20,K 1 30,K 2 40])';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: 'fromList [K 1 30,K 2 40]\n',
+  });
+});
+
+test('negative Integer bit counts use signed magnitude', () => {
+  expect(
+    executeProgram('haskell', 'import Data.Bits\nmain = print (map popCount [-1,-2,-3,-7,0,1,7 :: Integer])')
+  ).toMatchObject({ kind: 'executed', uncaughtException: undefined, stdout: '[-1,-1,-2,-3,0,1,3]\n' });
+});
+
+test('unit comparisons force their left operand before their right operand', () => {
+  expect(executeProgram('haskell', 'main = print ((error "left" :: ()) == error "right")')).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'left',
+    stdout: '',
+  });
+});
+
+test('introductory library combinators compose with collections', () => {
+  const source = `import Data.List
+import Control.Monad
+import Control.Applicative
+import Data.Function
+import Data.Bits
+import qualified Data.Map as M
+import qualified Data.Set as S
+main = do
+  print (deleteFirstsBy (==) [1,2,3,2] [2], applyWhen True reverse [1,2])
+  print (mfilter even (Just 2), optional (Nothing :: Maybe Int), Just 2 <**> Just (+3), liftM3 (\\a b c -> (a,b,c)) (Just 1) (Just True) (Just 'x'))
+  print (rotateL (1 :: Int) 3, rotateR (1 :: Int) 1, finiteBitSize (0 :: Int), countLeadingZeros (1 :: Int), countTrailingZeros (8 :: Int))
+  print (S.powerSet (S.fromList [1,2]), S.cartesianProduct (S.fromList [1,2]) (S.fromList "ab"))
+  print (M.mapAccum (\\s x -> (s+x,s)) (0 :: Int) (M.fromList [(1,2),(2,3)]))`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout:
+      "([1,3,2],[2,1])\n(Just 2,Just Nothing,Just 5,Just (1,True,'x'))\n(8,-9223372036854775808,64,63,3)\n(fromList [fromList [],fromList [1],fromList [1,2],fromList [2]],fromList [(1,'a'),(1,'b'),(2,'a'),(2,'b')])\n(5,fromList [(1,0),(2,2)])\n",
+  });
+});
+
+test.each([
+  ['data Either a b = L a | R b\nf :: Either Int Int -> Int\nf _ = 1\nmain = print 1', 'Prelude.Either', 'Main.Either'],
+  [
+    'class Show a where sh :: a -> String\ninstance Show Int where sh = const ""\nmain = putStrLn (sh (1::Int))',
+    'Prelude.Show',
+    'Main.Show',
+  ],
+  ['import Data.Map\ndata Map = Map\nf :: Map -> Int\nf _ = 1\nmain = print 1', 'Data.Map.Map', 'Main.Map'],
+])('type/class ambiguity diagnostics retain public origins: %s', (source, imported, own) => {
+  const result = executeProgram('haskell', source);
+  expect(result.kind).toBe('compileError');
+  if (result.kind === 'compileError') {
+    expect(result.diagnostics[0].message).toContain(imported);
+    expect(result.diagnostics[0].message).toContain(own);
+    expect(result.diagnostics[0].message).not.toContain('Base.');
+    expect(result.diagnostics[0].message).not.toContain('Internal.');
+  }
+});
+
+test.each([
+  ['data T = A | B\ninstance Show T where\n  show A = "A"\nmain = putStrLn (show B)', 'show'],
+  ['data T = A | B\ninstance Eq T where\n  A == A = True\nmain = print (A == B)', '=='],
+  ['class C a where\n  f :: Bool -> a\n  f True = undefined\ninstance C Int\nmain = print (f False :: Int)', 'f'],
+])('partial instance/default methods report their source name: %s', (source, name) => {
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: expect.stringMatching(new RegExp(`Non-exhaustive patterns in function ${name}$`)),
+  });
+});
+
+test.each([
+  ['main=do\nprint 1', 1],
+  ['main=do\n  print 1 >> do\n  print 2', 2],
+  ['main=do\n  let f=do\n      print 2\n  f', 2],
+  ['main=do\n  if True then print 1 else do\n  print 2', 2],
+  ['main=do\n  print [1,\n  2]', 2],
+  ['main=do\n  print(foldr (+) 0\n  [1,2])', 2],
+  ['main=print [1,\n2]', 1],
+  ['f default x=default+x\nmain=print(f 1 2)', 0],
+  ['main=let foreign=1 in print foreign', 0],
+  ['main=let forall=1 in print forall', 0],
+])('GHC layout and reserved identifiers produce syntax errors: %s', (source, row) => {
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row, message: '書き方に誤りがあります。' }],
+  });
+});
+
+test.each([
+  ['module Main(main,M.fromMaybe) where\nimport qualified Data.Maybe as M\nmain=print 1', '1\n'],
+  ['module Main(main,M.Maybe(..)) where\nimport qualified Data.Maybe as M\nmain=print 1', '1\n'],
+  ['module Main(main,M.Maybe(M.Just)) where\nimport qualified Data.Maybe as M\nmain=print 1', '1\n'],
+  ['module Main(main,Maybe(M.Just)) where\nimport qualified Data.Maybe as M\nmain=print 1', '1\n'],
+  [
+    'module Main(main,M.Maybe(N.Just)) where\nimport qualified Data.Maybe as M\nimport qualified Data.Maybe as N\nmain=print 1',
+    '1\n',
+  ],
+  ['main=do {print [1,\n2]}', '[1,2]\n'],
+  ['main=do\n  print [1,\n    2]', '[1,2]\n'],
+  ['main=print(map(show.fst)[(1,2::Int)])', '["1"]\n'],
+  ['main=print(length.show $ 12345)', '5\n'],
+  ['main=print(sum.map (*2) $ [1,2])', '6\n'],
+  ['main=print((.succ) (+1) 1)', '3\n'],
+  ['main=print((succ.succ) 1)', '3\n'],
+  ['main=print[x|x<-[1..3]]', '[1,2,3]\n'],
+  ['pattern=2\nmdo=3\nrec=4\nmain=print(pattern+mdo+rec)', '9\n'],
+  ['main=print$negate 1', '-1\n'],
+  ['main=print$(sum [1,2])', '3\n'],
+  ['import qualified Data.Map as M\nmain=print$(M.size.M.fromList)[(1,2)]', '1\n'],
+  ['main=print(map (+1).filter odd $ [1..5])', '[2,4,6]\n'],
+  ['main=print(sum.map (*2).filter odd $ [1..5])', '18\n'],
+  ['main=do\n  if True\n  then print 1\n  else print 2', '1\n'],
+  ['f x=if x>0\nthen 1\nelse 2\nmain=print(f 1)', '1\n'],
+  ['main=do\n  let y=if True\n      then 1\n      else 2\n  print y', '1\n'],
+  ['main=print(case True of\n  True -> if True\n  then 1\n  else 2\n  False -> 3)', '1\n'],
+])('supported syntax retains GHC meaning: %s', (source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test('ambiguous imports exclude origins from other qualified scopes', () => {
+  const source =
+    'import qualified Data.List as L\nfilter p xs = [x | x <- xs, p x]\nmain=print(filter even [1,2::Int])';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: 'filter が、Prelude.filter と Main.filter のどれを指すか決まりません。' }],
+  });
+});
+
+test.each(['disjoint', 'compose'])('explicit imports reject unsupported values: %s', (name) => {
+  expect(executeProgram('haskell', `import Data.Map (${name})\nmain=print 1`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 0, message: `ライブラリ関数（Data.Map.${name}）は、この採点環境では使えません。` }],
+  });
+  expect(executeProgram('haskell', `import Data.Map hiding (${name})\nmain=print 1`)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('class fixities cannot change another class method', () => {
+  const source =
+    'class A a where\n  foo :: a -> a -> a\nclass B a where\n  infixl 4 `foo`\n  bar :: a -> a\nmain=print 1';
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 3, message: expect.stringContaining('foo') }],
+  });
+});
+
+test.each([
+  ['import Numeric\nf :: Floating a => a -> a\nf x=sqrt x\nmain=print(f 4,showHex 255 "")', '(2.0,"ff")\n'],
+  ['import Text.Read\ng :: ReadS Int\ng=reads\nmain=print(g "1 x",readMaybe "2"::Maybe Int)', '([(1," x")],Just 2)\n'],
+])('public type re-exports retain their implementation identity: %s', (source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test('string pattern failures preserve lexical escape spelling', () => {
+  const result = executeProgram('haskell', String.raw`main=print (let ["\x80\&0",x]=[] in length x)`);
+  expect(result).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: expect.stringContaining(String.raw`Non-exhaustive patterns in ["\x80\&0", x]`),
+  });
+});
+
+test.each([
+  ['data P=P {\nx :: Int\n} deriving Show\nmain=print(P {\nx=1\n})', 'P {x = 1}\n'],
+  ['main=do {\n print 1;\n print 2\n}', '1\n2\n'],
+  ['main=do\n  let {\nx=1\n}\n  print x', '1\n'],
+  ['f x=case x of {\n True -> 1;\n False -> 2\n}\nmain=print(f True)', '1\n'],
+  ['data P=P {x::Int}\nmain=do\n  let p=P {\nx=1\n}\n  print(case p of P {\nx=y\n} -> y)', '1\n'],
+])('explicit braces suspend outer layout while preserving nested blocks: %s', (source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test('implicit blocks inside braces still enforce their own layout', () => {
+  expect(executeProgram('haskell', 'main=do {\n print 1;\n let x=[1,\n     2];\n print x\n}').kind).toBe(
+    'compileError'
+  );
+});
+
+test.each([
+  'import Data.List (\n  sort\n)\nmain=print(sort [2,1])',
+  'import Data.List (sort,\nsortBy)\nmain=print(sort [2,1])',
+])('import continuations obey module layout: %s', (source) => {
+  expect(executeProgram('haskell', source).kind).toBe('compileError');
+});
+
+test('indented import continuations remain valid', () => {
+  expect(executeProgram('haskell', 'import Data.List (\n  sort\n  )\nmain=print(sort [2,1])')).toMatchObject({
+    kind: 'executed',
+    stdout: '[1,2]\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'f R{b=0,a=0}=1\nf _=2\nmain=print(f(R(error "a")1))',
+  'main=print(case R(error "a")1 of R{b=0,a=0}->1;_->2)',
+  'main=print(let R{b=0,a=x}=R(error "a")1 in x)',
+])('record patterns match fields in their written order: %s', (body) => {
+  const result = executeProgram('haskell', `data R=R {a::Int,b::Int}\n${body}`);
+  if (body.startsWith('main=print(let'))
+    expect(result).toMatchObject({
+      kind: 'executed',
+      stdout: '',
+      uncaughtException: expect.stringContaining('Non-exhaustive patterns'),
+    });
+  else expect(result).toMatchObject({ kind: 'executed', stdout: '2\n', uncaughtException: undefined });
+});
+
+test.each(['\t', '\r', '\u007F', '\u0085', '\u200B', '\u2028'])(
+  'raw nongraphic characters are rejected in literals: %j',
+  (char) => {
+    expect(executeProgram('haskell', `main=print "a${char}b"`).kind).toBe('compileError');
+    expect(executeProgram('haskell', `main=print '${char}'`).kind).toBe('compileError');
+  }
+);
+
+test.each([
+  ['main=putStr "😀" >> print(case [] of x:_->x::Int)', '😀', 'Main.hs:1:26-47: Non-exhaustive patterns in case'],
+  ['main\t= print(case [] of x:_->x::Int)', '', 'Main.hs:1:17-38: Non-exhaustive patterns in case'],
+  ['main=print(let [x]=("😀" `seq` []) in (x::Int))', '', 'Main.hs:1:16-33: Non-exhaustive patterns in [x]'],
+  ['main = do\n\tprint (let [x]=[] in (x::Int))', '', 'Main.hs:2:20-25: Non-exhaustive patterns in [x]'],
+])('source spans count code points and tab stops: %s', (source, stdout, uncaughtException) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException });
+});
+
+test.each([
+  ['if True then 1 else 2', '1\n'],
+  ['case True of {True->1;False->2}', '1\n'],
+  ['do 1', '1\n'],
+  ['let x=1 in x', '1\n'],
+])('block arguments require parentheses or an infix operator: %s', (expression, stdout) => {
+  expect(executeProgram('haskell', `main=print ${expression}`).kind).toBe('compileError');
+  expect(executeProgram('haskell', `main=print(${expression})`)).toMatchObject({
+    kind: 'executed',
+    stdout,
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('haskell', `main=print $ ${expression}`)).toMatchObject({
+    kind: 'executed',
+    stdout,
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['Data.List (Foldable)', 'Data.Char (String)', 'Control.Monad ((<$>))'])(
+  'explicit imports reject names absent from the GHC module: %s',
+  (item) => {
+    expect(executeProgram('haskell', `import ${item}\nmain=print 1`).kind).toBe('compileError');
+  }
+);
+
+test('source modules follow runghc main export rules', () => {
+  expect(
+    executeProgram('haskell', 'module Geometry(main,area) where\narea r=pi*r*r\nmain=print(area 1::Double)')
+  ).toMatchObject({ kind: 'executed', stdout: '3.141592653589793\n', uncaughtException: undefined });
+  expect(executeProgram('haskell', 'module Example() where\nmain=print(1::Int)')).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('haskell', 'module Main() where\nmain=print 1').kind).toBe('compileError');
+});
+
+test.each([
+  'main::Monad m=>m ()\nmain=return ()',
+  'main::Num a=>IO a\nmain=return 1',
+  'main=(return 1::Num a=>IO a)',
+  'main=((do return 1)::Num a=>IO a)',
+  'main=(do return 1::Num a=>IO a)',
+  'main=do\n  (if True then return 1 else return 2::Num a=>IO a)',
+])('entry and IO annotations retain dictionary evidence: %s', (source) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+});
+
+test.each([
+  'module Example(x) where\n(main,x)=(putStrLn "ok",1::Int)',
+  'module Example() where\nJust main=Just(putStrLn "ok")',
+])('named modules run their unexported pattern-bound main: %s', (source) => {
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'ok\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['[R..B]', '[R..]', '[R,G..B]', '[R,G..]', '[R.. B]', '[Main.R..Main.B]'])(
+  'constructor-adjacent range dots follow qualified lexical syntax: %s',
+  (range) => {
+    expect(executeProgram('haskell', `data C=R|G|B deriving(Show,Enum)\nmain=print ${range}`).kind).toBe(
+      'compileError'
+    );
+  }
+);
+
+test.each(['[R ..B]', '[R,G ..B]', '[x..y]', '[(R)..B]', '[Main.R ..Main.B]'])(
+  'range dots remain valid after whitespace and variables: %s',
+  (range) => {
+    expect(executeProgram('haskell', `data C=R|G|B deriving(Show,Enum)\nx=R\ny=B\nmain=print ${range}`)).toMatchObject({
+      kind: 'executed',
+      stdout: '[R,G,B]\n',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([
+  ['Text.Printf (PrintfArg(formatArg))', 'formatArg'],
+  ['Text.Printf (PrintfArg(parseFormat))', 'parseFormat'],
+  ['Text.Read (Read(readPrec))', 'readPrec'],
+  ['Text.Read (Read(readListPrec))', 'readListPrec'],
+  ['Text.Read (Read(..))', 'readListPrec'],
+])('known class methods retain unsupported diagnostics: %s', (item, method) => {
+  const result = executeProgram('haskell', `import ${item}\nmain=print(1::Int)`);
+  expect(result).toMatchObject({
+    kind: 'compileError',
+    diagnostics: expect.arrayContaining([
+      expect.objectContaining({ message: expect.stringContaining('この採点環境では使えません') }),
+    ]),
+  });
+  if (result.kind === 'compileError')
+    expect(result.diagnostics.some(({ message }) => message.includes(method))).toBe(true);
+});
+
+test.each(['Text.Read (Read(readsPrec))', 'Text.Printf (PrintfArg)', 'Text.Read hiding (Read(readPrec))'])(
+  'supported and hidden class selections remain usable: %s',
+  (item) => {
+    expect(executeProgram('haskell', `import ${item}\nmain=print(1::Int)`)).toMatchObject({
+      kind: 'executed',
+      stdout: '1\n',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([false, true])(
+  'long binding chains compile without host recursion (cyclic=%s)',
+  { timeout: 30_000 },
+  (cyclic) => {
+    const count = 30_000;
+    const source =
+      Array.from({ length: count }, (_, index) => `x${index}=x${index + 1}`).join('\n') +
+      `\nx${count}=${cyclic ? 'x0' : '1'}\nmain=print(1::Int)`;
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: '1\n',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([
+  '  import Data.List\n  main=print(1::Int)',
+  'module Main where\n  import Data.List\n  main=print(1::Int)',
+  'main=do\n{ print(1::Int) }',
+  'main=case 1 of\n{ 1->print(1::Int); _->print(2::Int) }',
+  'main=print x where\n{ x=1::Int }',
+  'main=print(let\n{ x=1::Int } in x)',
+  'class C a where\n{ m::a->Int }\ninstance C Int where\n{ m _=1 }\nmain=print(m(0::Int))',
+  'module Main where\n{ main::IO (); main=print(1::Int) }\n-- trailing comment\n',
+  'module Main(main,) where\nimport Data.List(sort,)\nmain=print(head(sort[1::Int]))',
+])('grammar releases preserve valid module and block layouts: %s', (source) => {
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  '  import Data.List\nmain=print(1::Int)',
+  'module Main where { main=print(1::Int)',
+  'main=print[1,2,3,]',
+  'main=case [1::Int] of { [a,]->print a }',
+  'data T=T { a::Int,b::Int, } deriving Show\nmain=print(T 1 2)',
+  'main=print(let [x,y,]=[1,2::Int] in x)',
+  'main=print[(x,y)|x<-[1,2::Int],y<-[3,],True]',
+])('grammar releases reject malformed module and comma syntax: %s', (source) => {
+  expect(executeProgram('haskell', source).kind).toBe('compileError');
+});
+
+test.each([
+  ['Text.Read', 'Read', 'readPrec'],
+  ['Text.Read', 'Read', 'readListPrec'],
+  ['Text.Printf', 'PrintfArg', 'formatArg'],
+  ['Text.Printf', 'PrintfArg', 'parseFormat'],
+  ['qualified Text.Read', 'Read', 'readPrec'],
+])('known instance methods retain unsupported diagnostics: %s.%s.%s', (module, cls, method) => {
+  const result = executeProgram(
+    'haskell',
+    `import ${module}\ndata T=T\ninstance ${cls} T where ${method}=undefined\nmain=print(1::Int)`
+  );
+  expect(result).toMatchObject({
+    kind: 'compileError',
+    diagnostics: expect.arrayContaining([
+      expect.objectContaining({ message: expect.stringContaining('この採点環境では使えません') }),
+    ]),
+  });
+  if (result.kind === 'compileError')
+    expect(result.diagnostics.some(({ message }) => message.includes(method))).toBe(true);
+});
+
+test('implemented Read instance methods preserve dictionary slots', () => {
+  expect(
+    executeProgram(
+      'haskell',
+      'import Text.Read\ndata T=T deriving Show\ninstance Read T where readsPrec _ _=[(T,"")]\nmain=print(read "ignored"::T)'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'T\n', uncaughtException: undefined });
+});
+
+test('hidden instance methods remain unavailable', () => {
+  const result = executeProgram(
+    'haskell',
+    'import Text.Read hiding (readPrec)\ndata T=T\ninstance Read T where readPrec=undefined\nmain=print(1::Int)'
+  );
+  expect(result).toMatchObject({
+    kind: 'compileError',
+    diagnostics: expect.arrayContaining([
+      expect.objectContaining({ message: expect.stringContaining('見えるメソッドではありません') }),
+    ]),
+  });
+});
+
+test.each([
+  ['case', 'case 1 of\n{ 1->print(1::Int); _->print 2 }'],
+  ['let', 'let\n{ x=1::Int }\n  print x'],
+  ['where', 'let f=x where\n{ x=1::Int }\n  print f'],
+])('opening %s braces cannot dedent left of enclosing layout', (_name, block) => {
+  expect(executeProgram('haskell', `main=do\n  ${block}`).kind).toBe('compileError');
+});
+
+test.each([
+  'case 1 of\n  { 1->print(1::Int); _->print 2 }',
+  'let\n  { x=1::Int }\n  print x',
+  'let f=x where\n      { x=1::Int }\n  print f',
+])('opening braces at or right of enclosing layout remain valid: %s', (block) => {
+  expect(executeProgram('haskell', `main=do\n  ${block}`)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([2, 4])('explicit opening braces respect enclosing indentation %i', (indent) => {
+  const prefix = `main=do\n${' '.repeat(indent)}do\n`;
+  for (const column of [0, indent - 1]) {
+    const source = `${prefix}${' '.repeat(column)}{ print(1::Int) }`;
+    expect(executeProgram('haskell', source).kind).toBe('compileError');
+  }
+  for (const column of [indent, indent + 2]) {
+    const source = `${prefix}${' '.repeat(column)}{ print(1::Int) }`;
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: '1\n',
+      uncaughtException: undefined,
+    });
+  }
+});
+
+test.each([
+  'import Data.Ord hiding (Down)\nmain=print(Down(1::Int))',
+  'import Data.Ord hiding (Down(..))\nmain=print(Down(1::Int))',
+  'import Data.Ord hiding (Down(Down))\nmain=print(Down(1::Int))',
+  'import qualified Data.Ord as O hiding (Down)\nmain=print(O.Down(1::Int))',
+  'import Data.Ord hiding (Down)\nmain=print(undefined::Down Int)',
+  'import qualified Data.Ord as O hiding (Down)\nmain=print(undefined::O.Down Int)',
+  'import Data.Ord (Down)\nmain=print(Down(1::Int))',
+])('type hiding removes same-named constructors without widening explicit imports: %s', (source) => {
+  expect(executeProgram('haskell', source).kind).toBe('compileError');
+});
+
+test.each([
+  ['import Data.Ord (Down(..))\nmain=print(Down(1::Int))', 'Down 1\n'],
+  ['import Data.Ord hiding (Down())\nmain=print(Down(1::Int))', 'Down 1\n'],
+  ['import Data.Ord hiding (Down)\nmain=print(comparing id (1::Int) 1)', 'EQ\n'],
+  ['import qualified Data.Ord as O hiding (Down)\nmain=print(O.comparing id (1::Int) 1)', 'EQ\n'],
+])('constructor selection and unrelated imports remain usable: %s', (source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test.each(['inits1', 'tails1'])('NonEmpty-producing %s reports its missing API', (name) => {
+  for (const source of [
+    `import Data.List\nmain=print(${name} [1,2::Int])`,
+    `import Data.List (${name})\nmain=print(1::Int)`,
+  ]) {
+    const result = executeProgram('haskell', source);
+    expect(result).toMatchObject({
+      kind: 'compileError',
+      diagnostics: expect.arrayContaining([
+        expect.objectContaining({ message: expect.stringContaining('この採点環境では使えません') }),
+      ]),
+    });
+    if (result.kind === 'compileError')
+      expect(result.diagnostics.some(({ message }) => message.includes(name))).toBe(true);
+  }
+});
+
+test.each([
+  'System.IO hiding (IOMode(ReadMode))',
+  'System.IO hiding (SeekMode(AbsoluteSeek))',
+  'System.IO hiding (NewlineMode(inputNL))',
+  'Text.Read hiding (Lexeme(Ident))',
+  'Text.Printf hiding (FieldFormat(fmtChar))',
+  'Text.Printf hiding (FormatParse(fpRest))',
+  'Control.Applicative hiding (Const(getConst))',
+  'Data.Tuple hiding (Solo(MkSolo))',
+  'Data.Bits hiding (And(getAnd))',
+  'Data.Set hiding (Intersection(getIntersection))',
+])('unsupported type children can be hidden: %s', (item) => {
+  expect(executeProgram('haskell', `import ${item}\nmain=print(1::Int)`)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['System.IO (IOMode(ReadMode))', 'Text.Read (Lexeme(Ident))', 'Text.Printf (FieldFormat(fmtChar))'])(
+  'selecting unsupported type children still rejects use: %s',
+  (item) => {
+    expect(executeProgram('haskell', `import ${item}\nmain=print(1::Int)`)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: expect.arrayContaining([
+        expect.objectContaining({ message: expect.stringContaining('この採点環境では使えません') }),
+      ]),
+    });
+  }
+);
+
+test.each(['T', 't'])('record braces require continuation indentation: %s', (record) => {
+  const prefix = 'data T=T {a::Int} deriving Show\nmain=do\n  let t=T 1\n';
+  expect(executeProgram('haskell', `${prefix}  print(${record}\n  {a=2})`).kind).toBe('compileError');
+  expect(executeProgram('haskell', `${prefix}  print(${record}\n   {a=2})`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'T {a = 2}\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([2000, 3000])('large pattern bindings share their match (%i variables)', { timeout: 30_000 }, (count) => {
+  const pattern = `[${Array.from({ length: count }, (_, index) => `x${index}`).join(',')}]=[1..${count}::Int]`;
+  const result = `(x0,x${count - 1},x0)`;
+  for (const source of [`${pattern}\nmain=print${result}`, `main=print(let ${pattern} in ${result})`]) {
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: `(1,${count},1)\n`,
+      uncaughtException: undefined,
+    });
+  }
+});
+
+test('shared pattern matches remain deferred and retain full-pattern failures', () => {
+  expect(executeProgram('haskell', 'main=print(let (x,Just y)=(1,Nothing::Maybe Int) in 1::Int)')).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+  for (const target of ['x', 'y']) {
+    expect(
+      executeProgram('haskell', `main=print(let (x,Just y)=(1::Int,Nothing::Maybe Int) in ${target})`)
+    ).toMatchObject({
+      kind: 'executed',
+      stdout: '',
+      uncaughtException: expect.stringContaining('Non-exhaustive patterns'),
+    });
+  }
+});
+
+test.each([
+  'Data.Tuple hiding (Solo(getSolo))',
+  'qualified Data.Tuple hiding (Solo(wibble))',
+  'Data.Ord hiding (Down(imaginary))',
+  'Data.Ord hiding (Unknown(getDown))',
+])('unknown hiding children are ignored: %s', (item) => {
+  expect(executeProgram('haskell', `import ${item}\nmain=print(1::Int)`)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('a non-child hiding name leaves its independent value imported', () => {
+  expect(
+    executeProgram('haskell', 'import Data.Ord hiding (Down(comparing))\nmain=print(comparing id (1::Int) 1)')
+  ).toMatchObject({ kind: 'executed', stdout: 'EQ\n', uncaughtException: undefined });
+});
+
+test.each(['types', 'classes'])(
+  'compact shared %s compile without exponential memory growth',
+  { timeout: 30_000 },
+  (graph) => {
+    const output = execFileSync('bun', ['run', 'test/helpers/haskellCompilerMemory.ts', graph], {
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+    const result = z
+      .object({ kind: z.literal('executed'), stdout: z.literal('1\n'), peakRatio: z.number() })
+      .parse(JSON.parse(output));
+    expect(result.peakRatio).toBeLessThan(1.5);
+  }
+);
+
+test('shared superclass paths retain runtime evidence and remove redundant constraints', () => {
+  const count = 8;
+  const declarations = [
+    'class Eq a=>C0 a',
+    'class C0 a=>C1 a',
+    ...Array.from({ length: count - 1 }, (_, offset) => {
+      const index = offset + 2;
+      return `class (C${index - 1} a,C${index - 2} a)=>C${index} a`;
+    }),
+    ...Array.from({ length: count + 1 }, (_, index) => `instance C${index} Int`),
+  ];
+  const source = `${declarations.join('\n')}
+f::C${count} a=>a->a->Bool
+f x y=x==y
+g::(C${count} a,Eq a)=>a->a->Bool
+g x y=x==y
+main=print(f (1::Int) 1,f (1::Int) 2,g (1::Int) 1)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(True,False,True)\n',
+    uncaughtException: undefined,
+  });
+  expect(
+    executeProgram('haskell', 'class C a\nf::C a=>a->Ordering\nf x=compare x x\nmain=print(1::Int)')
+  ).toMatchObject({ kind: 'compileError' });
+});
+
+test('negative numeric patterns convert positive literals before dictionary negation', () => {
+  const source = `data N=N Integer deriving(Eq,Show)
+instance Num N where
+ fromInteger n=N(n+10)
+ negate(N n)=N(-n)
+f::(Eq a,Num a)=>a->Bool
+f (-1)=True
+f _=False
+z (-0)=True
+z _=False
+data F=F Rational deriving Eq
+instance Num F where
+ fromInteger n=F(fromInteger n+10)
+ negate(F n)=F(-n)
+instance Fractional F where fromRational n=F(n+10)
+g::(Eq a,Fractional a)=>a->Bool
+g (-1.5)=True
+g _=False
+main=do
+ print(f(N(-11)),f(N 9),(-1::N),z(N(-10)),z(N 10))
+ print(g(F(-11.5)),g(F 8.5))
+ print(case [N(-11)] of [-1]->True; _->False)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(True,False,N (-11),True,False)\n(True,False)\nTrue\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('negative pattern conversions remain lazy under negate and equality methods', () => {
+  const source = `data N=N
+instance Eq N where N==_=False
+instance Num N where
+ fromInteger _=error "conversion"
+ negate _=error "negation"
+f (-1)=True
+f _=False
+main=print(f N)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'False\n',
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('haskell', source.replace('N==_=False', 'N==x=x `seq` True'))).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: 'negation',
+  });
+});
+
+test.each([2, 3])('shared %i-way types remain bounded while recording', { timeout: 30_000 }, (branches) => {
+  const output = execFileSync('bun', ['run', 'test/helpers/haskellCompilerMemory.ts', 'trace', String(branches)], {
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  const result = z
+    .object({ traceItemCount: z.literal(3), stdout: z.literal('1\n'), peakRatio: z.number() })
+    .parse(JSON.parse(output));
+  expect(result.peakRatio).toBeLessThan(1.5);
+});
+
+test('shared polymorphic types remain independent across instantiations', () => {
+  const count = 24;
+  const duplicate = 'f ('.repeat(count) + 'x' + ')'.repeat(count);
+  const project = (value: string): string => 'fst ('.repeat(count) + `g ${value}` + ')'.repeat(count);
+  const source = `f x=(x,x)\ng x=${duplicate}\nmain=print(${project('True')},${project("'x'")})`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: "(True,'x')\n",
+    uncaughtException: undefined,
+  });
+});
+
+test('compiler work limits contain expanding diagnostics and constraints and reset between programs', () => {
+  const value = 'f ('.repeat(30) + 'True' + ')'.repeat(30);
+  for (const main of ['main=print(y::Int)', 'main=print(y==y)']) {
+    expect(executeProgram('haskell', `f x=(x,x)\ny=${value}\n${main}`)).toMatchObject({
+      kind: 'limitExceeded',
+      limit: 'operations',
+    });
+    expect(executeProgram('haskell', 'main=print(1::Int)')).toMatchObject({
+      kind: 'executed',
+      stdout: '1\n',
+      uncaughtException: undefined,
+    });
+  }
+});
+
+test('compiler and native evaluation recursion remain bounded under Node', { timeout: 30_000 }, () => {
+  const bundle = execFileSync(
+    'bun',
+    ['build', 'test/helpers/haskellCompilerNode.ts', '--target=node', '--packages=external'],
+    { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
+  );
+  const output = execFileSync('node', ['--input-type=module'], {
+    input: bundle,
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  const resultSchema = z.object({ kind: z.string() }).passthrough();
+  const {
+    synonyms: results,
+    chains,
+    native,
+    patterns,
+    flatSequences,
+    ioLets,
+    signatureGraphs,
+    ioLetTrace,
+    display,
+    recovery,
+  } = z
+    .object({
+      synonyms: z.array(resultSchema),
+      chains: z.array(resultSchema),
+      native: z.array(resultSchema),
+      patterns: z.array(resultSchema),
+      flatSequences: z.array(resultSchema),
+      ioLets: z.array(resultSchema),
+      signatureGraphs: z.object({ valid: z.array(resultSchema), ambiguous: resultSchema }),
+      ioLetTrace: z.object({ stdout: z.string(), uncaughtException: z.string().optional(), steps: z.number() }),
+      display: z.array(z.object({ stdout: z.string() }).passthrough()),
+      recovery: resultSchema,
+    })
+    .parse(JSON.parse(output));
+  expect(chains).toHaveLength(9);
+  expect(chains[5]).toMatchObject({ kind: 'executed', stdout: '0\n' });
+  expect(chains[6]).toMatchObject({ kind: 'executed', stdout: '1001\n' });
+  expect(chains[0]).toMatchObject({ kind: 'executed', stdout: '100\n' });
+  expect(chains.at(-1)).toMatchObject({ kind: 'executed', stdout: '1\n' });
+  for (const result of [...chains.slice(1, 5), chains[7], ...native])
+    expect(result).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  expect(flatSequences).toHaveLength(6);
+  for (const [index, result] of flatSequences.entries()) {
+    if (index < 4) {
+      expect(result).toMatchObject({ kind: 'executed', stdout: index < 2 ? '1\n' : '2\n' });
+      expect(result.uncaughtException).toBeUndefined();
+    } else expect(result).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+  expect(ioLets).toHaveLength(4);
+  for (const result of ioLets) {
+    expect(result).toMatchObject({ kind: 'executed', stdout: '1\n' });
+    expect(result.uncaughtException).toBeUndefined();
+  }
+  expect(signatureGraphs.valid).toHaveLength(5);
+  for (const result of signatureGraphs.valid) {
+    expect(result).toMatchObject({ kind: 'executed', stdout: '1\n' });
+    expect(result.uncaughtException).toBeUndefined();
+  }
+  expect(signatureGraphs.ambiguous).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('制約に') })],
+  });
+  expect(ioLetTrace).toEqual({ stdout: '1\n', steps: 1 });
+  expect(patterns).toHaveLength(12);
+  for (const [index, result] of patterns.entries()) {
+    expect(result).toMatchObject({ kind: 'executed', stdout: index % 4 === 0 ? '0\n' : '1\n' });
+    expect(result.uncaughtException).toBeUndefined();
+  }
+  expect(native).toHaveLength(6);
+  expect(display).toHaveLength(3);
+  for (const result of display) {
+    expect(result.stdout).toBe('1\n2\n');
+    expect(result.uncaughtException).toBeUndefined();
+  }
+  expect(recovery).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: 'stop' });
+  expect(results).toHaveLength(4);
+  for (const index of [0, 2]) {
+    expect(results[index]).toMatchObject({ kind: 'executed', stdout: '1\n' });
+    expect(results[index].uncaughtException).toBeUndefined();
+  }
+  for (const index of [1, 3])
+    expect(results[index]).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [expect.objectContaining({ message: expect.stringContaining('循環しています') })],
+    });
+});
+
+test.each([
+  ['f (+)=1+2\nmain=print(f (*))', '2\n'],
+  [String.raw`main=print((\(+) -> 3+4) (*))`, '12\n'],
+  ['main=print(case (*) of {(+) -> 3+4})', '12\n'],
+  ['main=print[1+2 | (+)<-[(*),(+)]]', '[2,3]\n'],
+  ['main=do {(+) <- pure (*); print(3+4)}', '12\n'],
+  ['main=print(let ((+),x)=((*),4::Int) in 3+x)', '12\n'],
+  ['data T=Int :# Int\nf ((:#) a b)=a+b\nmain=print(f(1:#2))', '3\n'],
+])('operator patterns bind local variables and retain constructors: %s', (source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test('qualified value operators cannot bind pattern variables', () => {
+  expect(executeProgram('haskell', 'f (Prelude.+)=1\nmain=print(1::Int)')).toMatchObject({ kind: 'compileError' });
+});
+
+test.each([
+  ['(#)=(++)\nmain=putStrLn("hello"#"world")', 'helloworld\n'],
+  ['(#)=(+)\nmain=print(1#2)', '3\n'],
+  ['(#)=(+)\nmain=print(0xA#0o7)', '17\n'],
+  ['(#)=(+)\nmain=print(1.5#2.5)', '4.0\n'],
+  ["(#) a b=[a,b]\nmain=putStrLn('a'#'b')", 'ab\n'],
+])('hash operators retain adjacent literal operands: %s', (source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test.each(['main=print("hello"#)', "main=print('a'#)", 'main=print(1#)', 'main=print(1.5#)'])(
+  'unbound hash operators after literals produce compile diagnostics: %s',
+  (source) => {
+    expect(executeProgram('haskell', source).kind).toBe('compileError');
+  }
+);
+
+test('large IO scopes execute and record within a bounded Node heap', { timeout: 30_000 }, () => {
+  const bundle = execFileSync(
+    'bun',
+    ['build', 'test/helpers/haskellScopeMemory.ts', '--target=node', '--packages=external'],
+    { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
+  );
+  const output = execFileSync('node', ['--max-old-space-size=192', '--input-type=module'], {
+    input: bundle,
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  const result = z
+    .object({
+      execution: z.object({ kind: z.literal('executed'), stdout: z.string(), finalTurtles: z.array(z.unknown()) }),
+      recording: z.object({
+        stdout: z.string(),
+        first: z.number(),
+        last: z.number(),
+        count: z.number(),
+        turtles: z.number(),
+      }),
+    })
+    .parse(JSON.parse(output));
+  expect(result.execution.stdout).toBe('1\n');
+  expect(result.execution.finalTurtles).toHaveLength(1);
+  expect(result.recording).toEqual({ stdout: '1\n', first: 1, last: 1, count: 4000, turtles: 1 });
+});
+
+test.each(['\u0085', '\u00A0', '\u1680', '\u2000', '\u2028', '\u2029', '\u202F', '\u205F', '\u3000', '\uFEFF'])(
+  'source string gaps reject non-ASCII whitespace: %j',
+  (char) => {
+    for (const gap of [char, ` \t${char}\n `]) {
+      const source = 'main=putStrLn "a\\' + gap + String.raw`\b"`;
+      expect(executeProgram('haskell', source).kind).toBe('compileError');
+    }
+  }
+);
+
+test.each([' ', '\t', '\n', '\v', '\f', '\r', ' \t\r\n\v\f '])('ASCII source string gaps remain valid: %j', (gap) => {
+  const source = 'main=putStrLn "a\\' + gap + String.raw`\b"`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'ab\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('bulk allocations stop at execution limits within a bounded Node heap', { timeout: 30_000 }, () => {
+  const bundle = execFileSync(
+    'bun',
+    ['build', 'test/helpers/haskellAllocationMemory.ts', '--target=node', '--packages=external'],
+    { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
+  );
+  const output = execFileSync('node', ['--max-old-space-size=512', '--input-type=module'], {
+    input: bundle,
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  const results = z
+    .array(
+      z.object({
+        name: z.string(),
+        finite: z.object({ kind: z.literal('executed'), stdout: z.string() }),
+        infinite: z.object({ kind: z.literal('limitExceeded'), limit: z.enum(['operations', 'time']) }),
+      })
+    )
+    .parse(JSON.parse(output));
+  expect(results).toHaveLength(19);
+  for (const result of results) expect(result.finite.stdout, result.name).toBe('1\n');
+});
+
+test.each(['infix', 'infixl', 'infixr'])(
+  'equal-precedence sections accept %s operators with side-associative operands',
+  (associativity) => {
+    const source = `${associativity} 5 <#>
+infixl 5 <+
+infixr 5 +>
+a <#> b=a*10+b
+a <+ b=a+b
+a +> b=a+b
+main=print((1 <+ 2 <#>) 4,(<#> 1 +> 2) 4)`;
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: '(34,43)\n',
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([
+  'main=print((1 <$ [2,3] ==) [1,1::Int])',
+  'main=print((Just 1 <* Just 2 ==) (Just (1::Int)))',
+  'main=print(((1 <$ [2,3]) ==) [1,1::Int])',
+  'main=print((== (Just 1 <* Just 2)) (Just (1::Int)))',
+])('sections accept non-associative library operators and parenthesized operands: %s', (source) => {
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'True\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['infixr 5', '(1 <+ 2 <#>) 4'],
+  ['infixl 5', '(<#> 1 <+ 2) 4'],
+  ['infix 5', '(1 <+ 2 <#>) 4'],
+  ['infix 5', '(<#> 1 <+ 2) 4'],
+  ['infixl 4', '(1 <+ 2 <#>) 4'],
+  ['infixr 4', '(<#> 1 <+ 2) 4'],
+])('sections reject an operand with fixity %s on the wrong side: %s', (fixity, section) => {
+  const source = `infix 5 <#>\n${fixity} <+\na <#> b=a*10+b\na <+ b=a+b\nmain=print(${section})`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'compileError' });
+});
+
+test('sections accept a tighter operand regardless of its associativity', () => {
+  const source = `infix 5 <#>
+infix 6 <+
+a <#> b=a*10+b
+a <+ b=a+b
+main=print((1 <+ 2 <#>) 4,(<#> 1 <+ 2) 4)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(34,43)\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['class (Eq a,Eq a)=>C a\ninstance C Int\nmain=print(1::Int)', '1\n'],
+  [
+    'class (Eq a,Eq a)=>C a where\n c::a->a->Bool\n c=(==)\ninstance C Int\nmain=print(c(1::Int)1,c(1::Int)2)',
+    '(True,False)\n',
+  ],
+  [
+    'class Eq a=>P a\nclass (P a,Eq a,P a)=>C a\ninstance P Int\ninstance C Int\nf::C a=>a->a->Bool\nf=(==)\nmain=print(f(1::Int)1,f(1::Int)2)',
+    '(True,False)\n',
+  ],
+])('redundant superclass predicates retain valid class evidence: %s', (source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout,
+    uncaughtException: undefined,
+  });
+});
+
+test('redundant superclass predicates still reject superclass cycles', () => {
+  expect(executeProgram('haskell', 'class(C a,C a)=>C a\nmain=print(1::Int)')).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [expect.objectContaining({ message: expect.stringContaining('循環しています') })],
+  });
+});
+
+test.each([
+  ['unused', 'main = print (1 :: Int)', '1\n'],
+  ['unambiguous', "main = print (c ['x'])", '1\n'],
+  ['deferred', "helper xs = c xs\nmain = print (helper ['x'])", '1\n'],
+])('allows %s potentially overlapping instances', (_name, body, stdout) => {
+  const source = `class C a where c :: a -> Int
+instance C [a] where c _ = 1
+instance C [Int] where c _ = 2
+${body}`;
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test.each([
+  'class C a where c :: a -> Int\ninstance C [a] where c _ = 1\ninstance C [b] where c _ = 2\nmain = print (1 :: Int)',
+  'class C a where c :: a -> Int\ninstance C [a] where c _ = 1\ninstance C [Int] where c _ = 2\nmain = print (c [1 :: Int])',
+  'class C a where c :: a -> Int\ninstance C [a] where c _ = 1\ninstance C [Int] where c _ = 2\nf :: [a] -> Int\nf = c\nmain = print (1 :: Int)',
+])('rejects duplicate declarations or ambiguous instance uses: %s', (source) => {
+  expect(executeProgram('haskell', source).kind).toBe('compileError');
+});
+
+test('retains an overlapping generic constraint until its helper is used', () => {
+  const declarations = `class C a where c :: a -> Int
+instance C (Either a a) where c _ = 1
+instance C (Either a b) where c _ = 2
+f x = c (if True then Left x else Right x)`;
+  expect(executeProgram('haskell', `${declarations}\nmain = print (1 :: Int)`)).toMatchObject({
+    kind: 'executed',
+    stdout: '1\n',
+    uncaughtException: undefined,
+  });
+  expect(executeProgram('haskell', `${declarations}\nmain = print (f (1 :: Int))`).kind).toBe('compileError');
+});
+
+test.each([
+  ['single do', 'main=(do (undefined::IO())) `seq` putStrLn "ok"', 'Prelude.undefined'],
+  ['let do', 'bad::IO()\nbad=do\n let x=1::Int\n undefined\nmain=bad `seq` putStrLn "ok"', 'Prelude.undefined'],
+  ['binding', 'bad::IO()\nbad=error "construction"\nmain=bad `seq` putStrLn "ok"', 'construction'],
+  ['function', 'bad::Int->IO()\nbad n=error "construction"\nmain=bad 1 `seq` putStrLn "ok"', 'construction'],
+  ['lambda', 'main=((\\n->error "construction"::IO()) (1::Int)) `seq` putStrLn "ok"', 'construction'],
+  ['local binding', 'main=do\n let bad::IO();bad=error "construction"\n bad `seq` putStrLn "ok"', 'construction'],
+  [
+    'guarded',
+    'bad::Int->IO()\nbad n | n>0=error "construction" | otherwise=pure()\nmain=bad 1 `seq` putStrLn "ok"',
+    'construction',
+  ],
+  [
+    'case',
+    'bad::Int->IO()\nbad n=case n of {1->error "construction";_->pure()}\nmain=bad 1 `seq` putStrLn "ok"',
+    'construction',
+  ],
+  ['strict application', 'bad::IO()\nbad=undefined\nmain=return $! bad', 'Prelude.undefined'],
+])('%s preserves IO construction demand', (_name, source, uncaughtException) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException });
+});
+
+test.each([
+  'main=(do (undefined::IO()); pure()) `seq` putStrLn "ok"',
+  'main=(do x<-(undefined::IO Int); pure x) `seq` putStrLn "ok"',
+  'bad::IO Int\nbad=pure(error "payload")\nmain=bad `seq` putStrLn "ok"',
+  'bad::IO()\nbad=do\n let unused=error "unused"::Int\n pure()\nmain=bad `seq` bad >> putStrLn "ok"',
+])('IO construction keeps sequencing and return payloads lazy: %s', (source) => {
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'ok\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('long IO let prefixes preserve shadowing without recursive compilation', () => {
+  const lets = Array.from({ length: 3000 }, (_, i) => ` let x=${i}::Int`).join('\n');
+  const source = `action::IO Int\naction=do\n${lets}\n pure x\nmain=action \`seq\` (action >>= print)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '2999\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['let expression', 'main=print(let infixr 5 <+>; x<+>y=x*10+y in (1::Int)<+>2<+>3)', '33\n'],
+  ['layout do let', 'main=do\n let infixr 5 <+>\n     x<+>y=x*10+y\n print((1::Int)<+>2<+>3)', '33\n'],
+  ['explicit do let', 'main=do {let {infixr 5 <+>; x<+>y=x*10+y}; print((1::Int)<+>2<+>3)}', '33\n'],
+  ['comprehension let', 'main=print[(1::Int)<+>2<+>3 | let infixr 5 <+>; x<+>y=x*10+y]', '[33]\n'],
+  ['where', 'main=print((1::Int)<+>2<+>3)\n where\n  infixr 5 <+>\n  x<+>y=x*10+y', '33\n'],
+])('local operator fixities preserve association in %s', (_name, source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+});
+
+test.each(['g::a->Int', 'infixl 4 `f`'])('class default clauses retain declaration separators: %s', (separator) => {
+  const source = `class C a where
+ f::a->Bool->Int
+ f _ True=1
+ ${separator}
+ f _ False=2
+instance C Int
+main=print(f(1::Int)False)`;
+  expect(executeProgram('haskell', source).kind).toBe('compileError');
+  const adjacent = source.replace(` ${separator}\n`, '');
+  expect(executeProgram('haskell', adjacent)).toMatchObject({
+    kind: 'executed',
+    stdout: '2\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(
+  ['Base', 'Example'].flatMap((module) =>
+    ['Eq', 'Ord', 'Show', 'Read', 'Enum', 'Bounded'].map((name) => ({ module, name }))
+  )
+)('user class $module.$name is not stock derivable', ({ module, name }) => {
+  const source = `module ${module} where
+import Prelude hiding (${name}(..))
+class ${name} a where
+ describe::a->String
+data T=T deriving ${name}
+main=putStrLn "ok"`;
+  expect(executeProgram('haskell', source).kind).toBe('compileError');
+});
+
+test('source modules retain actual stock deriving class identities', () => {
+  const source = `module Base where
+data T=Red|Blue deriving(Eq,Ord,Show,Read,Enum,Bounded)
+main=print(read "Blue"==Blue,Red<Blue,fromEnum Blue,[minBound..maxBound]::[T])`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(True,True,1,[Red,Blue])\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ...['Eq', 'Show', 'Read', 'Bounded'].map((cls) => `data T f=T(f Int) deriving ${cls}`),
+  'data T f=T(f(T f)) deriving Eq',
+  'data T f a=T(f(f a)) deriving Show',
+  'data T f a=T(f a a) deriving Eq',
+  'data T f g a=T(f(g a)a) deriving Eq',
+])('stock deriving rejects a context containing constructors or repeated variables: %s', (declaration) => {
+  expect(executeProgram('haskell', `${declaration}\nmain=print(1::Int)`).kind).toBe('compileError');
+});
+
+test.each([
+  ['data T f a=T(f a)', 'T(Just(1::Int))::T Maybe Int', 'T (Just 1)'],
+  ['data T f a b=T(f a b)', 'T(Left(1::Int))::T Either Int Bool', 'T (Left 1)'],
+  ['data T f g a=T(f(g a))', 'T(Just[1::Int])::T Maybe [] Int', 'T (Just [1])'],
+  ['data T f a=T(Maybe(f a))', 'T(Just[1::Int])::T [] Int', 'T (Just [1])'],
+  ['data T a=T(Maybe Int) a', 'T(Just 1)True::T Bool', 'T (Just 1) True'],
+])(
+  'stock deriving solves concrete instances and infers distinct-variable contexts: %s',
+  (declaration, value, shown) => {
+    const source = `${declaration} deriving(Eq,Ord,Show,Read)
+main=do
+ let x=${value}
+ print x
+ print(x==read(show x),compare x(read(show x)))`;
+    expect(executeProgram('haskell', source)).toMatchObject({
+      kind: 'executed',
+      stdout: `${shown}\n(True,EQ)\n`,
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test('stock deriving propagates constraints through mutually recursive datatypes', () => {
+  const source = `data A a=A(B a) deriving(Eq,Ord,Show,Read)
+data B a=B a (Maybe(A a)) deriving(Eq,Ord,Show,Read)
+main=do
+ let x=A(B(1::Int)Nothing)
+ print x
+ print(x==read(show x),compare x(read(show x)))`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'A (B 1 Nothing)\n(True,EQ)\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('stock Bounded deriving retains valid higher-kinded constraints', () => {
+  const source = `data F a=F a deriving(Show,Bounded)
+data T f a=T(f a) deriving(Show,Bounded)
+main=print(minBound::T F Bool,maxBound::T F Bool)`;
+  expect(executeProgram('haskell', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '(T (F False),T (F True))\n',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'f x=g []\ng ys=if null ys then "empty" else show ys++f ()\nmain=putStrLn(g [True])',
+  'f x=g []\ng ys=if null ys then True else ys==ys && f ()\nmain=print(g [True])',
+  'f x=g []\ng ys=if null ys then True else ys==ys && f ()\nmain=putStrLn "ok"',
+  'main=do\n let f x=g []\n     g ys=if null ys then True else ys==ys && f ()\n print(g [True])',
+  'main=print(g [True]) where\n f x=g []\n g ys=if null ys then True else ys==ys && f ()',
+  'run x=let f y=g [];g ys=if null ys then x==x else ys==ys && f () in g [True]\nmain=print(run(1::Int))',
+  'f x=g []\ng ys=h ys\nh zs=if null zs then True else zs==zs && f ()\nmain=print(g [True])',
+])('each inferred recursive binding must have an unambiguous context: %s', (source) => {
+  expect(executeProgram('haskell', source).kind).toBe('compileError');
+});
+
+test.each([
+  [
+    'f xs=g xs\ng ys=if null ys then "empty" else show ys++f []\nmain=do\n putStrLn(f [True])\n putStrLn(f [1::Int])',
+    '[True]empty\n[1]empty\n',
+  ],
+  ['f x=g ([]::[Bool])\ng ys=if null ys then "empty" else show ys++f ()\nmain=putStrLn(g [True])', '[True]empty\n'],
+  [
+    'f x=g []\ng ys=if null ys then True else sum ys>0 && f ()\nmain=print(g [0.5::Double],g [1::Int],f ())',
+    '(True,True,True)\n',
+  ],
+  ['f x=g []\ng ys=if null ys then show(sum ys) else f ()\nmain=print(g [0.5::Double],f ())', '("0.0","0")\n'],
+  ['f x=g []\ng ys=if null ys then 0 else sum ys+f ()\nmain=print(g [1::Int],g [0.5::Double])', '(1,0.5)\n'],
+  ['run x=let f ys=g ys;g zs=if null zs then x==x else zs==zs && f [] in g [True]\nmain=print(run(1::Int))', 'True\n'],
+])('recursive contexts preserve polymorphism, numeric defaulting and enclosing constraints: %s', (source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  const traced = traceProgram('haskell', source, source);
+  expect(traced.stdout).toBe(stdout);
+  expect(traced.uncaughtException).toBeUndefined();
+});
+
+test.each([
+  ['unusedPrint', 'greet name=do\n putStrLn name\n print 42\nmain=putStrLn "hi"', 'hi\n'],
+  ['usedPrint', 'greet name=do\n putStrLn name\n print 42\nmain=greet "hi"', 'hi\n42\n'],
+  ['unusedFractional', 'label x=show 1.5\nmain=putStrLn "hi"', 'hi\n'],
+  ['usedFractional', 'label x=show 1.5\nmain=putStrLn(label ())', '1.5\n'],
+  ['unusedEquality', 'h x=1==2\nmain=putStrLn "hi"', 'hi\n'],
+  ['usedEquality', 'h x=1==2\nmain=print(h ())', 'False\n'],
+  ['unusedConversion', 'h x=show(fromIntegral x)\nmain=putStrLn "hi"', 'hi\n'],
+  ['usedConversion', 'h x=show(fromIntegral x)\nmain=print(h(3::Int),h(4::Integer))', '("3","4")\n'],
+  ['unusedWhere', 'f n=n+1 where unused y=show 2\nmain=print(f(2::Int))', '3\n'],
+  ['unusedLet', 'main=do\n let unused y=show 2\n putStrLn "hi"', 'hi\n'],
+  ['usedLet', 'main=do\n let label y=show 2\n putStrLn(label True)\n putStrLn(label(1::Int))', '2\n2\n'],
+  [
+    'capturedPolymorphism',
+    'outer x=let local y=(x,y,show 2) in(local True,local(1::Int))\nmain=print(outer(3::Int))',
+    '((3,True,"2"),(3,1,"2"))\n',
+  ],
+  ['returnedNumeric', 'value x=42\nmain=print(value ()::Int,value True::Double)', '(42,42.0)\n'],
+  ['restrictedNumeric', 'main=do\n let value=42\n print(value::Double)', '42.0\n'],
+  [
+    'userClassAnnotated',
+    'class C a where c::a->String\ninstance C Integer where c _="integer"\nf x=c(1::Integer)\nmain=putStrLn(f ())',
+    'integer\n',
+  ],
+  ['partialVisible', 'f x=(x,show 42)\nmain=print(f True,f(3::Int))', '((True,"42"),(3,"42"))\n'],
+])('internal numeric defaulting preserves helper usage and polymorphism: %s', (_name, source, stdout) => {
+  expect(executeProgram('haskell', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
+  const traced = traceProgram('haskell', source, source);
+  expect(traced.stdout).toBe(stdout);
+  expect(traced.uncaughtException).toBeUndefined();
+});
+
+test.each([
+  ['nondefaultableHidden', 'f x=show []\nmain=putStrLn "hi"'],
+  [
+    'userClassHidden',
+    'class C a where c::a->String\ninstance C Integer where c _="integer"\nf x=c 1\nmain=putStrLn "hi"',
+  ],
+  [
+    'mixedHiddenUnused',
+    'data Proxy f=Proxy(f Int)\nclass C a where c::a->Bool\ninstance C(Maybe a) where c _=True\nmk::Proxy f->a->f a\nmk _ _=undefined\nf p=c(mk p 1)\nmain=putStrLn "hi"',
+  ],
+  [
+    'mixedHiddenUsed',
+    'data Proxy f=Proxy(f Int)\nclass C a where c::a->Bool\ninstance C(Maybe a) where c _=True\nmk::Proxy f->a->f a\nmk _ _=undefined\nf p=c(mk p 1)\nmain=print(f(Proxy(undefined::Maybe Int)))',
+  ],
+])('hidden nondefaultable constraints stay ambiguous even when the helper is used: %s', (_name, source) => {
+  const result = executeProgram('haskell', source);
+  expect(result.kind).toBe('compileError');
+  if (result.kind === 'compileError') expect(result.diagnostics[0]?.message).toContain('曖昧');
+});

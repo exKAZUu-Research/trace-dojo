@@ -1,0 +1,113 @@
+import { ExecutionLimitError } from '../../src/interpreter/limits';
+import { executeProgram, traceProgram } from '../../src/interpreter/program';
+
+const count = 10_000;
+const chain = Array.from({ length: count }, (_, index) => `type A${index}=A${index + 1}`).join('\n');
+const synonyms = [
+  `${chain}\ntype A${count}=Int\nmain=print(1::Int)`,
+  `${chain}\ntype A${count}=A0\nmain=print(1::Int)`,
+  'type A=B -> C\ntype B=C\ntype C=Int\nmain=print((id::A) 1)',
+  'type A a=B a\ntype B a=C a -> a\ntype C a=A a\nmain=print(1::Int)',
+];
+const chains = [
+  'main=print(' + Array.from({ length: 100 }, () => '1').join('+') + ')',
+  ...[3000, 6000].map((size) => 'main=print(' + Array.from({ length: size }, () => '1').join('+') + ')'),
+  'main=print(head(' + Array.from({ length: 3000 }, () => '1').join(':') + ':[]))',
+  'main=print(case [] of {' + Array.from({ length: 3000 }, () => '_').join(':') + ':_ -> 1; _ -> 0})',
+  'main=print(case [] of {[' + Array.from({ length: 3000 }, () => '_').join(',') + '] -> 1; _ -> 0})',
+  'main=print(' +
+    Array.from({ length: 50 }).reduce<string>(
+      (value) => '(' + Array.from({ length: 20 }, () => '1').join('+') + '+' + value + ')',
+      '1'
+    ) +
+    ')',
+  'main=print(' +
+    Array.from({ length: 50 }).reduce<string>(
+      (value) => '(' + value + '+' + Array.from({ length: 20 }, () => '1').join('+') + ')',
+      '1'
+    ) +
+    ')',
+  'main=print(1::Int)',
+];
+const patterns = [3000, 9000, 9500].flatMap((size) => {
+  const wildcards = Array.from({ length: size }, () => '_').join(',');
+  const binding = 'x,' + Array.from({ length: size - 1 }, () => '_').join(',');
+  return [
+    `main=print(case [] of {[${wildcards}] -> 1; _ -> 0})`,
+    `main=print((\\[${binding}]->x) [1..${size}::Int])`,
+    `[${binding}]=[1..${size}::Int]\nmain=print x`,
+    `main=do {[${binding}] <- return [1..${size}::Int]; print x}`,
+  ];
+});
+const flatSequences = [
+  ...['True', 'otherwise'].map(
+    (guard) => 'f | ' + Array.from({ length: 10_000 }, () => guard).join(',') + ' = 1::Int\nmain=print f'
+  ),
+  'f | let x=1::Int, True, let y=x+1, y==2 = y\nmain=print f',
+  'f | False,error "unused" = 1::Int | otherwise = 2\nmain=print f',
+  'main=print(length [1::Int | ' + Array.from({ length: 3000 }, () => 'True').join(',') + '])',
+  'main=print(do {' + Array.from({ length: 3000 }, () => 'Just ()').join(';') + '; Just(1::Int)})',
+];
+const ioLetResults = [6000, 10_000, 15_000, 20_000].map((size) => {
+  const source = 'main=do {' + Array.from({ length: size }, () => 'let {x=()}').join(';') + ';print(1::Int)}';
+  return executeProgram('haskell', source);
+});
+const sharedSignatures = (depth: number, polymorphic: boolean, constraint = ''): string => {
+  const argument = polymorphic ? ' a' : '';
+  const declarations = [
+    `type A0${argument}=${polymorphic ? 'a' : 'Int'}`,
+    ...Array.from(
+      { length: depth },
+      (_, index) => `type A${index + 1}${argument}=(A${index}${argument},A${index}${argument})`
+    ),
+  ].join('\n');
+  return `${declarations}\nf::${constraint}A${depth}${argument}->Bool\nf _=True\nmain=print(1::Int)`;
+};
+const signatureGraphs = {
+  valid: [
+    sharedSignatures(30, false),
+    sharedSignatures(31, false),
+    'class C a\n' + sharedSignatures(31, false, 'C A31=>'),
+    sharedSignatures(8, true, 'Eq a=>'),
+    sharedSignatures(8, true, 'Eq(A8 a)=>'),
+  ].map((source) => executeProgram('haskell', source)),
+  ambiguous: executeProgram('haskell', sharedSignatures(8, true, 'Eq b=>')),
+};
+const atomicLets =
+  'main=do -- atomic\n' + Array.from({ length: 10_000 }, () => ' let {x=()}').join('\n') + '\n print(1::Int)';
+const atomicLetRecording = traceProgram('haskell', atomicLets, atomicLets);
+const primitives = ['error(f(n+1))', 'errorWithoutStackTrace(f(n+1))', 'errorWithoutStackTrace("x"++f(n+1))'];
+const nativeResults = primitives.flatMap((rhs) => {
+  const source = `f n=${rhs}\nmain=putStrLn(f(0::Int))`;
+  let trace;
+  try {
+    traceProgram('haskell', source, source);
+    throw new Error('Expected an execution limit');
+  } catch (error) {
+    if (!(error instanceof ExecutionLimitError)) throw error;
+    trace = { kind: 'limitExceeded', limit: error.limit };
+  }
+  return [executeProgram('haskell', source), trace];
+});
+const displayResults = primitives.map((rhs) => {
+  const source = `f n=${rhs}\nmain=do\n let x=f(0::Int)\n let y=1::Int\n print y\n print(y+1)`;
+  return traceProgram('haskell', source, source);
+});
+process.stdout.write(
+  JSON.stringify({
+    synonyms: synonyms.map((source) => executeProgram('haskell', source)),
+    chains: chains.map((source) => executeProgram('haskell', source)),
+    flatSequences: flatSequences.map((source) => executeProgram('haskell', source)),
+    patterns: patterns.map((source) => executeProgram('haskell', source)),
+    ioLets: ioLetResults,
+    signatureGraphs,
+    ioLetTrace: {
+      stdout: atomicLetRecording.stdout,
+      uncaughtException: atomicLetRecording.uncaughtException,
+      steps: atomicLetRecording.traceItems.length,
+    },
+    native: nativeResults,
+    display: displayResults,
+    recovery: executeProgram('haskell', 'f 0="stop"; f n=error(f(n-1)); main=putStrLn(f(32::Int))'),
+  })
+);

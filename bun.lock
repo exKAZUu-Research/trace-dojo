@@ -31,6 +31,7 @@
         "@willbooster/shared-lib-react": "6.3.0",
         "@willbooster/tree-sitter-c": "40.0.0",
         "@willbooster/tree-sitter-go": "13.0.0",
+        "@willbooster/tree-sitter-haskell": "26.0.0",
         "@willbooster/tree-sitter-java": "35.0.0",
         "@willbooster/tree-sitter-javascript": "26.0.0",
         "@willbooster/tree-sitter-python": "21.0.0",
@@ -47,6 +48,7 @@
         "fast-deep-equal": "3.1.3",
         "get-east-asian-width": "1.7.0",
         "immer": "11.2.9",
+        "immutable": "5.1.4",
         "jsonwebtoken": "9.0.3",
         "jwks-rsa": "4.1.0",
         "koffi": "3.3.7",
@@ -748,6 +750,8 @@
 
     "@willbooster/tree-sitter-go": ["@willbooster/tree-sitter-go@13.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-cAU5YI2ZtWUCDmnhBylFK8YCZUtq3kymzAut7BnLhteKHvVdvEl9m8LbPOukk3pYVFjs+Mhn/IpRI92boHgQYA=="],
 
+    "@willbooster/tree-sitter-haskell": ["@willbooster/tree-sitter-haskell@26.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-x/R+3UhvksksFCLbGaS9x3mtyFl3+w+A/VIaiuCd3Ej1muxlvQkRblDIRRljB7t29lt9MhIABsminwArOfjoUg=="],
+
     "@willbooster/tree-sitter-java": ["@willbooster/tree-sitter-java@35.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-EwoPsE3cIHL0jNKIf5wyzwDi8CpahdQ3gqs2FM6RADADWEUjEURFItBYUGvMa2J0IzxQZVWULnJl3LvqVldMfg=="],
 
     "@willbooster/tree-sitter-javascript": ["@willbooster/tree-sitter-javascript@26.0.0", "", { "peerDependencies": { "@willbooster/web-tree-sitter": "^23.0.0" }, "optionalPeers": ["@willbooster/web-tree-sitter"] }, "sha512-GhGnCSkd4PVJPK1GbrDfUwmygkK0R5cr3VQdMt6aKcY+mU3Q8PNPmGFlus5rw7W6e9G3l0/mKTw3L+lLhog8Lg=="],
@@ -1199,6 +1203,8 @@
     "ignore": ["ignore@7.0.14", "", {}, "sha512-wCBiZ77u1tuWde6G/nfOtLaCTYcFDU5yCzARzK10y+rLhzYoL7a7yEemcopcc2Mzow7gZOIjnV2ym1NYmdiJOQ=="],
 
     "immer": ["immer@11.2.9", "", {}, "sha512-IQ4UEtXjZjyefyWjtLEDXUSrF6T2hwjKPi6BIJl3bY/2XXW24d6cNGdXJSBOA/+KNnuiXkZY6DR0C3efolhitA=="],
+
+    "immutable": ["immutable@5.1.4", "", {}, "sha512-p6u1bG3YSnINT5RQmx/yRZBpenIl30kVxkTLDyHLIMk0gict704Q9n+thfDI7lTRm9vXdDYutVzXhzcThxTnXA=="],
 
     "import-fresh": ["import-fresh@3.3.1", "", { "dependencies": { "parent-module": "^1.0.0", "resolve-from": "^4.0.0" } }, "sha512-TR3KfrTZTYLPB6jUjfx6MF9WcWrHL9su5TObK4ZkYgBdWKPOFoSoQIdEuTuR82pmtxH2spWG9h6etwfr1pLBqQ=="],
 
