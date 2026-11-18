@@ -12,6 +12,7 @@ import {
   type AccessorProperty,
   HOLE,
   isAccessor,
+  isCallable,
   isObject,
   JsArray,
   JsFunction,
@@ -72,8 +73,8 @@ interface Context {
   maxArrayLength: number;
   /** As `util.inspect`'s option, which `%o` sets: an array also shows its `[length]`. */
   showHidden: boolean;
-  /** As `util.inspect`'s options of the same names. */
-  sorted: boolean;
+  /** As `util.inspect`'s options of the same names; `sorted` is `true`, `false`, or the comparator the program gave. */
+  sorted: boolean | Value;
   getters: boolean | 'get' | 'set';
   numericSeparator: boolean;
   maxStringLength: number;
@@ -86,7 +87,7 @@ export interface InspectOptions {
   compact?: number | boolean;
   maxArrayLength?: number;
   showHidden?: boolean;
-  sorted?: boolean;
+  sorted?: boolean | Value;
   getters?: boolean | 'get' | 'set';
   numericSeparator?: boolean;
   maxStringLength?: number;
@@ -288,11 +289,29 @@ function appendProperties(
   const properties = keys.map(([owner, key]) => formatProperty(ctx, owner, recurseTimes, key, value));
   if (ctx.sorted && value.collection) {
     output.push(...properties);
-    output.sort();
+    sortOutput(ctx, output);
     return;
   }
-  if (ctx.sorted) properties.sort();
+  if (ctx.sorted) sortOutput(ctx, properties);
   output.push(...properties);
+}
+
+/** Sorts entries as Node.js does: by text for `sorted: true`, or with the comparator the program gave. */
+function sortOutput(ctx: Context, entries: string[]): void {
+  const { runtime, sorted } = ctx;
+  if (sorted === true) {
+    entries.sort();
+    return;
+  }
+  if (!isCallable(sorted))
+    runtime.throwError(
+      'TypeError',
+      `The comparison function must be either a function or undefined: ${runtime.describePlain(sorted)}`
+    );
+  entries.sort((a, b) => {
+    const order = runtime.toNumber(runtime.call(sorted, undefined, [a, b]));
+    return Number.isNaN(order) ? 0 : order;
+  });
 }
 
 /**

@@ -1566,6 +1566,16 @@ function main() {
 main();`,
   ],
   [
+    'console.dir sorted with a comparator',
+    `console.dir({ b: 2, a: 1 }, { sorted: (a, b) => b.localeCompare(a) });
+console.dir(new Map([["a", 1], ["b", 2]]), { sorted: (a, b) => { console.log("cmp", a, b); return b.localeCompare(a); } });
+console.dir([3, 1, 2], { sorted: () => 0 });
+try { console.dir({ a: 1, b: 2 }, { sorted: () => { throw new Error("boom"); } }); } catch (e) { console.log("caught", e.message); }
+try { console.dir({ b: 1, a: 2 }, { sorted: 1 }); } catch (e) { console.log(e.constructor.name, e.message); }
+console.dir({ b: 1, a: 2 }, { sorted: true });
+console.dir({ b: 1, a: 2 }, { sorted: () => "x" });`,
+  ],
+  [
     'inherited getters run on the inspected instance',
     `class C { #s = 7; v = 3; get double() { return this.v * 2; } get secret() { return this.#s; } }
 console.dir(new C(), { showHidden: true, getters: true });

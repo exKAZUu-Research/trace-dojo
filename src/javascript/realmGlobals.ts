@@ -595,7 +595,7 @@ function defineConsoleDir(
         maxArrayLength: limit('maxArrayLength'),
         maxStringLength: limit('maxStringLength'),
         showHidden: toBoolean(option('showHidden')),
-        sorted: toBoolean(option('sorted')),
+        sorted: sortedOption(option('sorted')),
         getters: getters === 'get' || getters === 'set' ? getters : toBoolean(getters),
         numericSeparator: toBoolean(option('numericSeparator')),
       })
@@ -692,4 +692,9 @@ function defineTurtle(builder: RealmBuilder): void {
 /** The state of a turtle the Turtle methods have checked is one. */
 function turtleStateOf(turtle: JsObject): NonNullable<JsObject['turtle']> {
   return turtle.turtle as NonNullable<JsObject['turtle']>;
+}
+
+/** `console.dir`'s `sorted` option: a comparator or other truthy value as given, which Node.js passes to its sort. */
+function sortedOption(value: Value): boolean | Value {
+  return toBoolean(value) && value !== true ? value : toBoolean(value);
 }
