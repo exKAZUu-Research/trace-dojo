@@ -1,5 +1,6 @@
 // code-gauge-allow-file fileNcss 535 -- PHP operators share coercion and comparison helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
+import { platformBinary } from '../interpreter/platformMath';
 import {
   boolValue,
   compareBytes,
@@ -16,7 +17,6 @@ import {
   valueName,
 } from './conversions';
 import { deprecated, notice, throwError, type UpdateWarning, warn, withCleanupExceptions } from './errors';
-import { cPow } from './floatPow';
 import { ExitSignal, PhpThrow, rt } from './runtime';
 import {
   copyValueSlot,
@@ -265,13 +265,13 @@ function power(a: bigint | number, b: bigint | number, pending?: PhpThrow): bigi
         exponent--;
         const product = result * factor;
         if (product < INT_MIN || product > INT_MAX)
-          return Number(result) * Number(factor) * cPow(Number(factor), Number(exponent));
+          return Number(result) * Number(factor) * platformBinary('pow', Number(factor), Number(exponent));
         result = product;
       } else {
         exponent /= 2n;
         const square = factor * factor;
         if (square < INT_MIN || square > INT_MAX)
-          return Number(result) * cPow(Number(factor) * Number(factor), Number(exponent));
+          return Number(result) * platformBinary('pow', Number(factor) * Number(factor), Number(exponent));
         factor = square;
       }
     }
@@ -280,7 +280,7 @@ function power(a: bigint | number, b: bigint | number, pending?: PhpThrow): bigi
   if (Number(a) === 0 && Number(b) < 0) {
     operatorDiagnostic(pending, deprecated, 'Power of base 0 and negative exponent is deprecated');
   }
-  return cPow(Number(a), Number(b));
+  return platformBinary('pow', Number(a), Number(b));
 }
 
 /**

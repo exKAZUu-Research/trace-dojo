@@ -458,3 +458,26 @@ $array = [
     $undefinedObject
     ->property
 ];
+
+try {
+    $undefinedReceiver
+        ->method
+        ();
+} catch (Error $error) { echo $error->getMessage(), ' at ', $error->getLine(), "\n"; }
+$array = [
+    1.5 =>
+    null ??
+    "left" .
+    "right"
+];
+$array = [
+    1.5 =>
+    null ??
+    fn() => 1
+];
+$counter = 0;
+$array = [
+    1.5 =>
+    $counter +=
+    1
+];

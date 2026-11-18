@@ -923,7 +923,7 @@ function instanceOfExpression(e: Extract<Expr, { k: 'instanceof' }>): boolean {
   let target: PhpClass | undefined;
   if (e.cls.k === 'expr') {
     const right = ev(e.cls.e);
-    rt().row = e.cls.e.row;
+    rt().row = e.cls.fetchRow ?? compiledOperandRow(e.cls.e);
     if (right instanceof PhpObject && !right.isResource) target = right.cls;
     else if (typeof right === 'string') target = findClass(right);
     else throwError('Error', 'Class name must be a valid object or a string');

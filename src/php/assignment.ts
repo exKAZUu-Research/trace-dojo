@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 896 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 900 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -94,7 +94,7 @@ export function placeOf(e: Expr, mode: PlaceMode = 'write', through = false): Pl
         if (e.index === undefined) throwError('Error', 'Cannot append to $GLOBALS');
         return namedPlace(e.index, mode, (name) => new VarPlace(runtime.globalFrame, name, 'global'));
       }
-      return dimensionPlace(e, mode);
+      return dimensionPlace(e, mode, through);
     }
     case 'prop': {
       return instancePropertyPlace(e, mode, through);
@@ -125,27 +125,28 @@ function namedPlace(name: Expr | string, mode: PlaceMode, locate: (name: string)
   return mode === 'deferred' || mode === 'coalesce' ? deferredPlace(resolve, () => readForIsset(resolve())) : resolve();
 }
 
-// code-gauge-allow functionNcss 34 -- Shares operand evaluation and parent writes across assignment modes.
+// code-gauge-allow functionNcss 35 -- Shares operand evaluation and parent writes across assignment modes.
 // code-gauge-allow functionCognitiveComplexity 24 -- Shares operand evaluation and parent writes across assignment modes.
-function dimensionPlace(e: Extract<Expr, { k: 'idx' }>, mode: PlaceMode): Place {
+function dimensionPlace(e: Extract<Expr, { k: 'idx' }>, mode: PlaceMode, through: boolean): Place {
   const parent = placeOf(e.base, mode, true);
   const readKey = e.index === undefined ? undefined : prepareOperand(e.index);
   const resolve = (writeMode: WriteMode, beforeOffsetGet?: BeforeOffsetGet, warning?: UpdateWarning): Place => {
     const row = dimensionWriteRow(e);
     const lookupRow =
       e.base.k === 'idx' || e.base.k === 'prop' || e.base.k === 'sprop' ? compiledOperandRow(e.base) : undefined;
+    const options = { update: writeMode !== 'write', lookupRow, fetchDimension: through };
     let fetch: Place | undefined;
     let container: PhpArray | PhpObject | string | undefined;
     if (mode === 'coalesce') {
       fetch = nestedPlace(parent, writeMode);
       rt().row = row;
-      container = writableContainer(fetch, undefined, writeMode !== 'write', lookupRow);
+      container = writableContainer(fetch, undefined, options);
     }
     const { key, keyWarning } = readDimensionKey(readKey, warning);
     rt().row = row;
     fetch ??= nestedPlace(parent, writeMode);
     rt().row = row;
-    container ??= writableContainer(fetch, undefined, writeMode !== 'write', lookupRow);
+    container ??= writableContainer(fetch, undefined, options);
     if (container instanceof PhpObject) {
       if (beforeOffsetGet && !isArrayAccess(container)) {
         beforeOffsetGet();
@@ -318,8 +319,12 @@ class StaticPlace implements Place {
   }
 
   typeSources(): Ref['typedBy'] {
+    return this.reference()?.typeOwners();
+  }
+
+  reference(): Ref | undefined {
     const target = this.target;
-    return target.isRef ? target.typeOwners() : undefined;
+    return target.isRef ? target : undefined;
   }
 
   declaration(): PropDecl | undefined {
@@ -388,6 +393,10 @@ function propPlace(object: PhpObject, name: string): Place {
       reportedStaticAccess = true;
     return undefined;
   };
+  const reference = (): Ref | undefined => {
+    const slot = object.props.get(lookup(false)?.key ?? name);
+    return slot instanceof Ref && slot.isRef ? slot : undefined;
+  };
   return {
     get: (operation) => {
       if (operation) lookup(true);
@@ -400,11 +409,8 @@ function propPlace(object: PhpObject, name: string): Place {
     ref: () => propRef(object, name, scope),
     unset: () => unsetProp(object, name, scope),
     declaration: () => lookup(false),
-    typeSources: () => {
-      const decl = lookup(false);
-      const ref = object.props.get(decl?.key ?? name);
-      return ref instanceof Ref && ref.isRef ? ref.typeOwners() : undefined;
-    },
+    reference,
+    typeSources: () => reference()?.typeOwners(),
     getForIsset: () => readProp(object, name, scope, 'coalesce'),
     warnUndefined: (
       warning = (emit) => {
@@ -896,30 +902,33 @@ export function destructureAssignment(target: Extract<Expr, { k: 'list' }>, expr
   const row = !byRef && isCompiledVariable(expression) ? listOperandRow(target) : compiledOperandRow(expression);
   if (!byRef) return destructure(target, prepareOperand(expression)(row), undefined, row);
   if (foreachSubjectWritable(expression)) {
-    const source = new RefPlace(placeOf(expression, 'write', true).ref());
-    return destructure(target, source.get(), source, row);
+    const slot = placeOf(expression, 'write', true).ref();
+    return destructure(target, slot.v, slot.rc === 0 ? 'temporary' : new RefPlace(slot), row);
   }
   const call = expression.k === 'call' || expression.k === 'mcall' || expression.k === 'scall';
   runtime.lastReturnRef = undefined;
   const value = ev(expression);
   const returned = call ? runtime.lastReturnRef : undefined;
   runtime.lastReturnRef = undefined;
-  if (call && !returned) notice('Attempting to set reference to non referenceable value');
-  return destructure(target, value, returned ? new RefPlace(returned) : undefined, row);
+  return destructure(target, value, returned ? new RefPlace(returned) : call ? 'temporary' : undefined, row);
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the list's fetch line and lazy writable source in assignment order.
+// code-gauge-allow functionCognitiveComplexity 29 -- Keeps the list's fetch line and lazy writable source in assignment order.
 // code-gauge-allow functionNcss 31 -- Keeps reference ownership and ordered target writes together.
 export function destructure(
   target: Extract<Expr, { k: 'list' }>,
   value: Value,
-  source?: RefPlace,
+  source?: RefPlace | 'temporary',
   fetchRow = target.row
 ): Value {
   const runtime = rt();
   const writableSource =
-    source ??
-    (value instanceof PhpArray && hasReferenceItem(target) ? new RefPlace(Ref.temporary(share(value))) : undefined);
+    source === 'temporary'
+      ? undefined
+      : (source ??
+        (value instanceof PhpArray && hasReferenceItem(target)
+          ? new RefPlace(Ref.temporary(share(value)))
+          : undefined));
   if (writableSource) {
     writableSource.target.isRef = true;
     runtime.holdTemporaryReference(writableSource.target);
@@ -937,7 +946,7 @@ export function destructure(
     if (writableSource) value = writableSource.get();
     if (byRef && writableSource && (value instanceof PhpArray || value === null || value === false))
       value = writableContainer(writableSource, value === false ? null : value);
-    destructureItem(item, value, key, source !== undefined, byRef);
+    destructureItem(item, value, key, source, byRef);
     if (item.target.k === 'list') fetchRow = runtime.row;
     else if (item.byRef) fetchRow = itemRow;
     else fetchRow = item.target.row;
@@ -955,34 +964,44 @@ function listOperandRow(target: Expr): number {
   return target.row;
 }
 
-function destructureItem(item: ListItem, value: Value, key: Value, writable: boolean, byRef: boolean): void {
-  if (item.byRef) {
-    bindRef(item.target, destructuredReference(value, key, writable));
+function destructureItem(
+  item: ListItem,
+  value: Value,
+  key: Value,
+  source: RefPlace | 'temporary' | undefined,
+  byRef: boolean
+): void {
+  if (byRef) {
+    const slot = listElementReference(value, key, source);
+    if (item.target.k === 'list')
+      destructure(item.target, slot.v, source === 'temporary' ? source : new RefPlace(slot), rt().row);
+    else bindRef(item.target, slot);
     return;
   }
-  if (byRef && item.target.k === 'list') {
-    const slot = destructuredReference(value, key, writable);
-    destructure(item.target, slot.v, new RefPlace(slot), rt().row);
-    return;
-  }
-  let element: Value;
-  if (value instanceof PhpArray) {
-    element = readElement(value, toKey(key), false);
-  } else if (value instanceof PhpObject) {
-    element = readIndex(value, key);
-  } else {
-    if (value !== null) warn(`Cannot use ${debugType(value)} as array`);
-    element = null;
-  }
+  const element = readListElement(value, key);
   if (item.target.k === 'list') destructure(item.target, element, undefined, rt().row);
   else placeOf(item.target).set(share(element));
 }
 
-function destructuredReference(value: Value, key: Value, writable: boolean): Ref {
+function readListElement(value: Value, key: Value): Value {
+  if (value instanceof PhpArray) return readElement(value, toKey(key), false);
+  if (value instanceof PhpObject) return readIndex(value, key);
+  if (value !== null) warn(`Cannot use ${debugType(value)} as array`);
+  return null;
+}
+
+function listElementReference(value: Value, key: Value, source: RefPlace | 'temporary' | undefined): Ref {
+  if (source === 'temporary') {
+    notice('Attempting to set reference to non referenceable value');
+    return Ref.temporary(readListElement(value, key));
+  }
   if (value instanceof PhpArray) return new ElementPlace(value, toKey(key)).ref();
   if (value instanceof PhpObject) return arrayAccessPlace(value, key).ref();
-  if (typeof value === 'string') throwError('Error', 'Cannot create references to/from string offsets');
-  if (writable && value !== null) throwError('Error', 'Cannot use a scalar value as an array');
+  if (typeof value === 'string') {
+    stringOffset(value, key);
+    throwError('Error', 'Cannot create references to/from string offsets');
+  }
+  if (source && value !== null) throwError('Error', 'Cannot use a scalar value as an array');
   if (value !== null) warn(`Cannot use ${debugType(value)} as array`);
   return Ref.temporary(null);
 }

@@ -1662,12 +1662,12 @@ export class Converter extends DeclarationConverter {
   }
 
   // code-gauge-allow functionCognitiveComplexity 22 -- Selects the emitting operand across the expression forms PHP can fold.
-  // code-gauge-allow functionNcss 33 -- Carries the shared folding row through the operands selected by each expression.
+  // code-gauge-allow functionNcss 35 -- Carries the shared folding row through the operands selected by each expression.
   private resultOpcodeRow(value: Expr, node: Node): number {
     if (node.type === 'heredoc' || node.type === 'nowdoc') return node.startPosition.row + 1;
     switch (value.k) {
       case 'arrow': {
-        return node.parent?.nextSibling?.startPosition.row ?? node.endPosition.row;
+        return followingTokenRow(node);
       }
       case 'closure': {
         return node.endPosition.row;
@@ -1696,8 +1696,11 @@ export class Converter extends DeclarationConverter {
         break;
       }
       case 'assign': {
-        if (value.target.k === 'idx') return compiledOperandRow(value.value);
+        if (value.target.k !== 'var') return compiledOperandRow(value.value);
         break;
+      }
+      case 'assignOp': {
+        return compiledOperandRow(value.value);
       }
     }
     return compiledOperandRow(value);
@@ -1712,7 +1715,7 @@ export class Converter extends DeclarationConverter {
     }
     if (this.compiledValue(value, true) === undefined) return value.opcodeRow ?? compiledOperandRow(value);
     if (value.op !== '.') return this.arrayValueFoldRow(node);
-    if (directiveLiteral(node, value)) return node.parent?.nextSibling?.startPosition.row ?? node.endPosition.row;
+    if (directiveLiteral(node, value)) return followingTokenRow(node);
     return this.arrayValueFoldRow(node);
   }
 
@@ -1983,6 +1986,15 @@ export function castType(node: Node): { spelling: string; type: string } {
   const spelling = lower(node.childForFieldName('type')?.text.replaceAll(/[\s()]/g, '') ?? '');
   const type = { integer: 'int', double: 'float', boolean: 'bool', binary: 'string' }[spelling] ?? spelling;
   return { spelling, type };
+}
+
+function followingTokenRow(node: Node): number {
+  for (let current: Node | null = node; current; current = current.parent) {
+    let sibling = current.nextSibling;
+    while (sibling?.type === 'comment') sibling = sibling.nextSibling;
+    if (sibling) return sibling.startPosition.row;
+  }
+  return node.endPosition.row;
 }
 
 function arrayFoldRow(node: Node): number {

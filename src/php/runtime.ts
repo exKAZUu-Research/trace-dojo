@@ -8,7 +8,7 @@ import type { Expr, FunctionDecl, Program } from './ast';
 import { collectScopeVars } from './astAnalysis';
 import { dec, enc, stringToBytes } from './bytes';
 import type { CompileNotice } from './converter';
-import { arrayIsShared, collectGarbage, GC_THRESHOLD_DEFAULT, releaseDropped } from './garbage';
+import { arrayIsShared, collectGarbage, GC_THRESHOLD_DEFAULT, releaseDropped, type ReleaseMode } from './garbage';
 import { GcRoots } from './gcRoots';
 import { ObjectHeap } from './objectHeap';
 import { setArraySharingCheck } from './places';
@@ -316,6 +316,7 @@ export class Runtime {
    * holds, so that releasing what a callback drops must wait until they return.
    */
   nativeCalls = 0;
+  nativeReleaseMode: ReleaseMode = 'ordinary';
 
   /** The values the callbacks of each running native function returned, which it holds until it returns. */
   nativeHeld: unknown[][] = [];
@@ -327,7 +328,7 @@ export class Runtime {
       for (const value of dropped) this.pendingGcRoots.add(value instanceof Ref ? value.v : value);
     }
     if (fromNative) {
-      releaseDropped(this, dropped, true);
+      releaseDropped(this, dropped, true, this.nativeReleaseMode);
       return;
     }
     for (const value of dropped) this.pendingReleases.push(value);
@@ -336,10 +337,20 @@ export class Runtime {
 
   durableReleaseVersion = 0;
 
-  flushReleases(fromNative = false): void {
+  flushReleases(fromNative = false, mode: ReleaseMode = 'ordinary'): void {
     if (this.pendingReleases.length === 0) return;
     const released = this.pendingReleases.splice(0);
-    releaseDropped(this, released, fromNative);
+    releaseDropped(this, released, fromNative, mode);
+  }
+
+  withNativeReleaseMode<T>(mode: ReleaseMode, work: () => T): T {
+    const previous = this.nativeReleaseMode;
+    this.nativeReleaseMode = mode;
+    try {
+      return work();
+    } finally {
+      this.nativeReleaseMode = previous;
+    }
   }
 
   discardNativeResult(value: Value, start: number, temporaryStart = Infinity): void {

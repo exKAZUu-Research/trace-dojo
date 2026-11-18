@@ -25,3 +25,19 @@ try { [$first, &$value] = $typed->nullable; }
 catch (Error $error) { echo $error->getMessage(), "\n"; }
 try { [&$value] = ListSource::$shared; }
 catch (Error $error) { echo $error->getMessage(), "\n"; }
+
+class DynamicListSource {
+    public function __get(string $name) { echo "getting ", $name, "\n"; return []; }
+}
+$dynamic = new DynamicListSource();
+[&$value] = $dynamic->missing;
+var_dump($value);
+$string = 'value';
+try { [1.5 => &$value] = $string; }
+catch (Error $error) { echo $error->getMessage(), "\n"; }
+
+$falseSource = false;
+set_error_handler(function () { throw new Exception('unexpected deprecation'); }, E_DEPRECATED);
+[$falseSource[0][0], &$tail] = $falseSource;
+restore_error_handler();
+var_dump($falseSource);

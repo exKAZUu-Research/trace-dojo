@@ -28,6 +28,7 @@ export interface Place {
   assign?(value: () => Value): Value;
   /** The location as a reference, which `=&`, by-reference arguments, and `global` share. */
   ref(): Ref;
+  reference?(): Ref | undefined;
   unset(): void;
   /** The declaration of the property the place is, whose type limits what the place holds. */
   declaration?(): PropDecl | undefined;
@@ -100,6 +101,11 @@ export class VarPlace implements Place {
     return this.frame.vars.get(this.name)?.typeOwners();
   }
 
+  reference(): Ref | undefined {
+    const ref = this.frame.vars.get(this.name);
+    return ref?.isRef ? ref : undefined;
+  }
+
   ref(): Ref {
     let ref = this.frame.vars.get(this.name);
     if (!ref) {
@@ -152,6 +158,10 @@ export class RefPlace implements Place {
     return this.target;
   }
 
+  reference(): Ref | undefined {
+    return this.target.isRef ? this.target : undefined;
+  }
+
   unset(): void {
     throwError('Error', 'Cannot unset this expression');
   }
@@ -199,6 +209,11 @@ export class ElementPlace implements Place {
   typeSources(): Ref['typedBy'] {
     const ref = this.key === undefined ? undefined : this.array.map.get(this.key);
     return ref instanceof Ref ? ref.typeOwners() : undefined;
+  }
+
+  reference(): Ref | undefined {
+    const slot = this.key === undefined ? undefined : this.array.map.get(this.key);
+    return slot instanceof Ref && slot.isRef ? slot : undefined;
   }
 
   ref(): Ref {
@@ -251,10 +266,9 @@ export class ValuePlace implements Place {
 export function writableContainer(
   place: Place,
   value?: Value,
-  update = false,
-  lookupRow?: number
+  options?: { update?: boolean; lookupRow?: number; fetchDimension?: boolean }
 ): PhpArray | PhpObject | string {
-  if (value === undefined) value = readContainerForWrite(place, update, lookupRow);
+  if (value === undefined) value = readContainerForWrite(place, options?.update ?? false, options?.lookupRow);
   if (value instanceof PhpArray) {
     if (arrayIsShared(value)) {
       const copy = value.copy();
@@ -265,7 +279,8 @@ export function writableContainer(
   }
   if (value === undefined || value === null) return initializeArray(place);
   if (value === false) {
-    deprecated('Automatic conversion of false to array is deprecated');
+    if (!options?.fetchDimension || !place.reference?.())
+      deprecated('Automatic conversion of false to array is deprecated');
     return initializeArray(place);
   }
   if (value instanceof PhpObject) return value;

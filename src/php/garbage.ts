@@ -1,7 +1,7 @@
-// code-gauge-allow-file fileNcss 992 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 993 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
-import { withCleanupExceptions, withPendingException } from './errors';
-import { type Frame, PhpThrow, type Runtime } from './runtime';
+import { type CleanupException, withCleanupExceptions, withPendingException } from './errors';
+import { ExitSignal, type Frame, PhpThrow, type Runtime } from './runtime';
 import {
   arrayHolderCount,
   type ClosureData,
@@ -212,12 +212,12 @@ export function releaseDropped(
   runtime: Runtime,
   dropped: unknown[],
   fromNative: boolean,
-  stopOnException = false
+  mode: ReleaseMode = 'ordinary'
 ): void {
   if (runtime.shuttingDown || runtime.exhausted) return;
   const collectible = releaseCollectionDescendants(runtime, dropped);
   try {
-    releaseDroppedNow(runtime, dropped, fromNative, stopOnException);
+    releaseDroppedNow(runtime, dropped, fromNative, mode);
   } finally {
     for (const object of collectible)
       if (runtime.objects.get(object.id) === object) runtime.collectingObjects.add(object);
@@ -273,7 +273,7 @@ function releaseCollectionDescendants(runtime: Runtime, dropped: unknown[]): Php
 
 // code-gauge-allow functionNcss 53 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function releaseDroppedNow(runtime: Runtime, dropped: unknown[], fromNative: boolean, stopOnException: boolean): void {
+function releaseDroppedNow(runtime: Runtime, dropped: unknown[], fromNative: boolean, mode: ReleaseMode): void {
   if (runtime.shuttingDown || runtime.exhausted) return;
   dropped = dropped.filter(
     (value) =>
@@ -307,7 +307,7 @@ function releaseDroppedNow(runtime: Runtime, dropped: unknown[], fromNative: boo
     retireArrays(runtime, arrayStorage);
     return;
   }
-  const release = new Release(runtime, freed, roots, fromNative, stopOnException);
+  const release = new Release(runtime, freed, roots, fromNative, mode);
   const active = release.active;
   releasing++;
   let failure: unknown;
@@ -325,7 +325,7 @@ function releaseDroppedNow(runtime: Runtime, dropped: unknown[], fromNative: boo
       pendingReleaseObjects.delete(object);
     }
     if (activeReleaseObjects.size === 0) releaseSequence = 0;
-    if (!failed || failure instanceof PhpThrow)
+    if (!failed || recoverableReleaseFailure(mode, failure))
       withPendingException(runtime, failure instanceof PhpThrow ? failure : undefined, () =>
         retireArrays(runtime, arrayStorage)
       );
@@ -342,6 +342,8 @@ class ReleaseFinish {
   constructor(readonly object: PhpObject) {}
 }
 
+export type ReleaseMode = 'ordinary' | 'shutdown' | 'bulk-removal';
+
 class Release {
   readonly active: PhpObject[] = [];
   private readonly visited = new Set<PhpObject>();
@@ -354,7 +356,7 @@ class Release {
     private readonly freed: Set<PhpObject>,
     private roots: Set<unknown>,
     private readonly fromNative: boolean,
-    private readonly stopOnException: boolean
+    private readonly mode: ReleaseMode
   ) {
     for (const object of freed) this.track(object);
   }
@@ -364,14 +366,18 @@ class Release {
     this.enqueue(pending, values);
     let work = 0;
     try {
-      withCleanupExceptions(this.runtime, (onFailure) => {
-        while (pending.length > 0) {
-          if ((++work & 255) === 0) this.runtime.budget.checkClock();
-          const item = pending.pop();
-          this.unhold(item);
-          this.releaseValue(item, pending, onFailure);
-        }
-      });
+      withCleanupExceptions(
+        this.runtime,
+        (onFailure) => {
+          while (pending.length > 0) {
+            if ((++work & 255) === 0) this.runtime.budget.checkClock();
+            const item = pending.pop();
+            this.unhold(item);
+            this.releaseValue(item, pending, onFailure);
+          }
+        },
+        this.mode === 'bulk-removal' ? 'latest' : 'prefer-exit'
+      );
     } finally {
       for (const item of pending) {
         this.unhold(item);
@@ -382,7 +388,7 @@ class Release {
 
   // code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  private releaseValue(item: unknown, pending: unknown[], onFailure: (error: PhpThrow) => void): void {
+  private releaseValue(item: unknown, pending: unknown[], onFailure: (error: CleanupException) => void): void {
     if (item instanceof ReleaseFinish) {
       this.runtime.freeObject(item.object);
       pendingReleaseObjects.delete(item.object);
@@ -404,8 +410,7 @@ class Release {
         try {
           owner.resume(item);
         } catch (error) {
-          if (!(error instanceof PhpThrow)) throw error;
-          onFailure(error);
+          this.retainFailure(error, onFailure);
         }
         return;
       }
@@ -420,14 +425,13 @@ class Release {
     }
   }
 
-  private releaseNative(object: PhpObject, onFailure: (error: PhpThrow) => void): void {
+  private releaseNative(object: PhpObject, onFailure: (error: CleanupException) => void): void {
     const native = object.internal as { beforeRelease?: () => boolean } | undefined;
     if (!native?.beforeRelease) return;
     try {
       if (!native.beforeRelease()) return;
     } catch (error) {
-      if (!(error instanceof PhpThrow)) throw error;
-      onFailure(error);
+      this.retainFailure(error, onFailure);
     }
     this.roots = ownershipRoots(this.runtime);
     this.unreachable.clear();
@@ -474,8 +478,7 @@ class Release {
   }
 
   // code-gauge-allow functionCognitiveComplexity 21 -- Release eligibility and resurrection use the same ownership state.
-  // code-gauge-allow functionNcss 32 -- Runs one destructor and resolves its effects before releasing its children.
-  private prepare(object: PhpObject, onFailure: (error: PhpThrow) => void): ReleaseFinish | undefined {
+  private prepare(object: PhpObject, onFailure: (error: CleanupException) => void): ReleaseFinish | undefined {
     if (this.visited.has(object) || this.runtime.objects.get(object.id) !== object) return undefined;
     if (ownedReachable(object, this.roots, this.runtime, this.unreachable, this.retainedBefore)) return undefined;
     if (!this.freed.has(object)) {
@@ -490,10 +493,11 @@ class Release {
       const changes: OwnershipChange[] = [];
       const stopObserving = observeOwnership((change) => changes.push(change));
       try {
-        destruct(object, this.fromNative ? undefined : this.runtime.row);
+        this.runtime.withNativeReleaseMode(this.mode, () =>
+          destruct(object, this.fromNative ? undefined : this.runtime.row)
+        );
       } catch (error) {
-        if (this.stopOnException || !(error instanceof PhpThrow)) throw error;
-        onFailure(error);
+        this.retainFailure(error, onFailure);
       } finally {
         stopObserving();
       }
@@ -508,6 +512,11 @@ class Release {
       }
     }
     return new ReleaseFinish(object);
+  }
+
+  private retainFailure(error: unknown, onFailure: (error: CleanupException) => void): void {
+    if (!recoverableReleaseFailure(this.mode, error)) throw error;
+    onFailure(error);
   }
 
   private addDetachedDescendants(root: PhpObject): void {
@@ -539,6 +548,10 @@ class Release {
     }
     return false;
   }
+}
+
+function recoverableReleaseFailure(mode: ReleaseMode, error: unknown): error is CleanupException {
+  return mode !== 'shutdown' && (error instanceof PhpThrow || (mode === 'bulk-removal' && error instanceof ExitSignal));
 }
 
 /** How many releases are running, during which a collection would free their objects out of order. */

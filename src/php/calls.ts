@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 730 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 733 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -598,8 +598,10 @@ function invokeUser(
   runtime.depth++;
   const outerNative = nativeDepth;
   const outerNativeCalls = runtime.nativeCalls;
+  const outerReleaseMode = runtime.nativeReleaseMode;
   nativeDepth = 0;
   runtime.nativeCalls = 0;
+  runtime.nativeReleaseMode = 'ordinary';
   let returned: Value = null;
   let failure: unknown;
   let failed = false;
@@ -639,6 +641,7 @@ function invokeUser(
   } finally {
     nativeDepth = outerNative;
     runtime.nativeCalls = outerNativeCalls;
+    runtime.nativeReleaseMode = outerReleaseMode;
     runtime.depth--;
     callStack.pop();
     runtime.frames.pop();

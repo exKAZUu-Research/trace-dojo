@@ -375,6 +375,18 @@ array(3) {
   int(1)
 }
 string(19) "{"0":1,"2":3,"1":2}"
+array(2) {
+  [2]=>
+  int(3)
+  [1]=>
+  int(2)
+}
+array(2) {
+  [2]=>
+  int(3)
+  [1]=>
+  int(2)
+}
 array(0) {
 }
 int(1)
@@ -389,6 +401,28 @@ array(1) {
   int(5)
 }
 array_combine(): Argument #1 ($keys) and argument #2 ($values) must have the same number of elements
+min(): Argument #1 ($value) must contain at least one element
+NULL
+max(): Argument #1 ($value) must contain at least one element
+NULL
+array(1) {
+  [0]=>
+  int(1)
+}
+array(1) {
+  [0]=>
+  int(1)
+}
+array(0) {
+}
+NULL
+NULL
+array(0) {
+}
+array(0) {
+}
+keys:1=2
+UndefinedArrayChild::{closure:UndefinedArrayChild::__destruct():55}(): Argument #2 ($b) not passed
 array(1) {
   ["y"]=>
   int(5)

@@ -298,16 +298,17 @@ function evalDeferredValueArgs(args: Arg[], row: number): ArgValue[] {
   return values;
 }
 
+// code-gauge-allow functionCognitiveComplexity 30 -- Resolves each form of call and callable in PHP's order of checks.
 // code-gauge-allow functionNcss 48 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>, discardResult = false): Chain {
   const runtime = rt();
   const member = e.name;
-  const deferred = isCompiledVariable(e.obj) && typeof member !== 'string';
+  const deferred = isCompiledVariable(e.obj);
   const earlyObject = !deferred || e.nullsafe ? evChain(e.obj) : undefined;
   if (earlyObject === SHORT || (e.nullsafe && earlyObject === null)) return SHORT;
   if (!deferred && earlyObject instanceof PhpObject) runtime.frame.temporaries.push(earlyObject);
   const readName = typeof member === 'string' ? undefined : prepareOperand(member);
-  const object = deferred ? ev(e.obj) : (earlyObject ?? null);
+  const object = deferred ? prepareOperand(e.obj)(e.row) : (earlyObject ?? null);
   const methodName = readName ? dynamicMethodName(readName()) : (member as string);
   runtime.row = e.row;
   if (!(object instanceof PhpObject) || object.isResource) {

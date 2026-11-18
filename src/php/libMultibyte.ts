@@ -948,7 +948,6 @@ function legacyTextDecoder(name: string): TextDecoder | undefined {
   else if (name === 'BIG-5' || name === 'CP950') label = 'big5';
   else if (name === 'EUC-CN' || name === 'CP936') label = 'gbk';
   else if (name === 'UHC') label = 'euc-kr';
-  else if (name === 'GB18030-2022') label = 'gb18030';
   try {
     return new TextDecoder(label, { ignoreBOM: true });
   } catch {

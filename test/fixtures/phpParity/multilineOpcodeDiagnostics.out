@@ -257,3 +257,12 @@ Warning: Undefined variable $undefinedObject in /main.php on line 459
 Warning: Attempt to read property "property" on null in /main.php on line 459
 
 Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 459
+
+Warning: Undefined variable $undefinedReceiver in /main.php on line 464
+Call to a member function method() on null at 464
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 472
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 477
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 482

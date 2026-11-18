@@ -142,29 +142,37 @@ function shutdown(runtime: Runtime): string | undefined {
   runtime.frames.length = 1;
   const staticFailure = guard(runtime, () => releaseMainStatics(runtime));
   if (runtime.shuttingDown || runtime.exhausted) return staticFailure;
-  const objectFailure = guard(runtime, () => {
-    runtime.releasingGlobalsAtShutdown = true;
-    try {
-      destroyGlobals(runtime);
-    } finally {
-      runtime.releasingGlobalsAtShutdown = false;
-    }
-    for (const object of runtime.objectsInShutdownOrder()) {
-      if (object.destructed) continue;
-      const destructor = object.cls.findMethod('__destruct');
-      object.destructed = true;
-      if (!destructor) continue;
-      runtime.destructibles--;
-      asInternal(() =>
-        invoke(
-          { fn: destructor.fn, thisObj: object, scope: destructor.scope, staticClass: object.cls, method: destructor },
-          [],
-          undefined
-        )
-      );
-    }
-    runtime.shuttingDown = true;
-  });
+  const objectFailure = guard(runtime, () =>
+    runtime.withNativeReleaseMode('shutdown', () => {
+      runtime.releasingGlobalsAtShutdown = true;
+      try {
+        destroyGlobals(runtime);
+      } finally {
+        runtime.releasingGlobalsAtShutdown = false;
+      }
+      for (const object of runtime.objectsInShutdownOrder()) {
+        if (object.destructed) continue;
+        const destructor = object.cls.findMethod('__destruct');
+        object.destructed = true;
+        if (!destructor) continue;
+        runtime.destructibles--;
+        asInternal(() =>
+          invoke(
+            {
+              fn: destructor.fn,
+              thisObj: object,
+              scope: destructor.scope,
+              staticClass: object.cls,
+              method: destructor,
+            },
+            [],
+            undefined
+          )
+        );
+      }
+      runtime.shuttingDown = true;
+    })
+  );
   return objectFailure ?? staticFailure;
 }
 
@@ -172,7 +180,7 @@ function releaseMainStatics(runtime: Runtime): void {
   const statics = [...runtime.globalStatics.values()];
   runtime.globalStatics.clear();
   for (const ref of statics) ref.rc--;
-  releaseDropped(runtime, statics, true, true);
+  releaseDropped(runtime, statics, true, 'shutdown');
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.

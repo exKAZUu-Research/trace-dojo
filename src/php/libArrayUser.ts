@@ -1,9 +1,8 @@
-import { type Behavior, type Comparisons, type Entry, setEntries, SortedWalk } from './arraySetWalk';
-import { consumeCallbackResult } from './callables';
+import { type Behavior, type Comparisons, type Entry, sortedSetEntries, SortedWalk } from './arraySetWalk';
 import { argumentCountMessage, callableProblem } from './calls';
 import { compareBytes } from './conversions';
 import { throwError } from './errors';
-import { checkSetArguments, comparisonSign, userComparisonCaller } from './libArray';
+import { checkSetArguments, comparisonSign, consumeComparisonResult, userComparisonCaller } from './libArray';
 import { isCallable } from './libCore';
 import { defineFunction } from './native';
 import { toStr } from './operators';
@@ -43,7 +42,7 @@ for (const [name, intersect] of [
     const [arrays, [callback]] = splitCallbacks(name, args, 1);
     checkSetArguments(name, arrays);
     return lookupOperation(arrays as PhpArray[], intersect, (a, b) =>
-      consumeCallbackResult(callback, [a, b], comparisonSign)
+      consumeComparisonResult(callback, [a, b], comparisonSign)
     );
   });
 }
@@ -55,7 +54,7 @@ function sortedOperation(operation: SortedOperation, args: Value[]): PhpArray {
   const lists: Entry[][] = [];
   for (const [index, array] of arrays.entries()) {
     checkSetArguments(name, arrays.slice(0, index + 1));
-    const list = setEntries(array as PhpArray);
+    const list = sortedSetEntries(array as PhpArray);
     if (list.length > 1) zendSort(list, behavior === 'normal' ? comparisons.data : comparisons.key);
     lists.push(list);
   }
@@ -108,7 +107,7 @@ function lookupOperation(arrays: PhpArray[], intersect: boolean, same: (a: Value
   const result = new PhpArray();
   for (const [key, slot] of first.map) {
     const matches = (other: PhpArray): boolean => {
-      const otherSlot = other.map.get(key);
+      const otherSlot = other.getSlot(key);
       return otherSlot !== undefined && same(deref(slot), deref(otherSlot)) === 0;
     };
     const keep = intersect ? others.every((other) => matches(other)) : !others.some((other) => matches(other));

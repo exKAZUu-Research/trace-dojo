@@ -1,14 +1,14 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { randomBytes } from 'node:crypto';
 
+import { platformBinary, platformUnary } from '../interpreter/platformMath';
 import { floatFitsInt, valueName } from './conversions';
 import { deprecated, throwError } from './errors';
-import { cPow } from './floatPow';
 import { defineAlias, defineConstant, defineFunction, defineUnitEnum } from './native';
 import { arithmetic, compare } from './operators';
 import { rt } from './runtime';
 import { fixedDigits, phpRound, type RoundMode } from './strings';
-import { deref, PhpArray, PhpObject, type Ref, type Value } from './values';
+import { deref, PhpArray, PhpObject, type Value } from './values';
 
 const MATH_CONSTANTS: [string, number][] = [
   ['M_PI', Math.PI],
@@ -95,7 +95,9 @@ defineFunction('sqrt(float $num): float', ({ args }) => Math.sqrt(args[0] as num
 defineFunction('pow(mixed $num, mixed $exponent): mixed', ({ args }) => {
   return arithmetic('**', args[0], args[1]);
 });
-defineFunction('fpow(float $num, float $exponent): float', ({ args }) => cPow(args[0] as number, args[1] as number));
+defineFunction('fpow(float $num, float $exponent): float', ({ args }) =>
+  platformBinary('pow', args[0] as number, args[1] as number)
+);
 defineFunction('intdiv(int $num1, int $num2): int', ({ args }) => {
   const [a, b] = args as [bigint, bigint];
   if (b === 0n) throwError('DivisionByZeroError', 'Division by zero');
@@ -159,9 +161,10 @@ function extremeOfArray(name: string, array: Value, direction: number): Value {
   if (!(array instanceof PhpArray)) {
     throwError('TypeError', `${name}(): Argument #1 ($value) must be of type array, ${valueName(array)} given`);
   }
-  if (array.size === 0) throwError('ValueError', `${name}(): Argument #1 ($value) must contain at least one element`);
   const slots = array.map.values();
-  let best: Value | Ref = slots.next().value ?? null;
+  const initial = slots.next();
+  if (initial.done) throwError('ValueError', `${name}(): Argument #1 ($value) must contain at least one element`);
+  let best = initial.value;
   for (const slot of slots) {
     rt().spend();
     if (compare(best, slot) * direction < 0) best = slot;
@@ -188,19 +191,23 @@ for (const name of [
   'expm1',
   'log1p',
 ] as const) {
-  defineFunction(`${name}(float $num): float`, ({ args }) => Math[name](args[0] as number));
+  defineFunction(`${name}(float $num): float`, ({ args }) => platformUnary(name, args[0] as number));
 }
-defineFunction('atan2(float $y, float $x): float', ({ args }) => Math.atan2(args[0] as number, args[1] as number));
+defineFunction('atan2(float $y, float $x): float', ({ args }) =>
+  platformBinary('atan2', args[0] as number, args[1] as number)
+);
 defineFunction('log(float $num, float $base = M_E): float', ({ args }) => {
   const [value, base] = args as [number, number?];
-  if (base === undefined) return Math.log(value);
+  if (base === undefined) return platformUnary('log', value);
   if (base <= 0) throwError('ValueError', 'log(): Argument #2 ($base) must be greater than 0');
   if (base === 1) return Number.NaN;
-  if (base === 2) return Math.log2(value);
-  if (base === 10) return Math.log10(value);
-  return Math.log(value) / Math.log(base);
+  if (base === 2) return platformUnary('log2', value);
+  if (base === 10) return platformUnary('log10', value);
+  return platformUnary('log', value) / platformUnary('log', base);
 });
-defineFunction('hypot(float $x, float $y): float', ({ args }) => Math.hypot(args[0] as number, args[1] as number));
+defineFunction('hypot(float $x, float $y): float', ({ args }) =>
+  platformBinary('hypot', args[0] as number, args[1] as number)
+);
 defineFunction('deg2rad(float $num): float', ({ args }) => ((args[0] as number) / 180) * Math.PI);
 defineFunction('rad2deg(float $num): float', ({ args }) => ((args[0] as number) / Math.PI) * 180);
 defineFunction('is_nan(float $num): bool', ({ args }) => Number.isNaN(args[0]));

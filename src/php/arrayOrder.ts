@@ -130,7 +130,7 @@ export class ArrayOrder {
     return cursor;
   }
 
-  copy(): ArrayOrder {
+  copy(preservePositions: boolean): ArrayOrder {
     const copy = new ArrayOrder([], this.capacity);
     for (const entry of this.orderedEntries()) copy.appendEntry(entry.key, entry.index);
     copy.nextIndex = this.nextIndex;
@@ -140,7 +140,7 @@ export class ArrayOrder {
       copy.capacity = 8;
       copy.packed = undefined;
       copy.listLayout = false;
-    } else if (!copy.packed) copy.compact();
+    } else if (!copy.packed && !preservePositions) copy.compact();
     for (const cursor of this.liveCursors()) {
       if (!cursor.family) continue;
       const cloned = copy.cursor(cursor.key, cursor.family);
@@ -152,7 +152,7 @@ export class ArrayOrder {
   }
 
   // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  insert(key: Key): void {
+  insert(key: Key, count = this.entries.size): void {
     if (this.get(key)) return;
     const numeric = typeof key === 'bigint' && key >= 0n && key < BigInt(Number.MAX_SAFE_INTEGER);
     const position = numeric ? Number(key) : -1;
@@ -160,12 +160,12 @@ export class ArrayOrder {
     if (this.packed) {
       if (!numeric || position < this.nextIndex) this.toMixed();
       else if (position >= this.capacity) {
-        if (position < this.capacity * 2 && this.entries.size > this.capacity / 2) this.capacity *= 2;
+        if (position < this.capacity * 2 && count > this.capacity / 2) this.capacity *= 2;
         else this.toMixed();
       }
     }
     if (!this.packed && this.nextIndex >= this.capacity) {
-      if (this.nextIndex > this.entries.size + (this.entries.size >> 5)) this.compact();
+      if (this.nextIndex > count + (count >> 5)) this.compact();
       else this.capacity *= 2;
     }
     if (key !== BigInt(this.entries.size)) this.listLayout = false;
@@ -177,8 +177,12 @@ export class ArrayOrder {
     }
   }
 
-  unpack(): void {
-    if (this.packed) this.replace(this.keys(), false);
+  unpack(preservePositions = false): void {
+    if (!this.packed) return;
+    if (preservePositions) {
+      this.packed = false;
+      this.listLayout = false;
+    } else this.replace(this.keys(), false);
   }
 
   private toMixed(): void {
@@ -247,7 +251,7 @@ export class ArrayOrder {
     this.listLayout = true;
   }
 
-  delete(key: Key): void {
+  delete(key: Key, preserveEndPosition = false): void {
     const entry = this.get(key);
     if (!entry) return;
     if (entry !== this.last) this.listLayout = false;
@@ -257,7 +261,7 @@ export class ArrayOrder {
     if (entry.next) entry.next.previous = entry.previous;
     else {
       this.last = entry.previous;
-      this.nextIndex = (this.last?.index ?? -1) + 1;
+      if (!preserveEndPosition) this.nextIndex = (this.last?.index ?? -1) + 1;
     }
     this.entries.delete(entry.rawKey);
     for (const cursor of this.liveCursors()) cursor.clamp(this.nextIndex);

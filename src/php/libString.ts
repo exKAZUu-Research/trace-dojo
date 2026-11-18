@@ -553,7 +553,7 @@ defineOverloadedFunction(
   { nullTypes: { 1: 'array|string', 2: '?string' } }
 );
 
-function translate(args: Value[], inlined: boolean): string {
+function translate(args: Value[], inlined: boolean): string | null {
   const text = s(args[0]);
   const from = args[1];
   if (from instanceof PhpArray) return translatePairs(text, from, inlined);
@@ -565,7 +565,7 @@ function translate(args: Value[], inlined: boolean): string {
   return [...text].map((char) => map.get(char) ?? char).join('');
 }
 
-function translatePairs(text: string, replacements: PhpArray, inlined: boolean): string {
+function translatePairs(text: string, replacements: PhpArray, inlined: boolean): string | null {
   if (text === '' || replacements.size === 0) return text;
   if (replacements.size === 1) return translateSinglePair(text, replacements, inlined);
   if (replacements.map.has('')) warn('strtr(): Ignoring replacement of empty string');
@@ -592,8 +592,10 @@ function translatePairs(text: string, replacements: PhpArray, inlined: boolean):
   return result;
 }
 
-function translateSinglePair(text: string, replacements: PhpArray, inlined: boolean): string {
-  const [key, slot] = replacements.map.entries().next().value!;
+function translateSinglePair(text: string, replacements: PhpArray, inlined: boolean): string | null {
+  const entry = replacements.map.entries().next();
+  if (entry.done) return null;
+  const [key, slot] = entry.value;
   const value = slot instanceof Ref ? slot.v : slot;
   if (key === '') {
     withStringConversionErrors((convert) => {

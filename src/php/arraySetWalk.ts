@@ -1,4 +1,4 @@
-import type { Key, PhpArray, Ref, Value } from './values';
+import { type Key, type PhpArray, type Ref, UNDEFINED_RESULT, type Value } from './values';
 
 export interface Entry {
   key: Key;
@@ -7,6 +7,12 @@ export interface Entry {
 
 export function setEntries(array: PhpArray): Entry[] {
   return [...array.map].map(([key, slot]) => ({ key, slot }));
+}
+
+export function sortedSetEntries(array: PhpArray): Entry[] {
+  const entries = setEntries(array);
+  while (entries.length < array.size) entries.push({ key: 0n, slot: UNDEFINED_RESULT });
+  return entries;
 }
 
 export type Compare = (a: Entry, b: Entry) => number;
@@ -36,8 +42,9 @@ export class SortedWalk {
     this.pointers = lists.map(() => 0);
   }
 
-  at(list: number): Entry | undefined {
-    return this.lists[list][this.pointers[list]];
+  at(list: number, position = this.pointers[list]): Entry | undefined {
+    const entry = this.lists[list][position];
+    return entry?.slot === UNDEFINED_RESULT ? undefined : entry;
   }
 
   /** Transcribes php_array_intersect's walk, yielding the keys of the first array that the result leaves out. */
@@ -112,7 +119,6 @@ export class SortedWalk {
   /** Looks for the first list's entry in list `index`, returning PHP's `c` and whether the walk stops looking. */
   private findIn(index: number, previous: number): [number, boolean] {
     const first = this.at(0) as Entry;
-    const list = this.lists[index];
     let c = previous;
     if (this.behavior === 'normal') {
       while (this.at(index) && (c = this.comparisons.data(first, this.at(index) as Entry)) > 0) this.pointers[index]++;
@@ -121,12 +127,13 @@ export class SortedWalk {
       return [0, true];
     }
     let pointer = this.pointers[index];
-    while (list[pointer] && (c = this.comparisons.key(first, list[pointer])) !== 0) pointer++;
+    let entry = this.at(index, pointer);
+    while (entry && (c = this.comparisons.key(first, entry)) !== 0) entry = this.at(index, ++pointer);
     if (c) return [c, false];
     if (this.behavior === 'key') return [0, true];
-    if (!list[pointer]) return [0, false];
+    if (!entry) return [0, false];
     this.comparisons.useData();
-    if (this.comparisons.data(first, list[pointer]) === 0) return [0, true];
+    if (this.comparisons.data(first, entry) === 0) return [0, true];
     this.comparisons.useKey();
     return [-1, false];
   }

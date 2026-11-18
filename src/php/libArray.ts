@@ -1,9 +1,9 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import type { ArrayRebuild } from './arrayOrder';
-import { type Comparisons, type Entry, setEntries, SortedWalk } from './arraySetWalk';
+import { type Comparisons, type Entry, setEntries, sortedSetEntries, SortedWalk } from './arraySetWalk';
 import { lower, upper } from './bytes';
-import { callCallback, callCallbackRefs, callMethod, consumeCallbackResult } from './callables';
+import { callCallback, callCallbackRefs, callMethod, consumeCallbackResult, consumeInvokedResult } from './callables';
 import type { ArgValue } from './calls';
 import { canAccessProp, declForKey, issetProp, lookupProp, readProp } from './classes';
 import * as conversionsModule from './conversions';
@@ -924,16 +924,12 @@ defineFunction(
       Number(args[1]),
       args[2] === undefined || args[2] === null ? undefined : Number(args[2])
     );
-    const densePacked = array.map.countsUndefinedSlots && array.hasDensePackedStorage();
-    const sliced = densePacked
-      ? [...array.map].filter(([key]) => Number(key) >= start).slice(0, end - start)
-      : array.map.mayHaveUndefinedSlots && array.hasDenseSlots()
-        ? [...array.map.physicalEntries()]
-            .slice(start)
-            .filter(([, slot]) => slot !== UNDEFINED_RESULT)
-            .slice(0, end - start)
-        : [...array.map].slice(start, end);
-    return rebuild(sliced, args[3] !== true || (start === 0 && densePacked));
+    const positional = array.map.countsUndefinedSlots && array.hasDenseSlots();
+    const entries = [...array.map];
+    const sliced = positional
+      ? entries.filter(([key]) => array.slotPosition(key) >= start).slice(0, end - start)
+      : entries.slice(start, end);
+    return rebuild(sliced, args[3] !== true || (start === 0 && positional && array.hasDensePackedStorage()));
   }
 );
 
@@ -1138,7 +1134,7 @@ function setOperation(name: string, args: Value[], keep: boolean, same: SetCompa
       useData: () => {},
     };
     const lists = [first, ...others].map((array) => {
-      const list = setEntries(array);
+      const list = sortedSetEntries(array);
       if (list.length > 1) zendSort(list, compareSetValues);
       return list;
     });
@@ -1150,7 +1146,7 @@ function setOperation(name: string, args: Value[], keep: boolean, same: SetCompa
   for (const entry of first.map) {
     rt().spend();
     const matches = (other: PhpArray): boolean => {
-      const slot = other.map.get(entry[0]);
+      const slot = other.getSlot(entry[0]);
       return slot !== undefined && same(entry, [entry[0], slot]);
     };
     if (keep ? others.every(matches) : !others.some(matches)) result.setSlot(entry[0], copyValueSlot(entry[1]));
@@ -1184,11 +1180,12 @@ defineFunction('array_diff(array $array, array ...$arrays): array', ({ args }) =
 
 /** Transcribes PHP's array_diff, which converts each value to a string once, so each conversion warns once. */
 function diffByString(first: PhpArray, others: Value[]): PhpArray {
-  if (first.size === 0) {
+  if (first.size <= 1) {
+    const value = first.firstValue();
+    if (value !== undefined) return diffSingle(first, others, value);
     checkSetArguments('array_diff', [first, ...others]);
     return new PhpArray();
   }
-  if (first.size === 1) return diffSingle(first, others);
   checkSetArguments('array_diff', [first, ...others]);
   const exclude = new Set<string>();
   for (const other of others) {
@@ -1205,8 +1202,8 @@ function diffByString(first: PhpArray, others: Value[]): PhpArray {
   return result;
 }
 
-function diffSingle(first: PhpArray, others: Value[]): PhpArray {
-  const search = toStr(first.firstValue() as Value);
+function diffSingle(first: PhpArray, others: Value[], value: Value): PhpArray {
+  const search = toStr(value);
   let found = false;
   for (const [index, other] of others.entries()) {
     checkSetArgument('array_diff', other, index + 2);
@@ -1343,7 +1340,7 @@ function userComparator(name: string, callback: Value): (a: Value, b: Value) => 
 export function userComparisonCaller(name: string): (callback: Value, a: Value, b: Value) => number {
   let warned = false;
   return (callback, a, b) => {
-    const result = consumeCallbackResult(callback, [a, b], (value) =>
+    const result = consumeComparisonResult(callback, [a, b], (value) =>
       typeof value === 'boolean' ? value : comparisonSign(value)
     );
     if (typeof result === 'boolean') {
@@ -1353,11 +1350,19 @@ export function userComparisonCaller(name: string): (callback: Value, a: Value, 
         );
         warned = true;
       }
-      if (!result) return -consumeCallbackResult(callback, [b, a], comparisonSign);
+      if (!result) return -consumeComparisonResult(callback, [b, a], comparisonSign);
       return 1;
     }
     return result;
   };
+}
+
+export function consumeComparisonResult<T>(callback: Value, args: [Value, Value], consume: (value: Value) => T): T {
+  if (!args.includes(UNDEFINED_RESULT)) return consumeCallbackResult(callback, args, consume);
+  const supplied = args.map((value): ArgValue =>
+    value === UNDEFINED_RESULT ? { v: null, omitted: true } : { v: value }
+  );
+  return consumeInvokedResult(() => callCallbackRefs(callback, supplied), consume);
 }
 
 /** The sign of a comparison callback's result, which PHP reads as an int: 0.5 counts as equal. */

@@ -125,7 +125,7 @@ class ObjectStorage {
     const runtime = rt();
     try {
       runtime.release(values);
-      runtime.flushReleases(true);
+      runtime.flushReleases(true, capture ? 'bulk-removal' : 'ordinary');
     } catch (error) {
       if (!capture || !(error instanceof PhpThrow || error instanceof ExitSignal)) throw error;
       capture(error);

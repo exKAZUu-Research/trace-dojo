@@ -37,6 +37,7 @@ class UndefinedArrayChild extends RecursiveArrayIterator {
         var_dump(count($packed), array_keys($packed));
         $packed[1] = 2;
         var_dump(count($packed), array_keys($packed), json_encode($packed));
+        var_dump(array_slice($packed, 1, 2, true), array_slice($packed, -2, 2, true));
         $sparse = [2 => 'a', 5 => $read(), 8 => 'b'];
         var_dump(array_slice($sparse, -1, null, true));
         $mixed = [1, $read(), 2, 'name' => 4];
@@ -46,6 +47,18 @@ class UndefinedArrayChild extends RecursiveArrayIterator {
         var_dump(array_combine(['u', 'v'], $array));
         try { array_combine(['u'], $array); }
         catch (ValueError $error) { echo $error->getMessage(), "\n"; }
+        foreach (['min', 'max'] as $extreme) {
+            try { $extreme([$read()]); }
+            catch (ValueError $error) { echo $error->getMessage(), "\n"; }
+            var_dump($extreme([$read(), null]));
+        }
+        $compareKeys = function ($a, $b) { echo "keys:", $a, '=', $b, "\n"; return $a <=> $b; };
+        var_dump(array_udiff_assoc([1], [$read(), 5], $compareKeys));
+        var_dump(array_diff_key([1], [$read(), 5]), array_intersect_key([1], [$read(), 5]));
+        var_dump(strtr('x', ['x' => $read()]), strtr('1', [1 => $read()]));
+        var_dump(array_diff([$read()], [1]), array_diff(['x' => $read()], [1]));
+        try { array_uintersect([1, $read(), 2], [1, 2], $compareKeys); }
+        catch (ArgumentCountError $error) { echo $error->getMessage(), "\n"; }
         var_dump([...$array], array_merge($array, ['z' => 6]), array_slice($array, 0), array_slice($array, -1));
         var_dump(array_reverse($array), array_change_key_case($array, CASE_UPPER));
         $report = function ($value, $key) { echo $key, '=', $value, "\n"; return true; };
