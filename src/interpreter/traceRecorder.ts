@@ -24,6 +24,7 @@ export interface TracedFrame {
 export interface FrameReader<F extends TracedFrame> {
   isAtomic(frame: F): boolean;
   variablesOf(frame: F): TraceVariables;
+  recordItem?(item: TraceItem): TraceItem;
 }
 
 /** Collects the trace items of a model program, starting with its state before it runs. */
@@ -49,15 +50,18 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     this.runtime.collectGarbage();
     const current = frames.at(-1) as F;
     const variables = this.frames.variablesOf(current);
-    this.traceItems.push({
+    const item: TraceItem = {
       line: row + 1,
       callLines: frames.slice(1).flatMap(({ callRow }) => (callRow === undefined ? [] : [callRow + 1])),
       ...variables,
       turtles: world.turtleTraces(),
       board: world.boardText(),
-    });
-    for (const frame of frames)
-      this.varsAtLastStep.set(frame, frame === current ? variables.vars : this.frames.variablesOf(frame).vars);
+    };
+    this.traceItems.push(this.frames.recordItem?.(item) ?? item);
+    for (const frame of frames) {
+      const snapshot = frame === current && !this.frames.recordItem ? variables : this.frames.variablesOf(frame);
+      this.varsAtLastStep.set(frame, snapshot.vars);
+    }
     return true;
   }
 
@@ -74,7 +78,14 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     return (
       last.board === world.boardText() &&
       isEqual(last.turtles, world.turtleTraces()) &&
-      (shownVars === undefined || isEqual(shownVars, this.frames.variablesOf(frame).vars))
+      (shownVars === undefined || sameVariables(shownVars, this.frames.variablesOf(frame).vars))
     );
   }
+}
+
+function sameVariables(a: TraceItem['vars'], b: TraceItem['vars']): boolean {
+  const names = Object.keys(a);
+  return (
+    names.length === Object.keys(b).length && names.every((name) => Object.hasOwn(b, name) && isEqual(a[name], b[name]))
+  );
 }

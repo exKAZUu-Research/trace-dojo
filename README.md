@@ -8,9 +8,17 @@
 
 An educational web app for training program tracing skills.
 
-## Releases
+## Haskell Type Limitations
 
-!!! We should manually run deployment workflow (`deploy-production.yml`) to deploy new version. !!!
+Haskell type constructors and classes use inferred monomorphic kinds. These uses receive the Japanese unsupported-feature diagnostic:
+
+| Feature             | Unsupported use                                                                                                                        |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `PolyKinds`         | Instantiating a type or class at a different kind from its inferred or defaulted kind.                                                 |
+| `ConstraintKinds`   | Using class constructors as type arguments, constraint synonyms (including deriving aliases), or constraints headed by type variables. |
+| Superclass contexts | Arguments that do not reduce to the class parameter after type-synonym expansion.                                                      |
+
+## Releases
 
 - Staging: https://trace-dojo-staging.fly.dev/
 - Production: https://trace-dojo.fly.dev/
@@ -111,7 +119,7 @@ An educational web app for training program tracing skills.
 
 ### Database storage and deployment
 
-Drizzle ORM and Drizzle Kit are pinned to `1.0.0-rc.3`. Edit `db/schema.ts`, run
+Edit `db/schema.ts`, run
 `bun run db-migrate-create`, review the SQL in `drizzle/`, then run `bun run db-migrate`.
 The initial Drizzle migration supports an empty database or an existing database with
 all historical migrations through `20260904131352_add_fill_in_blank_columns` applied.
