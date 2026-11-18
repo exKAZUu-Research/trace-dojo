@@ -156,7 +156,7 @@ export class Calls {
     const constructible = this.constructSignatures(calleeType).length > 0;
     if (
       !constructible &&
-      calleeType.kind === 'object' &&
+      !isIntrinsic(this.c.baseConstraint(calleeType), 'never') &&
       this.c.relations.isAssignable(calleeType, this.c.globalType('Function'))
     )
       return anyType;

@@ -1,0 +1,13 @@
+class StaticThisPlacement {
+  static value:this;
+  static values:this[];
+  static create():this {throw 0;}
+  static nested:{value:this};
+  static mapped:{[K in 'x']:this};
+  nested?:{value:this};
+  constructor(value?:this) {}
+  method(){function nested():this {throw 0;} return nested;}
+  static { const value:this = new StaticThisPlacement(); }
+}
+interface NestedThisPlacement { nested:{value:this}; }
+class GenericThisPlacement<T extends this> {}

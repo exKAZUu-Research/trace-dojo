@@ -1,0 +1,15 @@
+type U = {kind: "s", f: (x: string) => void} | {kind: "n", f: (x: number) => void};
+const tag = "s";
+const a: U = {kind: tag, f: x => console.log(x.toUpperCase())};
+a.f("a");
+const kind = "s";
+const b: U = {kind, f: x => console.log(x.toUpperCase())};
+b.f("b");
+const tags = {kind: "s" as const};
+const c: U = {kind: tags.kind, f: x => console.log(x.toUpperCase())};
+c.f("c");
+const d: U = {kind: ((tag)), f: x => console.log(x.toUpperCase())};
+d.f("d");
+let known: "s" | "n" = "s";
+const e: U = {kind: known, f: x => console.log(x.toUpperCase())};
+e.f("e");

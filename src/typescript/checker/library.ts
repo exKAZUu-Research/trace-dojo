@@ -11,6 +11,7 @@ import {
 } from './domGlobals';
 import { DOM_INTERFACE_MEMBERS } from './domMembers';
 import { ECMASCRIPT_LIBRARY } from './ecmascriptLibrary';
+import { LOCALE_OPTIONS_LIBRARY } from './localeOptionsLibrary';
 import { Scope, type Sym } from './scopes';
 
 const omittedLibraryGlobals = [
@@ -114,6 +115,12 @@ const parser = await loadParser('@willbooster/tree-sitter-typescript/tree-sitter
 export const libraryTree = (() => {
   const tree = parser.parse(`${ECMASCRIPT_LIBRARY}\n${HOST_LIBRARY}\n${BROWSER_LIBRARY}`);
   if (!tree) throw new Error('The parser returned no tree for the library');
+  return tree;
+})();
+
+export const localeOptionsTree = (() => {
+  const tree = parser.parse(LOCALE_OPTIONS_LIBRARY);
+  if (!tree) throw new Error('The parser returned no tree for locale options');
   return tree;
 })();
 

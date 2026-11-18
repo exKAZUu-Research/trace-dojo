@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 764 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 767 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -522,11 +522,18 @@ export class Runtime {
     array.definedElements.set(index, isAccessor(property) ? property : { ...property, value: undefined });
   }
 
-  createDataProperty(object: JsObject, key: Key, value: Value): void {
+  createDataProperty(object: JsObject, key: Key, value: Value, throwOnFailure = true): void {
     const current = this.getOwnProperty(object, key);
-    if (current && !current.configurable) this.throwError('TypeError', `Cannot redefine property: ${String(key)}`);
-    if (!current && !object.extensible)
-      this.throwError('TypeError', `Cannot define property ${String(key)}, object is not extensible`);
+    if (current && !current.configurable) {
+      this.refuse(throwOnFailure, `Cannot redefine property: ${String(key)}`);
+      return;
+    }
+    const blockedLength =
+      object instanceof JsArray && !object.isLengthWritable && (arrayIndexOf(key) ?? -1) >= object.elements.length;
+    if ((!current && !object.extensible) || blockedLength) {
+      this.refuse(throwOnFailure, `Cannot define property ${String(key)}, object is not extensible`);
+      return;
+    }
     this.defineProperty(object, key, {
       value,
       writable: true,

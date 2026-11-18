@@ -52,12 +52,16 @@ export class ClassDeclarationChecker {
 
   private checkIndexes(node: TreeNode, info: ClassInfo): void {
     const body = node.childForFieldName('body');
-    const base = this.c.classes.baseInstanceType(node);
-    checkIndexConformance(this.c, info.instanceType.resolve(), {
-      bodies: body ? [body] : [],
-      name: node.childForFieldName('name') ?? undefined,
-      bases: base ? [base] : [],
-    });
+    for (const isStatic of [false, true]) {
+      const base = isStatic ? this.c.classes.baseStaticType(node) : this.c.classes.baseInstanceType(node);
+      const type = isStatic ? info.staticType : info.instanceType;
+      checkIndexConformance(this.c, type.resolve(), {
+        bodies: body ? [body] : [],
+        name: node.childForFieldName('name') ?? undefined,
+        bases: base ? [base] : [],
+        isStatic,
+      });
+    }
   }
 
   /** Resolves the types written in the class, so that they report the names they cannot find. */

@@ -521,8 +521,8 @@ function internalize(
           : runtime.ownEnumerableKeys(value);
       for (const childKey of keys) {
         const revived = internalize(runtime, value, childKey, reviver, sources, callRow);
-        if (revived === undefined) runtime.deleteProperty(value, childKey);
-        else runtime.createDataProperty(value, childKey, revived);
+        if (revived === undefined) runtime.deleteProperty(value, childKey, false);
+        else runtime.createDataProperty(value, childKey, revived, false);
       }
     });
   }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 464 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 466 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -407,7 +407,7 @@ export class TypeNodes {
         nameNode,
         value
           ? `${name} は値であり、型としては使えません。型を表すには typeof ${name} と書いてください。`
-          : `型 ${name} が見つかりません。${nameSuggestionHint(this.c.scopeOf(nameNode), name, 'type')}`
+          : `型 ${name} が見つかりません。${nameSuggestionHint(this.c.scopeOf(nameNode), name, 'type', this.c.budget)}`
       );
       return errorType;
     }
@@ -463,7 +463,11 @@ export class TypeNodes {
   }
 
   private qualifiedType(node: TreeNode): Type {
-    if (this.c.isLibrary(node)) return anyType;
+    if (this.c.isLibrary(node)) {
+      const name = node.text.startsWith('Intl.') ? node.text.slice('Intl.'.length) : undefined;
+      const symbol = name ? this.c.localeOptionsBinder.moduleScope.types.get(name) : undefined;
+      return symbol ? this.declaredTypeOf(symbol) : anyType;
+    }
     let root = node;
     while (root.childForFieldName('module') ?? root.childForFieldName('object'))
       root = (root.childForFieldName('module') ?? root.childForFieldName('object')) as TreeNode;

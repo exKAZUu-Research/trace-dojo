@@ -1,0 +1,8 @@
+function noFunction<T>(value:T){return value();}
+function shapedGeneric<T extends {x:number}>(value:T){return value();}
+function neverGeneric<T extends never>(value:T){return value();}
+function constructOnly<T extends new()=>object>(value:T){return value();}
+function shapedTypeof(value:{x:number}){if(typeof value==='function')return value();}
+class ShapedTypeof {x=1;}
+function classTypeof(value:ShapedTypeof){if(typeof value==='function')return value();}
+function arrayTypeof(value:number[]){if(typeof value==='function')return value();}

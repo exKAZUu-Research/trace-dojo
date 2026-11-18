@@ -1,0 +1,6 @@
+(3,32): error TS7006: Parameter 'x' implicitly has an 'any' type.
+(5,15): error TS2322: Type 'string' is not assignable to type '"n" | "s"'.
+(5,30): error TS7006: Parameter 'x' implicitly has an 'any' type.
+(7,38): error TS7006: Parameter 'x' implicitly has an 'any' type.
+(8,40): error TS7006: Parameter 'x' implicitly has an 'any' type.
+(10,30): error TS7006: Parameter 'x' implicitly has an 'any' type.

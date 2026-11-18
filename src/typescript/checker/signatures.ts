@@ -84,6 +84,7 @@ export class Signatures {
    * a misplaced `this` parameter. All are grammar errors that hold however the signature is resolved.
    */
   private checkParameterGrammar(node: TreeNode): void {
+    this.checkStrictParameterList(node);
     const hasBody = node.childForFieldName('body') !== null;
     let optional = false;
     let listError = false;
@@ -96,6 +97,34 @@ export class Signatures {
       listError ||= this.checkParameterListGrammar(parameterNode, hasDefault, optional);
       if (parameterNode.type === 'optional_parameter') optional = true;
     }
+  }
+
+  private checkStrictParameterList(node: TreeNode): void {
+    const body = node.childForFieldName('body');
+    if (body?.type !== 'statement_block') return;
+    const directive = this.strictDirective(body);
+    if (!directive) return;
+    const invalid = parameterNodes(node).filter(
+      (parameter) =>
+        !isThisParameter(parameter) &&
+        (parameter.childForFieldName('value') !== null || patternOf(parameter).type !== 'identifier')
+    );
+    if (invalid.length === 0) return;
+    for (const parameter of invalid)
+      this.c.errorWhileResolving(
+        parameter,
+        "'use strict' 指令と一緒に、既定値・残余引数・分割代入の引数は使えません。"
+      );
+    this.c.errorWhileResolving(directive, "単純でない引数リストを持つ関数では、'use strict' 指令は使えません。");
+  }
+
+  private strictDirective(body: TreeNode): TreeNode | undefined {
+    for (const statement of named(body)) {
+      const expression = statement.type === 'expression_statement' ? named(statement)[0] : undefined;
+      if (expression?.type !== 'string') return undefined;
+      if (expression.text === '"use strict"' || expression.text === "'use strict'") return expression;
+    }
+    return undefined;
   }
 
   /** Reports a parameter's error in the list's grammar, of which tsc reports only the first; true if it reports one. */

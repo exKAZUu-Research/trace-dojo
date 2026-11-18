@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 525 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 532 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../../interpreter/diagnostics';
@@ -15,7 +15,14 @@ import { Flow } from './flow';
 import { FunctionChecker } from './functions';
 import { mergedPatternIndexes } from './indexInfos';
 import { TypeInference } from './inference';
-import { domInterfaceTree, libraryScope, libraryTree, markUnsupported, nativeOverloadTree } from './library';
+import {
+  domInterfaceTree,
+  libraryScope,
+  libraryTree,
+  localeOptionsTree,
+  markUnsupported,
+  nativeOverloadTree,
+} from './library';
 import { LiteralChecker } from './literals';
 import { MemberChecker } from './members';
 import { OperatorChecker } from './operators';
@@ -81,6 +88,7 @@ export class Checker {
   silent = 0;
   readonly binder: Binder;
   readonly libraryBinder: Binder;
+  readonly localeOptionsBinder: Binder;
   readonly nativeOverloadBinder: Binder;
   readonly relations = new Relations(this);
   readonly printer = new Printer(this);
@@ -117,6 +125,7 @@ export class Checker {
   constructor(readonly root: TreeNode) {
     startTypeCaches();
     this.libraryBinder = new Binder(libraryTree.rootNode, libraryScope());
+    this.localeOptionsBinder = new Binder(localeOptionsTree.rootNode, this.libraryBinder.moduleScope);
     markUnsupported(this.libraryBinder.moduleScope);
     this.nativeOverloadBinder = new Binder(nativeOverloadTree.rootNode, this.libraryBinder.moduleScope);
     this.binder = new Binder(root, this.libraryBinder.globalScope, this.libraryBinder.moduleScope);
@@ -131,6 +140,7 @@ export class Checker {
   }
 
   check(): SourceDiagnostic[] {
+    this.classes.checkThisTypePlacements(this.root);
     checkDuplicateDeclarations(this, this.binder.allScopes);
     this.signatures.checkTypeParameterDeclarations(this.binder.allScopes);
     this.signatures.checkImplicitReturnTypes(this.root);
@@ -174,17 +184,24 @@ export class Checker {
   }
 
   scopeOf(node: TreeNode): Scope {
+    if (node.tree === localeOptionsTree) return this.localeOptionsBinder.scopeOf(node);
     if (node.tree === nativeOverloadTree) return this.nativeOverloadBinder.scopeOf(node);
     return node.tree === libraryTree ? this.libraryBinder.scopeOf(node) : this.binder.scopeOf(node);
   }
 
   ownScope(node: TreeNode): Scope | undefined {
+    if (node.tree === localeOptionsTree) return this.localeOptionsBinder.ownScope(node);
     if (node.tree === nativeOverloadTree) return this.nativeOverloadBinder.ownScope(node);
     return node.tree === libraryTree ? this.libraryBinder.ownScope(node) : this.binder.ownScope(node);
   }
 
   isLibrary(node: TreeNode): boolean {
-    return node.tree === libraryTree || node.tree === nativeOverloadTree || node.tree === domInterfaceTree;
+    return (
+      node.tree === libraryTree ||
+      node.tree === localeOptionsTree ||
+      node.tree === nativeOverloadTree ||
+      node.tree === domInterfaceTree
+    );
   }
 
   nativeOverload(node: TreeNode): TreeNode {

@@ -10,7 +10,7 @@ import {
   keyedIndexes,
 } from './indexInfos';
 import { printedPropertyName } from './print';
-import { isWithin, named } from './syntax';
+import { hasToken, isWithin, named } from './syntax';
 import {
   isSymbolName,
   type KeyedIndexInfo,
@@ -27,6 +27,7 @@ export interface IndexOwner {
   bodies: TreeNode[];
   name?: TreeNode;
   bases?: Type[];
+  isStatic?: boolean;
 }
 
 /**
@@ -152,6 +153,7 @@ function indexSignatureNode(c: Checker, owner: IndexOwner, keyType: Type): TreeN
     .flatMap((body) => named(body))
     .find((member) => {
       if (member.type !== 'index_signature') return false;
+      if (owner.isStatic !== undefined && hasToken(member, 'static') !== owner.isStatic) return false;
       const declared = declaredKeyType(c, member);
       return (declared.kind === 'union' ? declared.types : [declared]).some(
         (key) => key === keyType || isSamePattern(c, key, keyType)

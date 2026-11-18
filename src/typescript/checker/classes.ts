@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 581 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 603 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -742,18 +742,68 @@ export class ClassChecker {
       this.c.error(node, "派生クラスのコンストラクタでは、'this' を使う前に 'super' を呼び出してください。");
   }
 
-  /** The type `this` stands for in a type annotation. */
+  checkThisTypePlacements(root: TreeNode): void {
+    for (const node of root.descendantsOfType('this_type'))
+      if (!this.thisTypeContainer(node)) this.reportInvalidThisType(node);
+  }
+
   thisTypeAt(node: TreeNode): Type {
-    for (let current = node.parent; current; current = current.parent) {
-      if (classTypes.has(current.type)) return this.selfType(this.classInfoOfNode(current));
-      if (current.type === 'interface_declaration') {
-        const name = current.childForFieldName('name')?.text;
-        const symbol = name ? this.c.scopeOf(current).lookupType(name) : undefined;
-        return symbol ? this.c.typeNodes.declaredTypeOf(symbol) : anyType;
-      }
+    const container = this.thisTypeContainer(node);
+    if (container && classTypes.has(container.type)) return this.selfType(this.classInfoOfNode(container));
+    if (container?.type === 'interface_declaration') {
+      const name = container.childForFieldName('name')?.text;
+      const symbol = name ? this.c.scopeOf(container).lookupType(name) : undefined;
+      return symbol ? this.c.typeNodes.declaredTypeOf(symbol) : anyType;
     }
-    this.c.error(node, "'this' 型は、クラスかインターフェースの中でしか使えません。");
+    this.reportInvalidThisType(node);
     return errorType;
+  }
+
+  private thisTypeContainer(node: TreeNode): TreeNode | undefined {
+    for (let current = node.parent; current; current = current.parent) {
+      if (
+        this.blocksThisType(current, node) ||
+        classTypes.has(current.type) ||
+        current.type === 'interface_declaration'
+      )
+        return undefined;
+      const parent = current.parent;
+      if (parent?.type === 'class_body' || parent?.type === 'interface_body') return parent.parent ?? undefined;
+    }
+    return undefined;
+  }
+
+  private blocksThisType(container: TreeNode, node: TreeNode): boolean {
+    if (
+      ['function_declaration', 'function_expression', 'function_signature', 'class_static_block'].includes(
+        container.type
+      )
+    )
+      return true;
+    if (
+      ![
+        'field_definition',
+        'method_definition',
+        'method_signature',
+        'abstract_method_signature',
+        'property_signature',
+        'index_signature',
+      ].includes(container.type)
+    )
+      return false;
+    if (hasToken(container, 'static')) return true;
+    if (isClassConstructor(container)) {
+      const body = container.childForFieldName('body');
+      return !body || !isWithin(node, body);
+    }
+    return (
+      container.type !== 'index_signature' &&
+      (container.parent?.type === 'object' || container.parent?.type === 'object_type')
+    );
+  }
+
+  private reportInvalidThisType(node: TreeNode): void {
+    this.c.errorWhileResolving(node, "'this' 型は、クラスかインターフェースの非静的なメンバーの中でしか使えません。");
   }
 
   // super --------------------------------------------------------------------------------------------------------

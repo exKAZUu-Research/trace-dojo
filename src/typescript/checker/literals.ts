@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 559 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 577 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -94,9 +94,7 @@ export class LiteralChecker {
 
   arrayLiteral(node: TreeNode, contextual?: Type): Type {
     const elements = arrayElements(node);
-    const tupleContext = contextual ? this.tupleContext(contextual) : undefined;
     const isConstContext = this.isConstContext(node);
-    const elementContext = contextual ? this.elementContext(contextual) : undefined;
     const types: { type: Type; spread: boolean }[] = elements.map((element, index) => {
       // A hole, as in `[, 1]`, reads as `undefined`.
       if (!element) return { type: undefinedType, spread: false };
@@ -104,7 +102,7 @@ export class LiteralChecker {
         const spread = this.c.expressions.check(named(element)[0]);
         return { type: spread, spread: true };
       }
-      const context = tupleContext ? (this.tupleElementContext(tupleContext, index) ?? elementContext) : elementContext;
+      const context = contextual ? this.arrayElementContext(contextual, index, elements.length) : undefined;
       const type = this.c.expressions.check(element, context);
       return { type: isConstContext ? type : this.widenForMutableLocation(type, context), spread: false };
     });
@@ -169,14 +167,14 @@ export class LiteralChecker {
   private isInTupleContext(node: TreeNode, contextual: Type | undefined): boolean {
     return (
       (contextual !== undefined &&
-        (this.tupleContext(contextual) !== undefined || this.isGenericHomomorphicMapped(contextual))) ||
+        (this.tupleContexts(contextual).length > 0 || this.isGenericHomomorphicMapped(contextual))) ||
       isSpreadIntoCall(node)
     );
   }
 
-  private tupleContext(contextual: Type): ObjectType | undefined {
+  private tupleContexts(contextual: Type): ObjectType[] {
     const members = contextual.kind === 'union' ? contextual.types : [contextual];
-    return members.find((member): member is ObjectType => member.kind === 'object' && member.objectKind === 'tuple');
+    return members.filter((member): member is ObjectType => member.kind === 'object' && member.objectKind === 'tuple');
   }
 
   /** Whether `contextual` has a generic homomorphic mapped type, which TypeScript takes as a tuple context. */
@@ -191,12 +189,26 @@ export class LiteralChecker {
     );
   }
 
-  private tupleElementContext(tuple: ObjectType, index: number): Type | undefined {
+  private arrayElementContext(contextual: Type, index: number, length: number): Type | undefined {
+    if (contextual.kind === 'union') {
+      const contexts = contextual.types
+        .map((member) => this.arrayElementContext(member, index, length))
+        .filter((type) => type !== undefined);
+      return contexts.length > 0 ? unionOf(contexts) : undefined;
+    }
+    return contextual.kind === 'object' && contextual.objectKind === 'tuple'
+      ? this.tupleElementContext(contextual, index, length)
+      : this.elementContext(contextual);
+  }
+
+  private tupleElementContext(tuple: ObjectType, index: number, length: number): Type | undefined {
     const elements = tuple.tuple?.elements ?? [];
-    const element = elements[index];
-    if (element && !element.rest) return element.type;
-    const rest = elements.find((member) => member.rest);
-    return rest ? this.c.restElementType(rest.type) : undefined;
+    const restIndex = elements.findIndex((member) => member.rest);
+    if (restIndex === -1 || index < restIndex) return elements[index]?.type;
+    const tailLength = elements.length - restIndex - 1;
+    const tailStart = length - tailLength;
+    if (index >= tailStart) return elements[restIndex + 1 + index - tailStart]?.type;
+    return this.c.restElementType(elements[restIndex].type);
   }
 
   private elementContext(contextual: Type): Type | undefined {
@@ -780,24 +792,35 @@ export class LiteralChecker {
    * The members of a contextual union that the literal's discriminant properties select, as `{ type: "say", … }`
    * selects the member whose `type` is `"say"`; the whole union when none or no member is selected.
    */
-  // code-gauge-allow functionCognitiveComplexity 16 -- Follows TypeScript's discrimination of a contextual union by literal properties.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Follows TypeScript's discrimination of a contextual union by literal properties.
   private discriminatedContext(node: TreeNode, contextual: Type): Type {
     if (contextual.kind !== 'union') return contextual;
     let members = contextual.types;
     for (const member of named(node)) {
-      if (member.type !== 'pair') continue;
-      const name = propertyNameText(member.childForFieldName('key') as TreeNode);
-      const value = member.childForFieldName('value') as TreeNode;
-      if (name === undefined || !['string', 'number', 'true', 'false'].includes(value.type)) continue;
-      if (!this.c.flow.isDiscriminant(contextual, name)) continue;
-      const valueType = regularOf(this.c.silently(() => this.c.expressions.check(value)));
+      const property = this.discriminantProperty(member);
+      if (!property || !this.c.flow.isDiscriminant(contextual, property.name)) continue;
+      const { name, value, isShorthand } = property;
+      const valueType = regularOf(
+        this.c.silently(() => (isShorthand ? this.c.expressions.identifier(value) : this.c.expressions.check(value)))
+      );
+      const valueTypes = valueType.kind === 'union' ? valueType.types : [valueType];
       const selected = members.filter((candidate) => {
         const property = candidate.kind === 'object' ? this.c.propertyOf(candidate, name) : undefined;
-        return !property || this.c.relations.isAssignable(valueType, property.type());
+        return !property || valueTypes.some((value) => this.c.relations.isAssignable(value, property.type()));
       });
       if (selected.length > 0) members = selected;
     }
     return members.length === contextual.types.length ? contextual : unionOf(members);
+  }
+
+  private discriminantProperty(member: TreeNode): { name: string; value: TreeNode; isShorthand: boolean } | undefined {
+    const isShorthand = member.type === 'shorthand_property_identifier';
+    if (!isShorthand && member.type !== 'pair') return undefined;
+    const key = isShorthand ? member : member.childForFieldName('key');
+    const value = isShorthand ? member : member.childForFieldName('value');
+    if (!key || !value || (!isShorthand && !isDiscriminantValue(value))) return undefined;
+    const name = propertyNameText(key);
+    return name === undefined ? undefined : { name, value, isShorthand };
   }
 
   /** A literal's type in an array element or a property, widened unless the contextual type expects literals. */
@@ -1045,4 +1068,13 @@ function arrayElements(node: TreeNode): (TreeNode | undefined)[] {
 function spreadCopy(property: Property, readonly: boolean): Property {
   const keeps = readonly === (property.readonly || property.getterOnly === true);
   return keeps ? { ...property, readonly } : { ...property, readonly, getterOnly: false, writeType: undefined };
+}
+
+function isDiscriminantValue(node: TreeNode): boolean {
+  if (node.type === 'parenthesized_expression') return isDiscriminantValue(named(node)[0]);
+  if (node.type === 'member_expression') {
+    const object = node.childForFieldName('object');
+    return object !== null && isDiscriminantValue(object);
+  }
+  return ['string', 'number', 'template_string', 'true', 'false', 'null', 'identifier'].includes(node.type);
 }

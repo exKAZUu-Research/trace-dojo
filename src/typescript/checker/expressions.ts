@@ -349,7 +349,7 @@ export class ExpressionChecker {
     if (typeSymbol && typeSymbol.typeKind !== 'class') {
       this.c.error(node, `${name} は型であり、値としては使えません。`);
     } else {
-      const hint = nodeGlobalHint(name) || nameSuggestionHint(this.c.scopeOf(node), name, 'value');
+      const hint = nodeGlobalHint(name) || nameSuggestionHint(this.c.scopeOf(node), name, 'value', this.c.budget);
       this.c.error(node, `名前 ${name} が見つかりません。${hint}`);
     }
     return errorType;

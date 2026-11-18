@@ -1,3 +1,5 @@
+import assert from 'node:assert/strict';
+
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -321,6 +323,7 @@ export class BindingPatterns {
   restObject(type: Type, omitted: string[]): Type {
     const object = this.c.relations.removeNullish(type);
     if (object.kind === 'union') return unionOf(object.types.map((member) => this.restObject(member, omitted)));
+    if (this.c.relations.isGeneric(object)) return this.genericRestObject(object, omitted);
     return anonymousObject(
       () => {
         const structure = emptyStructure();
@@ -337,6 +340,22 @@ export class BindingPatterns {
         return structure;
       },
       { isLiteral: true }
+    );
+  }
+
+  private genericRestObject(source: Type, omitted: string[]): Type {
+    const unspreadable = [...this.c.structureOf(source).properties.values()]
+      .filter((property) => !isSpreadableProperty(property))
+      .map((property) => property.name);
+    const excluded = unionOf([...omitted, ...unspreadable].map((name) => literalType(name)));
+    if (isIntrinsic(excluded, 'never')) return source;
+    const omit = this.c.libraryBinder.moduleScope.lookupType('Omit');
+    assert.ok(omit);
+    const parameters = this.c.signatures.typeParametersOfSymbol(omit);
+    const arguments_ = [source, excluded];
+    return this.c.instantiate(
+      this.c.typeNodes.declaredTypeOf(omit),
+      new Map(parameters.map((parameter, index) => [parameter.id, arguments_[index]]))
     );
   }
 

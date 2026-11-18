@@ -397,7 +397,7 @@ export class MemberChecker {
     const candidates = [...first].filter(
       (candidate) => !candidate.startsWith('__') && rest.every((names) => names.has(candidate))
     );
-    return spellingSuggestion(name, candidates);
+    return spellingSuggestion(name, candidates, this.c.budget);
   }
 
   elementAccess(node: TreeNode): Type {

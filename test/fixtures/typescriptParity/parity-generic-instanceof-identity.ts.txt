@@ -1,0 +1,9 @@
+class IdentityA {p=1;}
+class IdentityDerived extends IdentityA {q=2;}
+class IdentityOther {r=3;}
+function genericInstanceIdentity<T>(value:T){if(value instanceof IdentityA){const same:T=value;console.log(value.p);return same;}}
+function objectInstanceIdentity<T extends object>(value:T){if(value instanceof IdentityA){const same:T=value;return same;}}
+function constrainedInstanceIdentity<T extends IdentityA>(value:T){if(value instanceof IdentityA){const same:T=value;return same;}}
+console.log(genericInstanceIdentity(new IdentityA()), objectInstanceIdentity(new IdentityDerived()), constrainedInstanceIdentity(new IdentityDerived()));
+function concreteIdentity(value:IdentityA|IdentityOther){if(value instanceof IdentityA)return value.p;return value.r;}
+console.log(concreteIdentity(new IdentityA()), concreteIdentity(new IdentityOther()));

@@ -1,0 +1,7 @@
+const same: [(x: number) => void] | [(x: number) => void, string?] = [x => console.log(x.toFixed())];
+same[0](3);
+const explicit: [(x: number) => void] | [(x: string) => void] = [(x: number) => console.log(x + 1)];
+explicit[0](3);
+const tail: [...number[], (x: number) => void] = [1, 2, x => console.log(x.toFixed())];
+const last = tail[2];
+if (typeof last === "function") last(4);

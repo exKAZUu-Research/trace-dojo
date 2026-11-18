@@ -417,9 +417,12 @@ export class Flow {
     return results.every((result) => result === true) ? true : 'maybe';
   }
 
-  private objectTypeofMatches(type: Type, name: string): boolean {
+  private objectTypeofMatches(type: Type, name: string): boolean | 'maybe' {
     const isFunction =
-      this.c.signaturesOf(type, 'call').length > 0 || this.c.signaturesOf(type, 'construct').length > 0;
+      this.c.signaturesOf(type, 'call').length > 0 ||
+      this.c.signaturesOf(type, 'construct').length > 0 ||
+      this.c.relations.isAssignable(type, this.c.globalType('Function'));
+    if (name === 'function' && !isFunction && this.c.relations.isEmptyObjectType(type)) return 'maybe';
     if (name === 'function') return isFunction;
     return name === 'object' && !isFunction;
   }
@@ -511,12 +514,15 @@ export class Flow {
   }
 
   /** The part of a type that `value instanceof C` keeps, given the instance type of `C`. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Preserves generic identity and filters concrete nominal alternatives.
   narrowByInstanceof(type: Type, instance: Type, assumeTrue: boolean): Type {
     if (assumeTrue) {
       if (isAnyLike(type) || isIntrinsic(type, 'unknown')) return instance;
-      const related = mapType(type, (member) =>
-        this.isDerivedFrom(member, instance) ? member : this.isDerivedFrom(instance, member) ? instance : neverType
-      );
+      const related = mapType(type, (member) => {
+        if (member.kind === 'typeParameter') return intersectionOf([member, instance], this.c.budget);
+        if (this.isDerivedFrom(member, instance)) return member;
+        return this.isDerivedFrom(instance, member) ? instance : neverType;
+      });
       return isIntrinsic(related, 'never') ? instance : related;
     }
     return filterType(type, (member) => isAnyLike(member) || !this.isDerivedFrom(member, instance));

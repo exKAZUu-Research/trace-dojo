@@ -1,0 +1,13 @@
+(1,40): error TS2349: This expression is not callable.
+  Type 'unknown' has no call signatures.
+(2,62): error TS2349: This expression is not callable.
+  Type '{ x: number; }' has no call signatures.
+(3,56): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+(4,65): error TS2348: Value of type 'T' is not callable. Did you mean to include 'new'?
+(5,77): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+(7,78): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.
+(8,74): error TS2349: This expression is not callable.
+  Type 'never' has no call signatures.

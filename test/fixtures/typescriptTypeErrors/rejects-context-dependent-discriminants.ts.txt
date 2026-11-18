@@ -1,0 +1,10 @@
+type U = {kind: "s", f: (x: string) => void} | {kind: "n", f: (x: number) => void};
+const make = () => "s" as const;
+const a: U = {kind: make(), f: x => console.log(x.toUpperCase())};
+const wide: string = "s";
+const b: U = {kind: wide, f: x => console.log(x)};
+const tags = {kind: "s" as const};
+const c: U = {kind: tags["kind"], f: x => console.log(x.toUpperCase())};
+const d: U = {kind: ("s" as const), f: x => console.log(x.toUpperCase())};
+const key = "kind";
+const e: U = {[key]: "s", f: x => console.log(x.toUpperCase())};

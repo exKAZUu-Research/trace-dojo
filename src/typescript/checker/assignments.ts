@@ -353,7 +353,7 @@ export class AssignmentChecker {
     if (!symbol) {
       this.c.error(
         expression,
-        `名前 ${expression.text} が見つかりません。${nameSuggestionHint(this.c.scopeOf(expression), expression.text, 'value')}`
+        `名前 ${expression.text} が見つかりません。${nameSuggestionHint(this.c.scopeOf(expression), expression.text, 'value', this.c.budget)}`
       );
       return errorType;
     }
