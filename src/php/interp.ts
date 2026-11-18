@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 880 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 886 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -385,7 +385,7 @@ function evaluateRead(e: Expr, mode: ReadMode): Chain {
   return plan === SHORT ? SHORT : plan();
 }
 
-// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 37 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function prepareRead(e: Expr, mode: ReadMode): ReadPlan {
   const runtime = rt();
   switch (e.k) {
@@ -411,6 +411,7 @@ function prepareRead(e: Expr, mode: ReadMode): ReadPlan {
       return preparePropertyRead(e, mode);
     }
     case 'sprop': {
+      runtime.row = e.row;
       const cls = resolveStaticClass(e.cls, (expression) =>
         mode !== 'read' && hasNullsafeReceiver(expression) ? evaluateRead(expression, 'coalesce') : evChain(expression)
       );
@@ -628,13 +629,20 @@ function insertArrayItem(array: PhpArray, item: Extract<Expr, { k: 'array' }>['i
     slot.isRef = true;
     slot.rc++;
   } else slot = share(ev(item.value));
-  const key = readKey === undefined ? undefined : toKey(readKey());
+  const key = readKey === undefined ? undefined : readLiteralKey(item.key!, readKey);
   const previous = key === undefined ? undefined : array.map.get(key);
   if (key !== undefined) array.setSlot(key, slot);
   else if (!array.append(slot))
     throwError('Error', 'Cannot add element to the array as the next element is already occupied');
   if (previous !== undefined) rt().release([previous]);
   if (!item.byRef) rt().spend();
+}
+
+function readLiteralKey(expression: Expr, read: () => Value): string | bigint {
+  const undefinedVariable =
+    expression.k === 'var' && isCompiledVariable(expression) && !rt().frame.vars.has(expression.name);
+  const value = read();
+  return undefinedVariable ? '' : toKey(value);
 }
 
 // code-gauge-allow functionNcss 46 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
@@ -895,12 +903,13 @@ function classOfValue(value: Value): PhpClass {
 }
 
 function classConstantOf(e: Extract<Expr, { k: 'cconst' }>): Value {
-  if (e.className) return resolveClassName(e.cls);
   const runtime = rt();
+  runtime.row = e.row;
+  if (e.className) return resolveClassName(e.cls);
   const receiver = e.cls.k === 'expr' ? resolveClassRef(e.cls) : undefined;
   const name = typeof e.name === 'string' ? e.name : ev(e.name);
-  const cls = receiver ?? resolveClassRef(e.cls);
   runtime.row = e.row;
+  const cls = receiver ?? resolveClassRef(e.cls);
   // The direct fetch opcode starts evaluation; lookups within an initializer track recursive constant references.
   const trackEvaluation = runtime.frame.constantExpression;
   if (typeof name !== 'string') {
@@ -1037,8 +1046,8 @@ function binary(e: Extract<Expr, { k: 'bin' }>): Value {
   const mark = runtime.frame.temporaries.length;
   const readLeft = prepareOperand(e.l);
   const readRight = prepareOperand(e.r);
-  const left = readLeft();
-  const right = readRight();
+  const left = readLeft(e.r.row);
+  const right = readRight(e.r.row);
   runtime.row = e.r.row;
   // PHP frees the operands as soon as the operator has used them.
   const result = e.swapOperands ? operate(e.op, right, left) : operate(e.op, left, right);
@@ -1156,7 +1165,7 @@ function objectToArrayCast(object: PhpObject): PhpArray {
   return classesModule.objectToArray(object);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function matchExpression(e: Extract<Expr, { k: 'match' }>): Value {
   const runtime = rt();
   const readSubject = prepareOperand(e.subject);
@@ -1178,7 +1187,7 @@ function matchExpression(e: Extract<Expr, { k: 'match' }>): Value {
     e.subject.k === 'var' && isCompiledVariable(e.subject)
       ? (runtime.frame.vars.get(e.subject.name)?.v ?? null)
       : readSubject();
-  runtime.row = e.row;
+  runtime.row = (e.jumpTable ? e.subject : (e.arms.at(-1)?.conditions?.at(-1) ?? e.subject)).row;
   throwError('UnhandledMatchError', `Unhandled match case ${matchCaseText(subject)}`);
 }
 

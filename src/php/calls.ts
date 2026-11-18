@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 678 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 682 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -56,6 +56,7 @@ export interface CallTarget {
   magic?: MagicCall;
   directOverload?: boolean;
   inline?: boolean;
+  frameless?: boolean;
 }
 
 export interface MagicCall {
@@ -288,7 +289,7 @@ function invokeNative(
       calledClass: target.staticClass,
       named,
       directOverload: target.directOverload,
-      row: inline ? row : undefined,
+      row: inline || target.frameless ? row : undefined,
       discardResult: Boolean(inline && discardResult),
     });
   } catch (error) {
@@ -660,7 +661,7 @@ function completeUserReturn(decl: FunctionDecl, frame: Frame, value: Value, name
     frame.returning = ref;
   }
   if (!decl.returnType) return decl.byRefReturn ? value : share(value);
-  runtime.row = frame.returnRow ?? runtime.row;
+  runtime.row = frame.returnRow ?? decl.endRow;
   const result = checkReturn(value, decl.returnType, name, frame);
   if (!(frame.returning instanceof Ref)) return result;
   frame.returning.assign(result);

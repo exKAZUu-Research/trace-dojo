@@ -1178,7 +1178,7 @@ export class Converter extends DeclarationConverter {
     const name = this.nameText(nameNode);
     const className = lower(name) === 'class' ? true : undefined;
     const cls = this.classRef(scope, !className && this.constantInitializer);
-    if (!className || cls.k !== 'expr') return { k: 'cconst', cls, name, className, row };
+    if (!className || cls.k !== 'expr') return { k: 'cconst', cls, name, className, row: nameNode.startPosition.row };
     const literal = parserScalar(cls.e);
     if (literal === undefined) {
       const type = this.compiledType(cls.e);
@@ -1230,7 +1230,7 @@ export class Converter extends DeclarationConverter {
       }
       return { k: 'call', fn: name, args, fcc, row };
     }
-    return { k: 'call', fn: this.expr(fnNode), args, fcc, row };
+    return { k: 'call', fn: this.expr(fnNode), args, fcc, initRow: row, row: argumentsNode.startPosition.row };
   }
 
   private quietCheck(node: Node, argumentsNode: Node, word: 'isset' | 'empty', row: number): Expr {

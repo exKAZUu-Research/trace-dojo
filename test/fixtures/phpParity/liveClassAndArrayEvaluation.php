@@ -26,3 +26,6 @@ foreach (['a[a][b=v', 'a[a][b%00c]=v', 'a[b=v'] as $query) {
     parse_str($query, $parsed);
     echo json_encode($parsed), "\n";
 }
+
+$null = null;
+var_dump([$missingKey => 1], [$null => 2]);

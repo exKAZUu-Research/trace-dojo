@@ -30,3 +30,15 @@ int(4)
 {"a":{"a":"v"}}
 {"a":{"a":"v"}}
 {"a_b":"v"}
+
+Warning: Undefined variable $missingKey in /main.php on line 31
+
+Deprecated: Using null as an array offset is deprecated, use an empty string instead in /main.php on line 31
+array(1) {
+  [""]=>
+  int(1)
+}
+array(1) {
+  [""]=>
+  int(2)
+}

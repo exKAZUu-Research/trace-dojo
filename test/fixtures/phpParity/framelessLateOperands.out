@@ -1,0 +1,13 @@
+int(0)
+string(3) "bcd"
+bool(true)
+bool(true)
+string(3) "abc"
+string(3) "bcd"
+string(5) "xbcdy"
+bool(true)
+string(3) "bcd"
+string(2) "cd"
+string(5) "xabcy"
+#0 /main.php(30): strpos(Array, 'a')
+#1 {main}

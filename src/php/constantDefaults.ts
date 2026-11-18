@@ -35,6 +35,22 @@ export function foldedConstant(expression: Expr, context: FoldContext): Constant
   return value === UNKNOWN ? undefined : value;
 }
 
+// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+export function selectConstantBranch(expression: Expr, context: FoldContext): Expr {
+  let current = expression;
+  while (true) {
+    if (current.k === 'cond') {
+      const condition = foldBool(fold(current.test, context));
+      if (condition === UNKNOWN) return current;
+      current = condition ? (current.consequent ?? current.test) : current.alternate;
+    } else if (current.k === 'bin' && current.op === '??') {
+      const value = fold(current.l, context);
+      if (value === UNKNOWN) return current;
+      current = value === null ? current.r : current.l;
+    } else return current;
+  }
+}
+
 function fold(expression: Expr, context: FoldContext): Folded {
   switch (expression.k) {
     case 'lit': {

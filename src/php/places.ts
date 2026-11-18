@@ -6,11 +6,21 @@ import { dropped, type Key, PhpArray, PhpObject, type PropDecl, Ref, type Value 
 import { isSubtype } from './variance';
 
 export type PlaceOperation = 'assignOp' | 'incdec' | 'nested' | 'receiver';
+export type NestMode = 'write' | 'update' | 'unset';
+
+export const SKIP_COMPOUND = Symbol('compound target changed during fetch');
+
+export interface CompoundRead {
+  value: Value;
+  declaration?: PropDecl;
+  sources?: Ref['typedBy'];
+}
 
 /** A location a program writes to: a variable, an element, a property, or a static property. */
 export interface Place {
   /** The value, or undefined when the location does not exist. */
   get(update?: PlaceOperation): Value | undefined;
+  fetchCompound?(): CompoundRead | typeof SKIP_COMPOUND;
   set(value: Value, operation?: 'assignOp'): Value;
   assign?(value: () => Value): Value;
   /** The location as a reference, which `=&`, by-reference arguments, and `global` share. */
@@ -23,12 +33,19 @@ export interface Place {
    * The place a nested write (`$place[] = 1`) changes: the place itself, or another one for a property that `__get`
    * provides or an element that `offsetGet` provides. Throws where the place may not change that way.
    */
-  nested?(mode?: 'write' | 'update' | 'unset'): Place;
+  nested?(mode?: NestMode): Place;
   incrementTarget?(): Place;
   /** Warns that the place does not exist, as a read-modify-write (`++`, `.=`) of it does, creating what PHP creates. */
   warnUndefined?(): void;
   /** The value as `isset` and `??` read it, asking `__isset` or `offsetExists` first; undefined when unset. */
   getForIsset?(): Value | undefined;
+}
+
+export function readCompound(place: Place): CompoundRead | typeof SKIP_COMPOUND {
+  if (place.fetchCompound) return place.fetchCompound();
+  const value = place.get('assignOp');
+  if (value === undefined) place.warnUndefined?.();
+  return { value: value ?? null, declaration: place.declaration?.(), sources: place.typeSources?.() };
 }
 
 /** Marks an array as held by more than one holder, so that the next write copies it. */
@@ -50,6 +67,14 @@ export class VarPlace implements Place {
 
   warnUndefined(): void {
     warn(`Undefined ${this.global ? 'global ' : ''}variable $${this.name}`);
+  }
+
+  fetchCompound(): CompoundRead {
+    const current = this.get();
+    if (current !== undefined) return { value: current, sources: this.typeSources() };
+    this.warnUndefined();
+    this.set(null);
+    return { value: null };
   }
 
   set(value: Value): Value {
@@ -135,6 +160,15 @@ export class ElementPlace implements Place {
   warnUndefined(): void {
     if (this.key !== undefined)
       warn(`Undefined array key ${typeof this.key === 'bigint' ? this.key : `"${this.key}"`}`);
+  }
+
+  fetchCompound(): CompoundRead | typeof SKIP_COMPOUND {
+    const current = this.get();
+    if (current !== undefined) return { value: current, sources: this.typeSources() };
+    this.warnUndefined();
+    if (this.get() !== undefined) return SKIP_COMPOUND;
+    this.set(null);
+    return { value: null };
   }
 
   set(value: Value): Value {

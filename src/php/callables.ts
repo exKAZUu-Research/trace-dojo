@@ -187,8 +187,8 @@ function claimArgumentTemporaries(frame: Frame, args: ArgValue[], first: number,
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 38 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = false): Value {
   const runtime = rt();
   runtime.row = e.row;
@@ -210,17 +210,22 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = 
       return renderSimpleSprintf(format, reads, e.row);
     }
     const specialized = specializedCall(fn, e.args);
-    const directOverload = specialized && fn.kind === 'native' && fn.shortParamsDirectOnly;
-    const deferred = specialized && hasDeferredNativeOperands(fn.name);
-    const args = deferred ? evalDeferredValueArgs(e.args, e.row) : evalArgs(e.args, fn, fn.name);
-    runtime.row = e.row;
-    const result = invoke({ fn, inline: specialized && !directOverload, directOverload }, args, e.row, discardResult);
+    const frameless = specialized === 'frameless';
+    const directOverload = frameless && fn.kind === 'native' && fn.shortParamsDirectOnly;
+    const inline = specialized === 'opcode' || (frameless && fn.name === 'strtr');
+    const row = inline && fn.name === 'strlen' ? e.args[0].e.row : e.row;
+    const args =
+      specialized && fn.name !== 'call_user_func' && fn.name !== 'call_user_func_array'
+        ? evalDeferredValueArgs(e.args, row)
+        : evalArgs(e.args, fn, fn.name);
+    runtime.row = row;
+    const result = invoke({ fn, inline, frameless, directOverload }, args, row, discardResult);
     runtime.frame.temporaries.push(result);
     return result;
   }
   const callee = ev(e.fn);
   if (callee instanceof PhpObject || callee instanceof PhpArray) runtime.frame.temporaries.push(callee);
-  runtime.row = e.row;
+  runtime.row = e.initRow ?? e.row;
   const target = callTargetOf(callee, 'direct');
   if (e.fcc) return closureFromCallable(target);
   const args = evalArgs(e.args, target.fn, functionNameFor(target));
@@ -239,10 +244,6 @@ function evalDeferredValueArgs(args: Arg[], row: number): ArgValue[] {
   const values = reads.map((read, position) => ({ v: share(read(row)), position }));
   claimArgumentTemporaries(frame, values, 0, mark);
   return values;
-}
-
-function hasDeferredNativeOperands(name: string): boolean {
-  return name !== 'implode' && name !== 'call_user_func' && name !== 'call_user_func_array';
 }
 
 function functionNameFor(target: CallTarget): string {
@@ -929,21 +930,50 @@ function newClosure(fn: UserFunction, bound: Map<string, Ref>, isStatic: boolean
 
 // Function bodies ----------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function specializedCall(fn: Callable, args: Arg[]): boolean {
-  if (fn.kind !== 'native' || args.some((arg) => arg.spread || arg.name !== undefined)) return false;
+const FRAMELESS_ARITIES: Readonly<Partial<Record<string, readonly number[]>>> = {
+  class_exists: [1, 2],
+  dechex: [1],
+  dirname: [1, 2],
+  implode: [1, 2],
+  in_array: [2, 3],
+  is_numeric: [1],
+  max: [2],
+  min: [2],
+  preg_match: [2],
+  preg_replace: [3],
+  property_exists: [2],
+  str_contains: [2],
+  str_replace: [3],
+  str_starts_with: [2],
+  strpos: [2, 3],
+  strstr: [2, 3],
+  strtr: [2, 3],
+  substr: [2, 3],
+  trim: [1, 2],
+};
+
+const OPCODE_ARITIES: Readonly<Partial<Record<string, readonly number[]>>> = {
+  array_key_exists: [2],
+  boolval: [1],
+  call_user_func_array: [2],
+  doubleval: [1],
+  floatval: [1],
+  get_called_class: [0],
+  get_class: [0, 1],
+  intval: [1],
+  strval: [1],
+};
+
+function specializedCall(fn: Callable, args: Arg[]): 'opcode' | 'frameless' | undefined {
+  if (fn.kind !== 'native' || args.some((arg) => arg.spread || arg.name !== undefined)) return undefined;
   const name = lower(fn.name);
-  if (['strval', 'floatval', 'doubleval', 'boolval'].includes(name)) return args.length === 1;
-  if (name === 'intval') return args.length === 1;
-  if (name === 'min' || name === 'max') return args.length === 2;
-  if (name === 'implode') return args.length === 1 || args.length === 2;
-  if (name === 'strtr') return args.length === 2 || args.length === 3;
-  if (name === 'substr') return args.length === 2 || args.length === 3;
-  if (!fn.inlined) return false;
-  if (name === 'array_key_exists') return args.length === 2;
-  if (name === 'get_class') return args.length <= 1;
-  if (name === 'get_called_class') return args.length === 0;
-  if (name === 'call_user_func') return args.length > 0;
-  if (name === 'call_user_func_array') return args.length === 2;
-  return args.length === 1;
+  if (FRAMELESS_ARITIES[name]?.includes(args.length)) return 'frameless';
+  const arities = OPCODE_ARITIES[name];
+  if (
+    arities
+      ? arities.includes(args.length)
+      : fn.inlined && (name === 'call_user_func' ? args.length > 0 : args.length === 1)
+  )
+    return 'opcode';
+  return undefined;
 }

@@ -12,7 +12,7 @@ import {
 export { canAccessConstant, classConstant, setClassEvaluator } from './classConstants';
 import { lower } from './bytes';
 import { type ArgValue, asInternal, invoke } from './calls';
-import { foldedConstant } from './constantDefaults';
+import { foldedConstant, selectConstantBranch } from './constantDefaults';
 import { debugType, formatFloat, normalizeKeyString, toBool, valueName } from './conversions';
 import { deprecated, notice, throwError, warn } from './errors';
 import { strictEquals } from './operators';
@@ -813,9 +813,17 @@ function signatureText(method: Method): string {
   return `${fn.kind === 'user' && fn.decl.byRefReturn ? '& ' : ''}${method.scope.name}::${method.name}(${params})${returnType ? `: ${describeType(returnType, method.scope)}` : ''}`;
 }
 
-function defaultText(e: Expr, method: Method): string {
-  const value =
-    e.k === 'magic' ? methodMagicDefault(e.name, method) : foldedConstant(e, { preserveNamedConstants: true });
+// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+function defaultText(expression: Expr, method: Method): string {
+  const context = {
+    preserveNamedConstants: true,
+    className: (ref: Extract<Expr, { k: 'cconst' }>['cls']): string | undefined => {
+      if (ref.k === 'self' && method.scope.kind !== 'trait') return method.scope.fullName;
+      return ref.k === 'parent' ? method.scope.parent?.fullName : undefined;
+    },
+  };
+  const e = selectConstantBranch(expression, context);
+  const value = e.k === 'magic' ? methodMagicDefault(e.name, method) : foldedConstant(e, context);
   if (value instanceof Map) return value.size === 0 ? '[]' : '[...]';
   if (typeof value === 'string') return `'${value.slice(0, 10)}${value.length > 10 ? '...' : ''}'`;
   if (typeof value === 'number') return formatFloat(value);

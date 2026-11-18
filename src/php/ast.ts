@@ -54,7 +54,7 @@ export type Expr = { row: number } & (
   | { k: 'cconst'; cls: ClassRef; name: string | Expr; className?: true }
   | { k: 'const'; name: ResolvedName }
   | { k: 'magic'; name: '__CLASS__' | '__FUNCTION__' | '__METHOD__' | '__TRAIT__' }
-  | { k: 'call'; fn: ResolvedName | Expr; args: Arg[]; fcc: boolean }
+  | { k: 'call'; fn: ResolvedName | Expr; args: Arg[]; fcc: boolean; initRow?: number }
   | { k: 'mcall'; obj: Expr; name: string | Expr; args: Arg[]; nullsafe: boolean; fcc: boolean }
   | { k: 'scall'; cls: ClassRef; name: string | Expr; args: Arg[]; fcc: boolean }
   | { k: 'new'; cls: ClassRef; args: Arg[] }

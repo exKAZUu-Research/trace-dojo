@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 553 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 555 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
@@ -469,6 +469,7 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
     const container = place.get();
     if (container instanceof PhpObject && !container.isResource) return foreachObject(statement, container, true);
     if (!(container instanceof PhpArray)) {
+      runtime.row = statement.subject.row;
       warn(`foreach() argument must be of type array|object, ${valueName(container ?? null)} given`);
       return undefined;
     }
@@ -477,6 +478,7 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
   const subject = ev(statement.subject);
   if (subject instanceof PhpObject && !subject.isResource) return foreachObject(statement, subject);
   if (!(subject instanceof PhpArray)) {
+    runtime.row = statement.subject.row;
     warn(`foreach() argument must be of type array|object, ${valueName(subject)} given`);
     return undefined;
   }

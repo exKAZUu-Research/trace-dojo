@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 663 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 688 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -11,12 +11,16 @@ import { deprecated, notice, throwError, warn, withPendingException } from './er
 import { ev, isArrayAccess, memberName, prepareOperand, readIndex, resolveClassRef, stringOffset } from './interp';
 import { arithmetic, bitwise, concat, toInt, toKey, toStr } from './operators';
 import {
+  type CompoundRead,
   ElementPlace,
+  type NestMode,
   type Place,
   type PlaceOperation,
+  readCompound,
   readElement,
   RefPlace,
   share,
+  SKIP_COMPOUND,
   ValuePlace,
   VarPlace,
   writableContainer,
@@ -106,7 +110,7 @@ function dimensionPlace(e: Extract<Expr, { k: 'idx' }>, mode: PlaceMode): Place 
     const fetch = nestedPlace(parent, writeMode);
     const container = writableContainer(fetch, undefined, writeMode !== 'write');
     if (container instanceof PhpArray) return new ElementPlace(container, key === undefined ? undefined : toKey(key));
-    if (container instanceof PhpObject) return arrayAccessPlace(container, key);
+    if (container instanceof PhpObject) return arrayAccessPlace(container, key, writeMode === 'write');
     return stringOffsetPlace(fetch, container, key);
   };
   if (mode !== 'deferred') return resolve(mode);
@@ -120,6 +124,7 @@ function dimensionPlace(e: Extract<Expr, { k: 'idx' }>, mode: PlaceMode): Place 
   });
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function instancePropertyPlace(e: Extract<Expr, { k: 'prop' }>, mode: PlaceMode, through: boolean): Place {
   const parent = placeOf(e.obj, mode, true);
   const property = e.name;
@@ -130,7 +135,9 @@ function instancePropertyPlace(e: Extract<Expr, { k: 'prop' }>, mode: PlaceMode,
     rt().row = e.row;
     if (!(object instanceof PhpObject)) {
       const action = through ? 'modify' : writeMode === 'incdec' ? 'increment/decrement' : 'assign';
-      throwError('Error', `Attempt to ${action} property "${name}" on ${valueName(object)}`);
+      const error = (): never => throwError('Error', `Attempt to ${action} property "${name}" on ${valueName(object)}`);
+      if (writeMode === 'write' && !through) return invalidWriteTarget(error);
+      return error();
     }
     return propPlace(object, name);
   };
@@ -141,6 +148,19 @@ function instancePropertyPlace(e: Extract<Expr, { k: 'prop' }>, mode: PlaceMode,
     rt().row = e.row;
     return object instanceof PhpObject ? readProp(object, name, rt().frame.scope, 'coalesce') : undefined;
   });
+}
+
+function invalidWriteTarget(error: () => never): Place {
+  return {
+    get: error,
+    set: error,
+    ref: error,
+    unset: error,
+    assign: (value) => {
+      value();
+      return error();
+    },
+  };
 }
 
 function propertyReceiver(e: Expr, parent: Place, mode: WriteMode): Value {
@@ -181,6 +201,7 @@ function deferredPlace(resolve: (mode: WriteMode) => Place, read: () => Value | 
   const writable = (mode: WriteMode = 'write'): Place => (target ??= resolve(mode));
   return {
     get: (operation) => (operation === 'assignOp' ? writable('update').get(operation) : read()),
+    fetchCompound: () => readCompound(writable('update')),
     getForIsset: read,
     nested: (mode) => {
       const place = writable(mode === 'update' ? 'update' : 'write');
@@ -260,7 +281,15 @@ class StaticPlace implements Place {
   }
 
   set(value: Value, operation?: 'assignOp'): Value {
+    return this.write(this.target, value, operation);
+  }
+
+  assign(read: () => Value): Value {
     const target = this.target;
+    return this.write(target, read());
+  }
+
+  private write(target: Ref, value: Value, operation?: 'assignOp'): Value {
     const decl = this.decl;
     target.v =
       decl?.type && !(operation === 'assignOp' && target.isRef) ? classesModule.coerceProperty(decl, value) : value;
@@ -272,8 +301,6 @@ class StaticPlace implements Place {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function propPlace(object: PhpObject, name: string): Place {
   const scope = rt().frame.scope;
   let reportedStaticAccess = false;
@@ -289,6 +316,9 @@ function propPlace(object: PhpObject, name: string): Place {
       if (operation) lookup(true);
       return readPropertyPlace(object, name, scope, operation);
     },
+    fetchCompound() {
+      return fetchCompoundProperty(this, object, name, scope, lookup(true));
+    },
     set: (value, operation) => writeProp(object, name, value, scope, { fetched: reportedStaticAccess, operation }),
     ref: () => propRef(object, name, scope),
     unset: () => unsetProp(object, name, scope),
@@ -302,32 +332,60 @@ function propPlace(object: PhpObject, name: string): Place {
     warnUndefined: () => {
       if (object.cls.findMethod('__get')) return;
       // PHP creates the property (deprecating a dynamic one) before it warns about reading it.
-      if (!lookup(false)) {
-        classesModule.createDynamicProp(object, name);
-        object.props.set(name, null);
-      }
+      const decl = lookup(false);
+      if (!decl) classesModule.createDynamicProp(object, name);
+      object.props.set(decl?.key ?? name, null);
       warn(`Undefined property: ${object.cls.name}::$${name}`);
     },
     nested(mode = 'write') {
-      const decl = lookup(true);
-      if (decl && classesModule.canAccessProp(decl, scope))
-        classesModule.requireVirtualPropertyHook(object, decl, 'get');
-      if (
-        ((decl && !classesModule.canAccessProp(decl, scope)) || !issetPropExists(object, name, scope)) &&
-        object.cls.findMethod('__get')
-      )
-        return new RefPlace(propRef(object, name, scope, 'alias', reportedStaticAccess));
-      if (decl?.hooks?.get && !object.guards?.has(`hook:${name}`)) {
-        return new RefPlace(classesModule.hookedPropertyReference(object, decl, scope, mode, true));
-      }
-      classesModule.checkIndirectModification(object, name, scope, mode);
-      if (mode === 'unset' && !decl && !object.props.has(name)) {
-        classesModule.createDynamicProp(object, name);
-        object.props.set(name, null);
-      }
-      return this;
+      return nestedPropertyPlace(object, name, scope, mode, lookup(true), reportedStaticAccess) ?? this;
     },
   };
+}
+
+function fetchCompoundProperty(
+  place: Place,
+  object: PhpObject,
+  name: string,
+  scope: PhpClass | undefined,
+  decl: PropDecl | undefined
+): CompoundRead {
+  const ordinary =
+    decl &&
+    !decl.isReadonly &&
+    !decl.hooks &&
+    classesModule.canAccessProp(decl, scope) &&
+    !object.unsetProperties?.has(decl.key);
+  const value = readPropertyPlace(object, name, scope, 'assignOp');
+  if (value === undefined) place.warnUndefined?.();
+  return {
+    value: value ?? null,
+    declaration: ordinary ? decl : undefined,
+    sources: ordinary ? place.typeSources?.() : undefined,
+  };
+}
+
+function nestedPropertyPlace(
+  object: PhpObject,
+  name: string,
+  scope: PhpClass | undefined,
+  mode: NestMode,
+  decl: PropDecl | undefined,
+  reportedStaticAccess: boolean
+): Place | undefined {
+  const accessible = decl && classesModule.canAccessProp(decl, scope);
+  if (accessible) classesModule.requireVirtualPropertyHook(object, decl, 'get');
+  if (((decl && !accessible) || !issetPropExists(object, name, scope)) && object.cls.findMethod('__get'))
+    return new RefPlace(propRef(object, name, scope, 'alias', reportedStaticAccess));
+  if (decl?.hooks?.get && !object.guards?.has(`hook:${name}`))
+    return new RefPlace(classesModule.hookedPropertyReference(object, decl, scope, mode, true));
+  classesModule.checkIndirectModification(object, name, scope, mode);
+  const key = decl?.key ?? name;
+  if (mode === 'unset' && !decl?.type && (!object.props.has(key) || object.unsetProperties?.has(key))) {
+    if (!decl) classesModule.createDynamicProp(object, name);
+    object.props.set(key, null);
+  }
+  return undefined;
 }
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
@@ -387,8 +445,11 @@ export function nativeIteratorSlot(object: PhpObject): Value | Ref | undefined {
   return key === undefined ? undefined : storage.array.map.get(key);
 }
 
-function arrayAccessPlace(object: PhpObject, key: Value | undefined): Place {
-  if (!isArrayAccess(object)) throwError('Error', `Cannot use object of type ${object.cls.name} as array`);
+function arrayAccessPlace(object: PhpObject, key: Value | undefined, readAssignmentValue = false): Place {
+  if (!isArrayAccess(object)) {
+    const error = (): never => throwError('Error', `Cannot use object of type ${object.cls.name} as array`);
+    return readAssignmentValue ? invalidWriteTarget(error) : error();
+  }
   return {
     getForIsset: () =>
       toBool(callMethod(object, 'offsetExists', [key ?? null], rt().row))
@@ -686,17 +747,15 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
   const place = placeOf(e.target, 'deferred');
   const value = ev(e.value);
   runtime.row = e.row;
-  let current = place.get('assignOp');
-  if (current === undefined) {
-    place.warnUndefined?.();
-    current = null;
-  }
+  const fetched = readCompound(place);
+  if (fetched === SKIP_COMPOUND) return null;
+  const current = fetched.value;
   let result: Value;
   try {
     result = applyOperator(e.op, current, value);
   } catch (error) {
     if (error instanceof PhpThrow && !(e.op === '.' && typeof current === 'string')) {
-      finishFailedCompound(place, error);
+      finishFailedCompound(place, fetched, error);
     }
     throw error;
   }
@@ -704,10 +763,10 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
 }
 
 // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function finishFailedCompound(place: Place, pending: PhpThrow): void {
+function finishFailedCompound(place: Place, fetched: CompoundRead, pending: PhpThrow): void {
   const runtime = rt();
-  const sources = place.typeSources?.() ?? [];
-  const property = place.declaration?.();
+  const sources = fetched.sources ?? [];
+  const property = fetched.declaration;
   const declarations =
     sources.length > 0 ? sources.map(({ decl }) => decl) : property?.type && !property.hooks ? [property] : [];
   if (declarations.length === 0) return;

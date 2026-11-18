@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 506 -- PHP operators share coercion and comparison helpers.
+// code-gauge-allow-file fileNcss 512 -- PHP operators share coercion and comparison helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import {
   boolValue,
