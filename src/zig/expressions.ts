@@ -33,6 +33,7 @@ import { errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffset
 import { memorySpace, spendMemory } from './memoryAccounting';
 import { callableNative } from './nativeAdapter';
 import { asFloat, comparisonTest, isArithmeticType, isIntegerType, isZero, sign } from './operands';
+import { sliceLengthPointer } from './pointerViews';
 import { type Frame, Jump, withHeldValues } from './runtime';
 import {
   addDecls,
@@ -417,7 +418,7 @@ export abstract class ExpressionCompiler extends SemaBase {
             const place = base.place;
             const lengthPlace: Place | undefined = place && {
               isConst: place.isConst,
-              locate: (frame) => place.locate(frame).project('length'),
+              locate: (frame) => sliceLengthPointer(place.locate(frame)),
             };
             return runtime(USIZE, (frame) => (evaluate(frame) as Slice).lengthValue, expression, lengthPlace);
           }

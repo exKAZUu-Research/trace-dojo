@@ -1745,10 +1745,22 @@ test.each([
     '&other.interface',
   ],
 ])('native %s writer word identities match live fields and equivalent headers', (_kind, construct, writer, other) => {
-  const source = `const std=@import("std");const U=extern union{writer:*std.Io.Writer,words:*[4]usize};pub fn main(init:std.process.Init)!void{var first:[8]u8=undefined;var second:[4]u8=undefined;${construct}const a=U{.writer=${writer}};const b=U{.writer=${other}};const tag=a.words[0];const p=&a.writer.end;const q=&a.words[3];var map=std.AutoHashMap(*usize,u8).init(std.heap.page_allocator);defer map.deinit();try map.put(p,42);q.*=2;std.debug.print("{} {} {} {any} {}",.{tag==a.words[0],tag==b.words[0],p==q,map.get(q),p.*});}`;
+  const source = `const std=@import("std");const U=extern union{writer:*std.Io.Writer,words:*[4]usize};pub fn main(init:std.process.Init)!void{var first:[8]u8=undefined;var second:[4]u8=undefined;${construct}const a=U{.writer=${writer}};const b=U{.writer=${other}};const tag=a.words[0];const p=&a.writer.end;const q=&a.words[3];const n=&a.writer.buffer.len;const m=&a.words[2];var map=std.AutoHashMap(*usize,u8).init(std.heap.page_allocator);defer map.deinit();try map.put(p,42);try map.put(n,43);q.*=2;m.*=5;std.debug.print("{} {} {} {any} {}|{} {any} {}",.{tag==a.words[0],tag==b.words[0],p==q,map.get(q),p.*,n==m,map.get(m),n.*});}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
-    stderr: 'true true true 42 2',
+    stderr: 'true true true 42 2|true 43 5',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'var local:S=undefined;const s=&local;',
+  'var bytes:[32]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const s=try f.allocator().create(S);',
+])('raw header words and interior bytes share the slice-length location with %s', (storage) => {
+  const source = `const std=@import("std");const S=struct{data:[]u8};const U=extern union{s:*S,words:*[2]usize,raw:*[16]u8};const L=extern union{n:*usize,raw:*[8]u8};pub fn main()!void{var data:[4]u8=@splat(0);${storage}s.data=&data;const u=U{.s=s};const p=&s.data.len;const q=&u.words[1];const b=L{.n=p};std.debug.print("{} {} {}|",.{p==q,&b.raw[1]==&u.raw[9],q.*});q.*=3;std.debug.print("{} {}",.{p.*,s.data.len});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true true 4|3 3',
     uncaughtException: undefined,
   });
 });

@@ -6,12 +6,13 @@ import {
   fieldOffsets,
   optionalNicheBits,
   sizeOf,
+  SLICE_LENGTH_BIT_OFFSET,
   unionOffsets,
   usesFieldLayout,
 } from './layout';
-import { spendMemory } from './memoryAccounting';
+import { memorySpace, spendMemory } from './memoryAccounting';
 import { sparseBytes } from './sparseBytes';
-import { arrayOf, type StructType, type Type, typeId, U8, U16 } from './types';
+import { arrayOf, type StructType, type Type, typeId, U8, U16, USIZE } from './types';
 import {
   Cell,
   ErrorValue,
@@ -40,6 +41,13 @@ const views = new WeakMap<BufferMemorySpace, WeakValueMap<string, Pointer>>();
 
 export function rememberPointerType(pointer: Pointer, type: Type): void {
   if (!pointees.has(pointer)) pointees.set(pointer, { source: pointer, sourceType: type, type });
+}
+
+export function sliceLengthPointer(pointer: Pointer): Pointer {
+  const backing = memorySpace().typedViews.get(pointer.target.slots);
+  if (!backing) return pointer.project('length');
+  const offset = backing.offset(pointer.index) + SLICE_LENGTH_BIT_OFFSET;
+  return new Pointer(backing.memory.arrayView(USIZE, 1n, offset), 0);
 }
 
 export function viewPointer(pointer: Pointer, type: Type, space: BufferMemorySpace): Pointer {
@@ -400,8 +408,15 @@ function sourceLocation(pointer: Pointer, type: Type, offset: number): { storage
     const payload = new Pointer(union.fieldView!(0), 0).storageLocation();
     return { storage: payload.storage, index: payload.index + offset / 8 - unionOffsets(type).payload };
   }
+  return scalarSourceLocation(pointer, type, offset);
+}
+
+function scalarSourceLocation(pointer: Pointer, type: Type, offset: number): ReturnType<Pointer['storageLocation']> {
+  if (type.kind === 'pointer' && type.size === 'slice' && offset >= SLICE_LENGTH_BIT_OFFSET)
+    return scalarSourceLocation(sliceLengthPointer(pointer), USIZE, offset - SLICE_LENGTH_BIT_OFFSET);
   const location = pointer.storageLocation();
-  return { storage: location.storage, index: location.index + offset / (8 * Math.max(1, sizeOf(type))) };
+  const stride = memorySpace().memories.has(location.storage as Value[]) ? 1 : Math.max(1, sizeOf(type));
+  return { storage: location.storage, index: location.index + offset / (8 * stride) };
 }
 
 function wrapperSourceLocation(

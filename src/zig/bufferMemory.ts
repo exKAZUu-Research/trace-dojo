@@ -10,6 +10,7 @@ import {
   fieldOffsets,
   optionalNicheBits,
   sizeOf,
+  SLICE_LENGTH_BIT_OFFSET,
   unionOffsets,
   usesFieldLayout,
 } from './layout';
@@ -285,7 +286,7 @@ export class BufferMemory {
       case 'pointer': {
         const pointer = this.reference(offset, type);
         if (type.size !== 'slice') return pointer;
-        const length = this.readBits(offset + 64, 64);
+        const length = this.readBits(offset + SLICE_LENGTH_BIT_OFFSET, 64);
         return pointer instanceof Pointer ? new Slice(pointer.target, pointer.index, length) : undefinedValue(type);
       }
       case 'optional': {
@@ -504,7 +505,7 @@ export class BufferMemory {
         if (type.size === 'slice') {
           const slice = value as Slice;
           this.writeReference(offset, new Pointer(slice.target, slice.start), type);
-          this.writeBits(offset + 64, 64, slice.lengthValue);
+          this.writeBits(offset + SLICE_LENGTH_BIT_OFFSET, 64, slice.lengthValue);
         } else this.writeReference(offset, value, type);
         return;
       }

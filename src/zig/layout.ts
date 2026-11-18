@@ -1,6 +1,8 @@
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { intType, type StructType, type Type, type UnionType } from './types';
 
+export const SLICE_LENGTH_BIT_OFFSET = 64;
+
 /** `@sizeOf` and `@alignOf` as on the reference toolchain's target (aarch64), which the library's growth depends on. */
 export function sizeOf(type: Type): number {
   return layoutOf(type).size;
