@@ -120,12 +120,17 @@ test.each([
   'finite',
   'mixed',
   'selfField',
-])('transport annotations round-trip within a bounded heap: %s', { timeout: 30_000 }, (name) => {
+  'equalityControl',
+  'emptyLists',
+  'singletonLists',
+  'singletonStrings',
+  'deepEmpty',
+])('transport graphs round-trip within a bounded heap: %s', { timeout: 30_000 }, (name) => {
   const result = z
     .object({ bytes: z.number(), loops: z.number() })
-    .parse(runHelper('test/helpers/haskellTransportAnnotations.ts', 256, [name]));
+    .parse(runHelper('test/helpers/haskellTransportOutput.ts', 256, [name]));
   expect(result.bytes).toBeLessThan(32 * 1024 * 1024);
-  expect(result.loops).toBe(name === 'control' ? 5 : 1200);
+  expect(result.loops).toBe(name === 'control' || name === 'equalityControl' ? 5 : 1200);
 });
 
 function runHelper(path: string, heap: number, args: string[] = []): unknown {

@@ -6,65 +6,89 @@ import { z } from 'zod';
 import { traceProgram } from '../../src/interpreter/program';
 import type { DisplayNode } from '../../src/problems/trace';
 
-test(
-  'immutable composite views survive unchanged and persistent-map loops within a bounded heap',
-  { timeout: 30_000 },
-  () => {
-    const bundle = execFileSync(
-      'bun',
-      ['build', 'test/helpers/haskellCompositeTrace.ts', '--target=node', '--packages=external'],
-      {
-        encoding: 'utf8',
-        timeout: 30_000,
-        maxBuffer: 16 * 1024 * 1024,
-      }
-    );
-    const output = execFileSync('node', ['--max-old-space-size=256', '--input-type=module'], {
-      input: bundle,
-      encoding: 'utf8',
-      timeout: 15_000,
-    });
-    const array = z.object({ kind: z.literal('array'), entries: z.record(z.string(), z.unknown()) });
-    const result = z
-      .object({
-        unchanged: z.array(
-          z.object({
-            name: z.string(),
-            size: z.number(),
-            stdout: z.string(),
-            shown: z.number(),
-            entries: array,
-            exception: z.unknown().optional(),
-          })
-        ),
-        growing: z.object({
+test('immutable composite loops retain cheap answers within bounded transport output', { timeout: 30_000 }, () => {
+  const bundle = execFileSync(
+    'bun',
+    ['build', 'test/helpers/haskellCompositeTrace.ts', '--target=node', '--packages=external'],
+    { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
+  );
+  const output = execFileSync('node', ['--max-old-space-size=256', '--input-type=module'], {
+    input: bundle,
+    encoding: 'utf8',
+    timeout: 15_000,
+  });
+  const array = z.object({ kind: z.literal('array'), entries: z.record(z.string(), z.unknown()) });
+  const display = z.union([array, z.object({ kind: z.literal('value'), value: z.unknown() })]).optional();
+  const result = z
+    .object({
+      unchanged: z.array(
+        z.object({
+          name: z.string(),
+          size: z.number(),
+          loops: z.number(),
+          stdout: z.string(),
+          answers: z.number(),
+          shown: z.number(),
+          first: array,
+          entries: display,
+          bytes: z.number(),
+          decodedAnswers: z.number(),
+          exception: z.unknown().optional(),
+        })
+      ),
+      growing: z.array(
+        z.object({
+          loops: z.number(),
           stdout: z.string(),
           shown: z.number(),
-          expected: z.number(),
-          entries: array,
+          answers: z.number(),
+          entries: display,
+          bytes: z.number(),
+          decodedAnswers: z.number(),
           exception: z.unknown().optional(),
-        }),
-      })
-      .parse(JSON.parse(output));
-    expect(result.unchanged).toHaveLength(4);
-    const stdout = Array.from({ length: 1500 }, (_, index) => `${(index + 1) * 2}\n`).join('') + '1501\n';
-    for (const summary of result.unchanged) {
-      expect(summary.stdout).toBe(stdout);
-      expect(summary.shown).toBe(3000);
-      expect(Object.keys(summary.entries.entries)).toHaveLength(summary.size);
-      expect(summary.exception).toBeUndefined();
+        })
+      ),
+    })
+    .parse(JSON.parse(output));
+  expect(result.unchanged).toHaveLength(8);
+  for (const summary of result.unchanged) {
+    const { loops } = summary;
+    expect(summary.stdout).toBe(
+      Array.from({ length: loops }, (_, i) => `${(i + 1) * 2}\n`).join('') + `${loops + 1}\n`
+    );
+    expect(summary.answers).toBe(loops * 2);
+    expect(summary.decodedAnswers).toBe(summary.answers);
+    expect(Object.keys(summary.first.entries)).toHaveLength(summary.size);
+    expect(summary.shown).toBeGreaterThan(0);
+    expect(summary.shown).toBeLessThanOrEqual(summary.answers);
+    if (loops === 100) {
+      expect(summary.shown).toBe(summary.answers);
+      expect(Object.keys(array.parse(summary.entries).entries)).toHaveLength(summary.size);
     }
-    expect(result.growing.stdout).toBe(Array.from({ length: 300 }, (_, index) => `${index + 1}\n`).join('') + '300\n');
-    expect(result.growing.shown).toBe(result.growing.expected);
-    expect(result.growing.shown).toBeGreaterThanOrEqual(600);
-    expect(Object.keys(result.growing.entries.entries)).toHaveLength(300);
-    expect(result.growing.entries.entries['299']).toEqual({
-      kind: 'array',
-      entries: { '0': { kind: 'value', value: 300 }, '1': { kind: 'value', value: 600 } },
-    });
-    expect(result.growing.exception).toBeUndefined();
+    expect(summary.bytes).toBeLessThan(64 * 1024 * 1024);
+    expect(summary.exception).toBeUndefined();
   }
-);
+  expect(result.unchanged.some((summary) => summary.loops === 1500 && summary.shown < summary.answers)).toBe(true);
+  expect(result.growing).toHaveLength(2);
+  for (const summary of result.growing) {
+    const { loops } = summary;
+    expect(summary.stdout).toBe(Array.from({ length: loops }, (_, i) => `${i + 1}\n`).join('') + `${loops}\n`);
+    expect(summary.answers).toBeGreaterThanOrEqual(loops * 2);
+    expect(summary.decodedAnswers).toBe(summary.answers);
+    expect(summary.shown).toBeGreaterThan(0);
+    if (loops === 30) {
+      expect(summary.shown).toBeGreaterThanOrEqual(loops * 2);
+      const entries = array.parse(summary.entries).entries;
+      expect(Object.keys(entries)).toHaveLength(loops);
+      expect(entries[String(loops - 1)]).toEqual({
+        kind: 'array',
+        entries: { '0': { kind: 'value', value: loops }, '1': { kind: 'value', value: loops * 2 } },
+      });
+    } else expect(summary.entries?.kind).not.toBe('array');
+    expect(summary.bytes).toBeLessThan(64 * 1024 * 1024);
+    expect(summary.exception).toBeUndefined();
+  }
+});
 
 test('cached structures keep nested turtle positions live', () => {
   const source = `import qualified Data.Map as M

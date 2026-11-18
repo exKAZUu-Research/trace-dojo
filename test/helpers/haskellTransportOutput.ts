@@ -16,6 +16,11 @@ const name = z
     'finite',
     'mixed',
     'selfField',
+    'equalityControl',
+    'emptyLists',
+    'singletonLists',
+    'singletonStrings',
+    'deepEmpty',
   ])
   .parse(process.argv[2]);
 const values = {
@@ -28,8 +33,13 @@ const values = {
   finite: '[0.0::Double]',
   mixed: 'concat(replicate 20 [0.0,-0.0,0/0,1/0,-1/0::Double])',
   selfField: 'replicate 1000 (0/0::Double)',
+  equalityControl: 'replicate 1000 ([]::[Int])',
+  emptyLists: 'replicate 1000 ([]::[Int])',
+  singletonLists: 'replicate 1000 [0::Int]',
+  singletonStrings: 'replicate 1000 [""::String]',
+  deepEmpty: `${'replicate 1 ('.repeat(10)}replicate 200 ([]::[Int])${')'.repeat(10)}`,
 };
-const loops = name === 'control' ? 5 : 1200;
+const loops = name === 'control' || name === 'equalityControl' ? 5 : 1200;
 const source = `import Control.Monad
 data R=R{specialFloatingPointValuesCollectedForTheCurrentIteration::[Double]}
 main=do
@@ -74,7 +84,7 @@ else if (name === 'infinity') assert.equal(leaf, Infinity);
 else if (name === 'negativeInfinity') assert.equal(leaf, -Infinity);
 else if (name === 'deepBigints') assert.equal(leaf, 10n ** 30n);
 else if (name === 'finite') assert.ok(Object.is(leaf, 0));
-else {
+else if (name === 'mixed') {
   const values = z.array(z.unknown()).parse(displayed.vars.xs);
   assert.ok(Object.is(values[0], 0));
   assert.ok(Object.is(values[1], -0));
@@ -82,9 +92,24 @@ else {
   assert.equal(values[3], Infinity);
   assert.equal(values[4], -Infinity);
 }
-if (name === 'control' || name === 'finite') {
+if (name === 'equalityControl' || name === 'emptyLists') {
+  z.array(z.array(z.unknown()).length(0)).length(1000).parse(displayed.vars.xs);
+} else if (name === 'singletonLists') {
+  z.array(z.tuple([z.literal(0)]))
+    .length(1000)
+    .parse(displayed.vars.xs);
+} else if (name === 'singletonStrings') {
+  z.array(z.tuple([z.literal('')]))
+    .length(1000)
+    .parse(displayed.vars.xs);
+} else if (name === 'deepEmpty') {
+  let nested: unknown = displayed.vars.xs;
+  while (Array.isArray(nested) && nested.length === 1) nested = nested[0];
+  z.array(z.array(z.unknown()).length(0)).length(200).parse(nested);
+}
+if (name === 'control' || name === 'finite' || name === 'equalityControl') {
   assert.ok(Array.isArray(last.vars.xs));
   assert.ok(Array.isArray(decoded.finalVars.xs));
-  assert.equal(decoded.finalVars.xs.length, name === 'control' ? 1000 : 1);
+  assert.equal(decoded.finalVars.xs.length, name === 'finite' ? 1 : 1000);
 }
 process.stdout.write(JSON.stringify({ bytes: Buffer.byteLength(transported), loops }));

@@ -10,27 +10,36 @@ import { mapGraph } from './typeGraph';
 
 interface OutputSize {
   characters: number;
-  annotations: number;
-  annotationPaths: number;
-  annotationWork: number;
+  transportNodes: number;
+  transportPaths: number;
+  transportWork: number;
 }
 
 interface OutputCost {
   characters: number;
-  annotations: number;
+  transportNodes: number;
   work: number;
 }
 
 const RECORDING_CHARACTERS = LIMITS.maxSlots * 32;
 const STEP_CHARACTERS = 256;
-const truncated = { node: TRUNCATED_DISPLAY, size: JSON.stringify(TRUNCATED_DISPLAY).length };
+const IDENTITY_ENTRY_CHARACTERS = 8;
+const truncated = {
+  node: TRUNCATED_DISPLAY,
+  size: {
+    characters: JSON.stringify(TRUNCATED_DISPLAY).length + IDENTITY_ENTRY_CHARACTERS,
+    transportNodes: 1,
+    transportPaths: 0,
+    transportWork: 0,
+  },
+};
 const negativeZero = Symbol();
 
 export class RecordingOutput {
   private remaining = RECORDING_CHARACTERS;
   private stateRemaining = LIMITS.maxSlots * 8;
-  private annotationsRemaining = MAX_DISPLAY_NODES;
-  private annotationWorkRemaining = LIMITS.maxSlots;
+  private transportNodesRemaining = MAX_DISPLAY_NODES;
+  private transportWorkRemaining = LIMITS.maxSlots;
   private recordedItems = 1;
   private readonly sizes = new WeakMap<object, OutputSize>();
   private readonly stringSizes = new Map<string, number>();
@@ -59,7 +68,7 @@ export class RecordingOutput {
   private boundRoots<T>(
     roots: Record<string, T>,
     path: string,
-    fallback?: { node: T; size: number }
+    fallback?: { node: T; size: OutputSize }
   ): Record<string, T> {
     const bounded: Record<string, T> = Object.create(null);
     let smallRemaining = STEP_CHARACTERS;
@@ -70,14 +79,7 @@ export class RecordingOutput {
         smallRemaining -= cost.characters;
       } else if (cost && this.admit(cost)) {
         bounded[name] = node;
-      } else if (
-        fallback &&
-        this.admit({
-          characters: fallback.size + this.stringSize(name) + 2,
-          annotations: 0,
-          work: 0,
-        })
-      ) {
+      } else if (fallback && this.admit(this.rootCost(fallback.size, name, path))) {
         bounded[name] = fallback.node;
       }
     }
@@ -87,32 +89,36 @@ export class RecordingOutput {
   private outputCost(node: unknown, name: string, path: string): OutputCost | undefined {
     try {
       const size = this.size(node);
-      return {
-        characters:
-          size.characters +
-          size.annotationPaths +
-          size.annotations * (path.length + this.annotationSegmentSize(name)) +
-          this.stringSize(name) +
-          2,
-        annotations: size.annotations,
-        work: size.annotationWork + size.annotations * (path.split('.').length + 1),
-      };
+      return this.rootCost(size, name, path);
     } catch (error) {
       if (!(error instanceof DisplayAbort)) throw error;
       return;
     }
   }
 
+  private rootCost(size: OutputSize, name: string, path: string): OutputCost {
+    return {
+      characters:
+        size.characters +
+        size.transportPaths +
+        size.transportNodes * (path.length + this.pathSegmentSize(name)) +
+        this.stringSize(name) +
+        2,
+      transportNodes: size.transportNodes,
+      work: size.transportWork + size.transportNodes * (path.split('.').length + 1),
+    };
+  }
+
   private admit(cost: OutputCost): boolean {
     if (
       cost.characters > this.remaining ||
-      cost.annotations > this.annotationsRemaining ||
-      cost.work > this.annotationWorkRemaining
+      cost.transportNodes > this.transportNodesRemaining ||
+      cost.work > this.transportWorkRemaining
     )
       return false;
     this.remaining -= cost.characters;
-    this.annotationsRemaining -= cost.annotations;
-    this.annotationWorkRemaining -= cost.work;
+    this.transportNodesRemaining -= cost.transportNodes;
+    this.transportWorkRemaining -= cost.work;
     return true;
   }
 
@@ -140,16 +146,21 @@ export class RecordingOutput {
   }
 
   private rememberSize(node: object): OutputSize {
-    const size: OutputSize = { characters: 2, annotations: 0, annotationPaths: 0, annotationWork: 0 };
+    const size: OutputSize = {
+      characters: 2 + IDENTITY_ENTRY_CHARACTERS,
+      transportNodes: 1,
+      transportPaths: 0,
+      transportWork: 0,
+    };
     const array = Array.isArray(node);
     for (const [key, child] of Object.entries(node)) {
       const weight = typeof child === 'object' && child !== null ? this.sizes.get(child)! : this.scalarSize(child);
       size.characters = boundedSize(size.characters + weight.characters + 1 + (array ? 0 : this.stringSize(key) + 1));
-      size.annotations = boundedSize(size.annotations + weight.annotations);
-      size.annotationPaths = boundedSize(
-        size.annotationPaths + weight.annotationPaths + weight.annotations * this.annotationSegmentSize(key)
+      size.transportNodes = boundedSize(size.transportNodes + weight.transportNodes);
+      size.transportPaths = boundedSize(
+        size.transportPaths + weight.transportPaths + weight.transportNodes * this.pathSegmentSize(key)
       );
-      size.annotationWork = boundedSize(size.annotationWork + weight.annotationWork + weight.annotations);
+      size.transportWork = boundedSize(size.transportWork + weight.transportWork + weight.transportNodes);
     }
     this.sizes.set(node, size);
     return size;
@@ -163,16 +174,16 @@ export class RecordingOutput {
       size = {
         characters:
           (JSON.stringify(encoded.json)?.length ?? 4) + (annotation ? JSON.stringify(annotation).length + 4 : 0),
-        annotations: annotation ? 1 : 0,
-        annotationPaths: 0,
-        annotationWork: 0,
+        transportNodes: annotation ? 1 : 0,
+        transportPaths: 0,
+        transportWork: 0,
       };
       this.scalarSizes.set(key, size);
     }
     return size;
   }
 
-  private annotationSegmentSize(key: string): number {
+  private pathSegmentSize(key: string): number {
     // A dot becomes a backslash plus dot, then JSON escapes that backslash.
     return this.stringSize(key) * 3 + 1;
   }
