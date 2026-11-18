@@ -1814,6 +1814,22 @@ test.each([
 });
 
 test.each([
+  ['S', '0x12345678', '.{.x=null,.y=9}', '9'],
+  ['[2]?u8', '0x12345678', '.{null,null}', '0'],
+  ['?S', '0x12345678', '.{.x=null,.y=9}', '9'],
+  ['?u16', '0x12005678', 'u.o', '12005678'],
+  ['?u16', '0x12015678', 'u.o', '12015678'],
+  ['[2]?u8', '0x12345678', '.{u.o[1],u.o[0]}', '12341234'],
+])('union result locations preserve the bytes of %s from %s through %s', (type, initial, value, expected) => {
+  const source = `const std=@import("std");const S=struct{x:?u8,y:u16};const U=union(enum){o:${type},w:u32};pub fn main()void{var u:U=.{.w=${initial}};const p=&u.w;u=.{.o=${value}};std.debug.print("{x}",.{p.*});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
   ['', 'std.debug.print("{}",.{p.a});', 'invalid enum value'],
   ['p.*=.{.a=7};bytes[0]=255;', 'std.debug.print("{t}",.{p.*});', 'invalid enum value'],
   ['p.*=.{.a=7};bytes[0]=255;', 'std.debug.print("{any}",.{p.*});', 'invalid enum value'],
@@ -4149,15 +4165,14 @@ test('a labeled switch analyzes prongs reachable through continuation', () => {
 });
 
 test.each([
-  '.a=>|*p|{const a:[p.*]u8=@splat(0);std.debug.print("{} {}",.{a.len,p==&u.a});},.b=>unreachable',
-  '.b=>unreachable,inline else=>|*p,tag|{_=tag;const a:[p.*]u8=@splat(0);std.debug.print("{} {}",.{a.len,p==&u.a});}',
-])('a known union pointer capture provides its constant value and identity for %s', (prongs) => {
-  const source = `const std=@import("std");const U=union(enum){a:u8,b:u8};pub fn main()void{const u=U{.a=3};switch(u){${prongs}}}`;
-  expect(executeProgram('zig', source)).toMatchObject({
-    kind: 'executed',
-    stderr: '3 true',
-    uncaughtException: undefined,
-  });
+  ['u', '3 true'],
+  ['blk:{std.debug.print("x",.{});break :blk u;}', 'x3 true'],
+])('union pointer captures preserve the value, address and evaluation of %s', (operand, stderr) => {
+  const body = 'const a:[p.*]u8=@splat(0);std.debug.print("{} {}",.{a.len,p==&u.a});';
+  for (const prongs of [`.a=>|*p|{${body}},.b=>unreachable`, `.b=>unreachable,inline else=>|*p,tag|{_=tag;${body}}`]) {
+    const source = `const std=@import("std");const U=union(enum){a:u8,b:u8};pub fn main()void{const u=U{.a=3};switch(${operand}){${prongs}}}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr, uncaughtException: undefined });
+  }
 });
 
 test.each(['eql', 'replaceScalar'])('native %s scans charge every visited element', (method) => {

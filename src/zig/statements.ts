@@ -697,7 +697,7 @@ export abstract class StatementCompiler extends CallCompiler {
 
   /** The code that writes an anonymous literal into the value at `holder.slots[index]`, or undefined for other values. */
   // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  private resultLocationStore(value: Expression, type: Type): ResultStore | undefined {
+  private resultLocationStore(value: Expression, type: Type, unionPayload = false): ResultStore | undefined {
     value = unwrapParens(value);
     if (
       value.kind === 'structInit' &&
@@ -706,7 +706,7 @@ export abstract class StatementCompiler extends CallCompiler {
       !type.isTuple &&
       value.fields.length > 0
     ) {
-      return this.fieldStores(value, type);
+      return this.fieldStores(value, type, unionPayload);
     }
     const tupleTypes =
       type.kind === 'struct' && type.isTuple ? this.structFields(type, value).map((field) => field.type) : undefined;
@@ -716,7 +716,7 @@ export abstract class StatementCompiler extends CallCompiler {
         this.error(value, `配列の長さが合いません（${length} 個が必要ですが、${value.elements.length} 個です）。`);
       }
       const stores = value.elements.map((element, index) =>
-        this.slotStore(element, type.kind === 'array' ? type.child : (tupleTypes as Type[])[index])
+        this.slotStore(element, type.kind === 'array' ? type.child : (tupleTypes as Type[])[index], unionPayload)
       );
       return (frame, holder, index) => {
         const aggregate = holder.slots[index] as ZArray | ZStruct;
@@ -729,13 +729,17 @@ export abstract class StatementCompiler extends CallCompiler {
     if (value.kind === 'structInit' && !value.type && type.kind === 'union' && value.fields.length === 1) {
       return this.unionStore(value, type);
     }
-    if (type.kind === 'optional') return this.optionalStore(value, type);
-    if (type.kind === 'error_union') return this.errorUnionStore(value, type);
+    if (type.kind === 'optional') return this.optionalStore(value, type, unionPayload);
+    if (type.kind === 'error_union') return this.errorUnionStore(value, type, unionPayload);
     return undefined;
   }
 
-  private errorUnionStore(value: Expression, type: Extract<Type, { kind: 'error_union' }>): ResultStore | undefined {
-    const inner = this.resultLocationStore(value, type.payload);
+  private errorUnionStore(
+    value: Expression,
+    type: Extract<Type, { kind: 'error_union' }>,
+    unionPayload: boolean
+  ): ResultStore | undefined {
+    const inner = this.resultLocationStore(value, type.payload, unionPayload);
     if (!inner) return undefined;
     const project = this.errorUnionPayloadPointer(type, value);
     return (frame, holder, index) => {
@@ -747,8 +751,12 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
-  private optionalStore(value: Expression, type: Extract<Type, { kind: 'optional' }>): ResultStore | undefined {
-    const inner = this.resultLocationStore(value, type.child);
+  private optionalStore(
+    value: Expression,
+    type: Extract<Type, { kind: 'optional' }>,
+    unionPayload: boolean
+  ): ResultStore | undefined {
+    const inner = this.resultLocationStore(value, type.child, unionPayload);
     if (!inner) return undefined;
     return (frame, holder, index) => {
       if (holder.slots[index] === NULL) this.activateResultPayload(frame, holder, index, type);
@@ -782,12 +790,16 @@ export abstract class StatementCompiler extends CallCompiler {
     holder.slots[index] = type.kind === 'optional' ? optionalSome(fresh, child) : fresh;
   }
 
-  private fieldStores(value: ExpressionOf<'structInit'>, type: Extract<Type, { kind: 'struct' }>): ResultStore {
+  private fieldStores(
+    value: ExpressionOf<'structInit'>,
+    type: Extract<Type, { kind: 'struct' }>,
+    unionPayload: boolean
+  ): ResultStore {
     const stores = this.structInitializerPlan(value, type).map(({ position, field, value: initializer }) => ({
       position,
       store: initializer
-        ? this.slotStore(initializer, field.type)
-        : (((_frame, holder, index) => storeInto(holder, index, field.defaultValue)) as ResultStore),
+        ? this.slotStore(initializer, field.type, unionPayload)
+        : this.valueStore(field.type, known(field.type, field.defaultValue, value), unionPayload),
     }));
     return (frame, holder, index) => {
       const struct = holder.slots[index] as ZStruct;
@@ -806,11 +818,11 @@ export abstract class StatementCompiler extends CallCompiler {
     const slots = sizeOf(fieldType) === 0 ? 0 : valueSlots(fieldType);
     const retainBytes = !this.requiresComptime(type, value);
     const needsRegion = retainBytes && hasValueDependentWrites(fieldType, () => this.spendCompilation());
-    const store = this.slotStore(init.value, fieldType, needsRegion && fieldType.kind !== 'union');
+    const store = this.slotStore(init.value, fieldType, needsRegion);
     return (frame, holder, index) => {
       const union = holder.slots[index] as ZUnion;
       const changed = union.tag !== tag;
-      if (changed && retainBytes) this.retainUnionPayload(type, union, frame, needsRegion);
+      if ((changed || needsRegion) && retainBytes) this.retainUnionPayload(type, union, frame, needsRegion);
       const initialize = changed && !union.fieldView;
       let payload: Value;
       if (initialize) {
@@ -846,19 +858,31 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** The code that writes a field's or element's value: in place for a nested anonymous literal, else as a whole. */
-  private slotStore(value: Expression, type: Type, wholePayload = false): ResultStore {
-    const nested = this.resultLocationStore(value, type);
-    if (nested) return nested;
-    const evaluate = this.coerce(this.compile(value, type), type, value).eval;
-    if (!wholePayload) return (frame, holder, index) => storeInto(holder, index, evaluate(frame));
+  private slotStore(value: Expression, type: Type, unionPayload: boolean): ResultStore {
+    return (
+      this.resultLocationStore(value, type, unionPayload) ??
+      this.valueStore(type, this.coerce(this.compile(value, type), type, value), unionPayload)
+    );
+  }
+
+  private valueStore(type: Type, value: TExpr, unionPayload: boolean): ResultStore {
+    const evaluate = value.eval;
+    if (!unionPayload || type.kind === 'union' || !hasValueDependentWrites(type, () => this.spendCompilation()))
+      return (frame, holder, index) => storeInto(holder, index, evaluate(frame));
+    const locate = value.place?.locate;
     return (frame, holder, index) => {
-      const evaluated = evaluate(frame);
-      const backing = memorySpace().typedViews.get(holder.slots);
-      if (backing) {
-        backing.memory.writeWholePayload(type, backing.offset(index), copyForFrame(frame, evaluated, type));
-      } else {
-        storeInto(holder, index, evaluated);
+      const views = memorySpace().typedViews;
+      const target = views.get(holder.slots);
+      if (!target) return storeInto(holder, index, evaluate(frame));
+      const source = locate?.(frame);
+      const backing = source && views.get(source.target.slots);
+      const offset = target.offset(index);
+      if (source && backing) {
+        backing.memory.copyPayloadTo(type, backing.offset(source.index), target.memory, offset);
+        return;
       }
+      const evaluated = source ? source.load() : evaluate(frame);
+      target.memory.writeWholePayload(type, offset, copyForFrame(frame, evaluated, type));
     };
   }
 
@@ -2085,6 +2109,10 @@ export abstract class StatementCompiler extends CallCompiler {
     const selection =
       operandResult && !expression.label ? { ...operandResult, key: keyOf(operandResult.value) } : undefined;
     const reached = selection && this.reachedCase(matches, selection.key, tagType);
+    const capture = reached?.capture;
+    const selectedAddress = capture?.byPointer && !isDiscardName(capture) ? this.addressOf(operand) : undefined;
+    const addressResult = selectedAddress && staticResultOf(selectedAddress)?.value;
+    const selectedPointer = addressResult instanceof Pointer ? addressResult : undefined;
     fn.targets.push(target);
     try {
       for (const { each, match } of matches) {
@@ -2092,7 +2120,7 @@ export abstract class StatementCompiler extends CallCompiler {
           each,
           {
             skipped: reached !== undefined && each !== reached,
-            knownOperand: each === reached ? selection : undefined,
+            knownOperand: each === reached && selection ? { ...selection, pointer: selectedPointer } : undefined,
             operand,
             operandType,
             tagType,
@@ -2182,9 +2210,10 @@ export abstract class StatementCompiler extends CallCompiler {
     const evaluateOperand = operand.eval;
     const place = operand.place;
     const needsPointer = expression.cases.some((each) => each.capture?.byPointer);
+    const locate = selectedPointer ? selectedAddress?.eval : needsPointer ? place?.locate : undefined;
     const { id } = target;
     const run = (frame: Frame): Jump | { value: Value } | undefined => {
-      let pointer = needsPointer && place ? place.locate(frame) : undefined;
+      let pointer = locate?.(frame) as Pointer | undefined;
       let value = pointer ? pointer.load() : evaluateOperand(frame);
       for (;;) {
         frame.runtime.spend();
@@ -2343,7 +2372,7 @@ export abstract class StatementCompiler extends CallCompiler {
       asStatement: boolean;
       seen: Map<unknown, Span>;
       skipped: boolean;
-      knownOperand?: { value: Value; key: unknown };
+      knownOperand?: { value: Value; key: unknown; pointer?: Pointer };
     },
     match: SwitchMatch
   ): unknown {
@@ -2391,7 +2420,7 @@ export abstract class StatementCompiler extends CallCompiler {
         if (capture.byPointer) {
           const payloadPointer =
             capturePayload && union ? this.unionPayloadPointer(union, captureType, each) : undefined;
-          const original = knownOperand && this.knownAddress(operand);
+          const original = knownOperand?.pointer;
           const constant = original && (payloadPointer ? payloadPointer(original) : original);
           const binding = {
             ...this.newLocal(capture.name, pointerTo(captureType, operand.place?.isConst ?? true), true),
@@ -2401,7 +2430,7 @@ export abstract class StatementCompiler extends CallCompiler {
           locals.set(capture.name, binding);
           bind = (frame, value, pointer) => {
             const source = pointer ?? new Pointer(new Cell(value), 0);
-            frame.slots[binding.slot] = constant ?? (payloadPointer ? payloadPointer(source, value) : source);
+            frame.slots[binding.slot] = payloadPointer ? payloadPointer(source, value) : source;
           };
         } else {
           const value = knownOperand?.value;

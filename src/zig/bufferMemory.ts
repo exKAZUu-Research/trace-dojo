@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 676 -- Keeps the byte codecs, shared typed views, and reference recovery together.
+// code-gauge-allow-file fileNcss 688 -- Keeps byte codecs, typed views, alias-safe copying, and reference recovery together.
 import { transferCost } from './allocation';
 import { PANIC, panic } from './arith';
 import { enumLookup } from './enumLookup';
@@ -252,6 +252,20 @@ export class BufferMemory {
       this.clearRegion(offset, bits, true);
       this.write(type, offset, value);
     });
+  }
+
+  copyPayloadTo(type: Type, offset: number, target: BufferMemory, start: number): void {
+    const bits = sizeOf(type) * 8;
+    this.checkRegion(offset, bits);
+    target.checkRegion(start, bits);
+    if (target === this && offset === start) return;
+    if (target === this && this.synchronization) {
+      const snapshot = new BufferMemory(sparseBytes(sizeOf(type)), this.spend, this.space);
+      this.copyRegion(snapshot, offset, 0, bits);
+      snapshot.copyRegion(target, 0, start, bits);
+      return;
+    }
+    this.copyRegion(target, offset, start, bits);
   }
 
   private access<T>(write: boolean, offset: number, bits: number, run: () => T): T {
