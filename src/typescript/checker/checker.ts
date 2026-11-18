@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 514 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 520 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../../interpreter/diagnostics';
@@ -401,6 +401,13 @@ export class Checker {
   }
 
   private instantiateObject(type: ObjectType, mapper: Mapper): Type {
+    return (
+      this.typeNodes.recursiveAliases.instantiateReference(type, mapper) ?? this.instantiateAliasedObject(type, mapper)
+    );
+  }
+
+  /** An object type instantiated by `mapper`, without deferring it if it is a generic alias that holds itself. */
+  instantiateAliasedObject(type: ObjectType, mapper: Mapper): Type {
     switch (type.objectKind) {
       case 'reference': {
         return this.reference(

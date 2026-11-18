@@ -109,7 +109,7 @@ export class TypeNodes {
 
   private readonly indexedAccessKeys: IndexedAccessKeys;
   readonly interfaceBases: InterfaceBases;
-  private readonly recursiveAliases: RecursiveAliases;
+  readonly recursiveAliases: RecursiveAliases;
 
   constructor(private readonly c: Checker) {
     this.indexedAccessKeys = new IndexedAccessKeys(c);
@@ -452,6 +452,7 @@ export class TypeNodes {
     if (typeArguments.every((argument, index) => argument === parameters[index])) return declared;
     const mapper: Mapper = new Map(parameters.map((parameter, index) => [parameter.id, typeArguments[index]]));
     if (symbol.pendingUnion === declared) return this.c.deferredAliasUnion(unionAlias(symbol), mapper);
+    if (this.recursiveAliases.isPendingType(symbol, declared)) return this.recursiveAliases.reference(symbol, mapper);
     return this.c.instantiate(declared, mapper);
   }
 
@@ -656,12 +657,7 @@ export class TypeNodes {
   /** What a reference to an alias inside its own declaration stands for. */
   private aliasSelfReference(symbol: Sym): Type {
     // An array or a type argument may refer to the alias it is part of, as `type Json = … | Json[]` does.
-    if (this.deferredDepth > 0) {
-      if (symbol.pendingUnion) return symbol.pendingUnion;
-      // Instantiating a generic alias that holds itself would never end.
-      const value = symbol.typeDeclarations[0].childForFieldName('value');
-      if (value && isOutsideGenericDeclarations(value)) return this.recursiveAliases.pendingTypeOf(symbol);
-    }
+    if (this.deferredDepth > 0) return symbol.pendingUnion ?? this.recursiveAliases.pendingTypeOf(symbol);
     this.c.error(symbol.typeDeclarations[0], `型エイリアス ${symbol.name} が自分自身を参照しています。`);
     return errorType;
   }

@@ -123,6 +123,8 @@ export function childTypes(type: Type): readonly Type[] {
       return type.types;
     }
     case 'object': {
+      // Reading the members of a deferred alias reference instantiates them, as for a deferred union.
+      if (type.aliasMapper) return [...type.aliasMapper.values()];
       if (type.objectKind === 'reference') return type.typeArguments ?? [];
       return (type.tuple?.elements ?? []).map((element) => element.type);
     }

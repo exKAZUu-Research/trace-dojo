@@ -193,6 +193,11 @@ export interface ObjectType {
    * `getOuterTypeParameters` gives and instantiating it maps.
    */
   outerTypeParameters?: TypeParameter[];
+  /**
+   * For a reference to a generic alias that holds itself, whose members are instantiated when first read, the type
+   * arguments the alias's type parameters get.
+   */
+  aliasMapper?: Map<number, Type>;
 }
 
 export interface TupleElement {

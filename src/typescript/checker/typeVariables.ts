@@ -60,6 +60,7 @@ function ownTypeVariables(type: Type, search: Search): boolean | undefined {
 }
 
 function ownObjectTypeVariables(type: ObjectType, search: Search): boolean | undefined {
+  if (type.aliasMapper) return undefined;
   switch (type.objectKind) {
     case 'interface': {
       return (type.typeParameters?.length ?? 0) > 0 || outerTypeVariables(type, search);
