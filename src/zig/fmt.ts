@@ -5,7 +5,7 @@ import { checkOutputSize } from './allocation';
  * Formatting works on bytes, as Zig's strings are bytes.
  */
 import { checked, indexOutOfBounds, PANIC, panic } from './arith';
-import { physicalUnion } from './bufferMemory';
+import { activeUnionIndex, physicalUnion } from './bufferMemory';
 import {
   type AnyFloat,
   asBigFloat,
@@ -484,7 +484,7 @@ export function printValue(
         if (kind === 'error_set') return alignBuffer(out, utf8((value as ErrorValue).name), options);
         if (kind === 'enum_literal') return alignBuffer(out, utf8((value as EnumLiteral).name), options);
         if (kind === 'union')
-          return alignBuffer(out, utf8(info.unionFields(type)[(value as ZUnion).tag].name), options);
+          return alignBuffer(out, utf8(info.unionFields(type)[activeUnionIndex(value as ZUnion)].name), options);
         const name = enumName(value as bigint, type as EnumType, info);
         if (name === undefined) panic(PANIC.invalidEnum);
         return alignBuffer(out, utf8(name), options);
@@ -540,8 +540,9 @@ export function printValue(
       const fields = info.unionFields(type);
       if (type.tagType) {
         const union = value as ZUnion;
-        appendBytes(out, utf8(`.{ .${fields[union.tag].name} = `));
-        printValue(out, ANY, options, union.slots[0], fields[union.tag].type, info, depth - 1);
+        const field = fields[activeUnionIndex(union)];
+        appendBytes(out, utf8(`.{ .${field.name} = `));
+        printValue(out, ANY, options, union.slots[0], field.type, info, depth - 1);
         appendBytes(out, utf8(' }'));
         return;
       }

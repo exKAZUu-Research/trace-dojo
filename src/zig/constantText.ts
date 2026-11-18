@@ -140,10 +140,12 @@ function aggregateText(fields: string[]): string {
 }
 
 function quotedBytes(value: ConstantSequence): string {
-  spendMemory(value.length * 3);
-  const bytes = Array.from({ length: value.length }, (_, index) => Number(value.get(index)));
+  spendMemory(value.length);
+  const bytes = Uint8Array.from({ length: value.length }, (_, index) => Number(value.get(index)));
+  const text = decodeIdentifierBytes(bytes, spendMemory);
+  spendMemory(text.length);
   let result = '"';
-  for (const character of decodeIdentifierBytes(bytes)) {
+  for (const character of text) {
     const point = character.codePointAt(0) as number;
     if (character === '"' || character === '\\') result += `\\${character}`;
     else if (point === 10) result += String.raw`\n`;

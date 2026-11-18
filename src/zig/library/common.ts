@@ -4,6 +4,7 @@ import type { Expression, Span } from '../ast';
 import { BigFloat, compareFloats } from '../floats';
 import { spendIntegerOperation } from '../integerWork';
 import { spendMemory } from '../memoryAccounting';
+import { MemoryFault } from '../memoryFault';
 import { type Frame, withHeldValues, ZigPanic } from '../runtime';
 import {
   copyForStorage,
@@ -27,12 +28,18 @@ import {
   typeName,
   USIZE,
 } from '../types';
-import { compileTimeReadable, NULL, Pointer, Slice, storeInto, type Value, ZArray } from '../values';
+import { compileTimeReadable, isUndefinedMemory, NULL, Pointer, Slice, storeInto, type Value, ZArray } from '../values';
 import { ALLOCATOR, ALLOCATOR_ERROR, nativeEnum } from './heap';
 import { compileArgs, expectArgs, fnMember, type Member } from './native';
 
 export function nativeBudget(sema: SemaApi, frame?: Frame): (cost?: number) => void {
   return frame ? (cost = 1) => frame.runtime.spend(cost) : (cost = 1) => sema.spendCompilation(cost);
+}
+
+export function readSliceBytes(slice: Slice, spend: (cost?: number) => void): Uint8Array {
+  if (slice.lengthValue !== 0n && isUndefinedMemory(slice)) throw new MemoryFault();
+  spend(slice.length);
+  return Uint8Array.from({ length: slice.length }, (_, index) => Number(slice.get(index)));
 }
 
 export function nativeTransferCost(sema: SemaApi, type: Type, span: Span): number {

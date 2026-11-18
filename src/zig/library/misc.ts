@@ -1,6 +1,7 @@
 import { transferCost } from '../allocation';
 import { PANIC, panic } from '../arith';
 import type { Span } from '../ast';
+import { unionTagValue } from '../bufferMemory';
 import { enumLookup } from '../enumLookup';
 import { sizeOf } from '../layout';
 import { isIntegerType } from '../operands';
@@ -42,7 +43,7 @@ import {
 } from '../values';
 import { WeakValueMap } from '../weakValueMap';
 import { zeroAllocation } from '../zeroSizedMemory';
-import { computed, constSlice, nativeBudget, newSlice, ORDER } from './common';
+import { computed, constSlice, nativeBudget, newSlice, ORDER, readSliceBytes } from './common';
 import {
   ALLOCATOR,
   ALLOCATOR_ERROR,
@@ -307,7 +308,8 @@ const META: Record<string, () => Member> = {
     const fields = enumLookup(sema.enumFields(type), () => sema.spendCompilation());
     const text = constSlice(sema, textArg, U8);
     return computed(optionalOf(type), [text], call.span, ([value], frame) => {
-      const name = decodeIdentifierBytes(byteNumbers(value, nativeBudget(sema, frame)));
+      const spend = nativeBudget(sema, frame);
+      const name = decodeIdentifierBytes(readSliceBytes(value as Slice, spend), spend);
       return fields.byName.get(name)?.value ?? NULL;
     });
   }),
@@ -319,7 +321,7 @@ const META: Record<string, () => Member> = {
       return sema.error(unionArg, 'activeTag にはタグ付き union を渡してください。');
     const tagType = type.tagType;
     const tags = sema.enumFields(tagType);
-    return computed(tagType, [union], call.span, ([value]) => tags[(value as ZUnion).tag].value);
+    return computed(tagType, [union], call.span, ([value]) => unionTagValue(value as ZUnion, tags));
   }),
 };
 

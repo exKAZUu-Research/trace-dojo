@@ -1780,6 +1780,49 @@ test.each([
 });
 
 test.each([
+  ['union(enum)', 'u.*=U{.small=0x56};'],
+  ['union(enum)', 'const v=U{.small=0x56};u.*=v;'],
+  ['union(enum)', 'update(u,0x56);'],
+  ['extern union', 'u.*=U{.small=0x56};'],
+  ['extern union', 'update(u,0x56);'],
+])('whole %s copies replace the old payload bytes through %s', (layout, assignment) => {
+  const source = `const std=@import("std");const U=${layout}{wide:u16,small:u8};fn update(u:*U,n:u8)void{u.*=U{.small=n};}pub fn main()void{var local:U=.{.wide=0x1234};const u=&local;const p=&u.wide;${assignment}std.debug.print("{x}",.{p.*});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr: '56', uncaughtException: undefined });
+});
+
+test('a whole union store clears overlapping bytes in allocator storage', () => {
+  const source = `const std=@import("std");const U=union(enum){wide:u16,small:u8};pub fn main()!void{var bytes:[8]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(U);p.*=.{.wide=0x1234};p.*=U{.small=0x56};std.debug.print("{x} {x}",.{bytes[0],bytes[1]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '56 0',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  ['', 'std.debug.print("{}",.{p.a});', 'invalid enum value'],
+  ['p.*=.{.a=7};bytes[0]=255;', 'std.debug.print("{t}",.{p.*});', 'invalid enum value'],
+  ['p.*=.{.a=7};bytes[0]=255;', 'std.debug.print("{any}",.{p.*});', 'invalid enum value'],
+  ['p.*=.{.a=7};bytes[0]=255;', 'std.debug.print("{s}",.{@tagName(p.*)});', 'invalid enum value'],
+  ['p.*=.{.a=7};bytes[0]=255;', 'switch(p.*){.a=>{},.b=>{}}', 'switch on corrupt value'],
+])('invalid byte-backed union tags produce a Zig panic for %s %s', (setup, read, expected) => {
+  const source = `const std=@import("std");const U=union(enum(u8)){a:u8,b:u8};pub fn main()!void{var bytes:[8]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(U);${setup}${read}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: `panic: ${expected}`,
+  });
+});
+
+test('copying an invalid union tag preserves its raw bytes until an operation reads it', () => {
+  const source = `const std=@import("std");const U=union(enum(u8)){a:u8,b:u8};pub fn main()!void{var bytes:[8]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(U);const q=try f.allocator().create(U);p.*=.{.a=7};bytes[0]=254;q.*=p.*;std.debug.print("{x} {x} {x}",.{bytes[2],bytes[3],@intFromEnum(q.*)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'fe 7 fe',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
   ['.bits=0', '', 'true', 1],
   ['.bits=1', 'const v=identity(u);_=&v;', 'true', 1],
   ['.empty={}', 'const v=identity(u);_=&v;', 'false', 2],
@@ -1796,6 +1839,25 @@ test.each([
   ['std.mem.copyForwards(u8,&b.bytes,&a.bytes);', '', 'false', 2],
   ['std.mem.copyBackwards(u8,&b.bytes,&a.bytes);', '', 'false', 2],
   ['var bytes:[8]u8=undefined;@memcpy(&bytes,&a.bytes);a.bits=0;@memcpy(&b.bytes,&bytes);', '', 'false', 2],
+  [
+    'var x:[3]u8=undefined;var y:[5]u8=undefined;@memcpy(&x,a.bytes[0..3]);@memcpy(&y,a.bytes[3..8]);a.bits=0;@memcpy(b.bytes[0..3],&x);@memcpy(b.bytes[3..8],&y);',
+    '',
+    'false',
+    2,
+  ],
+  [
+    'var x:[4]u8=undefined;var y:[4]u8=undefined;@memcpy(&y,a.bytes[4..8]);@memcpy(&x,a.bytes[0..4]);a.bits=0;@memcpy(b.bytes[4..8],&y);@memcpy(b.bytes[0..4],&x);',
+    '',
+    'false',
+    2,
+  ],
+  [
+    'var x:[4]u8=undefined;var y:[4]u8=undefined;@memcpy(&x,a.bytes[0..4]);@memcpy(&y,a.bytes[4..8]);b.bits=1;@memcpy(b.bytes[0..4],&x);var c=b;c.bits=1;@memcpy(c.bytes[4..8],&y);@memcpy(c.bytes[0..4],&x);b=c;',
+    '',
+    'false',
+    2,
+  ],
+  ['b.bits=1;@memcpy(b.bytes[4..8],a.bytes[4..8]);', '', 'true', 1],
   ['@memcpy(&b.bytes,&a.bytes);', 'b.bits=0;', 'true', 1],
 ])('raw byte transfers keep surviving turtle pointers through %s', (copy, overwrite, clear, count) => {
   const source = `const std=@import("std");const U=extern union{p:*Turtle,bits:usize,bytes:[8]u8};fn make(a:std.mem.Allocator)!U{const p=try a.create(Turtle);p.*=Turtle.init(0,1);return .{.p=p};}pub fn main(init:std.process.Init)!void{var a=try make(init.gpa);var b:U=.{.bits=0};${copy}a.bits=0;${overwrite}const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});_=&b;}`;
@@ -8152,6 +8214,18 @@ test.each(['a', 'b'])('replacement searches repetitive %s input within linear wo
   });
 });
 
+test.each([
+  ['', '0 97 97 97'],
+  ['a[100]=98;a[200]=98;', '2 122 122 97'],
+])('left-shifted replacement searches stay linear with %s', (setup, expected) => {
+  const source = `const std=@import("std");pub fn main()void{var a:[10001]u8=@splat(97);var n:[100]u8=@splat(97);n[99]=98;${setup}const k=std.mem.replace(u8,a[1..],&n,"z",a[0..10000]);std.debug.print("{} {} {} {}",.{k,a[0],a[1],a[2]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
+
 test('replacement scans preserve live input and pattern aliases across sequential writes', () => {
   const source = `const std=@import("std");pub fn main()void{
     var a=[_]u8{'a','b','a','d','e',0};
@@ -9148,6 +9222,20 @@ test.each(['f64', 'f128'])('parseFloat meters buffering, decoding and numeric sc
   });
   const budget = new ExecutionBudget();
   budget.spend(LIMITS.maxOperations - 2200);
+  expect(() => runProgram(new Runtime(undefined, budget), compileSource(source))).toThrow(
+    expect.objectContaining({ limit: 'operations' })
+  );
+});
+
+test.each(['97', '255'])('enum-name lookup meters UTF-8 decoding for byte %s', (byte) => {
+  const source = `const std=@import("std");const E=enum{a,b};const input:[512]u8=@splat(${byte});pub fn main()void{std.debug.print("{} {}",.{std.meta.stringToEnum(E,&input)==null,std.meta.stringToEnum(E,"a").?==.a});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true true',
+    uncaughtException: undefined,
+  });
+  const budget = new ExecutionBudget();
+  budget.spend(LIMITS.maxOperations - 800);
   expect(() => runProgram(new Runtime(undefined, budget), compileSource(source))).toThrow(
     expect.objectContaining({ limit: 'operations' })
   );

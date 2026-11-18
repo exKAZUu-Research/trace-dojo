@@ -15,7 +15,7 @@ import {
   shiftRight,
 } from './arith';
 import type { BinaryOperator, Expression, ExpressionOf, Span } from './ast';
-import { packedValuesEqual, physicalUnion } from './bufferMemory';
+import { activeUnionIndex, packedValuesEqual, physicalUnion } from './bufferMemory';
 import { enumLookup } from './enumLookup';
 import {
   type AnyFloat,
@@ -519,18 +519,20 @@ export abstract class ExpressionCompiler extends SemaBase {
     }
     const check = (value: Value): ZUnion => {
       const union = value as ZUnion;
-      if (union.tag !== index) {
-        panic(`access of union field '${name}' while field '${fields[union.tag].name}' is active`);
+      const active = activeUnionIndex(union);
+      if (active !== index) {
+        panic(`access of union field '${name}' while field '${fields[active].name}' is active`);
       }
       return union;
     };
     const project = this.unionPayloadPointer(type, field.type, span, check);
     if (base.known) {
       const union = base.value as ZUnion;
-      if (union.tag !== index) {
+      const active = activeUnionIndex(union);
+      if (active !== index) {
         this.error(
           span,
-          `union のフィールド「${name}」を読もうとしましたが、有効なのは「${fields[union.tag].name}」です。`
+          `union のフィールド「${name}」を読もうとしましたが、有効なのは「${fields[active].name}」です。`
         );
       }
       const parent = this.knownAddress(base);
@@ -560,7 +562,7 @@ export abstract class ExpressionCompiler extends SemaBase {
       (parent, value) => {
         const source = value ?? parent.load();
         const union = check ? check(source) : (source as ZUnion);
-        const slots = fixed ? physicalUnion(type, union).fieldView!(union.tag) : union;
+        const slots = fixed ? physicalUnion(type, union).fieldView!(activeUnionIndex(union)) : union;
         return new Pointer(slots, 0);
       }
     );

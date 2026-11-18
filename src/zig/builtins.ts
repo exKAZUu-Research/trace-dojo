@@ -16,7 +16,7 @@ import {
   rem,
 } from './arith';
 import type { Expression, ExpressionOf, Span } from './ast';
-import { BufferMemory } from './bufferMemory';
+import { activeUnionIndex, BufferMemory, unionTagValue } from './bufferMemory';
 // code-gauge-allow-file fileNcss 714 -- The file holds one layer of the compiler, whose parts share its private state.
 import { enumLookup } from './enumLookup';
 import { ExpressionCompiler, log2IntType } from './expressions';
@@ -429,7 +429,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
           const tagType = type.tagType;
           const tags = this.enumFields(tagType);
           this.unionFields(type);
-          return this.derived(operand, tagType.tagType as IntType, (value) => tags[(value as ZUnion).tag].value);
+          return this.derived(operand, tagType.tagType as IntType, (value) => unionTagValue(value as ZUnion, tags));
         }
         if (type.kind !== 'enum')
           return this.error(args[0], `@intFromEnum は enum の値にだけ使えます（${typeName(type)} 型です）。`);
@@ -937,7 +937,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     if (type.kind === 'union' && type.tagType) {
       const fields = this.unionFields(type);
       return this.derived(operand, NAME_SLICE, (value, frame) =>
-        this.nameSlice(fields[(value as ZUnion).tag].name, frame)
+        this.nameSlice(fields[activeUnionIndex(value as ZUnion)].name, frame)
       );
     }
     if (type.kind !== 'enum')

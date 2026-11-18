@@ -1,7 +1,6 @@
 import { PANIC, panic } from '../arith';
 import { BigFloat, parseFloatLiteral, toNumber } from '../floats';
 import { spendIntegerOperation, spendIntegerWidth } from '../integerWork';
-import { MemoryFault } from '../memoryFault';
 import { runtime } from '../semaBase';
 import {
   CONST_U8_SLICE,
@@ -20,9 +19,18 @@ import {
   USIZE,
 } from '../types';
 import { createUtf8Decoder } from '../utf8';
-import { ErrorValue, isUndefinedMemory, Slice, type Value } from '../values';
+import { ErrorValue, Slice, type Value } from '../values';
 import { allocatingWriter, freeWriter, ownWriterSlice } from './allocatingWriter';
-import { allocating, allocatorArg, computed, constSlice, generic, mutableSlice, nativeBudget } from './common';
+import {
+  allocating,
+  allocatorArg,
+  computed,
+  constSlice,
+  generic,
+  mutableSlice,
+  nativeBudget,
+  readSliceBytes,
+} from './common';
 import { allocatorState, ERROR_OUT_OF_MEMORY, nativeEnum } from './heap';
 import { compileArgs, expectArgs, fnMember, type Member, nativeCall, nativeStruct, typeMember } from './native';
 import { compilePrint } from './print';
@@ -106,9 +114,7 @@ function parseInt(bytes: Slice, base: number, type: IntType, spend: (cost?: numb
 
 /** `std.fmt.parseFloat`: decimal or hexadecimal digits with `_`, `inf`, or `nan`, rounded to the type. */
 function parseFloat(bytes: Slice, type: Extract<Type, { kind: 'float' }>, spend: (cost?: number) => void): Value {
-  if (bytes.lengthValue !== 0n && isUndefinedMemory(bytes)) throw new MemoryFault();
-  spend(bytes.length);
-  const input = Uint8Array.from({ length: bytes.length }, (_, index) => Number(bytes.get(index)));
+  const input = readSliceBytes(bytes, spend);
   spend(input.length);
   const text = createUtf8Decoder().decode(input);
   const negative = text[0] === '-';

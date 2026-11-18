@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 454 -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
+// code-gauge-allow-file fileNcss 457 -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { BigFloat, compareFloats } from './floats';
@@ -75,11 +75,15 @@ export function storageOverlaps(
   rightLength = length
 ): boolean {
   if (length === 0 || rightLength === 0) return false;
-  const a = storageLocation(left.slots, leftStart);
-  const b = storageLocation(right.slots, rightStart);
-  const first = storageLocations.has(left.slots) ? a.index : a.index * stride;
-  const second = storageLocations.has(right.slots) ? b.index : b.index * stride;
-  return a.storage === b.storage && first < second + rightLength * stride && second < first + length * stride;
+  const a = storageByteLocation(left, leftStart, stride);
+  const b = storageByteLocation(right, rightStart, stride);
+  return a.storage === b.storage && a.index < b.index + rightLength * stride && b.index < a.index + length * stride;
+}
+
+export function storageByteLocation(target: Slots, index: number, stride: number): { storage: object; index: number } {
+  const slots = target.slots;
+  const location = storageLocation(slots, index);
+  return storageLocations.has(slots) ? location : { storage: location.storage, index: location.index * stride };
 }
 
 export function storageLocation(storage: object, index: number): { storage: object; index: number } {
@@ -191,6 +195,7 @@ export class ZStruct implements Slots {
 
 export class ZUnion implements Slots {
   slots: Value[];
+  rawTag?: () => bigint;
   retainedPayloads?: { type: UnionType; values: ReadonlyMap<number, Value> };
   writeBacking?: (value: ZUnion) => void;
   backingKey?: () => string;

@@ -3,7 +3,7 @@ import { valueSlots } from './allocation';
 import { PANIC, panic } from './arith';
 import { isDiscardName } from './ast';
 import type { Capture, Expression, ExpressionOf, Label, Span, Statement, SwitchCase } from './ast';
-import { physicalUnion } from './bufferMemory';
+import { activeUnionIndex, physicalUnion } from './bufferMemory';
 import { CallCompiler, type FunctionCompilation } from './calls';
 import { enumLookup } from './enumLookup';
 import type { FunctionInstance } from './functions';
@@ -806,10 +806,11 @@ export abstract class StatementCompiler extends CallCompiler {
     const store = this.slotStore(init.value, fieldType);
     const slots = sizeOf(fieldType) === 0 ? 0 : valueSlots(fieldType);
     const retainBytes = !this.requiresComptime(type, value);
+    const needsRegion = retainBytes && hasValueDependentWrites(fieldType, () => this.spendCompilation());
     return (frame, holder, index) => {
       const union = holder.slots[index] as ZUnion;
       const changed = union.tag !== tag;
-      if (changed && retainBytes) this.retainUnionPayload(type, union, frame);
+      if (changed && retainBytes) this.retainUnionPayload(type, union, frame, needsRegion);
       const initialize = changed && !union.fieldView;
       let payload: Value;
       if (initialize) {
@@ -824,8 +825,17 @@ export abstract class StatementCompiler extends CallCompiler {
     };
   }
 
-  private retainUnionPayload(type: Extract<Type, { kind: 'union' }>, union: ZUnion, frame: Frame): void {
+  private retainUnionPayload(
+    type: Extract<Type, { kind: 'union' }>,
+    union: ZUnion,
+    frame: Frame,
+    needsRegion: boolean
+  ): void {
     if (union.fieldView || !union.payloadInitialized) return;
+    if (needsRegion) {
+      physicalUnion(type, union);
+      return;
+    }
     const field = type.fields![union.tag].type;
     if (sizeOf(field) === 0) return;
     if (union.retainedPayloads?.values.has(union.tag) && hasValueDependentWrites(field, () => frame.runtime.spend())) {
@@ -2036,7 +2046,7 @@ export abstract class StatementCompiler extends CallCompiler {
     // The values each prong matches, as keys: bigints for integers and enums, names for errors, and booleans.
     const keyOf = (value: Value): unknown => {
       if (union) {
-        const field = unionFields?.[(value as ZUnion).tag];
+        const field = unionFields?.[activeUnionIndex(value as ZUnion, 'switch on corrupt value')];
         const index = field ? tagsByName?.get(field.name) : undefined;
         return index === undefined ? undefined : enumTags?.[index].value;
       }

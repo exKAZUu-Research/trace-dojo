@@ -1,6 +1,6 @@
-// code-gauge-allow-file fileNcss 576 -- Keeps the byte codecs, shared typed views, and reference-preserving copies together.
+// code-gauge-allow-file fileNcss 654 -- Keeps the byte codecs, shared typed views, and reference-preserving copies together.
 import { transferCost } from './allocation';
-import { panic } from './arith';
+import { PANIC, panic } from './arith';
 import { enumLookup } from './enumLookup';
 import { decodeFloat, encodeFloat } from './floatEncoding';
 import type { AnyFloat } from './floats';
@@ -18,7 +18,14 @@ import { memorySpace, reserveMemory, spendMemory } from './memoryAccounting';
 import { rememberPointerType, viewPointer } from './pointerViews';
 import { copyForStorage, undefinedValue } from './semaBase';
 import { singleValueOf } from './singleValue';
-import { copySparseBytes, propertyIndex, sparseBytes, sparseByteValues, sparseEntriesInRange } from './sparseBytes';
+import {
+  clearSparseBytes,
+  copySparseBytes,
+  propertyIndex,
+  sparseBytes,
+  sparseByteValues,
+  sparseEntriesInRange,
+} from './sparseBytes';
 import { type Type, typeId } from './types';
 import {
   ErrorValue,
@@ -47,6 +54,9 @@ interface StoredReference {
   bits: number;
 }
 
+type LocatedReference = StoredReference & { offset: number };
+type ReferenceCandidates = Map<number, Map<string, StoredReference>>;
+
 interface FieldLocation {
   type: Type;
   offset: number;
@@ -58,7 +68,7 @@ export class BufferMemorySpace {
   readonly memories = new WeakMap<Value[], BufferMemory>();
   readonly typedViews = new WeakMap<Value[], { memory: BufferMemory; offset: (index: number) => number }>();
   readonly logicalMemories = new WeakMap<object, Map<string, BufferMemory>>();
-  readonly byteReferences = new WeakMap<object, Map<number, StoredReference>>();
+  readonly byteReferences = new WeakMap<object, ReferenceCandidates>();
   readonly referenceIds = new WeakMap<object, bigint>();
   readonly references = new WeakValueMap<string, object>();
   nextReferenceId = 1n;
@@ -139,6 +149,7 @@ export function physicalUnion(type: Extract<Type, { kind: 'union' }>, value: ZUn
     },
   });
   value.slots = backing.slots;
+  value.rawTag = backing.rawTag;
   value.fieldView = backing.fieldView;
   value.copyBacking = backing.copyBacking;
   value.writeBacking = backing.writeBacking;
@@ -146,6 +157,16 @@ export function physicalUnion(type: Extract<Type, { kind: 'union' }>, value: ZUn
   value.backingReferences = backing.backingReferences;
   value.copyBackingTo = backing.copyBackingTo;
   return value;
+}
+
+export function activeUnionIndex(value: ZUnion, invalid: string = PANIC.invalidEnum): number {
+  const index = value.tag;
+  if (index < 0) return panic(invalid);
+  return index;
+}
+
+export function unionTagValue(value: ZUnion, tags: readonly { value: bigint }[]): bigint {
+  return value.rawTag?.() ?? tags[activeUnionIndex(value)].value;
 }
 
 // code-gauge-allow functionParameterCount 7 -- Binds typed storage, its byte region, work budget, and initialized prefix together.
@@ -186,6 +207,7 @@ export function bindBufferMemory(
 
 export class BufferMemory {
   static byteCopyReferences(destination: Pointer, source: Pointer, length: number): (() => void) | undefined {
+    if (length === 0) return undefined;
     const space = memorySpace();
     const from = space.typedViews.get(source.target.slots);
     const to = space.typedViews.get(destination.target.slots);
@@ -194,41 +216,22 @@ export class BufferMemory {
     const targetOffset = to ? to.offset(destination.index) : destinationLocation.index * 8;
     const bits = length * 8;
     const references = from
-      ? from.memory.sparseReferences(from.offset(source.index), targetOffset, bits)
-      : BufferMemory.logicalByteReferences(space, sourceLocation, targetOffset, bits);
+      ? from.memory.byteReferences(from.offset(source.index), targetOffset, bits)
+      : candidateReferences(
+          space.byteReferences.get(sourceLocation.storage),
+          sourceLocation.index * 8,
+          targetOffset,
+          bits,
+          (offset, width) => readLogicalBits(sourceLocation.storage as Value[], offset, width)
+        );
     if (references.length === 0) return undefined;
     return () => {
       if (to) {
-        to.memory.restoreReferences(references);
+        to.memory.restoreByteReferences(references);
         return;
       }
-      let target = space.byteReferences.get(destinationLocation.storage);
-      if (!target) {
-        target = new Map();
-        space.byteReferences.set(destinationLocation.storage, target);
-      }
-      for (const reference of references) {
-        if (!target.has(reference.offset)) reserveMemory(1);
-        target.set(reference.offset, reference);
-      }
+      recordCandidates(space, destinationLocation.storage, references);
     };
-  }
-
-  private static logicalByteReferences(
-    space: BufferMemorySpace,
-    source: ReturnType<Pointer['slotLocation']>,
-    target: number,
-    bits: number
-  ): (StoredReference & { offset: number })[] {
-    const stored = space.byteReferences.get(source.storage);
-    if (!stored) return [];
-    const start = source.index * 8;
-    const references: (StoredReference & { offset: number })[] = [];
-    for (const [offset, reference] of sparseEntriesInRange(stored, start, bits)) {
-      if (matchesLogicalBytes(source.storage as Value[], offset, reference))
-        references.push({ ...reference, offset: target + offset - start });
-    }
-    return references;
   }
 
   private accessDepth = 0;
@@ -427,7 +430,9 @@ export class BufferMemory {
     let active = 0;
     const tag = (): number => (tagOffset === undefined ? active : this.unionTag(type, offset + tagOffset * 8));
     const union = new ZUnion(0, undefined);
-    const payload = (): FieldLocation => unionFieldLocation(type, tag(), offset + layout.payload * 8);
+    const tagType = type.tagType;
+    if (tagType && tagOffset !== undefined) union.rawTag = () => this.read(tagType, offset + tagOffset * 8) as bigint;
+    const payload = (): FieldLocation => unionFieldLocation(type, activeUnionIndex(union), offset + layout.payload * 8);
     Object.defineProperty(union, 'tag', {
       get: tag,
       set: (index: number) => {
@@ -461,7 +466,7 @@ export class BufferMemory {
   }
 
   private attachUnionBacking(union: ZUnion, type: Extract<Type, { kind: 'union' }>, offset: number): void {
-    const bits = type.layout === 'packed' ? bitSizeOf(type) : sizeOf(type) * 8;
+    const bits = unionBitSize(type);
     if (type.layout !== 'auto') {
       union.backingKey = () => {
         spendMemory(Math.ceil(bits / 8));
@@ -473,7 +478,7 @@ export class BufferMemory {
       const memory = new BufferMemory(sparseBytes(sizeOf(type)), spendMemory, this.space);
       this.copyRegion(memory, offset, 0, bits);
       const copy = memory.read(type, 0) as ZUnion;
-      copy.tag = union.tag;
+      if (unionOffsets(type).tag === undefined) copy.tag = union.tag;
       return copy;
     };
     union.writeBacking = (value) =>
@@ -627,20 +632,38 @@ export class BufferMemory {
   }
 
   private writeUnion(type: Extract<Type, { kind: 'union' }>, offset: number, value: ZUnion): void {
-    const tag = value.tag;
-    const target = this.readAggregate(type, offset) as ZUnion;
-    if (value.copyBackingTo) {
-      value.copyBackingTo(this, offset);
-      target.tag = tag;
-      return;
+    const bits = unionBitSize(type);
+    if (offset < 0 || offset + bits > this.bytes.length * 8) panic('index out of bounds');
+    this.access(true, offset, bits, () => {
+      const layout = unionOffsets(type);
+      if (value.copyBackingTo) {
+        value.copyBackingTo(this, offset);
+        if (layout.tag === undefined) (this.readAggregate(type, offset) as ZUnion).tag = value.tag;
+        return;
+      }
+      this.clearUnionRegion(offset, bits, value.payloadInitialized);
+      if (!value.payloadInitialized) return;
+      const tag = activeUnionIndex(value);
+      (this.readAggregate(type, offset) as ZUnion).tag = tag;
+      const payloadOffset = offset + layout.payload * 8;
+      for (const [index, payload] of value.retainedPayloads?.values ?? []) {
+        this.spend();
+        this.writeUnionPayload(type, index, payloadOffset, payload);
+      }
+      this.writeUnionPayload(type, tag, payloadOffset, value.slots[0]);
+    });
+  }
+
+  private clearUnionRegion(offset: number, bits: number, initialized: boolean): void {
+    if (bits === 0) return;
+    const storage = sparseByteValues.get(this.bytes);
+    if (storage && offset % 8 === 0 && bits % 8 === 0) {
+      clearSparseBytes(storage, offset / 8, bits / 8, initialized);
+    } else {
+      const fill = initialized ? 0n : 0xaan;
+      for (let bit = 0; bit < bits; bit += 8) this.writeRawBits(offset + bit, Math.min(8, bits - bit), fill);
     }
-    target.tag = tag;
-    const payloadOffset = offset + unionOffsets(type).payload * 8;
-    for (const [index, payload] of value.retainedPayloads?.values ?? []) {
-      this.spend();
-      this.writeUnionPayload(type, index, payloadOffset, payload);
-    }
-    this.writeUnionPayload(type, tag, payloadOffset, value.slots[0]);
+    for (const [at] of sparseEntriesInRange(this.referenceOffsets, offset, bits)) this.referenceOffsets.delete(at);
   }
 
   private writeUnionPayload(type: Extract<Type, { kind: 'union' }>, tag: number, offset: number, value: Value): void {
@@ -658,12 +681,14 @@ export class BufferMemory {
   private copyRegionRaw(destination: BufferMemory, offset: number, start: number, bits: number): void {
     const sourceBytes = sparseByteValues.get(this.bytes);
     const destinationBytes = sparseByteValues.get(destination.bytes);
+    const fragments = this.pendingByteReferences(offset, start, bits);
     if (sourceBytes && destinationBytes && offset % 8 === 0 && start % 8 === 0 && bits % 8 === 0) {
       const references = this.sparseReferences(offset, start, bits);
       copySparseBytes(sourceBytes, destinationBytes, offset / 8, start / 8, bits / 8);
       for (const [at] of sparseEntriesInRange(destination.referenceOffsets, start, bits))
         destination.referenceOffsets.delete(at);
       destination.restoreReferences(references);
+      destination.restoreByteReferences(fragments);
       return;
     }
     spendMemory(Math.ceil(bits / 8) * 20);
@@ -676,18 +701,54 @@ export class BufferMemory {
     for (let bit = 0; bit < bits; bit++) destination.referenceOffsets.delete(start + bit);
     destination.writeRegionBytes(start, bits, bytes);
     destination.restoreReferences(references);
+    destination.restoreByteReferences(fragments);
   }
 
-  private sparseReferences(offset: number, start: number, bits: number): (StoredReference & { offset: number })[] {
-    const references: (StoredReference & { offset: number })[] = [];
+  private sparseReferences(offset: number, start: number, bits: number): LocatedReference[] {
+    const references: LocatedReference[] = [];
     for (const [at] of sparseEntriesInRange(this.referenceOffsets, offset, bits)) {
       const reference = this.currentReference(at);
       if (reference) references.push({ ...reference, offset: start + at - offset });
     }
+    for (const reference of this.pendingByteReferences(offset, offset, bits)) {
+      if (reference.offset < offset || reference.offset + reference.bits > offset + bits) continue;
+      if (this.readBits(reference.offset, reference.bits) === reference.id)
+        references.push({ ...reference, offset: reference.offset + start - offset });
+    }
     return references;
   }
 
-  private restoreReferences(references: readonly (StoredReference & { offset: number })[]): void {
+  private byteReferences(offset: number, start: number, bits: number): LocatedReference[] {
+    const references = this.pendingByteReferences(offset, start, bits);
+    const read = (at: number, count: number): bigint => this.readBits(at, count);
+    for (const [at, reference] of sparseEntriesInRange(this.referenceOffsets, offset - 63, bits + 63)) {
+      if (matchesReferenceRange(reference, at, offset, bits, read))
+        references.push({ ...reference, offset: at + start - offset });
+    }
+    return references;
+  }
+
+  private pendingByteReferences(offset: number, start: number, bits: number): LocatedReference[] {
+    return candidateReferences(this.space.byteReferences.get(this.bytes), offset, start, bits, (at, count) =>
+      this.readBits(at, count)
+    );
+  }
+
+  private restoreByteReferences(references: readonly LocatedReference[]): void {
+    for (const reference of references) {
+      if (
+        reference.offset >= 0 &&
+        reference.offset + reference.bits <= this.bytes.length * 8 &&
+        this.readBits(reference.offset, reference.bits) === reference.id
+      ) {
+        this.restoreReferences([reference]);
+      } else {
+        recordCandidates(this.space, this.bytes, [reference]);
+      }
+    }
+  }
+
+  private restoreReferences(references: readonly LocatedReference[]): void {
     for (const reference of references) {
       this.referenceOffsets.set(reference.offset, reference);
       this.referenceHolds.set(reference.key, reference.value);
@@ -805,15 +866,23 @@ export class BufferMemory {
   }
 
   private unionTag(type: Extract<Type, { kind: 'union' }>, offset: number): number {
-    if (!type.tagType) return Number(this.readBits(offset, 8));
+    if (!type.tagType) {
+      const index = Number(this.readBits(offset, 8));
+      return index < (type.fields?.length ?? 0) ? index : -1;
+    }
     const value = this.read(type.tagType, offset);
     return enumLookup(type.tagType.fields!, this.spend).indexByValue.get(value as bigint) ?? -1;
   }
 }
 
 function unionFieldLocation(type: Extract<Type, { kind: 'union' }>, index: number, offset: number): FieldLocation {
-  const field = type.fields![index].type;
-  return { type: field, offset, packed: type.layout === 'packed' ? bitSizeOf(field) : undefined };
+  const field = type.fields?.[index];
+  if (!field) return panic(PANIC.invalidEnum);
+  return { type: field.type, offset, packed: type.layout === 'packed' ? bitSizeOf(field.type) : undefined };
+}
+
+function unionBitSize(type: Extract<Type, { kind: 'union' }>): number {
+  return type.layout === 'packed' ? bitSizeOf(type) : sizeOf(type) * 8;
 }
 
 function referenceKey(id: bigint, bits: number): string {
@@ -821,17 +890,69 @@ function referenceKey(id: bigint, bits: number): string {
   return `${id} ${projection}`;
 }
 
-function matchesLogicalBytes(bytes: readonly Value[], offset: number, reference: StoredReference): boolean {
-  for (let bit = 0; bit < reference.bits; bit += 8) {
-    spendMemory();
-    const position = offset + bit;
-    const index = Math.floor(position / 8);
-    const shift = position % 8;
-    const low = bytes[index];
-    const high = shift === 0 ? 0n : bytes[index + 1];
-    if (typeof low !== 'bigint' || typeof high !== 'bigint') return false;
-    const mask = (1n << BigInt(Math.min(8, reference.bits - bit))) - 1n;
-    if ((((low | (high << 8n)) >> BigInt(shift)) & mask) !== ((reference.id >> BigInt(bit)) & mask)) return false;
+function recordCandidates(space: BufferMemorySpace, storage: object, references: readonly LocatedReference[]): void {
+  let candidates = space.byteReferences.get(storage);
+  if (!candidates) {
+    candidates = new Map();
+    space.byteReferences.set(storage, candidates);
   }
-  return true;
+  for (const reference of references) {
+    spendMemory();
+    let at = candidates.get(reference.offset);
+    if (!at) {
+      at = new Map();
+      candidates.set(reference.offset, at);
+    }
+    if (!at.has(reference.key)) reserveMemory(1);
+    at.set(reference.key, reference);
+  }
+}
+
+function candidateReferences(
+  candidates: ReferenceCandidates | undefined,
+  source: number,
+  target: number,
+  bits: number,
+  read: (offset: number, width: number) => bigint | undefined
+): LocatedReference[] {
+  if (!candidates) return [];
+  const references: LocatedReference[] = [];
+  for (const [offset, records] of sparseEntriesInRange(candidates, source - 63, bits + 63)) {
+    for (const reference of records.values()) {
+      spendMemory();
+      if (matchesReferenceRange(reference, offset, source, bits, read))
+        references.push({ ...reference, offset: target + offset - source });
+    }
+  }
+  return references;
+}
+
+function matchesReferenceRange(
+  reference: StoredReference,
+  offset: number,
+  source: number,
+  bits: number,
+  read: (offset: number, width: number) => bigint | undefined
+): boolean {
+  const start = Math.max(offset, source);
+  const width = Math.min(offset + reference.bits, source + bits) - start;
+  if (width <= 0) return false;
+  const expected = (reference.id >> BigInt(start - offset)) & ((1n << BigInt(width)) - 1n);
+  return read(start, width) === expected;
+}
+
+function readLogicalBits(bytes: readonly Value[], offset: number, width: number): bigint | undefined {
+  let bits = 0n;
+  for (let index = 0; index < width;) {
+    spendMemory();
+    const position = offset + index;
+    const shift = position % 8;
+    const byte = bytes[Math.floor(position / 8)];
+    if (typeof byte !== 'bigint') return undefined;
+    const count = Math.min(8 - shift, width - index);
+    const mask = (1n << BigInt(count)) - 1n;
+    bits |= ((byte >> BigInt(shift)) & mask) << BigInt(index);
+    index += count;
+  }
+  return bits;
 }

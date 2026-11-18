@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 679 -- Groups the related standard library operations that share this module.
+// code-gauge-allow-file fileNcss 682 -- Groups the related standard library operations that share this module.
 import { transferCost } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
@@ -31,6 +31,7 @@ import {
   NULL,
   Pointer,
   Slice,
+  storageByteLocation,
   storageLocation,
   storageOverlaps,
   storeInto,
@@ -709,17 +710,7 @@ const MEMBERS: Record<string, () => Member> = {
         else sema.spendCompilation(cost);
       };
       const equal = equality(frame);
-      const changesSearch = [source, pattern].some((input) =>
-        storageOverlaps(
-          input.target,
-          input.start,
-          target.target,
-          target.start,
-          input.length,
-          sizeOf(type),
-          target.length
-        )
-      );
+      const changesSearch = replacementCanChangeSearch(source, pattern, replace, target, sizeOf(type));
       const text = sequence(source, spend);
       const needle = sequence(pattern, spend);
       const matchesInStableInput = changesSearch ? undefined : sequenceMatches(text, needle, 0n, equal);
@@ -729,14 +720,7 @@ const MEMBERS: Record<string, () => Member> = {
         count = 0;
       while (index < source.length) {
         spend();
-        let matches = next === BigInt(index);
-        if (changesSearch) {
-          matches = index + pattern.length <= source.length;
-          for (let offset = 0; matches && offset < pattern.length; offset++) {
-            spend();
-            matches = equal(source.get(index + offset), pattern.get(offset));
-          }
-        }
+        const matches = changesSearch ? startsWith(text, needle, equal, BigInt(index)) : next === BigInt(index);
         if (matches) {
           if (written + replace.length > target.length) indexOutOfBounds(replace.length, target.length - written);
           if (
@@ -838,6 +822,22 @@ const MEMBERS: Record<string, () => Member> = {
   tokenizeSequence: iteratorFactory('std.mem.tokenizeSequence', 'token', 'sequence'),
   tokenizeAny: iteratorFactory('std.mem.tokenizeAny', 'token', 'any'),
 };
+
+function replacementCanChangeSearch(
+  source: Slice,
+  needle: Slice,
+  replacement: Slice,
+  target: Slice,
+  stride: number
+): boolean {
+  const overlaps = (input: Slice): boolean =>
+    storageOverlaps(input.target, input.start, target.target, target.start, input.length, stride, target.length);
+  if (overlaps(needle)) return true;
+  if (!overlaps(source)) return false;
+  const sourceLocation = storageByteLocation(source.target, source.start, stride);
+  const targetLocation = storageByteLocation(target.target, target.start, stride);
+  return targetLocation.index > sourceLocation.index || replacement.lengthValue > needle.lengthValue;
+}
 
 function cutMember(name: string, suffix: boolean): () => Member {
   return generic(name, 3, (sema, call, type, [sourceArg, needleArg]) => {

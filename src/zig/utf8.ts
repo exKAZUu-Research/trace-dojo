@@ -6,27 +6,33 @@ export function createUtf8Decoder(): TextDecoder {
   return new TextDecoder('utf-8', { ignoreBOM: true });
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Keeps strict decoding and the lossless malformed-byte fallback together.
-export function decodeIdentifierBytes(bytes: readonly number[]): string {
-  const input = new Uint8Array(bytes);
+export function decodeIdentifierBytes(bytes: readonly number[] | Uint8Array, spend?: (cost?: number) => void): string {
+  if (!(bytes instanceof Uint8Array)) spend?.(bytes.length);
+  const input = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  spend?.(input.length);
   const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
   try {
     return decoder.decode(input);
   } catch {
-    let result = '';
-    for (let index = 0; index < input.length;) {
-      const byte = input[index];
-      const length = byte < 0x80 ? 1 : byte < 0xe0 ? 2 : byte < 0xf0 ? 3 : 4;
-      try {
-        result += decoder.decode(input.subarray(index, index + length));
-        index += length;
-      } catch {
-        result += String.fromCodePoint(0xdc_00 + byte);
-        index++;
-      }
-    }
-    return result;
+    return decodeMalformedIdentifier(input, decoder, spend);
   }
+}
+
+function decodeMalformedIdentifier(input: Uint8Array, decoder: TextDecoder, spend?: (cost?: number) => void): string {
+  let result = '';
+  for (let index = 0; index < input.length;) {
+    spend?.();
+    const byte = input[index];
+    const length = byte < 0x80 ? 1 : byte < 0xe0 ? 2 : byte < 0xf0 ? 3 : 4;
+    try {
+      result += decoder.decode(input.subarray(index, index + length));
+      index += length;
+    } catch {
+      result += String.fromCodePoint(0xdc_00 + byte);
+      index++;
+    }
+  }
+  return result;
 }
 
 export function encodeIdentifierText(text: string): number[] {

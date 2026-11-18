@@ -12,6 +12,7 @@ import type {
   SourceFile,
   Span,
 } from './ast';
+import { unionTagValue } from './bufferMemory';
 import { markRuntimeStorage } from './comptimeMemory';
 import { enumLookup } from './enumLookup';
 import {
@@ -886,7 +887,7 @@ export abstract class SemaBase implements SemaApi {
         if (from.kind === 'union' && from.tagType === to) {
           this.unionFields(from);
           const tags = this.enumFields(to);
-          return this.derived(expression, to, (value) => tags[(value as ZUnion).tag].value);
+          return this.derived(expression, to, (value) => unionTagValue(value as ZUnion, tags));
         }
         return undefined;
       }

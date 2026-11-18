@@ -1,5 +1,5 @@
 /** Zig's Wyhash (`std.hash.Wyhash`) and `std.hash.autoHash`, which decide a hash map's iteration order. */
-import { physicalBytes } from '../bufferMemory';
+import { activeUnionIndex, physicalBytes } from '../bufferMemory';
 import { bitSizeOf, hasResolvedLayout, sizeOf } from '../layout';
 import type { Type } from '../types';
 import { encodeIdentifierText } from '../utf8';
@@ -161,11 +161,10 @@ function appendHashBytes(
     }
     case 'union': {
       const union = value as ZUnion;
-      const field = type.fields![union.tag];
+      const index = activeUnionIndex(union);
       const tag = type.tagType!;
-      const tagValue = tag.fields![union.tag].value;
-      appendHashBytes(bytes, tagValue, tag, identityOf, spend);
-      appendHashBytes(bytes, union.slots[0], field.type, identityOf, spend);
+      appendHashBytes(bytes, tag.fields![index].value, tag, identityOf, spend);
+      appendHashBytes(bytes, union.slots[0], type.fields![index].type, identityOf, spend);
       return;
     }
     case 'pointer':
