@@ -655,6 +655,9 @@ function completeUserReturn(decl: FunctionDecl, frame: Frame, value: Value, name
   if (decl.byRefReturn && !(frame.returning instanceof Ref)) {
     runtime.row = frame.returnRow ?? decl.endRow;
     notice('Only variable references should be returned by reference');
+    const ref = Ref.temporary(value);
+    ref.isRef = true;
+    frame.returning = ref;
   }
   if (!decl.returnType) return decl.byRefReturn ? value : share(value);
   runtime.row = frame.returnRow ?? runtime.row;

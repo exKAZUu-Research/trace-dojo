@@ -47,6 +47,7 @@ test.each([
   [String.raw`use Vendor\{Empty};`, 'unexpected token "empty", expecting identifier or namespaced name'],
   ['class T { use Empty; }', 'unexpected token "empty"'],
   ['try {} catch (Empty $e) {}', 'unexpected token "empty"'],
+  ['try {} catch (Problem|static $e) {}', 'Bad class name in the catch statement'],
   ['class T { var function f() {} }', 'unexpected token "function", expecting variable'],
   ['class T { var const C = 1; }', 'unexpected token "const", expecting variable'],
   ['class T { public private $p; }', 'Multiple access type modifiers are not allowed'],

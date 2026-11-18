@@ -1,5 +1,8 @@
-import type { Arg, ClassRef, Expr } from './ast';
+import type { Arg, ClassRef, Expr, ParamDecl, Stmt } from './ast';
 import { formatFloatRepr } from './conversions';
+import { typeToString } from './types';
+
+export class UnexportableSyntax extends Error {}
 
 /** The priority and operand priorities of each binary operator, as PHP's `zend_ast_export` writes code. */
 const BINARY: Record<string, [number, number, number]> = {
@@ -42,6 +45,16 @@ export function exportExpr(e: Expr, priority = 0): string {
     case 'var': {
       return `$${e.name}`;
     }
+    case 'varvar': {
+      return e.name.k === 'var' || e.name.k === 'varvar' ? `$${exportExpr(e.name)}` : `\${${exportExpr(e.name)}}`;
+    }
+    case 'interp': {
+      return `"${e.parts.map(exportEncapsedPart).join('')}"`;
+    }
+    case 'closure':
+    case 'arrow': {
+      return wrap(240, exportFunctionExpression(e));
+    }
     case 'bin': {
       const [own, left, right] = BINARY[e.op] ?? [200, 200, 201];
       const op = e.op === 'and' ? '&&' : e.op === 'or' ? '||' : e.op;
@@ -56,13 +69,13 @@ export function exportExpr(e: Expr, priority = 0): string {
     }
     case 'call': {
       const name = 'k' in e.fn ? exportExpr(e.fn, 260) : e.fn.name;
-      return `${name}(${exportArgs(e.args)})`;
+      return `${name}(${e.fcc ? '...' : exportArgs(e.args)})`;
     }
     case 'mcall': {
-      return `${exportExpr(e.obj, 260)}${e.nullsafe ? '?->' : '->'}${typeof e.name === 'string' ? e.name : `{${exportExpr(e.name)}}`}(${exportArgs(e.args)})`;
+      return `${exportExpr(e.obj, 260)}${e.nullsafe ? '?->' : '->'}${typeof e.name === 'string' ? e.name : `{${exportExpr(e.name)}}`}(${e.fcc ? '...' : exportArgs(e.args)})`;
     }
     case 'scall': {
-      return `${exportClass(e.cls)}::${typeof e.name === 'string' ? e.name : exportExpr(e.name)}(${exportArgs(e.args)})`;
+      return `${exportClass(e.cls)}::${typeof e.name === 'string' ? e.name : exportExpr(e.name)}(${e.fcc ? '...' : exportArgs(e.args)})`;
     }
     case 'prop': {
       return `${exportExpr(e.obj, 260)}${e.nullsafe ? '?->' : '->'}${typeof e.name === 'string' ? e.name : `{${exportExpr(e.name)}}`}`;
@@ -118,7 +131,73 @@ export function exportExpr(e: Expr, priority = 0): string {
       return wrap(240, e.prefix ? `${op}${exportExpr(e.target, 241)}` : `${exportExpr(e.target, 241)}${op}`);
     }
     default: {
-      return '...';
+      throw new UnexportableSyntax();
+    }
+  }
+}
+
+function exportEncapsedPart(part: string | Expr): string {
+  if (typeof part === 'string') {
+    return part.replaceAll(/[\r\n\t\v\f"\\$]/g, (character) => {
+      const escapes: Record<string, string> = { '\r': 'r', '\n': 'n', '\t': 't', '\v': 'v', '\f': 'f' };
+      return `\\${escapes[character] ?? character}`;
+    });
+  }
+  const text = exportExpr(part);
+  return part.k === 'var' ? text : `{${text}}`;
+}
+
+function exportFunctionExpression(expression: Extract<Expr, { k: 'arrow' | 'closure' }>): string {
+  const { fn, isStatic } = expression;
+  const prefix = isStatic ? 'static ' : '';
+  const reference = fn.byRefReturn ? '&' : '';
+  const params = fn.params.map(exportParameter).join(', ');
+  const type = fn.returnType ? `: ${typeToString(fn.returnType)}` : '';
+  if (expression.k === 'arrow' && fn.arrowBody) {
+    return `${prefix}fn${reference}(${params})${type} => ${exportExpr(fn.arrowBody)}`;
+  }
+  if (expression.k === 'arrow') throw new UnexportableSyntax();
+  const captures = expression.uses.map(({ name, byRef }) => `${byRef ? '&' : ''}$${name}`).join(', ');
+  return `${prefix}function ${reference}(${params})${captures ? ` use(${captures})` : ''}${type} ${exportBlock(fn.body, 0)}`;
+}
+
+function exportParameter(param: ParamDecl): string {
+  const type = param.type ? `${typeToString(param.type)} ` : '';
+  const reference = param.byRef ? '&' : '';
+  const variadic = param.variadic ? '...' : '';
+  const fallback = param.defaultExpr ? ` = ${exportExpr(param.defaultExpr)}` : '';
+  return `${type}${reference}${variadic}$${param.name}${fallback}`;
+}
+
+function exportBlock(statements: Stmt[], depth: number): string {
+  const indent = '    '.repeat(depth);
+  const lines = statements.map((statement) => `${indent}    ${exportStatement(statement, depth + 1)}\n`);
+  return `{\n${lines.join('')}${indent}}`;
+}
+
+function exportStatement(statement: Stmt, depth: number): string {
+  switch (statement.k) {
+    case 'return': {
+      return statement.e ? `return ${exportExpr(statement.e)};` : 'return;';
+    }
+    case 'expr': {
+      return `${exportExpr(statement.e)};`;
+    }
+    case 'echo': {
+      return `echo ${statement.args.map((argument) => exportExpr(argument)).join(', ')};`;
+    }
+    case 'if': {
+      const branch = `if (${exportExpr(statement.cond)}) ${exportBlock(statement.consequent, depth)}`;
+      return statement.alternate ? `${branch} else ${exportBlock(statement.alternate, depth)}` : branch;
+    }
+    case 'block': {
+      return exportBlock(statement.body, depth);
+    }
+    case 'nop': {
+      return ';';
+    }
+    default: {
+      throw new UnexportableSyntax();
     }
   }
 }

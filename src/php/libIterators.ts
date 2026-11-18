@@ -221,6 +221,8 @@ export class DualState {
     if (checkMore && !this.valid()) return false;
     const inner = this.inner as InnerIterator;
     this.data = { v: inner.current() };
+    inner.takeCurrent();
+    nativeOwnershipChanged(this.owner);
     consumeInvokedResult(
       () => inner.key(),
       (key) => {

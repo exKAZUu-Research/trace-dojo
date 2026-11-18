@@ -17,3 +17,23 @@ live
 "assert(false)"
 dropped
 done
+assert("value:$x" === 'expected')
+
+Warning: Undefined variable $x in /main.php on line 34
+assert($$n === 1)
+
+Warning: Undefined variable $x in /main.php on line 35
+assert($$n += 0)
+assert(false && fn() => 0)
+assert(false && function () {
+    return 0;
+})
+assert(false && (function ($a) {
+    return $a;
+})(0))
+assert(false && static function &(int $v, ...$args) use(&$x): int {
+    if ($v) {
+        return $x;
+    }
+    return $v;
+})

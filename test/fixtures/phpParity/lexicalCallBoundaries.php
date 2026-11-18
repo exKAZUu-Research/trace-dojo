@@ -56,3 +56,11 @@ function &fellThrough() {
 returnedValue();
 returnedNothing();
 fellThrough();
+
+function &returnChain() { return returnedValue(); }
+function &secondReturnChain() { return returnChain(); }
+$reference =& secondReturnChain();
+var_dump($reference);
+function &emptyReturnChain() { return fellThrough(); }
+$reference =& emptyReturnChain();
+var_dump($reference);

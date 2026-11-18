@@ -26,3 +26,17 @@ echo "registered\n";
 message(fn() => assert(false));
 assert_options(ASSERT_CALLBACK, null);
 echo "done\n";
+
+$x = 0;
+$n = 'x';
+foreach ([
+    fn() => assert("value:$x" === "expected"),
+    fn() => assert($$n === 1),
+    fn() => assert($$n += 0),
+    fn() => assert(false && fn() => 0),
+    fn() => assert(false && function () { return 0; }),
+    fn() => assert(false && (function ($a) { return $a; })(0)),
+    fn() => assert(false && static function &(int $v, ...$args) use (&$x): int { if ($v) return $x; return $v; }),
+] as $check) {
+    try { $check(); } catch (AssertionError $error) { echo $error->getMessage(), "\n"; }
+}

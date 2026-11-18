@@ -38,3 +38,19 @@ $iterator->rewind();
 var_dump($iterator->getPosition());
 $iterator->next();
 var_dump($iterator->getPosition());
+
+class ObjectKeyElements implements Iterator {
+    function rewind(): void {}
+    function valid(): bool { return true; }
+    function current(): mixed { return new Element('value'); }
+    function key(): mixed { return new Element('key'); }
+    function next(): void {}
+}
+foreach (['IteratorIterator', 'LimitIterator', 'InfiniteIterator'] as $wrapper) {
+    $iterator = new $wrapper(new ObjectKeyElements);
+    $iterator->rewind();
+    $iterator->next();
+    echo 'unset;';
+    unset($iterator);
+    echo "\n";
+}

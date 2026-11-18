@@ -6,3 +6,6 @@ seek:9007199254740993;seek:9007199254740995;int(9007199254740993)
 int(9007199254740995)
 seek:9223372036854775807;int(9223372036854775807)
 int(-9223372036854775808)
+dropvalue;dropkey;unset;dropvalue;dropkey;
+dropvalue;dropkey;unset;dropvalue;dropkey;
+dropvalue;dropkey;unset;dropvalue;dropkey;

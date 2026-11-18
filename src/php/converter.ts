@@ -17,7 +17,7 @@ import { type Constant, constantTruth, constantTypeName, foldedConstant } from '
 import { formatFloat, isNumericString, NAN_BOOL_WARNING, NAN_STRING_WARNING } from './conversions';
 import { type CompileNotice, isReservedClassName, MAGIC_RUNTIME } from './converterBase';
 import { DeclarationConverter } from './declarationConverter';
-import { exportExpr } from './export';
+import { exportExpr, UnexportableSyntax } from './export';
 import { decodeLiteral, parseIntegerLiteral } from './literals';
 
 export type { CompileNotice } from './converterBase';
@@ -509,10 +509,11 @@ export class Converter extends DeclarationConverter {
         const types = typeList.namedChildren
           .filter((type) => type.type !== 'comment')
           .map((type) => {
-            const raw = this.declaredIdentifier(type.type === 'named_type' ? type.namedChildren[0] : type, '');
+            const name = type.type === 'named_type' ? type.namedChildren[0] : type;
+            const raw = this.nameText(name);
             if (['self', 'static', 'parent'].includes(lower(raw)))
               this.error(type, 'Bad class name in the catch statement');
-            return this.resolveClassName(raw);
+            return this.resolveClassName(this.declaredIdentifier(name, ''));
           });
         const nameNode = child.childForFieldName('name');
         const varName = nameNode ? this.variableName(nameNode) : undefined;
@@ -1270,10 +1271,9 @@ export class Converter extends DeclarationConverter {
     // Use separate converter state so skipped operands cannot add notices or declarations to the program.
     const syntax = new Converter(this.source, new Set(), this.ignoredPrefix, true);
     try {
-      const rendered = exportExpr(syntax.expr(node));
-      return rendered === '...' ? enc(node.text) : rendered;
+      return exportExpr(syntax.expr(node));
     } catch (error) {
-      if (!(error instanceof CompileError)) throw error;
+      if (!(error instanceof CompileError || error instanceof UnexportableSyntax)) throw error;
       return enc(node.text);
     }
   }

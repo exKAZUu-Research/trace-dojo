@@ -434,15 +434,18 @@ function* propertyEntries(
   const dynamic = snapshotDynamicProperties(object);
   const runtime = rt();
   runtime.held.push(dynamic);
+  let completed = false;
   try {
     for (const key of keys) {
       const decl = declForKey(object.cls, key);
       const slot = decl ? readDeclared(key, decl) : dynamic.map.get(key);
       if (slot !== undefined) yield [key, slot];
     }
+    completed = true;
   } finally {
     runtime.held.pop();
     runtime.release([dynamic]);
+    if (completed && dynamic.composite) runtime.flushReleases();
   }
 }
 

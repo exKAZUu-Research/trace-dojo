@@ -1,0 +1,37 @@
+object(stdClass)#2 (2) {
+  ["first"]=>
+  object(ReplaceInInspector)#1 (0) {
+  }
+  ["later"]=>
+  object(ReplacedProperty)#3 (1) {
+    ["live"]=>
+    string(4) "live"
+  }
+drop;
+}
+
+drop;
+stdClass Object
+(
+    [first] => ReplaceInInspector Object
+        (
+        )
+
+    [later] => ReplacedProperty Object
+        (
+            [live] => live
+        )
+
+)
+
+drop;
+(object) array(
+   'first' => 
+  \ReplaceInExport::__set_state(array(
+     'replace' => 'hook',
+  )),
+   'later' => 
+  \ReplacedProperty::__set_state(array(
+     'live' => 'live',
+  )),
+)
