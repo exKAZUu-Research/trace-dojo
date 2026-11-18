@@ -186,6 +186,21 @@ fn main() {
   });
 });
 
+test('a shared reference shows the current value of what it refers to', () => {
+  const program = `fn main() {
+    let mut x = 1;
+    let mut s = String::from("a");
+    let rx = &x;
+    let rs = &s;
+    println!("{} {}", rx, rs);
+    x = 2;
+    s.push('b');
+    let n = 0;
+}`;
+  const { traceItems } = traceProgram('rust', program, program);
+  expect(traceItems.at(-1)?.vars).toEqual({ x: 2, s: 'ab', rx: 2, rs: 'ab', n: 0 });
+});
+
 test('a for loop records a step at each binding of its variable, and none after the last', () => {
   const program = `fn main() {
     let mut t = Turtle::new();

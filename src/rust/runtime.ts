@@ -47,6 +47,18 @@ export interface FunctionInfo {
 
 export class Frame implements TracedFrame {
   readonly locals: (Value | typeof UNASSIGNED)[];
+  /**
+   * The places that variables holding shared references refer to, by slot, which the trace shows the current values
+   * of: a shared reference holds a copy of its referent, which a change of the referent after the borrow ends leaves
+   * behind.
+   */
+  readonly referents = new Map<number, { place: Place; root: number }>();
+
+  /** Ends the scope of variables, which leave the trace with the references to them. */
+  endScope(slots: readonly number[]): void {
+    for (const slot of slots) this.locals[slot] = UNASSIGNED;
+    for (const [slot, { root }] of this.referents) if (slots.includes(root)) this.referents.delete(slot);
+  }
   /** Values in use that no variable holds, such as the value a `for` loop iterates, for garbage collection. */
   readonly temporaries: Value[] = [];
 

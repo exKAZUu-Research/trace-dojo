@@ -222,7 +222,7 @@ export class Compiler {
       try {
         return run(frame);
       } finally {
-        for (const slot of declared) frame.locals[slot] = UNASSIGNED;
+        frame.endScope(declared);
       }
     };
   }
@@ -265,12 +265,44 @@ export class Compiler {
       return this.withStep(stmt.span, run, isObjectCreation(stmt.init, this.annotations));
     }
     const bind = this.compileBinder(stmt.pattern);
+    const local =
+      stmt.pattern.kind === 'binding' && !stmt.pattern.sub ? this.annotations.bindings.get(stmt.pattern) : undefined;
+    const refer = local && this.referent(stmt.init, local.slot);
     const run: Eval = (frame) => {
       frame.runtime.spend();
       bind(frame, init(frame));
+      refer?.(frame);
       return UNIT_VALUE;
     };
     return this.withStep(stmt.span, run, isObjectCreation(stmt.init, this.annotations));
+  }
+
+  /**
+   * Records the place a variable's shared reference refers to (`let r = &x;`, `r = &s.name;`, `let r2 = r;`), for the
+   * trace to show its current value, or forgets the one it had.
+   */
+  private referent(expr: Expr, slot: number): ((frame: Frame) => void) | undefined {
+    if (!expr.ty) return undefined;
+    const type = normalize(shallow(expr.ty));
+    if (type.kind !== 'ref' || type.mutable) return undefined;
+    if (expr.kind === 'ref' && this.ownedFieldChain(expr.operand)) {
+      const place = this.place(expr.operand);
+      let root = expr.operand;
+      while (root.kind === 'field') root = root.operand;
+      const rootRes = this.annotations.paths.get(root);
+      const rootSlot = rootRes?.kind === 'local' ? rootRes.local.slot : -1;
+      return (frame) => void frame.referents.set(slot, { place: place(frame), root: rootSlot });
+    }
+    const res = expr.kind === 'path' ? this.annotations.paths.get(expr) : undefined;
+    if (res?.kind === 'local') {
+      const source = res.local.slot;
+      return (frame) => {
+        const place = frame.referents.get(source);
+        if (place) frame.referents.set(slot, place);
+        else frame.referents.delete(slot);
+      };
+    }
+    return (frame) => void frame.referents.delete(slot);
   }
 
   private destructure(stmt: Extract<Stmt, { kind: 'let' }>): Eval {
@@ -1016,8 +1048,10 @@ export class Compiler {
     if (res?.kind === 'discard') return (frame) => (value(frame), UNIT_VALUE);
     if (res?.kind === 'local' && res.local.mode === 'move') {
       const slot = res.local.slot;
+      const refer = this.referent(expr.value, slot);
       return (frame) => {
         frame.locals[slot] = value(frame);
+        refer?.(frame);
         return UNIT_VALUE;
       };
     }

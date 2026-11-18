@@ -52,8 +52,11 @@ function variablesOf(frame: Frame): TraceVariables {
   const variables: TraceVariables = { vars: {}, referenceVars: {} };
   const shown = new Set<string>();
   for (const local of frame.info.locals) {
-    const stored = frame.locals[local.slot];
+    let stored = frame.locals[local.slot];
     if (stored === UNASSIGNED) continue;
+    // A shared reference shows what it refers to now.
+    const referent = frame.referents.get(local.slot)?.place.get() as Value | typeof UNASSIGNED | undefined;
+    if (referent !== undefined && referent !== UNASSIGNED) stored = referent;
     const type = concreteType(local.type, frame.typeArgs);
     if (local.isSelf) {
       addSelf(variables, stored, type);
