@@ -139,6 +139,37 @@ test('a turtle disappears at the step that drops it', () => {
   ]);
 });
 
+test('turtles moved out by a loop, a pattern, or a field disappear when what took them drops them', () => {
+  const program = `fn main() {
+    let v = vec![Turtle::new(1, 1), Turtle::new(3, 3)];
+    for t in v {
+        let n = 1;
+    }
+    let pair = (Turtle::new(5, 5), Turtle::new(6, 6));
+    let (a, b) = pair;
+    drop(a);
+    let o = Some(Turtle::new(0, 0));
+    if let Some(t) = o {
+        let n = 2;
+    }
+    let x = 3;
+}`;
+  const { traceItems } = traceProgram('rust', program, program);
+  expect(traceItems.map(({ line, turtles }) => [line, turtles.map(({ x, y }) => `${x},${y}`).join(' ')])).toEqual([
+    [0, ''],
+    [2, '1,1 3,3'],
+    [4, '1,1 3,3'],
+    [3, '3,3'],
+    [4, '3,3'],
+    [6, '5,5 6,6'],
+    [7, '5,5 6,6'],
+    [8, '6,6'],
+    [9, '6,6 0,0'],
+    [11, '6,6 0,0'],
+    [13, '6,6'],
+  ]);
+});
+
 test('a for loop records a step at each binding of its variable, and none after the last', () => {
   const program = `fn main() {
     let mut t = Turtle::new();

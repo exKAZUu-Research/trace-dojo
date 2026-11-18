@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 678 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 683 -- One native per method of the standard library.
 import { normalize } from '../infer';
 import type { Interpreter } from '../interpreter';
 import { castValue, cloneValue, compareValues, copyValue, hashKey, needsCopy, valuesEqual, wrap } from '../ops';
@@ -14,6 +14,7 @@ import {
   type RangeValue,
   SetValue,
   sliceBase,
+  sliceItems,
   sliceLength,
   SliceView,
   type Value,
@@ -39,6 +40,22 @@ export function arrayIter(
   return iter;
 }
 
+/**
+ * An iterator that owns its elements (`into_iter`, `drain`, `for x in v`): it holds only those it has not yielded,
+ * so each one it hands out belongs to its receiver alone and disappears when that receiver drops it.
+ */
+export function ownedIter(items: Value[]): IterValue {
+  const rest = [...items];
+  const iter = new IterValue(
+    () => (rest.length > 0 ? (rest.shift() as Value) : DONE),
+    () => (rest.length > 0 ? (rest.pop() as Value) : DONE),
+    () => rest.length,
+    [rest]
+  );
+  iter.rest = () => [...rest];
+  return iter;
+}
+
 /** An iterator of a slice's elements; `places` yields places for `iter_mut`. */
 export function sliceIter(slice: Value, places: boolean): IterValue {
   const { base, start } = sliceBase(slice);
@@ -51,7 +68,7 @@ export function sliceIter(slice: Value, places: boolean): IterValue {
 export function toIterator(interp: Interpreter, value: Value, from: Type): Value {
   const t = normalize(shallow(from));
   if (value instanceof IterValue) return value;
-  if (t.kind === 'array') return sliceIter(value, false);
+  if (t.kind === 'array') return ownedIter(sliceItems(value));
   if (t.kind === 'ref') {
     const target = normalize(shallow(t.target));
     const v = t.mutable ? (deref(value) as Value) : value;
@@ -90,7 +107,7 @@ export function toIterator(interp: Interpreter, value: Value, from: Type): Value
       case 'Vec':
       case 'VecDeque':
       case 'BinaryHeap': {
-        return arrayIter(value as Value[]);
+        return ownedIter(value as Value[]);
       }
       case 'HashMap':
       case 'BTreeMap': {

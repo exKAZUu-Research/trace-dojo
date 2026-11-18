@@ -1871,13 +1871,16 @@ export class Checker {
   }
 
   /** The type arithmetic sees: numbers through one reference, as Rust's impls for `&i32` allow. */
+  /**
+   * The number an operand of an operator stands for: std implements the operators for numbers and for shared
+   * references to them, one level deep (`&i32 + i32`), but not for `&&i32` or `&mut i32`, which stay as they are.
+   */
   private numericOperand(type: Type): Type {
     const t = normalize(shallow(type));
-    if (t.kind === 'ref') {
+    if (t.kind === 'ref' && !t.mutable) {
       const target = normalize(shallow(t.target));
       if (target.kind === 'int' || target.kind === 'float' || (target.kind === 'var' && target.v.literal))
         return target;
-      if (target.kind === 'ref') return this.numericOperand(target);
     }
     return t;
   }

@@ -1,6 +1,6 @@
 import type { Annotations, Coercion, FnContext, LocalVar, MethodRes, PathRes, ReceiverAdjust } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, MacroCall, Pattern, Span, Stmt } from './ast';
-import { patternBindings } from './astWalk';
+import { forEachDirect, patternBindings } from './astWalk';
 import type { Checker } from './checker';
 import type { Formatter, Spec } from './fmt';
 import { normalize } from './infer';
@@ -18,9 +18,9 @@ import {
   valuesEqual,
   wrap,
 } from './ops';
-import { ControlSignal, FmtFailure, type Frame, type FunctionInfo, RustPanic, UNASSIGNED } from './runtime';
+import { ControlSignal, FmtFailure, type Frame, type FunctionInfo, MOVED, RustPanic, UNASSIGNED } from './runtime';
 import { runtimeType } from './runtimeTypes';
-import { type AdtDef, type FnDef, type IntName, isUnit, resolve, shallow, type Type } from './types';
+import { type AdtDef, type FnDef, type IntName, isUnit, resolve, shallow, substitute, type Type } from './types';
 import {
   AccessorPlace,
   CellPlace,
@@ -250,9 +250,9 @@ export class Compiler {
 
   private compileLet(stmt: Extract<Stmt, { kind: 'let' }>): Eval {
     if (!stmt.init) return () => UNIT_VALUE;
-    // Destructuring a variable moves only some of its elements, so the variable keeps its value.
-    const destructures = stmt.pattern.kind === 'tuple' && stmt.init.kind === 'path';
-    const init = destructures ? this.read(stmt.init) : this.value(stmt.init);
+    // Destructuring a variable moves the elements its bindings take; the variable keeps the rest.
+    if (stmt.pattern.kind === 'tuple' && stmt.init.kind === 'path' && !stmt.else) return this.destructure(stmt);
+    const init = this.value(stmt.init);
     if (stmt.else) {
       const matcher = this.compileMatcher(stmt.pattern);
       const elseBlock = this.compileBlock(stmt.else);
@@ -271,6 +271,55 @@ export class Compiler {
       return UNIT_VALUE;
     };
     return this.withStep(stmt.span, run, isObjectCreation(stmt.init, this.annotations));
+  }
+
+  private destructure(stmt: Extract<Stmt, { kind: 'let' }>): Eval {
+    const init = this.read(stmt.init!);
+    const place = this.place(stmt.init!);
+    const matcher = this.compileMatcher(stmt.pattern);
+    const takeAll = this.takesWhole(stmt.init!, stmt.pattern);
+    const run: Eval = (frame) => {
+      frame.runtime.spend();
+      matcher(frame, init(frame), () => place(frame));
+      takeAll?.(frame);
+      return UNIT_VALUE;
+    };
+    return this.withStep(stmt.span, run, false);
+  }
+
+  /**
+   * When a pattern moves every part of the variable it matches (`let (a, b) = pair;`, `Some(t) =>`), the variable is
+   * moved as a whole and leaves the trace; otherwise it keeps the parts the pattern leaves.
+   */
+  private takesWhole(scrutinee: Expr, pattern: Pattern): ((frame: Frame) => void) | undefined {
+    if (scrutinee.kind !== 'path' || !this.movesAll(pattern)) return undefined;
+    const res = this.annotations.paths.get(scrutinee);
+    if (res?.kind !== 'local' || res.local.mode !== 'move' || isRefType(res.local.type)) return undefined;
+    const slot = res.local.slot;
+    return (frame) => {
+      frame.locals[slot] = UNASSIGNED;
+    };
+  }
+
+  private movesAll(pattern: Pattern): boolean {
+    switch (pattern.kind) {
+      case 'binding': {
+        const local = this.annotations.bindings.get(pattern);
+        return local !== undefined && local.mode === 'move' && !isRefType(local.type) && !this.isCopy(local.type);
+      }
+      case 'tuple':
+      case 'tupleStruct': {
+        return pattern.elems.length > 0 && pattern.elems.every((elem) => this.movesAll(elem));
+      }
+      case 'struct': {
+        const res = this.annotations.paths.get(pattern);
+        const count = res?.kind === 'ctor' ? res.def.variants[res.variant].fields.length : -1;
+        return pattern.fields.length === count && pattern.fields.every((field) => this.movesAll(field.pattern));
+      }
+      default: {
+        return false;
+      }
+    }
   }
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -304,6 +353,8 @@ export class Compiler {
         const localType = normalize(shallow(local.type));
         // Match ergonomics on a `&mut` value gives the parts of the value with `&mut` types, which are their places.
         const bindsPlace = local.mode === 'refMut' || (localType.kind === 'ref' && localType.mutable);
+        // Binding a part of a variable by value moves it out, leaving the variable without it, as Rust does.
+        const movesOut = local.mode === 'move' && localType.kind !== 'ref' && !this.isCopy(local.type);
         return (frame, value, place) => {
           if (sub && !sub(frame, value, place)) return false;
           let bound = value;
@@ -312,6 +363,7 @@ export class Compiler {
           } else if (local.mode === 'ref' && isPlace(value)) bound = value.get();
           else if (copies) bound = copyValue(value);
           frame.locals[local.slot] = bound;
+          if (movesOut && place) place().set(MOVED);
           return true;
         };
       }
@@ -419,7 +471,28 @@ export class Compiler {
         };
       }
     }
+    // Moving a field out (`let a = s.a;`) leaves the struct without it.
+    if (expr.kind === 'field' && !this.isCopy(type) && this.ownedFieldChain(expr)) {
+      const place = this.place(expr);
+      return (frame) => {
+        const target = place(frame);
+        const value = target.get();
+        target.set(MOVED);
+        return value;
+      };
+    }
     return coerced;
+  }
+
+  /** Whether a field chain reaches its fields from a variable that owns them, not through a reference. */
+  private ownedFieldChain(expr: Expr): boolean {
+    if (expr.kind === 'path') {
+      const res = this.annotations.paths.get(expr);
+      return res?.kind === 'local' && res.local.mode === 'move' && !isRefType(res.local.type);
+    }
+    if (expr.kind !== 'field') return false;
+    const field = this.annotations.fields.get(expr);
+    return field !== undefined && field.derefs.length === 0 && this.ownedFieldChain(expr.operand);
   }
 
   // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of expression, statement, or pattern.
@@ -831,18 +904,15 @@ export class Compiler {
       index: fields.findIndex((f) => f.name === field.name),
       value: this.value(field.value),
     }));
-    // The base gives up only the fields it moves, which the borrow checker keeps from being used again.
+    // The base gives up the fields it moves, and copies the `Copy` ones.
     const base = expr.base ? this.read(expr.base) : undefined;
+    const given = new Set(values.map((v) => v.index));
+    const subst = new Map(def.params.map((param, index) => [param, res.typeArgs[index]]));
+    const moved = fields.map((field, index) => !given.has(index) && !this.isCopy(substitute(field.type, subst)));
     return (frame) => {
       const result: Value[] = Array.from({ length: fields.length });
       for (const { index, value } of values) result[index] = value(frame);
-      if (base) {
-        const source = base(frame) as StructValue;
-        const given = new Set(values.map((v) => v.index));
-        for (let index = 0; index < fields.length; index++) {
-          if (!given.has(index)) result[index] = copyValue(source.fields[index]);
-        }
-      }
+      if (base) takeFromBase(base(frame) as StructValue, result, given, moved);
       frame.runtime.allocate(fields.length);
       return def.kind === 'enum' ? new EnumValue(def, variant, result) : new StructValue(def, result);
     };
@@ -1106,8 +1176,6 @@ export class Compiler {
     return read;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of expression, statement, or pattern.
-  // code-gauge-allow functionNcss 33 -- One case per kind of expression, statement, or pattern.
   private closure(expr: Extract<Expr, { kind: 'closure' }>): Eval {
     const info = this.annotations.closures.get(expr);
     if (!info) throw new Error('Unchecked closure');
@@ -1131,29 +1199,75 @@ export class Compiler {
         local.owner === outer
           ? { kind: 'local', local }
           : { kind: 'capture', local, index: outer.captures.indexOf(local) };
-      return { res, local };
+      return { res, local, fields: this.capturedFields(expr.body, local) };
     });
-    const isMove = context.isMove;
     const name = '{closure}';
     return (frame) => {
-      const places = captures.map(({ res, local }) => {
-        let place: Place;
-        if (res.kind === 'local') {
-          place =
-            local.mode === 'refMut' && !isMove
-              ? new CellPlace(frame.locals[local.slot] as Value)
-              : new LocalPlace(frame, local.slot);
-        } else {
-          place = frame.captures[res.index];
-        }
-        if (isMove) {
-          const value = place.get();
-          return new CellPlace(needsCopy(resolve(local.type, true)) ? copyValue(value) : value);
-        }
-        return place;
-      });
+      const places = captures.map((capture) => this.capturePlace(frame, capture, context));
       return this.support.makeClosure(compiled, frame, places, name);
     };
+  }
+
+  /** The place a closure reaches a captured variable through: the variable's own, or a copy that it owns. */
+  private capturePlace(
+    frame: Frame,
+    { res, local, fields }: { res: PathRes; local: LocalVar; fields: Set<string> | undefined },
+    context: FnContext
+  ): Place {
+    const byValue = context.isMove || context.movedCaptures?.includes(local);
+    let place: Place;
+    if (res.kind === 'local') {
+      const reborrowed = local.mode === 'refMut' && !context.isMove;
+      place = reborrowed ? new CellPlace(frame.locals[local.slot] as Value) : new LocalPlace(frame, local.slot);
+    } else {
+      place = frame.captures[(res as { index: number }).index];
+    }
+    if (!byValue) return place;
+    const value = place.get();
+    if (this.isCopy(local.type)) return new CellPlace(needsCopy(resolve(local.type, true)) ? copyValue(value) : value);
+    if (res.kind !== 'local' || local.mode !== 'move' || isRefType(local.type)) return new CellPlace(value);
+    return new CellPlace(this.moveCaptured(frame, local, value, fields));
+  }
+
+  /**
+   * The fields of a captured variable that a closure's body uses (`p.name`), which it captures on their own as edition
+   * 2021 does, or undefined when the body uses the whole variable.
+   */
+  private capturedFields(body: Expr, local: LocalVar): Set<string> | undefined {
+    const fields = new Set<string>();
+    let whole = false;
+    const isCapture = (expr: Expr): boolean => {
+      const res = expr.kind === 'path' ? this.annotations.paths.get(expr) : undefined;
+      return (res?.kind === 'capture' || res?.kind === 'local') && res.local === local;
+    };
+    const visit = (expr: Expr): void => {
+      if (expr.kind === 'field' && isCapture(expr.operand) && this.annotations.fields.get(expr)?.derefs.length === 0) {
+        fields.add(expr.name);
+        return;
+      }
+      if (isCapture(expr)) whole = true;
+      forEachDirect(expr, visit);
+    };
+    visit(body);
+    return whole || fields.size === 0 ? undefined : fields;
+  }
+
+  /**
+   * What a closure that captures by value takes from a variable: all of it, which leaves the variable without a value,
+   * or the fields it uses, which leave the variable's other fields in place.
+   */
+  private moveCaptured(frame: Frame, local: LocalVar, value: Value, fields: Set<string> | undefined): Value {
+    const t = normalize(shallow(resolve(local.type, true)));
+    if (!fields || !(value instanceof StructValue) || t.kind !== 'adt') {
+      frame.locals[local.slot] = UNASSIGNED;
+      return value;
+    }
+    const subst = new Map(t.def.params.map((param, index) => [param, t.args[index]]));
+    const shell = new StructValue(value.def, [...value.fields]);
+    for (const [index, field] of t.def.variants[0].fields.entries()) {
+      if (fields.has(field.name) && !this.isCopy(substitute(field.type, subst))) value.fields[index] = MOVED;
+    }
+    return shell;
   }
 
   private tryExpr(expr: Extract<Expr, { kind: 'try' }>): Eval {
@@ -1186,9 +1300,12 @@ export class Compiler {
     const value = this.read(cond.value);
     const matcher = this.compileMatcher(cond.pattern);
     const placeEval = isPlaceExpr(cond.value, this.annotations) ? this.place(cond.value) : undefined;
+    const takeAll = this.takesWhole(cond.value, cond.pattern);
     return (frame) => {
       const v = value(frame);
-      return matcher(frame, v, placeEval ? () => placeEval(frame) : undefined);
+      const matched = matcher(frame, v, placeEval ? () => placeEval(frame) : undefined);
+      if (matched) takeAll?.(frame);
+      return matched;
     };
   }
 
@@ -1217,15 +1334,17 @@ export class Compiler {
       const matcher = this.compileMatcher(arm.pattern);
       const body = this.value(arm.body);
       const slots = this.patternSlots(arm.pattern);
-      return { matcher, body, slots };
+      const takeAll = this.takesWhole(expr.scrutinee, arm.pattern);
+      return { matcher, body, slots, takeAll };
     });
     return (frame) => {
       frame.runtime.spend();
       const value = scrutinee(frame);
       frame.temporaries.push(value);
       try {
-        for (const { matcher, body, slots } of arms) {
+        for (const { matcher, body, slots, takeAll } of arms) {
           if (matcher(frame, value, placeEval ? () => placeEval(frame) : undefined)) {
+            takeAll?.(frame);
             frame.temporaries.pop();
             try {
               return body(frame);
@@ -1303,8 +1422,9 @@ export class Compiler {
     const answered = this.bindsAnswer(expr.pattern);
     return (frame) => {
       const source = iterable(frame);
+      // The iterator keeps what the loop still uses: all of a borrowed collection, or what an owned one has left.
       const iterator = this.support.toIter(source, fromType(frame)) as IterValue;
-      frame.temporaries.push(source, iterator);
+      frame.temporaries.push(iterator);
       try {
         for (;;) {
           frame.runtime.spend();
@@ -1321,7 +1441,7 @@ export class Compiler {
           }
         }
       } finally {
-        frame.temporaries.splice(-2, 2);
+        frame.temporaries.pop();
         for (const slot of patternSlots) frame.locals[slot] = UNASSIGNED;
       }
     };
@@ -1689,5 +1809,14 @@ function formatPartly(format: Eval, frame: Frame): { text: string; failed: boole
   } catch (error) {
     if (error instanceof FmtFailure) return { text: error.written, failed: true };
     throw error;
+  }
+}
+
+/** Fills the fields a struct expression does not give from its base: moving the moved ones, copying the others. */
+function takeFromBase(source: StructValue, result: Value[], given: ReadonlySet<number>, moved: boolean[]): void {
+  for (let index = 0; index < result.length; index++) {
+    if (given.has(index)) continue;
+    result[index] = moved[index] ? source.fields[index] : copyValue(source.fields[index]);
+    if (moved[index]) source.fields[index] = MOVED;
   }
 }

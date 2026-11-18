@@ -17,7 +17,7 @@ import {
   UNIT_VALUE,
   type Value,
 } from '../values';
-import { arrayIter, heapPop, heapPush, sliceIter } from './iterators';
+import { arrayIter, heapPop, heapPush, ownedIter, sliceIter } from './iterators';
 import {
   call,
   define,
@@ -474,7 +474,7 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
         'core/src/slice/index.rs:1009:51'
       );
     }
-    return arrayIter(items.splice(start, end - start));
+    return ownedIter(items.splice(start, end - start));
   },
   retain: ([self, f], ctx) => {
     const items = vec(self);
@@ -543,7 +543,7 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   into_boxed_slice: ([self]) => vec(self),
   is_empty: ([self]) => vec(self).length === 0,
   len: ([self]) => BigInt(vec(self).length),
-  into_iter: ([self]) => arrayIter(vec(self)),
+  into_iter: ([self]) => ownedIter(vec(self)),
 };
 
 const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
@@ -605,7 +605,7 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   rotate_right: ([self, n]) => rotate(vec(self), vec(self).length - Number(n as bigint)),
   make_contiguous: ([self]) => self,
   drain: ([self, range], ctx) => vecNatives.drain([self, range], ctx),
-  into_iter: ([self]) => arrayIter(vec(self)),
+  into_iter: ([self]) => ownedIter(vec(self)),
 };
 
 const heapNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
@@ -644,7 +644,7 @@ const heapNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
     }
     return UNIT_VALUE;
   },
-  into_iter: ([self]) => arrayIter(vec(self)),
+  into_iter: ([self]) => ownedIter(vec(self)),
 };
 
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};

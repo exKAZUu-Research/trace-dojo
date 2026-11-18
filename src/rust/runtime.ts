@@ -24,6 +24,8 @@ import {
 
 /** Marks a variable whose scope has not begun, has ended, or whose value moved out. */
 export const UNASSIGNED: unique symbol = Symbol('unassigned');
+/** What a field or element holds after a pattern, a field read, or a struct update moved its value out. */
+export const MOVED = undefined as unknown as Value;
 
 /** A local variable as the trace shows it. */
 export interface LocalInfo {
