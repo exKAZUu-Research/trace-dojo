@@ -1315,6 +1315,16 @@ test('integer logarithms and empty-needle searches fail their Debug assertions p
   }
 });
 
+test('signed integer log2 checks the cast before the logarithm assertion', () => {
+  for (const [initial, panic] of [
+    [-3, 'integer does not fit in destination type'],
+    [0, 'reached unreachable code'],
+  ]) {
+    const source = `const std=@import("std");pub fn main()void{var n:i32=${initial};_=&n;_=std.math.log2(n);}`;
+    expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', uncaughtException: `panic: ${panic}` });
+  }
+});
+
 test('large ldexp exponents overflow or underflow without huge integer shifts', () => {
   const source = `const std=@import("std");pub fn main()void{
     std.debug.print("{} {} {}", .{std.math.ldexp(@as(f128,1),2147483647)==std.math.inf(f128),std.math.ldexp(@as(f80,1),-2147483648)==0,std.math.ldexp(@as(f64,-1),2147483647)==-std.math.inf(f64)});

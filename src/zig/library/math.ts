@@ -125,9 +125,11 @@ function logarithm(name: 'std.math.log2' | 'std.math.log10', base: bigint): () =
     if (base === 10n && type.kind === 'int' && type.signed) {
       return sema.error(call.span, `${name} は符号付き整数には使えません（${typeName(type)} 型です）。`);
     }
-    return computed(type, [value], call.span, ([x], frame) =>
-      integerLogarithm(base, x as bigint, nativeBudget(sema, frame))
-    );
+    const unsigned = type.kind === 'int' && type.signed ? intType(false, Math.max(0, type.bits - 1)) : undefined;
+    return computed(type, [value], call.span, ([x], frame) => {
+      const input = x as bigint;
+      return integerLogarithm(base, unsigned ? intCast(input, unsigned) : input, nativeBudget(sema, frame));
+    });
   });
 }
 
