@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 517 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 539 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -30,6 +30,12 @@ interface Resolution {
   returnType: Type;
 }
 
+interface CallableShape {
+  signatures: Signature[];
+  untyped: boolean;
+  blocked: boolean;
+}
+
 const functionExpressionTypes = new Set(['arrow_function', 'function_expression']);
 
 /** Resolves calls and `new` expressions: overloads, type argument inference, and argument checks. */
@@ -46,7 +52,7 @@ export class Calls {
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
-  // code-gauge-allow functionNcss 39 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
+  // code-gauge-allow functionNcss 40 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
   call(node: TreeNode, contextual?: Type): Type {
     const callee = node.childForFieldName('function') as TreeNode;
     const argumentsNode = node.childForFieldName('arguments');
@@ -70,10 +76,11 @@ export class Calls {
       );
       return this.checkArgumentsOnly(args, errorType);
     }
-    const signatures = this.withImmediateCallOptionals(callee, args, this.callSignatures(calleeType));
+    const callable = this.callShape(calleeType);
+    const signatures = this.withImmediateCallOptionals(callee, args, callable.signatures);
     if (signatures.length === 0) {
       for (const arg of args) this.c.expressions.check(arg);
-      return this.uncallableType(callee, calleeType);
+      return callable.untyped ? anyType : this.uncallableType(callee, calleeType);
     }
     const resolution = this.resolve(
       node,
@@ -150,17 +157,9 @@ export class Calls {
     return this.c.relations.removeNullish(type);
   }
 
-  /** The result of calling a type without call signatures, reporting the call unless the type is `Function`. */
+  /** Reports a call that neither a signature nor an untyped function type permits. */
   private uncallableType(callee: TreeNode, calleeType: Type): Type {
-    // A value of type `Function` may be called with anything, returning `any`.
     const constructible = this.constructSignatures(calleeType).length > 0;
-    if (
-      !constructible &&
-      !isIntrinsic(this.c.baseConstraint(calleeType), 'never') &&
-      !this.hasIncompatibleCallUnion(calleeType) &&
-      this.c.relations.isAssignable(calleeType, this.c.globalType('Function'))
-    )
-      return anyType;
     if (constructible) {
       this.c.error(callee, `型 '${this.c.print(calleeType)}' の値は呼び出せません。new を付けるつもりでしたか？`);
     } else {
@@ -170,21 +169,6 @@ export class Calls {
       );
     }
     return errorType;
-  }
-
-  private hasIncompatibleCallUnion(type: Type, seen = new Set<number>()): boolean {
-    if (seen.has(type.id)) return false;
-    seen.add(type.id);
-    const apparent = this.c.apparentType(type);
-    if (apparent.kind === 'intersection')
-      return apparent.types.some((member) => this.hasIncompatibleCallUnion(member, seen));
-    if (apparent.kind !== 'union') return false;
-    const lists = apparent.types.map((member) => this.c.signaturesOf(member, 'call'));
-    return (
-      lists.every((signatures) => signatures.length > 0) &&
-      this.unionSignatures.of(lists).length === 0 &&
-      this.unionSignatures.arrayMethodSignatures(apparent.types).length === 0
-    );
   }
 
   /** The object a method is called on, which its `this` parameter infers from. */
@@ -220,11 +204,48 @@ export class Calls {
     return this.c.assignments.isEvolvingArray(callee.childForFieldName('object') as TreeNode);
   }
 
-  private callSignatures(type: Type): Signature[] {
-    const members = this.apparentUnionMembers(type);
-    if (!members) return this.c.signaturesOf(type, 'call');
-    const signatures = this.unionSignatures.of(members.map((member) => this.c.signaturesOf(member, 'call')));
-    return signatures.length > 0 ? signatures : this.unionSignatures.arrayMethodSignatures(members);
+  private callShape(type: Type, seen = new Set<number>()): CallableShape {
+    if (seen.has(type.id)) return { signatures: [], untyped: false, blocked: true };
+    this.c.budget.spend();
+    seen.add(type.id);
+    try {
+      const apparent = this.c.apparentType(type);
+      if (apparent.kind === 'union') return this.unionCallShape(apparent.types, seen);
+      if (apparent.kind === 'intersection') {
+        const shapes = apparent.types.map((member) => this.callShape(member, seen));
+        const signatures = shapes.flatMap((shape) => shape.signatures);
+        if (signatures.length > 0) return { signatures, untyped: false, blocked: false };
+        const blocked = shapes.some((shape) => shape.blocked);
+        return { signatures, untyped: !blocked && this.isUntypedFunction(type), blocked };
+      }
+      const signatures = this.c.signaturesOf(type, 'call');
+      const blocked = this.c.signaturesOf(type, 'construct').length > 0;
+      return { signatures, untyped: signatures.length === 0 && this.isUntypedFunction(type), blocked };
+    } finally {
+      seen.delete(type.id);
+    }
+  }
+
+  private unionCallShape(members: Type[], seen: Set<number>): CallableShape {
+    const shapes = members.map((member) => this.callShape(member, seen));
+    if (shapes.some((shape) => shape.signatures.length === 0 && !shape.untyped))
+      return { signatures: [], untyped: false, blocked: true };
+    const concrete = members.filter((_, index) => shapes[index].signatures.length > 0);
+    if (concrete.length === 0) return { signatures: [], untyped: true, blocked: false };
+    const lists = shapes.flatMap((shape) => (shape.signatures.length > 0 ? [shape.signatures] : []));
+    let signatures = this.unionSignatures.of(lists);
+    if (signatures.length === 0) signatures = this.unionSignatures.arrayMethodSignatures(concrete);
+    if (shapes.some((shape) => shape.untyped))
+      signatures = signatures.map((signature) => ({ ...signature, returnType: () => anyType, predicate: undefined }));
+    return { signatures, untyped: false, blocked: signatures.length === 0 };
+  }
+
+  private isUntypedFunction(type: Type): boolean {
+    return (
+      !isIntrinsic(this.c.baseConstraint(type), 'never') &&
+      this.c.signaturesOf(type, 'construct').length === 0 &&
+      this.c.relations.isAssignable(type, this.c.globalType('Function'))
+    );
   }
 
   /** The construct signatures of `type`, which for a union combine its members' as its call signatures do. */
