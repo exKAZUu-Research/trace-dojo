@@ -10,6 +10,9 @@ import { javaScriptViewOf } from './jsView';
 import { TypeScriptProgramConverter } from './programConverter';
 import { rejectUnsupportedSyntax } from './unsupported';
 
+/** The members that may be a get or set accessor: in a class, an object literal, an interface, or an object type. */
+const accessorTypes = new Set(['method_definition', 'method_signature', 'abstract_method_signature']);
+
 const parser = await loadParser('@willbooster/tree-sitter-typescript/tree-sitter-typescript.wasm');
 
 /**
@@ -84,19 +87,31 @@ function decodedName(node: Node): string {
   }
 }
 
+/** The syntax errors tsc's parser reports where the tree-sitter grammar accepts the program. */
 function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagnostic[]): SourceDiagnostic[] {
   const visit = (node: Node): void => {
-    if (node.type === 'escape_sequence' && /^\\[0-9]/.test(node.text)) {
-      const template = node.parent;
-      const tagged = template?.type === 'template_string' && template.parent?.type === 'call_expression';
-      const nullEscape = node.text === String.raw`\0` && !/[0-9]/.test(source[node.endIndex] ?? '');
-      if (!tagged && !nullEscape)
-        errors.push({ row: node.startPosition.row, message: '8進数や10進数のエスケープシーケンスは使えません。' });
-    }
+    const message = numericEscapeError(node, source) ?? optionalAccessorError(node);
+    if (message) errors.push({ row: node.startPosition.row, message });
     for (const child of node.children) if (child) visit(child);
   };
   visit(root);
   return errors.toSorted((left, right) => left.row - right.row);
+}
+
+function numericEscapeError(node: Node, source: string): string | undefined {
+  if (node.type !== 'escape_sequence' || !/^\\[0-9]/.test(node.text)) return undefined;
+  const template = node.parent;
+  const tagged = template?.type === 'template_string' && template.parent?.type === 'call_expression';
+  const nullEscape = node.text === String.raw`\0` && !/[0-9]/.test(source[node.endIndex] ?? '');
+  return tagged || nullEscape ? undefined : '8進数や10進数のエスケープシーケンスは使えません。';
+}
+
+/** A `?` after an accessor's name, which tsc's parser rejects wherever an accessor may appear. */
+function optionalAccessorError(node: Node): string | undefined {
+  const member = node.parent;
+  if (node.type !== '?' || !member || !accessorTypes.has(member.type)) return undefined;
+  const tokens = new Set(member.children.map((child) => child?.type));
+  return tokens.has('get') || tokens.has('set') ? 'アクセサーに ? は付けられません。' : undefined;
 }
 
 /** The `// atomic` annotations of a program, read from its comment tokens. */

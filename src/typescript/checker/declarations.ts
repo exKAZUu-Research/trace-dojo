@@ -313,7 +313,6 @@ export function checkTypeMemberDuplicates(c: Checker, body: TreeNode): void {
  * the implementation, or from the first declaration when there is none.
  */
 export function checkOverloadOptionality(c: Checker, body: TreeNode): void {
-  reportOptionalAccessors(c, body);
   const byKey = new Map<string, TreeNode[]>();
   for (const member of named(body)) {
     if (!overloadableMethodTypes.has(member.type) || isAccessor(member)) continue;
@@ -331,14 +330,6 @@ export function checkOverloadOptionality(c: Checker, body: TreeNode): void {
           'オーバーロードは、すべて省略可能にするか、すべて省略不可にしてください。'
         );
     }
-  }
-}
-
-/** Reports a `?` on an accessor, for which TypeScript's grammar has no place, as a syntax error at the name. */
-function reportOptionalAccessors(c: Checker, body: TreeNode): void {
-  for (const member of named(body)) {
-    if (overloadableMethodTypes.has(member.type) && isAccessor(member) && hasToken(member, '?'))
-      c.error(memberNameNode(member), 'アクセサーに ? は付けられません。');
   }
 }
 
