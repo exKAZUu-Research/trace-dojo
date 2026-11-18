@@ -100,22 +100,13 @@ const MINIMAL_CAPACITY = 8;
 const MAX_LOAD = 80;
 
 function hashOf(frame: Frame, key: Value, keyType: Type, kind: KeyKind): bigint {
+  const spend = (cost?: number): void => frame.runtime.spend(cost);
   if (kind === 'string') {
     const slice = key as Slice;
-    frame.runtime.spend(1 + Number(slice.lengthValue));
-    return wyhash(
-      0n,
-      Array.from({ length: slice.length }, (_, index) => Number(slice.get(index) as bigint))
-    );
+    return wyhash(0n, slice.length, (index) => Number(slice.get(index) as bigint), spend);
   }
-  const bytes = autoHashBytes(
-    key,
-    keyType,
-    (value) => frame.runtime.identityOf(value),
-    (cost) => frame.runtime.spend(cost)
-  );
-  frame.runtime.spend(1 + bytes.length);
-  return wyhash(0n, bytes);
+  const bytes = autoHashBytes(key, keyType, (value) => frame.runtime.identityOf(value), spend);
+  return wyhash(0n, bytes.length, (index) => bytes[index], spend);
 }
 
 function keysEqual(frame: Frame, a: Value, b: Value, type: Type, kind: KeyKind): boolean {
@@ -129,7 +120,7 @@ function keysEqual(frame: Frame, a: Value, b: Value, type: Type, kind: KeyKind):
 function stringKeysEqual(frame: Frame, x: Slice, y: Slice): boolean {
   if (x.lengthValue !== y.lengthValue) return false;
   for (let index = 0; index < x.length; index++) {
-    frame.runtime.spend();
+    frame.runtime.spend(3);
     if (x.get(index) !== y.get(index)) return false;
   }
   return true;

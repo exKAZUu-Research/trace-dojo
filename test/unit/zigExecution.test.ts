@@ -6881,6 +6881,15 @@ test('StringHashMap compares equal live byte views within the shared budget', ()
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
 
+test.each(['get', 'contains'])('StringHashMap.%s meters overlapping Wyhash reads without copying keys', (method) => {
+  const prefix = 'const std=@import("std");pub fn main(init:std.process.Init)!void{';
+  const lookup = `var m=std.StringHashMap(u8).init(init.gpa);defer m.deinit();try m.put("x",1);for(0..n)|_|{_=m.${method}(&a);}std.debug.print("ok",.{});}`;
+  const overlapping = `${prefix}const a:[17]u8=@splat(97);const n=30000;${lookup}`;
+  const large = `${prefix}const a:[150000]u8=@splat(97);const n=4;${lookup}`;
+  expect(executeProgram('zig', overlapping)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  expect(executeProgram('zig', large)).toMatchObject({ kind: 'executed', stderr: 'ok' });
+});
+
 test('map key comparisons preserve independently backed strings and nested aggregates', () => {
   const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var s=std.StringHashMap(u8).init(init.gpa);defer s.deinit();var text=[_]u8{97,98};_=&text;try s.put("ab",7);const yes=s.get(&text).?;text[1]=99;const absent=s.get(&text)==null;var m=std.AutoHashMap([2][2]u8,u8).init(init.gpa);defer m.deinit();try m.put(.{.{1,2},.{3,4}},9);var key=[2][2]u8{.{1,2},.{3,4}};_=&key;const nested=m.get(key).?;key[1][1]=5;std.debug.print("{} {} {} {}",.{yes,absent,nested,m.get(key)==null});}`;
   expect(executeProgram('zig', source)).toMatchObject({

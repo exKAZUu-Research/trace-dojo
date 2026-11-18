@@ -42,29 +42,39 @@ function mix(a: bigint, b: bigint): bigint {
   return low ^ high;
 }
 
-function read(bytes: readonly number[], offset: number, count: number): bigint {
+function read(byteAt: (index: number) => number, offset: number, count: number): bigint {
   let value = 0n;
-  for (let index = count - 1; index >= 0; index--) value = (value << 8n) | BigInt(bytes[offset + index]);
+  for (let index = count - 1; index >= 0; index--) value = (value << 8n) | BigInt(byteAt(offset + index));
   return value;
 }
 
 /** `Wyhash.hash(seed, input)`. */
-// code-gauge-allow functionNcss 40 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
+// code-gauge-allow functionNcss 42 -- Keeps the reference Wyhash block order with its metered input reader.
 // code-gauge-allow functionCognitiveComplexity 17 -- Transcribes the corresponding function of Zig's standard library or compiler step by step.
-export function wyhash(seed: bigint, input: readonly number[]): bigint {
+export function wyhash(
+  seed: bigint,
+  length: number,
+  byteAt: (index: number) => number,
+  spend: (cost?: number) => void
+): bigint {
+  spend();
+  const readByte = (index: number): number => {
+    spend();
+    return byteAt(index);
+  };
   const state = [seed ^ mix(seed ^ SECRET[0], SECRET[1]), 0n, 0n];
   state[1] = state[0];
   state[2] = state[0];
   let a: bigint;
   let b: bigint;
-  if (input.length <= 16) {
-    if (input.length >= 4) {
-      const end = input.length - 4;
-      const quarter = (input.length >> 3) << 2;
-      a = (read(input, 0, 4) << 32n) | read(input, quarter, 4);
-      b = (read(input, end, 4) << 32n) | read(input, end - quarter, 4);
-    } else if (input.length > 0) {
-      a = (BigInt(input[0]) << 16n) | (BigInt(input[input.length >> 1]) << 8n) | BigInt(input.at(-1) as number);
+  if (length <= 16) {
+    if (length >= 4) {
+      const end = length - 4;
+      const quarter = (length >> 3) << 2;
+      a = (read(readByte, 0, 4) << 32n) | read(readByte, quarter, 4);
+      b = (read(readByte, end, 4) << 32n) | read(readByte, end - quarter, 4);
+    } else if (length > 0) {
+      a = (BigInt(readByte(0)) << 16n) | (BigInt(readByte(length >> 1)) << 8n) | BigInt(readByte(length - 1));
       b = 0n;
     } else {
       a = 0n;
@@ -72,30 +82,28 @@ export function wyhash(seed: bigint, input: readonly number[]): bigint {
     }
   } else {
     let i = 0;
-    if (input.length >= 48) {
-      while (i + 48 < input.length) {
+    if (length >= 48) {
+      while (i + 48 < length) {
         for (let lane = 0; lane < 3; lane++) {
-          const x = read(input, i + 8 * (2 * lane), 8);
-          const y = read(input, i + 8 * (2 * lane + 1), 8);
+          const x = read(readByte, i + 8 * (2 * lane), 8);
+          const y = read(readByte, i + 8 * (2 * lane + 1), 8);
           state[lane] = mix(x ^ SECRET[lane + 1], y ^ state[lane]);
         }
         i += 48;
       }
       state[0] ^= state[1] ^ state[2];
     }
-    const rest = input.slice(i);
-    let j = 0;
-    while (j + 16 < rest.length) {
-      state[0] = mix(read(rest, j, 8) ^ SECRET[1], read(rest, j + 8, 8) ^ state[0]);
-      j += 16;
+    while (i + 16 < length) {
+      state[0] = mix(read(readByte, i, 8) ^ SECRET[1], read(readByte, i + 8, 8) ^ state[0]);
+      i += 16;
     }
-    a = read(input, input.length - 16, 8);
-    b = read(input, input.length - 8, 8);
+    a = read(readByte, length - 16, 8);
+    b = read(readByte, length - 8, 8);
   }
   a ^= SECRET[1];
   b ^= state[0];
   [a, b] = mum(a, b);
-  return mix(a ^ SECRET[0] ^ BigInt(input.length), b ^ SECRET[1]);
+  return mix(a ^ SECRET[0] ^ BigInt(length), b ^ SECRET[1]);
 }
 
 export function autoHashBytes(
