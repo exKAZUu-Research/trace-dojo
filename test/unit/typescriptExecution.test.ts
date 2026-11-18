@@ -116,6 +116,16 @@ test.each([
     'const raw = (...a: unknown[]) => 1;\nfunction f(String: { raw: typeof raw }) { return String.raw`x`; }',
     'タグ付きテンプレートは、この採点環境では使えません。',
   ],
+  [
+    'a computed String.raw tag replaced by the program',
+    'String["raw"] = (...a: any[]) => 42 as any;\nconsole.log((String["raw"])`x`);',
+    'タグ付きテンプレートは、この採点環境では使えません。',
+  ],
+  [
+    'a parenthesized computed tag that names a String parameter',
+    'const raw = (...a: unknown[]) => 1;\nfunction f(String: { raw: typeof raw }) { return (String["raw"])`x`; }',
+    'タグ付きテンプレートは、この採点環境では使えません。',
+  ],
   ['a Promise', 'Promise.resolve(1);', 'Promise は、この採点環境では使えません。'],
   ['a timer', 'setTimeout(() => {}, 1);', 'setTimeout などのタイマーは、この採点環境では使えません。'],
   ['a Date', 'new Date();', 'Date（日付と時刻）は、この採点環境では使えません。'],

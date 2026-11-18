@@ -73,12 +73,5 @@ function unsupportedForm(node: TreeNode): string | undefined {
   if (node.type === 'method_definition' && tokens.has('*')) return 'ジェネレータ関数';
   if (node.type === 'for_in_statement' && tokens.has('await')) return 'for await';
   if (node.type === 'field_definition' && tokens.has('accessor')) return 'accessor フィールド';
-  // `String.raw` is a library function that learners use; other tags are the later-stage syntax.
-  if (
-    node.type === 'call_expression' &&
-    node.childForFieldName('arguments')?.type === 'template_string' &&
-    node.childForFieldName('function')?.text !== 'String.raw'
-  )
-    return 'タグ付きテンプレート';
   return undefined;
 }

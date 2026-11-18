@@ -1,0 +1,6 @@
+function identity<T>(value:T):T{return value;}
+identity.call(null,'g').toUpperCase();
+identity.apply(null,['g']).toUpperCase();
+function constrained<T extends number>(value:T):T{return value;}
+constrained.call(null,'bad');
+constrained.apply(null,['bad']);

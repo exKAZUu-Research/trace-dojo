@@ -1,11 +1,11 @@
-// code-gauge-allow-file fileNcss 552 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 563 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
 import { CallArity, minimumArguments, tupleArgumentContexts, tupleTypeAt } from './callArity';
 import type { Checker, Mapper } from './checker';
 import { InferencePriority, type InferenceRun, newInferenceRun } from './inference';
-import { named, skipParentheses, stringValue } from './syntax';
+import { named, skipParentheses, stringValue, withoutAssertions } from './syntax';
 import {
   anyType,
   errorType,
@@ -340,10 +340,7 @@ export class Calls {
 
   /** A tagged template, `String.raw\`...\``, which calls the tag with the template's strings and substitutions. */
   private taggedTemplate(callee: TreeNode, template: TreeNode): Type {
-    // The syntax check lets through only a tag spelled `String.raw`, which must name the library's `String`.
-    const object = callee.childForFieldName('object');
-    const declaration = object && this.c.scopeOf(object).lookupValue(object.text)?.valueDeclaration;
-    if (!declaration || !this.c.isLibrary(declaration)) {
+    if (!this.isStringRawTag(callee)) {
       this.c.error(callee, unsupportedMessage('タグ付きテンプレート'));
       return errorType;
     }
@@ -352,6 +349,18 @@ export class Calls {
       if (part.type === 'template_substitution') this.c.expressions.check(named(part)[0]);
     }
     return this.c.signaturesOf(calleeType, 'call')[0]?.returnType() ?? anyType;
+  }
+
+  private isStringRawTag(callee: TreeNode): boolean {
+    const expression = withoutAssertions(callee);
+    const receiver = expression.childForFieldName('object');
+    const object = receiver && withoutAssertions(receiver);
+    if (object?.type !== 'identifier') return false;
+    const symbol = this.c.scopeOf(object).lookupValue(object.text);
+    if (symbol !== this.c.libraryBinder.moduleScope.lookupValue('String')) return false;
+    if (expression.type === 'member_expression') return expression.childForFieldName('property')?.text === 'raw';
+    const index = expression.type === 'subscript_expression' ? expression.childForFieldName('index') : undefined;
+    return index !== undefined && index !== null && this.c.flow.constantIndexName(index) === 'raw';
   }
 
   /** Resolves a call to one of `signatures`, as `super(...)` does with its base class's constructors. */

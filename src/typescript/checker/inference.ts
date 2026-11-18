@@ -555,9 +555,14 @@ export class TypeInference {
   instantiateToFit(source: Signature, target: Signature): Signature {
     const run = newInferenceRun(source.typeParameters, true);
     if (source.thisType && target.thisType) this.inferTypes(run, target.thisType, source.thisType, true);
-    const count = Math.min(source.parameters.length, target.parameters.length);
-    for (let index = 0; index < count; index++) {
-      this.inferTypes(run, target.parameters[index].type, source.parameters[index].type, true);
+    for (const [index, parameter] of source.parameters.entries()) {
+      const last = target.parameters.at(-1);
+      if (last?.rest && index >= target.parameters.length - 1 && this.c.relations.isGenericRestType(last.type))
+        continue;
+      const targetType = parameter.rest
+        ? this.c.tupleType(target.parameters.slice(index).map(({ type, optional, rest }) => ({ type, optional, rest })))
+        : this.c.expressions.calls.parameterTypeAt(target, index);
+      if (targetType) this.inferTypes(run, targetType, parameter.type, true);
     }
     const mapper: Mapper = new Map();
     for (const parameter of source.typeParameters) {
