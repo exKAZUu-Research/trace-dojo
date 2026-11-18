@@ -378,7 +378,8 @@ export class TypeOperators {
     if (isAnyLike(object)) return anyType;
     if (object.kind === 'union') return unionOf(object.types.map((member) => this.indexedAccess(member, index, node)));
     if (isPropertyKeyLiteral(index)) return this.propertyAccess(object, index.value, node);
-    const applicable = applicableIndex(this.c, this.c.structureOf(object), index);
+    const applicable =
+      applicableIndex(this.c, this.c.structureOf(object), index) ?? this.unreportedStringIndex(object, index, node);
     if (applicable) return applicable.type;
     if (node)
       this.c.error(node, `型 '${this.c.print(index)}' は型 '${this.c.print(object)}' のインデックスに使えません。`);
@@ -403,11 +404,22 @@ export class TypeOperators {
     if (element) return element;
     const structure = this.c.structureOf(object);
     const applicable =
-      typeof key === 'symbol' ? structure.symbolIndex : applicableIndex(this.c, structure, literalType(key));
+      typeof key === 'symbol'
+        ? (structure.symbolIndex ?? this.unreportedStringIndex(object, literalType(key), node))
+        : applicableIndex(this.c, structure, literalType(key));
     if (applicable) return applicable.type;
     if (node)
       this.c.error(node, `プロパティ '${printedPropertyName(name)}' は型 '${this.c.print(object)}' にありません。`);
     return errorType;
+  }
+
+  /**
+   * The string index signature that an access with no node to report at reads for any key, a symbol included, as
+   * TypeScript's `getPropertyTypeForIndexType` does when it computes the constraint of `T[keyof T]`.
+   */
+  private unreportedStringIndex(object: Type, index: Type, node: TreeNode | undefined): IndexInfo | undefined {
+    if (node || !this.c.relations.isAssignable(index, unionOf([stringType, numberType, symbolType]))) return undefined;
+    return this.c.structureOf(object).stringIndex;
   }
 
   conditionalTypeFromNode(node: TreeNode): Type {
