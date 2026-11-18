@@ -148,7 +148,7 @@ function claimArgumentTemporaries(frame: Frame, args: ArgValue[], first: number,
   }
 }
 
-export function callExpression(e: Extract<Expr, { k: 'call' }>): Value {
+export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = false): Value {
   const runtime = rt();
   runtime.row = e.row;
   if (!('k' in e.fn)) {
@@ -164,7 +164,7 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>): Value {
     if (e.fcc) return closureFromCallable({ fn });
     const args = evalArgs(e.args, fn, fn.name);
     runtime.row = e.row;
-    const result = invoke({ fn, inline: inlineCall(fn, e.args) }, args, e.row);
+    const result = invoke({ fn, inline: inlineCall(fn, e.args) }, args, e.row, discardResult);
     runtime.frame.temporaries.push(result);
     return result;
   }
@@ -174,7 +174,7 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>): Value {
   if (e.fcc) return closureFromCallable(target);
   const args = evalArgs(e.args, target.fn, functionNameFor(target));
   runtime.row = e.row;
-  const result = invoke(target, args, e.row);
+  const result = invoke(target, args, e.row, discardResult);
   runtime.frame.temporaries.push(result);
   return result;
 }
@@ -185,7 +185,7 @@ function functionNameFor(target: CallTarget): string {
 
 // code-gauge-allow functionCognitiveComplexity 29 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 // code-gauge-allow functionNcss 48 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
-export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>): Chain {
+export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>, discardResult = false): Chain {
   const runtime = rt();
   const object = evChain(e.obj);
   if (object === SHORT) return SHORT;
@@ -207,7 +207,7 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>): Chain {
     const target = closureTarget(object);
     if (e.fcc) return object;
     const args = evalArgs(e.args, target.fn, functionNameFor(target));
-    return invoke(target, args, e.row);
+    return invoke(target, args, e.row, discardResult);
   }
   const method = lookupMethod(object.cls, lower(methodName), scope);
   if (method && !method.isAbstract && canCall(method, scope)) {
@@ -217,7 +217,7 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>): Chain {
     if (e.fcc) return closureFromCallable(target);
     const args = evalArgs(e.args, method.fn, `${method.scope.name}::${method.name}`);
     runtime.row = e.row;
-    const result = invoke(target, args, e.row);
+    const result = invoke(target, args, e.row, discardResult);
     runtime.frame.temporaries.push(result);
     return result;
   }
@@ -228,7 +228,8 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>): Chain {
     return invoke(
       { fn: magic.fn, thisObj: object, scope: magic.scope, staticClass: object.cls, method: magic },
       [{ v: methodName }, { v: argsArray(args) }],
-      e.row
+      e.row,
+      discardResult
     );
   }
   if (method) {
@@ -284,7 +285,7 @@ function magicForwarder(magic: Method, name: string, object: PhpObject | undefin
 
 // code-gauge-allow functionCognitiveComplexity 30 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 // code-gauge-allow functionNcss 46 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
-export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>): Value {
+export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>, discardResult = false): Value {
   const runtime = rt();
   const frame = runtime.frame;
   runtime.row = e.row;
@@ -309,7 +310,7 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>): Value {
     if (e.fcc) return closureFromCallable(target);
     const args = evalArgs(e.args, method.fn, `${method.scope.name}::${method.name}`);
     runtime.row = e.row;
-    const result = invoke(target, args, e.row);
+    const result = invoke(target, args, e.row, discardResult);
     frame.temporaries.push(result);
     return result;
   }
@@ -321,7 +322,8 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>): Value {
       return invoke(
         { fn: magic.fn, thisObj, scope: magic.scope, staticClass: thisObj.cls, method: magic },
         [{ v: methodName }, { v: argsArray(args) }],
-        e.row
+        e.row,
+        discardResult
       );
     }
   }
@@ -333,7 +335,8 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>): Value {
     return invoke(
       { fn: magicStatic.fn, scope: magicStatic.scope, staticClass: cls, method: magicStatic },
       [{ v: methodName }, { v: argsArray(args) }],
-      e.row
+      e.row,
+      discardResult
     );
   }
   if (method) {
@@ -617,14 +620,21 @@ export function callValue(
   callable: Value,
   args: ArgValue[],
   row: number | undefined,
-  mode: 'direct' | 'callback' = 'callback'
+  mode: 'direct' | 'callback' = 'callback',
+  discardResult = false
 ): Value {
   const target = callTargetOf(callable, mode);
-  return invokeCallbackTarget(target, args, row);
+  return invokeCallbackTarget(target, args, row, discardResult);
 }
 
-export function invokeCallbackTarget(target: CallTarget, args: ArgValue[], row: number | undefined): Value {
-  return invoke(target, bindCallbackArguments(target, args), row);
+export function invokeCallbackTarget(
+  target: CallTarget,
+  args: ArgValue[],
+  row: number | undefined,
+  discardResult = false
+): Value {
+  warnCallbackReferenceArguments(target, args);
+  return invoke(target, args, row, discardResult);
 }
 
 export function callCallback(callable: Value, args: Value[]): Value {
@@ -639,19 +649,18 @@ export function callCallbackRefs(callable: Value, args: ArgValue[]): Value {
   return callValue(callable, args, undefined);
 }
 
-function bindCallbackArguments(target: CallTarget, args: ArgValue[]): ArgValue[] {
-  return args.map((arg, index) => {
-    if (arg.ref || !paramIsByRef(target.fn, index, arg.name)) return arg;
+function warnCallbackReferenceArguments(target: CallTarget, args: ArgValue[]): void {
+  for (const [index, arg] of args.entries()) {
+    if (arg.ref || !paramIsByRef(target.fn, index, arg.name)) continue;
     const namedIndex = arg.name === undefined ? -1 : target.fn.params.findIndex((param) => param.name === arg.name);
     const position = namedIndex >= 0 ? namedIndex : index;
     const param = target.fn.params[Math.min(position, target.fn.params.length - 1)];
-    if (param?.preferRef) return arg;
+    if (param?.preferRef) continue;
     const label = param?.variadic ? '' : ` ($${param?.name ?? arg.name ?? ''})`;
     warn(
       `${functionDisplayName(target)}(): Argument #${position + 1}${label} must be passed by reference, value given`
     );
-    return { ...arg, ref: Ref.temporary(arg.v) };
-  });
+  }
 }
 
 export function closureFromCallable(target: CallTarget): PhpObject {

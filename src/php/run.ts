@@ -124,8 +124,10 @@ function printUncaught(runtime: Runtime, object: PhpObject): string {
   try {
     text = throwableText(object);
   } catch (error) {
-    if (error instanceof PhpThrow) text = throwableText(error.object);
-    else throw error;
+    if (error instanceof PhpThrow) {
+      object = error.object;
+      text = throwableText(object);
+    } else throw error;
   }
   const message = `Fatal error: Uncaught ${text}\n  thrown in ${throwableLocation(object)}`;
   runtime.echo(`\n${message}\n`);

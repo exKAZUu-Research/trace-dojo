@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callCallback } from './callables';
-import { backtraceLimit, type CallRecord, callStack } from './calls';
+import { backtraceLimit, callArguments, callNamedArguments, type CallRecord, callStack, frameArguments } from './calls';
 import * as conversionsModule from './conversions';
 import { clearLastError, deprecated, lastError, throwError, warn } from './errors';
 import { defineConstant, defineFunction } from './native';
@@ -78,23 +78,11 @@ function backtraceFrame(record: CallRecord, frame: Frame | undefined, options: b
     entry.set('type', record.type ?? '::');
   }
   if ((options & 2n) === 0n) {
-    const args = PhpArray.list(frame ? currentArgs(frame, record.args) : record.args);
-    for (const [name, value] of record.named ?? []) args.set(name, value);
+    const args = PhpArray.list(frame ? frameArguments(frame) : callArguments(record));
+    for (const [name, value] of callNamedArguments(record)) args.set(name, value);
     entry.set('args', args);
   }
   return entry;
-}
-
-/** The arguments of a call as PHP reports them: the parameters' current values, then the extra arguments. */
-function currentArgs(frame: Frame, passed: Value[]): Value[] {
-  const values = [...passed];
-  if (frame.fn?.kind !== 'user') return values;
-  for (const [index, param] of frame.fn.params.entries()) {
-    if (index >= values.length || param.variadic) break;
-    const ref = frame.vars.get(param.name);
-    if (ref) values[index] = ref.v;
-  }
-  return values;
 }
 
 // Assertions ---------------------------------------------------------------------------------------------------------

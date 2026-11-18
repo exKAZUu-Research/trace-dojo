@@ -85,6 +85,9 @@ export class Frame {
   /** Values that an expression being evaluated holds, which garbage collection must keep. */
   temporaries: (Value | Ref)[] = [];
   args: Value[] = [];
+  argumentHolders: (Value | Ref)[] = [];
+  argumentRefs: (Ref | undefined)[] = [];
+  namedArgumentRefs = new Map<string, Ref>();
   /** The row being run in this frame, which a stack trace reports for the call this frame made. */
   row = 0;
   /** The reference a function returning by reference returns. */
@@ -94,6 +97,7 @@ export class Frame {
    * runs, as when the body ends without `return`.
    */
   returning: Value | undefined;
+  returnRow?: number;
 
   // code-gauge-allow functionParameterCount 8 -- A frame takes the parts of a call that stay fixed while it runs.
   constructor(

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 603 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 654 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -63,6 +63,7 @@ export interface CallRecord {
   type?: '->' | '::';
   args: Value[];
   argumentRefs?: (Ref | undefined)[];
+  boundFrame?: Frame;
   /** The arguments a variadic parameter collected by name, which traces show as `name: value`. */
   named?: [string, Value][];
   /** The row of the call in its caller, or undefined when native code made the call. */
@@ -91,13 +92,36 @@ let hostStackExhaustion = new HostStackExhaustion();
 /** The calls running, innermost last, for stack traces. */
 export const callStack: CallRecord[] = [];
 setCallCapture(() =>
-  callStack.toReversed().map((record) => ({ ...record, args: callArguments(record), argumentRefs: undefined }))
+  callStack.toReversed().map((record) => ({
+    ...record,
+    args: callArguments(record),
+    named: callNamedArguments(record),
+    argumentRefs: undefined,
+    boundFrame: undefined,
+  }))
 );
 
 export function callArguments(record: CallRecord): Value[] {
+  if (record.boundFrame) return frameArguments(record.boundFrame);
   return record.args.map((value, index) => {
     const ref = record.argumentRefs?.[index];
     return ref ? ref.v : value;
+  });
+}
+
+export function frameArguments(frame: Frame): Value[] {
+  const values = frame.args.map((value, index) => (frame.argumentRefs[index] ? frame.argumentRefs[index].v : value));
+  for (const [index, param] of frame.fn?.params.entries() ?? []) {
+    if (index >= values.length || param.variadic) break;
+    values[index] = frame.vars.get(param.name)?.v ?? null;
+  }
+  return values;
+}
+
+export function callNamedArguments(record: CallRecord): [string, Value][] {
+  return (record.named ?? []).map(([name, value]) => {
+    const ref = record.boundFrame?.namedArgumentRefs.get(name);
+    return [name, ref ? ref.v : value];
   });
 }
 
@@ -149,12 +173,11 @@ function recordFor(target: CallTarget, args: Value[], row: number | undefined): 
       row,
     };
   if (fn.kind === 'user' && fn.decl.isClosure) {
-    const closureData = target.closure?.internal as ClosureData | undefined;
-    const scope = closureData?.scope;
+    const scope = target.scope;
     return {
       name: fn.decl.name,
       className: scope?.name,
-      type: scope ? (closureData?.thisObj ? '->' : '::') : undefined,
+      type: scope ? (thisObj ? '->' : '::') : undefined,
       args,
       row,
     };
@@ -167,9 +190,14 @@ function recordFor(target: CallTarget, args: Value[], row: number | undefined): 
  *
  * @param callRow The row of the call, or undefined for a call native code makes.
  */
-export function invoke(target: CallTarget, args: ArgValue[], callRow: number | undefined): Value {
-  if (target.fn.kind === 'native') return invokeNative(target, target.fn, args, callRow);
-  return invokeUser(target, target.fn, args, callRow);
+export function invoke(
+  target: CallTarget,
+  args: ArgValue[],
+  callRow: number | undefined,
+  discardResult = false
+): Value {
+  if (target.fn.kind === 'native') return invokeNative(target, target.fn, args, callRow, discardResult);
+  return invokeUser(target, target.fn, args, callRow, discardResult);
 }
 
 interface NativeHolders {
@@ -178,7 +206,13 @@ interface NativeHolders {
   argumentCount: number;
 }
 
-function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], row: number | undefined): Value {
+function invokeNative(
+  target: CallTarget,
+  fn: NativeFunction,
+  args: ArgValue[],
+  row: number | undefined,
+  discardResult: boolean
+): Value {
   const runtime = rt();
   runtime.spend();
   const caller = runtime.frame;
@@ -233,6 +267,7 @@ function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], 
       calledClass: target.staticClass,
       named,
       row: inline ? row : undefined,
+      discardResult: Boolean(inline && discardResult),
     });
   } catch (error) {
     failed = true;
@@ -369,7 +404,10 @@ function bindNative(
     if (param.variadic) {
       for (let rest = index; rest < positional.length; rest++) {
         const arg = positional[rest];
-        append(param.byRef ? (arg.ref?.v ?? arg.v) : coerceArg(param, rest, arg.v, strict, name), arg.ref);
+        append(
+          param.byRef ? (arg.ref?.v ?? arg.v) : coerceArg(param, rest, arg.v, strict, name),
+          param.byRef ? (arg.ref ?? Ref.temporary(arg.v)) : arg.ref
+        );
       }
       break;
     }
@@ -390,7 +428,7 @@ function bindNative(
       const value = arg.ref ? arg.ref.v : arg.v;
       // PHP checks the type of a by-reference argument without converting the variable.
       coerceArg(param, index, value, true, name);
-      append(value, arg.ref);
+      append(value, arg.ref ?? Ref.temporary(value));
     } else {
       append(coerceArg(param, index, arg.v, strict, name));
     }
@@ -472,8 +510,13 @@ function callerIsStrict(): boolean {
 
 // User functions -----------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row: number | undefined): Value {
+function invokeUser(
+  target: CallTarget,
+  fn: UserFunction,
+  args: ArgValue[],
+  row: number | undefined,
+  discardResult: boolean
+): Value {
   const runtime = rt();
   const { decl } = fn;
   if (runtime.depth >= LIMITS.maxCallDepth) {
@@ -504,6 +547,7 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
   frame.args = Array.from({ length: frame.args.length }, (_, index) => frame.args[index] ?? null);
   const record = recordFor(target, [...frame.args], row ?? implicitCallRow());
   frame.args = args.map((arg) => arg.ref?.v ?? arg.v);
+  frame.argumentHolders = [...frame.args];
   const savedRow = runtime.row;
   runtime.frames.push(frame);
   callStack.push(record);
@@ -521,7 +565,9 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
     if (closure) bindClosureVars(frame, closure);
     bindParams(frame, fn, args, positional, name, strict, row);
     recordBoundArgs(record, params, frame, args, positional.length);
-    frame.args = [...record.args];
+    bindArgumentHolders(frame, params, record, args);
+    runtime.dropTemporaries(frame, 0);
+    record.boundFrame = frame;
     let result: Value;
     try {
       result = runBody(decl, frame);
@@ -543,7 +589,12 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
         result = frame.returnRef.v;
       }
     } else if (decl.byRefReturn === false) result = share(result);
-    returned = result;
+    if (discardResult) {
+      const returning = frame.returning;
+      frame.returning = undefined;
+      runtime.row = frame.returnRow ?? runtime.row;
+      runtime.release([returning, result]);
+    } else returned = result;
   } catch (error) {
     failure = error;
     failed = true;
@@ -555,6 +606,7 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
     callStack.pop();
     runtime.frames.pop();
     for (const ref of frame.vars.values()) ref.rc--;
+    for (const value of frame.argumentHolders) if (value instanceof Ref) value.rc--;
     for (const value of frame.temporaries) if (value instanceof Ref) value.rc--;
     runtime.row = savedRow;
     if (decl.isAtomic) runtime.steps.completeAtomicCall();
@@ -568,8 +620,37 @@ function invokeUser(target: CallTarget, fn: UserFunction, args: ArgValue[], row:
         failure instanceof PhpThrow ? failure : undefined
       );
   }
-  runtime.lastReturnRef = decl.byRefReturn ? frame.returnRef : undefined;
+  runtime.lastReturnRef = decl.byRefReturn && !discardResult ? frame.returnRef : undefined;
   return returned;
+}
+
+// code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function bindArgumentHolders(frame: Frame, params: Param[], record: CallRecord, args: ArgValue[]): void {
+  frame.args = [...record.args];
+  frame.argumentHolders = [];
+  const variadic = params.at(-1)?.variadic ? params.at(-1) : undefined;
+  const fixed = variadic ? params.length - 1 : params.length;
+  const rest = variadic ? frame.vars.get(variadic.name)?.v : undefined;
+  const positional = positionalArguments(args);
+  const namedRefs = new Set(args.filter((arg) => arg.ref && arg.name !== undefined).map((arg) => arg.name));
+  const hold = (slot: Value | Ref): void => {
+    if (slot instanceof Ref) slot.rc++;
+    frame.argumentHolders.push(slot);
+  };
+  for (let index = fixed; index < frame.args.length; index++) {
+    const stored = rest instanceof PhpArray ? (rest.map.get(BigInt(index - fixed)) ?? null) : frame.args[index];
+    const slot = stored instanceof Ref && !positional[index]?.ref ? stored.v : stored;
+    frame.args[index] = slot instanceof Ref ? slot.v : slot;
+    if (slot instanceof Ref) frame.argumentRefs[index] = slot;
+    hold(slot);
+  }
+  for (const entry of record.named ?? []) {
+    const stored = rest instanceof PhpArray ? (rest.map.get(entry[0]) ?? null) : entry[1];
+    const slot = stored instanceof Ref && !namedRefs.has(entry[0]) ? stored.v : stored;
+    entry[1] = slot instanceof Ref ? slot.v : slot;
+    if (slot instanceof Ref) frame.namedArgumentRefs.set(entry[0], slot);
+    hold(slot);
+  }
 }
 
 /**
@@ -592,8 +673,9 @@ function releaseFrame(
     runtime,
     [
       ...[...frame.vars.values()].map((ref) => ref.v),
-      ...frame.args,
+      ...frame.argumentHolders,
       ...frame.temporaries,
+      frame.returning,
       frame.thisObj,
       frame.closure,
     ],
@@ -801,7 +883,7 @@ function bindParams(
 }
 
 function bindRef(arg: ArgValue): Ref {
-  const ref = arg.ref ?? new Ref(arg.v);
+  const ref = arg.ref ?? Ref.temporary(arg.v);
   ref.isRef = true;
   ref.rc++;
   return ref;

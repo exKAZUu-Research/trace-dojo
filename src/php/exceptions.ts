@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callMethod, callValue } from './callables';
-import { callArguments, type CallRecord, callStack } from './calls';
+import { asInternal, callArguments, callNamedArguments, type CallRecord, callStack } from './calls';
 import { createObject, findClass } from './classes';
 import { formatFloat } from './conversions';
 import { setErrorFactories, setThrowableFormatter } from './errors';
@@ -43,7 +43,7 @@ function traceArray(records: CallRecord[]): PhpArray {
       frame.set('type', record.type ?? '::');
     }
     const args = PhpArray.list(callArguments(record));
-    for (const [name, value] of record.named ?? []) args.set(name, value);
+    for (const [name, value] of callNamedArguments(record)) args.set(name, value);
     frame.set('args', args);
     trace.append(frame);
   }
@@ -55,7 +55,7 @@ export function traceText(records: CallRecord[]): string {
   const lines = records.map((record, index) => {
     const where = record.row === undefined ? '[internal function]' : `${SCRIPT_PATH}(${record.row + 1})`;
     const name = record.className ? `${record.className}${record.type}${record.name}` : record.name;
-    const named = (record.named ?? []).map(([key, arg]) => `${key}: ${traceArg(arg)}`);
+    const named = callNamedArguments(record).map(([key, arg]) => `${key}: ${traceArg(arg)}`);
     return `#${index} ${where}: ${name}(${[...callArguments(record).map((arg) => traceArg(arg)), ...named].join(', ')})`;
   });
   lines.push(`#${records.length} {main}`);
@@ -132,7 +132,7 @@ function escapeTraceString(text: string): string {
 /** The text of a throwable as `__toString` gives it, which an uncaught exception prints. */
 export function throwableText(object: PhpObject): string {
   const method = object.cls.findMethod('__tostring');
-  if (method && method.fn.kind === 'user') return toStr(callMethod(object, '__toString', []));
+  if (method && method.fn.kind === 'user') return asInternal(() => toStr(callMethod(object, '__toString', [])));
   return defaultThrowableText(object);
 }
 

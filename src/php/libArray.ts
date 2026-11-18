@@ -11,7 +11,7 @@ import { deprecated, throwError, warn } from './errors';
 import { cast } from './interp';
 import { naturalCompare } from './libString';
 import { defineAlias, defineConstant, defineFunction, markInlined } from './native';
-import { arithmetic, compare, looseEquals, strictEquals, toFloat, toKey, toStr } from './operators';
+import { arithmetic, compare, looseEquals, strictEquals, toFloat, toInt, toKey, toStr } from './operators';
 import { arrayIsShared, ElementPlace, share, VarPlace } from './places';
 import { rt } from './runtime';
 import {
@@ -925,6 +925,10 @@ defineFunction('array_product(array $array): int|float', ({ args }) => {
 });
 
 function accumulate(name: string, op: string, word: string, total: Value, value: Value): Value {
+  if (value instanceof PhpObject && value.isResource) {
+    warn(`${name}(): ${word} is not supported on type resource`);
+    return arithmetic(op, total, toInt(value));
+  }
   if (value instanceof PhpArray || value instanceof PhpObject) {
     warn(`${name}(): ${word} is not supported on type ${debugType(value)}`);
     return total;

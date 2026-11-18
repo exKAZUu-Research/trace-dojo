@@ -1502,7 +1502,7 @@ function encodingLiteral(node: Node, value: Expr): boolean {
 
 // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function compilerClassConstant(expression: Expr): boolean {
-  if (expression.k === 'lit' || expression.k === 'cconst') return true;
+  if (expression.k === 'lit' || expression.k === 'cconst' || expression.k === 'const') return true;
   if (expression.k === 'unary') return compilerClassConstant(expression.e);
   if (expression.k === 'bin') {
     if (expression.op === '??' || !compilerClassConstant(expression.l)) return false;

@@ -2,7 +2,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { lower } from './bytes';
 import { callValue, checkCallable, explainCallable } from './callables';
-import { type ArgValue, backtraceLimit, callStack, setCallableExplainer } from './calls';
+import { type ArgValue, backtraceLimit, callStack, frameArguments, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
 import { findClass } from './classes';
 import { debugType, getType, isNumericString, normalizeKeyString, toBool, valueName } from './conversions';
@@ -326,17 +326,7 @@ defineFunction(
 
 /** The arguments of the running function, with parameters a call left out taken from their current values. */
 function currentArgs(): Value[] {
-  const frame = rt().frame;
-  const fn = frame.fn;
-  const values = [...frame.args];
-  if (fn?.kind === 'user') {
-    for (const [index, param] of fn.params.entries()) {
-      if (index >= values.length || param.variadic) break;
-      const ref = frame.vars.get(param.name);
-      if (ref) values[index] = ref.v;
-    }
-  }
-  return values;
+  return frameArguments(rt().frame);
 }
 
 defineFunction('clone(object $object, array $withProperties = []): object', ({ args }) => {
@@ -344,7 +334,7 @@ defineFunction('clone(object $object, array $withProperties = []): object', ({ a
 });
 markInlined('clone');
 
-defineFunction('call_user_func(callable $callback, mixed ...$args): mixed', ({ args, named, row }) => {
+defineFunction('call_user_func(callable $callback, mixed ...$args): mixed', ({ args, named, row, discardResult }) => {
   const [callback, ...rest] = args;
   const argValues: ArgValue[] = rest.map((v) => ({ v }));
   for (const [name, v] of named ?? []) argValues.push({ v, name });
@@ -352,10 +342,10 @@ defineFunction('call_user_func(callable $callback, mixed ...$args): mixed', ({ a
     const values = rt().nativeHeld.at(-1)!;
     for (const arg of argValues) arg.nativeTransfer = { values, count: args.length + (named?.size ?? 0) };
   }
-  return callValue(callback, argValues, row);
+  return callValue(callback, argValues, row, 'callback', discardResult);
 });
-defineFunction('call_user_func_array(callable $callback, array $args): mixed', ({ args, row }) => {
-  return callValue(args[0], callbackArrayArguments(args[1] as PhpArray), row);
+defineFunction('call_user_func_array(callable $callback, array $args): mixed', ({ args, row, discardResult }) => {
+  return callValue(args[0], callbackArrayArguments(args[1] as PhpArray), row, 'callback', discardResult);
 });
 markInlined('call_user_func');
 markInlined('call_user_func_array');
@@ -398,14 +388,14 @@ defineFunction('get_object_vars(object $object): array', ({ args }) => {
   const declaredKeys = new Set(object.cls.props.map((decl) => decl.key));
   for (const decl of object.cls.props) {
     if (decl.isStatic || !classesModule.canAccessProp(decl, scope)) continue;
-    if (decl.hooks?.get) array.set(decl.name, classesModule.readProp(object, decl.name, scope));
+    if (decl.hooks?.get) array.set(toKey(decl.name), classesModule.readProp(object, decl.name, scope));
     else {
       const slot = object.props.get(decl.key);
-      if (slot !== undefined && slot !== UNINIT) array.setSlot(decl.name, copyValueSlot(slot));
+      if (slot !== undefined && slot !== UNINIT) array.setSlot(toKey(decl.name), copyValueSlot(slot));
     }
   }
   for (const [key, slot] of object.props) {
-    if (!declaredKeys.has(key) && slot !== UNINIT) array.setSlot(key, copyValueSlot(slot));
+    if (!declaredKeys.has(key) && slot !== UNINIT) array.setSlot(toKey(key), copyValueSlot(slot));
   }
   return array;
 });

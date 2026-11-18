@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 803 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 806 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -106,7 +106,7 @@ export function evReturn(e: Expr): Value {
   return value;
 }
 
-export function ev(e: Expr): Value {
+export function ev(e: Expr, discardResult = false): Value {
   const runtime = rt();
   const constant = compileTimeValue(e);
   const literals = runtime.literalArrays.get(e);
@@ -117,10 +117,10 @@ export function ev(e: Expr): Value {
   let value: Value;
   if (RELEASING_OPERANDS.has(e.k)) {
     const mark = runtime.frame.temporaries.length;
-    const result = evChain(e);
+    const result = evChain(e, discardResult);
     value = keepResult(mark, result === SHORT ? null : result) as Value;
   } else {
-    const result = evChain(e);
+    const result = evChain(e, discardResult);
     value = result === SHORT ? null : result;
   }
   if (
@@ -144,17 +144,21 @@ export function ev(e: Expr): Value {
 const RELEASING_OPERANDS = new Set<Expr['k']>(['instanceof', 'unary', 'cast', 'cond', 'empty', 'isset', 'prop', 'idx']);
 
 export function evBool(e: Expr): boolean {
+  return consumeExpression(e, toBool);
+}
+
+export function consumeExpression<T>(e: Expr, consume: (value: Value) => T): T {
   const runtime = rt();
   const frame = runtime.frame;
   const mark = frame.temporaries.length;
   const value = ev(e);
-  const result = toBool(value);
+  const result = consume(value);
   frame.temporaries.push(value);
   runtime.dropTemporaries(frame, mark);
   return result;
 }
 
-export function evChain(e: Expr): Chain {
+export function evChain(e: Expr, discardResult = false): Chain {
   const runtime = rt();
   switch (e.k) {
     case 'lit': {
@@ -221,15 +225,15 @@ export function evChain(e: Expr): Chain {
     }
     case 'call': {
       const mark = runtime.frame.temporaries.length;
-      return keepResult(mark, callExpression(e));
+      return keepResult(mark, callExpression(e, discardResult));
     }
     case 'mcall': {
       const mark = runtime.frame.temporaries.length;
-      return keepResult(mark, methodCallExpression(e));
+      return keepResult(mark, methodCallExpression(e, discardResult));
     }
     case 'scall': {
       const mark = runtime.frame.temporaries.length;
-      return keepResult(mark, staticCallExpression(e));
+      return keepResult(mark, staticCallExpression(e, discardResult));
     }
     case 'new': {
       return keepingResult(() => {
@@ -347,8 +351,10 @@ export function evChain(e: Expr): Chain {
       return matchExpression(e);
     }
     case 'print': {
-      runtime.echo(toStr(ev(e.e)));
-      return 1n;
+      return consumeExpression(e.e, (value) => {
+        runtime.echo(toStr(value));
+        return 1n;
+      });
     }
     case 'exit': {
       const input = e.e ? ev(e.e) : 0n;

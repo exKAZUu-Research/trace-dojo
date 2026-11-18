@@ -315,16 +315,19 @@ function strReplace(args: Value[], refs: (Ref | undefined)[], insensitive: boole
     }
     return result;
   };
-  let result: Value;
-  if (subject instanceof PhpArray) {
-    const array = new PhpArray();
-    for (const [key, item] of subject.entries()) {
-      array.set(key, replaceOne(toStr(item)));
-    }
-    result = array;
-  } else result = replaceOne(toStr(subject));
-  if (refs[3]) refs[3].v = BigInt(count.value);
-  return result;
+  try {
+    let result: Value;
+    if (subject instanceof PhpArray) {
+      const array = new PhpArray();
+      for (const [key, item] of subject.entries()) {
+        array.set(key, replaceOne(toStr(item)));
+      }
+      result = array;
+    } else result = replaceOne(toStr(subject));
+    return result;
+  } finally {
+    if (refs[3]) refs[3].v = BigInt(count.value);
+  }
 }
 
 defineFunction(
@@ -1165,7 +1168,7 @@ defineFunction('str_increment(string $string): string', ({ args }) => {
     );
   return incrementString(text);
 });
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 18 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 defineFunction('str_decrement(string $string): string', ({ args }) => {
   const text = s(args[0]);
   if (text === '') throwError('ValueError', 'str_decrement(): Argument #1 ($string) must not be empty');
@@ -1174,9 +1177,10 @@ defineFunction('str_decrement(string $string): string', ({ args }) => {
       'ValueError',
       'str_decrement(): Argument #1 ($string) must be composed only of alphanumeric ASCII characters'
     );
-  if (/^(a|A|0)$/.test(text))
+  if (text.startsWith('0') || text === 'a' || text === 'A')
     throwError('ValueError', `str_decrement(): Argument #1 ($string) "${text}" is out of decrement range`);
   const chars = [...text];
+  let carry = true;
   for (let index = chars.length - 1; index >= 0; index--) {
     const char = chars[index];
     if (char === 'a' || char === 'A' || char === '0') {
@@ -1184,17 +1188,10 @@ defineFunction('str_decrement(string $string): string', ({ args }) => {
       continue;
     }
     chars[index] = String.fromCharCode(char.charCodeAt(0) - 1);
+    carry = false;
     break;
   }
-  if (
-    chars.length > 1 &&
-    /[azAZ09]/.test(text[0]) &&
-    /^(a|A|0)/.test(text) &&
-    chars[0] !== text[0] &&
-    ['z', 'Z', '9'].includes(chars[0])
-  ) {
-    chars.shift();
-  }
+  if (carry || (chars[0] === '0' && chars.length > 1)) chars.shift();
   return chars.join('');
 });
 defineFunction('strspn(string $string, string $characters, int $offset = 0, ?int $length = null): int', ({ args }) =>

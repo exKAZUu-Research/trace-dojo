@@ -20,7 +20,7 @@ import {
 import { toBool, valueName } from './conversions';
 import { E_DEPRECATED, E_WARNING, emitError, setPrevious, throwError, warn } from './errors';
 import { collectBeforeAllocation, setDestructor } from './garbage';
-import { ev, evBool, evQuiet, evReturn } from './interp';
+import { consumeExpression, ev, evBool, evQuiet, evReturn } from './interp';
 import { looseEquals, setObjectConversions, toStr } from './operators';
 import { ElementPlace, RefPlace, share, ValuePlace, VarPlace, writableContainer } from './places';
 import { FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
@@ -158,7 +158,7 @@ function execStmt(statement: Stmt, seek?: string): Completion {
       case 'expr': {
         const mark = runtime.steps.statementMark();
         if (statement.e.k === 'var') evQuiet(statement.e);
-        else ev(statement.e);
+        else ev(statement.e, true);
         runtime.steps.completeStatement(statement.row, statement.onlyCalls, mark);
         return undefined;
       }
@@ -215,6 +215,7 @@ function execStmt(statement: Stmt, seek?: string): Completion {
       case 'return': {
         const value = statement.e ? evReturn(statement.e) : null;
         frame.returning = share(value);
+        frame.returnRow = statement.row;
         return { t: 'return', v: value };
       }
       case 'block': {
@@ -356,7 +357,7 @@ function switchStatement(statement: Extract<Stmt, { k: 'switch' }>): Completion 
   for (const [index, item] of statement.cases.entries()) {
     if (item.test === undefined) continue;
     rt().row = item.row;
-    if (looseEquals(subject, ev(item.test))) {
+    if (consumeExpression(item.test, (value) => looseEquals(subject, value))) {
       start = index;
       break;
     }

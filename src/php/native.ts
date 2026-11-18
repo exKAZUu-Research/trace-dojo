@@ -16,6 +16,7 @@ import {
 
 const functions: NativeFunction[] = [];
 const constants: [string, Value | (() => Value)][] = [];
+const compileConstants = new Map<string, Value>();
 const constantDeprecations = new Map<string, string>();
 const classDefinitions: ClassDefinition[] = [];
 
@@ -61,6 +62,11 @@ export function nativeMethodParameters(className: string, methodName: string): N
 export function defineConstant(name: string, value: Value, deprecation?: string): void {
   constants.push([name, value]);
   if (deprecation) constantDeprecations.set(name, deprecation);
+  else compileConstants.set(name, value);
+}
+
+export function compileConstant(name: string): Value | undefined {
+  return compileConstants.get(name);
 }
 
 export function defineRuntimeConstant(name: string, create: () => Value): void {

@@ -360,7 +360,9 @@ class HeapStorage {
     }
     this.elements[parent] = bottom;
     this.elements.length = count;
-    for (const value of isEntry(top) ? [top.data, top.priority] : [top]) this.nativeValues.delete(value);
+    const removed = isEntry(top) ? [top.data, top.priority] : [top];
+    for (const value of removed) this.nativeValues.delete(value);
+    rt().release(removed, true);
     this.finishSift();
     return top;
   }

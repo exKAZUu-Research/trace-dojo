@@ -548,7 +548,7 @@ defineClass({
       },
     },
     {
-      signature: 'offsetGet($key): mixed',
+      signature: 'offsetGet(string $key): mixed',
       impl: ({ thisObj, args }) => {
         const key = toStr(args[0]);
         const value = fullCache(thisObj).cache.get(toKey(key));
@@ -560,15 +560,15 @@ defineClass({
       },
     },
     {
-      signature: 'offsetSet($key, mixed $value): void',
+      signature: 'offsetSet(string $key, mixed $value): void',
       impl: ({ thisObj, args }) => (fullCache(thisObj).cache.set(toKey(toStr(args[0])), args[1]), null),
     },
     {
-      signature: 'offsetUnset($key): void',
+      signature: 'offsetUnset(string $key): void',
       impl: ({ thisObj, args }) => (fullCache(thisObj).cache.delete(toKey(toStr(args[0]))), null),
     },
     {
-      signature: 'offsetExists($key): bool',
+      signature: 'offsetExists(string $key): bool',
       impl: ({ thisObj, args }) => fullCache(thisObj).cache.has(toKey(toStr(args[0]))),
     },
     {

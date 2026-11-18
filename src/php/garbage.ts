@@ -620,7 +620,7 @@ export function mark(runtime: Runtime, includeBuffered = true, visitedArrays = n
 
 function pushFrame(frame: Frame, pending: unknown[]): void {
   for (const ref of frame.vars.values()) pending.push(ref);
-  appendValues(pending, [...frame.temporaries, ...frame.args, frame.returning]);
+  appendValues(pending, [...frame.temporaries, ...frame.argumentHolders, frame.returning]);
   if (frame.thisObj) pending.push(frame.thisObj);
   if (frame.closure) pending.push(frame.closure);
 }
@@ -827,7 +827,7 @@ export function holderCounts(runtime: Runtime): Map<PhpObject, number> {
   };
   for (const frame of runtime.frames) {
     for (const ref of frame.vars.values()) count(ref);
-    for (const value of [...frame.temporaries, ...frame.args]) count(value);
+    for (const value of [...frame.temporaries, ...frame.argumentHolders]) count(value);
   }
   for (const cls of runtime.classes.values()) for (const { ref } of cls.staticProps.values()) count(ref);
   for (const fn of runtime.functions.values())
@@ -919,7 +919,7 @@ function ownershipRoots(runtime: Runtime): Set<unknown> {
   );
 }
 
-// code-gauge-allow functionNcss 39 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 48 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function ownedReachable(
   value: Ref | PhpArray | PhpObject,
   roots: Set<unknown>,
@@ -947,6 +947,16 @@ function ownedReachable(
   const pending: object[] = [value];
   const visited = new Set<object>();
   const predecessor = new Map<object, object>();
+  const rememberPath = (item: object, root: object): void => {
+    if (retainOwners) return;
+    const path = [item];
+    let child = predecessor.get(item);
+    while (child) {
+      path.push(child);
+      child = predecessor.get(child);
+    }
+    rememberOwnership(path, root);
+  };
   let work = 0;
   while (pending.length > 0) {
     if ((++work & 255) === 0) runtime.budget.checkClock();
@@ -954,20 +964,20 @@ function ownedReachable(
     if (unreachable?.has(item)) continue;
     const root = isRoot(item) ? item : retainOwners ? undefined : ownershipProof(item, isRoot);
     if (root) {
-      const path = [item];
-      let child = predecessor.get(item);
-      while (child) {
-        path.push(child);
-        child = predecessor.get(child);
-      }
-      if (!retainOwners) rememberOwnership(path, root);
+      rememberPath(item, root);
       return true;
     }
     if (visited.has(item)) continue;
     visited.add(item);
     for (const parent of reverseOwners(item, runtime, visited)) {
       if (!visited.has(parent) && !predecessor.has(parent)) {
+        if (unreachable?.has(parent)) continue;
         predecessor.set(parent, item);
+        const root = isRoot(parent) ? parent : retainOwners ? undefined : ownershipProof(parent, isRoot);
+        if (root) {
+          rememberPath(parent, root);
+          return true;
+        }
         pending.push(parent);
       }
     }

@@ -1277,3 +1277,36 @@ test.each([
 ])('rejects invalid property hook contracts before executing: %s', (declaration) => {
   expect(run(`<?php echo 'never';${declaration}`).kind).toBe('compileError');
 });
+
+test.each(['mb_detect_encoding($text,$encodings)', 'mb_convert_encoding($text,"UTF-8",$encodings)'])(
+  'bounds encoding detection across candidates: %s',
+  (call) => {
+    expect(
+      run(`<?php $text=str_repeat("a",10000);$encodings=array_fill(0,20000,"UTF-8");${call};echo 'never';`)
+    ).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+  }
+);
+
+test('retains shared array owners without scanning every holder', () => {
+  vi.restoreAllMocks();
+  expect(
+    run(
+      '<?php class Item{function __construct(public $id,public array $cfg){}}$cfg=range(1,3);$items=[];for($i=0;$i<6000;$i++)$items[]=new Item($i,$cfg);echo count($items);'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '6000' });
+});
+
+test.each(['PHP_EOL', 'PHP_EOL . "A"', 'PHP_INT_MAX', 'PHP_INT_MAX + 1'])(
+  'rejects compile-time native constants as class receivers: %s',
+  (value) => {
+    expect(run(`<?php echo 'never';try {var_dump((${value})::class);}catch(Throwable $e){echo 'caught';}`).kind).toBe(
+      'compileError'
+    );
+  }
+);
+
+test('keeps runtime-defined class receivers catchable', () => {
+  expect(
+    run('<?php define("VV","X");echo "start;";try{var_dump((VV . "")::class);}catch(Throwable $e){echo "caught;";}')
+  ).toMatchObject({ kind: 'executed', stdout: 'start;caught;' });
+});

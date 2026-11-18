@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 779 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 832 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/text-encoding-identifier-case -- mbstring names its encodings in this case.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
@@ -100,22 +100,43 @@ defineUtf8Function('mb_str_split(string $string, int $length = 1, ?string $encod
 
 function mbSearch(args: Value[], reverse: boolean, insensitive: boolean, name: string): Value {
   const codec = encodingArgument(args, 4, name);
-  const tokens = (value: Value): string[] =>
-    chars(!insensitive && codec === UTF8 ? s(value) : searchableUtf8(codec.decode(s(value)), insensitive));
-  const haystack = tokens(args[0]);
-  const needle = tokens(args[1]);
-  let offset = args[2] === undefined ? 0 : n(args[2]);
-  if (offset > haystack.length || offset < -haystack.length) {
+  const searchable = (value: Value): string =>
+    !insensitive && codec === UTF8 ? s(value) : searchableUtf8(codec.decode(s(value)), insensitive);
+  const haystack = searchable(args[0]);
+  const needle = searchable(args[1]);
+  const offset = args[2] === undefined ? 0 : n(args[2]);
+  const pointer = utf8Offset(haystack, offset);
+  if (pointer === undefined)
     throwError('ValueError', `${name}(): Argument #3 ($offset) must be contained in argument #1 ($haystack)`);
+  const start = reverse && offset < 0 ? 0 : pointer;
+  const end =
+    reverse && offset < 0
+      ? (utf8Offset(haystack, charOffset(needle, needle.length), pointer) ?? haystack.length)
+      : haystack.length;
+  const found = searchBytes(haystack, needle, start, end - needle.length, reverse);
+  return found === false ? false : BigInt(charOffset(haystack, Number(found)));
+}
+
+// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function utf8Offset(text: string, offset: number, start = 0): number | undefined {
+  let position = offset < 0 ? text.length : start;
+  while (offset !== 0) {
+    rt().spend();
+    if (offset < 0) {
+      if (position <= start) return;
+      if (!isContinuation(text.charCodeAt(--position))) offset++;
+    } else {
+      if (position >= text.length) return;
+      const lead = text.charCodeAt(position);
+      position += lead < 0xc2 || lead > 0xf4 ? 1 : lead < 0xe0 ? 2 : lead < 0xf0 ? 3 : 4;
+      offset--;
+    }
   }
-  if (!reverse && offset < 0) offset += haystack.length;
-  const start = reverse ? Math.max(offset, 0) : offset;
-  const limit = reverse && offset < 0 ? haystack.length + offset : haystack.length - needle.length;
-  return searchCharacters(haystack, needle, start, Math.min(limit, haystack.length - needle.length), reverse);
+  return Math.min(position, text.length);
 }
 
 // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function searchCharacters(text: string[], needle: string[], start: number, limit: number, last: boolean): Value {
+function searchBytes(text: string, needle: string, start: number, limit: number, last: boolean): bigint | false {
   if (needle.length === 0) return BigInt(last ? limit : start);
   if (limit < start) return false;
   const prefix = new Uint32Array(needle.length);
@@ -128,7 +149,7 @@ function searchCharacters(text: string[], needle: string[], start: number, limit
     if (needle[index] === needle[matched]) matched++;
     prefix[index] = matched;
   }
-  let found: Value = false;
+  let found: bigint | false = false;
   for (let index = start, matched = 0; index < limit + needle.length; index++) {
     rt().spend();
     while (matched > 0 && text[index] !== needle[matched]) {
@@ -157,10 +178,21 @@ defineFunction(
   'mb_stripos(string $haystack, string $needle, int $offset = 0, ?string $encoding = null): int|false',
   ({ args }) => mbSearch(args, false, true, 'mb_stripos')
 );
-defineUtf8Function('mb_substr_count(string $haystack, string $needle, ?string $encoding = null): int', ({ args }) => {
+defineFunction('mb_substr_count(string $haystack, string $needle, ?string $encoding = null): int', ({ args }) => {
   if (s(args[1]) === '') throwError('ValueError', 'mb_substr_count(): Argument #2 ($needle) must not be empty');
-  checkEncoding('mb_substr_count', args, 3);
-  return BigInt(s(args[0]).split(s(args[1])).length - 1);
+  const codec = encodingArgument(args, 3, 'mb_substr_count');
+  const haystack = searchableUtf8(codec.decode(s(args[0])), false);
+  const needle = searchableUtf8(codec.decode(s(args[1])), false);
+  if (needle.length === 0) throwError('ValueError', 'mb_substr_count(): Argument #2 ($needle) must not be empty');
+  let count = 0n;
+  let start = 0;
+  while (start <= haystack.length - needle.length) {
+    const found = searchBytes(haystack, needle, start, haystack.length - needle.length, false);
+    if (found === false) break;
+    count++;
+    start = Number(found) + needle.length;
+  }
+  return count;
 });
 defineUtf8Function(
   'mb_str_pad(string $string, int $length, string $pad_string = " ", int $pad_type = STR_PAD_RIGHT, ?string $encoding = null): string',
@@ -188,18 +220,24 @@ defineFunction('mb_internal_encoding(?string $encoding = null): string|bool', ({
   rt().mbEncoding = codecFor(args[0], 'mb_internal_encoding').name;
   return true;
 });
-defineUtf8Function('mb_ucfirst(string $string, ?string $encoding = null): string', ({ args }) => {
-  checkEncoding('mb_ucfirst', args, 2);
-  const list = chars(args[0]);
-  if (list.length === 0) return '';
-  return enc(titleFull(dec(list[0]))) + list.slice(1).join('');
+defineFunction('mb_ucfirst(string $string, ?string $encoding = null): string', ({ args }) => {
+  return convertFirst(args, 'mb_ucfirst', titleFull);
 });
-defineUtf8Function('mb_lcfirst(string $string, ?string $encoding = null): string', ({ args }) => {
-  checkEncoding('mb_lcfirst', args, 2);
-  const list = chars(args[0]);
-  if (list.length === 0) return '';
-  return enc(dec(list[0]).toLowerCase()) + list.slice(1).join('');
+defineFunction('mb_lcfirst(string $string, ?string $encoding = null): string', ({ args }) => {
+  return convertFirst(args, 'mb_lcfirst', (text) => text.toLowerCase());
 });
+
+function convertFirst(args: Value[], name: string, convert: (text: string) => string): string {
+  const codec = encodingArgument(args, 2, name);
+  const text = s(args[0]);
+  const codes = codec.decode(text);
+  const singleByte = codec.name === 'ASCII' || codec.name === 'ISO-8859-1';
+  const first = singleByte ? text.slice(0, 1) : encodeCodes(codes.slice(0, 1), codec);
+  const head = convertCase([first, codec.name], 2, name, convert);
+  if (first === head) return text;
+  const rest = singleByte ? text.slice(1) : encodeCodes(codes.slice(1), codec);
+  return head + rest;
+}
 
 function convertCase(args: Value[], position: number, name: string, convert: (text: string) => string): string {
   const codec = encodingArgument(args, position, name);
@@ -425,6 +463,7 @@ function searchableUtf8(codes: number[], insensitive: boolean): string {
 function charOffset(text: string, offset: number): number {
   let count = 0;
   for (let index = 0; index < offset; index++) {
+    if ((index & 127) === 0) rt().spend(2);
     const byte = text.charCodeAt(index);
     if (byte < 0x80 || byte > 0xbf) count++;
   }
@@ -488,6 +527,7 @@ function charWidth(code: number): number {
 function decodeUtf8(bytes: string): number[] {
   const codes: number[] = [];
   for (let index = 0; index < bytes.length;) {
+    if ((codes.length & 127) === 0) rt().spend(2);
     const [code, length] = decodeUtf8At(bytes, index);
     codes.push(code);
     index += length;
@@ -535,7 +575,15 @@ function truncatedTail(bytes: string, start: number, lead: number, length: numbe
 
 const byteCodec = (name: string, max: number): Codec => ({
   name,
-  decode: (bytes) => [...bytes].map((char) => (char.charCodeAt(0) < max ? char.charCodeAt(0) : BAD)),
+  decode: (bytes) => {
+    const codes: number[] = [];
+    for (let index = 0; index < bytes.length; index++) {
+      if ((index & 127) === 0) rt().spend(2);
+      const byte = bytes.charCodeAt(index);
+      codes.push(byte < max ? byte : BAD);
+    }
+    return codes;
+  },
   encode: (code) => (code >= 0 && code < max ? String.fromCharCode(code) : undefined),
 });
 const UTF8: Codec = {
@@ -587,8 +635,8 @@ function wordBytes(word: number, size: number, littleEndian: boolean): string {
 }
 
 /** Decodes UTF-16 as mb_utf16_to_wchar does; without a byte order, a BOM decides it, and big-endian is the default. */
-// code-gauge-allow functionNcss 36 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionCognitiveComplexity 23 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 38 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function decodeUtf16(bytes: string, littleEndian: boolean | undefined): number[] {
   let index = 0;
   let little = littleEndian ?? false;
@@ -603,7 +651,8 @@ function decodeUtf16(bytes: string, littleEndian: boolean | undefined): number[]
       : (bytes.charCodeAt(at) << 8) | bytes.charCodeAt(at + 1);
   const end = index + ((bytes.length - index) & ~1);
   const codes: number[] = [];
-  while (index < end) {
+  for (let chunk = 0; index < end; chunk++) {
+    if ((chunk & 127) === 0) rt().spend(2);
     const unit = word(index);
     index += 2;
     if (unit >= 0xdc_00 && unit <= 0xdf_ff) codes.push(BAD);
@@ -638,6 +687,7 @@ function decodeUtf32(bytes: string, littleEndian: boolean | undefined): number[]
   }
   const codes: number[] = [];
   for (; index + 4 <= bytes.length; index += 4) {
+    if ((codes.length & 127) === 0) rt().spend(2);
     const code = word(index, little);
     codes.push(code < 0x11_00_00 && (code < 0xd8_00 || code > 0xdf_ff) ? code : BAD);
   }
@@ -830,6 +880,7 @@ function encodingList(
   const codecs: Codec[] = [];
   let includedAuto = false;
   for (const name of names) {
+    rt().spend();
     if (lower(name) === 'auto') {
       if (!includedAuto) codecs.push(...DETECT_ORDER);
       includedAuto = true;
@@ -876,15 +927,22 @@ defineFunction(
  * Picks the encoding that reads a string with the fewest demerits as mb_guess_encoding_for_strings does: invalid input
  * costs 1000 (or rules a candidate out when strict), and a rare code point costs more than a common one.
  */
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function guessEncoding(text: string, candidates: Codec[], strict: boolean): Codec | undefined {
   if (candidates.length === 1) return strict && candidates[0].decode(text).includes(BAD) ? undefined : candidates[0];
   if (text === '') return candidates[0];
   let best: { codec: Codec; demerits: number } | undefined;
   for (const [index, codec] of candidates.entries()) {
+    rt().spend();
     const codes = codec.decode(withoutBom(text, codec));
     if (strict && codes.includes(BAD)) continue;
     const multiplier = 1 + (0.3 * index) / candidates.length;
-    const demerits = Math.floor(codes.reduce((sum, code) => sum + codeDemerits(code), 0) * Math.fround(multiplier));
+    let score = 0;
+    for (let code = 0; code < codes.length; code++) {
+      if ((code & 127) === 0) rt().spend(2);
+      score += codeDemerits(codes[code]);
+    }
+    const demerits = Math.floor(score * Math.fround(multiplier));
     if (!best || demerits < best.demerits) best = { codec, demerits };
   }
   return best?.codec;

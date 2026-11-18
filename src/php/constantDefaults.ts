@@ -1,8 +1,9 @@
 // oxlint-disable unicorn/no-null -- PHP null is represented by JavaScript null.
 import type { Expr } from './ast';
 import { floatFitsInt, normalizeKeyString, numericPrefix, toBool } from './conversions';
+import { compileConstant } from './native';
 import { arithmetic, bitwise, compareScalar, toFloat, toInt } from './operators';
-import { INT_MAX, INT_MIN, type Key } from './values';
+import { INT_MAX, INT_MIN, type Key, PhpArray, PhpObject } from './values';
 
 type Scalar = Extract<Expr, { k: 'lit' }>['v'];
 type Constant = Scalar | Map<Key, Constant>;
@@ -19,11 +20,14 @@ export function foldedDefaultType(expression: Expr): string | undefined {
   return typeof value === 'boolean' ? String(value) : 'string';
 }
 
-// code-gauge-allow functionNcss 58 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function fold(expression: Expr): Folded {
   switch (expression.k) {
     case 'lit': {
       return expression.v;
+    }
+    case 'const': {
+      const value = compileConstant(expression.name.name);
+      return value === undefined || value instanceof PhpArray || value instanceof PhpObject ? UNKNOWN : value;
     }
     case 'interp': {
       let result = '';
