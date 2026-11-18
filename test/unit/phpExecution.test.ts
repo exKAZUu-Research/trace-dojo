@@ -1325,3 +1325,27 @@ test.each([
     'compileError'
   );
 });
+
+test.each([
+  'class A{const K="x";} (A::K)::class;',
+  'class A{const K=42;}function f(){(A::K)::class;}',
+  'class A{const K=[1];}class B extends A{}(B::K)::class;',
+  'interface A{const K="x";}(A::K)::class;',
+  'class A{private const K="x";function f(){(self::K)::class;}}',
+  'class A{const X="x",K=self::X;}(A::K)::class;',
+  'class A{const float K=1;}(A::K)::class;',
+  '(ArrayIterator::STD_PROP_LIST)::class;',
+])('folds source-order class constants before checking class receivers: %s', (program) => {
+  expect(run(`<?php echo 'never';${program}`).kind).toBe('compileError');
+});
+
+test.each([
+  'try{(A::K)::class;}catch(Throwable $e){echo "caught";}class A{const K="x";}',
+  'if(true){class A{const K="x";}}try{(A::K)::class;}catch(Throwable $e){echo "caught";}',
+  'interface I{const K="x";}class A implements I{}try{(A::K)::class;}catch(Throwable $e){echo "caught";}',
+  'class A{private const K="x";}try{(A::K)::class;}catch(Throwable $e){echo "caught";}',
+  'class A{const K="x";}class B extends A{function f(){try{(self::K)::class;}catch(Throwable $e){echo "caught";}}}(new B)->f();',
+  'class A{const K=B::K;}class B{const K="x";}try{(A::K)::class;}catch(Throwable $e){echo "caught";}',
+])('leaves unresolved class constant receivers catchable: %s', (program) => {
+  expect(run(`<?php echo 'start;';${program}`)).toMatchObject({ kind: 'executed', stdout: 'start;caught' });
+});

@@ -77,7 +77,6 @@ export type Expr = { row: number } & (
   | { k: 'instanceof'; e: Expr; cls: ClassRef }
   | { k: 'match'; subject: Expr; arms: MatchArm[] }
   | { k: 'print'; e: Expr }
-  | { k: 'exit'; e?: Expr }
   | { k: 'pipe'; l: Expr; r: Expr }
   | { k: 'unsupported'; what: string }
 );

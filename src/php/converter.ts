@@ -4,7 +4,6 @@ import type { Node } from '@willbooster/web-tree-sitter';
 import type { Arg, ArrayItem, CatchClause, Expr, ListItem, MatchArm, Program, Stmt, SwitchCase } from './ast';
 import { collectMainVars, collectVariables, hasReferenceItem, onlyCalls, validateReads } from './astAnalysis';
 import { enc, lower } from './bytes';
-import { foldedDefaultType } from './constantDefaults';
 import { formatFloat } from './conversions';
 import { MAGIC_RUNTIME } from './converterBase';
 import { DeclarationConverter } from './declarationConverter';
@@ -93,7 +92,6 @@ export class Converter extends DeclarationConverter {
         const expression = node.namedChildren.find((child) => child.type !== 'comment');
         if (!expression) return [{ k: 'nop', row }];
         const e = this.expr(expression);
-        if (e.k === 'exit') return [{ k: 'expr', e, onlyCalls: false, row }];
         return [{ k: 'expr', e, onlyCalls: onlyCalls(e), row }];
       }
       case 'echo_statement': {
@@ -243,12 +241,6 @@ export class Converter extends DeclarationConverter {
       case 'namespace_use_declaration': {
         this.useDeclaration(node);
         return [];
-      }
-      case 'exit_statement': {
-        const argument = node.namedChildren.find((child) => child.type !== 'comment');
-        return [
-          { k: 'expr', e: { k: 'exit', e: argument ? this.expr(argument) : undefined, row }, onlyCalls: false, row },
-        ];
       }
       case 'comment': {
         return [];
@@ -841,7 +833,7 @@ export class Converter extends DeclarationConverter {
         const literal = lower(name) === 'class' && cls.k === 'expr' ? parserScalar(cls.e) : undefined;
         if (literal !== undefined && typeof literal !== 'string') this.error(scope, 'Illegal class name');
         if (lower(name) === 'class' && cls.k === 'expr' && literal === undefined) {
-          const type = foldedDefaultType(cls.e, 'compiler');
+          const type = this.compiledType(cls.e);
           if (type !== undefined) this.error(scope, `Cannot use "::class" on ${type}`);
         }
         if (literal === undefined) return { k: 'cconst', cls, name, row };
@@ -986,9 +978,8 @@ export class Converter extends DeclarationConverter {
       case 'print_intrinsic': {
         return { k: 'print', e: this.expr(node.namedChildren[0]), row };
       }
-      case 'exit_statement': {
-        const argument = node.namedChildren.find((child) => child.type !== 'comment');
-        return { k: 'exit', e: argument ? this.expr(argument) : undefined, row };
+      case 'exit_expression': {
+        return { k: 'call', fn: { name: 'exit' }, args: [], fcc: false, row };
       }
       case 'sequence_expression': {
         this.error(node, '書き方に誤りがあります。');
@@ -1031,7 +1022,6 @@ export class Converter extends DeclarationConverter {
     const word = lower(raw);
     if (word === 'true' || word === 'false') return { k: 'lit', v: word === 'true', row };
     if (word === 'null') return { k: 'lit', v: null, row };
-    if (word === 'die' || word === 'exit') return { k: 'exit', row };
     if (raw === '__LINE__') return { k: 'lit', v: BigInt(row + 1), row };
     if (raw === '__FILE__') return { k: 'lit', v: '/main.php', row };
     if (raw === '__DIR__') return { k: 'lit', v: '/', row };
@@ -1169,7 +1159,7 @@ export class Converter extends DeclarationConverter {
     const rightNode = node.childForFieldName('right') as Node;
     const l = this.expr(leftNode);
     if (lower(operator) === 'instanceof') {
-      if (foldedDefaultType(l, 'compiler') !== undefined) return { k: 'lit', v: false, row };
+      if (this.compiledType(l) !== undefined) return { k: 'lit', v: false, row };
       const cls =
         rightNode.type === 'name' || rightNode.type === 'qualified_name' || rightNode.type === 'relative_name'
           ? this.classRef(rightNode)

@@ -60,9 +60,8 @@ import {
   unaryPlus,
 } from './operators';
 import { readElement, share } from './places';
-import { ExitSignal, PhpThrow, rt } from './runtime';
+import { PhpThrow, rt } from './runtime';
 import { constantKey, iteratorOf } from './statements';
-import { coerce, NO_MATCH } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import {
   type ClosureData,
@@ -355,31 +354,6 @@ export function evChain(e: Expr, discardResult = false): Chain {
         runtime.echo(toStr(value));
         return 1n;
       });
-    }
-    case 'exit': {
-      const input = e.e ? ev(e.e) : 0n;
-      const value = coerce(
-        input,
-        {
-          k: 'union',
-          types: [
-            { k: 'named', name: 'string' },
-            { k: 'named', name: 'int' },
-          ],
-        },
-        {
-          strict: runtime.strictTypes,
-          internal: true,
-          nullDeprecation: () => 'exit(): Passing null to parameter #1 ($status) of type string|int is deprecated',
-        }
-      );
-      if (value === NO_MATCH)
-        throwError('TypeError', `exit(): Argument #1 ($status) must be of type string|int, ${valueName(input)} given`);
-      if (typeof value === 'string') {
-        runtime.echo(value);
-        throw new ExitSignal(0);
-      }
-      throw new ExitSignal(Number(value));
     }
     case 'pipe': {
       const value = ev(e.l);

@@ -48,7 +48,7 @@ export function nativeMethodParameters(className: string, methodName: string): N
   let name: string | undefined = className;
   while (name && !seen.has(lower(name))) {
     seen.add(lower(name));
-    const definition = classDefinitions.find((definition) => lower(definition.name) === lower(name as string));
+    const definition = nativeClassDefinition(name);
     if (!definition) return;
     const method = definition.methods?.find(
       (method) => lower(method.signature.slice(0, method.signature.indexOf('('))) === lower(methodName)
@@ -100,6 +100,11 @@ export interface ClassDefinition {
   consts?: Record<string, Value>;
   methods?: NativeMethod[];
   createInternal?: (object: PhpObject) => unknown;
+}
+
+export function nativeClassDefinition(name: string): ClassDefinition | undefined {
+  const key = lower(name);
+  return classDefinitions.find((definition) => lower(definition.name) === key);
 }
 
 export function defineClass(definition: ClassDefinition): void {

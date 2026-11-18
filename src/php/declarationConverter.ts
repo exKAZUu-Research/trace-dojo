@@ -15,6 +15,7 @@ import type {
 } from './ast';
 import { lower } from './bytes';
 import { parseTypeText } from './calls';
+import { CompileClassConstants } from './compileClassConstants';
 import { foldedDefaultType } from './constantDefaults';
 import { BUILTIN_TYPES, ConverterBase } from './converterBase';
 import { SCRIPT_PATH } from './runtime';
@@ -45,6 +46,16 @@ const MAGIC_METHODS: Record<
 
 /** Converts the declarations of functions, parameters, types, and classes. */
 export abstract class DeclarationConverter extends ConverterBase {
+  private readonly compileClasses = new CompileClassConstants();
+  private activeClass?: ClassDecl;
+
+  protected compiledType(expression: Expr): string | undefined {
+    return foldedDefaultType(expression, {
+      compiler: true,
+      classConstant: this.compileClasses.lookup(this.activeClass, this.fn.isClosure),
+    });
+  }
+
   // code-gauge-allow functionNcss 31 -- Converts every part of a function declaration and checks it as PHP does at compile time.
   protected functionDecl(node: Node, isClosure: boolean, className?: string): FunctionDecl {
     const attributes = node.childForFieldName('attributes');
@@ -496,6 +507,8 @@ export abstract class DeclarationConverter extends ConverterBase {
     const outerClass = this.currentClass;
     const outerKind = this.currentClassKind;
     const outerHasParent = this.currentClassHasParent;
+    const outerDecl = this.activeClass;
+    this.activeClass = decl;
     this.currentClass = name;
     this.currentClassKind = kind;
     this.currentClassHasParent = parent !== undefined;
@@ -543,6 +556,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         }
       }
     } finally {
+      this.activeClass = outerDecl;
       this.currentClass = outerClass;
       this.currentClassKind = outerKind;
       this.currentClassHasParent = outerHasParent;
@@ -584,6 +598,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         });
       }
     }
+    if (topLevel && !anonymous) this.compileClasses.bind(decl);
     return decl;
   }
 
@@ -625,7 +640,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   protected classConsts(member: Node, decl: ClassDecl, kind: ClassDecl['kind']): void {
     const attributes = member.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -657,15 +672,22 @@ export abstract class DeclarationConverter extends ConverterBase {
       }
       const constantType = typeNode ? this.typeDecl(typeNode) : undefined;
       const constantValue = this.constantExpr(valueNode);
-      if (constantType && constantValue.k === 'lit') this.checkDefaultType(element, name, constantType, constantValue);
       decl.consts.push({
         name,
         value: constantValue,
         visibility: modifiers.visibility ?? 'public',
         isFinal: modifiers.isFinal,
         row: element.startPosition.row,
-        type: typeNode ? this.typeDecl(typeNode) : undefined,
+        type: constantType,
       });
+      const folded = this.compileClasses.add(decl, name, constantValue, constantType);
+      if (folded !== undefined && constantType && !defaultFits(constantType, folded)) {
+        const actual = folded === 'true' || folded === 'false' ? 'bool' : folded;
+        this.error(
+          element,
+          `Cannot use ${actual} as value for class constant ${decl.name}::${name} of type ${typeToString(constantType)}`
+        );
+      }
     }
   }
 

@@ -1,10 +1,10 @@
 <?php
 foreach ([0,1,2] as $kind) {
     try {
-        if ($kind === 0) die(unknown:"oops");
+        if ($kind === 0) exit(unknown:"oops");
         elseif ($kind === 1) die(...["status"=>[]]);
-        else die("first", print("extra;"));
+        else exit("first", print("extra;"));
     } catch (Throwable $error) {echo $error->getMessage(), "\n";}
 }
-die(...["status"=>"done;"]);
+exit(...["status"=>"done;"]);
 echo "never;";

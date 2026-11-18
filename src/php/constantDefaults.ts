@@ -1,24 +1,36 @@
 // oxlint-disable unicorn/no-null -- PHP null is represented by JavaScript null.
-import type { Expr } from './ast';
+import type { ClassRef, Expr } from './ast';
 import { floatFitsInt, normalizeKeyString, numericPrefix, toBool } from './conversions';
 import { compileConstant } from './native';
 import { arithmetic, bitwise, compareScalar, toFloat, toInt } from './operators';
 import { INT_MAX, INT_MIN, type Key, PhpArray, PhpObject } from './values';
 
 type Scalar = Extract<Expr, { k: 'lit' }>['v'];
-type Constant = Scalar | Map<Key, Constant>;
+export type Constant = Scalar | Map<Key, Constant>;
 const UNKNOWN = Symbol('unevaluated default');
 type Folded = Constant | typeof UNKNOWN;
-type FoldContext = 'default' | 'compiler';
+export type ClassConstantLookup = (cls: ClassRef, name: string) => Constant | undefined;
+interface FoldContext {
+  compiler?: boolean;
+  classConstant?: ClassConstantLookup;
+}
 
-export function foldedDefaultType(expression: Expr, context: FoldContext = 'default'): string | undefined {
-  const value = fold(expression, context);
-  if (value === UNKNOWN) return undefined;
+export function foldedDefaultType(expression: Expr, context: FoldContext = {}): string | undefined {
+  const value = foldedConstant(expression, context);
+  return value === undefined ? undefined : constantTypeName(value);
+}
+
+export function constantTypeName(value: Constant): string {
   if (value instanceof Map) return 'array';
   if (value === null) return 'null';
   if (typeof value === 'bigint') return 'int';
   if (typeof value === 'number') return 'float';
   return typeof value === 'boolean' ? String(value) : 'string';
+}
+
+export function foldedConstant(expression: Expr, context: FoldContext): Constant | undefined {
+  const value = fold(expression, context);
+  return value === UNKNOWN ? undefined : value;
 }
 
 function fold(expression: Expr, context: FoldContext): Folded {
@@ -31,7 +43,7 @@ function fold(expression: Expr, context: FoldContext): Folded {
       return value === undefined || value instanceof PhpArray || value instanceof PhpObject ? UNKNOWN : value;
     }
     case 'interp': {
-      if (context === 'compiler') return UNKNOWN;
+      if (context.compiler) return UNKNOWN;
       let result = '';
       for (const part of expression.parts) {
         const value = typeof part === 'string' ? part : fold(part, context);
@@ -43,10 +55,12 @@ function fold(expression: Expr, context: FoldContext): Folded {
       return result;
     }
     case 'cconst': {
-      return expression.name.toLowerCase() === 'class' && expression.cls.k === 'named' ? expression.cls.name : UNKNOWN;
+      if (expression.name.toLowerCase() === 'class' && expression.cls.k === 'named') return expression.cls.name;
+      const value = context.classConstant?.(expression.cls, expression.name);
+      return value === undefined ? UNKNOWN : value;
     }
     case 'idx': {
-      if (context === 'compiler') return UNKNOWN;
+      if (context.compiler) return UNKNOWN;
       const base = fold(expression.base, context);
       const index = expression.index ? fold(expression.index, context) : UNKNOWN;
       if (base === UNKNOWN) return UNKNOWN;
@@ -70,13 +84,13 @@ function fold(expression: Expr, context: FoldContext): Folded {
     case 'bin': {
       const left = fold(expression.l, context);
       if (left === UNKNOWN) return UNKNOWN;
-      if (expression.op === '??') return context === 'compiler' ? UNKNOWN : (left ?? fold(expression.r, context));
+      if (expression.op === '??') return context.compiler ? UNKNOWN : (left ?? fold(expression.r, context));
       if (['&&', 'and'].includes(expression.op) && !truth(left)) return false;
       if (['||', 'or'].includes(expression.op) && truth(left)) return true;
       return binaryConstant(expression.op, left, fold(expression.r, context));
     }
     case 'cond': {
-      if (context === 'compiler') return UNKNOWN;
+      if (context.compiler) return UNKNOWN;
       const test = fold(expression.test, context);
       if (test === UNKNOWN) return UNKNOWN;
       if (!truth(test)) return fold(expression.alternate, context);
@@ -84,7 +98,7 @@ function fold(expression: Expr, context: FoldContext): Folded {
       return test;
     }
     case 'cast': {
-      if (context === 'compiler') return UNKNOWN;
+      if (context.compiler) return UNKNOWN;
       return castConstant(expression.type, fold(expression.e, context));
     }
     default: {
