@@ -2,7 +2,7 @@ import { ArrayOps } from './arrayOps';
 import { inspectValue, OutputBudget, stringWidth } from './inspect';
 import { type CollectionEntry, CollectionIterator } from './realmCollections';
 import type { Runtime } from './runtime';
-import { arrayIndexOf, isObject, JsArray, JsFunction, JsObject, JsThrow, type Value } from './values';
+import { arrayIndexOf, isObject, JsArray, JsFunction, JsObject, JsThrow, type Key, type Value } from './values';
 
 /** The text `console.table` prints for its arguments, or undefined when it prints them as `console.log` does. */
 // code-gauge-allow functionNcss 34 -- Keeps argument validation, row collection, and the shared formatting budget in table evaluation order.
@@ -12,25 +12,25 @@ export function formatTable(runtime: Runtime, data: Value, properties: Value): s
   if (!(data instanceof JsObject) || data instanceof JsFunction) return undefined;
   const budget = new OutputBudget();
   const selection = properties instanceof JsArray ? new ArrayOps(runtime, properties) : undefined;
-  const selected = selection
-    ? Array.from({ length: selection.length }, (_, index) => runtime.toString(selection.get(index)))
-    : undefined;
   const collectionTable = formatCollectionTable(runtime, data, budget);
   if (collectionTable !== undefined) return collectionTable;
-  const columns = new Map<string, string[]>();
+  const columns = new Map<Key, string[]>();
   const values: string[] = [];
   let hasPrimitives = false;
   const rowKeys = runtime.ownEnumerableKeys(data);
   for (const [row, rowKey] of rowKeys.entries()) {
     runtime.spend();
     const item = runtime.get(data, rowKey);
-    if (selected === undefined && !isObject(item)) {
+    if (selection) {
+      addSelectedCells(runtime, columns, selection, item, row, budget);
+      continue;
+    }
+    if (!isObject(item)) {
       hasPrimitives = true;
       values[row] = inspectCell(runtime, item, budget);
       continue;
     }
-    const keys = selected ?? (item instanceof JsObject ? runtime.ownEnumerableKeys(item) : []);
-    for (const key of keys) {
+    for (const key of item instanceof JsObject ? runtime.ownEnumerableKeys(item) : []) {
       runtime.spend();
       const column = columns.get(key) ?? [];
       columns.set(key, column);
@@ -156,8 +156,39 @@ function renderTable(runtime: Runtime, head: string[], columns: string[][]): str
 }
 
 /** The headers and cells of a table's columns, which Node.js collects as an object's keys and so orders as one. */
-function tableColumns(columns: Map<string, string[]>, rowKeys: string[]): { head: string[]; body: string[][] } {
-  const ordered = [...columns.keys()].toSorted(byObjectKeyOrder);
+/**
+ * Fills a row's cells for the selected properties as Node.js does, converting a selector to a key at each use, as its
+ * `map[key] ??= []`, `hasOwnProperty`, and `map[key][i] = _inspect(item[key])` do.
+ */
+function addSelectedCells(
+  runtime: Runtime,
+  columns: Map<Key, string[]>,
+  selection: ArrayOps,
+  item: Value,
+  row: number,
+  budget: OutputBudget
+): void {
+  for (let index = 0; index < selection.length; index++) {
+    runtime.spend();
+    const selector = selection.get(index);
+    const key = (): Key => runtime.toPropertyKey(selector);
+    if (!columns.has(key())) columns.set(key(), []);
+    const cell = (): string[] =>
+      columns.get(key()) ?? runtime.throwError('TypeError', `Cannot set properties of undefined (setting '${row}')`);
+    if (!(item instanceof JsObject) || runtime.getOwnProperty(item, key()) === undefined) {
+      cell()[row] = '';
+      continue;
+    }
+    const column = cell();
+    column[row] = inspectCell(runtime, runtime.get(item, key()), budget);
+  }
+}
+
+/** The table's columns: a column a symbol selected stays out, as Node.js lists the columns with `Object.keys`. */
+function tableColumns(columns: Map<Key, string[]>, rowKeys: string[]): { head: string[]; body: string[][] } {
+  const ordered = [...columns.keys()]
+    .filter((key): key is string => typeof key === 'string')
+    .toSorted(byObjectKeyOrder);
   return {
     head: ['(index)', ...ordered],
     body: [rowKeys, ...ordered.map((key) => columns.get(key) as string[])],
