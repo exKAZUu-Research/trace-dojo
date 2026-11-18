@@ -163,27 +163,29 @@ defineFunction('explode(string $separator, string $string, int $limit = PHP_INT_
 defineOverloadedFunction(
   'implode(mixed $separator): string',
   'implode(array|string $separator, mixed $array = null): string',
-  implode
+  implode,
+  { shortParamsInlineOnly: true }
 );
 
 function implode({ args, row }: NativeContext): string {
   let [separator, array] = args;
+  const name = row === undefined ? (callStack.at(-1)?.name ?? 'implode') : 'implode';
   const inlinePair = row !== undefined && args.length === 2;
   if (inlinePair && separator instanceof PhpArray)
-    throwError('TypeError', 'implode(): Argument #1 ($separator) must be of type string, array given');
+    throwError('TypeError', `${name}(): Argument #1 ($separator) must be of type string, array given`);
   if (array !== undefined && array !== null && !(array instanceof PhpArray))
-    throwError('TypeError', `implode(): Argument #2 ($array) must be of type ?array, ${valueName(array)} given`);
+    throwError('TypeError', `${name}(): Argument #2 ($array) must be of type ?array, ${valueName(array)} given`);
   if (array === undefined || array === null) {
     if (!(separator instanceof PhpArray)) {
       throwError(
         'TypeError',
-        'implode(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given'
+        `${name}(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given`
       );
     }
     array = separator;
     separator = '';
   } else if (separator instanceof PhpArray) {
-    throwError('TypeError', 'implode(): Argument #1 ($separator) must be of type string, array given');
+    throwError('TypeError', `${name}(): Argument #1 ($separator) must be of type string, array given`);
   }
   let result = '';
   let first = true;
@@ -552,7 +554,7 @@ defineOverloadedFunction(
   'strtr(string $string, array $from): string',
   'strtr(string $string, string $from, string $to): string',
   ({ args, row }) => translate(args, row !== undefined),
-  { 1: 'array|string', 2: '?string' }
+  { nullTypes: { 1: 'array|string', 2: '?string' } }
 );
 
 function translate(args: Value[], inlined: boolean): string {

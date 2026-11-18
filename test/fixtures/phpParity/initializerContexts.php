@@ -26,6 +26,15 @@ function lateClosure($callback = static function () {
     catch (Throwable $error) { echo $error->getMessage(), "\n"; }
 }) { return $callback; }
 function lateDefault($value = NAN xor true) { return $value; }
+function identity($value) { return $value; }
+function dynamicStaticValues() {
+    static $left = identity(true &&
+        NAN);
+    static $right = identity(NAN || true);
+    static $text = identity(NAN .
+        'x');
+    return [$left, $right, $text];
+}
 interface Marker {}
 class Base {}
 class Item extends Base implements Marker {
@@ -34,6 +43,7 @@ class Item extends Base implements Marker {
 }
 echo 'start;';
 var_dump(GLOBAL_TEST, Holder::STRING, staticValues(), lateDefault());
+var_dump(dynamicStaticValues());
 (GLOBAL_CLOSURE)();
 (Holder::CLOSURE)();
 lateClosure()();

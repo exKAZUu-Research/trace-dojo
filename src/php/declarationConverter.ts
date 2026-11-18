@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 681 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 685 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -48,7 +48,7 @@ const MAGIC_METHODS: Record<
 export abstract class DeclarationConverter extends ConverterBase {
   private readonly compileClasses = new CompileClassConstants();
   private activeClass?: ClassDecl;
-  protected initializerContext?: { kind: 'eager' | 'deferred'; row: number };
+  protected initializerContext?: { kind: 'eager' | 'deferred' | 'static'; row: number };
 
   protected compiledType(expression: Expr): string | undefined {
     const value = this.compiledValue(expression);
@@ -81,7 +81,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     const outerFn = this.fn;
     const outerLoop = this.loop;
     const outerInitializer = this.initializerContext;
-    if (outerInitializer?.kind === 'eager') this.initializerContext = undefined;
+    if (outerInitializer?.kind !== 'deferred') this.initializerContext = undefined;
     this.fn = {
       isGenerator: false,
       labels: new Set(),
@@ -146,10 +146,10 @@ export abstract class DeclarationConverter extends ConverterBase {
         this.error(child, `引数の名前 $${name} が重なっています（Redefinition of parameter $${name}）。`);
       seen.add(name);
       const typeNode = child.childForFieldName('type');
-      const type = typeNode ? this.typeDecl(typeNode) : undefined;
+      const type = typeNode ? this.typeDecl(typeNode, true) : undefined;
       if (type?.k === 'named' && ['void', 'never'].includes(type.name))
         this.error(child, 'void and never cannot be parameter types');
-      if (typeNode && type) this.checkTypeScope(typeNode, type, true);
+      if (typeNode && type) this.checkTypeScope(typeNode, type);
       const defaultNode = child.childForFieldName('default_value');
       const defaultExpr = defaultNode ? this.constantExpr(defaultNode, true, 'deferred') : undefined;
       const byRef = child.childForFieldName('reference_modifier') !== null;
@@ -221,9 +221,10 @@ export abstract class DeclarationConverter extends ConverterBase {
     return lower(node.text.split('(')[0].trim()) as Visibility;
   }
 
-  protected typeDecl(node: Node): TypeDecl {
-    const type = this.parseTypeDecl(node);
+  protected typeDecl(node: Node, parameter = false): TypeDecl {
+    const type = this.parseTypeDecl(node, parameter);
     if (type.k === 'named') {
+      if (parameter && type.name === 'static') this.error(node, 'Cannot use the static modifier on a parameter');
       if (type.nullable && ['mixed', 'void', 'never', 'null'].includes(type.name))
         this.error(node, `Type ${type.name} cannot be nullable`);
     } else if (type.k === 'inter') this.checkIntersection(node, type.types);
@@ -265,7 +266,10 @@ export abstract class DeclarationConverter extends ConverterBase {
     if (seen.has('void')) this.error(node, 'Void can only be used as a standalone type');
     if (seen.has('never')) this.error(node, 'never can only be used as a standalone type');
     if (seen.has('object') && type.types.some((part) => part.k !== 'named' || !BUILTIN_TYPES.has(lower(part.name))))
-      this.error(node, `Type ${typeToString(type)} contains both object and a class type, which is redundant`);
+      this.error(
+        node,
+        `Type ${typeToString(this.resolveRelativeTypes(type, node))} contains both object and a class type, which is redundant`
+      );
   }
 
   private unionTypeComponents(member: TypeDecl, name: string, node: Node): string[] {
@@ -283,8 +287,13 @@ export abstract class DeclarationConverter extends ConverterBase {
   }
 
   private typeMemberName(member: TypeDecl, node: Node): string {
+    return typeToString(this.resolveRelativeTypes(member, node));
+  }
+
+  private resolveRelativeTypes(member: TypeDecl, node: Node): TypeDecl {
+    if (member.k !== 'named')
+      return { ...member, types: member.types.map((part) => this.resolveRelativeTypes(part, node)) };
     if (
-      member.k === 'named' &&
       (member.name === 'self' || member.name === 'parent') &&
       !this.fn.isClosure &&
       this.activeClass?.kind !== 'trait'
@@ -292,12 +301,12 @@ export abstract class DeclarationConverter extends ConverterBase {
       this.checkClassScope(node, member.name);
       const scope = this.activeClass;
       const resolved = member.name === 'self' ? scope?.name : scope?.parent;
-      if (resolved) return resolved;
+      if (resolved) return { ...member, name: resolved };
     }
-    return typeToString(member);
+    return member;
   }
 
-  private parseTypeDecl(node: Node): TypeDecl {
+  private parseTypeDecl(node: Node, parameter: boolean): TypeDecl {
     switch (node.type) {
       case 'primitive_type':
       case 'bottom_type': {
@@ -313,28 +322,32 @@ export abstract class DeclarationConverter extends ConverterBase {
         return this.typeName(node);
       }
       case 'optional_type': {
-        const inner = this.typeDecl(node.namedChildren[0]);
+        const inner = this.typeDecl(node.namedChildren[0], parameter);
         return inner.k === 'named' ? { ...inner, nullable: true } : inner;
       }
       case 'union_type':
       case 'disjunctive_normal_form_type': {
         return {
           k: 'union',
-          types: node.namedChildren.filter((child) => child.type !== 'comment').map((child) => this.typeDecl(child)),
+          types: node.namedChildren
+            .filter((child) => child.type !== 'comment')
+            .map((child) => this.typeDecl(child, parameter)),
         };
       }
       case 'intersection_type': {
         return {
           k: 'inter',
-          types: node.namedChildren.filter((child) => child.type !== 'comment').map((child) => this.typeDecl(child)),
+          types: node.namedChildren
+            .filter((child) => child.type !== 'comment')
+            .map((child) => this.typeDecl(child, parameter)),
         };
       }
       case 'type_list': {
-        return { k: 'union', types: node.namedChildren.map((child) => this.typeDecl(child)) };
+        return { k: 'union', types: node.namedChildren.map((child) => this.typeDecl(child, parameter)) };
       }
       default: {
-        if (node.namedChildren.length === 1) return this.typeDecl(node.namedChildren[0]);
-        return { k: 'union', types: node.namedChildren.map((child) => this.typeDecl(child)) };
+        if (node.namedChildren.length === 1) return this.typeDecl(node.namedChildren[0], parameter);
+        return { k: 'union', types: node.namedChildren.map((child) => this.typeDecl(child, parameter)) };
       }
     }
   }
@@ -345,7 +358,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     return expression;
   }
 
-  protected initializerExpr(node: Node, kind: 'eager' | 'deferred' = 'eager'): Expr {
+  protected initializerExpr(node: Node, kind: 'eager' | 'deferred' | 'static'): Expr {
     const outer = this.initializerContext;
     this.initializerContext = { kind, row: node.startPosition.row };
     try {
@@ -479,12 +492,11 @@ export abstract class DeclarationConverter extends ConverterBase {
   }
 
   /** Checks the `self`, `static`, and `parent` a declared type names, as {@link checkClassScope} does. */
-  protected checkTypeScope(node: Node, type: TypeDecl, parameter = false): void {
+  protected checkTypeScope(node: Node, type: TypeDecl): void {
     if (type.k !== 'named') {
-      for (const part of type.types) this.checkTypeScope(node, part, parameter);
+      for (const part of type.types) this.checkTypeScope(node, part);
       return;
     }
-    if (parameter && type.name === 'static') this.error(node, 'Cannot use the static modifier on a parameter');
     if (type.name === 'self' || type.name === 'static' || type.name === 'parent') this.checkClassScope(node, type.name);
   }
 

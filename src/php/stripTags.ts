@@ -2,18 +2,27 @@
 import { lower, untilNul } from './bytes';
 import { literalMatches, spendScan } from './byteSearch';
 import { toStr } from './operators';
+import { rt } from './runtime';
 import { PhpArray, type Value } from './values';
 
 export function allowedTags(value: Value): string {
   if (value === null) return '';
-  const text =
-    value instanceof PhpArray
-      ? value
-          .values()
-          .map((item) => `<${toStr(item)}>`)
-          .join('')
-      : toStr(value);
+  const text = value instanceof PhpArray ? wrapAllowedTags(value) : toStr(value);
   return lower(untilNul(text));
+}
+
+function wrapAllowedTags(values: PhpArray): string {
+  const runtime = rt();
+  const tags: string[] = [];
+  let bytes = 0;
+  for (const item of values.values()) {
+    const tag = toStr(item);
+    bytes += tag.length + 2;
+    runtime.ensureStringFits(bytes);
+    runtime.spend(Math.ceil((tag.length + 2) / 64));
+    tags.push(`<${tag}>`);
+  }
+  return tags.join('');
 }
 
 export function stripTags(text: string, allowed: string): string {

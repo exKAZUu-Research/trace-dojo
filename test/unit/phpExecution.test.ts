@@ -1465,6 +1465,14 @@ test.each([
   expect(run(`<?php ${source}`)).toMatchObject({ kind: 'executed', stdout });
 });
 
+test('bounds combined allowed tags before strip_tags builds the list', () => {
+  const result = run(`<?php $tag = str_repeat('a', 600000); strip_tags('hello', [$tag, $tag]); echo 'unreachable';`);
+  expect(result).toMatchObject({
+    kind: 'executed',
+    stdout: expect.stringMatching(/^\nFatal error: Allowed memory size/),
+  });
+});
+
 test('advances linked object and array heads while their nodes share an otherwise unheld object', () => {
   vi.restoreAllMocks();
   const result = run(`<?php
@@ -1536,6 +1544,8 @@ test.each([
   ['class A { function f(): self&A {} }', 'Duplicate type A is redundant'],
   ['class B {} class A extends B { function f(): parent|B {} }', 'Duplicate type B is redundant'],
   ['class A { function f(): parent&B {} }', 'Cannot use "parent" when current class scope has no parent'],
+  ['class A { function f(static&B $value) {} }', 'Cannot use the static modifier on a parameter'],
+  ['class A { function f(object|self $value) {} }', 'Type A|object contains both object and a class type'],
 ])('rejects invalid PHP expression or type syntax: %s', (source, message) => {
   expect(run(`<?php echo 'never'; ${source}`)).toMatchObject({
     kind: 'compileError',

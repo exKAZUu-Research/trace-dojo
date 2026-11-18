@@ -5,11 +5,13 @@ import { describePropertyType } from './types';
 import { dropped, type Key, PhpArray, PhpObject, type PropDecl, Ref, type Value } from './values';
 import { isSubtype } from './variance';
 
+export type PlaceOperation = 'assignOp' | 'incdec' | 'nested' | 'receiver';
+
 /** A location a program writes to: a variable, an element, a property, or a static property. */
 export interface Place {
   /** The value, or undefined when the location does not exist. */
-  get(update?: 'assignOp' | 'incdec' | 'nested'): Value | undefined;
-  set(value: Value): Value;
+  get(update?: PlaceOperation): Value | undefined;
+  set(value: Value, operation?: 'assignOp'): Value;
   /** The location as a reference, which `=&`, by-reference arguments, and `global` share. */
   ref(): Ref;
   unset(): void;

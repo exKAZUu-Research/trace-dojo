@@ -371,7 +371,7 @@ function bindNative(
   record?: CallRecord
 ): { values: Value[]; refs: (Ref | undefined)[]; named?: Map<string, Value> } {
   const positional = positionalArguments(args);
-  const params = nativeOverloadParams(fn, args, positional.length);
+  const params = nativeOverloadParams(fn, args, positional.length, record === undefined);
   const values: Value[] = [];
   const refs: (Ref | undefined)[] = [];
   if (record) record.argumentRefs = refs;
@@ -450,9 +450,9 @@ function bindNative(
   return { values, refs, named };
 }
 
-function nativeOverloadParams(fn: NativeFunction, args: ArgValue[], positional: number): Param[] {
+function nativeOverloadParams(fn: NativeFunction, args: ArgValue[], positional: number, inlined: boolean): Param[] {
   const short = fn.shortParams;
-  if (!short || positional > short.length) return fn.params;
+  if (!short || positional > short.length || (fn.shortParamsInlineOnly && !inlined)) return fn.params;
   const extraNames = new Set(fn.params.slice(short.length).map((param) => param.name));
   return args.some((arg) => arg.name !== undefined && extraNames.has(arg.name)) ? fn.params : short;
 }

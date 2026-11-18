@@ -201,7 +201,7 @@ class JsonEncoder {
         const decl = declForKey(object.cls, key);
         if (decl && !canAccessProp(decl, undefined)) continue;
         if (decl?.hooks?.get) {
-          yield this.member(decl.name, readProp(object, decl.name, undefined), level);
+          yield this.member(decl.name, readProp(object, decl.name, decl.cls, 'native'), level);
           continue;
         }
         const slot = decl ? object.props.get(key) : dynamic.map.get(key);

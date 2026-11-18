@@ -149,6 +149,8 @@ class ReadValidator {
       )
     );
   }
+  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   visit(value: unknown, writing: boolean): void {
     if (!value || typeof value !== 'object') return;
     if (Array.isArray(value)) {
@@ -157,6 +159,11 @@ class ReadValidator {
     }
     const node = value as Record<string, unknown> & { k?: string; row?: number };
     switch (node.k) {
+      case 'prop': {
+        this.visit(node.obj, writing);
+        this.visit(node.name, false);
+        return;
+      }
       case 'idx': {
         if (node.index === undefined && !writing) {
           throw new CompileError([
@@ -217,12 +224,8 @@ class ReadValidator {
         return;
       }
       case 'unset': {
-        for (const target of node.targets as { k: string; index?: unknown; row: number }[]) {
-          if (target.k === 'idx' && target.index === undefined) {
-            throw new CompileError([
-              { row: target.row, message: '[] で unset することはできません（Cannot use [] for unsetting）。' },
-            ]);
-          }
+        for (const target of node.targets as Expr[]) {
+          checkUnsetOffsets(target);
           this.visit(target, true);
         }
         return;
@@ -277,6 +280,20 @@ class ReadValidator {
       nativeParameters(expression.fn.name) ??
       (expression.fn.fallback ? nativeParameters(expression.fn.fallback) : undefined)
     );
+  }
+}
+
+function checkUnsetOffsets(target: Expr): void {
+  while (target.k === 'idx' || target.k === 'prop') {
+    if (target.k === 'prop') target = target.obj;
+    else {
+      if (target.index === undefined) {
+        throw new CompileError([
+          { row: target.row, message: '[] で unset することはできません（Cannot use [] for unsetting）。' },
+        ]);
+      }
+      target = target.base;
+    }
   }
 }
 

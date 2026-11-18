@@ -1,0 +1,56 @@
+isset;get;isset;get;isset;bool(false)
+array(1) {
+  ["value"]=>
+  bool(true)
+}
+isset;get;isset;isset;get;isset;isset;get;isset;bool(true)
+bool(false)
+bool(true)
+
+Warning: foreach() argument must be of type array|object, null given in /main.php on line 12
+
+Warning: foreach() argument must be of type array|object, null given in /main.php on line 13
+
+Warning: foreach() argument must be of type array|object, null given in /main.php on line 14
+
+Warning: Undefined variable $undefined in /main.php on line 15
+
+Warning: foreach() argument must be of type array|object, null given in /main.php on line 15
+array(1) {
+  ["missing"]=>
+  NULL
+}
+array(2) {
+  ["missing"]=>
+  NULL
+  ["nested"]=>
+  array(1) {
+    ["key"]=>
+    NULL
+  }
+}
+Attempt to modify property "p" on null
+Cannot use string offset as an object
+Cannot use string offset as an object
+
+Warning: String offset cast occurred in /main.php on line 22
+Cannot use string offset as an object
+Attempt to assign property "p" on null
+Attempt to increment/decrement property "p" on null
+array(3) {
+  ["missing"]=>
+  NULL
+  [0]=>
+  NULL
+  [1]=>
+  NULL
+}
+
+Deprecated: Implicit conversion from float 0.5 to int loses precision in /main.php on line 35
+Cannot assign array to property TypedReference::$value of type int
+
+Warning: Array to string conversion in /main.php on line 37
+Cannot assign string to reference held by property TypedReference::$items of type array
+
+Warning: Array to string conversion in /main.php on line 38
+Cannot assign string to reference held by property TypedReference::$other of type array

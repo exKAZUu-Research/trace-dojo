@@ -36,12 +36,20 @@ export function defineOverloadedFunction(
   shortSignature: string,
   signature: string,
   impl: (ctx: NativeContext) => Value,
-  nullTypes?: Record<number, string>
+  options: { nullTypes?: Record<number, string>; shortParamsInlineOnly?: boolean } = {}
 ): void {
   const { name, params, returnType } = parseSignature(signature);
-  if (nullTypes) for (const [index, param] of params.entries()) param.nativeNullType = nullTypes[index];
+  if (options.nullTypes) for (const [index, param] of params.entries()) param.nativeNullType = options.nullTypes[index];
   const shortParams = parseSignature(shortSignature).params;
-  functions.push({ kind: 'native', name, params, shortParams, returnType, impl });
+  functions.push({
+    kind: 'native',
+    name,
+    params,
+    shortParams,
+    shortParamsInlineOnly: options.shortParamsInlineOnly,
+    returnType,
+    impl,
+  });
 }
 
 /** Marks a native function whose direct calls PHP compiles away, as {@link NativeFunction.inlined} says. */

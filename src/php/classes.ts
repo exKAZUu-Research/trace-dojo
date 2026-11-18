@@ -4,7 +4,7 @@ import builtinNames from './builtinNames.json';
 import { addConst, applyTraitConstants, evaluateInClass, linkInterfaceConstants } from './classConstants';
 export { canAccessConstant, classConstant, setClassEvaluator } from './classConstants';
 import { lower } from './bytes';
-import { type ArgValue, invoke } from './calls';
+import { type ArgValue, asInternal, invoke } from './calls';
 import { debugType, normalizeKeyString, toBool, valueName } from './conversions';
 import { deprecated, notice, throwError, warn } from './errors';
 import { strictEquals } from './operators';
@@ -899,12 +899,12 @@ function guarded<T>(object: PhpObject, key: string, run: () => T): T {
   }
 }
 
-// code-gauge-allow functionNcss 46 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 47 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function readProp(
   object: PhpObject,
   name: string,
   scope: PhpClass | undefined,
-  mode: 'read' | 'quiet' | 'update' | 'coalesce' | 'empty' = 'read'
+  mode: 'read' | 'quiet' | 'update' | 'coalesce' | 'empty' | 'native' = 'read'
 ): Value {
   const quiet = mode !== 'read';
   rt().spend();
@@ -921,12 +921,10 @@ export function readProp(
       throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
     }
     if (decl.hooks?.get && !object.guards?.has(`hook:${name}`)) {
+      const get = decl.hooks.get;
+      const target = { fn: get, thisObj: object, scope: decl.cls, staticClass: object.cls };
       return guarded(object, `hook:${name}`, () =>
-        invoke(
-          { fn: decl.hooks?.get as Callable, thisObj: object, scope: decl.cls, staticClass: object.cls },
-          [],
-          rt().row
-        )
+        mode === 'native' ? asInternal(() => invoke(target, [], undefined)) : invoke(target, [], rt().row)
       );
     }
     requireVirtualPropertyHook(object, decl, 'get');
@@ -955,6 +953,8 @@ export function readProp(
   return null;
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function readOverloadedProp(
   object: PhpObject,
   name: string,
@@ -963,9 +963,12 @@ function readOverloadedProp(
 ): Value | undefined {
   const isset = mode === 'coalesce' || mode === 'empty' ? object.cls.findMethod('__isset') : undefined;
   if (isset && !object.guards?.has(`isset:${name}`)) {
-    return guarded(object, `isset:${name}`, () =>
-      toBool(callMagic(object, isset, [name])) ? readOverloadedProp(object, name, 'quiet', unset) : null
-    );
+    const present = (): boolean => toBool(callMagic(object, isset, [name]));
+    if (mode === 'empty')
+      return guarded(object, `isset:${name}`, () =>
+        present() ? readOverloadedProp(object, name, 'quiet', unset) : null
+      );
+    if (!guarded(object, `isset:${name}`, present)) return null;
   }
   if (mode === 'empty') return null;
   const magic = object.cls.findMethod('__get');
@@ -982,18 +985,19 @@ function readOverloadedProp(
   return result;
 }
 
-// code-gauge-allow functionNcss 57 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 58 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 58 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function writeProp(
   object: PhpObject,
   name: string,
   value: Value,
   scope: PhpClass | undefined,
-  fetched = false
+  options: { fetched?: boolean; operation?: 'assignOp' } = {}
 ): Value {
   if (object.isResource) throwError('Error', `Attempt to assign property "${name}" on resource`);
   rt().spend();
   const decl = lookupProp(object.cls, name, scope);
-  if (!fetched) reportStaticInstanceAccess(object, name, decl);
+  if (!options.fetched) reportStaticInstanceAccess(object, name, decl);
   if (decl && !decl.isStatic) {
     if (!canAccessProp(decl, scope)) {
       const magic = object.cls.findMethod('__set');
@@ -1037,8 +1041,9 @@ export function writeProp(
       return value;
     }
     requireVirtualPropertyHook(object, decl, 'set');
-    const coerced = decl.type ? coerceProperty(decl, value, object) : value;
     const slot = object.props.get(decl.key);
+    const referenceUpdate = options.operation === 'assignOp' && slot instanceof Ref && slot.isRef;
+    const coerced = decl.type && !referenceUpdate ? coerceProperty(decl, value, object) : value;
     if (slot instanceof Ref) slot.assign(coerced);
     else {
       object.props.set(decl.key, share(coerced));

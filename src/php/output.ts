@@ -388,10 +388,11 @@ function exportedProps(object: PhpObject): Iterable<[string | bigint, Slot]> {
   const entries: [string | bigint, Slot][] = storage?.exportEntries?.() ?? [];
   for (const key of objectPropertyKeys(object)) {
     const decl = declForKey(object.cls, key);
-    if (decl?.hooks?.get) entries.push([key, readProp(object, decl.name, decl.cls, 'quiet')]);
+    if (decl?.hooks?.get) entries.push([key, readProp(object, decl.name, decl.cls, 'native')]);
     else {
       const slot = object.props.get(key);
       if (slot !== undefined && slot !== UNINIT) entries.push([key, slot]);
+      else if (decl?.hooks && !decl.isVirtual && !object.unsetProperties?.has(decl.key)) entries.push([key, null]);
     }
   }
   return entries;

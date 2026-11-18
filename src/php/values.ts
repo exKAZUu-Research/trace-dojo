@@ -506,6 +506,7 @@ export interface NativeFunction {
   name: string;
   params: Param[];
   shortParams?: Param[];
+  shortParamsInlineOnly?: boolean;
   returnType?: TypeDecl;
   impl: (ctx: NativeContext) => Value;
   /** Whether the function reads its caller's variables (compact, extract, func_get_args). */

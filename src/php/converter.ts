@@ -17,6 +17,13 @@ export type { CompileNotice } from './converterBase';
 const EQUALITY_OPERATORS = new Set(['==', '!=', '===', '!==', '<>', '<=>']);
 const ORDER_OPERATORS = new Set(['<', '<=', '>', '>=']);
 const COMMUTATIVE_OPCODES = new Set(['*', '&', '|', '^']);
+const CALL_EXPRESSIONS = new Set([
+  'function_call_expression',
+  'member_call_expression',
+  'nullsafe_member_call_expression',
+  'scoped_call_expression',
+  'exit_expression',
+]);
 const VARIABLE_OPCODE_RESULTS = new Set<Expr['k']>([
   'varvar',
   'idx',
@@ -153,7 +160,10 @@ export class Converter extends DeclarationConverter {
           .map((child) => {
             const nameNode = child.childForFieldName('name') as Node;
             const value = child.childForFieldName('value');
-            return { name: this.variableName(nameNode), init: value ? this.initializerExpr(value) : undefined };
+            return {
+              name: this.variableName(nameNode),
+              init: value ? this.initializerExpr(value, 'static') : undefined,
+            };
           });
         let names = this.staticNames.get(this.fn);
         if (!names) {
@@ -718,6 +728,8 @@ export class Converter extends DeclarationConverter {
   }
 
   expr(node: Node): Expr {
+    if (this.initializerContext?.kind === 'static' && CALL_EXPRESSIONS.has(node.type))
+      return this.compileRuntimeCall(node);
     const row = node.startPosition.row;
     switch (node.type) {
       case 'parenthesized_expression': {
@@ -1034,6 +1046,16 @@ export class Converter extends DeclarationConverter {
       default: {
         this.error(node, '書き方に誤りがあります。');
       }
+    }
+  }
+
+  private compileRuntimeCall(node: Node): Expr {
+    const initializer = this.initializerContext;
+    this.initializerContext = undefined;
+    try {
+      return this.expr(node);
+    } finally {
+      this.initializerContext = initializer;
     }
   }
 

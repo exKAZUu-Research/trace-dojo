@@ -55,6 +55,7 @@ export class ArrayTable extends Map<Key, Slot> {
     for (const key of super.keys()) if (key !== index++) return false;
     this.packed = [...super.values()];
     for (const value of this.packed) this.count(value, 1);
+    super.clear();
     return true;
   }
 
@@ -122,7 +123,6 @@ export class ArrayTable extends Map<Key, Slot> {
     const values = this.packed;
     this.packed = undefined;
     this.holders.clear();
-    super.clear();
     for (let index = 0; index < values.length; index++) super.set(BigInt(index), values[index]);
     this.integerKeys = values.length;
     this.onMaterialize?.();

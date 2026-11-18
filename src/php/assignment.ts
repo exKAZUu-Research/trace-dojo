@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 627 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 638 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { callMethod } from './callables';
@@ -21,6 +21,7 @@ import { arithmetic, bitwise, concat, toInt, toKey, toStr } from './operators';
 import {
   ElementPlace,
   type Place,
+  type PlaceOperation,
   readElement,
   RefPlace,
   share,
@@ -152,11 +153,27 @@ function instancePropertyPlace(e: Extract<Expr, { k: 'prop' }>, mode: PlaceMode,
 
 function propertyReceiver(e: Expr, parent: Place, mode: WriteMode): Value {
   const target = nestedPlace(parent, mode);
-  const object = target.get('nested');
+  const object = target.get('receiver');
   if (object !== undefined) return object;
   if (mode !== 'write') target.warnUndefined?.();
-  if (e.k === 'idx' || e.k === 'prop') target.set(null);
+  materializeNestedSlot(e, target);
   return null;
+}
+
+export function foreachSubjectPlace(e: Expr): { place: Place; value: Value | undefined } {
+  const resolved = placeOf(e, 'write', true);
+  const place: Place =
+    resolved instanceof ValuePlace ? new RefPlace(Ref.temporary(resolved.value)) : nestedPlace(resolved, 'write');
+  const value = place.get('nested');
+  if (value === undefined) {
+    if (e.k === 'var' || e.k === 'varvar') place.warnUndefined?.();
+    materializeNestedSlot(e, place);
+  }
+  return { place, value };
+}
+
+function materializeNestedSlot(e: Expr, place: Place): void {
+  if (e.k === 'idx' || e.k === 'prop') place.set(null);
 }
 
 function nestedPlace(place: Place, mode: WriteMode): Place {
@@ -178,7 +195,7 @@ function deferredPlace(resolve: (mode: WriteMode) => Place, read: () => Value | 
       return place.nested?.(mode) ?? place;
     },
     warnUndefined: () => target?.warnUndefined?.(),
-    set: (value) => writable().set(value),
+    set: (value, operation) => writable().set(value, operation),
     ref: () => writable().ref(),
     unset: () => writable().unset(),
   };
@@ -213,10 +230,10 @@ class StaticPlace implements Place {
     return this.decl;
   }
 
-  get(update?: 'assignOp' | 'incdec' | 'nested'): Value {
+  get(update?: PlaceOperation): Value {
     const value = this.target.v;
     if ((value as unknown) === UNINIT) {
-      if (update === 'nested') return null;
+      if (update === 'nested' || update === 'receiver') return null;
       throwError(
         'Error',
         `Typed static property ${this.decl?.cls.name ?? this.cls.name}::$${this.name} must not be accessed before initialization`
@@ -243,10 +260,11 @@ class StaticPlace implements Place {
     return target;
   }
 
-  set(value: Value): Value {
+  set(value: Value, operation?: 'assignOp'): Value {
     const target = this.target;
     const decl = this.decl;
-    target.v = decl?.type ? classesModule.coerceProperty(decl, value) : value;
+    target.v =
+      decl?.type && !(operation === 'assignOp' && target.isRef) ? classesModule.coerceProperty(decl, value) : value;
     return target.v;
   }
 
@@ -271,7 +289,7 @@ function propPlace(object: PhpObject, name: string): Place {
       if (operation) reportStaticAccess();
       return readPropertyPlace(object, name, scope, operation);
     },
-    set: (value) => writeProp(object, name, value, scope, reportedStaticAccess),
+    set: (value, operation) => writeProp(object, name, value, scope, { fetched: reportedStaticAccess, operation }),
     ref: () => propRef(object, name, scope),
     unset: () => unsetProp(object, name, scope),
     declaration: () => classesModule.lookupProp(object.cls, name, scope),
@@ -314,7 +332,7 @@ function readPropertyPlace(
   object: PhpObject,
   name: string,
   scope: PhpClass | undefined,
-  operation?: 'assignOp' | 'incdec' | 'nested'
+  operation?: PlaceOperation
 ): Value | undefined {
   if (object.isResource && operation)
     throwError(
@@ -421,7 +439,7 @@ function arrayAccessNestedPlace(object: PhpObject, key: Value | undefined, unset
   return new RefPlace(Ref.temporary(value));
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function stringOffsetPlace(parent: Place, text: string, key: Value | undefined): Place {
   return {
@@ -433,7 +451,7 @@ function stringOffsetPlace(parent: Place, text: string, key: Value | undefined):
           ? 'Cannot use assign-op operators with string offsets'
           : operation === 'incdec'
             ? 'Cannot increment/decrement string offsets'
-            : 'Cannot use string offset as an array';
+            : `Cannot use string offset as an ${operation === 'receiver' ? 'object' : 'array'}`;
       throwError('Error', message);
     },
     getForIsset: () => (key === undefined ? undefined : readIndex(text, key, 'coalesce')),
@@ -638,7 +656,7 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
     current = null;
   }
   const result = applyOperator(e.op, current, value);
-  return place.set(share(result));
+  return place.set(share(result), 'assignOp');
 }
 
 export function applyOperator(op: string, left: Value, right: Value): Value {

@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss 537 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { assignTo, bindRef, destructure, placeOf, unsetTarget } from './assignment';
+import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
 import type { Expr, FunctionDecl, Program, Stmt } from './ast';
 import { nestedBodies } from './astAnalysis';
 import { lower } from './bytes';
@@ -22,7 +22,7 @@ import { E_DEPRECATED, E_WARNING, emitError, setPrevious, throwError, warn } fro
 import { collectBeforeAllocation, setDestructor } from './garbage';
 import { consumeExpression, ev, evBool, evQuiet, evReturn } from './interp';
 import { looseEquals, setObjectConversions, toStr } from './operators';
-import { ElementPlace, RefPlace, share, ValuePlace, VarPlace, writableContainer } from './places';
+import { ElementPlace, share, VarPlace, writableContainer } from './places';
 import { FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
 import {
   type Callable,
@@ -457,33 +457,17 @@ function catches(object: PhpObject, name: string): boolean {
   return cls !== undefined && object.cls.isSubclassOf(cls);
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- One case per statement kind, as PHP runs each kind differently.
-// code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completion {
   const runtime = rt();
   const frame = runtime.frame;
   if (statement.byRef) {
-    runtime.lastReturnRef = undefined;
-    const resolved = placeOf(statement.subject);
-    const returned = ['call', 'mcall', 'scall'].includes(statement.subject.k)
-      ? (runtime.lastReturnRef as Ref | undefined)
-      : undefined;
-    runtime.lastReturnRef = undefined;
-    const place =
-      resolved instanceof ValuePlace
-        ? new RefPlace(returned ?? new Ref(resolved.value))
-        : (resolved.nested?.() ?? resolved);
-    const container = place.get();
+    const { place, value: container } = foreachSubjectPlace(statement.subject);
     if (container instanceof PhpObject) return foreachObject(statement, container);
     if (!(container instanceof PhpArray)) {
-      if (container === undefined || container === null) {
-        warn(`foreach() argument must be of type array|object, ${valueName(container ?? null)} given`);
-        return undefined;
-      }
-      warn(`foreach() argument must be of type array|object, ${valueName(container)} given`);
+      warn(`foreach() argument must be of type array|object, ${valueName(container ?? null)} given`);
       return undefined;
     }
-    return foreachArrayByRef(statement, writableContainer(place) as PhpArray);
+    return foreachArrayByRef(statement, writableContainer(place, container) as PhpArray);
   }
   const subject = ev(statement.subject);
   if (subject instanceof PhpObject) return foreachObject(statement, subject);
