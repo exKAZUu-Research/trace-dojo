@@ -1966,3 +1966,12 @@ test.each(['(?<n>x)(?&n(1))', '(?<n>x)(?P>n(<n>))', '(x)(?R(1))'])(
     });
   }
 );
+
+test('decodes PHP exception bytes for the user-facing error summary', () => {
+  const result = run('<?php throw new RuntimeException("前に進めない！");');
+  expect(result).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('RuntimeException: 前に進めない！'),
+    stdout: expect.stringContaining('RuntimeException: 前に進めない！'),
+  });
+});

@@ -4,6 +4,7 @@ import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import { bootstrap } from './bootstrap';
+import { dec } from './bytes';
 import { callValue } from './callables';
 import { asInternal, type CallRecord, HostStackExhaustion, invoke, resetCallStack } from './calls';
 import { E_DEPRECATED, emitError, throwableLocation } from './errors';
@@ -98,7 +99,7 @@ function report(runtime: Runtime, error: unknown): string | undefined {
     restoreStack(runtime);
     const message = `Fatal error: ${error.message} in ${SCRIPT_PATH} on line ${(error.row ?? 0) + 1}\nStack trace:\n${trace}`;
     runtime.echo(`\n${message}\n`);
-    return message;
+    return dec(message);
   }
   if (error instanceof FatalError) {
     const records = error.calls as CallRecord[];
@@ -107,7 +108,7 @@ function report(runtime: Runtime, error: unknown): string | undefined {
     const file = error.row < 0 ? 'Unknown' : SCRIPT_PATH;
     const message = `Fatal error: ${error.message ? `${error.message} in ${file} on line ${error.row + 1}${error.withTrace ? `\nStack trace:\n${trace}` : ''}` : ''}`;
     if (error.message) runtime.echo(`\n${message}\n`);
-    return message || 'Fatal error';
+    return dec(message);
   }
   throw error;
 }
@@ -124,7 +125,7 @@ function printUncaught(runtime: Runtime, object: PhpObject): string | undefined 
       const text = throwableText(object);
       const message = `Fatal error: Uncaught ${text}\n  thrown in ${throwableLocation(object)}`;
       runtime.echo(`\n${message}\n`);
-      return message;
+      return dec(message);
     } catch (error) {
       if (!(error instanceof PhpThrow)) return report(runtime, error);
       runtime.spend();
