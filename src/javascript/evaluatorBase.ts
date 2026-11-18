@@ -110,7 +110,7 @@ export abstract class EvaluatorBase {
 
   /** Whether the running code is strict mode code. */
   isStrict(): boolean {
-    return this.functionFrame()?.isStrict ?? true;
+    return this.runtime.frame.scope.isStrict() ?? true;
   }
 
   thisValue(): Value {

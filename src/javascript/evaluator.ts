@@ -472,6 +472,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
           },
       true
     );
+    if (node.kind === 'arrow') scope.arrowIsStrict = node.isStrict;
     runtime.pushFrame(scope, callRow, node.isAtomic);
     try {
       if (node.isAsync && !node.isGenerator)

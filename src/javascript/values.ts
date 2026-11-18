@@ -220,6 +220,8 @@ export class Scope {
   readonly bindings = new Map<string, Binding>();
   /** The values `using` declarations in this scope declared, in order. */
   disposables?: Disposable[];
+  /** Set on the scope of an arrow function call, whose body is strict or not on its own, unlike its `this`. */
+  arrowIsStrict?: boolean;
 
   constructor(
     readonly parent: Scope | undefined,
@@ -235,6 +237,11 @@ export class Scope {
 
   nearestFunctionFrame(): FunctionFrame | undefined {
     return this.functionFrame ?? this.parent?.nearestFunctionFrame();
+  }
+
+  /** Whether the code this scope runs is strict mode code, as its nearest function or arrow function says. */
+  isStrict(): boolean | undefined {
+    return this.arrowIsStrict ?? this.functionFrame?.isStrict ?? this.parent?.isStrict();
   }
 }
 
