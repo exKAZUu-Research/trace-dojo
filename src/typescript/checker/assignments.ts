@@ -180,6 +180,7 @@ export class AssignmentChecker {
     }
   }
 
+  // code-gauge-allow functionNcss 31 -- Keeps object assignment targets with key transport and rest flow typing.
   private destructuringObjectAssignment(
     pattern: TreeNode,
     type: Type,
