@@ -1,0 +1,9 @@
+function first<T>(value:ArrayLike<T>):T {return value[0];}
+const value=first({0:3,length:1});
+const upper=Array.from({0:'hi',length:1}, value=>value.toUpperCase());
+interface Indexed {readonly [index:number]:number;length:number}
+const indexed:Indexed={0:4,length:1};
+const indexedValue=first(indexed);
+const text=first('hi');
+const tuple:[number,number]=[5,6];
+console.log(value.toFixed(),upper.join(','),indexedValue.toFixed(),text.toUpperCase(),first(tuple).toFixed());

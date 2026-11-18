@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 404 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 433 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import type { Checker, Mapper } from './checker';
 import { applicableIndex, isIndexKeyOf, isPropertyKeyOf, keyedIndexes } from './indexInfos';
 import {
@@ -31,6 +31,7 @@ export const InferencePriority = {
   Direct: 0,
   /** Through a homomorphic mapped type, as `T` in `Partial<T>`. */
   HomomorphicMappedType: 8,
+  MappedTypeConstraint: 32,
   /** From the type the call's result is expected to have. */
   ReturnType: 128,
 } as const;
@@ -273,10 +274,11 @@ export class TypeInference {
   }
 
   private inferToObject(run: InferenceRun, source: Type, target: ObjectType, recurse: Recurse): void {
-    // An iterable or array-like target infers its element from what iterating the source gives, as a string's characters.
+    if (this.c.isLibraryType(target, 'ArrayLike')) source = this.c.apparentType(source);
+    // An iterable target infers its element from what iterating the source gives, as a string's characters.
     if (
       target.objectKind === 'reference' &&
-      ['Iterable', 'ArrayLike', 'IterableIterator'].some((name) => this.c.isLibraryType(target, name)) &&
+      ['Iterable', 'IterableIterator'].some((name) => this.c.isLibraryType(target, name)) &&
       !(source.kind === 'object' && source.objectKind === 'reference' && source.target === target.target)
     ) {
       const element = this.c.silently(() => this.c.patterns.iteratedType(undefined, source));
@@ -288,13 +290,44 @@ export class TypeInference {
       return;
     }
     if (target.objectKind === 'mapped' && target.mapped) {
-      const { constraint, template } = target.mapped;
-      if (constraint.kind === 'keyof' && template.kind === 'indexedAccess')
-        recurse(source, constraint.type, undefined, InferencePriority.HomomorphicMappedType);
+      this.inferToMapped(source, target, recurse);
       return;
     }
     if (source.kind === 'object' && this.inferFromElements(run, source, target, recurse)) return;
     this.inferFromMembers(run, source, target, recurse);
+  }
+
+  private inferToMapped(source: Type, target: ObjectType, recurse: Recurse): void {
+    const info = target.mapped;
+    if (!info || info.nameType) return;
+    if (info.constraint.kind === 'keyof' && info.template.kind === 'indexedAccess') {
+      recurse(source, info.constraint.type, undefined, InferencePriority.HomomorphicMappedType);
+      return;
+    }
+    const keys = this.c.typeOperators.keyofType(source);
+    recurse(keys, info.constraint, undefined, InferencePriority.MappedTypeConstraint);
+    const entries = this.mappedInferenceEntries(source, this.c.baseConstraint(info.constraint));
+    if (!this.mentions(info.template, info.typeParameter)) {
+      if (entries.length > 0) recurse(unionOf(entries.map((entry) => entry.type)), info.template);
+      return;
+    }
+    for (const entry of entries)
+      recurse(entry.type, this.c.instantiate(info.template, new Map([[info.typeParameter.id, entry.key]])));
+  }
+
+  private mappedInferenceEntries(source: Type, allowed: Type): { key: Type; type: Type }[] {
+    const structure = this.c.structureOf(source);
+    const keys = allowed.kind === 'union' ? allowed.types : [allowed];
+    const entries: { key: Type; type: Type }[] = [];
+    for (const property of structure.properties.values()) {
+      this.c.budget.spend();
+      if (property.visibility !== 'public' || !keys.some((key) => isPropertyKeyOf(this.c, property, key))) continue;
+      entries.push({ key: this.c.typeOperators.propertyKeyType(property), type: property.type() });
+    }
+    for (const index of keyedIndexes(structure)) {
+      if (isIndexKeyOf(this.c, index.keyType, allowed)) entries.push({ key: index.keyType, type: index.type });
+    }
+    return entries;
   }
 
   /** Infers to an object from what a non-object source stands for, as TypeScript's `inferFromTypes` takes its apparent type. */

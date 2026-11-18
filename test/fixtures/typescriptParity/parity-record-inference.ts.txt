@@ -1,0 +1,23 @@
+function values<K extends PropertyKey,T>(obj:Record<K,T>):T[]{return Object.values(obj);}
+function keys<K extends PropertyKey,T>(obj:Record<K,T>):K[]{return Object.keys(obj) as K[];}
+function read<K extends string,T>(obj:Record<K,T>,key:K):T{return obj[key];}
+const numeric=values({a:3});
+const text=read({a:'hi'},'a');
+const key:'a'|'b'=keys({a:1,b:2})[0];
+const numericKey:0=keys({0:3})[0];
+function wrapped<K extends string,T>(obj:{[P in K]:{value:T}},key:K):T{return obj[key].value;}
+const nested=wrapped({a:{value:'yes'}},'a');
+function partial<T>(obj:Partial<T>):T{return obj as T;}
+const copied=partial({a:4});
+function fixed<T>(obj:{[P in 'a']:T}):T{return obj.a;}
+const data={a:7,b:'extra'};
+console.log(numeric[0].toFixed(),text.toUpperCase(),key,numericKey,nested.toUpperCase(),copied.a.toFixed(),fixed(data).toFixed());
+function readAny<K extends PropertyKey,T>(obj:Record<K,T>,key:K):T{return obj[key];}
+const token=Symbol('key');
+const dictionary:Record<string,number>={a:8};
+console.log(readAny({[token]:9},token).toFixed());
+console.log(readAny({0:4},0).toFixed());
+console.log(values(dictionary)[0].toFixed());
+const nestedData={a:{value:3},b:{value:'hi'}};
+const selectedNested:number=wrapped(nestedData,'a');
+console.log(selectedNested.toFixed());
