@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 767 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 768 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -270,7 +270,11 @@ export class Runtime {
     if (target === undefined || target === null) {
       this.throwError('TypeError', `Cannot set properties of ${String(target)} (setting '${String(key)}')`);
     }
-    const property = this.findProperty(this.objectFor(target, key), key);
+    const property = this.findProperty(this.toObject(target), key);
+    if (property && !isAccessor(property) && !property.writable) {
+      this.refuse(strict, () => this.readOnlyMessage(key, target));
+      return;
+    }
     if (property && isAccessor(property) && property.set) {
       this.call(property.set, target, [value], this.currentRow);
       return;
@@ -294,9 +298,10 @@ export class Runtime {
     }
   }
 
-  private readOnlyMessage(key: Key, target: JsObject): string {
-    const kind = target instanceof JsFunction ? 'function' : 'object';
-    return `Cannot assign to read only property '${String(key)}' of ${kind} '${this.receiverText(target)}'`;
+  private readOnlyMessage(key: Key, target: Value): string {
+    const kind = target instanceof JsObject ? (target instanceof JsFunction ? 'function' : 'object') : typeof target;
+    const receiver = target instanceof JsObject ? this.receiverText(target) : String(target);
+    return `Cannot assign to read only property '${String(key)}' of ${kind} '${receiver}'`;
   }
 
   /**
@@ -544,28 +549,26 @@ export class Runtime {
 
   /** Deletes a property as `delete target[key]` does, returning false where code that is not strict fails to. */
   deleteProperty(target: Value, key: Key, strict = true): boolean {
-    if (target === undefined || target === null)
-      this.throwError('TypeError', 'Cannot convert undefined or null to object');
-    if (!(target instanceof JsObject)) return true;
-    if (target instanceof JsArray) {
+    const object = this.toObject(target);
+    if (object instanceof JsArray) {
       const index = arrayIndexOf(key);
       // Deleting a hole changes nothing, which a sealed array allows.
-      if (index !== undefined && index < target.elements.length && target.elements[index] !== HOLE) {
-        if (target.sealed || target.definedElements?.get(index)?.configurable === false) {
+      if (index !== undefined && index < object.elements.length && object.elements[index] !== HOLE) {
+        if (object.sealed || object.definedElements?.get(index)?.configurable === false) {
           this.refuse(strict, `Cannot delete property '${index}' of [object Array]`);
           return false;
         }
-        target.definedElements?.delete(index);
-        target.elements[index] = HOLE;
+        object.definedElements?.delete(index);
+        object.elements[index] = HOLE;
       }
       if (index !== undefined) return true;
     }
-    const property = this.getOwnProperty(target, key);
+    const property = this.getOwnProperty(object, key);
     if (property && !property.configurable) {
-      this.refuse(strict, () => `Cannot delete property '${String(key)}' of ${this.receiverText(target)}`);
+      this.refuse(strict, () => `Cannot delete property '${String(key)}' of ${this.receiverText(object)}`);
       return false;
     }
-    target.properties.delete(key);
+    object.properties.delete(key);
     return true;
   }
 

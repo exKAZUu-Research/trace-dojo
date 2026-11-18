@@ -239,9 +239,10 @@ export class BindingPatterns {
   destructuredKey(key: TreeNode, objectType: Type): { type: Type; keyType: Type; names?: string[] } {
     const selection = this.patternKey(key);
     this.selectedKeys.set(key.id, selection.names);
+    const namedTypes = selection.names?.map((name) => this.destructuredProperty(key, objectType, name));
     const type =
-      selection.names && !this.c.relations.isGeneric(selection.type)
-        ? unionOf(selection.names.map((name) => this.destructuredProperty(key, objectType, name)))
+      namedTypes && !this.c.relations.isGeneric(selection.type)
+        ? unionOf(namedTypes)
         : this.c.members.indexedType(key, key, selection.node, objectType, selection.type);
     return { type, keyType: selection.type, names: selection.names };
   }
