@@ -1190,9 +1190,7 @@ export abstract class StatementCompiler extends CallCompiler {
           ...capture.binding,
           known: true,
           value: address
-            ? condition.type.kind === 'optional'
-              ? this.optionalPayloadPointer(address.value as Pointer, condition.type.child)
-              : address.value
+            ? (capture.projectPointer?.(address.value as Pointer) ?? address.value)
             : payload(conditionResult.value),
         };
       }
@@ -1318,6 +1316,7 @@ export abstract class StatementCompiler extends CallCompiler {
         binding: LocalBinding;
         byPointer?: boolean;
         locate?: (frame: Frame) => Pointer;
+        projectPointer?: (pointer: Pointer) => Pointer;
         bind: (frame: Frame, value: Value, pointer?: Pointer) => void;
       }
     | undefined {
@@ -1327,18 +1326,18 @@ export abstract class StatementCompiler extends CallCompiler {
       const pointerType = pointerTo(type, place?.isConst ?? true);
       const binding = this.newLocal(capture.name, pointerType, true);
       const locate = place?.locate;
+      const projectPointer = this.capturePointer(operand);
       return {
         binding,
         byPointer: true,
         locate,
+        projectPointer,
         bind: (frame, value, pointer) => {
           if (!pointer) {
             frame.slots[binding.slot] = new Pointer(new Cell(copyForFrame(frame, value, type)), 0);
             return;
           }
-          const target = pointer;
-          frame.slots[binding.slot] =
-            operand?.type.kind === 'optional' ? this.optionalPayloadPointer(target, operand.type.child) : target;
+          frame.slots[binding.slot] = projectPointer(pointer);
         },
       };
     }
@@ -1359,6 +1358,15 @@ export abstract class StatementCompiler extends CallCompiler {
         frame.slots[binding.slot] = copyForFrame(frame, value, binding.type);
       },
     };
+  }
+
+  private capturePointer(operand: TExpr | undefined): (pointer: Pointer) => Pointer {
+    if (operand?.type.kind === 'optional') {
+      const { child } = operand.type;
+      return (pointer) => this.optionalPayloadPointer(pointer, child);
+    }
+    if (operand?.type.kind === 'error_union') return this.errorUnionPayloadPointer(operand.type, operand.span);
+    return (pointer) => pointer;
   }
 
   private newLocal(name: string, type: Type, isConst: boolean): LocalBinding {

@@ -433,7 +433,13 @@ export function arrayPointerView(value: Pointer, type: Extract<Type, { kind: 'ar
 }
 
 export function hasAggregateStorage(type: Type): boolean {
-  return type.kind === 'array' || type.kind === 'struct' || type.kind === 'union' || type.kind === 'optional';
+  return (
+    type.kind === 'array' ||
+    type.kind === 'struct' ||
+    type.kind === 'union' ||
+    type.kind === 'optional' ||
+    type.kind === 'error_union'
+  );
 }
 
 export type NativeState = { turtle?: TurtleState } & Record<string, unknown>;

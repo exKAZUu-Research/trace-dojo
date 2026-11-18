@@ -1458,6 +1458,24 @@ test.each([
   }
 );
 
+test.each([
+  ['if', 'Oops', 'struct{x:u8,y:u8,z:void}', '.x=3,.y=4,', 'var value:O=undefined;const s=&value;'],
+  ['if', 'Oops', 'struct{x:[2]u8,z:void}', '.x=.{3,4},', 'var values:[2]O=undefined;const s=&values[1];'],
+  ['while', 'Oops', 'struct{x:u8,y:u8,z:void}', '.x=3,.y=4,', 'var values:[2]O=undefined;const s=&values[1];'],
+  ['if', '', 'struct{x:u8,y:u8,z:void}', '.x=3,.y=4,', 'var value:O=undefined;const s=&value;'],
+])(
+  'error-union %s pointer captures retain the payload layout offset with error{%s}',
+  (control, errors, payload, fields, storage) => {
+    const stop = control === 'while' ? 'break;' : '';
+    const source = `const std=@import("std");const P=${payload};const O=struct{e:error{${errors}}!P,v:void,prefix:u8};fn get(n:*usize,s:*O)*O{n.*+=1;return s;}pub fn main()void{${storage}s.e=.{${fields}.z={}};s.prefix=7;var n:usize=0;${control}(get(&n,s).e)|*p|{std.debug.print("{} {} {}",.{&p.z==&s.v,n,s.prefix});${stop}}else |_|{unreachable;}}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: 'true 1 7',
+      uncaughtException: undefined,
+    });
+  }
+);
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;

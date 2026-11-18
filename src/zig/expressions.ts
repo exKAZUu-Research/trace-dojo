@@ -29,7 +29,7 @@ import {
   parseFloatLiteral,
 } from './floats';
 import { integerOperationWork, type IntegerWork, spendIntegerOperation, spendIntegerShift } from './integerWork';
-import { fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
+import { errorUnionOffsets, fieldOffsets, optionalNicheBits, sizeOf, unionOffsets } from './layout';
 import { spendMemory } from './memoryAccounting';
 import { callableNative } from './nativeAdapter';
 import { asFloat, comparisonTest, isArithmeticType, isIntegerType, isZero, sign } from './operands';
@@ -767,6 +767,19 @@ export abstract class ExpressionCompiler extends SemaBase {
     if (optionalNicheBits(child)) return pointer;
     const payload = pointer.project('optional');
     return hasAggregateStorage(child) ? payload.withFieldLocation(pointer, 0) : payload;
+  }
+
+  protected errorUnionPayloadPointer(
+    type: Extract<Type, { kind: 'error_union' }>,
+    span: Span
+  ): (parent: Pointer) => Pointer {
+    return this.fieldPointer(
+      type,
+      type.payload,
+      span,
+      () => errorUnionOffsets(type.payload).payload,
+      (pointer) => pointer
+    );
   }
 
   // Indexing and slicing ----------------------------------------------------------------------------------------------
