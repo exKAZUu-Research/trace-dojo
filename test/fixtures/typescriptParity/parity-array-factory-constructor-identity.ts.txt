@@ -10,3 +10,5 @@ const ordinary=Array.from([5,6]);
 const ordinaryOf=Array.of(7,8);
 const custom:any=(Array.of as any).call(Factory,9,10);
 console.log(ordinary[0],ordinary[1],ordinaryOf[0],ordinaryOf[1],custom.foo,custom.length,reads);
+// Restore the constructor before the reference tsx process performs its own cleanup.
+Object.defineProperty(Array.prototype, 'constructor', {value: Array, writable: true, configurable: true});
