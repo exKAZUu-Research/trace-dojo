@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 855 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 856 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -123,8 +123,8 @@ export abstract class DeclarationConverter extends ConverterBase {
     return this.withClassContext(undefined, () => this.convertFunction(node, false));
   }
 
-  // code-gauge-allow functionNcss 43 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
-  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionNcss 44 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private convertFunction(node: Node, isClosure: boolean, className?: string): FunctionDecl {
     const attributes = node.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
@@ -142,6 +142,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       node.children.some((child) => child.type === 'reference_modifier');
     const outerFn = this.fn;
     const lexicalClass = className ?? (isClosure ? outerFn.className : undefined);
+    const displayClass = className ? (this.activeClass?.fullName ?? className) : undefined;
     const outerLoop = this.loop;
     const outerInitializer = this.initializerContext;
     if (outerInitializer?.kind !== 'deferred') this.initializerContext = undefined;
@@ -155,7 +156,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       isFunction: true,
       isClosure,
       name,
-      displayName: isClosure ? name : `${className === undefined ? '' : `${className}::`}${name}()`,
+      displayName: isClosure ? name : `${displayClass === undefined ? '' : `${displayClass}::`}${name}()`,
     };
     this.loop = { depth: 0, switches: [] };
     try {
@@ -261,6 +262,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         variadic,
         optional: defaultExpr !== undefined || variadic,
         defaultExpr,
+        defaultReportRow: defaultNode?.endPosition.row,
         row: child.startPosition.row,
       };
       if (defaultExpr?.k === 'lit' && defaultExpr.v === null && type && !typeAllowsNull(type))
@@ -591,6 +593,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     const literalType = foldedDefaultType(value, {
       budget: this.compileBudget,
       preserveNamedConstants: !property,
+      magic: (token) => this.compiledMagic(token),
       classConstant: property ? this.compileClasses.lookup(property) : undefined,
       className: property ? (cls) => this.compileClasses.className(cls, property) : undefined,
     });
@@ -959,7 +962,9 @@ export abstract class DeclarationConverter extends ConverterBase {
         type: constantType,
       });
       if (this.preserveSyntax) continue;
-      const folded = this.compileClasses.add(decl, name, constantValue, constantType);
+      const folded = this.compileClasses.add(decl, name, constantValue, constantType, (token) =>
+        this.compiledMagic(token)
+      );
       if (folded !== undefined && constantType && !defaultFits(constantType, folded)) {
         const actual = folded === 'true' || folded === 'false' ? 'bool' : folded;
         this.error(
@@ -1100,7 +1105,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         gotos: [],
         className,
         name: `$${prop.name}::${kind}`,
-        displayName: `${className}::$${prop.name}::${kind}()`,
+        displayName: `${this.activeClass?.fullName ?? className}::$${prop.name}::${kind}()`,
         propertyName: prop.name,
         isMethod: true,
         returnType: kind === 'set' ? { k: 'named', name: 'void' } : prop.type,

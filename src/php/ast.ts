@@ -23,6 +23,7 @@ export interface Arg {
 
 export interface ArrayItem {
   key?: Expr;
+  keyOpcodeRow?: number;
   value: Expr;
   byRef: boolean;
   spread: boolean;
@@ -159,6 +160,7 @@ export interface FunctionDecl {
 
 export interface ParamDecl extends Param {
   defaultExpr?: Expr;
+  defaultReportRow?: number;
   promote?: { visibility: Visibility; isReadonly: boolean; isFinal: boolean; setVisibility?: Visibility };
   row: number;
 }

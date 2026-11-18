@@ -1181,11 +1181,11 @@ export class Converter extends DeclarationConverter {
     return this.expr(node);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private constant(node: Node): Expr {
     const row = node.startPosition.row;
     const raw = this.nameText(node);
-    const word = lower(raw);
+    const word = lower(raw.startsWith('\\') ? raw.slice(1) : raw);
     if (node.type === 'name' && word === 'default') this.error(node, 'syntax error, unexpected token "default"');
     if (word === 'true' || word === 'false') return { k: 'lit', v: word === 'true', row };
     if (word === 'null') return { k: 'lit', v: null, row };
@@ -1271,7 +1271,7 @@ export class Converter extends DeclarationConverter {
       if (this.preserveSyntax) return { k: 'call', fn: { name: raw }, args, fcc, row };
       const name = this.resolveFunctionName(raw);
       if (!name.fallback && ['call_user_func', 'call_user_func_array'].includes(lower(name.name)) && args[0]) {
-        args[0].e = this.foldCallableOperand(args[0].e);
+        args[0].e = this.foldCallableOperand(args[0].e, true);
       }
       if (lower(name.fallback ?? name.name) === 'assert') {
         this.addAssertionDescription(argumentsNode, args, row);
@@ -1288,9 +1288,16 @@ export class Converter extends DeclarationConverter {
     };
   }
 
-  private foldCallableOperand(expression: Expr): Expr {
+  private foldCallableOperand(expression: Expr, forwarding = false): Expr {
     if (this.preserveSyntax || expression.k === 'lit') return expression;
-    const value = this.compiledValue(expression);
+    const value = forwarding
+      ? foldedConstant(expression, {
+          compiler: true,
+          preserveNamedConstants: true,
+          preserveClassConstants: true,
+          budget: this.compileBudget,
+        })
+      : this.compiledValue(expression);
     return typeof value === 'string' ? { k: 'lit', v: value, row: expression.row } : expression;
   }
 
@@ -1629,7 +1636,25 @@ export class Converter extends DeclarationConverter {
     const byRef = valueNode.type === 'by_ref';
     const value = byRef ? this.writable(semanticChildren(valueNode)[0]) : this.expr(valueNode);
     if (keyNotices > start) this.orderArrayFoldNotices(start, keyNotices);
-    return { key, value, byRef, spread: false };
+    const keyOpcodeRow = key ? this.arrayKeyOpcodeRow(value, valueNode) : undefined;
+    return { key, keyOpcodeRow, value, byRef, spread: false };
+  }
+
+  private arrayKeyOpcodeRow(value: Expr, node: Node): number {
+    if (this.constantInitializer) return this.initializerContext!.row;
+    return this.resultOpcodeRow(value, node);
+  }
+
+  private resultOpcodeRow(value: Expr, node: Node): number {
+    if (value.k === 'bin' && this.compiledValue(value) !== undefined) {
+      return value.op === '.' ? (node.parent?.nextSibling?.startPosition.row ?? node.endPosition.row) : value.row;
+    }
+    if (value.k === 'cond') {
+      const test = this.compiledValue(value.test);
+      if (test !== undefined)
+        return compiledOperandRow(constantTruth(test) ? (value.consequent ?? value.test) : value.alternate);
+    }
+    return compiledOperandRow(value);
   }
 
   private orderArrayFoldNotices(start: number, keyEnd: number): void {

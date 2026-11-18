@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 866 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 867 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -99,6 +99,7 @@ export function placeOf(e: Expr, mode: PlaceMode = 'write', through = false): Pl
       return instancePropertyPlace(e, mode, through);
     }
     case 'sprop': {
+      runtime.row = e.row;
       const cls = resolveClassRef(e.cls);
       return namedPlace(e.name, mode, (name) => new StaticPlace(cls, name, frame.scope));
     }
@@ -960,7 +961,7 @@ function destructuredReference(value: Value, key: Key, writable: boolean): Ref {
   return Ref.temporary(null);
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
   const runtime = rt();
   if (e.op === '??') {
@@ -968,7 +969,9 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
     const place = placeOf(e.target, 'deferred');
     const current = place.getForIsset ? place.getForIsset() : place.get();
     if (current !== undefined && current !== null) return current;
-    const value = ev(e.value);
+    const value = isCompiledVariable(e.value)
+      ? prepareOperand(e.value)(compoundWriteRow(e.target, e.value))
+      : ev(e.value);
     return place.set(share(value));
   }
   const place = placeOf(e.target, 'deferred');

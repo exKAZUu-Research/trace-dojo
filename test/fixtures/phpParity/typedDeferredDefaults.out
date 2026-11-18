@@ -4,3 +4,9 @@ float(6)
 6:failsInt(): Argument #1 ($value) must be of type int, string given, called in /main.php on line 18
 Cannot assign string to class constant RuntimeTypedConstant::NUMBER of type int
 {closure:/main.php:22}(): Argument #1 ($value) must be of type int, string given, called in /main.php on line 23
+29:namedDefaults(): Argument #2 ($number) must be of type int, string given, called in /main.php on line 32
+#0 /main.php(32): namedDefaults(1, 'text', 3)
+#1 {main}
+#0 /main.php(37): unpackedDefaults(extra: 1)
+#1 {main}
+41:{closure:/main.php:39}(): Argument #1 ($number) must be of type int, string given, called in /main.php on line 43

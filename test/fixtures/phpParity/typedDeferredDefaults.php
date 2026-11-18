@@ -22,3 +22,23 @@ catch (TypeError $error) { echo $error->getMessage(), "\n"; }
 $closure = function (int $value = NON_NUMERIC) {};
 try { $closure(); }
 catch (TypeError $error) { echo $error->getMessage(), "\n"; }
+
+function namedDefaults(
+    $first = 1,
+    int $number =
+        NON_NUMERIC,
+    $tail = 2
+) {}
+try { namedDefaults(tail: 3); }
+catch (TypeError $error) {
+    echo $error->getLine(), ':', $error->getMessage(), "\n", $error->getTraceAsString(), "\n";
+}
+function unpackedDefaults(int $number = NON_NUMERIC, ...$extra) {}
+try { unpackedDefaults(extra: 1); }
+catch (TypeError $error) { echo $error->getTraceAsString(), "\n"; }
+$refDefault = function (
+    int $number =
+        NON_NUMERIC
+) {};
+try { $refDefault(); }
+catch (TypeError $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }

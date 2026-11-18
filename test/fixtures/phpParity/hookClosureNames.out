@@ -4,3 +4,5 @@
 #1 /main.php(23): HookNames->$name::set('value')
 #2 {main}
 HookNames::{closure:HookNames::$type::get():15}(): Argument #1 ($input) must be of type string, array given, called in /main.php on line 16
+{closure:class@anonymous~/main.php:28$0::$name::get():30}
+{closure:{closure:class@anonymous~/main.php:28$0::inspect():34}:35}

@@ -12,7 +12,6 @@ import {
   checkNamedArgs,
   classMethodLabel,
   closureFunction,
-  closureFunctionName,
   functionDisplayName,
   handOverArgs,
   invoke,
@@ -576,9 +575,9 @@ export function closureTarget(closure: PhpObject): CallTarget {
 }
 
 export function callableClosureName(closure: PhpObject): string {
-  const { fn, method, scope } = closureTarget(closure);
+  const { fn, method } = closureTarget(closure);
   if (method) return `${method.scope.fullName}::${method.name}`;
-  if (fn.kind === 'user' && fn.decl.isClosure) return closureFunctionName(fn.decl, scope);
+  if (fn.kind === 'user' && fn.decl.isClosure) return fn.decl.name;
   return fn.name;
 }
 

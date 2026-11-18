@@ -141,6 +141,7 @@ $object
 class StaticDiagnostics {
     public static $value = 0;
     public static int $typed = 0;
+    public static $unset = null;
 }
 StaticDiagnostics::$value
     +=
@@ -167,3 +168,56 @@ $array = [
             2.5 => 1
         ]
 ];
+
+$target = [];
+$target
+    ['new']
+    ??=
+    $absentArray;
+$object
+    ->another
+    ??=
+    $absentProperty;
+StaticDiagnostics
+    ::$unset
+    ??=
+    $absentStatic;
+
+try {
+    MissingClass
+        ::$value
+        ++;
+} catch (Error $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }
+try {
+    MissingClass
+        ::
+            $value
+        = 1;
+} catch (Error $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }
+$array = [
+    1.5 =>
+        1 +
+        2
+];
+$array = [
+    1.5 =>
+        "a" .
+        "b"
+];
+$array = [
+    1.5 =>
+        1 ?
+        2 :
+        3
+];
+const
+    FOLDED_ARRAY = [
+        1.5 =>
+            1
+    ];
+function constantArrayDefault($value = [
+    1.5 =>
+        1
+]) {}
+constantArrayDefault();
+echo "finished diagnostics\n";

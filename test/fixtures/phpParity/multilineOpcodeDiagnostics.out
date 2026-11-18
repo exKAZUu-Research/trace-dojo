@@ -74,15 +74,34 @@ Warning: Undefined variable $unknownObject in /main.php on line 138
 
 Warning: Undefined property: stdClass::$second in /main.php on line 138
 
-Warning: Undefined variable $unknownStatic in /main.php on line 145
-150:Cannot assign string to property StaticDiagnostics::$typed of type int
+Warning: Undefined variable $unknownStatic in /main.php on line 146
+151:Cannot assign string to property StaticDiagnostics::$typed of type int
 
-Warning: Undefined property: stdClass::$nested in /main.php on line 155
+Warning: Undefined property: stdClass::$nested in /main.php on line 156
 
-Warning: Undefined array key "key" in /main.php on line 156
+Warning: Undefined array key "key" in /main.php on line 157
 
-Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 161
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 162
 
-Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.php on line 167
+Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.php on line 168
 
-Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 167
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 168
+
+Warning: Undefined variable $absentArray in /main.php on line 174
+
+Warning: Undefined variable $absentProperty in /main.php on line 178
+
+Warning: Undefined variable $absentStatic in /main.php on line 182
+188:Class "MissingClass" not found
+194:Class "MissingClass" not found
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 199
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 206
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 210
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 214
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 218
+finished diagnostics

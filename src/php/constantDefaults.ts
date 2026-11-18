@@ -16,6 +16,7 @@ interface FoldContext {
   budget?: FoldBudget;
   compiler?: boolean;
   preserveNamedConstants?: boolean;
+  preserveClassConstants?: boolean;
   classConstant?: ClassConstantLookup;
   className?: (cls: ClassRef) => string | undefined;
   magic?: (token: Extract<Expr, { k: 'magic' }>['name']) => string | undefined;
@@ -80,6 +81,7 @@ function fold(expression: Expr, context: BoundedFoldContext): Folded {
       return interpolatedConstant(expression.parts, context);
     }
     case 'cconst': {
+      if (context.preserveClassConstants) return UNKNOWN;
       if (expression.className) {
         if (expression.cls.k === 'named') return expression.cls.name;
         return context.className?.(expression.cls) ?? UNKNOWN;

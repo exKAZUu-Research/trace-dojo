@@ -16,9 +16,16 @@ export class CompileClassConstants {
     return (cls, name) => this.get(cls, name, scope, closure);
   }
 
-  add(decl: ClassDecl, name: string, expression: Expr, type: TypeDecl | undefined): string | undefined {
+  add(
+    decl: ClassDecl,
+    name: string,
+    expression: Expr,
+    type: TypeDecl | undefined,
+    magic: (token: Extract<Expr, { k: 'magic' }>['name']) => string | undefined
+  ): string | undefined {
     const value = foldedConstant(expression, {
       budget: this.budget(),
+      magic,
       classConstant: this.lookup(decl),
       className: (cls) => this.className(cls, decl),
     });

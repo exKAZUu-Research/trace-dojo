@@ -644,7 +644,10 @@ function insertArrayItem(array: PhpArray, item: Extract<Expr, { k: 'array' }>['i
     slot.isRef = true;
     slot.rc++;
   } else slot = share(ev(item.value));
-  const key = readKey === undefined ? undefined : readLiteralKey(item.key!, readKey, compiledOperandRow(item.value));
+  const key =
+    readKey === undefined
+      ? undefined
+      : readLiteralKey(item.key!, readKey, item.keyOpcodeRow ?? compiledOperandRow(item.value));
   const previous = key === undefined ? undefined : array.map.get(key);
   if (key !== undefined) array.setSlot(key, slot);
   else if (!array.append(slot))

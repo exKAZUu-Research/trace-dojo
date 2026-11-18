@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 717 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 729 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -169,7 +169,7 @@ export function functionDisplayName(target: CallTarget, parameter = false): stri
   if (fn.kind === 'user' && fn.decl.isPropertyHook)
     return scope && parameter ? classMethodLabel(scope, fn.name) : `${scope?.name ?? fn.decl.className}::${fn.name}`;
   if (fn.kind === 'user' && fn.decl.isClosure) {
-    const name = closureFunctionName(fn.decl, scope);
+    const name = fn.decl.name;
     return scope && parameter ? classMethodLabel(scope, name) : `${scope ? `${scope.name}::` : ''}${untilNul(name)}`;
   }
   return fn.name;
@@ -177,10 +177,6 @@ export function functionDisplayName(target: CallTarget, parameter = false): stri
 
 export function classMethodLabel(scope: PhpClass, method: string): string {
   return untilNul(`${scope.fullName}::${method}`);
-}
-
-export function closureFunctionName(decl: FunctionDecl, scope: PhpClass | undefined): string {
-  return scope?.isAnonymous ? decl.name.replace(scope.name, scope.fullName) : decl.name;
 }
 
 function recordFor(target: CallTarget, args: Value[], row: number | undefined): CallRecord {
@@ -207,7 +203,7 @@ function recordFor(target: CallTarget, args: Value[], row: number | undefined): 
   if (fn.kind === 'user' && fn.decl.isClosure) {
     const scope = target.scope;
     return {
-      name: closureFunctionName(fn.decl, scope),
+      name: fn.decl.name,
       className: scope?.fullName,
       type: scope ? (thisObj ? '->' : '::') : undefined,
       thisObj,
@@ -593,13 +589,7 @@ function invokeUser(
   const positional = positionalArguments(args);
   const params = fn.params;
   checkNamedArgs(params, args);
-  frame.args = positional.map((arg) => arg.ref?.v ?? arg.v);
-  for (const arg of args) {
-    const index = arg.name === undefined ? -1 : params.findIndex((param) => !param.variadic && param.name === arg.name);
-    if (index >= 0) frame.args[index] = arg.ref?.v ?? arg.v;
-  }
-  frame.args = Array.from({ length: frame.args.length }, (_, index) => frame.args[index] ?? null);
-  const record = recordFor(target, [...frame.args], row ?? implicitCallRow());
+  const record = recordForUserCall(target, params, positional, args, row);
   frame.args = args.map((arg) => arg.ref?.v ?? arg.v);
   frame.argumentHolders = [...frame.args];
   const savedRow = runtime.row;
@@ -670,6 +660,31 @@ function invokeUser(
   }
   runtime.lastReturnRef = !discardResult && frame.returning instanceof Ref ? frame.returning : undefined;
   return returned;
+}
+
+function recordForUserCall(
+  target: CallTarget,
+  params: Param[],
+  positional: ArgValue[],
+  args: ArgValue[],
+  row: number | undefined
+): CallRecord {
+  const fixed = positional.map((arg) => arg.ref?.v ?? arg.v);
+  const named: [string, Value][] = [];
+  for (const arg of args) {
+    if (arg.name === undefined) continue;
+    const index = params.findIndex((param) => !param.variadic && param.name === arg.name);
+    const value = arg.ref?.v ?? arg.v;
+    if (index !== -1) fixed[index] = value;
+    else named.push([arg.name, value]);
+  }
+  const record = recordFor(
+    target,
+    Array.from({ length: fixed.length }, (_, index) => fixed[index] ?? null),
+    row ?? implicitCallRow()
+  );
+  if (named.length > 0) record.named = named;
+  return record;
 }
 
 function completeUserReturn(decl: FunctionDecl, frame: Frame, value: Value, target: CallTarget): Value {
@@ -903,7 +918,7 @@ export function setDefaultEvaluator(run: (decl: FunctionDecl, index: number, fra
   evaluateDefault = run;
 }
 
-// code-gauge-allow functionNcss 55 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
+// code-gauge-allow functionNcss 59 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 // code-gauge-allow functionParameterCount 7 -- Binds arguments to parameters as PHP's call protocol does, in its order of checks.
 function bindParams(
   frame: Frame,
@@ -915,6 +930,7 @@ function bindParams(
   callRow: number | undefined
 ): void {
   const params = fn.params;
+  const record = callStack.at(-1);
   let holderIndices: Map<ArgValue, number> | undefined;
   const bindSupplied = (arg: ArgValue, param: Param, index: number, assign: (slot: Value | Ref) => void): void => {
     const ref = param.byRef ? bindRef(arg) : undefined;
@@ -967,7 +983,9 @@ function bindParams(
         );
       }
       const value = evaluateDefault(fn.decl, index, frame);
-      rt().row = fn.decl.row;
+      const declared = fn.decl.params[index];
+      rt().row = declared.defaultReportRow ?? declared.row;
+      if (record && index < record.args.length) record.args[index] = value;
       const checked = checkParam(value, param, index, labels.parameter, rt().strictTypes, frame, callRow);
       frame.vars.set(param.name, new Ref(checked));
       continue;
