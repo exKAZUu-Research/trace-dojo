@@ -1,5 +1,5 @@
 import { checkOutputSize } from './allocation';
-// code-gauge-allow-file fileNcss 821 -- Keeps format parsing and rendering with their shared specifiers.
+// code-gauge-allow-file fileNcss 825 -- Keeps format parsing and rendering with their shared specifiers.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
@@ -69,7 +69,6 @@ export interface FormatOutput {
   readonly length: number;
   push: (...bytes: number[]) => number;
   checkSize?: (length: number) => void;
-  checkMaterializedSize?: (length: number) => void;
   writeView?: (length: number, get: (index: number) => number) => void;
   writeChunks?: (length: number, get: (index: number) => number, chunkSize: number) => void;
   repeat?: (byte: number, count: bigint) => void;
@@ -1002,8 +1001,6 @@ function formatScientific(input: Decimal, requested: bigint | undefined): string
 const FLOAT_BUFFER_SIZE = 347;
 
 /** `std.fmt.float.formatDecimal`. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Keeps checked sizing and the three decimal point positions together.
-// code-gauge-allow functionNcss 32 -- Keeps checked sizing and the three decimal point positions together.
 function formatDecimal(input: Decimal, requested: bigint | undefined, bufferSize: number): string | undefined {
   if (input.special) return special(input);
   const decimal = requested === undefined ? input : roundDecimal(input, 'decimal', requested);
@@ -1016,7 +1013,15 @@ function formatDecimal(input: Decimal, requested: bigint | undefined, bufferSize
     USIZE
   );
   if (needed > bufferSize) return undefined;
+  const text = renderDecimal(decimal, digits, requested);
+  if (text.length > bufferSize) indexOutOfBounds(text.length, bufferSize);
+  return text;
+}
+
+// code-gauge-allow functionCognitiveComplexity 18 -- Handles each of the native renderer's decimal point positions.
+function renderDecimal(decimal: Decimal, digits: string, requested: bigint | undefined): string {
   const precision = requested === undefined ? undefined : Number(requested);
+  const olength = digits.length;
   let text = decimal.sign ? '-' : '';
   const pointOffset = decimal.exponent + olength;
   if (pointOffset <= 0) {
@@ -1044,11 +1049,15 @@ function formatDecimal(input: Decimal, requested: bigint | undefined, bufferSize
 }
 
 /** `printFloatHex`: a float as `0x1.8p1`. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the precision guard with the special and finite encodings.
+// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the fixed-buffer checks with finite and special encodings.
 function printFloatHex(out: FormatOutput, value: AnyFloat, bits: FloatBits, upper: boolean, options: Options): void {
   const big = asBigFloat(value);
+  const bufferSize = 50;
+  if (big.kind === 'finite' && options.precision !== undefined && options.precision > bufferSize) {
+    checked(BigInt(big.sign ? 5 : 4) + options.precision, USIZE);
+    panic('attempt to unwrap error: WriteFailed');
+  }
   const precision = options.precision === undefined ? undefined : Number(options.precision);
-  if (big.kind === 'finite') checkPrecisionSize(out, precision);
   let text = big.sign ? '-' : '';
   if (big.kind === 'nan') text += upper ? 'NAN' : 'nan';
   else if (big.kind === 'inf') text += upper ? 'INF' : 'inf';
@@ -1056,6 +1065,7 @@ function printFloatHex(out: FormatOutput, value: AnyFloat, bits: FloatBits, uppe
     const zeros = precision === undefined ? '.0' : precision > 0 ? `.${'0'.repeat(precision)}` : '';
     text += `0x0${zeros}p0`;
   } else text += hexFloatDigits(big, bits, upper, precision);
+  if (text.length > bufferSize) panic('attempt to unwrap error: WriteFailed');
   alignBuffer(out, utf8(text), options);
 }
 
@@ -1117,9 +1127,4 @@ function appendBytes(out: FormatOutput, bytes: readonly number[]): void {
 function checkFormatSize(out: FormatOutput, length: number): void {
   if (out.checkSize) out.checkSize(length);
   else checkOutputSize(length);
-}
-
-function checkPrecisionSize(out: FormatOutput, precision = 0): void {
-  if (out.checkMaterializedSize) out.checkMaterializedSize(precision);
-  else checkFormatSize(out, out.length + precision);
 }

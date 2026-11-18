@@ -1091,11 +1091,15 @@ pub fn main(init:std.process.Init)!void{
   ).toMatchObject({ kind: 'executed', stderr: '4 1 3 2 ', uncaughtException: undefined });
 });
 
-test('hexadecimal zero precision is bounded before allocating padding', () => {
-  for (const value of ['0.0', '-0.0']) {
-    const source = `const std = @import("std"); pub fn main() void { std.debug.print("{x:.999999999999}", .{@as(f128, ${value})}); }`;
-    expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'output' });
-  }
+test.each([
+  ['0.0', 44n, `0x0.${'0'.repeat(44)}p0`, undefined],
+  ['-0.0', 44n, '', 'panic: attempt to unwrap error: WriteFailed'],
+  ['1.5', 45n, '', 'panic: attempt to unwrap error: WriteFailed'],
+  ['0.0', 999_999_999_999n, '', 'panic: attempt to unwrap error: WriteFailed'],
+  ['1.5', 18_446_744_073_709_551_615n, '', 'panic: integer overflow'],
+])('hexadecimal %s at precision %s follows the native buffer bounds', (value, precision, stderr, uncaughtException) => {
+  const source = `const std=@import("std");pub fn main()void{std.debug.print("{x:.${precision}}",.{@as(f128,${value})});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr, uncaughtException });
 });
 
 test('repeated prints into a large fixed writer stay within the execution budget', () => {
@@ -4511,6 +4515,19 @@ test.each([
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr, uncaughtException });
 });
 
+test.each([
+  ['{Bi:.53}', '@as(usize,1000000)', 57, 56],
+  ['{Bi:.54}', '@as(usize,1000000)', 58, 56],
+  ['{d:.345}', '@as(f64,-976.5625)', 350, 347],
+])('decimal rendering %s checks actual output before the caller appends anything', (format, value, index, limit) => {
+  const source = `const std=@import("std");pub fn main()void{std.debug.print("${format}",.{${value}});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '',
+    uncaughtException: `panic: index out of bounds: index ${index}, len ${limit}`,
+  });
+});
+
 test('known widths retain value coercion while byte-size parameters enforce typed ranges', () => {
   expect(
     executeProgram('zig', 'const std=@import("std");pub fn main()void{std.debug.print("{d:[1]}",.{3,@as(u128,3)});}')
@@ -7689,6 +7706,16 @@ test.each([
     stderr: `20 ${value}`,
     uncaughtException: undefined,
   });
+});
+
+test.each([
+  ['AutoHashMap(u8,Turtle)', '', '20'],
+  ['AutoHashMap(u8,Turtle)', 'try m.put(7,Turtle.init(0,1));', '0'],
+  ['StringHashMap(Turtle)', '', '20'],
+  ['StringHashMap(Turtle)', 'try m.put("key",Turtle.init(0,1));_=m.remove("key");', '20'],
+])('turtle queries scan only occupied entries in %s: %s', (map, setup, stderr) => {
+  const source = `const std=@import("std");pub fn main(init:std.process.Init)!void{var m=std.${map}.init(init.gpa);defer m.deinit();try m.ensureTotalCapacity(100000);${setup}const t=Turtle.init(0,0);var count:usize=0;for(0..20)|_|{if(t.canMoveForward())count+=1;}std.debug.print("{}",.{count});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr, uncaughtException: undefined });
 });
 
 test.each(['[0]f32', '[0][]u8', '[2][0]f32'])('empty %s map keys do not hash an unused element type', (type) => {

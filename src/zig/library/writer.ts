@@ -109,11 +109,6 @@ export class WriterFormatOutput implements FormatOutput {
   checkSize(length: number): void {
     if (this.destination.flushAfterFormat) checkOutputSize(length);
   }
-
-  checkMaterializedSize(length: number): void {
-    this.checkSize(this.length + length);
-    this.frame.runtime.spend(length);
-  }
 }
 
 export function discardingWriter(): WriterState {

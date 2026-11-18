@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 464 -- Keeps hash-map state, storage layout, and public method registration together.
+// code-gauge-allow-file fileNcss 467 -- Keeps hash-map state, storage layout, and public method registration together.
 import { allocationSlots, transferCost } from '../allocation';
 import { reserveAllocatorBytes } from '../allocatorStorage';
 // code-gauge-allow-file duplicateLines 19 -- Library types repeat the same shape of method on purpose, each over its own state.
@@ -65,8 +65,7 @@ type KeyKind = 'auto' | 'string';
 
 interface MapState extends Record<string, unknown> {
   capacity: number;
-  /** 0 for free, 1 for a tombstone, and 0x80 | fingerprint for a used slot, as Zig's `Metadata` bytes. */
-  metadata: number[];
+  metadata: MapMetadata;
   keys: ZArray;
   values: ZArray;
   size: number;
@@ -74,6 +73,27 @@ interface MapState extends Record<string, unknown> {
   allocator?: AllocatorState;
   memory?: object;
   header?: ZStruct;
+}
+
+class MapMetadata {
+  readonly occupied = new Set<number>();
+
+  constructor(private readonly bytes: number[]) {}
+
+  get(index: number): number {
+    return this.bytes[index];
+  }
+
+  set(index: number, value: number): void {
+    this.bytes[index] = value;
+    if ((value & 0x80) === 0) this.occupied.delete(index);
+    else this.occupied.add(index);
+  }
+
+  clear(): void {
+    this.bytes.fill(0);
+    this.occupied.clear();
+  }
 }
 
 const MINIMAL_CAPACITY = 8;
@@ -137,7 +157,7 @@ function capacityForSize(size: number): number {
 function emptyState(): MapState {
   return {
     capacity: 0,
-    metadata: [],
+    metadata: new MapMetadata([]),
     keys: new ZArray([]),
     values: new ZArray([]),
     size: 0,
@@ -157,9 +177,9 @@ function getIndex(frame: Frame, state: MapState, key: Value, keyType: Type, kind
   const print = fingerprint(hash);
   let limit = state.capacity;
   let index = Number(hash & BigInt(mask));
-  while (state.metadata[index] !== 0 && limit !== 0) {
+  while (state.metadata.get(index) !== 0 && limit !== 0) {
     frame.runtime.spend();
-    if (state.metadata[index] === (0x80 | print) && keysEqual(frame, key, state.keys.slots[index], keyType, kind))
+    if (state.metadata.get(index) === (0x80 | print) && keysEqual(frame, key, state.keys.slots[index], keyType, kind))
       return index;
     limit--;
     index = (index + 1) & mask;
@@ -180,12 +200,12 @@ function putNoClobber(
   const hash = hashOf(frame, key, keyType, kind);
   const mask = state.capacity - 1;
   let index = Number(hash & BigInt(mask));
-  while ((state.metadata[index] & 0x80) !== 0) {
+  while ((state.metadata.get(index) & 0x80) !== 0) {
     frame.runtime.spend();
     index = (index + 1) & mask;
   }
   state.available--;
-  state.metadata[index] = 0x80 | fingerprint(hash);
+  state.metadata.set(index, 0x80 | fingerprint(hash));
   storeMapSlot(frame, state.keys, index, key, keyType);
   storeMapSlot(frame, state.values, index, value, valueType);
   state.size++;
@@ -225,7 +245,7 @@ function grow(
   }
   state.capacity = capacity;
   state.memory = memory;
-  state.metadata = metadata;
+  state.metadata = new MapMetadata(metadata);
   state.keys = keys;
   state.values = values;
   state.available = Math.floor((capacity * MAX_LOAD) / 100);
@@ -233,7 +253,7 @@ function grow(
   state.size = 0;
   for (let index = 0; index < old.capacity && state.size < size; index++) {
     frame.runtime.spend();
-    if ((old.metadata[index] & 0x80) === 0) continue;
+    if ((old.metadata.get(index) & 0x80) === 0) continue;
     putNoClobber(frame, state, old.keys.slots[index], old.values.slots[index], keyType, valueType, kind);
   }
   if (old.memory) freeMemory(old.allocator, old.memory);
@@ -307,11 +327,11 @@ function getOrPut(
   let limit = state.capacity;
   let index = Number(hash & BigInt(mask));
   let firstTombstone = state.capacity;
-  while (state.metadata[index] !== 0 && limit !== 0) {
+  while (state.metadata.get(index) !== 0 && limit !== 0) {
     frame.runtime.spend();
-    if (state.metadata[index] === (0x80 | print)) {
+    if (state.metadata.get(index) === (0x80 | print)) {
       if (keysEqual(frame, key, state.keys.slots[index], keyType, kind)) return { index, found: true };
-    } else if (firstTombstone === state.capacity && state.metadata[index] === 1) {
+    } else if (firstTombstone === state.capacity && state.metadata.get(index) === 1) {
       firstTombstone = index;
     }
     limit--;
@@ -319,7 +339,7 @@ function getOrPut(
   }
   if (firstTombstone < state.capacity) index = firstTombstone;
   state.available--;
-  state.metadata[index] = 0x80 | print;
+  state.metadata.set(index, 0x80 | print);
   frame.runtime.spend(transferCost(keyType) + transferCost(valueType));
   storeMapSlot(frame, state.keys, index, undefinedValue(keyType), keyType);
   storeMapSlot(frame, state.values, index, undefinedValue(valueType), valueType);
@@ -328,7 +348,7 @@ function getOrPut(
 }
 
 function removeAt(frame: Frame, state: MapState, index: number, keyType: Type, valueType: Type): void {
-  state.metadata[index] = 1;
+  state.metadata.set(index, 1);
   frame.runtime.spend(transferCost(keyType) + transferCost(valueType));
   storeMapSlot(frame, state.keys, index, undefinedValue(keyType), keyType);
   storeMapSlot(frame, state.values, index, undefinedValue(valueType), valueType);
@@ -601,7 +621,7 @@ function defineMembers(types: MapTypes, keyType: Type, valueType: Type, kind: Ke
       { args: [], result: VOID, mutable: true },
       (state, _args, frame) => {
         frame.runtime.spend(state.capacity);
-        state.metadata.fill(0);
+        state.metadata.clear();
         state.size = 0;
         state.available = Math.floor((state.capacity * MAX_LOAD) / 100);
         return;
@@ -673,7 +693,7 @@ function advance(returns: (state: MapState, index: number) => Value): (iteratorS
     if (state.size === 0) return NULL;
     while (index < state.capacity) {
       frame.runtime.spend();
-      if ((state.metadata[index] & 0x80) !== 0) {
+      if ((state.metadata.get(index) & 0x80) !== 0) {
         iteratorState.slots[1] = BigInt(index + 1);
         return returns(state, index);
       }
@@ -756,10 +776,10 @@ function mapAllocation(state: Record<string, unknown>, type: StructType): Native
     const visitKeys = mayContainTurtles(keyType);
     const visitValues = mayContainTurtles(valueType);
     if (!visitKeys && !visitValues) return;
-    const metadata = state.metadata as number[];
-    for (let index = 0; index < metadata.length; index++) {
+    const metadata = state.metadata as MapMetadata;
+    for (const index of metadata.occupied) {
       spend();
-      if ((metadata[index] & 0x80) === 0) continue;
+      if ((metadata.get(index) & 0x80) === 0) continue;
       if (visitKeys) yield { value: (state.keys as ZArray).get(index), type: keyType };
       if (visitValues) yield { value: (state.values as ZArray).get(index), type: valueType };
     }
