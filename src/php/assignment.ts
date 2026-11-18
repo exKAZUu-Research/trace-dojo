@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 837 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 847 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -128,8 +128,10 @@ function dimensionPlace(e: Extract<Expr, { k: 'idx' }>, mode: PlaceMode): Place 
   const readKey = e.index === undefined ? undefined : prepareOperand(e.index);
   const resolve = (writeMode: WriteMode, beforeOffsetGet?: BeforeOffsetGet, warning?: UpdateWarning): Place => {
     const { key, keyWarning } = readDimensionKey(readKey, warning);
-    rt().row = e.row;
+    const row = e.index?.row ?? e.row;
+    rt().row = row;
     const fetch = nestedPlace(parent, writeMode);
+    rt().row = row;
     const container = writableContainer(fetch, undefined, writeMode !== 'write');
     if (container instanceof PhpObject) {
       if (beforeOffsetGet && !isArrayAccess(container)) {
@@ -748,10 +750,21 @@ export function assignExpression(target: Expr, valueExpr: Expr): Value {
     return ref.v;
   }
   const place = placeOf(target, 'deferred');
-  const value = prepareOperand(valueExpr);
+  const read = prepareOperand(valueExpr);
+  if (isCompiledVariable(valueExpr) && !dimensionWritesOwnVariable(target, valueExpr)) {
+    runtime.row = target.row;
+    return assignWithOperandWarning(place, valueExpr, read, target.row);
+  }
+  const value = share(read());
   runtime.row = target.row;
-  if (isCompiledVariable(valueExpr)) return assignWithOperandWarning(place, valueExpr, value, target.row);
-  return assignPlace(place, () => share(value(target.row)));
+  return assignPlace(place, () => value);
+}
+
+function dimensionWritesOwnVariable(target: Expr, value: Expr): boolean {
+  if (target.k !== 'idx' || value.k !== 'var') return false;
+  let root: Expr = target;
+  while (root.k === 'idx' || root.k === 'prop') root = root.k === 'idx' ? root.base : root.obj;
+  return root.k === 'var' && root.name === value.name;
 }
 
 function assignWithOperandWarning(place: Place, expression: Expr, read: (row?: number) => Value, row: number): Value {
@@ -879,14 +892,18 @@ export function destructureAssignment(target: Extract<Expr, { k: 'list' }>, expr
   return destructure(target, value, returned ? new RefPlace(returned) : undefined);
 }
 
-export function destructure(target: Extract<Expr, { k: 'list' }>, value: Value, source?: Place): Value {
+export function destructure(
+  target: Extract<Expr, { k: 'list' }>,
+  value: Value,
+  source?: Place,
+  fetchRow = target.row
+): Value {
   if (hasReferenceItem(target) && (value instanceof PhpArray || (source && (value === null || value === false)))) {
     const place = source ?? new RefPlace(Ref.temporary(share(value)));
     value = writableContainer(place, value === false ? null : value);
   }
   rt().frame.temporaries.push(value);
   let position = 0n;
-  let fetchRow = target.row;
   for (const item of target.items) {
     if (item === undefined) {
       position++;
@@ -916,7 +933,7 @@ function destructureItem(item: ListItem, value: Value, key: Key, writable: boole
   }
   if (item.target.k === 'list') {
     const source = value instanceof PhpArray ? new ElementPlace(value, key) : undefined;
-    destructure(item.target, element, source);
+    destructure(item.target, element, source, rt().row);
   } else placeOf(item.target).set(share(element));
 }
 

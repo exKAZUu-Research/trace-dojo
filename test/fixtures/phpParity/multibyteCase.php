@@ -32,3 +32,8 @@ foreach (["ǆemal ǉ ǌ ǳ", "ßa", "ﬁx ﬂow", "ŉa", "ǰa", "ᾀa ᾳ ᾲ �
   echo mb_convert_case($x, MB_CASE_UPPER), "|", mb_convert_case($x, MB_CASE_UPPER_SIMPLE), "|", mb_convert_case($x, MB_CASE_LOWER), "|", mb_convert_case($x, MB_CASE_LOWER_SIMPLE), "\n";
   echo mb_convert_case($x, MB_CASE_FOLD), "|", mb_convert_case($x, MB_CASE_FOLD_SIMPLE), "|", mb_strtoupper($x), "|", mb_strtolower($x), "\n";
 }
+
+foreach (["\u{1FD3}" => "\u{0390}", "\u{1FE3}" => "\u{03B0}", "\u{FB05}" => "\u{FB06}"] as $source => $folded) {
+    var_dump(mb_convert_case($source, MB_CASE_FOLD_SIMPLE, 'UTF-8') === $folded);
+    var_dump(mb_stripos("z$source", $folded, 0, 'UTF-8'));
+}

@@ -587,6 +587,13 @@ test.each([
   expect(run(`<?php echo 'before'; ${source}`)).toMatchObject({ kind: 'compileError', diagnostics: [{ message }] });
 });
 
+test('rejects directly declared abstract methods on anonymous classes before execution', () => {
+  expect(run("<?php echo 'before';\nnew class {\nabstract function rejected();\n};")).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: 'Anonymous class method rejected() must not be abstract' }],
+  });
+});
+
 test.each([String.raw`/(a)?\1/`, String.raw`/(?<x>a)?\k<x>/`])(
   'does not match an empty subject through a reference to an unmatched group: %s',
   (pattern) => {

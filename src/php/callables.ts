@@ -1,14 +1,15 @@
-// code-gauge-allow-file fileNcss 620 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 643 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
 import { hasNullsafeReceiver } from './astAnalysis';
-import { simpleSprintfFormat } from './builtinCompiler';
+import { oneArgumentBuiltinOpcodes, simpleSprintfFormat } from './builtinCompiler';
 import builtinNames from './builtinNames.json';
 import { lower } from './bytes';
 import {
   type ArgValue,
   type CallTarget,
+  checkNamedArgs,
   classMethodLabel,
   closureFunction,
   closureFunctionName,
@@ -41,6 +42,7 @@ import {
   type ClosureData,
   isClosure,
   type Method,
+  type NativeFunction,
   PhpArray,
   type PhpClass,
   PhpObject,
@@ -180,8 +182,22 @@ function permitsTemporaryReference(e: Expr): boolean {
   if (e.fcc) return false;
   if ('k' in e.fn || e.fn.fallback) return true;
   const fn = rt().functions.get(lower(e.fn.name));
-  if (fn?.kind !== 'native') return true;
-  return !specializedCall(fn, e.args) && (fn.name !== 'sprintf' || simpleSprintfFormat(e.args) === undefined);
+  return fn?.kind !== 'native' || !compiledTemporaryResult(fn, e.args);
+}
+
+function compiledTemporaryResult(fn: NativeFunction, args: Arg[]): boolean {
+  const name = lower(fn.name);
+  if (name === 'call_user_func' || name === 'call_user_func_array') return false;
+  if (specializedCall(fn, args)) return true;
+  if (name === 'sprintf') return simpleSprintfFormat(args) !== undefined;
+  if (args.length !== 1 || args[0].spread || args[0].name !== undefined) return false;
+  if (oneArgumentBuiltinOpcodes.has(name)) return true;
+  const literal = args[0].e;
+  if (literal.k !== 'lit') return false;
+  const value = literal.v;
+  if (name === 'chr') return typeof value === 'bigint' && value >= 0n && value <= 255n;
+  if (name === 'ord') return typeof value === 'string' && value.length === 1;
+  return name === 'defined' && (typeof value !== 'string' || !/[\\:]/.test(value));
 }
 
 function keepUnpackedArguments(frame: Frame, args: ArgValue[], mark: number): void {
@@ -206,8 +222,8 @@ function claimArgumentTemporaries(frame: Frame, args: ArgValue[], first: number,
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 38 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 40 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = false): Value {
   const runtime = rt();
   runtime.row = e.row;
@@ -238,7 +254,13 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = 
         ? evalDeferredValueArgs(e.args, row)
         : evalArgs(e.args, fn, fn.name);
     runtime.row = row;
-    const result = invoke({ fn, inline, frameless, directOverload }, args, row, discardResult);
+    const callback = e.args[0]?.e;
+    const compiledCallback =
+      inline &&
+      ['call_user_func', 'call_user_func_array'].includes(fn.name) &&
+      callback?.k === 'lit' &&
+      typeof callback.v === 'string';
+    const result = invoke({ fn, inline, frameless, directOverload, compiledCallback }, args, row, discardResult);
     runtime.frame.temporaries.push(result);
     return result;
   }
@@ -247,7 +269,7 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = 
   runtime.row = e.initRow ?? e.row;
   const target = callTargetOf(callee, 'direct');
   if (e.fcc) return closureFromCallable(target);
-  const args = evalArgs(e.args, target.magic ? undefined : target.fn, functionNameFor(target));
+  const args = evalArgs(e.args, target.magic ? undefined : target.fn, functionDisplayName(target, true));
   runtime.row = e.row;
   const result = target.magic
     ? invokeMagic(target.magic, args, e.row, discardResult)
@@ -263,10 +285,6 @@ function evalDeferredValueArgs(args: Arg[], row: number): ArgValue[] {
   const values = reads.map((read, position) => ({ v: share(read(row)), position }));
   claimArgumentTemporaries(frame, values, 0, mark);
   return values;
-}
-
-function functionNameFor(target: CallTarget): string {
-  return target.method ? classMethodLabel(target.method.scope, target.method.name) : target.fn.name;
 }
 
 // code-gauge-allow functionNcss 48 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
@@ -289,7 +307,7 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>, discardRe
   if (isClosure(object) && lower(methodName) === '__invoke') {
     const target = closureTarget(object);
     if (e.fcc) return object;
-    const args = evalArgs(e.args, target.fn, functionNameFor(target));
+    const args = evalArgs(e.args, target.fn, functionDisplayName(target, true));
     return invoke(target, args, e.row, discardResult);
   }
   const method = lookupMethod(object.cls, lower(methodName), scope);
@@ -394,12 +412,10 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>, discardRe
   const methodName = typeof e.name === 'string' ? e.name : dynamicMethodName(ev(e.name));
   runtime.row = e.row;
   const scope = frame.scope;
-  const method =
-    typeof e.name === 'string' && lower(methodName) === '__construct'
-      ? staticConstructor(cls, scope)
-      : lookupMethod(cls, lower(methodName), scope);
+  const constructor = typeof e.name === 'string' && lower(methodName) === '__construct';
+  const method = constructor ? staticConstructor(cls, frame) : lookupMethod(cls, lower(methodName), scope);
   const thisObj = frame.thisObj && frame.thisObj.cls.isSubclassOf(cls) ? frame.thisObj : undefined;
-  if (method && canCall(method, scope)) {
+  if (method && (constructor || canCall(method, scope))) {
     const target = staticInvocationTarget(e.cls.k, cls, method, thisObj, frame.staticClass);
     if (e.fcc) return closureFromCallable(target);
     const args = evalArgs(e.args, method.fn, classMethodLabel(method.scope, method.name));
@@ -442,11 +458,11 @@ export function staticCallExpression(e: Extract<Expr, { k: 'scall' }>, discardRe
   throwError('Error', `Call to undefined method ${cls.name}::${methodName}()`);
 }
 
-function staticConstructor(cls: PhpClass, scope: PhpClass | undefined): Method {
+function staticConstructor(cls: PhpClass, frame: Frame): Method {
   const constructor = cls.findMethod('__construct');
   if (!constructor) throwError('Error', 'Cannot call constructor');
-  if (!canCall(constructor, scope))
-    throwError('Error', `Cannot call ${constructor.visibility} ${constructor.scope.name}::__construct()`);
+  if (constructor.visibility === 'private' && frame.thisObj && !canCall(constructor, frame.scope))
+    throwError('Error', `Cannot call private ${constructor.scope.name}::__construct()`);
   return constructor;
 }
 
@@ -837,9 +853,11 @@ export function callValue(
   args: ArgValue[],
   row: number | undefined,
   mode: 'direct' | 'callback' = 'callback',
-  discardResult = false
+  discardResult = false,
+  compiledTarget = false
 ): Value {
   const target = callTargetOf(callable, mode);
+  if (compiledTarget) target.dynamic = false;
   return invokeCallbackTarget(target, args, row, discardResult);
 }
 
@@ -850,6 +868,7 @@ export function invokeCallbackTarget(
   discardResult = false
 ): Value {
   if (target.magic) return invokeMagic(target.magic, args, row, discardResult);
+  checkNamedArgs(target.fn.params, args);
   warnCallbackReferenceArguments(target, args);
   return invoke(target, args, row, discardResult);
 }

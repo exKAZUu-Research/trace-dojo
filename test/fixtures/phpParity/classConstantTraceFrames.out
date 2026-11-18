@@ -7,3 +7,20 @@
 #1 {main}
 #0 {main}
 #0 {main}
+38
+#0 /main.php(44): {closure:/main.php:38}()
+#1 {main}
+39
+#0 /main.php(44): {closure:/main.php:39}()
+#1 {main}
+40
+#0 /main.php(44): {closure:/main.php:40}()
+#1 {main}
+34
+#0 /main.php(41): [constant expression]()
+#1 /main.php(44): {closure:/main.php:41}()
+#2 {main}
+31
+#0 /main.php(42): [constant expression]()
+#1 /main.php(44): {closure:/main.php:42}()
+#2 {main}

@@ -18,3 +18,22 @@ Warning: Undefined variable $unboundOne in /main.php on line 25
 Warning: Undefined variable $unboundTwo in /main.php on line 26
 30:exit(): Argument #1 ($status) must be of type string|int, array given
 33:clone(): Argument #1 ($object) must be of type object, int given
+
+Warning: Cannot use int as array in /main.php on line 36
+
+Warning: Cannot use int as array in /main.php on line 38
+
+Warning: Array to string conversion in /main.php on line 41
+Array
+Warning: Array to string conversion in /main.php on line 43
+
+Warning: Array to string conversion in /main.php on line 45
+Array50:Cannot use a scalar value as an array
+
+Warning: Constant DUPLICATE already defined, this will be an error in PHP 9 in /main.php on line 55
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 57
+
+Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.php on line 58
+60
+63:multiline

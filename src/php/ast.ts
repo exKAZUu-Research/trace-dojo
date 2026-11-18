@@ -124,7 +124,7 @@ export type Stmt = { row: number } & (
   | { k: 'unset'; targets: Expr[] }
   | { k: 'func'; decl: FunctionDecl }
   | { k: 'class'; decl: ClassDecl }
-  | { k: 'const'; items: { name: string; value: Expr }[] }
+  | { k: 'const'; items: { name: string; value: Expr; row: number }[] }
   | { k: 'goto'; label: string; offset: number }
   | { k: 'label'; name: string }
   | { k: 'nop' }

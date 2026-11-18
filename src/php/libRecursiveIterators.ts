@@ -1,11 +1,11 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { callMethod } from './callables';
+import { callMethod, consumeInvokedResult } from './callables';
 import { toBool } from './conversions';
 import { throwError } from './errors';
 import { InnerIterator, innerIteratorOf } from './libIterators';
 import { defineClass, type NativeMethod } from './native';
 import { PhpThrow, rt } from './runtime';
-import { type PhpClass, PhpObject, type Value } from './values';
+import { nativeOwnershipChanged, type PhpClass, PhpObject, type Value } from './values';
 
 const LEAVES_ONLY = 0;
 const SELF_FIRST = 1;
@@ -98,7 +98,7 @@ function validAt(object: PhpObject, state: RecursiveState): boolean {
 function rewind(object: PhpObject, state: RecursiveState): void {
   state.checkConstructed();
   while (state.levels.length > 1) {
-    state.levels.pop();
+    releaseLevel(object, state, true);
     callMethod(object, 'endChildren', []);
   }
   const root = state.levels[0];
@@ -116,10 +116,20 @@ function moveForward(object: PhpObject, state: RecursiveState): void {
     if (outcome === 'reported') return;
     if (outcome === 'exhausted') {
       if (state.levels.length === 1) return;
+      const exhausted = state.top;
       catching(state, () => hook(object, 'endChildren'));
-      state.levels.pop();
+      if (state.levels.at(-1) === exhausted) releaseLevel(object, state, false);
     }
   }
+}
+
+function releaseLevel(object: PhpObject, state: RecursiveState, rewinding: boolean): void {
+  const level = state.levels.pop() as Level;
+  nativeOwnershipChanged(object);
+  const runtime = rt();
+  const values = [level.iterator.handle, level.object];
+  runtime.release(rewinding ? values : values.toReversed(), true);
+  runtime.flushReleases(true);
 }
 
 /** Takes one step of the deepest level: reports an element, moves on, or finds the level exhausted. */
@@ -180,24 +190,42 @@ function overridableCall(object: PhpObject, name: string, sub: PhpObject, fallba
 }
 
 function descend(object: PhpObject, state: RecursiveState, level: Level): void {
-  let child: Value;
-  try {
-    child = overridableCall(object, 'callGetChildren', level.object, 'getChildren');
-  } catch (error) {
-    if (!isCaught(state, error)) throw error;
+  let failed = false;
+  const child = consumeInvokedResult(
+    () => {
+      try {
+        return overridableCall(object, 'callGetChildren', level.object, 'getChildren');
+      } catch (error) {
+        if (!isCaught(state, error)) throw error;
+        failed = true;
+        return null;
+      }
+    },
+    (result) => (failed ? undefined : appendChild(object, state, result))
+  );
+  if (!child) {
     level.step = Step.Next;
     return;
   }
-  if (!(child instanceof PhpObject) || !child.cls.isSubclassOf(rt().classes.get('recursiveiterator') as PhpClass))
+  level.step = state.mode === CHILD_FIRST ? Step.Self : Step.Next;
+  child.iterator.rewind();
+  catching(state, () => hook(object, 'beginChildren'));
+}
+
+function appendChild(object: PhpObject, state: RecursiveState, child: Value): Level {
+  const runtime = rt();
+  if (!(child instanceof PhpObject) || !child.cls.isSubclassOf(runtime.classes.get('recursiveiterator') as PhpClass))
     throwError(
       'UnexpectedValueException',
       'Objects returned by RecursiveIterator::getChildren() must implement RecursiveIterator'
     );
-  level.step = state.mode === CHILD_FIRST ? Step.Self : Step.Next;
+  const temporaryMark = runtime.frame.temporaries.length;
   const iterator = new InnerIterator(child);
-  state.levels.push({ object: child, iterator, step: Step.Start });
-  iterator.rewind();
-  catching(state, () => hook(object, 'beginChildren'));
+  const level = { object: child, iterator, step: Step.Start };
+  state.levels.push(level);
+  nativeOwnershipChanged(object);
+  runtime.discardNativeResult(iterator.handle, Infinity, temporaryMark);
+  return level;
 }
 
 const recursiveMethods: NativeMethod[] = [

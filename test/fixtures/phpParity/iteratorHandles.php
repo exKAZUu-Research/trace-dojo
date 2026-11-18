@@ -38,3 +38,16 @@ try {
     iterator_apply(new ArrayIterator([1, 2]), function () { throw new Exception('stop'); });
 } catch (Exception $error) { echo $error->getMessage(), "\n"; }
 printFreshHandle();
+
+class InheritedIterator extends ArrayObject {}
+function packIterator(...$values) {}
+foreach ([new ArrayObject([1, 2]), new InheritedIterator([3])] as $collection) {
+    foreach ($collection as $value) {}
+    printFreshHandle();
+    foreach ($collection as $value) { printFreshHandle(); break; }
+    printFreshHandle();
+    var_dump(iterator_to_array($collection), [...$collection]);
+    printFreshHandle();
+    packIterator(...$collection);
+    printFreshHandle();
+}

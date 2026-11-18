@@ -333,14 +333,12 @@ export class Runtime {
         if (held[index] !== value) continue;
         if (index === held.length - 1) held.pop();
         else held[index] = undefined;
-        break;
       }
     }
     const temporaries = this.frame.temporaries;
     for (let index = temporaries.length - 1; index >= temporaryStart; index--) {
       if (temporaries[index] !== value) continue;
       temporaries.splice(index, 1);
-      break;
     }
     this.release([value], true);
     this.flushReleases();

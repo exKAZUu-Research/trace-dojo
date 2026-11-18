@@ -14,3 +14,26 @@ try { byReference(sprintf('%s', $text)); }
 catch (Error $error) { echo $error->getMessage(), "\n"; }
 byReference(sprintf('%.2f', 1));
 byReference(explode('x', $text));
+
+echo end(call_user_func('explode', ',', 'a,b')), "\n";
+byReference(call_user_func_array('strlen', ['a']));
+byReference(call_user_func(fn () => 1));
+foreach ([fn () => byReference(is_null($text)), fn () => byReference(is_int(1)),
+    fn () => byReference(is_array([])), fn () => byReference(gettype($text)),
+    fn () => byReference(chr(65)), fn () => byReference(ord('a')),
+    fn () => byReference(defined('VALUE'))] as $check) {
+    try { $check(); }
+    catch (Error $error) { echo $error->getMessage(), "\n"; }
+}
+$code = 65;
+byReference(chr($code));
+byReference(ord('abc'));
+$callback = function (&$value) {};
+try { $callback(strlen('x')); }
+catch (Error $error) { echo $error->getMessage(), "\n"; }
+$arrow = fn (&$value) => 1;
+try { $arrow(strlen('x')); }
+catch (Error $error) { echo $error->getMessage(), "\n"; }
+class ClosureOwner { function method() { return function (&$value) {}; } }
+try { (new ClosureOwner)->method()(strlen('x')); }
+catch (Error $error) { echo $error->getMessage(), "\n"; }

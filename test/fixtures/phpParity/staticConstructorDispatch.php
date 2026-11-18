@@ -22,3 +22,19 @@ class CallsPrivate extends PrivateParent {
 }
 try { new CallsPrivate; }
 catch (Error $error) { echo $error->getMessage(), "\n"; }
+
+class ProtectedParent { protected function __construct() { echo "constructed\n"; } }
+class ProtectedChild extends ProtectedParent { function invoke() { parent::__construct(); } }
+class UnrelatedConstructorCaller { function invoke() { ProtectedParent::__construct(); } }
+class StaticPrivateChild extends PrivateParent { static function invoke() { parent::__construct(); } }
+foreach ([
+    fn () => ProtectedParent::__construct(),
+    fn () => PrivateParent::__construct(),
+    fn () => (new UnrelatedConstructorCaller)->invoke(),
+    fn () => StaticPrivateChild::invoke(),
+] as $call) {
+    try { $call(); }
+    catch (Error $error) { echo $error->getMessage(), "\n"; }
+}
+$protectedChild = new class extends ProtectedChild { function __construct() {} };
+$protectedChild->invoke();

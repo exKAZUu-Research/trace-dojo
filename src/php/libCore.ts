@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 570 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 571 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { byteAt, lower, untilNul } from './bytes';
 import { callableClosureName, callValue, checkCallable, explainCallable } from './callables';
@@ -357,23 +357,29 @@ defineFunction('clone(object $object, array $withProperties = []): object', ({ a
 });
 markInlined('clone');
 
-defineFunction('call_user_func(callable $callback, mixed ...$args): mixed', ({ args, named, row, discardResult }) => {
-  const [callback, ...rest] = args;
-  const argValues: ArgValue[] = rest.map((v) => ({ v }));
-  for (const [name, v] of named ?? []) argValues.push({ v, name });
-  if (row !== undefined) {
-    const values = rt().nativeHeld.at(-1)!;
-    for (const arg of argValues) arg.nativeTransfer = { values, count: args.length + (named?.size ?? 0) };
+defineFunction(
+  'call_user_func(callable $callback, mixed ...$args): mixed',
+  ({ args, named, row, discardResult, compiledCallback }) => {
+    const [callback, ...rest] = args;
+    const argValues: ArgValue[] = rest.map((v) => ({ v }));
+    for (const [name, v] of named ?? []) argValues.push({ v, name });
+    if (row !== undefined) {
+      const values = rt().nativeHeld.at(-1)!;
+      for (const arg of argValues) arg.nativeTransfer = { values, count: args.length + (named?.size ?? 0) };
+    }
+    return callValue(callback, argValues, row, 'callback', discardResult, compiledCallback);
   }
-  return callValue(callback, argValues, row, 'callback', discardResult);
-});
-defineFunction('call_user_func_array(callable $callback, array $args): mixed', ({ args, row, discardResult }) => {
-  const array = args[1] as PhpArray;
-  const forwarded = callbackArrayArguments(array);
-  const last = forwarded.at(-1);
-  if (last) last.nativeTransfer = { values: rt().nativeHeld.at(-1)!, count: args.length, value: array };
-  return callValue(args[0], forwarded, row, 'callback', discardResult);
-});
+);
+defineFunction(
+  'call_user_func_array(callable $callback, array $args): mixed',
+  ({ args, row, discardResult, compiledCallback }) => {
+    const array = args[1] as PhpArray;
+    const forwarded = callbackArrayArguments(array);
+    const last = forwarded.at(-1);
+    if (last) last.nativeTransfer = { values: rt().nativeHeld.at(-1)!, count: args.length, value: array };
+    return callValue(args[0], forwarded, row, 'callback', discardResult, compiledCallback);
+  }
+);
 markInlined('call_user_func');
 markInlined('call_user_func_array');
 
@@ -753,7 +759,8 @@ defineFunction(
   true
 );
 
-markDirectOnly('func_get_args', 'func_get_arg', 'func_num_args', 'get_defined_vars');
+markDirectOnly('function', 'func_get_args', 'func_get_arg', 'func_num_args');
+markDirectOnly('always', 'get_defined_vars');
 
 function checkDelay(value: bigint, name: string, parameter: string): void {
   if (value < 0n) throwError('ValueError', `${name}(): Argument #1 ($${parameter}) must be greater than or equal to 0`);

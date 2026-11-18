@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 943 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 949 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -170,6 +170,12 @@ export function consumeExpression<T>(e: Expr, consume: (value: Value) => T): T {
   return result;
 }
 
+export function evOpcodeOperand(e: Expr): Value {
+  const value = ev(e);
+  rt().row = e.row;
+  return value;
+}
+
 export function evChain(e: Expr, discardResult = false): Chain {
   const runtime = rt();
   switch (e.k) {
@@ -278,7 +284,7 @@ export function evChain(e: Expr, discardResult = false): Chain {
       return toBool(test) ? test : ev(e.alternate);
     }
     case 'cast': {
-      return cast(e.type, ev(e.e));
+      return cast(e.type, evOpcodeOperand(e.e));
     }
     case 'silence': {
       runtime.silence++;
@@ -334,6 +340,7 @@ export function evChain(e: Expr, discardResult = false): Chain {
     }
     case 'print': {
       return consumeExpression(e.e, (value) => {
+        runtime.row = e.e.row;
         runtime.echo(toStr(value));
         return 1n;
       });
@@ -649,6 +656,7 @@ function readLiteralKey(expression: Expr, read: () => Value): string | bigint {
   const undefinedVariable =
     expression.k === 'var' && isCompiledVariable(expression) && !rt().frame.vars.has(expression.name);
   const value = read();
+  rt().row = expression.row;
   return undefinedVariable ? '' : toKey(value);
 }
 

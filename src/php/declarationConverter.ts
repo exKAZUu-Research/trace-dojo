@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 833 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 835 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -639,8 +639,8 @@ export abstract class DeclarationConverter extends ConverterBase {
 
   // Classes -----------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 44 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
-  // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionNcss 47 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   classDecl(node: Node, anonymous = false, topLevel = true): ClassDecl {
     if (!this.preserveSyntax && !anonymous && this.currentClass !== undefined)
       this.error(node, 'Class declarations may not be nested');
@@ -709,6 +709,9 @@ export abstract class DeclarationConverter extends ConverterBase {
       for (const member of body.namedChildren) this.classMember(member, decl, memberNames);
     });
     if (!this.preserveSyntax) {
+      const abstractMethod = anonymous ? decl.methods.find((method) => method.isAbstract) : undefined;
+      if (abstractMethod)
+        this.error(abstractMethod.fn.row, `Anonymous class method ${abstractMethod.fn.name}() must not be abstract`);
       this.addPromotedProperties(decl);
       if (!anonymous && (!topLevel || !this.compileClasses.bind(decl))) this.runtimeDefinitionKeys++;
     }

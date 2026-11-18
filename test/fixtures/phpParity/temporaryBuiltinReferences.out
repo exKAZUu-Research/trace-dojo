@@ -13,3 +13,30 @@ array(2) {
   [1]=>
   string(5) "ample"
 }
+
+Notice: Only variables should be passed by reference in /main.php on line 18
+b
+
+Notice: Only variables should be passed by reference in /main.php on line 19
+int(1)
+
+Notice: Only variables should be passed by reference in /main.php on line 20
+int(1)
+byReference(): Argument #1 ($value) could not be passed by reference
+byReference(): Argument #1 ($value) could not be passed by reference
+byReference(): Argument #1 ($value) could not be passed by reference
+byReference(): Argument #1 ($value) could not be passed by reference
+byReference(): Argument #1 ($value) could not be passed by reference
+byReference(): Argument #1 ($value) could not be passed by reference
+byReference(): Argument #1 ($value) could not be passed by reference
+
+Notice: Only variables should be passed by reference in /main.php on line 29
+string(1) "A"
+
+Deprecated: ord(): Providing a string that is not one byte long is deprecated. Use ord($str[0]) instead in /main.php on line 30
+
+Notice: Only variables should be passed by reference in /main.php on line 30
+int(97)
+{closure:/main.php:31}(): Argument #1 ($value) could not be passed by reference
+{closure:/main.php:34}(): Argument #1 ($value) could not be passed by reference
+ClosureOwner::{closure:ClosureOwner::method():37}(): Argument #1 ($value) could not be passed by reference

@@ -1,0 +1,3 @@
+value:1;hook:1;destroy:child;value:2;end;
+again;destroy:child;hook:0;returned;
+destroy:child;destroy:root;done;

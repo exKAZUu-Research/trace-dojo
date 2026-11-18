@@ -18,3 +18,10 @@ class MagicArguments {
 }
 $callback = [new MagicArguments, 'missing'];
 $callback(named: 42);
+
+try { call_user_func('strlen', str: 'invalid'); }
+catch (Error $error) { echo $error->getTraceAsString(), "\n"; }
+try { call_user_func_array('strlen', ['str' => 'invalid']); }
+catch (Error $error) { echo $error->getTraceAsString(), "\n"; }
+try { call_user_func([new ArrayObject, 'count'], invalid: 1); }
+catch (Error $error) { echo $error->getTraceAsString(), "\n"; }

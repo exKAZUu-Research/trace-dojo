@@ -33,3 +33,27 @@ array(1) {
   [0]=>
   int(42)
 }
+array(1) {
+  ["value"]=>
+  int(42)
+}
+array(1) {
+  [0]=>
+  int(42)
+}
+int(1)
+int(1)
+int(8)
+array(3) {
+  [0]=>
+  string(5) "value"
+  [1]=>
+  string(4) "data"
+  [2]=>
+  string(9) "forwarded"
+}
+Cannot call compact() dynamically
+func_get_args() cannot be called from the global scope
+func_get_arg() cannot be called from the global scope
+func_num_args() must be called from a function context
+func_get_args() cannot be called from the global scope

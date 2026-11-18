@@ -21,7 +21,7 @@ import {
 import { toBool, valueName } from './conversions';
 import { E_DEPRECATED, E_WARNING, emitError, setPrevious, throwError, warn, withPendingException } from './errors';
 import { collectBeforeAllocation, setDestructor } from './garbage';
-import { consumeExpression, ev, evBool, evQuiet, evReturn, prepareOperand } from './interp';
+import { consumeExpression, ev, evBool, evOpcodeOperand, evQuiet, evReturn, prepareOperand } from './interp';
 import { acquireIterator } from './iteratorAcquisition';
 import { looseEquals, setObjectToString, toStr } from './operators';
 import { ElementPlace, RefPlace, share, ValuePlace, VarPlace, writableContainer } from './places';
@@ -173,9 +173,7 @@ function execStmt(statement: Stmt, seek?: string): Completion {
       case 'echo': {
         const mark = runtime.steps.statementMark();
         for (const arg of statement.args) {
-          const value = ev(arg);
-          runtime.row = arg.row;
-          runtime.echo(toStr(value));
+          runtime.echo(toStr(evOpcodeOperand(arg)));
           runtime.dropTemporaries(frame, held);
         }
         runtime.steps.completeStatement(statement.row, true, mark);
@@ -262,7 +260,11 @@ function execStmt(statement: Stmt, seek?: string): Completion {
         return undefined;
       }
       case 'const': {
-        for (const item of statement.items) defineConstant(item.name, ev(item.value));
+        for (const item of statement.items) {
+          const value = ev(item.value);
+          runtime.row = item.row;
+          defineConstant(item.name, value);
+        }
         return undefined;
       }
       case 'goto': {
@@ -741,11 +743,11 @@ setClassEvaluator((e, cls) => {
   const trigger = runtime.row;
   const frame = new Frame(undefined, undefined, false, undefined, cls, cls);
   frame.constantExpression = true;
-  const trace = cls !== undefined && trigger !== e.row;
+  const trace = !runtime.frame.constantExpression && e.k !== 'const' && trigger !== e.row;
   if (trace) callStack.push({ name: '[constant expression]', args: [], row: trigger });
   runtime.frames.push(frame);
   try {
-    return ev(e);
+    return ev(e.k === 'const' ? { ...e, row: trigger } : e);
   } finally {
     runtime.frames.pop();
     if (trace) callStack.pop();

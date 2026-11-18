@@ -13,6 +13,7 @@ import { padUnits } from './libString';
 import { defineConstant, defineFunction } from './native';
 import { toStr } from './operators';
 import { rt } from './runtime';
+import { foldSimple } from './unicodeSimpleCaseFold';
 import { UnsupportedFeatureError } from './unsupported';
 import { type NativeFunction, PhpArray, type Value } from './values';
 
@@ -341,13 +342,6 @@ function foldFull(char: string): string {
   if (code >= 0x13_f8 && code <= 0x13_fd) return String.fromCodePoint(code - 8);
   if ((code >= 0x13_a0 && code <= 0x13_f5) || char === 'ı') return char;
   return char.toLowerCase().toUpperCase().toLowerCase();
-}
-
-function foldSimple(char: string): string {
-  const folded = foldFull(char);
-  if (isOneChar(folded)) return folded;
-  const lowered = char.toLowerCase();
-  return isOneChar(lowered) ? lowered : char;
 }
 
 function mapChars(text: string, convert: (char: string) => string): string {

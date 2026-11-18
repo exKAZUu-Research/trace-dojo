@@ -2,3 +2,8 @@ Cannot call constructor
 magic __construct
 Cannot call constructor
 Cannot call private PrivateParent::__construct()
+Non-static method ProtectedParent::__construct() cannot be called statically
+Non-static method PrivateParent::__construct() cannot be called statically
+Non-static method ProtectedParent::__construct() cannot be called statically
+Non-static method PrivateParent::__construct() cannot be called statically
+constructed

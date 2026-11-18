@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 699 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 701 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -57,6 +57,7 @@ export interface CallTarget {
   closure?: PhpObject;
   magic?: MagicCall;
   dynamic?: boolean;
+  compiledCallback?: boolean;
   directOverload?: boolean;
   inline?: boolean;
   frameless?: boolean;
@@ -160,11 +161,16 @@ export function resetCallStack(): void {
 }
 
 /** The display name of a function in messages: `f`, `A::m`, or `{closure:A::m():3}`. */
-export function functionDisplayName(target: CallTarget): string {
-  const { fn, method } = target;
-  if (method) return classMethodLabel(method.scope, method.name);
-  if (fn.kind === 'user' && fn.decl.isPropertyHook) return `${target.scope?.name ?? fn.decl.className}::${fn.name}`;
-  if (fn.kind === 'user' && fn.decl.isClosure) return `${target.scope ? `${target.scope.name}::` : ''}${fn.decl.name}`;
+// code-gauge-allow functionCognitiveComplexity 16 -- PHP combines separate class and function names differently for each diagnostic format.
+export function functionDisplayName(target: CallTarget, parameter = false): string {
+  const { fn, method, scope } = target;
+  if (method) return parameter ? classMethodLabel(method.scope, method.name) : `${method.scope.name}::${method.name}`;
+  if (fn.kind === 'user' && fn.decl.isPropertyHook)
+    return scope && parameter ? classMethodLabel(scope, fn.name) : `${scope?.name ?? fn.decl.className}::${fn.name}`;
+  if (fn.kind === 'user' && fn.decl.isClosure) {
+    const name = closureFunctionName(fn.decl, scope);
+    return scope && parameter ? classMethodLabel(scope, name) : `${scope ? `${scope.name}::` : ''}${untilNul(name)}`;
+  }
   return fn.name;
 }
 
@@ -282,7 +288,8 @@ function invokeNative(
       Boolean(inline || target.directOverload),
       record
     );
-    if (target.dynamic && fn.directOnly) throwError('Error', `Cannot call ${fn.name}() dynamically`);
+    if (target.dynamic && (fn.directOnly === 'always' || (fn.directOnly === 'function' && runtime.frame.fn)))
+      throwError('Error', `Cannot call ${fn.name}() dynamically`);
     for (let index = 0; index < values.length; index++) {
       if (values[index] === undefined && fn.params[index]?.byRef)
         refs[index] = Ref.temporary(nativeDefault(fn.params[index].nativeDefault));
@@ -301,6 +308,7 @@ function invokeNative(
       calledClass: target.staticClass,
       named,
       directOverload: target.directOverload,
+      compiledCallback: target.compiledCallback,
       row: inline || target.frameless ? row : undefined,
       discardResult: Boolean(inline && discardResult),
     });
@@ -608,7 +616,7 @@ function invokeUser(
     runtime.row = decl.row;
     handOverArgs(caller, args);
     if (closure) bindClosureVars(frame, closure);
-    bindParams(frame, fn, args, positional, name, strict, row);
+    bindParams(frame, fn, args, positional, { name, parameter: functionDisplayName(target, true) }, strict, row);
     recordBoundArgs(record, params, frame, args, positional.length);
     bindArgumentHolders(frame, params, record, args);
     runtime.dropTemporaries(frame, 0);
@@ -832,7 +840,7 @@ function positionalArguments(args: ArgValue[]): ArgValue[] {
   return result;
 }
 
-function checkNamedArgs(params: Param[], args: ArgValue[]): Map<string, Value> | undefined {
+export function checkNamedArgs(params: Param[], args: ArgValue[]): Map<string, Value> | undefined {
   if (!args.some((arg) => arg.name !== undefined)) return undefined;
   const binding = new NamedArgumentBindings(params);
   for (const arg of args) binding.add(arg);
@@ -884,7 +892,7 @@ function bindParams(
   fn: UserFunction,
   args: ArgValue[],
   positional: ArgValue[],
-  name: string,
+  labels: { name: string; parameter: string },
   strict: boolean,
   callRow: number | undefined
 ): void {
@@ -894,7 +902,7 @@ function bindParams(
     const ref = param.byRef ? bindRef(arg) : undefined;
     if (ref) assign(ref);
     const original = ref ? ref.v : share(arg.v);
-    const value = checkParam(original, param, index, name, strict, frame, callRow);
+    const value = checkParam(original, param, index, labels.parameter, strict, frame, callRow);
     if (ref) {
       if (value !== original) ref.v = value;
     } else assign(value);
@@ -914,7 +922,7 @@ function bindParams(
       frame.vars.set(param.name, new Ref(rest));
       for (let at = index; at < positional.length; at++) {
         const arg = positional[at];
-        if (arg.omitted) throwError('ArgumentCountError', `${name}(): Argument #${at + 1} not passed`);
+        if (arg.omitted) throwError('ArgumentCountError', `${labels.name}(): Argument #${at + 1} not passed`);
         bindSupplied(arg, param, at, (slot) => rest.append(slot));
       }
       for (const arg of args) {
@@ -930,14 +938,14 @@ function bindParams(
         const anyNamed = args.some((candidate) => candidate.name !== undefined);
         const passed = callStack.at(-1)?.args.length ?? positional.length;
         if (arg?.omitted || (anyNamed && passed >= required)) {
-          throwError('ArgumentCountError', `${name}(): Argument #${index + 1} ($${param.name}) not passed`);
+          throwError('ArgumentCountError', `${labels.name}(): Argument #${index + 1} ($${param.name}) not passed`);
         }
         const hasOptional = params.some((other) => other.optional && !other.variadic);
         const where = callRow === undefined ? '' : ` in ${SCRIPT_PATH} on line ${callRow + 1}`;
         const expectation = hasOptional ? 'at least' : 'exactly';
         throwError(
           'ArgumentCountError',
-          `Too few arguments to function ${name}(), ${passed} passed${where} and ${expectation} ${required} expected`
+          `Too few arguments to function ${labels.name}(), ${passed} passed${where} and ${expectation} ${required} expected`
         );
       }
       const value = evaluateDefault(fn.decl, index, frame);

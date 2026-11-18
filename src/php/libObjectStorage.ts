@@ -2,12 +2,12 @@
 import { callMethod } from './callables';
 import { objectToArray } from './classes';
 import { valueName } from './conversions';
-import { deprecated, throwError } from './errors';
+import { deprecated, throwError, withCleanupExceptions } from './errors';
 import { magicSerializationMethods, serializationMethods } from './libArrayObject';
 import { defineClass, type NativeMethod } from './native';
 import { strictEquals, toKey } from './operators';
 import { share } from './places';
-import { rt } from './runtime';
+import { PhpThrow, rt } from './runtime';
 import { dropped, type Key, type NativeFunction, NativeValueIndex, PhpArray, PhpObject, type Value } from './values';
 
 interface StorageEntry {
@@ -75,7 +75,7 @@ class ObjectStorage {
     }
   }
 
-  detach(object: PhpObject): boolean {
+  detach(object: PhpObject, capture?: (error: PhpThrow) => void): boolean {
     const hash = this.hash(object);
     const entry = this.entries.get(hash);
     if (!entry) return false;
@@ -85,7 +85,12 @@ class ObjectStorage {
     this.slots[this.slots.indexOf(entry)] = undefined;
     const runtime = rt();
     runtime.release([entry.object, entry.info]);
-    runtime.flushReleases(true);
+    try {
+      runtime.flushReleases(true);
+    } catch (error) {
+      if (!capture || !(error instanceof PhpThrow)) throw error;
+      capture(error);
+    }
     return true;
   }
 
@@ -126,6 +131,20 @@ class ObjectStorage {
         `${this.holder.cls.name}::getHash(): Return value must be of type string, ${valueName(hash)} returned`
       );
     return hash;
+  }
+
+  removeAll(other: ObjectStorage): bigint {
+    return this.rewindAfter(() => {
+      withCleanupExceptions(rt(), (capture) => {
+        let position = 0;
+        while (position < other.slots.length) {
+          rt().spend();
+          const entry = other.slots[position];
+          if (!entry || !this.detach(entry.object, this.hashKeys ? undefined : capture)) position++;
+        }
+      });
+      return BigInt(this.entries.size);
+    });
   }
 
   rewindAfter<T>(operate: () => T): T {
@@ -242,19 +261,7 @@ defineClass({
     },
     {
       signature: 'removeAll(SplObjectStorage $storage): int',
-      impl: ({ thisObj, args }) => {
-        const storage = storageOf(thisObj);
-        const other = storageOf(args[0] as PhpObject);
-        return storage.rewindAfter(() => {
-          let position = 0;
-          while (position < other.slots.length) {
-            rt().spend();
-            const entry = other.slots[position];
-            if (!entry || !storage.detach(entry.object)) position++;
-          }
-          return BigInt(storage.entries.size);
-        });
-      },
+      impl: ({ thisObj, args }) => storageOf(thisObj).removeAll(storageOf(args[0] as PhpObject)),
     },
     {
       signature: 'removeAllExcept(SplObjectStorage $storage): int',

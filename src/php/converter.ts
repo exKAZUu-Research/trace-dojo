@@ -277,7 +277,11 @@ export class Converter extends DeclarationConverter {
             )
               this.error(nameNode, `syntax error, unexpected token "${name}", expecting identifier`);
             this.declareSymbol(nameNode, 'const', name);
-            return { name: this.qualify(name), value: this.constantExpr(valueNode, true) };
+            return {
+              name: this.qualify(name),
+              value: this.constantExpr(valueNode, true),
+              row: nameNode.startPosition.row,
+            };
           });
         return [{ k: 'const', items, row }];
       }
@@ -1397,7 +1401,12 @@ export class Converter extends DeclarationConverter {
     const classNode = parts.find((child) => child.type !== 'arguments') as Node;
     const { args, fcc } = argumentsNode ? this.args(argumentsNode) : { args: [], fcc: false };
     if (fcc) this.error(node, 'new で第一級 callable は作れません（Cannot create Closure for new expression）。');
-    return { k: 'new', cls: this.classRef(classNode, this.constantInitializer), args, row };
+    return {
+      k: 'new',
+      cls: this.classRef(classNode, this.constantInitializer),
+      args,
+      row: classNode.startPosition.row,
+    };
   }
 
   private binary(node: Node): Expr {

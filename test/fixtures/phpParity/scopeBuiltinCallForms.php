@@ -18,3 +18,21 @@ function checkScopeCalls() {
     var_dump(compact('value'), extract($array), $dynamic, func_get_args());
 }
 checkScopeCalls(42);
+
+function checkForwarding($value) {
+    $data = ['forwarded' => 8];
+    var_dump(call_user_func('compact', 'value'), call_user_func('func_get_args'),
+        call_user_func_array('func_num_args', []));
+    var_dump(call_user_func('extract', $data), $forwarded);
+    var_dump(array_keys(call_user_func('get_defined_vars')));
+    $callback = 'compact';
+    try { call_user_func($callback, 'value'); }
+    catch (Error $error) { echo $error->getMessage(), "\n"; }
+}
+checkForwarding(42);
+foreach (['func_get_args', 'func_get_arg', 'func_num_args', func_get_args(...)] as $callback) {
+    try {
+        if ($callback === 'func_get_arg') $callback(0);
+        else $callback();
+    } catch (Error $error) { echo $error->getMessage(), "\n"; }
+}
