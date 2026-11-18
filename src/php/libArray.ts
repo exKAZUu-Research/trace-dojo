@@ -113,7 +113,7 @@ defineFunction('count(Countable|array $value, int $mode = COUNT_NORMAL): int', (
   if (value instanceof PhpObject) {
     const countable = rt().classes.get('countable');
     if (countable && value.cls.isSubclassOf(countable)) {
-      return callMethod(value, 'count', []);
+      return toInt(callMethod(value, 'count', []));
     }
   }
   throwError('TypeError', `count(): Argument #1 ($value) must be of type Countable|array, ${valueName(value)} given`);
@@ -868,13 +868,16 @@ defineFunction(
 defineFunction('array_reverse(array $array, bool $preserve_keys = false): array', ({ args }) =>
   rebuild([...arr(args[0]).map].toReversed(), args[1] !== true)
 );
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 defineFunction('array_unique(array $array, int $flags = SORT_STRING): array', ({ args }) => {
+  const array = arr(args[0]);
+  if (array.size <= 1) return share(array);
   const flags = (args[1] as bigint | undefined) ?? 2n;
   const result = new PhpArray();
   if (flags !== 2n) {
     const compare = sortComparator(flags);
-    const entries = [...arr(args[0]).entries()].map(([key, value], position) => ({ key, value, position }));
+    const entries = [...array.entries()].map(([key, value], position) => ({ key, value, position }));
     zendSort(entries, (a, b) => {
       rt().spend();
       return compare(a.value, b.value) || a.position - b.position;
@@ -888,17 +891,17 @@ defineFunction('array_unique(array $array, int $flags = SORT_STRING): array', ({
         previous = entry;
       }
     }
-    for (const [position, [key]] of [...arr(args[0]).entries()].entries())
-      if (retained.has(position)) result.setSlot(key, copyValueSlot(arr(args[0]).map.get(key) as Value | Ref));
+    for (const [position, [key]] of [...array.entries()].entries())
+      if (retained.has(position)) result.setSlot(key, copyValueSlot(array.map.get(key) as Value | Ref));
     return result;
   }
   const strings = new Set<string>();
-  for (const [key, value] of arr(args[0]).entries()) {
+  for (const [key, value] of array.entries()) {
     rt().spend();
     const text = toStr(value);
     if (strings.has(text)) continue;
     strings.add(text);
-    result.setSlot(key, copyValueSlot(arr(args[0]).map.get(key) as Value | Ref));
+    result.setSlot(key, copyValueSlot(array.map.get(key) as Value | Ref));
   }
   return result;
 });
@@ -1042,7 +1045,7 @@ const sameAssoc: SetCompare = (a, b) => a[0] === b[0] && toStr(a[1]) === toStr(b
 defineFunction('array_diff(array $array, array ...$arrays): array', ({ args }) => {
   const [first, ...others] = args;
   checkSetArguments('array_diff', [first]);
-  return diffByString(first as PhpArray, others);
+  return others.length === 0 ? share(first) : diffByString(first as PhpArray, others);
 });
 
 /** Transcribes PHP's array_diff, which converts each value to a string once, so each conversion warns once. */
@@ -1282,10 +1285,9 @@ defineFunction('array_multisort(&~$array, &~...$rest): bool', (ctx) => {
   for (const [index, value] of ctx.args.entries()) {
     if (value instanceof PhpArray) {
       columns.push({ ref: ctx.refs[index] ?? new Ref(value), order: 1, flags: 0n, orderSet: false, modeSet: false });
-    } else if (typeof value === 'bigint' && columns.length > 0) {
-      const column = columns.at(-1) as (typeof columns)[number];
-      setColumnFlag(column, value, index + 1);
-    } else throwError('TypeError', `array_multisort(): Argument #${index + 1} must be an array or a sort flag`);
+    } else if (typeof value === 'bigint') {
+      setColumnFlag(columns.at(-1), value, index + 1);
+    } else throwError('TypeError', `${multisortArgument(index + 1)} must be an array or a sort flag`);
   }
   const size = (columns[0].ref.v as PhpArray).size;
   if (columns.some((column) => (column.ref.v as PhpArray).size !== size)) {
@@ -1313,30 +1315,29 @@ defineFunction('array_multisort(&~$array, &~...$rest): bool', (ctx) => {
 });
 
 function setColumnFlag(
-  column: { order: number; flags: bigint; orderSet: boolean; modeSet: boolean },
+  column: { order: number; flags: bigint; orderSet: boolean; modeSet: boolean } | undefined,
   value: bigint,
   position: number
 ): void {
   const mode = value & ~8n;
-  if (mode < 0n || mode > 6n)
-    throwError('ValueError', `array_multisort(): Argument #${position} must be a valid sort flag`);
-  if (mode === 3n || mode === 4n) {
-    if (column.orderSet)
-      throwError(
-        'TypeError',
-        `array_multisort(): Argument #${position} must be an array or a sort flag that has not already been specified`
-      );
+  if (mode < 0n || mode > 6n) throwError('ValueError', `${multisortArgument(position)} must be a valid sort flag`);
+  const order = mode === 3n || mode === 4n;
+  if (!column || (order ? column.orderSet : column.modeSet))
+    throwError(
+      'TypeError',
+      `${multisortArgument(position)} must be an array or a sort flag that has not already been specified`
+    );
+  if (order) {
     column.orderSet = true;
     column.order = value === 3n ? -1 : 1;
   } else {
-    if (column.modeSet)
-      throwError(
-        'TypeError',
-        `array_multisort(): Argument #${position} must be an array or a sort flag that has not already been specified`
-      );
     column.modeSet = true;
     column.flags = value;
   }
+}
+
+function multisortArgument(position: number): string {
+  return `array_multisort(): Argument #${position}${position === 1 ? ' ($array)' : ''}`;
 }
 
 // The internal pointer -----------------------------------------------------------------------------------------------

@@ -2,6 +2,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
+import { usesSimpleSprintf } from './builtinCompiler';
 import builtinNames from './builtinNames.json';
 import { lower } from './bytes';
 import { type ArgValue, type CallTarget, closureFunction, functionDisplayName, invoke, paramIsByRef } from './calls';
@@ -764,19 +765,14 @@ function newClosure(fn: UserFunction, bound: Map<string, Ref>, isStatic: boolean
 
 // Function bodies ----------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function inlineCall(fn: Callable, args: Arg[]): boolean {
   if (fn.kind !== 'native' || args.some((arg) => arg.spread || arg.name !== undefined)) return false;
   const name = lower(fn.name);
   if (['strval', 'floatval', 'doubleval', 'boolval'].includes(name)) return args.length === 1;
   if (name === 'intval') return args.length === 1;
   if (name === 'min' || name === 'max') return args.length === 2;
-  if (name === 'sprintf') {
-    const format = args[0]?.e;
-    if (format?.k !== 'lit' || typeof format.v !== 'string') return false;
-    const conversions = format.v.match(/%[sd]/g) ?? [];
-    return !format.v.replaceAll(/%[sd]/g, '').includes('%') && args.length === conversions.length + 1;
-  }
+  if (name === 'implode') return args.length === 1 || args.length === 2;
+  if (name === 'sprintf') return usesSimpleSprintf(args);
   if (!fn.inlined) return false;
   if (name === 'array_key_exists') return args.length === 2;
   if (name === 'get_class') return args.length <= 1;

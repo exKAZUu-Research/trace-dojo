@@ -1,0 +1,14 @@
+
+Warning: Undefined property: PrivateChild::$field in /main.php on line 7
+
+Warning: Undefined property: PrivateChild::$field in /main.php on line 10
+bool(false)
+NULL
+NULL
+
+Deprecated: Creation of dynamic property PrivateChild::$field is deprecated in /main.php on line 12
+int(4)
+int(6)
+int(4)
+int(0)
+Cannot access private property PrivateParent::$field

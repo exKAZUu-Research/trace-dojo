@@ -852,11 +852,12 @@ export abstract class DeclarationConverter extends ConverterBase {
         if (
           kind === 'set' &&
           paramsNode &&
-          prop.type &&
-          (!params[0]?.type ||
-            (builtinType(prop.type) &&
-              builtinType(params[0].type) &&
-              !isSubtype(prop.type, undefined, params[0].type, undefined)))
+          (prop.type
+            ? !params[0]?.type ||
+              (builtinType(prop.type) &&
+                builtinType(params[0].type) &&
+                !isSubtype(prop.type, undefined, params[0].type, undefined))
+            : params[0]?.type !== undefined)
         )
           this.error(
             hook,

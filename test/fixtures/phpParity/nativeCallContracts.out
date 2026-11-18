@@ -1,0 +1,73 @@
+int(2)
+int(1)
+int(2)
+int(0)
+int(0)
+bool(false)
+bool(true)
+bool(false)
+bool(false)
+array(1) {
+  [0]=>
+  array(2) {
+    [0]=>
+    int(1)
+    [1]=>
+    int(2)
+  }
+}
+array(1) {
+  [0]=>
+  array(2) {
+    [0]=>
+    int(3)
+    [1]=>
+    int(2)
+  }
+}
+array(2) {
+  [0]=>
+  array(2) {
+    [0]=>
+    int(1)
+    [1]=>
+    int(2)
+  }
+  [1]=>
+  array(1) {
+    [0]=>
+    int(3)
+  }
+}
+TypeError: array_multisort(): Argument #1 ($array) must be an array or a sort flag that has not already been specified
+ValueError: array_multisort(): Argument #1 ($array) must be a valid sort flag
+TypeError: array_multisort(): Argument #1 ($array) must be an array or a sort flag
+float(3)
+float(-0.12)
+float(130)
+float(2)
+float(-0.13)
+float(120)
+float(2)
+float(-0.12)
+float(120)
+float(3)
+float(-0.13)
+float(130)
+TypeError: round(): Argument #3 ($mode) must be of type RoundingMode|int, array given
+TypeError: implode(): Argument #1 ($separator) must be of type string, array given
+string(2) "12"
+string(2) "12"
+string(2) "12"
+string(2) "ab"
+string(3) "a-b"
+TypeError: SplObjectStorage::offsetExists(): Argument #1 ($object) must be of type object, string given
+TypeError: SplObjectStorage::offsetGet(): Argument #1 ($object) must be of type object, string given
+TypeError: SplObjectStorage::offsetSet(): Argument #1 ($object) must be of type object, string given
+TypeError: SplObjectStorage::offsetUnset(): Argument #1 ($object) must be of type object, string given
+
+Deprecated: ctype_digit(): Argument of type stdClass will be interpreted as string in the future in /main.php on line 54
+
+Deprecated: ctype_alpha(): Argument of type bool will be interpreted as string in the future in /main.php on line 54
+bool(false)
+bool(false)

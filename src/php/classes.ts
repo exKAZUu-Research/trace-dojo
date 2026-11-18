@@ -112,9 +112,14 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
     if (iface.kind !== 'interface') {
       throw new FatalError(`${decl.name} cannot implement ${iface.name} - it is not an interface`, row);
     }
+    if (cls.ownInterfaces.includes(iface)) {
+      const kind = cls.kind === 'interface' ? 'Interface' : 'Class';
+      throw new FatalError(`${kind} ${cls.name} cannot implement previously implemented interface ${iface.name}`, row);
+    }
     cls.ownInterfaces.push(iface);
   }
   cls.interfaces = linkInterfaces(cls.parent, cls.ownInterfaces);
+  checkBuiltinInterfaces(cls, row);
   for (const use of decl.traits) {
     for (const name of use.names) {
       const trait = findClass(name);
@@ -133,6 +138,25 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
   if (!decl.isAnonymous) runtime.classes.set(key, cls);
   runtime.userClasses.push(cls);
   return cls;
+}
+
+function checkBuiltinInterfaces(cls: PhpClass, row: number): void {
+  if (cls.kind !== 'class') return;
+  const implementsInterface = (name: string): boolean => cls.interfaces.some((iface) => lower(iface.name) === name);
+  if (
+    implementsInterface('traversable') &&
+    !implementsInterface('iterator') &&
+    !implementsInterface('iteratoraggregate')
+  )
+    throw new FatalError(
+      `Class ${cls.name} must implement interface Traversable as part of either Iterator or IteratorAggregate`,
+      -1
+    );
+  if (implementsInterface('throwable') && !cls.parent?.interfaces.some((iface) => lower(iface.name) === 'throwable'))
+    throw new FatalError(
+      `Class ${cls.name} cannot implement interface Throwable, extend Exception or Error instead`,
+      row
+    );
 }
 
 /**
@@ -821,7 +845,8 @@ export function lookupProp(cls: PhpClass, name: string, scope: PhpClass | undefi
     const own = scope.privateProps.get(name);
     if (own && cls.isSubclassOf(scope)) return own;
   }
-  return cls.propByName.get(name);
+  const declaration = cls.propByName.get(name);
+  return declaration?.visibility === 'private' && declaration.cls !== cls ? undefined : declaration;
 }
 
 export function canAccessProp(decl: PropDecl, scope: PhpClass | undefined): boolean {

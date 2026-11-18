@@ -72,8 +72,8 @@ function guard(runtime: Runtime, run: () => void): string | undefined {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 31 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 32 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function report(runtime: Runtime, error: unknown): string | undefined {
   if (error instanceof ExitSignal) return undefined;
   if (error instanceof UnsupportedFeatureError) {
@@ -106,7 +106,8 @@ function report(runtime: Runtime, error: unknown): string | undefined {
     const records = error.calls as CallRecord[];
     const trace = traceText(error.exhausted ? records.slice(0, 1) : records);
     restoreStack(runtime);
-    const message = `Fatal error: ${error.message ? `${error.message} in ${SCRIPT_PATH} on line ${error.row + 1}${error.withTrace ? `\nStack trace:\n${trace}` : ''}` : ''}`;
+    const file = error.row < 0 ? 'Unknown' : SCRIPT_PATH;
+    const message = `Fatal error: ${error.message ? `${error.message} in ${file} on line ${error.row + 1}${error.withTrace ? `\nStack trace:\n${trace}` : ''}` : ''}`;
     if (error.message) runtime.echo(`\n${message}\n`);
     return message || 'Fatal error';
   }

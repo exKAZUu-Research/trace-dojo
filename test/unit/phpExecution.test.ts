@@ -1298,7 +1298,7 @@ test.each([
 test('a timed-out pattern compilation does not affect the next run', () => {
   const pattern = `/${'b'.repeat(256)}${crypto.randomUUID()}/`;
   const program = `<?php var_dump(preg_match('${pattern}', 'no match'));`;
-  vi.mocked(performance.now).mockReturnValueOnce(0).mockReturnValueOnce(3000);
+  vi.spyOn(performance, 'now').mockReturnValueOnce(0).mockReturnValueOnce(3000);
   expect(run(program)).toEqual({ kind: 'limitExceeded', limit: 'time' });
   expect(run(program)).toMatchObject({ kind: 'executed', stdout: 'int(0)\n' });
 });
@@ -1355,4 +1355,61 @@ test.each([
   'class A{const K=B::K;}class B{const K="x";}try{(A::K)::class;}catch(Throwable $e){echo "caught";}',
 ])('leaves unresolved class constant receivers catchable: %s', (program) => {
   expect(run(`<?php echo 'start;';${program}`)).toMatchObject({ kind: 'executed', stdout: 'start;caught' });
+});
+
+test.each([
+  '[,"b"=>$value] = ["b"=>3];',
+  'list("a"=>$a,,"c"=>$c) = ["a"=>1,"c"=>3];',
+  'foreach ([["b"=>3]] as [,"b"=>$value]) {}',
+])('rejects a skipped entry in keyed destructuring: %s', (statement) => {
+  expect(run(`<?php echo 'never'; ${statement}`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 0, message: 'Cannot use empty array entries in keyed array assignment' }],
+  });
+});
+
+test.each(['mixed', 'int'])('rejects a %s setter parameter on an untyped property', (type) => {
+  expect(run(`<?php echo 'never'; if (false) { class C { public $field { set(${type} $value) {} } } }`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [
+      { row: 0, message: 'Type of parameter $value of hook C::$field::set must be compatible with property type' },
+    ],
+  });
+});
+
+test.each([
+  ['1 ? 2 : 3 ? 4 : 5', '(a ? b : c) ? d : e', 'a ? b : (c ? d : e)'],
+  ['1 ? 2 : 3 ?: 4', '(a ? b : c) ?: d', 'a ? b : (c ?: d)'],
+  ['1 ?: 2 ? 3 : 4', '(a ?: b) ? c : d', 'a ?: (b ? c : d)'],
+])('explains unparenthesized ternaries: %s', (expression, left, right) => {
+  const execution = run(`<?php echo ${expression};`);
+  expect(execution.kind).toBe('compileError');
+  if (execution.kind === 'compileError') {
+    expect(execution.diagnostics[0].message).toContain(`Use either \`${left}\` or \`${right}\``);
+  }
+});
+
+test.each([
+  'strlen("a")->p = 1;',
+  'count([])[0] = 1;',
+  'sprintf("%d", 1)->p = 1;',
+  'in_array("a", ["a"])->p = 1;',
+  '(clone $object)->p = 1;',
+  'namespace Example; use function strlen; strlen("a")->p = 1;',
+])('rejects writes to a compiler builtin result: %s', (statement) => {
+  expect(run(`<?php ${statement}`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 0, message: 'Cannot use result of built-in function in write context' }],
+  });
+});
+
+test('leaves ordinary call results writable', () => {
+  const program = `<?php
+    namespace Example;
+    function make() { return new \\stdClass(); }
+    make()->p = 1;
+    \\array_map(fn($v) => $v, [])[0] = 1;
+    echo 'done';
+  `;
+  expect(run(program)).toMatchObject({ kind: 'executed', stdout: 'done' });
 });

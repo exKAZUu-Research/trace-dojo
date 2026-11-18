@@ -116,6 +116,7 @@ const TRACE_ESCAPES: Record<string, string> = {
 
 /** Escapes the bytes of a string argument in a stack trace as PHP's smart_str_append_escaped does. */
 function escapeTraceString(text: string): string {
+  // oxlint-disable-next-line no-control-regex -- PHP trace arguments escape byte controls.
   return text.replaceAll(/[\0-\u001F\\\u007F-\u00FF]/g, (char) => {
     const escape = TRACE_ESCAPES[char];
     return `\\${escape ?? `x${(char.codePointAt(0) as number).toString(16).toUpperCase().padStart(2, '0')}`}`;

@@ -3,9 +3,10 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import type { Arg, ArrayItem, CatchClause, Expr, ListItem, MatchArm, Program, Stmt, SwitchCase } from './ast';
 import { collectMainVars, collectVariables, hasReferenceItem, onlyCalls, validateReads } from './astAnalysis';
+import { oneArgumentBuiltinOpcodes, usesSimpleSprintf } from './builtinCompiler';
 import { enc, lower } from './bytes';
 import { type Constant, constantTruth } from './constantDefaults';
-import { formatFloat, NAN_BOOL_WARNING } from './conversions';
+import { formatFloat, isNumericString, NAN_BOOL_WARNING } from './conversions';
 import { MAGIC_RUNTIME } from './converterBase';
 import { DeclarationConverter } from './declarationConverter';
 import { exportExpr } from './export';
@@ -689,17 +690,48 @@ export class Converter extends DeclarationConverter {
     }
   }
 
-  /**
-   * Rejects a write into what an expression produces, such as `(new A)->p = 1`, which PHP compiles as a temporary value;
-   * the value a call returns may be written into, as it may be an object.
-   */
   private checkWriteBase(base: Expr, node: Node): void {
     if (base.k === 'idx' || base.k === 'prop') {
       this.checkWritable(base, node);
       return;
     }
+    if (base.k === 'clone' || (base.k === 'call' && this.builtinWriteResult(base)))
+      this.error(node, 'Cannot use result of built-in function in write context');
     if (['var', 'varvar', 'sprop', 'call', 'mcall', 'scall'].includes(base.k)) return;
     this.error(node, 'この式には代入できません（Cannot use temporary expression in write context）。');
+  }
+
+  private builtinWriteResult(call: Extract<Expr, { k: 'call' }>): boolean {
+    const { fn, args, fcc } = call;
+    if ('k' in fn || fcc || fn.fallback || args.some((arg) => arg.spread || arg.name !== undefined)) return false;
+    const name = lower(fn.name);
+    if (oneArgumentBuiltinOpcodes.has(name)) return args.length === 1;
+    if (name === 'get_class') return args.length <= 1;
+    if (name === 'get_called_class') return args.length === 0;
+    if (name === 'func_num_args' || name === 'func_get_args') return this.fn.isFunction === true && args.length === 0;
+    if (name === 'array_key_exists') return args.length === 2;
+    if (name === 'sprintf') return usesSimpleSprintf(args);
+    if (name === 'defined') {
+      const value = args[0]?.e;
+      return args.length === 1 && value?.k === 'lit' && (typeof value.v !== 'string' || !/[\\:]/.test(value.v));
+    }
+    if (name === 'in_array') return this.builtinInArray(args);
+    return false;
+  }
+
+  private builtinInArray(args: Arg[]): boolean {
+    if (args.length !== 2 && args.length !== 3) return false;
+    const haystack = args[1].e;
+    if (haystack.k !== 'array') return false;
+    const values = this.compiledValue(haystack);
+    if (!(values instanceof Map)) return false;
+    const strict = args[2]?.e;
+    if (strict && strict.k !== 'lit' && strict.k !== 'const') return false;
+    const flag = strict ? this.compiledValue(strict) : false;
+    if (flag === undefined) return false;
+    return constantTruth(flag)
+      ? [...values.values()].every((value) => typeof value === 'string' || typeof value === 'bigint')
+      : [...values.values()].every((value) => typeof value === 'string' && !isNumericString(value));
   }
 
   expr(node: Node): Expr {
@@ -917,19 +949,33 @@ export class Converter extends DeclarationConverter {
         };
       }
       case 'conditional_expression': {
-        const test = this.expr(node.childForFieldName('condition') as Node);
+        const condition = node.childForFieldName('condition') as Node;
         const body = node.childForFieldName('body');
-        const alternative = this.expr(node.childForFieldName('alternative') as Node);
-        const conditionNode = node.childForFieldName('condition') as Node;
-        // PHP allows a chain of short ternaries (`a ?: b ?: c`) without parentheses, but no other nesting.
-        const shortChain = !body && !conditionNode.childForFieldName('body');
-        if (conditionNode.type === 'conditional_expression' && !shortChain) {
-          this.error(
-            node,
-            '括弧のない三項演算子の入れ子は使えません（Unparenthesized `a ? b : c ? d : e` is not supported）。'
-          );
+        if (condition.type === 'conditional_expression') {
+          const innerBody = condition.childForFieldName('body');
+          if (innerBody && body)
+            this.error(
+              node,
+              'Unparenthesized `a ? b : c ? d : e` is not supported. Use either `(a ? b : c) ? d : e` or `a ? b : (c ? d : e)`'
+            );
+          if (innerBody)
+            this.error(
+              node,
+              'Unparenthesized `a ? b : c ?: d` is not supported. Use either `(a ? b : c) ?: d` or `a ? b : (c ?: d)`'
+            );
+          if (body)
+            this.error(
+              node,
+              'Unparenthesized `a ?: b ? c : d` is not supported. Use either `(a ?: b) ? c : d` or `a ?: (b ? c : d)`'
+            );
         }
-        return { k: 'cond', test, consequent: body ? this.expr(body) : undefined, alternate: alternative, row };
+        return {
+          k: 'cond',
+          test: this.expr(condition),
+          consequent: body ? this.expr(body) : undefined,
+          alternate: this.expr(node.childForFieldName('alternative') as Node),
+          row,
+        };
       }
       case 'cast_expression': {
         const type = lower((node.childForFieldName('type') as Node).text.replaceAll(/[\s()]/g, ''));
@@ -1280,13 +1326,12 @@ export class Converter extends DeclarationConverter {
     return items;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
-  // code-gauge-allow functionNcss 35 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
+  // code-gauge-allow functionCognitiveComplexity 29 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
+  // code-gauge-allow functionNcss 39 -- One case per grammar node kind, each converted where PHP gives it its own meaning.
   private listLiteral(node: Node): Expr {
     const row = node.startPosition.row;
     const items: (ListItem | undefined)[] = [];
     let expectingItem = true;
-    let keyed = false;
     let pendingKey: Expr | undefined;
     for (const child of node.children.flatMap((child) =>
       child.type === 'array_element_initializer' ? child.children : [child]
@@ -1302,7 +1347,6 @@ export class Converter extends DeclarationConverter {
       const next = child.nextSibling;
       if (next?.type === '=>') {
         pendingKey = this.expr(child);
-        keyed = true;
         continue;
       }
       let byRef = false;
@@ -1320,11 +1364,17 @@ export class Converter extends DeclarationConverter {
     }
     if (items.every((item) => item === undefined))
       this.error(node, '空の list() は使えません（Cannot use empty list）。');
-    if (keyed && items.some((item) => item && item.key === undefined)) {
-      this.error(
-        node,
-        'キーのある要素とない要素を混ぜられません（Cannot mix keyed and unkeyed array entries in assignments）。'
-      );
+    const keyed = items.find((item) => item !== undefined)?.key !== undefined;
+    for (const item of items) {
+      if (!item) {
+        if (keyed) this.error(node, 'Cannot use empty array entries in keyed array assignment');
+        continue;
+      }
+      if ((item.key !== undefined) !== keyed)
+        this.error(
+          node,
+          'キーのある要素とない要素を混ぜられません（Cannot mix keyed and unkeyed array entries in assignments）。'
+        );
     }
     return { k: 'list', items, keyed, row };
   }

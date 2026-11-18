@@ -164,11 +164,11 @@ function deprecatedMethod(name: string, replacement: string): void {
   );
 }
 
-function storageKey(value: Value): PhpObject {
-  if (!(value instanceof PhpObject))
+function storageKey(value: Value, method: string): PhpObject {
+  if (!(value instanceof PhpObject) || value.isResource)
     throwError(
       'TypeError',
-      `SplObjectStorage::offsetExists(): Argument #1 ($object) must be of type object, ${valueName(value)} given`
+      `SplObjectStorage::${method}(): Argument #1 ($object) must be of type object, ${valueName(value)} given`
     );
   return value;
 }
@@ -277,13 +277,13 @@ defineClass({
     ...serializationMethods,
     {
       signature: 'offsetExists($object): bool',
-      impl: ({ thisObj, args }) => storageOf(thisObj).has(storageKey(args[0])),
+      impl: ({ thisObj, args }) => storageOf(thisObj).has(storageKey(args[0], 'offsetExists')),
     },
     {
       signature: 'offsetGet($object): mixed',
       impl: ({ thisObj, args }) => {
         const storage = storageOf(thisObj);
-        const key = storageKey(args[0]);
+        const key = storageKey(args[0], 'offsetGet');
         const info = storage.get(key);
         if (info === undefined) throwError('UnexpectedValueException', 'Object not found');
         return info;
@@ -291,11 +291,11 @@ defineClass({
     },
     {
       signature: 'offsetSet($object, mixed $info = null): void',
-      impl: ({ thisObj, args }) => (storageOf(thisObj).attach(storageKey(args[0]), args[1] ?? null), null),
+      impl: ({ thisObj, args }) => (storageOf(thisObj).attach(storageKey(args[0], 'offsetSet'), args[1] ?? null), null),
     },
     {
       signature: 'offsetUnset($object): void',
-      impl: ({ thisObj, args }) => (storageOf(thisObj).detach(storageKey(args[0])), null),
+      impl: ({ thisObj, args }) => (storageOf(thisObj).detach(storageKey(args[0], 'offsetUnset')), null),
     },
     {
       signature: 'getHash(object $object): string',
@@ -349,7 +349,7 @@ const multipleMethods: NativeMethod[] = [
       if (storage.entries.size === 0) return false;
       const expect = (storage.flags & MIT_NEED_ALL) !== 0;
       for (const iterator of storage.objects()) {
-        if (callMethod(iterator, 'valid', []) !== expect) return !expect;
+        if ((callMethod(iterator, 'valid', []) === true) !== expect) return !expect;
       }
       return expect;
     },

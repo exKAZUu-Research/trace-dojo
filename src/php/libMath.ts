@@ -55,7 +55,7 @@ defineFunction('abs(int|float $num): int|float', ({ args }) => {
 defineFunction('ceil(int|float $num): float', ({ args }) => Math.ceil(Number(num(args[0]))));
 defineFunction('floor(int|float $num): float', ({ args }) => Math.floor(Number(num(args[0]))));
 defineFunction(
-  'round(int|float $num, int $precision = 0, int|RoundingMode $mode = PHP_ROUND_HALF_UP): float',
+  'round(int|float $num, int $precision = 0, RoundingMode|int $mode = PHP_ROUND_HALF_UP): float',
   ({ args }) => {
     const value = num(args[0]);
     const places = Number(args[1] ?? 0n);
@@ -64,8 +64,13 @@ defineFunction(
       '2': 'halfDown',
       '3': 'halfEven',
       '4': 'halfOdd',
+      '5': 'ceiling',
+      '6': 'floor',
+      '7': 'towardsZero',
+      '8': 'awayFromZero',
     };
-    const mode = modes[String(args[2] ?? 1n)];
+    const modeArg = args[2] ?? 1n;
+    const mode = typeof modeArg === 'bigint' ? modes[modeArg.toString()] : undefined;
     if (!mode) throwError('ValueError', 'round(): Argument #3 ($mode) must be a valid rounding mode (RoundingMode::*)');
     if (typeof value === 'bigint') {
       if (places >= 0) return Number(value);

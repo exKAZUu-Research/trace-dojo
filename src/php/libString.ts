@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 967 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 970 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
@@ -6,7 +6,7 @@ import { createHash, createHmac } from 'node:crypto';
 
 import { byteAt, charAt, enc, lower, untilNul, upper } from './bytes';
 import { callStack } from './calls';
-import { valueName } from './conversions';
+import { debugType, valueName } from './conversions';
 import { deprecated, throwError, warn, withCleanupExceptions } from './errors';
 import { decodeHtml, escapeHtml, nextChar, translationTable } from './htmlEntities';
 import { isStream } from './libCore';
@@ -157,8 +157,13 @@ defineFunction('explode(string $separator, string $string, int $limit = PHP_INT_
   return PhpArray.list([parts.length > 1 ? parts.join(separator) : text]);
 });
 // `mixed` lets the body report the legacy argument order as PHP does, before the type of `$array` is checked.
-defineFunction('implode(array|string $separator, mixed $array = null): string', ({ args }) => {
+defineFunction('implode(array|string $separator, mixed $array = null): string', ({ args, row }) => {
   let [separator, array] = args;
+  const inlinePair = row !== undefined && args.length === 2;
+  if (inlinePair && separator instanceof PhpArray)
+    throwError('TypeError', 'implode(): Argument #1 ($separator) must be of type string, array given');
+  if (array !== undefined && array !== null && !(array instanceof PhpArray))
+    throwError('TypeError', `implode(): Argument #2 ($array) must be of type ?array, ${valueName(array)} given`);
   if (array === undefined || array === null) {
     if (!(separator instanceof PhpArray)) {
       throwError(
@@ -170,8 +175,6 @@ defineFunction('implode(array|string $separator, mixed $array = null): string', 
     separator = '';
   } else if (separator instanceof PhpArray) {
     throwError('TypeError', 'implode(): Argument #1 ($separator) must be of type string, array given');
-  } else if (!(array instanceof PhpArray)) {
-    throwError('TypeError', `implode(): Argument #2 ($array) must be of type ?array, ${valueName(array)} given`);
   }
   let result = '';
   let first = true;
@@ -1249,7 +1252,6 @@ for (const [name, pattern] of [
   ['ctype_print', /^[ -~\u00A0-\u00AC\u00AE-\u00FF]+$/],
   ['ctype_graph', /^[!-~\u00A1-\u00AC\u00AE-\u00FF]+$/],
 ] as const) {
-  // code-gauge-allow functionCognitiveComplexity 19 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
   defineFunction(`${name}(mixed $text): bool`, ({ args }) => {
     let [value] = args;
     if (typeof value === 'bigint') {
@@ -1259,9 +1261,8 @@ for (const [name, pattern] of [
           ? String.fromCharCode(Number(value < 0n ? value + 256n : value))
           : value.toString();
     } else if (typeof value !== 'string') {
-      deprecated(
-        `${name}(): Argument of type ${typeof value === 'number' ? 'float' : value === null ? 'null' : typeof value === 'boolean' ? 'bool' : 'array'} will be interpreted as string in the future`
-      );
+      const type = value instanceof PhpObject && value.isResource ? 'resource' : debugType(value);
+      deprecated(`${name}(): Argument of type ${type} will be interpreted as string in the future`);
       return false;
     }
     // oxlint-disable-next-line no-control-regex -- In the C locale, the C library classifies only ASCII bytes.
