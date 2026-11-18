@@ -14,7 +14,7 @@ import {
   UNIT_CON,
   WORD_TYPE,
 } from './builtinTypes';
-import type { CaseCore, Core, FunctionInfo, GlobalDef, IODoCore, IOStmt } from './core';
+import type { CaseCore, Core, FunctionInfo, GlobalDef, IODoCore, IOStmt, LamCore } from './core';
 import {
   type ClassEntity,
   type ConInfo,
@@ -330,7 +330,9 @@ export class Codegen {
     const arity = binding.clauses[0].pats.length;
     // Only top-level functions are frames in a trace: a local function (in `where` or `let`) runs as part of the
     // function that defines it, as a loop or a block inside a Java method does.
-    const info = isTop ? this.infoForBinding(binding, name) : undefined;
+    const source = this.infoForBinding(binding, name);
+    const info = isTop ? source : undefined;
+    const atomicScope = !isTop && source.isAtomic ? source : undefined;
     const resultType = info ? this.bindingResultType(binding) : undefined;
     const functionResult = resultType ? isFunctionType(resultType) : false;
     if (dictParams.length + arity === 0) {
@@ -339,7 +341,7 @@ export class Codegen {
         const body = this.withVisible(isTop ? OrderedMap<string, VisibleBinding>() : this.visible, () =>
           this.compileClauseBody(binding, [], name)
         );
-        return { k: 'frame', size: frame.size, body, info, functionResult } as Core;
+        return { k: 'frame', size: frame.size, body, info, atomicScope, functionResult } as Core;
       });
     }
     const visible = isTop ? OrderedMap<string, VisibleBinding>() : this.visible;
@@ -349,6 +351,7 @@ export class Codegen {
       (args) => this.withVisible(visible, () => this.compileClauseBody(binding, args, name)),
       {
         info,
+        atomicScope,
         functionResult,
         displayParameters: this.options.traceTypes && binding.type ? parameterTypes(binding.type, arity) : undefined,
       }
@@ -968,7 +971,7 @@ export class Codegen {
     params: readonly DictParam[],
     arity: number,
     build: (args: number[]) => Core,
-    options?: { info?: FunctionInfo; displayParameters?: Type[]; functionResult?: boolean }
+    options?: Pick<LamCore, 'info' | 'atomicScope' | 'displayParameters' | 'functionResult'>
   ): Core {
     const frame = new FrameScope(this.frame);
     return this.withFrame(frame, () => {

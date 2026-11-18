@@ -288,7 +288,7 @@ export class Machine {
       case 'frame': {
         this.runtime.allocate(code.size);
         state.env = new Env(code.size, env, code.info);
-        if (code.functionResult) this.pushFunctionResult(code.info, state.env);
+        if (code.functionResult || code.atomicScope) this.pushFunctionResult(code.info, state.env, code.atomicScope);
         state.code = code.body;
         return;
       }

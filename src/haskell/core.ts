@@ -25,7 +25,14 @@ export type Core = (
   | { k: 'str'; value: readonly string[] }
   | { k: 'app'; fn: Core; args: Core[] }
   | LamCore
-  | { k: 'frame'; size: number; body: Core; info: FunctionInfo | undefined; functionResult?: boolean }
+  | {
+      k: 'frame';
+      size: number;
+      body: Core;
+      info: FunctionInfo | undefined;
+      atomicScope?: FunctionInfo;
+      functionResult?: boolean;
+    }
   | { k: 'let'; binds: { index: number; expr: Core }[]; body: Core }
   | CaseCore
   | { k: 'charCase'; scrut: Core; value: string; matched: Core; unmatched: Core }
@@ -40,6 +47,7 @@ export type Core = (
 ) & { displayType?: Type };
 
 export interface LamCore {
+  atomicScope?: FunctionInfo;
   functionResult?: boolean;
   displayConstraints?: Type[];
   displayParameters?: Type[];

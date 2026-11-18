@@ -60,7 +60,7 @@ export class Closure {
   constructor(
     readonly lam: LamCore,
     readonly env: Env | undefined,
-    readonly atomicScope?: FunctionInfo
+    readonly atomicScope = lam.atomicScope
   ) {}
 
   get arity(): number {
