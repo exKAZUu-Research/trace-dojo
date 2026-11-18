@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 580 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 610 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -91,6 +91,7 @@ interface ObjectLiteral {
 
 /** Checks array and object literals and widens the types of their values. */
 export class LiteralChecker {
+  private readonly literalContexts = new Map<number, Type | undefined>();
   private readonly arrayLiterals = new Set<number>();
   private readonly tupleLiterals = new Set<number>();
   /** The node of each object literal type, whose members alone TypeScript checks for excess properties. */
@@ -100,9 +101,11 @@ export class LiteralChecker {
 
   constructor(private readonly c: Checker) {}
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps literal elements, holes, spreads and contextual tuple construction together.
   arrayLiteral(node: TreeNode, contextual?: Type): Type {
+    this.literalContexts.set(node.id, contextual);
     const elements = arrayElements(node);
-    const isConstContext = this.isConstContext(node);
+    const isConstContext = this.isConstContext(node, contextual);
     const types: { type: Type; spread: boolean }[] = elements.map((element, index) => {
       // A hole, as in `[, 1]`, reads as `undefined`.
       if (!element) return { type: undefinedType, spread: false };
@@ -117,7 +120,13 @@ export class LiteralChecker {
       return { type: isConstContext ? type : this.widenForMutableLocation(type, literalContext), spread: false };
     });
     if (isConstContext || this.isInTupleContext(node, contextual)) {
-      return this.tupleOfElements(node, elements, types, isConstContext);
+      return this.tupleOfElements(
+        node,
+        elements,
+        types,
+        isConstContext,
+        isConstContext && !this.hasMutableConstConstraint(contextual)
+      );
     }
     const elementTypes = types.map(({ type, spread }, index) =>
       spread ? this.spreadElementType(elements[index] as TreeNode, type) : type
@@ -130,12 +139,22 @@ export class LiteralChecker {
     return array;
   }
 
+  private hasMutableConstConstraint(contextual: Type | undefined): boolean {
+    if (contextual?.kind !== 'typeParameter' || !contextual.isConst) return false;
+    const constraint = contextual.constraint?.();
+    return (
+      constraint?.kind === 'object' &&
+      (this.c.isArrayType(constraint) || (constraint.objectKind === 'tuple' && !constraint.tuple?.readonly))
+    );
+  }
+
   /** The tuple an array literal is where a tuple or `as const` expects it, with what its spreads spread. */
   private tupleOfElements(
     node: TreeNode,
     elements: (TreeNode | undefined)[],
     types: { type: Type; spread: boolean }[],
-    isConstContext: boolean
+    isConstContext: boolean,
+    readonly = isConstContext
   ): Type {
     const tupleElements = types.flatMap(({ type, spread }, index) => {
       if (!spread) return [{ type: isConstContext ? regularOf(type) : type, optional: false, rest: false }];
@@ -148,7 +167,7 @@ export class LiteralChecker {
         },
       ];
     });
-    const tuple = { ...this.c.tupleType(tupleElements, isConstContext), id: newTypeId() };
+    const tuple = { ...this.c.tupleType(tupleElements, readonly), id: newTypeId() };
     this.tupleLiterals.add(tuple.id);
     return tuple;
   }
@@ -232,11 +251,13 @@ export class LiteralChecker {
     return iterated.length > 0 ? unionOf(iterated) : undefined;
   }
 
-  /** Whether an expression is in a `const` context, inside `as const`. */
-  isConstContext(node: TreeNode): boolean {
+  /** Whether a literal is checked with const inference or inside a const assertion. */
+  isConstContext(node: TreeNode, contextual?: Type): boolean {
+    if (this.isConstTypeVariable(contextual)) return true;
     let current: TreeNode | null = node.parent;
     let child = node;
     while (current) {
+      if (this.isConstTypeVariable(this.literalContexts.get(current.id))) return true;
       if (current.type === 'as_expression' || current.type === 'type_assertion')
         return (
           isConstAssertion(current) &&
@@ -261,14 +282,25 @@ export class LiteralChecker {
     return false;
   }
 
+  private isConstTypeVariable(type: Type | undefined): boolean {
+    this.c.budget.spend();
+    if (type?.kind === 'typeParameter') return type.isConst === true;
+    return (
+      (type?.kind === 'union' || type?.kind === 'intersection') &&
+      type.types.some((part) => this.isConstTypeVariable(part))
+    );
+  }
+
+  // code-gauge-allow functionNcss 31 -- Builds the common object-literal context before dispatching each member form.
   objectLiteral(node: TreeNode, contextual?: Type): Type {
+    this.literalContexts.set(node.id, contextual);
     const properties = new Map<string, Property>();
     const declarations = new Map<string, Property>();
     const discriminated = contextual && this.discriminatedContext(node, contextual);
     this.objectLiteralContexts.set(node.id, discriminated);
     const literal: ObjectLiteral = {
       contextual: discriminated,
-      isConstContext: this.isConstContext(node),
+      isConstContext: this.isConstContext(node, contextual),
       properties,
       declarations,
       receiver: this.receiverOf(

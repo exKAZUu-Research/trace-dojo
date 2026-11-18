@@ -228,6 +228,7 @@ export interface TypeParameter {
   kind: 'typeParameter';
   id: number;
   name: string;
+  isConst?: boolean;
   constraint?: () => Type | undefined;
   default?: () => Type | undefined;
   /** A `this` type, whose constraint is the class or interface it belongs to. */

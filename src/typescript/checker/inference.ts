@@ -114,7 +114,8 @@ export class TypeInference {
     if (inference.candidates.length === 0) {
       return this.commonSubtype(inference.contravariant);
     }
-    const shouldWiden = widen && inference.topLevel && !this.c.literals.hasPrimitiveConstraint(parameter);
+    const shouldWiden =
+      widen && inference.topLevel && !parameter.isConst && !this.c.literals.hasPrimitiveConstraint(parameter);
     const candidates = inference.candidates.map((candidate) =>
       shouldWiden ? this.c.widenLiteral(candidate) : regularOf(candidate)
     );

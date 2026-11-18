@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 496 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss 500 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -234,12 +234,16 @@ export class ExpressionChecker {
     if (node.type === 'identifier') {
       const symbol = this.c.scopeOf(node).lookupValue(node.text);
       if (!symbol) return this.reportUnknownValue(node, node.text);
-      return this.reportUnavailableValue(node, symbol) ? errorType : this.valueTypeOf(symbol);
+      return this.reportUnavailableValue(node, symbol)
+        ? errorType
+        : this.variableReferenceType(node, symbol, undefined, true);
     }
     if (node.type === 'member_expression') {
       const object = node.childForFieldName('object') as TreeNode;
       const property = node.childForFieldName('property') as TreeNode;
-      return this.c.members.propertyAccess(node, object, property, this.typeOfQuery(object), property.text);
+      const type = this.c.members.propertyAccess(node, object, property, this.typeOfQuery(object), property.text);
+      const key = this.c.flow.referenceKey(node);
+      return key ? (this.c.flow.entry(key)?.type ?? type) : type;
     }
     return this.check(node);
   }
@@ -256,6 +260,10 @@ export class ExpressionChecker {
     }
     if (this.reportUnavailableValue(node, symbol)) return errorType;
     this.checkUsedBeforeDeclaration(node, symbol);
+    return this.variableReferenceType(node, symbol, contextual);
+  }
+
+  private variableReferenceType(node: TreeNode, symbol: Sym, contextual?: Type, typeQuery = false): Type {
     const declared = this.valueTypeOf(symbol);
     const key = `s${symbol.id}`;
     this.c.flow.declaredTypes.set(key, declared);
@@ -263,10 +271,17 @@ export class ExpressionChecker {
     if (this.isOuterVariable(node, symbol)) {
       // A nested function checks the assignment of a variable of an enclosing one only when nothing ever assigns it.
       if (this.isNeverInitialized(symbol))
-        return this.flowVariableType(node, symbol, entry ?? { type: declared, assigned: false }, declared, contextual);
+        return this.flowVariableType(
+          node,
+          symbol,
+          entry ?? { type: declared, assigned: false },
+          declared,
+          contextual,
+          typeQuery
+        );
       return entry?.type ?? this.closureVariableType(node, symbol, declared);
     }
-    return entry ? this.flowVariableType(node, symbol, entry, declared, contextual) : declared;
+    return entry ? this.flowVariableType(node, symbol, entry, declared, contextual, typeQuery) : declared;
   }
 
   /** Whether a reference reads a variable that {@link isNeverInitialized} holds for. */
@@ -310,11 +325,13 @@ export class ExpressionChecker {
     symbol: Sym,
     entry: FlowEntry,
     declared: Type,
-    contextual: Type | undefined
+    contextual: Type | undefined,
+    typeQuery: boolean
   ): Type {
     const unassignedAuto =
       !entry.assigned && this.c.assignments.isAutoTyped(symbol) && isIntrinsic(entry.type, 'undefined');
     if (
+      !typeQuery &&
       !entry.assigned &&
       (unassignedAuto || this.needsDefiniteAssignment(symbol, declared)) &&
       assignmentKind(node) !== 'definite' &&

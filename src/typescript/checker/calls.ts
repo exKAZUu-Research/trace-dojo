@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 556 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 575 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -12,6 +12,7 @@ import {
   functionType,
   isAnyLike,
   isIntrinsic,
+  newTypeId,
   numberType,
   type Parameter,
   type Signature,
@@ -724,7 +725,8 @@ export class Calls {
         this.inferenceTuple(
           arguments_.slice(restIndex),
           parameterTypes.slice(restIndex),
-          this.c.inference.partialMapper(parameters, run.inferences)
+          this.c.inference.partialMapper(parameters, run.inferences),
+          signature.parameters.at(-1)?.type
         ),
         (signature.parameters.at(-1) as Parameter).type,
         true
@@ -786,7 +788,16 @@ export class Calls {
     return [...types.slice(0, restIndex), ...tail];
   }
 
-  private inferenceTuple(args: InferenceArgument[], contexts: (Type | undefined)[], mapper: Mapper | undefined): Type {
+  private inferenceTuple(
+    args: InferenceArgument[],
+    contexts: (Type | undefined)[],
+    mapper: Mapper | undefined,
+    restType?: Type
+  ): Type {
+    const constContext =
+      restType?.kind === 'typeParameter' && restType.isConst
+        ? { ...restType, id: newTypeId(), constraint: undefined }
+        : undefined;
     const lastRequired = args.findLastIndex((arg) => !arg.spread || (!arg.spread.optional && !arg.spread.rest));
     return this.c.tupleType(
       args.map((arg, index) => {
@@ -797,7 +808,9 @@ export class Calls {
         const parameterType = contexts[index];
         const context = parameterType && mapper ? this.c.instantiate(parameterType, mapper) : parameterType;
         return {
-          type: this.c.widenLiteral(this.c.silently(() => this.c.expressions.check(arg.node, context))),
+          type: constContext
+            ? this.c.silently(() => this.c.expressions.check(arg.node, constContext))
+            : this.c.widenLiteral(this.c.silently(() => this.c.expressions.check(arg.node, context))),
           optional: false,
           rest: false,
         };

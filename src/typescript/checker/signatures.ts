@@ -447,6 +447,7 @@ export class Signatures {
       kind: 'typeParameter',
       id: newTypeId(),
       name: node.childForFieldName('name')?.text ?? 'T',
+      isConst: hasToken(node, 'const'),
       constraint: constraintNode ? () => this.declaredConstraint(constraintNode) : undefined,
       default: defaultNode ? () => this.declaredDefault(defaultNode) : undefined,
     };

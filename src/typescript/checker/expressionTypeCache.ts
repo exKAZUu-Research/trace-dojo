@@ -49,6 +49,6 @@ export class ExpressionTypeCache {
       environmentId = this.silentEnvironments.size;
       this.silentEnvironments.set(environment, environmentId);
     }
-    return `${node.id}/${contextual?.id}/${environmentId}`;
+    return `${node.id}/${contextual?.id}/${this.c.literals.isConstContext(node, contextual)}/${environmentId}`;
   }
 }
