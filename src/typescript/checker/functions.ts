@@ -6,6 +6,7 @@ import { FlowState, type State } from './flow';
 import type { Sym } from './scopes';
 import { isContextSensitiveFunction } from './signatures';
 import {
+  argumentParameters,
   hasToken,
   isClassConstructor,
   isImmediatelyInvoked,
@@ -174,11 +175,7 @@ export class FunctionChecker {
     const scope = this.c.ownScope(node);
     if (!scope) return;
     const parametersNode = node.childForFieldName('parameters');
-    const parameterNodes = parametersNode
-      ? named(parametersNode).filter(
-          (parameter) => (parameter.childForFieldName('pattern') ?? parameter).type !== 'this'
-        )
-      : [];
+    const parameterNodes = parametersNode ? argumentParameters(named(parametersNode)) : [];
     const single = node.childForFieldName('parameter');
     if (single) parameterNodes.push(single);
     for (const [index, parameterNode] of parameterNodes.entries()) {
@@ -518,9 +515,7 @@ export class FunctionChecker {
 
   private checkParameterInitializers(parameters: TreeNode[], signature: Signature): void {
     this.c.flow.from(new FlowState(), () => {
-      const sourceParameters = parameters.filter(
-        (parameter) => (parameter.childForFieldName('pattern') ?? parameter).type !== 'this'
-      );
+      const sourceParameters = argumentParameters(parameters);
       for (const [index, parameter] of sourceParameters.entries()) {
         this.checkParameterDefault(parameter);
         const pattern = parameter.childForFieldName('pattern') ?? parameter;

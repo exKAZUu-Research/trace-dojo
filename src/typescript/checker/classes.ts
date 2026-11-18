@@ -8,6 +8,7 @@ import { mergedPatternIndexes } from './indexInfos';
 import { isUsedBeforeInitialization } from './initializationOrder';
 import type { Sym, ValueKind } from './scopes';
 import {
+  argumentParameters,
   hasToken,
   isClassConstructor,
   isConstructorName,
@@ -475,9 +476,8 @@ export class ClassChecker {
     if (!parameters) return;
     const signature = this.c.signatures.signatureOf(ctor);
     let index = 0;
-    for (const parameter of named(parameters)) {
+    for (const parameter of argumentParameters(named(parameters))) {
       const pattern = parameter.childForFieldName('pattern');
-      if (pattern?.type === 'this') continue;
       const modifier = parameter.namedChildren.find((child) => child?.type === 'accessibility_modifier');
       const isReadonly = hasToken(parameter, 'readonly');
       if ((modifier || isReadonly) && pattern?.type === 'identifier') {

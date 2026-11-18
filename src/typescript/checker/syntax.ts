@@ -139,6 +139,18 @@ export function isClassConstructor(node: TreeNode): boolean {
   );
 }
 
+/**
+ * The parameters that take arguments: all but a first `this` parameter, which types the receiver. tsc reads a `this`
+ * parameter in a later position as an ordinary parameter, after reporting it.
+ */
+export function argumentParameters(parameters: TreeNode[]): TreeNode[] {
+  return parameters.length > 0 && isThisParameter(parameters[0]) ? parameters.slice(1) : parameters;
+}
+
+export function isThisParameter(parameter: TreeNode): boolean {
+  return (parameter.childForFieldName('pattern') ?? parameter).type === 'this';
+}
+
 /** Whether a parameter carries a modifier that makes it a parameter property, as `private x: number`. */
 export function isParameterProperty(parameter: TreeNode): boolean {
   return parameter.children.some(

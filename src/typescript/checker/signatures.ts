@@ -2,7 +2,15 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import type { Scope, Sym } from './scopes';
-import { hasToken, isClassConstructor, isParameterProperty, named, patternIdentifiers } from './syntax';
+import {
+  argumentParameters,
+  hasToken,
+  isClassConstructor,
+  isParameterProperty,
+  isThisParameter,
+  named,
+  patternIdentifiers,
+} from './syntax';
 import {
   anyType,
   newTypeId,
@@ -17,6 +25,7 @@ import {
 
 /** The declarations that may be a get or set accessor: in a class, an interface, or an object type. */
 const accessorDeclarationTypes = new Set(['method_definition', 'method_signature', 'abstract_method_signature']);
+const constructSignatureTypes = new Set(['construct_signature', 'constructor_type']);
 
 /** Resolves the signatures and type parameters that function-like and generic declarations declare. */
 export class Signatures {
@@ -37,7 +46,7 @@ export class Signatures {
     const { parameters, thisType } = this.declaredParameters(node, contextual);
     const returnNode =
       node.childForFieldName('return_type') ??
-      (['construct_signature', 'constructor_type'].includes(node.type) ? node.childForFieldName('type') : undefined);
+      (constructSignatureTypes.has(node.type) ? node.childForFieldName('type') : undefined);
     let returnType: Type | undefined;
     const signature: Signature = {
       typeParameters,
@@ -60,14 +69,15 @@ export class Signatures {
 
   /**
    * Reports a required parameter after one marked `?`, which callers could not omit, a default value where no
-   * implementation could evaluate it, and a misplaced parameter property. All are grammar errors that hold however the
-   * signature is resolved.
+   * implementation could evaluate it, a misplaced parameter property, and a misplaced `this` parameter. All are grammar
+   * errors that hold however the signature is resolved.
    */
   private checkParameterGrammar(node: TreeNode): void {
     const hasBody = node.childForFieldName('body') !== null;
     let optional = false;
-    for (const parameterNode of parameterNodes(node)) {
+    for (const [index, parameterNode] of parameterNodes(node).entries()) {
       if (isParameterProperty(parameterNode)) this.checkParameterPropertyGrammar(node, parameterNode);
+      if (isThisParameter(parameterNode)) this.checkThisParameterGrammar(node, parameterNode, index);
       const hasDefault = parameterNode.childForFieldName('value') !== null;
       if (hasDefault && !hasBody)
         this.c.errorWhileResolving(parameterNode, '引数の既定値は、関数やコンストラクタの実装にしか書けません。');
@@ -75,6 +85,17 @@ export class Signatures {
       else if (optional && patternOf(parameterNode).type !== 'rest_pattern' && !hasDefault)
         this.c.errorWhileResolving(parameterNode, '省略できる引数の後に、省略できない引数は書けません。');
     }
+  }
+
+  /** Reports a `this` parameter after another parameter, or of a function that has no `this` of its own to type. */
+  private checkThisParameterGrammar(node: TreeNode, parameterNode: TreeNode, index: number): void {
+    if (index > 0) this.c.errorWhileResolving(parameterNode, "'this' 引数は、最初の引数にしてください。");
+    if (isClassConstructor(node) || constructSignatureTypes.has(node.type))
+      this.c.errorWhileResolving(parameterNode, "コンストラクタには 'this' 引数を書けません。");
+    if (node.type === 'arrow_function')
+      this.c.errorWhileResolving(parameterNode, "アロー関数には 'this' 引数を書けません。");
+    if (accessorDeclarationTypes.has(node.type) && (hasToken(node, 'get') || hasToken(node, 'set')))
+      this.c.errorWhileResolving(parameterNode, "get アクセサーや set アクセサーには 'this' 引数を書けません。");
   }
 
   /** Reports a parameter property declared by a binding pattern, or outside a constructor's implementation. */
@@ -94,14 +115,16 @@ export class Signatures {
     node: TreeNode,
     contextual: Signature | undefined
   ): { parameters: Parameter[]; thisType: Type | undefined } {
+    const nodes = parameterNodes(node);
+    const argumentNodes = argumentParameters(nodes);
+    const thisNode = argumentNodes.length < nodes.length ? nodes[0] : undefined;
     const parameters: Parameter[] = [];
-    let thisType: Type | undefined;
-    for (const parameterNode of parameterNodes(node)) {
-      if (patternOf(parameterNode).type === 'this')
-        thisType = this.c.typeNodes.annotationType(parameterNode.childForFieldName('type'));
-      else parameters.push(this.declaredParameter(node, parameterNode, contextual, parameters.length));
-    }
-    return { parameters: withRequiredPrefix(parameters, parameterNodes(node)), thisType };
+    for (const parameterNode of argumentNodes)
+      parameters.push(this.declaredParameter(node, parameterNode, contextual, parameters.length));
+    return {
+      parameters: withRequiredPrefix(parameters, argumentNodes),
+      thisType: thisNode && this.c.typeNodes.annotationType(thisNode.childForFieldName('type')),
+    };
   }
 
   private declaredParameter(
@@ -126,7 +149,11 @@ export class Signatures {
           )
         : this.c.expressions.implicitParameterType(parameterNode, pattern, rest));
     return {
-      name: rest ? (named(pattern)[0]?.text ?? 'args') : pattern.type === 'identifier' ? pattern.text : `__${index}`,
+      name: rest
+        ? (named(pattern)[0]?.text ?? 'args')
+        : ['identifier', 'this'].includes(pattern.type)
+          ? pattern.text
+          : `__${index}`,
       type,
       optional: parameterNode.type === 'optional_parameter' || value !== null,
       rest,
@@ -406,7 +433,7 @@ export function isContextSensitiveFunction(node: TreeNode): boolean {
   if (node.childForFieldName('type_parameters')) return false;
   const nodes = parameterNodes(node);
   if (nodes.some((parameterNode) => !parameterNode.childForFieldName('type'))) return true;
-  return node.type !== 'arrow_function' && (nodes.length === 0 || patternOf(nodes[0]).type !== 'this');
+  return node.type !== 'arrow_function' && argumentParameters(nodes).length === nodes.length;
 }
 
 /**
@@ -414,9 +441,8 @@ export function isContextSensitiveFunction(node: TreeNode): boolean {
  * it to reach the later one; its type takes `undefined` instead, which makes the default apply.
  */
 function withRequiredPrefix(parameters: Parameter[], nodes: TreeNode[]): Parameter[] {
-  const declared = nodes.filter((parameterNode) => patternOf(parameterNode).type !== 'this');
   const minArgumentCount =
-    declared.findLastIndex(
+    nodes.findLastIndex(
       (parameterNode) =>
         parameterNode.type !== 'optional_parameter' &&
         parameterNode.childForFieldName('value') === null &&

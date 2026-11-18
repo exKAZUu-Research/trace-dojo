@@ -1,7 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
-import { named } from './syntax';
+import { argumentParameters, named } from './syntax';
 import { intersectionOf, isAnyLike, type Signature, type Type, unionOf, unknownType } from './types';
 
 /**
@@ -118,9 +118,8 @@ function requiredParameterCount(node: TreeNode): number {
   const parametersNode = node.childForFieldName('parameters');
   if (!parametersNode) return node.childForFieldName('parameter') ? 1 : 0;
   let count = 0;
-  for (const parameter of named(parametersNode)) {
+  for (const parameter of argumentParameters(named(parametersNode))) {
     const pattern = parameter.childForFieldName('pattern') ?? parameter;
-    if (pattern.type === 'this') continue;
     if (
       parameter.type !== 'required_parameter' ||
       parameter.childForFieldName('value') ||
