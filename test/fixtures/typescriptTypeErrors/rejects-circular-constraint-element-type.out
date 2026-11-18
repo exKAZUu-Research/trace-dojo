@@ -1,0 +1,14 @@
+(5,29): error TS2313: Type parameter 'T' has a circular constraint.
+(6,31): error TS2313: Type parameter 'T' has a circular constraint.
+(7,32): error TS2313: Type parameter 'T' has a circular constraint.
+(8,29): error TS2313: Type parameter 'T' has a circular constraint.
+(9,28): error TS2313: Type parameter 'T' has a circular constraint.
+(10,31): error TS2313: Type parameter 'T' has a circular constraint.
+(11,28): error TS2313: Type parameter 'T' has a circular constraint.
+(12,32): error TS2313: Type parameter 'T' has a circular constraint.
+(13,33): error TS2313: Type parameter 'T' has a circular constraint.
+(14,30): error TS2313: Type parameter 'T' has a circular constraint.
+(15,35): error TS2313: Type parameter 'T' has a circular constraint.
+(16,32): error TS2313: Type parameter 'T' has a circular constraint.
+(17,30): error TS2313: Type parameter 'T' has a circular constraint.
+(18,29): error TS2313: Type parameter 'T' has a circular constraint.

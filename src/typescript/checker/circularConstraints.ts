@@ -2,13 +2,16 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { isGenericObjectOrIndexType } from './genericTypes';
+import { applicableIndex } from './indexInfos';
 import { named } from './syntax';
+import { tupleElementBeyond } from './tupleIndexes';
 import {
   type ConditionalType,
   type IndexedAccessType,
   isPropertyKeyLiteral,
   type Type,
   type TypeParameter,
+  unionOf,
 } from './types';
 
 /** What following a base constraint has gone through: type parameters, and the declared conditional types. */
@@ -45,8 +48,8 @@ export class CircularConstraints {
         return this.leadsBack(type.constraint?.(), { ...path, parameters: [...path.parameters, type.id] });
       }
       case 'indexedAccess': {
-        const selected = this.selectedTypes(type);
-        if (selected) return selected.some((member) => this.leadsBack(member, path));
+        const selected = this.selectedType(type);
+        if (selected) return this.leadsBack(selected, path);
         return this.leadsBack(type.objectType, path) || this.leadsBack(type.indexType, path);
       }
       case 'conditional': {
@@ -63,19 +66,38 @@ export class CircularConstraints {
   }
 
   /**
-   * The property types that an indexed access with literal keys on an object type that is not generic selects, as
-   * TypeScript's `getIndexedAccessType` gives them rather than a deferred indexed access.
+   * The type that an indexed access on an object type that is not generic, once an indexed access it reads selects
+   * its own, selects through properties and index signatures for each member of the object and the key, as
+   * TypeScript's `getIndexedAccessType` gives it rather than a deferred indexed access: `T[][number]` selects `T`.
    */
-  private selectedTypes({ objectType, indexType }: IndexedAccessType): Type[] | undefined {
-    if (isGenericObjectOrIndexType(objectType)) return undefined;
+  private selectedType({ objectType, indexType }: IndexedAccessType): Type | undefined {
+    const object = objectType.kind === 'indexedAccess' ? (this.selectedType(objectType) ?? objectType) : objectType;
+    if (isGenericObjectOrIndexType(object)) return undefined;
     const types: Type[] = [];
-    for (const key of indexType.kind === 'union' ? indexType.types : [indexType]) {
-      if (!isPropertyKeyLiteral(key) || typeof key.value === 'symbol') return undefined;
-      const property = this.c.propertyOf(objectType, String(key.value));
-      if (!property) return undefined;
-      types.push(property.type());
+    for (const member of object.kind === 'union' ? object.types : [object]) {
+      for (const key of indexType.kind === 'union' ? indexType.types : [indexType]) {
+        const type = this.elementType(member, key);
+        if (!type) return undefined;
+        types.push(type);
+      }
     }
-    return types;
+    return unionOf(types);
+  }
+
+  /**
+   * The type of the property a key names, else of the tuple elements past its fixed ones, else of the index signature
+   * that applies to the key.
+   */
+  private elementType(objectType: Type, key: Type): Type | undefined {
+    const apparent = this.c.apparentType(objectType);
+    if (!isPropertyKeyLiteral(key) || typeof key.value === 'symbol')
+      return applicableIndex(this.c, this.c.structureOf(apparent), key)?.type;
+    const name = String(key.value);
+    return (
+      this.c.propertyOf(apparent, name)?.type() ??
+      tupleElementBeyond(this.c, apparent, name, undefined) ??
+      applicableIndex(this.c, this.c.structureOf(apparent), key)?.type
+    );
   }
 
   /**
