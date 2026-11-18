@@ -72,10 +72,17 @@ export class TypeOperators {
   /** The type parameter named `name` that `ancestor` introduces for its descendant `child`, if any. */
   private localParameterAt(ancestor: TreeNode, child: TreeNode, name: string): TypeParameter | undefined {
     switch (ancestor.type) {
+      // As TypeScript's `resolveName`, the `infer` declarations of a conditional type are visible in its true branch
+      // and each in its own constraint, but not elsewhere in its extends type.
       case 'conditional_type': {
-        const fieldName = this.fieldNameOf(ancestor, child);
-        return fieldName === 'consequence' || fieldName === 'right'
+        return this.fieldNameOf(ancestor, child) === 'consequence'
           ? this.inferParametersOf(ancestor).get(name)
+          : undefined;
+      }
+      case 'infer_type': {
+        const [declared, constraint] = named(ancestor);
+        return declared.text === name && child.id === constraint?.id
+          ? this.inferParameterFor(ancestor, name)
           : undefined;
       }
       case 'index_signature': {
@@ -153,12 +160,13 @@ export class TypeOperators {
     return isRest ? () => this.c.arrayType(unknownType) : undefined;
   }
 
+  /** The type parameter that the `infer` declaration `node` declares in the conditional type whose extends type holds it. */
   inferParameterFor(node: TreeNode, name: string): TypeParameter | undefined {
+    let child = node;
     for (let current = node.parent; current; current = current.parent) {
-      if (current.type === 'conditional_type') {
-        const parameter = this.inferParametersOf(current).get(name);
-        if (parameter) return parameter;
-      }
+      if (current.type === 'conditional_type' && current.childForFieldName('right')?.id === child.id)
+        return this.inferParametersOf(current).get(name);
+      child = current;
     }
     return undefined;
   }

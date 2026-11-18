@@ -173,7 +173,9 @@ export class StatementChecker {
   private resolveTypeNode(node: TreeNode): void {
     if (
       (node.type === 'type_identifier' || node.type === 'generic_type') &&
-      !nameOnlyTypeParents.has(node.parent?.type ?? '')
+      (!nameOnlyTypeParents.has(node.parent?.type ?? '') ||
+        // The constraint of `infer U extends C` is a sibling of the name.
+        (node.parent?.type === 'infer_type' && named(node.parent)[0]?.id !== node.id))
     ) {
       this.c.typeNodes.typeFromNode(node);
     }
