@@ -2,24 +2,22 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { named } from './syntax';
-import { isIntrinsic, type Signature, type TupleElement, type Type, undefinedType, unionOf } from './types';
+import { isAnyLike, isIntrinsic, type Signature, type TupleElement, type Type, undefinedType, unionOf } from './types';
 
 /** Counts the arguments of a call against the parameters of a signature, and reports when they do not fit. */
 export class CallArity {
   constructor(private readonly c: Checker) {}
 
-  minimumArguments(signature: Signature): number {
-    if (signature.minimumArguments !== undefined) return signature.minimumArguments;
-    let minimum = 0;
-    for (const [index, parameter] of signature.parameters.entries()) {
-      if (!parameter.optional && !parameter.rest && !this.acceptsUndefinedOnly(parameter.type)) minimum = index + 1;
-    }
-    return minimum;
-  }
-
-  /** Whether a trailing parameter's type is `void`, which lets callers omit it. */
-  private acceptsUndefinedOnly(type: Type): boolean {
-    return isIntrinsic(type, 'void');
+  /**
+   * Whether the instance of a signature whose declaration takes the arguments takes them too. TypeScript counts the
+   * instance again only for a rest parameter that is no array, as `...args: A`; otherwise the declared parameters
+   * decide, where `x: T | void` stays omittable even when `T` is inferred as `unknown`.
+   */
+  instanceArityMatches(instance: Signature, declaration: Signature, args: TreeNode[]): boolean {
+    const hasNonArrayRest = declaration.parameters.some(
+      ({ rest, type }) => rest && !isAnyLike(type) && !this.c.isArrayType(type) && !this.c.isReadonlyArrayType(type)
+    );
+    return !hasNonArrayRest || this.arityMatches(instance, args);
   }
 
   maximumArguments(signature: Signature): number {
@@ -62,15 +60,15 @@ export class CallArity {
         // parameter or an optional one takes it, whatever follows it.
         count += this.leadingLength(arg);
         const hasRest = signature.parameters.some((parameter) => parameter.rest);
-        return count >= this.minimumArguments(signature) && (hasRest || count < signature.parameters.length);
+        return count >= minimumArguments(signature) && (hasRest || count < signature.parameters.length);
       }
       count += length;
     }
-    return count >= this.minimumArguments(signature) && count <= this.maximumArguments(signature);
+    return count >= minimumArguments(signature) && count <= this.maximumArguments(signature);
   }
 
   reportArity(node: TreeNode, callee: TreeNode, signature: Signature, args: TreeNode[]): void {
-    const minimum = this.minimumArguments(signature);
+    const minimum = minimumArguments(signature);
     const maximum = this.maximumArguments(signature);
     const spread = args.find((arg) => arg.type === 'spread_element' && this.spreadLength(arg) === undefined);
     if (spread && !this.arityMatches(signature, args)) {
@@ -105,4 +103,19 @@ export function tupleTypeAt(c: Checker, elements: TupleElement[], offset: number
     return element && (element.optional ? unionOf([element.type, undefinedType]) : element.type);
   }
   return c.restElementType(elements[restIndex].type);
+}
+
+/** How many arguments a call must pass, as TypeScript's `getMinArgumentCount` counts them. */
+export function minimumArguments(signature: Signature): number {
+  if (signature.minimumArguments !== undefined) return signature.minimumArguments;
+  let minimum = 0;
+  for (const [index, parameter] of signature.parameters.entries()) {
+    if (!parameter.optional && !parameter.rest && !acceptsVoid(parameter.type)) minimum = index + 1;
+  }
+  return minimum;
+}
+
+/** Whether a parameter's type has `void` as itself or a union member, which lets callers omit it when it trails. */
+function acceptsVoid(type: Type): boolean {
+  return (type.kind === 'union' ? type.types : [type]).some((member) => isIntrinsic(member, 'void'));
 }

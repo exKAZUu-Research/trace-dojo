@@ -2,7 +2,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
-import { CallArity, tupleTypeAt } from './callArity';
+import { CallArity, minimumArguments, tupleTypeAt } from './callArity';
 import type { Checker, Mapper } from './checker';
 import { InferencePriority, type InferenceRun, newInferenceRun } from './inference';
 import { named, skipParentheses, stringValue } from './syntax';
@@ -42,7 +42,7 @@ export class Calls {
 
   constructor(private readonly c: Checker) {
     this.arity = new CallArity(c);
-    this.unionSignatures = new UnionSignatures(c, this.arity);
+    this.unionSignatures = new UnionSignatures(c);
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
@@ -395,9 +395,8 @@ export class Calls {
     for (const candidate of candidates) {
       if (!this.arity.arityMatches(candidate, args)) continue;
       const instantiated = this.c.silently(() => instantiate(candidate));
-      // An instantiated rest parameter, as `...args: A` with `A = [number]`, may fix the arity.
       if (
-        this.arity.arityMatches(instantiated, args) &&
+        this.arity.instanceArityMatches(instantiated, candidate, args) &&
         this.c.silently(() => this.argumentsMatch(instantiated, args))
       ) {
         const final = instantiate(candidate);
@@ -433,7 +432,7 @@ export class Calls {
       );
     for (const arg of args) this.c.expressions.check(arg);
     if (byArity.length === 0) {
-      const minimum = Math.min(...candidates.map((candidate) => this.arity.minimumArguments(candidate)));
+      const minimum = Math.min(...candidates.map((candidate) => minimumArguments(candidate)));
       const maximum = Math.max(...candidates.map((candidate) => this.arity.maximumArguments(candidate)));
       this.c.error(
         args.length > maximum ? args[maximum] : node,
@@ -479,7 +478,7 @@ export class Calls {
     instantiate: (candidate: Signature) => Signature
   ): Resolution {
     const instantiated = this.arity.arityMatches(candidate, args) ? instantiate(candidate) : undefined;
-    if (instantiated && this.arity.arityMatches(instantiated, args)) {
+    if (instantiated && this.arity.instanceArityMatches(instantiated, candidate, args)) {
       this.checkArguments(instantiated, args, true, node);
       return { signature: instantiated, returnType: instantiated.returnType() };
     }

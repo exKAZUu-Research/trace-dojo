@@ -1,4 +1,5 @@
 // code-gauge-allow-file fileNcss 683 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
 import { childTypes, isGenericObjectOrIndexType, mappedOptionality } from './genericTypes';
@@ -873,9 +874,7 @@ export class Relations {
       sourceSignature = this.c.inference.instantiateToFit(source, target);
     }
     if (target.isAbstract === false && source.isAbstract) return false;
-    const sourceRequired = sourceSignature.parameters.filter(
-      (parameter) => !parameter.optional && !parameter.rest
-    ).length;
+    const sourceRequired = minimumArguments(sourceSignature);
     const targetCount = target.parameters.some((parameter) => parameter.rest)
       ? Number.POSITIVE_INFINITY
       : target.parameters.length;

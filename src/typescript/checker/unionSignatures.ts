@@ -1,4 +1,4 @@
-import type { CallArity } from './callArity';
+import { minimumArguments } from './callArity';
 import type { Checker, Mapper } from './checker';
 import {
   anyType,
@@ -21,10 +21,7 @@ interface SignatureMatch {
 
 /** Combines the call signatures of a union's members into those a call through the union resolves to. */
 export class UnionSignatures {
-  constructor(
-    private readonly c: Checker,
-    private readonly arity: CallArity
-  ) {}
+  constructor(private readonly c: Checker) {}
 
   /**
    * The signatures a call through a union whose members have `lists` resolves to, as TypeScript's `getUnionSignatures`
@@ -127,7 +124,7 @@ export class UnionSignatures {
   }
 
   private hasMatchingArity(source: Signature, target: Signature, partial: boolean): boolean {
-    const [sourceMinimum, targetMinimum] = [this.arity.minimumArguments(source), this.arity.minimumArguments(target)];
+    const [sourceMinimum, targetMinimum] = [minimumArguments(source), minimumArguments(target)];
     if (
       source.parameters.length === target.parameters.length &&
       sourceMinimum === targetMinimum &&
@@ -224,7 +221,7 @@ export class UnionSignatures {
     const longest = left.parameters.length >= right.parameters.length ? left : right;
     const eitherRest = hasRest(left) || hasRest(right);
     const extraRest = eitherRest && !hasRest(longest);
-    const minimum = Math.max(this.arity.minimumArguments(left), this.arity.minimumArguments(right));
+    const minimum = Math.max(minimumArguments(left), minimumArguments(right));
     const parameters: Parameter[] = longest.parameters.map((parameter, index) => {
       const isRest = eitherRest && !extraRest && index === longest.parameters.length - 1;
       return {
