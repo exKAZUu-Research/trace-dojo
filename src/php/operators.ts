@@ -536,7 +536,7 @@ function isIntegerText(text: string): boolean {
 export type KeyUse = 'access' | 'isset' | 'unset';
 
 /** Converts a value to an array key, as `$a[$key]` does, throwing for keys PHP rejects. */
-export function toKey(value: Value, use: KeyUse = 'access'): Key {
+export function toKey(value: Value, use: KeyUse = 'access', container = 'array'): Key {
   if (typeof value === 'bigint') return value;
   if (typeof value === 'string') return normalizeKeyString(value);
   if (value === null) {
@@ -547,5 +547,5 @@ export function toKey(value: Value, use: KeyUse = 'access'): Key {
   if (typeof value === 'number') return toIntForOperator(value);
   const type = debugType(value);
   if (use === 'isset') throwError('TypeError', `Cannot access offset of type ${type} in isset or empty`);
-  throwError('TypeError', `Cannot ${use === 'unset' ? 'unset' : 'access'} offset of type ${type} on array`);
+  throwError('TypeError', `Cannot ${use === 'unset' ? 'unset' : 'access'} offset of type ${type} on ${container}`);
 }

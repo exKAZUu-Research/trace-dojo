@@ -21,6 +21,7 @@ export interface Place {
    * provides or an element that `offsetGet` provides. Throws where the place may not change that way.
    */
   nested?(mode?: 'write' | 'update' | 'unset'): Place;
+  incrementTarget?(): Place;
   /** Warns that the place does not exist, as a read-modify-write (`++`, `.=`) of it does, creating what PHP creates. */
   warnUndefined?(): void;
   /** The value as `isset` and `??` read it, asking `__isset` or `offsetExists` first; undefined when unset. */
@@ -36,11 +37,16 @@ export function share(value: Value): Value {
 export class VarPlace implements Place {
   constructor(
     private readonly frame: Frame,
-    readonly name: string
+    readonly name: string,
+    private readonly global = false
   ) {}
 
   get(): Value | undefined {
     return this.frame.vars.get(this.name)?.v;
+  }
+
+  warnUndefined(): void {
+    warn(`Undefined ${this.global ? 'global ' : ''}variable $${this.name}`);
   }
 
   set(value: Value): Value {
@@ -123,6 +129,11 @@ export class ElementPlace implements Place {
     return this.array.get(this.key);
   }
 
+  warnUndefined(): void {
+    if (this.key !== undefined)
+      warn(`Undefined array key ${typeof this.key === 'bigint' ? this.key : `"${this.key}"`}`);
+  }
+
   set(value: Value): Value {
     if (this.key === undefined) {
       const key = this.array.appendKey;
@@ -188,7 +199,11 @@ export class ValuePlace implements Place {
  * The array a nested write goes into, after separating it from other holders or creating it, or the ArrayAccess
  * object that receives the write.
  */
-export function writableContainer(place: Place, value = place.get('nested')): PhpArray | PhpObject | string {
+export function writableContainer(
+  place: Place,
+  value = place.get('nested'),
+  update = false
+): PhpArray | PhpObject | string {
   if (value instanceof PhpArray) {
     if (arrayIsShared(value)) {
       const copy = value.copy();
@@ -198,6 +213,7 @@ export function writableContainer(place: Place, value = place.get('nested')): Ph
     return value;
   }
   if (value === undefined || value === null) {
+    if (update && value === undefined) place.warnUndefined?.();
     return initializeArray(place);
   }
   if (value === false) {

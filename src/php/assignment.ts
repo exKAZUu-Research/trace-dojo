@@ -63,7 +63,7 @@ export function placeOf(e: Expr, mode: 'write' | 'update' | 'deferred' = 'write'
       const key = e.index === undefined ? undefined : ev(e.index);
       runtime.row = e.row;
       if (mode === 'deferred') return deferredElementPlace(parent, key);
-      const container = writableContainer(parent.nested?.(mode) ?? parent);
+      const container = writableContainer(parent.nested?.(mode) ?? parent, undefined, mode === 'update');
       if (container instanceof PhpArray) return new ElementPlace(container, key === undefined ? undefined : toKey(key));
       if (container instanceof PhpObject) return arrayAccessPlace(container, key);
       return stringOffsetPlace(parent, container, key);
@@ -115,7 +115,7 @@ function deferredElementPlace(parent: Place, key: Value | undefined): Place {
     const container = parent.getForIsset ? parent.getForIsset() : parent.get();
     return container === undefined || container === null || key === undefined
       ? undefined
-      : readIndex(container, key, true);
+      : readIndex(container, key, 'coalesce');
   };
   return {
     get: read,
@@ -134,7 +134,7 @@ function deferredElementPlace(parent: Place, key: Value | undefined): Place {
 
 function globalPlace(index?: Expr): VarPlace {
   if (index === undefined) throwError('Error', 'Cannot append to $GLOBALS');
-  return new VarPlace(rt().globalFrame, toStr(ev(index)));
+  return new VarPlace(rt().globalFrame, toStr(ev(index)), true);
 }
 
 class StaticPlace implements Place {
@@ -207,6 +207,7 @@ function writtenObject(e: Expr): Value {
   return e.k === 'var' ? evQuiet(e) : ev(e);
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function propPlace(object: PhpObject, name: string): Place {
   const scope = rt().frame.scope;
   return {
@@ -232,6 +233,8 @@ function propPlace(object: PhpObject, name: string): Place {
     },
     nested(mode = 'write') {
       const decl = classesModule.lookupProp(object.cls, name, scope);
+      if (decl && classesModule.canAccessProp(decl, scope))
+        classesModule.requireVirtualPropertyHook(object, decl, 'get');
       if (
         ((decl && !classesModule.canAccessProp(decl, scope)) || !issetPropExists(object, name, scope)) &&
         object.cls.findMethod('__get')
@@ -246,6 +249,7 @@ function propPlace(object: PhpObject, name: string): Place {
   };
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function readPropertyPlace(
   object: PhpObject,
   name: string,
@@ -257,12 +261,16 @@ function readPropertyPlace(
       'Error',
       `Attempt to ${operation === 'assignOp' ? 'assign' : operation === 'incdec' ? 'increment/decrement' : 'modify'} property "${name}" on resource`
     );
-  if (!issetPropExists(object, name, scope)) {
+  const update = operation === 'assignOp' || operation === 'incdec';
+  const decl = classesModule.lookupProp(object.cls, name, scope);
+  if (decl && !decl.isStatic && classesModule.canAccessProp(decl, scope)) {
+    classesModule.requireVirtualPropertyHook(object, decl, 'get');
+  }
+  if (!decl?.hooks?.get && !issetPropExists(object, name, scope)) {
     const magic = object.cls.findMethod('__get');
-    const decl = classesModule.lookupProp(object.cls, name, scope);
     if (!magic && (!decl?.type || decl.isStatic)) return;
   }
-  return readProp(object, name, scope, operation === 'assignOp' || operation === 'incdec' ? 'update' : 'quiet');
+  return readProp(object, name, scope, update ? 'update' : 'quiet');
 }
 
 function issetPropExists(object: PhpObject, name: string, scope: PhpClass | undefined): boolean {
@@ -302,6 +310,7 @@ function arrayAccessPlace(object: PhpObject, key: Value | undefined): Place {
         ? callMethod(object, 'offsetGet', [key ?? null], rt().row)
         : undefined,
     nested: () => arrayAccessNestedPlace(object, key),
+    incrementTarget: () => arrayAccessNestedPlace(object, key),
     get: () => callMethod(object, 'offsetGet', [key ?? null], rt().row),
     set: (value) => {
       callMethod(object, 'offsetSet', [key ?? null, value], rt().row);
@@ -321,7 +330,7 @@ function arrayAccessNestedPlace(object: PhpObject, key: Value | undefined): Plac
     nativeArrayStorage(object.internal) &&
     object.cls.findMethod('offsetget')?.fn.kind === 'native'
   ) {
-    return new ElementPlace(object.internal.writable(), toKey(key ?? null));
+    return new ElementPlace(object.internal.writable(), toKey(key, 'access', object.cls.name));
   }
   if (
     key === undefined &&
@@ -350,7 +359,7 @@ function stringOffsetPlace(parent: Place, text: string, key: Value | undefined):
   return {
     get: (operation) => {
       if (key === undefined) throwError('Error', '[] operator not supported for strings');
-      stringOffset(text, key, false);
+      stringOffset(text, key);
       const message =
         operation === 'assignOp'
           ? 'Cannot use assign-op operators with string offsets'
@@ -359,10 +368,10 @@ function stringOffsetPlace(parent: Place, text: string, key: Value | undefined):
             : 'Cannot use string offset as an array';
       throwError('Error', message);
     },
-    getForIsset: () => (key === undefined ? undefined : readIndex(text, key, true)),
+    getForIsset: () => (key === undefined ? undefined : readIndex(text, key, 'coalesce')),
     set: (value) => {
       if (key === undefined) throwError('Error', '[] operator not supported for strings');
-      const position = stringOffset(text, key, false) as number;
+      const position = stringOffset(text, key) as number;
       let offset = position;
       if (position < 0) {
         const requested = Number(toInt(key));
@@ -532,7 +541,7 @@ function destructureItem(item: ListItem, value: Value, key: Key): void {
   if (value instanceof PhpArray) {
     element = readElement(value, key, false);
   } else if (value instanceof PhpObject) {
-    element = readIndex(value, key, false);
+    element = readIndex(value, key);
   } else {
     if (value !== null) warn(`Cannot use ${debugType(value)} as array`);
     element = null;
@@ -556,7 +565,7 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
   runtime.row = e.row;
   let current = place.get('assignOp');
   if (current === undefined) {
-    warnUndefinedTarget(e.target, place);
+    place.warnUndefined?.();
     current = null;
   }
   const result = applyOperator(e.op, current, value);
@@ -588,14 +597,15 @@ export function applyOperator(op: string, left: Value, right: Value): Value {
 }
 
 // code-gauge-allow functionCognitiveComplexity 24 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 37 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 38 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 export function incDec(e: Extract<Expr, { k: 'incdec' }>): Value {
   const runtime = rt();
-  const place = placeOf(e.target, 'update');
+  const target = placeOf(e.target, 'update');
+  const place = target.incrementTarget?.() ?? target;
   runtime.row = e.row;
   let old = place.get('incdec');
   if (old === undefined) {
-    warnUndefinedTarget(e.target, place);
+    place.warnUndefined?.();
     old = null;
   }
   let updated: Value;
@@ -622,13 +632,6 @@ export function incDec(e: Extract<Expr, { k: 'incdec' }>): Value {
   if (typeof old === 'bigint' && typeof updated === 'number') checkIntOverflow(place, e.inc);
   const stored = place.set(updated);
   return e.prefix ? stored : old;
-}
-
-function warnUndefinedTarget(target: Expr, place: Place): void {
-  if (target.k === 'var' || target.k === 'varvar') warn(`Undefined variable $${(place as VarPlace).name}`);
-  else if (place instanceof ElementPlace && place.key !== undefined) {
-    warn(`Undefined array key ${typeof place.key === 'bigint' ? place.key : `"${place.key}"`}`);
-  } else place.warnUndefined?.();
 }
 
 /** Throws PHP's TypeError when `++` or `--` takes a property typed int past the range of ints. */
@@ -666,8 +669,6 @@ function incDecString(text: string, inc: boolean): Value {
   return incrementString(text);
 }
 
-// code-gauge-allow functionNcss 43 -- Handles each kind of writable expression, whose write rules PHP defines separately.
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function unsetTarget(target: Expr): void {
   const runtime = rt();
   runtime.row = target.row;
@@ -681,19 +682,7 @@ export function unsetTarget(target: Expr): void {
       return;
     }
     case 'idx': {
-      if (target.index === undefined) throwError('Error', 'Cannot use [] for unsetting');
-      if (target.base.k === 'var' && target.base.name === 'GLOBALS') {
-        new VarPlace(runtime.globalFrame, toStr(ev(target.index))).unset();
-        return;
-      }
-      const base = unsetContainer(target.base);
-      const index = ev(target.index);
-      if (base === undefined) return;
-      if (base instanceof PhpArray) base.delete(toKey(index, 'unset'));
-      else if (base instanceof PhpObject) {
-        if (!isArrayAccess(base)) throwError('Error', `Cannot use object of type ${base.cls.name} as array`);
-        callMethod(base, 'offsetUnset', [index], rt().row);
-      } else if (typeof base === 'string') throwError('Error', 'Cannot unset string offsets');
+      unsetDimensions(target);
       return;
     }
     case 'prop': {
@@ -713,44 +702,54 @@ export function unsetTarget(target: Expr): void {
   }
 }
 
-/** The container an unset of an element writes into, or undefined when it does not exist. */
-function unsetContainer(e: Expr): PhpArray | PhpObject | string | undefined {
-  const place = unsetPlace(e);
-  const value = place?.get();
-  if (value === undefined && e.k !== 'idx') warnUndefinedBase(e);
-  if (value instanceof PhpArray) return writableContainer(place as Place, value) as PhpArray;
-  if (value instanceof PhpObject || typeof value === 'string') return value;
-  return undefined;
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function unsetDimensions(target: Extract<Expr, { k: 'idx' }>): void {
+  const dimensions: Expr[] = [];
+  let base: Expr = target;
+  while (base.k === 'idx' && !(base.base.k === 'var' && base.base.name === 'GLOBALS')) {
+    if (base.index === undefined) throwError('Error', 'Cannot use [] for unsetting');
+    dimensions.push(base.index);
+    base = base.base;
+  }
+  let place = unsetBasePlace(base);
+  if (dimensions.length === 0) {
+    place?.unset();
+    return;
+  }
+  const indices = dimensions.toReversed().map((index) => ev(index));
+  place = place?.nested?.('unset') ?? place;
+  for (const [index, key] of indices.entries()) {
+    const nested = index + 1 < indices.length;
+    const value = place?.get();
+    if (index === 0 && value === undefined) warnUndefinedBase(base);
+    const container = value instanceof PhpArray && place ? writableContainer(place, value) : value;
+    place = unsetOffsetPlace(container, key, nested);
+    if (!place) return;
+    if (nested) place = place.nested?.('unset') ?? place;
+  }
+  place?.unset();
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function unsetPlace(e: Expr): Place | undefined {
-  if (e.k === 'idx') {
-    if (e.index === undefined) throwError('Error', 'Cannot use [] for unsetting');
-    if (e.base.k === 'var' && e.base.name === 'GLOBALS') {
-      return new VarPlace(rt().globalFrame, toStr(ev(e.index)));
-    }
-    const container = unsetContainer(e.base);
-    const key = ev(e.index);
-    if (container instanceof PhpArray) return new ElementPlace(container, toKey(key, 'unset'));
-    if (container instanceof PhpObject) {
-      const place = arrayAccessPlace(container, key);
-      return place.nested?.() ?? place;
-    }
-    if (typeof container === 'string') throwError('Error', 'Cannot unset string offsets');
-    return undefined;
-  }
+function unsetBasePlace(e: Expr): Place | undefined {
+  if (e.k === 'idx') return globalPlace(e.index);
   if (e.k === 'prop') {
     const object = ev(e.obj);
     const name = memberName(e.name);
-    if (!(object instanceof PhpObject)) return undefined;
-    const place = propPlace(object, name);
-    return place.nested?.('unset') ?? place;
+    return object instanceof PhpObject ? propPlace(object, name) : undefined;
   }
-  if (e.k === 'var' || e.k === 'varvar' || e.k === 'sprop') {
-    return placeOf(e);
-  }
+  if (e.k === 'var' || e.k === 'varvar' || e.k === 'sprop') return placeOf(e);
   return new ValuePlace(ev(e));
+}
+
+function unsetOffsetPlace(container: Value | undefined, key: Value, nested: boolean): Place | undefined {
+  if (container instanceof PhpArray) return new ElementPlace(container, toKey(key, 'unset'));
+  if (container instanceof PhpObject) return arrayAccessPlace(container, key);
+  if (typeof container === 'string')
+    throwError('Error', nested ? 'Cannot use string offset as an array' : 'Cannot unset string offsets');
+  if (container === false) deprecated('Automatic conversion of false to array is deprecated');
+  else if (container !== undefined && container !== null)
+    throwError('Error', 'Cannot unset offset in a non-array variable');
+  return undefined;
 }
 
 /** Warns about the undefined variable an unset of an element starts from, as PHP's fetch for unset does. */
@@ -782,8 +781,7 @@ export function isset(e: Expr): boolean {
       const index = ev(e.index);
       if (base instanceof PhpArray) return (base.get(toKey(index, 'isset')) ?? null) !== null;
       if (typeof base === 'string') {
-        if (typeof index === 'string' && !/^[ \t\n\r\v\f]*[+-]?\d+[ \t\n\r\v\f]*$/.test(index)) return false;
-        const position = stringOffset(base, index, true);
+        const position = stringOffset(base, index, 'isset');
         return position !== undefined && position >= 0;
       }
       if (base instanceof PhpObject) {

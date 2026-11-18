@@ -257,12 +257,12 @@ function arrayMethods(name: string): NativeMethod[] {
     },
     {
       signature: 'offsetExists(mixed $key): bool',
-      impl: ({ thisObj, args }) => storageOf(thisObj).array.has(toKey(args[0])),
+      impl: ({ thisObj, args }) => storageOf(thisObj).array.has(toKey(args[0], 'isset', thisObj.cls.name)),
     },
     {
       signature: 'offsetGet(mixed $key): mixed',
       impl: ({ thisObj, args }) => {
-        const key = toKey(args[0]);
+        const key = toKey(args[0], 'access', thisObj.cls.name);
         const value = storageOf(thisObj).array.get(key);
         if (value === undefined) {
           warn(`Undefined array key ${typeof key === 'bigint' ? key : `"${key}"`}`);
@@ -276,14 +276,16 @@ function arrayMethods(name: string): NativeMethod[] {
       impl: ({ thisObj, args }) => {
         const array = storageOf(thisObj).writable();
         if (args[0] === null) array.append(share(args[1]));
-        else array.set(toKey(args[0]), share(args[1]));
+        else array.set(toKey(args[0], 'access', thisObj.cls.name), share(args[1]));
         return null;
       },
     },
     {
       signature: 'offsetUnset(mixed $key): void',
       impl: ({ thisObj, args }) => {
-        storageOf(thisObj).writable().delete(toKey(args[0]));
+        storageOf(thisObj)
+          .writable()
+          .delete(toKey(args[0], 'unset', thisObj.cls.name));
         return null;
       },
     },

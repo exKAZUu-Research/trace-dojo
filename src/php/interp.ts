@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 806 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 809 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -55,6 +55,7 @@ import {
   strictEquals,
   toFloat,
   toInt,
+  toIntForOperator,
   toKey,
   toStr,
   unaryPlus,
@@ -205,7 +206,7 @@ export function evChain(e: Expr, discardResult = false): Chain {
       if (base === SHORT) return SHORT;
       const index = ev(e.index);
       runtime.row = e.row;
-      return readIndex(base, index, false);
+      return readIndex(base, index);
     }
     case 'prop': {
       const object = evChain(e.obj);
@@ -409,12 +410,12 @@ function isThrowableObject(object: PhpObject): boolean {
 
 /** Evaluates an expression without the warnings an undefined variable or key would raise, as `??` and `empty` do. */
 // code-gauge-allow functionNcss 37 -- One case per expression kind, as PHP evaluates each kind differently.
-// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function evQuiet(e: Expr, mode: 'isset' | 'coalesce' = 'isset'): Value {
   const runtime = rt();
   switch (e.k) {
     case 'var': {
-      if (e.name === 'this') return runtime.frame.thisObj ?? null;
+      if (e.name === 'this') return mode === 'coalesce' ? readVar(e.name, e.row) : (runtime.frame.thisObj ?? null);
       if (e.name === 'GLOBALS') return globalsArray();
       return runtime.frame.vars.get(e.name)?.v ?? null;
     }
@@ -426,7 +427,7 @@ export function evQuiet(e: Expr, mode: 'isset' | 'coalesce' = 'isset'): Value {
       const base = evQuiet(e.base, 'coalesce');
       const index = ev(e.index);
       if (base === null) return null;
-      return readIndex(base, index, true);
+      return readIndex(base, index, mode);
     }
     case 'prop': {
       const object = evQuiet(e.obj, 'coalesce');
@@ -472,9 +473,12 @@ function globalsArray(): PhpArray {
   return array;
 }
 
-export function readIndex(base: Value, index: Value, quiet: boolean): Value {
-  if (base instanceof PhpArray) return readElement(base, toKey(index, quiet ? 'isset' : 'access'), quiet);
-  if (typeof base === 'string') return readStringOffset(base, index, quiet);
+type OffsetRead = 'read' | 'isset' | 'coalesce';
+
+export function readIndex(base: Value, index: Value, mode: OffsetRead = 'read'): Value {
+  const quiet = mode !== 'read';
+  if (base instanceof PhpArray) return readElement(base, toKey(index, mode === 'isset' ? 'isset' : 'access'), quiet);
+  if (typeof base === 'string') return readStringOffset(base, index, mode);
   if (base instanceof PhpObject) {
     if (base.cls.findMethod('offsetget') && isArrayAccess(base)) {
       if (quiet && !toBool(callMethod(base, 'offsetExists', [index], rt().row))) return null;
@@ -492,8 +496,9 @@ export function isArrayAccess(object: PhpObject): boolean {
 }
 
 /** The position an index selects in a string: -1 when it is out of range, undefined when `quiet` and the index is not an integer. */
-// code-gauge-allow functionNcss 40 -- One case per expression kind, as PHP evaluates each kind differently.
-export function stringOffset(text: string, index: Value, quiet: boolean): number | undefined {
+// code-gauge-allow functionNcss 44 -- One case per expression kind, as PHP evaluates each kind differently.
+export function stringOffset(text: string, index: Value, mode: OffsetRead = 'read'): number | undefined {
+  const quiet = mode !== 'read';
   let offset: bigint;
   if (typeof index === 'bigint') offset = index;
   else if (typeof index === 'string') {
@@ -509,7 +514,7 @@ export function stringOffset(text: string, index: Value, quiet: boolean): number
         throwError('TypeError', 'Cannot access offset of type string on string');
       }
       const leading = /^[ \t\n\r\v\f]*[+-]?\d+/.exec(index);
-      if (!leading || quiet) {
+      if (!leading || mode === 'isset') {
         if (quiet) return undefined;
         throwError('TypeError', `Cannot access offset of type ${debugType(index)} on string`);
       }
@@ -518,21 +523,22 @@ export function stringOffset(text: string, index: Value, quiet: boolean): number
     }
   } else if (typeof index === 'number') {
     if (!quiet) warn('String offset cast occurred');
-    offset = toInt(index);
+    offset = mode === 'isset' ? toIntForOperator(index) : toInt(index);
   } else if (typeof index === 'boolean' || index === null) {
     if (!quiet) warn('String offset cast occurred');
     offset = index ? 1n : 0n;
-  } else throwError('TypeError', `Cannot access offset of type ${debugType(index)} on string`);
+  } else if (mode === 'isset') return undefined;
+  else throwError('TypeError', `Cannot access offset of type ${debugType(index)} on string`);
   const position = offset < 0n ? BigInt(text.length) + offset : offset;
   if (position < 0n || position >= BigInt(text.length)) return -1;
   return Number(position);
 }
 
-function readStringOffset(text: string, index: Value, quiet: boolean): Value {
-  const position = stringOffset(text, index, quiet);
+function readStringOffset(text: string, index: Value, mode: OffsetRead): Value {
+  const position = stringOffset(text, index, mode);
   if (position === undefined) return null;
   if (position < 0) {
-    if (quiet) return null;
+    if (mode !== 'read') return null;
     warn(`Uninitialized string offset ${toInt(index)}`);
     return '';
   }

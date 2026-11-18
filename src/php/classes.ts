@@ -927,9 +927,7 @@ export function readProp(
         )
       );
     }
-    if (decl.isVirtual && decl.hooks && !decl.hooks.get) {
-      throwError('Error', `Property ${object.cls.name}::$${name} is write-only`);
-    }
+    requireVirtualPropertyHook(object, decl, 'get');
     const slot = object.props.get(decl.key);
     if (slot === undefined || slot === UNINIT) {
       if (slot === undefined || object.unsetProperties?.has(decl.key)) {
@@ -1022,9 +1020,7 @@ export function writeProp(object: PhpObject, name: string, value: Value, scope: 
       );
       return value;
     }
-    if (decl.isVirtual && decl.hooks && !decl.hooks.set) {
-      throwError('Error', `Property ${object.cls.name}::$${name} is read-only`);
-    }
+    requireVirtualPropertyHook(object, decl, 'set');
     const coerced = decl.type ? coerceProperty(decl, value, object) : value;
     const slot = object.props.get(decl.key);
     if (slot instanceof Ref) slot.assign(coerced);
@@ -1180,6 +1176,12 @@ export function propRef(
   if (decl?.type && !decl.isStatic) ref.typedBy = [{ decl, object }];
   object.props.set(key, ref);
   return ref;
+}
+
+export function requireVirtualPropertyHook(object: PhpObject, decl: PropDecl, hook: 'get' | 'set'): void {
+  if (decl.isVirtual && decl.hooks && !decl.hooks[hook]) {
+    throwError('Error', `Property ${object.cls.name}::$${decl.name} is ${hook === 'get' ? 'write' : 'read'}-only`);
+  }
 }
 
 export function hookedPropertyReference(

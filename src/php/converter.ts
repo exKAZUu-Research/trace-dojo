@@ -20,26 +20,9 @@ export class Converter extends DeclarationConverter {
   convertProgram(root: Node): Program {
     this.checkNamespaces(root);
     const body: Stmt[] = [];
-    let index = 0;
-    const children = root.children;
-    // Text before the first `<?php` tag is output as is.
-    while (index < children.length && children[index].type !== 'php_tag') {
-      const child = children[index];
+    for (const child of root.namedChildren) {
       if (child.type === 'text') body.push({ k: 'inline', text: enc(child.text), row: child.startPosition.row });
-      index++;
-    }
-    let echoTag = false;
-    if (index < children.length && children[index].type === 'php_tag') {
-      echoTag = children[index].text === '<?=';
-      index++;
-    }
-    const statements = children.slice(index).filter((child) => child.isNamed && child.type !== 'comment');
-    let first = true;
-    for (const child of statements) {
-      if (child.type === 'php_end_tag') continue;
-      if (first && echoTag) body.push(...this.echoTagStatement(child));
-      else body.push(...this.statement(child, true));
-      first = false;
+      else if (!['php_tag', 'php_end_tag', 'comment'].includes(child.type)) body.push(...this.statement(child, true));
     }
     this.checkGotos(this.fn, body);
     validateReads(body);
@@ -52,14 +35,6 @@ export class Converter extends DeclarationConverter {
   }
 
   // Errors ------------------------------------------------------------------------------------------------------------
-
-  private echoTagStatement(node: Node): Stmt[] {
-    if (node.type === 'expression_statement') {
-      const expression = node.namedChildren.find((child) => child.type !== 'comment');
-      if (expression) return [{ k: 'echo', args: this.sequence(expression), row: node.startPosition.row }];
-    }
-    return this.statement(node, true);
-  }
 
   protected block(node: Node | null | undefined): Stmt[] {
     if (!node) return [];
@@ -85,10 +60,6 @@ export class Converter extends DeclarationConverter {
 
   private statement(node: Node, topLevel: boolean): Stmt[] {
     const row = node.startPosition.row;
-    if (this.pendingEcho && node.type !== 'comment') {
-      this.pendingEcho = false;
-      return this.echoTagStatement(node);
-    }
     switch (node.type) {
       case 'expression_statement': {
         const expression = node.namedChildren.find((child) => child.type !== 'comment');
@@ -263,9 +234,7 @@ export class Converter extends DeclarationConverter {
     let text = this.source.slice(end.endIndex, tag ? tag.startIndex : node.endIndex);
     // PHP swallows the single newline that directly follows a closing tag.
     if (text.startsWith('\r\n')) text = text.slice(2);
-    else if (text.startsWith('\n')) text = text.slice(1);
-    // `<?=` echoes the expression statement that follows it.
-    if (tag?.text === '<?=') this.pendingEcho = true;
+    else if (text.startsWith('\n') || text.startsWith('\r')) text = text.slice(1);
     return enc(text);
   }
 
@@ -296,42 +265,28 @@ export class Converter extends DeclarationConverter {
     const row = node.startPosition.row;
     const cond = this.condition(node);
     const consequent = this.controlBody(node);
-    const alternate = this.alternatives(this.clauseGroups(node.namedChildren, ['else_clause', 'else_if_clause']));
+    const alternate = this.alternatives(node.childrenForFieldName('alternative'));
     return { k: 'if', cond, consequent, alternate, row };
   }
 
-  private alternatives(groups: { clause: Node; tail: Node[] }[]): Stmt[] | undefined {
-    if (groups.length === 0) return undefined;
-    const [{ clause, tail }, ...rest] = groups;
-    if (clause.type === 'else_clause') return this.controlBody(clause, tail);
-    const cond = this.condition(clause);
-    const consequent = this.controlBody(clause, tail);
+  private alternatives(clauses: Node[]): Stmt[] | undefined {
+    const [clause, ...rest] = clauses;
+    if (!clause) return undefined;
+    const body = this.controlBody(clause);
+    if (clause.type === 'else_clause') return body;
     return [
       {
         k: 'if',
-        cond,
-        consequent,
+        cond: this.condition(clause),
+        consequent: body,
         alternate: this.alternatives(rest),
         row: clause.startPosition.row,
       },
     ];
   }
 
-  private controlBody(node: Node, tail: Node[] = []): Stmt[] {
-    const colon = node.children.find((child) => child.type === ':' || child.type === 'colon_block');
-    if (!colon) return this.blockOf(node.childrenForFieldName('body'));
-    const end = node.childrenForFieldName('alternative')[0]?.startIndex ?? node.endIndex;
-    const nodes = node.namedChildren.filter((child) => child.startIndex >= colon.startIndex && child.startIndex < end);
-    return this.blockOf([...nodes, ...tail]);
-  }
-
-  private clauseGroups(nodes: Node[], types: string[]): { clause: Node; tail: Node[] }[] {
-    const groups: { clause: Node; tail: Node[] }[] = [];
-    for (const node of nodes) {
-      if (types.includes(node.type)) groups.push({ clause: node, tail: [] });
-      else groups.at(-1)?.tail.push(node);
-    }
-    return groups;
+  private controlBody(node: Node): Stmt[] {
+    return this.blockOf(node.childrenForFieldName('body'));
   }
 
   private foreachStatement(node: Node): Stmt {
@@ -374,8 +329,9 @@ export class Converter extends DeclarationConverter {
     let defaults = 0;
     const cases = this.loopBody(
       () =>
-        this.clauseGroups(block.namedChildren, ['case_statement', 'default_statement']).map(
-          ({ clause: child, tail }): SwitchCase => {
+        block.namedChildren
+          .filter((child) => ['case_statement', 'default_statement'].includes(child.type))
+          .map((child): SwitchCase => {
             const value = child.childForFieldName('value');
             if (child.type === 'default_statement') {
               defaults++;
@@ -385,8 +341,7 @@ export class Converter extends DeclarationConverter {
                   'switch に default が2つあります（Switch statements may only contain one default clause）。'
                 );
             }
-            const separator = child.children.find((part) => part.type === ':' || part.type === ';');
-            if (separator?.type === ';') {
+            if (!child.children.some((part) => part.type === ':')) {
               this.notices.push({
                 level: 'Deprecated',
                 message: 'Case statements followed by a semicolon (;) are deprecated, use a colon (:) instead',
@@ -396,11 +351,10 @@ export class Converter extends DeclarationConverter {
             const statements = child.namedChildren.filter((part) => part.id !== value?.id && part.type !== 'comment');
             return {
               test: value ? this.expr(value) : undefined,
-              body: [...statements, ...tail].flatMap((statement) => this.statement(statement, false)),
+              body: statements.flatMap((statement) => this.statement(statement, false)),
               row: child.startPosition.row,
             };
-          }
-        ),
+          }),
       true
     );
     return { k: 'switch', subject, cases, row };
@@ -558,12 +512,7 @@ export class Converter extends DeclarationConverter {
 
   private namespaceTrivia(node: Node): boolean {
     if (['php_tag', 'php_end_tag', 'comment', 'empty_statement'].includes(node.type)) return true;
-    if (node.type !== 'text_interpolation') return false;
-    const end = node.namedChildren.find((child) => child.type === 'php_end_tag');
-    const tag = node.namedChildren.find((child) => child.type === 'php_tag');
-    if (!end || tag?.text === '<?=') return false;
-    const text = this.source.slice(end.endIndex, tag?.startIndex ?? node.endIndex);
-    return text.replace(/^\r?\n/, '') === '';
+    return node.type === 'text_interpolation' && this.inlineText(node) === '';
   }
 
   private namespaceDefinition(node: Node): Stmt[] {
