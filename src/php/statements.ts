@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 618 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 620 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
@@ -34,6 +34,7 @@ import {
   type PhpClass,
   PhpObject,
   Ref,
+  UNDEFINED_RESULT,
   type UserFunction,
   type Value,
 } from './values';
@@ -501,7 +502,7 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
   if (!(subject instanceof PhpArray)) return warnForeachSubject(statement, subject);
   subject.shared = true;
   frame.temporaries.push(subject);
-  for (const [key, slot] of subject.map) {
+  for (const [key, slot] of subject.definedSlots()) {
     runtime.spend();
     const value = slot instanceof Ref ? slot.v : slot;
     const completion = foreachIteration(statement, key, value);
@@ -543,7 +544,7 @@ interface NativeForeachStorage {
   writable(): PhpArray;
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the live cursor, subject replacement and reference binding in order.
 function foreachArrayByRef(
   statement: Extract<Stmt, { k: 'foreach' }>,
   array: PhpArray,
@@ -563,8 +564,9 @@ function foreachArrayByRef(
       const key = cursor.key;
       if (key === undefined) return undefined;
       runtime.spend();
-      const ref = new ElementPlace(array, key).ref();
       cursor.next();
+      if (array.map.get(key) === UNDEFINED_RESULT) continue;
+      const ref = new ElementPlace(array, key).ref();
       bindForeachRef(statement.value, ref);
       if (statement.key) assignTo(statement.key, key);
       runtime.steps.stepBinding(statement.row, true);

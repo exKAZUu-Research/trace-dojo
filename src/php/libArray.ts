@@ -248,7 +248,7 @@ defineFunction('array_values(array $array): array', ({ args }) => {
   // PHP returns a list as it is, sharing it with its internal pointer.
   if (array.isList()) return share(array);
   return rebuild(
-    [...array.map.values()].map((slot): [Key, Value | Ref] => [0n, slot]),
+    Array.from(array.definedSlots(), ([, slot]): [Key, Value | Ref] => [0n, slot]),
     true
   );
 });
@@ -648,7 +648,7 @@ defineFunction(
       const name = value;
       const ref = frame.vars.get(name);
       if (name === 'this' && frame.thisObj) result.set('this', frame.thisObj);
-      else if (ref) result.set(normalizeKeyString(name), share(ref.v));
+      else if (ref?.isDefinedBinding) result.set(normalizeKeyString(name), share(ref.v));
       else warn(`compact(): Undefined variable $${name}`);
     };
     for (const [index, value] of args.entries()) visit(value, index + 1);
@@ -658,6 +658,7 @@ defineFunction(
 );
 defineFunction(
   'extract(array &~$array, int $flags = EXTR_OVERWRITE, string $prefix = UNKNOWN): int',
+  // code-gauge-allow functionNcss 31 -- The extraction loop shares the source and bindings across modes.
   // code-gauge-allow functionCognitiveComplexity 17 -- The extraction loop shares the source and bindings across modes.
   ({ args, refs, dynamic }) => {
     const flags = (args[1] as bigint | undefined) ?? 0n;
@@ -674,12 +675,13 @@ defineFunction(
     const runtime = rt();
     const frame = runtime.frame;
     const compiledNames = mode === 5 ? runtime.compiledNames(frame) : undefined;
+    const exists = (name: string): boolean => frame.vars.get(name)?.isDefinedBinding === true;
     let count = 0n;
     for (const key of array.keys()) {
       const name =
-        typeof key === 'string' && compiledNames?.has(key) && !frame.vars.has(key)
+        typeof key === 'string' && compiledNames?.has(key) && !exists(key)
           ? key
-          : extractedName(key, mode, `${prefix ?? ''}_`, (candidate) => frame.vars.has(candidate));
+          : extractedName(key, mode, `${prefix ?? ''}_`, exists);
       if (name === undefined) continue;
       if (name === 'this') throwError('Error', 'Cannot re-assign $this');
       const place = new VarPlace(frame, name);

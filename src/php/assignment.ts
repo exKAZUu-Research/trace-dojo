@@ -1273,7 +1273,7 @@ function unsetStringOffset(key: Value, nested?: UnsetBase): never {
 }
 
 export function issetOffset(base: Value, index: Value): boolean {
-  if (base instanceof PhpArray) return (base.get(toKey(index, 'isset')) ?? null) !== null;
+  if (base instanceof PhpArray) return base.isSet(toKey(index, 'isset'));
   if (typeof base === 'string') {
     const position = stringOffset(base, index, 'isset');
     return position !== undefined && position >= 0;
@@ -1284,6 +1284,6 @@ export function issetOffset(base: Value, index: Value): boolean {
 function issetArrayAccess(object: PhpObject, index: Value): boolean {
   if (!isArrayAccess(object)) throwError('Error', `Cannot use object of type ${object.cls.name} as array`);
   if (nativeArrayStorage(object.internal) && object.cls.findMethod('offsetexists')?.fn.kind === 'native')
-    return (object.internal.array.get(toKey(index, 'isset')) ?? null) !== null;
+    return object.internal.array.isSet(toKey(index, 'isset'));
   return toBool(callMethod(object, 'offsetExists', [index], rt().row));
 }

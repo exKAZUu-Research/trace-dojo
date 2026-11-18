@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 956 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 959 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -402,22 +402,20 @@ function evaluateRead(e: Expr, mode: ReadMode): Chain {
 }
 
 // code-gauge-allow functionNcss 37 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 27 -- Applies quiet, isset and value reads across the same expression forms.
 function prepareRead(e: Expr, mode: ReadMode): ReadPlan {
   const runtime = rt();
   switch (e.k) {
     case 'var': {
-      return () => {
-        if (mode === 'isset' && e.name === 'GLOBALS') return true;
-        const value = variableRead(e, mode);
-        return mode === 'isset' ? value !== null : value;
-      };
+      return () => variableRead(e, mode);
     }
     case 'varvar': {
       const name = prepareOperand(e.name);
       return () => {
         const key = toStr(name());
-        const value = mode === 'read' ? readVar(key, e.row) : definedOrNull(runtime.frame.vars.get(key)?.v);
-        return mode === 'isset' ? value !== null : value;
+        const ref = runtime.frame.vars.get(key);
+        if (mode === 'isset') return ref?.isSetBinding ?? false;
+        return mode === 'read' ? readVar(key, e.row) : definedOrNull(ref?.v);
       };
     }
     case 'idx': {
@@ -451,9 +449,13 @@ function prepareRead(e: Expr, mode: ReadMode): ReadPlan {
 
 function variableRead(e: Extract<Expr, { k: 'var' }>, mode: ReadMode): Value {
   const runtime = rt();
-  if (e.name === 'GLOBALS') return globalsArray();
+  if (e.name === 'GLOBALS') return mode === 'isset' ? true : globalsArray();
   if (mode === 'read' || (e.name === 'this' && mode === 'coalesce')) return readVar(e.name, e.row);
-  return e.name === 'this' ? (runtime.frame.thisObj ?? null) : definedOrNull(runtime.frame.vars.get(e.name)?.v);
+  if (e.name === 'this')
+    return mode === 'isset' ? runtime.frame.thisObj !== undefined : (runtime.frame.thisObj ?? null);
+  const ref = runtime.frame.vars.get(e.name);
+  if (mode === 'isset') return ref?.isSetBinding ?? false;
+  return definedOrNull(ref?.v);
 }
 
 function prepareOffsetRead(e: Extract<Expr, { k: 'idx' }>, mode: ReadMode): ReadPlan {
@@ -481,7 +483,7 @@ function globalOffsetRead(key: Value, row: number, mode: ReadMode): Value {
   const runtime = rt();
   runtime.row = row;
   const ref = runtime.globalFrame.vars.get(name);
-  if (mode === 'isset') return definedOrNull(ref?.v) !== null;
+  if (mode === 'isset') return ref?.isSetBinding ?? false;
   if (ref?.isDefinedBinding) return ref.v;
   if (mode === 'read') warn(`Undefined global variable $${name}`);
   return null;

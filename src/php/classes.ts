@@ -26,6 +26,7 @@ import {
   type Callable,
   copyValueSlot,
   dropped,
+  isSetSlot,
   type Method,
   type Param,
   PhpArray,
@@ -36,6 +37,7 @@ import {
   setReferenceTypeCheck,
   type Slot,
   type TypeDecl,
+  UNDEFINED_RESULT,
   UNINIT,
   type UserFunction,
   type Value,
@@ -1605,10 +1607,10 @@ export function issetProp(object: PhpObject, name: string, scope: PhpClass | und
     if (decl.hooks?.get) return readProp(object, name, scope, internal ? 'native' : 'quiet') !== null;
     const slot = object.props.get(decl.key);
     if (slot === UNINIT && !object.unsetProperties?.has(decl.key)) return false;
-    if (slot !== undefined && slot !== UNINIT) return (slot instanceof Ref ? slot.v : slot) !== null;
+    if (slot !== undefined && slot !== UNINIT) return isSetSlot(slot);
   } else if (!decl || decl.isStatic) {
     const slot = object.props.get(name);
-    if (slot !== undefined && slot !== UNINIT) return (slot instanceof Ref ? slot.v : slot) !== null;
+    if (slot !== undefined && slot !== UNINIT) return isSetSlot(slot);
   }
   const magic = object.cls.findMethod('__isset');
   if (magic && !object.guards?.has(`isset:${name}`)) {
@@ -1639,7 +1641,8 @@ export function* visiblePropertyKeys(
     rt().spend();
     const slot = object.props.get(key);
     const decl = declForKey(object.cls, key);
-    if ((!includeVirtual || !decl?.hooks?.get) && (slot === UNINIT || slot === undefined)) continue;
+    if ((!includeVirtual || !decl?.hooks?.get) && (slot === UNINIT || slot === undefined || slot === UNDEFINED_RESULT))
+      continue;
     if (decl && !isVisibleProperty(object, decl, scope)) continue;
     yield key;
   }

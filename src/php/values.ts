@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 845 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 858 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
@@ -86,6 +86,10 @@ export class Ref {
     return this.value !== UNDEFINED_RESULT || this.isRef;
   }
 
+  get isSetBinding(): boolean {
+    return this.value !== null && this.isDefinedBinding;
+  }
+
   /** Writes a value, converting or rejecting it for the type of the property the reference was taken from. */
   assign(value: Value): void {
     this.v = value;
@@ -126,6 +130,11 @@ export function setReferenceTypeCheck(check: (ref: Ref, value: Value) => Value):
 /** The marker of a typed property that has no value yet. */
 export const UNINIT = Symbol('uninitialized');
 export type Slot = Value | Ref | typeof UNINIT;
+
+export function isSetSlot(slot: Slot | undefined): boolean {
+  if (slot instanceof Ref) return slot.isSetBinding;
+  return slot !== undefined && slot !== null && slot !== UNINIT && slot !== UNDEFINED_RESULT;
+}
 
 export const INT_MAX = 9_223_372_036_854_775_807n;
 export const INT_MIN = -9_223_372_036_854_775_808n;
@@ -194,6 +203,10 @@ export class PhpArray {
 
   has(key: Key): boolean {
     return this.map.has(key);
+  }
+
+  isSet(key: Key): boolean {
+    return isSetSlot(this.map.get(key));
   }
 
   set(key: Key, value: Value): void {
@@ -395,7 +408,7 @@ export class PhpArray {
   }
 
   keys(): Key[] {
-    return [...this.map.keys()];
+    return Array.from(this.definedSlots(), ([key]) => key);
   }
 
   values(): Value[] {
@@ -403,11 +416,15 @@ export class PhpArray {
   }
 
   *iterValues(): Generator<Value> {
-    for (const slot of this.map.values()) yield deref(slot);
+    for (const slot of this.map.values()) if (slot !== UNDEFINED_RESULT) yield deref(slot);
   }
 
   *entries(): Generator<[Key, Value]> {
-    for (const [key, slot] of this.map) yield [key, slot instanceof Ref ? slot.v : slot];
+    for (const [key, slot] of this.definedSlots()) yield [key, deref(slot)];
+  }
+
+  *definedSlots(): Generator<[Key, Value | Ref]> {
+    for (const entry of this.map) if (entry[1] !== UNDEFINED_RESULT) yield entry;
   }
 
   firstValue(): Value | undefined {

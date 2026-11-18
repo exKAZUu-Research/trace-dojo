@@ -104,6 +104,7 @@ function debugEntries(object: PhpObject, state: Inspection): { entries: Iterable
 
 function* debugPropertyEntries(object: PhpObject, keys: string[], state: Inspection): Generator<DebugEntry> {
   for (const [key, slot] of propertyEntries(object, keys, state, (key) => object.props.get(key))) {
+    if (slot === UNDEFINED_RESULT) continue;
     if (slot === UNINIT && !declForKey(object.cls, key)?.type) continue;
     const name = propNameOf(key);
     const decl = declForKey(object.cls, key);
@@ -292,7 +293,7 @@ function printRValue(value: Value, indent: number, state: Inspection): string {
 }
 
 function* printableArrayEntries(array: PhpArray): Generator<[string, Value]> {
-  for (const [key, slot] of array.map) yield [String(key), slotValue(slot)];
+  for (const [key, slot] of array.definedSlots()) yield [String(key), slotValue(slot)];
 }
 
 function* printableDebugEntries(entries: Iterable<DebugEntry>): Generator<[string, Value]> {
@@ -358,7 +359,7 @@ function dumpValue(value: Value, level: number, state: Inspection, write: (text:
   try {
     if (value instanceof PhpArray) {
       write(`${pad}array(${value.size}) {\n`);
-      for (const [key, item] of value.map) {
+      for (const [key, item] of value.definedSlots()) {
         write(`${' '.repeat(level + 1)}[${typeof key === 'bigint' ? key : `"${key}"`}]=>\n`);
         dumpValue(slotValue(item), level + 2, state, write, item);
       }
@@ -412,10 +413,10 @@ function quoteExport(text: string): string {
   return `'${text.replaceAll(/['\\]/g, String.raw`\$&`).replaceAll('\0', `' . "\\0" . '`)}'`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 28 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 // code-gauge-allow functionNcss 41 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function exportValue(value: Value, level: number, state: Inspection): string {
-  if (value === null || (value instanceof PhpObject && value.isResource)) return 'NULL';
+  if (value === null || value === UNDEFINED_RESULT || (value instanceof PhpObject && value.isResource)) return 'NULL';
   switch (typeof value) {
     case 'boolean': {
       return value ? 'true' : 'false';
@@ -454,7 +455,7 @@ function exportValue(value: Value, level: number, state: Inspection): string {
     const isStd = object.cls.name === 'stdClass';
     let text = isStd ? `${lead}(object) array(\n` : `${lead}\\${object.cls.fullName}::__set_state(array(\n`;
     for (const [key, slot] of exportedProps(object, state)) {
-      if (slot === UNINIT) continue;
+      if (slot === UNINIT || slot === UNDEFINED_RESULT) continue;
       const keyText = typeof key === 'bigint' ? String(key) : quoteExport(propNameOf(key));
       text = grown(`${text}${' '.repeat(level + 2)}${keyText} => ${exportValue(slotValue(slot), level + 2, state)},\n`);
     }

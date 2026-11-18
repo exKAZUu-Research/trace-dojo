@@ -3,7 +3,16 @@ import { floatFitsInt, numericPrefix, toBool } from './conversions';
 import { deprecated } from './errors';
 import { formatFloatForMessage, toStr } from './operators';
 import { rt } from './runtime';
-import { type Param, PhpArray, type PhpClass, PhpObject, type PropDecl, type TypeDecl, type Value } from './values';
+import {
+  type Param,
+  PhpArray,
+  type PhpClass,
+  PhpObject,
+  type PropDecl,
+  type TypeDecl,
+  UNDEFINED_RESULT,
+  type Value,
+} from './values';
 
 /** Checks whether a value is callable, which the interpreter provides. */
 let isCallableValue: (value: Value) => boolean = () => false;
@@ -99,6 +108,7 @@ export function coerce(value: Value, type: TypeDecl, context: CoercionContext): 
   if (context.internal && type.k === 'named' && type.name === 'resource') {
     return value instanceof PhpObject && value.isResource ? value : NO_MATCH;
   }
+  if (value === UNDEFINED_RESULT) return coerceUndefinedResult(type, context);
   if (matches(value, type, context)) return value;
   if (value === null) {
     if (!context.strict && context.internal && context.nullDeprecation && scalarTarget(type)) {
@@ -115,6 +125,17 @@ export function coerce(value: Value, type: TypeDecl, context: CoercionContext): 
 }
 
 export { NO_MATCH };
+
+function coerceUndefinedResult(type: TypeDecl, context: CoercionContext): Value | typeof NO_MATCH {
+  const mixed = acceptsName(type, 'mixed');
+  if (mixed && context.internal) return UNDEFINED_RESULT;
+  if (context.strict) return NO_MATCH;
+  if (mixed || acceptsName(type, 'int')) return 0n;
+  if (acceptsName(type, 'float')) return 0;
+  if (acceptsName(type, 'string')) return '';
+  if (acceptsName(type, 'bool')) return false;
+  return NO_MATCH;
+}
 
 function scalarTarget(type: TypeDecl): boolean {
   if (type.k === 'named') return ['int', 'float', 'string', 'bool'].includes(type.name);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 531 -- PHP operators share coercion and comparison helpers.
+// code-gauge-allow-file fileNcss 535 -- PHP operators share coercion and comparison helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import {
   boolValue,
@@ -109,9 +109,9 @@ export function withStringConversionErrors(
 }
 
 /** Converts a value to an int as `(int)` and `intval` do. */
-// code-gauge-allow duplicateLines 20 -- Mirrors toFloat, as PHP converts each type to int and to float by separate rules.
+// code-gauge-allow duplicateLines 22 -- Mirrors toFloat, as PHP converts each type to int and to float by separate rules.
 export function toInt(value: Value): bigint {
-  if (value === null) return 0n;
+  if (value === null || value === UNDEFINED_RESULT) return 0n;
   switch (typeof value) {
     case 'boolean': {
       return value ? 1n : 0n;
@@ -158,9 +158,10 @@ function floatToIntCap(value: number): bigint {
 }
 
 /** Converts a value to a float as `(float)` and `floatval` do. */
-// code-gauge-allow duplicateLines 21 -- Mirrors toInt, as PHP converts each type to int and to float by separate rules.
+// code-gauge-allow duplicateLines 22 -- Mirrors toInt, as PHP converts each type to int and to float by separate rules.
 export function toFloat(value: Value, reportWarning = warn): number {
   if (value === null) return 0;
+  if (value === UNDEFINED_RESULT) return 1;
   switch (typeof value) {
     case 'boolean': {
       return value ? 1 : 0;
@@ -529,14 +530,19 @@ function* arrayComparisonPairs(a: PhpArray, b: PhpArray, mode: ComparisonMode): 
     if (right) {
       const item = right.next();
       if (item.done || item.value[0] !== key) return 1;
-      yield [value, item.value[1], mode];
+      yield [comparedBucket(value), comparedBucket(item.value[1]), mode];
     } else {
       const other = b.map.get(key);
       if (other === undefined) return 1;
-      yield [value, other, mode];
+      yield [comparedBucket(value), comparedBucket(other), mode];
     }
   }
   return 0;
+}
+
+function comparedBucket(slot: Value | Ref): Value | Ref {
+  // oxlint-disable-next-line unicorn/no-null -- Zend compares raw undefined buckets as PHP null.
+  return slot === UNDEFINED_RESULT ? null : slot;
 }
 
 function* objectComparisonPairs(

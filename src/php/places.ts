@@ -105,7 +105,7 @@ export class VarPlace implements Place {
     if (!ref) {
       ref = new Ref(null);
       this.frame.vars.set(this.name, ref);
-    }
+    } else if (!ref.isDefinedBinding) ref.v = null;
     return ref;
   }
 

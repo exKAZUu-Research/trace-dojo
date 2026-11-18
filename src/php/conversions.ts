@@ -174,6 +174,7 @@ export function debugType(value: Value): string {
  * zend_zval_value_name writes as `debugType` does except for the booleans.
  */
 export function valueName(value: Value): string {
+  if (value === UNDEFINED_RESULT) return 'null';
   const name = typeof value === 'boolean' ? String(value) : debugType(value);
   return name === 'resource (stream)' ? 'resource' : name;
 }
