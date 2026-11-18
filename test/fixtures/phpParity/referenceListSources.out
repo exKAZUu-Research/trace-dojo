@@ -45,3 +45,65 @@ array(2) {
   [1]=>
   &NULL
 }
+
+Notice: Indirect modification of overloaded property NestedListSource::$array has no effect in /main.php on line 60
+
+Notice: Attempting to set reference to non referenceable value in /main.php on line 60
+int(1)
+
+Notice: Attempting to set reference to non referenceable value in /main.php on line 62
+int(2)
+
+Notice: Indirect modification of overloaded element of OffsetListSource has no effect in /main.php on line 65
+
+Notice: Attempting to set reference to non referenceable value in /main.php on line 65
+int(3)
+array(1) {
+  [0]=>
+  &int(5)
+}
+
+Warning: String offset cast occurred in /main.php on line 72
+Cannot create references to/from string offsets
+
+Warning: String offset cast occurred in /main.php on line 74
+Cannot create references to/from string offsets
+
+Warning: String offset cast occurred in /main.php on line 76
+Cannot create references to/from string offsets
+
+Warning: String offset cast occurred in /main.php on line 72
+Cannot create references to/from string offsets
+
+Warning: String offset cast occurred in /main.php on line 74
+Cannot create references to/from string offsets
+
+Warning: String offset cast occurred in /main.php on line 76
+Cannot create references to/from string offsets
+
+Warning: Illegal string offset "1x" in /main.php on line 72
+Cannot create references to/from string offsets
+
+Warning: Illegal string offset "1x" in /main.php on line 74
+Cannot create references to/from string offsets
+
+Warning: Illegal string offset "1x" in /main.php on line 76
+Cannot create references to/from string offsets
+Cannot access offset of type array on string
+Cannot access offset of type array on string
+Cannot access offset of type array on string
+Cannot access offset of type string on string
+Cannot access offset of type string on string
+Cannot access offset of type string on string
+
+Warning: String offset cast occurred in /main.php on line 80
+Cannot create references to/from string offsets
+
+Warning: String offset cast occurred in /main.php on line 82
+Cannot create references to/from string offsets
+
+Warning: Undefined array key 0 in /main.php on line 88
+array(1) {
+  [0]=>
+  int(1)
+}

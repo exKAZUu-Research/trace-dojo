@@ -946,7 +946,7 @@ function legacyTextDecoder(name: string): TextDecoder | undefined {
   else if (/^(?:EUC-JP|eucJP|CP51932)/.test(name)) label = 'euc-jp';
   else if (/^(?:ISO-2022-JP|JIS|CP5022)/.test(name)) label = 'iso-2022-jp';
   else if (name === 'BIG-5' || name === 'CP950') label = 'big5';
-  else if (name === 'EUC-CN' || name === 'CP936') label = 'gbk';
+  else if (name === 'CP936') label = 'gbk';
   else if (name === 'UHC') label = 'euc-kr';
   try {
     return new TextDecoder(label, { ignoreBOM: true });

@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/prefer-code-point -- Each code unit is one PHP byte.
 import { detectionCodePoint, mobileDetectionTable } from './detectionDecodeTables';
-import { decodeGb18030 } from './gb18030Detection';
+import { decodeEucCn, decodeGb18030 } from './gb18030Detection';
 import { readJisEncoding } from './jisDetectionReader';
 import { rt } from './runtime';
 
@@ -20,7 +20,7 @@ export function encodingValidator(name: string, utf16: Decode): ((bytes: string)
   if (name === 'JIS' || name === 'ISO-2022-JP') return (bytes) => readJisEncoding(bytes, name === 'ISO-2022-JP').valid;
 }
 
-// code-gauge-allow functionNcss 34 -- Keeps the encoding dispatch and its codec-specific reader construction together.
+// code-gauge-allow functionNcss 36 -- Keeps the encoding dispatch and its codec-specific reader construction together.
 export function extraEncodingReader(name: string, utf8: Decode, utf16: Decode): Decode | undefined {
   if (name.startsWith('UTF-8-Mobile#')) return mobileReader(name, utf8);
   if (name.startsWith('UCS-')) {
@@ -31,6 +31,9 @@ export function extraEncodingReader(name: string, utf8: Decode, utf16: Decode): 
     case 'GB18030':
     case 'GB18030-2022': {
       return (bytes) => decodeGb18030(bytes, name === 'GB18030-2022', BAD);
+    }
+    case 'EUC-CN': {
+      return (bytes) => decodeEucCn(bytes, BAD);
     }
     case 'JIS':
     case 'ISO-2022-JP': {

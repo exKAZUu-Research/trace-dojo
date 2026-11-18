@@ -266,3 +266,20 @@ Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.p
 Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 477
 
 Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 482
+
+Warning: Undefined variable $missingMethod in /main.php on line 485
+485:Method name must be a string
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 490
+
+Deprecated: Implicit conversion from float 2.5 to int loses precision in /main.php on line 494
+
+Deprecated: Implicit conversion from float 3.5 to int loses precision in /main.php on line 498
+
+Deprecated: Implicit conversion from float 4.5 to int loses precision in /main.php on line 501
+
+Deprecated: Implicit conversion from float 5.5 to int loses precision in /main.php on line 504
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 510
+
+Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 515

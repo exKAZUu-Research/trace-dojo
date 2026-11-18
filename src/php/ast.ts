@@ -47,7 +47,7 @@ export type Expr = { row: number } & (
   | { k: 'interp'; parts: (string | Expr)[] }
   | { k: 'var'; name: string }
   | { k: 'varvar'; name: Expr }
-  | { k: 'array'; items: ArrayItem[]; initializerRow?: number }
+  | { k: 'array'; items: ArrayItem[]; initializerRow?: number; mixedStorage?: boolean }
   | { k: 'list'; items: (ListItem | undefined)[]; keyed: boolean }
   | { k: 'idx'; base: Expr; index?: Expr }
   | { k: 'prop'; obj: Expr; name: string | Expr; nullsafe: boolean }

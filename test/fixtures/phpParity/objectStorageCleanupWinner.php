@@ -24,3 +24,21 @@ foreach (['removeAll', 'removeAllExcept'] as $operation) {
     }
 }
 echo "done\n";
+
+class CustomCleanupStorage extends SplObjectStorage {
+    function getHash($object): string { return (string) spl_object_id($object); }
+}
+class NestedCleanupInfo {
+    function __destruct() {
+        $locals = [new CleanupInfo('exit'), new CleanupInfo('throw')];
+    }
+}
+foreach (['removeAll', 'removeAllExcept'] as $operation) {
+    $storage = new CustomCleanupStorage();
+    $other = new SplObjectStorage();
+    $key = new stdClass();
+    $storage[$key] = new NestedCleanupInfo();
+    if ($operation === 'removeAll') $other[$key] = 0;
+    try { $storage->$operation($other); }
+    catch (Throwable $error) { echo $error->getMessage(), ';', count($storage), "\n"; }
+}

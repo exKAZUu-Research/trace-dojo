@@ -308,8 +308,8 @@ export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>, discardRe
   if (earlyObject === SHORT || (e.nullsafe && earlyObject === null)) return SHORT;
   if (!deferred && earlyObject instanceof PhpObject) runtime.frame.temporaries.push(earlyObject);
   const readName = typeof member === 'string' ? undefined : prepareOperand(member);
-  const object = deferred ? prepareOperand(e.obj)(e.row) : (earlyObject ?? null);
   const methodName = readName ? dynamicMethodName(readName()) : (member as string);
+  const object = deferred ? prepareOperand(e.obj)(e.row) : (earlyObject ?? null);
   runtime.row = e.row;
   if (!(object instanceof PhpObject) || object.isResource) {
     throwError('Error', `Call to a member function ${methodName}() on ${valueName(object)}`);

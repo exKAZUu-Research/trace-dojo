@@ -15,7 +15,7 @@ import {
 import { oneArgumentBuiltinOpcodes, simpleSprintfFormat } from './builtinCompiler';
 import { enc, lower } from './bytes';
 import { type Constant, constantTruth, constantTypeName, foldedConstant } from './constantDefaults';
-import { formatFloat, isNumericString, NAN_BOOL_WARNING, NAN_STRING_WARNING } from './conversions';
+import { formatFloat, isNumericString, NAN_BOOL_WARNING, NAN_STRING_WARNING, normalizeKeyString } from './conversions';
 import {
   type CompileNotice,
   isReservedClassName,
@@ -939,6 +939,7 @@ export class Converter extends DeclarationConverter {
           items,
           row: arrayRow,
           initializerRow: this.constantInitializer ? arrayFoldRow(node) : undefined,
+          mixedStorage: items.some(({ key }) => key !== undefined && this.hasStringArrayKey(key)),
         };
       }
       case 'list_literal': {
@@ -1610,6 +1611,11 @@ export class Converter extends DeclarationConverter {
     }
   }
 
+  private hasStringArrayKey(key: Expr): boolean {
+    const value = this.compiledValue(key, true);
+    return typeof value === 'string' && typeof normalizeKeyString(value) === 'string';
+  }
+
   // code-gauge-allow functionCognitiveComplexity 18 -- Checks folded keys and values in source order and keeps deferred failures at runtime.
   private checkConstantArrayOperands(node: Node, items: ArrayItem[]): void {
     if (this.preserveSyntax || !items.some((item) => item.spread || item.key)) return;
@@ -1661,9 +1667,9 @@ export class Converter extends DeclarationConverter {
     return { key, keyOpcodeRow, value, byRef, spread: false };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Selects the emitting operand across the expression forms PHP can fold.
-  // code-gauge-allow functionNcss 35 -- Carries the shared folding row through the operands selected by each expression.
+  // code-gauge-allow functionNcss 36 -- Dispatches by the PHP expression that produced the current compiler row.
   private resultOpcodeRow(value: Expr, node: Node): number {
+    node = unparenthesizedNode(node);
     if (node.type === 'heredoc' || node.type === 'nowdoc') return node.startPosition.row + 1;
     switch (value.k) {
       case 'arrow': {
@@ -1679,7 +1685,9 @@ export class Converter extends DeclarationConverter {
         if (node.type === 'binary_expression' && !directiveLiteral(node, value)) return this.arrayValueFoldRow(node);
         break;
       }
-      case 'array':
+      case 'array': {
+        return this.arrayOpcodeRow(value, node);
+      }
       case 'const':
       case 'unary':
       case 'idx': {
@@ -1687,23 +1695,39 @@ export class Converter extends DeclarationConverter {
         break;
       }
       case 'cond': {
-        const test = this.compiledValue(value.test);
-        if (test !== undefined) {
-          const selected = constantTruth(test) ? (value.consequent ?? value.test) : value.alternate;
-          const branch = selected === value.alternate ? 'alternative' : selected === value.test ? 'condition' : 'body';
-          return this.resultOpcodeRow(selected, node.childForFieldName(branch) ?? node);
-        }
-        break;
+        return this.conditionalOpcodeRow(value, node);
       }
       case 'assign': {
+        if (value.target.k === 'list') return listAssignmentRow(value.target, compiledOperandRow(value.value));
         if (value.target.k !== 'var') return compiledOperandRow(value.value);
         break;
       }
+      case 'assignRef': {
+        return compiledOperandRow(value.source);
+      }
       case 'assignOp': {
-        return compiledOperandRow(value.value);
+        return compiledOperandRow(value.op === '??' ? value.target : value.value);
       }
     }
     return compiledOperandRow(value);
+  }
+
+  private arrayOpcodeRow(value: Extract<Expr, { k: 'array' }>, node: Node): number {
+    if (this.compiledValue(value, true) !== undefined) return this.arrayValueFoldRow(node);
+    const item = value.items.at(-1);
+    const element = node.namedChildren.findLast((child) => child.type === 'array_element_initializer');
+    const child = element && semanticChildren(element).at(-1);
+    if (!item || !child) return compiledOperandRow(value);
+    const operand = item.spread || item.byRef ? semanticChildren(child)[0] : child;
+    return operand ? this.resultOpcodeRow(item.value, operand) : compiledOperandRow(value);
+  }
+
+  private conditionalOpcodeRow(value: Extract<Expr, { k: 'cond' }>, node: Node): number {
+    const test = this.compiledValue(value.test);
+    if (test === undefined) return compiledOperandRow(value);
+    const selected = constantTruth(test) ? (value.consequent ?? value.test) : value.alternate;
+    const branch = selected === value.alternate ? 'alternative' : selected === value.test ? 'condition' : 'body';
+    return this.resultOpcodeRow(selected, node.childForFieldName(branch) ?? node);
   }
 
   private binaryOpcodeRow(value: Extract<Expr, { k: 'bin' }>, node: Node): number {
@@ -1966,8 +1990,7 @@ function chainedComparison(operator: Node, left: Node, right: Node): Node | unde
 }
 
 function directiveLiteral(node: Node, value: Expr): boolean {
-  while (node.type === 'parenthesized_expression')
-    node = node.namedChildren.find((child) => child.type !== 'comment') as Node;
+  node = unparenthesizedNode(node);
   if (value.k === 'lit')
     return (
       ['integer', 'float', 'string', 'encapsed_string', 'heredoc', 'nowdoc'].includes(node.type) &&
@@ -1980,6 +2003,25 @@ function directiveLiteral(node: Node, value: Expr): boolean {
     directiveLiteral(node.childForFieldName('left') as Node, value.l) &&
     directiveLiteral(node.childForFieldName('right') as Node, value.r)
   );
+}
+
+function unparenthesizedNode(node: Node): Node {
+  while (node.type === 'parenthesized_expression') {
+    const inner = semanticChildren(node)[0];
+    if (!inner) break;
+    node = inner;
+  }
+  return node;
+}
+
+function listAssignmentRow(target: Extract<Expr, { k: 'list' }>, row: number): number {
+  for (const item of target.items) {
+    if (!item) continue;
+    if (item.key) row = compiledOperandRow(item.key);
+    if (item.target.k === 'list') row = listAssignmentRow(item.target, row);
+    else if (!item.byRef && (item.target.k === 'var' || item.target.k === 'varvar')) row = item.target.row;
+  }
+  return row;
 }
 
 export function castType(node: Node): { spelling: string; type: string } {
@@ -2005,6 +2047,8 @@ function arrayFoldRow(node: Node): number {
       const inner = first?.namedChildren.findLast((child) => child.type !== 'comment');
       if (!inner) return value.endPosition.row;
       value = inner;
+    } else if (value.type === 'binary_expression' && parserConcatenation(value)) {
+      return followingTokenRow(value);
     } else if (
       [
         'variadic_unpacking',
@@ -2021,6 +2065,22 @@ function arrayFoldRow(node: Node): number {
       value = inner;
     } else return value.startPosition.row;
   }
+}
+
+function parserConcatenation(node: Node): boolean {
+  const value = unparenthesizedNode(node);
+  if (value.type === 'binary_expression') {
+    if (value.childForFieldName('operator')?.type !== '.') return false;
+    const left = value.childForFieldName('left');
+    const right = value.childForFieldName('right');
+    return !!left && !!right && parserConcatenation(left) && parserConcatenation(right);
+  }
+  if (value.type === 'integer' || value.type === 'float' || value.type === 'string' || value.type === 'nowdoc')
+    return true;
+  return (
+    (value.type === 'encapsed_string' || value.type === 'heredoc_body') &&
+    value.namedChildren.every((child) => child.type === 'string_content' || child.type === 'escape_sequence')
+  );
 }
 
 function parserScalar(expression: Expr): string | bigint | number | undefined {

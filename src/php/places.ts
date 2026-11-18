@@ -20,6 +20,7 @@ export interface CompoundRead {
 
 /** A location a program writes to: a variable, an element, a property, or a static property. */
 export interface Place {
+  readonly unbound?: boolean;
   /** The value, or undefined when the location does not exist. */
   get(update?: PlaceOperation): Value | undefined;
   readCompoundName?(warning: UpdateWarning): void;
@@ -137,8 +138,11 @@ export class VarPlace implements Place {
 }
 
 export class RefPlace implements Place {
+  readonly unbound: boolean;
+
   constructor(readonly target: Ref) {
-    if (target.rc === 0) rt().holdTemporaryReference(target);
+    this.unbound = target.rc === 0;
+    if (this.unbound) rt().holdTemporaryReference(target);
   }
 
   get(): Value {
@@ -171,7 +175,8 @@ export class ElementPlace implements Place {
   constructor(
     readonly array: PhpArray,
     /** The key, or undefined to append. */
-    public key: Key | undefined
+    public key: Key | undefined,
+    readonly unbound = false
   ) {}
 
   get(): Value | undefined {

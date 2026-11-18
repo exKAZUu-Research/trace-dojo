@@ -245,9 +245,9 @@ class ReadValidator {
         return;
       }
       case 'array': {
-        for (const item of node.items as { key?: unknown; value: unknown; byRef: boolean }[]) {
+        for (const item of node.items as { key?: unknown; value: unknown }[]) {
           this.visit(item.key, false);
-          this.visit(item.value, item.byRef);
+          this.visit(item.value, false);
         }
         return;
       }

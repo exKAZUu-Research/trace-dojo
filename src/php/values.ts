@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 934 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 945 -- Keeps PHP value storage and the ownership helpers it uses together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
@@ -160,8 +160,10 @@ export class PhpArray {
 
   constructor(
     map?: Map<Key, Value | Ref>,
-    private capacityHint = map?.size ?? 8
+    private capacityHint = map?.size ?? 8,
+    mixedStorage = false
   ) {
+    if (mixedStorage) this.orderPacked = false;
     this.map = this.table(map);
     for (const [key, slot] of this.map) this.trackSlot(key, slot);
     // An array costs a slot of its own besides its elements, as a program of many small arrays holds their tables too.
@@ -381,21 +383,38 @@ export class PhpArray {
     const count = this.size;
     let nextFree = 0n;
     let rehash = packed;
-    const entries: [Key, Value | Ref][] = [];
+    const positions = !packed && this.hasDenseSlots() ? new Map<Key, number>() : undefined;
+    const renumbered = new Map<Key, Key>();
     for (const [key, slot] of this.map.physicalEntries()) {
-      if (typeof key === 'bigint' && slot !== UNDEFINED_RESULT) {
-        if (key !== nextFree) rehash = true;
-        entries.push([nextFree++, slot]);
-      } else entries.push([key, slot]);
+      if (typeof key !== 'bigint' || slot === UNDEFINED_RESULT) continue;
+      if (key !== nextFree) rehash = true;
+      renumbered.set(key, nextFree++);
     }
     if (rehash) {
-      const rebuilt = entries.filter(([, slot]) => slot !== UNDEFINED_RESULT);
-      this.replaceTable(rebuilt, packed, 'shift');
-      this.map.removedUndefinedSlots = count - rebuilt.length;
+      this.rehashShift(renumbered, nextFree, count, packed, positions);
     }
     this.nextFree = nextFree;
     this.pointer = null;
     return { value };
+  }
+
+  private rehashShift(
+    renumbered: ReadonlyMap<Key, Key>,
+    nextFree: bigint,
+    count: number,
+    packed: boolean,
+    positions: Map<Key, number> | undefined
+  ): void {
+    const entries = new Map<Key, Value | Ref>();
+    for (const [key, slot] of this.map.physicalEntries()) {
+      if (slot === UNDEFINED_RESULT && (!positions || (typeof key === 'bigint' && key >= 0n && key < nextFree)))
+        continue;
+      const renamed = renumbered.get(key) ?? key;
+      entries.set(renamed, slot);
+      positions?.set(renamed, this.slotPosition(key));
+    }
+    this.replaceTable(entries, packed, positions ? { positions } : 'shift');
+    this.map.removedUndefinedSlots = count - entries.size;
   }
 
   prependList(values: Value[]): boolean {
@@ -509,10 +528,7 @@ export class PhpArray {
   }
 
   private ordered(): ArrayOrder {
-    if (!this.order) {
-      this.order = new ArrayOrder(this.map.physicalKeys(), this.capacityHint);
-      if (this.orderPacked === false) this.order.unpack();
-    }
+    this.order ??= new ArrayOrder(this.map.physicalKeys(), this.capacityHint, this.orderPacked === false);
     return this.order;
   }
 
@@ -528,9 +544,13 @@ export class PhpArray {
    * Copies the array for a holder that writes to it. Nested arrays become shared, and references held only by this
    * array become plain values, as PHP's copy does.
    */
+  // code-gauge-allow functionCognitiveComplexity 21 -- Duplicates both the buckets and their values with the array's reference ownership.
   copy(): PhpArray {
     const map = new Map<Key, Value | Ref>();
-    for (const [key, slot] of this.map.physicalEntries()) {
+    const order = this.map.countsUndefinedSlots ? this.ordered() : this.order;
+    const dense = order?.endPosition === this.size;
+    const keepsHoles = !this.map.countsUndefinedSlots || dense || order?.isPacked;
+    for (const [key, slot] of keepsHoles ? this.map.physicalEntries() : this.map.entries()) {
       if (slot instanceof Ref) {
         if (slot.rc <= 1) {
           const value = slot.v;
@@ -546,8 +566,8 @@ export class PhpArray {
       }
     }
     const copy = new PhpArray(map, this.capacityHint);
-    copy.map.removedUndefinedSlots = this.map.removedUndefinedSlots;
-    copy.order = this.order?.copy(this.hasDenseSlots());
+    if (keepsHoles) copy.map.removedUndefinedSlots = this.map.removedUndefinedSlots;
+    copy.order = order?.copy(dense, keepsHoles ? undefined : map);
     copy.orderPacked = this.orderPacked;
     copy.nextFree = this.nextFree;
     copy.composite = this.composite;

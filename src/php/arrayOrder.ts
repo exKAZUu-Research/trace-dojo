@@ -35,7 +35,8 @@ export interface SpliceRange {
   inserted: number;
 }
 
-export type ArrayRebuild = SpliceRange | 'shift' | { prepend: number };
+type ArrayReindex = SpliceRange | 'shift' | { prepend: number };
+export type ArrayRebuild = ArrayReindex | { positions: ReadonlyMap<Key, number> };
 
 interface CursorFamily {
   generation: number;
@@ -59,7 +60,8 @@ export class ArrayOrder {
   private readonly cursors = new Set<WeakRef<ArrayCursor>>();
   private readonly cursorCopies = new WeakMap<CursorFamily, ArrayCursor>();
 
-  constructor(keys: Iterable<Key>, capacityHint = 8) {
+  constructor(keys: Iterable<Key>, capacityHint = 8, mixed = false) {
+    if (mixed) this.packed = false;
     while (this.capacity < capacityHint) this.capacity *= 2;
     for (const key of keys) this.insert(key);
   }
@@ -130,9 +132,11 @@ export class ArrayOrder {
     return cursor;
   }
 
-  copy(preservePositions: boolean): ArrayOrder {
+  // code-gauge-allow functionCognitiveComplexity 16 -- Copies array layout and its active cursors using the same surviving buckets.
+  copy(preservePositions: boolean, keys?: ReadonlyMap<Key, unknown>): ArrayOrder {
     const copy = new ArrayOrder([], this.capacity);
-    for (const entry of this.orderedEntries()) copy.appendEntry(entry.key, entry.index);
+    for (const entry of this.orderedEntries())
+      if (!keys || keys.has(entry.key)) copy.appendEntry(entry.key, entry.index);
     copy.nextIndex = this.nextIndex;
     copy.packed = this.packed;
     copy.listLayout = this.listLayout;
@@ -143,8 +147,10 @@ export class ArrayOrder {
     } else if (!copy.packed && !preservePositions) copy.compact();
     for (const cursor of this.liveCursors()) {
       if (!cursor.family) continue;
-      const cloned = copy.cursor(cursor.key, cursor.family);
-      if (cursor.key === undefined) cloned.setPosition(undefined, copy.nextIndex);
+      let entry = cursor.entry;
+      while (entry && keys && !keys.has(entry.key)) entry = entry.next;
+      const cloned = copy.cursor(entry?.key, cursor.family);
+      if (entry === undefined) cloned.setPosition(undefined, copy.nextIndex);
       else if (copy.packed) cloned.setPosition(cloned.entry, cursor.index);
       copy.cursorCopies.set(cursor.family, cloned);
     }
@@ -270,23 +276,35 @@ export class ArrayOrder {
   replace(keys: Iterable<Key>, packed: boolean, rebuild?: ArrayRebuild): void {
     const orderedKeys = [...keys];
     const cursors = [...this.liveCursors()].map((cursor) => ({ cursor, index: cursor.index }));
-    if (rebuild !== undefined && cursors.length > 0) this.remapRebuild(rebuild, cursors);
+    let positions: ReadonlyMap<Key, number> | undefined;
+    if (rebuild !== undefined) {
+      if (typeof rebuild === 'object' && 'positions' in rebuild) positions = rebuild.positions;
+      else if (cursors.length > 0) this.remapRebuild(rebuild, cursors);
+    }
     this.entries.clear();
     this.first = undefined;
     this.last = undefined;
     this.keyOffset = 0n;
     this.indexOffset = 0;
-    for (const key of orderedKeys) this.appendEntry(key, this.entries.size);
-    this.nextIndex = this.entries.size;
+    for (const key of orderedKeys) this.appendEntry(key, positions?.get(key) ?? this.entries.size);
+    if (!positions) this.nextIndex = this.entries.size;
     while (this.capacity < this.nextIndex) this.capacity *= 2;
     this.listLayout = orderedKeys.every((key, index) => key === BigInt(index));
     this.packed = packed && this.listLayout;
-    const entries = [...this.orderedEntries()];
-    for (const { cursor, index } of cursors)
-      cursor.setPosition(index === undefined ? undefined : entries[index], index);
+    this.restorePositions(cursors, positions !== undefined);
   }
 
-  private remapRebuild(rebuild: ArrayRebuild, cursors: CursorPosition[]): void {
+  private restorePositions(cursors: CursorPosition[], preserve: boolean): void {
+    if (cursors.length === 0) return;
+    const entries = [...this.orderedEntries()];
+    for (const { cursor, index } of cursors) {
+      const entry =
+        index === undefined ? undefined : preserve ? entries.find((entry) => entry.index >= index) : entries[index];
+      cursor.setPosition(entry, index);
+    }
+  }
+
+  private remapRebuild(rebuild: ArrayReindex, cursors: CursorPosition[]): void {
     if (rebuild === 'shift') {
       const positions = new Map([...this.orderedEntries()].map((entry, ordinal) => [entry.index, ordinal]));
       for (const state of cursors) {

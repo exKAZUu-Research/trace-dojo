@@ -574,43 +574,40 @@ export function isArrayAccess(object: PhpObject): boolean {
   return arrayAccess !== undefined && object.cls.isSubclassOf(arrayAccess);
 }
 
-/** The position an index selects in a string: -1 when it is out of range, undefined when `quiet` and the index is not an integer. */
-// code-gauge-allow functionNcss 44 -- One case per expression kind, as PHP evaluates each kind differently.
-export function stringOffset(text: string, index: Value, mode: OffsetRead = 'read'): number | undefined {
-  const quiet = mode !== 'read';
-  let offset: bigint;
+// code-gauge-allow functionCognitiveComplexity 22 -- Keeps PHP's offset checks and mode-specific warnings in evaluation order.
+// code-gauge-allow functionNcss 31 -- Keeps the offset conversion and position calculation together.
+export function stringOffset(text: string, index: Value, mode: OffsetRead | 'reference' = 'read'): number | undefined {
+  const quiet = mode === 'isset' || mode === 'coalesce';
+  let offset: bigint | undefined;
   if (typeof index === 'bigint') offset = index;
-  else if (typeof index === 'string') {
-    if (/^[ \t\n\r\v\f]*[+-]?\d+[ \t\n\r\v\f]*$/.test(index)) {
-      offset = BigInt(index);
-      if (offset < INT_MIN || offset > INT_MAX) {
-        if (quiet) return undefined;
-        throwError('TypeError', 'Cannot access offset of type string on string');
-      }
-    } else {
-      if (numericPrefix(index)?.whole) {
-        if (quiet) return undefined;
-        throwError('TypeError', 'Cannot access offset of type string on string');
-      }
-      const leading = /^[ \t\n\r\v\f]*[+-]?\d+/.exec(index);
-      if (!leading || mode === 'isset') {
-        if (quiet) return undefined;
-        throwError('TypeError', `Cannot access offset of type ${debugType(index)} on string`);
-      }
-      warn(`Illegal string offset "${index}"`);
-      offset = BigInt(leading[0].trim());
-    }
-  } else if (typeof index === 'number') {
+  else if (typeof index === 'string') offset = parseStringOffset(index, mode === 'isset', quiet);
+  else if (typeof index === 'number') {
     if (!quiet) warn('String offset cast occurred');
+    if (mode === 'reference') return undefined;
     offset = mode === 'isset' ? toIntForOperator(index) : toInt(index);
   } else if (typeof index === 'boolean' || index === null) {
     if (!quiet) warn('String offset cast occurred');
     offset = index ? 1n : 0n;
   } else if (mode === 'isset') return undefined;
   else throwError('TypeError', `Cannot access offset of type ${debugType(index)} on string`);
+  if (offset === undefined) return undefined;
   const position = offset < 0n ? BigInt(text.length) + offset : offset;
   if (position < 0n || position >= BigInt(text.length)) return -1;
   return Number(position);
+}
+
+function parseStringOffset(index: string, isset: boolean, quiet: boolean): bigint | undefined {
+  if (/^[ \t\n\r\v\f]*[+-]?\d+[ \t\n\r\v\f]*$/.test(index)) {
+    const offset = BigInt(index);
+    if (offset >= INT_MIN && offset <= INT_MAX) return offset;
+  } else if (!isset && !numericPrefix(index)?.whole) {
+    const leading = /^[ \t\n\r\v\f]*[+-]?\d+/.exec(index);
+    if (leading) {
+      warn(`Illegal string offset "${index}"`);
+      return BigInt(leading[0].trim());
+    }
+  }
+  if (!quiet) throwError('TypeError', 'Cannot access offset of type string on string');
 }
 
 function readStringOffset(text: string, index: Value, mode: OffsetRead): Value {
@@ -636,7 +633,7 @@ const scopedCompileTimeValues = { constant: new WeakMap<Expr, boolean>(), expres
 function arrayLiteral(e: Extract<Expr, { k: 'array' }>): PhpArray {
   const runtime = rt();
   const frame = runtime.frame;
-  const array = new PhpArray(undefined, e.items.length);
+  const array = new PhpArray(undefined, e.items.length, e.mixedStorage);
   const initializerRow = frame.scope ? e.initializerRow : (frame.initializerOpcodeRow ?? e.initializerRow);
   frame.temporaries.push(array);
   for (const item of e.items) {

@@ -1173,9 +1173,8 @@ const sameAssoc: SetCompare = (a, b) => a[0] === b[0] && sameValue(a, b);
 
 defineFunction('array_diff(array $array, array ...$arrays): array', ({ args }) => {
   const [first, ...others] = args;
-  checkSetArguments('array_diff', [first]);
-  const array = first as PhpArray;
-  return others.length === 0 && array.size !== 1 ? share(array) : diffByString(array, others);
+  checkSetArgument('array_diff', first, 1);
+  return diffByString(first, others);
 });
 
 /** Transcribes PHP's array_diff, which converts each value to a string once, so each conversion warns once. */
@@ -1187,6 +1186,10 @@ function diffByString(first: PhpArray, others: Value[]): PhpArray {
     return new PhpArray();
   }
   checkSetArguments('array_diff', [first, ...others]);
+  if (others.every((other) => (other as PhpArray).size === 0)) {
+    first.shared = true;
+    return first;
+  }
   const exclude = new Set<string>();
   for (const other of others) {
     for (const value of (other as PhpArray).iterValues()) {

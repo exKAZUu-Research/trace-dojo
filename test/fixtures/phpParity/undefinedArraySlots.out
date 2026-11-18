@@ -389,6 +389,17 @@ array(2) {
 }
 array(0) {
 }
+array(1) {
+  [0]=>
+  string(1) "b"
+}
+array(1) {
+  [0]=>
+  string(1) "b"
+}
+bool(false)
+array(0) {
+}
 int(1)
 array(3) {
   [0]=>
@@ -421,8 +432,28 @@ array(0) {
 }
 array(0) {
 }
+array(2) {
+  [0]=>
+  int(1)
+}
+array(2) {
+  ["y"]=>
+  int(5)
+}
+array(2) {
+  [2]=>
+  int(4)
+  [8]=>
+  int(2)
+}
+array(2) {
+  [2]=>
+  int(4)
+  [8]=>
+  int(2)
+}
 keys:1=2
-UndefinedArrayChild::{closure:UndefinedArrayChild::__destruct():55}(): Argument #2 ($b) not passed
+UndefinedArrayChild::{closure:UndefinedArrayChild::__destruct():60}(): Argument #2 ($b) not passed
 array(1) {
   ["y"]=>
   int(5)

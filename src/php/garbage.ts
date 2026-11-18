@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 993 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 997 -- Holds object ownership, reachability and release with their shared helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type CleanupException, withCleanupExceptions, withPendingException } from './errors';
 import { ExitSignal, type Frame, PhpThrow, type Runtime } from './runtime';
@@ -800,9 +800,10 @@ export function mark(runtime: Runtime, includeBuffered = true, visitedArrays = n
   return reached;
 }
 
-function pushFrame(frame: Frame, pending: unknown[]): void {
+function pushFrame(frame: Frame, pending: unknown[], includeTemporaries = true): void {
   for (const ref of frame.vars.values()) pending.push(ref);
-  appendValues(pending, [...frame.temporaries, ...frame.argumentHolders, frame.returning]);
+  if (includeTemporaries) appendValues(pending, frame.temporaries);
+  appendValues(pending, [...frame.argumentHolders, frame.returning]);
   if (frame.thisObj) pending.push(frame.thisObj);
   if (frame.closure) pending.push(frame.closure);
 }
@@ -1153,17 +1154,21 @@ export function arrayIsShared(runtime: Runtime, target: PhpArray): boolean {
   return false;
 }
 
-function ownershipRoots(runtime: Runtime): Set<unknown> {
+export function hasStoredObject(runtime: Runtime, object: PhpObject): boolean {
+  return ownedReachable(object, ownershipRoots(runtime, false), runtime);
+}
+
+function ownershipRoots(runtime: Runtime, includeTemporaries = true): Set<unknown> {
   return new Set(
-    ownershipRootSlots(runtime).filter(
+    ownershipRootSlots(runtime, includeTemporaries).filter(
       (value) => value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject
     )
   );
 }
 
-function ownershipRootSlots(runtime: Runtime): unknown[] {
+function ownershipRootSlots(runtime: Runtime, includeTemporaries = true): unknown[] {
   const roots: unknown[] = [];
-  for (const frame of runtime.frames) pushFrame(frame, roots);
+  for (const frame of runtime.frames) pushFrame(frame, roots, includeTemporaries);
   appendValues(roots, runtime.globalStatics.values());
   for (const fn of runtime.userFunctions) appendValues(roots, fn.statics.values());
   for (const cls of runtime.userClasses) {

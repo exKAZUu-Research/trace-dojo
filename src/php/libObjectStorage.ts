@@ -16,6 +16,10 @@ interface StorageEntry {
   slot: number;
 }
 
+interface BulkCleanup {
+  capture?: (error: CleanupException) => void;
+}
+
 class ObjectStorage {
   readonly nativeValues = new NativeValueIndex();
   slots: (StorageEntry | undefined)[] = [];
@@ -107,7 +111,7 @@ class ObjectStorage {
     for (const [slot, entry] of this.slots.entries()) if (entry) entry.slot = slot;
   }
 
-  detach(object: PhpObject, capture?: (error: CleanupException) => void): boolean {
+  detach(object: PhpObject, cleanup?: BulkCleanup): boolean {
     const hash = this.hash(object);
     const entry = this.entries.get(hash);
     if (!entry) return false;
@@ -117,18 +121,18 @@ class ObjectStorage {
     this.slots[entry.slot] = undefined;
     if (entry.slot === this.slots.length - 1)
       while (this.slots.length > 0 && this.slots.at(-1) === undefined) this.slots.pop();
-    this.releaseRemoved([entry.object, entry.info], capture);
+    this.releaseRemoved([entry.object, entry.info], cleanup);
     return true;
   }
 
-  private releaseRemoved(values: Value[], capture?: (error: CleanupException) => void): void {
+  private releaseRemoved(values: Value[], cleanup?: BulkCleanup): void {
     const runtime = rt();
     try {
       runtime.release(values);
-      runtime.flushReleases(true, capture ? 'bulk-removal' : 'ordinary');
+      runtime.flushReleases(true, cleanup ? 'bulk-removal' : 'ordinary');
     } catch (error) {
-      if (!capture || !(error instanceof PhpThrow || error instanceof ExitSignal)) throw error;
-      capture(error);
+      if (!cleanup?.capture || !(error instanceof PhpThrow || error instanceof ExitSignal)) throw error;
+      cleanup.capture(error);
     }
   }
 
@@ -172,19 +176,19 @@ class ObjectStorage {
   }
 
   removeAll(other: ObjectStorage): bigint {
-    return this.bulkRemove(this.hashKeys, (capture) => {
+    return this.bulkRemove(this.hashKeys, (cleanup) => {
       let position = 0;
       while (position < other.slots.length) {
         rt().spend();
         const entry = other.slots[position];
-        if (!entry || !this.detach(entry.object, capture)) position++;
+        if (!entry || !this.detach(entry.object, cleanup)) position++;
       }
     });
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- Pins a key through its callback, detach and pending-exception cleanup.
   removeAllExcept(other: ObjectStorage): bigint {
-    return this.bulkRemove(this.hashKeys || other.hashKeys, (capture) => {
+    return this.bulkRemove(this.hashKeys || other.hashKeys, (cleanup) => {
       for (let slot = 0; slot < this.slots.length; slot++) {
         const runtime = rt();
         runtime.spend();
@@ -195,22 +199,22 @@ class ObjectStorage {
         runtime.held.push(object);
         let pending: PhpThrow | undefined;
         try {
-          if (!other.has(object)) this.detach(object, capture);
+          if (!other.has(object)) this.detach(object, cleanup);
         } catch (error) {
           if (error instanceof PhpThrow) pending = error;
           throw error;
         } finally {
           runtime.held.splice(holder, 1);
-          withPendingException(runtime, pending, () => this.releaseRemoved([object], capture));
+          withPendingException(runtime, pending, () => this.releaseRemoved([object], cleanup));
         }
       }
     });
   }
 
-  private bulkRemove(callsHash: boolean, remove: (capture?: (error: CleanupException) => void) => void): bigint {
+  private bulkRemove(callsHash: boolean, remove: (cleanup: BulkCleanup) => void): bigint {
     return this.rewindAfter(() => {
-      if (callsHash) remove();
-      else withCleanupExceptions(rt(), remove, 'latest');
+      if (callsHash) remove({});
+      else withCleanupExceptions(rt(), (capture) => remove({ capture }), 'latest');
       return BigInt(this.entries.size);
     });
   }

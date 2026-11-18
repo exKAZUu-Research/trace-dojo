@@ -41,3 +41,50 @@ set_error_handler(function () { throw new Exception('unexpected deprecation'); }
 [$falseSource[0][0], &$tail] = $falseSource;
 restore_error_handler();
 var_dump($falseSource);
+
+class NestedListSource {
+    public function __construct(private object $object) {}
+    public function __get(string $name) {
+        return match ($name) {
+            'array' => ['key' => [1]],
+            'temporary' => (object) ['items' => [2]],
+            'stored' => $this->object,
+        };
+    }
+}
+class OffsetListSource extends ArrayObject {
+    public function offsetGet(mixed $key): mixed { return [3]; }
+}
+$object = (object) ['items' => [4]];
+$nested = new NestedListSource($object);
+[&$value] = $nested->array['key'];
+var_dump($value);
+[&$value] = $nested->temporary->items;
+var_dump($value);
+$offsets = new OffsetListSource();
+[&$value] = $offsets['key'];
+var_dump($value);
+[&$value] = $nested->stored->items;
+$value++;
+var_dump($object->items);
+
+foreach ([NAN, 1e30, '1x', [], 'invalid'] as $key) {
+    try { [ $key => &$value ] = $string; }
+    catch (Error $error) { echo $error->getMessage(), "\n"; }
+    try { $value = &$string[$key]; }
+    catch (Error $error) { echo $error->getMessage(), "\n"; }
+    try { $array = [&$string[$key]]; }
+    catch (Error $error) { echo $error->getMessage(), "\n"; }
+}
+function takeListReference(&$value) {}
+try { takeListReference($string[false]); }
+catch (Error $error) { echo $error->getMessage(), "\n"; }
+try { $string[1.5] = &$value; }
+catch (Error $error) { echo $error->getMessage(), "\n"; }
+
+$falseReference = false;
+$falseAlias = &$falseReference;
+set_error_handler(function () { throw new Exception('unexpected deprecation'); }, E_DEPRECATED);
+++$falseReference[0];
+restore_error_handler();
+var_dump($falseAlias);

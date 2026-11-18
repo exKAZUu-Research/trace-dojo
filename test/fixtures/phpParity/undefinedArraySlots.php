@@ -40,6 +40,11 @@ class UndefinedArrayChild extends RecursiveArrayIterator {
         var_dump(array_slice($packed, 1, 2, true), array_slice($packed, -2, 2, true));
         $sparse = [2 => 'a', 5 => $read(), 8 => 'b'];
         var_dump(array_slice($sparse, -1, null, true));
+        array_shift($sparse);
+        var_dump(array_slice($sparse, 1, 2, true), array_slice($sparse, -1, 2, false));
+        $sparse = [2 => 'a', 5 => $read(), 8 => 'b', 'hidden' => $read()];
+        array_shift($sparse);
+        var_dump(array_key_exists('hidden', $sparse), array_slice($sparse, 1, 2, true));
         $mixed = [1, $read(), 2, 'name' => 4];
         var_dump(array_shift($mixed), $mixed);
 
@@ -57,6 +62,10 @@ class UndefinedArrayChild extends RecursiveArrayIterator {
         var_dump(array_diff_key([1], [$read(), 5]), array_intersect_key([1], [$read(), 5]));
         var_dump(strtr('x', ['x' => $read()]), strtr('1', [1 => $read()]));
         var_dump(array_diff([$read()], [1]), array_diff(['x' => $read()], [1]));
+        var_dump(array_diff([1, $read()], []), array_diff(['x' => $read(), 'y' => 5], [], []));
+        $sparse = [2 => 4, 5 => $read(), 8 => 2];
+        $compare = fn ($a = null, $b = null) => $a <=> $b;
+        var_dump(array_diff_ukey($sparse, [3, 1, 2], $compare), array_uintersect($sparse, [2, 4], $compare));
         try { array_uintersect([1, $read(), 2], [1, 2], $compareKeys); }
         catch (ArgumentCountError $error) { echo $error->getMessage(), "\n"; }
         var_dump([...$array], array_merge($array, ['z' => 6]), array_slice($array, 0), array_slice($array, -1));

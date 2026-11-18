@@ -481,3 +481,37 @@ $array = [
     $counter +=
     1
 ];
+try { $missingReceiver
+    ->{$missingMethod}
+    (); }
+catch (Error $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }
+$array = [
+    1.5 =>
+    $uninitialized ??=
+    1 +
+    1,
+    2.5 =>
+    [$item] =
+    [1],
+    3.5 =>
+    $reference =&
+    $item,
+    4.5 =>
+    ("a" .
+    "b"),
+    5.5 =>
+    null ??
+    (fn () => 1)
+];
+$array = [
+    1.5 =>
+    !(
+    "a" .
+    "b")
+];
+$array = [
+    1.5 =>
+    ["a" .
+    "b"]
+    [0]
+];
