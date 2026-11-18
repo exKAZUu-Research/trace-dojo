@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 683 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 688 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -40,6 +40,7 @@ import {
   unionOf,
   type UnionType,
   unknownType,
+  voidType,
 } from './types';
 
 type Relation = 'assignable' | 'comparable';
@@ -853,6 +854,23 @@ export class Relations {
       if (!erasedSources.some((source) => this.signatureRelated(source, target, relation))) return false;
     }
     return true;
+  }
+
+  /**
+   * Whether an overload's return type relates either way to its implementation's, or is `void`, and the implementation
+   * accepts the overload's arguments, as TypeScript's `isImplementationCompatibleWithOverload` compares erased signatures.
+   */
+  isImplementationCompatibleWithOverload(implementation: Signature, overload: Signature): boolean {
+    const source = this.erased(implementation);
+    const target = this.erased(overload);
+    const sourceReturn = source.returnType();
+    const targetReturn = target.returnType();
+    const returnsRelated =
+      isIntrinsic(targetReturn, 'void') ||
+      isAnyLike(sourceReturn) ||
+      this.isAssignable(sourceReturn, targetReturn) ||
+      this.isAssignable(targetReturn, sourceReturn);
+    return returnsRelated && this.signatureRelated(source, { ...target, returnType: () => voidType }, 'assignable');
   }
 
   private erased(signature: Signature): Signature {

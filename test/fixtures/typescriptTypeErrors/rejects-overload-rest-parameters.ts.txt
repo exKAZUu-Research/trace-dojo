@@ -1,0 +1,32 @@
+function elementType(...args: string[]): void;
+function elementType(x: number, y: number) { console.log(x, y); }
+
+function restElements(...args: number[]): void;
+function restElements(...args: string[]) { console.log(args); }
+
+function tupleElements(...args: [number, string]): void;
+function tupleElements(x: number, y: number) { console.log(x, y); }
+
+function implementationRest(x: number, ...rest: string[]): void;
+function implementationRest(...args: number[]) { console.log(args); }
+
+function tupleTail(...args: [number, ...string[]]): void;
+function tupleTail(x: number, y: string, z: number) { console.log(x, y, z); }
+
+function shortTuple(...args: [number]): void;
+function shortTuple(x: number, y: number) { console.log(x, y); }
+
+function literalElements(...args: number[]): void;
+function literalElements(x: 1, y: 2) { console.log(x, y); }
+
+function narrower(x: string | number): void;
+function narrower(x: string) { console.log(x); }
+
+elementType();
+restElements(1);
+tupleElements(1, "a");
+implementationRest(1, "a");
+tupleTail(1, "a");
+shortTuple(1);
+literalElements();
+narrower("a");

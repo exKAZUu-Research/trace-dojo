@@ -1,0 +1,43 @@
+function spread(...args: number[]): void;
+function spread(x: number, y: number) { console.log("spread", x, y); }
+
+function prefixed(x: string, ...args: number[]): void;
+function prefixed(x: string, y: number | void) { console.log("prefixed", x, y); }
+
+function both(...args: number[]): void;
+function both(...args: number[]) { console.log("both", args); }
+
+function optional(...args: number[]): void;
+function optional(x?: number, y?: number) { console.log("optional", x, y); }
+
+function wider(x: number, ...rest: string[]): void;
+function wider(...args: (number | string)[]) { console.log("wider", args); }
+
+function tupleRest(...args: [number, ...string[]]): void;
+function tupleRest(x: number, y: string, z: string) { console.log("tupleRest", x, y, z); }
+
+function restTail(...args: [string, ...number[]]): void;
+function restTail(x: string, ...rest: number[]) { console.log("restTail", x, rest); }
+
+function nullable(...args: number[]): void;
+function nullable(x: number | null, y: number) { console.log("nullable", x, y); }
+
+function union(...args: string[]): void;
+function union(x: string | number) { console.log("union", x); }
+
+function generic<T>(...args: T[]): T;
+function generic(x: number) { return x; }
+
+spread();
+spread(1, 2);
+prefixed("x");
+prefixed("x", 2);
+both(1, 2);
+optional();
+optional(1, 2);
+wider(1, "a");
+tupleRest(1, "a");
+restTail("a", 1, 2);
+nullable(1, 2);
+union("u");
+console.log(generic(3));

@@ -1,6 +1,5 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
-import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
 import { FlowState, type State } from './flow';
@@ -22,7 +21,6 @@ import {
   isAnyLike,
   isIntrinsic,
   neverType,
-  nullType,
   type Signature,
   type Type,
   undefinedType,
@@ -478,16 +476,7 @@ export class FunctionChecker {
     const overloads = symbol.valueDeclarations.filter((declaration) => declaration.type === 'function_signature');
     for (const overload of overloads) {
       const overloadSignature = this.c.signatures.signatureOf(this.c.nativeOverload(overload));
-      // As in TypeScript's `compareSignaturesRelated`, an implementation fits an overload that passes as many arguments
-      // as it needs at least, or any number of them through a rest parameter.
-      const compatible =
-        (overloadSignature.parameters.some((parameter) => parameter.rest) ||
-          overloadSignature.parameters.length >= minimumArguments(signature)) &&
-        overloadSignature.parameters.every((parameter, index) =>
-          this.overloadParameterCompatible(parameter, signature, index)
-        ) &&
-        this.returnsCompatibly(overloadSignature.returnType(), signature.returnType());
-      if (!compatible) {
+      if (!this.c.relations.isImplementationCompatibleWithOverload(signature, overloadSignature)) {
         this.c.error(
           this.c.isLibrary(overload)
             ? (implementation.childForFieldName('name') ?? implementation)
@@ -498,36 +487,6 @@ export class FunctionChecker {
         return;
       }
     }
-  }
-
-  private overloadParameterCompatible(
-    parameter: Signature['parameters'][number],
-    implementation: Signature,
-    index: number
-  ): boolean {
-    const target = this.c.expressions.calls.parameterTypeAt(implementation, index);
-    if (!target) return true;
-    const source = parameter.optional ? unionOf([parameter.type, undefinedType]) : parameter.type;
-    if (!isAnyLike(source)) {
-      for (const nullish of [undefinedType, nullType]) {
-        if (nullish === undefinedType && implementation.parameters[index]?.optional) continue;
-        if (this.c.relations.isAssignable(nullish, source) && !this.c.relations.isAssignable(nullish, target))
-          return false;
-      }
-    }
-    return (
-      this.c.relations.isAssignable(parameter.type, target) || this.c.relations.isAssignable(target, parameter.type)
-    );
-  }
-
-  /** Whether an overload's return type and its implementation's are related either way, or the overload returns `void`. */
-  private returnsCompatibly(overloadReturn: Type, implementationReturn: Type): boolean {
-    return (
-      isIntrinsic(overloadReturn, 'void') ||
-      isAnyLike(implementationReturn) ||
-      this.c.relations.isAssignable(implementationReturn, overloadReturn) ||
-      this.c.relations.isAssignable(overloadReturn, implementationReturn)
-    );
   }
 
   /** Checks a function's body loudly, when its expression or declaration is checked. */
