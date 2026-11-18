@@ -1,0 +1,11 @@
+function lazy(read = (): string => helper()): string {
+  function helper(): string { return "inner"; }
+  try { return read(); } catch (e) { return (e as Error).constructor.name; }
+}
+console.log(lazy());
+function v(a = 1, get = () => a) { var a: number; console.log(a); a = 2; console.log(a, get()); }
+v();
+function x({ p }: { p: number }, q = p) { var p = 9; let r = q; return [p, q, r]; }
+console.log(x({ p: 4 }));
+function h(a: number) { var a = 4; return [a, arguments[0]]; }
+console.log(h(1));

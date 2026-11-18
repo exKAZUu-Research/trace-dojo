@@ -480,7 +480,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
         return startAsyncFunction(runtime, runtime.frame, this.asyncBody(fn, node, args));
       this.bindParameters(fn, node, args);
       if (!Array.isArray(node.body)) return this.evaluate(node.body);
-      this.instantiate(scope, node.scope);
+      this.instantiate(this.enterBodyScope(node), node.scope);
       if (node.isGenerator) {
         const create = node.isAsync ? createAsyncGeneratorObject : createGeneratorObject;
         return create(runtime, runtime.get(fn, 'prototype'), runtime.frame, this.bodySteps(node.body, node.scope));
@@ -509,8 +509,27 @@ export class Evaluator extends SuspendableStatementEvaluator {
   private *asyncBody(fn: JsFunction, node: FunctionNode, args: Value[]): Steps<Completion> {
     this.bindParameters(fn, node, args);
     if (!Array.isArray(node.body)) return { kind: 'return', value: yield* this.valueSteps(node.body) };
-    this.instantiate(this.runtime.frame.scope, node.scope);
+    this.instantiate(this.enterBodyScope(node), node.scope);
     return yield* this.bodySteps(node.body, node.scope);
+  }
+
+  /**
+   * The scope a function body declares its names in: the parameters' own one, or, when parameters are patterns or have
+   * defaults whose closures must not see the body's declarations, a new one inside it, where a `var` named as a
+   * parameter starts with the parameter's value.
+   */
+  private enterBodyScope(node: FunctionNode): Scope {
+    const { frame } = this.runtime;
+    const parameters = frame.scope;
+    if (node.params.every((param) => param.kind === 'identifier') && (!node.rest || node.rest.kind === 'identifier'))
+      return parameters;
+    const body = new Scope(parameters);
+    for (const name of node.scope.order) {
+      const binding = parameters.bindings.get(name);
+      if (binding) body.bindings.set(name, { value: binding.value, isMutable: true });
+    }
+    frame.scope = body;
+    return body;
   }
 
   /** Binds parameters in order after creating them all, so a default reading a later parameter throws as in JavaScript. */

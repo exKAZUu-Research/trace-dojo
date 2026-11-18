@@ -211,7 +211,8 @@ export abstract class ConverterBase {
         scope.names.set(name, 'var');
         continue;
       }
-      if (!scope.names.has(name)) {
+      // A `var` named as a parameter is the body's own variable when the parameters have their own scope.
+      if (!scope.names.has(name) || scope.names.get(name) === 'parameter') {
         scope.names.set(name, 'var');
         scope.declarations.vars.push(name);
         scope.declarations.order.push(name);
@@ -227,7 +228,7 @@ export abstract class ConverterBase {
     if (previous && (previous === 'lexical' || !scope.isFunction)) duplicate(node, fn.name);
     scope.names.set(fn.name, scope.isFunction ? 'var' : 'lexical');
     scope.declarations.functions.push(fn);
-    if (!previous) scope.declarations.order.push(fn.name);
+    if (!previous || previous === 'parameter') scope.declarations.order.push(fn.name);
   }
 
   protected declareParameter(node: Node, name: string): void {

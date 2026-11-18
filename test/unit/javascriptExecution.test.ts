@@ -1572,6 +1572,26 @@ function main() {
 main();`,
   ],
   [
+    'parameter defaults do not see body declarations',
+    `function lazy(read = () => helper()) { function helper() { return "inner"; } try { return read(); } catch (e) { return e.constructor.name; } }
+console.log(lazy());
+function helper() { return "outer"; }
+function lazy2(read = () => helper()) { function helper() { return "inner"; } return read(); }
+console.log(lazy2());
+function v(a = 1, get = () => a) { var a; console.log(a); a = 2; console.log(a, get()); }
+v();
+function w(a = 1, get = () => a) { a = 3; var a = 5; return [a, get()]; }
+console.log(w());
+function x({ p }, q = p) { var p = 9; let r = q; return [p, q, r]; }
+console.log(x({ p: 4 }));
+function y(n = 1) { function n() {} return typeof n; }
+console.log(y());
+async function z(a = () => b) { var b = 2; try { return a(); } catch (e) { return e.constructor.name; } }
+z().then(console.log);
+function* g(a = 1) { var a; yield a; }
+console.log([...g()]);`,
+  ],
+  [
     'callees with escaped string keys in errors',
     `const o = {};
 for (const f of [() => o["a"](), () => o["a\\nb"](), () => o[\`\\x62\`](), () => o.c(), () => o.d(), () => o["\\u{1F600}"](), () => o['q"r'](), () => ("a" + "b")()]) {
