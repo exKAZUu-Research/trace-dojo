@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 462 -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
+// code-gauge-allow-file fileNcss 477 -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { BigFloat, compareFloats } from './floats';
@@ -123,15 +123,31 @@ function pointerLocation(location: { storage: object; index: number }): { storag
 
 const immutableStorage = new WeakSet<object>();
 
-export function markConstantStorage(storage: Slots): void {
+export function markConstantStorage(storage: Slots, type?: Type): void {
   if (immutableStorage.has(storage.slots)) return;
+  spendMemory();
   immutableStorage.add(storage);
   immutableStorage.add(storage.slots);
-  const visit = (value: Value): void => {
-    if (value instanceof ZArray || value instanceof ZStruct || value instanceof ZUnion) markConstantStorage(value);
-    else if (value instanceof Some) visit(value.value);
-  };
-  for (const value of storage.slots) visit(value);
+  if (storage instanceof ZArray) {
+    const child = type?.kind === 'array' ? type.child : undefined;
+    if (child && !hasAggregateStorage(child)) return;
+    const singleton = zeroArrayElement(storage);
+    if (singleton) return markConstantValue(singleton.value, child);
+    spendMemory(storage.slots.length);
+    for (const value of storage.slots) markConstantValue(value, child);
+    return;
+  }
+  const child = storage instanceof ZStruct || storage instanceof ZUnion ? undefined : type;
+  spendMemory(storage.slots.length);
+  for (const value of storage.slots) markConstantValue(value, child);
+}
+
+function markConstantValue(value: Value, type: Type | undefined): void {
+  if (isAggregate(value)) markConstantStorage(value, type);
+  else if (value instanceof Some) {
+    spendMemory();
+    markConstantValue(value.value, type?.kind === 'optional' ? type.child : undefined);
+  }
 }
 
 export function compileTimeReadable(value: Value): boolean {

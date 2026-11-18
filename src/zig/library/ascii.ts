@@ -143,9 +143,10 @@ const MEMBERS: Record<string, () => Member> = {
 function stringConstant(text: string): Member {
   const bytes = [...text].map((char) => BigInt(char.codePointAt(0) as number));
   const storage = new Constant(new ZArray([...bytes, 0n], 0, bytes.length, true));
-  markConstantStorage(storage);
+  const type = arrayOf(bytes.length, U8, 0n);
+  markConstantStorage(storage, type);
   return {
-    type: pointerTo(arrayOf(bytes.length, U8, 0n), true),
+    type: pointerTo(type, true),
     value: new Pointer(storage, 0),
   };
 }

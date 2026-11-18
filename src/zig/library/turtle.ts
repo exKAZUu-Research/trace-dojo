@@ -3,7 +3,7 @@ import { panic } from '../arith';
 import { bytesToText } from '../builtins';
 import { type NativeCall, runtime, type SemaApi, type TExpr } from '../semaBase';
 import { BOOL, CONST_U8_SLICE, fnType, type StructType, type Type, typeName, VOID } from '../types';
-import { NativeHandle, Pointer, type Value } from '../values';
+import { NativeHandle, Pointer, type Slice, type Value } from '../values';
 import { expectArgs, fnMember, type Member, nativeStruct } from './native';
 
 /** `Turtle`, which programs use without importing it, as Java's `Turtle` class. */
@@ -95,7 +95,11 @@ function compileInit(sema: SemaApi, call: NativeCall): TExpr {
     (frame) => {
       frame.runtime.spend();
       const [x, y] = coordinates.map((evaluate) => Number(evaluate(frame) as bigint));
-      const created = frame.runtime.world.create(x ?? 0, y ?? 0, color ? bytesToText(color(frame)) : undefined);
+      const created = frame.runtime.world.create(
+        x ?? 0,
+        y ?? 0,
+        color ? bytesToText(color(frame) as Slice) : undefined
+      );
       if ('error' in created) panic(created.error);
       frame.runtime.allocate(1);
       return new NativeHandle('turtle', { turtle: created });

@@ -31,6 +31,7 @@ import {
 } from './floats';
 import { FunctionInstance } from './functions';
 import { bitSizeOf, hasResolvedLayout, resolveTypeLayout, sizeOf } from './layout';
+import { spendMemory } from './memoryAccounting';
 import { MemoryFault, UNDEFINED_MEMORY } from './memoryFault';
 import { type Frame, ZigPanic } from './runtime';
 import { singleValueOf } from './singleValue';
@@ -509,7 +510,7 @@ export abstract class SemaBase implements SemaApi {
         decl.type = compiled.type;
         if (decl.kind === 'const') {
           decl.value = compiled.value;
-          markConstantStorage(decl.cell);
+          markConstantStorage(decl.cell, compiled.type);
         } else {
           markRuntimeStorage(decl.cell, compiled.type);
           const owner = decl.namespace.name.replace(/^main\.?/, '');
@@ -1239,7 +1240,8 @@ export abstract class SemaBase implements SemaApi {
   ): TExpr {
     this.reserveStorage(type, span);
     if (elements.every((element) => element.known)) {
-      return known(type, build(elements.map((element) => copyForStorage(element.value))), span);
+      this.spendCompilation(elements.length);
+      return known(type, build(elements.map((element) => copyIntoReservedStorage(element.value))), span);
     }
     const evaluators = valueEvaluators(elements, false);
     return {
@@ -1247,11 +1249,19 @@ export abstract class SemaBase implements SemaApi {
         type,
         (frame) => {
           frame.runtime.reserveStorage(valueSlots(type));
-          return build(evaluateHeld(frame, evaluators, copyForStorage));
+          frame.runtime.spend(elements.length);
+          return build(evaluateHeld(frame, evaluators, copyIntoReservedStorage));
         },
         span
       ),
-      staticResult: this.constantResult(elements, (values) => build(values.map(copyForStorage)), span),
+      staticResult: this.constantResult(
+        elements,
+        (values) => {
+          this.spendCompilation(values.length);
+          return build(values.map(copyIntoReservedStorage));
+        },
+        span
+      ),
       valueFacts: retainFacts ? aggregateFacts(elements, () => this.spendCompilation()) : undefined,
     };
   }
@@ -1633,6 +1643,10 @@ function copyFrameStorage(frame: Frame, value: Value, type: Type): Value {
 /** A value about to be stored, whose aggregates must not be shared with the value it came from. */
 export function copyForStorage(value: Value): Value {
   return copyStoredValue(value);
+}
+
+export function copyIntoReservedStorage(value: Value): Value {
+  return copyStoredValue(value, spendMemory);
 }
 
 // code-gauge-allow functionCognitiveComplexity 25 -- Dispatches concrete value shapes while retaining type proofs and charging each mutable clone before allocation.

@@ -2106,7 +2106,7 @@ test('runtime aggregate materializations share one storage budget across calls a
     `fn make()[600000]u8{return @splat(1);}pub fn main()void{const a=make();const b=make();std.debug.print("{} {}",.{a.len,b.len});}`;
   const recursive =
     prefix +
-    `fn retain(n:u8)u8{const a:[400000]u8=@splat(1);if(n==0)return a[0];return a[0]+retain(n-1);}pub fn main()void{std.debug.print("{}",.{retain(3)});}`;
+    `fn retain(n:u8)u8{const a:[400000]u8=undefined;if(n==0)return a[0]&1;return (a[0]&1)+retain(n-1);}pub fn main()void{std.debug.print("{}",.{retain(3)});}`;
   for (const source of [repeated, recursive])
     expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
   const reuse =
@@ -4237,6 +4237,48 @@ test('memory equality retains the reference self-address shortcut except for flo
   });
 });
 
+test.each(['.{a,b}', '[_][128]u8{a,b}', 'S{.a=a,.b=b}'])(
+  'aggregate initializers meter element copies for %s',
+  (value) => {
+    const source = `const S=struct{a:[128]u8,b:[128]u8};pub fn main()void{var a:[128]u8=@splat(1);var b:[128]u8=@splat(2);_=&a;_=&b;const x=${value};_=x;}`;
+    const program = compileSource(source);
+    expect(() => runProgram(new Runtime(), program)).not.toThrow();
+    const budget = new ExecutionBudget();
+    budget.spend(LIMITS.maxOperations - 600);
+    expect(() => runProgram(new Runtime(undefined, budget), program)).toThrow(
+      expect.objectContaining({ limit: 'operations' })
+    );
+  }
+);
+
+test.each([
+  ['u8', '1', 200],
+  ['P', '.{.n=1}', 400],
+])('splat meters construction of runtime %s elements', (type, initial, remaining) => {
+  const source = `const P=struct{n:u8};pub fn main()void{var x:${type}=${initial};_=&x;const a:[128]${type}=@splat(x);_=a;}`;
+  const program = compileSource(source);
+  expect(() => runProgram(new Runtime(), program)).not.toThrow();
+  const budget = new ExecutionBudget();
+  budget.spend(LIMITS.maxOperations - remaining);
+  expect(() => runProgram(new Runtime(undefined, budget), program)).toThrow(
+    expect.objectContaining({ limit: 'operations' })
+  );
+});
+
+test.each([
+  ['&a', 256],
+  ['a[1..]', 255],
+])('panic messages from %s share the operation budget', (value, length) => {
+  const source = `pub fn main()void{var a:[256]u8=@splat(97);_=&a;@panic(${value});}`;
+  const program = compileSource(source);
+  expect(runProgram(new Runtime(), program).uncaughtException).toBe(`panic: ${'a'.repeat(length)}`);
+  const budget = new ExecutionBudget();
+  budget.spend(LIMITS.maxOperations - 600);
+  expect(() => runProgram(new Runtime(undefined, budget), program)).toThrow(
+    expect.objectContaining({ limit: 'operations' })
+  );
+});
+
 test.each([
   ['f80', '-0x1.5555555555555554p-5461'],
   ['f128', '-0x1.aaaaaaaaaaaaaaaaaaaaaaaaaaaap-5461'],
@@ -5807,6 +5849,14 @@ test.each(['std.debug.print(&format,.{});', '_=std.fmt.count(&format,.{});'])(
 test('protecting a mutable global aggregate consumes compilation work', () => {
   const source = 'const S=struct{x:u8,y:u8};var a:[150000]S=@splat(.{.x=1,.y=2});pub fn main()void{_=&a;}';
   expect(() => compileSource(source)).toThrow(expect.objectContaining({ limit: 'operations' }));
+});
+
+test('protecting nested constant storage consumes compilation work', () => {
+  const source = 'const S=struct{x:u8};const a:[128]S=undefined;pub fn main()void{_=&a;}';
+  expect(() => compileSource(source)).not.toThrow();
+  const budget = new ExecutionBudget();
+  budget.spend(LIMITS.maxOperations - 1000);
+  expect(() => compileSource(source, { budget })).toThrow(expect.objectContaining({ limit: 'operations' }));
 });
 
 test.each(['x'.repeat(100_000), '{{}}'.repeat(25_000)])(
@@ -8081,7 +8131,7 @@ test('comparator body-type coercions keep queue construction lazy', () => {
 test.each(['const', 'var'])('global %s aggregate copies share the compilation storage budget', (kind) => {
   const declarations = Array.from({ length: 12 }, (_, index) => `${kind} b${index}:[100000]u8=a;`).join('');
   const uses = Array.from({ length: 12 }, (_, index) => `_=&b${index};`).join('');
-  expect(executeProgram('zig', `const a:[100000]u8=@splat(1);${declarations}pub fn main()void{${uses}}`)).toMatchObject(
+  expect(executeProgram('zig', `const a:[100000]u8=undefined;${declarations}pub fn main()void{${uses}}`)).toMatchObject(
     { kind: 'limitExceeded', limit: 'storage' }
   );
 });

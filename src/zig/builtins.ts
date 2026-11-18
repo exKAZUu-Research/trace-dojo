@@ -17,7 +17,7 @@ import {
 } from './arith';
 import type { Expression, ExpressionOf, Span } from './ast';
 import { activeUnionIndex, unionTagValue } from './bufferMemory';
-// code-gauge-allow-file fileNcss 714 -- The file holds one layer of the compiler, whose parts share its private state.
+// code-gauge-allow-file fileNcss 720 -- The file holds one layer of the compiler, whose parts share its private state.
 import { enumLookup } from './enumLookup';
 import { ExpressionCompiler, log2IntType } from './expressions';
 import {
@@ -40,6 +40,7 @@ import {
 import { integerOperationWork, spendIntegerShift } from './integerWork';
 import { sizeOf } from './layout';
 import { importStd } from './library/std';
+import { spendMemory } from './memoryAccounting';
 import { MemoryFault } from './memoryFault';
 import { isIntegerType } from './operands';
 import { referenceUnary } from './referenceMath';
@@ -47,6 +48,7 @@ import type { UnaryOperation } from './referenceMathOperations';
 import type { Frame } from './runtime';
 import {
   copyForStorage,
+  copyIntoReservedStorage,
   evaluateHeld,
   inMemoryCoercible,
   known,
@@ -278,7 +280,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
       case '@panic': {
         const message = this.coerce(this.compile(args[0], CONST_U8), CONST_U8, args[0]);
         const evaluate = message.eval;
-        return runtime({ kind: 'noreturn' }, (frame) => panic(bytesToText(evaluate(frame))), expression);
+        return runtime({ kind: 'noreturn' }, (frame) => panic(bytesToText(evaluate(frame) as Slice)), expression);
       }
       case '@intCast': {
         return this.intCastBuiltin(args[0], this.castTarget(expression, resultType, 'int'), expression);
@@ -506,13 +508,15 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
         return this.derived(
           element,
           target,
-          (value) =>
-            zero
-              ? zeroArray(length, sentinel !== undefined, value)
-              : newArray(
-                  Array.from({ length: Number(length) }, () => copyForStorage(value)),
-                  sentinel
-                ),
+          (value) => {
+            if (zero) return zeroArray(length, sentinel !== undefined, value);
+            const count = Number(length);
+            spendMemory(count);
+            return newArray(
+              Array.from({ length: count }, () => copyIntoReservedStorage(value)),
+              sentinel
+            );
+          },
           true
         );
       }
@@ -968,7 +972,7 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
     const bytes = encodeIdentifierText(text).map(BigInt);
     bytes.push(0n);
     const array = new ZArray(bytes, 0, length, true);
-    markConstantStorage(array);
+    markConstantStorage(array, arrayOf(length, U8, 0n));
     const slice = new Slice(array, 0, length);
     this.nameSlices.set(text, slice);
     return slice;
@@ -1053,9 +1057,10 @@ export const CONST_U8: Type = sliceOf(U8, true);
 
 const NAME_SLICE = sliceOf(U8, true, 0n);
 
-/** The text of a byte slice or a pointer to a byte array, decoded as UTF-8. */
-export function bytesToText(value: Value): string {
-  return decodeUtf8(byteValues(value).map(Number));
+export function bytesToText(slice: Slice): string {
+  const bytes = slice.readBytes(spendMemory);
+  spendMemory(bytes.length);
+  return decodeUtf8(bytes);
 }
 
 export function byteValues(value: Value, spend?: (cost: number) => void): bigint[] {

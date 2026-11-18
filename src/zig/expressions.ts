@@ -360,7 +360,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     let storage = this.constants.get(key);
     if (!storage) {
       storage = new Constant(copyForStorage(value));
-      markConstantStorage(storage);
+      markConstantStorage(storage, type);
       this.constants.set(key, storage);
     }
     return new Pointer(storage, 0);
