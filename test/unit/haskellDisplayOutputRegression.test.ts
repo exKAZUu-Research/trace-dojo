@@ -60,3 +60,48 @@ test('shared reference views serialize and render within a bounded heap', { time
     entries: { 0: { kind: 'value', value: 1 }, 1: { kind: 'value', value: 2 } },
   });
 });
+
+test(
+  'shared scalar answer arrays keep complete recordings serializable within a bounded heap',
+  { timeout: 30_000 },
+  () => {
+    const bundle = execFileSync(
+      'bun',
+      ['build', 'test/helpers/haskellScalarOutput.ts', '--target=node', '--packages=external'],
+      { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
+    );
+    const output = execFileSync('node', ['--max-old-space-size=256', '--input-type=module'], {
+      input: bundle,
+      encoding: 'utf8',
+      timeout: 10_000,
+      maxBuffer: 1024 * 1024,
+    });
+    const results = z
+      .array(
+        z.object({
+          name: z.string(),
+          bytes: z.number(),
+          stdout: z.string(),
+          answers: z.array(z.string()),
+          finalAnswers: z.array(z.string()),
+          loops: z.number(),
+          outer: z.number(),
+          inner: z.number(),
+        })
+      )
+      .parse(JSON.parse(output));
+    expect(results.map((item) => item.name)).toEqual(['small', 'million', 'repeated', 'aliases', 'selfField']);
+    for (const result of results) {
+      expect(result.bytes).toBeLessThan(64 * 1024 * 1024);
+      expect(result.stdout).toBe(
+        `${result.outer}\n${(result.inner * (result.inner + 1)) / 2}\n${Array.from({ length: result.loops }, (_, i) => `${i + 1}\n`).join('')}`
+      );
+      expect(result.answers).toContain('cheap');
+      expect(result.finalAnswers).toContain('cheap');
+      if (result.name === 'aliases') {
+        expect(result.answers).toContain('alias0');
+        expect(result.answers).not.toContain('alias19');
+      }
+    }
+  }
+);

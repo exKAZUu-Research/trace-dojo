@@ -79,7 +79,7 @@ function variablesOf(runtime: Runtime, frame: TraceFrame): TraceVariables {
     if (visible.name === 'this') self = entry;
   }
   addSelfFields(runtime, variables, self);
-  return { ...variables, referenceVars: boundDisplayOutput(runtime, variables.referenceVars) };
+  return boundDisplayOutput(runtime, variables);
 }
 
 function addSlotVariable(
