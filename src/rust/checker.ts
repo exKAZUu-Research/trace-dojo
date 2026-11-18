@@ -39,6 +39,7 @@ import {
   type AdtDef,
   BOOL,
   CHAR,
+  childTypes,
   type ClosureType,
   F32,
   F64,
@@ -47,6 +48,7 @@ import {
   freshVar,
   hasParams,
   hasVars,
+  type ImplDef,
   intMax,
   intMin,
   type IntName,
@@ -58,6 +60,7 @@ import {
   ref,
   REF_STR,
   resolve,
+  sameType,
   shallow,
   STR,
   type Subst,
@@ -127,6 +130,7 @@ export class Checker {
 
   checkProgram(): void {
     this.checkDerivedFields();
+    for (const impl of this.program.impls) this.checkImplSignatures(impl);
     for (const fn of this.program.pendingFns.splice(0)) this.checkFn(fn);
     while (this.nestedFns.length > 0) this.checkFn(this.nestedFns.shift()!);
     this.checkConstsAndMain();
@@ -137,6 +141,38 @@ export class Checker {
     for (const def of this.program.adts) {
       if ((def.module as Module | undefined)?.isStd) continue;
       for (const name of def.derives) this.checkDerivedTrait(def, name);
+    }
+  }
+
+  /** Requires the methods of a trait impl to take `self`, their parameters, and return as the trait declares them. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Follows the type checking rules of rustc case by case.
+  private checkImplSignatures(impl: ImplDef): void {
+    const traitRef = impl.trait;
+    if (!traitRef || (impl.module as Module).isStd) return;
+    const { trait } = traitRef;
+    for (const fn of impl.methods.values()) {
+      const decl = trait.methods.get(fn.name);
+      if (!decl || !fn.ast) continue;
+      const span = fn.ast.span;
+      if (decl.selfMode !== fn.selfMode) {
+        compileError(span, `メソッド ${fn.name} の self の受け取り方が、トレイト ${trait.name} の宣言と違います。`);
+      }
+      if (decl.paramTypes.length !== fn.paramTypes.length) {
+        compileError(
+          span,
+          `メソッド ${fn.name} の引数の数が、トレイト ${trait.name} の宣言と違います（${decl.paramTypes.length} 個です）。`
+        );
+      }
+      const subst = implSubst(impl, traitRef, decl, fn);
+      const pairs = [...decl.paramTypes.map((type, index) => [type, fn.paramTypes[index]]), [decl.ret, fn.ret]];
+      for (const [declared, written] of pairs) {
+        const expected = substitute(declared, subst);
+        if (hasOpaque(expected) || hasOpaque(written) || sameType(expected, written)) continue;
+        compileError(
+          span,
+          `メソッド ${fn.name} の型が、トレイト ${trait.name} の宣言と違います（${typeToString(expected)} が必要ですが、${typeToString(written)} です）。`
+        );
+      }
     }
   }
 
@@ -2060,6 +2096,8 @@ export class Checker {
       if (isMap) {
         const keyType = t.args[0];
         const indexType = this.expr(expr.index, ref(keyType));
+        // A key whose type is not known yet is a reference whose target the `Borrow` bound settles later.
+        if (normalize(shallow(indexType)).kind === 'var') this.unifier.tryUnify(indexType, ref(freshVar()));
         const it = normalize(shallow(indexType));
         if (it.kind !== 'ref')
           compileError(expr.index.span, `HashMap の [ ] には、キーの参照（&key）を書いてください。`);
@@ -2901,4 +2939,21 @@ function checkIntLiteral(literal: Extract<Expr, { kind: 'int' }>, name: IntName,
     literal.span,
     `リテラル ${negated ? '-' : ''}${literal.value} は ${name} の範囲（${intMin(name)}〜${intMax(name)}）を超えています。`
   );
+}
+
+function hasOpaque(type: Type): boolean {
+  const t = shallow(type);
+  return t.kind === 'opaque' || childTypes(t).some(hasOpaque);
+}
+
+/** What a trait's method signature reads as in an impl: its `Self`, the trait's and the method's own type parameters. */
+function implSubst(impl: ImplDef, traitRef: TraitRef, decl: FnDef, fn: FnDef): Map<TypeParam, Type> {
+  const { trait } = traitRef;
+  const subst = new Map<TypeParam, Type>([[trait.self, impl.selfType]]);
+  for (const [index, param] of trait.params.entries()) subst.set(param, traitRef.args[index]);
+  const own = fn.params.slice(fn.parentParamCount);
+  for (const [index, param] of decl.params.slice(decl.parentParamCount).entries()) {
+    if (own[index]) subst.set(param, { kind: 'param', param: own[index] });
+  }
+  return subst;
 }

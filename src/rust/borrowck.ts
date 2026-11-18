@@ -1,11 +1,11 @@
-// code-gauge-allow-file fileNcss 657 -- Follows the borrow checking rules case by case.
+// code-gauge-allow-file fileNcss 691 -- Follows the borrow checking rules case by case.
 import type { Annotations, FnContext, LocalVar } from './annotations';
 import type { Block, Condition, Expr, FnItem, FormatArgs, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindings, walkBlock } from './astWalk';
 import { normalize } from './infer';
 import { compileError } from './items';
 import type { TraitSolver } from './traits';
-import { resolve, shallow, substitute as substituteType, type Type } from './types';
+import { childTypes, resolve, shallow, substitute as substituteType, type Type } from './types';
 
 /** Whether a variable holds a value at a point: certainly, certainly not (never assigned or moved), or maybe. */
 interface VarState {
@@ -139,12 +139,34 @@ export class BorrowChecker {
     return current;
   }
 
+  /**
+   * `let (a, b) = t;` moves only the elements that its bindings take by value and that are not `Copy`, as rustc does;
+   * undefined for other patterns and values.
+   */
+  private destructure(pattern: Pattern, init: Expr, state: State): State | undefined {
+    const place = this.placeOf(init);
+    if (pattern.kind !== 'tuple' || !place || place.indirect || place.root.mode !== 'move') return undefined;
+    if (!pattern.elems.every((elem) => elem.kind === 'wild' || (elem.kind === 'binding' && !elem.sub)))
+      return undefined;
+    const varState = state.get(place.root);
+    if (varState) this.checkUsable(place.root, varState, init.span, 'read', place.path);
+    let current = state;
+    for (const [index, elem] of pattern.elems.entries()) {
+      const local = elem.kind === 'binding' ? this.annotations.bindings.get(elem) : undefined;
+      if (!local || local.mode !== 'move' || this.isCopy(local.type)) continue;
+      const path = { ...place, path: `${place.path}.${index}` };
+      this.checkLoans(path, init.span, 'move');
+      current = this.markMoved(current, path, init.span, false);
+    }
+    return current;
+  }
+
   private stmt(stmt: Stmt, state: State): State {
     switch (stmt.kind) {
       case 'let': {
         let current = state;
         if (stmt.init) {
-          current = this.expr(stmt.init, current, 'move');
+          current = this.destructure(stmt.pattern, stmt.init, current) ?? this.expr(stmt.init, current, 'move');
           if (stmt.else) {
             const elseState = this.block(stmt.else, current);
             void elseState;
@@ -793,7 +815,14 @@ export class BorrowChecker {
         const method = this.annotations.methods.get(expr);
         // A result borrows from the receiver only when the signature's result has a reference of its own, not one
         // that a type argument brings (`Vec<&str>::pop` returns no borrow of the vector).
-        if (!containsReference(expr.ty) || (method && !containsReference(method.fn.ret))) return [];
+        if (!containsReference(expr.ty)) return [];
+        // A result whose references come from the receiver's type arguments keeps the receiver's borrows
+        // (`v.first().unwrap()`), unlike one of the method's own type parameters (`map`'s items, which a closure makes).
+        if (method && !containsReference(method.fn.ret)) {
+          const own = new Set(method.fn.params.slice(method.fn.parentParamCount));
+          const fromReceiver = !mentionsParams(method.fn.ret, own) && containsReference(expr.receiver.ty);
+          return fromReceiver ? this.borrowsOf(expr.receiver) : [];
+        }
         if (!method || method.fn.selfMode === 'value') {
           return method?.fn.selfMode === 'value' ? this.borrowsOf(expr.receiver) : [];
         }
@@ -832,6 +861,13 @@ export class BorrowChecker {
         const place = this.placeOf(expr);
         if (place) return this.inheritedLoans(place.root);
         return [];
+      }
+      case 'struct':
+      case 'tuple':
+      case 'array': {
+        const loans: Omit<Loan, 'holder'>[] = [];
+        forEachDirect(expr, (child) => loans.push(...this.borrowsOf(child)));
+        return loans;
       }
       default: {
         return [];
@@ -936,7 +972,11 @@ function containsReference(type: Type | undefined): boolean {
       return containsReference(t.elem);
     }
     case 'adt': {
-      return t.args.some(containsReference) || t.def.builtin === 'Entry';
+      // A struct of the program holds a borrow in a field of a reference type (`struct View<'a> { data: &'a T }`).
+      const borrowingField = t.def.variants.some((variant) =>
+        variant.fields.some((field) => normalize(shallow(field.type)).kind === 'ref')
+      );
+      return t.args.some(containsReference) || t.def.builtin === 'Entry' || borrowingField;
     }
     case 'closure': {
       return true;
@@ -957,4 +997,10 @@ function isFieldChain(expr: Expr): boolean {
   let current = expr;
   while (current.kind === 'field') current = current.operand;
   return current.kind === 'path';
+}
+
+function mentionsParams(type: Type, params: ReadonlySet<unknown>): boolean {
+  const t = shallow(type);
+  if (t.kind === 'param') return params.has(t.param);
+  return childTypes(t).some((child) => mentionsParams(child, params));
 }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 430 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 432 -- One native per method of the standard library.
 import { normalize } from '../infer';
 import { strSliceBytes } from '../interpreter';
 import { RustPanic } from '../runtime';
@@ -669,6 +669,8 @@ for (const name of Object.keys(charNatives).filter((key) => key.includes('ascii'
     return typeof result === 'string' ? BigInt(result.codePointAt(0)!) : result;
   };
 }
+natives['String::len'] = strNatives.len;
+natives['String::is_empty'] = strNatives.is_empty;
 natives['std::char::from_u32'] = ([i], ctx) => fromU32(ctx, i);
 natives['std::char::from_digit'] = ([num, radix], ctx) => fromDigit(ctx, num, radix);
 define(natives);

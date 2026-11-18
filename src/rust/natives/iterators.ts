@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 668 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 669 -- One native per method of the standard library.
 import { normalize } from '../infer';
 import type { Interpreter } from '../interpreter';
 import { castValue, cloneValue, compareValues, copyValue, hashKey, needsCopy, valuesEqual, wrap } from '../ops';
@@ -217,15 +217,25 @@ export function nextOf(iter: IterValue): Next {
   return iter.next();
 }
 
-function collectAll(ctx: NativeContext, iter: IterValue): Value[] {
+/** Takes the elements left, up to and including one that `stop` picks. */
+function collectAll(ctx: NativeContext, iter: IterValue, stop?: (item: Value) => boolean): Value[] {
   const items: Value[] = [];
   for (;;) {
     ctx.runtime.spend();
     const item = nextOf(iter);
     if (item === DONE) return items;
     items.push(item);
+    if (stop?.(item)) return items;
     if (items.length > 1_000_000) ctx.runtime.allocate(items.length);
   }
+}
+
+/** Flattens `Option`s or `Result`s, keeping the value of each one whose variant is `present` (`Some`, `Ok`). */
+function flattenPresent(ctx: NativeContext, self: Value, present: number): IterValue {
+  return flatten(ctx, iterOf(self), (item) => {
+    const value = deref(item) as EnumValue;
+    return arrayIter(value.variant === present ? [value.fields[0]] : []);
+  });
 }
 
 function adapter(source: IterValue, next: () => Next, nextBack?: () => Next, remaining?: () => number): IterValue {
@@ -449,7 +459,8 @@ define({
   },
   'Iter<_>::peekable': ([self]) => iterOf(self),
   'Iter<_>::fuse': ([self]) => iterOf(self),
-  'Iter<_>::by_ref': ([self]) => self,
+  // `&mut I` iterates as `I` does, so the adapters after `by_ref` advance the same iterator.
+  'Iter<_>::by_ref': ([self]) => deref(self),
   'Iter<_>::into_iter': ([self]) => iterOf(self),
   'Iter<_>::peek': ([self], ctx) => {
     const iter = iterOf(self);
@@ -501,8 +512,15 @@ define({
       return DONE;
     });
   },
-  'Iter<_>::collect': ([self], ctx) =>
-    collectInto(ctx, collectAll(ctx, iterOf(self)), ctx.typeArgs[1], ctx.typeArgs[0]),
+  'Iter<_>::collect': ([self], ctx) => {
+    // Collecting into a `Result` or an `Option` stops at the first `Err` or `None`, taking nothing after it.
+    const target = normalize(shallow(ctx.typeArgs[1]));
+    const builtin = target.kind === 'adt' ? target.def.builtin : undefined;
+    const stopVariant = builtin === 'Result' ? 1 : builtin === 'Option' ? 0 : undefined;
+    const stop =
+      stopVariant === undefined ? undefined : (item: Value) => (deref(item) as EnumValue).variant === stopVariant;
+    return collectInto(ctx, collectAll(ctx, iterOf(self), stop), ctx.typeArgs[1], ctx.typeArgs[0]);
+  },
   'Iter<_>::sum': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[1], '+'),
   'Iter<_>::product': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[1], '*'),
   'Iter<_>::count': ([self], ctx) => BigInt(collectAll(ctx, iterOf(self)).length),
@@ -662,16 +680,11 @@ define({
   'Iter<Iter<_>>::flatten': ([self], ctx) => flatten(ctx, iterOf(self), (item) => iterOf(item)),
   'Iter<Vec<_>>::flatten': ([self], ctx) => flatten(ctx, iterOf(self), (item) => arrayIter(item as Value[])),
   'Iter<&Vec<_>>::flatten': ([self], ctx) => flatten(ctx, iterOf(self), (item) => arrayIter(deref(item) as Value[])),
-  'Iter<Option<_>>::flatten': ([self], ctx) =>
-    flatten(ctx, iterOf(self), (item) => {
-      const option = item as EnumValue;
-      return arrayIter(option.variant === 1 ? [option.fields[0]] : []);
-    }),
-  'Iter<Result<_, _>>::flatten': ([self], ctx) =>
-    flatten(ctx, iterOf(self), (item) => {
-      const result = item as EnumValue;
-      return arrayIter(result.variant === 0 ? [result.fields[0]] : []);
-    }),
+  // A shared reference is the value it refers to, so `&Option` and `&Result` flatten as their values do.
+  'Iter<&Option<_>>::flatten': ([self], ctx) => flattenPresent(ctx, self, 1),
+  'Iter<&Result<_, _>>::flatten': ([self], ctx) => flattenPresent(ctx, self, 0),
+  'Iter<Option<_>>::flatten': ([self], ctx) => flattenPresent(ctx, self, 1),
+  'Iter<Result<_, _>>::flatten': ([self], ctx) => flattenPresent(ctx, self, 0),
   'std::iter::repeat': ([value], ctx) => new IterValue(() => cloneValue(ctx.typeArgs[0], value)),
   'std::iter::repeat_n': ([value, n], ctx) => {
     let left = Number(n as bigint);

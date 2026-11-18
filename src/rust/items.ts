@@ -779,6 +779,7 @@ const BUILTIN_STRUCTS: Record<string, BuiltinAdt> = {
   ParseError: 'ParseError',
   Unsigned: 'Unsigned',
   Signed: 'Signed',
+  Indexed: 'Indexed',
   ParseBoolError: 'ParseBoolError',
   ParseCharError: 'ParseCharError',
 };

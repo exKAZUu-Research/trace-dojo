@@ -595,7 +595,7 @@ export class Converter {
   // -------------------------------------------------------------------------------------------------------------------
   // Types
 
-  // code-gauge-allow functionNcss 47 -- One case per kind of syntax node.
+  // code-gauge-allow functionNcss 48 -- One case per kind of syntax node.
   type(node: Node): TypeAst {
     const span = this.span(node);
     switch (node.type) {
@@ -608,7 +608,9 @@ export class Converter {
       }
       case 'reference_type': {
         const mutable = node.namedChildren.some((child) => child.type === 'mutable_specifier');
-        return { kind: 'ref', mutable, target: this.type(this.field(node, 'type')), span };
+        const type: TypeAst = { kind: 'ref', mutable, target: this.type(this.field(node, 'type')), span };
+        // `&&T` is one token, which stands for two references.
+        return node.children[0]?.type === '&&' ? { kind: 'ref', mutable: false, target: type, span } : type;
       }
       case 'tuple_type': {
         return { kind: 'tuple', elems: node.namedChildren.filter((c) => !isComment(c)).map((c) => this.type(c)), span };

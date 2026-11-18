@@ -5,7 +5,8 @@
  *
  * Pseudo-traits that rustc does not have stand for groups of types that the natives handle alike: `Integer`,
  * `SignedInteger`, `UnsignedInteger`, `Float`, `Pattern` (what `str::split` and its kin accept), `Borrow` (keys that
- * look up a map), `FromStrTarget`, `StringPart`, `RangeBounds`, and `ExtendInto`.
+ * look up a map), `FromStrTarget`, `StringPart`, `RangeBounds`, `ExtendInto`, and `SliceIndex` (what `<[T]>::get`
+ * accepts: a `usize` or a range of them, giving `Indexed<I, T>`, an element or a slice).
  */
 export const STD_SOURCE = String.raw`
 pub mod marker {
@@ -158,6 +159,8 @@ pub mod string {
     pub struct String;
     pub trait ToString { fn to_string(&self) -> String; }
     impl String {
+        pub fn len(&self) -> usize;
+        pub fn is_empty(&self) -> bool;
         pub fn new() -> String;
         pub fn with_capacity(capacity: usize) -> String;
         pub fn from_utf8(vec: Vec<u8>) -> Result<String, Utf8Error>;
@@ -230,8 +233,8 @@ pub mod slice {
         pub fn last(&self) -> Option<&T>;
         pub fn first_mut(&mut self) -> Option<&mut T>;
         pub fn last_mut(&mut self) -> Option<&mut T>;
-        pub fn get(&self, index: usize) -> Option<&T>;
-        pub fn get_mut(&mut self, index: usize) -> Option<&mut T>;
+        pub fn get<I: SliceIndex>(&self, index: I) -> Option<&Indexed<I, T>>;
+        pub fn get_mut<I: SliceIndex>(&mut self, index: I) -> Option<&mut Indexed<I, T>>;
         pub fn iter(&self) -> Iter<&T>;
         pub fn iter_mut(&mut self) -> Iter<&mut T>;
         pub fn contains(&self, x: &T) -> bool where T: PartialEq;
@@ -703,7 +706,7 @@ pub mod iter {
         pub fn inspect<F: FnMut(&T)>(self, f: F) -> Iter<T>;
         pub fn cycle(self) -> Iter<T> where T: Clone;
         pub fn scan<St, B, F: FnMut(&mut St, T) -> Option<B>>(self, initial_state: St, f: F) -> Iter<B>;
-        pub fn by_ref(&mut self) -> &mut Iter<T>;
+        pub fn by_ref(&mut self) -> Iter<T>;
         pub fn collect<B: FromIterator<T>>(self) -> B;
         pub fn sum<S: Sum<T>>(self) -> S;
         pub fn product<P: Product<T>>(self) -> P;
@@ -752,6 +755,12 @@ pub mod iter {
         pub fn flatten(self) -> Iter<T>;
     }
     impl<T> Iter<&Vec<T>> {
+        pub fn flatten(self) -> Iter<&T>;
+    }
+    impl<T> Iter<&Option<T>> {
+        pub fn flatten(self) -> Iter<&T>;
+    }
+    impl<T, E> Iter<&Result<T, E>> {
         pub fn flatten(self) -> Iter<&T>;
     }
     impl<T> Iter<Option<T>> {
@@ -817,6 +826,7 @@ pub mod collections {
         pub fn into_iter(self) -> Iter<(&K, &mut V)>;
     }
     impl<K, V> BTreeMap<K, V> {
+        pub fn range<R: RangeBounds<K>>(&self, range: R) -> Iter<(&K, &V)>;
         pub fn new() -> BTreeMap<K, V>;
         pub fn insert(&mut self, k: K, v: V) -> Option<V> where K: Ord;
         pub fn get<Q>(&self, k: &Q) -> Option<&V> where K: Borrow<Q>;
@@ -885,6 +895,7 @@ pub mod collections {
         pub fn into_iter(self) -> Iter<&T>;
     }
     impl<T> BTreeSet<T> {
+        pub fn range<R: RangeBounds<T>>(&self, range: R) -> Iter<&T>;
         pub fn new() -> BTreeSet<T>;
         pub fn insert(&mut self, value: T) -> bool where T: Ord;
         pub fn contains<Q>(&self, value: &Q) -> bool where T: Borrow<Q>;
@@ -1088,6 +1099,7 @@ pub mod pseudo {
     pub trait Integer {}
     pub trait SignedInteger {}
     pub trait UnsignedInteger {}
+    pub trait SliceIndex {}
     pub trait Float {}
     pub trait Pattern {}
     pub trait Borrow<Q> {}
@@ -1098,6 +1110,7 @@ pub mod pseudo {
     pub struct ParseError<F>;
     pub struct Unsigned<N>;
     pub struct Signed<N>;
+    pub struct Indexed<I, T>;
     pub struct Utf8Error;
 }
 `;

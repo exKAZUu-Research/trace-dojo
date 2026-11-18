@@ -28,8 +28,19 @@ export class Unifier {
     this.trail.push(v);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 26 -- One case per kind of type.
-  // code-gauge-allow functionNcss 59 -- One case per kind of type.
+  /**
+   * `ParseError<F>`, the error of `str::parse::<F>` while `F` is unknown, may be any parse error; rustc does not infer
+   * `F` from it, so `F` must still come from elsewhere (a type annotation).
+   */
+  private unifyParseError(pseudo: Type & { kind: 'adt' }, error: Type & { kind: 'adt' }): boolean {
+    if (pseudo.def.builtin !== 'ParseError' || shallow(pseudo.args[0]).kind !== 'var') return false;
+    return ['ParseIntError', 'ParseFloatError', 'ParseBoolError', 'ParseCharError'].includes(
+      error.def.builtin as string
+    );
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 28 -- One case per kind of type.
+  // code-gauge-allow functionNcss 58 -- One case per kind of type.
   unify(a: Type, b: Type): boolean {
     const x = normalize(shallow(a));
     const y = normalize(shallow(b));
@@ -66,18 +77,14 @@ export class Unifier {
       }
       case 'adt': {
         const other = y as typeof x;
-        return x.def === other.def && x.args.every((arg, i) => this.unify(arg, other.args[i]));
+        if (x.def !== other.def) return this.unifyParseError(x, other) || this.unifyParseError(other, x);
+        return x.args.every((arg, i) => this.unify(arg, other.args[i]));
       }
       case 'param': {
         return x.param === (y as typeof x).param;
       }
       case 'fn': {
-        const other = y as typeof x;
-        return (
-          x.params.length === other.params.length &&
-          x.params.every((p, i) => this.unify(p, other.params[i])) &&
-          this.unify(x.ret, other.ret)
-        );
+        return this.unifySignatures(x, y as typeof x);
       }
       case 'closure': {
         return x.closure === (y as typeof x).closure;
@@ -85,15 +92,7 @@ export class Unifier {
       case 'dyn': {
         const other = y as typeof x;
         if (x.trait.trait !== other.trait.trait) return false;
-        if (x.trait.fnSig && other.trait.fnSig) {
-          const p = x.trait.fnSig;
-          const q = other.trait.fnSig;
-          return (
-            p.params.length === q.params.length &&
-            p.params.every((t, i) => this.unify(t, q.params[i])) &&
-            this.unify(p.ret, q.ret)
-          );
-        }
+        if (x.trait.fnSig && other.trait.fnSig) return this.unifySignatures(x.trait.fnSig, other.trait.fnSig);
         return x.trait.args.every((arg, i) => this.unify(arg, other.trait.args[i]));
       }
       case 'opaque': {
@@ -103,6 +102,14 @@ export class Unifier {
         return true;
       }
     }
+  }
+
+  private unifySignatures(p: { params: Type[]; ret: Type }, q: { params: Type[]; ret: Type }): boolean {
+    return (
+      p.params.length === q.params.length &&
+      p.params.every((t, i) => this.unify(t, q.params[i])) &&
+      this.unify(p.ret, q.ret)
+    );
   }
 
   private bindVar(v: TypeVar, type: Type): boolean {
@@ -129,11 +136,13 @@ export function setPseudoTypes(types: { parseError: (target: Type) => Type | und
 }
 
 /**
- * Replaces `ParseError<F>`, `Unsigned<N>`, and `Signed<N>` with the types they stand for when their argument is known.
+ * Replaces `ParseError<F>`, `Unsigned<N>`, `Signed<N>`, and `Indexed<I, T>` with the types they stand for when their
+ * first argument is known.
  */
 export function normalize(type: Type): Type {
   if (type.kind !== 'adt' || !isPseudo(type.def)) return type;
   const arg = shallow(type.args[0]);
+  if (type.def.builtin === 'Indexed') return indexed(type, arg);
   if (arg.kind === 'var') return type;
   if (type.def.builtin === 'Unsigned' || type.def.builtin === 'Signed') {
     if (arg.kind !== 'int') return type;
@@ -142,8 +151,16 @@ export function normalize(type: Type): Type {
   return pseudoTypes?.parseError(arg) ?? type;
 }
 
+/** `Indexed<I, T>`: an element for an index, which an untyped number is as a `usize`, or a slice for a range. */
+function indexed(type: Type & { kind: 'adt' }, index: Type): Type {
+  const isNumber = index.kind === 'int' || (index.kind === 'var' && index.v.literal === 'int');
+  if (isNumber) return normalize(shallow(type.args[1]));
+  if (index.kind === 'adt') return { kind: 'slice', elem: type.args[1] };
+  return type;
+}
+
 function isPseudo(def: AdtDef): boolean {
-  return def.builtin === 'ParseError' || def.builtin === 'Unsigned' || def.builtin === 'Signed';
+  return ['ParseError', 'Unsigned', 'Signed', 'Indexed'].includes(def.builtin as string);
 }
 
 /** Resolves a type deeply, normalizing pseudo-types. */

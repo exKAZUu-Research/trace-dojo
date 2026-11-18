@@ -1,6 +1,16 @@
 import { cloneValue, compareValues, hashKey } from '../ops';
 import type { Type } from '../types';
-import { DONE, ElementPlace, EntryValue, type IterValue, MapValue, SetValue, UNIT_VALUE, type Value } from '../values';
+import {
+  DONE,
+  ElementPlace,
+  EntryValue,
+  type IterValue,
+  MapValue,
+  type RangeValue,
+  SetValue,
+  UNIT_VALUE,
+  type Value,
+} from '../values';
 import { defaultValue } from './core';
 import { arrayIter, mapIter, setIter } from './iterators';
 import { call, define, deref, type NativeContext, none, option, some } from './support';
@@ -14,6 +24,12 @@ function set(self: Value): SetValue {
 }
 
 /** The type of the keys, which hashes them: `K` of `HashMap<K, V>`. */
+function collectIter(iter: IterValue): Value[] {
+  const items: Value[] = [];
+  for (let item = iter.next(); item !== DONE; item = iter.next()) items.push(item);
+  return items;
+}
+
 function keyType(ctx: NativeContext): Type {
   return ctx.typeArgs[0];
 }
@@ -287,6 +303,21 @@ const entryNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
 };
 
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
+/** Whether a key lies in a range of keys (`3..6`, `..=5`, `..`), as the ordered collections' `range` takes them. */
+function inKeyRange(type: Type, key: Value, range: Value): boolean {
+  const r = deref(range) as RangeValue | undefined;
+  if (!r) return true;
+  const fromStart = r.start === undefined || (compareValues(type, key, r.start) ?? 0) >= 0;
+  const order = r.end === undefined ? -1 : (compareValues(type, key, r.end) ?? 0);
+  return fromStart && (r.inclusive ? order <= 0 : order < 0);
+}
+
+natives['BTreeMap<_, _>::range'] = ([self, range], ctx) => {
+  const entries = collectIter(mapIter(ctx.interp, map(self), keyType(ctx), 'ref'));
+  return arrayIter(entries.filter((entry) => inKeyRange(keyType(ctx), (entry as Value[])[0], range)));
+};
+natives['BTreeSet<_>::range'] = ([self, range], ctx) =>
+  arrayIter(collectIter(setIter(set(self), keyType(ctx))).filter((item) => inKeyRange(keyType(ctx), item, range)));
 for (const [name, native] of Object.entries(mapNatives(false))) natives[`HashMap<_, _>::${name}`] = native;
 for (const [name, native] of Object.entries(mapNatives(true))) natives[`BTreeMap<_, _>::${name}`] = native;
 for (const [name, native] of Object.entries(setNatives(false))) natives[`HashSet<_>::${name}`] = native;

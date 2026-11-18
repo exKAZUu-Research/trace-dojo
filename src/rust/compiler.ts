@@ -248,7 +248,9 @@ export class Compiler {
 
   private compileLet(stmt: Extract<Stmt, { kind: 'let' }>): Eval {
     if (!stmt.init) return () => UNIT_VALUE;
-    const init = this.value(stmt.init);
+    // Destructuring a variable moves only some of its elements, so the variable keeps its value.
+    const destructures = stmt.pattern.kind === 'tuple' && stmt.init.kind === 'path';
+    const init = destructures ? this.read(stmt.init) : this.value(stmt.init);
     if (stmt.else) {
       const matcher = this.compileMatcher(stmt.pattern);
       const elseBlock = this.compileBlock(stmt.else);

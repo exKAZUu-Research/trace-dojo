@@ -1,5 +1,6 @@
 import { sliceRange } from '../compiler';
 import { cloneValue, compareValues, copyValue, valuesEqual } from '../ops';
+import { RustPanic } from '../runtime';
 import { shallow, type Type } from '../types';
 import {
   DONE,
@@ -81,6 +82,16 @@ function mergeSort(items: Value[], compare: (a: Value, b: Value) => number): Val
   return result;
 }
 
+/** `get` with a range: the part of the slice it covers, or `None` when it reaches outside. */
+function subslice(ctx: NativeContext, slice: Value, range: Value): Value {
+  try {
+    return some(ctx, sliceRange(slice, deref(range) as RangeValue | undefined, ctx.span));
+  } catch (error) {
+    if (error instanceof RustPanic) return none(ctx);
+    throw error;
+  }
+}
+
 function checkIndex(ctx: NativeContext, index: number, length: number, what: string): void {
   if (index >= length) panic(ctx, `${what} index (is ${index}) should be < len (is ${length})`);
 }
@@ -124,12 +135,14 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   },
   get: ([self, index], ctx) => {
     const slice = deref(self);
-    const position = Number(index as bigint);
+    if (typeof index !== 'bigint') return subslice(ctx, slice, index);
+    const position = Number(index);
     return option(ctx, sliceGet(slice, position), position < sliceLength(slice));
   },
   get_mut: ([self, index], ctx) => {
     const slice = deref(self);
-    const position = Number(index as bigint);
+    if (typeof index !== 'bigint') return subslice(ctx, slice, index);
+    const position = Number(index);
     const { base, start } = sliceBase(slice);
     return option(ctx, new ElementPlace(base, start + position), position < sliceLength(slice));
   },

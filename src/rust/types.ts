@@ -95,6 +95,7 @@ export type BuiltinAdt =
   | 'ParseError'
   | 'Unsigned'
   | 'Signed'
+  | 'Indexed'
   | 'Formatter'
   | 'FmtError'
   | 'ParseIntError'

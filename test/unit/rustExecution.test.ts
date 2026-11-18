@@ -139,6 +139,43 @@ true true
   });
 });
 
+test('closures, map keys, slices, and Debug builders run as rustc runs them', () => {
+  const program = `use std::collections::HashMap;
+use std::fmt;
+struct P { x: i32 }
+impl fmt::Debug for P {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("P").field("x", &self.x).finish()
+    }
+}
+fn main() {
+    let name = String::from("n");
+    let take = move || name + "!";
+    println!("{}", take());
+    let mut m: HashMap<&str, i32> = HashMap::new();
+    m.insert("a", 1);
+    let keys: Vec<&&str> = m.keys().collect();
+    println!("{}", m[*keys[0]]);
+    let v = vec![1, 2, 3];
+    println!("{:?} {:?} {}", v.get(1..), v.get(9), [0; 2 + 1].len());
+    let total: Result<Vec<i32>, String> = vec!["1", "x", "y"].iter().map(|s| s.parse::<i32>().map_err(|e| e.to_string())).collect();
+    println!("{:?} {:#?}", total, vec![P { x: 1 }]);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: `n!
+1
+Some([2, 3]) None 3
+Err("invalid digit found in string") [
+    P {
+        x: 1,
+    },
+]
+`,
+    uncaughtException: undefined,
+  });
+});
+
 test.each([
   ['a use after a move', '    let s1 = String::from("a");\n    let s2 = s1;\n    println!("{s1} {s2}");', 4],
   ['a move in an earlier iteration', '    let s = String::from("a");\n    for _ in 0..2 { let t = s; }', 3],
@@ -162,6 +199,17 @@ test.each([
   ],
   ['a method of signed integers on an unsigned one', '    let d = 3usize - 1;\n    println!("{}", d.abs());', 3],
   ['a derive whose field lacks the trait', '', 4, 'struct Id;\n#[derive(Debug)]\nstruct P {\n    id: Id,\n}'],
+  [
+    'a second call of an FnOnce closure',
+    '    let v = vec![String::new()];\n    let f = move || v;\n    f();\n    f();',
+    5,
+  ],
+  [
+    'a trait method implemented with another return type',
+    '',
+    6,
+    'trait Shape {\n    fn area(&self) -> f64;\n}\nstruct Sq;\nimpl Shape for Sq {\n    fn area(&self) -> i32 { 1 }\n}',
+  ],
   ['mismatched types', '    let x: i32 = "a";', 2],
 ])('rustc rejects %s before running', (_name, body, row, items = '') => {
   const execution = executeProgram('rust', rustMain(body, items));

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 537 -- One rule per trait or conversion of the standard library.
+// code-gauge-allow-file fileNcss 547 -- One rule per trait or conversion of the standard library.
 import { normalize, type Unifier } from './infer';
 import type { Module, Program } from './items';
 import {
@@ -12,6 +12,7 @@ import {
   type TraitDef,
   type TraitRef,
   type Type,
+  USIZE,
 } from './types';
 
 export type Answer = 'yes' | 'no' | 'unknown';
@@ -29,15 +30,9 @@ export class TraitSolver {
     const t = normalize(shallow(type));
     const { trait } = ref;
     if (t.kind === 'never') return 'yes';
-    if (t.kind === 'var') {
-      if (t.v.literal && trait.builtin) return this.literalImplements(t.v.literal, ref);
-      return 'unknown';
-    }
+    if (t.kind === 'var') return this.varImplements(t, ref);
     if (t.kind === 'param') return this.boundsImply(t.param.bounds, ref) ? 'yes' : 'no';
-    if (
-      t.kind === 'adt' &&
-      (t.def.builtin === 'ParseError' || t.def.builtin === 'Unsigned' || t.def.builtin === 'Signed')
-    )
+    if (t.kind === 'adt' && ['ParseError', 'Unsigned', 'Signed', 'Indexed'].includes(t.def.builtin as string))
       return 'unknown';
     if (t.kind === 'opaque') return this.boundsImply(t.opaque.bounds, ref) ? 'yes' : this.builtinOnly(t, ref);
     if (t.kind === 'dyn') {
@@ -53,6 +48,14 @@ export class TraitSolver {
 
   private builtinOnly(t: Type, ref: TraitRef): Answer {
     return ref.trait.builtin ? this.builtinImplements(t, ref) : 'no';
+  }
+
+  private varImplements(t: Type & { kind: 'var' }, ref: TraitRef): Answer {
+    // An untyped number indexing a slice is a `usize`, the only integer type slices take.
+    if (t.v.literal === 'int' && ref.trait.builtin === 'SliceIndex')
+      return this.unifier.tryUnify(t, USIZE) ? 'yes' : 'no';
+    if (t.v.literal && ref.trait.builtin) return this.literalImplements(t.v.literal, ref);
+    return 'unknown';
   }
 
   private literalImplements(literal: 'int' | 'float', ref: TraitRef): Answer {
@@ -349,6 +352,12 @@ export class TraitSolver {
       case 'Integer': {
         return t.kind === 'int' ? 'yes' : 'no';
       }
+      case 'SliceIndex': {
+        // A `usize`, or a range of them.
+        if (t.kind === 'int') return t.name === 'usize' ? 'yes' : 'no';
+        if (t.kind !== 'adt' || !RANGE_TYPES.has(t.def.builtin as string)) return t.kind === 'var' ? 'unknown' : 'no';
+        return t.args.every((arg) => this.unifier.tryUnify(arg, USIZE)) ? 'yes' : 'no';
+      }
       case 'SignedInteger':
       case 'UnsignedInteger': {
         return t.kind === 'int' && isSigned(t.name) === (name === 'SignedInteger') ? 'yes' : 'no';
@@ -527,10 +536,7 @@ export class TraitSolver {
     }
     const source = normalize(shallow(ref.args[0]));
     if (source.kind === 'var') return 'unknown';
-    if (
-      source.kind === 'adt' &&
-      (source.def.builtin === 'ParseError' || source.def.builtin === 'Unsigned' || source.def.builtin === 'Signed')
-    )
+    if (source.kind === 'adt' && ['ParseError', 'Unsigned', 'Signed', 'Indexed'].includes(source.def.builtin as string))
       return 'unknown';
     if (this.unifier.tryUnify(t, source)) return 'yes';
     return conversionExists(this.program, source, t, this) ? 'yes' : 'no';
