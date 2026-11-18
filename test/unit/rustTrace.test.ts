@@ -170,6 +170,22 @@ test('turtles moved out by a loop, a pattern, or a field disappear when what too
   ]);
 });
 
+test('a part moved out of a tuple or a struct leaves the variable that held it', () => {
+  const program = `struct S { a: String, b: i32 }
+fn main() {
+    let t = (String::from("x"), 1);
+    let first = t.0;
+    let s = S { a: String::from("y"), b: 2 };
+    let a = s.a;
+    let n = 0;
+}`;
+  const { traceItems } = traceProgram('rust', program, program);
+  expect(traceItems.at(-1)?.referenceVars).toEqual({
+    t: { kind: 'object', entries: { 1: { kind: 'value', value: 1 } } },
+    s: { kind: 'object', entries: { b: { kind: 'value', value: 2 } } },
+  });
+});
+
 test('a for loop records a step at each binding of its variable, and none after the last', () => {
   const program = `fn main() {
     let mut t = Turtle::new();

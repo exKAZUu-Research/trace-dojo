@@ -10,7 +10,7 @@ import { DEFAULT_SPEC, Formatter } from './fmt';
 import { normalize } from './infer';
 import { fieldTypes } from './interpreter';
 import { compareValues } from './ops';
-import { type Frame, Runtime, UNASSIGNED } from './runtime';
+import { type Frame, MOVED, Runtime, UNASSIGNED } from './runtime';
 import { concreteType } from './runtimeTypes';
 import { shallow, type Type } from './types';
 import {
@@ -191,7 +191,8 @@ const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNode | undefined {
   const t = derefType(type);
   const v = deref(value);
-  if (t.kind === 'closure' || t.kind === 'fn') return undefined;
+  // A part moved out (`let a = s.a;`) leaves what held it.
+  if (v === MOVED || t.kind === 'closure' || t.kind === 'fn') return undefined;
   if (v instanceof DynValue) return displayNodeOf(v.value, v.type, seen);
   if (v instanceof TurtleValue) {
     if (!v.state.isAlive) return undefined;
@@ -202,7 +203,7 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
   }
   const scalar = scalarOf(v, t);
   if (scalar !== NOT_SCALAR && !isSequence(t)) return { kind: 'value', value: scalar as TraceScalar };
-  if (v === undefined || v instanceof FnValue || v instanceof IterValue) return undefined;
+  if (v instanceof FnValue || v instanceof IterValue) return undefined;
   if (typeof v === 'object' && v !== null) {
     if (seen.has(v)) return undefined;
     seen.add(v);
@@ -223,7 +224,9 @@ function containerNodeOf(v: Value, t: Type, seen: Set<unknown>): DisplayNode | u
   }
   if (t.kind === 'tuple' && Array.isArray(v)) {
     const entries: Record<string, DisplayNode> = {};
-    for (const [index, item] of v.entries()) entries[index] = displayNodeOf(item, t.elems[index], seen) ?? NULL_NODE;
+    for (const [index, item] of v.entries()) {
+      if (item !== MOVED) entries[index] = displayNodeOf(item, t.elems[index], seen) ?? NULL_NODE;
+    }
     return { kind: 'object', entries };
   }
   if (t.kind !== 'adt') return undefined;
