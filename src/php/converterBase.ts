@@ -140,13 +140,14 @@ export abstract class ConverterBase {
   protected classRef(node: Node, deferScope = false): ClassRef {
     const isName = node.type === 'name' || node.type === 'qualified_name' || node.type === 'relative_name';
     if (node.type !== 'relative_scope' && !isName) return { k: 'expr', e: this.expr(node) };
-    const raw = this.declaredIdentifier(node, node.parent?.type === 'object_creation_expression' ? '"class"' : '');
+    const raw = this.nameText(node);
     const word = lower(raw);
     if (word === 'self' || word === 'parent' || word === 'static') {
       if (!deferScope) this.checkClassScope(node, word);
       return { k: word };
     }
-    return { k: 'named', name: this.resolveClassName(raw) };
+    const name = this.declaredIdentifier(node, node.parent?.type === 'object_creation_expression' ? '"class"' : '');
+    return { k: 'named', name: this.resolveClassName(name) };
   }
 
   /**
@@ -250,8 +251,18 @@ export abstract class ConverterBase {
   abstract expr(node: Node): Expr;
 }
 
+const BARE_KEYWORDS = new Set(
+  `__halt_compiler __class__ __dir__ __file__ __function__ __line__ __method__ __namespace__ __property__ __trait__
+   abstract and array as break callable case catch class clone const continue declare default do echo else elseif empty
+   enddeclare endfor endforeach endif endswitch endwhile enum eval exit extends final finally fn for foreach function global
+   goto if implements include include_once instanceof insteadof interface isset list match namespace new or print private
+   protected public readonly require require_once return static switch throw trait try unset use var while xor yield`.split(
+    /\s+/
+  )
+);
+
 export function reservedIdentifierToken(name: string): string | undefined {
   const word = lower(name);
   if (word === 'die') return 'exit';
-  return ['empty', 'isset', 'exit'].includes(word) ? word : undefined;
+  return BARE_KEYWORDS.has(word) ? word : undefined;
 }

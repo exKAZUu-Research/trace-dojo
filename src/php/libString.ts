@@ -393,27 +393,28 @@ defineFunction(
           'substr_replace(): Argument #4 ($length) cannot be an array when working on a single string'
         );
     }
-    const replacements = replace instanceof PhpArray ? replace.values() : undefined;
-    const offsets = offset instanceof PhpArray ? offset.values() : undefined;
-    const lengths = length instanceof PhpArray ? length.values() : undefined;
-    const one = (subject: string, index: number): string => {
-      const replacement = toStr(replacements ? (replacements[index] ?? '') : replace);
-      let start = Number(toInt(offsets ? (offsets[index] ?? null) : offset));
-      const lengthValue = lengths ? (index < lengths.length ? toInt(lengths[index]) : undefined) : length;
+    const replacements = replace instanceof PhpArray ? replace.iterValues() : undefined;
+    const offsets = offset instanceof PhpArray ? offset.iterValues() : undefined;
+    const lengths = length instanceof PhpArray ? length.iterValues() : undefined;
+    const one = (subject: string): string => {
+      let start = Number(toInt(offsets ? (offsets.next().value ?? 0n) : offset));
+      const lengthSlot = lengths?.next();
+      const lengthValue = lengthSlot ? (lengthSlot.done ? undefined : toInt(lengthSlot.value)) : length;
       if (start < 0) start = Math.max(subject.length + start, 0);
       if (start > subject.length) start = subject.length;
       let end = lengthValue === null || lengthValue === undefined ? subject.length : Number(toInt(lengthValue));
       if (lengthValue !== null && lengthValue !== undefined)
         end = end < 0 ? Math.max(subject.length + end, start) : Math.min(start + end, subject.length);
+      const replacement = toStr(replacements ? (replacements.next().value ?? '') : replace);
       rt().ensureStringFits(start + replacement.length + subject.length - Math.max(end, start));
       return subject.slice(0, start) + replacement + subject.slice(Math.max(end, start));
     };
     if (text instanceof PhpArray) {
       const array = new PhpArray();
-      for (const [index, [key, item]] of [...text.entries()].entries()) array.set(key, one(toStr(item), index));
+      for (const [key, item] of text.entries()) array.set(key, one(toStr(item)));
       return array;
     }
-    return one(s(text), 0);
+    return one(s(text));
   }
 );
 defineFunction('strrev(string $string): string', ({ args }) => [...s(args[0])].toReversed().join(''));

@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { callCallback, callMethod } from './callables';
+import { callCallback, callMethod, consumeInvokedResult } from './callables';
 import { createObject, findClass } from './classes';
 import { toBool } from './conversions';
 import { throwError, warn } from './errors';
@@ -8,7 +8,7 @@ import { defineClass, type NativeMethod } from './native';
 import { toKey, toStr } from './operators';
 import { rt } from './runtime';
 import { iteratorOf } from './statements';
-import { PhpArray, PhpClass, PhpObject, type Value } from './values';
+import { nativeOwnershipChanged, PhpArray, PhpClass, PhpObject, type Value } from './values';
 
 const ITERATOR_CLASS = new PhpClass('InternalIterator');
 
@@ -21,7 +21,13 @@ export class InnerIterator {
   readonly handle = rt().newObject(ITERATOR_CLASS);
   private cached: { v: Value } | undefined;
 
-  constructor(readonly object: PhpObject) {}
+  constructor(readonly object: PhpObject) {
+    this.handle.internal = this;
+  }
+
+  held(): Value[] {
+    return this.cached ? [this.cached.v, this.object] : [this.object];
+  }
 
   rewind(): void {
     this.invalidate();
@@ -33,8 +39,15 @@ export class InnerIterator {
   }
 
   current(): Value {
-    this.cached ??= { v: callMethod(this.object, 'current', []) };
-    return this.cached.v;
+    if (this.cached) return this.cached.v;
+    return consumeInvokedResult(
+      () => callMethod(this.object, 'current', []),
+      (value) => {
+        this.cached = { v: value };
+        nativeOwnershipChanged(this.handle);
+        return value;
+      }
+    );
   }
 
   key(): Value {
@@ -47,8 +60,23 @@ export class InnerIterator {
   }
 
   invalidate(): void {
-    this.cached = undefined;
+    releaseIteratorValues([this.takeCurrent()]);
   }
+
+  takeCurrent(): Value | undefined {
+    if (!this.cached) return;
+    const { v } = this.cached;
+    this.cached = undefined;
+    nativeOwnershipChanged(this.handle);
+    return v;
+  }
+}
+
+function releaseIteratorValues(values: (Value | undefined)[]): void {
+  if (!values.some((value) => value instanceof PhpArray || value instanceof PhpObject)) return;
+  const runtime = rt();
+  runtime.release(values, true);
+  runtime.flushReleases();
 }
 
 /** The engine's iterator for a Traversable object, which asks an IteratorAggregate for its iterator. */
@@ -132,9 +160,9 @@ export class DualState {
   /** The fetched element, or undefined when there is none. */
   data: { v: Value } | undefined;
   key: Value | undefined;
-  pos = 0;
-  limitOffset = 0;
-  limitCount = -1;
+  pos = 0n;
+  limitOffset = 0n;
+  limitCount = -1n;
   cachingFlags = 0;
   cachingString: string | undefined;
   cache = new PhpArray();
@@ -143,10 +171,10 @@ export class DualState {
   callback: Value = null;
   regex = { pattern: '', mode: 0, flags: 0, pregFlags: 0 };
 
-  constructor(private readonly className: string) {}
+  constructor(private readonly owner: PhpObject) {}
 
   clone(): never {
-    throwError('Error', `Trying to clone an uncloneable object of class ${this.className}`);
+    throwError('Error', `Trying to clone an uncloneable object of class ${this.owner.cls.name}`);
   }
 
   /** What the iterator holds, in the order PHP releases it (spl_dual_it_free_storage). */
@@ -167,15 +195,19 @@ export class DualState {
   }
 
   free(): void {
-    this.inner?.invalidate();
+    const data = this.data;
+    const key = this.key;
+    const current = this.inner?.takeCurrent();
     this.data = undefined;
     this.key = undefined;
     this.cachingString = undefined;
+    if (data || key !== undefined) nativeOwnershipChanged(this.owner);
+    releaseIteratorValues([current, data?.v, key]);
   }
 
   rewind(): void {
     this.free();
-    this.pos = 0;
+    this.pos = 0n;
     this.inner?.rewind();
   }
 
@@ -189,7 +221,13 @@ export class DualState {
     if (checkMore && !this.valid()) return false;
     const inner = this.inner as InnerIterator;
     this.data = { v: inner.current() };
-    this.key = inner.key();
+    consumeInvokedResult(
+      () => inner.key(),
+      (key) => {
+        this.key = key;
+        nativeOwnershipChanged(this.owner);
+      }
+    );
     return true;
   }
 
@@ -197,7 +235,7 @@ export class DualState {
     if (free) this.free();
     else if (!this.inner) throwError('Error', "The inner constructor wasn't initialized with an iterator instance");
     this.inner?.next();
-    this.pos++;
+    this.pos = BigInt.asIntN(64, this.pos + 1n);
   }
 }
 
@@ -273,7 +311,7 @@ defineClass({
       },
     },
   ],
-  createInternal: (object) => new DualState(object.cls.name),
+  createInternal: (object) => new DualState(object),
 });
 
 /** The iterator IteratorIterator wraps: the object, or the iterator an IteratorAggregate gives. */
@@ -358,15 +396,15 @@ defineClass({
 // LimitIterator ------------------------------------------------------------------------------------------------------
 
 function limitInRange(state: DualState): boolean {
-  return state.limitCount === -1 || state.pos - state.limitOffset < state.limitCount;
+  return state.limitCount === -1n || BigInt.asIntN(64, state.pos - state.limitOffset) < state.limitCount;
 }
 
 /** Transcribes spl_limit_it_seek, which seeks a SeekableIterator directly and steps through any other. */
-function limitSeek(state: DualState, position: number): void {
+function limitSeek(state: DualState, position: bigint): void {
   state.free();
   if (position < state.limitOffset)
     throwError('OutOfBoundsException', `Cannot seek to ${position} which is below the offset ${state.limitOffset}`);
-  if (position - state.limitOffset >= state.limitCount && state.limitCount !== -1)
+  if (position - state.limitOffset >= state.limitCount && state.limitCount !== -1n)
     throwError(
       'OutOfBoundsException',
       `Cannot seek to ${position} which is behind offset ${state.limitOffset} plus count ${state.limitCount}`
@@ -374,7 +412,7 @@ function limitSeek(state: DualState, position: number): void {
   const inner = state.innerObject as PhpObject;
   if (position !== state.pos && inner.cls.isSubclassOf(rt().classes.get('seekableiterator') as PhpClass)) {
     state.free();
-    callMethod(inner, 'seek', [BigInt(position)]);
+    callMethod(inner, 'seek', [position]);
     state.pos = position;
     if (limitInRange(state) && state.valid()) state.fetch(false);
     return;
@@ -392,14 +430,14 @@ defineClass({
       signature: '__construct(Iterator $iterator, int $offset = 0, int $limit = -1)',
       impl: ({ thisObj, args }) => {
         const state = constructDual(thisObj, 'LimitIterator');
-        state.limitOffset = Number(args[1] ?? 0n);
-        state.limitCount = Number(args[2] ?? -1n);
-        if (state.limitOffset < 0)
+        state.limitOffset = (args[1] ?? 0n) as bigint;
+        state.limitCount = (args[2] ?? -1n) as bigint;
+        if (state.limitOffset < 0n)
           throwError(
             'ValueError',
             'LimitIterator::__construct(): Argument #2 ($offset) must be greater than or equal to 0'
           );
-        if (state.limitCount < -1)
+        if (state.limitCount < -1n)
           throwError(
             'ValueError',
             'LimitIterator::__construct(): Argument #3 ($limit) must be greater than or equal to -1'
@@ -436,11 +474,11 @@ defineClass({
       signature: 'seek(int $offset): int',
       impl: ({ thisObj, args }) => {
         const state = dualOf(thisObj);
-        limitSeek(state, Number(args[0]));
-        return BigInt(state.pos);
+        limitSeek(state, args[0] as bigint);
+        return state.pos;
       },
     },
-    { signature: 'getPosition(): int', impl: ({ thisObj }) => BigInt(dualOf(thisObj).pos) },
+    { signature: 'getPosition(): int', impl: ({ thisObj }) => dualOf(thisObj).pos },
   ],
 });
 

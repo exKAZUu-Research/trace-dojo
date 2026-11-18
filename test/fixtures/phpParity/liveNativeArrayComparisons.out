@@ -1,0 +1,60 @@
+array(2) {
+  [0]=>
+  string(3) "one"
+  [2]=>
+  string(1) "z"
+}
+array(1) {
+  [1]=>
+  &string(3) "new"
+}
+array(1) {
+  [0]=>
+  string(1) "b"
+}
+array(2) {
+  [0]=>
+  object(ChangeValue)#1 (2) {
+    ["result":"ChangeValue":private]=>
+    string(1) "a"
+    ["newValue":"ChangeValue":private]=>
+    string(1) "b"
+  }
+  [1]=>
+  &string(1) "b"
+}
+array(2) {
+  [0]=>
+  object(ChangeValue)#1 (2) {
+    ["result":"ChangeValue":private]=>
+    string(1) "a"
+    ["newValue":"ChangeValue":private]=>
+    string(1) "b"
+  }
+  [1]=>
+  &string(1) "b"
+}
+array(2) {
+  [0]=>
+  object(ChangeValue)#1 (2) {
+    ["result":"ChangeValue":private]=>
+    string(1) "a"
+    ["newValue":"ChangeValue":private]=>
+    string(1) "b"
+  }
+  [1]=>
+  &string(1) "b"
+}
+array(2) {
+  [0]=>
+  object(ChangeValue)#1 (2) {
+    ["result":"ChangeValue":private]=>
+    string(1) "a"
+    ["newValue":"ChangeValue":private]=>
+    string(1) "b"
+  }
+  [1]=>
+  &string(1) "b"
+}
+string(1) "a"
+string(1) "z"

@@ -18,7 +18,18 @@ import {
 import { deprecated, notice, throwError, warn, withCleanupExceptions } from './errors';
 import { cPow } from './floatPow';
 import { PhpThrow, rt } from './runtime';
-import { copyValueSlot, deref, INT_MAX, INT_MIN, type Key, PhpArray, PhpObject, UNINIT, type Value } from './values';
+import {
+  copyValueSlot,
+  deref,
+  INT_MAX,
+  INT_MIN,
+  type Key,
+  PhpArray,
+  PhpObject,
+  type Ref,
+  UNINIT,
+  type Value,
+} from './values';
 
 /** Converts an object to a string through `__toString`, which the interpreter provides. */
 let objectToString: (object: PhpObject) => string = () => '';
@@ -400,14 +411,15 @@ function compareNumericStrings(a: string, b: string): number | undefined {
 
 type ComparisonMode = 'order' | 'strict';
 type ObjectString = (object: PhpObject) => string | undefined;
-type ComparisonPair = [Value, Value, ComparisonMode];
+type ComparisonOperand = Value | Ref;
+type ComparisonPair = [ComparisonOperand, ComparisonOperand, ComparisonMode];
 interface ComparisonFrame {
   owner: PhpArray | PhpObject;
   pairs: Generator<ComparisonPair, number>;
 }
 
 /** The result of PHP's `<=>`, where 1 also stands for values PHP cannot order. */
-export function compare(a: Value, b: Value, tryString?: ObjectString): number {
+export function compare(a: ComparisonOperand, b: ComparisonOperand, tryString?: ObjectString): number {
   return walkComparison(a, b, 'order', tryString);
 }
 
@@ -420,7 +432,12 @@ export function strictEquals(a: Value, b: Value): boolean {
 }
 
 // code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function walkComparison(a: Value, b: Value, mode: ComparisonMode, tryString?: ObjectString): number {
+function walkComparison(
+  a: ComparisonOperand,
+  b: ComparisonOperand,
+  mode: ComparisonMode,
+  tryString?: ObjectString
+): number {
   const stack: ComparisonFrame[] = [];
   const active = new Set<PhpArray | PhpObject>();
   let pair: ComparisonPair | undefined = [a, b, mode];
@@ -449,7 +466,14 @@ function walkComparison(a: Value, b: Value, mode: ComparisonMode, tryString?: Ob
 }
 
 // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function comparisonStep(a: Value, b: Value, mode: ComparisonMode, tryString?: ObjectString): number | ComparisonFrame {
+function comparisonStep(
+  left: ComparisonOperand,
+  right: ComparisonOperand,
+  mode: ComparisonMode,
+  tryString?: ObjectString
+): number | ComparisonFrame {
+  const a = deref(left);
+  const b = deref(right);
   if (a === b) return typeof a === 'number' && Number.isNaN(a) ? 1 : 0;
   if (a instanceof PhpArray && b instanceof PhpArray) {
     if (a.size !== b.size) return a.size < b.size ? -1 : 1;
@@ -463,19 +487,20 @@ function comparisonStep(a: Value, b: Value, mode: ComparisonMode, tryString?: Ob
     if (native === undefined && a.cls !== b.cls) return 1;
     return { owner: a, pairs: objectComparisonPairs(a, b, native) };
   }
-  return compareScalar(a, b, tryString);
+  return compareScalar(left, right, tryString);
 }
 
 function* arrayComparisonPairs(a: PhpArray, b: PhpArray, mode: ComparisonMode): Generator<ComparisonPair, number> {
-  const right = mode === 'strict' ? b.entries() : undefined;
-  for (const [key, value] of a.entries()) {
+  const right = mode === 'strict' ? b.map.entries() : undefined;
+  for (const [key, value] of a.map) {
     if (right) {
       const item = right.next();
       if (item.done || item.value[0] !== key) return 1;
       yield [value, item.value[1], mode];
     } else {
-      if (!b.has(key)) return 1;
-      yield [value, b.get(key) as Value, mode];
+      const other = b.map.get(key);
+      if (other === undefined) return 1;
+      yield [value, other, mode];
     }
   }
   return 0;
@@ -512,9 +537,9 @@ function* propertyComparisonPairs(a: PhpObject, b: PhpObject): Generator<Compari
   return 0;
 }
 
-function comparisonProperty(object: PhpObject, name: string): Value | undefined {
+function comparisonProperty(object: PhpObject, name: string): ComparisonOperand | undefined {
   const slot = object.props.get(name);
-  return slot === undefined || slot === UNINIT ? undefined : deref(slot);
+  return slot === UNINIT ? undefined : slot;
 }
 
 function hasDynamicProps(object: PhpObject): boolean {
@@ -522,7 +547,9 @@ function hasDynamicProps(object: PhpObject): boolean {
 }
 
 // code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-export function compareScalar(a: Value, b: Value, tryString?: ObjectString): number {
+export function compareScalar(left: ComparisonOperand, right: ComparisonOperand, tryString?: ObjectString): number {
+  const a = deref(left);
+  const b = deref(right);
   if ((typeof a === 'bigint' || typeof a === 'number') && (typeof b === 'bigint' || typeof b === 'number')) {
     return compareNumbers(a, b);
   }
@@ -549,8 +576,8 @@ export function compareScalar(a: Value, b: Value, tryString?: ObjectString): num
     return 1;
   if (typeof a === 'string' && (typeof b === 'bigint' || typeof b === 'number')) return compareStringNumber(a, b);
   if (typeof b === 'string' && (typeof a === 'bigint' || typeof a === 'number')) return -compareStringNumber(b, a);
-  if (a instanceof PhpObject) return compareObjectScalar(a, b, tryString);
-  if (b instanceof PhpObject) return -compareObjectScalar(b, a, tryString);
+  if (a instanceof PhpObject) return compareObjectScalar(a, right, true, tryString);
+  if (b instanceof PhpObject) return compareObjectScalar(b, left, false, tryString);
   if (a instanceof PhpArray) return 1;
   if (b instanceof PhpArray) return -1;
   return 1;
@@ -575,17 +602,25 @@ function compareStringNumber(text: string, number: bigint | number): number {
  * Compares an object with a value of another type as PHP's zend_std_compare_objects does: the object is converted to
  * the value's type, and an object that cannot be converted is greater.
  */
-function compareObjectScalar(object: PhpObject, other: Value, tryString: ObjectString = objectToString): number {
+function compareObjectScalar(
+  object: PhpObject,
+  slot: ComparisonOperand,
+  objectOnLeft: boolean,
+  tryString: ObjectString = objectToString
+): number {
+  const other = deref(slot);
+  const uncast = objectOnLeft ? 1 : -1;
+  let cast: Value;
   if (typeof other === 'string' && object.cls.findMethod('__tostring')) {
     const text = tryString(object);
-    return text === undefined ? 1 : compareStrings(text, other);
-  }
-  if (typeof other === 'bigint' || typeof other === 'number') {
+    if (text === undefined) return uncast;
+    cast = text;
+  } else if (typeof other === 'bigint' || typeof other === 'number') {
     const kind = typeof other === 'bigint' ? 'int' : 'float';
     notice(`Object of class ${object.cls.name} could not be converted to ${kind}`);
-    return compareNumbers(1n, other);
-  }
-  return 1;
+    cast = typeof other === 'bigint' ? 1n : 1;
+  } else return uncast;
+  return objectOnLeft ? compare(cast, slot, tryString) : compare(slot, cast, tryString);
 }
 
 /** Whether a numeric string is written as an integer, which a float holds only when the integer overflows. */

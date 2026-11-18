@@ -8,7 +8,7 @@ import { defineAlias, defineConstant, defineFunction, markInlined } from './nati
 import { arithmetic, compare } from './operators';
 import { rt } from './runtime';
 import { fixedDigits, phpRound, type RoundMode } from './strings';
-import { PhpArray, type Value } from './values';
+import { deref, PhpArray, type Ref, type Value } from './values';
 
 const MATH_CONSTANTS: [string, number][] = [
   ['M_PI', Math.PI],
@@ -151,10 +151,13 @@ function extremeOfArray(name: string, array: Value, direction: number): Value {
     throwError('TypeError', `${name}(): Argument #1 ($value) must be of type array, ${valueName(array)} given`);
   }
   if (array.size === 0) throwError('ValueError', `${name}(): Argument #1 ($value) must contain at least one element`);
-  const [first, ...rest] = array.values();
-  let best = first;
-  for (const value of rest) if (compare(best, value) * direction < 0) best = value;
-  return best;
+  const slots = array.map.values();
+  let best: Value | Ref = slots.next().value ?? null;
+  for (const slot of slots) {
+    rt().spend();
+    if (compare(best, slot) * direction < 0) best = slot;
+  }
+  return deref(best);
 }
 
 defineFunction('pi(): float', () => Math.PI);

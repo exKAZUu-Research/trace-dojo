@@ -868,26 +868,27 @@ function encodingList(
   parameter: string,
   removesNonEncodings: boolean
 ): Codec[] {
-  const names =
-    value instanceof PhpArray
-      ? value.values().map((item) => toStr(item))
-      : s(value) === ''
-        ? []
-        : s(value)
-            .replace(/^"(.+)"$/s, '$1')
-            .split(',')
-            .map((name) => name.replaceAll(/^[ \t]+|[ \t]+$/g, ''));
+  const isArray = value instanceof PhpArray;
+  const parts =
+    !isArray && s(value) !== ''
+      ? s(value)
+          .replace(/^"(.+)"$/s, '$1')
+          .split(',')
+      : [];
+  const input = isArray ? value.iterValues() : parts;
+  const inputSize = isArray ? value.size : parts.length;
   const codecs: Codec[] = [];
   let includedAuto = false;
-  for (const name of names) {
+  for (const item of input) {
     rt().spend();
+    const name = isArray ? toStr(item) : s(item).replaceAll(/^[ \t]+|[ \t]+$/g, '');
     if (lower(name) === 'auto') {
       if (!includedAuto) codecs.push(...DETECT_ORDER);
       includedAuto = true;
-    } else if (name === '' && !(value instanceof PhpArray)) {
+    } else if (name === '' && !isArray) {
       // mbstring's lookup by name and length finds ASCII for an empty name in a comma-separated list.
       codecs.push(CODECS.get('ascii') as Codec);
-    } else if (NON_ENCODINGS.has(lower(name)) && (removesNonEncodings || names.length > 1)) continue;
+    } else if (NON_ENCODINGS.has(lower(name)) && (removesNonEncodings || inputSize > 1)) continue;
     else if (ENCODINGS.has(lower(name))) codecs.push(codecFor(name, functionName));
     else {
       throwError(
@@ -896,7 +897,7 @@ function encodingList(
       );
     }
   }
-  if (names.length === 0 || (codecs.length === 0 && !removesNonEncodings)) {
+  if (inputSize === 0 || (codecs.length === 0 && !removesNonEncodings)) {
     throwError(
       'ValueError',
       `${functionName}(): Argument #${position} ($${parameter}) must specify at least one encoding`

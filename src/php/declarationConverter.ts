@@ -380,12 +380,12 @@ export abstract class DeclarationConverter extends ConverterBase {
       }
       case 'named_type': {
         const inner = node.namedChildren[0];
-        return this.typeName(inner);
+        return this.typeName(inner, parameter);
       }
       case 'name':
       case 'qualified_name':
       case 'relative_name': {
-        return this.typeName(node);
+        return this.typeName(node, parameter);
       }
       case 'optional_type': {
         const inner = this.typeDecl(node.namedChildren[0], parameter);
@@ -567,12 +567,16 @@ export abstract class DeclarationConverter extends ConverterBase {
     if (type.name === 'self' || type.name === 'static' || type.name === 'parent') this.checkClassScope(node, type.name);
   }
 
-  protected typeName(node: Node): TypeDecl {
+  protected typeName(node: Node, parameter: boolean): TypeDecl {
     const raw = this.nameText(node);
     const word = lower(raw);
     if (BUILTIN_TYPES.has(word)) return { k: 'named', name: word };
     if (word === 'self' || word === 'static' || word === 'parent') return { k: 'named', name: word };
-    return { k: 'named', name: this.resolveClassName(raw) };
+    const typeNode = node.parent?.type === 'named_type' ? node.parent : node;
+    const parent = typeNode.parent;
+    const root = parent?.type === 'property_declaration' || parent?.type.endsWith('_parameter');
+    const expected = root && (parameter || parent?.type === 'property_declaration') ? 'variable' : '';
+    return { k: 'named', name: this.resolveClassName(this.declaredIdentifier(node, expected)) };
   }
 
   // Classes -----------------------------------------------------------------------------------------------------------
@@ -783,6 +787,12 @@ export abstract class DeclarationConverter extends ConverterBase {
     for (const modifier of modifiers) {
       const visibility = modifier.type === 'visibility_modifier';
       const kind = visibility && this.setVisibilityOf(modifier) ? 'set_visibility' : modifier.type;
+      if (member.type === 'const_declaration' && kind !== 'visibility_modifier' && kind !== 'final_modifier') {
+        this.error(
+          member,
+          `Cannot use the ${lower(modifier.text).replaceAll(/\s+/g, '')} modifier on a class constant`
+        );
+      }
       if (kinds.has(kind)) {
         const label = visibility ? 'access type' : modifier.type.replace(/_modifier$/, '');
         this.error(member, `Multiple ${label} modifiers are not allowed`);
@@ -798,17 +808,15 @@ export abstract class DeclarationConverter extends ConverterBase {
     const attributes = member.childForFieldName('attributes');
     if (attributes) this.unsupported(attributes, '属性（#[...]）');
     const modifiers = this.memberModifiers(member);
-    if (
-      modifiers.isAbstract ||
-      modifiers.isStatic ||
-      modifiers.isReadonly ||
-      (modifiers.isFinal && modifiers.visibility === 'private')
-    )
-      this.error(member, 'Invalid modifier on a class constant');
     const typeNode = member.childForFieldName('type');
     for (const element of member.namedChildren.filter((child) => child.type === 'const_element')) {
       const [nameNode, valueNode] = element.namedChildren.filter((part) => part.type !== 'comment');
       const name = this.nameText(nameNode);
+      if (modifiers.isFinal && modifiers.visibility === 'private')
+        this.error(
+          element,
+          `Private constant ${decl.name}::${name} cannot be final as it is not visible to other classes`
+        );
       if (lower(name) === 'class')
         this.error(
           element,
@@ -1194,7 +1202,7 @@ export abstract class DeclarationConverter extends ConverterBase {
   protected traitUse(member: Node): ClassDecl['traits'][number] {
     const names = member.namedChildren
       .filter((child) => child.type === 'name' || child.type === 'qualified_name' || child.type === 'relative_name')
-      .map((child) => this.resolveClassName(this.nameText(child)));
+      .map((child) => this.resolveClassName(this.declaredIdentifier(child, '')));
     const rules: TraitRule[] = [];
     const list = member.namedChildren.find((child) => child.type === 'use_list');
     for (const clause of list?.namedChildren ?? []) {
@@ -1203,9 +1211,9 @@ export abstract class DeclarationConverter extends ConverterBase {
         const [traitNode, methodNode] = target.namedChildren;
         rules.push({
           k: 'insteadof',
-          trait: this.resolveClassName(this.nameText(traitNode)),
+          trait: this.resolveClassName(this.declaredIdentifier(traitNode, '')),
           method: this.nameText(methodNode),
-          instead: instead.map((child) => this.resolveClassName(this.nameText(child))),
+          instead: instead.map((child) => this.resolveClassName(this.declaredIdentifier(child, ''))),
         });
       } else if (clause.type === 'use_as_clause') {
         const parts = clause.namedChildren.filter((child) => child.type !== 'comment');
@@ -1213,7 +1221,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         let trait: string | undefined;
         let method: string;
         if (target.type === 'class_constant_access_expression') {
-          trait = this.resolveClassName(this.nameText(target.namedChildren[0]));
+          trait = this.resolveClassName(this.declaredIdentifier(target.namedChildren[0], ''));
           method = this.nameText(target.namedChildren[1]);
         } else method = this.nameText(target);
         const visibilityNode = rest.find((child) => child.type === 'visibility_modifier');

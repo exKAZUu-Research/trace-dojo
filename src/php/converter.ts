@@ -223,7 +223,9 @@ export class Converter extends DeclarationConverter {
         return [{ k: 'unset', targets, row }];
       }
       case 'function_definition': {
-        const name = this.declaredIdentifier(node.childForFieldName('name') as Node, '"("');
+        const nameNode = node.childForFieldName('name') as Node;
+        const name =
+          lower(nameNode.text) === 'readonly' ? this.nameText(nameNode) : this.declaredIdentifier(nameNode, '"("');
         if (this.namespace === '' && lower(name) === '__autoload')
           this.error(node, '__autoload() is no longer supported, use spl_autoload_register() instead');
         this.declareSymbol(node, 'function', name);
@@ -257,7 +259,7 @@ export class Converter extends DeclarationConverter {
           .filter((child) => child.type === 'const_element')
           .map((child) => {
             const [nameNode, valueNode] = child.namedChildren.filter((part) => part.type !== 'comment');
-            const name = this.nameText(nameNode);
+            const name = this.declaredIdentifier(nameNode);
             const word = lower(name);
             if (['null', 'true', 'false'].includes(word)) this.error(nameNode, `Cannot redeclare constant '${name}'`);
             if (
@@ -507,7 +509,7 @@ export class Converter extends DeclarationConverter {
         const types = typeList.namedChildren
           .filter((type) => type.type !== 'comment')
           .map((type) => {
-            const raw = this.nameText(type.type === 'named_type' ? type.namedChildren[0] : type);
+            const raw = this.declaredIdentifier(type.type === 'named_type' ? type.namedChildren[0] : type, '');
             if (['self', 'static', 'parent'].includes(lower(raw)))
               this.error(type, 'Bad class name in the catch statement');
             return this.resolveClassName(raw);
@@ -665,7 +667,10 @@ export class Converter extends DeclarationConverter {
       const target = clause.namedChildren.find(
         (child) => child.type === 'name' || child.type === 'qualified_name'
       ) as Node;
-      const raw = this.nameText(target).replace(/^\\/, '');
+      const expected = group
+        ? `identifier or namespaced name${kind === 'class' && !clauseKind ? ' or "function" or "const"' : ''}`
+        : '';
+      const raw = this.declaredIdentifier(target, expected).replace(/^\\/, '');
       const full = prefix ? `${prefix}\\${raw}` : raw;
       const aliasNode = clause.childForFieldName('alias');
       if (this.namespace === '' && !aliasNode && !full.includes('\\')) {
@@ -675,7 +680,7 @@ export class Converter extends DeclarationConverter {
           row: clause.startPosition.row,
         });
       }
-      const alias = aliasNode ? this.nameText(aliasNode) : (full.split('\\').at(-1) as string);
+      const alias = aliasNode ? this.declaredIdentifier(aliasNode) : (full.split('\\').at(-1) as string);
       if (effective === 'class' && isReservedClassName(alias))
         this.error(clause, `Cannot use ${full} as ${alias} because '${alias}' is a special class name`);
       const imports = this.importsFor(effective);

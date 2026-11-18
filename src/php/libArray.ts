@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
-import { type Comparisons, type Entry, SortedWalk } from './arraySetWalk';
+import { type Comparisons, type Entry, setEntries, SortedWalk } from './arraySetWalk';
 import { lower, upper } from './bytes';
 import { callCallback, callCallbackRefs, callMethod, consumeCallbackResult } from './callables';
 import type { ArgValue } from './calls';
@@ -797,45 +797,91 @@ for (const name of ['array_walk', 'array_walk_recursive']) {
   });
 }
 
-// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function walkValues(ref: Ref, ctx: NativeContext, recursive: boolean, active: Set<PhpArray | PhpObject>): void {
-  let container = ref.v as PhpArray | PhpObject;
-  if (active.has(container)) throwError('Error', 'Recursion detected');
-  if (container instanceof PhpArray && arrayIsShared(container)) {
-    container = container.copy();
-    ref.v = container;
-  }
+  let container = walkContainer(ref, active);
   active.add(container);
   try {
-    const keys = container instanceof PhpArray ? container.keys() : [...container.props.keys()];
-    for (const key of keys) {
-      let elementRef: Ref;
-      if (container instanceof PhpArray) {
-        if (!container.has(key)) continue;
-        elementRef = new ElementPlace(container, key).ref();
-      } else {
-        const name = key as string;
-        const slot = container.props.get(name);
-        if (slot === undefined || slot === UNINIT) continue;
-        elementRef = slot instanceof Ref ? slot : new Ref(slot);
-        const decl = declForKey(container.cls, name);
-        if (decl?.type) elementRef.addTypeOwner(decl, container);
-        container.props.set(name, elementRef);
+    let keys = walkKeys(container);
+    for (;;) {
+      const key = keys.next().value;
+      if (key === undefined) return;
+      rt().spend();
+      visitWalkSlot(container, key, ctx, recursive, active);
+      if (ref.v !== container) {
+        active.delete(container);
+        container = walkContainer(ref, active);
+        active.add(container);
+        keys = walkKeys(container);
       }
-      if (recursive && elementRef.v instanceof PhpArray) {
-        walkValues(elementRef, ctx, true, active);
-        continue;
-      }
-      const decl = container instanceof PhpObject ? declForKey(container.cls, key as string) : undefined;
-      const callbackKey = decl?.visibility === 'protected' ? `\0*\0${decl.name}` : key;
-      const args: ArgValue[] = [{ v: elementRef.v, ref: elementRef }, { v: callbackKey }];
-      if (ctx.args.length > 2) args.push({ v: ctx.args[2] });
-      callCallbackRefs(ctx.args[1], args, true);
     }
   } finally {
     active.delete(container);
   }
+}
+
+function walkContainer(ref: Ref, active: Set<PhpArray | PhpObject>): PhpArray | PhpObject {
+  const container = ref.v;
+  if (!(container instanceof PhpArray || (container instanceof PhpObject && !container.isResource)))
+    throwError('TypeError', 'Iterated value is no longer an array or object');
+  if (active.has(container)) throwError('Error', 'Recursion detected');
+  if (container instanceof PhpArray) {
+    if (!arrayIsShared(container)) return container;
+    const copy = container.copy();
+    ref.v = copy;
+    return copy;
+  }
+  return container;
+}
+
+function* walkKeys(container: PhpArray | PhpObject): Generator<Key, undefined> {
+  if (container instanceof PhpArray) {
+    const cursor = container.cursor();
+    while (cursor.key !== undefined) {
+      const key = cursor.key;
+      cursor.next();
+      yield key;
+    }
+  } else yield* container.props.keys();
+  return undefined;
+}
+
+function visitWalkSlot(
+  container: PhpArray | PhpObject,
+  key: Key,
+  ctx: NativeContext,
+  recursive: boolean,
+  active: Set<PhpArray | PhpObject>
+): void {
+  const element = walkSlot(container, key);
+  if (!element) return;
+  const [ref, callbackKey] = element;
+  if (recursive && ref.v instanceof PhpArray) {
+    const runtime = rt();
+    const frame = runtime.frame;
+    const mark = frame.temporaries.length;
+    runtime.holdTemporaryReference(ref);
+    try {
+      walkValues(ref, ctx, true, active);
+    } finally {
+      runtime.dropTemporaries(frame, mark);
+    }
+    return;
+  }
+  const args: ArgValue[] = [{ v: ref.v, ref }, { v: callbackKey }];
+  if (ctx.args.length > 2) args.push({ v: ctx.args[2] });
+  callCallbackRefs(ctx.args[1], args, true);
+}
+
+function walkSlot(container: PhpArray | PhpObject, key: Key): [Ref, Key] | undefined {
+  if (container instanceof PhpArray) return [new ElementPlace(container, key).ref(), key];
+  const name = key as string;
+  const slot = container.props.get(name);
+  if (slot === undefined || slot === UNINIT) return;
+  const decl = declForKey(container.cls, name);
+  const ref = slot instanceof Ref ? slot : new Ref(slot);
+  if (decl?.type) ref.addTypeOwner(decl, container);
+  container.props.set(name, ref);
+  return [ref, decl?.visibility === 'protected' ? `\0*\0${decl.name}` : key];
 }
 defineFunction(
   'array_slice(array $array, int $offset, ?int $length = null, bool $preserve_keys = false): array',
@@ -902,22 +948,22 @@ defineFunction('array_unique(array $array, int $flags = SORT_STRING): array', ({
   const result = new PhpArray();
   if (flags !== 2n) {
     const compare = sortComparator(flags);
-    const entries = [...array.entries()].map(([key, value], position) => ({ key, value, position }));
+    const entries = [...array.map].map(([key, slot], position) => ({ key, slot, position }));
     zendSort(entries, (a, b) => {
       rt().spend();
-      return compare(a.value, b.value) || a.position - b.position;
+      return compare(a.slot, b.slot) || a.position - b.position;
     });
     const retained = new Set<number>();
     let previous: (typeof entries)[number] | undefined;
     for (const entry of entries) {
       rt().spend();
-      if (!previous || compare(previous.value, entry.value) !== 0) {
+      if (!previous || compare(previous.slot, entry.slot) !== 0) {
         retained.add(entry.position);
         previous = entry;
       }
     }
-    for (const [position, [key]] of [...array.entries()].entries())
-      if (retained.has(position)) result.setSlot(key, copyValueSlot(array.map.get(key) as Value | Ref));
+    let position = 0;
+    for (const [key, slot] of array.map) if (retained.has(position++)) result.setSlot(key, copyValueSlot(slot));
     return result;
   }
   const strings = new Set<string>();
@@ -1018,7 +1064,7 @@ defineFunction('array_count_values(array $array): array', ({ args }) => {
   return result;
 });
 
-type SetCompare = (a: [Key, Value], b: [Key, Value]) => boolean;
+type SetCompare = (a: [Key, Value | Ref], b: [Key, Value | Ref]) => boolean;
 
 // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function setOperation(name: string, args: Value[], keep: boolean, same: SetCompare): PhpArray {
@@ -1033,7 +1079,7 @@ function setOperation(name: string, args: Value[], keep: boolean, same: SetCompa
       useData: () => {},
     };
     const lists = [first, ...others].map((array) => {
-      const list = [...array.entries()].map(([key, value]) => ({ key, value }));
+      const list = setEntries(array);
       if (list.length > 1) zendSort(list, compareSetValues);
       return list;
     });
@@ -1042,12 +1088,13 @@ function setOperation(name: string, args: Value[], keep: boolean, same: SetCompa
     for (const key of keep ? walk.intersect() : walk.diff()) copied.delete(key);
     return copied;
   }
-  for (const entry of first.entries()) {
+  for (const entry of first.map) {
     rt().spend();
-    const matches = (other: PhpArray): boolean =>
-      other.has(entry[0]) && same(entry, [entry[0], other.get(entry[0]) as Value]);
-    if (keep ? others.every(matches) : !others.some(matches))
-      result.setSlot(entry[0], copyValueSlot(first.map.get(entry[0]) as Value | Ref));
+    const matches = (other: PhpArray): boolean => {
+      const slot = other.map.get(entry[0]);
+      return slot !== undefined && same(entry, [entry[0], slot]);
+    };
+    if (keep ? others.every(matches) : !others.some(matches)) result.setSlot(entry[0], copyValueSlot(entry[1]));
   }
   return result;
 }
@@ -1065,9 +1112,9 @@ function checkSetArgument(name: string, value: Value, position: number): asserts
   }
 }
 
-const sameValue: SetCompare = (a, b) => toStr(a[1]) === toStr(b[1]);
+const sameValue: SetCompare = (a, b) => toStr(deref(a[1])) === toStr(deref(b[1]));
 const sameKey: SetCompare = (a, b) => a[0] === b[0];
-const sameAssoc: SetCompare = (a, b) => a[0] === b[0] && toStr(a[1]) === toStr(b[1]);
+const sameAssoc: SetCompare = (a, b) => a[0] === b[0] && sameValue(a, b);
 
 defineFunction('array_diff(array $array, array ...$arrays): array', ({ args }) => {
   const [first, ...others] = args;
@@ -1199,20 +1246,20 @@ function sortComparator(
   convert = toStr,
   reportWarning = warn,
   tryConvert?: (value: Value) => string | undefined
-): (a: Value, b: Value) => number {
+): (a: Value | Ref, b: Value | Ref) => number {
   const caseless = (flags & 8n) !== 0n;
   switch (flags & ~8n) {
     case 1n: {
-      return (a, b) => compareNumbers(toFloat(a, reportWarning), toFloat(b, reportWarning));
+      return (a, b) => compareNumbers(toFloat(deref(a), reportWarning), toFloat(deref(b), reportWarning));
     }
     case 2n:
     case 5n: {
       return caseless
-        ? (a, b) => compareBytes(lower(convert(a)), lower(convert(b)))
-        : (a, b) => compareBytes(convert(a), convert(b));
+        ? (a, b) => compareBytes(lower(convert(deref(a))), lower(convert(deref(b))))
+        : (a, b) => compareBytes(convert(deref(a)), convert(deref(b)));
     }
     case 6n: {
-      return (a, b) => naturalCompare(convert(a), convert(b), caseless);
+      return (a, b) => naturalCompare(convert(deref(a)), convert(deref(b)), caseless);
     }
     default: {
       return (a, b) => compare(a, b, tryConvert);
@@ -1272,8 +1319,8 @@ function sortArray(
   withStringConversionErrors((convert, reportWarning, hold, tryConvert) => {
     const compareValues = sortComparator(flags, convert, reportWarning, tryConvert);
     const compareEntries = (a: [Key, Value | Ref], b: [Key, Value | Ref]): number => {
-      const x = byKey ? a[0] : valueOf(a[1]);
-      const y = byKey ? b[0] : valueOf(b[1]);
+      const x = byKey ? a[0] : a[1];
+      const y = byKey ? b[0] : b[1];
       try {
         return reverse ? -compareValues(x, y) : compareValues(x, y);
       } catch (error) {
@@ -1405,7 +1452,7 @@ defineFunction('array_multisort(&~$array, &~...$rest): bool', (ctx) => {
     rt().spend();
     for (const [index, column] of columns.entries()) {
       const comparator = sortComparator(column.flags);
-      const result = comparator(valueOf(rows[index][a][1]), valueOf(rows[index][b][1])) * column.order;
+      const result = comparator(rows[index][a][1], rows[index][b][1]) * column.order;
       if (result !== 0) return result;
     }
     return a - b;
@@ -1512,5 +1559,5 @@ function withPointer(value: Value, name: string, action: (array: PhpArray) => Va
 
 function compareSetValues(a: Entry, b: Entry): number {
   rt().spend();
-  return compareBytes(toStr(a.value), toStr(b.value));
+  return compareBytes(toStr(deref(a.slot)), toStr(deref(b.slot)));
 }

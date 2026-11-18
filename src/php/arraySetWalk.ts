@@ -1,8 +1,12 @@
-import type { Key, Value } from './values';
+import type { Key, PhpArray, Ref, Value } from './values';
 
 export interface Entry {
   key: Key;
-  value: Value;
+  slot: Value | Ref;
+}
+
+export function setEntries(array: PhpArray): Entry[] {
+  return [...array.map].map(([key, slot]) => ({ key, slot }));
 }
 
 export type Compare = (a: Entry, b: Entry) => number;

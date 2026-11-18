@@ -39,15 +39,35 @@ test.each([
   ['trait Die {}', 'unexpected token "exit", expecting identifier'],
   ['class T extends Exit {}', 'unexpected token "exit"'],
   ['new ISSET;', 'unexpected token "isset", expecting "class"'],
+  ['function f(empty &$p) {}', 'unexpected token "empty", expecting variable'],
+  ['function f(int|list $p) {}', 'unexpected token "list"'],
+  ['class T { public ?empty $p; }', 'unexpected token "empty"'],
+  ['function f(): isset {}', 'unexpected token "isset"'],
+  ['use isset;', 'unexpected token "isset"'],
+  [String.raw`use Vendor\{Empty};`, 'unexpected token "empty", expecting identifier or namespaced name'],
+  ['class T { use Empty; }', 'unexpected token "empty"'],
+  ['try {} catch (Empty $e) {}', 'unexpected token "empty"'],
   ['class T { var function f() {} }', 'unexpected token "function", expecting variable'],
   ['class T { var const C = 1; }', 'unexpected token "const", expecting variable'],
   ['class T { public private $p; }', 'Multiple access type modifiers are not allowed'],
   ['class T { static static function f() {} }', 'Multiple static modifiers are not allowed'],
+  ['class T { abstract abstract const C = 1; }', 'Cannot use the abstract modifier on a class constant'],
+  ['class T { static static const C = 1; }', 'Cannot use the static modifier on a class constant'],
+  ['class T { final final const C = 1; }', 'Multiple final modifiers are not allowed'],
 ])('reports the PHP diagnostic for %s', (source, message) => {
   expect(run(`<?php\n${source}`)).toMatchObject({
     kind: 'compileError',
     diagnostics: [{ row: 1, message: expect.stringContaining(message) }],
   });
+});
+
+test('accepts qualified names and the readonly function identifier in their PHP contexts', () => {
+  const source = `<?php
+namespace Empty;
+use Vendor\\Empty as Ordinary;
+function readonly(?Ordinary $p = null): bool { return $p === null; }
+echo readonly() ? 'ok' : 'fail';`;
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout: 'ok' });
 });
 
 test.each([
