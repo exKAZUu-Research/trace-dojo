@@ -308,7 +308,7 @@ export class Checker {
     }
     this.finishBody(item.span);
     this.requireKnownTypes();
-    new BorrowChecker(this.annotations, this.solver).checkFn(item, this.body.fn);
+    new BorrowChecker(this.annotations, this.solver).checkFn(item, this.body.fn, this.body.retType);
     new ConstLint(this.annotations).check(item.body);
   }
 

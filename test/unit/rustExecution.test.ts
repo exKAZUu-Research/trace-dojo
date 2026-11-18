@@ -233,11 +233,62 @@ test.each([
     6,
     'trait Shape {\n    fn area(&self) -> f64;\n}\nstruct Sq;\nimpl Shape for Sq {\n    fn area(&self) -> i32 { 1 }\n}',
   ],
+  [
+    'a borrow that an if-let pattern binds, used after a push',
+    '    let mut v = vec![1];\n    if let Some(x) = v.first() {\n        v.push(2);\n        println!("{x}");\n    }',
+    4,
+  ],
+  [
+    'a closure that borrows a variable a later push changes',
+    '    let mut v = vec![1];\n    let c = || v.len();\n    v.push(2);\n    println!("{}", c());',
+    4,
+  ],
+  ['a slice method whose argument reads the receiver', '    let mut v = vec![1, 2];\n    v.swap(0, v.len() - 1);', 3],
+  [
+    'a reference to a variable that goes out of scope',
+    '    let r;\n    {\n        let x = 5;\n        r = &x;\n    }\n    println!("{r}");',
+    5,
+  ],
   ['mismatched types', '    let x: i32 = "a";', 2],
 ])('rustc rejects %s before running', (_name, body, row, items = '') => {
   const execution = executeProgram('rust', rustMain(body, items));
   expect(execution.kind).toBe('compileError');
   expect(execution.kind === 'compileError' && execution.diagnostics[0].row + 1).toBe(row);
+});
+
+test('borrows end where non-lexical lifetimes end them, as rustc ends them', () => {
+  const program = `fn first<'a, 'b>(x: &'a str, _y: &'b str) -> &'a str {
+    x
+}
+struct P {
+    name: String,
+    age: u32,
+}
+fn main() {
+    let mut v = vec![1, 2, 3];
+    let r = &v[0];
+    if v.len() > 5 { println!("{r}"); } else { v.push(4); }
+    let words = vec![" a ", "b "];
+    let trimmed: Vec<&str> = words.iter().map(|w| w.trim()).collect();
+    let moved = words;
+    let a = String::from("a");
+    let mut b = String::from("b");
+    let f = first(&a, &b);
+    b.push('!');
+    let p = P { name: String::from("n"), age: 3 };
+    let P { name, age: _ } = p;
+    let opt: Option<String> = None;
+    if let Some(s) = opt { println!("{s}"); } else { println!("{:?}", opt); }
+    let mut x = vec![1];
+    let mut y = vec![2];
+    std::mem::swap(&mut x, &mut y);
+    println!("{:?} {:?} {:?} {} {} {} {} {:?} {:?}", v, trimmed, moved, f, b, name, p.age, x, y);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'None\n[1, 2, 3, 4] ["a", "b"] [" a ", "b "] a b! n 3 [2] [1]\n',
+    uncaughtException: undefined,
+  });
 });
 
 test.each([

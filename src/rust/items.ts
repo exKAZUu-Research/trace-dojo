@@ -292,6 +292,7 @@ export class ItemCollector {
       variants: [],
       derives: new Set(item.attrs.derives.map((derive) => derive.name)),
       span: item.span,
+      lifetimeParams: item.generics.lifetimes,
       module,
     };
     // `Error` is a builtin only as `fmt::Error`; `io::Error` is a plain declaration.
@@ -336,6 +337,7 @@ export class ItemCollector {
       variants: [],
       derives: new Set(item.attrs.derives.map((derive) => derive.name)),
       span: item.span,
+      lifetimeParams: item.generics.lifetimes,
       module,
     };
     if (module.isStd && BUILTIN_ENUMS[item.name]) {
@@ -1173,7 +1175,7 @@ export function lowerType(ast: TypeAst, scope: TypeScope): Type {
       return lowerPathType(ast.path, scope);
     }
     case 'ref': {
-      return { kind: 'ref', mutable: ast.mutable, target: lowerType(ast.target, scope) };
+      return { kind: 'ref', mutable: ast.mutable, target: lowerType(ast.target, scope), lifetime: ast.lifetime };
     }
     case 'tuple': {
       return { kind: 'tuple', elems: ast.elems.map((elem) => lowerType(elem, scope)) };
@@ -1272,7 +1274,7 @@ function lowerPathType(path: PathAst, scope: TypeScope): Type {
             : `${def.name} には型引数を ${def.params.length} 個書いてください（${def.name}<${def.params.map((p) => p.name).join(', ')}>）。`
         );
       }
-      return adt(def, args);
+      return last.lifetimes?.length ? { kind: 'adt', def, args, lifetimes: last.lifetimes } : adt(def, args);
     }
     case 'alias': {
       if (binding.params.length === 0) return binding.resolve();

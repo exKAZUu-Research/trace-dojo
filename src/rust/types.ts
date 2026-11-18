@@ -13,8 +13,10 @@ export type Type =
   | { kind: 'tuple'; elems: Type[] }
   | { kind: 'array'; elem: Type; len: number }
   | { kind: 'slice'; elem: Type }
-  | { kind: 'ref'; mutable: boolean; target: Type }
-  | { kind: 'adt'; def: AdtDef; args: Type[] }
+  /** `lifetime`: the name a declared signature gives the reference's lifetime (`'a`), which only the borrow checker reads. */
+  | { kind: 'ref'; mutable: boolean; target: Type; lifetime?: string }
+  /** `lifetimes`: the lifetime arguments a declared signature writes (`Parser<'a>`), which only the borrow checker reads. */
+  | { kind: 'adt'; def: AdtDef; args: Type[]; lifetimes?: string[] }
   | { kind: 'param'; param: TypeParam }
   | { kind: 'var'; v: TypeVar }
   | { kind: 'fn'; params: Type[]; ret: Type }
@@ -120,6 +122,8 @@ export interface AdtDef {
   /** Where the type is declared, whose name rustc reports for errors about its derives. */
   span: Span;
   builtin?: BuiltinAdt;
+  /** The lifetime parameters the type declares (`'a`), through which its values may hold borrows. */
+  lifetimeParams?: string[];
   /** The module the type is declared in, whose items may read its private fields. */
   module?: unknown;
 }

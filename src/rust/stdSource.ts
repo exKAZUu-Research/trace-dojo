@@ -114,11 +114,11 @@ pub mod fmt {
         fn write_str(&mut self, s: &str) -> Result;
         fn write_char(&mut self, c: char) -> Result;
     }
-    pub struct DebugStruct;
-    pub struct DebugTuple;
-    pub struct DebugList;
-    pub struct DebugSet;
-    pub struct DebugMap;
+    pub struct DebugStruct<'a>;
+    pub struct DebugTuple<'a>;
+    pub struct DebugList<'a>;
+    pub struct DebugSet<'a>;
+    pub struct DebugMap<'a>;
     impl DebugStruct {
         pub fn field(&mut self, name: &str, value: &dyn Debug) -> &mut DebugStruct;
         pub fn finish(&mut self) -> Result;
@@ -800,7 +800,7 @@ pub mod error {
     pub trait Error: Debug + Display {}
 }
 pub mod iter {
-    pub struct Iter<T>;
+    pub struct Iter<'a, T>;
     pub trait Iterator {}
     pub trait IntoIterator {}
     pub trait FromIterator<A> {}
@@ -913,7 +913,7 @@ pub mod collections {
     pub struct VecDeque<T>;
     pub struct BinaryHeap<T>;
     pub mod hash_map {
-        pub struct Entry<K, V>;
+        pub struct Entry<'a, K, V>;
         pub use super::HashMap;
     }
     pub mod btree_map {

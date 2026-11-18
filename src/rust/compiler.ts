@@ -250,8 +250,8 @@ export class Compiler {
 
   private compileLet(stmt: Extract<Stmt, { kind: 'let' }>): Eval {
     if (!stmt.init) return () => UNIT_VALUE;
-    // Destructuring a variable moves the elements its bindings take; the variable keeps the rest.
-    if (stmt.pattern.kind === 'tuple' && stmt.init.kind === 'path' && !stmt.else) return this.destructure(stmt);
+    // Destructuring a place moves the parts its bindings take; the place keeps the rest.
+    if (stmt.pattern.kind !== 'binding' && isPlaceExpr(stmt.init, this.annotations)) return this.destructure(stmt);
     const init = this.value(stmt.init);
     if (stmt.else) {
       const matcher = this.compileMatcher(stmt.pattern);
@@ -278,10 +278,11 @@ export class Compiler {
     const place = this.place(stmt.init!);
     const matcher = this.compileMatcher(stmt.pattern);
     const takeAll = this.takesWhole(stmt.init!, stmt.pattern);
+    const elseBlock = stmt.else && this.compileBlock(stmt.else);
     const run: Eval = (frame) => {
       frame.runtime.spend();
-      matcher(frame, init(frame), () => place(frame));
-      takeAll?.(frame);
+      if (matcher(frame, init(frame), () => place(frame))) takeAll?.(frame);
+      else elseBlock?.(frame);
       return UNIT_VALUE;
     };
     return this.withStep(stmt.span, run, false);

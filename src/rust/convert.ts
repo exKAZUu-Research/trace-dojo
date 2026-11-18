@@ -267,14 +267,12 @@ export class Converter {
 
   private selfParam(node: Node): SelfParam {
     const span = this.span(node);
-    if (node.namedChildren.some((child) => child.type === 'lifetime')) {
-      // `&'a self` names the lifetime of the borrow, which this interpreter does not check further.
-    }
+    const lifetime = node.namedChildren.find((child) => child.type === 'lifetime')?.text;
     const text = node.text.replaceAll(/\s+/g, ' ');
     if (node.text.includes(':')) unavailable(span, '型を書いた self（self: Box<Self> など）');
     const isRef = text.startsWith('&');
     const isMut = node.namedChildren.some((child) => child.type === 'mutable_specifier');
-    if (isRef) return { mode: isMut ? 'mutRef' : 'ref', mutable: false, span };
+    if (isRef) return { mode: isMut ? 'mutRef' : 'ref', mutable: false, lifetime, span };
     return { mode: 'value', mutable: isMut, span };
   }
 
@@ -290,9 +288,9 @@ export class Converter {
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of syntax node.
-  // code-gauge-allow functionNcss 32 -- One case per kind of syntax node.
+  // code-gauge-allow functionNcss 33 -- One case per kind of syntax node.
   private generics(node: Node): Generics {
-    const generics: Generics = { params: [], where: [] };
+    const generics: Generics = { params: [], lifetimes: [], where: [] };
     const parameters = node.childForFieldName('type_parameters');
     for (const child of parameters?.namedChildren ?? []) {
       if (isComment(child)) continue;
@@ -300,6 +298,7 @@ export class Converter {
       if (child.type === 'lifetime_parameter') {
         const bounds = child.childForFieldName('bounds');
         if (bounds) unavailable(span, "ライフタイムの境界（'a: 'b）");
+        generics.lifetimes.push(this.field(child, 'name').text);
         continue;
       }
       if (child.type === 'const_parameter') unavailable(span, '定数のジェネリクス（const N: usize）');
@@ -608,7 +607,8 @@ export class Converter {
       }
       case 'reference_type': {
         const mutable = node.namedChildren.some((child) => child.type === 'mutable_specifier');
-        const type: TypeAst = { kind: 'ref', mutable, target: this.type(this.field(node, 'type')), span };
+        const lifetime = node.namedChildren.find((child) => child.type === 'lifetime')?.text;
+        const type: TypeAst = { kind: 'ref', mutable, target: this.type(this.field(node, 'type')), lifetime, span };
         // `&&T` is one token, which stands for two references.
         return node.children[0]?.type === '&&' ? { kind: 'ref', mutable: false, target: type, span } : type;
       }
@@ -662,9 +662,13 @@ export class Converter {
     const span = this.span(node);
     if (node.type === 'generic_type' || node.type === 'generic_type_with_turbofish') {
       const base = this.typePath(this.field(node, 'type'));
-      const args = this.typeArgs(this.field(node, 'type_arguments'));
+      const typeArguments = this.field(node, 'type_arguments');
+      const args = this.typeArgs(typeArguments);
+      const lifetimes = typeArguments.namedChildren
+        .filter((child) => child.type === 'lifetime')
+        .map((child) => child.text);
       const last = base.segments.at(-1) as PathSegment;
-      return { segments: [...base.segments.slice(0, -1), { ...last, args }], span };
+      return { segments: [...base.segments.slice(0, -1), { ...last, args, lifetimes }], span };
     }
     if (node.type === 'scoped_type_identifier' || node.type === 'scoped_identifier') {
       const path = node.childForFieldName('path');

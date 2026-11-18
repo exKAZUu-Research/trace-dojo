@@ -39,6 +39,8 @@ export interface Attributes {
 
 export interface Generics {
   params: GenericParamAst[];
+  /** The lifetime parameters' names (`'a`). */
+  lifetimes: string[];
   where: WherePredicate[];
 }
 
@@ -79,6 +81,8 @@ export interface FnItem {
 export interface SelfParam {
   mode: 'value' | 'ref' | 'mutRef';
   mutable: boolean;
+  /** The lifetime that `&'a self` names. */
+  lifetime?: string;
   span: Span;
 }
 
@@ -175,7 +179,7 @@ export interface UseItem {
 
 export type TypeAst =
   | { kind: 'path'; path: PathAst; span: Span }
-  | { kind: 'ref'; mutable: boolean; target: TypeAst; span: Span }
+  | { kind: 'ref'; mutable: boolean; target: TypeAst; lifetime?: string; span: Span }
   | { kind: 'tuple'; elems: TypeAst[]; span: Span }
   | { kind: 'array'; elem: TypeAst; len: Expr; span: Span }
   | { kind: 'slice'; elem: TypeAst; span: Span }
@@ -193,6 +197,8 @@ export interface PathAst {
 export interface PathSegment {
   name: string;
   args: TypeAst[] | undefined;
+  /** The lifetime arguments (`Parser<'a>`). */
+  lifetimes?: string[];
   span: Span;
 }
 
