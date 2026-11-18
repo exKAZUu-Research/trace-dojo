@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 799 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 803 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -327,16 +327,16 @@ export function evChain(e: Expr): Chain {
     }
     case 'instanceof': {
       const value = ev(e.e);
-      if (!(value instanceof PhpObject)) return false;
       if (e.cls.k === 'expr') {
         const right = ev(e.cls.e);
-        if (right instanceof PhpObject) return value.cls.isSubclassOf(right.cls);
+        if (right instanceof PhpObject) return value instanceof PhpObject && value.cls.isSubclassOf(right.cls);
         if (typeof right === 'string') {
           const cls = findClass(right);
-          return cls !== undefined && value.cls.isSubclassOf(cls);
+          return value instanceof PhpObject && cls !== undefined && value.cls.isSubclassOf(cls);
         }
         throwError('Error', 'Class name must be a valid object or a string');
       }
+      if (!(value instanceof PhpObject)) return false;
       if (e.cls.k === 'named') {
         const cls = findClass(e.cls.name);
         return cls !== undefined && value.cls.isSubclassOf(cls);
@@ -656,6 +656,7 @@ function immutableArrayContents(array: PhpArray): boolean {
   return true;
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function spreadInto(array: PhpArray, value: Value): void {
   if (value instanceof PhpArray) {
     for (const [key, slot] of value.map) {
@@ -666,7 +667,7 @@ function spreadInto(array: PhpArray, value: Value): void {
     }
     return;
   }
-  if (value instanceof PhpObject) {
+  if (value instanceof PhpObject && value.cls.isSubclassOf(rt().classes.get('traversable') as PhpClass)) {
     for (const [key, item] of iterate(value)) {
       if (typeof key === 'string') array.set(key, share(item));
       else if (typeof key === 'bigint') array.append(share(item));
@@ -674,7 +675,7 @@ function spreadInto(array: PhpArray, value: Value): void {
     }
     return;
   }
-  throwError('Error', 'Only arrays and Traversables can be unpacked');
+  throwError('TypeError', `Only arrays and Traversables can be unpacked, ${valueName(value)} given`);
 }
 
 /** Iterates over an array or a Traversable object, as `foreach` would. */
@@ -873,9 +874,12 @@ function cloneExpression(e: Extract<Expr, { k: 'clone' }>): Value {
   return cloneObject(value);
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- One case per expression kind, as PHP evaluates each kind differently.
-// code-gauge-allow functionNcss 37 -- One case per expression kind, as PHP evaluates each kind differently.
+// code-gauge-allow functionNcss 41 -- One case per expression kind, as PHP evaluates each kind differently.
 export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
+  if (original.isResource)
+    throwError('TypeError', 'clone(): Argument #1 ($object) must be of type object, resource given');
+  if (!original.cls.isCloneable)
+    throwError('Error', `Trying to clone an uncloneable object of class ${original.cls.name}`);
   const runtime = rt();
   const scope = runtime.frame.scope;
   const cloneMethod = original.cls.findMethod('__clone');

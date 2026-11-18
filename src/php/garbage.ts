@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss 867 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
-import { setPrevious, withPendingException } from './errors';
+import { withCleanupExceptions, withPendingException } from './errors';
 import { type Frame, PhpThrow, type Runtime } from './runtime';
 import {
   arrayHolderCount,
@@ -32,13 +32,25 @@ export function setDestructor(run: (object: PhpObject, row?: number) => void): v
 export function collectGarbage(runtime: Runtime, cycles = false): number {
   if (runtime.collectingCycles) return 0;
   runtime.collectingCycles = cycles;
+  if (cycles) for (const value of gcTemporaries(runtime)) runtime.gcRoots.delete(value);
   try {
     return collectGarbageNow(runtime, cycles);
   } finally {
     runtime.collectingCycles = false;
     runtime.collectingArrays.clear();
     runtime.collectingObjects.clear();
+    if (cycles) for (const value of gcTemporaries(runtime)) runtime.gcRoots.add(value);
   }
+}
+
+function gcTemporaries(runtime: Runtime): (PhpArray | PhpObject)[] {
+  return runtime.frames
+    .flatMap((frame) => frame.temporaries)
+    .filter((value): value is PhpArray | PhpObject =>
+      value instanceof PhpArray
+        ? !value.uncollectable
+        : value instanceof PhpObject && !value.isResource && runtime.objects.get(value.id) === value
+    );
 }
 
 function collectGarbageNow(runtime: Runtime, cycles: boolean): number {
@@ -88,31 +100,40 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean): number {
     retainTurtles(runtime, mark(runtime));
     return collected;
   }
-  // A destructor may store its object somewhere reachable again, so each object is freed only if it stays garbage.
-  for (const object of owners) {
-    if (object.destructed) continue;
-    if (object.cls.findMethod('__destruct')) {
-      object.destructed = true;
-      runtime.destructibles--;
-      destruct(object);
+  let count = 0;
+  withCleanupExceptions(runtime, (capture) => {
+    // A destructor may store its object somewhere reachable again, so each object is freed only if it stays garbage.
+    for (const object of owners) {
+      if (object.destructed) continue;
+      if (object.cls.findMethod('__destruct')) {
+        object.destructed = true;
+        runtime.destructibles--;
+        try {
+          destruct(object);
+        } catch (error) {
+          if (!(error instanceof PhpThrow)) throw error;
+          capture(error);
+        }
+      }
     }
-  }
-  const afterArrays = new Set<PhpArray>();
-  const after = mark(runtime, false, afterArrays);
-  const remaining = freed.filter((object) => !after.has(object));
-  const { cyclic } = cyclicObjects(remaining);
-  const protectedObjects = collectibleGraph(
-    destructible.filter((object) => cyclic.has(object)),
-    new Set(),
-    new Set(),
-    new Set(remaining)
-  ).objects;
-  const excluded = new Set(destructible.filter((object) => !protectedObjects.has(object)));
-  const graph = collectibleGraph([...cyclic, ...arrayCandidates], afterArrays, excluded, new Set(remaining));
-  for (const object of handles) if (!after.has(object)) runtime.freeObject(object);
-  finishArrayCollection(runtime, arrayStorage);
-  retainTurtles(runtime, after);
-  return graph.objects.size + graph.arrays.size;
+    const afterArrays = new Set<PhpArray>();
+    const after = mark(runtime, false, afterArrays);
+    const remaining = freed.filter((object) => !after.has(object));
+    const { cyclic } = cyclicObjects(remaining);
+    const protectedObjects = collectibleGraph(
+      destructible.filter((object) => cyclic.has(object)),
+      new Set(),
+      new Set(),
+      new Set(remaining)
+    ).objects;
+    const excluded = new Set(destructible.filter((object) => !protectedObjects.has(object)));
+    const graph = collectibleGraph([...cyclic, ...arrayCandidates], afterArrays, excluded, new Set(remaining));
+    for (const object of handles) if (!after.has(object)) runtime.freeObject(object);
+    finishArrayCollection(runtime, arrayStorage);
+    retainTurtles(runtime, after);
+    count = graph.objects.size + graph.arrays.size;
+  });
+  return count;
 }
 
 /**
@@ -244,15 +265,8 @@ class Release {
   // code-gauge-allow functionNcss 48 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   values(values: unknown[]): void {
     const pending: unknown[] = values.toReversed();
-    const heldMark = this.runtime.held.length;
-    let failure: PhpThrow | undefined;
-    const onFailure = (error: PhpThrow): void => {
-      if (failure) setPrevious(error.object, failure.object);
-      failure = error;
-      this.runtime.held.push(error.object);
-    };
     let work = 0;
-    try {
+    withCleanupExceptions(this.runtime, (onFailure) => {
       while (pending.length > 0) {
         if ((++work & 255) === 0) this.runtime.budget.checkClock();
         const item = pending.pop();
@@ -288,13 +302,7 @@ class Release {
           appendReversed(pending, children);
         }
       }
-      if (failure) {
-        this.runtime.thrown = failure.object;
-        throw failure;
-      }
-    } finally {
-      this.runtime.held.length = heldMark;
-    }
+    });
   }
 
   hasVisited(object: PhpObject): boolean {

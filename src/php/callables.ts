@@ -73,7 +73,10 @@ export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | u
               add({ v: ref.v, ref, name: argumentName });
             } else add({ v: share(item), name: argumentName });
           }
-        } else if (value instanceof PhpObject) {
+        } else if (
+          value instanceof PhpObject &&
+          value.cls.isSubclassOf(runtime.classes.get('traversable') as PhpClass)
+        ) {
           for (const [key, item] of iterate(value)) {
             const argumentName = unpackName(key);
             const position = argumentName === undefined ? positional : -1;
@@ -87,7 +90,8 @@ export function evalArgs(args: Arg[], fn: Callable | undefined, name: string | u
             }
             add({ v: share(item), name: argumentName });
           }
-        } else throwError('TypeError', 'Only arrays and Traversables can be unpacked');
+        } else
+          throwError('TypeError', `Only arrays and Traversables can be unpacked, ${valueName(value ?? null)} given`);
         continue;
       }
       const position = arg.name === undefined ? positional : -1;
@@ -475,23 +479,24 @@ function arrayCallable(
       if (isClosure(target) && lower(method) === '__invoke') return closureTarget(target);
       const qualified = mode === 'callback' ? qualifiedObjectMethod(target.cls, method, scope) : undefined;
       const found = lookupMethod(qualified?.cls ?? target.cls, lower(qualified?.name ?? method), scope);
+      if (qualified && emitScopeWarning)
+        deprecated(`Callables of the form ["${target.cls.name}", "${method}"] are deprecated`);
       if (found && canCall(found, scope)) {
-        if (qualified && emitScopeWarning)
-          deprecated(`Callables of the form ["${target.cls.name}", "${method}"] are deprecated`);
         return found.isStatic
           ? { fn: found.fn, scope: found.scope, staticClass: target.cls, method: found }
           : { fn: found.fn, thisObj: target, scope: found.scope, staticClass: target.cls, method: found };
       }
       const magic = target.cls.findMethod('__call');
-      if (magic) return magicTarget(target, magic, method);
+      if (magic && (!qualified || qualified.cls === target.cls))
+        return magicTarget(target, magic, qualified?.name ?? method);
       if (found)
         throw new CallableFailure(
           `Call to ${found.visibility} method ${target.cls.name}::${found.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`,
           `cannot access ${found.visibility} method ${target.cls.name}::${found.name}()`
         );
       throw new CallableFailure(
-        `Call to undefined method ${target.cls.name}::${method}()`,
-        `class ${target.cls.name} does not have a method "${method}"`
+        `Call to undefined method ${qualified?.cls.name ?? target.cls.name}::${qualified?.name ?? method}()`,
+        `class ${qualified?.cls.name ?? target.cls.name} does not have a method "${qualified?.name ?? method}"`
       );
     }
     if (typeof method === 'string' && typeof target === 'string')

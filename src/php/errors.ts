@@ -182,6 +182,30 @@ export function withPendingException(runtime: Runtime, pending: PhpThrow | undef
   }
 }
 
+export function withCleanupExceptions(runtime: Runtime, cleanup: (capture: (error: PhpThrow) => void) => void): void {
+  const heldMark = runtime.held.length;
+  let failure: PhpThrow | undefined;
+  const capture = (error: PhpThrow): void => {
+    if (failure) setPrevious(error.object, failure.object);
+    failure = error;
+    runtime.held.push(error.object);
+  };
+  try {
+    try {
+      cleanup(capture);
+    } catch (error) {
+      if (!(error instanceof PhpThrow)) throw error;
+      capture(error);
+    }
+    if (failure) {
+      runtime.thrown = failure.object;
+      throw failure;
+    }
+  } finally {
+    runtime.held.length = heldMark;
+  }
+}
+
 function previousOf(exception: PhpObject): PhpObject | undefined {
   const slot = exception.props.get(previousKey(exception));
   const value = slot instanceof Ref ? slot.v : slot;

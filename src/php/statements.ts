@@ -10,10 +10,11 @@ import {
   canDeclareEarly,
   declareClass,
   findClass,
+  propNameOf,
   propRef,
   readProp,
   setClassEvaluator,
-  visibleProps,
+  visiblePropertyKeys,
   writeProp,
 } from './classes';
 import { toBool, valueName } from './conversions';
@@ -567,7 +568,9 @@ function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpOb
   // PHP walks the property table as it is, so a property the loop adds is visited too.
   const visited = new Set<string>();
   for (;;) {
-    const name = visibleProps(object, scope).find(([candidate]) => !visited.has(candidate))?.[0];
+    const name = visiblePropertyKeys(object, scope, true)
+      .map(propNameOf)
+      .find((candidate) => !visited.has(candidate));
     if (name === undefined) break;
     visited.add(name);
     runtime.spend();

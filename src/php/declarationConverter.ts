@@ -713,6 +713,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     if (typeNode && type) this.checkTypeScope(typeNode, type);
     const isReadonly = modifiers.isReadonly || decl.isReadonly;
     const hookList = member.namedChildren.find((child) => child.type === 'property_hook_list');
+    if (hookList && isReadonly) this.error(hookList, 'Hooked properties cannot be readonly');
     for (const element of member.namedChildren.filter((child) => child.type === 'property_element')) {
       const name = this.variableName(element.childForFieldName('name') as Node);
       if (decl.props.some((prop) => prop.name === name)) {
@@ -760,8 +761,11 @@ export abstract class DeclarationConverter extends ConverterBase {
 
   protected hooks(list: Node, prop: PropertyDeclAst, className: string): void {
     const declarations = list.namedChildren.filter((child) => child.type === 'property_hook');
+    const kinds = new Set<string>();
     for (const hook of declarations) {
       const kind = lower(hook.namedChildren.find((child) => child.type === 'name')?.text ?? '');
+      if (kinds.has(kind)) this.error(hook, `Cannot redeclare property hook "${kind}"`);
+      kinds.add(kind);
       const parameters = hook.childForFieldName('parameters');
       if (kind === 'get' && parameters)
         this.error(hook, `get hook of property ${className}::$${prop.name} must not have a parameter list`);
@@ -794,7 +798,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         gotos: [],
         className,
         isMethod: true,
-        returnType: kind === 'set' ? { k: 'named', name: 'void' } : undefined,
+        returnType: kind === 'set' ? { k: 'named', name: 'void' } : prop.type,
       };
       try {
         let params: ParamDecl[] = [];
@@ -869,6 +873,8 @@ export abstract class DeclarationConverter extends ConverterBase {
         if (body && referencesProperty(body, prop.name)) referencesBacking = true;
         const fn: FunctionDecl = {
           name: `$${prop.name}::${kind}`,
+          isPropertyHook: true,
+          returnType: this.fn.returnType,
           params,
           body: statements,
           arrowBody,

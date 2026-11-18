@@ -627,7 +627,14 @@ defineEngine(
     XOSHIRO,
     32,
     (state, seed) => state.seed64(seed),
-    (state, words) => (state.state = words)
+    (state, words) => {
+      if (words.every((word) => word === 0n))
+        throwError(
+          'ValueError',
+          `${XOSHIRO}::__construct(): Argument #1 ($seed) must not consist entirely of NUL bytes`
+        );
+      state.state = words;
+    }
   ),
   () => new XoshiroState(),
   [
@@ -643,6 +650,7 @@ defineEngine(
 );
 defineClass({
   name: String.raw`Random\Engine\Secure`,
+  isCloneable: false,
   interfaces: [String.raw`Random\CryptoSafeEngine`, String.raw`Random\Engine`],
   isFinal: true,
   methods: [{ signature: 'generate(): string', impl: () => unseeded() }],
@@ -654,6 +662,7 @@ defineClass({
 defineClass({
   name: String.raw`Random\Randomizer`,
   isFinal: true,
+  isCloneable: false,
   props: [{ name: 'engine', visibility: 'public', defaultValue: () => null, typed: true, isReadonly: true }],
   methods: randomizerMethods,
 });

@@ -1105,8 +1105,8 @@ function setterAccessLabel(property: PropDecl): string {
 }
 
 /** The reference a property holds, creating it, for `=&`, by-reference arguments, and nested writes. */
-// code-gauge-allow functionCognitiveComplexity 27 -- Follows PHP's class linking and property access rules in their order of checks.
-// code-gauge-allow functionNcss 38 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionCognitiveComplexity 29 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss 40 -- Follows PHP's class linking and property access rules in their order of checks.
 export function propRef(
   object: PhpObject,
   name: string,
@@ -1121,6 +1121,7 @@ export function propRef(
     if (overloaded) return overloaded;
     throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
   }
+  if (decl?.hooks?.get && !object.guards?.has(`hook:${name}`)) return hookedPropertyReference(object, decl, scope);
   let slot = object.props.get(key);
   const value = slot instanceof Ref ? slot.v : slot;
   if (mode === 'foreach' && decl?.isReadonly)
@@ -1150,6 +1151,24 @@ export function propRef(
   if (decl?.type && !decl.isStatic) ref.typedBy = [{ decl, object }];
   object.props.set(key, ref);
   return ref;
+}
+
+export function hookedPropertyReference(
+  object: PhpObject,
+  decl: PropDecl,
+  scope: PhpClass | undefined,
+  mode: 'write' | 'update' | 'unset' = 'write',
+  allowObject = false
+): Ref {
+  checkIndirectModification(object, decl.name, scope, mode);
+  const runtime = rt();
+  runtime.lastReturnRef = undefined;
+  const value = readProp(object, decl.name, scope, 'quiet');
+  const returned = runtime.lastReturnRef;
+  runtime.lastReturnRef = undefined;
+  if (returned) return returned;
+  if (allowObject && value instanceof PhpObject) return Ref.temporary(value);
+  throwError('Error', `Indirect modification of ${decl.cls.name}::$${decl.name} is not allowed`);
 }
 
 function overloadedPropertyReference(object: PhpObject, name: string): Ref | undefined {
@@ -1305,18 +1324,29 @@ export function issetProp(object: PhpObject, name: string, scope: PhpClass | und
   return false;
 }
 
-/** The properties of an object that code in `scope` can see, by name, in table order. */
-export function visibleProps(object: PhpObject, scope: PhpClass | undefined): [string, Value][] {
-  const entries: [string, Value][] = [];
-  for (const [key, slot] of object.props) {
-    if (slot === UNINIT) continue;
-    const name = propNameOf(key);
+export function objectPropertyKeys(object: PhpObject): string[] {
+  return [...new Set([...object.cls.props.map((decl) => decl.key), ...object.props.keys()])];
+}
+
+export function visiblePropertyKeys(object: PhpObject, scope: PhpClass | undefined, includeVirtual = false): string[] {
+  const keys = includeVirtual ? objectPropertyKeys(object) : object.props.keys();
+  const visible: string[] = [];
+  for (const key of keys) {
+    const slot = object.props.get(key);
     const decl = declForKey(object.cls, key);
+    if ((!includeVirtual || !decl?.hooks?.get) && (slot === UNINIT || slot === undefined)) continue;
     if (decl && !canAccessProp(decl, scope)) continue;
     if (decl && decl.visibility === 'private' && scope !== decl.cls) continue;
-    entries.push([name, slot instanceof Ref ? slot.v : slot]);
+    visible.push(key);
   }
-  return entries;
+  return visible;
+}
+
+export function visibleProps(object: PhpObject, scope: PhpClass | undefined): [string, Value][] {
+  return visiblePropertyKeys(object, scope).map((key) => {
+    const slot = object.props.get(key) as Value | Ref;
+    return [propNameOf(key), slot instanceof Ref ? slot.v : slot];
+  });
 }
 
 export function propNameOf(key: string): string {

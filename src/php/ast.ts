@@ -132,6 +132,7 @@ export type Stmt = { row: number } & (
 
 export interface FunctionDecl {
   name: string;
+  isPropertyHook?: boolean;
   params: ParamDecl[];
   returnType?: TypeDecl;
   byRefReturn: boolean;

@@ -1241,3 +1241,39 @@ test.each(
   });
   expect(run(`<?php echo 'never';function f(true $x=${value}){}`).kind).toBe('compileError');
 });
+
+test.each([
+  '"A".true',
+  '"A".-1',
+  '"A".+1',
+  '"A".false',
+  '"A".null',
+  '"A".(1+2)',
+  'true||missing()',
+  'false&&missing()',
+  '1',
+  '[]',
+])('rejects compiler-folded class receivers before executing: %s', (receiver) => {
+  expect(run(`<?php echo 'never';try{var_dump((${receiver})::class);}catch(Throwable $e){echo 'caught';}`).kind).toBe(
+    'compileError'
+  );
+});
+
+test.each(['"A".(string)1', '"A"??"B"', 'true?"A":"B"', '"A"[0]'])(
+  'keeps dynamic class receivers catchable: %s',
+  (receiver) => {
+    expect(
+      run(`<?php echo 'run';try{var_dump((${receiver})::class);}catch(Throwable $e){echo 'caught';}`)
+    ).toMatchObject({ kind: 'executed', stdout: 'runcaught' });
+  }
+);
+
+test.each([
+  'class C{public int $x{get=>1;get=>2;}}',
+  'class C{public int $x{set{}set{}}}',
+  'class C{public readonly int $x{get=>1;}}',
+  'readonly class C{public int $x{get=>1;}}',
+  'class C{public readonly int $x=1{get{return $this->x;}}}',
+])('rejects invalid property hook contracts before executing: %s', (declaration) => {
+  expect(run(`<?php echo 'never';${declaration}`).kind).toBe('compileError');
+});

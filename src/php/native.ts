@@ -89,6 +89,7 @@ export interface ClassDefinition {
   interfaces?: string[];
   isAbstract?: boolean;
   isFinal?: boolean;
+  isCloneable?: boolean;
   props?: { name: string; visibility: Visibility; defaultValue: () => Value; typed?: boolean; isReadonly?: boolean }[];
   consts?: Record<string, Value>;
   methods?: NativeMethod[];
@@ -113,12 +114,13 @@ export function installNatives(): void {
 }
 
 // code-gauge-allow functionCognitiveComplexity 24 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 43 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 44 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function buildClass(definition: ClassDefinition): PhpClass {
   const runtime = rt();
   const cls = new PhpClass(definition.name, definition.kind ?? 'class');
   cls.isAbstract = definition.isAbstract ?? false;
   cls.isFinal = definition.isFinal ?? false;
+  cls.isCloneable = definition.isCloneable ?? true;
   if (definition.parent) {
     const parent = runtime.classes.get(lower(definition.parent));
     if (!parent) throw new Error(`Unknown builtin parent ${definition.parent}`);

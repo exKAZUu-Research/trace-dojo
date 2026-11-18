@@ -207,7 +207,6 @@ function writtenObject(e: Expr): Value {
   return e.k === 'var' ? evQuiet(e) : ev(e);
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function propPlace(object: PhpObject, name: string): Place {
   const scope = rt().frame.scope;
   return {
@@ -239,16 +238,7 @@ function propPlace(object: PhpObject, name: string): Place {
       )
         return new RefPlace(propRef(object, name, scope));
       if (decl?.hooks?.get && !object.guards?.has(`hook:${name}`)) {
-        classesModule.checkIndirectModification(object, name, scope, mode);
-        const runtime = rt();
-        runtime.lastReturnRef = undefined;
-        const value = readProp(object, name, scope, 'quiet');
-        const returned = runtime.lastReturnRef;
-        runtime.lastReturnRef = undefined;
-        if (returned) return new RefPlace(returned);
-        if (!(value instanceof PhpObject))
-          throwError('Error', `Indirect modification of ${decl.cls.name}::$${name} is not allowed`);
-        return new RefPlace(Ref.temporary(value));
+        return new RefPlace(classesModule.hookedPropertyReference(object, decl, scope, mode, true));
       }
       classesModule.checkIndirectModification(object, name, scope, mode);
       return this;
@@ -462,9 +452,14 @@ export function bindRef(target: Expr, ref: Ref): void {
       );
     if (!(container instanceof PhpArray)) throwError('Error', 'Cannot create references to elements of this value');
     ref.isRef = true;
+    if (key !== undefined && container.map.get(key) === ref) return;
     ref.rc++;
-    if (key === undefined) container.append(ref);
-    else container.setSlot(key, ref);
+    if (key === undefined) {
+      if (!container.append(ref)) {
+        ref.rc--;
+        throwError('Error', 'Cannot add element to the array as the next element is already occupied');
+      }
+    } else container.setSlot(key, ref);
     return;
   }
   if (target.k === 'prop') {

@@ -1,15 +1,16 @@
-// code-gauge-allow-file fileNcss 419 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 422 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { codePointBytes, enc, utf8Length } from './bytes';
 import { callMethod } from './callables';
-import { canAccessProp, createObject, declForKey, propNameOf, readProp } from './classes';
+import { canAccessProp, createObject, declForKey, objectPropertyKeys, propNameOf, readProp } from './classes';
 import * as conversionsModule from './conversions';
 import { formatFloatRepr } from './conversions';
 import { newThrowable, throwError } from './errors';
+import { nextChar } from './htmlEntities';
 import { defineConstant, defineFunction } from './native';
 import { PhpThrow, rt } from './runtime';
-import { copyValueSlot, PhpArray, type PhpClass, type PhpObject, Ref, UNINIT, type Value } from './values';
+import { copyValueSlot, PhpArray, type PhpClass, PhpObject, Ref, UNINIT, type Value } from './values';
 
 const FLAGS: [string, bigint][] = [
   ['JSON_HEX_TAG', 1n],
@@ -96,8 +97,8 @@ class JsonEncoder {
     private readonly maxDepth: number
   ) {}
 
-  // code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   encode(value: Value, level: number): string {
     rt().spend();
     if (value === null) return 'null';
@@ -121,6 +122,7 @@ class JsonEncoder {
         return this.encodeString(value, this.flags);
       }
     }
+    if (value instanceof PhpObject && value.isResource) return this.fail(8);
     const serializable = rt().classes.get('jsonserializable') as PhpClass;
     if (value instanceof PhpArray || !value.cls.isSubclassOf(serializable)) return this.encodeContainer(value, level);
     if (this.active.has(value)) return this.fail(6);
@@ -188,12 +190,7 @@ class JsonEncoder {
       }
       return;
     }
-    const keys = [
-      ...new Set([
-        ...[...object.cls.propByName.values()].filter((decl) => !decl.isStatic).map((decl) => decl.key),
-        ...object.props.keys(),
-      ]),
-    ];
+    const keys = objectPropertyKeys(object);
     const dynamic = new PhpArray();
     for (const [key, slot] of object.props)
       if (!declForKey(object.cls, key) && slot !== UNINIT) dynamic.setSlot(key, copyValueSlot(slot));
@@ -241,8 +238,9 @@ class JsonEncoder {
         result += escaped;
         continue;
       }
-      const length = utf8Length(text, index);
-      const encoded = length === 1 ? invalidByte(flags) : encodeCharacter(text.slice(index, index + length), flags);
+      const [length, point] = nextChar(text, index);
+      const encoded =
+        point === undefined ? invalidByte(flags) : encodeCharacter(text.slice(index, index + length), flags);
       if (encoded === undefined) return this.fail(5);
       rt().ensureStringFits(result.length + encoded.length + 1);
       result += encoded;

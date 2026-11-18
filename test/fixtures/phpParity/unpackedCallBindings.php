@@ -18,7 +18,7 @@ var_dump($items[0]);
 $items = new ArrayIterator(["value" => 2, "tail" => 3]);
 mutate(...$items);
 var_dump($items["value"], $items["tail"]);
-function reorder($first, &$second) { $second = $first; }
+function reorder($first, &$second) {}
 $first = ["second" => 0];
 reorder(...$first, ...[5]);
 var_dump($first);

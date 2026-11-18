@@ -1,10 +1,11 @@
-// code-gauge-allow-file fileNcss 558 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 603 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
 import { lower } from './bytes';
 import { valueName } from './conversions';
 import { throwError, withPendingException } from './errors';
+import { decodeLiteral } from './literals';
 import { share } from './places';
 import {
   FatalError,
@@ -123,6 +124,7 @@ export function resetCallStack(): void {
 export function functionDisplayName(target: CallTarget): string {
   const { fn, method } = target;
   if (method) return `${method.scope.name}::${method.name}`;
+  if (fn.kind === 'user' && fn.decl.isPropertyHook) return `${target.scope?.name ?? fn.decl.className}::${fn.name}`;
   if (fn.kind === 'user' && fn.decl.isClosure) return `${target.scope ? `${target.scope.name}::` : ''}${fn.decl.name}`;
   return fn.name;
 }
@@ -138,6 +140,14 @@ function recordFor(target: CallTarget, args: Value[], row: number | undefined): 
       row,
     };
   }
+  if (fn.kind === 'user' && fn.decl.isPropertyHook)
+    return {
+      name: fn.name,
+      className: target.scope?.name ?? fn.decl.className,
+      type: thisObj ? '->' : '::',
+      args,
+      row,
+    };
   if (fn.kind === 'user' && fn.decl.isClosure) {
     const closureData = target.closure?.internal as ClosureData | undefined;
     const scope = closureData?.scope;
@@ -168,7 +178,6 @@ interface NativeHolders {
   argumentCount: number;
 }
 
-// code-gauge-allow functionNcss 55 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], row: number | undefined): Value {
   const runtime = rt();
   runtime.spend();
@@ -184,7 +193,10 @@ function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], 
       const index = fn.params.findIndex((param) => param.name === arg.name && !param.variadic);
       if (index !== -1) passed[index] = arg.ref?.v ?? arg.v;
     }
-    record = recordFor(target, passed, nativeDepth > 0 && row === undefined ? undefined : row);
+    const dense = Array.from({ length: passed.length }, (_, index) =>
+      index in passed ? passed[index] : nativeDefault(fn.params[index]?.nativeDefault)
+    );
+    record = recordFor(target, dense, nativeDepth > 0 && row === undefined ? undefined : row);
     callStack.push(record);
     nativeDepth++;
   }
@@ -202,8 +214,18 @@ function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], 
   let failed = false;
   let failure: unknown;
   try {
-    const { values, refs, named } = bindNative(fn, args, name, strict);
+    const { values, refs, named } = bindNative(fn, args, name, strict, record);
+    for (let index = 0; index < values.length; index++) {
+      if (values[index] === undefined && fn.params[index]?.byRef)
+        refs[index] = Ref.temporary(nativeDefault(fn.params[index].nativeDefault));
+    }
     if (record) record.argumentRefs = refs;
+    for (const ref of refs) {
+      if (!ref || held.references.includes(ref)) continue;
+      ref.rc++;
+      held.references.push(ref);
+      held.values.splice(held.argumentCount++, 0, ref);
+    }
     result = runNative(runtime, fn, {
       args: values,
       refs,
@@ -234,6 +256,27 @@ function invokeNative(target: CallTarget, fn: NativeFunction, args: ArgValue[], 
   }
   runtime.lastReturnRef = undefined;
   return result;
+}
+
+function nativeDefault(defaultText: string | undefined): Value {
+  const text = defaultText?.trim();
+  if (!text || text === 'UNKNOWN' || text === 'null') return null;
+  if (text === 'true' || text === 'false') return text === 'true';
+  if (text === '[]') return new PhpArray();
+  if (/^-?\d+$/.test(text)) return BigInt(text);
+  if (/^-?\d+\.\d+(?:e[+-]?\d+)?$/i.test(text)) return Number(text);
+  if (text.startsWith('"') || text.startsWith("'")) return decodeLiteral(text.slice(1, -1), text[0] === '"');
+  if (text.includes('|')) {
+    let bits = 0n;
+    for (const part of text.split('|')) bits |= nativeDefault(part.trim()) as bigint;
+    return bits;
+  }
+  const separator = text.indexOf('::');
+  if (separator !== -1) {
+    const cls = rt().classes.get(lower(text.slice(0, separator)));
+    return cls?.findConst(text.slice(separator + 2))?.value ?? null;
+  }
+  return rt().constants.get(text) ?? null;
 }
 
 function releaseNativeValues(runtime: Runtime, held: NativeHolders, pending?: PhpThrow): void {
@@ -281,15 +324,29 @@ function bindNative(
   fn: NativeFunction,
   args: ArgValue[],
   name: string,
-  strict: boolean
+  strict: boolean,
+  record?: CallRecord
 ): { values: Value[]; refs: (Ref | undefined)[]; named?: Map<string, Value> } {
   const params = fn.params;
   const values: Value[] = [];
   const refs: (Ref | undefined)[] = [];
+  if (record) record.argumentRefs = refs;
+  const append = (value: Value | undefined, ref?: Ref): void => {
+    const index = values.length;
+    values.push(value as Value);
+    refs.push(ref);
+    if (record && index < record.args.length && value !== undefined) record.args[index] = value;
+  };
   const named = checkNamedArgs(params, args);
   const variadic = params.at(-1)?.variadic ? params.at(-1) : undefined;
   const fixed = variadic ? params.length - 1 : params.length;
   const positional = positionalArguments(args);
+  let lastGiven = positional.length - 1;
+  for (const arg of args)
+    lastGiven = Math.max(
+      lastGiven,
+      params.findIndex((param) => param.name === arg.name)
+    );
   const required = params.filter((param) => !param.optional && !param.variadic).length;
   const given = args.filter((arg) => arg.name === undefined || !named?.has(arg.name)).length;
   if (positional.length < required && args.every((arg) => arg.name === undefined)) {
@@ -312,8 +369,7 @@ function bindNative(
     if (param.variadic) {
       for (let rest = index; rest < positional.length; rest++) {
         const arg = positional[rest];
-        values.push(param.byRef ? (arg.ref?.v ?? arg.v) : coerceArg(param, rest, arg.v, strict, name));
-        refs.push(arg.ref);
+        append(param.byRef ? (arg.ref?.v ?? arg.v) : coerceArg(param, rest, arg.v, strict, name), arg.ref);
       }
       break;
     }
@@ -322,19 +378,21 @@ function bindNative(
       if (!param.optional) {
         throwError('ArgumentCountError', `${name}(): Argument #${index + 1} ($${param.name}) not passed`);
       }
-      values.push(undefined as unknown as Value);
-      refs.push(undefined);
+      if (param.nativeDefault === 'UNKNOWN' && index < lastGiven)
+        throwError(
+          'ArgumentCountError',
+          `${name}(): Argument #${index + 1} ($${param.name}) must be passed explicitly, because the default value is not known`
+        );
+      append(undefined);
       continue;
     }
     if (param.byRef) {
       const value = arg.ref ? arg.ref.v : arg.v;
       // PHP checks the type of a by-reference argument without converting the variable.
       coerceArg(param, index, value, true, name);
-      values.push(value);
-      refs.push(arg.ref);
+      append(value, arg.ref);
     } else {
-      values.push(coerceArg(param, index, arg.v, strict, name));
-      refs.push(undefined);
+      append(coerceArg(param, index, arg.v, strict, name));
     }
   }
   // Trailing parameters left out stay undefined, so natives can tell them from an explicit null.
@@ -716,8 +774,6 @@ function bindParams(
         const anyNamed = args.some((candidate) => candidate.name !== undefined);
         const passed = callStack.at(-1)?.args.length ?? positional.length;
         if (anyNamed && passed >= required) {
-          const record = callStack.at(-1);
-          if (record) record.args = record.args.slice(0, params.length);
           throwError('ArgumentCountError', `${name}(): Argument #${index + 1} ($${param.name}) not passed`);
         }
         const hasOptional = params.some((other) => other.optional && !other.variadic);
@@ -832,7 +888,7 @@ export function parseSignature(signature: string): { name: string; params: Param
     for (const part of splitParams(inside)) {
       const match = /^(?:([^$&.]+?)\s+)?(&~?)?(\.\.\.)?\$(\w+)(\s*=\s*(.+))?$/.exec(part.trim());
       if (!match) throw new Error(`Bad signature part: ${part} in ${signature}`);
-      const [, typeText, ref, dots, paramName, defaultPart] = match;
+      const [, typeText, ref, dots, paramName, defaultPart, defaultText] = match;
       params.push({
         name: paramName,
         type: typeText ? parseTypeText(typeText.trim()) : undefined,
@@ -840,6 +896,7 @@ export function parseSignature(signature: string): { name: string; params: Param
         preferRef: ref === '&~',
         variadic: dots === '...',
         optional: defaultPart !== undefined || dots === '...',
+        nativeDefault: defaultText,
       });
     }
   }

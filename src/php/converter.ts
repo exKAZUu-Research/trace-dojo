@@ -4,6 +4,7 @@ import type { Node } from '@willbooster/web-tree-sitter';
 import type { Arg, ArrayItem, CatchClause, Expr, ListItem, MatchArm, Program, Stmt, SwitchCase } from './ast';
 import { collectMainVars, collectVariables, hasReferenceItem, onlyCalls, validateReads } from './astAnalysis';
 import { enc, lower } from './bytes';
+import { foldedDefaultType } from './constantDefaults';
 import { formatFloat } from './conversions';
 import { MAGIC_RUNTIME } from './converterBase';
 import { DeclarationConverter } from './declarationConverter';
@@ -837,8 +838,14 @@ export class Converter extends DeclarationConverter {
         const [scope, nameNode] = node.namedChildren.filter((child) => child.type !== 'comment');
         const cls = this.classRef(scope);
         const name = this.nameText(nameNode);
-        const literal = lower(name) === 'class' && cls.k === 'expr' ? parserClassName(cls.e) : undefined;
+        const literal = lower(name) === 'class' && cls.k === 'expr' ? parserScalar(cls.e) : undefined;
+        if (literal !== undefined && typeof literal !== 'string') this.error(scope, 'Illegal class name');
+        if (lower(name) === 'class' && cls.k === 'expr' && literal === undefined && compilerClassConstant(cls.e)) {
+          const type = foldedDefaultType(cls.e);
+          if (type !== undefined) this.error(scope, `Cannot use "::class" on ${type}`);
+        }
         if (literal === undefined) return { k: 'cconst', cls, name, row };
+        if (typeof literal !== 'string') return { k: 'cconst', cls, name, row };
         const word = lower(literal);
         if (word === 'self' || word === 'parent' || word === 'static') {
           this.checkClassScope(scope, word);
@@ -1063,7 +1070,6 @@ export class Converter extends DeclarationConverter {
       if (word === 'eval') this.unsupported(node, 'eval');
       if (word === 'die' || word === 'exit') {
         const { args, fcc } = this.args(argumentsNode);
-        if (!fcc) return { k: 'exit', e: args[0]?.e, row };
         return { k: 'call', fn: { name: 'exit' }, args, fcc, row };
       }
       if (word === '__halt_compiler') this.unsupported(node, '__halt_compiler');
@@ -1494,9 +1500,22 @@ function encodingLiteral(node: Node, value: Expr): boolean {
   );
 }
 
-function parserClassName(expression: Expr): string | undefined {
-  const literal = parserScalar(expression);
-  return typeof literal === 'string' ? literal : undefined;
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function compilerClassConstant(expression: Expr): boolean {
+  if (expression.k === 'lit' || expression.k === 'cconst') return true;
+  if (expression.k === 'unary') return compilerClassConstant(expression.e);
+  if (expression.k === 'bin') {
+    if (expression.op === '??' || !compilerClassConstant(expression.l)) return false;
+    const left = foldedDefaultType(expression.l);
+    if (['&&', 'and'].includes(expression.op) && (left === 'false' || left === 'null')) return true;
+    if (['||', 'or'].includes(expression.op) && left === 'true') return true;
+    return compilerClassConstant(expression.r);
+  }
+  if (expression.k === 'array')
+    return expression.items.every(
+      (item) => !item.byRef && (!item.key || compilerClassConstant(item.key)) && compilerClassConstant(item.value)
+    );
+  return false;
 }
 
 function parserScalar(expression: Expr): string | bigint | number | undefined {

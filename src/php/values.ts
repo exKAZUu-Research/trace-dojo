@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 993 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 995 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { ArrayTable } from './arrayTable';
@@ -188,7 +188,7 @@ export class PhpArray {
       slot.assign(value);
     } else {
       this.insert(key, value);
-      if (typeof key === 'bigint' && key >= this.nextFree) this.nextFree = key + 1n;
+      if (typeof key === 'bigint' && key >= this.nextFree) this.nextFree = key === INT_MAX ? INT_MAX : key + 1n;
     }
     if (value !== null && typeof value === 'object') this.composite = true;
     if (!(slot instanceof Ref)) dropped(slot);
@@ -198,7 +198,7 @@ export class PhpArray {
     const old = this.map.get(key);
     if (old instanceof Ref && old !== slot) old.rc--;
     this.insert(key, slot);
-    if (typeof key === 'bigint' && key >= this.nextFree) this.nextFree = key + 1n;
+    if (typeof key === 'bigint' && key >= this.nextFree) this.nextFree = key === INT_MAX ? INT_MAX : key + 1n;
     if (slot !== null && typeof slot === 'object') this.composite = true;
     dropped(old);
   }
@@ -208,12 +208,11 @@ export class PhpArray {
     return this.nextFree === INT_MIN ? 0n : this.nextFree;
   }
 
-  /** Appends a value, returning false when the next key would pass the largest integer. */
   append(value: Value | Ref): boolean {
-    if (this.nextFree > INT_MAX) return false;
     const key = this.appendKey;
+    if (this.map.has(key)) return false;
     this.insert(key, value);
-    this.nextFree = key + 1n;
+    this.nextFree = key === INT_MAX ? INT_MAX : key + 1n;
     if (value !== null && typeof value === 'object') this.composite = true;
     return true;
   }
@@ -245,7 +244,7 @@ export class PhpArray {
       this.trackSlot(key, slot);
       if (slot !== null && typeof slot === 'object') this.composite = true;
     }
-    this.nextFree = nextFree;
+    this.nextFree = nextFree > INT_MAX ? INT_MAX : nextFree;
     this.invalidate();
   }
 
@@ -465,6 +464,7 @@ export interface Param {
   optional: boolean;
   /** Whether a null default makes the type nullable implicitly, as `int $x = null` does. */
   implicitNullable?: boolean;
+  nativeDefault?: string;
 }
 
 export type TypeDecl =
@@ -567,6 +567,7 @@ export class PhpClass {
   ownInterfaces: PhpClass[] = [];
   isAbstract = false;
   isFinal = false;
+  isCloneable = true;
   isReadonly = false;
   consts = new Map<string, ClassConst>();
   staticProps = new Map<string, { ref: Ref; decl: PropDecl }>();
