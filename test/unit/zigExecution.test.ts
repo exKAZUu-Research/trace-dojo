@@ -3886,6 +3886,19 @@ std.debug.print("{} {} {}",.{view.len,s.len,empty[0..].len});}`;
   });
 });
 
+test.each(['log2', 'log10'])('%s checks required comptime results inside runtime branches', (name) => {
+  const source = `const std=@import("std");pub fn main()void{var flag=false;_=&flag;if(flag){_=std.math.${name}(0);}std.debug.print("ok",.{});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: expect.stringContaining('コンパイルのときの計算が失敗しました') }],
+  });
+  const typedSource = `const std=@import("std");pub fn main()void{var x:u8=0;_=&x;_=std.math.${name}(x);}`;
+  expect(executeProgram('zig', typedSource)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'panic: reached unreachable code',
+  });
+});
+
 test.each(['log2', 'log10'])('large comptime integer %s is bounded without repeated division', (name) => {
   const source = `const std=@import("std");pub fn main()void{const n=std.math.${name}(0x${'f'.repeat(250_000)});_=n;}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });

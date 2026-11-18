@@ -1,3 +1,4 @@
+import { CompileError } from '../../interpreter/diagnostics';
 import { transferCost } from '../allocation';
 import type { Expression, Span } from '../ast';
 import { BigFloat, compareFloats } from '../floats';
@@ -146,6 +147,7 @@ export function computed(
       if (args.every((arg) => arg.known)) return known(type, result.value, span);
     } catch (error) {
       if (!(error instanceof ZigPanic)) throw error;
+      throw new CompileError([{ row: span.row, message: `コンパイルのときの計算が失敗しました: ${error.text}` }]);
     }
   }
   const evaluators = valueEvaluators(args);
