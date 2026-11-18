@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 727 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 729 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -1104,7 +1104,7 @@ export abstract class DeclarationConverter extends ConverterBase {
   }
 
   /** Checks the declaration of a magic method as PHP's zend_check_magic_method_implementation does, in its order. */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Checks PHP's rules for each magic method in PHP's order, which decides the error shown.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Checks PHP's rules for each magic method in PHP's order, which decides the error shown.
   private checkMagicMethod(
     member: Node,
     className: string,
@@ -1120,6 +1120,8 @@ export abstract class DeclarationConverter extends ConverterBase {
     else if (rule.args !== undefined && fn.params.length !== rule.args) {
       fail(`Method ${where} must take exactly ${rule.args} argument${rule.args === 1 ? '' : 's'}`);
     }
+    if (rule.args !== undefined && fn.params.some((param) => param.byRef))
+      fail(`Method ${where} cannot take arguments by reference`);
     if (rule.isStatic === false && modifiers.isStatic) fail(`Method ${where} cannot be static`);
     if (rule.isStatic === true && !modifiers.isStatic) fail(`Method ${where} must be static`);
     if (rule.isPublic && modifiers.visibility !== undefined && modifiers.visibility !== 'public') {

@@ -182,6 +182,7 @@ function detachAndRewind(object: PhpObject, target: PhpObject): void {
 
 defineClass({
   name: 'SplObjectStorage',
+  compare: compareObjectStorage,
   interfaces: ['Countable', 'SeekableIterator', 'Traversable', 'Iterator', 'Serializable', 'ArrayAccess'],
   methods: [
     {
@@ -305,6 +306,19 @@ defineClass({
   ],
   createInternal: (object) => new ObjectStorage(object, true),
 });
+
+function* compareObjectStorage(a: PhpObject, b: PhpObject): Generator<[Value, Value, 'order'], number> {
+  if (a.cls.name !== 'SplObjectStorage' || b.cls.name !== 'SplObjectStorage') return 1;
+  const left = storageOf(a).entries;
+  const right = storageOf(b).entries;
+  if (left.size !== right.size) return Math.sign(left.size - right.size);
+  for (const [key, entry] of left) {
+    const other = right.get(key);
+    if (other === undefined) return 1;
+    yield [entry.info, other.info, 'order'];
+  }
+  return 0;
+}
 
 // MultipleIterator ---------------------------------------------------------------------------------------------------
 

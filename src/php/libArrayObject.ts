@@ -399,6 +399,7 @@ const flagConstants = { STD_PROP_LIST: BigInt(STD_PROP_LIST), ARRAY_AS_PROPS: Bi
 
 defineClass({
   name: 'ArrayIterator',
+  compare: compareArrayStorage,
   interfaces: ['SeekableIterator', 'Traversable', 'Iterator', 'ArrayAccess', 'Serializable', 'Countable'],
   consts: flagConstants,
   methods: [...arrayMethods('ArrayIterator'), ...iteratorMethods],
@@ -406,6 +407,7 @@ defineClass({
 });
 defineClass({
   name: 'ArrayObject',
+  compare: compareArrayStorage,
   interfaces: ['IteratorAggregate', 'Traversable', 'ArrayAccess', 'Serializable', 'Countable'],
   consts: flagConstants,
   methods: [
@@ -440,6 +442,11 @@ defineClass({
   ],
   createInternal: (object) => holdStorage(object, new ArrayStorage('ArrayObject', new PhpArray())),
 });
+
+function* compareArrayStorage(a: PhpObject, b: PhpObject): Generator<[Value, Value, 'order'], undefined> {
+  yield [(a.internal as ArrayStorage).array, (b.internal as ArrayStorage).array, 'order'];
+  return undefined;
+}
 
 /** The current element of a RecursiveArrayIterator when it has children, which are arrays and, unless the flags say otherwise, objects. */
 function childEntry(object: PhpObject): Value | undefined {

@@ -578,6 +578,10 @@ export interface ClassConst {
 }
 
 export type ClassKind = 'class' | 'interface' | 'trait' | 'enum';
+export type NativeObjectComparison = (
+  left: PhpObject,
+  right: PhpObject
+) => number | Generator<[Value, Value, 'order'], number | undefined>;
 
 export class PhpClass {
   parent?: PhpClass;
@@ -608,6 +612,7 @@ export class PhpClass {
   isAnonymous = false;
   /** Native construction of the internal state a builtin class keeps. */
   createInternal?: (object: PhpObject) => unknown;
+  compare?: NativeObjectComparison;
   /** Whether the class's static properties have their initial values. */
   staticsInitialized = false;
   traits: PhpClass[] = [];
@@ -955,6 +960,7 @@ export class PhpObject {
 /** The internal state of a closure object. */
 export interface ClosureData {
   fn: Callable;
+  isCallable?: true;
   /** The variables `use` captured, by name. */
   bound: Map<string, Ref>;
   thisObj?: PhpObject;

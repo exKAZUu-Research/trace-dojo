@@ -1149,6 +1149,24 @@ test.each([
   }
 });
 
+test.each([
+  ['try{$arr=[...1];}catch(TypeError $e){echo "caught";}', 'int given'],
+  ['function f($arr=[...null]){}', 'null given'],
+  ['class C{const ARRAY=[...true];}', 'true given'],
+])('rejects non-array unpacking in constant array literals: %s', (source, detail) => {
+  const result = run(`<?php echo 'never'; ${source}`);
+  expect(result.kind).toBe('compileError');
+  if (result.kind === 'compileError')
+    expect(result.diagnostics[0]?.message).toContain(`Only arrays and Traversables can be unpacked, ${detail}`);
+});
+
+test('rejects references in the fixed arity signatures of magic methods', () => {
+  const result = run("<?php echo 'never'; class C { function __get(&$name) {} }");
+  expect(result.kind).toBe('compileError');
+  if (result.kind === 'compileError')
+    expect(result.diagnostics[0]?.message).toContain('Method C::__get() cannot take arguments by reference');
+});
+
 test('mutates arrays held by many objects within the operation limit', () => {
   const source =
     '<?php class Student{public array $scores=[];}$students=[];for($i=0;$i<2000;$i++)$students[]=new Student;foreach($students as $s){$s->scores[]=1;$s->scores[]=2;}$sum=0;foreach($students as $s)$sum+=array_sum($s->scores);echo $sum;';

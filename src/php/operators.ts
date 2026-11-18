@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 478 -- PHP operators share coercion and comparison helpers.
+// code-gauge-allow-file fileNcss 489 -- PHP operators share coercion and comparison helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import {
   boolValue,
@@ -450,7 +450,7 @@ function walkComparison(a: Value, b: Value, mode: ComparisonMode): number {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function comparisonStep(a: Value, b: Value, mode: ComparisonMode): number | ComparisonFrame {
   if (a === b) return typeof a === 'number' && Number.isNaN(a) ? 1 : 0;
   if (a instanceof PhpArray && b instanceof PhpArray) {
@@ -459,8 +459,10 @@ function comparisonStep(a: Value, b: Value, mode: ComparisonMode): number | Comp
   }
   if (mode === 'strict') return 1;
   if (a instanceof PhpObject && b instanceof PhpObject) {
-    if (a.cls !== b.cls) return 1;
-    return { owner: a, pairs: objectComparisonPairs(a, b) };
+    const native = a.cls.compare && a.cls.compare === b.cls.compare ? a.cls.compare(a, b) : undefined;
+    if (typeof native === 'number') return native;
+    if (native === undefined && a.cls !== b.cls) return 1;
+    return { owner: a, pairs: objectComparisonPairs(a, b, native) };
   }
   return compareScalar(a, b);
 }
@@ -480,7 +482,20 @@ function* arrayComparisonPairs(a: PhpArray, b: PhpArray, mode: ComparisonMode): 
   return 0;
 }
 
-function* objectComparisonPairs(a: PhpObject, b: PhpObject): Generator<ComparisonPair, number> {
+function* objectComparisonPairs(
+  a: PhpObject,
+  b: PhpObject,
+  native?: Generator<[Value, Value, 'order'], number | undefined>
+): Generator<ComparisonPair, number> {
+  if (native !== undefined) {
+    const result = yield* native;
+    if (result !== undefined) return result;
+  }
+  if (a.cls !== b.cls) return 1;
+  return yield* propertyComparisonPairs(a, b);
+}
+
+function* propertyComparisonPairs(a: PhpObject, b: PhpObject): Generator<ComparisonPair, number> {
   const dynamic = hasDynamicProps(a) || hasDynamicProps(b);
   if (dynamic) {
     const leftCount = presentPropertyCount(a);

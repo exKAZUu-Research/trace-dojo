@@ -5,7 +5,8 @@ import { addConst, applyTraitConstants, evaluateInClass, linkInterfaceConstants 
 export { canAccessConstant, classConstant, setClassEvaluator } from './classConstants';
 import { lower } from './bytes';
 import { type ArgValue, asInternal, invoke } from './calls';
-import { debugType, normalizeKeyString, toBool, valueName } from './conversions';
+import { foldedConstant } from './constantDefaults';
+import { debugType, formatFloat, normalizeKeyString, toBool, valueName } from './conversions';
 import { deprecated, notice, throwError, warn } from './errors';
 import { strictEquals } from './operators';
 import { share } from './places';
@@ -54,11 +55,15 @@ export function requireClass(name: string): PhpClass {
 
 /** Whether a class declaration can be bound before the program runs, as PHP's early binding does. */
 export function canDeclareEarly(decl: ClassDecl, declared: Set<string>): boolean {
-  if (decl.interfaces.length > 0 || decl.traits.length > 0) return false;
+  if (decl.interfaces.length > 0 || decl.traits.length > 0 || declaresStringConversion(decl)) return false;
   if (decl.kind === 'interface' || decl.kind === 'trait') return decl.interfaces.length === 0;
   if (!decl.parent) return true;
   const parent = lower(decl.parent);
   return declared.has(parent) || findClass(parent)?.isUser === false;
+}
+
+function declaresStringConversion(decl: ClassDecl): boolean {
+  return decl.methods.some((method) => lower(method.fn.name) === '__tostring');
 }
 
 // Declaration ----------------------------------------------------------------------------------------------------------
@@ -100,10 +105,7 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
   }
   const declared = [...decl.interfaces];
   // A class that declares __toString implements Stringable, as if it had named it last.
-  if (
-    decl.methods.some((method) => lower(method.fn.name) === '__tostring') &&
-    !declared.some((name) => lower(name) === 'stringable')
-  ) {
+  if (declaresStringConversion(decl) && !declared.some((name) => lower(name) === 'stringable')) {
     declared.push('Stringable');
   }
   for (const name of declared) {
@@ -184,6 +186,7 @@ function inherit(cls: PhpClass, parent: PhpClass): void {
   for (const [name, decl] of parent.propByName) cls.propByName.set(name, decl);
   for (const [name, constant] of parent.consts) cls.consts.set(name, constant);
   cls.createInternal = parent.createInternal;
+  cls.compare = parent.compare;
 }
 
 function propertyKey(cls: PhpClass, name: string, visibility: Visibility): string {
@@ -797,7 +800,7 @@ function signatureText(method: Method): string {
       if (param.optional && !param.variadic) {
         const defaultExpr =
           fn.kind === 'user' ? fn.decl.params.find((other) => other.name === param.name)?.defaultExpr : undefined;
-        text += ` = ${defaultExpr ? defaultText(defaultExpr) : '<default>'}`;
+        text += ` = ${defaultExpr ? defaultText(defaultExpr, method) : (param.nativeDefault ?? '<default>')}`;
       }
       return text;
     })
@@ -806,15 +809,33 @@ function signatureText(method: Method): string {
   return `${fn.kind === 'user' && fn.decl.byRefReturn ? '& ' : ''}${method.scope.name}::${method.name}(${params})${returnType ? `: ${describeType(returnType, method.scope)}` : ''}`;
 }
 
-function defaultText(e: Expr): string {
-  if (e.k === 'lit') {
-    if (e.v === null) return 'null';
-    if (typeof e.v === 'string') return `'${e.v}'`;
-    if (typeof e.v === 'boolean') return e.v ? 'true' : 'false';
-    return String(e.v);
-  }
-  if (e.k === 'array') return '[]';
+function defaultText(e: Expr, method: Method): string {
+  const value = e.k === 'magic' ? methodMagicDefault(e.name, method) : foldedConstant(e, {});
+  if (value instanceof Map) return value.size === 0 ? '[]' : '[...]';
+  if (typeof value === 'string') return `'${value.slice(0, 10)}${value.length > 10 ? '...' : ''}'`;
+  if (typeof value === 'number') return formatFloat(value);
+  if (value !== undefined) return String(value);
+  if (e.k === 'const') return e.name.name;
+  if (e.k === 'cconst' && e.cls.k !== 'expr') return `${e.cls.k === 'named' ? e.cls.name : e.cls.k}::${e.name}`;
   return '<expression>';
+}
+
+function methodMagicDefault(name: Extract<Expr, { k: 'magic' }>['name'], method: Method): string | undefined {
+  const className = (method.fn.kind === 'user' ? method.fn.decl.className : undefined) ?? method.scope.name;
+  switch (name) {
+    case '__CLASS__': {
+      return method.scope.kind === 'trait' ? undefined : method.scope.name;
+    }
+    case '__FUNCTION__': {
+      return method.fn.name;
+    }
+    case '__METHOD__': {
+      return `${className}::${method.fn.name}`;
+    }
+    case '__TRAIT__': {
+      return className && findClass(className)?.kind === 'trait' ? className : '';
+    }
+  }
 }
 
 // Objects ------------------------------------------------------------------------------------------------------------

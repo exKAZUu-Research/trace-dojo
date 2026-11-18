@@ -21,6 +21,7 @@ const MISSING_TOKEN_NAMES: Record<string, string> = {
 export interface ParsedProgram {
   program: Program;
   notices: CompileNotice[];
+  conversionError?: CompileError;
 }
 
 /**
@@ -30,9 +31,18 @@ export interface ParsedProgram {
  */
 export function parsePhp(source: string, trace?: TraceOptions): ParsedProgram {
   const atomicRows = new Set(trace?.atomicAnnotations.keys());
-  return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) => {
-    const converter = new Converter(source, atomicRows);
-    const program = converter.convertProgram(root);
+  const ignoredPrefix = shebangEnd(source);
+  const text = hideShebang(source, ignoredPrefix);
+  return parseSource(parser, text, MISSING_TOKEN_NAMES, (root) => {
+    const converter = new Converter(text, atomicRows, ignoredPrefix);
+    let program: Program;
+    try {
+      program = converter.convertProgram(root);
+    } catch (error) {
+      if (!(error instanceof CompileError)) throw error;
+      program = converter.compiledPrefix();
+      return { program, notices: converter.notices, conversionError: error };
+    }
     for (const row of atomicRows) {
       if (!converter.claimedAtomicRows.has(row)) throw new CompileError([{ row, message: misplacedAtomicMessage }]);
     }
@@ -46,9 +56,21 @@ const PHP_ANNOTATION_PATTERN = /(?:\/\/|#)[ \t]*atomic[ \t]*$/;
 /** The `// atomic` and `# atomic` annotations of a program, read from its line comments. */
 export function findPhpTraceAnnotations(source: string): TraceAnnotation[] {
   return traceAnnotationsIn(
-    commentTokens(parser, source).filter(
+    commentTokens(parser, hideShebang(source, shebangEnd(source))).filter(
       (comment) => comment.text.startsWith('//') || (comment.text.startsWith('#') && !comment.text.startsWith('#['))
     ),
     PHP_ANNOTATION_PATTERN
   );
+}
+
+function shebangEnd(source: string): number {
+  if (!source.startsWith('#!')) return 0;
+  const end = source.indexOf('\n');
+  return end === -1 ? source.length : end + 1;
+}
+
+function hideShebang(source: string, end: number): string {
+  if (end === 0) return source;
+  const hasNewline = source[end - 1] === '\n';
+  return ' '.repeat(end - Number(hasNewline)) + (hasNewline ? '\n' : '') + source.slice(end);
 }

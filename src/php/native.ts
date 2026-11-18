@@ -6,6 +6,7 @@ import {
   type Method,
   type NativeContext,
   type NativeFunction,
+  type NativeObjectComparison,
   PhpArray,
   PhpClass,
   PhpObject,
@@ -126,6 +127,7 @@ export interface ClassDefinition {
   consts?: Record<string, Value>;
   methods?: NativeMethod[];
   createInternal?: (object: PhpObject) => unknown;
+  compare?: NativeObjectComparison;
 }
 
 export function nativeClassDefinition(name: string): ClassDefinition | undefined {
@@ -151,7 +153,7 @@ export function installNatives(): void {
 }
 
 // code-gauge-allow functionCognitiveComplexity 24 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 44 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 45 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
 function buildClass(definition: ClassDefinition): PhpClass {
   const runtime = rt();
   const cls = new PhpClass(definition.name, definition.kind ?? 'class');
@@ -175,6 +177,7 @@ function buildClass(definition: ClassDefinition): PhpClass {
   }
   cls.interfaces = cls.ownInterfaces.length > 0 ? [...cls.ownInterfaces] : (cls.parent?.interfaces.toReversed() ?? []);
   if (definition.createInternal) cls.createInternal = definition.createInternal;
+  cls.compare = definition.compare ?? cls.parent?.compare;
   for (const prop of definition.props ?? []) {
     const decl: PropDecl = {
       name: prop.name,

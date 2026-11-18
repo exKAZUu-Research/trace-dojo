@@ -785,6 +785,7 @@ function makeCallableClosure(target: CallTarget, omitParameters = false): PhpObj
   const object = runtime.newObject(closureClass);
   const data: ClosureData = {
     fn: target.fn,
+    isCallable: true,
     bound: new Map(),
     thisObj: target.thisObj,
     scope: target.scope,

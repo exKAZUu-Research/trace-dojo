@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 537 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 539 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
 import type { Expr, FunctionDecl, Program, Stmt } from './ast';
 import { nestedBodies } from './astAnalysis';
@@ -35,36 +36,43 @@ type Completion =
 // Program --------------------------------------------------------------------------------------------------------------
 
 /** Declares the functions and classes PHP binds before running, then runs the program's statements. */
-export function runStatements(program: Program): void {
+export function runStatements(program: Program, conversionError?: CompileError): void {
   const runtime = rt();
   runtime.strictTypes = program.strictTypes;
-  hoist(program.body);
-  for (const notice of runtime.notices) {
-    emitError(notice.level === 'Deprecated' ? E_DEPRECATED : E_WARNING, notice.message, notice.row);
-  }
+  hoist(program.body, conversionError);
+  if (conversionError) throw conversionError;
   const completion = execList(program.body);
   if (completion?.t === 'goto') throw new Error(`Unresolved goto ${completion.label}`);
 }
 
 const hoisted = new WeakSet<Stmt>();
 
-function hoist(body: Stmt[]): void {
+function hoist(body: Stmt[], conversionError?: CompileError): void {
   const runtime = rt();
+  const declared = new Set<string>();
+  let noticeIndex = 0;
+  const publishNotices = (through: number): void => {
+    while (runtime.notices[noticeIndex]?.row <= through) {
+      const notice = runtime.notices[noticeIndex++];
+      emitError(notice.level === 'Deprecated' ? E_DEPRECATED : E_WARNING, notice.message, notice.row);
+    }
+  };
   for (const statement of body) {
     if (statement.k === 'func') {
+      publishNotices(statement.decl.endRow);
       declareFunction(statement.decl);
       hoisted.add(statement);
+      continue;
     }
-  }
-  const declared = new Set<string>();
-  for (const statement of body) {
     if (statement.k !== 'class') continue;
+    publishNotices(statement.decl.endRow);
     if (runtime.classes.has(lower(statement.decl.name)) || !canDeclareEarly(statement.decl, declared)) continue;
     runtime.row = statement.row;
     declareClass(statement.decl, statement.row);
     declared.add(lower(statement.decl.name));
     hoisted.add(statement);
   }
+  if (!conversionError) publishNotices(Number.POSITIVE_INFINITY);
 }
 
 function declareFunction(decl: FunctionDecl): void {

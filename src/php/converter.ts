@@ -5,7 +5,7 @@ import type { Arg, ArrayItem, CatchClause, Expr, ListItem, MatchArm, Program, St
 import { collectMainVars, collectVariables, hasReferenceItem, onlyCalls, validateReads } from './astAnalysis';
 import { oneArgumentBuiltinOpcodes, usesSimpleSprintf } from './builtinCompiler';
 import { enc, lower } from './bytes';
-import { type Constant, constantTruth } from './constantDefaults';
+import { type Constant, constantTruth, constantTypeName } from './constantDefaults';
 import { formatFloat, isNumericString, NAN_BOOL_WARNING, NAN_STRING_WARNING } from './conversions';
 import { isReservedClassName, MAGIC_RUNTIME } from './converterBase';
 import { DeclarationConverter } from './declarationConverter';
@@ -41,36 +41,56 @@ const VARIABLE_OPCODE_RESULTS = new Set<Expr['k']>([
 export class Converter extends DeclarationConverter {
   private declaredSymbols = new Map<string, Map<string, string>>();
   private readonly staticNames = new WeakMap<object, Set<string>>();
+  private readonly body: Stmt[] = [];
+
+  constructor(
+    source: string,
+    atomicRows: ReadonlySet<number>,
+    private readonly ignoredPrefix: number
+  ) {
+    super(source, atomicRows);
+  }
+
   convertProgram(root: Node): Program {
     this.checkNamespaces(root);
-    const body: Stmt[] = [];
     for (const child of root.namedChildren) {
-      if (child.type === 'text') body.push({ k: 'inline', text: enc(child.text), row: child.startPosition.row });
-      else if (!['php_tag', 'php_end_tag', 'comment'].includes(child.type)) body.push(...this.statement(child, true));
+      if (child.type === 'text') {
+        const text = this.source.slice(Math.max(this.ignoredPrefix, child.startIndex), child.endIndex);
+        if (text !== '') this.body.push({ k: 'inline', text: enc(text), row: child.startPosition.row });
+      } else if (!['php_tag', 'php_end_tag', 'comment'].includes(child.type)) {
+        this.body.push(...this.statement(child, true));
+      }
     }
-    this.checkGotos(this.fn, body);
-    validateReads(body);
+    this.checkGotos(this.fn, this.body);
+    validateReads(this.body);
     return {
-      body,
+      ...this.compiledPrefix(),
+      mainVars: [...collectMainVars(this.body)],
+    };
+  }
+
+  compiledPrefix(): Program {
+    return {
+      body: this.body,
       strictTypes: this.strictTypes,
       hasGoto: this.fn.gotos.length > 0,
-      mainVars: [...collectMainVars(body)],
+      mainVars: [],
     };
   }
 
   // Errors ------------------------------------------------------------------------------------------------------------
 
-  protected block(node: Node | null | undefined, topLevel = false): Stmt[] {
+  protected block(node: Node | null | undefined): Stmt[] {
     if (!node) return [];
     if (node.type === 'compound_statement' || node.type === 'colon_block') {
       const statements: Stmt[] = [];
       for (const child of node.namedChildren) {
         if (child.type === 'comment') continue;
-        statements.push(...this.statement(child, topLevel));
+        statements.push(...this.statement(child, false));
       }
       return statements;
     }
-    return this.statement(node, topLevel);
+    return this.statement(node, false);
   }
 
   private blockOf(nodes: Node[]): Stmt[] {
@@ -510,7 +530,9 @@ export class Converter extends DeclarationConverter {
           !topLevel ||
           node.parent?.namedChildren.some(
             (child) =>
-              child.endIndex <= node.startIndex && !['php_tag', 'comment', 'declare_statement'].includes(child.type)
+              child.endIndex <= node.startIndex &&
+              !this.ignoredText(child) &&
+              !['php_tag', 'comment', 'declare_statement'].includes(child.type)
           ) ||
           node.namedChildren.some((child) => child.type !== 'declare_directive' && child.type !== 'comment')
         ) {
@@ -531,7 +553,9 @@ export class Converter extends DeclarationConverter {
           !topLevel ||
           node.parent?.namedChildren.some(
             (child) =>
-              child.endIndex <= node.startIndex && !['php_tag', 'comment', 'declare_statement'].includes(child.type)
+              child.endIndex <= node.startIndex &&
+              !this.ignoredText(child) &&
+              !['php_tag', 'comment', 'declare_statement'].includes(child.type)
           )
         )
           this.error(node, 'Encoding declaration pragma must be the very first statement in the script');
@@ -570,8 +594,13 @@ export class Converter extends DeclarationConverter {
   }
 
   private namespaceTrivia(node: Node): boolean {
+    if (this.ignoredText(node)) return true;
     if (['php_tag', 'php_end_tag', 'comment', 'empty_statement'].includes(node.type)) return true;
     return node.type === 'text_interpolation' && this.inlineText(node) === '';
+  }
+
+  private ignoredText(node: Node): boolean {
+    return node.type === 'text' && node.endIndex <= this.ignoredPrefix;
   }
 
   private namespaceDefinition(node: Node): Stmt[] {
@@ -590,13 +619,13 @@ export class Converter extends DeclarationConverter {
     this.constImports = new Map();
     this.declaredSymbols = new Map();
     if (!body) return [];
-    const statements = this.block(body, true);
+    for (const child of body.namedChildren) this.body.push(...this.statement(child, true));
     this.namespace = '';
     this.classImports = new Map();
     this.functionImports = new Map();
     this.constImports = new Map();
     this.declaredSymbols = new Map();
-    return statements;
+    return [];
   }
 
   // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
@@ -837,7 +866,9 @@ export class Converter extends DeclarationConverter {
         return this.constant(node);
       }
       case 'array_creation_expression': {
-        return { k: 'array', items: this.compileArrayItems(node), row };
+        const items = this.compileArrayItems(node);
+        this.checkArrayUnpacking(node, items);
+        return { k: 'array', items, row };
       }
       case 'list_literal': {
         return this.listLiteral(node);
@@ -1395,6 +1426,19 @@ export class Converter extends DeclarationConverter {
     } finally {
       this.initializerContext = undefined;
     }
+  }
+
+  private checkArrayUnpacking(node: Node, items: ArrayItem[]): void {
+    if (!items.some((item) => item.spread)) return;
+    let invalid: Constant | undefined;
+    for (const item of items) {
+      if (item.byRef) return;
+      const value = this.compiledValue(item.value);
+      if (value === undefined || (item.key && this.compiledValue(item.key) === undefined)) return;
+      if (item.spread && !(value instanceof Map) && invalid === undefined) invalid = value;
+    }
+    if (invalid !== undefined)
+      this.error(node, `Only arrays and Traversables can be unpacked, ${constantTypeName(invalid)} given`);
   }
 
   // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.

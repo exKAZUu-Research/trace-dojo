@@ -138,6 +138,7 @@ function bindClosure(closure: PhpObject, newThis: Value, newScope: Value | undef
 defineClass({
   name: 'Closure',
   isFinal: true,
+  compare: compareClosures,
   methods: [
     {
       signature: 'bind(Closure $closure, ?object $newThis, object|string|null $newScope = "static"): ?Closure',
@@ -185,6 +186,20 @@ defineClass({
     },
   ],
 });
+
+function compareClosures(a: PhpObject, b: PhpObject): number {
+  const left = a.internal as ClosureData;
+  const right = b.internal as ClosureData;
+  return left.isCallable &&
+    right.isCallable &&
+    left.thisObj === right.thisObj &&
+    left.calledClass === right.calledClass &&
+    left.scope === right.scope &&
+    left.fn.kind === right.fn.kind &&
+    (left.method?.name ?? left.fn.name) === (right.method?.name ?? right.fn.name)
+    ? 0
+    : 1;
+}
 
 function turtleOf(object: PhpObject): TurtleState {
   const state = object.turtle;

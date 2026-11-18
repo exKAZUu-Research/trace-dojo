@@ -17,18 +17,12 @@ import { PhpObject } from './values';
 
 import './library';
 
-// code-gauge-allow duplicateLines 15 -- Follows the entry point that every interpreter in this repository shares.
 export function executePhpProgram(source: string, input?: ProgramInput): ProgramExecution {
-  let parsed: ParsedProgram;
   try {
-    parsed = parsePhp(source);
-  } catch (error) {
-    if (error instanceof CompileError) return { kind: 'compileError', diagnostics: error.diagnostics };
-    throw error;
-  }
-  try {
+    const parsed = parsePhp(source);
     return { kind: 'executed', ...runProgram(new Runtime(input), parsed) };
   } catch (error) {
+    if (error instanceof CompileError) return { kind: 'compileError', diagnostics: error.diagnostics };
     if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };
     throw error;
   }
@@ -47,7 +41,7 @@ export function runProgram(runtime: Runtime, parsed: ParsedProgram, onEnd?: (fra
     runtime.notices = parsed.notices;
     let uncaughtException: string | undefined;
     try {
-      uncaughtException = guard(runtime, () => runStatements(parsed.program));
+      uncaughtException = guard(runtime, () => runStatements(parsed.program, parsed.conversionError));
       onEnd?.(runtime.globalFrame);
       uncaughtException = shutdown(runtime) ?? uncaughtException;
     } finally {
