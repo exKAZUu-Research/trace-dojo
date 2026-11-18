@@ -5,8 +5,6 @@ import type { Runtime } from './runtime';
 import { arrayIndexOf, isObject, JsArray, JsFunction, JsObject, JsThrow, type Key, type Value } from './values';
 
 /** The text `console.table` prints for its arguments, or undefined when it prints them as `console.log` does. */
-// code-gauge-allow functionNcss 34 -- Keeps argument validation, row collection, and the shared formatting budget in table evaluation order.
-// code-gauge-allow functionCognitiveComplexity 20 -- Preserves Node's validation order, collection dispatch, primitive rows, selected properties, and final layout.
 export function formatTable(runtime: Runtime, data: Value, properties: Value): string | undefined {
   if (properties !== undefined && !(properties instanceof JsArray)) invalidProperties(runtime, properties);
   if (!(data instanceof JsObject) || data instanceof JsFunction) return undefined;
@@ -30,15 +28,7 @@ export function formatTable(runtime: Runtime, data: Value, properties: Value): s
       values[row] = inspectCell(runtime, item, budget);
       continue;
     }
-    for (const key of item instanceof JsObject ? runtime.ownEnumerableKeys(item) : []) {
-      runtime.spend();
-      const column = columns.get(key) ?? [];
-      columns.set(key, column);
-      column[row] =
-        item instanceof JsObject && runtime.getOwnProperty(item, key) !== undefined
-          ? inspectCell(runtime, runtime.get(item, key), budget)
-          : '';
-    }
+    addOwnCells(runtime, columns, item, row, budget);
   }
   const { head, body } = tableColumns(columns, rowKeys);
   if (hasPrimitives) {
@@ -156,6 +146,23 @@ function renderTable(runtime: Runtime, head: string[], columns: string[][]): str
 }
 
 /** The headers and cells of a table's columns, which Node.js collects as an object's keys and so orders as one. */
+/** Fills a row's cells for the own enumerable properties of an object. */
+function addOwnCells(
+  runtime: Runtime,
+  columns: Map<Key, string[]>,
+  item: JsObject,
+  row: number,
+  budget: OutputBudget
+): void {
+  for (const key of runtime.ownEnumerableKeys(item)) {
+    runtime.spend();
+    const column = columns.get(key) ?? [];
+    columns.set(key, column);
+    column[row] =
+      runtime.getOwnProperty(item, key) === undefined ? '' : inspectCell(runtime, runtime.get(item, key), budget);
+  }
+}
+
 /**
  * Fills a row's cells for the selected properties as Node.js does, converting a selector to a key at each use, as its
  * `map[key] ??= []`, `hasOwnProperty`, and `map[key][i] = _inspect(item[key])` do.

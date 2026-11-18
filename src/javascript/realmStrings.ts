@@ -258,14 +258,7 @@ function defineBuilders(method: StringMethod): void {
     ['padStart', true],
     ['padEnd', false],
   ] as const) {
-    method(name, 1, ({ runtime, args }, text) => {
-      const length = integerArgument(runtime, args[0], 0);
-      // The filler is not converted when the text is already long enough.
-      if (length <= text.length) return text;
-      const filler = args[1] === undefined ? ' ' : runtime.toString(args[1]);
-      runtime.buildString(Math.max(length, text.length));
-      return atStart ? text.padStart(length, filler) : text.padEnd(length, filler);
-    });
+    method(name, 1, (call, text) => padText(call, text, atStart));
   }
   for (const [name, all] of [
     ['replace', false],
@@ -273,6 +266,15 @@ function defineBuilders(method: StringMethod): void {
   ] as const) {
     method(name, 2, (call, text) => replaceText(call, text, all));
   }
+}
+
+function padText({ runtime, args }: NativeCall, text: string, atStart: boolean): string {
+  const length = integerArgument(runtime, args[0], 0);
+  // The filler is not converted when the text is already long enough.
+  if (length <= text.length) return text;
+  const filler = args[1] === undefined ? ' ' : runtime.toString(args[1]);
+  runtime.buildString(length);
+  return atStart ? text.padStart(length, filler) : text.padEnd(length, filler);
 }
 
 function replaceText(call: NativeCall, text: string, all: boolean): string {
