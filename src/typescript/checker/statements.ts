@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 575 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 599 -- Follows the flow of control through each kind of statement.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -24,6 +24,7 @@ import {
   type Type,
   undefinedType,
 } from './types';
+import { unionStructure } from './unionMembers';
 
 interface JumpTarget {
   isLoop: boolean;
@@ -51,6 +52,8 @@ export class StatementChecker {
   /** Where each loop checked silently exits, by the loop and its entry state. */
   private readonly silentLoopExits = new Map<string, State[]>();
   private readonly jumpTargets: JumpTarget[] = [];
+  /** The types of the objects `for...in` loops iterate, by loop. */
+  private readonly forInObjectTypes = new Map<number, Type>();
   /** How each kind of statement is checked; the others need no checks. */
   private readonly checkers = new Map<string, (node: TreeNode) => void>([
     ['expression_statement', (node) => this.expressionStatement(node)],
@@ -600,6 +603,7 @@ export class StatementChecker {
     const kind = header.childForFieldName('kind')?.text;
     const rightType = this.c.expressions.check(right, isOf ? this.iterableContext(left) : undefined);
     const elementType = isOf ? this.c.patterns.iteratedType(right, rightType) : this.forInKeyType(right, rightType);
+    if (!isOf) this.forInObjectTypes.set(node.id, rightType);
     const body = node.childForFieldName('body') as TreeNode;
     this.loop(node, (target) => {
       const head = this.c.flow.current?.clone();
@@ -609,6 +613,42 @@ export class StatementChecker {
       this.c.flow.current = this.c.flow.merge([this.c.flow.current, ...target.continues]);
       return this.c.flow.merge([head, this.c.flow.current]);
     });
+  }
+
+  /**
+   * Whether an index is the variable of an enclosing `for...in` loop over an object whose only index signature is a
+   * number one, as an array's, which TypeScript's `isForInVariableForNumericPropertyNames` lets index as a number.
+   */
+  isForInNumericIndex(index: TreeNode): boolean {
+    const expression = skipParentheses(index);
+    if (expression.type !== 'identifier') return false;
+    const symbol = this.c.scopeOf(expression).lookupValue(expression.text);
+    for (let child = index, node = index.parent; symbol && node; child = node, node = node.parent) {
+      if (
+        node.type === 'for_in_statement' &&
+        node.childForFieldName('body')?.id === child.id &&
+        this.forInVariable(node) === symbol &&
+        this.hasOnlyNumberIndex(this.forInObjectTypes.get(node.id))
+      )
+        return true;
+    }
+    return false;
+  }
+
+  /** The variable a `for...in` loop assigns, when it is a single name. */
+  private forInVariable(node: TreeNode): Sym | undefined {
+    const header = node.childForFieldName('header') ?? node;
+    const left = header.childForFieldName('left');
+    if (header.childForFieldName('operator')?.text !== 'in' || left?.type !== 'identifier') return undefined;
+    return this.c.scopeOf(left).lookupValue(left.text);
+  }
+
+  private hasOnlyNumberIndex(type: Type | undefined): boolean {
+    if (!type) return false;
+    const apparent = this.c.apparentType(type);
+    const { stringIndex, numberIndex, symbolIndex } =
+      apparent.kind === 'union' ? unionStructure(this.c, apparent.types) : this.c.structureOf(apparent);
+    return numberIndex !== undefined && !stringIndex && !symbolIndex;
   }
 
   /** The array a `for...of` loop's pattern implies for an array literal it iterates. */

@@ -1,0 +1,9 @@
+(4,15): error TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ x: number; y: number; }'.
+  No index signature with a parameter of type 'string' was found on type '{ x: number; y: number; }'.
+(8,22): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.
+(11,22): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.
+(14,40): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.
+(19,22): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.
+(23,22): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.
+(26,15): error TS2362: The left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.
+(30,22): error TS7015: Element implicitly has an 'any' type because index expression is not of type 'number'.

@@ -174,7 +174,7 @@ export class MemberChecker {
       : this.checkNonNullable(objectNode, objectType);
     if (isElement) {
       const indexNode = callee.childForFieldName('index') as TreeNode;
-      return this.indexedType(callee, objectNode, indexNode, nonNull, this.c.expressions.check(indexNode));
+      return this.indexedType(callee, objectNode, indexNode, nonNull, this.indexTypeOf(indexNode));
     }
     const propertyNode = callee.childForFieldName('property') as TreeNode;
     return this.propertyAccess(callee, objectNode, propertyNode, nonNull, propertyNode.text);
@@ -386,7 +386,7 @@ export class MemberChecker {
     const optional = node.childForFieldName('optional_chain') !== null;
     const checked = this.c.expressions.check(objectNode);
     if (optional) this.continueChain(objectNode);
-    const indexType = this.c.expressions.check(indexNode);
+    const indexType = this.indexTypeOf(indexNode);
     const continued = this.continuedObjectType(objectNode, checked);
     const objectType = optional
       ? this.c.relations.removeNullish(continued ?? checked)
@@ -401,6 +401,12 @@ export class MemberChecker {
     // As for a property, `?.` adds `undefined` only where it can short-circuit.
     const shortCircuits = (optional && this.c.relations.isNullable(continued ?? checked)) || continued;
     return shortCircuits ? this.chainResult(node, result) : result;
+  }
+
+  /** The type an element access's index selects by, which is `number` for a `for...in` variable over an array. */
+  indexTypeOf(indexNode: TreeNode): Type {
+    const type = this.c.expressions.check(indexNode);
+    return this.c.statements.isForInNumericIndex(indexNode) ? numberType : type;
   }
 
   isReadonlyIndex(objectType: Type, indexType: Type): boolean {

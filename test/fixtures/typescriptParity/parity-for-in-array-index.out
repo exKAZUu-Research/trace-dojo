@@ -1,0 +1,15 @@
+60
+[ 22, 42, 62 ]
+0 string 22
+1 string 42
+2 string 62
+[ [ 10, 20 ], [ 30, 40 ] ]
+1
+one
+0 a
+1 b
+zero x
+one y
+undefined z
+5
+6

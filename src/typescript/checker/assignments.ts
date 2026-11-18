@@ -382,7 +382,7 @@ export class AssignmentChecker {
     const objectNode = expression.childForFieldName('object') as TreeNode;
     const indexNode = expression.childForFieldName('index') as TreeNode;
     const objectType = this.c.members.checkNonNullable(objectNode, this.c.expressions.check(objectNode));
-    const indexType = this.c.expressions.check(indexNode);
+    const indexType = this.c.members.indexTypeOf(indexNode);
     if (this.isReadonlyArrayLike(objectType)) return this.reportReadonlyIndex(expression, objectType);
     const keys = literalKeys(indexType);
     const readonlyKey = keys
