@@ -1348,6 +1348,16 @@ test('base64 formats ordinary and sentinel-terminated byte arrays', () => {
   });
 });
 
+test('nested function-pointer field calls analyze and evaluate each receiver once', () => {
+  const chain = '.f()'.repeat(24);
+  const source = `const std=@import("std");const S=struct{f:*const fn()S};var calls:usize=0;fn make()S{calls+=1;return .{.f=&make};}pub fn main()void{const s=make()${chain};std.debug.print("{} {}",.{s.f==&make,calls});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true 25',
+    uncaughtException: undefined,
+  });
+});
+
 test('writer result types use the canonical usize and mutable byte slice', () => {
   const source = `const std=@import("std");fn less(n:usize,a:u8,b:u8)bool{return n>0 and a<b;}
 pub fn main()!void{var b:[2]u8=undefined;var w=std.Io.Writer.fixed(&b);const n=try w.write("x");var a=[_]u8{2,1};std.sort.heap(u8,&a,n,less);std.debug.print("{} {} {}",.{a[0],a[1],@TypeOf(w.buffered())==[]u8});}`;

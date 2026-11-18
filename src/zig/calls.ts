@@ -2,7 +2,7 @@ import { PANIC, panic } from './arith';
 import { isDiscardName } from './ast';
 import type { Expression, ExpressionOf, FunctionDeclaration, SourceFile, Span } from './ast';
 import { BuiltinCompiler } from './builtins';
-import { constantKey } from './expressions';
+import { constantKey, unwrapResult } from './expressions';
 import { FunctionInstance } from './functions';
 import { callableNative } from './nativeAdapter';
 import { type Frame, Jump } from './runtime';
@@ -72,15 +72,12 @@ export abstract class CallCompiler extends BuiltinCompiler {
       }
       const method = this.methodOf(object, callee.name, callee);
       if (method) return this.callValue(method.callee, object, expression, resultType);
-      const field = this.fieldAccess(callee);
+      const field = this.fieldAccess(callee, true, object);
       return this.callValue(field, undefined, expression, resultType);
     }
     if (callee.kind === 'enumLiteral' && resultType) {
       // A decl literal such as `.init(42)` names a declaration of the result type, seen through `?` and `!`.
-      let namespace = resultType;
-      while (namespace.kind === 'optional' || namespace.kind === 'error_union') {
-        namespace = namespace.kind === 'optional' ? namespace.child : namespace.payload;
-      }
+      const namespace = unwrapResult(resultType);
       const member = this.typeMember(namespace, callee.name, callee);
       return this.callValue(member, undefined, expression, resultType);
     }

@@ -361,8 +361,11 @@ export abstract class ExpressionCompiler extends SemaBase {
 
   // code-gauge-allow functionNcss 42 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
   // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the analysis and the generated code of one construct together, as Zig's Sema does.
-  protected fieldAccess(expression: ExpressionOf<'field'>, load = true): TExpr {
-    const object = this.compileLocation(expression.object);
+  protected fieldAccess(
+    expression: ExpressionOf<'field'>,
+    load = true,
+    object = this.compileLocation(expression.object)
+  ): TExpr {
     const { name } = expression;
     if (object.type.kind === 'type') {
       return this.typeMember(this.knownValue(object, '型') as Type, name, expression);
@@ -1983,9 +1986,10 @@ function elementSlots(value: Value, type: Type): { slots: Value[]; start: number
 }
 
 /** The type that a result type asks an initializer for, looking through optionals and error unions. */
-function unwrapResult(type: Type): Type {
-  if (type.kind === 'optional') return unwrapResult(type.child);
-  if (type.kind === 'error_union') return unwrapResult(type.payload);
+export function unwrapResult(type: Type): Type {
+  while (type.kind === 'optional' || type.kind === 'error_union') {
+    type = type.kind === 'optional' ? type.child : type.payload;
+  }
   return type;
 }
 
