@@ -204,6 +204,8 @@ export class Relations {
 
   private intersectionSourceRelated(s: IntersectionType, t: Type, relation: Relation, state: number): boolean {
     if (s.types.some((member) => this.isRelated(member, t, relation, state | INTERSECTION_SOURCE))) return true;
+    // An intersection with `null` or `undefined`, as `T & null`, has no members.
+    if (s.types.some((member) => isIntrinsic(member, 'null') || isIntrinsic(member, 'undefined'))) return false;
     return t.kind === 'object' && this.objectRelated(s, t, relation, state);
   }
 

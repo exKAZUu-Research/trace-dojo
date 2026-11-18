@@ -2,11 +2,13 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { applicableIndex } from './indexInfos';
+import { nonNullableType, withoutNullishUnit } from './nullishConstraints';
 import { named, propertyNameText, skipParentheses } from './syntax';
 import {
   anonymousObject,
   bigintType,
   booleanType,
+  emptyObjectType,
   emptyStructure,
   falseType,
   filterType,
@@ -79,7 +81,6 @@ export class Flow {
   /** While set, only the references it accepts narrow, and their keys are collected, as for an aliased condition. */
   narrowingScope?: { accepts: (node: TreeNode) => boolean; keys: Set<string> };
   /** `{}`, what `unknown` narrows to where it is neither `null` nor `undefined`. */
-  private readonly emptyObject = anonymousObject(() => emptyStructure());
 
   constructor(private readonly c: Checker) {}
 
@@ -415,13 +416,11 @@ export class Flow {
   // code-gauge-allow functionCognitiveComplexity 28 -- Follows TypeScript's narrowing of each kind of type by truthiness.
   narrowByTruthiness(type: Type, assumeTrue: boolean): Type {
     if (assumeTrue) {
-      if (isIntrinsic(type, 'unknown')) return this.emptyObject;
-      return filterType(type, (member) => {
-        if (isIntrinsic(member, 'null') || isIntrinsic(member, 'undefined') || isIntrinsic(member, 'void'))
-          return false;
-        if (member.kind === 'literal') return Boolean(member.value);
-        return true;
-      });
+      if (isIntrinsic(type, 'unknown')) return emptyObjectType;
+      return nonNullableType(
+        this.c,
+        filterType(type, (member) => member.kind !== 'literal' || Boolean(member.value))
+      );
     }
     if (isAnyLike(type) || isIntrinsic(type, 'unknown')) return type;
     return mapType(type, (member) => {
@@ -486,16 +485,17 @@ export class Flow {
     if (!isUnit(other)) return type;
     // `unknown` that is not `null` is `{} | undefined`, and not either is `{}`.
     if (isIntrinsic(type, 'unknown') && nullish) {
-      if (loose) return this.emptyObject;
-      return unionOf([this.emptyObject, isIntrinsic(other, 'null') ? undefinedType : nullType]);
+      if (loose) return emptyObjectType;
+      return unionOf([emptyObjectType, isIntrinsic(other, 'null') ? undefinedType : nullType]);
     }
-    if (loose && nullish) {
-      return filterType(
-        type,
-        (member) => !isIntrinsic(member, 'null') && !isIntrinsic(member, 'undefined') && !isIntrinsic(member, 'void')
-      );
-    }
-    return filterType(type, (member) => !(isUnit(member) && sameUnit(member, other)));
+    if (loose && nullish) return nonNullableType(this.c, type);
+    // An intersection with a unit, as `T & null`, is that unit or nothing.
+    const unequal = filterType(type, (member) =>
+      (member.kind === 'intersection' ? member.types : [member]).every(
+        (part) => !isUnit(part) || !sameUnit(part, other)
+      )
+    );
+    return nullish ? withoutNullishUnit(this.c, unequal, other) : unequal;
   }
 
   /** The part of a type that `value instanceof C` keeps, given the instance type of `C`. */

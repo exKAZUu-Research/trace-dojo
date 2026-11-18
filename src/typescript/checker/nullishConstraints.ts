@@ -1,18 +1,57 @@
 import type { Checker } from './checker';
-import { intersectionOf, isAnyLike, isIntrinsic, mapType, type Type, unionOf, unknownType } from './types';
+import {
+  emptyObjectType,
+  filterType,
+  intersectionOf,
+  isAnyLike,
+  isIntrinsic,
+  mapType,
+  neverType,
+  nullType,
+  type Type,
+  undefinedType,
+  unionOf,
+  unknownType,
+} from './types';
 
 /**
  * A type without `null` and `undefined`, as TypeScript's `getNonNullableType` gives it: a generic member whose
- * constraint may be either is intersected with the rest of its constraint, as TypeScript's `T & {}` relates.
+ * constraint may be either is intersected with the rest of its constraint, or with `{}` when nothing bounds it, as
+ * TypeScript's `T & {}` relates.
  */
 export function nonNullableType(c: Checker, type: Type): Type {
   return mapType(type, (member): Type => {
-    if (member.kind !== 'typeParameter' && member.kind !== 'indexedAccess' && member.kind !== 'conditional')
-      return c.relations.removeNullish(member);
+    if (isNullishLike(member, nullType) || isNullishLike(member, undefinedType)) return neverType;
+    if (!isGenericMember(member)) return c.relations.removeNullish(member);
     const bound = nullishConstraint(c, member);
     if (isAnyLike(bound) || (!c.relations.isNullable(bound) && !isIntrinsic(bound, 'unknown'))) return member;
-    return intersectionOf([member, c.relations.removeNullish(bound)], c.budget);
+    const rest = c.relations.removeNullish(bound);
+    return intersectionOf([member, isIntrinsic(rest, 'unknown') ? emptyObjectType : rest], c.budget);
   });
+}
+
+/**
+ * The part of a type that `value !== unit` keeps for `unit` `null` or `undefined`, as TypeScript's
+ * `removeNullableByIntersection` gives it: a generic member that may be `unit` is intersected with the rest of its
+ * constraint, or with `{}` when nothing bounds it, which keeps the other nullish value unless the type has it already.
+ */
+export function withoutNullishUnit(c: Checker, type: Type, unit: Type): Type {
+  const other = isIntrinsic(unit, 'null') ? undefinedType : nullType;
+  const hasOther = (type.kind === 'union' ? type.types : [type]).some((member) => isNullishLike(member, other));
+  return mapType(type, (member): Type => {
+    const rest = isGenericMember(member)
+      ? boundWithoutUnit(nullishConstraint(c, member), unit, other, hasOther)
+      : undefined;
+    return rest ? intersectionOf([member, rest], c.budget) : member;
+  });
+}
+
+/** What a bound that may be `unit` is without it, and without `other` too when `hasOther`; else `undefined`. */
+function boundWithoutUnit(bound: Type, unit: Type, other: Type, hasOther: boolean): Type | undefined {
+  if (isAnyLike(bound)) return undefined;
+  if (isIntrinsic(bound, 'unknown')) return hasOther ? emptyObjectType : unionOf([emptyObjectType, other]);
+  if (!(bound.kind === 'union' ? bound.types : [bound]).some((part) => isNullish(part, unit))) return undefined;
+  return filterType(bound, (part) => !isNullish(part, unit) && !(hasOther && isNullish(part, other)));
 }
 
 /** What a type may be at most, which decides whether it may be nullish or falsy; `unknown` where nothing bounds it. */
@@ -41,4 +80,18 @@ export function nullishConstraint(c: Checker, type: Type, seen = new Set<number>
   } finally {
     seen.delete(type.id);
   }
+}
+
+function isGenericMember(type: Type): boolean {
+  return type.kind === 'typeParameter' || type.kind === 'indexedAccess' || type.kind === 'conditional';
+}
+
+/** Whether a type is `unit`, `null` or `undefined`, or an intersection with it, where `void` counts as `undefined`. */
+function isNullishLike(type: Type, unit: Type): boolean {
+  return type.kind === 'intersection' ? type.types.some((part) => isNullish(part, unit)) : isNullish(type, unit);
+}
+
+function isNullish(type: Type, unit: Type): boolean {
+  if (unit.kind !== 'intrinsic') return false;
+  return isIntrinsic(type, unit.name) || (unit.name === 'undefined' && isIntrinsic(type, 'void'));
 }

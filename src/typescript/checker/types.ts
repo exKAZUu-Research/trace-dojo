@@ -552,6 +552,9 @@ export function anonymousObject(resolve: () => Structure, extra: Partial<ObjectT
   };
 }
 
+/** `{}`, which every value but `null` and `undefined` is assignable to. */
+export const emptyObjectType = anonymousObject(() => emptyStructure());
+
 export function simpleProperty(name: string, type: Type, options: Partial<Property> = {}): Property {
   return {
     name,
