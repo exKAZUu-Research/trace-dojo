@@ -3,7 +3,7 @@ import { floatFitsInt, numericPrefix, toBool } from './conversions';
 import { deprecated } from './errors';
 import { formatFloatForMessage, toStr } from './operators';
 import { rt } from './runtime';
-import { PhpArray, type PhpClass, PhpObject, type TypeDecl, type Value } from './values';
+import { PhpArray, type PhpClass, PhpObject, type PropDecl, type TypeDecl, type Value } from './values';
 
 /** Checks whether a value is callable, which the interpreter provides. */
 let isCallableValue: (value: Value) => boolean = () => false;
@@ -263,7 +263,12 @@ interface TypeDisplayScope {
   parent?: { name: string };
 }
 
-/** Resolves `self` and `static` in a type for messages, as PHP prints the class names. */
+export function describePropertyType(property: PropDecl): string {
+  return property.type
+    ? describeType(property.type, property.declarationScope?.kind === 'trait' ? undefined : property.cls)
+    : 'mixed';
+}
+
 export function describeType(type: TypeDecl, scope?: TypeDisplayScope, staticClass?: TypeDisplayScope): string {
   return typeToString(resolveSelf(type, scope, staticClass));
 }

@@ -521,7 +521,7 @@ export class Converter extends DeclarationConverter {
         }
         this.strictTypes = valueNode.text === '1';
       } else if (key === 'encoding') {
-        if (!encodingLiteral(this.expr(valueNode))) this.error(valueNode, 'Encoding must be a literal');
+        if (!encodingLiteral(valueNode, this.expr(valueNode))) this.error(valueNode, 'Encoding must be a literal');
         if (
           !topLevel ||
           node.parent?.namedChildren.some(
@@ -1467,8 +1467,19 @@ export class Converter extends DeclarationConverter {
   }
 }
 
-function encodingLiteral(value: Expr): boolean {
+function encodingLiteral(node: Node, value: Expr): boolean {
+  while (node.type === 'parenthesized_expression')
+    node = node.namedChildren.find((child) => child.type !== 'comment') as Node;
   if (value.k === 'lit')
-    return typeof value.v === 'string' || typeof value.v === 'bigint' || typeof value.v === 'number';
-  return value.k === 'bin' && value.op === '.' && encodingLiteral(value.l) && encodingLiteral(value.r);
+    return (
+      ['integer', 'float', 'string', 'encapsed_string', 'heredoc', 'nowdoc'].includes(node.type) &&
+      (typeof value.v === 'string' || typeof value.v === 'bigint' || typeof value.v === 'number')
+    );
+  return (
+    node.type === 'binary_expression' &&
+    value.k === 'bin' &&
+    value.op === '.' &&
+    encodingLiteral(node.childForFieldName('left') as Node, value.l) &&
+    encodingLiteral(node.childForFieldName('right') as Node, value.r)
+  );
 }

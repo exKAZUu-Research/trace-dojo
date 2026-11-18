@@ -35,7 +35,10 @@ function checkConstantOverride(cls: PhpClass, constant: ClassConst, inherited: C
   if (inherited.cls === cls || inherited.visibility === 'private') return;
   const name = constant.name;
   if (inherited.isFinal) {
-    throw new FatalError(`${cls.name}::${name} cannot override final constant ${inherited.cls.name}::${name}`, row);
+    throw new FatalError(
+      `${constant.cls.name}::${name} cannot override final constant ${inherited.cls.name}::${name}`,
+      row
+    );
   }
   if (visibilityRank(constant.visibility) < visibilityRank(inherited.visibility)) {
     const weaker = inherited.visibility === 'protected' ? ' or weaker' : '';
@@ -52,12 +55,12 @@ function checkConstantOverride(cls: PhpClass, constant: ClassConst, inherited: C
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function linkInterfaceConstants(cls: PhpClass, row: number): void {
   for (const iface of cls.interfaces) {
     for (const [name, constant] of iface.consts) {
       const existing = cls.consts.get(name);
-      if (!existing) cls.consts.set(name, constant);
+      if (!existing || (existing.visibility === 'private' && existing.cls !== cls)) cls.consts.set(name, constant);
       else if (existing !== constant) {
         if (constant.isFinal) checkConstantOverride(cls, existing, constant, row);
         if (existing.cls !== constant.cls && existing.cls !== cls) {

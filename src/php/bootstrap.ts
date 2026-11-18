@@ -101,7 +101,7 @@ function bindClosure(closure: PhpObject, newThis: Value, newScope: Value | undef
   }
   if (methodScope && newThis instanceof PhpObject && !newThis.cls.isSubclassOf(methodScope)) {
     warn(
-      `Cannot bind method ${methodScope.name}::${data.fn.name}() to object of class ${newThis.cls.name}, this will be an error in PHP 9`
+      `Cannot bind method ${methodScope.name}::${data.method?.name ?? data.fn.name}() to object of class ${newThis.cls.name}, this will be an error in PHP 9`
     );
     return null;
   }

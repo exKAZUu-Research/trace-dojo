@@ -1,7 +1,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { deprecated, throwError, warn } from './errors';
 import { type Frame, rt } from './runtime';
-import { describeType } from './types';
+import { describePropertyType } from './types';
 import { dropped, type Key, PhpArray, PhpObject, type PropDecl, Ref, type Value } from './values';
 import { isSubtype } from './variance';
 
@@ -214,13 +214,13 @@ function initializeArray(place: Place): PhpArray {
   if (decl?.type && !isSubtype({ k: 'named', name: 'array' }, undefined, decl.type, decl.cls))
     throwError(
       'TypeError',
-      `Cannot auto-initialize an array inside property ${decl.cls.name}::$${decl.name} of type ${describeType(decl.type, decl.cls)}`
+      `Cannot auto-initialize an array inside property ${decl.cls.name}::$${decl.name} of type ${describePropertyType(decl)}`
     );
   for (const { decl: source } of place.typeSources?.() ?? [])
     if (source.type && !isSubtype({ k: 'named', name: 'array' }, undefined, source.type, source.cls))
       throwError(
         'TypeError',
-        `Cannot auto-initialize an array inside a reference held by property ${source.cls.name}::$${source.name} of type ${describeType(source.type, source.cls)}`
+        `Cannot auto-initialize an array inside a reference held by property ${source.cls.name}::$${source.name} of type ${describePropertyType(source)}`
       );
   const array = new PhpArray();
   place.set(array);

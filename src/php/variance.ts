@@ -92,18 +92,18 @@ function isClassSubtype(
   supScope: PhpClass | undefined,
   allowUnresolved = false
 ): boolean {
-  const subClass = resolve(sub, subScope);
-  const supClass = resolve(sup, supScope);
+  const subClass = resolve(sub, subScope, supScope);
+  const supClass = resolve(sup, supScope, subScope);
   if (subClass && supClass) return subClass.isSubclassOf(supClass);
   if (allowUnresolved) return true;
   return (subClass ? lower(subClass.name) : sub) === (supClass ? lower(supClass.name) : sup);
 }
 
-function resolve(name: string, scope: PhpClass | undefined): PhpClass | undefined {
+function resolve(name: string, scope: PhpClass | undefined, peer?: PhpClass): PhpClass | undefined {
   if (!scope) return undefined;
-  // The class being declared is not registered yet while PHP checks its methods.
   if (name === 'self' || name === lower(scope.name)) return scope;
   if (name === 'parent') return scope.parent;
+  if (peer && name === lower(peer.name)) return peer;
   return rt().classes.get(name);
 }
 

@@ -815,7 +815,6 @@ export class ArrayCursor {
     this.rewind();
   }
   get key(): Key | undefined {
-    this.position = this.current?.index;
     return this.current?.key;
   }
   get index(): number | undefined {

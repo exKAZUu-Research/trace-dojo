@@ -5,7 +5,7 @@ import { formatFloat, formatFloatRepr } from './conversions';
 import { deprecated, E_ERROR, reportUncaughtWarning, warn } from './errors';
 import { toStr } from './operators';
 import { FatalError, PhpThrow, rt } from './runtime';
-import { describeType } from './types';
+import { describePropertyType } from './types';
 import { type ClosureData, isClosure, PhpArray, PhpObject, Ref, type Slot, UNINIT, type Value } from './values';
 
 /** The properties an object shows to `var_dump` and `print_r`: `__debugInfo`'s array, or its property table. */
@@ -224,7 +224,7 @@ function dumpValue(value: Value, level: number, active: Set<object>, slot?: Slot
       text += `${' '.repeat(level + 1)}[${typeof key === 'bigint' ? key : label}]=>\n`;
       if (slot === UNINIT) {
         const decl = declForKey(object.cls, typeof key === 'string' ? keyFor(key, label) : String(key));
-        text += `${' '.repeat(level + 1)}uninitialized(${decl?.type ? describeType(decl.type, decl.cls) : 'mixed'})\n`;
+        text += `${' '.repeat(level + 1)}uninitialized(${decl?.type ? describePropertyType(decl) : 'mixed'})\n`;
       } else text = grown(text + dumpValue(slotValue(slot), level + 2, active, slot));
     }
     return `${text}${indent}}\n`;

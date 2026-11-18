@@ -1,0 +1,1 @@
+<?php interface I{const X=1;}class P{private const X=2;function values(){echo self::X,':',static::X,';';}}class C extends P implements I{}echo C::X,';';(new C)->values();class D{private const X=1;}class E extends D implements I{}echo E::X;

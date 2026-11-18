@@ -12,7 +12,7 @@ import { strictEquals } from './operators';
 import { share } from './places';
 import { FatalError, rt, SCRIPT_PATH } from './runtime';
 import tentativeReturnMethods from './tentativeReturnMethods.json';
-import { coerce, describeType, NO_MATCH, typeToString } from './types';
+import { coerce, describePropertyType, describeType, NO_MATCH, typeToString } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import { unsupportedClasses } from './unsupportedCatalog';
 import {
@@ -197,10 +197,10 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst, declarationScope = cls
         ast.row
       );
     }
-    if (inherited.type && !propertyTypeCompatible(inherited, ast, cls)) {
+    if (inherited.type && !propertyTypeCompatible(inherited, ast, cls, declarationScope)) {
       propertyTypeError(inherited, cls, ast.name, ast.row);
     }
-    if (!inherited.type && ast.type && !propertyTypeCompatible(inherited, ast, cls)) {
+    if (!inherited.type && ast.type && !propertyTypeCompatible(inherited, ast, cls, declarationScope)) {
       throw new FatalError(
         `Type of ${cls.name}::$${ast.name} must not be defined (as in class ${inherited.cls.name})`,
         ast.row
@@ -264,7 +264,20 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst, declarationScope = cls
   if (decl.visibility === 'private') cls.privateProps.set(ast.name, decl);
 }
 
-function propertyTypeCompatible(parent: PropDecl, child: Pick<PropertyDeclAst, 'type'>, cls: PhpClass): boolean {
+function propertyTypeCompatible(
+  parent: PropDecl,
+  child: Pick<PropertyDeclAst, 'type'>,
+  cls: PhpClass,
+  declarationScope = cls
+): boolean {
+  if (
+    parent.type &&
+    child.type &&
+    parent.declarationScope?.kind === 'trait' &&
+    declarationScope.kind === 'trait' &&
+    sameDeclarationType(parent.type, parent.declarationScope, child.type, declarationScope)
+  )
+    return true;
   if (Boolean(parent.type) !== Boolean(child.type)) return false;
   const parentType: TypeDecl = parent.type ?? { k: 'named', name: 'mixed' };
   const childType: TypeDecl = child.type ?? { k: 'named', name: 'mixed' };
@@ -302,7 +315,7 @@ function checkPropertyDefault(decl: PropDecl, value: Value): Value {
   const coerced = coerce(value, decl.type, { strict: true, internal: false, scope: decl.cls });
   if (coerced === NO_MATCH) {
     throw new FatalError(
-      `Cannot use ${debugType(value)} as default value for property ${decl.cls.name}::$${decl.name} of type ${typeToString(decl.type)}`,
+      `Cannot use ${debugType(value)} as default value for property ${decl.cls.name}::$${decl.name} of type ${describePropertyType(decl)}`,
       decl.cls.declaredRow
     );
   }
@@ -574,8 +587,8 @@ function checkInterfaceHooks(parent: PropDecl, child: PropDecl, row: number): vo
     if (compatible) continue;
     const signature = (prop: PropDecl, fn: Callable, type: TypeDecl | undefined): string => {
       const prefix = `${prop.cls.name}::$${prop.name}::${kind}`;
-      if (kind === 'get') return `${prefix}()${type ? `: ${typeToString(type)}` : ''}`;
-      return `${prefix}(${type ? `${typeToString(type)} ` : ''}$${fn.params[0]?.name ?? 'value'}): void`;
+      if (kind === 'get') return `${prefix}()${type ? `: ${describeType(type, prop.cls)}` : ''}`;
+      return `${prefix}(${type ? `${describeType(type, prop.cls)} ` : ''}$${fn.params[0]?.name ?? 'value'}): void`;
     };
     throw new FatalError(
       `Declaration of ${signature(child, own, childType)} must be compatible with ${signature(parent, inherited, parentType)}`,
@@ -931,7 +944,7 @@ function readOverloadedProp(object: PhpObject, name: string, coalesce: boolean, 
   if (result === NO_MATCH)
     throwError(
       'TypeError',
-      `Value of type ${valueName(value)} returned from ${unset.cls.name}::__get() must be compatible with unset property ${unset.cls.name}::$${name} of type ${describeType(unset.type, unset.cls)}`
+      `Value of type ${valueName(value)} returned from ${unset.cls.name}::__get() must be compatible with unset property ${unset.cls.name}::$${name} of type ${describePropertyType(unset)}`
     );
   rt().lastReturnRef?.assign(result);
   return result;
@@ -1050,7 +1063,7 @@ export function coerceProperty(decl: PropDecl, value: Value, object?: PhpObject,
   if (coerced === NO_MATCH) {
     throwError(
       'TypeError',
-      `Cannot assign ${valueName(value)} to ${holder} ${(object?.cls ?? decl.cls).name}::$${decl.name} of type ${describeType(type, decl.cls)}`
+      `Cannot assign ${valueName(value)} to ${holder} ${(object?.cls ?? decl.cls).name}::$${decl.name} of type ${describePropertyType(decl)}`
     );
   }
   return coerced;
@@ -1203,7 +1216,7 @@ export function attachPropertyReference(ref: Ref, decl: PropDecl, object?: PhpOb
     if (source)
       throwError(
         'TypeError',
-        `Reference with value of type ${valueName(ref.v)} held by property ${source.cls.name}::$${source.name} of type ${describeType(source.type as TypeDecl, source.cls)} is not compatible with property ${decl.cls.name}::$${decl.name} of type ${describeType(decl.type as TypeDecl, decl.cls)}`
+        `Reference with value of type ${valueName(ref.v)} held by property ${source.cls.name}::$${source.name} of type ${describePropertyType(source)} is not compatible with property ${decl.cls.name}::$${decl.name} of type ${describePropertyType(decl)}`
       );
   }
   ref.assign(value);
@@ -1222,7 +1235,7 @@ function checkReferenceValue(ref: Ref, value: Value): Value {
     if (!Object.is(coerceProperty(decl, coerced, object, 'reference held by property'), coerced)) {
       throwError(
         'TypeError',
-        `Cannot assign ${valueName(value)} to reference held by property ${decl.cls.name}::$${decl.name} of type ${describeType(decl.type as TypeDecl, decl.cls)}`
+        `Cannot assign ${valueName(value)} to reference held by property ${decl.cls.name}::$${decl.name} of type ${describePropertyType(decl)}`
       );
     }
   }

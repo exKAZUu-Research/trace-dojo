@@ -1071,7 +1071,7 @@ test.each([
 test.each(['![...[]]', '![...[...[]]]', '![...[1]]'])('validates resolved spread-array default truth: %s', (value) => {
   const result = run(`<?php class A{public int $x=${value};}echo 'never';`);
   expect(result.kind).toBe('compileError');
-  expect(JSON.stringify(result)).toMatch(/Cannot use (?:true|false) as default value/);
+  expect(JSON.stringify(result)).toContain('Cannot use bool as default value');
 });
 
 test('mutates arrays held by many objects within the operation limit', () => {
@@ -1114,4 +1114,29 @@ test.each([
   const result = run(`<?php ${source};`);
   expect(result.kind).toBe('compileError');
   expect(JSON.stringify(result)).toContain(message);
+});
+
+test.each(['__FILE__', '__DIR__', '__LINE__', '__NAMESPACE__', "'a'.__LINE__", '(__FILE__)'])(
+  'rejects nonliteral encoding origins: %s',
+  (value) => {
+    const result = run(`<?php declare(encoding=${value});echo 'never';`);
+    expect(result.kind).toBe('compileError');
+    expect(JSON.stringify(result)).toContain('Encoding must be a literal');
+  }
+);
+
+test.each([
+  '![...(true?[1]:[])]',
+  '![...([1]+[])]',
+  '![...(array)1]',
+  '![...(false?MISSING:[1])]',
+  '![...(array)(true?1:null)]',
+  '![...((1===1)?[1]:[])]',
+  '![...(([1]==[1])?[1]:[])]',
+  '![...([[1]][0])]',
+  '![...(array)Missing::class]',
+])('folds complete constant default expressions: %s', (value) => {
+  const result = run(`<?php echo 'never';function f(true $x=${value}){}echo 'never';`);
+  expect(result.kind).toBe('compileError');
+  expect(JSON.stringify(result)).toContain('Cannot use bool as default value');
 });

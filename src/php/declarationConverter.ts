@@ -15,14 +15,12 @@ import type {
 } from './ast';
 import { lower } from './bytes';
 import { parseTypeText } from './calls';
-import { numericPrefix, toBool } from './conversions';
+import { foldedDefaultType } from './constantDefaults';
 import { BUILTIN_TYPES, ConverterBase } from './converterBase';
 import { SCRIPT_PATH } from './runtime';
 import { describeType, typeToString } from './types';
-import { INT_MAX, INT_MIN, type TypeDecl, type Visibility } from './values';
+import type { TypeDecl, Visibility } from './values';
 import { isSubtype } from './variance';
-
-type LiteralValue = Extract<Expr, { k: 'lit' }>['v'];
 
 const MAGIC_METHODS: Record<
   string,
@@ -391,24 +389,10 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private checkDefaultType(node: Node, name: string, type: TypeDecl, value: Expr, property?: ClassDecl): void {
-    value = knownScalarDefault(value) ?? value;
-    if (value.k !== 'lit' && value.k !== 'array') return;
-    if (value.k === 'lit' && value.v === null && !property) return;
-    const literalType =
-      value.k === 'array'
-        ? 'array'
-        : value.v === null
-          ? 'null'
-          : typeof value.v === 'bigint'
-            ? 'int'
-            : typeof value.v === 'number'
-              ? 'float'
-              : typeof value.v === 'boolean'
-                ? String(value.v)
-                : typeof value.v === 'string'
-                  ? 'string'
-                  : undefined;
+    const literalType = foldedDefaultType(value);
+    if (literalType === 'null' && !property) return;
     if (literalType === undefined || defaultFits(type, literalType)) return;
     const display = describeType(
       type,
@@ -428,7 +412,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
     this.error(
       node,
-      `型に合わない既定値です（Cannot use ${literalType} as default value for ${property ? `property ${property.name}::$${name}` : `parameter $${name}`} of type ${display}）。`
+      `型に合わない既定値です（Cannot use ${literalType === 'true' || literalType === 'false' ? 'bool' : literalType} as default value for ${property ? `property ${property.name}::$${name}` : `parameter $${name}`} of type ${display}）。`
     );
   }
 
@@ -1090,53 +1074,4 @@ function defaultFits(type: TypeDecl, literalType: string): boolean {
 
 function builtinType(type: TypeDecl): boolean {
   return type.k === 'named' ? BUILTIN_TYPES.has(type.name) : type.types.every(builtinType);
-}
-
-function knownScalarDefault(value: Expr): Expr | undefined {
-  if (value.k === 'lit') return value;
-  if (value.k !== 'unary') return;
-  if (value.op === '!' && value.e.k === 'array') {
-    const truth = knownArrayTruth(value.e);
-    return truth === undefined ? undefined : { k: 'lit', v: !truth, row: value.row };
-  }
-  const operand = knownScalarDefault(value.e);
-  if (operand?.k !== 'lit') return;
-  const result = unaryDefaultValue(value.op, operand.v);
-  return result === undefined ? undefined : { k: 'lit', v: result, row: value.row };
-}
-
-function knownArrayTruth(value: Extract<Expr, { k: 'array' }>): boolean | undefined {
-  let known = true;
-  for (const item of value.items) {
-    if (!item.spread) return true;
-    const truth = item.value.k === 'array' ? knownArrayTruth(item.value) : undefined;
-    if (truth) return true;
-    if (truth === undefined) known = false;
-  }
-  return known ? false : undefined;
-}
-
-// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function unaryDefaultValue(op: string, input: LiteralValue): LiteralValue | undefined {
-  if (op === '!') return !toBool(input);
-  if (op === '~') {
-    if (typeof input === 'bigint') return ~input;
-    if (typeof input === 'string')
-      return input
-        .split('')
-        .map((char) => String.fromCodePoint((char.codePointAt(0) as number) ^ 255))
-        .join('');
-    return;
-  }
-  if (op !== '+' && op !== '-') return;
-  let number: bigint | number;
-  if (typeof input === 'number' || typeof input === 'bigint') number = input;
-  else if (input === null || typeof input === 'boolean') number = input ? 1n : 0n;
-  else if (typeof input === 'string') {
-    const parsed = numericPrefix(input);
-    if (!parsed?.whole) return;
-    number = parsed.value;
-  } else return;
-  const result = op === '-' ? -number : number;
-  return typeof result === 'bigint' && (result < INT_MIN || result > INT_MAX) ? Number(result) : result;
 }
