@@ -102,6 +102,24 @@ const declarations = [
   { declaration: String.raw`f x= \n->do`, suffix: '', call: 'f x', main: 'f (7::Int) 2' },
   { declaration: String.raw`f=(\x n->do`, suffix: ') (7::Int)', call: 'f', main: 'f 2' },
   { declaration: String.raw`(f,_)=((\n->do`, suffix: '),())', call: 'f', main: 'f 2' },
+  {
+    declaration: String.raw`f=pick(\n->do`,
+    suffix: ')\npick::(Int->IO())->Int->IO()\npick f=f',
+    call: 'f',
+    main: 'f 2',
+  },
+  {
+    declaration: String.raw`f x=pick(\n->do`,
+    suffix: ')\npick::(Int->IO())->Int->IO()\npick f=f',
+    call: 'f x',
+    main: 'f (7::Int) 2',
+  },
+  {
+    declaration: String.raw`(f,_)=((pick(\n->do`,
+    suffix: ')),())\npick::(Int->IO())->Int->IO()\npick f=f',
+    call: 'f',
+    main: 'f 2',
+  },
 ];
 
 test.each(declarations)(
@@ -286,4 +304,53 @@ test('comprehension-created turtle actions display their generator values as the
     { x: 3, y: 0, color: '#', dir: 'E' },
   ]);
   expect(result.finalVars).not.toHaveProperty('t');
+});
+
+test.each([
+  ['pick', String.raw`pick (\z->do`, ')'],
+  ['choose first', String.raw`choose True (\z->do`, ') print'],
+  ['choose second', String.raw`choose False print (\z->do`, ')'],
+  ['composed helpers', String.raw`pick(choose True (\z->do`, ') print)'],
+  ['partial lambda', String.raw`pick((\offset z->do`, ') (7::Int))'],
+  ['tail relay', String.raw`relay 5000 (\z->do`, ')'],
+])('returning a caller lambda preserves inline iteration bindings: %s', (_name, expression, suffix) => {
+  const declarations = `pick::(Int->IO())->Int->IO()
+pick f=f
+choose::Bool->(Int->IO())->(Int->IO())->Int->IO()
+choose c f g=if c then f else g
+relay::Int->(Int->IO())->Int->IO()
+relay n f=if n<=0 then f else relay(n-1) f
+`;
+  const source = `${declarations}main=do
+ mapM_ (${expression}
+    print(z::Int)
+    print(z+1)${suffix}) [1,2]
+ print(0::Int)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('1\n2\n2\n3\n0\n');
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.traceItems.every((item) => item.callLines.length === 0)).toBe(true);
+  expect(
+    result.traceItems.filter((item) => item.line === 8 && item.vars.z !== undefined).map((item) => item.vars.z)
+  ).toEqual([1, 2]);
+  expect(result.traceItems.filter((item) => item.line === 9 || item.line === 10).map((item) => item.vars.z)).toEqual([
+    1, 1, 2, 2,
+  ]);
+});
+
+test('a caller lambda keeps its named enclosing invocation through a helper', () => {
+  const source = `pick::(Int->IO())->Int->IO()
+pick f=f
+run n=do
+ mapM_ (pick(\\z->do
+   print(z+n::Int)
+   print z)) [1,2]
+ print n
+main=run 7`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('8\n1\n9\n2\n7\n');
+  expect(result.uncaughtException).toBeUndefined();
+  const items = result.traceItems.filter((item) => item.vars.z !== undefined);
+  expect(items.map((item) => item.vars.z)).toEqual([1, 1, 1, 2, 2, 2]);
+  expect(items.every((item) => item.vars.n === 7 && item.callLines.length === 1)).toBe(true);
 });

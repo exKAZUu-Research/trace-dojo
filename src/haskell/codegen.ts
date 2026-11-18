@@ -136,6 +136,7 @@ export class Codegen {
       return;
     }
     const whole = globalOf(binding, '<pattern>');
+    const patternOwner = { name: '<pattern>', row: binding.span.row, isAtomic: false };
     const frame = new FrameScope(undefined);
     whole.code = this.withFrame(frame, () => {
       const slot = frame.alloc();
@@ -147,7 +148,7 @@ export class Codegen {
         k: 'frame',
         size: frame.size,
         body: { k: 'let', binds: [{ index: slot, expr: rhs }], body: matched },
-        info: { name: '<pattern>', row: binding.span.row, isAtomic: false },
+        info: patternOwner,
       } as Core;
     });
     for (const index of binding.binders.keys()) {
@@ -156,7 +157,7 @@ export class Codegen {
         k: 'frame',
         size: 0,
         body: patternProjection({ k: 'global', global: whole }, index, binding.binders.length),
-        info: { name: global.name, row: binding.span.row, isAtomic: false },
+        info: { name: global.name, row: binding.span.row, isAtomic: false, patternOwner },
         functionResult: global.scheme ? isFunctionType(global.scheme.type) : false,
       };
     }

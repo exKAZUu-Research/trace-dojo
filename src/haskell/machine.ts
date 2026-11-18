@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 523 -- Machine states and frames share one evaluator stack.
+// code-gauge-allow-file fileNcss 528 -- Machine states and frames share one evaluator stack.
 import { CONS_CON, NIL_CON } from './builtinTypes';
 import type { CaseCore, Core, FunctionInfo } from './core';
 import type { TypeHint } from './displayTypeHints';
@@ -56,7 +56,13 @@ export type Frame =
       target: Thunk | undefined;
     }
   | { k: 'apply'; args: Slot[]; displayType?: TypeHint }
-  | { k: 'functionResult'; info: FunctionInfo; invocation: Env; atomicScope: boolean }
+  | {
+      k: 'functionResult';
+      info: FunctionInfo | undefined;
+      invocation: Env;
+      atomicScope: FunctionInfo | undefined;
+      owners: WeakMap<Env | FunctionInfo, FunctionInfo>;
+    }
   | { k: 'ioScope'; frame: TraceFrame }
   | { k: 'case'; core: CaseCore; env: Env; displayType: TypeHint | undefined }
   | { k: 'charCase'; core: Extract<Core, { k: 'charCase' }>; env: Env }
@@ -429,9 +435,10 @@ export class Machine {
       this.stack.push({ k: 'apply', args: args.slice(arity) });
       args = args.slice(0, arity);
     }
+    const info = fn instanceof Closure ? fn.lam.info : fn.info;
+    const atomicScope = fn.atomicScope ?? (info?.isAtomic ? info : undefined);
     if (fn instanceof PrimFn) {
-      const atomicScope = fn.atomicScope || !!fn.info?.isAtomic;
-      if (atomicScope) this.pushFunctionResult(fn.info, new Env(0, undefined, fn.info), true);
+      if (atomicScope) this.pushFunctionResult(fn.info, new Env(0, undefined, fn.info), atomicScope);
       this.runtime.allocate(args.length);
       this.stack.push({ k: 'prim', prim: fn.prim, args: [...args], position: 0 });
       state.mode = 'primNext';
@@ -444,7 +451,6 @@ export class Machine {
     const frameEnv = new Env(fn.lam.size, fn.env, fn.lam.info);
     for (let index = 0; index < arity; index++) frameEnv.slots[index] = args[index];
     bindDisplayTypes(frameEnv, fn.lam.displayConstraints ?? [], fn.lam.displayParameters ?? [], args, this.runtime);
-    const atomicScope = fn.atomicScope || !!fn.lam.info?.isAtomic;
     if (fn.lam.functionResult || atomicScope) this.pushFunctionResult(fn.lam.info, frameEnv, atomicScope);
     state.evaluate(fn.lam.body, frameEnv);
   }
@@ -481,7 +487,7 @@ export class Machine {
         return true;
       }
       case 'functionResult': {
-        state.returnValue(this.nameFunctionResult(state.value, frame.info, frame.invocation, frame.atomicScope));
+        state.returnValue(this.nameFunctionResult(state.value, frame));
         return false;
       }
       case 'update': {
@@ -550,34 +556,51 @@ export class Machine {
   private pushFunctionResult(
     info: FunctionInfo | undefined,
     invocation: Env,
-    atomicScope = info?.isAtomic ?? false
+    atomicScope = info?.isAtomic ? info : undefined
   ): void {
-    if (!info) return;
+    if (!info && !atomicScope) return;
     const top = this.stack.at(-1);
-    if (top?.k === 'functionResult') {
-      top.info = info;
-      top.invocation = invocation;
-      top.atomicScope ||= atomicScope;
-    } else this.stack.push({ k: 'functionResult', info, invocation, atomicScope });
+    const frame =
+      top?.k === 'functionResult'
+        ? top
+        : {
+            k: 'functionResult' as const,
+            info,
+            invocation,
+            atomicScope,
+            owners: new WeakMap<Env | FunctionInfo, FunctionInfo>(),
+          };
+    frame.info = info ?? frame.info;
+    frame.invocation = invocation;
+    frame.atomicScope ??= atomicScope;
+    if (info) {
+      frame.owners.set(invocation, info);
+      if (info.patternOwner) frame.owners.set(info.patternOwner, info);
+    }
+    if (frame !== top) this.stack.push(frame);
   }
 
-  private nameFunctionResult(value: Slot, info: FunctionInfo, invocation: Env, atomicScope: boolean): Slot {
-    if (value instanceof Closure || value instanceof PrimFn) return this.namedCallable(value, info, atomicScope);
-    if (value instanceof Partial && (value.fn instanceof Closure || value.fn instanceof PrimFn)) {
-      const fn = this.namedCallable(value.fn, info, atomicScope);
+  private nameFunctionResult(value: Slot, frame: Extract<Frame, { k: 'functionResult' }>): Slot {
+    if (value instanceof Closure || value instanceof PrimFn) return this.namedCallable(value, frame);
+    if (value instanceof Partial) {
+      const fn = this.namedCallable(value.fn, frame);
       return fn === value.fn ? value : new Partial(fn, value.args);
     }
-    if (atomicScope && isIOAction(value)) {
-      const scope = invocation.info?.isAtomic ? invocation : new Env(0, invocation, this.atomicInfo(info));
+    if (frame.atomicScope && isIOAction(value)) {
+      const scope = frame.invocation.info?.isAtomic
+        ? frame.invocation
+        : new Env(0, frame.invocation, this.atomicInfo(frame.atomicScope));
       return new IOCall(value, scope);
     }
     return value;
   }
 
-  private namedCallable(value: Closure | PrimFn, info: FunctionInfo, atomicScope: boolean): Closure | PrimFn {
+  private namedCallable(value: Closure | PrimFn, frame: Extract<Frame, { k: 'functionResult' }>): Closure | PrimFn {
     const original = value instanceof Closure ? value.lam.info : value.info;
-    const source = original ?? info;
-    const scope = value.atomicScope || atomicScope;
+    const owner = value instanceof Closure ? value.env?.invocation() : undefined;
+    const source =
+      original ?? (owner ? (frame.owners.get(owner) ?? (owner.info && frame.owners.get(owner.info))) : frame.info);
+    const scope = value.atomicScope ?? frame.atomicScope;
     if (source === original && scope === value.atomicScope) return value;
     return value instanceof Closure
       ? new Closure({ ...value.lam, info: source }, value.env, scope)

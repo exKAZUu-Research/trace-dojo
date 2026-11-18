@@ -15,6 +15,7 @@ export interface FunctionInfo {
   /** The row of its declaration, which `-- atomic` marks. */
   row: number;
   isAtomic: boolean;
+  patternOwner?: FunctionInfo;
 }
 
 export type Core = (

@@ -157,3 +157,26 @@ main=do
   expect(result.traceItems.some((item) => item.line === 5)).toBe(true);
   expect(result.traceItems.every((item) => item.callLines.length <= 1)).toBe(true);
 });
+
+test('an atomic helper groups a caller lambda without renaming or mutating it', () => {
+  const source = `pick f=f -- atomic
+main=do
+ let action= \\z->do
+       print(z::Int)
+       print(z+1)
+ pick action 1
+ action 2
+ print(0::Int)`;
+  const result = traceProgram('haskell', source, source);
+  expect(result.stdout).toBe('1\n2\n2\n3\n0\n');
+  expect(result.uncaughtException).toBeUndefined();
+  expect(result.traceItems.map((item) => [item.line, item.callLines, item.vars.z])).toEqual([
+    [0, [], undefined],
+    [6, [], undefined],
+    [3, [], 2],
+    [4, [], 2],
+    [5, [], 2],
+    [7, [], undefined],
+    [8, [], undefined],
+  ]);
+});
