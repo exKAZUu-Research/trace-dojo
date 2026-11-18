@@ -8,3 +8,9 @@ Warning: Undefined array key "also missing" in /main.php on line 9
 19
 #0 /main.php(25): Watcher::trace()
 #1 {main}
+
+Warning: Undefined variable $undefined in /main.php on line 29
+#0 /main.php(32): {closure:/main.php:31}()
+#1 {main}
+#0 /main.php(39): MagicTrace->__get('property')
+#1 {main}

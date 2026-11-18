@@ -3,12 +3,12 @@ import { setNativeArrayStorage } from './assignment';
 import { callMethod } from './callables';
 import { invoke } from './calls';
 import { createObject, findClass, objectToArray } from './classes';
-import { deprecated, throwError, warn } from './errors';
+import { deprecated, throwError, warn, withCleanupExceptions } from './errors';
 import { defineClass, type NativeMethod } from './native';
 import { toKey } from './operators';
 import { arrayIsShared, share } from './places';
 import './splInterfaces';
-import { rt } from './runtime';
+import { PhpThrow, rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import {
   type ArrayCursor,
@@ -30,6 +30,7 @@ const INTERNAL_FLAGS = 0xff_ff_00_00;
 /** The storage of an ArrayObject or ArrayIterator: its own array, or the ArrayObject whose storage it uses. */
 export class ArrayStorage {
   readonly nativeValues = new NativeValueIndex();
+  private sorting = false;
   private cursorArray: PhpArray | undefined;
   private iteratorCursor: ArrayCursor | undefined;
   private readonly watchers = new Set<WeakRef<ArrayStorage>>();
@@ -71,6 +72,7 @@ export class ArrayStorage {
   }
 
   replaceWith(storage: ArrayStorage): void {
+    this.checkMutation();
     this.own = storage.own;
     this.backing = storage.backing;
     this.flags = storage.flags;
@@ -97,12 +99,29 @@ export class ArrayStorage {
 
   writable(): PhpArray {
     const root = this.chain().at(-1) as ArrayStorage;
+    root.checkMutation();
     if (arrayIsShared(root.own)) {
       root.own = root.own.copy();
       root.nativeValues.reset(root.held());
       root.syncCursors('copy');
     }
     return root.own;
+  }
+
+  checkMutation(): void {
+    if (this.chain().some((storage) => storage.sorting))
+      throwError('Error', 'Modification of ArrayObject during sorting is prohibited');
+  }
+
+  runSort(run: () => Value): Value {
+    this.checkMutation();
+    const root = this.chain().at(-1) as ArrayStorage;
+    root.sorting = true;
+    try {
+      return run();
+    } finally {
+      root.sorting = false;
+    }
   }
 
   private syncCursors(mode: 'copy' | 'replace'): void {
@@ -202,6 +221,7 @@ export const magicSerializationMethods: NativeMethod[] = [
  */
 function setStorage(object: PhpObject, value: Value, method: string, flags: number, justArray: boolean): void {
   const old = storageOf(object);
+  old.checkMutation();
   const name = old.owner;
   let storage: ArrayStorage;
   let newFlags = flags;
@@ -342,8 +362,16 @@ function sortStorage(object: PhpObject, name: string, args: Value[]): Value {
   const ref = new Ref(storage.array);
   const fn = rt().functions.get(name);
   if (!fn) throw new Error(`Unknown sort function ${name}`);
-  const result = invoke({ fn }, [{ v: ref.v, ref }, ...args.map((v) => ({ v }))], undefined);
-  storage.array = ref.v as PhpArray;
+  let result: Value = null;
+  withCleanupExceptions(rt(), (capture) => {
+    try {
+      result = storage.runSort(() => invoke({ fn }, [{ v: ref.v, ref }, ...args.map((v) => ({ v }))], undefined));
+    } catch (error) {
+      if (!(error instanceof PhpThrow)) throw error;
+      capture(error);
+    }
+    if (storage.array !== ref.v) storage.array = ref.v as PhpArray;
+  });
   return result;
 }
 

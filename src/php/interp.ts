@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 825 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 875 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -7,7 +7,7 @@ import {
   compoundAssign,
   destructure,
   incDec,
-  isset,
+  issetOffset,
   nativeIteratorSlot,
   placeOf,
 } from './assignment';
@@ -34,6 +34,7 @@ import {
   declareClass,
   findClass,
   instantiate,
+  issetProp,
   readProp,
   readStaticProp,
   requireClass,
@@ -192,42 +193,10 @@ export function evChain(e: Expr, discardResult = false): Chain {
     case 'array': {
       return arrayLiteral(e);
     }
-    case 'idx': {
-      if (e.index === undefined) throwError('Error', 'Cannot use [] for reading');
-      if (e.base.k === 'var' && e.base.name === 'GLOBALS') {
-        const name = toStr(ev(e.index));
-        runtime.row = e.row;
-        const ref = runtime.globalFrame.vars.get(name);
-        if (ref) return ref.v;
-        warn(`Undefined global variable $${name}`);
-        return null;
-      }
-      const earlyBase = isCompiledVariable(e.base) ? undefined : evChain(e.base);
-      if (earlyBase === SHORT) return SHORT;
-      const index = ev(e.index);
-      const base = earlyBase === undefined ? evChain(e.base) : earlyBase;
-      if (base === SHORT) return SHORT;
-      runtime.row = e.row;
-      return readIndex(base, index);
-    }
-    case 'prop': {
-      const earlyObject = e.nullsafe || !isCompiledVariable(e.obj) ? evChain(e.obj) : undefined;
-      if (earlyObject === SHORT || (e.nullsafe && earlyObject === null)) return SHORT;
-      const name = memberName(e.name);
-      const object = earlyObject === undefined ? evChain(e.obj) : earlyObject;
-      if (object === SHORT) return SHORT;
-      runtime.row = e.row;
-      if (!(object instanceof PhpObject)) {
-        warn(`Attempt to read property "${name}" on ${valueName(object)}`);
-        return null;
-      }
-      return readProp(object, name, runtime.frame.scope);
-    }
+    case 'idx':
+    case 'prop':
     case 'sprop': {
-      const cls = resolveClassRef(e.cls);
-      const name = typeof e.name === 'string' ? e.name : toStr(ev(e.name));
-      runtime.row = e.row;
-      return readStaticProp(cls, name, runtime.frame.scope);
+      return evaluateRead(e, 'read');
     }
     case 'cconst': {
       return classConstantOf(e);
@@ -334,7 +303,7 @@ export function evChain(e: Expr, discardResult = false): Chain {
       throw new PhpThrow(value);
     }
     case 'isset': {
-      return e.items.every((item) => isset(item));
+      return e.items.every((item) => evaluateRead(item, 'isset') === true);
     }
     case 'empty': {
       return !toBool(evQuiet(e.e));
@@ -413,42 +382,131 @@ function isThrowableObject(object: PhpObject): boolean {
 }
 
 /** Evaluates an expression without the warnings an undefined variable or key would raise, as `??` and `empty` do. */
-// code-gauge-allow functionNcss 37 -- One case per expression kind, as PHP evaluates each kind differently.
-// code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-export function evQuiet(e: Expr, mode: 'isset' | 'coalesce' = 'isset'): Value {
+export function evQuiet(e: Expr, mode: 'empty' | 'coalesce' = 'empty'): Value {
+  const result = evaluateRead(e, mode);
+  return result === SHORT ? null : result;
+}
+
+type ReadMode = 'read' | 'empty' | 'coalesce' | 'isset';
+type ReadPlan = typeof SHORT | (() => Chain);
+
+function evaluateRead(e: Expr, mode: ReadMode): Chain {
+  const plan = prepareRead(e, mode);
+  return plan === SHORT ? SHORT : plan();
+}
+
+// code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function prepareRead(e: Expr, mode: ReadMode): ReadPlan {
   const runtime = rt();
   switch (e.k) {
     case 'var': {
-      if (e.name === 'this') return mode === 'coalesce' ? readVar(e.name, e.row) : (runtime.frame.thisObj ?? null);
-      if (e.name === 'GLOBALS') return globalsArray();
-      return runtime.frame.vars.get(e.name)?.v ?? null;
+      return () => {
+        if (mode === 'isset' && e.name === 'GLOBALS') return true;
+        const value = variableRead(e, mode);
+        return mode === 'isset' ? value !== null : value;
+      };
     }
     case 'varvar': {
-      return runtime.frame.vars.get(toStr(ev(e.name)))?.v ?? null;
+      const name = prepareOperand(e.name);
+      return () => {
+        const key = toStr(name());
+        const value = mode === 'read' ? readVar(key, e.row) : (runtime.frame.vars.get(key)?.v ?? null);
+        return mode === 'isset' ? value !== null : value;
+      };
     }
     case 'idx': {
-      if (e.index === undefined) throwError('Error', 'Cannot use [] for reading');
-      const base = evQuiet(e.base, 'coalesce');
-      const index = ev(e.index);
-      if (base === null) return null;
-      return readIndex(base, index, mode);
+      return prepareOffsetRead(e, mode);
     }
     case 'prop': {
-      const object = evQuiet(e.obj, 'coalesce');
-      if (!(object instanceof PhpObject)) return null;
-      const name = memberName(e.name);
-      const scope = runtime.frame.scope;
-      return readProp(object, name, scope, mode === 'coalesce' ? 'coalesce' : 'empty');
+      return preparePropertyRead(e, mode);
     }
     case 'sprop': {
       const cls = resolveClassRef(e.cls);
-      const name = typeof e.name === 'string' ? e.name : toStr(ev(e.name));
-      return readStaticProp(cls, name, runtime.frame.scope, true);
+      const name = readMemberOperand(e.name);
+      return () => {
+        const key = name();
+        runtime.row = e.row;
+        const value = readStaticProp(cls, key, runtime.frame.scope, mode !== 'read');
+        return mode === 'isset' ? value !== null : value;
+      };
     }
     default: {
-      return ev(e);
+      const value = e.k === 'mcall' ? evChain(e) : ev(e);
+      if (value === SHORT) return SHORT;
+      if (value instanceof PhpArray || value instanceof PhpObject) runtime.frame.temporaries.push(value);
+      return () => (mode === 'isset' ? value !== null : value);
     }
   }
+}
+
+function variableRead(e: Extract<Expr, { k: 'var' }>, mode: ReadMode): Value {
+  const runtime = rt();
+  if (e.name === 'GLOBALS') return globalsArray();
+  if (mode === 'read' || (e.name === 'this' && mode === 'coalesce')) return readVar(e.name, e.row);
+  return e.name === 'this' ? (runtime.frame.thisObj ?? null) : (runtime.frame.vars.get(e.name)?.v ?? null);
+}
+
+function prepareOffsetRead(e: Extract<Expr, { k: 'idx' }>, mode: ReadMode): ReadPlan {
+  if (e.index === undefined) throwError('Error', 'Cannot use [] for reading');
+  if (e.base.k === 'var' && e.base.name === 'GLOBALS') {
+    const key = prepareOperand(e.index);
+    return () => globalOffsetRead(key(), e.row, mode);
+  }
+  const base = prepareRead(e.base, mode === 'read' ? 'read' : 'coalesce');
+  if (base === SHORT) return SHORT;
+  const index = prepareOperand(e.index);
+  return () => {
+    const value = base();
+    if (value === SHORT) return SHORT;
+    const key = index();
+    rt().row = e.row;
+    if (mode === 'isset') return issetOffset(value, key);
+    if (value === null && mode !== 'read') return null;
+    return readIndex(value, key, mode === 'empty' ? 'isset' : mode);
+  };
+}
+
+function globalOffsetRead(key: Value, row: number, mode: ReadMode): Value {
+  const name = toStr(key);
+  const runtime = rt();
+  runtime.row = row;
+  const ref = runtime.globalFrame.vars.get(name);
+  if (mode === 'isset') return ref !== undefined && ref.v !== null;
+  if (ref) return ref.v;
+  if (mode === 'read') warn(`Undefined global variable $${name}`);
+  return null;
+}
+
+// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function preparePropertyRead(e: Extract<Expr, { k: 'prop' }>, mode: ReadMode): ReadPlan {
+  let receiver = prepareRead(e.obj, mode === 'read' ? 'read' : 'coalesce');
+  if (receiver === SHORT) return SHORT;
+  if (e.nullsafe) {
+    const object = receiver();
+    if (object === SHORT || object === null) return SHORT;
+    if (!isCompiledVariable(e.obj)) receiver = () => object;
+  }
+  const name = readMemberOperand(e.name);
+  return () => {
+    const object = receiver();
+    if (object === SHORT) return SHORT;
+    const key = name();
+    const runtime = rt();
+    runtime.row = e.row;
+    if (!(object instanceof PhpObject)) {
+      if (mode === 'read') warn(`Attempt to read property "${key}" on ${valueName(object)}`);
+      return mode === 'isset' ? false : null;
+    }
+    if (mode === 'isset') return issetProp(object, key, runtime.frame.scope);
+    return readProp(object, key, runtime.frame.scope, mode);
+  };
+}
+
+function readMemberOperand(name: string | Expr): () => string {
+  if (typeof name === 'string') return () => name;
+  const read = prepareOperand(name);
+  return () => toStr(read());
 }
 
 function readVar(name: string, row: number): Value {
@@ -568,13 +626,14 @@ function arrayLiteral(e: Extract<Expr, { k: 'array' }>): PhpArray {
 }
 
 function insertArrayItem(array: PhpArray, item: Extract<Expr, { k: 'array' }>['items'][number]): void {
-  const key = item.key === undefined ? undefined : toKey(ev(item.key));
+  const readKey = item.key === undefined ? undefined : prepareOperand(item.key);
   let slot: Value | Ref;
   if (item.byRef) {
     slot = placeOf(item.value).ref();
     slot.isRef = true;
     slot.rc++;
   } else slot = share(ev(item.value));
+  const key = readKey === undefined ? undefined : toKey(readKey());
   const previous = key === undefined ? undefined : array.map.get(key);
   if (key !== undefined) array.setSlot(key, slot);
   else if (!array.append(slot))
@@ -975,8 +1034,14 @@ export function isCompiledVariable(e: Expr): boolean {
   return e.k === 'var' && e.name !== 'this' && e.name !== 'GLOBALS';
 }
 
-export function prepareOperand(e: Expr): () => Value {
-  if (isCompiledVariable(e)) return () => holdOperand(e);
+export function prepareOperand(e: Expr): (row?: number) => Value {
+  if (e.k === 'var' && isCompiledVariable(e)) {
+    return (row = e.row) => {
+      const value = readVar(e.name, row);
+      rt().frame.temporaries.push(value);
+      return value;
+    };
+  }
   const value = holdOperand(e);
   return () => value;
 }
@@ -1076,18 +1141,28 @@ function objectToArrayCast(object: PhpObject): PhpArray {
   return classesModule.objectToArray(object);
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function matchExpression(e: Extract<Expr, { k: 'match' }>): Value {
   const runtime = rt();
-  const subject = ev(e.subject);
-  runtime.frame.temporaries.push(subject);
+  const readSubject = prepareOperand(e.subject);
+  const snapshot = e.jumpTable ? readSubject() : undefined;
   for (const arm of e.arms) {
     if (!arm.conditions) continue;
     for (const condition of arm.conditions) {
-      if (consumeExpression(condition, (value) => strictEquals(subject, value))) return ev(arm.body);
+      if (
+        consumeExpression(condition, (value) =>
+          strictEquals(snapshot === undefined ? readSubject(condition.row) : snapshot, value)
+        )
+      )
+        return ev(arm.body);
     }
   }
   const fallback = e.arms.find((arm) => !arm.conditions);
   if (fallback) return ev(fallback.body);
+  const subject =
+    e.subject.k === 'var' && isCompiledVariable(e.subject)
+      ? (runtime.frame.vars.get(e.subject.name)?.v ?? null)
+      : readSubject();
   runtime.row = e.row;
   throwError('UnhandledMatchError', `Unhandled match case ${matchCaseText(subject)}`);
 }

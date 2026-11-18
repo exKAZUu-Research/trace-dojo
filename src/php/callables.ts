@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 568 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 576 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
@@ -19,7 +19,7 @@ import {
 import { canCall, classScopeMessage, lookupMethod, requireClass } from './classes';
 import { debugType, valueName } from './conversions';
 import { deprecated, notice, probe, ProbeFailure, throwError, warn, withPendingException } from './errors';
-import { type Chain, ev, evChain, iterate, resolveClassRef, SHORT } from './interp';
+import { type Chain, ev, evChain, isCompiledVariable, iterate, prepareOperand, resolveClassRef, SHORT } from './interp';
 import { ElementPlace, share, VarPlace, writableContainer } from './places';
 import { type Frame, PhpThrow, rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
@@ -177,6 +177,7 @@ function claimArgumentTemporaries(frame: Frame, args: ArgValue[], first: number,
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = false): Value {
   const runtime = rt();
   runtime.row = e.row;
@@ -191,10 +192,11 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = 
       throwError('Error', `Call to undefined function ${name.name}()`);
     }
     if (e.fcc) return closureFromCallable({ fn });
-    const args = evalArgs(e.args, fn, fn.name);
-    runtime.row = e.row;
     const specialized = specializedCall(fn, e.args);
     const directOverload = specialized && fn.kind === 'native' && fn.shortParamsDirectOnly;
+    const deferred = specialized && hasDeferredNativeOperands(fn.name);
+    const args = deferred ? evalDeferredValueArgs(e.args, e.row) : evalArgs(e.args, fn, fn.name);
+    runtime.row = e.row;
     const result = invoke({ fn, inline: specialized && !directOverload, directOverload }, args, e.row, discardResult);
     runtime.frame.temporaries.push(result);
     return result;
@@ -212,6 +214,19 @@ export function callExpression(e: Extract<Expr, { k: 'call' }>, discardResult = 
   return result;
 }
 
+function evalDeferredValueArgs(args: Arg[], row: number): ArgValue[] {
+  const frame = rt().frame;
+  const mark = frame.temporaries.length;
+  const reads = args.map((arg) => prepareOperand(arg.e));
+  const values = reads.map((read, position) => ({ v: share(read(row)), position }));
+  claimArgumentTemporaries(frame, values, 0, mark);
+  return values;
+}
+
+function hasDeferredNativeOperands(name: string): boolean {
+  return name !== 'implode' && name !== 'call_user_func' && name !== 'call_user_func_array';
+}
+
 function functionNameFor(target: CallTarget): string {
   return target.method ? `${target.method.scope.name}::${target.method.name}` : target.fn.name;
 }
@@ -220,16 +235,13 @@ function functionNameFor(target: CallTarget): string {
 // code-gauge-allow functionNcss 48 -- Resolves each form of call and callable by PHP's lookup rules, in PHP's order of checks.
 export function methodCallExpression(e: Extract<Expr, { k: 'mcall' }>, discardResult = false): Chain {
   const runtime = rt();
-  const object = evChain(e.obj);
-  if (object === SHORT) return SHORT;
-  if (e.nullsafe && object === null) return SHORT;
-  const name = typeof e.name === 'string' ? e.name : undefined;
-  let methodName: string;
-  if (name !== undefined) methodName = name;
-  else {
-    const value = ev(e.name as Expr);
-    methodName = dynamicMethodName(value);
-  }
+  const member = e.name;
+  const deferred = isCompiledVariable(e.obj) && typeof member !== 'string';
+  const earlyObject = !deferred || e.nullsafe ? evChain(e.obj) : undefined;
+  if (earlyObject === SHORT || (e.nullsafe && earlyObject === null)) return SHORT;
+  const readName = typeof member === 'string' ? undefined : prepareOperand(member);
+  const object = deferred ? ev(e.obj) : (earlyObject ?? null);
+  const methodName = readName ? dynamicMethodName(readName()) : (member as string);
   runtime.row = e.row;
   if (!(object instanceof PhpObject) || object.isResource) {
     throwError('Error', `Call to a member function ${methodName}() on ${valueName(object)}`);
@@ -871,8 +883,7 @@ function newClosure(fn: UserFunction, bound: Map<string, Ref>, isStatic: boolean
 
 // Function bodies ----------------------------------------------------------------------------------------------------
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function specializedCall(fn: Callable, args: Arg[]): boolean {
   if (fn.kind !== 'native' || args.some((arg) => arg.spread || arg.name !== undefined)) return false;
   const name = lower(fn.name);
@@ -881,6 +892,7 @@ function specializedCall(fn: Callable, args: Arg[]): boolean {
   if (name === 'min' || name === 'max') return args.length === 2;
   if (name === 'implode') return args.length === 1 || args.length === 2;
   if (name === 'strtr') return args.length === 2 || args.length === 3;
+  if (name === 'substr') return args.length === 2 || args.length === 3;
   if (name === 'sprintf') return usesSimpleSprintf(args);
   if (!fn.inlined) return false;
   if (name === 'array_key_exists') return args.length === 2;

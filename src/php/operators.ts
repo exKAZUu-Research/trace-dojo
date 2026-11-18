@@ -56,7 +56,13 @@ function stringify(value: Value, reportWarning: (message: string) => void): stri
   return objectToString(value);
 }
 
-export function withStringConversionErrors(continuation: (convert: (value: Value) => string) => void): void {
+export function withStringConversionErrors(
+  continuation: (
+    convert: (value: Value) => string,
+    reportWarning: (message: string) => void,
+    hold: (error: unknown) => void
+  ) => void
+): void {
   const runtime = rt();
   const pending = runtime.nativeStringConversionPending;
   try {
@@ -73,7 +79,7 @@ export function withStringConversionErrors(continuation: (convert: (value: Value
           hold(error);
         }
       };
-      continuation((value) => {
+      const convert = (value: Value): string => {
         if (runtime.nativeStringConversionPending && value instanceof PhpObject && !value.isResource) return '';
         try {
           return stringify(value, reportWarning);
@@ -81,7 +87,8 @@ export function withStringConversionErrors(continuation: (convert: (value: Value
           hold(error);
           return '';
         }
-      });
+      };
+      continuation(convert, reportWarning, hold);
     });
   } finally {
     runtime.nativeStringConversionPending = pending;
@@ -134,7 +141,7 @@ function floatToIntCap(value: number): bigint {
 
 /** Converts a value to a float as `(float)` and `floatval` do. */
 // code-gauge-allow duplicateLines 21 -- Mirrors toInt, as PHP converts each type to int and to float by separate rules.
-export function toFloat(value: Value): number {
+export function toFloat(value: Value, reportWarning = warn): number {
   if (value === null) return 0;
   switch (typeof value) {
     case 'boolean': {
@@ -153,7 +160,7 @@ export function toFloat(value: Value): number {
   }
   if (value instanceof PhpArray) return value.size > 0 ? 1 : 0;
   if (value instanceof PhpObject && value.isResource) return value.id;
-  warn(`Object of class ${(value as PhpObject).cls.name} could not be converted to float`);
+  reportWarning(`Object of class ${(value as PhpObject).cls.name} could not be converted to float`);
   return 1;
 }
 

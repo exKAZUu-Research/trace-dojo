@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 547 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 548 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
@@ -21,7 +21,7 @@ import {
 import { toBool, valueName } from './conversions';
 import { E_DEPRECATED, E_WARNING, emitError, setPrevious, throwError, warn } from './errors';
 import { collectBeforeAllocation, setDestructor } from './garbage';
-import { consumeExpression, ev, evBool, evQuiet, evReturn } from './interp';
+import { consumeExpression, ev, evBool, evQuiet, evReturn, prepareOperand } from './interp';
 import { looseEquals, setObjectToString, toStr } from './operators';
 import { ElementPlace, share, VarPlace, writableContainer } from './places';
 import { FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
@@ -350,12 +350,13 @@ function forStatement(statement: Extract<Stmt, { k: 'for' }>, held: number): Com
 
 // code-gauge-allow functionCognitiveComplexity 16 -- One case per statement kind, as PHP runs each kind differently.
 function switchStatement(statement: Extract<Stmt, { k: 'switch' }>): Completion {
-  const subject = ev(statement.subject);
+  const readSubject = prepareOperand(statement.subject);
   let start = -1;
   for (const [index, item] of statement.cases.entries()) {
     if (item.test === undefined) continue;
     rt().row = item.row;
-    if (consumeExpression(item.test, (value) => looseEquals(subject, value))) {
+    const row = item.test.row;
+    if (consumeExpression(item.test, (value) => looseEquals(readSubject(row), value))) {
       start = index;
       break;
     }

@@ -7,7 +7,13 @@ type Length = readonly [number, number];
 
 // code-gauge-allow functionNcss 49 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-export function analyzeRegex(source: string, unicode: boolean, utf8: boolean, ignoreCase: boolean): Set<string> {
+export function analyzeRegex(
+  source: string,
+  unicode: boolean,
+  utf8: boolean,
+  ignoreCase: boolean,
+  invalidLookbehind: (start: number, reason: string) => never
+): Set<string> {
   let tree: AST.Pattern;
   try {
     tree = new RegExpParser({ ecmaVersion: 2025 }).parsePattern(source, 0, source.length, { unicode });
@@ -49,7 +55,7 @@ export function analyzeRegex(source: string, unicode: boolean, utf8: boolean, ig
       capturesAtEntry.set(node, captureCount);
     },
     onAssertionLeave(node) {
-      if (validateLookbehind(node, lengths) && captureCount !== capturesAtEntry.get(node))
+      if (validateLookbehind(node, lengths, invalidLookbehind) && captureCount !== capturesAtEntry.get(node))
         throw new UnsupportedFeatureError('可変長後読みのキャプチャ');
     },
     onQuantifierLeave(node) {
@@ -69,18 +75,27 @@ function validateCaptureRepeat(node: AST.Quantifier, lengths: Map<AST.Element, L
   if (min === 0 && (node.min === 0 || max > 0)) throw new UnsupportedFeatureError('空に一致できるキャプチャの繰り返し');
 }
 
-function validateLookbehind(node: AST.Assertion, lengths: Map<AST.Element, Length>): boolean {
+function validateLookbehind(
+  node: AST.Assertion,
+  lengths: Map<AST.Element, Length>,
+  invalid: (start: number, reason: string) => never
+): boolean {
   if (node.kind !== 'lookbehind') return false;
   let firstLength: number | undefined;
   let variable = false;
+  let uneven = false;
+  let longest = 0;
   for (const alternative of node.alternatives) {
     const [min, max] = alternativeLength(alternative, lengths, new Set());
-    if (!Number.isFinite(max) || max > 65_535 || (min !== max && max > 255))
-      throw new UnsupportedFeatureError('長さの制限を超える後読み正規表現');
-    if (min !== max || (firstLength !== undefined && min !== firstLength)) variable = true;
+    if (!Number.isFinite(max)) invalid(node.start, 'length of lookbehind assertion is not limited');
+    if (max > 65_535) invalid(node.start, 'lookbehind assertion is too long');
+    variable ||= min !== max;
+    uneven ||= firstLength !== undefined && min !== firstLength;
+    longest = Math.max(longest, max);
     firstLength ??= min;
   }
-  return variable;
+  if (variable && longest > 255) invalid(node.start, 'branch too long in variable-length lookbehind assertion');
+  return variable || uneven;
 }
 
 function alternativeLength(node: AST.Alternative, cache: Map<AST.Element, Length>, active: Set<AST.Element>): Length {

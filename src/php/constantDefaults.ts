@@ -13,6 +13,7 @@ export type ClassConstantLookup = (cls: ClassRef, name: string) => Constant | un
 interface FoldContext {
   compiler?: boolean;
   classConstant?: ClassConstantLookup;
+  className?: (cls: ClassRef) => string | undefined;
 }
 
 export function foldedDefaultType(expression: Expr, context: FoldContext = {}): string | undefined {
@@ -53,7 +54,10 @@ function fold(expression: Expr, context: FoldContext): Folded {
       return result;
     }
     case 'cconst': {
-      if (expression.className && expression.cls.k === 'named') return expression.cls.name;
+      if (expression.className) {
+        if (expression.cls.k === 'named') return expression.cls.name;
+        return context.className?.(expression.cls) ?? UNKNOWN;
+      }
       const name = typeof expression.name === 'string' ? expression.name : fold(expression.name, context);
       if (typeof name !== 'string') return UNKNOWN;
       const value = context.classConstant?.(expression.cls, name);

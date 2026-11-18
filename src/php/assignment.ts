@@ -3,21 +3,12 @@
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable } from './astAnalysis';
 import { callMethod } from './callables';
-import { issetProp, propRef, readProp, staticPropRef, unsetProp, writeProp } from './classes';
+import { propRef, readProp, staticPropRef, unsetProp, writeProp } from './classes';
 import * as classesModule from './classes';
 import * as conversionsModule from './conversions';
 import { debugType, numericPrefix, toBool, valueName } from './conversions';
-import { deprecated, notice, throwError, warn } from './errors';
-import {
-  ev,
-  evQuiet,
-  isArrayAccess,
-  memberName,
-  prepareOperand,
-  readIndex,
-  resolveClassRef,
-  stringOffset,
-} from './interp';
+import { deprecated, notice, throwError, warn, withPendingException } from './errors';
+import { ev, isArrayAccess, memberName, prepareOperand, readIndex, resolveClassRef, stringOffset } from './interp';
 import { arithmetic, bitwise, concat, toInt, toKey, toStr } from './operators';
 import {
   ElementPlace,
@@ -30,9 +21,9 @@ import {
   VarPlace,
   writableContainer,
 } from './places';
-import { rt } from './runtime';
+import { PhpThrow, rt } from './runtime';
 import { incrementString } from './strings';
-import { coerce, NO_MATCH, typeToString } from './types';
+import { coerce, describePropertyType, matches, NO_MATCH, typeToString } from './types';
 import {
   type Key,
   PhpArray,
@@ -177,7 +168,7 @@ function materializeNestedSlot(e: Expr, place: Place): void {
   if (e.k === 'idx' || e.k === 'prop') place.set(null);
 }
 
-function nestedPlace(place: Place, mode: WriteMode): Place {
+function nestedPlace(place: Place, mode: WriteMode | 'unset'): Place {
   return place.nested?.(mode === 'incdec' ? 'update' : mode) ?? place;
 }
 
@@ -196,7 +187,10 @@ function deferredPlace(resolve: (mode: WriteMode) => Place, read: () => Value | 
       return place.nested?.(mode) ?? place;
     },
     warnUndefined: () => target?.warnUndefined?.(),
+    declaration: () => target?.declaration?.(),
+    typeSources: () => target?.typeSources?.(),
     set: (value, operation) => writable().set(value, operation),
+    assign: (value) => assignPlace(writable(), value),
     ref: () => writable().ref(),
     unset: () => writable().unset(),
   };
@@ -278,28 +272,29 @@ class StaticPlace implements Place {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function propPlace(object: PhpObject, name: string): Place {
   const scope = rt().frame.scope;
   let reportedStaticAccess = false;
-  const reportStaticAccess = (decl = classesModule.lookupProp(object.cls, name, scope)): void => {
-    if (reportedStaticAccess || !decl?.isStatic) return;
-    reportedStaticAccess = true;
-    classesModule.reportStaticInstanceAccess(object, name, decl);
+  const lookup = (report: boolean): PropDecl | undefined => {
+    const property = classesModule.lookupProp(object.cls, name, scope);
+    if (!property?.isStatic) return property;
+    if (report && classesModule.checkStaticInstanceAccess(object, name, scope, property, 'get', !reportedStaticAccess))
+      reportedStaticAccess = true;
+    return undefined;
   };
   return {
     get: (operation) => {
-      if (operation) reportStaticAccess();
+      if (operation) lookup(true);
       return readPropertyPlace(object, name, scope, operation);
     },
     set: (value, operation) => writeProp(object, name, value, scope, { fetched: reportedStaticAccess, operation }),
     ref: () => propRef(object, name, scope),
     unset: () => unsetProp(object, name, scope),
-    declaration: () => classesModule.lookupProp(object.cls, name, scope),
+    declaration: () => lookup(false),
     typeSources: () => {
-      const decl = classesModule.lookupProp(object.cls, name, scope);
+      const decl = lookup(false);
       const ref = object.props.get(decl?.key ?? name);
       return ref instanceof Ref && ref.isRef ? ref.typeOwners() : undefined;
     },
@@ -307,32 +302,35 @@ function propPlace(object: PhpObject, name: string): Place {
     warnUndefined: () => {
       if (object.cls.findMethod('__get')) return;
       // PHP creates the property (deprecating a dynamic one) before it warns about reading it.
-      if (!classesModule.lookupProp(object.cls, name, scope)) {
+      if (!lookup(false)) {
         classesModule.createDynamicProp(object, name);
         object.props.set(name, null);
       }
       warn(`Undefined property: ${object.cls.name}::$${name}`);
     },
     nested(mode = 'write') {
-      const decl = classesModule.lookupProp(object.cls, name, scope);
-      reportStaticAccess(decl);
+      const decl = lookup(true);
       if (decl && classesModule.canAccessProp(decl, scope))
         classesModule.requireVirtualPropertyHook(object, decl, 'get');
       if (
         ((decl && !classesModule.canAccessProp(decl, scope)) || !issetPropExists(object, name, scope)) &&
         object.cls.findMethod('__get')
       )
-        return new RefPlace(propRef(object, name, scope));
+        return new RefPlace(propRef(object, name, scope, 'alias', reportedStaticAccess));
       if (decl?.hooks?.get && !object.guards?.has(`hook:${name}`)) {
         return new RefPlace(classesModule.hookedPropertyReference(object, decl, scope, mode, true));
       }
       classesModule.checkIndirectModification(object, name, scope, mode);
+      if (mode === 'unset' && !decl && !object.props.has(name)) {
+        classesModule.createDynamicProp(object, name);
+        object.props.set(name, null);
+      }
       return this;
     },
   };
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function readPropertyPlace(
   object: PhpObject,
   name: string,
@@ -349,7 +347,11 @@ function readPropertyPlace(
   if (decl && !decl.isStatic && classesModule.canAccessProp(decl, scope)) {
     classesModule.requireVirtualPropertyHook(object, decl, 'get');
   }
-  if (!decl?.hooks?.get && !issetPropExists(object, name, scope)) {
+  if (
+    !decl?.hooks?.get &&
+    !issetPropExists(object, name, scope) &&
+    (!decl || classesModule.canAccessProp(decl, scope))
+  ) {
     const magic = object.cls.findMethod('__get');
     if (!magic && (!decl?.type || decl.isStatic)) return;
   }
@@ -445,8 +447,31 @@ function arrayAccessNestedPlace(object: PhpObject, key: Value | undefined, unset
 }
 
 // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 31 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function stringOffsetPlace(parent: Place, text: string, key: Value | undefined): Place {
+  const assign = (value: () => Value): Value => {
+    if (key === undefined) throwError('Error', '[] operator not supported for strings');
+    const position = stringOffset(text, key) as number;
+    const offset = position < 0 ? Number(toInt(key)) : position;
+    if (offset < 0) {
+      warn(`Illegal string offset ${offset}`);
+      return null;
+    }
+    let character = toStr(value());
+    if (character === '') throwError('Error', 'Cannot assign an empty string to a string offset');
+    if (character.length > 1) {
+      warn('Only the first byte will be assigned to the string offset');
+      character = character[0];
+    }
+    const length = Math.max(text.length, offset + 1);
+    rt().ensureStringFits(length);
+    rt().spend(Math.ceil(length / 64));
+    const updated =
+      offset >= text.length
+        ? text + ' '.repeat(offset - text.length) + character
+        : text.slice(0, offset) + character + text.slice(offset + 1);
+    parent.set(updated);
+    return character;
+  };
   return {
     get: (operation) => {
       if (key === undefined) throwError('Error', '[] operator not supported for strings');
@@ -460,31 +485,8 @@ function stringOffsetPlace(parent: Place, text: string, key: Value | undefined):
       throwError('Error', message);
     },
     getForIsset: () => (key === undefined ? undefined : readIndex(text, key, 'coalesce')),
-    set: (value) => {
-      if (key === undefined) throwError('Error', '[] operator not supported for strings');
-      const position = stringOffset(text, key) as number;
-      let offset = position;
-      if (position < 0) {
-        const requested = Number(toInt(key));
-        if (requested < 0) {
-          warn(`Illegal string offset ${requested}`);
-          return null;
-        }
-        offset = requested;
-      }
-      let character = toStr(value);
-      if (character === '') throwError('Error', 'Cannot assign an empty string to a string offset');
-      if (character.length > 1) {
-        warn('Only the first byte will be assigned to the string offset');
-        character = character[0];
-      }
-      rt().ensureStringFits(Math.max(text.length, offset + 1));
-      rt().spend(Math.ceil(Math.max(text.length, offset + 1) / 64));
-      const padded = offset >= text.length ? text + ' '.repeat(offset - text.length) + character : text;
-      const updated = offset >= text.length ? padded : text.slice(0, offset) + character + text.slice(offset + 1);
-      parent.set(updated);
-      return character;
-    },
+    set: (value) => assign(() => value),
+    assign,
     ref: () => {
       throwError('Error', 'Cannot create references to/from string offsets');
     },
@@ -508,9 +510,13 @@ export function assignExpression(target: Expr, valueExpr: Expr): Value {
     return ref.v;
   }
   const place = placeOf(target, 'deferred');
-  const value = ev(valueExpr);
+  const value = prepareOperand(valueExpr);
   runtime.row = target.row;
-  return place.set(share(value));
+  return assignPlace(place, () => share(value(target.row)));
+}
+
+function assignPlace(place: Place, value: () => Value): Value {
+  return place.assign ? place.assign(value) : place.set(value());
 }
 
 /** Assigns a value to a writable expression, as a foreach binding or list() element does. */
@@ -660,8 +666,42 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
     place.warnUndefined?.();
     current = null;
   }
-  const result = applyOperator(e.op, current, value);
+  let result: Value;
+  try {
+    result = applyOperator(e.op, current, value);
+  } catch (error) {
+    if (error instanceof PhpThrow && !(e.op === '.' && typeof current === 'string')) {
+      finishFailedCompound(place, error);
+    }
+    throw error;
+  }
   return place.set(share(result), 'assignOp');
+}
+
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function finishFailedCompound(place: Place, pending: PhpThrow): void {
+  const runtime = rt();
+  const sources = place.typeSources?.() ?? [];
+  const property = place.declaration?.();
+  const declarations =
+    sources.length > 0 ? sources.map(({ decl }) => decl) : property?.type && !property.hooks ? [property] : [];
+  if (declarations.length === 0) return;
+  withPendingException(runtime, pending, () => {
+    if (!runtime.strictTypes) {
+      for (const zero of [0n, 0]) {
+        if (!declarations.every((decl) => decl.type && matches(zero, decl.type, { scope: decl.cls }))) continue;
+        place.set(zero, 'assignOp');
+        return;
+      }
+    }
+    const first = sources[0]?.decl;
+    if (first) {
+      throwError(
+        'TypeError',
+        `Cannot assign null to reference held by property ${first.cls.name}::$${first.name} of type ${describePropertyType(first)}`
+      );
+    }
+  });
 }
 
 export function applyOperator(op: string, left: Value, right: Value): Value {
@@ -763,77 +803,79 @@ function incDecString(text: string, inc: boolean): Value {
 }
 
 export function unsetTarget(target: Expr): void {
-  const runtime = rt();
-  runtime.row = target.row;
-  switch (target.k) {
-    case 'var': {
-      new VarPlace(runtime.frame, target.name).unset();
-      return;
-    }
-    case 'varvar': {
-      new VarPlace(runtime.frame, toStr(ev(target.name))).unset();
-      return;
-    }
+  rt().row = target.row;
+  prepareUnset(target)()?.unset();
+}
+
+type UnsetBase = 'array' | 'object';
+
+function prepareUnset(e: Expr, nested?: UnsetBase): () => Place | undefined {
+  switch (e.k) {
     case 'idx': {
-      unsetDimensions(target);
-      return;
+      return prepareUnsetOffset(e, nested);
     }
     case 'prop': {
-      const object = evQuiet(target.obj);
-      if (!(object instanceof PhpObject)) return;
-      unsetProp(object, memberName(target.name), runtime.frame.scope);
-      return;
+      return prepareUnsetProperty(e, nested);
+    }
+    case 'var': {
+      const place = placeOf(e);
+      return () => place;
+    }
+    case 'varvar': {
+      const name = prepareOperand(e.name);
+      return () => new VarPlace(rt().frame, toStr(name()));
     }
     case 'sprop': {
-      const cls = resolveClassRef(target.cls);
-      new StaticPlace(cls, memberName(target.name), runtime.frame.scope).unset();
-      return;
+      const cls = resolveClassRef(e.cls);
+      const name = e.name;
+      const readName = typeof name === 'string' ? () => name : prepareOperand(name);
+      return () => new StaticPlace(cls, toStr(readName()), rt().frame.scope);
     }
     default: {
-      throwError('Error', 'Cannot unset this expression');
+      if (!nested) throwError('Error', 'Cannot unset this expression');
+      const place = placeOf(e);
+      return () => place;
     }
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function unsetDimensions(target: Extract<Expr, { k: 'idx' }>): void {
-  const dimensions: Expr[] = [];
-  let base: Expr = target;
-  while (base.k === 'idx' && !(base.base.k === 'var' && base.base.name === 'GLOBALS')) {
-    if (base.index === undefined) throwError('Error', 'Cannot use [] for unsetting');
-    dimensions.push(base.index);
-    base = base.base;
+function prepareUnsetOffset(e: Extract<Expr, { k: 'idx' }>, nested?: UnsetBase): () => Place | undefined {
+  if (e.index === undefined) throwError('Error', 'Cannot use [] for unsetting');
+  if (e.base.k === 'var' && e.base.name === 'GLOBALS') {
+    const readKey = prepareOperand(e.index);
+    return () => new VarPlace(rt().globalFrame, toStr(readKey()), true);
   }
-  let place = unsetBasePlace(base);
-  if (dimensions.length === 0) {
-    place?.unset();
-    return;
-  }
-  const indices = dimensions.toReversed().map((index) => ev(index));
-  place = place?.nested?.('unset') ?? place;
-  for (const [index, key] of indices.entries()) {
-    const nested = index + 1 < indices.length;
-    const value = place?.get();
-    if (index === 0 && value === undefined) warnUndefinedBase(base);
-    const container = value instanceof PhpArray && place ? writableContainer(place, value) : value;
-    place = unsetOffsetPlace(container, key, nested);
-    if (!place) return;
-    if (nested) place = place.nested?.('unset') ?? place;
-  }
-  place?.unset();
+  const readParent = prepareUnset(e.base, 'array');
+  const readKey = prepareOperand(e.index);
+  return () => {
+    const parent = readParent();
+    const value = parent?.get('nested');
+    if (value === undefined && e.base.k === 'var') parent?.warnUndefined?.();
+    const key = readKey();
+    rt().row = e.row;
+    const container = value instanceof PhpArray && parent ? writableContainer(parent, value) : value;
+    const place = unsetOffsetPlace(container, key, nested);
+    return nested && place ? nestedPlace(place, 'unset') : place;
+  };
 }
 
-function unsetBasePlace(e: Expr): Place | undefined {
-  if (e.k === 'idx') return globalPlace(e.index);
-  if (e.k === 'prop') {
-    const object = ev(e.obj);
-    const name = memberName(e.name);
-    return object instanceof PhpObject ? propPlace(object, name) : undefined;
-  }
-  return placeOf(e);
+function prepareUnsetProperty(e: Extract<Expr, { k: 'prop' }>, nested?: UnsetBase): () => Place | undefined {
+  const readParent = prepareUnset(e.obj, 'object');
+  const member = e.name;
+  const readName = typeof member === 'string' ? () => member : prepareOperand(member);
+  return () => {
+    const parent = readParent();
+    const object = parent?.get('receiver');
+    if (nested && object === undefined && e.obj.k === 'var') parent?.warnUndefined?.();
+    if (!(object instanceof PhpObject)) return;
+    const name = toStr(readName());
+    rt().row = e.row;
+    const place = propPlace(object, name);
+    return nested ? nestedPlace(place, 'unset') : place;
+  };
 }
 
-function unsetOffsetPlace(container: Value | undefined, key: Value, nested: boolean): Place | undefined {
+function unsetOffsetPlace(container: Value | undefined, key: Value, nested?: UnsetBase): Place | undefined {
   if (container instanceof PhpArray) {
     const offset = !nested && key === null ? '' : toKey(key, nested ? 'access' : 'unset');
     return new ElementPlace(container, offset);
@@ -846,73 +888,26 @@ function unsetOffsetPlace(container: Value | undefined, key: Value, nested: bool
   return undefined;
 }
 
-function unsetStringOffset(key: Value, nested: boolean): never {
+function unsetStringOffset(key: Value, nested?: UnsetBase): never {
   if (nested) {
     if (key === null || typeof key === 'boolean' || typeof key === 'number') {
       warn('String offset cast occurred');
-      throwError('Error', 'Cannot use string offset as an array');
+      throwError('Error', `Cannot use string offset as an ${nested}`);
     }
     if (typeof key === 'bigint' || (typeof key === 'string' && typeof numericPrefix(key)?.value === 'bigint')) {
-      throwError('Error', 'Cannot use string offset as an array');
+      throwError('Error', `Cannot use string offset as an ${nested}`);
     }
   }
   throwError('Error', 'Cannot unset string offsets');
 }
 
-/** Warns about the undefined variable an unset of an element starts from, as PHP's fetch for unset does. */
-function warnUndefinedBase(e: Expr): void {
-  let base = e;
-  while (base.k === 'idx') base = base.base;
-  if (base.k !== 'var' || base.name === 'this' || base.name === 'GLOBALS') return;
-  if (!rt().frame.vars.has(base.name)) warn(`Undefined variable $${base.name}`);
-}
-
-// code-gauge-allow functionNcss 48 -- Handles each kind of writable expression, whose write rules PHP defines separately.
-// code-gauge-allow functionCognitiveComplexity 27 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-export function isset(e: Expr): boolean {
-  const runtime = rt();
-  switch (e.k) {
-    case 'var': {
-      if (e.name === 'this') return runtime.frame.thisObj !== undefined;
-      if (e.name === 'GLOBALS') return true;
-      const ref = runtime.frame.vars.get(e.name);
-      return ref !== undefined && ref.v !== null;
-    }
-    case 'varvar': {
-      const ref = runtime.frame.vars.get(toStr(ev(e.name)));
-      return ref !== undefined && ref.v !== null;
-    }
-    case 'idx': {
-      if (e.index === undefined) throwError('Error', 'Cannot use [] for reading');
-      const base = evQuiet(e.base, 'coalesce');
-      const index = ev(e.index);
-      if (base instanceof PhpArray) return (base.get(toKey(index, 'isset')) ?? null) !== null;
-      if (typeof base === 'string') {
-        const position = stringOffset(base, index, 'isset');
-        return position !== undefined && position >= 0;
-      }
-      if (base instanceof PhpObject) {
-        return issetArrayAccess(base, index);
-      }
-      return false;
-    }
-    case 'prop': {
-      const object = evQuiet(e.obj, 'coalesce');
-      if (!(object instanceof PhpObject)) return false;
-      return issetProp(object, memberName(e.name), runtime.frame.scope);
-    }
-    case 'sprop': {
-      const cls = resolveClassRef(e.cls);
-      const name = typeof e.name === 'string' ? e.name : toStr(ev(e.name));
-      return classesModule.readStaticProp(cls, name, runtime.frame.scope, true) !== null;
-    }
-    case 'cconst': {
-      return ev(e) !== null;
-    }
-    default: {
-      return ev(e) !== null;
-    }
+export function issetOffset(base: Value, index: Value): boolean {
+  if (base instanceof PhpArray) return (base.get(toKey(index, 'isset')) ?? null) !== null;
+  if (typeof base === 'string') {
+    const position = stringOffset(base, index, 'isset');
+    return position !== undefined && position >= 0;
   }
+  return base instanceof PhpObject && issetArrayAccess(base, index);
 }
 
 function issetArrayAccess(object: PhpObject, index: Value): boolean {

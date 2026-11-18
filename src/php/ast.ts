@@ -75,7 +75,7 @@ export type Expr = { row: number } & (
   | { k: 'closure'; fn: FunctionDecl; uses: { name: string; byRef: boolean }[]; isStatic: boolean }
   | { k: 'arrow'; fn: FunctionDecl; isStatic: boolean }
   | { k: 'instanceof'; e: Expr; cls: ClassRef }
-  | { k: 'match'; subject: Expr; arms: MatchArm[] }
+  | { k: 'match'; subject: Expr; arms: MatchArm[]; jumpTable?: boolean }
   | { k: 'print'; e: Expr }
   | { k: 'pipe'; l: Expr; r: Expr }
   | { k: 'unsupported'; what: string }

@@ -74,7 +74,6 @@ export abstract class ConverterBase {
   protected strictTypes = false;
   protected declaredFunctions = new Map<string, number>();
   /** The classes declared at run time so far (anonymous ones and those inside blocks), which number anonymous classes. */
-  protected runtimeClasses = 0;
   protected currentClass?: string;
   protected currentClassKind?: 'class' | 'interface' | 'trait';
   protected currentClassHasParent = false;

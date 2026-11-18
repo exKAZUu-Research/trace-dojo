@@ -456,8 +456,6 @@ test('weak exit accepts an integral float without precision-loss diagnostics', (
 test.each([
   String.raw`<?php preg_match('/\xe9/i',"\xc9");`,
   String.raw`<?php preg_match('/[\xe0-\xef]/i',"\xc9");`,
-  '<?php preg_match("/(?<=a+)b/","ab");',
-  '<?php preg_match("/(?<=a{1,256})b/","ab");',
   '<?php preg_match("/(a*)+/","aaa");',
   '<?php preg_match("/(a?){0,3}/","a");',
   '<?php preg_match("/()*/","");',

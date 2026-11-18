@@ -12,6 +12,7 @@ export interface Place {
   /** The value, or undefined when the location does not exist. */
   get(update?: PlaceOperation): Value | undefined;
   set(value: Value, operation?: 'assignOp'): Value;
+  assign?(value: () => Value): Value;
   /** The location as a reference, which `=&`, by-reference arguments, and `global` share. */
   ref(): Ref;
   unset(): void;

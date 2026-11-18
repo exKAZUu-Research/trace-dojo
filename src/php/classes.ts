@@ -1,5 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst, TraitRule } from './ast';
+import { canBindClass, declaresStringConversion } from './astAnalysis';
 import builtinNames from './builtinNames.json';
 import { addConst, applyTraitConstants, evaluateInClass, linkInterfaceConstants } from './classConstants';
 export { canAccessConstant, classConstant, setClassEvaluator } from './classConstants';
@@ -55,15 +56,7 @@ export function requireClass(name: string): PhpClass {
 
 /** Whether a class declaration can be bound before the program runs, as PHP's early binding does. */
 export function canDeclareEarly(decl: ClassDecl, declared: Set<string>): boolean {
-  if (decl.interfaces.length > 0 || decl.traits.length > 0 || declaresStringConversion(decl)) return false;
-  if (decl.kind === 'interface' || decl.kind === 'trait') return decl.interfaces.length === 0;
-  if (!decl.parent) return true;
-  const parent = lower(decl.parent);
-  return declared.has(parent) || findClass(parent)?.isUser === false;
-}
-
-function declaresStringConversion(decl: ClassDecl): boolean {
-  return decl.methods.some((method) => lower(method.fn.name) === '__tostring');
+  return canBindClass(decl, (parent) => declared.has(parent) || findClass(parent)?.isUser === false);
 }
 
 // Declaration ----------------------------------------------------------------------------------------------------------
@@ -996,6 +989,14 @@ export function readProp(
     return null;
   }
   const decl = lookupProp(object.cls, name, scope);
+  checkStaticInstanceAccess(
+    object,
+    name,
+    scope,
+    decl,
+    mode === 'empty' || mode === 'coalesce' ? 'quiet' : 'get',
+    !quiet
+  );
   if (decl && !decl.isStatic) {
     if (!canAccessProp(decl, scope)) {
       const overloaded = readOverloadedProp(object, name, mode);
@@ -1026,7 +1027,6 @@ export function readProp(
     }
     return slot instanceof Ref ? slot.v : slot;
   }
-  if (!quiet) reportStaticInstanceAccess(object, name, decl);
   const slot = object.props.get(name);
   if (slot !== undefined && slot !== UNINIT) return slot instanceof Ref ? slot.v : slot;
   const overloaded = readOverloadedProp(object, name, mode);
@@ -1078,7 +1078,7 @@ export function writeProp(
   if (object.isResource) throwError('Error', `Attempt to assign property "${name}" on resource`);
   rt().spend();
   const decl = lookupProp(object.cls, name, scope);
-  if (!options.fetched) reportStaticInstanceAccess(object, name, decl);
+  checkStaticInstanceAccess(object, name, scope, decl, 'set', !options.fetched);
   if (decl && !decl.isStatic) {
     if (!canAccessProp(decl, scope)) {
       const magic = object.cls.findMethod('__set');
@@ -1230,23 +1230,37 @@ function setterAccessLabel(property: PropDecl): string {
   return `${visibility}(set)${property.isReadonly && visibility !== 'private' ? ' readonly' : ''}`;
 }
 
-export function reportStaticInstanceAccess(object: PhpObject, name: string, decl: PropDecl | undefined): void {
-  if (decl?.isStatic) notice(`Accessing static property ${object.cls.name}::$${name} as non static`);
+export function checkStaticInstanceAccess(
+  object: PhpObject,
+  name: string,
+  scope: PhpClass | undefined,
+  decl: PropDecl | undefined,
+  operation: 'get' | 'set' | 'unset' | 'quiet',
+  report = true
+): boolean {
+  if (!decl?.isStatic || operation === 'quiet') return false;
+  if (object.cls.findMethod(`__${operation}`) && !object.guards?.has(`${operation}:${name}`)) return false;
+  if (!canAccessProp(decl, scope))
+    throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
+  if (report) notice(`Accessing static property ${object.cls.name}::$${name} as non static`);
+  return report;
 }
 
 /** The reference a property holds, creating it, for `=&`, by-reference arguments, and nested writes. */
-// code-gauge-allow functionNcss 44 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss 45 -- Follows PHP's class linking and property access rules in their order of checks.
 export function propRef(
   object: PhpObject,
   name: string,
   scope: PhpClass | undefined,
-  mode: 'alias' | 'foreach' = 'alias'
+  mode: 'alias' | 'foreach' = 'alias',
+  reportedStatic = false
 ): Ref {
   if (object.isResource) throwError('Error', `Attempt to modify property "${name}" on resource`);
-  const decl = lookupProp(object.cls, name, scope);
-  reportStaticInstanceAccess(object, name, decl);
-  const key = decl && !decl.isStatic ? decl.key : name;
-  if (decl && !decl.isStatic && !canAccessProp(decl, scope)) {
+  const property = lookupProp(object.cls, name, scope);
+  checkStaticInstanceAccess(object, name, scope, property, 'get', !reportedStatic);
+  const decl = property?.isStatic ? undefined : property;
+  const key = decl?.key ?? name;
+  if (decl && !canAccessProp(decl, scope)) {
     const overloaded = overloadedPropertyReference(object, name);
     if (overloaded) return overloaded;
     throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
@@ -1283,7 +1297,7 @@ export function propRef(
   if (slot === UNINIT || slot === undefined) slot = null;
   const ref = new Ref(slot);
   ref.isRef = true;
-  if (decl?.type && !decl.isStatic) ref.typedBy = [{ decl, object }];
+  if (decl?.type) ref.typedBy = [{ decl, object }];
   object.props.set(key, ref);
   return ref;
 }
@@ -1327,11 +1341,12 @@ function overloadedPropertyReference(object: PhpObject, name: string): Ref | und
 }
 
 // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 36 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function bindPropertyReference(object: PhpObject, name: string, ref: Ref, scope: PhpClass | undefined): void {
   if (object.isResource) throwError('Error', `Attempt to modify property "${name}" on resource`);
-  const decl = lookupProp(object.cls, name, scope);
-  reportStaticInstanceAccess(object, name, decl);
+  const property = lookupProp(object.cls, name, scope);
+  checkStaticInstanceAccess(object, name, scope, property, 'get');
+  const decl = property?.isStatic ? undefined : property;
   if ((!decl || !canAccessProp(decl, scope)) && object.cls.findMethod('__get')) {
     rt().lastReturnRef = undefined;
     const value = readProp(object, name, scope, 'quiet');
@@ -1340,7 +1355,7 @@ export function bindPropertyReference(object: PhpObject, name: string, ref: Ref,
     rt().lastReturnRef = undefined;
     throwError('Error', 'Cannot assign by reference to overloaded object');
   }
-  if (decl && !decl.isStatic) {
+  if (decl) {
     if (!canAccessProp(decl, scope))
       throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
     if (decl.isReadonly) {
@@ -1356,7 +1371,7 @@ export function bindPropertyReference(object: PhpObject, name: string, ref: Ref,
     checkIndirectModification(object, name, scope);
     if (decl.type) attachPropertyReference(ref, decl, object);
   } else if (!object.props.has(name)) createDynamicProp(object, name);
-  const key = decl && !decl.isStatic ? decl.key : name;
+  const key = decl?.key ?? name;
   const old = object.props.get(key);
   if (old === ref) return;
   if (old instanceof Ref) old.rc--;
@@ -1405,7 +1420,7 @@ function checkReferenceValue(ref: Ref, value: Value): Value {
 export function unsetProp(object: PhpObject, name: string, scope: PhpClass | undefined): void {
   if (object.isResource) return;
   const decl = lookupProp(object.cls, name, scope);
-  reportStaticInstanceAccess(object, name, decl);
+  checkStaticInstanceAccess(object, name, scope, decl, 'unset');
   if (decl && !decl.isStatic) {
     if (!canAccessProp(decl, scope)) {
       const magic = object.cls.findMethod('__unset');

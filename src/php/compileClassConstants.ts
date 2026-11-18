@@ -1,4 +1,5 @@
 import type { ClassDecl, ClassRef, Expr } from './ast';
+import { canBindClass } from './astAnalysis';
 import { lower } from './bytes';
 import { type ClassConstantLookup, type Constant, constantTypeName, foldedConstant } from './constantDefaults';
 import { nativeClassDefinition } from './native';
@@ -13,7 +14,10 @@ export class CompileClassConstants {
   }
 
   add(decl: ClassDecl, name: string, expression: Expr, type: TypeDecl | undefined): string | undefined {
-    const value = foldedConstant(expression, { classConstant: this.lookup(decl) });
+    const value = foldedConstant(expression, {
+      classConstant: this.lookup(decl),
+      className: (cls) => this.className(cls, decl),
+    });
     if (value === undefined) return;
     let constants = this.values.get(decl);
     if (!constants) {
@@ -27,20 +31,24 @@ export class CompileClassConstants {
     return constantTypeName(stored);
   }
 
-  bind(decl: ClassDecl): void {
-    if (decl.kind === 'trait' || decl.interfaces.length > 0 || decl.traits.length > 0) return;
-    if (decl.parent && !this.bound.has(lower(decl.parent)) && !nativeClassDefinition(decl.parent)) return;
+  bind(decl: ClassDecl): boolean {
+    if (!canBindClass(decl, (parent) => this.bound.has(parent) || nativeClassDefinition(parent) !== undefined))
+      return false;
     const name = lower(decl.name);
-    if (!this.bound.has(name)) this.bound.set(name, decl);
+    if (this.bound.has(name) || nativeClassDefinition(name)) return false;
+    this.bound.set(name, decl);
+    return true;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  className(cls: ClassRef, scope: ClassDecl | undefined, closure = false): string | undefined {
+    if (closure || scope?.kind === 'trait') return undefined;
+    if (cls.k === 'self') return scope?.fullName ?? scope?.name;
+    if (cls.k === 'parent') return scope?.parent;
+    return undefined;
+  }
+
   private get(cls: ClassRef, name: string, scope: ClassDecl | undefined, closure: boolean): Constant | undefined {
     const knownScope = !closure && scope?.kind !== 'trait';
-    if (lower(name) === 'class') {
-      if (cls.k === 'self' && knownScope) return scope?.fullName ?? scope?.name;
-      if (cls.k === 'parent' && knownScope) return scope?.parent;
-    }
     if (cls.k === 'self') return knownScope && scope ? this.own(scope, name, scope) : undefined;
     if (cls.k !== 'named') return;
     const classKey = lower(cls.name);

@@ -1446,7 +1446,14 @@ export class Converter extends DeclarationConverter {
         arms.push({ body: this.expr(arm.childForFieldName('return_expression') as Node), row: arm.startPosition.row });
       }
     }
-    return { k: 'match', subject, arms, row };
+    const conditions = arms.flatMap((arm) => arm.conditions ?? []);
+    const jumpTable =
+      conditions.length >= 2 &&
+      conditions.every((condition) => {
+        const value = this.compiledValue(condition);
+        return typeof value === 'bigint' || typeof value === 'string';
+      });
+    return { k: 'match', subject, arms, jumpTable, row };
   }
 
   private compileArrayItems(node: Node): ArrayItem[] {

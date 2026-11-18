@@ -23,3 +23,17 @@ class Watcher {
 }
 echo Watcher
     ::trace(), "\n";
+switch (
+    $undefined
+) {
+    case 1: break;
+}
+$trace = function () { return (new Exception)->getTraceAsString(); };
+echo $trace(
+), "\n";
+class MagicTrace {
+    function __get($key) { echo (new Exception)->getTraceAsString(), "\n"; }
+}
+$tracedObject = new MagicTrace;
+$tracedObject
+    ->property;

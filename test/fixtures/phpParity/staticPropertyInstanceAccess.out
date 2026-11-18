@@ -1,0 +1,52 @@
+bool(false)
+bool(true)
+string(5) "quiet"
+Cannot access private property PlainStatic::$private
+Cannot access private property PlainStatic::$private
+Cannot access private property PlainStatic::$private
+Cannot access private property PlainStatic::$private
+bool(false)
+bool(true)
+string(5) "quiet"
+Cannot access protected property PlainStatic::$protected
+Cannot access protected property PlainStatic::$protected
+Cannot access protected property PlainStatic::$protected
+Cannot access protected property PlainStatic::$protected
+
+Notice: Accessing static property PlainStatic::$shared as non static in /main.php on line 20
+
+Deprecated: Creation of dynamic property PlainStatic::$shared is deprecated in /main.php on line 20
+NULL
+
+Notice: Accessing static property PlainStatic::$shared as non static in /main.php on line 22
+
+Notice: Accessing static property PlainStatic::$shared as non static in /main.php on line 23
+
+Deprecated: Creation of dynamic property PlainStatic::$shared is deprecated in /main.php on line 23
+
+Warning: Undefined property: PlainStatic::$shared in /main.php on line 23
+
+Notice: Accessing static property PlainStatic::$shared as non static in /main.php on line 24
+int(1)
+int(3)
+get hidden
+get items
+array(1) {
+  [0]=>
+  int(2)
+}
+array(1) {
+  [0]=>
+  int(2)
+}
+get items
+array(2) {
+  [0]=>
+  int(2)
+  [1]=>
+  int(9)
+}
+set hidden=7
+set value=3
+unset hidden
+unset value

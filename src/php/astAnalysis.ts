@@ -1,5 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
-import type { Arg, Expr, FunctionDecl, Stmt } from './ast';
+import type { Arg, ClassDecl, Expr, FunctionDecl, Stmt } from './ast';
 import { lower } from './bytes';
 import { nativeMethodParameters, nativeParameters } from './native';
 import type { Param } from './values';
@@ -322,6 +322,15 @@ export function foreachSubjectWritable(expression: Expr): boolean {
   while (base.k === 'idx' || base.k === 'prop') base = base.k === 'idx' ? base.base : base.obj;
   if (base === expression && (base.k === 'call' || base.k === 'mcall' || base.k === 'scall')) return false;
   return ['var', 'varvar', 'sprop', 'call', 'mcall', 'scall'].includes(base.k);
+}
+
+export function canBindClass(decl: ClassDecl, parentIsBound: (name: string) => boolean): boolean {
+  if (decl.interfaces.length > 0 || decl.traits.length > 0 || declaresStringConversion(decl)) return false;
+  return !decl.parent || parentIsBound(lower(decl.parent));
+}
+
+export function declaresStringConversion(decl: ClassDecl): boolean {
+  return decl.methods.some((method) => lower(method.fn.name) === '__tostring');
 }
 
 /** Whether a destructuring assigns any element by reference, at any depth. */

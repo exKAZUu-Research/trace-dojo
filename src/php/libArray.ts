@@ -11,7 +11,17 @@ import { deprecated, throwError, warn, withCleanupExceptions } from './errors';
 import { cast } from './interp';
 import { naturalCompare } from './libString';
 import { defineAlias, defineConstant, defineFunction, markInlined } from './native';
-import { arithmetic, compare, looseEquals, strictEquals, toFloat, toInt, toKey, toStr } from './operators';
+import {
+  arithmetic,
+  compare,
+  looseEquals,
+  strictEquals,
+  toFloat,
+  toInt,
+  toKey,
+  toStr,
+  withStringConversionErrors,
+} from './operators';
 import { arrayIsShared, ElementPlace, share, VarPlace } from './places';
 import { PhpThrow, rt } from './runtime';
 import {
@@ -1185,20 +1195,20 @@ defineFunction('shuffle(array &$array): true', (ctx) => {
 // Sorting ------------------------------------------------------------------------------------------------------------
 
 /** The comparison a sort flag selects. */
-function sortComparator(flags: bigint): (a: Value, b: Value) => number {
+function sortComparator(flags: bigint, convert = toStr, reportWarning = warn): (a: Value, b: Value) => number {
   const caseless = (flags & 8n) !== 0n;
   switch (flags & ~8n) {
     case 1n: {
-      return (a, b) => compareNumbers(toFloat(a), toFloat(b));
+      return (a, b) => compareNumbers(toFloat(a, reportWarning), toFloat(b, reportWarning));
     }
     case 2n:
     case 5n: {
       return caseless
-        ? (a, b) => compareBytes(lower(toStr(a)), lower(toStr(b)))
-        : (a, b) => compareBytes(toStr(a), toStr(b));
+        ? (a, b) => compareBytes(lower(convert(a)), lower(convert(b)))
+        : (a, b) => compareBytes(convert(a), convert(b));
     }
     case 6n: {
-      return (a, b) => naturalCompare(toStr(a), toStr(b), caseless);
+      return (a, b) => naturalCompare(convert(a), convert(b), caseless);
     }
     default: {
       return compare;
@@ -1242,11 +1252,34 @@ export function comparisonSign(result: Value): number {
 function sortArray(
   ctx: NativeContext,
   name: string,
-  compareEntries: (a: [Key, Value | Ref], b: [Key, Value | Ref]) => number,
-  renumber: boolean
+  {
+    flags,
+    byKey = false,
+    reverse = false,
+    renumber = false,
+  }: {
+    flags: bigint;
+    byKey?: boolean;
+    reverse?: boolean;
+    renumber?: boolean;
+  }
 ): true {
   checkArrayRef(ctx, 0, name, 'array');
-  return sortStorage(writableArray(ctx, 0), name, compareEntries, renumber);
+  withStringConversionErrors((convert, reportWarning, hold) => {
+    const compareValues = sortComparator(flags, convert, reportWarning);
+    const compareEntries = (a: [Key, Value | Ref], b: [Key, Value | Ref]): number => {
+      const x = byKey ? a[0] : valueOf(a[1]);
+      const y = byKey ? b[0] : valueOf(b[1]);
+      try {
+        return reverse ? -compareValues(x, y) : compareValues(x, y);
+      } catch (error) {
+        hold(error);
+        return 0;
+      }
+    };
+    sortStorage(writableArray(ctx, 0), name, compareEntries, renumber);
+  });
+  return true;
 }
 
 function sortUserArray(
@@ -1328,19 +1361,9 @@ for (const [name, byKey, reverse, renumber] of [
   ['ksort', true, false, false],
   ['krsort', true, true, false],
 ] as const) {
-  defineFunction(`${name}(array &$array, int $flags = SORT_REGULAR): true`, (ctx) => {
-    const comparator = sortComparator((ctx.args[1] as bigint | undefined) ?? 0n);
-    return sortArray(
-      ctx,
-      name,
-      (a, b) => {
-        const x = byKey ? a[0] : valueOf(a[1]);
-        const y = byKey ? b[0] : valueOf(b[1]);
-        return reverse ? -comparator(x, y) : comparator(x, y);
-      },
-      renumber
-    );
-  });
+  defineFunction(`${name}(array &$array, int $flags = SORT_REGULAR): true`, (ctx) =>
+    sortArray(ctx, name, { flags: (ctx.args[1] as bigint | undefined) ?? 0n, byKey, reverse, renumber })
+  );
 }
 for (const [name, byKey, renumber] of [
   ['usort', false, true],
@@ -1357,12 +1380,8 @@ for (const [name, byKey, renumber] of [
     );
   });
 }
-defineFunction('natsort(array &$array): true', (ctx) =>
-  sortArray(ctx, 'natsort', (a, b) => naturalCompare(toStr(valueOf(a[1])), toStr(valueOf(b[1])), false), false)
-);
-defineFunction('natcasesort(array &$array): true', (ctx) =>
-  sortArray(ctx, 'natcasesort', (a, b) => naturalCompare(toStr(valueOf(a[1])), toStr(valueOf(b[1])), true), false)
-);
+defineFunction('natsort(array &$array): true', (ctx) => sortArray(ctx, 'natsort', { flags: 6n }));
+defineFunction('natcasesort(array &$array): true', (ctx) => sortArray(ctx, 'natcasesort', { flags: 14n }));
 defineFunction('array_multisort(&~$array, &~...$rest): bool', (ctx) => {
   const columns: { ref: Ref; order: number; flags: bigint; orderSet: boolean; modeSet: boolean }[] = [];
   for (const [index, value] of ctx.args.entries()) {

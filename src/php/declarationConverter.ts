@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 739 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 740 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -48,6 +48,7 @@ const MAGIC_METHODS: Record<
 /** Converts the declarations of functions, parameters, types, and classes. */
 export abstract class DeclarationConverter extends ConverterBase {
   private readonly compileClasses = new CompileClassConstants();
+  private runtimeDefinitionKeys = 0;
   private activeClass?: ClassDecl;
   protected initializerContext?: { kind: 'eager' | 'deferred' | 'static' | 'array'; row: number };
 
@@ -64,6 +65,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     return foldedConstant(expression, {
       compiler: true,
       classConstant: this.compileClasses.lookup(this.activeClass, this.fn.isClosure),
+      className: (cls) => this.compileClasses.className(cls, this.activeClass, this.fn.isClosure),
     });
   }
 
@@ -565,7 +567,6 @@ export abstract class DeclarationConverter extends ConverterBase {
       node.type === 'interface_declaration' ? 'interface' : node.type === 'trait_declaration' ? 'trait' : 'class';
     const nameNode = node.childForFieldName('name');
     let name = '';
-    const runtimeIndex = anonymous || !topLevel ? this.runtimeClasses++ : 0;
     if (!anonymous) {
       const raw = this.nameText(nameNode as Node);
       if (isReservedClassName(raw)) {
@@ -598,6 +599,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     let fullName: string | undefined;
     if (anonymous) {
       name = `${parent ?? interfaces[0] ?? 'class'}@anonymous`;
+      const runtimeIndex = this.runtimeDefinitionKeys++;
       fullName = `${name}\0${SCRIPT_PATH}:${node.startPosition.row + 1}$${runtimeIndex.toString(16)}`;
     }
     const decl: ClassDecl = {
@@ -712,7 +714,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         });
       }
     }
-    if (topLevel && !anonymous) this.compileClasses.bind(decl);
+    if (!anonymous && (!topLevel || !this.compileClasses.bind(decl))) this.runtimeDefinitionKeys++;
     return decl;
   }
 
