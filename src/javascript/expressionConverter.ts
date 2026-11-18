@@ -266,6 +266,8 @@ export abstract class ExpressionConverter extends ConverterBase {
         row: rowOf(node),
       };
     }
+    if (operator === '**' && (leftNode.type === 'unary_expression' || leftNode.type === 'await_expression'))
+      fail(leftNode, `** の左辺に ${leftNode.children[0]?.type} 演算子を使った式を書くときは、括弧で囲んでください。`);
     const left = this.expression(leftNode);
     const right = this.expression(field(node, 'right'));
     if (operator === '&&' || operator === '||' || operator === '??') {

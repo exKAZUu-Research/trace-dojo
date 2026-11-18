@@ -94,6 +94,12 @@ test.each([
     'フィールドの初期値や static ブロックの中では arguments を使えません。',
   ],
   ['new.target outside functions', 'console.log(new.target);', 0, 'new.target は関数の中にしか書けません。'],
+  [
+    'unary bases of exponentiation',
+    'let x = 2;\nconsole.log(-x ** 2);',
+    1,
+    '** の左辺に - 演算子を使った式を書くときは、括弧で囲んでください。',
+  ],
   ['a legacy octal number', 'const n = 017;', 0, '数値「017」は、この採点環境では使えません。'],
   [
     'an async getter',
