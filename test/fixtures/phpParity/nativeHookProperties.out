@@ -1,0 +1,17 @@
+{"stored":null,"virtual":13,"other":7}
+array (
+  'stored' => NULL,
+  'virtual' => 13,
+  'other' => 7,
+)
+\Properties::__set_state(array(
+   'stored' => NULL,
+   'virtual' => 13,
+   'protected' => 4,
+   'other' => 7,
+))
+
+Fatal error: Uncaught Error: Cannot unset hooked property Properties::$stored in /main.php:15
+Stack trace:
+#0 {main}
+  thrown in /main.php on line 15

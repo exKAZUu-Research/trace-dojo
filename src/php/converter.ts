@@ -1771,7 +1771,7 @@ function arrayFoldRow(node: Node): number {
     if (value.type === 'array_creation_expression') {
       const first = value.namedChildren.find((child) => child.type === 'array_element_initializer');
       const inner = first?.namedChildren.findLast((child) => child.type !== 'comment');
-      if (!inner) return value.startPosition.row;
+      if (!inner) return value.endPosition.row;
       value = inner;
     } else if (['variadic_unpacking', 'parenthesized_expression', 'by_ref'].includes(value.type)) {
       const inner = value.namedChildren.find((child) => child.type !== 'comment');

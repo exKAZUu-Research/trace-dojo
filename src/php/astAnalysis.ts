@@ -157,8 +157,7 @@ class ReadValidator {
       )
     );
   }
-  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   visit(value: unknown, writing: boolean): void {
     if (!value || typeof value !== 'object') return;
     if (Array.isArray(value)) {
@@ -198,7 +197,8 @@ class ReadValidator {
         return;
       }
       case 'foreach': {
-        this.visit(node.subject, Boolean(node.byRef));
+        const subject = node.subject as Expr;
+        this.visit(subject, Boolean(node.byRef) && foreachSubjectWritable(subject));
         this.visit(node.key, true);
         this.visit(node.value, true);
         this.visit(node.body, false);
@@ -314,6 +314,14 @@ export function hasNullsafeReceiver(expression: Expr): boolean {
       current = current.obj;
     } else return false;
   }
+}
+
+export function foreachSubjectWritable(expression: Expr): boolean {
+  if (hasNullsafeReceiver(expression)) return false;
+  let base = expression;
+  while (base.k === 'idx' || base.k === 'prop') base = base.k === 'idx' ? base.base : base.obj;
+  if (base === expression && (base.k === 'call' || base.k === 'mcall' || base.k === 'scall')) return false;
+  return ['var', 'varvar', 'sprop', 'call', 'mcall', 'scall'].includes(base.k);
 }
 
 /** Whether a destructuring assigns any element by reference, at any depth. */

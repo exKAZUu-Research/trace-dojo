@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 539 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 547 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
@@ -30,7 +30,7 @@ import { type Callable, type Key, PhpArray, PhpClass, PhpObject, Ref, type UserF
 type Completion =
   | undefined
   | { t: 'break' | 'continue'; depth: number }
-  | { t: 'return'; v: Value }
+  | { t: 'return' }
   | { t: 'goto'; label: string };
 
 // Program --------------------------------------------------------------------------------------------------------------
@@ -212,9 +212,9 @@ function execStmt(statement: Stmt, seek?: string): Completion {
       }
       case 'return': {
         const value = statement.e ? evReturn(statement.e) : null;
-        frame.returning = share(value);
+        frame.returning = value instanceof Ref ? value : share(value);
         frame.returnRow = statement.e?.row ?? statement.row;
-        return { t: 'return', v: value };
+        return { t: 'return' };
       }
       case 'block': {
         return execList(statement.body);
@@ -388,12 +388,10 @@ function staticDeclaration(statement: Extract<Stmt, { k: 'static' }>, frame: Fra
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Completion {
   const runtime = rt();
   let completion: Completion;
-  let pending: unknown;
-  let failed = false;
+  let pending: PhpThrow | undefined;
   const inFinally = seek !== undefined && statement.fin?.some((inner) => containsLabel(inner, seek));
   if (!inFinally) {
     try {
@@ -401,24 +399,29 @@ function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Co
     } catch (error) {
       if (!(error instanceof PhpThrow) || runtime.exhausted || !statement.fin) throw error;
       pending = error;
-      failed = true;
     }
   }
-  if (statement.fin) {
-    const frame = runtime.frame;
-    if (completion?.t === 'return') frame.temporaries.push(share(completion.v));
-    if (pending instanceof PhpThrow) frame.temporaries.push(pending.object);
-    let finalCompletion: Completion;
-    try {
-      finalCompletion = execList(statement.fin, inFinally ? seek : undefined);
-    } catch (error) {
-      // An exception thrown while another one unwinds takes that one as its previous one.
-      if (error instanceof PhpThrow && pending instanceof PhpThrow) setPrevious(error.object, pending.object);
-      throw error;
-    }
-    if (finalCompletion) return finalCompletion;
-    if (failed) throw pending;
+  if (!statement.fin) return completion;
+  return runFinally(statement.fin, inFinally ? seek : undefined, completion, pending);
+}
+
+function runFinally(body: Stmt[], seek: string | undefined, completion: Completion, pending?: PhpThrow): Completion {
+  const runtime = rt();
+  const frame = runtime.frame;
+  const returning = completion?.t === 'return' ? frame.returning : undefined;
+  if (returning instanceof Ref) runtime.holdTemporaryReference(returning);
+  else if (returning !== undefined) frame.temporaries.push(returning);
+  if (pending) frame.temporaries.push(pending.object);
+  let result: Completion;
+  try {
+    result = execList(body, seek);
+  } catch (error) {
+    if (completion?.t === 'return') frame.returning = undefined;
+    if (error instanceof PhpThrow && pending) setPrevious(error.object, pending.object);
+    throw error;
   }
+  if (result) return result;
+  if (pending) throw pending;
   return completion;
 }
 
@@ -459,7 +462,8 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
   const runtime = rt();
   const frame = runtime.frame;
   if (statement.byRef) {
-    const { place, value: container } = foreachSubjectPlace(statement.subject);
+    const place = foreachSubjectPlace(statement.subject);
+    const container = place.get();
     if (container instanceof PhpObject) return foreachObject(statement, container);
     if (!(container instanceof PhpArray)) {
       warn(`foreach() argument must be of type array|object, ${valueName(container ?? null)} given`);
@@ -557,15 +561,8 @@ function foreachObject(statement: Extract<Stmt, { k: 'foreach' }>, object: PhpOb
     return undefined;
   }
   const scope = runtime.frame.scope;
-  // PHP walks the property table as it is, so a property the loop adds is visited too.
-  const visited = new Set<string>();
-  for (;;) {
-    const name = visiblePropertyKeys(object, scope, true)
-      .map(propNameOf)
-      .find((candidate) => !visited.has(candidate));
-    if (name === undefined) break;
-    visited.add(name);
-    runtime.spend();
+  for (const key of visiblePropertyKeys(object, scope, true)) {
+    const name = propNameOf(key);
     if (statement.byRef) {
       const ref = propRef(object, name, scope, 'foreach');
       bindForeachRef(statement.value, ref);
@@ -608,11 +605,19 @@ function runBody(decl: FunctionDecl, frame: Frame): Value {
       if (param.promote) writeProp(frame.thisObj, param.name, frame.vars.get(param.name)?.v ?? null, frame.scope);
     }
   }
-  if (decl.arrowBody) return evReturn(decl.arrowBody);
-  const completion = execList(decl.body);
-  if (completion?.t === 'return') return completion.v;
-  if (completion?.t === 'goto') throw new Error(`Unresolved goto ${completion.label}`);
-  return null;
+  if (decl.arrowBody) {
+    frame.returning = evReturn(decl.arrowBody);
+    frame.returnRow = decl.arrowBody.row;
+  } else {
+    const completion = execList(decl.body);
+    if (completion?.t === 'goto') throw new Error(`Unresolved goto ${completion.label}`);
+    if (completion?.t !== 'return') {
+      frame.returning = undefined;
+      frame.returnRow = undefined;
+    }
+  }
+  const result = frame.returning;
+  return result instanceof Ref ? result.v : (result ?? null);
 }
 
 setBodyRunner(runBody);

@@ -1,6 +1,7 @@
-// code-gauge-allow-file fileNcss 641 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 645 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
+import { foreachSubjectWritable } from './astAnalysis';
 import { callMethod } from './callables';
 import { issetProp, propRef, readProp, staticPropRef, unsetProp, writeProp } from './classes';
 import * as classesModule from './classes';
@@ -160,16 +161,16 @@ function propertyReceiver(e: Expr, parent: Place, mode: WriteMode): Value {
   return null;
 }
 
-export function foreachSubjectPlace(e: Expr): { place: Place; value: Value | undefined } {
-  const resolved = placeOf(e, 'write', true);
-  const place: Place =
-    resolved instanceof ValuePlace ? new RefPlace(Ref.temporary(resolved.value)) : nestedPlace(resolved, 'write');
-  const value = place.get('nested');
-  if (value === undefined) {
-    if (e.k === 'var' || e.k === 'varvar') place.warnUndefined?.();
-    materializeNestedSlot(e, place);
+export function foreachSubjectPlace(e: Expr): Place {
+  if (e.k === 'call' || e.k === 'mcall' || e.k === 'scall') return placeOf(e);
+  if (!foreachSubjectWritable(e)) return new RefPlace(Ref.temporary(share(ev(e))));
+  const place = placeOf(e, 'write', true);
+  if (place instanceof ValuePlace) return new RefPlace(Ref.temporary(place.value));
+  if (e.k === 'var' && place.get() === undefined) {
+    place.warnUndefined?.();
+    return place;
   }
-  return { place, value };
+  return new RefPlace(place.ref());
 }
 
 function materializeNestedSlot(e: Expr, place: Place): void {

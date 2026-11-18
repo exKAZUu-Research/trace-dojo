@@ -616,9 +616,9 @@ function invokeUser(
     if (decl.returnType) {
       runtime.row = frame.returnRow ?? runtime.row;
       result = checkReturn(result, decl.returnType, name, frame);
-      if (decl.byRefReturn && frame.returnRef) {
-        frame.returnRef.assign(result);
-        result = frame.returnRef.v;
+      if (frame.returning instanceof Ref) {
+        frame.returning.assign(result);
+        result = frame.returning.v;
       }
     } else if (decl.byRefReturn === false) result = share(result);
     if (discardResult) {
@@ -652,7 +652,7 @@ function invokeUser(
         failure instanceof PhpThrow ? failure : undefined
       );
   }
-  runtime.lastReturnRef = decl.byRefReturn && !discardResult ? frame.returnRef : undefined;
+  runtime.lastReturnRef = !discardResult && frame.returning instanceof Ref ? frame.returning : undefined;
   return returned;
 }
 
@@ -951,8 +951,8 @@ function checkReturn(value: Value, type: TypeDecl, name: string, frame: Frame): 
     throwError('TypeError', `${name}(): never-returning function must not implicitly return`);
   }
   if (
-    frame.decl?.byRefReturn &&
-    frame.returnRef?.typeOwners().length &&
+    frame.returning instanceof Ref &&
+    frame.returning.typeOwners().length > 0 &&
     !matches(value, type, { scope: frame.scope, staticClass: frame.staticClass })
   )
     return throwReturnTypeError(value, type, name, frame);

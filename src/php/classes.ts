@@ -964,11 +964,11 @@ function scopeText(scope: PhpClass | undefined): string {
 }
 
 /** Calls a magic method, guarding against recursion into the same property. */
-function callMagic(object: PhpObject, method: Method, args: Value[]): Value {
+function callMagic(object: PhpObject, method: Method, args: Value[], internal = false): Value {
   return invoke(
     { fn: method.fn, thisObj: object, scope: method.scope, staticClass: object.cls, method },
     args.map((v) => ({ v })),
-    rt().row
+    internal ? undefined : rt().row
   );
 }
 
@@ -1037,7 +1037,6 @@ export function readProp(
 }
 
 // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function readOverloadedProp(
   object: PhpObject,
   name: string,
@@ -1056,7 +1055,7 @@ function readOverloadedProp(
   if (mode === 'empty') return null;
   const magic = object.cls.findMethod('__get');
   if (!magic || object.guards?.has(`get:${name}`)) return;
-  const value = guarded(object, `get:${name}`, () => callMagic(object, magic, [name]));
+  const value = guarded(object, `get:${name}`, () => callMagic(object, magic, [name], mode === 'native'));
   if (!unset?.type) return value;
   const result = coerce(value, unset.type, { strict: rt().strictTypes, internal: false, scope: unset.cls });
   if (result === NO_MATCH)
@@ -1068,7 +1067,6 @@ function readOverloadedProp(
   return result;
 }
 
-// code-gauge-allow functionNcss 58 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionNcss 58 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function writeProp(
   object: PhpObject,
@@ -1449,13 +1447,13 @@ export function unsetProp(object: PhpObject, name: string, scope: PhpClass | und
     guarded(object, `unset:${name}`, () => callMagic(object, magic, [name]));
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Follows PHP's class linking and property access rules in their order of checks.
-export function issetProp(object: PhpObject, name: string, scope: PhpClass | undefined): boolean {
+// code-gauge-allow functionCognitiveComplexity 27 -- Follows PHP's class linking and property access rules in their order of checks.
+export function issetProp(object: PhpObject, name: string, scope: PhpClass | undefined, internal = false): boolean {
   if (object.isResource) return false;
   const decl = lookupProp(object.cls, name, scope);
   if (decl && !decl.isStatic && canAccessProp(decl, scope)) {
     requireVirtualPropertyHook(object, decl, 'get');
-    if (decl.hooks?.get) return readProp(object, name, scope, 'quiet') !== null;
+    if (decl.hooks?.get) return readProp(object, name, scope, internal ? 'native' : 'quiet') !== null;
     const slot = object.props.get(decl.key);
     if (slot === UNINIT && !object.unsetProperties?.has(decl.key)) return false;
     if (slot !== undefined && slot !== UNINIT) return (slot instanceof Ref ? slot.v : slot) !== null;
@@ -1465,7 +1463,7 @@ export function issetProp(object: PhpObject, name: string, scope: PhpClass | und
   }
   const magic = object.cls.findMethod('__isset');
   if (magic && !object.guards?.has(`isset:${name}`)) {
-    return toBool(guarded(object, `isset:${name}`, () => callMagic(object, magic, [name])));
+    return toBool(guarded(object, `isset:${name}`, () => callMagic(object, magic, [name], internal)));
   }
   return false;
 }
@@ -1474,25 +1472,46 @@ export function objectPropertyKeys(object: PhpObject): string[] {
   return [...new Set([...object.cls.props.map((decl) => decl.key), ...object.props.keys()])];
 }
 
-export function visiblePropertyKeys(object: PhpObject, scope: PhpClass | undefined, includeVirtual = false): string[] {
-  const keys = includeVirtual ? objectPropertyKeys(object) : object.props.keys();
-  const visible: string[] = [];
-  for (const key of keys) {
+export function* visiblePropertyKeys(
+  object: PhpObject,
+  scope: PhpClass | undefined,
+  includeVirtual = false
+): Generator<string> {
+  for (const key of includeVirtual ? livePropertyKeys(object) : object.props.keys()) {
+    rt().spend();
     const slot = object.props.get(key);
     const decl = declForKey(object.cls, key);
     if ((!includeVirtual || !decl?.hooks?.get) && (slot === UNINIT || slot === undefined)) continue;
     if (decl && !canAccessProp(decl, scope)) continue;
     if (decl && decl.visibility === 'private' && scope !== decl.cls) continue;
-    visible.push(key);
+    yield key;
   }
-  return visible;
+}
+
+function* livePropertyKeys(object: PhpObject): Generator<string> {
+  for (const decl of object.cls.props) yield decl.key;
+  for (const key of object.props.keys()) {
+    if (!declForKey(object.cls, key)) yield key;
+  }
 }
 
 export function visibleProps(object: PhpObject, scope: PhpClass | undefined): [string, Value][] {
-  return visiblePropertyKeys(object, scope).map((key) => {
+  return Array.from(visiblePropertyKeys(object, scope), (key) => {
     const slot = object.props.get(key) as Value | Ref;
     return [propNameOf(key), slot instanceof Ref ? slot.v : slot];
   });
+}
+
+export function nativePropertySlot(
+  object: PhpObject,
+  key: string,
+  decl: PropDecl | undefined
+): Value | Ref | undefined {
+  if (decl?.hooks?.get) return readProp(object, decl.name, decl.cls, 'native');
+  const slot = object.props.get(key);
+  if (slot !== undefined && slot !== UNINIT) return slot;
+  if (decl?.hooks && !decl.isVirtual && !object.unsetProperties?.has(decl.key)) return null;
+  return undefined;
 }
 
 export function propNameOf(key: string): string {

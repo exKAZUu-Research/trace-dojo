@@ -3,7 +3,7 @@ import type { ClassRef, Expr, FunctionDecl, Stmt } from './ast';
 import { nestedBodies } from './astAnalysis';
 import { callMethod } from './callables';
 import { canAccessConstant } from './classConstants';
-import { declForKey, findClass, objectPropertyKeys, propNameOf, readProp } from './classes';
+import { declForKey, findClass, nativePropertySlot, objectPropertyKeys, propNameOf } from './classes';
 import { type Constant, foldedConstant } from './constantDefaults';
 import { formatFloat, formatFloatRepr } from './conversions';
 import { deprecated, E_ERROR, reportUncaughtWarning, warn } from './errors';
@@ -387,13 +387,8 @@ function exportedProps(object: PhpObject): Iterable<[string | bigint, Slot]> {
   if (storage?.properties) return storage.properties().map;
   const entries: [string | bigint, Slot][] = storage?.exportEntries?.() ?? [];
   for (const key of objectPropertyKeys(object)) {
-    const decl = declForKey(object.cls, key);
-    if (decl?.hooks?.get) entries.push([key, readProp(object, decl.name, decl.cls, 'native')]);
-    else {
-      const slot = object.props.get(key);
-      if (slot !== undefined && slot !== UNINIT) entries.push([key, slot]);
-      else if (decl?.hooks && !decl.isVirtual && !object.unsetProperties?.has(decl.key)) entries.push([key, null]);
-    }
+    const slot = nativePropertySlot(object, key, declForKey(object.cls, key));
+    if (slot !== undefined) entries.push([key, slot]);
   }
   return entries;
 }

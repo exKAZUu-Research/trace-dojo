@@ -82,7 +82,7 @@ export type Chain = Value | typeof SHORT;
 // Expressions --------------------------------------------------------------------------------------------------------
 
 /** Evaluates an expression whose value a `return` passes to the caller, which keeps it alive meanwhile. */
-export function evReturn(e: Expr): Value {
+export function evReturn(e: Expr): Value | Ref {
   const runtime = rt();
   const frame = runtime.frame;
   const fn = frame.fn;
@@ -100,8 +100,9 @@ export function evReturn(e: Expr): Value {
   }
   if (ref) {
     ref.isRef = true;
-    frame.returnRef = ref;
-  } else notice('Only variable references should be returned by reference');
+    return ref;
+  }
+  notice('Only variable references should be returned by reference');
   return value;
 }
 

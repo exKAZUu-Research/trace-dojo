@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 405 -- The regex functions share matching, offsets, capture handling, and error state.
+// code-gauge-allow-file fileNcss 410 -- The regex functions share matching, offsets, capture handling, and error state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { dec, enc } from './bytes';
 import { consumeCallbackResult } from './callables';
@@ -195,18 +195,24 @@ function toMatch(
   };
 }
 
+// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function byteIndexer(text: string): (index: number) => number {
-  const offsets = new Map<number, number>([[0, 0]]);
+  let offsets: Uint32Array | undefined;
   let cursor = 0;
   let bytes = 0;
   return (position) => {
-    const cached = offsets.get(position);
-    if (cached !== undefined) return cached;
-    if (position < cursor) return enc(text.slice(0, position)).length;
-    bytes += enc(text.slice(cursor, position)).length;
-    cursor = position;
-    offsets.set(position, bytes);
-    return bytes;
+    if (position === 0) return 0;
+    offsets ??= new Uint32Array(text.length + 1);
+    if (position > cursor) rt().spend(Math.ceil((position - cursor) / 64));
+    while (cursor < position) {
+      const point = text.codePointAt(cursor) as number;
+      if (point >= 0x1_00_00) {
+        offsets[++cursor] = bytes + 3;
+        bytes += 4;
+      } else bytes += point < 0x80 ? 1 : point < 0x8_00 ? 2 : 3;
+      offsets[++cursor] = bytes;
+    }
+    return offsets[position];
   };
 }
 

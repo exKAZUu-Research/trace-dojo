@@ -1,0 +1,4 @@
+first=1;virtual=2;last=4;
+a=1;b=2;a=3;
+a=1;b=2;a=3;
+int(10000)

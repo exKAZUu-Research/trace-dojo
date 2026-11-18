@@ -33,3 +33,13 @@ function declaredArray() {
     return $a;
 }
 var_dump(declaredArray());
+echo count([
+    [
+    ],
+    NAN || true
+]), "\n";
+echo count([
+    ...[
+    ],
+    NAN || true
+]), "\n";

@@ -414,11 +414,8 @@ defineFunction('get_object_vars(object $object): array', ({ args }) => {
   const declaredKeys = new Set(object.cls.props.map((decl) => decl.key));
   for (const decl of object.cls.props) {
     if (decl.isStatic || !classesModule.canAccessProp(decl, scope)) continue;
-    if (decl.hooks?.get) array.set(toKey(decl.name), classesModule.readProp(object, decl.name, scope));
-    else {
-      const slot = object.props.get(decl.key);
-      if (slot !== undefined && slot !== UNINIT) array.setSlot(toKey(decl.name), copyValueSlot(slot));
-    }
+    const slot = classesModule.nativePropertySlot(object, decl.key, decl);
+    if (slot !== undefined) array.setSlot(toKey(decl.name), copyValueSlot(slot));
   }
   for (const [key, slot] of object.props) {
     if (!declaredKeys.has(key) && slot !== UNINIT) array.setSlot(toKey(key), copyValueSlot(slot));

@@ -155,20 +155,26 @@ function shutdown(runtime: Runtime): string | undefined {
   });
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function destroyGlobals(runtime: Runtime): void {
   if (runtime.destructibles === 0) return;
   const order = globalOrder(runtime);
+  let counts: ReturnType<typeof holderCounts> | undefined;
   for (;;) {
     let removed = false;
-    for (const name of order.toReversed()) {
+    for (const name of order) {
+      runtime.spend();
       const ref = runtime.globalFrame.vars.get(name);
       if (!ref) continue;
       const value = ref.v;
       // A variable that became a reference stays one, which this pass skips even when nothing else holds it.
-      if (!(value instanceof PhpObject) || ref.isRef || holderCounts(runtime).get(value) !== 1) continue;
+      if (!(value instanceof PhpObject) || ref.isRef) continue;
+      counts ??= holderCounts(runtime);
+      if (counts.get(value) !== 1) continue;
       runtime.globalFrame.vars.delete(name);
       removed = true;
       runtime.collectGarbage();
+      counts = undefined;
     }
     if (!removed) break;
   }
@@ -176,7 +182,10 @@ function destroyGlobals(runtime: Runtime): void {
 
 /** The global variables in the order PHP's symbol table holds them: the program's variables in order of appearance. */
 function globalOrder(runtime: Runtime): string[] {
-  const order = [...(runtime.program?.mainVars ?? [])];
-  for (const name of runtime.globalFrame.vars.keys()) if (!order.includes(name)) order.push(name);
-  return order;
+  const order = new Set(runtime.program?.mainVars);
+  for (const name of runtime.globalFrame.vars.keys()) {
+    runtime.spend();
+    order.add(name);
+  }
+  return [...order].toReversed();
 }

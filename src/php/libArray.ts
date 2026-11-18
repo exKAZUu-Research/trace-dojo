@@ -978,7 +978,7 @@ function columnField(row: Value, key: Value): Value | undefined {
     const slot = row.props.get(decl.key);
     exists = canAccessProp(decl, scope) && ((slot !== undefined && slot !== UNINIT) || decl.hooks?.get !== undefined);
   }
-  return exists || issetProp(row, name, scope) ? readProp(row, name, scope) : undefined;
+  return exists || issetProp(row, name, scope, true) ? readProp(row, name, scope, 'native') : undefined;
 }
 
 defineFunction('array_chunk(array $array, int $length, bool $preserve_keys = false): array', ({ args }) => {
@@ -1044,13 +1044,15 @@ function setOperation(name: string, args: Value[], keep: boolean, same: SetCompa
 }
 
 export function checkSetArguments(name: string, arrays: Value[]): void {
-  for (const [index, value] of arrays.entries()) {
-    if (!(value instanceof PhpArray)) {
-      throwError(
-        'TypeError',
-        `${name}(): Argument #${index + 1}${index === 0 ? ' ($array)' : ''} must be of type array, ${valueName(value)} given`
-      );
-    }
+  for (const [index, value] of arrays.entries()) checkSetArgument(name, value, index + 1);
+}
+
+function checkSetArgument(name: string, value: Value, position: number): asserts value is PhpArray {
+  if (!(value instanceof PhpArray)) {
+    throwError(
+      'TypeError',
+      `${name}(): Argument #${position}${position === 1 ? ' ($array)' : ''} must be of type array, ${valueName(value)} given`
+    );
   }
 }
 
@@ -1074,19 +1076,32 @@ function diffByString(first: PhpArray, others: Value[]): PhpArray {
   if (first.size === 1) return diffSingle(first, others);
   checkSetArguments('array_diff', [first, ...others]);
   const exclude = new Set<string>();
-  for (const other of others) for (const value of (other as PhpArray).values()) exclude.add(toStr(value));
+  for (const other of others) {
+    for (const value of (other as PhpArray).iterValues()) {
+      rt().spend();
+      exclude.add(toStr(value));
+    }
+  }
   const result = new PhpArray();
-  for (const [key, value] of first.entries())
+  for (const [key, value] of first.entries()) {
+    rt().spend();
     if (!exclude.has(toStr(value))) result.setSlot(key, copyValueSlot(first.map.get(key) as Value | Ref));
+  }
   return result;
 }
 
 function diffSingle(first: PhpArray, others: Value[]): PhpArray {
-  const search = toStr(first.values()[0]);
+  const search = toStr(first.firstValue() as Value);
   let found = false;
   for (const [index, other] of others.entries()) {
-    checkSetArguments('array_diff', [first, ...others.slice(0, index + 1)]);
-    found ||= (other as PhpArray).values().some((value) => toStr(value) === search);
+    checkSetArgument('array_diff', other, index + 2);
+    if (found) continue;
+    for (const value of other.iterValues()) {
+      rt().spend();
+      if (toStr(value) !== search) continue;
+      found = true;
+      break;
+    }
   }
   if (found) return new PhpArray();
   first.shared = true;

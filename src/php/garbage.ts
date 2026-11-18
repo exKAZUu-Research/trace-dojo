@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 893 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 898 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { withCleanupExceptions, withPendingException } from './errors';
 import { type Frame, PhpThrow, type Runtime } from './runtime';
@@ -868,16 +868,17 @@ function referencedGarbage(graph: CollectionGraph, objects: PhpObject[]): Set<Ph
 }
 
 /** Counts the holders of each reachable object: variables, elements, and properties that refer to it. */
-// code-gauge-allow functionNcss 56 -- Visits every kind of runtime value that can hold references.
 export function holderCounts(runtime: Runtime): Map<PhpObject, number> {
   const counts = new Map<PhpObject, number>();
   const visitedArrays = new Set<PhpArray>();
   const visitedObjects = new Set<PhpObject>();
   const visitedRefs = new Set<Ref>();
   const pending: unknown[] = [];
+  let work = 0;
   const count = (value: unknown): void => {
+    if ((++work & 15) === 0) runtime.spend();
     if (value instanceof PhpObject) counts.set(value, (counts.get(value) ?? 0) + 1);
-    pending.push(value);
+    if (typeof value === 'object' && value !== null) pending.push(value);
   };
   for (const frame of runtime.frames) {
     for (const ref of frame.vars.values()) count(ref);
@@ -900,6 +901,7 @@ export function holderCounts(runtime: Runtime): Map<PhpObject, number> {
     } else if (item instanceof PhpObject) {
       if (visitedObjects.has(item)) continue;
       visitedObjects.add(item);
+      runtime.spend(Math.ceil(item.props.size / 16));
       const children: unknown[] = [];
       pushObject(item, children);
       for (const child of children) count(child);

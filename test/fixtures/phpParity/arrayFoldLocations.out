@@ -12,6 +12,10 @@ Warning: unexpected NAN value was coerced to bool in /main.php on line 22
 Warning: unexpected NAN value was coerced to bool in /main.php on line 25
 
 Warning: unexpected NAN value was coerced to bool in /main.php on line 29
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 38
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 43
 array(1) {
   ["NANkey"]=>
   int(1)
@@ -48,3 +52,5 @@ array(1) {
   [0]=>
   bool(true)
 }
+2
+1

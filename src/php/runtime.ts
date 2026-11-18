@@ -90,13 +90,11 @@ export class Frame {
   namedArgumentRefs = new Map<string, Ref>();
   /** The row being run in this frame, which a stack trace reports for the call this frame made. */
   row = 0;
-  /** The reference a function returning by reference returns. */
-  returnRef?: Ref;
   /**
    * The value a `return` statement is returning, which the statements it leaves must not free; undefined until one
    * runs, as when the body ends without `return`.
    */
-  returning: Value | undefined;
+  returning: Value | Ref | undefined;
   returnRow?: number;
 
   // code-gauge-allow functionParameterCount 8 -- A frame takes the parts of a call that stay fixed while it runs.

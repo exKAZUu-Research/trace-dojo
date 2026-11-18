@@ -1,0 +1,29 @@
+int(1)
+int(2)
+int(1)
+int(2)
+int(2)
+int(2)
+
+Warning: foreach() argument must be of type array|object, null given in /main.php on line 12
+
+Warning: foreach() argument must be of type array|object, string given in /main.php on line 13
+
+Warning: Undefined property: stdClass::$missing in /main.php on line 14
+
+Warning: foreach() argument must be of type array|object, null given in /main.php on line 14
+bool(false)
+Cannot access uninitialized non-nullable property Types::$required by reference
+
+Warning: foreach() argument must be of type array|object, null given in /main.php on line 24
+NULL
+Cannot access uninitialized non-nullable property Types::$shared by reference
+Cannot create references to/from string offsets
+
+Warning: Undefined variable $undefined in /main.php on line 32
+
+Warning: foreach() argument must be of type array|object, null given in /main.php on line 32
+bool(false)
+
+Warning: foreach() argument must be of type array|object, null given in /main.php on line 35
+bool(true)

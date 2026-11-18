@@ -1,9 +1,9 @@
-// code-gauge-allow-file fileNcss 422 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 423 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { codePointBytes, enc, utf8Length } from './bytes';
 import { callMethod } from './callables';
-import { canAccessProp, createObject, declForKey, objectPropertyKeys, propNameOf, readProp } from './classes';
+import { canAccessProp, createObject, declForKey, nativePropertySlot, objectPropertyKeys, propNameOf } from './classes';
 import * as conversionsModule from './conversions';
 import { formatFloatRepr } from './conversions';
 import { newThrowable, throwError } from './errors';
@@ -200,12 +200,8 @@ class JsonEncoder {
       for (const key of keys) {
         const decl = declForKey(object.cls, key);
         if (decl && !canAccessProp(decl, undefined)) continue;
-        if (decl?.hooks?.get) {
-          yield this.member(decl.name, readProp(object, decl.name, decl.cls, 'native'), level);
-          continue;
-        }
-        const slot = decl ? object.props.get(key) : dynamic.map.get(key);
-        if (slot === UNINIT || slot === undefined) continue;
+        const slot = decl ? nativePropertySlot(object, key, decl) : dynamic.map.get(key);
+        if (slot === undefined) continue;
         yield this.member(propNameOf(key), slot instanceof Ref ? slot.v : slot, level);
       }
     } finally {
@@ -335,7 +331,7 @@ defineFunction(
     if (!throws) runtime.lastJsonError = 0;
     try {
       if (text === '') throw new JsonError(4);
-      if (depth <= 0) throwError('ValueError', 'json_decode(): Argument #3 ($depth) must be greater than 0');
+      validateDepth(depth, 'json_decode', 3);
       return new JsonParser(text, associative, depth, flags).parseDocument();
     } catch (error) {
       if (!(error instanceof JsonError)) throw error;
@@ -358,7 +354,7 @@ defineFunction('json_validate(string $json, int $depth = 512, int $flags = 0): b
       );
     if (args[0] === '') throw new JsonError(4);
     rt().lastJsonError = 0;
-    if (depth <= 0) throwError('ValueError', 'json_validate(): Argument #2 ($depth) must be greater than 0');
+    validateDepth(depth, 'json_validate', 2);
     new JsonParser(args[0] as string, true, depth, flags).parseDocument();
     return true;
   } catch (error) {
@@ -367,6 +363,12 @@ defineFunction('json_validate(string $json, int $depth = 512, int $flags = 0): b
     return false;
   }
 });
+
+function validateDepth(depth: number, name: string, position: number): void {
+  const argument = `${name}(): Argument #${position} ($depth)`;
+  if (depth <= 0) throwError('ValueError', `${argument} must be greater than 0`);
+  if (depth > 2_147_483_647) throwError('ValueError', `${argument} must be less than 2147483647`);
+}
 
 /** The characters of JSON's escapes other than `\\u`, by the letter after the backslash. */
 const SIMPLE_ESCAPES: Record<string, string> = {
