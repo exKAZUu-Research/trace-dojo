@@ -1287,13 +1287,12 @@ test.each(['mb_detect_encoding($text,$encodings)', 'mb_convert_encoding($text,"U
   }
 );
 
-test('retains shared array owners without scanning every holder', () => {
+test.each([
+  '<?php class Item{function __construct(public $id,public array $cfg){}}$cfg=range(1,3);$items=[];for($i=0;$i<6000;$i++)$items[]=new Item($i,$cfg);echo count($items);',
+  '<?php function items(){$cfg=range(1,3);$items=[];for($i=0;$i<6000;$i++)$items[]=["cfg"=>$cfg];return $items;}function size($cfg){return count($cfg);}$n=0;foreach(items() as $item)$n+=size($item["cfg"]);echo $n/3;',
+])('retains shared arrays without scanning every holder: %s', (program) => {
   vi.restoreAllMocks();
-  expect(
-    run(
-      '<?php class Item{function __construct(public $id,public array $cfg){}}$cfg=range(1,3);$items=[];for($i=0;$i<6000;$i++)$items[]=new Item($i,$cfg);echo count($items);'
-    )
-  ).toMatchObject({ kind: 'executed', stdout: '6000' });
+  expect(run(program)).toMatchObject({ kind: 'executed', stdout: '6000' });
 });
 
 test.each(['PHP_EOL', 'PHP_EOL . "A"', 'PHP_INT_MAX', 'PHP_INT_MAX + 1'])(

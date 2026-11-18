@@ -374,6 +374,11 @@ markInlined('get_class');
 defineFunction('get_parent_class(object|string $object_or_class = UNKNOWN): string|false', ({ args }) => {
   if (args.length === 0) deprecated('Calling get_parent_class() without arguments is deprecated');
   const cls = args.length === 0 ? rt().frame.scope : classOf(args[0]);
+  if (typeof args[0] === 'string' && !cls)
+    throwError(
+      'TypeError',
+      'get_parent_class(): Argument #1 ($object_or_class) must be an object or a valid class name, string given'
+    );
   return cls?.parent?.name ?? false;
 });
 defineFunction('get_called_class(): string', () => {

@@ -80,7 +80,7 @@ export function placeOf(e: Expr, mode: 'write' | 'update' | 'deferred' = 'write'
     }
     case 'sprop': {
       const cls = resolveClassRef(e.cls);
-      const name = typeof e.name === 'string' ? e.name : toStr(ev(e.name));
+      const name = memberName(e.name);
       return new StaticPlace(cls, name, frame.scope);
     }
     case 'call':
@@ -198,7 +198,7 @@ class StaticPlace implements Place {
   }
 
   unset(): void {
-    throwError('Error', 'Attempt to unset static property');
+    throwError('Error', `Attempt to unset static property ${this.cls.name}::$${this.name}`);
   }
 }
 
@@ -663,7 +663,7 @@ function incDecString(text: string, inc: boolean): Value {
   return incrementString(text);
 }
 
-// code-gauge-allow functionNcss 41 -- Handles each kind of writable expression, whose write rules PHP defines separately.
+// code-gauge-allow functionNcss 43 -- Handles each kind of writable expression, whose write rules PHP defines separately.
 // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function unsetTarget(target: Expr): void {
   const runtime = rt();
@@ -700,7 +700,9 @@ export function unsetTarget(target: Expr): void {
       return;
     }
     case 'sprop': {
-      throwError('Error', 'Attempt to unset static property');
+      const cls = resolveClassRef(target.cls);
+      new StaticPlace(cls, memberName(target.name), runtime.frame.scope).unset();
+      return;
     }
     default: {
       throwError('Error', 'Cannot unset this expression');

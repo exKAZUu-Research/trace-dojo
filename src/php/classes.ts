@@ -11,7 +11,7 @@ import { strictEquals } from './operators';
 import { share } from './places';
 import { FatalError, rt, SCRIPT_PATH } from './runtime';
 import tentativeReturnMethods from './tentativeReturnMethods.json';
-import { coerce, describePropertyType, describeType, NO_MATCH, typeToString } from './types';
+import { coerce, describePropertyType, describeType, NO_MATCH } from './types';
 import { UnsupportedFeatureError } from './unsupported';
 import { unsupportedClasses } from './unsupportedCatalog';
 import {
@@ -703,7 +703,7 @@ function signatureText(method: Method): string {
   const params = fn.params
     .map((param) => {
       let text = '';
-      if (param.type) text += `${typeToString(param.type)} `;
+      if (param.type) text += `${describeType(param.type, method.scope)} `;
       if (param.byRef) text += '&';
       if (param.variadic) text += '...';
       text += `$${param.name}`;
@@ -716,7 +716,7 @@ function signatureText(method: Method): string {
     })
     .join(', ');
   const returnType = fn.kind === 'user' ? fn.decl.returnType : fn.returnType;
-  return `${fn.kind === 'user' && fn.decl.byRefReturn ? '& ' : ''}${method.scope.name}::${method.name}(${params})${returnType ? `: ${typeToString(returnType)}` : ''}`;
+  return `${fn.kind === 'user' && fn.decl.byRefReturn ? '& ' : ''}${method.scope.name}::${method.name}(${params})${returnType ? `: ${describeType(returnType, method.scope)}` : ''}`;
 }
 
 function defaultText(e: Expr): string {
@@ -1122,7 +1122,7 @@ export function propRef(
   const getter = decl?.hooks?.get;
   if (decl && getter && !object.guards?.has(`hook:${name}`)) {
     if (mode === 'foreach' && !(getter.kind === 'user' && getter.decl.byRefReturn))
-      throwError('Error', `Cannot create reference to property ${decl.cls.name}::$${name}`);
+      throwError('Error', `Cannot create reference to property ${object.cls.name}::$${name}`);
     return hookedPropertyReference(object, decl, scope);
   }
   let slot = object.props.get(key);

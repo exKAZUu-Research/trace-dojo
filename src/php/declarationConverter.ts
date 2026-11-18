@@ -16,7 +16,7 @@ import type {
 import { lower } from './bytes';
 import { parseTypeText } from './calls';
 import { CompileClassConstants } from './compileClassConstants';
-import { foldedDefaultType } from './constantDefaults';
+import { type Constant, constantTypeName, foldedConstant, foldedDefaultType } from './constantDefaults';
 import { BUILTIN_TYPES, ConverterBase } from './converterBase';
 import { SCRIPT_PATH } from './runtime';
 import { describeType, typeToString } from './types';
@@ -48,9 +48,15 @@ const MAGIC_METHODS: Record<
 export abstract class DeclarationConverter extends ConverterBase {
   private readonly compileClasses = new CompileClassConstants();
   private activeClass?: ClassDecl;
+  protected inConstantExpression = false;
 
   protected compiledType(expression: Expr): string | undefined {
-    return foldedDefaultType(expression, {
+    const value = this.compiledValue(expression);
+    return value === undefined ? undefined : constantTypeName(value);
+  }
+
+  protected compiledValue(expression: Expr): Constant | undefined {
+    return foldedConstant(expression, {
       compiler: true,
       classConstant: this.compileClasses.lookup(this.activeClass, this.fn.isClosure),
     });
@@ -299,9 +305,15 @@ export abstract class DeclarationConverter extends ConverterBase {
   }
 
   protected constantExpr(node: Node, allowNew = false): Expr {
-    const expression = this.expr(node);
-    this.checkConstantExpr(expression, allowNew);
-    return expression;
+    const outer = this.inConstantExpression;
+    this.inConstantExpression = true;
+    try {
+      const expression = this.expr(node);
+      this.checkConstantExpr(expression, allowNew);
+      return expression;
+    } finally {
+      this.inConstantExpression = outer;
+    }
   }
 
   private checkConstantExpr(expression: Expr, allowNew: boolean): void {

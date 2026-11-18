@@ -919,7 +919,7 @@ function ownershipRoots(runtime: Runtime): Set<unknown> {
   );
 }
 
-// code-gauge-allow functionNcss 48 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function ownedReachable(
   value: Ref | PhpArray | PhpObject,
   roots: Set<unknown>,
@@ -928,7 +928,45 @@ function ownedReachable(
   retainedBefore?: number,
   retainOwners = false
 ): boolean {
-  const isRoot = (value: object): boolean => {
+  const isRoot = ownershipRootCheck(roots, runtime, retainedBefore, retainOwners);
+  const cursors: Iterator<object>[] = [[value].values()];
+  const path: object[] = [];
+  const visited = new Set<object>();
+  let work = 0;
+  while (cursors.length > 0) {
+    if ((++work & 255) === 0) runtime.budget.checkClock();
+    const next = cursors.at(-1)!.next();
+    if (next.done) {
+      cursors.pop();
+      path.pop();
+      continue;
+    }
+    const item = next.value;
+    if (visited.has(item) || unreachable?.has(item)) continue;
+    const root = isRoot(item) ? item : retainOwners ? undefined : ownershipProof(item, isRoot);
+    if (root) {
+      if (!retainOwners) {
+        path.push(item);
+        rememberOwnership(path.toReversed(), root);
+      }
+      return true;
+    }
+    visited.add(item);
+    path.push(item);
+    cursors.push(reverseOwners(item, runtime, visited));
+  }
+  if (unreachable) for (const item of visited) unreachable.add(item);
+  return false;
+}
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function ownershipRootCheck(
+  roots: Set<unknown>,
+  runtime: Runtime,
+  retainedBefore: number | undefined,
+  retainOwners: boolean
+): (value: object) => boolean {
+  return (value) => {
     if (
       roots.has(value) ||
       (value instanceof PhpObject && (runtime.objectCycles.has(value) || runtime.collectingObjects.has(value))) ||
@@ -944,46 +982,6 @@ function ownedReachable(
     const sequence = value instanceof PhpObject ? pendingReleaseObjects.get(value) : undefined;
     return retainedBefore !== undefined && sequence !== undefined && sequence <= retainedBefore;
   };
-  const pending: object[] = [value];
-  const visited = new Set<object>();
-  const predecessor = new Map<object, object>();
-  const rememberPath = (item: object, root: object): void => {
-    if (retainOwners) return;
-    const path = [item];
-    let child = predecessor.get(item);
-    while (child) {
-      path.push(child);
-      child = predecessor.get(child);
-    }
-    rememberOwnership(path, root);
-  };
-  let work = 0;
-  while (pending.length > 0) {
-    if ((++work & 255) === 0) runtime.budget.checkClock();
-    const item = pending.pop() as object;
-    if (unreachable?.has(item)) continue;
-    const root = isRoot(item) ? item : retainOwners ? undefined : ownershipProof(item, isRoot);
-    if (root) {
-      rememberPath(item, root);
-      return true;
-    }
-    if (visited.has(item)) continue;
-    visited.add(item);
-    for (const parent of reverseOwners(item, runtime, visited)) {
-      if (!visited.has(parent) && !predecessor.has(parent)) {
-        if (unreachable?.has(parent)) continue;
-        predecessor.set(parent, item);
-        const root = isRoot(parent) ? parent : retainOwners ? undefined : ownershipProof(parent, isRoot);
-        if (root) {
-          rememberPath(parent, root);
-          return true;
-        }
-        pending.push(parent);
-      }
-    }
-  }
-  if (unreachable) for (const item of visited) unreachable.add(item);
-  return false;
 }
 
 function* reverseOwners(value: object, runtime: Runtime, visited: Set<object>): Generator<object> {

@@ -107,8 +107,15 @@ export function normalizeKeyString(text: string): Key {
   return text;
 }
 
+export const NAN_BOOL_WARNING = 'unexpected NAN value was coerced to bool';
+
 /** Converts to bool as PHP does. */
 export function toBool(value: Value): boolean {
+  if (typeof value === 'number' && Number.isNaN(value)) warn(NAN_BOOL_WARNING);
+  return boolValue(value);
+}
+
+export function boolValue(value: Value): boolean {
   if (value === null) return false;
   switch (typeof value) {
     case 'boolean': {
@@ -118,7 +125,6 @@ export function toBool(value: Value): boolean {
       return value !== 0n;
     }
     case 'number': {
-      if (Number.isNaN(value)) warn('unexpected NAN value was coerced to bool');
       return value !== 0;
     }
     case 'string': {

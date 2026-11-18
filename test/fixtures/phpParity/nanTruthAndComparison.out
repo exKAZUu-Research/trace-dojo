@@ -1,0 +1,29 @@
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 6
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 7
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 7
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 8
+begin
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 4
+class evaluated
+bool(false)
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 5
+Cannot use "::class" on false
+bool(false)
+bool(false)
+bool(false)
+bool(false)
+
+Warning: unexpected NAN value was coerced to bool in /main.php on line 11
+class evaluated
+bool(false)
+bool(true)
+bool(false)
+bool(false)
+int(1)
+bool(true)

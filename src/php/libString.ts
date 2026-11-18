@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 963 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 967 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
@@ -7,18 +7,18 @@ import { createHash, createHmac } from 'node:crypto';
 import { byteAt, charAt, enc, lower, untilNul, upper } from './bytes';
 import { callStack } from './calls';
 import { valueName } from './conversions';
-import { deprecated, throwError, warn } from './errors';
+import { deprecated, throwError, warn, withCleanupExceptions } from './errors';
 import { decodeHtml, escapeHtml, nextChar, translationTable } from './htmlEntities';
 import { isStream } from './libCore';
 import { ctypeUpper, isCtypeAlpha, isUtf8Ctype } from './libLocale';
 import { defineAlias, defineConstant, defineFunction, markInlined } from './native';
 import { toInt, toStr } from './operators';
-import { rt } from './runtime';
+import { PhpThrow, rt } from './runtime';
 import { formatPrintf } from './sprintf';
 import { incrementString } from './strings';
 import { allowedTags, stripTags } from './stripTags';
 import { UnsupportedFeatureError } from './unsupported';
-import { PhpArray, type Ref, type Value } from './values';
+import { PhpArray, PhpObject, type Ref, type Value } from './values';
 
 defineConstant('STR_PAD_RIGHT', 1n);
 defineConstant('STR_PAD_LEFT', 0n);
@@ -290,44 +290,63 @@ function replaceAll(
   return checkLength(result + subject.slice(position));
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function strReplace(args: Value[], refs: (Ref | undefined)[], insensitive: boolean): Value {
   const [search, replace, subject] = args;
-  const count = { value: 0 };
   if (!(search instanceof PhpArray) && replace instanceof PhpArray)
     throwError(
       'TypeError',
       `${insensitive ? 'str_ireplace' : 'str_replace'}(): Argument #2 ($replace) must be of type string when argument #1 ($search) is a string`
     );
-  const replaceOne = (text: string): string => {
-    if (!(search instanceof PhpArray)) {
-      return replaceAll(text, toStr(search), toStr(replace), insensitive, count);
-    }
-    const replacements = replace instanceof PhpArray ? replace.values() : undefined;
-    let result = text;
-    for (const [index, item] of search.values().entries()) {
-      const replacement = replacements
-        ? index < replacements.length
-          ? toStr(replacements[index])
-          : ''
-        : toStr(replace);
-      result = replaceAll(result, toStr(item), replacement, insensitive, count);
-    }
-    return result;
-  };
-  try {
-    let result: Value;
+  const runtime = rt();
+  const count = { value: 0 };
+  let result: Value = '';
+  withCleanupExceptions(runtime, (capture) => {
+    let conversionFailed = false;
+    const convert = (value: Value): string => {
+      if (conversionFailed && value instanceof PhpObject && !value.isResource) return '';
+      try {
+        return toStr(value);
+      } catch (error) {
+        if (!(error instanceof PhpThrow)) throw error;
+        capture(error);
+        conversionFailed = true;
+        return '';
+      }
+    };
+    const replaceOne = (text: string): string => replaceSubject(text, search, replace, convert, insensitive, count);
     if (subject instanceof PhpArray) {
       const array = new PhpArray();
-      for (const [key, item] of subject.entries()) {
-        array.set(key, replaceOne(toStr(item)));
-      }
+      for (const [key, item] of subject.entries()) array.set(key, replaceOne(convert(item)));
       result = array;
-    } else result = replaceOne(toStr(subject));
-    return result;
-  } finally {
+    } else result = replaceOne(convert(subject));
     if (refs[3]) refs[3].v = BigInt(count.value);
+  });
+  return result;
+}
+
+function replaceSubject(
+  text: string,
+  search: Value,
+  replace: Value,
+  convert: (value: Value) => string,
+  insensitive: boolean,
+  count: { value: number }
+): string {
+  if (text === '') return '';
+  if (!(search instanceof PhpArray)) return replaceAll(text, toStr(search), toStr(replace), insensitive, count);
+  const replacements = replace instanceof PhpArray ? replace.entries() : undefined;
+  const replacement = replacements ? '' : toStr(replace);
+  let result = text;
+  for (const [, item] of search.entries()) {
+    rt().spend();
+    const needle = convert(item);
+    const next = replacements?.next();
+    const substitute = next?.done === false ? convert(next.value[1]) : replacement;
+    result = replaceAll(result, needle, substitute, insensitive, count);
+    if (result === '') break;
   }
+  return result;
 }
 
 defineFunction(
@@ -561,7 +580,7 @@ defineFunction('strtr(string $string, string|array $from, ?string $to = null): s
     return result;
   }
   if (args[2] === undefined || args[2] === null) {
-    throwError('ArgumentCountError', 'strtr(): Argument #2 ($from) must be of type array, string given');
+    throwError('TypeError', 'strtr(): Argument #2 ($from) must be of type array, string given');
   }
   const source = toStr(from);
   const target = s(args[2]);

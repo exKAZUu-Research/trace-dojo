@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 485 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 501 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr } from './ast';
@@ -478,30 +478,8 @@ function arrayCallable(
   if (value.size === 2) {
     const target = value.get(0n);
     const method = value.get(1n);
-    if (typeof method === 'string' && target instanceof PhpObject) {
-      if (isClosure(target) && lower(method) === '__invoke') return closureTarget(target);
-      const qualified = mode === 'callback' ? qualifiedObjectMethod(target.cls, method, scope) : undefined;
-      const found = lookupMethod(qualified?.cls ?? target.cls, lower(qualified?.name ?? method), scope);
-      if (qualified && emitScopeWarning)
-        deprecated(`Callables of the form ["${target.cls.name}", "${method}"] are deprecated`);
-      if (found && canCall(found, scope)) {
-        return found.isStatic
-          ? { fn: found.fn, scope: found.scope, staticClass: target.cls, method: found }
-          : { fn: found.fn, thisObj: target, scope: found.scope, staticClass: target.cls, method: found };
-      }
-      const magic = target.cls.findMethod('__call');
-      if (magic && (!qualified || qualified.cls === target.cls))
-        return magicTarget(target, magic, qualified?.name ?? method);
-      if (found)
-        throw new CallableFailure(
-          `Call to ${found.visibility} method ${target.cls.name}::${found.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`,
-          `cannot access ${found.visibility} method ${target.cls.name}::${found.name}()`
-        );
-      throw new CallableFailure(
-        `Call to undefined method ${qualified?.cls.name ?? target.cls.name}::${qualified?.name ?? method}()`,
-        `class ${qualified?.cls.name ?? target.cls.name} does not have a method "${qualified?.name ?? method}"`
-      );
-    }
+    if (typeof method === 'string' && target instanceof PhpObject)
+      return arrayObjectCallable(target, method, scope, mode, emitScopeWarning);
     if (typeof method === 'string' && typeof target === 'string')
       return staticCallable(target, method, scope, mode, emitScopeWarning);
   }
@@ -516,6 +494,60 @@ function arrayCallable(
       ? 'first array member is not a valid class name or object'
       : 'second array member is not a valid method'
   );
+}
+
+function arrayObjectCallable(
+  target: PhpObject,
+  method: string,
+  scope: PhpClass | undefined,
+  mode: 'direct' | 'callback',
+  emitScopeWarning: boolean
+): CallTarget {
+  if (isClosure(target) && lower(method) === '__invoke') return closureTarget(target);
+  const qualified = mode === 'callback' ? qualifiedObjectMethod(target.cls, method, scope) : undefined;
+  const name = qualified?.name ?? method;
+  const found =
+    qualified && qualified.cls !== target.cls
+      ? qualified.cls.findMethod(lower(name))
+      : lookupMethod(target.cls, lower(name), scope);
+  if (qualified && emitScopeWarning)
+    deprecated(`Callables of the form ["${target.cls.name}", "${method}"] are deprecated`);
+  if (found && canCall(found, scope)) {
+    return found.isStatic
+      ? { fn: found.fn, scope: found.scope, staticClass: target.cls, method: found }
+      : { fn: found.fn, thisObj: target, scope: found.scope, staticClass: target.cls, method: found };
+  }
+  const magic = arrayMagicTarget(target, qualified?.cls ?? target.cls, name, found);
+  if (magic) return magic;
+  if (found)
+    throw new CallableFailure(
+      `Call to ${found.visibility} method ${target.cls.name}::${found.name}() from ${scope ? `scope ${scope.name}` : 'global scope'}`,
+      `cannot access ${found.visibility} method ${target.cls.name}::${found.name}()`
+    );
+  throw new CallableFailure(
+    `Call to undefined method ${qualified?.cls.name ?? target.cls.name}::${qualified?.name ?? method}()`,
+    `class ${qualified?.cls.name ?? target.cls.name} does not have a method "${qualified?.name ?? method}"`
+  );
+}
+
+function arrayMagicTarget(
+  receiver: PhpObject,
+  lookupClass: PhpClass,
+  name: string,
+  inaccessible: Method | undefined
+): CallTarget | undefined {
+  const magic = lookupClass.findMethod('__call');
+  if (lookupClass === receiver.cls) return magic && magicTarget(receiver, magic, name);
+  if (inaccessible && !magic) return;
+  const caller = rt().frame.thisObj;
+  if (magic && caller?.cls.isSubclassOf(lookupClass)) {
+    const callerMagic = caller.cls.findMethod('__call') ?? magic;
+    return magicTarget(receiver, callerMagic, name);
+  }
+  const staticMagic = lookupClass.findMethod('__callstatic');
+  if (staticMagic) {
+    return { fn: magicForwarder(staticMagic, name, undefined, receiver.cls), staticClass: receiver.cls };
+  }
 }
 
 function qualifiedObjectMethod(

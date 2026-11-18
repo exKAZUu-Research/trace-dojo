@@ -19,7 +19,7 @@ function debugEntries(object: PhpObject): [string | bigint, Slot, string][] {
     } catch (error) {
       if (!(error instanceof PhpThrow)) throw error;
       reportUncaughtWarning(error.object);
-      failDebugInfo();
+      failDebugInfo(false);
     }
     if (info === null) {
       deprecated(`Returning null from ${object.cls.name}::__debugInfo() is deprecated, return an empty array instead`);
@@ -48,12 +48,12 @@ function debugEntries(object: PhpObject): [string | bigint, Slot, string][] {
   return entries;
 }
 
-function failDebugInfo(): never {
+function failDebugInfo(withTrace = true): never {
   throw new FatalError(
     (rt().errorReporting & E_ERROR) !== 0n ? '__debuginfo() must return an array' : '',
     rt().row,
     false,
-    false
+    withTrace
   );
 }
 

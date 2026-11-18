@@ -107,7 +107,7 @@ export class RefPlace implements Place {
   }
 
   unset(): void {
-    throwError('Error', 'Attempt to unset static property');
+    throwError('Error', 'Cannot unset this expression');
   }
 }
 

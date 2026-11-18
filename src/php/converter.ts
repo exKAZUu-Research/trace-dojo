@@ -4,7 +4,8 @@ import type { Node } from '@willbooster/web-tree-sitter';
 import type { Arg, ArrayItem, CatchClause, Expr, ListItem, MatchArm, Program, Stmt, SwitchCase } from './ast';
 import { collectMainVars, collectVariables, hasReferenceItem, onlyCalls, validateReads } from './astAnalysis';
 import { enc, lower } from './bytes';
-import { formatFloat } from './conversions';
+import { type Constant, constantTruth } from './constantDefaults';
+import { formatFloat, NAN_BOOL_WARNING } from './conversions';
 import { MAGIC_RUNTIME } from './converterBase';
 import { DeclarationConverter } from './declarationConverter';
 import { exportExpr } from './export';
@@ -1166,13 +1167,35 @@ export class Converter extends DeclarationConverter {
           : { k: 'expr' as const, e: this.expr(rightNode) };
       return { k: 'instanceof', e: l, cls, row };
     }
+    const op = lower(operator);
+    if (!this.inConstantExpression && (op === '&&' || op === 'and' || op === '||' || op === 'or')) {
+      return this.shortCircuit(op, l, rightNode, row);
+    }
     const r = this.expr(rightNode);
     if (operator === '|>') {
       if (rightNode.type === 'arrow_function')
         this.error(rightNode, 'Arrow functions on the right hand side of |> must be parenthesized');
       return { k: 'pipe', l, r, row };
     }
-    return { k: 'bin', op: lower(operator) === '<>' ? '!=' : lower(operator), l, r, row };
+    return { k: 'bin', op: op === '<>' ? '!=' : op, l, r, row };
+  }
+
+  private shortCircuit(op: string, l: Expr, right: Node, row: number): Expr {
+    const value = this.compiledValue(l);
+    if (value === undefined) return { k: 'bin', op, l, r: this.expr(right), row };
+    const isAnd = op === '&&' || op === 'and';
+    const condition = this.compileTruth(value, row);
+    if (condition !== isAnd) return { k: 'lit', v: this.compileTruth(value, row), row };
+    const r = this.expr(right);
+    const result = this.compiledValue(r);
+    if (result !== undefined) return { k: 'lit', v: this.compileTruth(result, row), row };
+    return { k: 'bin', op, l: { k: 'lit', v: condition, row: l.row }, r, row };
+  }
+
+  private compileTruth(value: Constant, row: number): boolean {
+    if (typeof value === 'number' && Number.isNaN(value))
+      this.notices.push({ level: 'Warning', message: NAN_BOOL_WARNING, row });
+    return constantTruth(value);
   }
 
   private closure(node: Node): Expr {

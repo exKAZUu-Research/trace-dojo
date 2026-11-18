@@ -313,7 +313,8 @@ export function evChain(e: Expr, discardResult = false): Chain {
     case 'throw': {
       const value = ev(e.e);
       runtime.row = e.row;
-      if (!(value instanceof PhpObject) || !isThrowableObject(value)) throwError('Error', 'Can only throw objects');
+      if (!(value instanceof PhpObject) || value.isResource) throwError('Error', 'Can only throw objects');
+      if (!isThrowableObject(value)) throwError('Error', 'Cannot throw objects that do not implement Throwable');
       throw new PhpThrow(value);
     }
     case 'isset': {
@@ -811,7 +812,7 @@ function classConstantOf(e: Extract<Expr, { k: 'cconst' }>): Value {
     if (e.cls.k === 'named') return e.cls.name;
     if (e.cls.k === 'expr') {
       const value = ev(e.cls.e);
-      if (!(value instanceof PhpObject)) throwError('TypeError', `Cannot use "::class" on ${debugType(value)}`);
+      if (!(value instanceof PhpObject)) throwError('TypeError', `Cannot use "::class" on ${valueName(value)}`);
       return value.cls.fullName;
     }
     if (e.cls.k === 'self' || e.cls.k === 'static' || e.cls.k === 'parent')
@@ -1044,7 +1045,7 @@ function matchExpression(e: Extract<Expr, { k: 'match' }>): Value {
   for (const arm of e.arms) {
     if (!arm.conditions) continue;
     for (const condition of arm.conditions) {
-      if (strictEquals(subject, ev(condition))) return ev(arm.body);
+      if (consumeExpression(condition, (value) => strictEquals(subject, value))) return ev(arm.body);
     }
   }
   const fallback = e.arms.find((arm) => !arm.conditions);

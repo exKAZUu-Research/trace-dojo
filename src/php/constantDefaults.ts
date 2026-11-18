@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP null is represented by JavaScript null.
 import type { ClassRef, Expr } from './ast';
-import { floatFitsInt, normalizeKeyString, numericPrefix, toBool } from './conversions';
+import { boolValue, floatFitsInt, normalizeKeyString, numericPrefix } from './conversions';
 import { compileConstant } from './native';
 import { arithmetic, bitwise, compareScalar, toFloat, toInt } from './operators';
 import { INT_MAX, INT_MIN, type Key, PhpArray, PhpObject } from './values';
@@ -79,21 +79,28 @@ function fold(expression: Expr, context: FoldContext): Folded {
       return arrayConstant(expression, context);
     }
     case 'unary': {
-      return unaryConstant(expression.op, fold(expression.e, context));
+      const value = fold(expression.e, context);
+      if (context.compiler && expression.op === '!' && typeof value === 'number') return UNKNOWN;
+      return unaryConstant(expression.op, value);
     }
     case 'bin': {
       const left = fold(expression.l, context);
       if (left === UNKNOWN) return UNKNOWN;
       if (expression.op === '??') return context.compiler ? UNKNOWN : (left ?? fold(expression.r, context));
-      if (['&&', 'and'].includes(expression.op) && !truth(left)) return false;
-      if (['||', 'or'].includes(expression.op) && truth(left)) return true;
+      if (['&&', 'and', '||', 'or'].includes(expression.op)) {
+        const condition = foldBool(left);
+        if (condition === UNKNOWN) return UNKNOWN;
+        const conjunction = expression.op === '&&' || expression.op === 'and';
+        return condition === conjunction ? foldBool(fold(expression.r, context)) : condition;
+      }
       return binaryConstant(expression.op, left, fold(expression.r, context));
     }
     case 'cond': {
       if (context.compiler) return UNKNOWN;
       const test = fold(expression.test, context);
-      if (test === UNKNOWN) return UNKNOWN;
-      if (!truth(test)) return fold(expression.alternate, context);
+      const condition = foldBool(test);
+      if (test === UNKNOWN || condition === UNKNOWN) return UNKNOWN;
+      if (!condition) return fold(expression.alternate, context);
       if (expression.consequent) return fold(expression.consequent, context);
       return test;
     }
@@ -153,10 +160,13 @@ function constantKey(value: Folded): Key | typeof UNKNOWN {
   return Number.isInteger(value) && floatFitsInt(value) ? BigInt(value) : UNKNOWN;
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function unaryConstant(op: string, value: Folded): Folded {
   if (value === UNKNOWN) return UNKNOWN;
-  if (op === '!') return !truth(value);
+  if (op === '!') {
+    const condition = foldBool(value);
+    return condition === UNKNOWN ? UNKNOWN : !condition;
+  }
   if (value instanceof Map) return UNKNOWN;
   if (op === '~') {
     if (typeof value === 'bigint') return ~value;
@@ -177,8 +187,11 @@ function unaryConstant(op: string, value: Folded): Folded {
 // code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function binaryConstant(op: string, left: Constant, right: Folded): Folded {
   if (right === UNKNOWN) return UNKNOWN;
-  if (['&&', 'and', '||', 'or'].includes(op)) return truth(right);
-  if (op === 'xor') return truth(left) !== truth(right);
+  if (op === 'xor') {
+    const a = foldBool(left),
+      b = foldBool(right);
+    return a === UNKNOWN || b === UNKNOWN ? UNKNOWN : a !== b;
+  }
   if (['===', '!==', '==', '!=', '<>', '<', '<=', '>', '>=', '<=>'].includes(op))
     return comparisonConstant(op, left, right);
   if (left instanceof Map || right instanceof Map) {
@@ -251,7 +264,7 @@ function compareConstant(left: Constant, right: Constant, strict: boolean): numb
     (left === null || right === null || typeof left === 'boolean' || typeof right === 'boolean') &&
     (left instanceof Map || right instanceof Map)
   )
-    return Number(truth(left)) - Number(truth(right));
+    return Number(constantTruth(left)) - Number(constantTruth(right));
   if (left instanceof Map) return 1;
   if (right instanceof Map) return -1;
   return compareScalar(left, right);
@@ -261,7 +274,7 @@ function compareConstant(left: Constant, right: Constant, strict: boolean): numb
 function castConstant(type: string, value: Folded): Folded {
   if (value === UNKNOWN) return UNKNOWN;
   if (type === 'array') return value instanceof Map ? value : value === null ? new Map() : new Map([[0n, value]]);
-  if (type === 'bool') return truth(value);
+  if (type === 'bool') return foldBool(value);
   if (value instanceof Map)
     return type === 'int' ? (value.size > 0 ? 1n : 0n) : type === 'float' ? (value.size > 0 ? 1 : 0) : UNKNOWN;
   if (type === 'string') return scalarString(value);
@@ -281,8 +294,13 @@ function integerOperand(value: bigint | number): boolean {
   return typeof value === 'bigint' || (Number.isInteger(value) && floatFitsInt(value));
 }
 
-function truth(value: Constant): boolean {
-  return value instanceof Map ? value.size > 0 : toBool(value);
+function foldBool(value: Folded): boolean | typeof UNKNOWN {
+  if (value === UNKNOWN || (typeof value === 'number' && Number.isNaN(value))) return UNKNOWN;
+  return constantTruth(value);
+}
+
+export function constantTruth(value: Constant): boolean {
+  return value instanceof Map ? value.size > 0 : boolValue(value);
 }
 
 function scalarString(value: Scalar): string | typeof UNKNOWN {

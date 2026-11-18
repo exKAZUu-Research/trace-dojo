@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss 443 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import {
+  boolValue,
   compareBytes,
   compareNumbers,
   debugType,
@@ -11,7 +12,6 @@ import {
   normalizeKeyString,
   numericPrefix,
   numericValue,
-  toBool,
   valueName,
 } from './conversions';
 import { deprecated, notice, throwError, warn } from './errors';
@@ -470,8 +470,8 @@ export function compareScalar(a: Value, b: Value): number {
     if (b === null && typeof a === 'string') return a === '' ? 0 : 1;
     if (a === null && b instanceof PhpObject) return -1;
     if (b === null && a instanceof PhpObject) return 1;
-    const x = toBool(a);
-    const y = toBool(b);
+    const x = boolValue(a);
+    const y = boolValue(b);
     return x === y ? 0 : x ? 1 : -1;
   }
   if (
