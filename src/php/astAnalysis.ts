@@ -1,7 +1,7 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { Arg, ClassDecl, Expr, FunctionDecl, MethodDeclAst, Stmt } from './ast';
 import { lower } from './bytes';
-import { nativeMethodParameters, nativeParameters } from './native';
+import { nativeClassDefinition, nativeMethodParameters, nativeParameters } from './native';
 import type { Param } from './values';
 
 /** Whether an expression statement only calls functions or creates objects, whose own steps show what it did. */
@@ -169,11 +169,17 @@ class ReadValidator {
   private readonly functions = new Map<string, Param[]>();
   private readonly classes = new Map<string, ClassDecl>();
   private activeClass?: { decl: ClassDecl; methods: Map<string, MethodDeclAst> };
+  private inClosure = false;
 
   statement(statement: Stmt): void {
     this.visit(statement, false);
     if (statement.k === 'func') this.functions.set(lower(statement.decl.name), statement.decl.params);
-    if (statement.k === 'class') this.classes.set(lower(statement.decl.name), statement.decl);
+    if (
+      statement.k === 'class' &&
+      canBindClass(statement.decl, (parent) => this.classes.has(parent) || nativeClassDefinition(parent) !== undefined)
+    ) {
+      this.classes.set(lower(statement.decl.name), statement.decl);
+    }
   }
   // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   visit(value: unknown, writing: boolean): void {
@@ -186,6 +192,14 @@ class ReadValidator {
     switch (node.k) {
       case 'class': {
         this.classMembers(node.decl as ClassDecl);
+        return;
+      }
+      case 'closure':
+      case 'arrow': {
+        const previous = this.inClosure;
+        this.inClosure = true;
+        this.visit(node.fn, false);
+        this.inClosure = previous;
         return;
       }
       case 'prop': {
@@ -315,7 +329,7 @@ class ReadValidator {
   }
   private parametersOf(expression: Expr): Param[] | undefined {
     if (expression.k === 'scall' && typeof expression.name === 'string') return this.staticMethodParameters(expression);
-    if (expression.k === 'mcall' && expression.obj.k === 'var' && expression.obj.name === 'this') {
+    if (!this.inClosure && expression.k === 'mcall' && expression.obj.k === 'var' && expression.obj.name === 'this') {
       const method = typeof expression.name === 'string' && this.activeClass?.methods.get(lower(expression.name));
       return method && (method.visibility === 'private' || method.isFinal) ? method.fn.params : undefined;
     }
@@ -323,23 +337,21 @@ class ReadValidator {
     return this.functions.get(lower(expression.fn.name)) ?? nativeParameters(expression.fn.name);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 19 -- Follows available class and method declarations in PHP's resolution order.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Follows available class and method declarations in PHP's resolution order.
   private staticMethodParameters(expression: Extract<Expr, { k: 'scall' }>): Param[] | undefined {
     const { cls, name } = expression;
     if (typeof name !== 'string') return;
+    if (cls.k === 'self' && this.inClosure) return;
     const methodName = lower(name);
-    let className = cls.k === 'named' ? cls.name : cls.k === 'self' ? this.activeClass?.decl.name : undefined;
+    const active = this.activeClass;
+    if (active && (cls.k === 'self' || (cls.k === 'named' && lower(cls.name) === lower(active.decl.name)))) {
+      return active.decl.kind === 'trait' && cls.k === 'self' ? undefined : active.methods.get(methodName)?.fn.params;
+    }
+    let className = cls.k === 'named' ? cls.name : undefined;
     const seen = new Set<string>();
     while (className && !seen.has(lower(className))) {
       const key = lower(className);
       seen.add(key);
-      const active = this.activeClass;
-      if (active && active.decl.kind !== 'trait' && lower(active.decl.name) === key) {
-        const method = active.methods.get(methodName);
-        if (method) return method.fn.params;
-        className = active.decl.parent;
-        continue;
-      }
       const current = this.classes.get(key);
       if (!current) return nativeMethodParameters(className, methodName);
       const method = current.methods.find((method) => lower(method.fn.name) === methodName);
@@ -367,6 +379,14 @@ function writableFetchRoot(expression: Expr): Expr {
 
 export function isWritableFetchBase(expression: Expr): boolean {
   return ['var', 'varvar', 'sprop', 'call', 'mcall', 'scall', 'pipe', 'clone'].includes(expression.k);
+}
+
+export function isReferenceArgumentTemporary(expression: Expr): boolean {
+  if (expression.k === 'call' || expression.k === 'mcall' || expression.k === 'scall') return expression.fcc;
+  return (
+    expression.k === 'clone' ||
+    (!isWritableFetchBase(expression) && expression.k !== 'new' && expression.k !== 'newAnon')
+  );
 }
 
 function checkUnsetOffsets(target: Expr): void {

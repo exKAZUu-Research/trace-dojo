@@ -49,6 +49,7 @@ export class Converter extends DeclarationConverter {
   private declaredSymbols = new Map<string, Map<string, string>>();
   private readonly staticNames = new WeakMap<object, Set<string>>();
   private readonly body: Stmt[] = [];
+  private namespaceStyle?: 'bracketed' | 'unbracketed';
 
   constructor(
     source: string,
@@ -61,7 +62,6 @@ export class Converter extends DeclarationConverter {
   }
 
   convertProgram(root: Node): Program {
-    this.checkNamespaces(root);
     try {
       this.compileTopLevel(root);
     } catch (error) {
@@ -84,8 +84,24 @@ export class Converter extends DeclarationConverter {
     }
     for (const child of root.namedChildren) {
       if (!['text', 'php_tag', 'php_end_tag', 'comment'].includes(child.type)) {
-        this.body.push(...this.statement(child, true));
+        this.appendTopLevel(child, true);
       }
+    }
+  }
+
+  private appendTopLevel(node: Node, fileScope = false): void {
+    if (node.type === 'compound_statement' && !this.preserveSyntax) {
+      for (const child of semanticChildren(node)) this.appendTopLevel(child, fileScope);
+      return;
+    }
+    this.body.push(...this.statement(node, true));
+    if (
+      fileScope &&
+      this.namespaceStyle === 'bracketed' &&
+      node.type !== 'namespace_definition' &&
+      !this.namespaceTrivia(node)
+    ) {
+      this.error(namespaceDiagnosticRow(node), 'No code may exist outside of namespace {}');
     }
   }
 
@@ -266,7 +282,7 @@ export class Converter extends DeclarationConverter {
         break;
       }
       case 'const_declaration': {
-        if (!topLevel) this.error(node, 'syntax error, unexpected token "const"');
+        if (!topLevel || isPlainBlockChild(node)) this.error(node, 'syntax error, unexpected token "const"');
         let declarationRow: number | undefined;
         let opcodeRow: number | undefined;
         const items = node.namedChildren
@@ -308,7 +324,7 @@ export class Converter extends DeclarationConverter {
         return this.namespaceDefinition(node);
       }
       case 'namespace_use_declaration': {
-        if (!topLevel) this.error(node, 'syntax error, unexpected token "use"');
+        if (!topLevel || isPlainBlockChild(node)) this.error(node, 'syntax error, unexpected token "use"');
         this.useDeclaration(node);
         return [];
       }
@@ -573,6 +589,7 @@ export class Converter extends DeclarationConverter {
       if (key === 'strict_types') {
         if (
           !topLevel ||
+          isPlainBlockChild(node) ||
           (node.parent?.type === 'program' && this.hasLeadingText(node.parent)) ||
           node.parent?.namedChildren.some(
             (child) =>
@@ -597,6 +614,7 @@ export class Converter extends DeclarationConverter {
       } else if (key === 'encoding') {
         if (
           !topLevel ||
+          isPlainBlockChild(node) ||
           (node.parent?.type === 'program' && this.hasLeadingText(node.parent)) ||
           node.parent?.namedChildren.some(
             (child) =>
@@ -620,30 +638,29 @@ export class Converter extends DeclarationConverter {
       }
     }
     const body = node.namedChildren.filter((child) => child.type !== 'declare_directive' && child.type !== 'comment');
-    return body.flatMap((child) => this.statement(child, topLevel));
+    return this.blockOf(body);
   }
 
-  private checkNamespaces(root: Node): void {
-    const statements = root.namedChildren.filter((child) => !this.namespaceTrivia(child));
-    const namespaces = statements.filter((child) => child.type === 'namespace_definition');
-    if (namespaces.length === 0) return;
-    const first = statements.indexOf(namespaces[0]);
-    if (this.hasLeadingText(root) || statements.slice(0, first).some((child) => child.type !== 'declare_statement'))
+  private selectNamespaceStyle(node: Node, root: Node, body: Node | null): void {
+    const style = body ? 'bracketed' : 'unbracketed';
+    if (this.namespaceStyle && this.namespaceStyle !== style)
       this.error(
-        namespaceDiagnosticRow(namespaces[0]),
+        namespaceDiagnosticRow(node),
+        'Cannot mix bracketed namespace declarations with unbracketed namespace declarations'
+      );
+    if (
+      !this.namespaceStyle &&
+      (this.hasLeadingText(root) ||
+        root.namedChildren.some(
+          (child) =>
+            child.endIndex <= node.startIndex && child.type !== 'declare_statement' && !this.namespaceTrivia(child)
+        ))
+    )
+      this.error(
+        namespaceDiagnosticRow(node),
         'Namespace declaration statement has to be the very first statement or after any declare call in the script'
       );
-    const bracketed = namespaces[0].childForFieldName('body') !== null;
-    for (let index = first + 1; index < statements.length; index++) {
-      const statement = statements[index];
-      if (statement.type === 'namespace_definition') {
-        if ((statement.childForFieldName('body') !== null) !== bracketed)
-          this.error(
-            namespaceDiagnosticRow(statement),
-            'Cannot mix bracketed namespace declarations with unbracketed namespace declarations'
-          );
-      } else if (bracketed) this.error(namespaceDiagnosticRow(statement), 'No code may exist outside of namespace {}');
-    }
+    this.namespaceStyle = style;
   }
 
   private hasLeadingText(root: Node): boolean {
@@ -666,6 +683,7 @@ export class Converter extends DeclarationConverter {
       this.error(namespaceDiagnosticRow(node), 'Namespace declarations cannot be nested');
     const nameNode = node.childForFieldName('name');
     const body = node.childForFieldName('body');
+    this.selectNamespaceStyle(node, node.parent, body);
     const name = nameNode ? this.nameText(nameNode) : '';
     if (name.startsWith('\\'))
       this.error(nameNode as Node, `syntax error, unexpected fully qualified name "${name}", expecting "{"`);
@@ -678,7 +696,7 @@ export class Converter extends DeclarationConverter {
     this.constImports = new Map();
     this.declaredSymbols = new Map();
     if (!body) return [];
-    for (const child of body.namedChildren) this.body.push(...this.statement(child, true));
+    for (const child of body.namedChildren) this.appendTopLevel(child);
     this.namespace = '';
     this.classImports = new Map();
     this.functionImports = new Map();
@@ -925,13 +943,14 @@ export class Converter extends DeclarationConverter {
           };
         }
         const name = this.compileStringName(this.expr(inner), inner);
+        const nameRow = this.memberOperandRow(name, inner);
         const constant = interpolating
           ? undefined
           : foldedConstant(name, { compiler: true, preserveNamedConstants: true, budget: this.compileBudget });
-        if (typeof constant !== 'string') return { k: 'varvar', name, row };
+        if (typeof constant !== 'string') return { k: 'varvar', name, row: nameRow };
         if (this.preserveSyntax) return { k: 'varvar', name: { k: 'lit', v: constant, row }, row };
         this.checkVariableAvailability(node, constant);
-        return { k: 'var', name: constant, row };
+        return { k: 'var', name: constant, row: nameRow };
       }
       case 'name':
       case 'qualified_name':
@@ -1239,6 +1258,11 @@ export class Converter extends DeclarationConverter {
   private memberOperandRow(name: string | Expr, node: Node): number {
     if (typeof name === 'string') return node.startPosition.row;
     const value = unparenthesizedNode(node);
+    if (value.type === 'heredoc' || value.type === 'nowdoc') {
+      const body = value.childForFieldName('value');
+      return name.k === 'interp' ? value.endPosition.row - 1 : (body?.endPosition.row ?? value.endPosition.row);
+    }
+    if (name.k === 'interp') return value.endPosition.row;
     if (name.k === 'bin' && name.op === '.' && directiveLiteral(value, name)) return followingTokenRow(value);
     return compiledOperandRow(name);
   }
@@ -1314,12 +1338,16 @@ export class Converter extends DeclarationConverter {
       const literal = parserScalar(cls.e);
       if (typeof literal === 'string') cls = { k: 'named', name: literal };
     }
+    const foldedNonString =
+      literal !== undefined &&
+      typeof literal !== 'string' &&
+      (name.k !== 'lit' || (typeof name.v !== 'number' && typeof name.v !== 'bigint'));
     return {
       k: 'cconst',
       cls,
       name: typeof literal === 'string' ? literal : name,
       scopeRow: scope.startPosition.row,
-      row: name.row,
+      row: foldedNonString ? scope.startPosition.row : this.memberOperandRow(name, nameExpression),
     };
   }
 
@@ -1941,20 +1969,7 @@ export class Converter extends DeclarationConverter {
         const before = this.source.slice(node.startIndex, rawStart) + text.slice(0, offset);
         return row + before.split('\n').length - 1;
       };
-      parts.push(
-        decodeLiteral(
-          text,
-          !isHeredoc,
-          (escape, offset) => {
-            this.notices.push({
-              level: 'Warning',
-              message: `Octal escape sequence overflow ${escape} is greater than \\377`,
-              row: escapeRow(offset),
-            });
-          },
-          (message, offset) => this.error(escapeRow(offset), message)
-        )
-      );
+      parts.push(decodeLiteral(text, !isHeredoc, (message, offset) => this.error(escapeRow(offset), message)));
       raw = '';
     };
     let braced = false;
@@ -2028,6 +2043,10 @@ export class Converter extends DeclarationConverter {
 
 function isArrayFoldNotice({ message }: CompileNotice): boolean {
   return message === NAN_STRING_WARNING || message === NAN_BOOL_WARNING;
+}
+
+function isPlainBlockChild(node: Node): boolean {
+  return node.parent?.type === 'compound_statement' && node.parent.parent?.type !== 'namespace_definition';
 }
 
 function chainedComparison(operator: Node, left: Node, right: Node): Node | undefined {

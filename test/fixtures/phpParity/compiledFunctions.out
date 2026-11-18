@@ -15,3 +15,6 @@ Warning: Array to string conversion in /main.php on line 11
 #0 /main.php(16): array_slice(1, 1)
 #0 /main.php(17): defined(Array)
 #0 /main.php(19): str_repeat(Array, 1)
+received
+Cannot use temporary expression in write context
+plain block

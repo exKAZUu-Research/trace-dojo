@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 662 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 684 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr, ResolvedName } from './ast';
-import { hasNullsafeReceiver } from './astAnalysis';
+import { hasNullsafeReceiver, isReferenceArgumentTemporary } from './astAnalysis';
 import { oneArgumentBuiltinOpcodes, simpleSprintfFormat } from './builtinCompiler';
 import builtinNames from './builtinNames.json';
 import { lower } from './bytes';
@@ -143,7 +143,7 @@ export function evalArgs(
           (['varvar', 'idx', 'prop', 'sprop'].includes(e.k) || (e.k === 'var' && e.name !== 'GLOBALS')) &&
           !hasNullsafeReceiver(e)
         ) {
-          const ref = placeOf(e, 'write', true).ref();
+          const ref = argumentReference(e);
           add({ v: ref.v, ref, name: arg.name });
           continue;
         }
@@ -178,6 +178,30 @@ export function evalArgs(
     }
   }
   return values;
+}
+
+function argumentReference(expression: Expr): Ref {
+  let receiver = expression;
+  const operands: Expr[] = [];
+  while (receiver.k === 'idx' || receiver.k === 'prop') {
+    const operand = receiver.k === 'idx' ? receiver.index : receiver.name;
+    if (operand && typeof operand !== 'string') operands.push(operand);
+    receiver = receiver.k === 'idx' ? receiver.base : receiver.obj;
+  }
+  if (receiver !== expression && temporaryArgumentReceiver(receiver)) {
+    ev(receiver);
+    for (const operand of operands.toReversed()) prepareOperand(operand);
+    rt().row = compiledOperandRow(operands.at(-1) ?? receiver);
+    throwError('Error', 'Cannot use temporary expression in write context');
+  }
+  return placeOf(expression, 'write', true).ref();
+}
+
+function temporaryArgumentReceiver(expression: Expr): boolean {
+  if (isReferenceArgumentTemporary(expression)) return true;
+  if (expression.k !== 'call' || 'k' in expression.fn || expression.fn.fallback) return false;
+  const fn = rt().functions.get(lower(expression.fn.name));
+  return fn?.kind === 'native' && compiledTemporaryResult(fn, expression.args);
 }
 
 function referenceParameterIndex(params: Callable['params'] | undefined, position: number, name?: string): number {

@@ -1531,6 +1531,8 @@ test.each([
   ['[&$value] = [[1]][0];', 'Cannot use temporary expression in write context'],
   ['class C { public $p = [1]; } [&$value] = (new C())->p;', 'Cannot use temporary expression in write context'],
   ['function f(&$arg) {} f((new stdClass())->p);', 'Cannot use temporary expression in write context'],
+  ['{ function f(&$arg) {} } f((new stdClass())->p);', 'Cannot use temporary expression in write context'],
+  ['{ function f(&$arg) {} f((new stdClass())->p); }', 'Cannot use temporary expression in write context'],
   ['class C extends A, B {}', 'unexpected token ","'],
 ])('validates write and declaration syntax: %s', (source, message) => {
   const result = run(`<?php echo 'never'; ${source}`);
@@ -1541,6 +1543,10 @@ test.each([
 test.each([
   ['namespace {\n  class G {}\n}\ninterface I {}\nnamespace Q {}', 'No code may exist outside of namespace {}'],
   ['namespace P;\nclass A {}\n\nnamespace Q { class B {} }', 'Cannot mix bracketed namespace declarations'],
+  [
+    'namespace {\n  class G {}\n}\ndeclare(strict_types=1);',
+    'strict_types declaration must be the very first statement',
+  ],
 ])('reports the offending namespace statement: %s', (source, message) => {
   const result = run(`<?php\n${source}`);
   expect(result.kind).toBe('compileError');

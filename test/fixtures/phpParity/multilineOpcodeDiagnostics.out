@@ -283,3 +283,9 @@ Deprecated: Implicit conversion from float 5.5 to int loses precision in /main.p
 Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 510
 
 Deprecated: Implicit conversion from float 1.5 to int loses precision in /main.php on line 515
+
+Warning: Undefined variable $missingVariable in /main.php on line 521
+526:Undefined constant stdClass::missingConstant
+532:Call to undefined method stdClass::missing()
+
+Warning: Undefined variable $missingValue in /main.php on line 537

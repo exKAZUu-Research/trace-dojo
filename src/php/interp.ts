@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 989 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 991 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -211,7 +211,7 @@ export function evChain(e: Expr, discardResult = false): Chain {
       return e.name === 'GLOBALS' ? globalsArray() : readVar(e.name, e.row);
     }
     case 'varvar': {
-      return readVar(toStr(ev(e.name)), e.row);
+      return evaluateRead(e, 'read');
     }
     case 'array': {
       return arrayLiteral(e);
@@ -415,7 +415,9 @@ function prepareRead(e: Expr, mode: ReadMode): ReadPlan {
     case 'varvar': {
       const name = prepareOperand(e.name);
       return () => {
-        const key = toStr(name());
+        const value = name(e.row);
+        runtime.row = e.row;
+        const key = toStr(value);
         const ref = runtime.frame.vars.get(key);
         if (mode === 'isset') return ref?.isSetBinding ?? false;
         return mode === 'read' ? readVar(key, e.row) : definedOrNull(ref?.v);
@@ -435,9 +437,11 @@ function prepareRead(e: Expr, mode: ReadMode): ReadPlan {
       if (cls === SHORT) return SHORT;
       const name = readMemberOperand(e.name);
       return () => {
-        const key = toStr(name());
+        const property = name(e.row);
         runtime.row = e.row;
-        const value = readStaticProp(cls, key, runtime.frame.scope, mode !== 'read');
+        const value = withPropertyName(property, (key) =>
+          readStaticProp(cls, key, runtime.frame.scope, mode !== 'read')
+        );
         return mode === 'isset' ? value !== null : value;
       };
     }
@@ -534,7 +538,7 @@ function readPropertyOperand(object: Value, name: Value, row: number, mode: Read
   return readProp(object, key, runtime.frame.scope, mode);
 }
 
-function readMemberOperand(name: string | Expr): () => Value {
+function readMemberOperand(name: string | Expr): (row?: number) => Value {
   return typeof name === 'string' ? () => name : prepareOperand(name);
 }
 
@@ -638,7 +642,7 @@ function readStringOffset(text: string, index: Value, mode: OffsetRead): Value {
   return text[position];
 }
 
-export function withPropertyName<T>(name: Value, diagnose: (key: string) => T): T {
+export function withPropertyName<T>(name: Value, use: (key: string) => T, diagnose: (key: string) => unknown = use): T {
   let key: string;
   try {
     key = toStr(name);
@@ -647,7 +651,7 @@ export function withPropertyName<T>(name: Value, diagnose: (key: string) => T): 
     withPendingException(rt(), error, () => diagnose(''));
     throw error;
   }
-  return diagnose(key);
+  return use(key);
 }
 
 const compileTimeConstants = new Set(builtinNames.constants);

@@ -169,13 +169,16 @@ export class ArrayStorage {
     const initialized = this.iteratorCursor !== undefined;
     this.iteratorCursor?.close();
     this.cursorArray = array;
-    this.iteratorCursor = array.cursor();
-    if (initialized)
+    this.iteratorCursor = array.cursor(true);
+    if (initialized) {
       while (
         this.iteratorCursor.key !== undefined &&
-        (mode === 'copy' ? this.iteratorCursor.key !== key : this.iteratorCursor.index !== index)
+        (mode === 'copy' ? this.iteratorCursor.key !== key : (this.iteratorCursor.entry?.index ?? 0) < (index ?? 0))
       )
         this.iteratorCursor.next();
+      if (mode === 'replace' || !this.iteratorCursor.entry)
+        this.iteratorCursor.setPosition(this.iteratorCursor.entry, index);
+    }
   }
 
   private chain(): ArrayStorage[] {
@@ -369,22 +372,28 @@ function iteratorClassName(value: Value, method: string, position: number): stri
 /** Sorts the storage with PHP's sort function of the same name, as spl_array_method does. */
 function sortStorage(object: PhpObject, name: string, args: Value[]): Value {
   const storage = storageOf(object);
-  const ref = new Ref(storage.array);
+  const runtime = rt();
+  const ref = new Ref(share(storage.array));
   const fn = rt().functions.get(name);
   if (!fn) throw new Error(`Unknown sort function ${name}`);
+  runtime.nativeHeld.at(-1)!.push(ref);
   let result: Value = null;
-  withCleanupExceptions(rt(), (capture) => {
-    try {
-      result = storage.runSort(() =>
-        invoke({ fn }, [{ v: ref.v, ref }, ...args.map((v) => ({ v }) as const)], undefined)
-      );
-    } catch (error) {
-      if (!(error instanceof PhpThrow)) throw error;
-      capture(error);
-    }
-    if (storage.array !== ref.v) storage.array = ref.v as PhpArray;
-  });
-  return result;
+  try {
+    withCleanupExceptions(runtime, (capture) => {
+      try {
+        result = storage.runSort(() =>
+          invoke({ fn }, [{ v: ref.v, ref }, ...args.map((v) => ({ v }) as const)], undefined)
+        );
+      } catch (error) {
+        if (!(error instanceof PhpThrow)) throw error;
+        capture(error);
+      }
+      if (storage.array !== ref.v) storage.array = ref.v as PhpArray;
+    });
+    return result;
+  } finally {
+    ref.releaseWithoutGc();
+  }
 }
 
 function keyAt(storage: ArrayStorage): Key | undefined {

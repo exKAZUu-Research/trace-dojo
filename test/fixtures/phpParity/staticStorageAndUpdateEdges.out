@@ -29,3 +29,7 @@ Cannot increment/decrement string offsets
 Cannot use string offset as an array
 a
 3 4
+Object of class stdClass could not be converted to string | Access to undeclared static property ValueParent::$
+Object of class stdClass could not be converted to string | Access to undeclared static property ValueParent::$
+- | Object of class stdClass could not be converted to string
+- | Object of class stdClass could not be converted to string

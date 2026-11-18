@@ -58,18 +58,7 @@ export function parsePhp(source: string, trace?: TraceOptions): ParsedProgram {
 }
 
 function convertPhp(root: Node, text: string, atomicRows: Set<number>, ignoredPrefix: number): ParsedProgram {
-  const parseNotices = root.descendantsOfType('cast_expression').flatMap((node): CompileNotice[] => {
-    const { spelling, type } = castType(node);
-    return spelling === type
-      ? []
-      : [
-          {
-            level: 'Deprecated',
-            message: `Non-canonical cast (${spelling}) is deprecated, use the (${type}) cast instead`,
-            row: node.startPosition.row,
-          },
-        ];
-  });
+  const parseNotices = collectLexerNotices(root);
   const converter = new Converter(text, atomicRows, ignoredPrefix);
   let program: Program;
   try {
@@ -83,6 +72,29 @@ function convertPhp(root: Node, text: string, atomicRows: Set<number>, ignoredPr
     if (!converter.claimedAtomicRows.has(row)) throw new CompileError([{ row, message: misplacedAtomicMessage }]);
   }
   return { program, notices: converter.notices, parseNotices };
+}
+
+function collectLexerNotices(root: Node): CompileNotice[] {
+  const notices: CompileNotice[] = [];
+  for (const token of root.descendantsOfType(['cast_type', 'escape_sequence'])) {
+    const row = token.startPosition.row;
+    if (token.type === 'cast_type' && token.parent?.type === 'cast_expression') {
+      const { spelling, type } = castType(token.parent);
+      if (spelling !== type)
+        notices.push({
+          level: 'Deprecated',
+          message: `Non-canonical cast (${spelling}) is deprecated, use the (${type}) cast instead`,
+          row,
+        });
+    } else if (/^\\[4-7][0-7]{2}$/.test(token.text)) {
+      notices.push({
+        level: 'Warning',
+        message: `Octal escape sequence overflow ${token.text} is greater than \\377`,
+        row,
+      });
+    }
+  }
+  return notices;
 }
 
 function locatePhpErrors(root: Node, diagnostics: SourceDiagnostic[]): SourceDiagnostic[] {

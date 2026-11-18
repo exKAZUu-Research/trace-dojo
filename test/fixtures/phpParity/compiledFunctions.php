@@ -17,3 +17,16 @@ t(fn() => array_slice(1, 1));
 t(fn() => defined([]));
 t(fn() => floatval([]));
 t(fn() => str_repeat([], 1));
+class ReferenceReceiver {public $value = 1;}
+class ReferenceTarget {
+    static function take(&$value) {echo "received\n";}
+}
+class InheritedReferenceTarget extends ReferenceTarget {
+    static function send() {self::take((new ReferenceReceiver)->value);}
+}
+InheritedReferenceTarget::send();
+try { acceptReference("a"[0]); }
+catch (Throwable $error) {echo $error->getMessage(), "\n";}
+function acceptReference(&$value) {}
+usePlainBlockFunction();
+{ function usePlainBlockFunction() {echo "plain block\n";} }

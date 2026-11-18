@@ -48,20 +48,11 @@ const SIMPLE_ESCAPES: Record<string, string> = {
 };
 
 /** Decodes one escape sequence of a double-quoted string or heredoc, as bytes. */
-function decodeEscape(
-  text: string,
-  doubleQuoted: boolean,
-  onOverflow?: (escape: string) => void,
-  invalidUnicode?: (message: string) => void
-): string {
+function decodeEscape(text: string, doubleQuoted: boolean, invalidUnicode?: (message: string) => void): string {
   const body = text.slice(1);
   if (body === '"') return doubleQuoted ? '"' : String.raw`\"`;
   if (body in SIMPLE_ESCAPES) return SIMPLE_ESCAPES[body];
-  if (/^[0-7]{1,3}$/.test(body)) {
-    const code = Number.parseInt(body, 8);
-    if (code > 0xff) onOverflow?.(text);
-    return String.fromCharCode(code & 0xff);
-  }
+  if (/^[0-7]{1,3}$/.test(body)) return String.fromCharCode(Number.parseInt(body, 8) & 0xff);
   if (/^x[0-9A-Fa-f]{1,2}$/.test(body)) return String.fromCharCode(Number.parseInt(body.slice(1), 16));
   if (body.startsWith('u{')) {
     if (!body.endsWith('}')) invalidUnicode?.('Invalid UTF-8 codepoint escape sequence');
@@ -74,14 +65,9 @@ function decodeEscape(
   return enc(text);
 }
 
-/**
- * Decodes the escapes of a literal part of a double-quoted string or heredoc into bytes, reporting octal escapes past
- * a byte, which PHP warns about.
- */
 export function decodeLiteral(
   raw: string,
   doubleQuoted: boolean,
-  onOverflow?: (escape: string, offset: number) => void,
   invalidUnicode?: (message: string, offset: number) => void
 ): string {
   let result = '';
@@ -89,12 +75,7 @@ export function decodeLiteral(
   for (const match of raw.matchAll(/\\(?:u\{(?:[0-9A-Fa-f]+\})?|x[0-9A-Fa-f]{1,2}|[0-7]{1,3}|[ntrvef\\$"])/g)) {
     result +=
       enc(raw.slice(last, match.index)) +
-      decodeEscape(
-        match[0],
-        doubleQuoted,
-        (escape) => onOverflow?.(escape, match.index),
-        (message) => invalidUnicode?.(message, match.index)
-      );
+      decodeEscape(match[0], doubleQuoted, (message) => invalidUnicode?.(message, match.index));
     last = match.index + match[0].length;
   }
   return result + enc(raw.slice(last));

@@ -49,3 +49,12 @@ t(fn() => range(0, 10, 3));
 t(fn() => range('z', 'w', 2));
 t(fn() => range(5, 'b'));
 t(fn() => range(-3, 3, 2.5));
+
+foreach (['ksort', 'asort', 'uasort', 'sort'] as $sorter) {
+    $values = ['x' => 1, 0 => 3, 5 => 0];
+    unset($values[5]);
+    if ($sorter === 'uasort') $sorter($values, fn($left, $right) => $left <=> $right);
+    else $sorter($values);
+    $values[] = 2;
+    var_dump(array_key_last($values));
+}

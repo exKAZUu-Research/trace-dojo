@@ -515,3 +515,25 @@ $array = [
     "b"]
     [0]
 ];
+
+$namePrefix = 'missing';
+echo ${$namePrefix .
+    "Variable"
+};
+try {
+    echo stdClass::{
+        $namePrefix .
+        "Constant"
+    };
+} catch (Throwable $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }
+try {
+    (new stdClass)->{
+        <<<TEXT
+        missing
+        TEXT
+    }();
+} catch (Throwable $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }
+$object->{
+    $namePrefix .
+    "Property"
+} ??= $missingValue;

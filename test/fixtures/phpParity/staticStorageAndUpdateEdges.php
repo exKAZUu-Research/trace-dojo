@@ -41,3 +41,15 @@ class ReferenceChild extends ValueParent {function &f($x){return $x;}}
 class ReferenceParent {function &f($x){return $x;}}
 class ReferenceChildToo extends ReferenceParent {function &f($x){return $x;}}
 echo (new ReferenceChild)->f(3),' ',(new ReferenceChildToo)->f(4),"\n";
+$name = new stdClass;
+foreach ([
+    fn() => ValueParent::$$name,
+    fn() => ValueParent::$$name = 1,
+    fn() => isset(ValueParent::$$name),
+    function() use ($name) {unset(ValueParent::$$name);},
+] as $operation) {
+    try { $operation(); }
+    catch (Throwable $error) {
+        echo $error->getPrevious()?->getMessage() ?? '-', ' | ', $error->getMessage(), "\n";
+    }
+}

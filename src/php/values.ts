@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 951 -- Keeps PHP value storage and the ownership helpers it uses together.
+// code-gauge-allow-file fileNcss 953 -- Keeps PHP value storage and the ownership helpers it uses together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
@@ -180,8 +180,8 @@ export class PhpArray {
     return array;
   }
 
-  cursor(): ArrayCursor {
-    return this.ordered().cursor(undefined, undefined, (key) => this.map.get(key) !== UNDEFINED_RESULT);
+  cursor(physical = false): ArrayCursor {
+    return this.ordered().cursor(undefined, undefined, (key) => this.map.get(key) !== UNDEFINED_RESULT, physical);
   }
 
   foreachCursor(previous?: ArrayCursor, retainPosition = false): ArrayCursor {
@@ -299,7 +299,12 @@ export class PhpArray {
     return value;
   }
 
-  replaceTable(entries: Iterable<readonly [Key, Value | Ref]>, packed = false, rebuild?: ArrayRebuild): void {
+  replaceTable(
+    entries: Iterable<readonly [Key, Value | Ref]>,
+    packed = false,
+    rebuild?: ArrayRebuild,
+    keepAppendKey = false
+  ): void {
     const previousSize = this.map.size;
     this.capacityHint = Math.max(this.capacityHint, previousSize);
     this.map = this.table(entries);
@@ -307,10 +312,10 @@ export class PhpArray {
     this.order?.replace(this.map.physicalKeys(), packed, rebuild);
     this.orderPacked = packed;
     this.composite = false;
-    this.nextFree = INT_MIN;
+    if (!keepAppendKey) this.nextFree = INT_MIN;
     for (const [key, slot] of this.map) {
       this.trackSlot(key, slot);
-      this.advanceAppendKey(key);
+      if (!keepAppendKey) this.advanceAppendKey(key);
       if (slot !== null && typeof slot === 'object') this.composite = true;
     }
     this.invalidate();

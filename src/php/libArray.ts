@@ -108,7 +108,7 @@ function rebuild(
         yield [newKey, slot];
       }
     }
-    array.replaceTable(renamed(), renumber, mutation);
+    array.replaceTable(renamed(), renumber, mutation, !renumber);
     return array;
   }
   for (const [key, source] of entries) {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 421 -- Keeps array bucket layout, mutations and their cursor positions together.
+// code-gauge-allow-file fileNcss 424 -- Keeps array bucket layout, mutations and their cursor positions together.
 import type { Key } from './values';
 
 class ArrayEntry {
@@ -111,8 +111,13 @@ export class ArrayOrder {
     return this.nextIndex;
   }
 
-  cursor(key = this.first?.key, family?: CursorFamily, includes?: (key: Key) => boolean): ArrayCursor {
-    const cursor = new ArrayCursor(this, key === undefined ? undefined : this.get(key), family, includes);
+  cursor(
+    key = this.first?.key,
+    family?: CursorFamily,
+    includes?: (key: Key) => boolean,
+    physical = false
+  ): ArrayCursor {
+    const cursor = new ArrayCursor(this, key === undefined ? undefined : this.get(key), family, includes, physical);
     this.cursors.add(cursor.registration);
     return cursor;
   }
@@ -185,7 +190,8 @@ export class ArrayOrder {
     this.nextIndex = index + 1;
     const entry = this.appendEntry(key, index);
     for (const cursor of this.liveCursors()) {
-      if (!cursor.entry && (!cursor.family || index >= (cursor.index ?? 0))) cursor.setPosition(entry, cursor.index);
+      if (!cursor.entry && (!cursor.preservesPosition || index >= (cursor.index ?? 0)))
+        cursor.setPosition(entry, cursor.index);
     }
   }
 
@@ -279,7 +285,7 @@ export class ArrayOrder {
       if (!preserveEndPosition) this.nextIndex = (this.last?.index ?? -1) + 1;
     }
     this.entries.delete(entry.rawKey);
-    for (const cursor of this.liveCursors()) cursor.clamp(this.nextIndex);
+    if (!entry.next) for (const cursor of this.liveCursors()) cursor.clamp(this.nextIndex);
   }
 
   replace(keys: Iterable<Key>, packed: boolean, rebuild?: ArrayRebuild): void {
@@ -405,7 +411,8 @@ export class ArrayCursor {
     private readonly order: ArrayOrder,
     entry: ArrayEntry | undefined,
     readonly family?: CursorFamily,
-    private readonly includes?: (key: Key) => boolean
+    private readonly includes?: (key: Key) => boolean,
+    private readonly physical = false
   ) {
     this.generation = family?.generation;
     this.entry = entry;
@@ -414,6 +421,9 @@ export class ArrayCursor {
 
   get active(): boolean {
     return !this.closed && this.generation === this.family?.generation;
+  }
+  get preservesPosition(): boolean {
+    return this.physical || this.family !== undefined;
   }
   close(): void {
     if (this.family && this.active) this.family.generation++;
@@ -428,7 +438,7 @@ export class ArrayCursor {
   }
   setPosition(value: ArrayEntry | undefined, index = value?.index): void {
     this.current = value;
-    const position = this.family ? (index ?? this.order.endPosition) : value?.index;
+    const position = this.preservesPosition ? (index ?? this.order.endPosition) : value?.index;
     this.rawPosition = position === undefined ? undefined : position + this.order.indexOffset;
   }
   refreshPosition(): void {
@@ -439,7 +449,7 @@ export class ArrayCursor {
   }
   clamp(end: number): void {
     const index = this.index;
-    if (this.family && index !== undefined && index > end) this.setPosition(this.current, end);
+    if (this.preservesPosition && index !== undefined && index > end) this.setPosition(this.current, end);
   }
   get key(): Key | undefined {
     this.skipExcluded();
@@ -454,7 +464,7 @@ export class ArrayCursor {
   }
   next(): void {
     const entry = this.current;
-    if (entry) this.setPosition(entry.next, entry.index + 1);
+    if (entry) this.setPosition(entry.next, this.physical ? entry.next?.index : entry.index + 1);
     this.skipExcluded();
   }
 

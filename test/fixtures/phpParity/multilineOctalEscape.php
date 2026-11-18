@@ -1,4 +1,7 @@
 <?php
+$object = new stdClass;
+$object->Array = 'name';
+echo $object->{[]}, ':', (integer) "\461", "\n";
 $text = "start
 \400 middle
 say \777";

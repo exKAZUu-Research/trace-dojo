@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 923 -- Holds assignment and offset access modes with their shared helpers.
+// code-gauge-allow-file fileNcss 947 -- Holds assignment and offset access modes with their shared helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -31,7 +31,7 @@ import {
   stringOffsetIndex,
   withPropertyName,
 } from './interp';
-import { compiledOperandRow, dimensionWriteRow } from './opcodeRows';
+import { compiledOperandRow, constantAstRow, dimensionWriteRow } from './opcodeRows';
 import { arithmetic, bitwise, concat, toKey, toStr } from './operators';
 import {
   type BeforeOffsetGet,
@@ -102,9 +102,7 @@ export function placeOf(e: Expr, mode: PlaceMode = 'write', through = false): Pl
       return instancePropertyPlace(e, mode, through);
     }
     case 'sprop': {
-      runtime.row = e.row;
-      const cls = resolveClassRef(e.cls);
-      return namedPlace(e.name, mode, (name) => new StaticPlace(cls, name, frame.scope));
+      return staticPropertyPlace(e, mode);
     }
     case 'call':
     case 'mcall':
@@ -127,6 +125,27 @@ function namedPlace(name: Expr | string, mode: PlaceMode, locate: (name: string)
   const readName = typeof name === 'string' ? () => name : prepareOperand(name);
   const resolve = (): Place => locate(toStr(readName()));
   return mode === 'deferred' || mode === 'coalesce' ? deferredPlace(resolve, () => readForIsset(resolve())) : resolve();
+}
+
+function staticPropertyPlace(e: Extract<Expr, { k: 'sprop' }>, mode: PlaceMode): Place {
+  const runtime = rt();
+  runtime.row = e.row;
+  const cls = resolveClassRef(e.cls);
+  const scope = runtime.frame.scope;
+  const name = e.name;
+  const readName = typeof name === 'string' ? () => name : prepareOperand(name);
+  const withName = <T>(use: (name: string) => T, diagnose?: (name: string) => unknown): T => {
+    const value = readName(e.row);
+    runtime.row = e.row;
+    return withPropertyName(value, use, diagnose);
+  };
+  const resolve = (): StaticPlace =>
+    withName(
+      (name) => new StaticPlace(cls, name, scope),
+      (name) => staticPropRef(cls, name, scope)
+    );
+  if (mode !== 'deferred' && mode !== 'coalesce') return resolve();
+  return deferredPlace(resolve, () => withName((name) => classesModule.readStaticProp(cls, name, scope, true)));
 }
 
 // code-gauge-allow functionNcss 35 -- Shares operand evaluation and parent writes across assignment modes.
@@ -878,8 +897,10 @@ export function bindRef(target: Expr, ref: Ref): void {
   }
   if (target.k === 'sprop') {
     const cls = resolveClassRef(target.cls);
-    const name = typeof target.name === 'string' ? target.name : toStr(ev(target.name));
-    classesModule.bindStaticPropertyReference(cls, name, rt().frame.scope, ref);
+    const name = typeof target.name === 'string' ? target.name : prepareOperand(target.name)(target.row);
+    const runtime = rt();
+    runtime.row = target.row;
+    withPropertyName(name, (key) => classesModule.bindStaticPropertyReference(cls, key, runtime.frame.scope, ref));
     return;
   }
   throwError('Error', 'Cannot assign reference to this expression');
@@ -1051,7 +1072,7 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
     const current = place.getForIsset ? place.getForIsset() : place.get();
     if (current !== undefined && current !== null && current !== UNDEFINED_RESULT) return current;
     const read = prepareOperand(e.value);
-    const row = e.target.k === 'var' ? e.target.row : compoundWriteRow(e.target, e.value);
+    const row = coalesceWriteRow(e.target);
     if (dimensionWritesOwnVariable(e.target, e.value)) return place.set(share(read(row)));
     return assignPlace(place, () => share(read(row)));
   }
@@ -1076,6 +1097,13 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
     runtime.row = row;
     return storeCompoundResult(e.op, place, fetched, value, warningPending());
   });
+}
+
+function coalesceWriteRow(target: Expr): number {
+  if (target.k === 'idx') return dimensionWriteRow(target);
+  if (target.k === 'prop' || target.k === 'sprop')
+    return typeof target.name === 'string' ? target.row : constantAstRow(target.name);
+  return target.row;
 }
 
 function compoundWriteRow(target: Expr, value: Expr): number {
@@ -1278,6 +1306,10 @@ function prepareUnset(e: Expr, nested?: UnsetBase): () => Place | undefined {
       return () => new VarPlace(rt().frame, toStr(name()), 'dynamic');
     }
     case 'sprop': {
+      if (nested) {
+        const place = staticPropertyPlace(e, 'deferred');
+        return () => nestedPlace(place, 'unset');
+      }
       const cls = resolveClassRef(e.cls);
       const name = e.name;
       const readName = typeof name === 'string' ? () => name : prepareOperand(name);

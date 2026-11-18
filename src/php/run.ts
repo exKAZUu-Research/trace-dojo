@@ -7,7 +7,7 @@ import { bootstrap } from './bootstrap';
 import { dec } from './bytes';
 import { callValue } from './callables';
 import { asInternal, type CallRecord, HostStackExhaustion, invoke, resetCallStack } from './calls';
-import { E_DEPRECATED, E_ERROR, emitError, throwableLocation } from './errors';
+import { E_DEPRECATED, E_ERROR, E_WARNING, emitError, throwableLocation } from './errors';
 import { throwableText, traceText } from './exceptions';
 import { holderCounts, releaseDropped, releaseGlobalObject } from './garbage';
 import { type ParsedProgram, parsePhp } from './parse';
@@ -43,7 +43,8 @@ export function runProgram(runtime: Runtime, parsed: ParsedProgram, onEnd?: (fra
     let uncaughtException: string | undefined;
     try {
       uncaughtException = guard(runtime, () => {
-        for (const notice of parsed.parseNotices) emitError(E_DEPRECATED, notice.message, notice.row);
+        for (const notice of parsed.parseNotices)
+          emitError(notice.level === 'Deprecated' ? E_DEPRECATED : E_WARNING, notice.message, notice.row);
         runStatements(parsed.program, parsed.conversionError);
       });
       onEnd?.(runtime.globalFrame);
