@@ -145,7 +145,7 @@ export class LiteralChecker {
     return tuple;
   }
 
-  /** The elements a spread adds to an array literal, where `never` counts as an array, as TypeScript's `isArrayLikeType` has it. */
+  /** The elements a spread adds to an array literal; `never` is an array there, as TypeScript's `isArrayLikeType` has it. */
   private spreadElementType(spread: TreeNode, type: Type): Type {
     return isIntrinsic(type, 'never') ? neverType : this.c.patterns.iteratedType(named(spread)[0], type);
   }

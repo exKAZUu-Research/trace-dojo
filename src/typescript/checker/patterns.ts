@@ -300,17 +300,8 @@ export class BindingPatterns {
     if (isAnyLike(type)) return anyType;
     // As an element access does, any property of `never` is `never`.
     if (isIntrinsic(type, 'never')) return neverType;
-    if (type.kind === 'union') {
-      // Each member must have the property, whose types then unite.
-      const types = type.types.map((member) => this.c.silently(() => this.destructuredProperty(node, member, name)));
-      if (!types.includes(errorType)) {
-        for (const member of type.types) {
-          const property = this.c.propertyOf(member, name);
-          if (property) this.c.members.checkPropertyUse(node, node, node, member, name, property);
-        }
-        return unionOf(types);
-      }
-    }
+    const united = type.kind === 'union' ? this.unionDestructuredProperty(node, type, name) : undefined;
+    if (united) return united;
     const property = this.c.propertyOf(type, name);
     if (!property) {
       const indexType = this.c.members.indexSignatureType(type, name);
@@ -321,6 +312,17 @@ export class BindingPatterns {
     this.c.members.checkPropertyUse(node, node, node, type, name, property);
     const propertyType = property.type();
     return property.optional ? unionOf([propertyType, undefinedType]) : propertyType;
+  }
+
+  /** The union of a property's types when each member of a union has it, or `undefined` when one lacks it. */
+  private unionDestructuredProperty(node: TreeNode, type: UnionType, name: string): Type | undefined {
+    const types = type.types.map((member) => this.c.silently(() => this.destructuredProperty(node, member, name)));
+    if (types.includes(errorType)) return undefined;
+    for (const member of type.types) {
+      const property = this.c.propertyOf(member, name);
+      if (property) this.c.members.checkPropertyUse(node, node, node, member, name, property);
+    }
+    return unionOf(types);
   }
 
   private bindArrayPattern(

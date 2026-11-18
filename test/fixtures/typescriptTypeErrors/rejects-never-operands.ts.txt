@@ -22,6 +22,10 @@ function loop(value: never): void {
   for (const item of value) console.log(item);
 }
 
+function shiftAny(value: any): bigint {
+  return value >>> 1n;
+}
+
 function accepted(value: never) {
   const { size } = value;
   return [value - 1n, value + "!", value[0], [...value], size, -value, value < value];

@@ -169,7 +169,7 @@ export class OperatorChecker {
     return this.c.relations.isAssignable(regular, numberType);
   }
 
-  /** Whether a type is a bigint; `never` is not, as operators take it for a number unless the other operand is a bigint. */
+  /** Whether a type is a bigint; not `never`, which operators take for a number unless the other operand is a bigint. */
   isBigintLike(type: Type): boolean {
     const regular = regularOf(type);
     return !isAnyLike(regular) && !isIntrinsic(regular, 'never') && this.c.relations.isAssignable(regular, bigintType);
@@ -280,7 +280,6 @@ export class OperatorChecker {
     return errorType;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Follows TypeScript's checks of arithmetic operands, bigint included.
   private arithmetic(
     node: TreeNode,
     operator: string,
@@ -299,15 +298,10 @@ export class OperatorChecker {
     if (!rightOk)
       this.c.error(right, '算術演算の右辺は、any 型、number 型、bigint 型、列挙型のいずれかでなければいけません。');
     if (!leftOk || !rightOk) return numberType;
-    if (isAnyLike(l) || isAnyLike(r))
-      return isAnyLike(l) && isAnyLike(r)
-        ? numberType
-        : this.isBigintLike(l) || this.isBigintLike(r)
-          ? bigintType
-          : numberType;
     const leftBig = this.isBigintLike(l);
     const rightBig = this.isBigintLike(r);
-    if (leftBig !== rightBig && !isIntrinsic(l, 'never') && !isIntrinsic(r, 'never')) {
+    // `any` and `never` take the kind of the other operand.
+    if (leftBig !== rightBig && [l, r].every((type) => !isAnyLike(type) && !isIntrinsic(type, 'never'))) {
       this.reportOperator(node, operator, leftType, rightType);
       return errorType;
     }
