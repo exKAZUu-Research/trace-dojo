@@ -1,4 +1,12 @@
-import { Annotations, type FnContext, type LocalVar, type PathRes, type ReceiverAdjust } from './annotations';
+import { CompileError } from '../interpreter/diagnostics';
+import {
+  Annotations,
+  type Coercion,
+  type FnContext,
+  type LocalVar,
+  type PathRes,
+  type ReceiverAdjust,
+} from './annotations';
 import type {
   Block,
   Condition,
@@ -536,6 +544,87 @@ export class Checker {
     this.coerce(expr, actual, target);
   }
 
+  /**
+   * Records a coercion of an expression's value. A block's value is its tail's, and an `if`'s or a `match`'s are its
+   * branches', which rustc coerces each where it ends.
+   */
+  private setCoercion(expr: Expr, coercion: Coercion): void {
+    if (expr.kind === 'block') {
+      if (expr.tail) this.setCoercion(expr.tail, coercion);
+      return;
+    }
+    if (expr.kind === 'if' && expr.else) {
+      this.setCoercion(expr.consequent, coercion);
+      this.setCoercion(expr.else, coercion);
+      return;
+    }
+    if (expr.kind === 'match') {
+      for (const arm of expr.arms) this.setCoercion(arm.body, coercion);
+      return;
+    }
+    if (shallow(expr.ty ?? UNIT).kind === 'never') return;
+    this.coercionLog?.push([expr, this.annotations.coercions.get(expr)]);
+    this.annotations.coercions.set(expr, coercion);
+  }
+
+  /** The coercions recorded during a {@link tryCoerce}, with what each expression had before, to undo them. */
+  private coercionLog: [Expr, Coercion | undefined][] | undefined;
+
+  /** Coerces like {@link coerce}, telling whether it could, and undoing what it did when it could not. */
+  private tryCoerce(expr: Expr, actual: Type, target: Type): boolean {
+    return this.attempt(() => this.coerce(expr, actual, target));
+  }
+
+  /** Runs a check, undoing its bindings and coercions when it fails. */
+  private attempt(check: () => void): boolean {
+    const snapshot = this.unifier.snapshot();
+    const outer = this.coercionLog;
+    const log: [Expr, Coercion | undefined][] = [];
+    this.coercionLog = log;
+    try {
+      check();
+      outer?.push(...log);
+      return true;
+    } catch (error) {
+      if (!(error instanceof CompileError)) throw error;
+      this.unifier.rollback(snapshot);
+      for (const [expr, previous] of log.toReversed()) {
+        if (previous) this.annotations.coercions.set(expr, previous);
+        else this.annotations.coercions.delete(expr);
+      }
+      return false;
+    } finally {
+      this.coercionLog = outer;
+    }
+  }
+
+  /**
+   * The type that values which must agree (branches, arms, elements) take, as rustc's `CoerceMany` merges them: each
+   * value coerces to the type so far, or else the values so far all coerce to its type (`&String` and `&str` give
+   * `&str` in either order). `mismatch` reports a value that fits neither way.
+   */
+  private mergeTypes(
+    values: [Expr, Type][],
+    mismatch: (expr: Expr, merged: Type, type: Type) => never
+  ): Type | undefined {
+    let merged: Type | undefined;
+    const previous: [Expr, Type][] = [];
+    for (const [expr, type] of values) {
+      if (shallow(type).kind === 'never') continue;
+      if (merged !== undefined && !this.tryCoerce(expr, type, merged)) {
+        const target = type;
+        const lub = this.attempt(() => {
+          for (const [prevExpr, prevType] of previous) this.coerce(prevExpr, prevType, target);
+        });
+        if (!lub) mismatch(expr, merged, type);
+        merged = type;
+      }
+      merged ??= type;
+      previous.push([expr, type]);
+    }
+    return merged;
+  }
+
   // code-gauge-allow functionCognitiveComplexity 22 -- Follows the type checking rules of rustc case by case.
   private coerce(expr: Expr, actual: Type, target: Type): void {
     const a = normalize(shallow(actual));
@@ -547,7 +636,7 @@ export class Checker {
       const target = shallow(t.args[0]);
       if (target.kind === 'dyn') {
         this.requireDyn(a.args[0], target.trait, expr.span);
-        this.annotations.coercions.set(expr, { kind: 'dyn', type: a.args[0], mutable: false });
+        this.setCoercion(expr, { kind: 'dyn', type: a.args[0], mutable: false });
         return;
       }
     }
@@ -559,7 +648,7 @@ export class Checker {
         shape &&
         this.unifier.tryUnify({ kind: 'tuple', elems: [item, shape] }, { kind: 'tuple', elems: t.args })
       ) {
-        this.annotations.coercions.set(expr, { kind: 'intoIter', from: a });
+        this.setCoercion(expr, { kind: 'intoIter', from: a });
         return;
       }
     }
@@ -582,13 +671,13 @@ export class Checker {
     for (const step of steps) {
       if (!this.unifier.tryUnify(step.type, t.target)) continue;
       if (step.derefs.length > 0 || (a.mutable && !t.mutable)) {
-        this.annotations.coercions.set(expr, { kind: 'deref', derefs: step.derefs, fromMut: a.mutable && !t.mutable });
+        this.setCoercion(expr, { kind: 'deref', derefs: step.derefs, fromMut: a.mutable && !t.mutable });
       }
       return true;
     }
     if (target.kind !== 'dyn') return false;
     this.requireDyn(a.target, target.trait, expr.span);
-    this.annotations.coercions.set(expr, { kind: 'dyn', type: a.target, mutable: a.mutable });
+    this.setCoercion(expr, { kind: 'dyn', type: a.target, mutable: a.mutable });
     return true;
   }
 
@@ -889,8 +978,15 @@ export class Checker {
     }
   }
 
+  /** Checks the elements of an array or a `vec!`: each coerces to `elem` when it is known, or else they merge. */
   private elements(elems: Expr[], elem: Type): void {
-    for (const item of elems) this.coerceExpr(item, elem);
+    if (shallow(elem).kind !== 'var') {
+      for (const item of elems) this.coerceExpr(item, elem);
+      return;
+    }
+    const values = elems.map((item): [Expr, Type] => [item, this.expr(item, undefined)]);
+    const merged = this.mergeTypes(values, (item, result, type) => this.mismatch(item.span, result, type));
+    if (merged) this.unifyOrError(elems[0].span, elem, merged);
   }
 
   private constUsize(expr: Expr): number {
@@ -975,53 +1071,55 @@ export class Checker {
   private join(first: Expr, firstType: Type, second: Expr, secondType: Type, expected: Type | undefined): Type {
     if (shallow(firstType).kind === 'never') return secondType;
     if (shallow(secondType).kind === 'never') return firstType;
-    const target = expected ?? firstType;
     if (expected) {
       this.coerce(first, firstType, expected);
       this.coerce(second, secondType, expected);
       return expected;
     }
-    if (!this.unifier.tryUnify(firstType, secondType)) {
-      const span = second.kind === 'block' ? (second.tail?.span ?? second.span) : second.span;
-      compileError(
-        span,
-        `if と else の値の型が合いません（${typeToString(resolve(firstType))} と ${typeToString(resolve(secondType))} です）。`
-      );
-    }
-    return target;
+    return this.mergeTypes(
+      [
+        [first, firstType],
+        [second, secondType],
+      ],
+      (expr) => {
+        const span = expr.kind === 'block' ? (expr.tail?.span ?? expr.span) : expr.span;
+        return compileError(
+          span,
+          `if と else の値の型が合いません（${typeToString(resolve(firstType))} と ${typeToString(resolve(secondType))} です）。`
+        );
+      }
+    ) as Type;
   }
 
   private matchExpr(expr: Extract<Expr, { kind: 'match' }>, expected: Type | undefined): Type {
     const scrutinee = this.expr(expr.scrutinee, undefined);
-    let result: Type | undefined = expected;
-    let resultSet = expected !== undefined;
+    const arms: [Expr, Type][] = [];
+    let hint = expected;
     for (const arm of expr.arms) {
       this.withScope(() => {
         this.checkPattern(arm.pattern, scrutinee, 'move');
-        const type = this.expr(arm.body, result);
+        const type = this.expr(arm.body, hint);
         if (shallow(type).kind === 'never') return;
-        if (!resultSet) {
-          result = type;
-          resultSet = true;
-          return;
-        }
-        this.coerceArm(arm.body, type, result as Type);
+        if (expected) this.coerceArm(arm.body, type, expected);
+        else arms.push([arm.body, type]);
+        hint ??= type;
       });
     }
-    if (expr.arms.length === 0) {
-      this.deferredChecks.push(() => this.checkExhaustive(expr, scrutinee));
-      return NEVER;
-    }
     this.deferredChecks.push(() => this.checkExhaustive(expr, scrutinee));
-    return result ?? NEVER;
+    if (expected) return expr.arms.length === 0 ? NEVER : expected;
+    const merged = this.mergeTypes(arms, (body, result, type) => {
+      const span = body.kind === 'block' ? (body.tail?.span ?? body.span) : body.span;
+      return compileError(
+        span,
+        `match の腕の値の型が合いません（${typeToString(resolve(result))} と ${typeToString(resolve(type))} です）。`
+      );
+    });
+    return merged ?? NEVER;
   }
 
   private coerceArm(body: Expr, type: Type, result: Type): void {
-    if (this.unifier.tryUnify(type, result)) return;
-    const span = body.kind === 'block' ? (body.tail?.span ?? body.span) : body.span;
-    try {
-      this.coerce(body, type, result);
-    } catch {
+    if (!this.tryCoerce(body, type, result)) {
+      const span = body.kind === 'block' ? (body.tail?.span ?? body.span) : body.span;
       compileError(
         span,
         `match の腕の値の型が合いません（${typeToString(resolve(result))} と ${typeToString(resolve(type))} です）。`
@@ -1472,6 +1570,20 @@ export class Checker {
     }
     if (expectation && hasVars(param)) {
       const type = this.expr(arg, expectation);
+      // An argument coerces to the type its expected input has (`Some(&s)` as an `Option<&str>`), unless that type is
+      // unsized and only a hint (`Box::new(s)` as a `Box<dyn T>`), as rustc's `rvalue_hint` makes it.
+      const target = resolve(expectation);
+      const t = normalize(shallow(target));
+      if (
+        t.kind !== 'dyn' &&
+        t.kind !== 'str' &&
+        t.kind !== 'slice' &&
+        !hasVars(target) &&
+        this.tryCoerce(arg, type, target)
+      ) {
+        this.unifyOrError(arg.span, param, target);
+        return;
+      }
       this.coerce(arg, type, param);
       return;
     }
@@ -2000,7 +2112,7 @@ export class Checker {
     return ref(type, expr.mutable);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Follows the type checking rules of rustc case by case.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Follows the type checking rules of rustc case by case.
   private cast(expr: Extract<Expr, { kind: 'cast' }>): Type {
     const target = this.lowerType(expr.type);
     const sourceType = this.expr(expr.operand, castExpectation(expr.operand, target));
@@ -2028,6 +2140,8 @@ export class Checker {
       return ok();
     }
     if (this.unifier.tryUnify(s, t)) return ok();
+    // `as` also applies the coercions (`Box::new(1) as Box<dyn Display>`).
+    if (s.kind !== 'var' && this.tryCoerce(expr.operand, sourceType, target)) return ok();
     if (s.kind === 'var') compileError(expr.span, '型が決まらないので、as で変換できません。');
     if (t.kind === 'char') {
       compileError(

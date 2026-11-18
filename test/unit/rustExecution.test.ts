@@ -331,6 +331,34 @@ Skip { iter: Iter([1, 2, 3, 4, 5]), n: 3 } Rev { iter: Chars(['h', 'i']) }
   });
 });
 
+test('values coerce where rustc coerces them: branches, elements, arguments, and casts', () => {
+  const program = `use std::fmt::Display;
+fn get(s: &String) -> Result<&str, String> {
+    Ok(s)
+}
+fn make(c: bool) -> Box<dyn Display> {
+    if c { Box::new(1) } else { Box::new("two") }
+}
+fn main() {
+    let owned = String::from("o");
+    let a = if owned.is_empty() { "lit" } else { &owned };
+    let b = match owned.len() {
+        1 => &owned,
+        _ => "other",
+    };
+    let c = [&owned, "x"];
+    let d: Option<&str> = Some(&owned);
+    let e: Option<Box<dyn Display>> = Some(Box::new(2.5));
+    let f = Box::new(3) as Box<dyn Display>;
+    println!("{} {} {:?} {:?} {:?} {} {} {} {}", a, b, c, d, get(&owned), e.unwrap(), f, make(true), make(false));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'o o ["o", "x"] Some("o") Ok("o") 2.5 3 1 two\n',
+    uncaughtException: undefined,
+  });
+});
+
 test.each([
   ['range patterns (stage C)', '    match 3 { 1..=5 => {}, _ => {} }'],
   ['threads (stage D)', '    std::thread::spawn(|| {});'],
