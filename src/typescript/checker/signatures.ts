@@ -6,6 +6,7 @@ import {
   argumentParameters,
   hasToken,
   isClassConstructor,
+  isConstructorName,
   isParameterProperty,
   isThisParameter,
   named,
@@ -27,6 +28,14 @@ import {
 const accessorDeclarationTypes = new Set(['method_definition', 'method_signature', 'abstract_method_signature']);
 const constructSignatureTypes = new Set(['construct_signature', 'constructor_type']);
 const typeNameDeclarationParents = new Set(['type_parameter', 'mapped_type_clause', 'infer_type']);
+/** The declarations whose return type, without an annotation or a body, is implicitly `any`. */
+const bodilessSignatureTypes = [
+  'function_signature',
+  'method_signature',
+  'abstract_method_signature',
+  'call_signature',
+  'construct_signature',
+];
 
 /** Resolves the signatures and type parameters that function-like and generic declarations declare. */
 export class Signatures {
@@ -48,9 +57,7 @@ export class Signatures {
     this.checkParameterGrammar(node);
     const typeParameters = this.functionTypeParameters(node, contextual);
     const { parameters, thisType } = this.declaredParameters(node, contextual);
-    const returnNode =
-      node.childForFieldName('return_type') ??
-      (constructSignatureTypes.has(node.type) ? node.childForFieldName('type') : undefined);
+    const returnNode = returnTypeNode(node);
     let returnType: Type | undefined;
     const signature: Signature = {
       typeParameters,
@@ -224,17 +231,22 @@ export class Signatures {
   /** A setter's parameter without an annotation has the type its getter of the same property returns. */
   private setterParameterType(node: TreeNode): Type | undefined {
     if (!accessorDeclarationTypes.has(node.type) || !hasToken(node, 'set')) return undefined;
+    const getter = this.pairedAccessor(node, 'get');
+    return getter ? this.signatureOf(getter).returnType() : undefined;
+  }
+
+  /** The accessor of the other kind for the same property, declared beside an accessor. */
+  private pairedAccessor(node: TreeNode, kind: 'get' | 'set'): TreeNode | undefined {
     const name = this.accessorName(node);
-    const getter = node.parent
+    return node.parent
       ? named(node.parent).find(
           (member) =>
             accessorDeclarationTypes.has(member.type) &&
-            hasToken(member, 'get') &&
+            hasToken(member, kind) &&
             hasToken(member, 'static') === hasToken(node, 'static') &&
             this.accessorName(member) === name
         )
       : undefined;
-    return getter ? this.signatureOf(getter).returnType() : undefined;
   }
 
   /** The property an accessor declares, as `value`, `"value"`, and `["value"]` declare the same one. */
@@ -261,12 +273,49 @@ export class Signatures {
     ];
   }
 
+  /** The return type of a declaration without an annotation or a body: a getter's is its setter's parameter type. */
   private implicitReturnType(node: TreeNode): Type {
-    if (!this.c.isLibrary(node) && !['method_definition'].includes(node.type)) {
+    const setter = accessorDeclarationTypes.has(node.type) && hasToken(node, 'get') && this.pairedAccessor(node, 'set');
+    return setter && firstArgumentParameter(setter)?.childForFieldName('type')
+      ? this.signatureOf(setter).parameters[0].type
+      : anyType;
+  }
+
+  /**
+   * Reports the declarations in a program whose return type is implicitly `any`, used or not, as tsc checks every
+   * signature: a getter paired with a setter is not, as the setter's parameter types the property.
+   */
+  checkImplicitReturnTypes(root: TreeNode): void {
+    for (const node of root.descendantsOfType(bodilessSignatureTypes)) {
+      if (returnTypeNode(node) || node.childForFieldName('body')) continue;
       const name = node.childForFieldName('name');
-      this.c.error(name ?? node, `${name ? name.text : 'この宣言'} の戻り値の型が暗黙に any になります。`);
+      if (accessorDeclarationTypes.has(node.type) && (hasToken(node, 'get') || hasToken(node, 'set'))) {
+        this.checkImplicitAccessorType(node);
+      } else if (node.parent?.type !== 'class_body' || !isConstructorName(name)) {
+        const subject =
+          node.type === 'call_signature'
+            ? '呼び出しシグネチャ'
+            : node.type === 'construct_signature'
+              ? 'コンストラクトシグネチャ'
+              : (name?.text ?? '');
+        this.c.error(name ?? node, `${subject} の戻り値の型が暗黙に any になります。`);
+      }
     }
-    return anyType;
+  }
+
+  /**
+   * Reports a getter without a return type whose property no setter's parameter annotation types, at the setter if
+   * there is one, as tsc does; a setter's own parameter reports itself.
+   */
+  private checkImplicitAccessorType(node: TreeNode): void {
+    if (hasToken(node, 'set')) return;
+    const name = node.childForFieldName('name')?.text ?? '';
+    const setter = this.pairedAccessor(node, 'set');
+    if (!setter) {
+      this.c.error(node.childForFieldName('name') ?? node, `${name} の戻り値の型が暗黙に any になります。`);
+    } else if (!firstArgumentParameter(setter)?.childForFieldName('type')) {
+      this.c.error(setter.childForFieldName('name') ?? setter, `プロパティ ${name} の型が暗黙に any になります。`);
+    }
   }
 
   private contextualParameterType(signature: Signature, index: number, rest: boolean): Type | undefined {
@@ -535,6 +584,18 @@ function isDeclaredTypeName(node: TreeNode): boolean {
 }
 
 /** The parameter declarations of a function-like node, a `this` parameter included. */
+function returnTypeNode(node: TreeNode): TreeNode | undefined {
+  return (
+    node.childForFieldName('return_type') ??
+    (constructSignatureTypes.has(node.type) ? node.childForFieldName('type') : undefined) ??
+    undefined
+  );
+}
+
+function firstArgumentParameter(node: TreeNode): TreeNode | undefined {
+  return argumentParameters(parameterNodes(node))[0];
+}
+
 function parameterNodes(node: TreeNode): TreeNode[] {
   const parametersNode = node.childForFieldName('parameters');
   const nodes = parametersNode ? named(parametersNode) : [];

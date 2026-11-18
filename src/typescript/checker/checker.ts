@@ -133,6 +133,7 @@ export class Checker {
   check(): SourceDiagnostic[] {
     checkDuplicateDeclarations(this, this.binder.allScopes);
     this.signatures.checkTypeParameterDeclarations(this.binder.allScopes);
+    this.signatures.checkImplicitReturnTypes(this.root);
     this.statements.checkProgram(this.root);
     const seen = new Set<string>();
     return this.diagnostics

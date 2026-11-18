@@ -1,0 +1,30 @@
+interface Handler {
+  onClick();
+  onKey(key: string): void;
+}
+type Shape = { draw(); area(): number };
+interface Factory {
+  new ();
+}
+type Callable = {
+  ();
+};
+abstract class Widget {
+  abstract render();
+  resize(width: number);
+  resize(width: number) {
+    return width;
+  }
+}
+function format(value: number);
+function format(value: number) {
+  return String(value);
+}
+interface Temperature {
+  get celsius();
+  set celsius(value: number);
+  get kelvin();
+  set kelvin(value);
+  get fahrenheit();
+}
+console.log(format(1));
