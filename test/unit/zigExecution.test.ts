@@ -4237,6 +4237,20 @@ test('memory equality retains the reference self-address shortcut except for flo
   });
 });
 
+test.each(['eql', 'findDiff', 'indexOfDiff', 'order', 'lessThan'])(
+  'memory %s charges reads from both operands',
+  (method) => {
+    const source = `const std=@import("std");pub fn main()void{var a:[128]u8=@splat(97);var b:[128]u8=@splat(97);_=&a;_=&b;_=std.mem.${method}(u8,&a,&b);}`;
+    const program = compileSource(source);
+    expect(() => runProgram(new Runtime(), program)).not.toThrow();
+    const budget = new ExecutionBudget();
+    budget.spend(LIMITS.maxOperations - 480);
+    expect(() => runProgram(new Runtime(undefined, budget), program)).toThrow(
+      expect.objectContaining({ limit: 'operations' })
+    );
+  }
+);
+
 test.each(['.{a,b}', '[_][128]u8{a,b}', 'S{.a=a,.b=b}'])(
   'aggregate initializers meter element copies for %s',
   (value) => {

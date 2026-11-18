@@ -146,14 +146,12 @@ function sequence(value: Value, spend: () => void, scalar = false, type?: Type):
   const slice = value as Slice;
   const location =
     type?.kind === 'int' && !isUndefinedMemory(slice) ? storageLocation(slice.target.slots, slice.start) : undefined;
-  return new Sequence(
-    slice.lengthValue,
-    (index) => {
-      spend();
-      return slice.get(Number(index));
-    },
-    location
-  );
+  return new Sequence(slice.lengthValue, (index) => readSlice(slice, index, spend), location);
+}
+
+function readSlice(slice: Slice, index: number | bigint, spend: () => void): Value {
+  spend();
+  return slice.get(Number(index));
 }
 
 function findSequenceLast(haystack: Sequence, needle: Sequence, equal: typeof equalValues): bigint | undefined {
@@ -300,18 +298,16 @@ function iteratorType(kind: 'split' | 'token', delimiter: DelimiterKind, child: 
     equal: typeof equalValues,
     spend: () => void
   ): boolean => {
-    spend();
-    if (delimiter === 'scalar') return equal(buffer.get(Number(index)), value);
+    if (delimiter === 'scalar') return equal(readSlice(buffer, index, spend), value);
     const set = value as Slice;
     if (delimiter === 'any') {
+      if (set.lengthValue === 0n) return false;
+      const item = readSlice(buffer, index, spend);
       for (let offset = 0n; offset < set.lengthValue; offset++)
-        if (equal(set.get(Number(offset)), buffer.get(Number(index)))) return true;
+        if (equal(readSlice(set, offset, spend), item)) return true;
       return false;
     }
-    if (index + set.lengthValue > buffer.lengthValue) return false;
-    for (let offset = 0n; offset < set.lengthValue; offset++)
-      if (!equal(buffer.get(Number(index + offset)), set.get(Number(offset)))) return false;
-    return true;
+    return startsWith(sequence(buffer, spend), sequence(set, spend), equal, index);
   };
   const findDelimiter = (
     buffer: Slice,
@@ -477,7 +473,9 @@ const MEMBERS: Record<string, () => Member> = {
         second = storageLocation(b.target.slots, b.start);
       if (type.kind !== 'float' && first.storage === second.storage && first.index === second.index) return true;
       const equal = equality(frame);
-      for (let index = 0; index < a.length; index++) if (!equal(a.get(index), b.get(index))) return false;
+      const spend = nativeBudget(sema, frame);
+      for (let index = 0; index < a.length; index++)
+        if (!equal(readSlice(a, index, spend), readSlice(b, index, spend))) return false;
       return true;
     });
   }),
@@ -670,8 +668,7 @@ const MEMBERS: Record<string, () => Member> = {
       const equal = equality(frame);
       const spend = nativeBudget(sema, frame);
       for (let index = 0; index < target.length; index++) {
-        spend();
-        if (!equal(target.get(index), from)) continue;
+        if (!equal(readSlice(target, index, spend), from)) continue;
         spend(cost);
         storeSliceValue(target, index, to);
       }
@@ -885,8 +882,8 @@ function lexicographic(first: Slice, second: Slice, type: Type, spend: () => voi
   const length = Math.min(first.length, second.length);
   for (let index = 0; index < length; index++) {
     spend();
-    const x = first.get(index);
-    const y = second.get(index);
+    const x = readSlice(first, index, spend);
+    const y = readSlice(second, index, spend);
     const order =
       type.kind === 'float' || type.kind === 'comptime_float'
         ? compareFloats(x as AnyFloat, y as AnyFloat)
@@ -903,10 +900,10 @@ function checkOrdering(sema: SemaApi, type: Type, span: Span): void {
 
 function extreme(values: Slice, direction: number, type: Type, spend: () => void): Value {
   if (values.lengthValue === 0n) panic(PANIC.unreachable);
-  let best = values.get(0);
+  let best = readSlice(values, 0, spend);
   for (let index = 1n; index < values.lengthValue; index++) {
     spend();
-    const value = values.get(Number(index));
+    const value = readSlice(values, index, spend);
     if (type.kind === 'float' || type.kind === 'comptime_float')
       best = minMaxFloat(best as AnyFloat, value as AnyFloat, direction > 0);
     else if (compareScalars(value, best) * direction > 0) best = value;
@@ -925,7 +922,8 @@ function extremeIndex(name: string, direction: number): () => Member {
       let best = 0n;
       for (let index = 1n; index < values.lengthValue; index++) {
         spend();
-        if (compareScalars(values.get(Number(index)), values.get(Number(best))) * direction > 0) best = index;
+        if (compareScalars(readSlice(values, index, spend), readSlice(values, best, spend)) * direction > 0)
+          best = index;
       }
       return best;
     });
@@ -1127,9 +1125,9 @@ function minMaxIndexes(name: string): Member {
       let high = 0;
       for (let index = 0; index < items.length; index++) {
         spend(2);
-        const item = items.get(index);
-        if (compareScalars(item, items.get(low)) < 0) low = index;
-        if (compareScalars(item, items.get(high)) > 0) high = index;
+        const item = readSlice(items, index, spend);
+        if (compareScalars(item, readSlice(items, low, spend)) < 0) low = index;
+        if (compareScalars(item, readSlice(items, high, spend)) > 0) high = index;
       }
       return new ZStruct([BigInt(low), BigInt(high)]);
     });
@@ -1170,8 +1168,9 @@ function diffMember(name: string): Member {
       const ys = y as Slice;
       const shorter = xs.lengthValue < ys.lengthValue ? xs.lengthValue : ys.lengthValue;
       const equal = equality(frame);
+      const spend = nativeBudget(sema, frame);
       for (let index = 0n; index < shorter; index++)
-        if (!equal(xs.get(Number(index)), ys.get(Number(index)))) return index;
+        if (!equal(readSlice(xs, index, spend), readSlice(ys, index, spend))) return index;
       return xs.lengthValue === ys.lengthValue ? NULL : shorter;
     });
   })();
