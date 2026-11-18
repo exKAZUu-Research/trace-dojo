@@ -279,12 +279,30 @@ export class MemberChecker {
     this.c.classes.checkPropertyAccessibility(node, propertyNode, objectNode, objectType, property);
     this.c.classes.checkInitializedBefore(node, objectNode, property);
     this.c.expressions.expandos.checkAssignedBefore(node, propertyNode, property);
-    this.checkPropertyAvailability(propertyNode, property);
+    this.checkPropertyAvailability(propertyNode, objectType, property);
   }
 
-  private checkPropertyAvailability(propertyNode: TreeNode, property: Property): void {
-    const unsupported = this.unsupportedLibraryMember(propertyNode, property);
+  private checkPropertyAvailability(propertyNode: TreeNode, objectType: Type, property: Property): void {
+    const unsupported = [property, ...this.propertyOrigins(objectType, property.name)]
+      .map((origin) => this.unsupportedLibraryMember(propertyNode, origin))
+      .find((feature) => feature !== undefined);
     if (unsupported) this.c.error(propertyNode, unsupportedMessage(unsupported));
+  }
+
+  /**
+   * The properties a member of a type may read at run time, of each member of a union or an intersection and of a type
+   * parameter's constraint, as the property merged from them keeps the declaration of only one.
+   */
+  private propertyOrigins(type: Type, name: string): Property[] {
+    this.c.budget.spend();
+    if (type.kind === 'union' || type.kind === 'intersection')
+      return type.types.flatMap((member) => this.propertyOrigins(member, name));
+    if (type.kind === 'typeParameter') {
+      const apparent = this.c.apparentType(type);
+      return apparent === type ? [] : this.propertyOrigins(apparent, name);
+    }
+    const property = type.kind === 'object' ? this.c.propertyOf(type, name) : undefined;
+    return property ? [property] : [];
   }
 
   /** A member the library declares that this interpreter does not provide, named by the interface declaring it. */
@@ -506,7 +524,7 @@ export class MemberChecker {
         ? this.c.structureOf(objectType).symbolIndex?.type
         : (tupleElementBeyond(this.c, objectType, name, access.indexNode) ??
             applicableIndex(this.c, this.c.structureOf(objectType), literalType(value))?.type);
-    this.checkPropertyAvailability(access.indexNode, property);
+    this.checkPropertyAvailability(access.indexNode, objectType, property);
     this.c.expressions.expandos.checkAssignedBefore(access.node, access.indexNode, property);
     // `o["secret"]` reads a private or protected member, which TypeScript leaves as a way around its access checks.
     return property.optional ? unionOf([property.type(), undefinedType]) : property.type();

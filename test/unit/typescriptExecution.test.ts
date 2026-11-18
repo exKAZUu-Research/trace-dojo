@@ -121,6 +121,16 @@ test.each([
   ['a Date', 'new Date();', 'Date（日付と時刻）は、この採点環境では使えません。'],
   ['Math.random', 'Math.random();', 'Math.random は、この採点環境では使えません。'],
   [
+    'Math.random through an intersection whose first member declares it too',
+    'const m: { random(): number } & Math = Math;\nm.random();',
+    'Math.random は、この採点環境では使えません。',
+  ],
+  [
+    'the stack of an Error through a type parameter constrained to an intersection',
+    'function f<E extends { stack?: string } & Error>(e: E) { return e.stack; }',
+    'Error の stack は、この採点環境では使えません。',
+  ],
+  [
     'a well-known symbol',
     'Symbol.iterator;',
     'Symbol.iterator などの well-known シンボルは、この採点環境では使えません。',
