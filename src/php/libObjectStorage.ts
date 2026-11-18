@@ -24,7 +24,7 @@ class ObjectStorage {
   /** The number key() reports, which counts the steps since the rewind. */
   index = 0;
   /** The MultipleIterator flags. */
-  flags = 0;
+  flags = 0n;
 
   constructor(
     private readonly holder: PhpObject,
@@ -326,18 +326,18 @@ function* compareObjectStorage(a: PhpObject, b: PhpObject): Generator<[Value, Va
 
 // MultipleIterator ---------------------------------------------------------------------------------------------------
 
-const MIT_NEED_ALL = 1;
-const MIT_KEYS_ASSOC = 2;
+const MIT_NEED_ALL = 1n;
+const MIT_KEYS_ASSOC = 2n;
 
 const multipleMethods: NativeMethod[] = [
   {
     signature: '__construct(int $flags = 1)',
-    impl: ({ thisObj, args }) => ((storageOf(thisObj).flags = Number(args[0] ?? BigInt(MIT_NEED_ALL))), null),
+    impl: ({ thisObj, args }) => ((storageOf(thisObj).flags = (args[0] as bigint | undefined) ?? MIT_NEED_ALL), null),
   },
-  { signature: 'getFlags(): int', impl: ({ thisObj }) => BigInt(storageOf(thisObj).flags) },
+  { signature: 'getFlags(): int', impl: ({ thisObj }) => storageOf(thisObj).flags },
   {
     signature: 'setFlags(int $flags): void',
-    impl: ({ thisObj, args }) => ((storageOf(thisObj).flags = Number(args[0])), null),
+    impl: ({ thisObj, args }) => ((storageOf(thisObj).flags = args[0] as bigint), null),
   },
   {
     signature: 'attachIterator(Iterator $iterator, string|int|null $info = null): void',
@@ -365,7 +365,7 @@ const multipleMethods: NativeMethod[] = [
     impl: ({ thisObj }) => {
       const storage = storageOf(thisObj);
       if (storage.entries.size === 0) return false;
-      const expect = (storage.flags & MIT_NEED_ALL) !== 0;
+      const expect = (storage.flags & MIT_NEED_ALL) !== 0n;
       for (const iterator of storage.objects()) {
         if ((callMethod(iterator, 'valid', []) === true) !== expect) return !expect;
       }
@@ -403,9 +403,9 @@ defineClass({
   interfaces: ['Iterator', 'Traversable'],
   consts: {
     MIT_NEED_ANY: 0n,
-    MIT_NEED_ALL: BigInt(MIT_NEED_ALL),
+    MIT_NEED_ALL,
     MIT_KEYS_NUMERIC: 0n,
-    MIT_KEYS_ASSOC: BigInt(MIT_KEYS_ASSOC),
+    MIT_KEYS_ASSOC,
   },
   methods: multipleMethods,
   createInternal: (object) => new ObjectStorage(object),

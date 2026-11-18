@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP pattern strings contain bytes; UTF-8 validation reads each byte separately.
-// code-gauge-allow-file fileNcss 878 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 971 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import propertyAliases from 'unicode-property-value-aliases-ecmascript';
 
 import { dec, enc, utf8Length } from './bytes';
@@ -16,12 +16,12 @@ export interface Compiled {
   regex: RegExp;
   /** Matches only at `lastIndex` and only a match that does not end there, as PCRE retries after an empty match. */
   retry: RegExp;
+  emptyRegex?: RegExp;
   utf8: boolean;
   names: (string | undefined)[];
   groupCount: number;
   /** The capture names of the `\K` points, the last passed of which starts the reported match. */
   keeps: string[];
-  referenced: Set<number>;
   byteCaselessReferences: Set<string>;
 }
 
@@ -61,7 +61,7 @@ const MODIFIERS = new Map<string, PatternOption | undefined>([
   [' ', undefined],
 ]);
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function translate(pattern: string): Compiled {
   if (pattern.length > 32_768) throw new UnsupportedFeatureError('大きすぎる正規表現');
   const { body, modifiers } = splitDelimiters(pattern);
@@ -94,21 +94,23 @@ export function translate(pattern: string): Compiled {
   const converted = converter.convert();
   if (converted.length > 65_536) throw new UnsupportedFeatureError('大きすぎる正規表現');
   const flags = `d${options.caseless ? 'i' : ''}${converter.unicode ? 'u' : ''}`;
-  const byteCaselessReferences = analyzeRegex(
+  const { byteCaselessReferences, emptySource } = analyzeRegex(
     converted,
     converter.unicode,
     options.utf8,
     options.caseless,
-    (start, reason) => converter.invalidLookbehind(start, reason)
+    (start, reason) => converter.invalidLookbehind(start, reason),
+    emptySubjectMarkers(layout.marked)
   );
+  if (converter.unavailable) unsupported(converter.unavailable);
   return {
     regex: new RegExp(converted, `${options.anchored || converter.sticky ? 'y' : 'g'}${flags}`),
     retry: new RegExp(String.raw`(?=(?<$r>[\s\S]*))(?:${converted})(?!\k<$r>(?![\s\S]))`, `y${flags}`),
+    emptyRegex: emptySource === undefined ? undefined : new RegExp(emptySource, `y${flags}`),
     utf8: options.utf8,
     names: options.utf8 ? converter.names.map((name) => (name === undefined ? undefined : enc(name))) : converter.names,
     groupCount: converter.names.length - 1,
     keeps: converter.keeps,
-    referenced: layout.referenced,
     byteCaselessReferences,
   };
 }
@@ -192,7 +194,6 @@ interface Layout {
    * PCRE fails a reference to a group that did not, where JavaScript matches the empty string.
    */
   marked: Set<number>;
-  referenced: Set<number>;
 }
 
 const INLINE_OPTIONS = new Map<string, PatternOption>([
@@ -263,6 +264,11 @@ const SIMPLE_ESCAPES = new Map([
 const DIGITS_MISSING = String.raw`digits missing after \x or in \x{} or \o{} or \N{U+}`;
 const UNSUPPORTED_CASE_ESCAPE = String.raw`PCRE2 does not support \F, \L, \l, \N{name}, \U, or \u`;
 
+function bracedQuantifier(text: string): RegExpExecArray | undefined {
+  const match = /^\{[ \t]*(\d*)[ \t]*(?:(,)[ \t]*(\d*)[ \t]*)?\}/.exec(text);
+  return match && (match[1] !== '' || match[3]) ? match : undefined;
+}
+
 function unsupported(what: string): never {
   throw new UnsupportedFeatureError(`正規表現の${what}`);
 }
@@ -278,6 +284,7 @@ class PatternConverter {
   readonly keeps: string[] = [];
   /** Whether the pattern starts with `\G`, so that it matches only where the search starts. */
   sticky = false;
+  unavailable?: string;
   private index = 0;
   private result = '';
   /** Whether the last item can take a quantifier. */
@@ -317,13 +324,7 @@ class PatternConverter {
       const group = typeof target === 'number' ? target : this.names.indexOf(target);
       marked.add(group);
     }
-    return {
-      names: this.names,
-      marked,
-      referenced: new Set(
-        this.references.map(({ target }) => (typeof target === 'number' ? target : this.names.indexOf(target)))
-      ),
-    };
+    return { names: this.names, marked };
   }
 
   convert(): string {
@@ -456,6 +457,7 @@ class PatternConverter {
   }
 
   /** Emits a quantifier ending at `end`, with the lazy (`?`) or possessive (`+`) suffix that follows it. */
+  // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private quantifier(text: string, end: number, repeats: boolean): void {
     if (!this.repeatable) this.fail('quantifier does not follow a repeatable item', end);
     this.index = end;
@@ -466,14 +468,18 @@ class PatternConverter {
       rt().spend();
     }
     const suffix = this.source[this.index];
+    const optional = text === '?' || text === '{0,1}';
     if (suffix === '+') {
       this.index++;
-      this.possessive(text);
+      if (optional) this.optionalItem(true);
+      this.possessive(optional ? '' : text);
       return;
     }
     const lazy = suffix === '?';
     if (lazy) this.index++;
-    this.emit(lazy === this.options.ungreedy ? text : `${text}?`, false);
+    const greedy = lazy === this.options.ungreedy;
+    if (optional) this.optionalItem(greedy);
+    else this.emit(greedy ? text : `${text}?`, false);
   }
 
   /** Notes the groups in the item that a quantifier repeats, whose captures JavaScript forgets at each repetition. */
@@ -490,7 +496,15 @@ class PatternConverter {
   /** Repeats the last item atomically, as a lookahead does, which JavaScript does not backtrack into. */
   private possessive(quantifier: string): void {
     const name = `$a${this.hiddenGroups++}`;
-    const open = `(?:(?=(?<${name}>`;
+    this.wrapItem(`(?:(?=(?<${name}>`, `${quantifier}))\\k<${name}>)`);
+  }
+
+  private optionalItem(greedy: boolean): void {
+    // JavaScript's optional quantifier skips zero-width captures even when the greedy branch succeeds.
+    this.wrapItem(greedy ? '(?:' : '(?:|', greedy ? '|)' : ')');
+  }
+
+  private wrapItem(open: string, close: string): void {
     for (const starts of [this.groupStarts, this.keepStarts, this.lookbehindStarts]) {
       for (let index = startIndex(starts, this.itemStart); index < starts.length; index++) {
         rt().spend();
@@ -498,14 +512,14 @@ class PatternConverter {
       }
     }
     const before = this.result.slice(0, this.itemStart);
-    this.result = `${before}${open}${this.result.slice(this.itemStart)}${quantifier}))\\k<${name}>)`;
+    this.result = `${before}${open}${this.result.slice(this.itemStart)}${close}`;
     this.repeatable = false;
   }
 
   /** Reads `{n}`, `{n,}`, `{n,m}`, or `{,m}` (spaces allowed inside since PCRE2 10.43), or a literal `{`. */
   private brace(): void {
-    const match = /^\{[ \t]*(\d*)[ \t]*(?:(,)[ \t]*(\d*)[ \t]*)?\}/.exec(this.source.slice(this.index));
-    if (!match || (match[1] === '' && !match[3])) {
+    const match = bracedQuantifier(this.source.slice(this.index));
+    if (!match) {
       this.index++;
       this.emit(String.raw`\{`, true);
       return;
@@ -520,7 +534,7 @@ class PatternConverter {
 
   private escape(): void {
     const letter = this.escapeLetter();
-    if (letter === 'N' && this.source[this.index] !== '{') {
+    if (letter === 'N' && (this.source[this.index] !== '{' || bracedQuantifier(this.source.slice(this.index)))) {
       this.emit(String.raw`[^\n]`, true);
       return;
     }
@@ -682,6 +696,7 @@ class PatternConverter {
     return value > 0xff ? `\\u{${value.toString(16)}}` : `\\x${value.toString(16).padStart(2, '0')}`;
   }
 
+  // code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private otherEscape(letter: string): void {
     switch (letter) {
       case 'Q': {
@@ -709,9 +724,13 @@ class PatternConverter {
         this.reference(name, start);
         return;
       }
-      case 'C':
       case 'X': {
-        unsupported(`\\${letter}`);
+        this.unavailable ??= String.raw`\X`;
+        this.emit(String.raw`(?:[\s\S]+)`, true);
+        return;
+      }
+      case 'C': {
+        unsupported(String.raw`\C`);
       }
     }
     if (/[1-9]/.test(letter)) this.digitEscape(letter);
@@ -749,10 +768,15 @@ class PatternConverter {
     return value;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private gReference(): void {
     const start = this.index;
-    const braced = this.source[start] === '{';
+    const opener = this.source[start];
+    if (opener === '<' || opener === "'") {
+      this.angleSubroutine(opener === '<' ? '>' : "'");
+      return;
+    }
+    const braced = opener === '{';
     const match = this.readMatch(braced ? /^\{[ \t]*([+-]?\d+)[ \t]*\}/ : /^([+-]?\d+)/);
     if (!match) {
       if (braced) {
@@ -761,7 +785,6 @@ class PatternConverter {
         this.reference(name, nameStart);
         return;
       }
-      if (this.source[start] === '<' || this.source[start] === "'") unsupported('再帰');
       this.fail(
         String.raw`\g is not followed by a braced, angle-bracketed, or quoted name/number or by a plain number`,
         this.index
@@ -776,6 +799,62 @@ class PatternConverter {
     const group = relative ? this.names.length - Number(number > 0) + number : number;
     if (group <= 0) this.fail('reference to non-existent subpattern', at);
     this.reference(group, this.index);
+  }
+
+  private angleSubroutine(terminator: string): void {
+    this.index++;
+    const start = this.index - 1;
+    const digits = this.readMatch(/^[+-]?\d+/)?.[0];
+    if (!digits) {
+      const { name, start: nameStart } = this.readGroupName(terminator);
+      this.subroutine(name, nameStart);
+      return;
+    }
+    const number = Number(digits);
+    const relative = /^[+-]/.test(digits);
+    if (Math.abs(number) > 65_535) this.fail('subpattern number is too big', start);
+    if (relative && number === 0) this.fail('a relative value of zero is not allowed', start);
+    if (this.source[this.index] !== terminator)
+      this.fail('syntax error in subpattern number (missing terminator?)', this.index);
+    this.index++;
+    const group = relative ? this.names.length - Number(number > 0) + number : number;
+    if (relative && group <= 0) this.fail('reference to non-existent subpattern', start);
+    this.subroutine(group, this.index);
+  }
+
+  private parenthesizedSubroutine(rest: string): void {
+    this.index += 2;
+    if (rest.startsWith('&') || rest.startsWith('P>')) {
+      this.index += rest.startsWith('&') ? 1 : 2;
+      const { name, start } = this.readGroupName(')', true);
+      this.subroutine(name, start);
+      return;
+    }
+    if (rest.startsWith('R')) {
+      this.index++;
+      if (this.source[this.index] !== ')')
+        this.fail('(?R (recursive pattern call) must be followed by a closing parenthesis', this.index);
+      this.index++;
+      this.subroutine(0, this.index);
+      return;
+    }
+    const digits = this.readMatch(/^[+-]?\d+/)?.[0];
+    if (!digits) this.fail('digit expected after (?+', this.index + 1);
+    const number = Number(digits);
+    const relative = /^[+-]/.test(digits);
+    if (Math.abs(number) > 65_535) this.fail('subpattern number is too big', this.index);
+    if (relative && number === 0) this.fail('a relative value of zero is not allowed', this.index);
+    if (this.source[this.index] !== ')') this.fail('missing closing parenthesis', this.index);
+    const group = relative ? this.names.length - Number(number > 0) + number : number;
+    if (relative && group <= 0) this.fail('reference to non-existent subpattern', this.index);
+    this.index++;
+    this.subroutine(group, this.index - 1);
+  }
+
+  private subroutine(target: string | number, at: number): void {
+    this.unavailable ??= '再帰';
+    if (target === 0) this.emit(String.raw`(?:[\s\S]+)`, true);
+    else this.reference(target, at);
   }
 
   private reference(target: number | string, at: number): void {
@@ -836,6 +915,10 @@ class PatternConverter {
       const { name, start } = this.readGroupName(prefix === 'P=' ? ')' : prefix === "'" ? "'" : '>');
       if (prefix === 'P=') this.reference(name, start);
       else this.namedGroup(name);
+      return;
+    }
+    if (/^(?:[R\d+]|-\d|&|P>)/.test(rest)) {
+      this.parenthesizedSubroutine(rest);
       return;
     }
     unsupportedGroup(rest);
@@ -915,7 +998,7 @@ class PatternConverter {
     options[option] = !unsetting;
   }
 
-  private readGroupName(terminator: string): { name: string; start: number } {
+  private readGroupName(terminator: string, parenthesized = false): { name: string; start: number } {
     if (terminator === '}') this.readMatch(/^[ \t]*/);
     const start = this.index;
     const digit = this.readMatch(this.options.utf8 ? /^\p{Nd}/u : /^\d/);
@@ -925,8 +1008,10 @@ class PatternConverter {
     if ((this.options.utf8 ? enc(name).length : name.length) > 128)
       this.fail('subpattern name is too long (maximum 128 code units)', this.index);
     if (terminator === '}') this.readMatch(/^[ \t]*/);
-    if (this.source[this.index] !== terminator)
+    if (this.source[this.index] !== terminator) {
+      if (parenthesized && this.index >= this.source.length) this.fail('missing closing parenthesis', this.index);
       this.fail('syntax error in subpattern name (missing terminator?)', this.index);
+    }
     this.index++;
     return { name, start };
   }
@@ -939,7 +1024,16 @@ class PatternConverter {
     this.captureGroup(name);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   private characterClass(): void {
+    const direction = this.source[this.index + 3];
+    if ((direction === '<' || direction === '>') && this.source.startsWith(`[[:${direction}:]]`, this.index)) {
+      this.index += 7;
+      const boundary = this.assertionEscape('b');
+      const word = (this.options.utf8 ? UCP_SETS : BYTE_SETS).get('w');
+      this.emit(`(?:${boundary}(?${direction === '<' ? '=' : '<='}[${word}]))`, true);
+      return;
+    }
     const posix = this.posixEnd();
     if (posix !== undefined) {
       const reason =
@@ -1097,7 +1191,6 @@ function unicodeBoundary(negated: boolean): string {
 
 /** Rejects the groups that JavaScript cannot express, which start with `(?` followed by `rest`. */
 function unsupportedGroup(rest: string): void {
-  if (/^(?:[R\d+]|-\d)/.test(rest) || rest.startsWith('&') || rest.startsWith('P>')) unsupported('再帰');
   if (rest.startsWith('(')) unsupported('条件分岐');
   if (rest.startsWith('|')) unsupported('グループ番号のリセット');
 }
@@ -1111,6 +1204,15 @@ function participationMarker(group: number): string {
 function participated(group: number): string {
   const [after, before] = [String.raw`\k<$m${group}a>`, String.raw`\k<$m${group}b>`];
   return String.raw`(?=(?=${after}*(?!${after}))|(?=${before}*(?!${before}))|(?<![\s\S])(?![\s\S]))`;
+}
+
+function emptySubjectMarkers(groups: ReadonlySet<number>): Map<string, string> {
+  const markers = new Map<string, string>();
+  for (const group of groups) {
+    markers.set(participationMarker(group), String.raw`(?=(?<$m${group}a>\x00))`);
+    markers.set(participated(group), String.raw`(?=\k<$m${group}a>$)`);
+  }
+  return markers;
 }
 
 const SCRIPT_ALIASES = looseAliases('Script');

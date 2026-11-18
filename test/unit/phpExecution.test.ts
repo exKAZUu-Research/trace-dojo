@@ -466,11 +466,12 @@ test.each([
 });
 
 test.each([String.raw`/(a)?\1/`, String.raw`/(?<x>a)?\k<x>/`])(
-  'rejects empty-subject backreferences whose participation cannot be represented: %s',
+  'does not match an empty subject through a reference to an unmatched group: %s',
   (pattern) => {
-    expect(run(`<?php preg_match('${pattern}', '', $m);`)).toMatchObject({
+    expect(run(`<?php var_dump(preg_match('${pattern}', '', $m));`)).toMatchObject({
       kind: 'executed',
-      uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+      stdout: 'int(0)\n',
+      uncaughtException: undefined,
     });
   }
 );
@@ -736,6 +737,19 @@ test.each(['/(?<=(a{1,3})(a{1,3}))b/', '/(?<=a{1,3}(a{1,3}))b/'])(
     });
   }
 );
+
+test.each([
+  String.raw`preg_match('/(?<=(a)\1)b/', 'aab')`,
+  String.raw`preg_match('/(?<!(a)\1)b/', 'aab')`,
+  String.raw`preg_replace('/(?<=(.)\1)x/', 'Y', 'aax bcx')`,
+  String.raw`preg_match_all('/(?<=(\d)\1)-/', '11-23-', $matches)`,
+])('rejects references to captures within the same lookbehind: %s', (call) => {
+  expect(run(`<?php ${call}; echo 'done';`)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: expect.stringContaining('後読みの内部キャプチャへの後方参照'),
+  });
+});
 
 test('retains fixed lookbehind captures', () => {
   expect(run("<?php preg_match('/(?<=(aa))b/','aab',$m);echo $m[1];")).toMatchObject({

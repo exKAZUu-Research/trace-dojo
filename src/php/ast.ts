@@ -73,7 +73,7 @@ export type Expr = { row: number } & (
   | { k: 'isset'; items: Expr[] }
   | { k: 'empty'; e: Expr }
   | { k: 'closure'; fn: FunctionDecl; uses: { name: string; byRef: boolean }[]; isStatic: boolean }
-  | { k: 'arrow'; fn: FunctionDecl; isStatic: boolean }
+  | { k: 'arrow'; fn: FunctionDecl; isStatic: boolean; parenthesized?: true }
   | { k: 'instanceof'; e: Expr; cls: ClassRef }
   | { k: 'match'; subject: Expr; arms: MatchArm[]; jumpTable?: boolean }
   | { k: 'print'; e: Expr }
@@ -101,7 +101,7 @@ export type Stmt = { row: number } & (
   | { k: 'expr'; e: Expr; onlyCalls: boolean }
   | { k: 'echo'; args: Expr[] }
   | { k: 'inline'; text: string }
-  | { k: 'if'; cond: Expr; consequent: Stmt[]; alternate?: Stmt[] }
+  | { k: 'if'; cond: Expr; consequent: Stmt[]; alternate?: Stmt[]; continuation?: 'elseif' | 'else if' }
   | { k: 'while'; cond: Expr; body: Stmt[] }
   | { k: 'do'; body: Stmt[]; cond: Expr }
   | { k: 'for'; init: Expr[]; cond: Expr[]; update: Expr[]; body: Stmt[] }
@@ -114,7 +114,7 @@ export type Stmt = { row: number } & (
       body: Stmt[];
     }
   | { k: 'switch'; subject: Expr; cases: SwitchCase[] }
-  | { k: 'break' | 'continue'; depth: number }
+  | { k: 'break' | 'continue'; depth: number; explicitDepth?: true }
   | { k: 'return'; e?: Expr }
   | { k: 'block'; body: Stmt[] }
   | { k: 'try'; body: Stmt[]; catches: CatchClause[]; fin?: Stmt[] }

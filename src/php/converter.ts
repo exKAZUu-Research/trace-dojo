@@ -353,13 +353,19 @@ export class Converter extends DeclarationConverter {
     const [clause, ...rest] = clauses;
     if (!clause) return undefined;
     const body = this.controlBody(clause);
-    if (clause.type === 'else_clause') return body;
+    if (clause.type === 'else_clause') {
+      const nested = body[0];
+      if (this.preserveSyntax && nested?.k === 'if' && clause.childForFieldName('body')?.type === 'if_statement')
+        nested.continuation = 'else if';
+      return body;
+    }
     return [
       {
         k: 'if',
         cond: this.condition(clause),
         consequent: body,
         alternate: this.alternatives(rest),
+        continuation: this.preserveSyntax ? 'elseif' : undefined,
         row: clause.startPosition.row,
       },
     ];
@@ -463,7 +469,12 @@ export class Converter extends DeclarationConverter {
       this.error(node, `${depth} 段の '${kind}' はできません（Cannot '${kind}' ${depth} levels）。`);
     }
     if (kind === 'continue' && this.loop.switches.at(-depth)) this.warnContinueInSwitch(node, depth);
-    return { k: kind, depth, row: node.startPosition.row };
+    return {
+      k: kind,
+      depth,
+      explicitDepth: this.preserveSyntax && argument ? true : undefined,
+      row: node.startPosition.row,
+    };
   }
 
   private warnContinueInSwitch(node: Node, depth: number): void {
@@ -831,7 +842,9 @@ export class Converter extends DeclarationConverter {
     const row = node.startPosition.row;
     switch (node.type) {
       case 'parenthesized_expression': {
-        return this.parenthesized(node);
+        const expression = this.parenthesized(node);
+        if (this.preserveSyntax && expression.k === 'arrow') expression.parenthesized = true;
+        return expression;
       }
       case 'integer': {
         return { k: 'lit', v: parseIntegerLiteral(node.text), row };

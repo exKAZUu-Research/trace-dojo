@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 999 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 1000 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
@@ -977,27 +977,40 @@ function similarChars(a: string, b: string): number {
 
 defineFunction(
   'levenshtein(string $string1, string $string2, int $insertion_cost = 1, int $replacement_cost = 1, int $deletion_cost = 1): int',
-  ({ args }) => {
-    const a = s(args[0]);
-    const b = s(args[1]);
-    const insert = args[2] === undefined ? 1 : n(args[2]);
-    const replace = args[3] === undefined ? 1 : n(args[3]);
-    const remove = args[4] === undefined ? 1 : n(args[4]);
-    if (a.length === 0) return BigInt(b.length * insert);
-    if (b.length === 0) return BigInt(a.length * remove);
-    let previous = Array.from({ length: b.length + 1 }, (_, index) => index * insert);
-    for (let i = 0; i < a.length; i++) {
-      rt().spend(Math.ceil(b.length / 16));
-      const current = [(i + 1) * remove];
-      for (let j = 0; j < b.length; j++) {
-        const cost = previous[j] + (a[i] === b[j] ? 0 : replace);
-        current.push(Math.min(cost, previous[j + 1] + remove, current[j] + insert));
-      }
-      previous = current;
-    }
-    return BigInt(previous[b.length]);
-  }
+  ({ args }) =>
+    levenshtein(
+      s(args[0]),
+      s(args[1]),
+      (args[2] as bigint | undefined) ?? 1n,
+      (args[3] as bigint | undefined) ?? 1n,
+      (args[4] as bigint | undefined) ?? 1n
+    )
 );
+
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+function levenshtein(a: string, b: string, insert: bigint, replace: bigint, remove: bigint): bigint {
+  if (a.length === 0) return BigInt.asIntN(64, BigInt(b.length) * insert);
+  if (b.length === 0) return BigInt.asIntN(64, BigInt(a.length) * remove);
+  if (a.length < b.length && insert === replace && replace === remove) [a, b] = [b, a];
+  let previous = new BigInt64Array(b.length + 1);
+  let current = new BigInt64Array(b.length + 1);
+  for (let j = 1; j <= b.length; j++) previous[j] = previous[j - 1] + insert;
+  const runtime = rt();
+  for (let i = 0; i < a.length; i++) {
+    runtime.spend(Math.ceil(b.length / 16));
+    current[0] = previous[0] + remove;
+    for (let j = 0; j < b.length; j++) {
+      const substitute = BigInt.asIntN(64, previous[j] + (a[i] === b[j] ? 0n : replace));
+      const deletion = BigInt.asIntN(64, previous[j + 1] + remove);
+      const insertion = BigInt.asIntN(64, current[j] + insert);
+      const withoutInsertion = substitute < deletion ? substitute : deletion;
+      current[j + 1] = withoutInsertion < insertion ? withoutInsertion : insertion;
+    }
+    [previous, current] = [current, previous];
+  }
+  return previous[b.length];
+}
+
 defineFunction('vfprintf(resource $stream, string $format, array $values): int', ({ args }) => {
   const stream = args[0] as PhpObject;
   const text = formatPrintf(s(args[1]), args[2] as PhpArray, (output) => writeStream(stream, output));

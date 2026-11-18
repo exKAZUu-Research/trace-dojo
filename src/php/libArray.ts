@@ -4,7 +4,7 @@ import { type Comparisons, type Entry, setEntries, SortedWalk } from './arraySet
 import { lower, upper } from './bytes';
 import { callCallback, callCallbackRefs, callMethod, consumeCallbackResult } from './callables';
 import type { ArgValue } from './calls';
-import { canAccessProp, declForKey, issetProp, lookupProp, objectToArray, readProp } from './classes';
+import { canAccessProp, declForKey, issetProp, lookupProp, readProp } from './classes';
 import * as conversionsModule from './conversions';
 import { compareBytes, compareNumbers, debugType, floatFitsInt, normalizeKeyString, valueName } from './conversions';
 import { deprecated, throwError, warn, withCleanupExceptions } from './errors';
@@ -1557,21 +1557,22 @@ function pointerValue(ctx: NativeContext): Value {
   return ctx.refs[0]?.v instanceof PhpArray ? writableArray(ctx, 0) : (ctx.refs[0]?.v ?? ctx.args[0]);
 }
 
-/** The internal pointers of objects, which PHP keeps in the property table that the pointer functions walk. */
-const objectPointers = new WeakMap<PhpObject, { pointer: Key | undefined | null }>();
-
 /** Runs a pointer function on an array, or deprecatedly on an object's property table with the object's pointer. */
 function withPointer(value: Value, name: string, action: (array: PhpArray) => Value): Value {
   if (value instanceof PhpArray) return action(value);
   if (!(value instanceof PhpObject))
     throwError('TypeError', `${name}(): Argument #1 ($array) must be of type array, ${valueName(value)} given`);
   deprecated(`${name}(): Calling ${name}() on an object is deprecated`);
-  const table = objectToArray(value);
-  const saved = objectPointers.get(value);
-  table.pointer = saved ? saved.pointer : null;
+  const table = new PhpArray();
+  for (const [key, slot] of value.props) {
+    if (slot !== UNINIT) table.setSlot(key, copyValueSlot(slot));
+  }
+  table.pointer = value.props.pointer;
   const result = action(table);
-  objectPointers.set(value, { pointer: table.pointer });
-  return result;
+  value.props.pointer = table.currentKey() as string | undefined;
+  if (name !== 'key' || typeof result !== 'string') return result;
+  const decl = declForKey(value.cls, result);
+  return decl?.visibility === 'protected' ? `\0*\0${decl.name}` : result;
 }
 
 function compareSetValues(a: Entry, b: Entry): number {

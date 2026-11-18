@@ -5,15 +5,16 @@ import { UnsupportedFeatureError } from './unsupported';
 
 type Length = readonly [number, number];
 
-// code-gauge-allow functionNcss 49 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 53 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function analyzeRegex(
   source: string,
   unicode: boolean,
   utf8: boolean,
   ignoreCase: boolean,
-  invalidLookbehind: (start: number, reason: string) => never
-): Set<string> {
+  invalidLookbehind: (start: number, reason: string) => never,
+  emptyMarkers: ReadonlyMap<string, string>
+): { byteCaselessReferences: Set<string>; emptySource?: string } {
   let tree: AST.Pattern;
   try {
     tree = new RegExpParser({ ecmaVersion: 2025 }).parsePattern(source, 0, source.length, { unicode });
@@ -26,7 +27,9 @@ export function analyzeRegex(
   let captureCount = 0;
   const references = new Set<string>();
   const contexts: boolean[] = [];
+  const lookbehinds: AST.LookaroundAssertion[] = [];
   const lengths = new Map<AST.Element, Length>();
+  let backwardCaptureReference = false;
   visitRegExpAST(tree, {
     onGroupEnter(node) {
       contexts.push(ignoreCase);
@@ -46,15 +49,18 @@ export function analyzeRegex(
         throw new UnsupportedFeatureError('非 UTF-8 の Unicode プロパティの大文字・小文字を区別しない照合');
     },
     onBackreferenceEnter(node) {
-      if (!utf8 && ignoreCase) {
-        const groups = node.ambiguous ? node.resolved : [node.resolved];
-        for (const group of groups) if (group.name) references.add(group.name);
-      }
+      const groups = node.ambiguous ? node.resolved : [node.resolved];
+      backwardCaptureReference ||= referencesLocalLookbehindGroup(groups, lookbehinds);
+      if (!utf8 && ignoreCase) recordReferenceNames(references, groups);
     },
     onAssertionEnter(node) {
+      if (node.kind !== 'lookbehind') return;
       capturesAtEntry.set(node, captureCount);
+      lookbehinds.push(node);
     },
     onAssertionLeave(node) {
+      if (node.kind !== 'lookbehind') return;
+      lookbehinds.pop();
       if (validateLookbehind(node, lengths, invalidLookbehind) && captureCount !== capturesAtEntry.get(node))
         throw new UnsupportedFeatureError('可変長後読みのキャプチャ');
     },
@@ -65,7 +71,47 @@ export function analyzeRegex(
       captureCount++;
     },
   });
-  return references;
+  if (backwardCaptureReference) throw new UnsupportedFeatureError('後読みの内部キャプチャへの後方参照');
+  return {
+    byteCaselessReferences: references,
+    emptySource: emptyMarkers.size === 0 ? undefined : specializeForEmptySubject(tree, emptyMarkers),
+  };
+}
+
+function recordReferenceNames(references: Set<string>, groups: readonly AST.CapturingGroup[]): void {
+  for (const group of groups) if (group.name) references.add(group.name);
+}
+
+function referencesLocalLookbehindGroup(
+  groups: readonly AST.CapturingGroup[],
+  lookbehinds: readonly AST.LookaroundAssertion[]
+): boolean {
+  return groups.some(
+    (group) =>
+      /^\$\d+$/.test(group.name ?? '') &&
+      lookbehinds.some((assertion) => group.start > assertion.start && group.end < assertion.end)
+  );
+}
+
+function specializeForEmptySubject(tree: AST.Pattern, markers: ReadonlyMap<string, string>): string {
+  let output = '';
+  let cursor = 0;
+  const replace = (node: AST.Node, text: string): void => {
+    if (node.start < cursor) return;
+    output += tree.raw.slice(cursor, node.start) + text;
+    cursor = node.end;
+  };
+  // Character-consuming atoms cannot match an empty subject. Only marker assertions can see the synthetic byte.
+  visitRegExpAST(tree, {
+    onAssertionEnter(node) {
+      const marker = markers.get(node.raw);
+      if (marker !== undefined) replace(node, marker);
+    },
+    onCharacterEnter: (node) => replace(node, '[]'),
+    onCharacterSetEnter: (node) => replace(node, '[]'),
+    onCharacterClassEnter: (node) => replace(node, '[]'),
+  });
+  return output + tree.raw.slice(cursor);
 }
 
 function validateCaptureRepeat(node: AST.Quantifier, lengths: Map<AST.Element, Length>): void {

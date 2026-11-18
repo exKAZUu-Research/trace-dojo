@@ -1157,11 +1157,15 @@ function directHolderCount(parent: Owner, value: object, keys: Set<Key | undefin
 }
 
 class PropertyMap extends Map<string, Slot> {
+  pointer: string | undefined | null = null;
+
   constructor(private readonly owner: PhpObject) {
     super();
   }
   override set(key: string, value: Slot): this {
     const old = this.get(key);
+    if (value === UNINIT) this.advancePointerOnRemoval(key);
+    else if (old === undefined && this.pointer === undefined) this.pointer = key;
     super.set(key, value);
     if (value !== UNINIT) this.owner.unsetProperties?.delete(key);
     trackOwner(value, this.owner, key);
@@ -1171,14 +1175,23 @@ class PropertyMap extends Map<string, Slot> {
   override clear(): void {
     invalidateOwner(this.owner);
     this.owner.unsetProperties?.clear();
+    this.pointer = null;
     super.clear();
   }
   override delete(key: string): boolean {
     const old = this.get(key);
+    this.advancePointerOnRemoval(key);
     invalidateOwner(this.owner);
     const removed = super.delete(key);
     if (removed) dropped(old);
     return removed;
+  }
+
+  private advancePointerOnRemoval(key: string): void {
+    if (this.pointer !== key) return;
+    const properties = this.entries();
+    for (const [name] of properties) if (name === key) break;
+    this.pointer = properties.find(([, slot]) => slot !== UNINIT)?.[0];
   }
 }
 

@@ -80,7 +80,7 @@ function matchesOf(compiled: Compiled, subject: string, offset = 0, status?: { e
   return scanMatches(compiled, subject, offset, toMatch, status);
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Empty matches retry at the same position before advancing by a code point.
+// code-gauge-allow functionCognitiveComplexity 23 -- Empty matches retry at the same position before advancing by a code point.
 function* scanMatches<T>(
   compiled: Compiled,
   subject: string,
@@ -103,15 +103,18 @@ function* scanMatches<T>(
   let retry = false;
   while (position <= text.length) {
     rt().spend();
-    const result = executeMatch(retry ? compiled.retry : compiled.regex, text, position);
+    const emptyRegex = text === '' ? compiled.emptyRegex : undefined;
+    const result = executeMatch(
+      retry ? compiled.retry : (emptyRegex ?? compiled.regex),
+      emptyRegex && !retry ? '\0' : text,
+      position
+    );
     if (!result) {
       if (!retry || position >= text.length) return;
       retry = false;
       position += compiled.utf8 && (text.codePointAt(position) ?? 0) > 0xff_ff ? 2 : 1;
       continue;
     }
-    if (text === '' && [...compiled.referenced].some((group) => result.groups?.[groupName(group)] === undefined))
-      throw new UnsupportedFeatureError('空文字列に対する未参加キャプチャへの後方参照');
     if ([...compiled.byteCaselessReferences].some((name) => /[\u0080-\u00FF]/.test(result.groups?.[name] ?? '')))
       throw new UnsupportedFeatureError('非 ASCII バイトを大文字・小文字を区別せずに後方参照する正規表現');
     const [matchStart, matchEnd] = matchBounds(compiled, result);

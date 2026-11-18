@@ -89,22 +89,16 @@ defineConstant('PHP_ZTS', 0n);
 
 // Output -------------------------------------------------------------------------------------------------------------
 
-defineFunction('print_r(mixed $value, bool $return = false): string|bool', ({ args }) => {
-  const text = printR(args[0]);
-  if (args[1] === true) return text;
-  rt().echo(text);
-  return true;
-});
+defineFunction('print_r(mixed $value, bool $return = false): string|bool', ({ args }) =>
+  printR(args[0], args[1] === true)
+);
 defineFunction('var_dump(mixed $value, mixed ...$values): void', ({ args }) => {
-  for (const value of args) varDump(value);
+  varDump(args);
   return null;
 });
-defineFunction('var_export(mixed $value, bool $return = false): ?string', ({ args }) => {
-  const text = varExport(args[0]);
-  if (args[1] === true) return text;
-  rt().echo(text);
-  return null;
-});
+defineFunction('var_export(mixed $value, bool $return = false): ?string', ({ args }) =>
+  varExport(args[0], args[1] === true)
+);
 defineFunction('printf(string $format, mixed ...$values): int', ({ args }) => {
   const text = formatPrintf(args[0] as string, args.slice(1), (output) => rt().echo(output));
   return BigInt(text.length);

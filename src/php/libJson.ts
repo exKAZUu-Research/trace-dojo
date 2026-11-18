@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 423 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 426 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { codePointBytes, enc, utf8Length } from './bytes';
@@ -407,7 +407,7 @@ class JsonParser {
     try {
       const value = this.value(0);
       this.skipSpace();
-      if (this.index < this.text.length) throw new JsonError(4);
+      if (this.index < this.text.length) this.unexpectedToken();
       return value;
     } finally {
       runtime.nativeHeld.pop();
@@ -422,6 +422,11 @@ class JsonParser {
 
   private skipSpace(): void {
     while (this.index < this.text.length && ' \t\n\r'.includes(this.text[this.index])) this.index++;
+  }
+
+  private unexpectedToken(): never {
+    if (this.text[this.index] === '"') this.string();
+    throw new JsonError(4);
   }
 
   private value(depth: number): Value {
@@ -447,8 +452,8 @@ class JsonParser {
     throw new JsonError(4);
   }
 
-  // code-gauge-allow functionNcss 44 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-  // code-gauge-allow functionCognitiveComplexity 16 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss 45 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private object(depth: number): Value {
     this.index++;
     const array = new PhpArray();
@@ -474,7 +479,7 @@ class JsonParser {
         if (this.text[this.index] !== '"') throw new JsonError(4);
         const key = this.string();
         this.skipSpace();
-        if (this.text[this.index] !== ':') throw new JsonError(4);
+        if (this.text[this.index] !== ':') this.unexpectedToken();
         this.index++;
         const value = this.value(depth);
         const runtime = rt();
@@ -487,10 +492,11 @@ class JsonParser {
         }
         this.releaseStoredTemporaries();
         this.skipSpace();
-        const next = this.text[this.index++];
+        const next = this.text[this.index];
+        if (next !== '}' && next !== ']' && next !== ',') this.unexpectedToken();
+        this.index++;
         if (next === '}') break;
         if (next === ']') throw new JsonError(2);
-        if (next !== ',') throw new JsonError(4);
       }
       return object ?? array;
     } finally {
@@ -513,10 +519,11 @@ class JsonParser {
         array.append(this.value(depth));
         this.releaseStoredTemporaries();
         this.skipSpace();
-        const next = this.text[this.index++];
+        const next = this.text[this.index];
+        if (next !== ']' && next !== '}' && next !== ',') this.unexpectedToken();
+        this.index++;
         if (next === ']') break;
         if (next === '}') throw new JsonError(2);
-        if (next !== ',') throw new JsonError(4);
       }
       return array;
     } finally {
