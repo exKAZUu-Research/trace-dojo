@@ -186,7 +186,7 @@ const DEBUG = nativeStruct('std.debug', {
           print(frame, state);
         } catch (error) {
           if (error instanceof WriterWriteError)
-            return panic(decodeUtf8(writerBytes(frame, buffer)) + '(msg truncated)');
+            return panic(decodeUtf8(writerBytes(frame, state.buffer)) + '(msg truncated)');
           throw error;
         }
         return panic(decodeUtf8(bufferedBytes(frame, state)));
@@ -291,7 +291,7 @@ function addIoMembers(): void {
             const file = evaluate(frame) as NativeHandle;
             io.eval(frame);
             const value = bytes.eval(frame);
-            frame.runtime.writeOutput(file.state.fd as number, writerBytes(frame, value));
+            frame.runtime.writeOutput(file.state.fd as number, writerBytes(frame, value as Slice));
             return;
           },
           call.span

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 457 -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
+// code-gauge-allow-file fileNcss 462 -- Keeps logical slots, pointer identity, and retained payload storage with their shared assignment rules.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { BigFloat, compareFloats } from './floats';
@@ -400,6 +400,12 @@ export class Slice {
 
   set(index: number, value: Value): void {
     this.target.slots[this.start + index] = value;
+  }
+
+  readBytes(spend: (cost?: number) => void): Uint8Array {
+    if (this.lengthValue !== 0n && isUndefinedMemory(this)) throw new MemoryFault();
+    spend(this.length);
+    return Uint8Array.from({ length: this.length }, (_, index) => Number(this.get(index)));
   }
 
   values(spend?: (cost: number) => void): Value[] {

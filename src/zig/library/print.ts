@@ -1,5 +1,4 @@
 import type { Expression, Span } from '../ast';
-import { byteValues } from '../builtins';
 import { enumLookup } from '../enumLookup';
 import {
   checkFormat,
@@ -149,8 +148,8 @@ function templateOf(sema: SemaApi, value: Slice, span: Span): FormatTemplate {
   let template = views.get(key);
   if (!template) {
     sema.reserveStorage(arrayOf(value.lengthValue, U8), span);
-    sema.spendCompilation(Math.ceil(value.length / 64));
-    template = parseFormatTemplate(byteValues(value).map(Number), (cost) => sema.spendCompilation(cost));
+    const spend = (cost?: number): void => sema.spendCompilation(cost);
+    template = parseFormatTemplate(value.readBytes(spend), spend);
     views.set(key, template);
   }
   return template;

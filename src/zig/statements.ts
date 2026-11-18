@@ -803,10 +803,10 @@ export abstract class StatementCompiler extends CallCompiler {
     if (tag === undefined)
       return this.error(init, `${typeName(type)} 型には、フィールド「${init.name}」がありません。`);
     const fieldType = fields[tag].type;
-    const store = this.slotStore(init.value, fieldType);
     const slots = sizeOf(fieldType) === 0 ? 0 : valueSlots(fieldType);
     const retainBytes = !this.requiresComptime(type, value);
     const needsRegion = retainBytes && hasValueDependentWrites(fieldType, () => this.spendCompilation());
+    const store = this.slotStore(init.value, fieldType, needsRegion && fieldType.kind !== 'union');
     return (frame, holder, index) => {
       const union = holder.slots[index] as ZUnion;
       const changed = union.tag !== tag;
@@ -846,11 +846,20 @@ export abstract class StatementCompiler extends CallCompiler {
   }
 
   /** The code that writes a field's or element's value: in place for a nested anonymous literal, else as a whole. */
-  private slotStore(value: Expression, type: Type): ResultStore {
+  private slotStore(value: Expression, type: Type, wholePayload = false): ResultStore {
     const nested = this.resultLocationStore(value, type);
     if (nested) return nested;
     const evaluate = this.coerce(this.compile(value, type), type, value).eval;
-    return (frame, holder, index) => storeInto(holder, index, evaluate(frame));
+    if (!wholePayload) return (frame, holder, index) => storeInto(holder, index, evaluate(frame));
+    return (frame, holder, index) => {
+      const evaluated = evaluate(frame);
+      const backing = memorySpace().typedViews.get(holder.slots);
+      if (backing) {
+        backing.memory.writeWholePayload(type, backing.offset(index), copyForFrame(frame, evaluated, type));
+      } else {
+        storeInto(holder, index, evaluated);
+      }
+    };
   }
 
   // Jumps -------------------------------------------------------------------------------------------------------------
@@ -2380,13 +2389,19 @@ export abstract class StatementCompiler extends CallCompiler {
       const capture = each.capture;
       if (capture && !isDiscardName(capture)) {
         if (capture.byPointer) {
-          const binding = this.newLocal(capture.name, pointerTo(captureType, operand.place?.isConst ?? true), true);
-          locals.set(capture.name, binding);
           const payloadPointer =
             capturePayload && union ? this.unionPayloadPointer(union, captureType, each) : undefined;
+          const original = knownOperand && this.knownAddress(operand);
+          const constant = original && (payloadPointer ? payloadPointer(original) : original);
+          const binding = {
+            ...this.newLocal(capture.name, pointerTo(captureType, operand.place?.isConst ?? true), true),
+            known: constant !== undefined,
+            value: constant,
+          };
+          locals.set(capture.name, binding);
           bind = (frame, value, pointer) => {
             const source = pointer ?? new Pointer(new Cell(value), 0);
-            frame.slots[binding.slot] = payloadPointer ? payloadPointer(source, value) : source;
+            frame.slots[binding.slot] = constant ?? (payloadPointer ? payloadPointer(source, value) : source);
           };
         } else {
           const value = knownOperand?.value;

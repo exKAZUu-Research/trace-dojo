@@ -43,7 +43,7 @@ import {
 } from '../values';
 import { WeakValueMap } from '../weakValueMap';
 import { zeroAllocation } from '../zeroSizedMemory';
-import { computed, constSlice, nativeBudget, newSlice, ORDER, readSliceBytes } from './common';
+import { computed, constSlice, nativeBudget, newSlice, ORDER } from './common';
 import {
   ALLOCATOR,
   ALLOCATOR_ERROR,
@@ -309,7 +309,7 @@ const META: Record<string, () => Member> = {
     const text = constSlice(sema, textArg, U8);
     return computed(optionalOf(type), [text], call.span, ([value], frame) => {
       const spend = nativeBudget(sema, frame);
-      const name = decodeIdentifierBytes(readSliceBytes(value as Slice, spend), spend);
+      const name = decodeIdentifierBytes((value as Slice).readBytes(spend), spend);
       return fields.byName.get(name)?.value ?? NULL;
     });
   }),

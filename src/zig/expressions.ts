@@ -719,7 +719,7 @@ export abstract class ExpressionCompiler extends SemaBase {
     return runtime(pointerTo(expression.type, true), (frame) => new Pointer(new Constant(evaluate(frame)), 0), span);
   }
 
-  private knownAddress(expression: TExpr): Pointer | undefined {
+  protected knownAddress(expression: TExpr): Pointer | undefined {
     if (!expression.known) return undefined;
     const address = this.addressOf(expression);
     return address.known && address.value instanceof Pointer ? address.value : undefined;

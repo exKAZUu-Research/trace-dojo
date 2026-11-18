@@ -30,21 +30,27 @@ export function validateCommentText(root: Node, source: string, budget: Executio
 export class LiteralDecoder {
   private allocated = 0;
 
+  constructor(private readonly budget: ExecutionBudget) {}
+
   decodeIdentifier(node: Node): string {
     if (!node.text.startsWith('@')) return node.text;
     const bytes = this.decodeQuoted(node);
     if (bytes.length === 0) fail(node, '名前を空にはできません。');
+    this.budget.spend(bytes.length);
     if (bytes.includes(0)) fail(node, '名前に NUL 文字は使えません。');
-    return decodeIdentifierBytes(bytes);
+    return decodeIdentifierBytes(bytes, (cost) => this.budget.spend(cost));
   }
 
   decodeString(node: Node): number[] {
     if (node.type !== 'multiline_string') return this.decodeQuoted(node);
     const bytes: number[] = [];
     let first = true;
+    this.budget.spend(node.endIndex - node.startIndex);
     for (const line of node.text.split(/\r?\n/)) {
+      this.budget.spend();
       const prefix = /^[ \t]*\\\\/.exec(line);
       if (!prefix) continue;
+      this.budget.spend(prefix[0].length);
       if (!first) this.appendBytes(bytes, [10]);
       first = false;
       this.appendText(bytes, line.slice(prefix[0].length), node);
@@ -53,24 +59,28 @@ export class LiteralDecoder {
   }
 
   decodeCharacter(node: Node): bigint {
+    this.budget.spend(node.namedChildCount);
     const content = node.namedChildren.find(
       (part) => part.type === 'character_content' || part.type === 'escape_sequence'
     );
     if (!content) fail(node, '文字のリテラルが空です。');
-    validateRawText(content.text, content);
-    return BigInt(
-      content.type === 'escape_sequence' ? escapeValue(content.text, content) : (content.text.codePointAt(0) as number)
-    );
+    const text = content.text;
+    this.budget.spend(text.length * 2);
+    validateRawText(text, content);
+    return BigInt(content.type === 'escape_sequence' ? escapeValue(text, content) : (text.codePointAt(0) as number));
   }
 
   private decodeQuoted(node: Node): number[] {
     const bytes: number[] = [];
+    this.budget.spend(node.namedChildCount);
     for (const part of node.namedChildren) {
       if (part.type === 'string') return this.decodeQuoted(part);
       if (part.type === 'string_content') this.appendText(bytes, part.text, part);
       else if (part.type === 'escape_sequence') {
-        validateRawText(part.text, part);
-        this.appendBytes(bytes, escapeBytes(part.text, part, true));
+        const text = part.text;
+        this.budget.spend(text.length * 2);
+        validateRawText(text, part);
+        this.appendBytes(bytes, escapeBytes(text, part, true));
       }
     }
     return bytes;
@@ -78,18 +88,16 @@ export class LiteralDecoder {
 
   private appendText(bytes: number[], text: string, node: Node): void {
     if (this.allocated + text.length > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
-    validateRawText(text, node);
-    let length = 0;
-    for (const character of text) {
-      const point = character.codePointAt(0) as number;
-      length += point <= 0x7f ? 1 : point <= 0x7_ff ? 2 : point <= 0xff_ff ? 3 : 4;
-    }
+    this.budget.spend(text.length);
+    const length = validateRawText(text, node);
     this.reserve(length);
+    this.budget.spend(text.length + length);
     for (const byte of new TextEncoder().encode(text)) bytes.push(byte);
   }
 
   private appendBytes(bytes: number[], decoded: readonly number[]): void {
     this.reserve(decoded.length);
+    this.budget.spend(decoded.length);
     for (const byte of decoded) bytes.push(byte);
   }
 
@@ -99,11 +107,14 @@ export class LiteralDecoder {
   }
 }
 
-function validateRawText(text: string, node: Node): void {
-  for (let index = 0; index < text.length; index++) {
-    const code = text.codePointAt(index) as number;
+function validateRawText(text: string, node: Node): number {
+  let length = 0;
+  for (const character of text) {
+    const code = character.codePointAt(0) as number;
     if (code < 0x20 || code === 0x7f) fail(node, 'そのまま書けない制御文字があります。');
+    length += code <= 0x7f ? 1 : code <= 0x7_ff ? 2 : code <= 0xff_ff ? 3 : 4;
   }
+  return length;
 }
 
 /** The bytes an escape sequence stands for in a string: `\u{...}` is UTF-8 encoded. */

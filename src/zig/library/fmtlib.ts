@@ -21,16 +21,7 @@ import {
 import { createUtf8Decoder } from '../utf8';
 import { ErrorValue, Slice, type Value } from '../values';
 import { allocatingWriter, freeWriter, ownWriterSlice } from './allocatingWriter';
-import {
-  allocating,
-  allocatorArg,
-  computed,
-  constSlice,
-  generic,
-  mutableSlice,
-  nativeBudget,
-  readSliceBytes,
-} from './common';
+import { allocating, allocatorArg, computed, constSlice, generic, mutableSlice, nativeBudget } from './common';
 import { allocatorState, ERROR_OUT_OF_MEMORY, nativeEnum } from './heap';
 import { compileArgs, expectArgs, fnMember, type Member, nativeCall, nativeStruct, typeMember } from './native';
 import { compilePrint } from './print';
@@ -114,7 +105,7 @@ function parseInt(bytes: Slice, base: number, type: IntType, spend: (cost?: numb
 
 /** `std.fmt.parseFloat`: decimal or hexadecimal digits with `_`, `inf`, or `nan`, rounded to the type. */
 function parseFloat(bytes: Slice, type: Extract<Type, { kind: 'float' }>, spend: (cost?: number) => void): Value {
-  const input = readSliceBytes(bytes, spend);
+  const input = bytes.readBytes(spend);
   spend(input.length);
   const text = createUtf8Decoder().decode(input);
   const negative = text[0] === '-';

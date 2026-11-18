@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 654 -- Keeps the byte codecs, shared typed views, and reference-preserving copies together.
+// code-gauge-allow-file fileNcss 676 -- Keeps the byte codecs, shared typed views, and reference recovery together.
 import { transferCost } from './allocation';
 import { PANIC, panic } from './arith';
 import { enumLookup } from './enumLookup';
@@ -45,7 +45,6 @@ import {
   ZStruct,
   ZUnion,
 } from './values';
-import { WeakValueMap } from './weakValueMap';
 
 interface StoredReference {
   key: string;
@@ -55,7 +54,6 @@ interface StoredReference {
 }
 
 type LocatedReference = StoredReference & { offset: number };
-type ReferenceCandidates = Map<number, Map<string, StoredReference>>;
 
 interface FieldLocation {
   type: Type;
@@ -68,13 +66,26 @@ export class BufferMemorySpace {
   readonly memories = new WeakMap<Value[], BufferMemory>();
   readonly typedViews = new WeakMap<Value[], { memory: BufferMemory; offset: (index: number) => number }>();
   readonly logicalMemories = new WeakMap<object, Map<string, BufferMemory>>();
-  readonly byteReferences = new WeakMap<object, ReferenceCandidates>();
   readonly referenceIds = new WeakMap<object, bigint>();
-  readonly references = new WeakValueMap<string, object>();
+  private readonly references = new Map<string, object>();
+  readonly referenceTypes = new WeakMap<Type, boolean>();
   nextReferenceId = 1n;
   readonly errorReferenceIds = new WeakMap<object, bigint>();
   nextErrorReferenceId = 1n;
   private readonly writerVtables = new Map<string, object>();
+
+  reference(key: string): object | undefined {
+    return this.references.get(key);
+  }
+
+  keepReference(key: string, value: object): void {
+    if (!this.references.has(key)) reserveMemory(1);
+    this.references.set(key, value);
+  }
+
+  get hasReferences(): boolean {
+    return this.references.size > 0;
+  }
 
   identityOf(value: object): bigint {
     let identity = this.referenceIds.get(value);
@@ -206,34 +217,6 @@ export function bindBufferMemory(
 }
 
 export class BufferMemory {
-  static byteCopyReferences(destination: Pointer, source: Pointer, length: number): (() => void) | undefined {
-    if (length === 0) return undefined;
-    const space = memorySpace();
-    const from = space.typedViews.get(source.target.slots);
-    const to = space.typedViews.get(destination.target.slots);
-    const sourceLocation = source.slotLocation();
-    const destinationLocation = destination.slotLocation();
-    const targetOffset = to ? to.offset(destination.index) : destinationLocation.index * 8;
-    const bits = length * 8;
-    const references = from
-      ? from.memory.byteReferences(from.offset(source.index), targetOffset, bits)
-      : candidateReferences(
-          space.byteReferences.get(sourceLocation.storage),
-          sourceLocation.index * 8,
-          targetOffset,
-          bits,
-          (offset, width) => readLogicalBits(sourceLocation.storage as Value[], offset, width)
-        );
-    if (references.length === 0) return undefined;
-    return () => {
-      if (to) {
-        to.memory.restoreByteReferences(references);
-        return;
-      }
-      recordCandidates(space, destinationLocation.storage, references);
-    };
-  }
-
   private accessDepth = 0;
   private readonly views = new Map<string, Value>();
   private readonly referenceHolds = new Map<string, object>();
@@ -260,6 +243,15 @@ export class BufferMemory {
   activatePayload(type: Extract<Type, { kind: 'optional' | 'error_union' }>, offset: number): void {
     if (type.kind === 'optional') this.writeBits(offset + sizeOf(type.child) * 8, 8, 1n);
     else this.writeBits(offset + errorUnionOffsets(type.payload).error * 8, 16, 0n);
+  }
+
+  writeWholePayload(type: Type, offset: number, value: Value): void {
+    const bits = sizeOf(type) * 8;
+    this.checkRegion(offset, bits);
+    this.access(true, offset, bits, () => {
+      this.clearRegion(offset, bits, true);
+      this.write(type, offset, value);
+    });
   }
 
   private access<T>(write: boolean, offset: number, bits: number, run: () => T): T {
@@ -473,7 +465,7 @@ export class BufferMemory {
         return this.access(false, offset, bits, () => this.regionBytes(offset, bits).join(','));
       };
     }
-    union.backingReferences = () => this.sparseReferences(offset, 0, bits).map((reference) => reference.value as Value);
+    union.backingReferences = () => this.unionReferences(type, offset, bits);
     union.copyBacking = () => {
       const memory = new BufferMemory(sparseBytes(sizeOf(type)), spendMemory, this.space);
       this.copyRegion(memory, offset, 0, bits);
@@ -484,6 +476,84 @@ export class BufferMemory {
     union.writeBacking = (value) =>
       this.write(type, offset, type.layout === 'auto' ? value : physicalUnion(type, value));
     union.copyBackingTo = (destination, start) => this.copyRegion(destination as BufferMemory, offset, start, bits);
+  }
+
+  private unionReferences(type: Extract<Type, { kind: 'union' }>, offset: number, bits: number): Value[] {
+    if (!this.space.hasReferences) return [];
+    const known = this.sparseReferences(offset, offset, bits);
+    const locations = new Set(known.map((reference) => reference.offset));
+    const values = known.map((reference) => reference.value as Value);
+    for (const at of this.referenceLocations(type, offset)) {
+      this.spend();
+      if (at < offset || at + 64 > offset + bits || locations.has(at)) continue;
+      locations.add(at);
+      const id = this.readBits(at, 64);
+      const key = referenceKey(id, 64);
+      const value = this.space.reference(key);
+      if (!value) continue;
+      this.referenceOffsets.set(at, { key, value, id, bits: 64 });
+      values.push(value as Value);
+    }
+    return values;
+  }
+
+  // code-gauge-allow functionNcss 31 -- Traverses the shared physical layout for each reference-bearing type.
+  private *referenceLocations(type: Type, offset: number): IterableIterator<number> {
+    if (!encodesReferences(type, this.space.referenceTypes, this.spend)) return;
+    this.spend();
+    switch (type.kind) {
+      case 'pointer': {
+        yield offset;
+        return;
+      }
+      case 'optional': {
+        yield* this.referenceLocations(type.child, offset);
+        return;
+      }
+      case 'error_union': {
+        yield* this.referenceLocations(type.payload, offset + errorUnionOffsets(type.payload).payload * 8);
+        return;
+      }
+      case 'array': {
+        yield* this.arrayReferenceLocations(type, offset);
+        return;
+      }
+      case 'union': {
+        const payload = offset + unionOffsets(type).payload * 8;
+        for (const field of type.fields ?? []) yield* this.referenceLocations(field.type, payload);
+        return;
+      }
+      case 'struct': {
+        if (!usesFieldLayout(type)) {
+          yield offset;
+          return;
+        }
+        const fields = fieldOffsets(type);
+        for (const [index, field] of (type.fields ?? []).entries())
+          if (field.comptimeValue === undefined) yield* this.referenceLocations(field.type, offset + fields[index]);
+        return;
+      }
+    }
+  }
+
+  private *arrayReferenceLocations(type: Extract<Type, { kind: 'array' }>, offset: number): IterableIterator<number> {
+    const stride = sizeOf(type.child) * 8;
+    const length = Number(type.length + (type.sentinel === undefined ? 0n : 1n));
+    if (stride === 0 || length === 0) return;
+    const sparse = sparseByteValues.get(this.bytes);
+    if (!sparse) {
+      for (let index = 0; index < length; index++) yield* this.referenceLocations(type.child, offset + index * stride);
+      return;
+    }
+    const start = Math.floor(offset / 8);
+    const end = Math.ceil((offset + length * stride) / 8);
+    const used = new Set<number>();
+    for (const [byte, value] of sparseEntriesInRange(sparse.values, start, end - start)) {
+      if (value === 0n) continue;
+      const index = Math.max(0, Math.floor((byte * 8 - offset) / stride));
+      if (index < length) used.add(index);
+    }
+    for (const index of used) yield* this.referenceLocations(type.child, offset + index * stride);
   }
 
   arrayView(child: Type, length: bigint, offset: number, hasSentinel = false): ZArray {
@@ -633,7 +703,7 @@ export class BufferMemory {
 
   private writeUnion(type: Extract<Type, { kind: 'union' }>, offset: number, value: ZUnion): void {
     const bits = unionBitSize(type);
-    if (offset < 0 || offset + bits > this.bytes.length * 8) panic('index out of bounds');
+    this.checkRegion(offset, bits);
     this.access(true, offset, bits, () => {
       const layout = unionOffsets(type);
       if (value.copyBackingTo) {
@@ -641,7 +711,7 @@ export class BufferMemory {
         if (layout.tag === undefined) (this.readAggregate(type, offset) as ZUnion).tag = value.tag;
         return;
       }
-      this.clearUnionRegion(offset, bits, value.payloadInitialized);
+      this.clearRegion(offset, bits, value.payloadInitialized);
       if (!value.payloadInitialized) return;
       const tag = activeUnionIndex(value);
       (this.readAggregate(type, offset) as ZUnion).tag = tag;
@@ -654,7 +724,7 @@ export class BufferMemory {
     });
   }
 
-  private clearUnionRegion(offset: number, bits: number, initialized: boolean): void {
+  private clearRegion(offset: number, bits: number, initialized: boolean): void {
     if (bits === 0) return;
     const storage = sparseByteValues.get(this.bytes);
     if (storage && offset % 8 === 0 && bits % 8 === 0) {
@@ -681,14 +751,12 @@ export class BufferMemory {
   private copyRegionRaw(destination: BufferMemory, offset: number, start: number, bits: number): void {
     const sourceBytes = sparseByteValues.get(this.bytes);
     const destinationBytes = sparseByteValues.get(destination.bytes);
-    const fragments = this.pendingByteReferences(offset, start, bits);
     if (sourceBytes && destinationBytes && offset % 8 === 0 && start % 8 === 0 && bits % 8 === 0) {
       const references = this.sparseReferences(offset, start, bits);
       copySparseBytes(sourceBytes, destinationBytes, offset / 8, start / 8, bits / 8);
       for (const [at] of sparseEntriesInRange(destination.referenceOffsets, start, bits))
         destination.referenceOffsets.delete(at);
       destination.restoreReferences(references);
-      destination.restoreByteReferences(fragments);
       return;
     }
     spendMemory(Math.ceil(bits / 8) * 20);
@@ -701,7 +769,6 @@ export class BufferMemory {
     for (let bit = 0; bit < bits; bit++) destination.referenceOffsets.delete(start + bit);
     destination.writeRegionBytes(start, bits, bytes);
     destination.restoreReferences(references);
-    destination.restoreByteReferences(fragments);
   }
 
   private sparseReferences(offset: number, start: number, bits: number): LocatedReference[] {
@@ -710,49 +777,14 @@ export class BufferMemory {
       const reference = this.currentReference(at);
       if (reference) references.push({ ...reference, offset: start + at - offset });
     }
-    for (const reference of this.pendingByteReferences(offset, offset, bits)) {
-      if (reference.offset < offset || reference.offset + reference.bits > offset + bits) continue;
-      if (this.readBits(reference.offset, reference.bits) === reference.id)
-        references.push({ ...reference, offset: reference.offset + start - offset });
-    }
     return references;
-  }
-
-  private byteReferences(offset: number, start: number, bits: number): LocatedReference[] {
-    const references = this.pendingByteReferences(offset, start, bits);
-    const read = (at: number, count: number): bigint => this.readBits(at, count);
-    for (const [at, reference] of sparseEntriesInRange(this.referenceOffsets, offset - 63, bits + 63)) {
-      if (matchesReferenceRange(reference, at, offset, bits, read))
-        references.push({ ...reference, offset: at + start - offset });
-    }
-    return references;
-  }
-
-  private pendingByteReferences(offset: number, start: number, bits: number): LocatedReference[] {
-    return candidateReferences(this.space.byteReferences.get(this.bytes), offset, start, bits, (at, count) =>
-      this.readBits(at, count)
-    );
-  }
-
-  private restoreByteReferences(references: readonly LocatedReference[]): void {
-    for (const reference of references) {
-      if (
-        reference.offset >= 0 &&
-        reference.offset + reference.bits <= this.bytes.length * 8 &&
-        this.readBits(reference.offset, reference.bits) === reference.id
-      ) {
-        this.restoreReferences([reference]);
-      } else {
-        recordCandidates(this.space, this.bytes, [reference]);
-      }
-    }
   }
 
   private restoreReferences(references: readonly LocatedReference[]): void {
     for (const reference of references) {
       this.referenceOffsets.set(reference.offset, reference);
       this.referenceHolds.set(reference.key, reference.value);
-      this.space.references.set(reference.key, reference.value);
+      this.space.keepReference(reference.key, reference.value);
     }
   }
 
@@ -772,7 +804,7 @@ export class BufferMemory {
   }
 
   private readBits(offset: number, bits: number): bigint {
-    if (offset < 0 || offset + bits > this.bytes.length * 8) panic('index out of bounds');
+    this.checkRegion(offset, bits);
     return this.access(false, offset, bits, () => this.readRawBits(offset, bits));
   }
 
@@ -792,8 +824,12 @@ export class BufferMemory {
   }
 
   private writeBits(offset: number, bits: number, value: bigint): void {
-    if (offset < 0 || offset + bits > this.bytes.length * 8) panic('index out of bounds');
+    this.checkRegion(offset, bits);
     this.access(true, offset, bits, () => this.writeRawBits(offset, bits, value));
+  }
+
+  private checkRegion(offset: number, bits: number): void {
+    if (offset < 0 || offset + bits > this.bytes.length * 8) panic('index out of bounds');
   }
 
   private writeRawBits(offset: number, bits: number, value: bigint): void {
@@ -824,9 +860,7 @@ export class BufferMemory {
     const key = referenceKey(id, bits);
     const stored = this.referenceOffsets.get(offset);
     const value =
-      (stored?.key === key ? stored.value : undefined) ??
-      this.referenceHolds.get(key) ??
-      this.space.references.get(key);
+      (stored?.key === key ? stored.value : undefined) ?? this.referenceHolds.get(key) ?? this.space.reference(key);
     if (value) {
       this.referenceHolds.set(key, value);
       this.referenceOffsets.set(offset, { key, value, id, bits });
@@ -859,7 +893,7 @@ export class BufferMemory {
     }
     if (value instanceof Pointer && type.kind === 'pointer') rememberPointerType(value, type.child);
     const key = referenceKey(id, bits);
-    this.space.references.set(key, value);
+    this.space.keepReference(key, value);
     this.referenceHolds.set(key, value);
     this.referenceOffsets.set(offset, { key, value, id, bits });
     this.writeBits(offset, bits, id);
@@ -885,74 +919,45 @@ function unionBitSize(type: Extract<Type, { kind: 'union' }>): number {
   return type.layout === 'packed' ? bitSizeOf(type) : sizeOf(type) * 8;
 }
 
+function encodesReferences(type: Type, cached: WeakMap<Type, boolean>, spend: () => void): boolean {
+  spend();
+  const prior = cached.get(type);
+  if (prior !== undefined) return prior;
+  let result = false;
+  switch (type.kind) {
+    case 'pointer': {
+      result = true;
+      break;
+    }
+    case 'array':
+    case 'optional': {
+      result = encodesReferences(type.child, cached, spend);
+      break;
+    }
+    case 'error_union': {
+      result = encodesReferences(type.payload, cached, spend);
+      break;
+    }
+    case 'struct': {
+      result =
+        !usesFieldLayout(type) ||
+        Boolean(
+          type.fields?.some(
+            (field) => field.comptimeValue === undefined && encodesReferences(field.type, cached, spend)
+          )
+        );
+      break;
+    }
+    case 'union': {
+      result = Boolean(type.fields?.some((field) => encodesReferences(field.type, cached, spend)));
+      break;
+    }
+  }
+  cached.set(type, result);
+  return result;
+}
+
 function referenceKey(id: bigint, bits: number): string {
   const projection = bits === 16 ? 'error' : 'address';
   return `${id} ${projection}`;
-}
-
-function recordCandidates(space: BufferMemorySpace, storage: object, references: readonly LocatedReference[]): void {
-  let candidates = space.byteReferences.get(storage);
-  if (!candidates) {
-    candidates = new Map();
-    space.byteReferences.set(storage, candidates);
-  }
-  for (const reference of references) {
-    spendMemory();
-    let at = candidates.get(reference.offset);
-    if (!at) {
-      at = new Map();
-      candidates.set(reference.offset, at);
-    }
-    if (!at.has(reference.key)) reserveMemory(1);
-    at.set(reference.key, reference);
-  }
-}
-
-function candidateReferences(
-  candidates: ReferenceCandidates | undefined,
-  source: number,
-  target: number,
-  bits: number,
-  read: (offset: number, width: number) => bigint | undefined
-): LocatedReference[] {
-  if (!candidates) return [];
-  const references: LocatedReference[] = [];
-  for (const [offset, records] of sparseEntriesInRange(candidates, source - 63, bits + 63)) {
-    for (const reference of records.values()) {
-      spendMemory();
-      if (matchesReferenceRange(reference, offset, source, bits, read))
-        references.push({ ...reference, offset: target + offset - source });
-    }
-  }
-  return references;
-}
-
-function matchesReferenceRange(
-  reference: StoredReference,
-  offset: number,
-  source: number,
-  bits: number,
-  read: (offset: number, width: number) => bigint | undefined
-): boolean {
-  const start = Math.max(offset, source);
-  const width = Math.min(offset + reference.bits, source + bits) - start;
-  if (width <= 0) return false;
-  const expected = (reference.id >> BigInt(start - offset)) & ((1n << BigInt(width)) - 1n);
-  return read(start, width) === expected;
-}
-
-function readLogicalBits(bytes: readonly Value[], offset: number, width: number): bigint | undefined {
-  let bits = 0n;
-  for (let index = 0; index < width;) {
-    spendMemory();
-    const position = offset + index;
-    const shift = position % 8;
-    const byte = bytes[Math.floor(position / 8)];
-    if (typeof byte !== 'bigint') return undefined;
-    const count = Math.min(8 - shift, width - index);
-    const mask = (1n << BigInt(count)) - 1n;
-    bits |= ((byte >> BigInt(shift)) & mask) << BigInt(index);
-    index += count;
-  }
-  return bits;
 }

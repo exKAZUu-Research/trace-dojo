@@ -1,5 +1,5 @@
 import { checkOutputSize } from './allocation';
-// code-gauge-allow-file fileNcss 827 -- Keeps format parsing and rendering with their shared specifiers.
+// code-gauge-allow-file fileNcss 832 -- Keeps format parsing and rendering with their shared specifiers.
 /**
  * Zig's formatted printing (`std.Io.Writer.print` and `printValue`), transcribed so that output matches byte for byte.
  * Formatting works on bytes, as Zig's strings are bytes.
@@ -133,23 +133,22 @@ export function parseFormat(
 }
 
 // code-gauge-allow functionCognitiveComplexity 22 -- Scans escaped braces and placeholders while preserving literal write boundaries.
-// code-gauge-allow functionNcss 36 -- Keeps the format lexer and its literal accumulation together.
-export function parseFormatTemplate(format: readonly number[], spend: (cost?: number) => void): FormatTemplate {
+// code-gauge-allow functionNcss 37 -- Keeps the format lexer and its literal accumulation together.
+export function parseFormatTemplate(format: Uint8Array, spend: (cost?: number) => void): FormatTemplate {
   const segments: TemplateSegment[] = [];
   let literal: number[] = [];
   let index = 0;
   for (;;) {
-    const start = index;
-    while (index < format.length && format[index] !== 0x7b && format[index] !== 0x7d) index++;
-    let end = index;
-    let unescape = false;
-    if (index + 1 < format.length && format[index + 1] === format[index]) {
-      unescape = true;
-      end++;
-      index += 2;
+    while (index < format.length && format[index] !== 0x7b && format[index] !== 0x7d) {
+      spend();
+      literal.push(format[index++]);
     }
-    for (let at = start; at < end; at++) literal.push(format[at]);
-    if (unescape) continue;
+    spend();
+    if (index + 1 < format.length && format[index + 1] === format[index]) {
+      literal.push(format[index]);
+      index += 2;
+      continue;
+    }
     if (literal.length > 0) {
       segments.push({ kind: 'literal', bytes: literal });
       literal = [];
@@ -158,14 +157,27 @@ export function parseFormatTemplate(format: readonly number[], spend: (cost?: nu
     if (format[index] === 0x7d) throw new FormatError('missing opening {');
     index++;
     const begin = index;
-    while (index < format.length && format[index] !== 0x7d) index++;
+    while (index < format.length && format[index] !== 0x7d) {
+      spend();
+      index++;
+    }
     if (index >= format.length) throw new FormatError('missing closing }');
-    spend(index - begin + 1);
-    const placeholder = parsePlaceholder(format.slice(begin, index));
+    const placeholder = parsePlaceholder(format.subarray(begin, index), spend);
     index++;
     segments.push({ kind: 'placeholder', ...placeholder });
   }
-  return { segments, length: format.length, text: decodeUtf8(format) };
+  let text: string | undefined;
+  return {
+    segments,
+    length: format.length,
+    get text() {
+      if (text === undefined) {
+        spend(format.length);
+        text = decodeUtf8(format);
+      }
+      return text;
+    },
+  };
 }
 
 type ParsedSpecifier = { kind: 'none' } | { kind: 'number'; value: bigint } | { kind: 'named'; name: string };
@@ -187,7 +199,10 @@ function isAlign(byte: number | undefined): boolean {
 }
 
 /** `std.fmt.Placeholder.parse`. */
-function parsePlaceholder(bytes: readonly number[]): {
+function parsePlaceholder(
+  bytes: Uint8Array,
+  spend: (cost?: number) => void
+): {
   arg: ParsedSpecifier;
   spec: string;
   fill: number;
@@ -202,14 +217,18 @@ function parsePlaceholder(bytes: readonly number[]): {
     if (peek(0) === 0x5b) {
       i++;
       const start = i;
-      while (i < bytes.length && bytes[i] !== 0x5d) i++;
-      const name = decodeIdentifierBytes(bytes.slice(start, i));
+      while (i < bytes.length && bytes[i] !== 0x5d) {
+        spend();
+        i++;
+      }
+      const name = decodeIdentifierBytes(bytes.subarray(start, i), spend);
       if (peek(0) !== 0x5d) throw new FormatError('Expected closing ]');
       i++;
       return { kind: 'named', name };
     }
     let value: bigint | undefined;
     while (peek(0) !== undefined && (peek(0) as number) >= 0x30 && (peek(0) as number) <= 0x39) {
+      spend();
       value = (value ?? 0n) * 10n + BigInt((peek(0) as number) - 0x30);
       if (value > (1n << 64n) - 1n) throw new FormatError('format option overflows usize');
       i++;
@@ -218,8 +237,12 @@ function parsePlaceholder(bytes: readonly number[]): {
   };
   const arg = parseSpecifier();
   const specStart = i;
-  while (i < bytes.length && bytes[i] !== 0x3a) i++;
-  const spec = decodeUtf8(bytes.slice(specStart, i));
+  while (i < bytes.length && bytes[i] !== 0x3a) {
+    spend();
+    i++;
+  }
+  spend(i - specStart);
+  const spec = decodeUtf8(bytes.subarray(specStart, i));
   const colon = char();
   if (colon !== undefined && colon !== 0x3a)
     throw new FormatError(`expected : or }, found '${String.fromCodePoint(colon)}'`);

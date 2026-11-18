@@ -16,7 +16,7 @@ import {
   rem,
 } from './arith';
 import type { Expression, ExpressionOf, Span } from './ast';
-import { activeUnionIndex, BufferMemory, unionTagValue } from './bufferMemory';
+import { activeUnionIndex, unionTagValue } from './bufferMemory';
 // code-gauge-allow-file fileNcss 714 -- The file holds one layer of the compiler, whose parts share its private state.
 import { enumLookup } from './enumLookup';
 import { ExpressionCompiler, log2IntType } from './expressions';
@@ -1009,20 +1009,11 @@ export abstract class BuiltinCompiler extends ExpressionCompiler {
           panic(PANIC.memcpyAlias);
         if (isUndefinedMemory(valuesOf[0]) || isUndefinedMemory(valuesOf[1])) throw new MemoryFault();
         frame.runtime.spend(Number(input.length) * cost);
-        const restoreReferences =
-          target.child === U8
-            ? BufferMemory.byteCopyReferences(
-                new Pointer(out.slots, out.start),
-                new Pointer(input.slots, input.start),
-                Number(input.length)
-              )
-            : undefined;
         const values = input.slots.slots.slice(input.start, input.start + Number(input.length)).map(copyForStorage);
         for (const [index, value] of values.entries()) {
           frame.runtime.spend(cost * 2);
           storeInto(out.slots, out.start + index, value);
         }
-        restoreReferences?.();
         return;
       },
       expression

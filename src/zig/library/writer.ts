@@ -1,6 +1,5 @@
 import { checkOutputSize } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
-import { byteValues } from '../builtins';
 import type { FormatOutput } from '../fmt';
 import { MemoryFault } from '../memoryFault';
 import type { Frame } from '../runtime';
@@ -234,8 +233,10 @@ export function bufferedBytes(frame: Frame, state: WriterState): number[] {
   return writerBytes(frame, bufferedSlice(state));
 }
 
-export function writerBytes(frame: Frame, value: Value): number[] {
-  return byteValues(value, (cost) => frame.runtime.spend(cost * 2)).map(Number);
+export function writerBytes(frame: Frame, value: Slice): number[] {
+  const bytes = value.readBytes((cost) => frame.runtime.spend(cost));
+  frame.runtime.spend(bytes.length);
+  return [...bytes];
 }
 
 export function bufferingWriter(): WriterState {

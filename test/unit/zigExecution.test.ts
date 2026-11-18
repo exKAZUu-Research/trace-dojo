@@ -1070,7 +1070,7 @@ pub fn main() void {
 });
 
 test('large string literals respect storage limits without overflowing the host call stack', () => {
-  expect(executeProgram('zig', `pub fn main() void { const s = "${'a'.repeat(900_000)}"; _ = s; }`)).toMatchObject({
+  expect(executeProgram('zig', `pub fn main() void { const s = "${'a'.repeat(200_000)}"; _ = s; }`)).toMatchObject({
     kind: 'executed',
     uncaughtException: undefined,
   });
@@ -1242,10 +1242,11 @@ test('literal decoding rejects raw control bytes while accepting escaped control
 });
 
 test('literal storage is bounded cumulatively and resets for each compilation', () => {
-  const text = 'x'.repeat(600_000);
+  const text = 'x'.repeat(100_000);
+  const extra = 'y'.repeat(900_001);
   for (const source of [
-    `const a = "${text}"; const b = "${text}"; pub fn main() void {}`,
-    `const @"${text}" = 1; const @"${text}y" = 2; pub fn main() void {}`,
+    `const a = "${text}"; const b = "${extra}"; pub fn main() void {}`,
+    `const @"${text}" = 1; const @"${extra}" = 2; pub fn main() void {}`,
   ]) {
     expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
   }
@@ -1326,7 +1327,7 @@ test('large ldexp exponents overflow or underflow without huge integer shifts', 
 });
 
 test('source-sized plain, quoted, and base64 output follows the output limit', () => {
-  const text = 'a'.repeat(900_000);
+  const text = 'a'.repeat(120_000);
   for (const source of [
     `const std=@import("std");pub fn main()void{std.debug.print("${text}",.{});}`,
     `const std=@import("std");pub fn main()void{std.debug.print("{q}",.{"${text}"});}`,
@@ -1800,6 +1801,19 @@ test('a whole union store clears overlapping bytes in allocator storage', () => 
 });
 
 test.each([
+  ['?u8', 'u16', '0x1234', '0'],
+  ['?u16', 'u32', '0x12345678', '0'],
+  ['?u8', 'u32', '0x12345678', '12340000'],
+])('anonymous union stores replace the entire %s payload within %s', (optional, wide, initial, expected) => {
+  const source = `const std=@import("std");const U=union(enum){o:${optional},w:${wide}};pub fn main()void{var u:U=.{.w=${initial}};const p=&u.w;u=.{.o=null};std.debug.print("{x}",.{p.*});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: expected,
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
   ['', 'std.debug.print("{}",.{p.a});', 'invalid enum value'],
   ['p.*=.{.a=7};bytes[0]=255;', 'std.debug.print("{t}",.{p.*});', 'invalid enum value'],
   ['p.*=.{.a=7};bytes[0]=255;', 'std.debug.print("{any}",.{p.*});', 'invalid enum value'],
@@ -1820,6 +1834,14 @@ test('copying an invalid union tag preserves its raw bytes until an operation re
     stderr: 'fe 7 fe',
     uncaughtException: undefined,
   });
+});
+
+test.each([
+  [254, 'false', undefined],
+  [255, '', 'panic: switch on corrupt value'],
+])('union equality compares raw tags before inspecting the variant for tag %s', (other, stderr, uncaughtException) => {
+  const source = `const std=@import("std");const U=union(enum(u8)){a:u8,b:u8};pub fn main()!void{var bytes:[8]u8=undefined;var f=std.heap.FixedBufferAllocator.init(&bytes);const p=try f.allocator().create(U);const q=try f.allocator().create(U);p.*=.{.a=7};q.*=.{.a=7};bytes[0]=255;bytes[2]=${other};std.debug.print("{}",.{std.meta.eql(p.*,q.*)});}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'executed', stderr, uncaughtException });
 });
 
 test.each([
@@ -1864,6 +1886,56 @@ test.each([
   const result = executeProgram('zig', source);
   expect(result).toMatchObject({ kind: 'executed', stderr: clear, uncaughtException: undefined });
   if (result.kind === 'executed') expect(result.finalTurtles).toHaveLength(count);
+});
+
+test.each([
+  ['p:*Turtle', '.p=p', '8', 'for(a.bytes,0..)|v,i|b.bytes[i]=v;', '', 'false'],
+  [
+    'p:*Turtle',
+    '.p=p',
+    '8',
+    'var temp:[8]u8=undefined;for(a.bytes,0..)|v,i|temp[i]=v;@memcpy(&b.bytes,&temp);',
+    '',
+    'false',
+  ],
+  ['p:*Turtle', '.p=p', '8', 'var temp=a.bytes;_=&temp;@memcpy(&b.bytes,&temp);', '', 'false'],
+  [
+    'p:*Turtle',
+    '.p=p',
+    '8',
+    'var temp:[8]u8=undefined;@memcpy(&temp,&a.bytes);const copied=identity(temp);@memcpy(&b.bytes,&copied);',
+    '',
+    'false',
+  ],
+  ['p:*Turtle', '.p=p', '8', 'for(a.bytes,0..)|v,i|b.bytes[i]=v;', 'b.bytes[0]^=1;', 'true'],
+  [
+    'nested:extern struct{prefix:usize,p:*Turtle}',
+    '.nested=.{.prefix=7,.p=p}',
+    '16',
+    'for(a.bytes,0..)|v,i|b.bytes[i]=v;',
+    '',
+    'false',
+  ],
+  ['refs:[2]?*Turtle', '.refs=.{null,p}', '16', 'for(a.bytes,0..)|v,i|b.bytes[i]=v;', '', 'false'],
+])(
+  'ordinary byte stores recover surviving turtle pointers for %s %s',
+  (fields, initial, length, copy, overwrite, clear) => {
+    const source = `const std=@import("std");const U=extern union{${fields},bytes:[${length}]u8};fn identity(value:[${length}]u8)[${length}]u8{return value;}fn make(a:std.mem.Allocator)!U{const p=try a.create(Turtle);p.*=Turtle.init(0,1);return .{${initial}};}pub fn main(init:std.process.Init)!void{var a=try make(init.gpa);var b:U=.{.bytes=@splat(0)};${copy}@memset(&a.bytes,0);${overwrite}const t=Turtle.init(0,0);std.debug.print("{}",.{t.canMoveForward()});_=&b;}`;
+    expect(executeProgram('zig', source)).toMatchObject({
+      kind: 'executed',
+      stderr: clear,
+      uncaughtException: undefined,
+    });
+  }
+);
+
+test.each([500, 1000])('reusable raw buffers do not accumulate work after %s distinct pointer copies', (count) => {
+  const source = `const std=@import("std");const U=extern union{p:*u8,bytes:[8]u8};pub fn main()void{var values:[${count}]u8=undefined;var tmp:[8]u8=undefined;var b:U=undefined;_=&tmp;for(0..${count})|i|{const a=U{.p=&values[i]};@memcpy(&tmp,&a.bytes);@memcpy(&b.bytes,&tmp);}std.debug.print("{}",.{b.p==&values[${count}-1]});}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: 'true',
+    uncaughtException: undefined,
+  });
 });
 
 test.each([
@@ -2135,6 +2207,19 @@ test.each(['//', '///', '//!'])('the Zig parser charges nested %s comment text t
   const source = `const S=struct{\n${prefix} ${'comment '.repeat(40)}\nconst x=1;\n};pub fn main()void{_=S;}\n`;
   const budget = new ExecutionBudget();
   budget.spend(LIMITS.maxOperations - 200);
+  expect(() => parseZig(source, budget)).toThrow(expect.objectContaining({ limit: 'operations' }));
+});
+
+test.each([
+  ['quoted ASCII', `const text="${'x'.repeat(512)}";`, 1300],
+  ['quoted UTF-8', `const text="${'あ'.repeat(256)}";`, 1200],
+  ['multiline', `const text=\n\\\\${'x'.repeat(384)}\n;`, 1300],
+  ['quoted identifier', `const @"${'x'.repeat(384)}"=1;`, 1300],
+])('the Zig parser meters decoding for %s', (_shape, declaration, remaining) => {
+  const source = `${declaration}pub fn main()void{}`;
+  expect(() => parseZig(source)).not.toThrow();
+  const budget = new ExecutionBudget();
+  budget.spend(LIMITS.maxOperations - remaining);
   expect(() => parseZig(source, budget)).toThrow(expect.objectContaining({ limit: 'operations' }));
 });
 
@@ -2545,7 +2630,7 @@ test('long float input and import paths return controlled results', () => {
       `const std=@import("std");pub fn main()void{const x=std.fmt.parseFloat(f64,"${digits}") catch 0;_=x;}`
     )
   ).not.toThrow();
-  expect(executeProgram('zig', `const value=@import("${'x'.repeat(900_000)}");pub fn main()void{_=value;}`).kind).toBe(
+  expect(executeProgram('zig', `const value=@import("${'x'.repeat(200_000)}");pub fn main()void{_=value;}`).kind).toBe(
     'compileError'
   );
 });
@@ -4061,6 +4146,18 @@ test.each([
 test('a labeled switch analyzes prongs reachable through continuation', () => {
   const source = `const U=union(enum){a:u8,b:u8};pub fn main()void{const u=U{.a=7};retry:switch(u){.a=>continue :retry .{.b=1},.b=>|v|{_=v;const bad:u8=300;_=bad;}}}`;
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});
+
+test.each([
+  '.a=>|*p|{const a:[p.*]u8=@splat(0);std.debug.print("{} {}",.{a.len,p==&u.a});},.b=>unreachable',
+  '.b=>unreachable,inline else=>|*p,tag|{_=tag;const a:[p.*]u8=@splat(0);std.debug.print("{} {}",.{a.len,p==&u.a});}',
+])('a known union pointer capture provides its constant value and identity for %s', (prongs) => {
+  const source = `const std=@import("std");const U=union(enum){a:u8,b:u8};pub fn main()void{const u=U{.a=3};switch(u){${prongs}}}`;
+  expect(executeProgram('zig', source)).toMatchObject({
+    kind: 'executed',
+    stderr: '3 true',
+    uncaughtException: undefined,
+  });
 });
 
 test.each(['eql', 'replaceScalar'])('native %s scans charge every visited element', (method) => {
@@ -5619,6 +5716,17 @@ test('shared format syntax binds each argument layout and backing view independe
   });
 });
 
+test.each(['std.debug.print(&format,.{});', '_=std.fmt.count(&format,.{});'])(
+  'format-template compilation meters a constant byte array for %s',
+  (body) => {
+    const source = `const std=@import("std");const format:[768]u8=@splat(97);pub fn main()void{${body}}`;
+    expect(() => compileSource(source)).not.toThrow();
+    const budget = new ExecutionBudget();
+    budget.spend(LIMITS.maxOperations - 1500);
+    expect(() => compileSource(source, { budget })).toThrow(expect.objectContaining({ limit: 'operations' }));
+  }
+);
+
 test.each(['x'.repeat(100_000), '{{}}'.repeat(25_000)])(
   'shared large formats retain the output budget (%#)',
   (format) => {
@@ -5629,7 +5737,7 @@ test.each(['x'.repeat(100_000), '{{}}'.repeat(25_000)])(
   }
 );
 
-test('distinct large format views reserve compilation storage before copying', () => {
+test('distinct large format views consume the compilation budget independently', () => {
   const views = Array.from({ length: 11 }, (_, i) => `const f${i}=base[${i}..${i + 100_000}];`).join('');
   const calls = Array.from({ length: 11 }, (_, i) => `std.debug.print(f${i},.{});`).join('');
   expect(
@@ -5637,7 +5745,7 @@ test('distinct large format views reserve compilation storage before copying', (
       'zig',
       `const std=@import("std");const base="${'x'.repeat(100_010)}";${views}pub fn main()void{${calls}}`
     )
-  ).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+  ).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
 });
 
 test.each(['_=a;', 'const s:[]const u8=&a;_=s;'])(
@@ -6287,14 +6395,14 @@ test('tag and error names share immutable backing across calls and matching name
 });
 
 test.each(['error', 'enum'])('long %s names are reused through retained pointer identities', (kind) => {
-  const name = 'x'.repeat(100_000);
+  const name = 'x'.repeat(50_000);
   const declaration = kind === 'error' ? '' : `const E=enum{@"${name}"};`;
   const value = kind === 'error' ? `var e:anyerror=error.@"${name}";` : `var e:E=.@"${name}";`;
   const call = kind === 'error' ? '@errorName(e)' : '@tagName(e)';
   const source = `const std=@import("std");${declaration}pub fn main()void{${value}_=&e;const first=${call};var same=true;for(0..30)|_|{const next=${call};same=same and &first[0]==&next[0];}std.debug.print("{} {}",.{same,first.len});}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
-    stderr: 'true 100000',
+    stderr: `true ${name.length}`,
     uncaughtException: undefined,
   });
 });
@@ -9566,15 +9674,16 @@ test.each([
 });
 
 test.each(['fixed', 'allocated'])('formatting keeps %s writer bytes separate from stream output', (writer) => {
-  const format = writer === 'fixed' ? '{s:410000}' : `${'a'.repeat(409_997)}{s}`;
+  const length = writer === 'fixed' ? 410_000 : 150_000;
+  const format = writer === 'fixed' ? `{s:${length}}` : `${'a'.repeat(length - 3)}{s}`;
   const body =
     writer === 'fixed'
-      ? `var b:[410000]u8=undefined;var w=std.Io.Writer.fixed(&b);try w.print("${format}",.{"a"});const data=w.buffered();`
+      ? `var b:[${length}]u8=undefined;var w=std.Io.Writer.fixed(&b);try w.print("${format}",.{"a"});const data=w.buffered();`
       : `const data=try std.fmt.allocPrint(std.heap.page_allocator,"${format}",.{"aaa"});`;
   const source = `const std=@import("std");pub fn main()!void{${body}std.debug.print("{} {c}",.{data.len,data[data.len-1]});}`;
   expect(executeProgram('zig', source)).toMatchObject({
     kind: 'executed',
-    stderr: '410000 a',
+    stderr: `${length} a`,
     uncaughtException: undefined,
   });
 });

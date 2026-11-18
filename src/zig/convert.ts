@@ -33,7 +33,7 @@ export function convertFile(root: Node, budget = new ExecutionBudget()): SourceF
   conversionBudget = budget;
   source = root.text;
   validateCommentText(root, source, budget);
-  literals = new LiteralDecoder();
+  literals = new LiteralDecoder(budget);
   functions = [];
   const { members, fields } = containerMembers(root);
   return { members, fields, functions };
@@ -41,7 +41,7 @@ export function convertFile(root: Node, budget = new ExecutionBudget()): SourceF
 
 /** The text of the file being converted, for checks of the spaces around operators. */
 let source = '';
-let literals = new LiteralDecoder();
+let literals: LiteralDecoder;
 let functions: FunctionDeclaration[] = [];
 let conversionBudget: ExecutionBudget;
 

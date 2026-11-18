@@ -1,5 +1,5 @@
 import type { Span } from '../ast';
-import { packedValuesEqual } from '../bufferMemory';
+import { activeUnionIndex, packedValuesEqual, unionTagValue } from '../bufferMemory';
 import type { SemaApi } from '../semaBase';
 import { singleValueOf } from '../singleValue';
 import type { Type } from '../types';
@@ -70,11 +70,7 @@ export function valuesEqual(type: Type | undefined, a: Value, b: Value, spend: (
   if (a instanceof ZArray && b instanceof ZArray)
     return arraysEqual(type?.kind === 'array' ? type.child : undefined, a, b, spend);
   if (a instanceof ZStruct && b instanceof ZStruct) return structsEqual(type, a, b, spend);
-  if (a instanceof ZUnion && b instanceof ZUnion)
-    return (
-      a.tag === b.tag &&
-      valuesEqual(type?.kind === 'union' ? type.fields?.[a.tag]?.type : undefined, a.slots[0], b.slots[0], spend)
-    );
+  if (a instanceof ZUnion && b instanceof ZUnion) return unionsEqual(type, a, b, spend);
   if (a instanceof Some && b instanceof Some) return valuesEqual(undefined, a.value, b.value, spend);
   if (a instanceof Slice && b instanceof Slice) {
     const left = storageLocation(a.target.slots, a.start);
@@ -82,6 +78,13 @@ export function valuesEqual(type: Type | undefined, a: Value, b: Value, spend: (
     return left.storage === right.storage && left.index === right.index && a.lengthValue === b.lengthValue;
   }
   return scalarValuesEqual(a, b);
+}
+
+function unionsEqual(type: Type | undefined, a: ZUnion, b: ZUnion, spend: () => void): boolean {
+  const tags = type?.kind === 'union' ? type.tagType?.fields : undefined;
+  if (tags ? unionTagValue(a, tags) !== unionTagValue(b, tags) : a.tag !== b.tag) return false;
+  const index = activeUnionIndex(a, 'switch on corrupt value');
+  return valuesEqual(type?.kind === 'union' ? type.fields?.[index]?.type : undefined, a.slots[0], b.slots[0], spend);
 }
 
 function arraysEqual(child: Type | undefined, a: ZArray, b: ZArray, spend: () => void): boolean {

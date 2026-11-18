@@ -2,7 +2,7 @@
 import { transferCost } from '../allocation';
 import { indexOutOfBounds, PANIC, panic } from '../arith';
 import type { Expression, Span } from '../ast';
-import { BufferMemory, zeroPhysicalValue } from '../bufferMemory';
+import { zeroPhysicalValue } from '../bufferMemory';
 import { enumLookup } from '../enumLookup';
 import { type AnyFloat, BigFloat, compareFloats, floatFromBigInt, minMaxFloat } from '../floats';
 import { sizeOf } from '../layout';
@@ -29,7 +29,7 @@ import {
 import {
   isUndefinedMemory,
   NULL,
-  Pointer,
+  type Pointer,
   Slice,
   storageByteLocation,
   storageLocation,
@@ -949,20 +949,11 @@ function copier(name: string): () => Member {
       }
       if (cost === 0) return;
       const spend = nativeBudget(sema, frame);
-      const restoreReferences =
-        type === U8
-          ? BufferMemory.byteCopyReferences(
-              new Pointer(target.target, target.start),
-              new Pointer(values.target, values.start),
-              Number(values.lengthValue)
-            )
-          : undefined;
       for (let position = 0n; position < values.lengthValue; position++) {
         spend(cost * 2);
         const index = backwards ? values.lengthValue - position - 1n : position;
         storeSliceValue(target, Number(index), values.get(Number(index)));
       }
-      restoreReferences?.();
       return;
     });
   });
