@@ -15,6 +15,7 @@ import {
   isIntrinsic,
   isPropertyKeyLiteral,
   literalType,
+  neverType,
   numberType,
   type Property,
   regularOf,
@@ -442,6 +443,12 @@ export class MemberChecker {
   private indexedTypeAt(access: IndexAccess, objectType: Type, indexType: Type): Type {
     if (isAnyLike(objectType)) return anyType;
     const index = regularOf(indexType);
+    // As TypeScript's `getPropertyTypeForIndexType`, any key reads `never` from `never`.
+    if (
+      isIntrinsic(objectType, 'never') &&
+      this.c.relations.isAssignable(index, unionOf([stringType, numberType, symbolType]))
+    )
+      return neverType;
     if (isGenericKey(index))
       return this.checkedGenericIndex(access, objectType, this.c.typeOperators.indexedAccess(objectType, index));
     // A key that is not generic reads the object a type parameter stands for through its constraint.

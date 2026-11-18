@@ -114,7 +114,10 @@ export class OperatorChecker {
     if (isAnyLike(type)) return false;
     const constraint = this.c.baseConstraint(type);
     const members = constraint.kind === 'union' ? constraint.types : [constraint];
-    return members.some((member) => !isAnyLike(member) && this.c.relations.isAssignable(member, symbolType));
+    return members.some(
+      (member) =>
+        !isAnyLike(member) && !isIntrinsic(member, 'never') && this.c.relations.isAssignable(member, symbolType)
+    );
   }
 
   private checkDelete(argument: TreeNode): void {
@@ -163,9 +166,10 @@ export class OperatorChecker {
   isNumberLike(type: Type): boolean {
     const regular = regularOf(type);
     if (isAnyLike(regular) || regular === errorType) return true;
-    return this.c.relations.isAssignable(regular, numberType) && !isIntrinsic(regular, 'never');
+    return this.c.relations.isAssignable(regular, numberType);
   }
 
+  /** Whether a type is a bigint; `never` is not, as operators take it for a number unless the other operand is a bigint. */
   isBigintLike(type: Type): boolean {
     const regular = regularOf(type);
     return !isAnyLike(regular) && !isIntrinsic(regular, 'never') && this.c.relations.isAssignable(regular, bigintType);
@@ -271,7 +275,7 @@ export class OperatorChecker {
     const l = this.c.relations.removeNullish(leftType);
     const r = this.c.relations.removeNullish(rightType);
     if (this.isNumberLike(l) && this.isNumberLike(r)) return numberType;
-    if (this.isBigintLike(l) && this.isBigintLike(r)) return bigintType;
+    if ([l, r].every((type) => this.isBigintLike(type) || isIntrinsic(type, 'never'))) return bigintType;
     this.reportOperator(node, '+', leftType, rightType);
     return errorType;
   }
@@ -303,14 +307,15 @@ export class OperatorChecker {
           : numberType;
     const leftBig = this.isBigintLike(l);
     const rightBig = this.isBigintLike(r);
-    if (leftBig !== rightBig) {
+    if (leftBig !== rightBig && !isIntrinsic(l, 'never') && !isIntrinsic(r, 'never')) {
       this.reportOperator(node, operator, leftType, rightType);
       return errorType;
     }
-    if (leftBig && operator === '>>>') {
+    const big = leftBig || rightBig;
+    if (big && operator === '>>>') {
       this.c.error(node, "演算子 '>>>' は型 'bigint' には使えません。");
     }
-    return leftBig ? bigintType : numberType;
+    return big ? bigintType : numberType;
   }
 
   /** Reports operands that are or may be `null` or `undefined`, returning whether both are usable. */

@@ -11,6 +11,7 @@ import {
   isIntrinsic,
   isPropertyKeyLiteral,
   literalType,
+  neverType,
   type ObjectType,
   regularOf,
   simpleProperty,
@@ -297,6 +298,8 @@ export class BindingPatterns {
 
   destructuredProperty(node: TreeNode, type: Type, name: string): Type {
     if (isAnyLike(type)) return anyType;
+    // As an element access does, any property of `never` is `never`.
+    if (isIntrinsic(type, 'never')) return neverType;
     if (type.kind === 'union') {
       // Each member must have the property, whose types then unite.
       const types = type.types.map((member) => this.c.silently(() => this.destructuredProperty(node, member, name)));

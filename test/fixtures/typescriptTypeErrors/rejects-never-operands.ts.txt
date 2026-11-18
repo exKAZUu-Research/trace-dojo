@@ -1,0 +1,28 @@
+function compareText(value: never): boolean {
+  return value > "a";
+}
+
+function shiftBig(value: never): bigint {
+  return value >>> 1n;
+}
+
+function multiply(value: never, other: number | bigint) {
+  return value * other;
+}
+
+function addSymbol(value: never, key: symbol) {
+  return value + key;
+}
+
+function readMember(value: never) {
+  return value.size;
+}
+
+function loop(value: never): void {
+  for (const item of value) console.log(item);
+}
+
+function accepted(value: never) {
+  const { size } = value;
+  return [value - 1n, value + "!", value[0], [...value], size, -value, value < value];
+}

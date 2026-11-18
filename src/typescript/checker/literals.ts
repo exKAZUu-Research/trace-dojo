@@ -112,7 +112,7 @@ export class LiteralChecker {
       return this.tupleOfElements(node, elements, types, isConstContext);
     }
     const elementTypes = types.map(({ type, spread }, index) =>
-      spread ? this.c.patterns.iteratedType(named(elements[index] as TreeNode)[0], type) : type
+      spread ? this.spreadElementType(elements[index] as TreeNode, type) : type
     );
     const array = {
       ...this.c.arrayType(elementTypes.length === 0 ? neverType : unionOf(elementTypes, true)),
@@ -134,7 +134,7 @@ export class LiteralChecker {
       if (type.kind === 'object' && type.objectKind === 'tuple') return type.tuple?.elements ?? [];
       return [
         {
-          type: this.c.arrayType(this.c.patterns.iteratedType(named(elements[index] as TreeNode)[0], type)),
+          type: this.c.arrayType(this.spreadElementType(elements[index] as TreeNode, type)),
           optional: false,
           rest: true,
         },
@@ -143,6 +143,11 @@ export class LiteralChecker {
     const tuple = { ...this.c.tupleType(tupleElements, isConstContext), id: newTypeId() };
     this.tupleLiterals.add(tuple.id);
     return tuple;
+  }
+
+  /** The elements a spread adds to an array literal, where `never` counts as an array, as TypeScript's `isArrayLikeType` has it. */
+  private spreadElementType(spread: TreeNode, type: Type): Type {
+    return isIntrinsic(type, 'never') ? neverType : this.c.patterns.iteratedType(named(spread)[0], type);
   }
 
   isArrayLiteral(type: Type): boolean {
