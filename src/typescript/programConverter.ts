@@ -1,7 +1,7 @@
 import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
 import type { ClassNode, IterationSource, Program, Statement } from '../javascript/ast';
-import { type Node, rowOf, unwrapParentheses } from '../javascript/convertNodes';
+import { nameOf, type Node, rowOf, unwrapParentheses } from '../javascript/convertNodes';
 import { isConstructorDefinition, ProgramConverter } from '../javascript/programConverter';
 import { PARAMETER_PROPERTY_ASSIGNMENT } from './jsView';
 
@@ -25,7 +25,7 @@ export class TypeScriptProgramConverter extends ProgramConverter {
     // `this.name = name` for a parameter property, which steps on the parameter's row as the assignment it stands for.
     this.statementConverters[PARAMETER_PROPERTY_ASSIGNMENT] = (node: Node) => {
       const row = node.startPosition.row;
-      const name = node.text;
+      const name = nameOf(node);
       return {
         kind: 'expression',
         expression: {
