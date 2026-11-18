@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 881 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 893 -- Holds the cases of one concern of the interpreter, which share their helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { withCleanupExceptions, withPendingException } from './errors';
 import { type Frame, PhpThrow, type Runtime } from './runtime';
@@ -83,7 +83,7 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean): number {
     retainTurtles(runtime, reached);
     return arrayCount;
   }
-  const freed = cycles ? garbage : freeable(garbage);
+  const freed = cycles ? garbage : freeable(garbage, runtime);
   if (freed.length === 0) {
     finishArrayCollection(runtime, arrayCandidates);
     retainTurtles(runtime, reached);
@@ -119,7 +119,7 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean): number {
     const afterArrays = new Set<PhpArray>();
     const after = mark(runtime, false, afterArrays);
     const remaining = freed.filter((object) => !after.has(object));
-    const { cyclic } = cyclicObjects(remaining);
+    const cyclic = cyclicObjects(new CollectionGraph(remaining, runtime), remaining);
     const protectedObjects = collectibleGraph(
       destructible.filter((object) => cyclic.has(object)),
       new Set(),
@@ -207,7 +207,7 @@ function releaseDroppedNow(runtime: Runtime, dropped: unknown[]): void {
   const freed = new Set<PhpObject>();
   if (garbage.length > 0) {
     runtime.spend();
-    for (const object of freeable(garbage, detached)) freed.add(object);
+    for (const object of freeable(garbage, runtime, detached)) freed.add(object);
     for (const object of garbage) if (!freed.has(object)) runtime.objectCycles.add(object);
   }
   if (freed.size === 0 && activeReleaseObjects.size === 0) {
@@ -677,64 +677,111 @@ function pushObject(object: PhpObject, pending: unknown[]): void {
   if (typeof held === 'function') appendValues(pending, [...held.call(internal)]);
 }
 
-/**
- * The garbage objects that reference counting frees: all but those a cycle of garbage keeps, which are the objects on
- * a cycle and those reachable from one.
- */
-function freeable(garbage: PhpObject[], include?: (value: Ref | PhpArray) => boolean): PhpObject[] {
-  const { edges, cyclic } = cyclicObjects(garbage, include);
-  const kept = new Set<PhpObject>();
-  const pending = [...cyclic];
+type CollectionNode = PhpObject | PhpArray | Ref;
+
+class CollectionGraph {
+  private readonly members: Set<PhpObject>;
+  private readonly edges = new Map<CollectionNode, CollectionNode[]>();
+  private work = 0;
+
+  constructor(
+    objects: PhpObject[],
+    private readonly runtime: Runtime,
+    private readonly include: (value: Ref | PhpArray) => boolean = () => true
+  ) {
+    this.members = new Set(objects);
+  }
+
+  spend(): void {
+    if ((++this.work & 15) === 0) this.runtime.spend();
+  }
+
+  accepts(value: unknown): value is CollectionNode {
+    if (value instanceof PhpObject) return this.members.has(value);
+    if (value instanceof PhpArray) return value.composite && this.include(value);
+    return value instanceof Ref && (value.v instanceof PhpObject || value.v instanceof PhpArray) && this.include(value);
+  }
+
+  children(node: CollectionNode): CollectionNode[] {
+    const existing = this.edges.get(node);
+    if (existing) return existing;
+    let values: Iterable<unknown>;
+    if (node instanceof PhpArray) values = node.map.values();
+    else if (node instanceof Ref) values = [node.v];
+    else {
+      const held: unknown[] = [];
+      pushObject(node, held);
+      values = held;
+    }
+    const result = this.collectEdges(values);
+    this.edges.set(node, result);
+    return result;
+  }
+
+  private collectEdges(values: Iterable<unknown>): CollectionNode[] {
+    const edges: CollectionNode[] = [];
+    const stack = [values[Symbol.iterator]()];
+    while (stack.length > 0) {
+      const next = stack.at(-1)?.next();
+      if (!next || next.done) {
+        stack.pop();
+        continue;
+      }
+      this.spend();
+      const value: unknown = next.value;
+      if (this.accepts(value)) edges.push(value);
+      else if (value instanceof Map) stack.push(value.values());
+      else if (Array.isArray(value)) stack.push(value.values());
+    }
+    return edges;
+  }
+}
+
+/** Reference counting leaves objects that are on a cycle or reachable from one. */
+function freeable(garbage: PhpObject[], runtime: Runtime, include?: (value: Ref | PhpArray) => boolean): PhpObject[] {
+  const graph = new CollectionGraph(garbage, runtime, include);
+  const cyclic = cyclicObjects(graph, garbage);
+  const kept = new Set<CollectionNode>();
+  const pending: CollectionNode[] = [...cyclic];
   while (pending.length > 0) {
-    const object = pending.pop() as PhpObject;
-    if (kept.has(object)) continue;
-    kept.add(object);
-    appendValues(pending, [...(edges.get(object) as PhpObject[])]);
+    graph.spend();
+    const node = pending.pop() as CollectionNode;
+    if (kept.has(node)) continue;
+    kept.add(node);
+    for (const target of graph.children(node)) pending.push(target);
   }
   return garbage.filter((object) => !kept.has(object));
 }
 
-// code-gauge-allow functionNcss 55 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function cyclicObjects(
-  garbage: PhpObject[],
-  include?: (value: Ref | PhpArray) => boolean
-): { edges: Map<PhpObject, PhpObject[]>; cyclic: Set<PhpObject> } {
-  const set = new Set(garbage);
-  const edges = new Map<PhpObject, PhpObject[]>();
-  for (const object of garbage)
-    edges.set(
-      object,
-      referencedObjects(object, include).filter((target) => set.has(target))
-    );
+// code-gauge-allow functionNcss 45 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+function cyclicObjects(graph: CollectionGraph, garbage: PhpObject[]): Set<PhpObject> {
   // Tarjan's strongly connected components finds the objects on cycles.
   let index = 0;
-  const indices = new Map<PhpObject, number>();
-  const lowlinks = new Map<PhpObject, number>();
-  const stack: PhpObject[] = [];
-  const onStack = new Set<PhpObject>();
+  const indices = new Map<CollectionNode, number>();
+  const lowlinks = new Map<CollectionNode, number>();
+  const stack: CollectionNode[] = [];
+  const onStack = new Set<CollectionNode>();
   const cyclic = new Set<PhpObject>();
+  const enter = (node: CollectionNode): [CollectionNode, number] => {
+    indices.set(node, index);
+    lowlinks.set(node, index++);
+    stack.push(node);
+    onStack.add(node);
+    return [node, 0];
+  };
   const strongConnect = (root: PhpObject): void => {
-    const work: [PhpObject, number][] = [[root, 0]];
-    indices.set(root, index);
-    lowlinks.set(root, index);
-    index++;
-    stack.push(root);
-    onStack.add(root);
+    const work = [enter(root)];
     while (work.length > 0) {
-      const top = work.at(-1) as [PhpObject, number];
+      graph.spend();
+      const top = work.at(-1) as [CollectionNode, number];
       const [node, position] = top;
-      const targets = edges.get(node) as PhpObject[];
+      const targets = graph.children(node);
       if (position < targets.length) {
         top[1]++;
         const target = targets[position];
-        if (!indices.has(target)) {
-          indices.set(target, index);
-          lowlinks.set(target, index);
-          index++;
-          stack.push(target);
-          onStack.add(target);
-          work.push([target, 0]);
-        } else if (onStack.has(target)) {
+        if (!indices.has(target)) work.push(enter(target));
+        else if (onStack.has(target)) {
           lowlinks.set(node, Math.min(lowlinks.get(node) as number, indices.get(target) as number));
         }
         continue;
@@ -743,79 +790,56 @@ function cyclicObjects(
       const parent = work.at(-1);
       if (parent) lowlinks.set(parent[0], Math.min(lowlinks.get(parent[0]) as number, lowlinks.get(node) as number));
       if (lowlinks.get(node) === indices.get(node)) {
-        const component: PhpObject[] = [];
-        let member: PhpObject;
+        const isCycle = stack.at(-1) !== node || targets.includes(node);
+        let member: CollectionNode;
         do {
-          member = stack.pop() as PhpObject;
+          member = stack.pop() as CollectionNode;
           onStack.delete(member);
-          component.push(member);
+          if (isCycle && member instanceof PhpObject) cyclic.add(member);
         } while (member !== node);
-        const selfLoop = (edges.get(node) as PhpObject[]).includes(node);
-        if (component.length > 1 || selfLoop) for (const item of component) cyclic.add(item);
       }
     }
   };
   for (const object of garbage) if (!indices.has(object)) strongConnect(object);
-  return { edges, cyclic };
+  return cyclic;
 }
 
-/**
- * The order in which PHP releases freed objects: a holder releases what it holds in order (an array its elements, a
- * function its variables), so the objects nothing else freed refers to go in the order the program held them, as the
- * last reachability pass saw it. Destructors run owners first; handles return to the free list owners last, after
- * releasing an object has released what it held.
- */
-// code-gauge-allow functionNcss 52 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+/** Owner order follows retained slots; a handle is freed after its owner's children. */
+// code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function releaseOrder(
   freed: PhpObject[],
   previousOrder: Map<PhpObject, number>,
   runtime: Runtime,
   buffered?: (PhpArray | PhpObject)[]
 ): { owners: PhpObject[]; handles: PhpObject[] } {
-  const set = new Set(freed);
-  const referenced = new Set<PhpObject>();
-  const edges = new Map<PhpObject, PhpObject[]>();
-  for (const object of freed) {
-    const targets = referencedObjects(object).filter((target) => set.has(target));
-    edges.set(object, targets);
-    for (const target of targets) referenced.add(target);
-  }
+  const graph = new CollectionGraph(freed, runtime);
+  const referenced = referencedGarbage(graph, freed);
   const owners: PhpObject[] = [];
   const handles: PhpObject[] = [];
-  const visited = new Set<PhpObject>();
-  const visit = (object: PhpObject): void => {
-    const pending: { object: PhpObject; finish: boolean }[] = [{ object, finish: false }];
-    let work = 0;
+  const visited = new Set<CollectionNode>();
+  const visit = (root: CollectionNode): void => {
+    const pending: { node: CollectionNode; finish: boolean }[] = [{ node: root, finish: false }];
     while (pending.length > 0) {
-      if ((++work & 255) === 0) runtime.budget.checkClock();
-      const item = pending.pop() as { object: PhpObject; finish: boolean };
-      if (item.finish) {
-        handles.push(item.object);
+      graph.spend();
+      const { node, finish } = pending.pop() as { node: CollectionNode; finish: boolean };
+      if (finish) {
+        handles.push(node as PhpObject);
         continue;
       }
-      if (visited.has(item.object)) continue;
-      visited.add(item.object);
-      owners.push(item.object);
-      pending.push({ object: item.object, finish: true });
-      const children = edges.get(item.object) as PhpObject[];
-      for (let index = children.length - 1; index >= 0; index--)
-        pending.push({ object: children[index], finish: false });
-    }
-  };
-  if (buffered) {
-    const pending: unknown[] = buffered.toReversed();
-    const arrays = new Set<PhpArray>();
-    while (pending.length > 0) {
-      const value = pending.pop();
-      if (value instanceof PhpObject) {
-        if (set.has(value)) visit(value);
-      } else if (value instanceof Ref) pending.push(value.v);
-      else if (value instanceof PhpArray && !arrays.has(value)) {
-        arrays.add(value);
-        appendReversed(pending, value.map.values());
+      if (visited.has(node)) continue;
+      visited.add(node);
+      if (node instanceof PhpObject) {
+        owners.push(node);
+        pending.push({ node, finish: true });
+      }
+      const children = graph.children(node);
+      for (let index = children.length - 1; index >= 0; index--) {
+        pending.push({ node: children[index], finish: false });
       }
     }
-  }
+  };
+  if (buffered) for (const node of buffered) if (graph.accepts(node)) visit(node);
   const position = (object: PhpObject): number => previousOrder.get(object) ?? Number.MAX_SAFE_INTEGER;
   const roots = freed
     .filter((object) => !referenced.has(object))
@@ -825,29 +849,22 @@ function releaseOrder(
   return { owners, handles };
 }
 
-/** The objects an object refers to directly or through arrays it holds, in property order. */
-export function referencedObjects(
-  object: PhpObject,
-  include: (value: Ref | PhpArray) => boolean = () => true
-): PhpObject[] {
-  const found: PhpObject[] = [];
-  const pending: unknown[] = [];
-  pushObject(object, pending);
-  pending.reverse();
-  const seenArrays = new Set<PhpArray>();
+function referencedGarbage(graph: CollectionGraph, objects: PhpObject[]): Set<PhpObject> {
+  const referenced = new Set<PhpObject>();
+  const visited = new Set<CollectionNode>();
+  const pending: CollectionNode[] = [...objects];
   while (pending.length > 0) {
-    const item = pending.pop();
-    if (item instanceof Ref) {
-      if (include(item)) pending.push(item.v);
-    } else if (item instanceof PhpObject) found.push(item);
-    else if (item instanceof PhpArray) {
-      if (seenArrays.has(item) || !include(item)) continue;
-      seenArrays.add(item);
-      appendReversed(pending, item.map.values());
-    } else if (item instanceof Map) appendReversed(pending, item.values());
-    else if (Array.isArray(item)) appendReversed(pending, item);
+    graph.spend();
+    const node = pending.pop() as CollectionNode;
+    if (visited.has(node)) continue;
+    visited.add(node);
+    for (const child of graph.children(node)) {
+      graph.spend();
+      if (child instanceof PhpObject) referenced.add(child);
+      pending.push(child);
+    }
   }
-  return found;
+  return referenced;
 }
 
 /** Counts the holders of each reachable object: variables, elements, and properties that refer to it. */
@@ -1036,8 +1053,4 @@ function* reverseOwners(value: object, runtime: Runtime, visited: Set<object>): 
 
 function appendValues(target: unknown[], values: Iterable<unknown>): void {
   for (const value of values) target.push(value);
-}
-function appendReversed(target: unknown[], values: Iterable<unknown>): void {
-  const list = [...values];
-  for (let index = list.length - 1; index >= 0; index--) target.push(list[index]);
 }

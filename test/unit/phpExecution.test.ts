@@ -675,6 +675,19 @@ test('collects a long object cycle without host recursion', () => {
   ).toMatchObject({ kind: 'executed', stdout: '30001' });
 });
 
+test('counts shared cyclic arrays once when collecting their owners', () => {
+  const source = `<?php
+    class Node { public $items; }
+    $nodes = [];
+    for ($i = 0; $i < 1500; $i++) $nodes[] = new Node;
+    $shared = [$nodes];
+    foreach ($nodes as $node) $node->items = $shared;
+    unset($node, $nodes, $shared);
+    echo gc_collect_cycles(), ':', gc_collect_cycles();
+  `;
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout: '1502:0' });
+});
+
 test.each(['$this->next=null;', 'unset($this->next);'])(
   'nested destructor cleanup obeys the call-depth limit without rescanning: %s',
   (body) => {
