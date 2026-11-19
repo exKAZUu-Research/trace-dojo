@@ -476,7 +476,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     this.requireObjectUse(type, 'copy', expr.row);
   }
 
-  protected implicitReturnSource(expr: Expr, destination: Type): Expr {
+  protected implicitMoveSource(expr: Expr, destination: Type): Expr {
     const moved: Expr = { ...expr, isXvalue: true };
     if (destination.kind === 'class' && expr.type.kind === 'class' && expr.type.cls.isDerivedFrom(destination.cls)) {
       const written = this.writtenCopyConstructors(destination.cls);
@@ -978,7 +978,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     if (cls.base) this.checkObjectUse(classType(cls.base), operation, row, { ...nested, baseObject: cls });
     for (const field of cls.ownFields) this.checkObjectUse(field.type, operation, row, nested);
     for (const owned of cls.library?.ownedTypes ?? []) {
-      const library = { seen, sourceIsConst: true };
+      const library = { seen, sourceIsConst: cls.library?.ownedCopyFromConst ?? true };
       if (operation === 'assign' && cls.library?.elementUseOnAssignment === 'assign-and-copy')
         this.checkLibraryAssignment(owned, row);
       this.checkObjectUse(owned, operation, row, library);

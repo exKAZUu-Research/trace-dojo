@@ -95,6 +95,7 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
     args: [first, second],
     size: Math.ceil((secondOffset + sizeOf(secondStorage)) / align) * align,
     align,
+    fieldOffsets: [0, secondOffset],
     operator: (compiler, operator, operands, row) => {
       const [left, right] = operands;
       const isSelf = (expr: Expr | undefined): boolean => expr?.type.kind === 'class' && expr.type.cls === cls;

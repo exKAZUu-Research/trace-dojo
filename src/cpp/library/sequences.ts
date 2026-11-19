@@ -122,6 +122,8 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   };
   // std::array destroys its elements as a built-in array does, from the last.
   const editor = new SequenceEditor(kind === 'array' ? 'vector' : kind, ops);
+  // libc++ copies vector elements through the source's mutable storage pointers.
+  const ownedCopyFromConst = kind !== 'vector';
   const arrayDefault = (compiler: ExpressionCompiler, row: number, valueInitialize: boolean): Expr['run'] => {
     if (fixedLength === 0) return () => make(new ArrayStore([]));
     const initialize = compiler.withLibraryAccess<Initializer>(() => {
@@ -139,6 +141,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
     kind,
     args: [element],
     ownedTypes: fixedLength === 0 ? [] : [element],
+    ownedCopyFromConst,
     elementUseOnAssignment: kind === 'array' ? undefined : 'assign-and-copy',
     allowsConstantCopy: kind === 'array' && (fixedLength === 0 || allowsConstantCopy(element)),
     size: kind === 'array' ? Math.max(1, fixedLength ?? 0) * sizeOf(element) : kind === 'deque' ? 48 : 24,
@@ -185,7 +188,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
       }
       reserve(frame, items.length);
       return editor.construct(frame, make([]), items.length, (index, destination) =>
-        ops().copy(frame, items[index], destination)
+        ops().copy(frame, items[index], destination, ownedCopyFromConst)
       );
     },
     assign: (frame, target, source) => {
@@ -199,7 +202,11 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
         return;
       }
       reserve(frame, Math.max(0, from.items.length - to.items.length));
-      editor.assignRange(frame, to, { values: from.items, construct: ops().copy, isSameType: true });
+      editor.assignRange(frame, to, {
+        values: from.items,
+        construct: (f, value, destination) => ops().copy(f, value, destination, ownedCopyFromConst),
+        isSameType: true,
+      });
     },
     destroy: (frame, value) => editor.destroy(frame, (value as SequenceValue).items),
   };

@@ -1,5 +1,6 @@
 #include <iostream>
 #include <stdexcept>
+#include <vector>
 
 struct E {
   int id;
@@ -13,6 +14,20 @@ struct Mine : std::runtime_error {
 };
 
 void fail() { throw E(1); }
+
+struct Choice {
+  Choice() {}
+  Choice(Choice&) { std::cout << "L"; }
+  Choice(const Choice&) { std::cout << "C"; }
+};
+struct MutableOnly {
+  MutableOnly() {}
+  MutableOnly(MutableOnly&) { std::cout << "M"; }
+};
+struct Group { std::vector<Choice> items; };
+void throwParameter(Choice value) { throw (value); }
+void throwGroup(Group value) { throw value; }
+void throwMutable(MutableOnly value) { throw value; }
 
 int main() {
   try {
@@ -110,4 +125,28 @@ int main() {
   std::cout << assigned.what() << "\n";
   sliced = std::runtime_error("c");
   std::cout << sliced.what() << "\n";
+
+  try { throwParameter(Choice{}); }
+  catch (const Choice&) { std::cout << '\n'; }
+  try { throwMutable(MutableOnly{}); }
+  catch (const MutableOnly&) { std::cout << '\n'; }
+  Group group;
+  group.items.emplace_back();
+  try { throwGroup(group); }
+  catch (const Group& caught) { std::cout << caught.items.size() << '\n'; }
+  std::vector<Choice> assignedItems;
+  assignedItems = group.items;
+  std::cout << assignedItems.size() << '\n';
+
+  Choice outer;
+  static Choice stored;
+  try { throw outer; }
+  catch (const Choice&) { std::cout << ' '; }
+  try { throw stored; }
+  catch (const Choice&) { std::cout << '\n'; }
+  try {
+    Choice local;
+    try { throw 1; }
+    catch (int) { throw local; }
+  } catch (const Choice&) { std::cout << '\n'; }
 }

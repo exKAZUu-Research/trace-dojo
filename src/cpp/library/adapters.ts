@@ -67,6 +67,7 @@ export function adapterClass(
     return elementOps;
   };
   const storageKind = storage.cls.library?.kind;
+  const ownedCopyFromConst = storage.cls.library?.ownedCopyFromConst;
   const editor = new SequenceEditor(storageKind === 'deque' || storageKind === 'list' ? storageKind : 'vector', ops);
   const make = (items: Value[]): SequenceValue => {
     const sequence = new SequenceValue(
@@ -102,6 +103,7 @@ export function adapterClass(
     kind,
     args: [element],
     ownedTypes: [element],
+    ownedCopyFromConst,
     elementUseOnAssignment: storage.cls.library?.elementUseOnAssignment,
     size,
     align,
@@ -151,7 +153,7 @@ export function adapterClass(
   const copyItems = (frame: Frame, { items }: SequenceValue): SequenceValue => {
     frame.runtime.reserve(items.length);
     return editor.construct(frame, make([]), items.length, (index, destination) =>
-      ops().copy(frame, items[index], destination)
+      ops().copy(frame, items[index], destination, ownedCopyFromConst)
     );
   };
   const storageOperations = storage.cls.operations;

@@ -887,7 +887,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   // min, max, clamp ------------------------------------------------------------------------------------------------
   /** The order of min, max, minmax, or clamp: the comparator argument at `index`, or `<`. */
   const extremumOrder = (args: Expr[], index: number, type: Type): ((frame: Frame) => Less) | undefined =>
-    orderOf(args[index], [type, type], args[0].row);
+    orderOf(args[index], [withConst(type), withConst(type)], args[0].row);
   for (const name of ['min', 'max', 'minmax']) {
     define(name, extremumTemplateParameters, (args, templateArgs) => {
       if (args[0]?.braced && args.length <= 2) {

@@ -1,4 +1,7 @@
 #include <iostream>
+#include <map>
+#include <utility>
+#include <vector>
 
 struct Base { int value = 7; };
 struct Hidden : private Base {};
@@ -51,4 +54,15 @@ int main() {
   Table* recoveredHeap = static_cast<Table*>(static_cast<void*>(heapTable->row.cell.self));
   std::cout << (recoveredHeap == heapTable) << '\n';
   delete recoveredHeap;
+
+  std::pair<int, int> pair{1, 2};
+  std::pair<char, long> padded{'a', 3};
+  std::vector<std::pair<int, int>> entries(1);
+  std::map<int, int> mapped{{1, 2}};
+  auto& entry = *mapped.begin();
+  std::cout << (&pair.first == &pair.second)
+            << (static_cast<void*>(&padded) == static_cast<void*>(&padded.first))
+            << (static_cast<void*>(&padded) == static_cast<void*>(&padded.second))
+            << (&entries.front().first == &entries.front().second)
+            << (&entry.first == &entry.second) << '\n';
 }

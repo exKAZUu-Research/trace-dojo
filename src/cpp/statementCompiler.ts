@@ -1167,10 +1167,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (returnType.kind === 'reference') {
       return this.convert(expr, returnType, row).run;
     }
-    const local = this.returnedAutomaticObject(node, expr);
+    const local = this.namedAutomaticObject(node, expr);
     const canElide = local && !local.isParameter && sameType(expr.type, returnType, false);
     this.context.noteReturn(canElide ? local : undefined);
-    const source = local ? this.implicitReturnSource(expr, returnType) : expr;
+    const source = local ? this.implicitMoveSource(expr, returnType) : expr;
     const initialize = this.copyInitializer(returnType, source, row, false);
     const copy: Eval<Value> = (frame) => initialize(frame, undefined, false, 'full-expression');
     if (!local || !canElide) return copy;
@@ -1183,19 +1183,29 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return (frame) => (namedReturns.has(local) ? share(frame) : copy(frame));
   }
 
-  private returnedAutomaticObject(node: Syntax, expr: Expr): LocalInfo | undefined {
+  private namedAutomaticObject(
+    node: Syntax,
+    expr: Expr,
+    scopeLimit: 'function' | 'try' = 'function'
+  ): LocalInfo | undefined {
     let name = node;
     while (name.type === 'parenthesized_expression' && name.children.length === 1) name = name.children[0];
     if (name.type !== 'identifier' || expr.type.kind !== 'class') return undefined;
     const entity = this.context.lookupLocal(name.text);
     if (entity?.kind !== 'local' || entity.isReference) return undefined;
     const { local } = entity;
-    return this.context.scopes.some((scope) => scope.statics.includes(local.slot)) ? undefined : local;
+    for (const scope of this.context.scopes.toReversed()) {
+      if (scope.slots.includes(local.slot)) return scope.statics.includes(local.slot) ? undefined : local;
+      if (scopeLimit === 'try' && scope.isTryBlock) return;
+    }
   }
 
   private tryStatement(node: Syntax): Exec {
-    if (fieldOf(node, 'body') === undefined) return this.error(node.row, 'try の後に {} を書いてください。');
-    const body = this.compileBlock(fieldOf(node, 'body') as Syntax);
+    const block = fieldOf(node, 'body');
+    if (!block) return this.error(node.row, 'try の後に {} を書いてください。');
+    const scope = new Scope();
+    scope.isTryBlock = true;
+    const body = this.inScope(() => this.compileStatements(block.children), scope);
     const clauses = node.children.filter((child) => child.type === 'catch_clause');
     const handlers = clauses.map((clause, index) => {
       if (index < clauses.length - 1 && catchesAll(clause))
@@ -1332,7 +1342,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (incomplete) this.error(node.row, `まだ定義されていないクラス ${incomplete} は投げられません。`);
     if (type.kind === 'class' && type.cls.isAbstract)
       this.error(node.row, `${type.cls.name} は抽象クラスなので投げられません。`);
-    const initialize = this.copyInitializer(type, expr, node.row, false);
+    const source = this.namedAutomaticObject(valueNode, expr, 'try') ? this.implicitMoveSource(expr, type) : expr;
+    const initialize = this.copyInitializer(type, source, node.row, false);
     const makeStorage = this.fullExpression((frame) => {
       const storage = new Box();
       return holdValues(frame, [storage], () => {

@@ -43,11 +43,12 @@ import { StringValue } from './string';
 /** What a container does with its elements: make them, copy them, assign them, and destroy them. */
 export interface ElementOperations {
   type: Type;
+  arrayElement?: ElementOperations;
   /** A value-initialized element, as `std::vector<T>(n)` makes. */
   make: (frame: Frame, destination?: CObject) => Value;
   /** Whether the type has a default constructor, which `make` needs. */
   isDefaultConstructible: boolean;
-  copy: (frame: Frame, value: Value, destination?: CObject) => Value;
+  copy: (frame: Frame, value: Value, destination?: CObject, sourceIsConst?: boolean) => Value;
   /** Assigns `source` to the element `target`, giving the element's new value (the same object for a class). */
   assign: (frame: Frame, target: Value, source: Value) => Value;
   destroy?: (frame: Frame, value: Value) => void;
@@ -75,6 +76,14 @@ export function destroyElements(
 
 export function swapElements(frame: Frame, a: Ptr, b: Ptr, ops: ElementOperations): void {
   if (a.equals(b)) return;
+  if (ops.arrayElement) {
+    const left = a.read() as ArrayStore;
+    const right = b.read() as ArrayStore;
+    for (let index = 0; index < left.length; index++) {
+      swapElements(frame, left.location(index), right.location(index), ops.arrayElement);
+    }
+    return;
+  }
   const swap = swapFunction(ops.type);
   if (swap) {
     invoke(frame, swap, [b], a, swap.row);
@@ -89,6 +98,10 @@ export function swapElements(frame: Frame, a: Ptr, b: Ptr, ops: ElementOperation
 }
 
 function requireSwapUse(compiler: ExpressionCompiler, type: Type, row: number): void {
+  if (type.kind === 'array') {
+    if ((type.length ?? 1) > 0) requireSwapUse(compiler, type.of, row);
+    return;
+  }
   const swap = swapFunction(type);
   if (swap) {
     swap.nativeUses?.(row);
@@ -326,9 +339,9 @@ export function elementOperations(
       get isDefaultConstructible() {
         return findDefault() !== undefined;
       },
-      copy: (frame, value, destination) => {
+      copy: (frame, value, destination, sourceIsConst) => {
         if (cls.isNoncopyable) throw new CppRuntimeError('custom', `${cls.name} のオブジェクトはコピーできません。`);
-        return operations?.copy(frame, value, destination) ?? value;
+        return operations?.copy(frame, value, destination, sourceIsConst) ?? value;
       },
       assign: (frame, target, source) => operations?.assign(frame, target, source) ?? target,
       destroy: (frame, value) => {
@@ -340,6 +353,7 @@ export function elementOperations(
   const zero = zeroOf(type);
   return {
     type,
+    arrayElement: type.kind === 'array' ? elementOperations(compiler, type.of, row) : undefined,
     make: () => zero,
     isDefaultConstructible: true,
     copy: (_frame, value) => value,

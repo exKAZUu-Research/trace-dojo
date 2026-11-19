@@ -27,6 +27,11 @@ struct Default {
 };
 
 struct Value { int n; };
+struct SwapItem {
+  SwapItem() {}
+  SwapItem(const SwapItem&) { std::cout << 'C'; }
+  ~SwapItem() { std::cout << 'D'; }
+};
 int main() {
   std::vector<Copy> noCopies(1);
   Default reversed[] = {1, 2};
@@ -53,4 +58,17 @@ int main() {
   auto position = nested.first.begin();
   std::swap(nested, other);
   std::cout << *position << (position == other.first.begin()) << other.second;
+  std::cout << '\n';
+  {
+    SwapItem first[2], second[2];
+    std::swap(first, second);
+    std::cout << '|';
+  }
+  std::cout << '\n';
+  {
+    SwapItem first[2][1], second[2][1];
+    std::swap(first, second);
+    std::cout << '|';
+  }
+  std::cout << '\n';
 }

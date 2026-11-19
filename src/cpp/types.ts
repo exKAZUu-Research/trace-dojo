@@ -572,7 +572,7 @@ export function baseSubobjectOffset(derived: ClassInfo, base: ClassInfo): number
 }
 
 export function fieldSubobjectOffset(derived: ClassInfo, field: FieldInfo): number {
-  const own = classLayout(field.owner).fieldOffsets?.get(field.index) ?? 0;
+  const own = classLayout(field.owner).fieldOffsets?.[field.index] ?? field.index;
   return baseSubobjectOffset(derived, field.owner) + own;
 }
 
@@ -581,7 +581,7 @@ interface ClassLayout {
   align: number;
   dataSize: number;
   baseOffset: number;
-  fieldOffsets?: ReadonlyMap<number, number>;
+  fieldOffsets?: readonly number[];
   atOrigin: ReadonlySet<ClassInfo>;
 }
 
@@ -592,8 +592,10 @@ function classLayout(cls: ClassInfo): ClassLayout {
   const cached = completedLayouts.get(cls);
   if (cached) return cached;
   const atOrigin = new Set([cls]);
-  if (cls.library)
-    return { size: cls.library.size, align: cls.library.align, dataSize: cls.library.size, baseOffset: 0, atOrigin };
+  if (cls.library) {
+    const { size, align, fieldOffsets } = cls.library;
+    return { size, align, dataSize: size, baseOffset: 0, fieldOffsets, atOrigin };
+  }
   let offset = cls.isPolymorphic && !cls.base?.isPolymorphic ? 8 : 0;
   let align = offset > 0 ? 8 : 1;
   let baseOffset = 0;
@@ -612,7 +614,7 @@ function classLayout(cls: ClassInfo): ClassLayout {
     }
     align = Math.max(align, base.align);
   }
-  const fieldOffsets = new Map<number, number>();
+  const fieldOffsets: number[] = [];
   for (const field of cls.ownFields) {
     // A reference member takes the room of a pointer, though `sizeof` of a reference type is that of its referent.
     const type = field.type.kind === 'reference' ? pointerTo(field.type.to) : field.type;
@@ -622,7 +624,7 @@ function classLayout(cls: ClassInfo): ClassLayout {
     const hasConflict = members && emptyBase && [...members].some((member) => emptyBase.has(member));
     if (members && !hasConflict) for (const member of members) atOrigin.add(member);
     const fieldOffset = at + (hasConflict ? fieldAlign : 0);
-    fieldOffsets.set(field.index, fieldOffset);
+    fieldOffsets[field.index] = fieldOffset;
     offset = fieldOffset + sizeOf(type);
     align = Math.max(align, fieldAlign);
   }

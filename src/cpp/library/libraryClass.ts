@@ -13,6 +13,7 @@ export interface LibraryClass {
   readonly kind: string;
   readonly args: readonly Type[];
   readonly ownedTypes?: readonly Type[];
+  readonly ownedCopyFromConst?: boolean;
   readonly elementUseOnAssignment?: 'copy' | 'assign-and-copy';
   readonly allowsConstantCopy?: boolean;
   readonly scalarValue?: { type: ArithmeticType; read: (value: Value) => number | bigint };
@@ -21,6 +22,7 @@ export interface LibraryClass {
   /** `sizeof` of the class in libc++ on arm64. */
   readonly size: number;
   readonly align: number;
+  readonly fieldOffsets?: readonly number[];
   /**
    * Compiles an operator whose operands include an object of this class, such as `s + t`, `*it`, or `cout << x`, or
    * gives undefined when the class has no such operator for these operands. Unary operators get one operand;

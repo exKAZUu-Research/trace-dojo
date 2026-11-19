@@ -686,6 +686,16 @@ test.each([
     '#include <array>\nstruct X { const int n; };\nint main() { std::array<X, 1> a{{{1}}}; a.fill(X{2}); }',
     2,
   ],
+  [
+    'min comparator that requires a mutable reference',
+    '#include <algorithm>\nbool compare(int& a, int& b) { return a < b; }\nint main() { int a=1, b=2; std::min(a, b, compare); }',
+    2,
+  ],
+  [
+    'initializer-list max comparator that requires a mutable reference',
+    '#include <algorithm>\nbool compare(int& a, int& b) { return a < b; }\nint main() { std::max({1, 2}, compare); }',
+    2,
+  ],
   ['array fill with const elements', '#include <array>\nint main() { std::array<const int, 1> a{1}; a.fill(2); }', 1],
   [
     'empty array fill with a const element type',
