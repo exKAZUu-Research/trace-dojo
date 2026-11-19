@@ -822,7 +822,7 @@ interface TextOperand {
 }
 
 function stringObject(value: unknown): StringValue {
-  return (value instanceof Ptr ? value.read() : value) as StringValue;
+  return (value as Ptr).read() as StringValue;
 }
 
 function operandBytes(frame: Frame, operand: TextOperand, value: unknown): string {
@@ -867,7 +867,7 @@ function stringOperator(
   const canMoveString = (expr: Expr): boolean =>
     isString(expr) && !isConstType(expr.type) && (!expr.isLvalue || expr.isXvalue === true);
   const textOperand = (expr: Expr): TextOperand | undefined => {
-    if (isString(expr)) return { kind: 'string', run: expr.run };
+    if (isString(expr)) return { kind: 'string', run: compiler.objectOf(expr) };
     const { type, run } = compiler.rvalue(expr);
     if (type.kind === 'pointer' && isCharType(type.to)) return { kind: 'pointer', run };
   };

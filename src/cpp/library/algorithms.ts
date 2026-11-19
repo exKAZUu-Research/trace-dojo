@@ -277,8 +277,8 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     }
     const less = sameType(left, right, false) ? lessThan(left) : undefined;
     if (less) return () => (a, b) => less(a.read(), b.read()) < 0;
-    const compare = valueComparison(compiler(), '<', left, right, row);
-    return compare && ((frame) => (a, b) => compare(frame, a.read(), b.read()));
+    const compare = locationComparison(compiler(), '<', left, right, row);
+    return compare && ((frame) => (a, b) => compare(frame, a, b));
   };
   /** A predicate of the expressions an algorithm passes, including proxy dereferences. */
   const predicateOf = (
@@ -1264,8 +1264,10 @@ function valueEquality(
   }
   const equal = sameType(type, argType, false) ? equalTo(type) : undefined;
   if (!equal) {
-    const compare = valueComparison(compiler, '==', type, argType, row);
-    return compare ? { test: compare } : undefined;
+    const compare = locationComparison(compiler, '==', type, argType, row);
+    return compare
+      ? { test: (frame, a, b) => compare(frame, new Box(a, false).location(0), new Box(b, false).location(0)) }
+      : undefined;
   }
   return {
     test: (frame, a, b) => {
@@ -1275,35 +1277,18 @@ function valueEquality(
   };
 }
 
-function valueComparison(
+function locationComparison(
   compiler: ExpressionCompiler,
   operator: '<' | '==',
   left: Type,
   right: Type,
   row: number
-): ValueEquality['test'] | undefined {
-  const input = (type: Type, index: number): Expr => ({
-    type,
-    isLvalue: false,
-    row,
-    run: (frame) => frame.pending.at(index),
-  });
-  let run: Expr['run'];
-  try {
-    run = compiler.binary(operator, input(left, -2), input(right, -1), row).run;
-  } catch (error) {
-    if (error instanceof CompileError) return;
-    throw error;
-  }
+): ((frame: Frame, left: Ptr, right: Ptr) => boolean) | undefined {
+  const operation = binaryStep(compiler, operator, [{ type: left }, { type: right }], row);
+  if (!operation) return;
   return (frame, a, b) => {
     frame.runtime.spend();
-    const mark = frame.pending.length;
-    frame.pending.push(a, b);
-    try {
-      return truthy(run(frame));
-    } finally {
-      frame.pending.length = mark;
-    }
+    return truthy(operation.run(frame, a, b));
   };
 }
 
