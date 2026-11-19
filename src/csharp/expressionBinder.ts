@@ -471,8 +471,19 @@ export abstract class ExpressionBinder extends MemberBinder {
     const { operator } = node;
     const row = node.operatorRow;
     if (operator === '&&' || operator === '||') {
-      const left = this.bindAs(node.left, this.boolType, context);
-      const right = this.bindAs(node.right, this.boolType, context);
+      const leftValue = this.bindValue(node.left, context);
+      const rightValue = this.bindValue(node.right, context);
+      // Roslyn resolves `&&` as an operator on bool, so operands that are no bool fail as its operands.
+      const isBool = (operand: BoundExpression): boolean =>
+        operand.kind === 'unbound' ||
+        operand.type.kind === 'error' ||
+        this.implicitConversionOf(operand, this.boolType) !== undefined;
+      if (!isBool(leftValue) || !isBool(rightValue)) {
+        this.reportBinary(operator, leftValue, rightValue, row);
+        return { kind: 'default', type: this.boolType, row: node.row };
+      }
+      const left = this.convert(leftValue, this.boolType, node.left);
+      const right = this.convert(rightValue, this.boolType, node.right);
       if (left.kind === 'constant' && right.kind === 'constant') {
         return this.constant(
           operator === '&&'
@@ -1201,7 +1212,7 @@ export abstract class ExpressionBinder extends MemberBinder {
         this.error(
           node,
           'CS0029',
-          `型 '${this.tupleDisplay(node, context)}' を '${displayType(target)}' に暗黙的に変換できません`
+          `型 '${this.tupleDisplay(node, context)}' を '${displayType(target, true)}' に暗黙的に変換できません`
         );
       return undefined;
     }
@@ -1679,7 +1690,7 @@ export abstract class ExpressionBinder extends MemberBinder {
     const value = this.bindValue(node.value, context);
     const operand: BoundExpression = { kind: 'compoundOperand', type: target.type, row: node.row };
     const resolvedValue = value.kind === 'unbound' ? this.convert(value, target.type, node) : value;
-    const operation = this.bindBinary(binaryOperator, operand, resolvedValue, node.row);
+    const operation = this.bindBinary(binaryOperator, operand, resolvedValue, node.row, operator);
     if (operation.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
     const converted =
       this.implicitConversionOf(operation, target.type) || operation.kind !== 'binary'
@@ -1908,33 +1919,51 @@ export abstract class ExpressionBinder extends MemberBinder {
     };
   }
 
+  private readonly switchParts = new WeakMap<
+    Expression,
+    {
+      scope: LocalScope;
+      value: BoundExpression;
+      arms: {
+        pattern: BoundPattern;
+        guard: BoundExpression | undefined;
+        value: BoundExpression;
+        row: number;
+        syntax: Expression;
+      }[];
+    }
+  >();
+
   /** Binds `value switch { ... }`, with the natural type of its arms or the target type. */
   protected bindSwitchExpression(
     node: Extract<Expression, { kind: 'switch' }>,
     context: BindContext,
     target: Type | undefined
   ): BoundExpression | undefined {
-    const value = this.bindValue(node.value, context);
-    const arms = node.arms.map((arm) => {
-      const scope = new LocalScope(context.scope, context.fn);
-      const armContext: BindContext = { scope, fn: context.fn };
-      const pattern = this.bindPattern(arm.pattern, value.type, armContext);
-      const guard = arm.guard ? this.bindAs(arm.guard, this.boolType, armContext) : undefined;
-      const result = this.bindAllowingThrow(arm.value, armContext);
-      return { pattern, guard, value: result, row: arm.row, syntax: arm.value };
-    });
+    // A switch without a natural type binds again once its target is known, reusing its parts so that the variables
+    // its patterns declare are declared once (see bindConditional).
+    let parts = this.switchParts.get(node);
+    if (parts?.scope !== context.scope) {
+      const value = this.bindValue(node.value, context);
+      const arms = node.arms.map((arm) => {
+        const scope = new LocalScope(context.scope, context.fn);
+        const armContext: BindContext = { scope, fn: context.fn };
+        const pattern = this.bindPattern(arm.pattern, value.type, armContext);
+        const guard = arm.guard ? this.bindAs(arm.guard, this.boolType, armContext) : undefined;
+        const result = this.bindAllowingThrow(arm.value, armContext);
+        return { pattern, guard, value: result, row: arm.row, syntax: arm.value };
+      });
+      parts = { scope: context.scope, value, arms };
+      this.switchParts.set(node, parts);
+    }
+    const { value, arms } = parts;
     if (arms.length === 0) {
       this.error(node, 'CS8506', 'switch 式に最適な型が見つかりませんでした。');
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
     const type = target ?? this.bestCommonType(arms.map((arm) => arm.value));
-    if (!type) {
-      if (arms.every((arm) => arm.value.kind !== 'unbound' && arm.value.type.kind !== 'null')) {
-        this.error(node, 'CS8506', 'switch 式に最適な型が見つかりませんでした。');
-        return { kind: 'default', type: ERROR_TYPE, row: node.row };
-      }
-      return undefined;
-    }
+    // Without a natural type the switch converts its arms to its target (C# spec §12.11), which a later binding knows.
+    if (!type) return undefined;
     return {
       kind: 'switch',
       value,

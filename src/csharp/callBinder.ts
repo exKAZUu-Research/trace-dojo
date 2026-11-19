@@ -737,8 +737,8 @@ export abstract class CallBinder extends OperatorBinder {
         const code = arg.kind === 'named' && arg.symbol.isValueType ? 'CS0315' : 'CS0311';
         const how =
           code === 'CS0315'
-            ? `'${displayType(arg)}' から '${displayType(target)}' へのボックス変換がありません。`
-            : `'${displayType(arg)}' から '${displayType(target)}' への暗黙的な参照変換がありません。`;
+            ? `'${displayType(arg, true)}' から '${displayType(target, true)}' へのボックス変換がありません。`
+            : `'${displayType(arg, true)}' から '${displayType(target, true)}' への暗黙的な参照変換がありません。`;
         this.error(
           row,
           code,
@@ -880,14 +880,19 @@ export abstract class CallBinder extends OperatorBinder {
     }
     if (candidates.length === 1 && args.length < candidates[0].method.parameters.length) {
       const method = candidates[0].method;
+      const positional = args.filter((arg) => arg.name === undefined).length;
+      const isGiven = (name: string, index: number): boolean =>
+        index < positional || args.some((arg) => arg.name === name);
       const missing =
         method.parameters.find(
-          (parameter, index) => index >= args.length && parameter.defaultSyntax === undefined && !parameter.isParams
+          (parameter, index) =>
+            !isGiven(parameter.name, index) && parameter.defaultSyntax === undefined && !parameter.isParams
         ) ?? method.parameters[args.length];
+      // Roslyn's Japanese message names the parameter first and the method second.
       this.error(
         row,
         'CS7036',
-        `'${displayMethodIn(method, candidates[0].owner)}' の必要なパラメーター '${missing.name}' に対応する特定の引数がありません`
+        `'${missing.name}' の必要なパラメーター '${displayMethodIn(method, candidates[0].owner)}' に対応する特定の引数がありません`
       );
       return;
     }

@@ -134,6 +134,7 @@ export class Compiler extends StatementBinder {
       } else {
         entry = this.findMain(declared);
       }
+      this.checkTypeArguments();
       this.checkAtomicAnnotations();
       // Binding the members adds the fields that capture primary constructors' parameters, which shift the slots of
       // the fields of derived types.
@@ -147,6 +148,17 @@ export class Compiler extends StatementBinder {
     const types = declared.map((type) => type.symbol);
     if (isTopLevel) types.push(entry.owner);
     return { library: this.library, types, entry, isTopLevel };
+  }
+
+  /** Checks the type arguments of the generic types the program names against their parameters' constraints. */
+  private checkTypeArguments(): void {
+    for (const { symbol, args, row } of this.constraintChecks) {
+      const parameters = symbol.allTypeParameters;
+      const substitution = new Map(parameters.map((parameter, index) => [parameter, args[index]]));
+      for (const [index, parameter] of parameters.entries()) {
+        if (!this.satisfiesConstraints(args[index], parameter, substitution, row, displayTypeSymbol(symbol))) break;
+      }
+    }
   }
 
   /** Binds the constants and default parameter values of the library, whose methods have no bodies. */

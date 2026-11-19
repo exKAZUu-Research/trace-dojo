@@ -54,10 +54,14 @@ function roslynSyntaxErrors(root: Node, errors: SourceDiagnostic[]): SourceDiagn
   return diagnostics.toSorted((a, b) => a.row - b.row);
 }
 
-/** Whether a local declaration lacks its `;` on a row before more code, where Roslyn expects another declarator. */
+/**
+ * Whether a top-level local declaration lacks its `;` on a row before more code, where Roslyn expects another
+ * declarator; inside a method it expects the `;`.
+ */
 function endsDeclarationBeforeMore(root: Node, row: number): boolean {
   const missing = leavesOf(root).find((leaf) => leaf.isMissing && leaf.type === ';' && leaf.startPosition.row === row);
-  if (missing?.parent?.type !== 'local_declaration_statement') return false;
+  if (missing?.parent?.type !== 'local_declaration_statement' || missing.parent.parent?.type !== 'global_statement')
+    return false;
   const next = nextLeafOf(root, missing);
   return next !== undefined && next.type !== '}';
 }
@@ -73,12 +77,17 @@ function hasErrorAncestor(node: Node): boolean {
 
 function roslynErrorsOf(root: Node, error: Node): SourceDiagnostic[] {
   const tokens = leavesOf(error);
-  const inDeclaration = ancestorOfType(error, 'variable_declaration') !== undefined;
+  // Roslyn reads on into a top-level declaration, expecting another declarator, where in a method it expects `;`.
+  const inDeclaration =
+    ancestorOfType(error, 'variable_declaration') !== undefined &&
+    ancestorOfType(error, 'global_statement') !== undefined;
   if (tokens[0]?.type === '"') {
     // An unterminated string ends at the line's end, after which a declaration expects its next declarator.
     const row = tokens[0].startPosition.row;
     const unterminated = { row, message: 'CS1010: 定数の 新しい行です' };
-    return inDeclaration ? [unterminated, { row, message: MISSING_TOKENS[','] }] : [unterminated];
+    if (inDeclaration) return [unterminated, { row, message: MISSING_TOKENS[','] }];
+    if (ancestorOfType(error, 'variable_declaration')) return [unterminated, { row, message: MISSING_TOKENS[';'] }];
+    return [unterminated];
   }
   if (error.parent?.type === 'compilation_unit' && tokens.every((token) => token.type === '}')) {
     return [{ row: error.startPosition.row, message: 'CS1022: 型、名前空間の定義、またはファイルの終わりが必要です' }];
@@ -101,6 +110,9 @@ function roslynErrorOf(root: Node, error: Node, tokens: Node[], inDeclaration: b
   const previous = previousLeafOf(root, error);
   const first = tokens[0] ?? error;
   if (previous && first.startPosition.row > previous.endPosition.row) {
+    return { row: previous.endPosition.row, message: inDeclaration ? MISSING_TOKENS[','] : MISSING_TOKENS[';'] };
+  }
+  if (previous && ancestorOfType(error, 'variable_declarator') && /^[\p{L}_]/u.test(first.text)) {
     return { row: previous.endPosition.row, message: inDeclaration ? MISSING_TOKENS[','] : MISSING_TOKENS[';'] };
   }
   const next = nextLeafOf(root, error);

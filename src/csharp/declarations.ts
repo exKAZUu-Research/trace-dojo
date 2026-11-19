@@ -1170,13 +1170,7 @@ export class DeclarationBinder extends BinderBase {
       if (inherited.some((other) => sameType(other, face))) continue;
       for (const member of face.symbol.methods) {
         if (member.isStatic || member.property) continue;
-        if (!this.findImplementation(symbol.declaredType, member, face)) {
-          this.error(
-            symbol.row,
-            'CS0535',
-            `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${displayMethodIn(member, face)}' を実装しません`
-          );
-        }
+        if (!this.findImplementation(symbol.declaredType, member, face)) this.reportUnimplemented(symbol, member, face);
       }
       for (const property of face.symbol.properties) {
         const implementation = this.findPropertyImplementation(symbol.declaredType, property, face);
@@ -1243,7 +1237,7 @@ export class DeclarationBinder extends BinderBase {
         this.error(
           method.row,
           'CS0508',
-          `'${displayMethod(method)}': オーバーライドされたメンバー '${displayType(expectedReturn)}' に対応するために戻り値の型は '${displayMethodIn(candidate, current)}' でなければなりません`
+          `'${displayMethod(method)}': オーバーライドされたメンバー '${displayMethodIn(candidate, current)}' に対応するために戻り値の型は '${displayType(expectedReturn)}' でなければなりません`
         );
       }
       if (
@@ -1318,6 +1312,46 @@ export class DeclarationBinder extends BinderBase {
   }
 
   /** The method of a class or its bases that implements an interface's method, which must be public and an instance method. */
+  /**
+   * Reports an interface method that a class does not implement: as CS0737 or CS0738 when a method of the same
+   * signature is not public or returns another type, and as CS0535 otherwise.
+   */
+  private reportUnimplemented(symbol: TypeSymbol, member: MethodSymbol, face: NamedType): void {
+    const memberText = displayMethodIn(member, face);
+    for (let current: NamedType | undefined = symbol.declaredType; current; current = baseTypeOf(current)) {
+      const owner = current;
+      const close = owner.symbol.methods.find(
+        (method) =>
+          method.name === member.name &&
+          !method.isStatic &&
+          method.kind === 'method' &&
+          this.sameParameters(method, member, owner, face)
+      );
+      if (!close) continue;
+      const closeText = displayMethodIn(close, owner);
+      if (close.access !== 'public') {
+        this.error(
+          symbol.row,
+          'CS0737',
+          `'${displayTypeSymbol(symbol)}' は、インターフェイス メンバー '${memberText}' を実装していません。'${closeText}' は public ではないため、インターフェイス メンバーを実装できません。`
+        );
+      } else {
+        const expected = displayType(substitute(member.returnType, substitutionOf(face)));
+        this.error(
+          symbol.row,
+          'CS0738',
+          `'${displayTypeSymbol(symbol)}' は、インターフェイス メンバー '${memberText}' を実装していません。'${closeText}' は一致する '${expected}' の戻り値の型を持たないため、'${memberText}' を実装できません。`
+        );
+      }
+      return;
+    }
+    this.error(
+      symbol.row,
+      'CS0535',
+      `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${memberText}' を実装しません`
+    );
+  }
+
   findImplementation(type: NamedType, member: MethodSymbol, face: NamedType): MethodSymbol | undefined {
     for (let current: NamedType | undefined = type; current; current = baseTypeOf(current)) {
       const candidate = current.symbol.methods.find(
@@ -1391,7 +1425,9 @@ export function displayMethodIn(method: MethodSymbol, owner: NamedType): string 
     )
     .join(', ');
   if (method.kind === 'getter' || method.kind === 'setter') return displayMethod(method);
-  return `${displayTypeSymbol(owner.symbol, owner.args)}.${method.name}${method.typeParameters.length > 0 ? `<${method.typeParameters.map((parameter) => parameter.name).join(', ')}>` : ''}(${parameters})`;
+  // Roslyn names a constructor after its type, as `A.A(int)`.
+  const name = method.kind === 'constructor' ? owner.symbol.name : method.name;
+  return `${displayTypeSymbol(owner.symbol, owner.args)}.${name}${method.typeParameters.length > 0 ? `<${method.typeParameters.map((parameter) => parameter.name).join(', ')}>` : ''}(${parameters})`;
 }
 
 export function isDelegateType(type: Type): type is NamedType {

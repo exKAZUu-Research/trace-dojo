@@ -142,24 +142,11 @@ export abstract class StatementBinder extends PatternBinder {
         this.error(position, 'CS1604', "'this' は読み取り専用であるため、割り当てることはできません");
         return { kind: 'discard', type: ERROR_TYPE, row: position.row };
       }
-      case 'constant': {
-        if ((target as { local?: LocalSymbol }).local || this.isConstantName(position)) {
-          this.error(position, 'CS0131', '代入式の左辺には変数、プロパティ、またはインデクサーを指定してください');
-        } else {
-          this.error(position, 'CS0131', '代入式の左辺には変数、プロパティ、またはインデクサーを指定してください');
-        }
-        return { kind: 'discard', type: ERROR_TYPE, row: position.row };
-      }
       default: {
-        if (target.type.kind !== 'error')
-          this.error(position, 'CS0131', '代入式の左辺には変数、プロパティ、またはインデクサーを指定してください');
+        if (target.type.kind !== 'error') this.reportNotAssignable(position, use);
         return { kind: 'discard', type: ERROR_TYPE, row: position.row };
       }
     }
-  }
-
-  private isConstantName(_position: Position): boolean {
-    return false;
   }
 
   private checkPropertyAssignable(
@@ -312,6 +299,12 @@ export abstract class StatementBinder extends PatternBinder {
     if (expression.kind === 'call')
       return `${displayTypeSymbol(expression.method.owner)}.${expression.method.name}(${expression.method.parameters.map((parameter) => displayType(parameter.type)).join(', ')})`;
     return displayType(expression.type);
+  }
+
+  private reportNotAssignable(position: Position, use: 'assign' | 'ref' | 'out' | 'compound' | 'initializer'): void {
+    if (use === 'ref' || use === 'out')
+      this.error(position, 'CS1510', 'ref または out 値は、割り当て可能な変数でなければなりません');
+    else this.error(position, 'CS0131', '代入式の左辺には変数、プロパティ、またはインデクサーを指定してください');
   }
 
   bindLValue(node: Expression, context: BindContext, use: 'assign' | 'ref' | 'out' | 'compound'): BoundLValue {
@@ -647,6 +640,7 @@ export abstract class StatementBinder extends PatternBinder {
     if (what === 'default') this.error(declarator, 'CS8716', "'default' リテラルにターゲット型がありません。");
     else if (what === 'implicitNew') this.error(declarator, 'CS8754', "'new()' のターゲット型がありません");
     else if (what === 'collection') this.error(declarator, 'CS9176', 'コレクション式のターゲット型がありません。');
+    else if (what === 'switch') this.error(bound.node, 'CS8506', 'switch 式に最適な型が見つかりませんでした。');
     else if (what === 'tuple')
       this.error(declarator, 'CS0815', `(${'?'}) を暗黙的に型指定された変数に割り当てることはできません`);
     else this.error(declarator, 'CS8917', 'デリゲート型を推論できませんでした。');
@@ -1068,7 +1062,7 @@ export abstract class StatementBinder extends PatternBinder {
         this.error(
           clause.type ?? clause,
           'CS0160',
-          `前の catch 句はこれ、またはスーパー型 ('${this.exceptionDisplay(earlier)}') の例外のすべてを既にキャッチしました`
+          `前の catch 句はこれ、またはスーパー型 ('${displayType(earlier)}') の例外のすべてを既にキャッチしました`
         );
       }
       if (!clause.filter) caught.push(type);
@@ -1102,10 +1096,6 @@ export abstract class StatementBinder extends PatternBinder {
   }
 
   /** The full name of an exception type, as CS0160 shows it. */
-  private exceptionDisplay(type: Type): string {
-    if (type.kind !== 'named') return displayType(type);
-    return type.symbol.isLibrary ? type.symbol.fullName : displayType(type);
-  }
 
   /** Declares a local function's signature, which its block knows from its start. */
   protected declareLocalFunction(declaration: MethodDeclaration, context: BindContext): MethodSymbol {

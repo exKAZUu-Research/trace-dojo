@@ -106,6 +106,14 @@ export abstract class PatternBinder extends ExpressionBinder {
     return inputType;
   }
 
+  /** A pattern's value that is no constant: Roslyn names the type it expects unless the input is `object`. */
+  private reportNotConstant(pattern: Position, inputType: Type): void {
+    const target = nullableUnderlying(inputType) ?? inputType;
+    if (specialOf(target) === 'object' || target.kind === 'typeParameter')
+      this.error(pattern, 'CS0150', '定数値が必要です');
+    else this.error(pattern, 'CS9135', `型 '${displayType(target)}' の定数値が必要です`);
+  }
+
   private checkPatternType(type: Type, inputType: Type, position: Position): void {
     if (type.kind === 'error' || inputType.kind === 'error') return;
     if (type.kind === 'named' && type.symbol.special === 'nullable') {
@@ -155,7 +163,7 @@ export abstract class PatternBinder extends ExpressionBinder {
     }
     if (value.type.kind === 'error') return { kind: 'constant', value, inputType, type: ERROR_TYPE };
     if (value.kind !== 'constant') {
-      this.error(pattern, 'CS0150', '定数値が必要です');
+      this.reportNotConstant(pattern, inputType);
       return { kind: 'constant', value, inputType, type: ERROR_TYPE };
     }
     const target = nullableUnderlying(inputType) ?? inputType;
@@ -173,7 +181,7 @@ export abstract class PatternBinder extends ExpressionBinder {
     this.error(
       pattern,
       'CS0029',
-      `型 '${displayType(value.type)}' を '${displayType(inputType)}' に暗黙的に変換できません`
+      `型 '${displayType(value.type, true)}' を '${displayType(inputType, true)}' に暗黙的に変換できません`
     );
     return { kind: 'constant', value, inputType, type: ERROR_TYPE };
   }
@@ -188,7 +196,7 @@ export abstract class PatternBinder extends ExpressionBinder {
     if (value.type.kind === 'error' || target.kind === 'error')
       return { kind: 'relational', operator: pattern.operator, value, operandKind: 'int', inputType };
     if (value.kind !== 'constant') {
-      this.error(pattern, 'CS0150', '定数値が必要です');
+      this.reportNotConstant(pattern, inputType);
       return { kind: 'relational', operator: pattern.operator, value, operandKind: 'int', inputType };
     }
     const comparedType = isNumeric(target) || isEnum(target) ? target : value.type;

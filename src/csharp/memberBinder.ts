@@ -94,7 +94,7 @@ export abstract class MemberBinder extends CallBinder {
         this.error(
           position,
           'CS0119',
-          `'${displayType(result.type)}' は 型 です。これは特定のコンテンツでは無効になります`
+          `'${displayType(result.type)}' は 種類 です。これは特定のコンテンツでは無効になります`
         );
         return { kind: 'default', type: ERROR_TYPE, row: position.row };
       }
@@ -795,7 +795,7 @@ export abstract class MemberBinder extends CallBinder {
       const canFallBack = group.extensions.length > 0 && group.receiver !== undefined;
       const resolved = this.resolveCall(group.candidates, args, group.typeArgs, node.row, description);
       if (resolved) return this.callNode(group, resolved, node);
-      if (!canFallBack) return { kind: 'default', type: ERROR_TYPE, row: node.row };
+      if (!canFallBack) return { kind: 'default', type: this.failedCallType(group.candidates), row: node.row };
       this.diagnostics.length = saved;
     }
     const receiver = group.receiver as BoundExpression;
@@ -812,6 +812,18 @@ export abstract class MemberBinder extends CallBinder {
     });
     if (!resolved) return { kind: 'default', type: ERROR_TYPE, row: node.row };
     return this.callNode({ ...group, receiver: undefined }, resolved, node);
+  }
+
+  /**
+   * The type of a call whose arguments fit no candidate: a single candidate's non-generic return type, which Roslyn
+   * keeps so that the later uses of the result are checked, and otherwise the error type.
+   */
+  private failedCallType(candidates: MethodCandidate[]): Type {
+    if (candidates.length !== 1 || candidates[0].method.typeParameters.length > 0) return ERROR_TYPE;
+    const [{ method, owner }] = candidates;
+    // A void result has no later use, and an error type keeps the statement from reporting it as no statement.
+    if (method.returnType.kind === 'void') return ERROR_TYPE;
+    return substitute(method.returnType, substitutionOf(owner));
   }
 
   /** The call node for a resolved method, checking that an instance method has a receiver. */
@@ -1100,7 +1112,17 @@ export abstract class MemberBinder extends CallBinder {
       kind: 'constructor',
       typeName: displayType(type),
     });
-    if (!resolved) return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    // A creation whose arguments fit no constructor still has its type, which later errors then use, as in Roslyn.
+    if (!resolved)
+      return {
+        kind: 'new',
+        constructor: undefined,
+        objectType: type,
+        args: [],
+        initializer: undefined,
+        type,
+        row: node.row,
+      };
     const constructor = resolved.candidate.method;
     if (!constructor.native && symbol.isLibrary && !constructor.declaration && !(symbol.kind === 'struct'))
       this.unsupported(node, `${displayTypeSymbol(symbol)} のコンストラクター`);

@@ -94,7 +94,7 @@ export abstract class ConversionBinder extends LookupBinder {
     if (expression.kind === 'unbound')
       return this.bindUnbound(expression, target, mode, true) ?? { kind: 'default', type: ERROR_TYPE, row };
     if (expression.type.kind === 'void') {
-      this.error(row, 'CS0029', `型 'void' を '${displayType(target)}' に暗黙的に変換できません`);
+      this.error(row, 'CS0029', `型 'void' を '${displayType(target, true)}' に暗黙的に変換できません`);
       return { ...expression, type: ERROR_TYPE };
     }
     const implicit = this.implicitConversionOf(expression, target);
@@ -115,14 +115,16 @@ export abstract class ConversionBinder extends LookupBinder {
   }
 
   private reportMissingConversion(expression: BoundExpression, target: Type, row: number, mode: ConversionMode): void {
-    const from = displayType(expression.type);
     const to = displayType(target);
+    // Roslyn's conversion errors name the types with their namespaces.
+    const fromQualified = displayType(expression.type, true);
+    const toQualified = displayType(target, true);
     if (expression.type.kind === 'null') {
       this.error(row, 'CS0037', `Null 非許容の値型であるため、Null を '${to}' に変換できません`);
       return;
     }
     if (mode === 'explicit') {
-      this.error(row, 'CS0030', `型 '${from}' を '${to}' に変換できません`);
+      this.error(row, 'CS0030', `型 '${fromQualified}' を '${toQualified}' に変換できません`);
       return;
     }
     if (
@@ -156,11 +158,11 @@ export abstract class ConversionBinder extends LookupBinder {
       this.error(
         row,
         'CS0266',
-        `型 '${from}' を '${to}' に暗黙的に変換できません。明示的な変換が存在します (cast が不足していないかどうかを確認してください)`
+        `型 '${fromQualified}' を '${toQualified}' に暗黙的に変換できません。明示的な変換が存在します (cast が不足していないかどうかを確認してください)`
       );
       return;
     }
-    this.error(row, 'CS0029', `型 '${from}' を '${to}' に暗黙的に変換できません`);
+    this.error(row, 'CS0029', `型 '${fromQualified}' を '${toQualified}' に暗黙的に変換できません`);
   }
 
   /** Builds the conversion node, folding constants. */

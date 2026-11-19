@@ -499,21 +499,25 @@ const KEYWORD_NAMES: Partial<Record<SpecialType, string>> = {
 };
 
 /** The name of a type as Roslyn's diagnostics show it, such as `List<int>`, `int?`, `(int, string)`, or `A.B`. */
-export function displayType(type: Type): string {
+/**
+ * A type as Roslyn's diagnostics show it. With `qualified`, as its conversion errors do, a type outside the global
+ * namespace carries its namespace, such as `System.Collections.Generic.List<int>`.
+ */
+export function displayType(type: Type, qualified = false): string {
   switch (type.kind) {
     case 'named': {
       const keyword = type.symbol.special ? KEYWORD_NAMES[type.symbol.special] : undefined;
       if (keyword) return keyword;
-      if (type.symbol.special === 'nullable') return `${displayType(type.args[0])}?`;
+      if (type.symbol.special === 'nullable') return `${displayType(type.args[0], qualified)}?`;
       if (type.symbol.special === 'valueTuple' && type.args.length > 1) {
         return `(${type.args
           .map((arg, index) => {
             const name = type.tupleNames?.[index];
-            return name ? `${displayType(arg)} ${name}` : displayType(arg);
+            return name ? `${displayType(arg, qualified)} ${name}` : displayType(arg, qualified);
           })
           .join(', ')})`;
       }
-      return displayTypeSymbol(type.symbol, type.args);
+      return displayTypeSymbol(type.symbol, type.args, qualified);
     }
     case 'array': {
       let element: Type = type.element;
@@ -522,7 +526,7 @@ export function displayType(type: Type): string {
         ranks += `[${','.repeat(element.rank - 1)}]`;
         element = element.element;
       }
-      return `${displayType(element)}${ranks}`;
+      return `${displayType(element, qualified)}${ranks}`;
     }
     case 'typeParameter': {
       return type.symbol.name;
@@ -541,15 +545,17 @@ export function displayType(type: Type): string {
 
 export function displayTypeSymbol(
   symbol: TypeSymbol,
-  args: Type[] = symbol.allTypeParameters.map((parameter) => parameter.type)
+  args: Type[] = symbol.allTypeParameters.map((parameter) => parameter.type),
+  qualified = false
 ): string {
   const keyword = symbol.special ? KEYWORD_NAMES[symbol.special] : undefined;
   if (keyword) return keyword;
   const ownCount = symbol.typeParameters.length;
   const ownArgs = args.slice(args.length - ownCount);
   const outerArgs = args.slice(0, args.length - ownCount);
-  const prefix = symbol.containing ? `${displayTypeSymbol(symbol.containing, outerArgs)}.` : '';
-  const suffix = ownCount > 0 ? `<${ownArgs.map((arg) => displayType(arg)).join(', ')}>` : '';
+  const namespace = qualified && symbol.namespace ? `${symbol.namespace}.` : '';
+  const prefix = symbol.containing ? `${displayTypeSymbol(symbol.containing, outerArgs, qualified)}.` : namespace;
+  const suffix = ownCount > 0 ? `<${ownArgs.map((arg) => displayType(arg, qualified)).join(', ')}>` : '';
   return `${prefix}${symbol.name}${suffix}`;
 }
 

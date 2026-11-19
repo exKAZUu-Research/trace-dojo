@@ -5,6 +5,7 @@ import { IMPLICIT_USINGS, NamespaceSymbol } from './namespaces';
 import {
   arrayType,
   displayType,
+  displayTypeSymbol,
   ERROR_TYPE,
   type NamedType,
   namedType,
@@ -361,12 +362,12 @@ export class BinderBase {
       const candidate = this.findTypeInScope(name, -1, context) as TypeSymbol;
       const arity = candidate.typeParameters.length;
       if (arity === 0)
-        this.error(position, 'CS0308', `非ジェネリック 型 '${candidate.name}' は型引数と一緒には使用できません`);
+        this.error(position, 'CS0308', `非ジェネリック 種類 '${candidate.name}' は型引数と一緒には使用できません`);
       else
         this.error(
           position,
           'CS0305',
-          `ジェネリック 型 '${candidate.name}<${candidate.typeParameters.map((parameter) => parameter.name).join(', ')}>' を使用するには、${arity} 型引数が必要です`
+          `ジェネリック 種類 '${candidate.name}<${candidate.typeParameters.map((parameter) => parameter.name).join(', ')}>' を使用するには、${arity} 型引数が必要です`
         );
       return ERROR_TYPE;
     }
@@ -417,13 +418,16 @@ export class BinderBase {
   }
 
   /** Constructs a generic type with its arguments, checking their number. */
+  /** The constructed types whose type arguments the compiler checks against their constraints once they are known. */
+  readonly constraintChecks: { symbol: TypeSymbol; args: Type[]; row: number }[] = [];
+
   construct(position: Position, symbol: TypeSymbol, args: Type[]): Type {
     const expected = symbol.allTypeParameters.length;
     if (args.length !== expected) {
       this.error(
         position,
         'CS0305',
-        `ジェネリック 型 '${symbol.name}' を使用するには、${symbol.typeParameters.length} 型引数が必要です`
+        `ジェネリック 種類 '${displayTypeSymbol(symbol)}' を使用するには、${symbol.typeParameters.length} 型引数が必要です`
       );
       return ERROR_TYPE;
     }
@@ -438,6 +442,8 @@ export class BinderBase {
         `型 '${displayType(args[0])}' は、ジェネリック型のパラメーター 'T'、またはメソッド 'Nullable<T>' として使用するために、Null 非許容の値型でなければなりません`
       );
     }
+    if (args.length > 0 && symbol.special !== 'nullable')
+      this.constraintChecks.push({ symbol, args, row: position.row });
     return namedType(symbol, args);
   }
 }

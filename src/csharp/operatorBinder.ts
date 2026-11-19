@@ -121,7 +121,14 @@ export abstract class OperatorBinder extends ConversionBinder {
   }
 
   /** Binds a binary operator other than `&&`, `||`, and `??`. */
-  bindBinary(operator: string, left: BoundExpression, right: BoundExpression, row: number): BoundExpression {
+  /** @param shownOperator The operator that an error names, such as `-=` for a compound assignment's `-`. */
+  bindBinary(
+    operator: string,
+    left: BoundExpression,
+    right: BoundExpression,
+    row: number,
+    shownOperator = operator
+  ): BoundExpression {
     if (left.type.kind === 'error' || right.type.kind === 'error')
       return {
         kind: 'binary',
@@ -192,7 +199,7 @@ export abstract class OperatorBinder extends ConversionBinder {
       const rightTarget = SHIFTS.has(operator) ? this.intType : operandType;
       return this.finishBinary(operator, left, right, kind, operandType, isLifted, row, rightTarget);
     }
-    this.reportBinary(operator, left, right, row);
+    this.reportBinary(shownOperator, left, right, row);
     return {
       kind: 'binary',
       operator,
