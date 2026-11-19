@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 426 -- One case per kind of type.
 import type { Span } from './ast';
+// code-gauge-allow-file fileNcss 429 -- One case per kind of type.
+import { sizeTable } from './capacity';
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
 import { RustPanic } from './runtime';
@@ -481,7 +482,7 @@ export function hashKey(type: Type, value: Value): string {
 
 /** A deep copy of a value as `Clone::clone` makes it, calling the program's own `clone` for its types. */
 // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of type.
-// code-gauge-allow functionNcss 59 -- One case per kind of value.
+// code-gauge-allow functionNcss 60 -- One case per kind of value.
 export function cloneValue(type: Type, value: Value): Value {
   const t = normalize(shallow(type));
   if (t.kind === 'ref') return value;
@@ -518,6 +519,7 @@ export function cloneValue(type: Type, value: Value): Value {
           for (const [hash, [key, item]] of source.entries) {
             copy.entries.set(hash, [cloneValue(t.args[0], key), cloneValue(t.args[1], item)]);
           }
+          sizeTable(copy.entries, 0, source.entries);
           return copy;
         }
         case 'HashSet':
@@ -525,6 +527,7 @@ export function cloneValue(type: Type, value: Value): Value {
           const source = value as SetValue;
           const copy = new SetValue(source.sorted);
           for (const [hash, item] of source.entries) copy.entries.set(hash, cloneValue(t.args[0], item));
+          sizeTable(copy.entries, 0, source.entries);
           return copy;
         }
         case 'Range':

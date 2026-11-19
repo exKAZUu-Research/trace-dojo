@@ -494,6 +494,28 @@ test('sorts, max_by, dedup_by_key, and zip call closures in the order and number
   });
 });
 
+test('capacities grow and sizes lay out as std and rustc make them', () => {
+  const program = `use std::collections::HashMap;
+use std::mem::size_of;
+enum Message { Quit, Move { x: i32, y: i32 }, Write(String) }
+fn main() {
+    let mut v: Vec<i32> = Vec::new();
+    for i in 0..5 { v.push(i); print!("{} ", v.capacity()); }
+    let evens: Vec<i32> = (0..10).filter(|x| x % 2 == 0).collect();
+    let mut s = String::with_capacity(3);
+    s.push_str("abcd");
+    let mut m: HashMap<i32, i32> = HashMap::new();
+    m.insert(1, 1);
+    println!("{} {} {}", evens.capacity(), s.capacity(), m.capacity());
+    println!("{} {} {} {}", size_of::<Option<bool>>(), size_of::<Option<String>>(), size_of::<Message>(), size_of::<(u8, u32, u8)>());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '4 4 4 4 8 8 8 3\n1 24 24 8\n',
+    uncaughtException: undefined,
+  });
+});
+
 test.each([
   ['range patterns (stage C)', '    match 3 { 1..=5 => {}, _ => {} }'],
   ['threads (stage D)', '    std::thread::spawn(|| {});'],

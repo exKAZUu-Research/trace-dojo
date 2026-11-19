@@ -1,7 +1,7 @@
 import { compareValues } from '../ops';
 import { type IntName, intType, type Type } from '../types';
 import { ElementPlace, sliceItems, sliceSet, UNIT_VALUE, type Value } from '../values';
-import { sizeOf } from './core';
+import { sizeOf } from './layout';
 import type { SortElement } from './sort/shared';
 import { stableSort } from './sort/stable';
 import { unstableSort } from './sort/unstable';
@@ -25,7 +25,7 @@ export function sortSlice(
 }
 
 function sortElement(ctx: NativeContext, type: Type): SortElement {
-  return { size: sizeOf(ctx, type), isCopy: ctx.interp.checker.solver.isCopy(type) };
+  return { size: sizeOf(type), isCopy: ctx.interp.checker.solver.isCopy(type) };
 }
 
 function ordViolation(ctx: NativeContext): never {
@@ -110,7 +110,7 @@ export function sortByCachedKey(ctx: NativeContext, slice: Value, f: Value): voi
   let index = 0;
   while (
     index < 3 &&
-    !(sizeOf(ctx, pairType(names[index])) < sizeOf(ctx, pairType(names[index + 1])) && items.length < 2 ** (8 << index))
+    !(sizeOf(pairType(names[index])) < sizeOf(pairType(names[index + 1])) && items.length < 2 ** (8 << index))
   ) {
     index++;
   }

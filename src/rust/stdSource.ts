@@ -187,6 +187,9 @@ pub mod string {
         pub fn clear(&mut self);
         pub fn capacity(&self) -> usize;
         pub fn reserve(&mut self, additional: usize);
+        pub fn reserve_exact(&mut self, additional: usize);
+        pub fn shrink_to_fit(&mut self);
+        pub fn shrink_to(&mut self, min_capacity: usize);
         pub fn as_str(&self) -> &str;
         pub fn as_mut_str(&mut self) -> &mut str;
         pub fn into_bytes(self) -> Vec<u8>;
@@ -215,7 +218,9 @@ pub mod vec {
         pub fn clear(&mut self);
         pub fn capacity(&self) -> usize;
         pub fn reserve(&mut self, additional: usize);
+        pub fn reserve_exact(&mut self, additional: usize);
         pub fn shrink_to_fit(&mut self);
+        pub fn shrink_to(&mut self, min_capacity: usize);
         pub fn extend<A: ExtendInto<T>, S>(&mut self, iter: IterImpl<A, S>);
         pub fn extend_from_slice(&mut self, other: &[T]) where T: Clone;
         pub fn append(&mut self, other: &mut Vec<T>);
@@ -1044,6 +1049,9 @@ pub mod collections {
     impl<K, V> HashMap<K, V> {
         pub fn new() -> HashMap<K, V>;
         pub fn with_capacity(capacity: usize) -> HashMap<K, V>;
+        pub fn reserve(&mut self, additional: usize);
+        pub fn shrink_to_fit(&mut self);
+        pub fn shrink_to(&mut self, min_capacity: usize);
         pub fn insert(&mut self, k: K, v: V) -> Option<V> where K: Eq + Hash;
         pub fn get<Q>(&self, k: &Q) -> Option<&V> where K: Borrow<Q>;
         pub fn get_mut<Q>(&mut self, k: &Q) -> Option<&mut V> where K: Borrow<Q>;
@@ -1119,6 +1127,10 @@ pub mod collections {
     impl<T> HashSet<T> {
         pub fn new() -> HashSet<T>;
         pub fn with_capacity(capacity: usize) -> HashSet<T>;
+        pub fn capacity(&self) -> usize;
+        pub fn reserve(&mut self, additional: usize);
+        pub fn shrink_to_fit(&mut self);
+        pub fn shrink_to(&mut self, min_capacity: usize);
         pub fn insert(&mut self, value: T) -> bool where T: Eq + Hash;
         pub fn contains<Q>(&self, value: &Q) -> bool where T: Borrow<Q>;
         pub fn remove<Q>(&mut self, value: &Q) -> bool where T: Borrow<Q>;
@@ -1173,6 +1185,10 @@ pub mod collections {
     impl<T> VecDeque<T> {
         pub fn new() -> VecDeque<T>;
         pub fn with_capacity(capacity: usize) -> VecDeque<T>;
+        pub fn capacity(&self) -> usize;
+        pub fn reserve(&mut self, additional: usize);
+        pub fn reserve_exact(&mut self, additional: usize);
+        pub fn shrink_to_fit(&mut self);
         pub fn push_back(&mut self, value: T);
         pub fn push_front(&mut self, value: T);
         pub fn pop_back(&mut self) -> Option<T>;
@@ -1210,6 +1226,9 @@ pub mod collections {
     impl<T> BinaryHeap<T> {
         pub fn new() -> BinaryHeap<T>;
         pub fn with_capacity(capacity: usize) -> BinaryHeap<T>;
+        pub fn capacity(&self) -> usize;
+        pub fn reserve(&mut self, additional: usize);
+        pub fn shrink_to_fit(&mut self);
         pub fn push(&mut self, item: T) where T: Ord;
         pub fn pop(&mut self) -> Option<T> where T: Ord;
         pub fn peek(&self) -> Option<&T>;

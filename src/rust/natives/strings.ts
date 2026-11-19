@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 486 -- One native per method of the standard library.
+import { madeString } from '../capacity';
 import { normalize } from '../infer';
 import { strSliceBytes } from '../interpreter';
 import { RustPanic } from '../runtime';
@@ -14,6 +14,8 @@ import {
   UNIT_VALUE,
   type Value,
 } from '../values';
+// code-gauge-allow-file fileNcss 488 -- One native per method of the standard library.
+import { withStringCapacity } from './capacityNatives';
 import { arrayIter } from './iterators';
 import { parseFloatText, parseInteger } from './numbers';
 import {
@@ -504,7 +506,7 @@ function replaceN(ctx: NativeContext, text: string, from: Value, to: string, cou
 
 const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   new: () => '',
-  with_capacity: () => '',
+  with_capacity: ([capacity]) => madeString('', Number(capacity as bigint)),
   from_iter: ([iter], ctx) => {
     const iterator = deref(iter) as IterValue;
     let text = '';
@@ -578,8 +580,6 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     placeOf(self).set('');
     return UNIT_VALUE;
   },
-  capacity: ([self]) => BigInt(byteLength(str(self))),
-  reserve: () => UNIT_VALUE,
   as_str: ([self]) => str(self),
   as_mut_str: ([self]) => self,
   into_bytes: ([self]) => Array.from(encoder.encode(str(self)), BigInt),
@@ -723,7 +723,7 @@ function caseIter(name: 'ToUppercase' | 'ToLowercase', text: string): Value {
 
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
 for (const [name, native] of Object.entries(strNatives)) natives[`str::${name}`] = native;
-for (const [name, native] of Object.entries(stringNatives)) natives[`String::${name}`] = native;
+for (const [name, native] of Object.entries(withStringCapacity(stringNatives))) natives[`String::${name}`] = native;
 for (const [name, native] of Object.entries(charNatives)) natives[`char::${name}`] = native;
 // `u8`'s ASCII methods behave as `char`'s on the byte's code point.
 const byteChar = (byte: Value): string => String.fromCodePoint(Number(deref(byte) as bigint));

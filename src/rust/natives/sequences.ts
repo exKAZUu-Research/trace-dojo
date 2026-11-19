@@ -1,3 +1,4 @@
+import { keepVecCapacity, setIntoIterBuffer, vecCapacity } from '../capacity';
 import { sliceRange } from '../compiler';
 import { normalize } from '../infer';
 import { cloneValue, compareValues, copyValue, valuesEqual } from '../ops';
@@ -17,7 +18,9 @@ import {
   UNIT_VALUE,
   type Value,
 } from '../values';
-import { arrayIter, heapPop, heapPush, ownedIter, sliceIter } from './iterators';
+import { extendRoom, withCapacity } from './capacityNatives';
+import { arrayIter, collectVec, heapPop, heapPush, ownedIter, sliceIter } from './iterators';
+import { layoutOf } from './layout';
 import { dedupBy, intoSortedVec, lessByKey, lessByOrd, sortByCachedKey, sortSlice } from './sorting';
 import {
   call,
@@ -335,16 +338,7 @@ function joinStrings(self: Value, sep: Value): string {
 
 const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   new: () => [],
-  from_iter: ([iter], ctx) => {
-    const iterator = deref(iter) as IterValue;
-    const items: Value[] = [];
-    for (let item = iterator.next(); item !== DONE; item = iterator.next()) {
-      ctx.runtime.spend();
-      items.push(item);
-    }
-    return items;
-  },
-  with_capacity: () => [],
+  from_iter: ([iter], ctx) => collectVec(ctx, deref(iter) as IterValue, ctx.typeArgs[1], elemType(ctx)),
   push: ([self, value], ctx) => {
     ctx.runtime.allocate(1);
     vec(self).push(value);
@@ -393,18 +387,17 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     vec(self).length = 0;
     return UNIT_VALUE;
   },
-  capacity: ([self]) => BigInt(vec(self).length),
-  reserve: () => UNIT_VALUE,
-  shrink_to_fit: () => UNIT_VALUE,
   extend: ([self, iter], ctx) => {
     const items = vec(self);
     const iterator = deref(iter) as IterValue;
     // Extending from references copies the `Copy` values they refer to.
     const fromRefs = isRefType(ctx.typeArgs[1]);
+    const room = extendRoom(ctx, items, iterator, ctx.typeArgs[2]);
     for (;;) {
       ctx.runtime.spend();
       const item = iterator.next();
       if (item === DONE) break;
+      room();
       ctx.runtime.allocate(1);
       items.push(fromRefs ? copyValue(deref(item)) : item);
     }
@@ -420,6 +413,7 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   append: ([self, other]) => {
     const target = vec(self);
     const source = vec(other);
+    keepVecCapacity(source, source.length);
     target.push(...source);
     source.length = 0;
     return UNIT_VALUE;
@@ -489,7 +483,13 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   into_boxed_slice: ([self]) => vec(self),
   is_empty: ([self]) => vec(self).length === 0,
   len: ([self]) => BigInt(vec(self).length),
-  into_iter: ([self]) => ownedIter(vec(self)),
+  into_iter: ([self], ctx) => {
+    const items = vec(self);
+    const iter = ownedIter(items);
+    const elem = layoutOf(elemType(ctx));
+    setIntoIterBuffer(iter, vecCapacity(items, items.length, elem.size), elem);
+    return iter;
+  },
 };
 
 const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
@@ -595,9 +595,9 @@ const heapNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
 
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
 for (const [name, native] of Object.entries(sliceNatives)) natives[`[_]::${name}`] = native;
-for (const [name, native] of Object.entries(vecNatives)) natives[`Vec<_>::${name}`] = native;
-for (const [name, native] of Object.entries(dequeNatives)) natives[`VecDeque<_>::${name}`] = native;
-for (const [name, native] of Object.entries(heapNatives)) natives[`BinaryHeap<_>::${name}`] = native;
+for (const [name, native] of Object.entries(withCapacity(vecNatives))) natives[`Vec<_>::${name}`] = native;
+for (const [name, native] of Object.entries(withCapacity(dequeNatives))) natives[`VecDeque<_>::${name}`] = native;
+for (const [name, native] of Object.entries(withCapacity(heapNatives))) natives[`BinaryHeap<_>::${name}`] = native;
 natives['[_]::into_iter'] = ([self]) => arrayIter(sliceItems(deref(self)));
 natives['&[_]::into_iter'] = ([self]) => sliceIter(deref(self), false);
 natives['&mut [_]::into_iter'] = ([self]) => sliceIter(deref(self), true);

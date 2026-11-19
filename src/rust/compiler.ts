@@ -1,6 +1,7 @@
 import type { Annotations, Coercion, FnContext, LocalVar, MethodRes, PathRes, ReceiverAdjust } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, MacroCall, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindings } from './astWalk';
+import { changeString, claimMadeString, concatStrings, forgetMadeString, sizeTable, TableMap } from './capacity';
 import type { Checker } from './checker';
 import type { Formatter, Spec } from './fmt';
 import { normalize } from './infer';
@@ -83,6 +84,10 @@ class LocalPlace implements Place {
 
   set(value: Value): void {
     this.frame.locals[this.slot] = value;
+  }
+
+  storage(): [object, number] {
+    return [this.frame.locals, this.slot];
   }
 }
 
@@ -268,13 +273,38 @@ export class Compiler {
     const local =
       stmt.pattern.kind === 'binding' && !stmt.pattern.sub ? this.annotations.bindings.get(stmt.pattern) : undefined;
     const refer = local && this.referent(stmt.init, local.slot);
+    const store = this.storeString(stmt.init, local);
     const run: Eval = (frame) => {
       frame.runtime.spend();
+      store.before(frame);
       bind(frame, init(frame));
+      store.after(frame);
       refer?.(frame);
       return UNIT_VALUE;
     };
     return this.withStep(stmt.span, run, isObjectCreation(stmt.init, this.annotations));
+  }
+
+  /**
+   * Around storing a value in a variable: when it is a `String`, the capacity it was made with or had where it is moved
+   * from stays with it.
+   */
+  private storeString(value: Expr, local: LocalVar | undefined): { before: Eval; after: Eval } {
+    if (!local || !isStringType(local.type)) return { before: () => UNIT_VALUE, after: () => UNIT_VALUE };
+    const movedFrom = this.movedLocal(value);
+    const { slot } = local;
+    return {
+      before: (frame) => (forgetMadeString(movedFrom?.(frame)), UNIT_VALUE),
+      after: (frame) => (claimMadeString(new LocalPlace(frame, slot)), UNIT_VALUE),
+    };
+  }
+
+  /** The variable an expression moves its value out of, when it is just a variable. */
+  private movedLocal(expr: Expr): ((frame: Frame) => Place) | undefined {
+    const res = expr.kind === 'path' ? this.annotations.paths.get(expr) : undefined;
+    if (res?.kind !== 'local' || res.local.mode !== 'move') return undefined;
+    const { slot } = res.local;
+    return (frame) => new LocalPlace(frame, slot);
   }
 
   /**
@@ -1025,7 +1055,7 @@ export class Compiler {
     }
     if (type.kind === 'adt') {
       // String + &str
-      return (frame) => (left(frame) as string) + (derefAll(rightCoerced(frame)) as string);
+      return (frame) => concatStrings(left(frame) as string, derefAll(rightCoerced(frame)) as string);
     }
     if (type.kind === 'bool') {
       const fn = {
@@ -1056,16 +1086,24 @@ export class Compiler {
     if (res?.kind === 'local' && res.local.mode === 'move') {
       const slot = res.local.slot;
       const refer = this.referent(expr.value, slot);
+      const store = this.storeString(expr.value, res.local);
       return (frame) => {
+        store.before(frame);
         frame.locals[slot] = value(frame);
+        store.after(frame);
         refer?.(frame);
         return UNIT_VALUE;
       };
     }
     const place = this.place(expr.target);
+    const storesString = isStringType(expr.target.ty!);
+    const movedFrom = this.movedLocal(expr.value);
     return (frame) => {
+      if (storesString) forgetMadeString(movedFrom?.(frame));
       const v = value(frame);
-      place(frame).set(v);
+      const target = place(frame);
+      target.set(v);
+      if (storesString) claimMadeString(target);
       return UNIT_VALUE;
     };
   }
@@ -1081,7 +1119,7 @@ export class Compiler {
       return (frame) => {
         const target = place(frame);
         const addition = derefAll(value(frame)) as string;
-        target.set((target.get() as string) + addition);
+        changeString(target, () => target.set((target.get() as string) + addition));
         return UNIT_VALUE;
       };
     }
@@ -1192,7 +1230,8 @@ export class Compiler {
   private receiver(expr: Extract<Expr, { kind: 'methodCall' }>, method: MethodRes): Eval {
     const adjust: ReceiverAdjust = method.receiver;
     const iterFrom = adjust.asIter ? runtimeType(stripRefs(expr.receiver.ty!)) : undefined;
-    if (adjust.autoref === 'mut') {
+    // `String::capacity` reads where the string is stored, which keeps its capacity (a JS string cannot).
+    if (adjust.autoref === 'mut' || (adjust.autoref === 'ref' && isStringCapacity(method.fn))) {
       const place = this.placeThrough(expr.receiver, adjust.derefs);
       if (iterFrom) return (frame) => new CellPlace(this.support.toIter(place(frame).get(), iterFrom(frame)));
       return place;
@@ -1717,6 +1756,15 @@ function stringish(type: Type): Type | undefined {
   return undefined;
 }
 
+function isStringType(type: Type): boolean {
+  const t = normalize(shallow(type));
+  return t.kind === 'adt' && t.def.builtin === 'String';
+}
+
+function isStringCapacity(fn: FnDef): boolean {
+  return fn.name === 'capacity' && fn.impl !== undefined && isStringType(fn.impl.selfType);
+}
+
 function stripRefs(type: Type): Type {
   let t = normalize(shallow(type));
   while (t.kind === 'ref') t = normalize(shallow(t.target));
@@ -1860,6 +1908,7 @@ function takeFromBase(source: StructValue, result: Value[], given: ReadonlySet<n
 /** The set that `|`, `&`, `-`, or `^` makes of two sets, of clones of their elements, in the order they iterate. */
 function setOperation(op: string, a: SetValue, b: SetValue, elem: Type): SetValue {
   const result = new SetValue(a.sorted);
+  if (a.entries instanceof TableMap) sizeTable(result.entries, a.entries.entrySize);
   const add = (hash: string, value: Value): void => void result.entries.set(hash, cloneValue(elem, value));
   for (const [hash, value] of a.entries) {
     const inB = b.entries.has(hash);

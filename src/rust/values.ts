@@ -1,4 +1,5 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
+import { TableMap } from './capacity';
 import type { AdtDef, Type } from './types';
 
 /**
@@ -50,6 +51,8 @@ export interface Place {
   readonly isPlace: true;
   get(): Value;
   set(value: Value): void;
+  /** Where the place stores its value, which stays the same however the place is reached. */
+  storage?(): [object, number];
 }
 
 export class CellPlace implements Place {
@@ -63,6 +66,10 @@ export class CellPlace implements Place {
   set(value: Value): void {
     this.value = value;
   }
+
+  storage(): [object, number] {
+    return [this, 0];
+  }
 }
 
 export class ElementPlace implements Place {
@@ -74,6 +81,10 @@ export class ElementPlace implements Place {
 
   get(): Value {
     return this.array[this.index];
+  }
+
+  storage(): [object, number] {
+    return [this.array, this.index];
   }
 
   set(value: Value): void {
@@ -178,13 +189,17 @@ export class IterValue {
 
 /** A `HashMap` or `BTreeMap`: entries keyed by a text that equal keys share. */
 export class MapValue {
-  readonly entries = new Map<string, [Value, Value]>();
-  constructor(readonly sorted: boolean) {}
+  readonly entries: Map<string, [Value, Value]>;
+  constructor(readonly sorted: boolean) {
+    this.entries = sorted ? new Map() : new TableMap();
+  }
 }
 
 export class SetValue {
-  readonly entries = new Map<string, Value>();
-  constructor(readonly sorted: boolean) {}
+  readonly entries: Map<string, Value>;
+  constructor(readonly sorted: boolean) {
+    this.entries = sorted ? new Map() : new TableMap();
+  }
 }
 
 /** A `Range` or `RangeInclusive`, which is its own iterator. */

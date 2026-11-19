@@ -1,3 +1,4 @@
+import { TableMap } from '../capacity';
 import { cloneValue, compareValues, hashKey } from '../ops';
 import type { Type } from '../types';
 import {
@@ -13,7 +14,27 @@ import {
 } from '../values';
 import { defaultValue } from './core';
 import { arrayIter, mapIter, setIter } from './iterators';
+import { sizeOf } from './layout';
 import { call, define, deref, type NativeContext, none, option, some } from './support';
+
+/** A new `HashMap` or `HashSet` with its entries' size, and with room for `capacity` elements. */
+export function withTable<T extends MapValue | SetValue>(collection: T, size: number, capacity?: Value): T {
+  if (collection.entries instanceof TableMap) {
+    collection.entries.entrySize = size;
+    if (capacity !== undefined) collection.entries.allocate(Number(capacity as bigint));
+  }
+  return collection;
+}
+
+/** The size of a `HashMap`'s key and value together, as its table stores them. */
+function entrySize(ctx: NativeContext): number {
+  return sizeOf({ kind: 'tuple', elems: [ctx.typeArgs[0], ctx.typeArgs[1]] });
+}
+
+function resize(collection: MapValue | SetValue, change: (table: TableMap<string, unknown>) => void): Value {
+  if (collection.entries instanceof TableMap) change(collection.entries);
+  return UNIT_VALUE;
+}
 
 function map(self: Value): MapValue {
   return deref(self) as MapValue;
@@ -46,8 +67,11 @@ function setValues(ctx: NativeContext, s: SetValue): Value[] {
 
 function mapNatives(sorted: boolean): Record<string, (args: Value[], ctx: NativeContext) => Value> {
   return {
-    new: () => new MapValue(sorted),
-    with_capacity: () => new MapValue(sorted),
+    new: (_args, ctx) => withTable(new MapValue(sorted), entrySize(ctx)),
+    with_capacity: ([capacity], ctx) => withTable(new MapValue(sorted), entrySize(ctx), capacity),
+    reserve: ([self, additional]) => resize(map(self), (table) => table.reserve(Number(additional as bigint))),
+    shrink_to_fit: ([self]) => resize(map(self), (table) => table.shrinkTo(0)),
+    shrink_to: ([self, min]) => resize(map(self), (table) => table.shrinkTo(Number(min as bigint))),
     insert: ([self, k, v], ctx) => {
       const m = map(self);
       const hash = hashKey(keyType(ctx), k);
@@ -129,7 +153,7 @@ function mapNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
       }
       return UNIT_VALUE;
     },
-    capacity: ([self]) => BigInt(map(self).entries.size),
+    capacity: ([self]) => BigInt((map(self).entries as TableMap<string, unknown>).capacity),
     into_iter: ([self], ctx) => mapIter(ctx.interp, map(self), keyType(ctx), 'value'),
     first_key_value: ([self], ctx) => {
       const entries = entriesOf(ctx, map(self));
@@ -177,8 +201,12 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
     return arrayIter(result);
   };
   return {
-    new: () => new SetValue(sorted),
-    with_capacity: () => new SetValue(sorted),
+    new: (_args, ctx) => withTable(new SetValue(sorted), sizeOf(ctx.typeArgs[0])),
+    with_capacity: ([capacity], ctx) => withTable(new SetValue(sorted), sizeOf(ctx.typeArgs[0]), capacity),
+    capacity: ([self]) => BigInt((set(self).entries as TableMap<string, unknown>).capacity),
+    reserve: ([self, additional]) => resize(set(self), (table) => table.reserve(Number(additional as bigint))),
+    shrink_to_fit: ([self]) => resize(set(self), (table) => table.shrinkTo(0)),
+    shrink_to: ([self, min]) => resize(set(self), (table) => table.shrinkTo(Number(min as bigint))),
     insert: ([self, value], ctx) => {
       const s = set(self);
       const hash = hashKey(keyType(ctx), value);

@@ -1,8 +1,10 @@
 // code-gauge-allow-file fileNcss 760 -- One native per method of the standard library.
+import { collectedVecCapacity, inPlaceCapacity, setVecCapacity, sizeTable } from '../capacity';
 import { normalize } from '../infer';
 import type { Interpreter } from '../interpreter';
 import { castValue, cloneValue, compareValues, copyValue, hashKey, needsCopy, valuesEqual, wrap } from '../ops';
 import { RustPanic } from '../runtime';
+import { iteratorCapability } from '../traits';
 import { shallow, type Type } from '../types';
 import {
   DONE,
@@ -19,6 +21,7 @@ import {
   SliceView,
   type Value,
 } from '../values';
+import { layoutOf, sizeOf } from './layout';
 import { call, define, deref, libraryPanic, type NativeContext, none, option, placeOf, some } from './support';
 
 /** An iterator over an array's elements from `start` to `end`, from both ends. */
@@ -684,6 +687,63 @@ const RANDOM_ACCESS_ADAPTERS = new Set([
   'ZipShape',
 ]);
 
+/** The shapes of the iterators that are `TrustedLen` themselves, whose size hint is exact. */
+const TRUSTED_LEN_SHAPES = new Set([
+  ...RANDOM_ACCESS_SHAPES,
+  'RangeInclusiveShape',
+  'VecIntoIterShape',
+  'ArrayIntoIterShape',
+  'VecDrainShape',
+  'OptionIterShape',
+  'VecDequeIntoIterShape',
+  'BTreeMapIterShape',
+  'BTreeMapIterMutShape',
+  'BTreeMapKeysShape',
+  'BTreeMapValuesShape',
+  'BTreeMapValuesMutShape',
+  'BTreeMapIntoIterShape',
+  'BTreeMapIntoKeysShape',
+  'BTreeMapIntoValuesShape',
+  'BTreeSetIterShape',
+  'BTreeSetIntoIterShape',
+  'RepeatNShape',
+  'OnceShape',
+  'EmptyShape',
+]);
+
+/** The adapters that are `TrustedLen` when what they adapt is; `Skip` and `StepBy` when it is `TrustedRandomAccess`. */
+const TRUSTED_LEN_ADAPTERS = new Set([
+  'MapShape',
+  'EnumerateShape',
+  'CopiedShape',
+  'ClonedShape',
+  'FuseShape',
+  'PeekableShape',
+  'RevShape',
+  'TakeShape',
+  'ByRefShape',
+  'ZipShape',
+  'ChainShape',
+]);
+
+/** Whether iterators of these shapes are all `TrustedLen`, which `collect` and `extend` size exactly. */
+// code-gauge-allow functionCognitiveComplexity 16 -- Follows std's `TrustedLen` impls case by case.
+export function isTrustedLen(...shapes: Type[]): boolean {
+  return shapes.every((shape) => {
+    const t = normalize(shallow(shape));
+    if (t.kind !== 'adt') return false;
+    const { name } = t.def;
+    if (name === 'RangeShape' || name === 'RangeInclusiveShape') {
+      const idx = normalize(shallow(t.args[0]));
+      return idx.kind === 'int' || idx.kind === 'char';
+    }
+    if (TRUSTED_LEN_SHAPES.has(name)) return true;
+    if (name === 'SkipShape' || name === 'StepByShape') return isTrustedRandomAccess(t.args[0]);
+    if (!TRUSTED_LEN_ADAPTERS.has(name)) return false;
+    return isTrustedLen(...(name === 'ZipShape' || name === 'ChainShape' ? t.args : [t.args[0]]));
+  });
+}
+
 /** Whether iterators of these shapes are all `TrustedRandomAccess`, as std implements it. */
 function isTrustedRandomAccess(...shapes: Type[]): boolean {
   return shapes.every((shape) => {
@@ -720,6 +780,7 @@ define({
     const stopVariant = builtin === 'Result' ? 1 : builtin === 'Option' ? 0 : undefined;
     const stop =
       stopVariant === undefined ? undefined : (item: Value) => (deref(item) as EnumValue).variant === stopVariant;
+    if (builtin === 'Vec') return collectVec(ctx, iterOf(self), ctx.typeArgs[1], ctx.typeArgs[0]);
     return collectInto(ctx, collectAll(ctx, iterOf(self), stop), ctx.typeArgs[2], ctx.typeArgs[0]);
   },
   'IterImpl<_, _>::sum': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[2], '+'),
@@ -943,9 +1004,56 @@ function intStep(ctx: NativeContext, type: Type, op: '+' | '*', total: bigint, v
   return result;
 }
 
+/**
+ * `Vec::from_iter`: the elements, with the exact capacity a `TrustedLen` iterator's size hint gives, and otherwise
+ * what growth by the size hint's lower bound gives, which is exact for an `ExactSizeIterator` and 0 for others.
+ */
+export function collectVec(ctx: NativeContext, iter: IterValue, shape: Type, elem: Type): Value[] {
+  const exact = iteratorCapability(shape, 'exact') === 'yes' ? lengthOf(iter) : undefined;
+  const source = inPlaceSource(iter, shape);
+  const items = collectAll(ctx, iter);
+  ctx.runtime.allocate(items.length);
+  const inPlace = source && inPlaceCapacity(source, layoutOf(elem));
+  if (inPlace !== undefined) setVecCapacity(items, inPlace);
+  else if (!isTrustedLen(shape)) {
+    const lowerAfter = (taken: number): number => (exact === undefined ? 0 : exact - taken);
+    setVecCapacity(items, collectedVecCapacity(items.length, sizeOf(elem), lowerAfter));
+  }
+  return items;
+}
+
+/** The adapters through which `collect` reuses the buffer of a `Vec`'s `into_iter` (`InPlaceIterable`). */
+const IN_PLACE_ADAPTERS = new Set([
+  'MapShape',
+  'FilterShape',
+  'FilterMapShape',
+  'EnumerateShape',
+  'CopiedShape',
+  'ClonedShape',
+  'TakeShape',
+  'SkipShape',
+  'TakeWhileShape',
+  'SkipWhileShape',
+  'MapWhileShape',
+  'InspectShape',
+  'ScanShape',
+  'ZipShape',
+]);
+
+/** The `into_iter` of a `Vec` under adapters that let `collect` reuse its buffer, if the iterator is one. */
+function inPlaceSource(iter: IterValue, shape: Type): IterValue | undefined {
+  let t = normalize(shallow(shape));
+  let source: IterValue | undefined = iter;
+  while (t.kind === 'adt' && IN_PLACE_ADAPTERS.has(t.def.name)) {
+    t = normalize(shallow(t.args[0]));
+    source = source?.roots[0] instanceof IterValue ? source.roots[0] : undefined;
+  }
+  return t.kind === 'adt' && t.def.name === 'VecIntoIterShape' ? source : undefined;
+}
+
 /** Collects elements into a collection of the type `collect` was asked for. */
 // code-gauge-allow functionCognitiveComplexity 25 -- One native per method of the standard library.
-// code-gauge-allow functionNcss 52 -- One native per method of the standard library.
+// code-gauge-allow functionNcss 54 -- One native per method of the standard library.
 export function collectInto(ctx: NativeContext, items: Value[], target: Type, item: Type): Value {
   const t = normalize(shallow(target));
   if (t.kind !== 'adt') throw new Error('collect into a non-collection');
@@ -968,6 +1076,7 @@ export function collectInto(ctx: NativeContext, items: Value[], target: Type, it
     case 'HashMap':
     case 'BTreeMap': {
       const map = new MapValue(t.def.builtin === 'BTreeMap');
+      sizeTable(map.entries, sizeOf({ kind: 'tuple', elems: t.args }));
       for (const entry of items as Value[][]) {
         const hash = hashKey(t.args[0], entry[0]);
         const existing = map.entries.get(hash);
@@ -979,6 +1088,7 @@ export function collectInto(ctx: NativeContext, items: Value[], target: Type, it
     case 'HashSet':
     case 'BTreeSet': {
       const set = new SetValue(t.def.builtin === 'BTreeSet');
+      sizeTable(set.entries, sizeOf(t.args[0]));
       for (const element of items) {
         const hash = hashKey(t.args[0], element);
         if (!set.entries.has(hash)) set.entries.set(hash, element);
