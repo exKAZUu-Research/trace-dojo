@@ -11,7 +11,7 @@ import {
 } from './conversions';
 import { CppException, CppRuntimeError } from './errors';
 import { type Expr, hasConstantObject, mapMemberConstants, type TemporaryBinding } from './expr';
-import { constructElementFromRvalue } from './library/elements';
+import { constructElementFromRvalue, moveConstruction } from './library/elements';
 import { type Eval, type Frame, holdAll, type Temporary } from './runtime';
 import type { Syntax } from './syntax';
 import {
@@ -350,22 +350,18 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   }
 
   copyObject(expr: Expr, cls: ClassInfo): Expr {
-    if (cls.isNoncopyable) {
-      this.error(expr.row, `${cls.name} のオブジェクトはコピーできません（コピーコンストラクタが削除されています）。`);
-    }
     if (expr.type.kind === 'class') this.checkBaseConversion(expr.type.cls, cls, expr.row);
     const candidates = this.writtenCopyConstructors(cls);
     if (candidates.length > 0) {
       const selected = this.resolve(`コピーコンストラクタ ${cls.name}`, candidates, [expr], undefined, expr.row);
       return this.constructWith(cls, selected, [expr], expr.row);
     }
-    if (!cls.implicitCopyFromConst && (!expr.isLvalue || expr.isXvalue || isConstType(expr.type)))
-      this.error(expr.row, `${cls.name} のコピーコンストラクタには const でない左辺値が必要です。`);
-    this.requireObjectUse(classType(cls), 'copy', expr.row);
-    const source = this.rvalue(expr);
     const type = classType(cls);
-    const constantInitialization = source.constantInitialization === true && allowsConstantCopy(type);
     const movesSource = expr.isXvalue === true && !isConstType(expr.type);
+    if (movesSource) this.checkMoveConstruction(type, expr.row, { access: this.accessClass, seen: new Set() });
+    else this.checkCopySource(type, expr);
+    const source = this.rvalue(expr);
+    const constantInitialization = source.constantInitialization === true && allowsConstantCopy(type);
     return {
       type,
       isLvalue: false,
@@ -381,6 +377,16 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
           : copyAs(frame, cls, value, destination);
       },
     };
+  }
+
+  private checkCopySource(type: ClassType, expr: Expr): void {
+    const { cls } = type;
+    if (cls.isNoncopyable) {
+      this.error(expr.row, `${cls.name} のオブジェクトはコピーできません（コピーコンストラクタが削除されています）。`);
+    }
+    if (!cls.implicitCopyFromConst && (!expr.isLvalue || expr.isXvalue || isConstType(expr.type)))
+      this.error(expr.row, `${cls.name} のコピーコンストラクタには const でない左辺値が必要です。`);
+    this.requireObjectUse(type, 'copy', expr.row);
   }
 
   protected implicitReturnSource(expr: Expr, destination: Type): Expr {
@@ -806,6 +812,31 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   }
 
   private readonly copyDefaults = new Map<FunctionInfo, Eval<unknown>[]>();
+
+  private checkMoveConstruction(type: Type, row: number, context: ObjectUseContext): void {
+    if (type.kind === 'array') {
+      if ((type.length ?? 1) > 0) this.checkMoveConstruction(type.of, row, context);
+      return;
+    }
+    if (type.kind !== 'class') return;
+    const move = moveConstruction(type);
+    if (move.kind === 'copy') {
+      this.checkObjectUse(type, 'copy', row, { ...context, sourceIsConst: true, seen: new Set() });
+      return;
+    }
+    if (move.kind === 'array') {
+      this.checkMoveConstruction(move.array.type, row, { seen: context.seen });
+      return;
+    }
+    if (move.kind !== 'members') return;
+    const { cls } = type;
+    const { seen } = context;
+    this.requireVirtualDefinitions(cls, row);
+    if (seen.has(cls)) return;
+    seen.add(cls);
+    if (cls.base) this.checkMoveConstruction(classType(cls.base), row, { access: cls, seen, baseObject: cls });
+    for (const field of cls.ownFields) this.checkMoveConstruction(field.type, row, { access: cls, seen });
+  }
 
   protected invokeStoredCopy(frame: Frame, fn: FunctionInfo, source: Ptr, target: Ptr): void {
     const defaults = this.copyDefaults.get(fn) ?? [];

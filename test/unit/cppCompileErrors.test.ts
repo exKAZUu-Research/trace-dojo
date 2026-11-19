@@ -2,6 +2,16 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
+test('copying a vector still requires access to the element copy constructor', () => {
+  const program = `#include <vector>
+class Item { public: Item() {} private: Item(const Item&); };
+int main() { std::vector<Item> source(2); auto copy = source; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: expect.stringContaining('private') }],
+  });
+});
+
 test.each([
   'static int main() {}',
   'inline int main() {}',

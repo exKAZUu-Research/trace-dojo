@@ -5,6 +5,7 @@ import { installBaseValue, invoke, makeEach, newObject, withTemporaries, zeroOf 
 import type { Frame } from '../runtime';
 import {
   type ClassInfo,
+  type ClassType,
   classType,
   type FunctionInfo,
   isArithmetic,
@@ -42,6 +43,10 @@ export interface ElementOperations {
 }
 
 type ElementUse = 'copy' | 'assign' | 'relocate' | 'swap';
+
+type MoveConstruction =
+  | { kind: 'copy' | 'string' | 'sequence' | 'members' }
+  | { kind: 'array'; array: NonNullable<LibraryClass['aggregateArray']> };
 
 export function destroyElements(
   frame: Frame,
@@ -125,16 +130,23 @@ export function canTransferElementStorage(type: Type): boolean {
   if (type.kind !== 'class') return true;
   const { cls } = type;
   if (!cls.isComplete || cls.isNoncopyable) return false;
-  if (isConstType(type)) return canCopyWithoutThrow(type);
-  const library = cls.library;
-  if (library?.kind === 'string' || ownsMovableSequence(type)) return true;
-  const fixedArray = library?.aggregateArray;
-  if (fixedArray) return canTransferElementStorage(fixedArray.type);
-  if (!canMoveFields(cls)) return canCopyWithoutThrow(type);
+  const move = moveConstruction(type);
+  if (move.kind === 'copy') return canCopyWithoutThrow(type);
+  if (move.kind === 'string' || move.kind === 'sequence') return true;
+  if (move.kind === 'array') return canTransferElementStorage(move.array.type);
   return (
     (!cls.base || canTransferElementStorage(classType(cls.base))) &&
     cls.ownFields.every((field) => canTransferElementStorage(field.type))
   );
+}
+
+export function moveConstruction(type: ClassType): MoveConstruction {
+  if (isConstType(type)) return { kind: 'copy' };
+  const { cls } = type;
+  if (cls.library?.kind === 'string') return { kind: 'string' };
+  if (ownsMovableSequence(type)) return { kind: 'sequence' };
+  if (cls.library?.aggregateArray) return { kind: 'array', array: cls.library.aggregateArray };
+  return { kind: canMoveFields(cls) ? 'members' : 'copy' };
 }
 
 function canCopyWithoutThrow(type: Type): boolean {
@@ -163,19 +175,17 @@ export function constructElementFromRvalue(frame: Frame, type: Type, source: Val
   }
   if (type.kind !== 'class') return source;
   const { cls } = type;
-  if (isConstType(type)) return cls.operations?.copy(frame, source, target) ?? source;
-  if (source instanceof StringValue) {
+  const construction = moveConstruction(type);
+  if (construction.kind === 'string') {
     const target = new StringValue('');
-    target.moveFrom(source);
+    target.moveFrom(source as StringValue);
     return target;
   }
-  if (source instanceof SequenceValue) {
-    const array = cls.library?.aggregateArray;
-    if (array) return constructMovedArray(frame, array, source.items);
-    if (ownsMovableSequence(type)) return source.moveStorage();
-  }
-  if (source instanceof CObject && canMoveFields(cls)) {
-    const move = (): Value => transferSubobjects(frame, cls, source, target);
+  if (construction.kind === 'sequence') return (source as SequenceValue).moveStorage();
+  if (construction.kind === 'array')
+    return constructMovedArray(frame, construction.array, (source as SequenceValue).items);
+  if (construction.kind === 'members') {
+    const move = (): Value => transferSubobjects(frame, cls, source as CObject, target);
     return canTransferElementStorage(type) ? frame.runtime.withoutOuterHandlers(move) : move();
   }
   return cls.operations?.copy(frame, source, target) ?? source;
