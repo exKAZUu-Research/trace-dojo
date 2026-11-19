@@ -100,3 +100,28 @@ $appending->append(new ArrayIterator(['next']));
 try { $appending->rewind(); }
 catch (Exception $error) { echo $error->getMessage(), ':'; }
 echo $appending->getIteratorIndex(), ':', $appending->current(), "\n";
+
+class AppendsOnRelease extends ArrayIterator {
+    public bool $advance = false;
+    function __destruct() {
+        global $appending;
+        echo json_encode([$appending->valid(), $appending->getInnerIterator() === null, $appending->current()]), ';';
+        $appending->append(new ArrayIterator([7]));
+        if ($this->advance) $appending->getArrayIterator()->next();
+    }
+}
+foreach ([false, true] as $advance) {
+    $appending = new AppendIterator;
+    $old = new AppendsOnRelease([1]);
+    $old->advance = $advance;
+    $appending->append($old);
+    $appending->append(new ArrayIterator([2, 3]));
+    $list = $appending->getArrayIterator();
+    if ($advance) $old->next();
+    unset($list[0], $old);
+    $appending->rewind();
+    for ($i = 0; $i < 5 && $appending->valid(); $i++, $appending->next()) {
+        echo $appending->current() ?? 'empty', ';';
+    }
+    echo "\n";
+}

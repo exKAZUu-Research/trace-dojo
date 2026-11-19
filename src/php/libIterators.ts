@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 440 -- Keeps the wrappers with their shared iterator state and retirement phases.
+// code-gauge-allow-file fileNcss 455 -- Keeps the wrappers with their shared iterator state and retirement phases.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callCallback, callMethod, consumeInvokedResult, discardInvokedResult } from './callables';
 import { createObject, findClass } from './classes';
@@ -95,6 +95,7 @@ export class DualState {
   constructed = false;
   innerObject: PhpObject | undefined;
   inner: InnerIterator | undefined;
+  private retiringInner: InnerIterator | undefined;
   /** The fetched element, or undefined when there is none. */
   data: { v: Value } | undefined;
   private sourceData: { v: Value } | undefined;
@@ -140,16 +141,35 @@ export class DualState {
 
   releaseInner(): void {
     const object = this.innerObject;
-    const handle = this.inner?.handle;
+    const inner = this.inner;
+    const handle = inner?.handle;
     if (!object && !handle) return;
     this.innerObject = undefined;
     this.inner = undefined;
     nativeOwnershipChanged(this.owner);
     const runtime = rt();
-    withIteratorTransition((transition) => {
-      transition.run(() => releaseIteratorValues([object]));
-      if (handle) runtime.discardNativeResult(handle, Infinity, 0);
-    });
+    const outerRetirement = this.retiringInner;
+    this.retiringInner = inner;
+    try {
+      withIteratorTransition((transition) => {
+        transition.run(() => releaseIteratorValues([object]));
+        if (handle) runtime.discardNativeResult(handle, Infinity, 0);
+      });
+    } finally {
+      this.retiringInner = outerRetirement;
+      this.retireReentrantInner();
+    }
+  }
+
+  private retireReentrantInner(): void {
+    if (!this.inner) return;
+    rt().nativeShutdownHolders.add(this.inner.handle);
+    this.inner = undefined;
+    nativeOwnershipChanged(this.owner);
+  }
+
+  private get engine(): InnerIterator | undefined {
+    return this.inner ?? this.retiringInner;
   }
 
   clearCache(): void {
@@ -175,7 +195,7 @@ export class DualState {
     const data = this.data;
     const sourceData = this.sourceData;
     const key = this.key;
-    const current = this.inner?.takeCurrent();
+    const current = this.engine?.takeCurrent();
     this.data = undefined;
     this.sourceData = undefined;
     this.key = undefined;
@@ -187,11 +207,11 @@ export class DualState {
   rewind(throwing = false): void {
     this.free();
     this.pos = 0n;
-    this.inner?.rewind(throwing);
+    this.engine?.rewind(throwing);
   }
 
   valid(throwing = false): boolean {
-    return this.inner?.valid(throwing) ?? false;
+    return this.engine?.valid(throwing) ?? false;
   }
 
   /** Copies the inner iterator's element, after checking that it has one when `checkMore` asks to. */
@@ -199,7 +219,7 @@ export class DualState {
     this.free();
     if (checkMore && !this.valid()) return false;
     this.fetchCurrent();
-    const inner = this.inner as InnerIterator;
+    const inner = this.engine as InnerIterator;
     consumeInvokedResult(
       () => inner.key(),
       (key) => {
@@ -212,11 +232,11 @@ export class DualState {
 
   fetchWithPendingException(checkMore: boolean): void {
     this.free();
-    if ((!checkMore || this.valid(true)) && this.inner?.runsWhileThrowing()) this.fetchCurrent();
+    if ((!checkMore || this.valid(true)) && this.engine?.runsWhileThrowing()) this.fetchCurrent();
   }
 
   private fetchCurrent(): void {
-    const inner = this.inner as InnerIterator;
+    const inner = this.engine as InnerIterator;
     this.data = { v: inner.current() };
     inner.takeCurrent();
     nativeOwnershipChanged(this.owner);
@@ -244,13 +264,13 @@ export class DualState {
       nativeOwnershipChanged(this.owner);
       releaseIteratorValues([sourceData.v]);
     }
-    this.inner?.next();
+    this.engine?.next();
   }
 
   next(free: boolean, throwing = false): void {
     if (free) this.free();
-    else if (!this.inner) throwError('Error', "The inner constructor wasn't initialized with an iterator instance");
-    this.inner?.next(throwing);
+    else if (!this.engine) throwError('Error', "The inner constructor wasn't initialized with an iterator instance");
+    this.engine?.next(throwing);
     this.pos = BigInt.asIntN(64, this.pos + 1n);
   }
 }
@@ -768,7 +788,7 @@ defineClass({
         const advance = list.valid() && !state.valid();
         callMethod(list.object, 'append', [iterator]);
         if (advance) list.next();
-        if (state.inner && state.valid()) return null;
+        if (state.valid()) return null;
         if (!list.valid()) list.rewind();
         withIteratorTransition((transition) => {
           while (appendNextIterator(state, transition)) {
