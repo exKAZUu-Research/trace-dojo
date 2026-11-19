@@ -1,7 +1,7 @@
 import type { WordPart } from './ast';
 import { charactersOf } from './characters';
 
-/** A character of a word that brace expansion may read, or a part it passes over as a whole. */
+/** A character of a word that brace expansion may read (or a term of a sequence), or a part it passes over as a whole. */
 type Token = { kind: 'char'; c: string } | { kind: 'opaque'; part: WordPart };
 
 /** Expands the braces of a word's parts, as Bash's `brace_expand`, giving the parts of each resulting word. */
@@ -88,7 +88,8 @@ function expandTokens(tokens: Token[], spend: () => void): Token[][] {
         .join('');
       const sequence = amble.isSequence ? sequenceOf(text, spend) : undefined;
       if (!sequence) continue;
-      alternatives = sequence.map((item) => charactersOf(item).map((c): Token => ({ kind: 'char', c })));
+      // A term of a sequence holds no brace or comma, so one token stands for all its characters.
+      alternatives = sequence.map((item): Token[] => [{ kind: 'char', c: item }]);
     }
     const preamble = tokens.slice(0, open);
     const postambles = expandTokens(tokens.slice(close + 1), spend);

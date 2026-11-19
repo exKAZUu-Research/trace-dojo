@@ -86,6 +86,10 @@ class ConditionalParser {
   }
 
   private term(): void {
+    this.text.nested(() => this.termAt());
+  }
+
+  private termAt(): void {
     this.skipNewlines();
     const { token } = this;
     // Bash's cond_term returns without a message at `]]`; its parser then names the text it stopped at.

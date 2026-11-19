@@ -179,6 +179,21 @@ test('a syntax error rejects the program before it runs, naming the token and li
   });
 });
 
+function nestedSubstitutions(depth: number): string {
+  return `x=${'$('.repeat(depth)}${')'.repeat(depth)}\necho ok\n`;
+}
+
+test('a deep nesting and a huge printf field stop at a limit instead of exhausting the server', () => {
+  // Reading each level twice would take 2^30 steps here.
+  expect(executeProgram('bash', nestedSubstitutions(30))).toMatchObject({ kind: 'executed', stdout: 'ok\n' });
+  expect(executeProgram('bash', nestedSubstitutions(20_000))).toMatchObject({ kind: 'compileError' });
+  expect(executeProgram('bash', `printf '%999999999d' 1\n`)).toMatchObject({ kind: 'limitExceeded', limit: 'storage' });
+  expect(executeProgram('bash', `printf '%.999999999f' 1\n`)).toMatchObject({
+    kind: 'limitExceeded',
+    limit: 'storage',
+  });
+});
+
 test('features this environment does not provide stop the program with a message', () => {
   expect(executeProgram('bash', 'echo a | cat\n')).toEqual({
     kind: 'compileError',

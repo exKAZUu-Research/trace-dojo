@@ -15,12 +15,16 @@ export class SyntaxFailure extends Error {
   }
 }
 
-/** Syntax this port does not read, a here-document's body, which leaves the check to the tree's diagnostics. */
+/** The nesting the tree's own check allows, which no program needs to exceed. */
+const MAX_NESTING = 300;
+
+/** A here-document, whose body this port does not read, or a nesting too deep to read: the tree's diagnostics decide. */
 export class UnknownSyntax extends Error {}
 
 /** A program's text, with its rows, and the parser of the command substitutions its words hold. */
 export class SourceText {
   private readonly lineStarts: number[] = [0];
+  private depth = 0;
   /** Parses the commands of `$(...)` from just after `$(`, returning the index after its `)`. */
   parseSubstitution: (start: number) => number = () => {
     throw new Error('No parser for command substitutions');
@@ -44,6 +48,19 @@ export class SourceText {
   /** The row Bash reports at the end of the file: the line after the last newline. */
   get eofRow(): number {
     return this.lineStarts.length - 1;
+  }
+
+  /**
+   * Reads a nested piece of a program, giving up on a nesting deeper than any program needs before the stack runs out;
+   * the tree's own check then rejects it as too deep.
+   */
+  nested<T>(read: () => T): T {
+    if (++this.depth > MAX_NESTING) throw new UnknownSyntax();
+    try {
+      return read();
+    } finally {
+      this.depth--;
+    }
   }
 
   fail(row: number, text: string): never {
@@ -82,13 +99,15 @@ function closeAt(text: SourceText, open: number, close: number, delimiter: strin
 }
 
 function skipDoubleQuoted(text: SourceText, open: number): number {
-  const { source } = text;
-  let i = open + 1;
-  while (i < source.length && source[i] !== '"') {
-    const c = source[i];
-    i = c === '\\' ? i + 2 : c === '$' || c === '`' ? skipWordPiece(text, i) : i + 1;
-  }
-  return closeAt(text, open, i < source.length ? i : -1, '"');
+  return text.nested(() => {
+    const { source } = text;
+    let i = open + 1;
+    while (i < source.length && source[i] !== '"') {
+      const c = source[i];
+      i = c === '\\' ? i + 2 : c === '$' || c === '`' ? skipWordPiece(text, i) : i + 1;
+    }
+    return closeAt(text, open, i < source.length ? i : -1, '"');
+  });
 }
 
 function skipAnsiC(text: SourceText, open: number): number {
@@ -106,34 +125,40 @@ function skipBackquoted(text: SourceText, open: number): number {
 }
 
 function skipBraces(text: SourceText, open: number): number {
-  const { source } = text;
-  let depth = 0;
-  for (let i = open; i < source.length;) {
-    const c = source[i];
-    if (c === '{') depth++;
-    else if (c === '}' && --depth === 0) return i + 1;
-    i = c === '{' || c === '}' ? i + 1 : skipWordPiece(text, i);
-  }
-  return text.unclosed(open, '}');
+  return text.nested(() => {
+    const { source } = text;
+    let depth = 0;
+    for (let i = open; i < source.length;) {
+      const c = source[i];
+      if (c === '{') depth++;
+      else if (c === '}' && --depth === 0) return i + 1;
+      i = c === '{' || c === '}' ? i + 1 : skipWordPiece(text, i);
+    }
+    return text.unclosed(open, '}');
+  });
 }
 
 /** Skips text from an opening delimiter to its match, as Bash's `parse_matched_pair` does. */
 export function skipBalanced(text: SourceText, open: number, opener: string, closer: string): number {
-  const { source } = text;
-  let depth = 0;
-  for (let i = open; i < source.length;) {
-    const c = source[i];
-    if (c === opener) depth++;
-    else if (c === closer && --depth === 0) return i + 1;
-    i = c === opener || c === closer ? i + 1 : skipWordPiece(text, i);
-  }
-  return text.unclosed(open, closer);
+  return text.nested(() => {
+    const { source } = text;
+    let depth = 0;
+    for (let i = open; i < source.length;) {
+      const c = source[i];
+      if (c === opener) depth++;
+      else if (c === closer && --depth === 0) return i + 1;
+      i = c === opener || c === closer ? i + 1 : skipWordPiece(text, i);
+    }
+    return text.unclosed(open, closer);
+  });
 }
 
 /** `$((...))`, which Bash reads as text up to the matching parenthesis, or `$(...)`, whose commands it parses. */
 function skipDollarParenthesis(text: SourceText, open: number): number {
-  if (text.source[open + 1] === '(') return skipBalanced(text, open, '(', ')');
-  return text.parseSubstitution(open + 1);
+  return text.nested(() => {
+    if (text.source[open + 1] === '(') return skipBalanced(text, open, '(', ')');
+    return text.parseSubstitution(open + 1);
+  });
 }
 
 /**

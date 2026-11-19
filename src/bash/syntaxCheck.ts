@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 478 -- One port of Bash's grammar, whose rules call each other as its yacc rules do.
+// code-gauge-allow-file fileNcss 483 -- One port of Bash's grammar, whose rules call each other as its yacc rules do.
 /**
  * Bash's syntax errors, found by a port of the grammar of `parse.y` over a port of how its lexer reads words, so that
  * a program fails where Bash's does, with Bash's message and line. The tree-sitter grammar builds the statements, but
@@ -17,7 +17,7 @@ import {
 
 /**
  * The first syntax error Bash reports for a program, `undefined` when Bash reads it, or `'unknown'` for a program
- * with a here-document, whose body this port does not read.
+ * with a here-document, whose body this port does not read, or with a nesting too deep to read.
  */
 export function findBashSyntaxError(source: string): BashSyntaxError | 'unknown' | undefined {
   const text = new SourceText(source);
@@ -28,6 +28,9 @@ export function findBashSyntaxError(source: string): BashSyntaxError | 'unknown'
   } catch (error) {
     if (error instanceof SyntaxFailure) return { row: error.row, text: error.text };
     if (error instanceof UnknownSyntax) return 'unknown';
+    // The stack's size depends on where the program runs (a worker thread has less), so a nesting within the limit
+    // may still exhaust it; the tree's own check then rejects the program as too deep.
+    if (error instanceof RangeError) return 'unknown';
     throw error;
   }
 }
@@ -255,7 +258,7 @@ class CommandParser {
     const token = this.peek();
     if (this.isReserved(token, '!')) {
       this.take();
-      this.pipelineCommand();
+      this.text.nested(() => this.pipelineCommand());
       return;
     }
     if (this.isReserved(token, 'time')) {
@@ -276,6 +279,10 @@ class CommandParser {
   }
 
   private command(): void {
+    this.text.nested(() => this.commandAt());
+  }
+
+  private commandAt(): void {
     const token = this.peek();
     if (token.kind === 'word' && this.isReservedWord(token)) {
       if (CLOSING_WORDS.has(token.text) || token.text === 'in') this.unexpected(token);
@@ -592,7 +599,13 @@ class CommandParser {
    * @param assignmentAllowed Whether `name=(` there starts a compound assignment.
    */
   private peek(assignmentAllowed = false): Token {
-    if (this.lookahead && this.lookaheadAssigns !== assignmentAllowed && this.lookahead.kind === 'word') {
+    // Only `name=(` reads differently where a compound assignment may be, so only it is read again: reading every
+    // word again would read the command substitutions inside it again, twice for each level of nesting.
+    if (
+      this.lookahead &&
+      this.lookaheadAssigns !== assignmentAllowed &&
+      this.startsCompoundAssignment(this.lookahead)
+    ) {
       this.lexer.index = this.lookahead.start;
       this.lookahead = undefined;
     }
@@ -601,6 +614,13 @@ class CommandParser {
       this.lookaheadAssigns = assignmentAllowed;
     }
     return this.lookahead;
+  }
+
+  private startsCompoundAssignment(token: Token): boolean {
+    if (token.kind !== 'word') return false;
+    const word = this.text.source.slice(token.start, token.end + 1);
+    const open = word.indexOf('(');
+    return open !== -1 && ASSIGNMENT_PREFIX.test(word.slice(0, open));
   }
 
   private take(): Token {

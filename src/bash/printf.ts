@@ -202,7 +202,9 @@ class Printf {
     if (fmt[i] === 46) ({ precision, end: i } = this.precision(i + 1));
     while (i < fmt.length && LENGTH_MODIFIERS.includes(String.fromCodePoint(fmt[i]))) i++;
     if (i >= fmt.length) this.fail(`\`${decodeBytes(fmt.slice(start))}': missing format character`);
-    this.format({ flags, width, precision, conversion: String.fromCodePoint(fmt[i]) });
+    const conversion = String.fromCodePoint(fmt[i]);
+    checkFieldSize(width, NUMERIC_CONVERSIONS.includes(conversion) ? precision : undefined);
+    this.format({ flags, width, precision, conversion });
     return i;
   }
 
@@ -275,6 +277,16 @@ class Printf {
     else quoted = backslashQuote(arg, true, true);
     const bytes = encodeText(quoted);
     this.push(pad(spec.conversion === 'Q' ? bytes : truncate(bytes, spec.precision), spec));
+  }
+}
+
+/** The conversions whose precision adds digits, unlike that of `%s`, which only cuts its argument. */
+const NUMERIC_CONVERSIONS = 'diouxXfFeEgGaA';
+
+/** Stops a field wider than any string a program may hold before building it, as `%999999999d` would be. */
+function checkFieldSize(width: number | undefined, precision: number | undefined): void {
+  if ((width ?? 0) > LIMITS.maxStringLength || (precision ?? 0) > LIMITS.maxStringLength) {
+    throw new ExecutionLimitError('storage');
   }
 }
 
