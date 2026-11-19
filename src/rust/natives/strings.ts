@@ -350,7 +350,10 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     const text = str(s);
     const match = patternMatcher(ctx, p);
     let last: { index: number; length: number } | undefined;
-    for (let found = match(text, 0); found; found = match(text, found.index + Math.max(found.length, 1))) last = found;
+    for (let found = match(text, 0); found; found = match(text, found.index + Math.max(found.length, 1))) {
+      ctx.runtime.spend();
+      last = found;
+    }
     if (!last) return none(ctx);
     return some(ctx, [text.slice(0, last.index), text.slice(last.index + last.length)]);
   },
@@ -379,7 +382,10 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     const text = str(s);
     const match = patternMatcher(ctx, p);
     let last: { index: number } | undefined;
-    for (let found = match(text, 0); found; found = match(text, found.index + 1)) last = found;
+    for (let found = match(text, 0); found; found = match(text, found.index + 1)) {
+      ctx.runtime.spend();
+      last = found;
+    }
     return option(ctx, last && BigInt(byteOffset(text, last.index)), last !== undefined);
   },
   matches: ([s, p], ctx) => matchesIter(str(s), patternOf(ctx, p), false),
@@ -437,6 +443,8 @@ function replaceN(ctx: NativeContext, text: string, from: Value, to: string, cou
   while (replaced < count) {
     const found = match(text, position);
     if (!found) break;
+    // Each match is charged, as the pieces between short matches are too short to be charged by their length.
+    ctx.runtime.spend();
     result = appended(ctx, result, text.slice(position, found.index) + to);
     if (found.length === 0) {
       if (found.index >= text.length) {
