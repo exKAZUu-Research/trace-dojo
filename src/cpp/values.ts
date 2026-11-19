@@ -146,7 +146,8 @@ export class CObject extends Store {
   private exceptionMessage?: ExceptionMessage;
   referenceTemporaries?: Temporary[];
   needsConstruction = false;
-  arrayAddress?: Ptr;
+  arrayPosition?: { location: Ptr; elementClass: ClassInfo };
+  private baseLocations?: Map<ClassInfo, Ptr>;
   private memberStorage?: Map<number, MemberStorage>;
 
   /**
@@ -165,8 +166,17 @@ export class CObject extends Store {
     return this.values.length;
   }
 
-  receiver(): Ptr {
-    return this.arrayAddress ?? new Ptr(new Box(this, false), 0);
+  receiver(asClass = this.cls): Ptr {
+    const array = this.arrayPosition;
+    if (!array) return new ObjectReceiverStorage(this).location(0);
+    if (array.elementClass === asClass) return array.location;
+    this.baseLocations ??= new Map();
+    let location = this.baseLocations.get(asClass);
+    if (!location) {
+      location = new ObjectReceiverStorage(this).location(0);
+      this.baseLocations.set(asClass, location);
+    }
+    return location;
   }
 
   get message(): string | undefined {
@@ -242,6 +252,16 @@ export class CObject extends Store {
       this.memberStorage.set(index, storage);
     }
     return storage;
+  }
+}
+
+class ObjectReceiverStorage extends Box {
+  constructor(private readonly object: CObject) {
+    super(object, false);
+  }
+
+  override checkAlive(): void {
+    this.object.checkAlive();
   }
 }
 
@@ -370,6 +390,11 @@ export class Ptr {
 
   sharesRange(other: Ptr): boolean {
     return this.store === other.store;
+  }
+
+  forClass(cls: ClassInfo): Ptr {
+    const object = this.addressedObject();
+    return object?.arrayPosition ? object.receiver(cls) : this;
   }
 
   rangeLength(last: Ptr, isReverse: boolean): number {

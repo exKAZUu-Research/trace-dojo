@@ -6,6 +6,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import { byteAt } from './bytes';
 import { hasAuto, isAuto } from './compilerBase';
 import {
+  classLocation,
   type ConversionSequence,
   convertArithmetic,
   implicitConversion,
@@ -803,15 +804,23 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     if (COMPARISONS.has(operator) && (isPointerLike(lt) || isPointerLike(rt))) {
       const comparable =
-        (isPointerLike(lt) && isPointerLike(rt) && this.pointersComparable(lt, rt, row)) ||
+        (isPointerLike(lt) && isPointerLike(rt) && this.pointersComparable(lt, rt)) ||
         (isPointerLike(lt) && right.isNullConstant) ||
         (isPointerLike(rt) && left.isNullConstant);
       if (!comparable) return this.error(row, `${typeName(lt)} と ${typeName(rt)} は比べられません。`);
       if (operator !== '==' && operator !== '!=' && (left.isNullConstant || right.isNullConstant)) {
         return this.error(row, `ポインタと nullptr の大小は比べられません。`);
       }
-      const a = left.run;
-      const b = right.run;
+      const base =
+        lt.kind === 'pointer' &&
+        rt.kind === 'pointer' &&
+        lt.to.kind === 'class' &&
+        rt.to.kind === 'class' &&
+        lt.to.cls !== rt.to.cls
+          ? commonConditionalPointer(left, right)
+          : undefined;
+      const a = (base ? this.convert(left, base, row) : left).run;
+      const b = (base ? this.convert(right, base, row) : right).run;
       return {
         type: BOOL,
         isLvalue: false,
@@ -822,16 +831,16 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return this.error(row, `演算子 ${operator} は ${typeName(lt)} と ${typeName(rt)} には使えません。`);
   }
 
-  private pointersComparable(a: Type, b: Type, row: number): boolean {
+  private pointersComparable(a: Type, b: Type): boolean {
     if (a.kind === 'nullptr' || b.kind === 'nullptr') return true;
     if (a.kind !== 'pointer' || b.kind !== 'pointer') return false;
     if (a.to.kind === 'void' || b.to.kind === 'void') return true;
     if (sameType(unqualified(a.to), unqualified(b.to), false)) return true;
-    if (a.to.kind !== 'class' || b.to.kind !== 'class') return false;
-    if (a.to.cls.isDerivedFrom(b.to.cls)) this.checkBaseConversion(a.to.cls, b.to.cls, row);
-    else if (b.to.cls.isDerivedFrom(a.to.cls)) this.checkBaseConversion(b.to.cls, a.to.cls, row);
-    else return false;
-    return true;
+    return (
+      a.to.kind === 'class' &&
+      b.to.kind === 'class' &&
+      (a.to.cls.isDerivedFrom(b.to.cls) || b.to.cls.isDerivedFrom(a.to.cls))
+    );
   }
 
   /** A pointer moved by a number of elements, which must stay within its array or one past its end. */
@@ -1212,7 +1221,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     row: number
   ): { left: Expr; right: Expr; type: Type; isLvalue: boolean } {
     const glvalue = this.conditionalGlvalueType(a, b, row);
-    if (glvalue) return { left: a, right: b, type: glvalue, isLvalue: true };
+    if (glvalue) {
+      const withBaseLocation = (expr: Expr): Expr =>
+        glvalue.kind === 'class' && expr.type.kind === 'class' && glvalue.cls !== expr.type.cls
+          ? classLocation(expr, glvalue.cls)
+          : expr;
+      return { left: withBaseLocation(a), right: withBaseLocation(b), type: glvalue, isLvalue: true };
+    }
     if (a.type.kind === 'void' && b.type.kind === 'void') return { left: a, right: b, type: a.type, isLvalue: false };
     const av = this.rvalue(a);
     const bv = this.rvalue(b);
@@ -1510,14 +1525,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (from === to) return { ...expr, type };
     const downcast = to.isDerivedFrom(from);
     if (kind === 'static') this.checkBaseConversion(downcast ? to : from, downcast ? from : to, row);
-    if (!downcast) return { ...expr, type };
+    if (!downcast) return { ...classLocation(expr, to), type };
     const { run, temporaryBinding } = expr;
     const checked = (location: Ptr): Ptr => {
       if (location.isNull) return location;
       const object = location.read();
       if (!(object instanceof CObject) || !object.cls.isDerivedFrom(to))
         throw new CppRuntimeError('custom', `${to.name} 型ではないオブジェクトをキャストしました。`);
-      return location;
+      return location.forClass(to);
     };
     return {
       ...expr,

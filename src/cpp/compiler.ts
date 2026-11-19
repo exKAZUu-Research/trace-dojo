@@ -1095,7 +1095,7 @@ export class Compiler extends StatementCompiler {
       if (hasUserCopy) {
         const copy = sourceIsConst ? constCopy : mutableCopy;
         if (!copy) throw new CppRuntimeError('custom', `${cls.name} のオブジェクトはコピーできません。`);
-        this.invokeStoredCopy(frame, copy, source.receiver(), target.receiver());
+        this.invokeStoredCopy(frame, copy, source.receiver(cls), target.receiver(cls));
         return;
       }
       const mark = frame.pending.length;

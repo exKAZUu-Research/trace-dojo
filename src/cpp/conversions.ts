@@ -140,7 +140,7 @@ function referenceBinding(
   if (!expr.isLvalue && from.kind === 'class' && target.kind === 'class') {
     const distance = from.cls === target.cls ? 0 : baseDistance(from, target);
     if (from.cls === target.cls || distance > 0) {
-      return sequence(distance > 0 ? Rank.Conversion : Rank.Exact, (e) => host.materialize(toBase(host, e, target)), {
+      return sequence(distance > 0 ? Rank.Conversion : Rank.Exact, (e) => toBase(host, host.materialize(e), target), {
         reference: { toConst },
         baseDistance: distance,
       });
@@ -309,12 +309,21 @@ export function permitsQualificationConversion(from: Type, to: Type, canAdd = tr
   return sameType(from, to, false);
 }
 
-/** An expression of a derived class (or a pointer to one) unchanged, once its conversion to `base` is accessible. */
 function toBase(host: ConversionHost, expr: Expr, base: Type): Expr {
   const { type } = expr;
   const from = type.kind === 'pointer' ? type.to : type.kind === 'array' ? type.of : type;
-  if (from.kind === 'class' && base.kind === 'class') host.checkBaseConversion(from.cls, base.cls, expr.row);
-  return expr;
+  if (from.kind !== 'class' || base.kind !== 'class' || from.cls === base.cls) return expr;
+  host.checkBaseConversion(from.cls, base.cls, expr.row);
+  return classLocation(type.kind === 'array' || type.kind === 'pointer' ? host.rvalue(expr) : expr, base.cls);
+}
+
+export function classLocation(expr: Expr, cls: ClassInfo): Expr {
+  const { run, temporaryBinding } = expr;
+  return {
+    ...expr,
+    run: (frame) => (run(frame) as Ptr).forClass(cls),
+    temporaryBinding: temporaryBinding && ((frame, retain) => temporaryBinding(frame, retain).forClass(cls)),
+  };
 }
 
 function notNull(run: Expr['run']): Expr['run'] {

@@ -67,6 +67,7 @@ export function invoke(
   isCallerDestroying = false
 ): Value | Ptr {
   const { runtime } = frame;
+  if (fn.owner && self) self = self.forClass(fn.owner);
   if (fn.native) {
     const override = fn.libcGlobal ? runtime.libcOverrides.get(fn.name) : undefined;
     if (override && sameParameters(fn, override)) return invoke(frame, override, args, self, row, isCallerDestroying);
@@ -239,12 +240,14 @@ export function constructArray(
               object.needsConstruction = true;
               store.values[index] = object;
             }
-            object.arrayAddress = store.location(index);
+            object.arrayPosition = { location: store.location(index), elementClass: element.cls };
             value = object;
           }
           const destination = value instanceof CObject || value instanceof ArrayStore ? value : undefined;
           const initialized = initialize(frame, destination, index);
-          if (initialized instanceof CObject) initialized.arrayAddress ??= store.location(index);
+          if (initialized instanceof CObject && element.kind === 'class') {
+            initialized.arrayPosition ??= { location: store.location(index), elementClass: element.cls };
+          }
           return initialized;
         },
         () => destroy,

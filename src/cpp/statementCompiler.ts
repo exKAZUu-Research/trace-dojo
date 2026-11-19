@@ -584,8 +584,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
     const member = isDirect ? target.temporaryBinding : undefined;
     if (member) {
-      this.convert(target, type, row);
-      return { type, lifetime: member };
+      const converted = this.convert(target, type, row);
+      return { type, lifetime: converted.temporaryBinding ?? member };
     }
     return {
       type,
@@ -1214,14 +1214,23 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     this.context.scopes.push(scope);
     let body: Exec;
     let bind: (frame: Frame, error: CppException) => void = doNothing;
+    const pointerClass = caught.kind === 'pointer' && caught.to.kind === 'class' ? caught.to.cls : undefined;
     try {
       if (declared.name || (caught.kind === 'class' && handlerType.kind !== 'reference')) {
         const name = declared.name ?? '\0catch';
         if (handlerType.kind === 'reference') {
           const local = this.context.declareLocal(name, handlerType, false);
           scope.names.set(name, { kind: 'local', local, isReference: true });
+          const conversion = pointerClass ? this.context.declareLocal('\0catchPointer', caught, false) : undefined;
           bind = (frame, error) => {
-            frame.slots[local.slot] = error.location();
+            const original = error.location();
+            const value = pointerClass ? original.read() : undefined;
+            const adjusted = pointerClass && value instanceof Ptr ? value.forClass(pointerClass) : value;
+            if (conversion && adjusted !== value) {
+              const box = new Box(adjusted);
+              frame.slots[conversion.slot] = box;
+              frame.slots[local.slot] = box.location(0);
+            } else frame.slots[local.slot] = original;
           };
         } else {
           const local = this.context.declareLocal(name, handlerType, false);
@@ -1231,7 +1240,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
           const copy = caught.kind === 'class' ? caught.cls : undefined;
           this.requireObjectUse(handlerType, 'copy', param.row);
           bind = (frame, error) => {
-            const value = copy ? copy.operations?.copy(frame, error.value, undefined, false) : error.value;
+            let value = copy ? copy.operations?.copy(frame, error.value, undefined, false) : error.value;
+            if (pointerClass && value instanceof Ptr) value = value.forClass(pointerClass);
             frame.slots[local.slot] = new Box(value as Value);
           };
           const destroy = this.destroyerOf(handlerType, param.row);
