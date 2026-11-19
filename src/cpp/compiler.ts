@@ -997,7 +997,7 @@ export class Compiler extends StatementCompiler {
             ? [this.argument(argumentsNode)]
             : this.initializerArguments(explicit);
         if (args.length !== 1) this.error(row, `参照のメンバ ${field.name} には値を1つ書いてください。`);
-        value = this.constructorReference(type, args[0], row) as Initializer;
+        value = this.constructorReference(type, args[0], row, true) as Initializer;
       } else if (argumentsNode?.type === 'initializer_list') {
         value = this.listInitializer(type, argumentsNode, row, true);
         isCreation = type.kind === 'class' && !type.cls.library;
@@ -1017,7 +1017,8 @@ export class Compiler extends StatementCompiler {
       }
     } else if (field.initializer) {
       const node = field.initializer;
-      if (type.kind === 'reference') value = this.constructorReference(type, this.argument(node), row) as Initializer;
+      if (type.kind === 'reference')
+        value = this.constructorReference(type, this.argument(node), row, field.directInitializer) as Initializer;
       else if (node.type === 'initializer_list') {
         value = this.listInitializer(type, node, row, field.directInitializer);
         isCreation = type.kind === 'class' && !type.cls.library;
@@ -1051,8 +1052,13 @@ export class Compiler extends StatementCompiler {
     return this.withStep(row, exec, isCreation);
   }
 
-  private constructorReference(type: Extract<Type, { kind: 'reference' }>, expr: Expr, row: number): Eval<Value | Ptr> {
-    const target = this.referenceMemberTarget(type, expr, row);
+  private constructorReference(
+    type: Extract<Type, { kind: 'reference' }>,
+    expr: Expr,
+    row: number,
+    direct = false
+  ): Eval<Value | Ptr> {
+    const target = this.referenceMemberTarget(type, expr, row, direct);
     if (!target.isLvalue || target.isXvalue || target.temporaryBinding || !isReferenceRelated(target.type, type.to))
       throw new TemporaryConstructorReferenceError([
         { row, message: 'コンストラクタで参照メンバを一時的な値に束縛できません。' },
@@ -1527,7 +1533,7 @@ export class Compiler extends StatementCompiler {
     if (this.globalScope.names.has(name)) return this.error(declarator.row, `${name} はすでに宣言されています。`);
     const value = declarator.type === 'init_declarator' ? fieldOf(declarator, 'value') : undefined;
     let type = declaredType;
-    if (type.kind === 'reference') return this.globalReference(name, type, value, declarator.row);
+    if (type.kind === 'reference') return this.globalReference(name, type, declarator);
     if (hasAuto(type))
       type = this.deduceAuto(
         type,
@@ -1553,13 +1559,9 @@ export class Compiler extends StatementCompiler {
     return type;
   }
 
-  private globalReference(
-    name: string,
-    declared: Extract<Type, { kind: 'reference' }>,
-    value: Syntax | undefined,
-    row: number
-  ): Type {
-    const binding = this.bindReference(name, declared, value, row);
+  private globalReference(name: string, declared: Extract<Type, { kind: 'reference' }>, declarator: Syntax): Type {
+    const { row } = declarator;
+    const binding = this.bindReference(name, declared, declarator);
     const global = this.declareStaticStorage(name, binding.type, row, true);
     global.isDefined = true;
     this.globalScope.names.set(name, { kind: 'global', global, isReference: true });
@@ -2065,9 +2067,9 @@ export class Compiler extends StatementCompiler {
     type: Extract<Type, { kind: 'reference' }>,
     expr: Expr,
     row: number,
-    hasDefault = false
+    { hasDefault = false, direct = false } = {}
   ): Initializer {
-    const binding = this.referenceBinding(type, this.referenceMemberTarget(type, expr, row), row);
+    const binding = this.referenceBinding(type, this.referenceMemberTarget(type, expr, row, direct), row);
     if (!('lifetime' in binding))
       return initializerWithConstancy(
         hasDefault ? this.fullExpression(binding.loc) : binding.loc,
@@ -2090,10 +2092,16 @@ export class Compiler extends StatementCompiler {
     );
   }
 
-  private referenceMemberTarget(type: Extract<Type, { kind: 'reference' }>, expr: Expr, row: number): Expr {
+  private referenceMemberTarget(
+    type: Extract<Type, { kind: 'reference' }>,
+    expr: Expr,
+    row: number,
+    direct: boolean
+  ): Expr {
     if (!expr.braced) return expr;
     return (
-      this.listReferenceValue(expr.braced, type.to) ?? this.error(row, '参照メンバを {...} の値に束縛できません。')
+      this.listReferenceValue(expr.braced, type.to, direct) ??
+      this.error(row, '参照メンバを {...} の値に束縛できません。')
     );
   }
 
@@ -2283,7 +2291,11 @@ export class Compiler extends StatementCompiler {
     const previous = this.context;
     this.context = new FunctionContext(undefined, field.owner, VOID);
     try {
-      if (field.type.kind === 'reference') return this.memberReference(field.type, this.argument(node), node.row, true);
+      if (field.type.kind === 'reference')
+        return this.memberReference(field.type, this.argument(node), node.row, {
+          hasDefault: true,
+          direct: field.directInitializer,
+        });
       const initialize =
         node.type === 'initializer_list'
           ? this.listInitializer(field.type, node, node.row, field.directInitializer)

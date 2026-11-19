@@ -21,6 +21,19 @@ int main() { std::vector<std::mt19937> target; target.push_back({2}); }`;
 });
 
 test.each([
+  'int main() { const std::mt19937& engine = {2}; }',
+  'int main() { static const std::mt19937& engine = {2}; }',
+  'const std::mt19937& engine = {2}; int main() {}',
+])('copy-list reference initialization rejects an explicit constructor: %s', (declaration) => {
+  const program = `#include <random>
+${declaration}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: expect.stringContaining('explicit') }],
+  });
+});
+
+test.each([
   'auto copy = source;',
   'std::vector<std::vector<Item>> target; target.push_back(source);',
   'std::vector<std::vector<Item>> target; target.insert(target.end(), source);',

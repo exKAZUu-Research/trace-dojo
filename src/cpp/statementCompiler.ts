@@ -268,7 +268,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     this.checkRedeclaration(name, declarator.row);
     const value = declarator.type === 'init_declarator' ? fieldOf(declarator, 'value') : undefined;
     let type = declared.type;
-    if (type.kind === 'reference') return this.referenceDeclarator(name, type, value, declarator.row);
+    if (type.kind === 'reference') return this.referenceDeclarator(name, type, declarator);
     if (type.kind === 'void') return this.error(declarator.row, `void 型の変数 ${name} は作れません。`);
     let init: Eval<Value>;
     let createsObject = false;
@@ -500,10 +500,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   private referenceDeclarator(
     name: string,
     declared: Extract<Type, { kind: 'reference' }>,
-    value: Syntax | undefined,
-    row: number
+    declarator: Syntax
   ): { exec: Exec; hasInitializer: boolean; createsObject: boolean; deduced?: AutoDeduction } {
-    const binding = this.bindReference(name, declared, value, row);
+    const binding = this.bindReference(name, declared, declarator);
     const { type } = binding;
     const deduced = hasAuto(declared.to) ? { name, type: deducedType(declared, type) } : undefined;
     const local = this.context.declareLocal(name, type, false);
@@ -526,14 +525,15 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   protected bindReference(
     name: string,
     declared: Extract<Type, { kind: 'reference' }>,
-    value: Syntax | undefined,
-    row: number
+    declarator: Syntax
   ): ReferenceBinding {
+    const { row } = declarator;
+    const value = declarator.type === 'init_declarator' ? fieldOf(declarator, 'value') : undefined;
     if (!value) return this.error(row, `参照 ${name} には初期値が要ります。`);
     const isDeduced = hasAuto(declared.to);
     let target: Expr;
     if (value.type === 'initializer_list' && !isDeduced) {
-      const bound = this.listReferenceValue(value, declared.to);
+      const bound = this.listReferenceValue(value, declared.to, !hasToken(declarator, '='));
       if (!bound) return this.error(row, `参照 ${name} を {...} の値に束縛できません。`);
       target = bound;
     } else if (value.type === 'initializer_list' || value.type === 'argument_list') {
@@ -608,7 +608,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     this.checkRedeclaration(name, row);
     const value = declarator.type === 'init_declarator' ? fieldOf(declarator, 'value') : undefined;
     let type: Type = declared.type;
-    const reference = type.kind === 'reference' ? this.bindReference(name, type, value, row) : undefined;
+    const reference = type.kind === 'reference' ? this.bindReference(name, type, declarator) : undefined;
     if (reference) type = reference.type;
     else if (hasAuto(type)) {
       type = this.deduceAuto(type, this.compileExpression(this.autoInitializer(declarator, value, name)), row);

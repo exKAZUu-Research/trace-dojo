@@ -1709,10 +1709,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return sequence(rank, () => (to.kind === 'reference' ? this.materialize(value) : value));
   }
 
-  protected listReferenceValue(list: Syntax, referent: Type): Expr | undefined {
+  protected listReferenceValue(list: Syntax, referent: Type, direct: boolean): Expr | undefined {
     const target = this.singleListExpression(list);
     if (target && isReferenceRelated(target.type, referent)) return target;
-    if (isConstType(referent)) return this.listValue(unqualified(referent), list);
+    if (isConstType(referent)) return this.listValue(unqualified(referent), list, direct);
   }
 
   private singleListExpression(list: Syntax): Expr | undefined {
@@ -1720,8 +1720,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (first && rest.length === 0 && first.type !== 'initializer_list') return this.compileExpression(first);
   }
 
-  private listValue(type: Type, list: Syntax): Expr {
-    const run = this.listInitializer(type, list, list.row);
+  private listValue(type: Type, list: Syntax, direct = false): Expr {
+    const run = this.listInitializer(type, list, list.row, direct);
     return {
       type,
       isLvalue: false,
