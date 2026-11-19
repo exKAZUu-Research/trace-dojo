@@ -20,12 +20,21 @@ bool lessKp(int k, const P& a) { return k < a.k; }
 bool near(int a, int b) { return b - a < 2; }
 bool byLength(const std::string& a, const std::string& b) { return a.size() < b.size(); }
 const int* expected = nullptr;
+const int* searched = nullptr;
 bool observesReference(const int& a, const int& b) {
   std::cout << (&a == expected);
   return a < b;
 }
 bool observesArray(const int& a, const int& b) {
   std::cout << (&a + 1 == &b);
+  return a < b;
+}
+bool observesKey(const int& a, const int& b) {
+  std::cout << (&b == searched);
+  return a < b;
+}
+bool observesNodes(const int& a, const int& b) {
+  std::cout << ((&a == expected && &b == searched) || (&b == expected && &a == searched));
   return a < b;
 }
 
@@ -46,6 +55,19 @@ int main() {
   expected = &five;
   std::cout << std::min(three, five, observesReference) << ' ';
   std::cout << std::max({7, 9}, observesArray) << '\n';
+
+  int small[]{2, 1};
+  expected = &small[1];
+  std::cout << *std::min_element(small, small + 2, observesReference) << ' ';
+  std::sort(small, small + 2, observesReference);
+  int key = 2;
+  searched = &key;
+  std::cout << *std::lower_bound(small, small + 2, key, observesKey) << ' ';
+  std::list<int> linked{2, 1};
+  expected = &linked.front();
+  searched = &linked.back();
+  linked.sort(observesNodes);
+  std::cout << linked.front() << '\n';
 
   std::string a = "abc", b = "ABC", c = "ABCD";
   std::cout << std::equal(a.begin(), a.end(), b.begin(), b.end(), ieq)

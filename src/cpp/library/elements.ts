@@ -558,30 +558,6 @@ export function locationOf(value: Value): Ptr {
   return new Ptr(new Box(value), 0);
 }
 
-/**
- * A comparator argument of an algorithm or a container: a function's name, or a function object such as
- * `std::greater<int>()`, compiled for two elements of a type, or for arguments of the types `elementType` lists.
- * Gives undefined when the argument is neither.
- */
-export function comparatorOf(
-  compiler: ExpressionCompiler,
-  argumentType: Type,
-  functions: FunctionCandidates | undefined,
-  elementType: Type | Type[],
-  row: number,
-  arity = 2
-): ((frame: Frame, ...args: Value[]) => Value) | undefined {
-  const types = Array.isArray(elementType) ? elementType : Array.from({ length: arity }, () => elementType);
-  const call = predicateCallback(
-    compiler,
-    argumentType,
-    functions,
-    types.map((type) => ({ type })),
-    row
-  );
-  if (call) return (frame, ...values) => call(frame, ...values.map(locationOf));
-}
-
 export interface CallbackOperand {
   type: Type;
   category?: 'xvalue' | 'prvalue';

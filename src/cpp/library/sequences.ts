@@ -32,7 +32,6 @@ import { bitReferences } from './bitReference';
 import { SequenceValue } from './containerValues';
 import {
   callbackOperands,
-  comparatorOf,
   constructElementFromRvalue,
   type ElementOperations,
   elementOperations,
@@ -40,6 +39,7 @@ import {
   lessThan,
   locationOf,
   movedArgument,
+  predicateCallback,
   requireDefaultConstruction,
   requireElementUse,
   requireMoveConstruction,
@@ -795,14 +795,15 @@ function listMethods(
     if (!less) throw new CppRuntimeError('custom', `${typeName(element)} の値は < で比べられません。`);
     self.reorder((items) => listSort(items, (a, b) => less(a.value, b.value) < 0));
   });
-  const unique = (self: SequenceValue, frame: Frame, same: (a: Value, b: Value) => boolean): bigint => {
+  const unique = (self: SequenceValue, frame: Frame, same: (a: Ptr, b: Ptr) => boolean): bigint => {
     let count = 0;
-    let first: Value;
+    let first: Ptr | undefined;
     self.reorder(
       (items) =>
-        items.filter(({ value }, index) => {
-          if (index > 0 && same(first, value)) return false;
-          first = value;
+        items.filter(({ index }) => {
+          const next = self.location(index);
+          if (first && same(first, next)) return false;
+          first = next;
           return true;
         }),
       (removed) => {
@@ -814,13 +815,14 @@ function listMethods(
   };
   method('unique', [], SIZE_T, (self, _args, frame) => {
     if (!equal) throw new CppRuntimeError('custom', `${typeName(element)} の値は == で比べられません。`);
-    return unique(self, frame, equal);
+    return unique(self, frame, (a, b) => equal(a.read(), b.read()));
   });
   /** A comparator or predicate argument, given as a function's name or a function object. */
-  const callable = (args: Expr[]): ((frame: Frame, a: Value, b: Value) => boolean) | undefined => {
+  const callable = (args: Expr[]): ((frame: Frame, a: Ptr, b: Ptr) => boolean) | undefined => {
     const [arg] = args;
     if (args.length !== 1) return;
-    const call = comparatorOf(library.compiler, unqualified(arg.type), arg.functions, unqualified(element), arg.row);
+    const operand = { type: element };
+    const call = predicateCallback(library.compiler, unqualified(arg.type), arg.functions, [operand, operand], arg.row);
     return call ? (frame, a, b) => truthy(call(frame, a, b)) : undefined;
   };
   addTemplateMethod(cls, 'sort', (args) => {
@@ -832,7 +834,9 @@ function listMethods(
       VOID,
       (_args, { self, frame }) => {
         const list = self as SequenceValue;
-        list.reorder((items) => listSort(items, (a, b) => compare(frame, a.value, b.value)));
+        list.reorder((items) =>
+          listSort(items, (a, b) => compare(frame, list.location(a.index), list.location(b.index)))
+        );
       },
       { owner: cls }
     );

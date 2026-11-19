@@ -34,7 +34,6 @@ import {
   assignElement,
   type CallbackOperand,
   callbackOperands,
-  comparatorOf,
   constructElementFromRvalue,
   destroyElements,
   type ElementOperations,
@@ -42,7 +41,6 @@ import {
   equalTo,
   functionCallback,
   lessThan,
-  locationOf,
   moveAssignElement,
   moveValue,
   predicateCallback,
@@ -124,10 +122,6 @@ class Range {
     return this.first.target().location(index);
   }
 
-  comparisonValue(position: number): Value {
-    return this.info.reference ? this.location(position) : this.get(position);
-  }
-
   set(position: number, value: Value): void {
     if (!this.write) {
       const index = this.index(position);
@@ -149,10 +143,17 @@ class Range {
     return object;
   }
 
-  withTemporary<T>(position: number, use: (value: Value) => T): T {
+  temporary(position: number, frame: Frame): Ptr {
+    frame.runtime.reserve(1);
+    const object = new Box(this.take(position), false);
+    frame.temporaries.push({ object, destroy: (_frame, value) => endLifetime(value) });
+    return new AlgorithmLocal(object, 0);
+  }
+
+  withTemporary<T>(position: number, use: (location: Ptr) => T): T {
     const frame = this.write?.frame;
-    if (!frame) return use(this.get(position));
-    return withTemporaries(frame, () => use(this.take(position)));
+    if (!frame) throw new Error('Sorting requires a writable range');
+    return withTemporaries(frame, () => use(this.temporary(position, frame)));
   }
 
   swap(a: number, b: number): void {
@@ -201,8 +202,9 @@ class Output {
   }
 }
 
-type Less = (a: Value, b: Value) => boolean;
-type LocationLess = (a: Ptr, b: Ptr) => boolean;
+class AlgorithmLocal extends Ptr {}
+
+type Less = (a: Ptr, b: Ptr) => boolean;
 
 const ARRAY_REFERENCE_FUNCTIONS = new Set([
   'begin',
@@ -240,37 +242,32 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     });
     functions.set(name, [...(functions.get(name) ?? []), overload]);
   };
-  /** The comparison an algorithm uses: the argument at `index`, or `<`. */
   const lessOf = (
     args: Expr[],
     index: number,
     info: IteratorInfo,
     usesStoredValues = false
   ): ((frame: Frame) => Less) | undefined => {
-    const { element, reference } = info;
     const compare = args[index];
-    if (!reference) return orderOf(compare, [element, element], args[0].row);
-    if (compare) return bitIteratorOrder(compiler(), compare, info, usesStoredValues);
-    const order = orderOf(undefined, [element, element], args[0].row);
-    if (order) {
-      return (frame) => {
-        const less = order(frame);
-        return (a, b) => less(a instanceof Ptr ? a.read() : a, b instanceof Ptr ? b.read() : b);
-      };
-    }
+    if (info.reference && compare && usesStoredValues) return bitIteratorOrder(compiler(), compare, info);
+    const operand = iteratorOperand(info);
+    return orderOf(compare, [operand, operand], [info.element, info.element], args[0].row);
   };
-  /** The comparison `arg` makes between values of the two types, or `<` without it. */
-  const orderOf = (arg: Expr | undefined, types: [Type, Type], row: number): ((frame: Frame) => Less) | undefined => {
-    if (!arg) {
-      const [left, right] = types;
-      const less = sameType(left, right, false) ? lessThan(left) : undefined;
-      if (less) return () => (a, b) => less(a, b) < 0;
-      const compare = valueComparison(compiler(), '<', left, right, row);
-      return compare ? (frame) => (a, b) => compare(frame, a, b) : undefined;
+
+  const orderOf = (
+    arg: Expr | undefined,
+    operands: [CallbackOperand, CallbackOperand],
+    [left, right]: [Type, Type],
+    row: number
+  ): ((frame: Frame) => Less) | undefined => {
+    if (arg) {
+      const call = predicateOf(arg, ...operands);
+      return call && ((frame) => (a, b) => truthy(call(frame, a, b)));
     }
-    const call = comparatorOf(compiler(), unqualified(arg.type), arg.functions, types, arg.row);
-    if (!call) return undefined;
-    return (frame) => (a, b) => truthy(call(frame, a, b));
+    const less = sameType(left, right, false) ? lessThan(left) : undefined;
+    if (less) return () => (a, b) => less(a.read(), b.read()) < 0;
+    const compare = valueComparison(compiler(), '<', left, right, row);
+    return compare && ((frame) => (a, b) => compare(frame, a.read(), b.read()));
   };
   /** A predicate of the expressions an algorithm passes, including proxy dereferences. */
   const predicateOf = (
@@ -311,7 +308,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         const values = mutableRange(first, last, info, frame, ops, true);
         frame.runtime.spend(values.length);
         if (name === 'sort') introsort(values, less(frame));
-        else stableSort(values, less(frame));
+        else stableSort(values, less(frame), frame);
         return;
       });
     });
@@ -338,7 +335,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       return native(name, params(args), BOOL, ([first, last], { frame }) => {
         const values = mutableRange(first, last, info, frame, ops);
         const compare = less(frame);
-        const ordered = name === 'next_permutation' ? compare : (a: Value, b: Value): boolean => compare(b, a);
+        const ordered = name === 'next_permutation' ? compare : (a: Ptr, b: Ptr): boolean => compare(b, a);
         return permute(values, ordered) ? 1 : 0;
       });
     });
@@ -377,8 +374,8 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         for (let index = 1; index < values.length; index++) {
           if (
             name === 'min_element'
-              ? compare(values.comparisonValue(index), values.comparisonValue(best))
-              : compare(values.comparisonValue(best), values.comparisonValue(index))
+              ? compare(values.location(index), values.location(best))
+              : compare(values.location(best), values.location(index))
           )
             best = index;
         }
@@ -463,28 +460,17 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const info = rangeAt(args, 0);
       if (!info || args.length < 3 || args.length > 4) return;
       const types = params(args);
-      const valueType = types[2];
-      // A comparator may take the element and the value in different types: (element, value) for lower_bound and
-      // (value, element) for upper_bound.
-      const elementType = unqualified(info.element);
-      const searched = unqualified(valueType.kind === 'reference' ? valueType.to : valueType);
-      const boundOrder = (elementFirst: boolean): ((frame: Frame) => Less) | undefined => {
-        const comparator = args[3];
-        if (!info.reference || !comparator) {
-          const types: [Type, Type] = elementFirst ? [elementType, searched] : [searched, elementType];
-          return orderOf(comparator, types, args[0].row);
-        }
-        const element = iteratorOperand(info);
-        const key = { type: withConst(searched) };
-        const operands = elementFirst ? [element, key] : [key, element];
-        const predicate = predicateOf(comparator, ...operands);
-        if (predicate) {
-          return (frame) => (a, b) =>
-            truthy(
-              predicate(frame, elementFirst ? (a as Ptr) : locationOf(a), elementFirst ? locationOf(b) : (b as Ptr))
-            );
-        }
-      };
+      const keyType = withConst(decayed(args[2].type));
+      types[2] = referenceTo(keyType);
+      const element = iteratorOperand(info);
+      const key = { type: keyType };
+      const boundOrder = (elementFirst: boolean): ((frame: Frame) => Less) | undefined =>
+        orderOf(
+          args[3],
+          elementFirst ? [element, key] : [key, element],
+          elementFirst ? [info.element, keyType] : [keyType, info.element],
+          args[0].row
+        );
       const elementFirst = name !== 'upper_bound' ? boundOrder(true) : undefined;
       const valueFirst = name !== 'lower_bound' ? boundOrder(false) : undefined;
       if ((name !== 'upper_bound' && !elementFirst) || (name !== 'lower_bound' && !valueFirst)) return;
@@ -496,22 +482,22 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
           const values = range(first, last, info);
           const elementLess = elementFirst?.(frame) as Less;
           const valueLess = valueFirst?.(frame) as Less;
-          const target = readArg(value, valueType);
-          const element = (index: number): Value =>
-            info.reference && args[3] ? values.comparisonValue(index) : values.get(index);
+          const target = value as Ptr;
           const upper = name === 'upper_bound';
           let low = 0;
           let count = values.length;
           while (count > 0) {
             const step = Math.floor(count / 2);
             const middle = low + step;
-            const goesRight = upper ? !valueLess(target, element(middle)) : elementLess(element(middle), target);
+            const goesRight = upper
+              ? !valueLess(target, values.location(middle))
+              : elementLess(values.location(middle), target);
             if (goesRight) {
               low = middle + 1;
               count -= step + 1;
             } else count = step;
           }
-          if (name === 'binary_search') return low < values.length && !valueLess(target, element(low)) ? 1 : 0;
+          if (name === 'binary_search') return low < values.length && !valueLess(target, values.location(low)) ? 1 : 0;
           return values.iterator(low);
         }
       );
@@ -890,21 +876,9 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
 
   // min, max, clamp ------------------------------------------------------------------------------------------------
   /** The order of min, max, minmax, or clamp: the comparator argument at `index`, or `<`. */
-  const extremumOrder = (args: Expr[], index: number, type: Type): ((frame: Frame) => LocationLess) | undefined => {
+  const extremumOrder = (args: Expr[], index: number, type: Type): ((frame: Frame) => Less) | undefined => {
     const operand = { type: withConst(type) };
-    const comparator = args[index];
-    if (comparator) {
-      const compare = predicateOf(comparator, operand, operand);
-      return compare && ((frame) => (first, second) => truthy(compare(frame, first, second)));
-    }
-    const build = orderOf(undefined, [operand.type, operand.type], args[0].row);
-    return (
-      build &&
-      ((frame) => {
-        const compare = build(frame);
-        return (first, second) => compare(first.read(), second.read());
-      })
-    );
+    return orderOf(args[index], [operand, operand], [operand.type, operand.type], args[0].row);
   };
   for (const name of ['min', 'max', 'minmax']) {
     define(name, extremumTemplateParameters, (args, templateArgs) => {
@@ -1073,27 +1047,27 @@ function explicitAlgorithmArguments(
 function bitIteratorOrder(
   compiler: ExpressionCompiler,
   arg: Expr,
-  info: IteratorInfo,
-  usesStoredValues: boolean
+  info: IteratorInfo
 ): ((frame: Frame) => Less) | undefined {
   const proxy = iteratorOperand(info);
+  const local = { type: info.element };
   const bind = (left: CallbackOperand, right: CallbackOperand): ReturnType<typeof predicateCallback> =>
     predicateCallback(compiler, unqualified(arg.type), arg.functions, [left, right], arg.row);
   const twoProxies = bind(proxy, proxy);
-  if (!twoProxies) return;
-  if (!usesStoredValues) return (frame) => (a, b) => truthy(twoProxies(frame, a as Ptr, b as Ptr));
-  const local = { type: info.element };
   const proxyLeft = bind(proxy, local);
   const proxyRight = bind(local, proxy);
   const twoLocals = bind(local, local);
-  if (!proxyLeft || !proxyRight || !twoLocals) return;
+  if (!twoProxies || !proxyLeft || !proxyRight || !twoLocals) return;
   return (frame) => (a, b) => {
-    if (a instanceof Ptr) {
-      return truthy(b instanceof Ptr ? twoProxies(frame, a, b) : proxyLeft(frame, a, locationOf(b)));
-    }
-    return truthy(
-      b instanceof Ptr ? proxyRight(frame, locationOf(a), b) : twoLocals(frame, locationOf(a), locationOf(b))
-    );
+    const compare =
+      a instanceof AlgorithmLocal
+        ? b instanceof AlgorithmLocal
+          ? twoLocals
+          : proxyRight
+        : b instanceof AlgorithmLocal
+          ? proxyLeft
+          : twoProxies;
+    return truthy(compare(frame, a, b));
   };
 }
 
@@ -1185,7 +1159,7 @@ function mutableRange(
   ops: ElementOperations,
   move = false
 ): Range {
-  const write = info.element.kind === 'class' ? { frame, ops, move } : undefined;
+  const write = move || info.element.kind === 'class' ? { frame, ops, move } : undefined;
   return new Range(first as Ptr, last as Ptr, info, write);
 }
 
@@ -1549,7 +1523,7 @@ function listExtremum(
   name: string,
   elements: Expr[],
   type: Type,
-  less: (frame: Frame) => LocationLess,
+  less: (frame: Frame) => Less,
   comparatorParams: Type[],
   result: ClassInfo | undefined
 ): FunctionInfo {
@@ -1629,40 +1603,40 @@ function minmaxPositions(length: number, less: (a: number, b: number) => boolean
 // libc++'s std::sort ------------------------------------------------------------------------------------------------
 
 function sort3(values: Range, x: number, y: number, z: number, less: Less): void {
-  if (!less(values.comparisonValue(y), values.comparisonValue(x))) {
-    if (!less(values.comparisonValue(z), values.comparisonValue(y))) return;
+  if (!less(values.location(y), values.location(x))) {
+    if (!less(values.location(z), values.location(y))) return;
     values.swap(y, z);
-    if (less(values.comparisonValue(y), values.comparisonValue(x))) values.swap(x, y);
+    if (less(values.location(y), values.location(x))) values.swap(x, y);
     return;
   }
-  if (less(values.comparisonValue(z), values.comparisonValue(y))) {
+  if (less(values.location(z), values.location(y))) {
     values.swap(x, z);
     return;
   }
   values.swap(x, y);
-  if (less(values.comparisonValue(z), values.comparisonValue(y))) values.swap(y, z);
+  if (less(values.location(z), values.location(y))) values.swap(y, z);
 }
 
 function sort4(values: Range, a: number, b: number, c: number, d: number, less: Less): void {
   sort3(values, a, b, c, less);
-  if (less(values.comparisonValue(d), values.comparisonValue(c))) {
+  if (less(values.location(d), values.location(c))) {
     values.swap(c, d);
-    if (less(values.comparisonValue(c), values.comparisonValue(b))) {
+    if (less(values.location(c), values.location(b))) {
       values.swap(b, c);
-      if (less(values.comparisonValue(b), values.comparisonValue(a))) values.swap(a, b);
+      if (less(values.location(b), values.location(a))) values.swap(a, b);
     }
   }
 }
 
 function sort5(values: Range, a: number, b: number, c: number, d: number, e: number, less: Less): void {
   sort4(values, a, b, c, d, less);
-  if (less(values.comparisonValue(e), values.comparisonValue(d))) {
+  if (less(values.location(e), values.location(d))) {
     values.swap(d, e);
-    if (less(values.comparisonValue(d), values.comparisonValue(c))) {
+    if (less(values.location(d), values.location(c))) {
       values.swap(c, d);
-      if (less(values.comparisonValue(c), values.comparisonValue(b))) {
+      if (less(values.location(c), values.location(b))) {
         values.swap(b, c);
-        if (less(values.comparisonValue(b), values.comparisonValue(a))) values.swap(a, b);
+        if (less(values.location(b), values.location(a))) values.swap(a, b);
       }
     }
   }
@@ -1672,15 +1646,15 @@ function insertionSort(values: Range, first: number, last: number, less: Less, g
   if (first === last) return;
   for (let i = first + 1; i !== last; i++) {
     let j = i - 1;
-    if (less(values.comparisonValue(i), values.comparisonValue(j))) {
+    if (less(values.location(i), values.location(j))) {
       values.withTemporary(i, (value) => {
         let k = j;
         j = i;
         do {
           values.set(j, values.get(k));
           j = k;
-        } while ((!guarded || j !== first) && less(value, values.comparisonValue(--k)));
-        values.set(j, value);
+        } while ((!guarded || j !== first) && less(value, values.location(--k)));
+        values.set(j, value.read());
       });
     }
   }
@@ -1693,7 +1667,7 @@ function insertionSortIncomplete(values: Range, first: number, last: number, les
       return true;
     }
     case 2: {
-      if (less(values.comparisonValue(last - 1), values.comparisonValue(first))) values.swap(first, last - 1);
+      if (less(values.location(last - 1), values.location(first))) values.swap(first, last - 1);
       return true;
     }
     case 3: {
@@ -1713,15 +1687,15 @@ function insertionSortIncomplete(values: Range, first: number, last: number, les
   sort3(values, first, first + 1, j, less);
   let count = 0;
   for (let i = j + 1; i !== last; i++) {
-    if (less(values.comparisonValue(i), values.comparisonValue(j))) {
+    if (less(values.location(i), values.location(j))) {
       values.withTemporary(i, (value) => {
         let k = j;
         j = i;
         do {
           values.set(j, values.get(k));
           j = k;
-        } while (j !== first && less(value, values.comparisonValue(--k)));
-        values.set(j, value);
+        } while (j !== first && less(value, values.location(--k)));
+        values.set(j, value.read());
       });
       if (++count === 8) return i + 1 === last;
     }
@@ -1736,23 +1710,23 @@ function partitionWithEqualsOnRight(values: Range, start: number, end: number, l
   let last = end;
   return values.withTemporary(first, (pivot) => {
     do first++;
-    while (less(values.comparisonValue(first), pivot));
+    while (less(values.location(first), pivot));
     if (begin === first - 1) {
-      while (first < last && !less(values.comparisonValue(--last), pivot));
+      while (first < last && !less(values.location(--last), pivot));
     } else {
-      while (!less(values.comparisonValue(--last), pivot));
+      while (!less(values.location(--last), pivot));
     }
     const alreadyPartitioned = first >= last;
     while (first < last) {
       values.swap(first, last);
       do first++;
-      while (less(values.comparisonValue(first), pivot));
+      while (less(values.location(first), pivot));
       do last--;
-      while (!less(values.comparisonValue(last), pivot));
+      while (!less(values.location(last), pivot));
     }
     const pivotPosition = first - 1;
     if (begin !== pivotPosition) values.set(begin, values.get(pivotPosition));
-    values.set(pivotPosition, pivot);
+    values.set(pivotPosition, pivot.read());
     return [pivotPosition, alreadyPartitioned];
   });
 }
@@ -1762,26 +1736,26 @@ function partitionWithEqualsOnLeft(values: Range, start: number, end: number, le
   let first = start;
   let last = end;
   return values.withTemporary(first, (pivot) => {
-    if (less(pivot, values.comparisonValue(last - 1))) {
+    if (less(pivot, values.location(last - 1))) {
       do first++;
-      while (!less(pivot, values.comparisonValue(first)));
+      while (!less(pivot, values.location(first)));
     } else {
-      while (++first < last && !less(pivot, values.comparisonValue(first)));
+      while (++first < last && !less(pivot, values.location(first)));
     }
     if (first < last) {
       do last--;
-      while (less(pivot, values.comparisonValue(last)));
+      while (less(pivot, values.location(last)));
     }
     while (first < last) {
       values.swap(first, last);
       do first++;
-      while (!less(pivot, values.comparisonValue(first)));
+      while (!less(pivot, values.location(first)));
       do last--;
-      while (less(pivot, values.comparisonValue(last)));
+      while (less(pivot, values.location(last)));
     }
     const pivotPosition = first - 1;
     if (begin !== pivotPosition) values.set(begin, values.get(pivotPosition));
-    values.set(pivotPosition, pivot);
+    values.set(pivotPosition, pivot.read());
     return first;
   });
 }
@@ -1793,9 +1767,8 @@ function heapSort(values: Range, first: number, last: number, less: Less): void 
     let child = start;
     if (size < 2 || (size - 2) >> 1 < child) return;
     child = 2 * child + 1;
-    if (child + 1 < size && less(values.comparisonValue(first + child), values.comparisonValue(first + child + 1)))
-      child++;
-    if (less(values.comparisonValue(first + child), values.comparisonValue(first + start))) return;
+    if (child + 1 < size && less(values.location(first + child), values.location(first + child + 1))) child++;
+    if (less(values.location(first + child), values.location(first + start))) return;
     values.withTemporary(first + start, (top) => {
       let hole = start;
       do {
@@ -1803,10 +1776,9 @@ function heapSort(values: Range, first: number, last: number, less: Less): void 
         hole = child;
         if ((size - 2) >> 1 < child) break;
         child = 2 * child + 1;
-        if (child + 1 < size && less(values.comparisonValue(first + child), values.comparisonValue(first + child + 1)))
-          child++;
-      } while (!less(values.comparisonValue(first + child), top));
-      values.set(first + hole, top);
+        if (child + 1 < size && less(values.location(first + child), values.location(first + child + 1))) child++;
+      } while (!less(values.location(first + child), top));
+      values.set(first + hole, top.read());
     });
   };
   for (let start = (length - 2) >> 1; start >= 0; start--) siftDown(start, length);
@@ -1846,7 +1818,7 @@ function sortPart(
         return;
       }
       case 2: {
-        if (less(values.comparisonValue(last - 1), values.comparisonValue(first))) values.swap(first, last - 1);
+        if (less(values.location(last - 1), values.location(first))) values.swap(first, last - 1);
         return;
       }
       case 3: {
@@ -1881,7 +1853,7 @@ function sortPart(
     } else {
       sort3(values, first + half, first, last - 1, less);
     }
-    if (!leftmost && !less(values.comparisonValue(first - 1), values.comparisonValue(first))) {
+    if (!leftmost && !less(values.location(first - 1), values.location(first))) {
       first = partitionWithEqualsOnLeft(values, first, last, less);
       continue;
     }
@@ -1905,20 +1877,20 @@ function sortPart(
 }
 
 /** A stable merge sort, whose result `std::stable_sort` guarantees. */
-function stableSort(values: Range, less: Less): void {
-  const items = Array.from({ length: values.length }, (_, index) => values.take(index));
-  const merge = (list: Value[]): Value[] => {
+function stableSort(values: Range, less: Less, frame: Frame): void {
+  const items = Array.from({ length: values.length }, (_, index) => values.temporary(index, frame));
+  const merge = (list: Ptr[]): Ptr[] => {
     if (list.length <= 1) return list;
     const middle = list.length >> 1;
     const left = merge(list.slice(0, middle));
     const right = merge(list.slice(middle));
-    const result: Value[] = [];
+    const result: Ptr[] = [];
     let i = 0;
     let j = 0;
     while (i < left.length && j < right.length) result.push(less(right[j], left[i]) ? right[j++] : left[i++]);
     return [...result, ...left.slice(i), ...right.slice(j)];
   };
-  for (const [index, item] of merge(items).entries()) values.set(index, item);
+  for (const [index, item] of merge(items).entries()) values.set(index, item.read());
 }
 
 /** Rearranges a range into the next permutation in the order `less`, telling whether one existed. */
@@ -1929,9 +1901,9 @@ function permute(values: Range, less: Less): boolean {
   for (;;) {
     const ip1 = i;
     i--;
-    if (less(values.comparisonValue(i), values.comparisonValue(ip1))) {
+    if (less(values.location(i), values.location(ip1))) {
       let j = length - 1;
-      while (!less(values.comparisonValue(i), values.comparisonValue(j))) j--;
+      while (!less(values.location(i), values.location(j))) j--;
       values.swap(i, j);
       for (let a = ip1, b = length - 1; a < b; a++, b--) values.swap(a, b);
       return true;
