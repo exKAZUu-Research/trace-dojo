@@ -12,7 +12,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { type Ptr,type Value } from '../values';
+import { type Ptr, type Value } from '../values';
 import { comparatorOrder } from './associative';
 import { SequenceValue } from './containerValues';
 import { type ElementOperations, elementOperations } from './elements';
