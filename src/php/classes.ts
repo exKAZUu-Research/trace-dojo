@@ -471,10 +471,10 @@ function importTraitMethod(
   for (const rule of aliases) {
     const adapted = {
       ...original,
-      name: rule.alias ?? method.name,
-      lname: rule.alias ? lower(rule.alias) : method.lname,
-      visibility: rule.visibility ?? (rule.alias ? original : method).visibility,
-      isFinal: (rule.alias ? original : method).isFinal || rule.isFinal === true,
+      name: rule.alias ?? original.name,
+      lname: rule.alias ? lower(rule.alias) : original.lname,
+      visibility: rule.visibility ?? original.visibility,
+      isFinal: original.isFinal || rule.isFinal === true,
     };
     if (rule.alias) addTraitMethod(cls, adapted, original, imported);
     else method = adapted;

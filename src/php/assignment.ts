@@ -52,7 +52,6 @@ import {
 import { FatalError, PhpThrow, rt } from './runtime';
 import { incrementString } from './strings';
 import { coerce, describePropertyType, matches, NO_MATCH, typeToString } from './types';
-import { checkedDynamicVariable } from './unsupported';
 import {
   type Key,
   PhpArray,
@@ -124,7 +123,7 @@ export function placeOf(e: Expr, mode: PlaceMode = 'write', through = false): Pl
 
 function namedPlace(name: Expr | string, mode: PlaceMode, locate: (name: string) => Place): Place {
   const readName = typeof name === 'string' ? () => name : prepareOperand(name);
-  const resolve = (): Place => locate(checkedDynamicVariable(toStr(readName())));
+  const resolve = (): Place => locate(toStr(readName()));
   return mode === 'deferred' || mode === 'coalesce' ? deferredPlace(resolve, () => readForIsset(resolve())) : resolve();
 }
 
@@ -329,7 +328,7 @@ function deferredPlace(
 
 function globalPlace(index?: Expr): VarPlace {
   if (index === undefined) throwError('Error', 'Cannot append to $GLOBALS');
-  return new VarPlace(rt().globalFrame, checkedDynamicVariable(toStr(ev(index))), 'global');
+  return new VarPlace(rt().globalFrame, toStr(ev(index)), 'global');
 }
 
 class StaticPlace implements Place {
@@ -882,7 +881,7 @@ export function assignTo(target: Expr, value: Value): void {
 export function bindRef(target: Expr, ref: Ref): void {
   if (target.k === 'var' || target.k === 'varvar') {
     const name = target.k === 'var' ? target.name : toStr(ev(target.name));
-    new VarPlace(rt().frame, name).bind(ref);
+    new VarPlace(rt().frame, name, target.k === 'varvar' ? 'dynamic' : 'compiled').bind(ref);
     return;
   }
   if (target.k === 'idx') return bindDimensionRef(target, ref);
@@ -1312,7 +1311,7 @@ function prepareUnset(e: Expr, nested?: UnsetBase): () => Place | undefined {
     }
     case 'varvar': {
       const name = prepareOperand(e.name);
-      return () => new VarPlace(rt().frame, checkedDynamicVariable(toStr(name())), 'dynamic');
+      return () => new VarPlace(rt().frame, toStr(name()), 'dynamic');
     }
     case 'sprop': {
       if (nested) {
@@ -1336,7 +1335,7 @@ function prepareUnsetOffset(e: Extract<Expr, { k: 'idx' }>, nested?: UnsetBase):
   if (e.index === undefined) throwError('Error', 'Cannot use [] for unsetting');
   if (e.base.k === 'var' && e.base.name === 'GLOBALS') {
     const readKey = prepareOperand(e.index);
-    return () => new VarPlace(rt().globalFrame, checkedDynamicVariable(toStr(readKey())), 'global');
+    return () => new VarPlace(rt().globalFrame, toStr(readKey()), 'global');
   }
   const readParent = prepareUnset(e.base, 'array');
   const readKey = prepareOperand(e.index);

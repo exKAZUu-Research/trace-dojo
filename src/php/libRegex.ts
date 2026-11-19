@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 412 -- The regex functions share matching, offsets, capture handling, and error state.
+// code-gauge-allow-file fileNcss 414 -- The regex functions share matching, offsets, capture handling, and error state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { dec, enc } from './bytes';
 import { consumeCallbackResult } from './callables';
@@ -29,9 +29,12 @@ const PREG_CONSTANTS: [string, bigint][] = [
   ['PREG_JIT_STACKLIMIT_ERROR', 6n],
 ];
 for (const [name, value] of PREG_CONSTANTS) defineConstant(name, value);
-defineConstant('PCRE_VERSION', '10.47 2025-10-21');
-defineConstant('PCRE_VERSION_MAJOR', 10n);
-defineConstant('PCRE_VERSION_MINOR', 47n);
+// These constants describe the linked PCRE2 build of the PHP CLI used to record the parity fixtures.
+const PHP_REFERENCE_PCRE_VERSION = '10.49 2026-09-28';
+const [major, minor] = PHP_REFERENCE_PCRE_VERSION.split(/[. ]/, 2).map(BigInt);
+defineConstant('PCRE_VERSION', PHP_REFERENCE_PCRE_VERSION);
+defineConstant('PCRE_VERSION_MAJOR', major);
+defineConstant('PCRE_VERSION_MINOR', minor);
 defineConstant('PCRE_JIT_SUPPORT', false);
 
 /**

@@ -2,6 +2,7 @@
 import { deprecated, E_WARNING, emitError, throwError, type UpdateWarning, warn } from './errors';
 import { type Frame, type PhpThrow, rt } from './runtime';
 import { describePropertyType } from './types';
+import { checkedDynamicVariable } from './unsupported';
 import { dropped, type Key, PhpArray, PhpObject, type PropDecl, Ref, type Value } from './values';
 import { isSubtype } from './variance';
 
@@ -69,7 +70,9 @@ export class VarPlace implements Place {
     readonly name: string,
     private readonly kind: 'compiled' | 'dynamic' | 'global' = 'compiled',
     private readonly fetchRow?: number
-  ) {}
+  ) {
+    if (kind !== 'compiled') checkedDynamicVariable(name);
+  }
 
   get(): Value | undefined {
     const ref = this.frame.vars.get(this.name);

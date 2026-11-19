@@ -278,6 +278,9 @@ test.each([
   ['_GET', 'unset($$name);', 'スーパーグローバル変数'],
   ['argv', 'echo ${$name};', 'コマンドライン引数'],
   ['argc', 'echo $GLOBALS[$name];', 'コマンドライン引数'],
+  ['_GET', '$value = 1; $$name =& $value;', 'スーパーグローバル変数'],
+  ['argv', '$values = [1]; [&$$name] = $values;', 'コマンドライン引数'],
+  ['_POST', '$values = [1]; foreach ($values as &$$name) {}', 'スーパーグローバル変数'],
 ])('rejects indirect access to $%s through %s', (name, action, label) => {
   expect(run(`<?php $name = '${name}'; echo 'before'; ${action} echo 'after';`)).toMatchObject({
     kind: 'executed',
