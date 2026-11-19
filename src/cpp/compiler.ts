@@ -124,17 +124,30 @@ export class Compiler extends StatementCompiler {
       if (!this.usedAtomicRows.has(row)) this.error(row, misplacedAtomicMessage);
     }
     const types = this.globalTypes;
+    const libcOverrides = this.libcOverrides();
     return {
       main: mainFunction,
       globals: this.globals,
       createGlobals: (runtime) => types.map((type) => new Box(staticZero(runtime, type))),
       initializeGlobals: (frame) => {
+        frame.runtime.libcOverrides = libcOverrides;
         for (const init of this.constantInitializers) init(frame);
         for (const init of this.dynamicInitializers) init(frame);
       },
       shownGlobals: this.globals.filter((global) => global.isShown),
       mainTakesArguments: mainFunction.params.length === 2,
     };
+  }
+
+  private libcOverrides(): ReadonlyMap<string, FunctionInfo> {
+    const overrides = new Map<string, FunctionInfo>();
+    for (const entity of this.globalScope.names.values()) {
+      if (entity.kind !== 'functions') continue;
+      for (const fn of entity.functions) {
+        if (this.library.isLibcDefinition(fn)) overrides.set(fn.name, fn);
+      }
+    }
+    return overrides;
   }
 
   private checkLibraryGlobalDeclarations(): void {
@@ -607,7 +620,7 @@ export class Compiler extends StatementCompiler {
     cls.isComplete = true;
     if (cls.constructors.length === 0) {
       cls.isDefaultConstructorDeleted =
-        (cls.base !== undefined && !this.isDefaultInitializable(classType(cls.base), cls)) ||
+        (cls.base !== undefined && !this.isDefaultInitializable(classType(cls.base), cls, true)) ||
         cls.ownFields.some((field) => !field.initializer && !this.isDefaultInitializable(field.type, cls));
       if (!cls.isDefaultConstructorDeleted) {
         this.implicitDefaults.set(cls, this.bindImplicitDefault(cls));
@@ -616,7 +629,7 @@ export class Compiler extends StatementCompiler {
     cls.operations = this.classOperations(cls, userCopy);
   }
 
-  private isDefaultInitializable(type: Type, owner: ClassInfo): boolean {
+  private isDefaultInitializable(type: Type, owner: ClassInfo, isBase = false): boolean {
     if (type.kind === 'reference') return false;
     if (type.kind === 'array') return type.length === 0 || this.isDefaultInitializable(type.of, owner);
     if (type.kind !== 'class') return !isConstType(type);
@@ -624,14 +637,15 @@ export class Compiler extends StatementCompiler {
     if (cls.isDefaultConstructorDeleted || (isConstType(type) && !isConstDefaultConstructible(type))) return false;
     const fixed = cls.library?.aggregateArray;
     if (fixed) return this.isDefaultInitializable(fixed.type, cls);
-    if (cls.destructor && !isMemberAccessible(cls.destructor.access, cls, cls, owner)) return false;
+    const objectClass = isBase ? owner : cls;
+    if (cls.destructor && !isMemberAccessible(cls.destructor.access, cls, cls, owner, objectClass)) return false;
     const members = cls.library?.valueInitializedMembers;
     if (members?.some((member) => !this.isDefaultInitializable(unqualified(member), cls))) return false;
     if (cls.constructors.length === 0) return true;
     try {
       const viable = this.matchingOverloads(cls.constructors, []);
       const selected = this.chooseOverload(cls.name, viable, owner.row)?.fn;
-      return selected !== undefined && isMemberAccessible(selected.access, cls, cls, owner);
+      return selected !== undefined && isMemberAccessible(selected.access, cls, cls, owner, objectClass);
     } catch (error) {
       if (error instanceof CompileError) return false;
       throw error;
@@ -1430,6 +1444,7 @@ export class Compiler extends StatementCompiler {
     global.isDefined = true;
     this.globalScope.names.set(name, { kind: 'global', global, isReference: true });
     global.hasStaticReferenceBinding = binding.isConstant;
+    global.constantLocation = binding.isConstant ? binding.constantLocation : undefined;
     const initializers = binding.isConstant ? this.constantInitializers : this.dynamicInitializers;
     initializers.push(this.staticReferenceInitializer(global, binding, row, true));
     return binding.type;
@@ -1495,6 +1510,7 @@ export class Compiler extends StatementCompiler {
       if (!init) return;
       if ((type.kind === 'class' || type.kind === 'array') && isConstType(type))
         global.hasConstantObjectValue = init.isConstant;
+      if (global.isConstexprPointer && init.isConstant) global.constantPointee = init.run.constantPointee;
       if (global.isConstexprPointer && !init.isConstant)
         this.error(row, 'constexpr の変数の初期値には定数式を書いてください。');
       const { index } = global;
@@ -1608,6 +1624,7 @@ export class Compiler extends StatementCompiler {
       ? this.objectInitializer(converted)
       : initializerWithConstancy(converted.run as Eval<Value>, this.isConstantInitializer(converted), {
           memberConstant: memberConstantOf(converted),
+          constantPointee: converted.constantPointee,
         });
   }
 

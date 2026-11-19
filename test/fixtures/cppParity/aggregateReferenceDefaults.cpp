@@ -12,6 +12,11 @@ struct Derived : Base {
 
   ~Derived() { std::cout << 'D'; }
 };
+struct ProtectedBase {
+protected:
+  ~ProtectedBase() {}
+};
+struct AllowedDestruction : ProtectedBase {};
 struct Ref { const Base& value; };
 struct WrappedArray { std::array<Ref, 2> elements; };
 struct Item {
@@ -72,6 +77,7 @@ WrappedArray wrappedReturn() {
 }
 
 int main() {
+  AllowedDestruction allowed;
   DefaultRef first{};
   DefaultRef second{9};
   std::cout << first.value << second.value;

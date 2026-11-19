@@ -58,7 +58,11 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
   cls.memberTypes.set('second_type', second);
   cls.isAssignmentDeleted = [first, second].some((member) => {
     const type = nonReference(member);
-    return isConstType(type) || type.kind === 'array' || (type.kind === 'class' && type.cls.isAssignmentDeleted);
+    return (
+      isConstType(type) ||
+      type.kind === 'array' ||
+      (type.kind === 'class' && (type.cls.isAssignmentDeleted || type.cls.isNoncopyable))
+    );
   });
   let operations: [ElementOperations, ElementOperations] | undefined;
   const ops = (): [ElementOperations, ElementOperations] => {

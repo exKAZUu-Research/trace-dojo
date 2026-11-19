@@ -37,6 +37,13 @@ WithPair pairCopy = initialPair;
 WithString textCopy = initialText;
 const Value valueArray[] = {{1}, {2}};
 Value fromArray = valueArray[1];
+constexpr const Value* firstValue = &valueArray[0];
+constexpr const Value* endOfValues = valueArray + 2;
+const Value& lastValue = valueArray[1];
+Value fromPointer = *firstValue;
+Value fromOffset = firstValue[1];
+Value fromEnd = *(endOfValues - 1);
+Value fromReference = lastValue;
 struct WithValue { Value member; int number; };
 const WithValue wrappedValue{{9}, 0};
 Value fromMember = wrappedValue.member;
@@ -54,7 +61,8 @@ void read() {
             << copiedPrefix.size() << expanded.size() << maximum << '\n'
             << valueCopy.number << pairCopy.number << textCopy.number << textCopy.text.size() << '\n'
             << fromArray.number << fromMember.number << fromSequence.number << copiedReference.member
-            << maxFromGlobal.size() << minFromList.size() << '\n';
+            << maxFromGlobal.size() << minFromList.size() << '\n'
+            << fromPointer.number << fromOffset.number << fromEnd.number << fromReference.number << '\n';
 }
 
 int calls = 0;

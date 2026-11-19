@@ -633,7 +633,10 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     });
   });
   define('swap', (args) => {
-    if (args.length !== 2 || !args[0].isLvalue || !args[1].isLvalue) return;
+    if (args.length !== 2) return;
+    const bitSwap = bitReferenceSwap(args);
+    if (bitSwap) return bitSwap;
+    if (!args[0].isLvalue || !args[1].isLvalue) return;
     const type = unqualified(args[0].type);
     if (
       typeName(type) !== typeName(unqualified(args[1].type)) ||
@@ -1157,6 +1160,26 @@ function supportsConstantOrder(type: Type): boolean {
   if (isArithmetic(type)) return true;
   const library = type.kind === 'class' ? type.cls.library : undefined;
   return library?.kind === 'string' || (library?.kind === 'pair' && library.args.every(supportsConstantOrder));
+}
+
+function bitReferenceSwap(args: Expr[]): FunctionInfo | undefined {
+  const types = args.map((arg) => unqualified(arg.type));
+  const proxy = types.map(
+    (type) => type.kind === 'class' && type.cls.library?.kind === 'bitReference' && !type.cls.isAssignmentDeleted
+  );
+  if (!proxy.some(Boolean)) return;
+  const parameters = types.map((type, index) => {
+    if (proxy[index]) return type;
+    if (args[index].isLvalue && !isConstType(args[index].type) && sameType(type, BOOL)) return referenceTo(BOOL);
+  });
+  if (parameters.some((type) => !type)) return;
+  return native('swap', parameters as Type[], VOID, ([left, right]) => {
+    const a = left as Ptr;
+    const b = right as Ptr;
+    const first = a.read();
+    a.write(b.read());
+    b.write(first);
+  });
 }
 
 function bindEquality(equal: ValueEquality, frame: Frame, target: Value): (element: Value) => boolean {

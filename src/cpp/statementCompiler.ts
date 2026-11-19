@@ -2,7 +2,7 @@ import { isBaseAccessible } from './access';
 import { AUTO, hasAuto } from './compilerBase';
 import { permitsQualificationConversion } from './conversions';
 import { CppException, ProgramAbort } from './errors';
-import { type Expr, type MemberConstant, memberConstantOf } from './expr';
+import { type ConstantLocation, constantLocationOf, type Expr, type MemberConstant, memberConstantOf } from './expr';
 import { ExpressionCompiler } from './expressionCompiler';
 import { SequenceValue } from './library/containerValues';
 import { withTemporaries, zeroOf } from './objectCompiler';
@@ -32,6 +32,7 @@ export type ReferenceBinding = {
   type: Extract<Type, { kind: 'reference' }>;
   isConstant?: boolean;
   memberConstant?: MemberConstant;
+  constantLocation?: ConstantLocation;
 } & ({ loc: Eval<Ptr> } | { lifetime: { type: Type; make: Eval<Value | Ptr>; locate: (box: Box) => Ptr } });
 
 export interface AutoDeduction {
@@ -507,6 +508,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         type,
         isConstant: this.isConstantInitializer(bound),
         memberConstant: memberConstantOf(bound),
+        constantLocation: constantLocationOf(bound),
         lifetime: { type: heldType, make: bound.run, locate: (box) => new Ptr(box, 0) },
       };
     }
@@ -518,6 +520,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       type,
       isConstant: isDirect && target.staticAddress,
       memberConstant: isDirect ? target.memberConstant : undefined,
+      constantLocation: isDirect ? constantLocationOf(target) : undefined,
       loc: this.convert(target, type, row).run as Eval<Ptr>,
     };
   }

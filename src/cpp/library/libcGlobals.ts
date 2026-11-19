@@ -4,6 +4,8 @@ import sdk from './libcGlobalDeclarations.json';
 const declarations: Readonly<Record<string, (string | number)[][]>> = sdk.declarations;
 const macros: Readonly<Record<string, number>> = sdk.macros;
 const standard: Readonly<Record<string, (number | boolean)[][]>> = sdk.standard;
+type MathWrapper = 'integer' | 'float' | 'double' | 'ldouble';
+const mathCalls: Readonly<Record<string, Partial<Record<MathWrapper, string>>>> = sdk.mathCalls;
 const headerGroups = sdk.headers.map((group) => new Set(group));
 
 export function conflictsWithLibcGlobal(
@@ -60,6 +62,10 @@ export function conflictsWithStdName(name: string, isFunction: boolean, headers:
         typeof group === 'number' && (!isFunction || !isStdFunction) && visibleIn(group, headers)
     )
   );
+}
+
+export function mathWrapperCall(name: string, kind: MathWrapper): string | undefined {
+  return Object.hasOwn(mathCalls, name) ? mathCalls[name][kind] : undefined;
 }
 
 function visibleIn(group: number, headers: ReadonlySet<string>): boolean {

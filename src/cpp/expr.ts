@@ -9,9 +9,14 @@ export type ConstantMembers = ReadonlyMap<FieldInfo, number | bigint>;
 export type MemberConstant = (members: ConstantMembers) => number | bigint | undefined;
 export const NO_CONSTANT_MEMBERS: ConstantMembers = new Map();
 export type LibraryConstant = true | { stringLength: number };
+export interface ConstantLocation {
+  index: number;
+  length: number;
+}
 interface ConstantValue {
   memberConstant?: MemberConstant;
   constantStringLength?: number;
+  constantPointee?: ConstantLocation;
 }
 
 export type Initializer = ((
@@ -25,6 +30,7 @@ export function initializerWithConstancy(run: Initializer, isConstant: boolean, 
   if (isConstant) run.isConstant = true;
   if (value?.memberConstant) run.memberConstant = value.memberConstant;
   if (value?.constantStringLength !== undefined) run.constantStringLength = value.constantStringLength;
+  if (value?.constantPointee) run.constantPointee = value.constantPointee;
   return run;
 }
 
@@ -56,6 +62,7 @@ export interface Expr extends ConstantValue {
   staticAddress?: boolean;
   constantPointerValue?: boolean;
   constantInitialization?: boolean;
+  constantLocation?: ConstantLocation;
   /** The bytes of a string literal, which may initialize a `char` array. */
   literalBytes?: string;
   /** The functions a name denotes, which a call resolves among. */
@@ -96,6 +103,24 @@ export function constantExpr(type: Type, value: number | bigint, row: number): E
 export function memberConstantOf(expr: Expr): MemberConstant | undefined {
   const value = expr.constant;
   return value === undefined ? expr.memberConstant : () => value;
+}
+
+export function constantLocationOf(expr: Expr): ConstantLocation | undefined {
+  return expr.constantLocation ?? (expr.constantInitialization ? { index: 0, length: 1 } : undefined);
+}
+
+export function offsetConstantLocation(
+  location: ConstantLocation | undefined,
+  offset: number | bigint | undefined,
+  sign: 1 | -1 = 1
+): ConstantLocation | undefined {
+  if (!location || offset === undefined || !Number.isSafeInteger(Number(offset))) return;
+  const index = location.index + sign * Number(offset);
+  if (index >= 0 && index <= location.length) return { index, length: location.length };
+}
+
+export function hasConstantObject(location: ConstantLocation | undefined): boolean {
+  return location !== undefined && location.index < location.length;
 }
 
 export function mapMemberConstants(

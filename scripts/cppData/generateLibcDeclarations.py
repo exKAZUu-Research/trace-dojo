@@ -10,6 +10,7 @@ from pathlib import Path
 TREE_NODE = re.compile(r"^((?:[| ] )*)(?:\|-|`-)(\w+) (.*)")
 TYPE_NAME = re.compile(r"\b\w+\b")
 USING_SHADOW = re.compile(r" (Function|FunctionTemplate|Var) 0x\w+ '([^']+)'(?: '([^']+)')?")
+SEMANTIC_PARENT = re.compile(r"^0x\w+ parent 0x\w+")
 STD_FUNCTIONS = {"FunctionDecl", "FunctionTemplateDecl"}
 STD_OTHER_NAMES = {
     "ClassTemplateDecl", "ConceptDecl", "CXXRecordDecl", "EnumDecl", "NamespaceAliasDecl",
@@ -77,7 +78,7 @@ def std_nodes(tree):
         depth = len(prefix) // 2
         del ancestors[depth:]
         name, is_inline = declaration_name(category, syntax)
-        if ancestors and ancestors[0] == ("NamespaceDecl", "std", False):
+        if ancestors and ancestors[0] == ("NamespaceDecl", "std", False) and not SEMANTIC_PARENT.match(syntax):
             if all(node == "LinkageSpecDecl" or node == "NamespaceDecl" and inline for node, _, inline in ancestors[1:]):
                 if category == "UsingShadowDecl":
                     shadow = USING_SHADOW.search(syntax)
@@ -114,7 +115,7 @@ def global_nodes(tree):
         prefix, category, syntax = match.groups()
         depth = len(prefix) // 2
         del ancestors[depth:]
-        if all(node == "LinkageSpecDecl" for node in ancestors):
+        if all(node == "LinkageSpecDecl" for node in ancestors) and not SEMANTIC_PARENT.match(syntax):
             if item:
                 yield item
             item = category, syntax, False
@@ -134,6 +135,45 @@ def normalize_type(signature, aliases):
             break
         signature = following
     return re.sub(r"\b_(?:Nonnull|Nullable|Null_unspecified)\b", "", signature).strip()
+
+
+def math_wrapper_calls():
+    source = Path("src/c/library/mathFunctions.ts").read_text()
+    families = {"fma": 3}
+    for family, arity in (("UNARY", 1), ("BINARY", 2)):
+        block = source.split(f"export const {family}:", 1)[1].split("\n};", 1)[0]
+        for name in re.findall(r"^  ([a-z]\w*)(?:,|:)", block, re.M):
+            families[name] = arity
+    requests = [
+        (name, arity, kind, argument, result, suffix)
+        for name, arity in sorted(families.items())
+        for kind, argument, result, suffix in (
+            ("integer", "int", "double", ""),
+            ("double", "double", "double", ""),
+            ("float", "float", "float", "f"),
+            ("ldouble", "long double", "long double", "l"),
+        )
+    ]
+    calls = defaultdict(dict)
+    with ThreadPoolExecutor(4) as pool:
+        for (name, _, kind, *_), symbol in zip(requests, pool.map(math_wrapper_symbol, requests)):
+            if symbol:
+                calls[name][kind] = symbol
+    return calls
+
+
+def math_wrapper_symbol(request):
+    name, arity, _, argument, result, suffix = request
+    params = ", ".join(f"{argument} a{i}" for i in range(arity))
+    args = ", ".join(f"a{i}" for i in range(arity))
+    code = f'#include <cmath>\nextern "C" {result} probe({params}) {{ return std::{name}({args}); }}\n'
+    assembly = subprocess.run(
+        ["clang++", "-std=c++20", "-O0", "-x", "c++", "-S", "-o", "-", "-"],
+        input=code, capture_output=True, text=True, check=True,
+    ).stdout
+    for symbol in (name + suffix, name):
+        if re.search(rf"^\s+b(?:l)?\s+_{re.escape(symbol)}\s*$", assembly, re.M):
+            return symbol
 
 
 def main():
@@ -161,9 +201,13 @@ def main():
         else:
             names[name].append([group, kind, signature])
     output = Path("src/cpp/library/libcGlobalDeclarations.json")
-    output.write_text(
-        json.dumps({"headers": groups, "declarations": names, "macros": macros, "standard": standard}, indent=2) + "\n"
-    )
+    output.write_text(json.dumps({
+        "headers": groups,
+        "declarations": names,
+        "macros": macros,
+        "standard": standard,
+        "mathCalls": math_wrapper_calls(),
+    }, indent=2) + "\n")
     subprocess.run(["bun", "fmt", "--no-script", "--no-config", str(output)], check=True)
 
 

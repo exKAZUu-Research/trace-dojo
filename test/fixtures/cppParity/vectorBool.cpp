@@ -20,6 +20,11 @@ int main() {
             << std::count(values.begin(), values.end(), true) << ' ' << (values[0] + 2) << '\n';
   values.flip();
   std::cout << values[0] << values[1] << '\n';
+  bool other = true;
+  std::swap(values[0], values[1]);
+  std::swap(other, values[1]);
+  std::swap(values[0], other);
+  std::cout << values[0] << values[1] << other << '\n';
   values.resize(66);
   std::cout << values.capacity() << ' ';
   values.resize(2);

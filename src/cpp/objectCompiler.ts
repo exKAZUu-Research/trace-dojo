@@ -191,6 +191,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
         type: pointerTo(type.of),
         isLvalue: false,
         staticAddress: expr.staticAddress,
+        constantPointee:
+          expr.constantInitialization && type.length !== undefined ? { index: 0, length: type.length } : undefined,
         row: expr.row,
         run: (frame) => new Ptr((run(frame) as Ptr).read() as ArrayStore, 0),
       };
@@ -199,6 +201,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       type: type.kind === 'class' ? type : unqualified(type),
       isLvalue: false,
       staticAddress: expr.constantPointerValue,
+      constantPointee: expr.constantPointee,
       constantInitialization: expr.constantInitialization,
       constantStringLength: expr.constantStringLength,
       memberConstant: expr.memberConstant,
@@ -644,7 +647,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     operation: 'copy' | 'assign' | 'destroy',
     row: number,
     accessContext: ClassInfo | undefined,
-    seen: Set<ClassInfo>
+    seen: Set<ClassInfo>,
+    derivedObject?: ClassInfo
   ): void {
     if (type.kind === 'array') {
       if ((type.length ?? 1) > 0) this.checkObjectUse(type.of, operation, row, accessContext, seen);
@@ -657,7 +661,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       operation === 'destroy' &&
       destructor &&
       !destructor.native &&
-      !isMemberAccessible(destructor.access, cls, cls, accessContext)
+      !isMemberAccessible(destructor.access, cls, cls, accessContext, derivedObject ?? cls)
     ) {
       this.error(row, `${cls.name} のデストラクタは ${destructor.access} なので、ここでは使えません。`);
     }
@@ -673,7 +677,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       }
     }
     if (operation === 'destroy' && destructor) this.checkDefined(destructor, row);
-    if (cls.base) this.checkObjectUse(classType(cls.base), operation, row, cls, seen);
+    if (cls.base) this.checkObjectUse(classType(cls.base), operation, row, cls, seen, cls);
     for (const field of cls.ownFields) this.checkObjectUse(field.type, operation, row, cls, seen);
     for (const owned of cls.library?.ownedTypes ?? []) {
       this.checkObjectUse(owned, operation, row, cls, seen);

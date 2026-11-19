@@ -2,6 +2,30 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
+test.each(['Base value;', 'Base values[1];'])(
+  'a protected destructor cannot destroy a separate base-typed member: %s',
+  (member) => {
+    const program = `struct Base { protected: ~Base() {} };
+struct Derived : Base { ${member} };
+int main() { Derived object; }`;
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 2 }] });
+  }
+);
+
+test.each(['Turtle', 'WithTurtle'])('assignment through a pair requires an assignable %s', (type) => {
+  const program = `#include <utility>
+struct WithTurtle { Turtle turtle; };
+int main() {
+  ${type} first, second;
+  std::pair<${type}&, int> target(first, 1), source(second, 2);
+  target = source;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 5, message: expect.stringContaining('代入演算子が削除') }],
+  });
+});
+
 test.each(['private', 'protected'])('an array may not destroy an element with a %s destructor', (access) => {
   const program = `#include <array>
 struct Item { Item(int) {} ${access}: ~Item() {} };

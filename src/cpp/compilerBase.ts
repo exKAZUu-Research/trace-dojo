@@ -94,6 +94,9 @@ export abstract class CompilerBase {
     if (own?.kind === 'class' && this.library.hasGlobalDeclaration(name)) {
       return library ?? { kind: 'hiddenClass', cls: own.cls };
     }
+    if (own?.kind === 'functions' && library?.kind === 'functions' && this.library.hasGlobalDeclaration(name)) {
+      return { kind: 'functions', functions: this.library.mergeCOverloads(name, library.functions, own.functions) };
+    }
     return own ?? library;
   }
 

@@ -2,6 +2,7 @@ import { fma } from '../../c/library/binaryFloat';
 import { BINARY, UNARY } from '../../c/library/mathFunctions';
 import { CppRuntimeError, overflowError, ProgramExit } from '../errors';
 import type { ExpressionCompiler } from '../expressionCompiler';
+import { invoke } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import type { Entity } from '../scopes';
 import {
@@ -19,6 +20,7 @@ import {
   LDOUBLE,
   LLONG,
   LONG,
+  type NativeFunction,
   nonReference,
   referenceTo,
   sameParameters,
@@ -47,6 +49,7 @@ import {
   conflictsWithStdName,
   isLibcGlobalDeclared,
   isLibcHeaderMacro,
+  mathWrapperCall,
   redeclaresLibcFunction,
 } from './libcGlobals';
 import { randomEngines } from './random';
@@ -271,10 +274,24 @@ export class Library {
     const definitions = declared.filter((fn) => redeclaresLibcFunction(fn, this.headers));
     if (definitions.length === 0) return standard;
     return standard.map((fn) => {
-      if (!global.functions.includes(fn)) return fn;
+      if (fn.mathIntrinsic || !global.functions.includes(fn)) return fn;
       const definition = definitions.find((candidate) => sameParameters(candidate, fn));
       return definition ?? fn;
     });
+  }
+
+  mergeCOverloads(name: string, standard: FunctionInfo[], declared: FunctionInfo[]): FunctionInfo[] {
+    const visible = this.rebindCOverloads(name, standard, declared);
+    const overloads = declared.filter(
+      (fn) =>
+        !visible.some((candidate) => candidate.mathIntrinsic && sameParameters(candidate, fn)) ||
+        !redeclaresLibcFunction(fn, this.headers)
+    );
+    return [...new Set([...overloads, ...visible])];
+  }
+
+  isLibcDefinition(fn: FunctionInfo): boolean {
+    return fn.isDefined && !fn.native && redeclaresLibcFunction(fn, this.headers);
   }
 
   private cOverload(name: string): FunctionInfo | undefined {
@@ -495,37 +512,49 @@ const MANIPULATORS: Record<string, (stream: StreamValue, frame: Frame) => void> 
 /** The functions of `<cmath>`, with the overloads for `float`, `double`, `long double`, and integers. */
 function mathFunctions(): Map<string, FunctionInfo[]> {
   const functions = new Map<string, FunctionInfo[]>();
-  for (const [name, fn] of Object.entries(UNARY)) {
-    const overloads = [
-      native(name, [FLOAT], FLOAT, ([x]) => Math.fround(fn(x as number))),
-      native(name, [DOUBLE], DOUBLE, ([x]) => fn(x as number)),
-      native(name, [LDOUBLE], LDOUBLE, ([x]) => fn(x as number)),
-      promotedMath(name, 1, ([x]) => fn(x)),
-    ];
-    functions.set(name, overloads);
-    functions.set(`${name}f`, [native(`${name}f`, [FLOAT], FLOAT, ([x]) => Math.fround(fn(x as number)))]);
-    functions.set(`${name}l`, [native(`${name}l`, [LDOUBLE], LDOUBLE, ([x]) => fn(x as number))]);
-  }
-  for (const [name, fn] of Object.entries(BINARY)) {
+  const add = (name: string, arity: number, run: (args: number[], isFloat?: boolean) => number): void => {
     functions.set(name, [
-      native(name, [FLOAT, FLOAT], FLOAT, ([x, y]) => Math.fround(fn(x as number, y as number))),
-      native(name, [DOUBLE, DOUBLE], DOUBLE, ([x, y]) => fn(x as number, y as number)),
-      native(name, [LDOUBLE, LDOUBLE], LDOUBLE, ([x, y]) => fn(x as number, y as number)),
-      promotedMath(name, 2, ([x, y]) => fn(x, y)),
+      ...[FLOAT, DOUBLE, LDOUBLE].map((type) => {
+        const symbol = mathWrapperCall(name, type.name);
+        const calculate = (values: number[]): number => {
+          const result = run(values, type.name === 'float');
+          return type.name === 'float' ? Math.fround(result) : result;
+        };
+        const fn = native(
+          name,
+          Array.from({ length: arity }, () => type),
+          type,
+          linkedMath(symbol, calculate)
+        );
+        fn.mathIntrinsic = symbol === undefined;
+        return fn;
+      }),
+      promotedMath(name, arity, run),
     ]);
-    functions.set(`${name}f`, [
-      native(`${name}f`, [FLOAT, FLOAT], FLOAT, ([x, y]) => Math.fround(fn(x as number, y as number))),
-    ]);
-    functions.set(`${name}l`, [
-      native(`${name}l`, [LDOUBLE, LDOUBLE], LDOUBLE, ([x, y]) => fn(x as number, y as number)),
-    ]);
-  }
-  functions.set('fma', [
-    native('fma', [FLOAT, FLOAT, FLOAT], FLOAT, ([x, y, z]) => fma(x as number, y as number, z as number, true)),
-    native('fma', [DOUBLE, DOUBLE, DOUBLE], DOUBLE, ([x, y, z]) => fma(x as number, y as number, z as number)),
-    native('fma', [LDOUBLE, LDOUBLE, LDOUBLE], LDOUBLE, ([x, y, z]) => fma(x as number, y as number, z as number)),
-    promotedMath('fma', 3, ([x, y, z]) => fma(x, y, z)),
-  ]);
+    if (name === 'fma') return;
+    for (const [suffix, type] of [
+      ['f', FLOAT],
+      ['l', LDOUBLE],
+    ] as const) {
+      const symbol = name + suffix;
+      const calculate = (values: number[]): number => {
+        const result = run(values, suffix === 'f');
+        return suffix === 'f' ? Math.fround(result) : result;
+      };
+      const target = mathWrapperCall(name, type.name);
+      const fn = native(
+        symbol,
+        Array.from({ length: arity }, () => type),
+        type,
+        linkedMath(target, calculate)
+      );
+      fn.mathIntrinsic = target === undefined;
+      functions.set(symbol, [fn]);
+    }
+  };
+  for (const [name, fn] of Object.entries(UNARY)) add(name, 1, ([x]) => fn(x));
+  for (const [name, fn] of Object.entries(BINARY)) add(name, 2, ([x, y]) => fn(x, y));
+  add('fma', 3, ([x, y, z], isFloat) => fma(x, y, z, isFloat));
   functions.set('abs', [
     native('abs', [INT], INT, ([x]) => integerAbs(x, INT)),
     native('abs', [LONG], LONG, ([x]) => integerAbs(x, LONG)),
@@ -571,8 +600,17 @@ const promotedMath = (name: string, arity: number, run: (args: number[]) => numb
     if (types[0].kind === 'float' && types.every((type) => type.kind === 'float' && type.name === types[0].name))
       return;
     const result = types.some((type) => type.kind === 'float' && type.name === 'ldouble') ? LDOUBLE : DOUBLE;
-    return native(name, types, result, (values) => run(values.map((value) => asNumber(value))));
+    const symbol = mathWrapperCall(name, result.name === 'ldouble' ? 'ldouble' : 'integer');
+    return native(name, types, result, linkedMath(symbol, run));
   });
+
+function linkedMath(symbol: string | undefined, run: (values: number[]) => number): NativeFunction {
+  return (values, { frame, row }) => {
+    const args = values.map(asNumber);
+    const override = symbol && frame.runtime.libcOverrides.get(symbol);
+    return override ? invoke(frame, override, args, undefined, row) : run(args);
+  };
+}
 
 function integerAbs(value: unknown, type: IntType): number | bigint {
   const numeric = BigInt(value as number | bigint);

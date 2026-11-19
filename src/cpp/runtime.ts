@@ -105,6 +105,7 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly steps = new StepTracker();
   /** The storage of each variable with static storage duration, by its index. */
   globals: Store[] = [];
+  libcOverrides: ReadonlyMap<string, FunctionInfo> = new Map();
   private allocatedSlots = 0;
   private readonly writers: Record<'stdout' | 'stderr', ByteStream>;
   /** The state of `rand`. */

@@ -1,5 +1,5 @@
 import { type FloatName, INT_PROPERTIES, type IntName } from '../c/types';
-import type { Expr, LibraryConstant } from './expr';
+import type { ConstantLocation, Expr, LibraryConstant } from './expr';
 import type { ClassOperations, LibraryClass } from './library/libraryClass';
 import type { CompiledFunction, Eval, Frame } from './runtime';
 import type { Syntax } from './syntax';
@@ -91,6 +91,8 @@ export interface GlobalInfo {
   hasStaticReferenceBinding?: boolean;
   isConstexprPointer?: boolean;
   hasConstantObjectValue?: boolean;
+  constantLocation?: ConstantLocation;
+  constantPointee?: ConstantLocation;
   /** Whether learners see the variable: constants never change, so they would only crowd the variable table. */
   isShown: boolean;
 }
@@ -138,6 +140,7 @@ export interface FunctionInfo {
   evaluateConstant?: (args: readonly (number | bigint)[]) => number | bigint;
   libraryConstant?: (args: readonly Expr[]) => LibraryConstant | undefined;
   streamManipulator?: 'both' | 'output';
+  mathIntrinsic?: boolean;
   /** The syntax of the definition, which the compiler compiles once the declarations it may use are known. */
   definition?: Syntax;
   /** Whether the function takes any number of further arguments, as `printf` does. */

@@ -9,13 +9,16 @@ import { type ConversionSequence, convertArithmetic, implicitConversion, Rank, s
 import { CppRuntimeError } from './errors';
 import {
   constantExpr,
+  constantLocationOf,
   type Expr,
   type FunctionCandidates,
+  hasConstantObject,
   type Initializer,
   mapMemberConstants,
   type MemberConstant,
   memberConstantOf,
   NO_CONSTANT_MEMBERS,
+  offsetConstantLocation,
 } from './expr';
 import { throwLibrary } from './library/support';
 import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
@@ -277,6 +280,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
             isLvalue: true,
             row,
             staticAddress: entity.global.hasStaticReferenceBinding,
+            constantInitialization: hasConstantObject(entity.global.constantLocation),
+            constantLocation: entity.global.constantLocation,
             run: (frame) => (frame.runtime.globals[index] as Box).get(0) as Ptr,
           };
         }
@@ -288,6 +293,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
           staticAddress: true,
           constantInitialization: entity.global.hasConstantObjectValue,
           constantPointerValue: entity.global.isConstexprPointer,
+          constantPointee: entity.global.constantPointee,
           run: (frame) => new Ptr(frame.runtime.globals[index], 0),
         };
       }
@@ -821,6 +827,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type,
       isLvalue: false,
       staticAddress: pointer.staticAddress && displacement.constant !== undefined,
+      constantPointee: offsetConstantLocation(pointer.constantPointee, displacement.constant, sign),
       row,
       run: (frame) => (p(frame) as Ptr).offset(sign * Number(n(frame))),
     };
@@ -963,6 +970,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type,
       isLvalue: true,
       staticAddress: pointer.staticAddress,
+      constantInitialization: hasConstantObject(pointer.constantPointee),
+      constantLocation: pointer.constantPointee,
       isThis: pointer.isThis,
       row,
       run: (frame) => {
@@ -985,6 +994,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       isLvalue: false,
       row,
       staticAddress: operand.staticAddress,
+      constantPointee: constantLocationOf(operand),
       run: operand.run,
     };
   }
@@ -1145,6 +1155,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
           }
         : chosen?.memberConstant,
       constantInitialization: chosen?.constantInitialization,
+      constantLocation: chosen?.constantLocation,
+      constantPointee: chosen?.constantPointee,
       constantStringLength: chosen?.constantStringLength,
       staticAddress: chosen?.staticAddress,
       constantPointerValue: chosen?.constantPointerValue,
@@ -1224,6 +1236,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       isNullConstant: undefined,
       literalBytes: undefined,
       constantInitialization: hasConstantLeft ? right.constantInitialization : undefined,
+      constantLocation: hasConstantLeft ? right.constantLocation : undefined,
+      constantPointee: hasConstantLeft ? right.constantPointee : undefined,
       constantStringLength: hasConstantLeft ? right.constantStringLength : undefined,
       staticAddress: hasConstantLeft ? right.staticAddress : undefined,
       constantPointerValue: hasConstantLeft ? right.constantPointerValue : undefined,
@@ -1261,18 +1275,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const p = pointer.run;
     const n = convertArithmetic(offset, LONG);
     const type = (pointer.type as Extract<Type, { kind: 'pointer' }>).to;
-    const container = array.type.kind === 'array' ? array : index;
-    const at = n.constant;
+    const constantLocation = offsetConstantLocation(pointer.constantPointee, n.constant);
     return {
       type,
       isLvalue: true,
       staticAddress: pointer.staticAddress && offset.constant !== undefined,
-      constantInitialization:
-        container.constantInitialization === true &&
-        container.type.kind === 'array' &&
-        at !== undefined &&
-        at >= 0 &&
-        at < (container.type.length ?? 0),
+      constantInitialization: hasConstantObject(constantLocation),
+      constantLocation,
       row,
       run: (frame) => (p(frame) as Ptr).offset(Number(n.run(frame))),
     };
