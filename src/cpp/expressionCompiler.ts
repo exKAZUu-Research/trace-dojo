@@ -28,6 +28,7 @@ import {
   NO_CONSTANT_MEMBERS,
   offsetConstantLocation,
 } from './expr';
+import { moveValue } from './library/elements';
 import { throwLibrary } from './library/support';
 import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
 import { constructArray, initializeAt, ObjectCompiler, zeroOf } from './objectCompiler';
@@ -1143,19 +1144,22 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const cls = (target.type as Extract<Type, { kind: 'class' }>).cls;
     if (cls.isNoncopyable || cls.isAssignmentDeleted)
       return this.error(row, `${cls.name} のオブジェクトには代入できません（代入演算子が削除されています）。`);
-    this.requireObjectUse(target.type, 'assign', row);
-    const value = this.convert(source, { kind: 'reference', to: classType(cls, true) }, row).run;
+    const bound = this.convert(source, { kind: 'reference', to: classType(cls, true) }, row);
+    const moves = bound.isXvalue && !isConstType(bound.type);
+    this.requireObjectUse(target.type, moves ? 'move-assign' : 'assign', row);
     const location = target.run;
     return {
       type: target.type,
       isLvalue: true,
       row,
       run: (frame) =>
-        holdAll(frame, [value, location], ([right, left]) => {
+        holdAll(frame, [bound.run, location], ([right, left]) => {
           const place = left as Ptr;
           const object = place.read();
           const from = (right as Ptr).read();
-          const replacement = cls.operations?.assign(frame, object, from);
+          const replacement = moves
+            ? moveValue(frame, target.type, object, from)
+            : cls.operations?.assign(frame, object, from);
           if (replacement !== undefined) place.write(replacement);
           return place;
         }),

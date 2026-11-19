@@ -7,6 +7,7 @@ struct Cell {
   Cell* end;
   int id;
   Cell(int id = 1) : self(this), end(this + 1), id(id) {}
+  Cell(const Cell& source) : self(this), end(this + 1), id(source.id) {}
   ~Cell() { destroyed += id; }
 };
 
@@ -41,4 +42,10 @@ int main() {
   delete explicitAllocation->self;
   std::cout << destroyed << '\n';
   byValue(Cell(7));
+  Cell source[] = {Cell(8), Cell(9)};
+  for (Cell value : source) show(value);
+  try { throw Cell(10); }
+  catch (Cell value) { show(value); }
+  try { throw Cell(11); }
+  catch (const Cell& value) { show(value); }
 }

@@ -879,8 +879,10 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     return undefined;
   }
 
-  requireObjectUse(type: Type, operation: 'copy' | 'assign' | 'destroy', row: number): void {
-    this.checkObjectUse(type, operation, row, { access: this.accessClass, seen: new Set() });
+  requireObjectUse(type: Type, operation: 'copy' | 'assign' | 'destroy' | 'move-assign', row: number): void {
+    const context: ObjectUseContext = { access: this.accessClass, seen: new Set() };
+    if (operation === 'move-assign') this.checkMoveOperation(type, 'assign', row, context);
+    else this.checkObjectUse(type, operation, row, context);
   }
 
   requireLibraryObjectUse(

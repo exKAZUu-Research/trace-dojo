@@ -8,6 +8,7 @@ import {
   constantLocationOf,
   type Expr,
   type Initializer,
+  type InitializerTarget,
   type MemberConstant,
   memberConstantOf,
   NO_CONSTANT_MEMBERS,
@@ -22,6 +23,7 @@ import { type ConstantReference, type Entity, Scope } from './scopes';
 import { isObjectCreation, onlyCalls } from './stepRules';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
+  type ClassInfo,
   type GlobalInfo,
   hasVacuousInitialization,
   intMax,
@@ -309,12 +311,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const { local } = entity;
     const destroy = this.destroyerOf(type, declarator.row);
     if (destroy) this.context.scope.destructibles.set(local.slot, destroy);
-    const { slot } = local;
     // A variable must be declared before its initializer runs, which may name it (C++20 [basic.scope.pdecl]).
     const exec: Exec = (frame) => {
-      const store = new Box(UNINIT);
-      frame.slots[slot] = store;
-      initializeAt(frame, type, store.location(0), UNINIT, (target) => init(frame, target));
+      this.initializeLocal(frame, local, (target) => init(frame, target));
       return;
     };
     return {
@@ -324,6 +323,16 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       deduced,
       type,
     };
+  }
+
+  private initializeLocal(
+    frame: Frame,
+    local: LocalInfo,
+    initialize: (target: InitializerTarget | undefined) => Value
+  ): void {
+    const storage = new Box();
+    frame.slots[local.slot] = storage;
+    initializeAt(frame, local.type, storage.location(0), UNINIT, initialize);
   }
 
   /** Rejects `auto x = 1, y = 2.0;`, whose declarators deduce `auto` differently, and returns the first deduction. */
@@ -889,7 +898,11 @@ export abstract class StatementCompiler extends ExpressionCompiler {
           frame.slots[rangeSlot] = range.run(frame) as Ptr;
         }
       : (frame) => {
-          frame.slots[rangeSlot] = new Box(range.run(frame) as Value);
+          this.initializeLocal(
+            frame,
+            rangeLocal,
+            (target) => range.run(frame, false, target instanceof CObject ? target : undefined) as Value
+          );
         };
     if (!range.isLvalue) {
       const destroy = this.destroyerOf(rangeType);
@@ -1023,7 +1036,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (destroy) this.context.scope.destructibles.set(local.slot, destroy);
     return {
       bind: this.fullExpression<undefined>((frame) => {
-        frame.slots[local.slot] = new Box(value(frame));
+        this.initializeLocal(frame, local, (target) => value(frame, target));
         return;
       }),
       type,
@@ -1237,41 +1250,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const scope = new Scope();
     this.context.scopes.push(scope);
     let body: Exec;
-    let bind: (frame: Frame, error: CppException) => void = doNothing;
-    const pointerClass = caught.kind === 'pointer' && caught.to.kind === 'class' ? caught.to.cls : undefined;
+    let bind: (frame: Frame, error: CppException) => void;
     try {
-      if (declared.name || (caught.kind === 'class' && handlerType.kind !== 'reference')) {
-        const name = declared.name ?? '\0catch';
-        if (handlerType.kind === 'reference') {
-          const local = this.context.declareLocal(name, handlerType, false);
-          scope.names.set(name, { kind: 'local', local, isReference: true });
-          const conversion = pointerClass ? this.context.declareLocal('\0catchPointer', caught, false) : undefined;
-          bind = (frame, error) => {
-            const original = error.location();
-            const value = pointerClass ? original.read() : undefined;
-            const adjusted = pointerClass && value instanceof Ptr ? value.forClass(pointerClass) : value;
-            if (conversion && adjusted !== value) {
-              const box = new Box(adjusted);
-              frame.slots[conversion.slot] = box;
-              frame.slots[local.slot] = box.location(0);
-            } else frame.slots[local.slot] = original;
-          };
-        } else {
-          const local = this.context.declareLocal(name, handlerType, false);
-          if (declared.name) scope.names.set(name, { kind: 'local', local, isReference: false });
-          // A handler's variable is no candidate for returning without a copy (C++20 [class.copy.elision]).
-          scope.returnSlots.delete(local);
-          const copy = caught.kind === 'class' ? caught.cls : undefined;
-          this.requireObjectUse(handlerType, 'copy', param.row);
-          bind = (frame, error) => {
-            let value = copy ? copy.operations?.copy(frame, error.value, undefined, false) : error.value;
-            if (pointerClass && value instanceof Ptr) value = value.forClass(pointerClass);
-            frame.slots[local.slot] = new Box(value as Value);
-          };
-          const destroy = this.destroyerOf(handlerType, param.row);
-          if (destroy) scope.destructibles.set(local.slot, destroy);
-        }
-      }
+      bind = this.catchBinding(declared.name, handlerType, caught, param.row);
       body = this.compileStatements(bodyNode.children);
     } finally {
       this.context.popScope();
@@ -1283,6 +1264,56 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       return body(frame);
     }, scope);
     return { matches: (error) => exceptionMatches(handlerType, error.type), run: (frame) => run(frame) };
+  }
+
+  private catchBinding(
+    name: string | undefined,
+    type: Type,
+    caught: Type,
+    row: number
+  ): (frame: Frame, error: CppException) => void {
+    const isReference = type.kind === 'reference';
+    if (!name && (caught.kind !== 'class' || isReference)) return doNothing;
+    const scope = this.context.scope;
+    const local = this.context.declareLocal(name ?? '\0catch', type, false);
+    if (name) scope.names.set(name, { kind: 'local', local, isReference });
+    const pointerClass = caught.kind === 'pointer' && caught.to.kind === 'class' ? caught.to.cls : undefined;
+    if (isReference) return this.catchReference(local, caught, pointerClass);
+    // A handler parameter is ineligible for named return value optimization (C++20 [class.copy.elision]).
+    scope.returnSlots.delete(local);
+    this.requireObjectUse(type, 'copy', row);
+    const destroy = this.destroyerOf(type, row);
+    if (destroy) scope.destructibles.set(local.slot, destroy);
+    const copy = caught.kind === 'class' ? caught.cls.operations?.copy : undefined;
+    return (frame, error) =>
+      this.initializeLocal(frame, local, (target) => {
+        if (copy) return copy(frame, error.value, target instanceof CObject ? target : undefined, false);
+        const value = error.value;
+        return pointerClass && value instanceof Ptr ? value.forClass(pointerClass) : value;
+      });
+  }
+
+  private catchReference(
+    local: LocalInfo,
+    caught: Type,
+    pointerClass: ClassInfo | undefined
+  ): (frame: Frame, error: CppException) => void {
+    if (!pointerClass) {
+      return (frame, error) => {
+        frame.slots[local.slot] = error.location();
+      };
+    }
+    const conversion = this.context.declareLocal('\0catchPointer', caught, false);
+    return (frame, error) => {
+      const original = error.location();
+      const value = original.read();
+      const adjusted = value instanceof Ptr ? value.forClass(pointerClass) : value;
+      if (adjusted !== value) {
+        const storage = new Box(adjusted);
+        frame.slots[conversion.slot] = storage;
+        frame.slots[local.slot] = storage.location(0);
+      } else frame.slots[local.slot] = original;
+    };
   }
 
   private throwStatement(node: Syntax): Exec {
@@ -1301,8 +1332,18 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (incomplete) this.error(node.row, `まだ定義されていないクラス ${incomplete} は投げられません。`);
     if (type.kind === 'class' && type.cls.isAbstract)
       this.error(node.row, `${type.cls.name} は抽象クラスなので投げられません。`);
-    const value = this.fullExpression(this.copyInitializer(type, expr, node.row, false));
-    return (frame) => frame.runtime.throwException(frame, new CppException(value(frame), type));
+    const initialize = this.copyInitializer(type, expr, node.row, false);
+    const makeStorage = this.fullExpression((frame) => {
+      const storage = new Box();
+      return holdValues(frame, [storage], () => {
+        initializeAt(frame, type, storage.location(0), UNINIT, (target) => initialize(frame, target));
+        return storage;
+      });
+    });
+    return (frame) => {
+      const storage = makeStorage(frame);
+      return frame.runtime.throwException(frame, new CppException(storage.value, type, storage));
+    };
   }
 
   // Function bodies --------------------------------------------------------------------------------------------------

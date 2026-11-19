@@ -127,4 +127,8 @@ int main() {
   std::pair<std::vector<Item>, long> converted(std::make_pair(std::vector<Item>(6), 7));
   std::cout << pair.first.size() << pair.second << made.first.size() << made.second
             << converted.first.size() << converted.second << '\n';
+
+  Wrapper assigned{std::vector<Item>(2)};
+  assigned = Wrapper{std::vector<Item>(3)};
+  std::cout << assigned.items.size() << '\n';
 }
