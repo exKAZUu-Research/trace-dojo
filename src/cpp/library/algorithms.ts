@@ -40,6 +40,7 @@ import {
   functionCallback,
   lessThan,
   locationOf,
+  moveAssignElement,
   moveConstructElement,
   moveValue,
   requireElementUse,
@@ -123,7 +124,7 @@ class Range {
     }
     const { frame, ops, move } = this.write;
     const location = this.location(position);
-    if (move) location.write(moveValue(frame, ops.type, location.readRaw(), value));
+    if (move) moveAssignElement(frame, location, ops.type, value);
     else assignElement(frame, location, ops, value);
   }
 

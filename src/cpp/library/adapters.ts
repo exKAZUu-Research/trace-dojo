@@ -22,8 +22,8 @@ import { SequenceValue } from './containerValues';
 import {
   type ElementOperations,
   elementOperations,
+  moveAssignElement,
   moveConstructElement,
-  moveValue,
   requireElementUse,
 } from './elements';
 import type { Library } from './registry';
@@ -346,8 +346,7 @@ class Heap {
   }
 
   private assign(index: number, value: Value): void {
-    const target = this.sequence.location(index);
-    target.write(moveValue(this.frame, this.operations.type, target.readRaw(), value));
+    moveAssignElement(this.frame, this.sequence.location(index), this.operations.type, value);
   }
 
   private withMoved(index: number, run: (value: Value) => void): void {

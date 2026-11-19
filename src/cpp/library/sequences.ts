@@ -999,11 +999,11 @@ function sequenceList(
   }
   if (elements.length > 0) requireElementUse(compiler, element, row, 'copy');
   const run: Eval<Value> = (frame) => {
-    const { hasEffects, copy, destroy } = editor.ops;
-    if (!hasEffects) return holdAll(frame, inits, (values) => make(values as Value[]));
+    const { copy, destroy } = editor.ops;
+    if (!destroy) return holdAll(frame, inits, (values) => make(values as Value[]));
     const temporaries = inits.map((init) => {
       const object = init(frame);
-      if (destroy) frame.temporaries.push({ object, destroy });
+      frame.temporaries.push({ object, destroy });
       return object;
     });
     return make(editor.build(frame, temporaries.length, (index) => copy(frame, temporaries[index])));

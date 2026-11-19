@@ -1,10 +1,10 @@
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { destroyTemporaries, invoke, withTemporaries, zeroOf } from '../objectCompiler';
+import { destroyTemporaries, invoke, newObject, withTemporaries, zeroOf } from '../objectCompiler';
 import type { Frame } from '../runtime';
-import { type ClassInfo, type FunctionInfo, isArithmetic, isCopyConstructor, type Type } from '../types';
-import { type ArrayStore, Box, CObject, endLifetime, FunctionRef, Ptr, Store, UNINIT, type Value } from '../values';
+import { type ClassInfo, type FunctionInfo, isArithmetic, isConstType, isCopyConstructor, type Type } from '../types';
+import { ArrayStore, Box, CObject, endLifetime, FunctionRef, Ptr, Store, UNINIT, type Value } from '../values';
 import { SequenceValue } from './containerValues';
 import { StringValue } from './string';
 
@@ -19,8 +19,6 @@ export interface ElementOperations {
   /** Assigns `source` to the element `target`, giving the element's new value (the same object for a class). */
   assign: (frame: Frame, target: Value, source: Value) => Value;
   destroy?: (frame: Frame, value: Value) => void;
-  /** Whether copying or destroying an element runs code the program wrote, which reallocation then shows. */
-  hasEffects: boolean;
 }
 
 type ElementUse = 'copy' | 'assign' | 'relocate' | 'swap';
@@ -33,10 +31,17 @@ export function swapElements(frame: Frame, a: Ptr, b: Ptr, ops: ElementOperation
     return;
   }
   withTemporaries(frame, () => {
-    const value = ops.copy(frame, a.read());
+    const transfer = canTransferElementStorage(ops.type);
+    const source = a.read();
+    const value = transfer ? transferElement(frame, ops.type, source) : ops.copy(frame, source);
     if (ops.destroy) frame.temporaries.push({ object: value, destroy: ops.destroy });
-    assignElement(frame, a, ops, b.read());
-    assignElement(frame, b, ops, value);
+    if (transfer) {
+      moveAssignElement(frame, a, ops.type, b.read());
+      moveAssignElement(frame, b, ops.type, value);
+    } else {
+      assignElement(frame, a, ops, b.read());
+      assignElement(frame, b, ops, value);
+    }
   });
 }
 
@@ -71,18 +76,56 @@ export function assignElement(frame: Frame, location: Ptr, operations: ElementOp
   location.write(operations.assign(frame, location.readRaw(), value));
 }
 
+export function moveAssignElement(frame: Frame, location: Ptr, type: Type, value: Value): void {
+  location.write(moveValue(frame, type, location.readRaw(), value));
+}
+
 export function moveConstructElement(frame: Frame, operations: ElementOperations, source: Value): Value {
+  return canTransferElementStorage(operations.type)
+    ? transferElement(frame, operations.type, source)
+    : operations.copy(frame, source);
+}
+
+export function canTransferElementStorage(type: Type): boolean {
+  if (type.kind === 'array') return type.length === 0 || canTransferElementStorage(type.of);
+  if (type.kind !== 'class') return true;
+  const { cls } = type;
+  if (isConstType(type) || !cls.isComplete || cls.isNoncopyable) return false;
+  const library = cls.library;
+  if (library?.kind === 'string' || ownsMovableSequence(type)) return true;
+  const fixedArray = library?.aggregateArray;
+  if (fixedArray) return canTransferElementStorage(fixedArray.type);
+  return (
+    canMoveFields(cls) &&
+    (!cls.base || canTransferElementStorage({ kind: 'class', cls: cls.base })) &&
+    cls.ownFields.every((field) => canTransferElementStorage(field.type))
+  );
+}
+
+function transferElement(frame: Frame, type: Type, source: Value): Value {
+  if (type.kind === 'array' && source instanceof ArrayStore) {
+    frame.runtime.reserve(source.values.length);
+    return new ArrayStore(source.values.map((value) => transferElement(frame, type.of, value)));
+  }
+  if (type.kind !== 'class') return source;
   if (source instanceof StringValue) {
     const target = new StringValue('');
     target.moveFrom(source);
     return target;
   }
-  if (source instanceof SequenceValue && ownsMovableSequence(operations.type)) return source.moveStorage();
-  return operations.copy(frame, source);
-}
-
-export function canTransferElementStorage(type: Type): boolean {
-  return (type.kind === 'class' && type.cls.library?.kind === 'string') || ownsMovableSequence(type);
+  if (source instanceof SequenceValue) {
+    const array = type.cls.library?.aggregateArray;
+    if (!array) return source.moveStorage();
+    frame.runtime.reserve(source.items.length);
+    return array.make(source.items.map((value) => transferElement(frame, array.type.of, value)));
+  }
+  if (source instanceof CObject) {
+    const destination = newObject(frame, type.cls);
+    for (const field of type.cls.fields)
+      destination.values[field.index] = transferElement(frame, field.type, source.values[field.index]);
+    return destination;
+  }
+  return source;
 }
 
 function ownsMovableSequence(type: Type): boolean {
@@ -129,9 +172,6 @@ export function elementOperations(
         operations?.destroy?.(frame, value);
         endLifetime(value);
       },
-      hasEffects:
-        !cls.library &&
-        (operations?.destroy !== undefined || cls.constructors.some((ctor) => isCopyConstructor(ctor, cls))),
     };
   }
   const zero = zeroOf(type);
@@ -141,7 +181,6 @@ export function elementOperations(
     isDefaultConstructible: true,
     copy: (_frame, value) => value,
     assign: (_frame, _target, source) => source,
-    hasEffects: false,
   };
 }
 
@@ -165,13 +204,32 @@ export function moveValue(frame: Frame, type: Type, target: Value, source: Value
   } else if (target instanceof SequenceValue && source instanceof SequenceValue && ownsMovableSequence(type)) {
     cls.operations?.destroy?.(frame, target);
     target.takeItems(source);
-  } else if (!cls.library && !declaresCopyOrDestructor(cls)) {
+  } else if (target instanceof SequenceValue && source instanceof SequenceValue && cls.library?.aggregateArray) {
+    const element = cls.library.aggregateArray.type.of;
+    for (const [index, value] of source.items.entries())
+      target.items[index] = moveValue(frame, element, target.items[index], value);
+  } else if (canMoveFields(cls)) {
     const to = target as CObject;
     const from = source as CObject;
     for (const field of cls.fields)
-      to.values[field.index] = moveValue(frame, field.type, to.values[field.index], from.values[field.index]);
+      to.values[field.index] = moveField(frame, field.type, to.values[field.index], from.values[field.index]);
   } else cls.operations?.assign(frame, target, source);
   return target;
+}
+
+function moveField(frame: Frame, type: Type, target: Value, source: Value): Value {
+  if (type.kind !== 'reference') return moveValue(frame, type, target, source);
+  const location = target as Ptr;
+  const value = (source as Ptr).read();
+  if (type.to.kind === 'class') {
+    const replacement = type.to.cls.operations?.assign(frame, location.readRaw(), value);
+    if (replacement !== undefined) location.write(replacement);
+  } else location.write(value);
+  return target;
+}
+
+function canMoveFields(cls: ClassInfo): boolean {
+  return cls.library?.kind === 'pair' || (!cls.library && !declaresCopyOrDestructor(cls));
 }
 
 /** Whether a class or a base declares a copy constructor or a destructor, which leaves it without an implicit move. */
