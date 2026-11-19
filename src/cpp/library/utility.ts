@@ -180,6 +180,7 @@ export function numericLimitsClass(library: Library, type: Type): ClassInfo {
         isAtomic: false,
         isDefined: true,
         native: () => value,
+        evaluateConstant: () => value,
       },
     ]);
   };

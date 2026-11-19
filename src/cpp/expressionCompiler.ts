@@ -7,7 +7,7 @@ import { byteAt } from './bytes';
 import { hasAuto, isAuto } from './compilerBase';
 import { type ConversionSequence, convertArithmetic, implicitConversion, Rank, sequence } from './conversions';
 import { CppRuntimeError } from './errors';
-import { constantExpr, type Expr, type FunctionCandidates } from './expr';
+import { constantExpr, type Expr, type FunctionCandidates, type Initializer } from './expr';
 import { throwLibrary } from './library/support';
 import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
 import { makeEach, ObjectCompiler, zeroOf } from './objectCompiler';
@@ -97,7 +97,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         if (node.text === 'NULL') return { ...constantExpr(LONG, 0n, node.row), isNullConstant: true };
         return { type: NULLPTR, isLvalue: false, row: node.row, run: () => NULL_PTR, isNullConstant: true };
       }
-      case 'identifier': {
+      case 'identifier':
+      case 'type_identifier': {
         return this.identifier(node);
       }
       case 'qualified_identifier': {
@@ -1050,7 +1051,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type,
       isLvalue: false,
       row: list.row,
-      run: value,
+      run: value as Eval<Value>,
       isTemporaryObject: type.kind === 'class',
       isAssignmentList: true,
     };
@@ -1140,9 +1141,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   private commaExpression(node: Syntax): Expr {
     const left = this.compileExpression(fieldOf(node, 'left') as Syntax);
     const right = this.compileExpression(fieldOf(node, 'right') as Syntax);
-    const first = left.run;
+    const first = this.discardedValue(left);
     const second = right.run;
     return { ...right, constant: undefined, run: (frame) => (first(frame), second(frame)) };
+  }
+
+  discardedValue(expr: Expr): Expr['run'] {
+    return expr.isTemporaryObject && expr.type.kind === 'class' ? this.materialize(expr).run : expr.run;
   }
 
   private subscriptExpression(node: Syntax): Expr {
@@ -1208,7 +1213,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   /** An explicit conversion: `static_cast`, a C-style cast (`kind` 'C'), or a functional cast `T(x)`. */
   explicitConversion(expr: Expr, type: Type, row: number, kind: 'static' | 'C'): Expr {
     if (type.kind === 'void') {
-      const run = expr.run;
+      const run = this.discardedValue(expr);
       return { type, isLvalue: false, row, run: (frame) => (run(frame), undefined), onlyCalls: expr.onlyCalls };
     }
     if (type.kind === 'reference') {
@@ -1335,7 +1340,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type,
       isLvalue: false,
       row: node.row,
-      run,
+      run: (frame, zeroInitialize) => run(frame, undefined, zeroInitialize),
       onlyCalls: type.kind === 'class',
       isTemporaryObject: type.kind === 'class',
     };
@@ -1478,7 +1483,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   private listValue(type: Type, list: Syntax): Expr {
     const run = this.listInitializer(type, list, list.row);
-    return { type, isLvalue: false, row: list.row, run, isTemporaryObject: type.kind === 'class' };
+    return {
+      type,
+      isLvalue: false,
+      row: list.row,
+      run: (frame, zeroInitialize) => run(frame, undefined, zeroInitialize),
+      isTemporaryObject: type.kind === 'class',
+    };
   }
 
   /** A prvalue object of a class made from constructor arguments, or by aggregate initialization when braced. */
@@ -1492,13 +1503,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         const resolved = this.chooseOverload(`${cls.name} のコンストラクタ`, matching, row);
         if (resolved) return this.constructWith(cls, resolved, args, row);
       }
-      const run = initialize
-        ? initialize(
-            this,
-            list.children.filter((child) => child.type !== 'comment'),
-            row
-          )
-        : this.listInitializer(classType(cls), list, row);
+      if (!initialize) return this.listValue(classType(cls), list);
+      const run = initialize(
+        this,
+        list.children.filter((child) => child.type !== 'comment'),
+        row
+      );
       if (run) return { type: classType(cls), isLvalue: false, isTemporaryObject: true, row, run };
     }
     if (args.length === 1 && args[0].type.kind === 'class' && args[0].type.cls.isDerivedFrom(cls) && !isBraced) {
@@ -1561,7 +1571,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   /** Compiles a braced initializer list for an object of a type, as list-initialization does. */
-  abstract listInitializer(type: Type, list: Syntax, row: number): Eval<Value>;
+  abstract listInitializer(type: Type, list: Syntax, row: number): Initializer;
 
   // new and delete ---------------------------------------------------------------------------------------------------
 
@@ -1667,7 +1677,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   abstract copyInitializer(type: Type, expr: Expr, row: number, isList: boolean): Eval<Value>;
 
   /** The value default-initialization gives an object of a type. */
-  abstract defaultInitializer(type: Type, row: number): Eval<Value>;
+  abstract defaultInitializer(type: Type, row: number): Initializer;
 
   private deleteExpression(node: Syntax): Expr {
     const isArray = node.all.some((child) => child.type === '[');

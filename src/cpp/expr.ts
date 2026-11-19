@@ -1,7 +1,9 @@
-import type { Eval } from './runtime';
+import type { Eval, Frame } from './runtime';
 import type { Syntax } from './syntax';
 import type { ClassInfo, FunctionInfo, Type } from './types';
-import type { Ptr, Value } from './values';
+import type { ArrayStore, Ptr, Value } from './values';
+
+export type Initializer = (frame: Frame, target?: ArrayStore, zeroInitialize?: boolean) => Value;
 
 /**
  * A compiled expression. An lvalue evaluates to the location it designates (a `Ptr`); a prvalue evaluates to its
@@ -11,7 +13,7 @@ export interface Expr {
   isAssignmentList?: boolean;
   type: Type;
   isLvalue: boolean;
-  run: Eval<Value | Ptr>;
+  run: (frame: Frame, zeroInitialize?: boolean) => Value | Ptr;
   row: number;
   /** The value of a constant expression of arithmetic type, which array lengths and `case` labels need. */
   constant?: number | bigint;

@@ -3,8 +3,8 @@ import { MATH_CONSTANTS } from './constants';
 
 /**
  * The groups of library names each header makes visible in libc++ (Apple clang 21), directly or through the headers it
- * includes, as compiling a probe of each group after including the header showed. A group is named after the header
- * that declares it. A standard header missing here makes every group visible.
+ * includes, as compiling a probe of each group after including the header showed. Groups use the names of the
+ * headers that declare them. Headers with no transitive groups can be omitted.
  */
 const VISIBLE_GROUPS: Record<string, readonly string[]> = {
   iostream: [
@@ -461,6 +461,250 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
   'stddef.h': [],
 };
 
+const TRANSITIVE_GROUPS: ReadonlyMap<string, readonly string[]> = new Map(
+  (
+    [
+      [
+        ['any', 'barrier', 'memory', 'optional', 'scoped_allocator'],
+        [
+          'utility',
+          'functional',
+          'iterator',
+          'stdexcept',
+          'exception',
+          'new',
+          'limits',
+          'cstdlib',
+          'cmath',
+          'cctype',
+          'cstring',
+          'cstdio',
+          'climits',
+        ],
+      ],
+      [
+        ['atomic', 'latch', 'semaphore', 'stop_token'],
+        ['utility', 'limits', 'cstdlib', 'cmath', 'cstring', 'climits'],
+      ],
+      [['bit'], ['limits', 'cstdlib']],
+      [
+        [
+          'bitset',
+          'codecvt',
+          'condition_variable',
+          'locale',
+          'memory_resource',
+          'mutex',
+          'shared_mutex',
+          'streambuf',
+          'system_error',
+        ],
+        [
+          'string',
+          'utility',
+          'algorithm',
+          'functional',
+          'iterator',
+          'stdexcept',
+          'exception',
+          'new',
+          'limits',
+          'cstdlib',
+          'cmath',
+          'cctype',
+          'cstring',
+          'cstdio',
+          'climits',
+        ],
+      ],
+      [['charconv'], ['utility', 'iterator', 'exception', 'new', 'limits', 'cstdlib', 'cmath', 'cstring']],
+      [
+        ['chrono', 'complex', 'future', 'thread'],
+        [
+          'string',
+          'vector',
+          'unordered_map',
+          'deque',
+          'stack',
+          'queue',
+          'array',
+          'utility',
+          'algorithm',
+          'functional',
+          'iterator',
+          'sstream',
+          'stdexcept',
+          'exception',
+          'new',
+          'limits',
+          'cstdlib',
+          'cmath',
+          'cctype',
+          'cstring',
+          'cstdio',
+          'climits',
+        ],
+      ],
+      [['compare'], ['limits', 'cmath']],
+      [['coroutine'], ['utility', 'limits', 'cmath', 'cstring']],
+      [['cwchar', 'cwctype'], ['cctype']],
+      [
+        ['filesystem', 'fstream'],
+        [
+          'iomanip',
+          'string',
+          'vector',
+          'unordered_map',
+          'deque',
+          'stack',
+          'queue',
+          'array',
+          'utility',
+          'algorithm',
+          'functional',
+          'iterator',
+          'stdexcept',
+          'exception',
+          'new',
+          'limits',
+          'cstdlib',
+          'cmath',
+          'cctype',
+          'cstring',
+          'cstdio',
+          'climits',
+        ],
+      ],
+      [
+        ['format'],
+        [
+          'string',
+          'vector',
+          'unordered_map',
+          'deque',
+          'stack',
+          'queue',
+          'array',
+          'utility',
+          'algorithm',
+          'functional',
+          'iterator',
+          'stdexcept',
+          'exception',
+          'new',
+          'limits',
+          'cstdlib',
+          'cmath',
+          'cctype',
+          'cstring',
+          'cstdio',
+          'climits',
+        ],
+      ],
+      [
+        ['forward_list', 'ranges', 'span', 'valarray'],
+        [
+          'string',
+          'vector',
+          'unordered_map',
+          'array',
+          'utility',
+          'algorithm',
+          'functional',
+          'iterator',
+          'stdexcept',
+          'exception',
+          'new',
+          'limits',
+          'cstdlib',
+          'cmath',
+          'cctype',
+          'cstring',
+          'cstdio',
+          'climits',
+        ],
+      ],
+      [['ratio'], ['climits']],
+      [
+        ['regex'],
+        [
+          'string',
+          'vector',
+          'unordered_map',
+          'deque',
+          'array',
+          'utility',
+          'algorithm',
+          'functional',
+          'iterator',
+          'stdexcept',
+          'exception',
+          'new',
+          'limits',
+          'cstdlib',
+          'cmath',
+          'cctype',
+          'cstring',
+          'cstdio',
+          'climits',
+        ],
+      ],
+      [
+        ['string_view'],
+        [
+          'utility',
+          'algorithm',
+          'functional',
+          'iterator',
+          'stdexcept',
+          'exception',
+          'new',
+          'limits',
+          'cstdlib',
+          'cmath',
+          'cctype',
+          'cstring',
+          'cstdio',
+          'climits',
+        ],
+      ],
+      [
+        ['syncstream'],
+        [
+          'string',
+          'vector',
+          'map',
+          'unordered_map',
+          'deque',
+          'stack',
+          'queue',
+          'array',
+          'utility',
+          'algorithm',
+          'functional',
+          'iterator',
+          'stdexcept',
+          'exception',
+          'new',
+          'limits',
+          'cstdlib',
+          'cmath',
+          'cctype',
+          'cstring',
+          'cstdio',
+          'climits',
+        ],
+      ],
+      [
+        ['tuple', 'typeindex'],
+        ['utility', 'exception', 'new', 'limits', 'cstdlib', 'cmath'],
+      ],
+      [['typeinfo'], ['exception', 'cstdlib']],
+      [['variant'], ['utility', 'functional', 'exception', 'new', 'limits', 'cstdlib', 'cmath', 'cstring']],
+    ] as const
+  ).flatMap(([headers, groups]) => headers.map((header) => [header, groups] as const))
+);
+
 /**
  * The groups of each library name whose visibility depends on the headers a program includes, any of which makes it
  * visible, as `<cstdlib>` and `<cmath>` both declare `std::abs`.
@@ -726,8 +970,8 @@ export function isVisible(name: string, headers: ReadonlySet<string>, scope: 'st
   const nameGroups = NAME_GROUPS[name];
   if (!nameGroups) return true;
   for (const header of headers) {
-    const groups = VISIBLE_GROUPS[header];
-    if (!groups || nameGroups.some((group) => header === group || groups.includes(group))) return true;
+    const groups = VISIBLE_GROUPS[header] ?? TRANSITIVE_GROUPS.get(header);
+    if (nameGroups.some((group) => header === group || groups?.includes(group))) return true;
   }
   return false;
 }
@@ -741,5 +985,50 @@ export function hasLocaleCtypeOverload(name: string, headers: ReadonlySet<string
   if (!NAME_GROUPS[name]?.includes('cctype') || name === 'isblank') return false;
   return ['locale', 'ios', 'istream', 'ostream', 'iostream', 'sstream', 'iomanip'].some((header) =>
     headers.has(header)
+  );
+}
+
+// SDK declarations that participate in global name lookup even when the interpreter does not implement the functions.
+const TRANSITIVE_C_GLOBAL_HEADERS = new Set([
+  'algorithm',
+  'array',
+  'deque',
+  'functional',
+  'iomanip',
+  'ios',
+  'iostream',
+  'istream',
+  'iterator',
+  'list',
+  'map',
+  'numeric',
+  'ostream',
+  'queue',
+  'random',
+  'set',
+  'sstream',
+  'stack',
+  'string',
+  'unordered_map',
+  'unordered_set',
+  'vector',
+]);
+const C_GLOBAL_HEADERS: ReadonlyMap<string, readonly string[]> = new Map([
+  ['index', ['cstring', 'string.h']],
+  ['time', ['ctime', 'time.h']],
+  ['y1', ['cmath', 'math.h', 'utility']],
+  ['remove', ['cstdio', 'stdio.h']],
+  ['signal', ['csignal', 'signal.h', 'cstdlib', 'stdlib.h', 'exception', 'new', 'stdexcept', 'utility']],
+  ['clock', ['ctime', 'time.h']],
+  ['div', ['cstdlib', 'stdlib.h', 'exception', 'new', 'stdexcept', 'utility']],
+  ['random', ['cstdlib', 'stdlib.h', 'exception', 'new', 'stdexcept', 'utility']],
+]);
+
+export function hasDeclarationOnlyCGlobal(name: string, headers: ReadonlySet<string>): boolean {
+  const declaringHeaders = C_GLOBAL_HEADERS.get(name);
+  if (!declaringHeaders) return false;
+  return (
+    declaringHeaders.some((header) => headers.has(header)) ||
+    [...headers].some((header) => TRANSITIVE_C_GLOBAL_HEADERS.has(header))
   );
 }

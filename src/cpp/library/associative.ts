@@ -2,6 +2,7 @@ import type { DisplayNode } from '../../problems/trace';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
+import { makeEach } from '../objectCompiler';
 import type { Eval, Frame } from '../runtime';
 import {
   alignOf,
@@ -94,10 +95,20 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
       return { type: BOOL, isLvalue: false, row, run: (frame) => (test(a(frame) as Value, b(frame) as Value) ? 1 : 0) };
     },
   };
+  const construct = (frame: Frame, initialize: [(frame: Frame) => Value, (frame: Frame) => Value]): CObject => {
+    const parts = ops();
+    const [a, b] = makeEach(
+      frame,
+      2,
+      (index) => initialize[index](frame),
+      (index) => parts[index].destroy
+    );
+    return make(a, b);
+  };
   cls.operations = {
     copy: (frame, source) => {
       const [a, b] = (source as CObject).values;
-      return make(ops()[0].copy(frame, a), ops()[1].copy(frame, b));
+      return construct(frame, [(f) => ops()[0].copy(f, a), (f) => ops()[1].copy(f, b)]);
     },
     assign: (frame, target, source) => {
       const to = target as CObject;
@@ -112,16 +123,22 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
     },
   };
   cls.constructors = [
-    nativeConstructor(cls, [], (_args, { frame }) => make(ops()[0].make(frame), ops()[1].make(frame)), {
-      uses: (row) => {
-        library.compiler.valueInitialized(first, row);
-        library.compiler.valueInitialized(second, row);
-      },
-    }),
+    nativeConstructor(
+      cls,
+      [],
+      (_args, { frame }) => construct(frame, [(f) => ops()[0].make(f), (f) => ops()[1].make(f)]),
+      {
+        uses: (row) => {
+          library.compiler.valueInitialized(first, row);
+          library.compiler.valueInitialized(second, row);
+        },
+      }
+    ),
     nativeConstructor(
       cls,
       [constRef(first), constRef(second)],
-      ([a, b], { frame }) => make(ops()[0].copy(frame, (a as Ptr).read()), ops()[1].copy(frame, (b as Ptr).read())),
+      ([a, b], { frame }) =>
+        construct(frame, [(f) => ops()[0].copy(f, (a as Ptr).read()), (f) => ops()[1].copy(f, (b as Ptr).read())]),
       {
         uses: (row) => {
           library.compiler.requireObjectUse(classType(cls), 'copy', row);
@@ -161,13 +178,17 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
         }
         return nativeConstructor(cls, [constRef(source.type)], ([pair], { frame }) => {
           const object = (pair as Ptr).read() as CObject;
-          frame.pending.push(new Ptr(object, 0));
-          const x = convertFirst(frame);
-          frame.pending.pop();
-          frame.pending.push(new Ptr(object, 1));
-          const y = convertSecond(frame);
-          frame.pending.pop();
-          return make(x as Value, y as Value);
+          const member =
+            (index: number, convert: Eval): Eval<Value> =>
+            (f) => {
+              f.pending.push(new Ptr(object, index));
+              try {
+                return convert(f) as Value;
+              } finally {
+                f.pending.pop();
+              }
+            };
+          return construct(frame, [member(0, convertFirst), member(1, convertSecond)]);
         });
       },
       isTemplate: true,

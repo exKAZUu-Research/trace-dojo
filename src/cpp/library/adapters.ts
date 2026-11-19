@@ -59,7 +59,7 @@ export function adapterClass(
       items,
       element,
       kind !== 'priority_queue',
-      storageKind === 'deque' || storageKind === 'list' ? storageKind : undefined
+      storageKind === 'deque' || storageKind === 'list' || storageKind === 'vector' ? storageKind : undefined
     );
   const push = (frame: Frame, self: SequenceValue, value: Value): void => {
     frame.runtime.reserve(1);
@@ -74,7 +74,7 @@ export function adapterClass(
     kind,
     args: [element],
     ownedTypes: [element],
-    assignmentCopies: true,
+    assignmentCopies: storage.cls.library?.assignmentCopies,
     size: kind === 'priority_queue' ? 32 : 48,
     align: 8,
     operator: (compiler_, operator, operands, row) => {
@@ -109,22 +109,7 @@ export function adapterClass(
     frame.runtime.reserve(items.length);
     return editor.build(frame, items.length, (index) => ops().copy(frame, items[index]));
   };
-  cls.operations = {
-    copy: (frame, source) => make(copyItems(frame, source as SequenceValue)),
-    assign: (frame, target, source) => {
-      const to = target as SequenceValue;
-      if (to !== source) {
-        const values = copyItems(frame, source as SequenceValue);
-        const previous = to.replaceItems(values);
-        const destroy = ops().destroy;
-        if (destroy) for (const item of previous) destroy(frame, item);
-      }
-    },
-    destroy: (frame, value) => {
-      const destroy = ops().destroy;
-      if (destroy) for (const item of (value as SequenceValue).items) destroy(frame, item);
-    },
-  };
+  cls.operations = storage.cls.operations;
   cls.constructors = [nativeConstructor(cls, [], () => make([]))];
   if (compareType) {
     const fromItems = (items: Value[]): SequenceValue => {

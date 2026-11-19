@@ -79,6 +79,15 @@ export class NodePositions {
     this.end = new NodePosition(this.owner, undefined);
   }
 
+  invalidateFrom(index: number): void {
+    this.invalidateEnd();
+    for (const [position, node] of this.positions) {
+      if (position < index) continue;
+      node.position = -1;
+      this.positions.delete(position);
+    }
+  }
+
   splice(from: number, remove: number, insert: number): void {
     if (this.positions.size === 0 || (remove === 0 && from === this.owner.length)) return;
     const next = new Map<number, NodePosition>();
@@ -167,16 +176,23 @@ export class SequenceValue extends Store {
   }
 
   replaceAllocation(items: Value[], capacity: number): void {
-    this.nodes?.invalidateEnd();
-    this.replaceItems(items);
+    this.invalidateVectorSuffix(0);
+    this.items = items;
     this.capacity = capacity;
+  }
+
+  invalidateVectorSuffix(from: number): void {
+    if (this.storageKind === 'vector') this.nodes?.invalidateFrom(from);
   }
 
   editPositions(from: number, remove: number, insert: number): void {
     const atEnd = from + remove === this.length;
     const changesMiddle = from > 0 && !atEnd;
     const epoch = this.dequeEpoch;
-    if (this.storageKind === 'vector' && (remove || insert)) this.nodes?.invalidateEnd();
+    if (this.storageKind === 'vector' && (remove || insert)) {
+      this.invalidateVectorSuffix(from);
+      return;
+    }
     if (epoch && changesMiddle) this.nodes?.splice(0, this.length, this.length - remove + insert);
     else this.nodes?.splice(from, remove, insert);
     if (epoch && (insert || changesMiddle)) epoch.all++;

@@ -1,5 +1,6 @@
-import { ClassInfo, type NativeContext, type Type } from '../types';
-import { CObject, Ptr } from '../values';
+import { ClassInfo, type NativeContext, type Type, VOID } from '../types';
+import type { Ptr } from '../values';
+import { CObject } from '../values';
 import { addMethod, CONST_CHAR_PTR, constRef, cStringStore, native, nativeConstructor, readCString } from './support';
 
 /** The standard exception classes of `<exception>` and `<stdexcept>`, by name without `std::`. */
@@ -17,6 +18,12 @@ export function exceptionClasses(stringType: () => Type): Map<string, ClassInfo>
     cls.isComplete = true;
     cls.library = { kind: name, args: [], size: base ? 16 : 8, align: 8, isInheritable: true };
     if (base) for (const [key, fn] of base.virtuals) cls.virtuals.set(key, fn);
+    cls.destructor = {
+      ...native(`~${name}`, [], VOID, () => {}, { owner: cls, isVirtual: true }),
+      isDestructor: true,
+      isNoexcept: true,
+    };
+    cls.virtuals.set('~', cls.destructor);
     const construct = (message: string | undefined) => (_args: unknown[], context: NativeContext) => {
       const self = context.self instanceof CObject ? context.self : new CObject(cls, []);
       self.message = message ?? defaultMessage;
@@ -41,7 +48,7 @@ export function exceptionClasses(stringType: () => Type): Map<string, ClassInfo>
         return copy;
       },
       assign: (_frame, target, source) => {
-        if (hasMessage) (target as CObject).message = (source as CObject).message;
+        if (hasMessage && target !== source) (target as CObject).message = (source as CObject).message;
       },
     };
     classes.set(name, cls);
@@ -53,7 +60,11 @@ export function exceptionClasses(stringType: () => Type): Map<string, ClassInfo>
       'what',
       [],
       CONST_CHAR_PTR,
-      (_args, { self }) => new Ptr(cStringStore((self as CObject).message ?? 'std::exception'), 0),
+      (_args, { self }) => {
+        const exception = self as CObject;
+        exception.messageStorage ??= cStringStore(exception.message ?? 'std::exception');
+        return exception.messageStorage.location(0);
+      },
       { isConst: true, isVirtual: true }
     ),
     isNoexcept: true,

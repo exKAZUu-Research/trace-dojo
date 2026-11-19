@@ -115,7 +115,8 @@ export class CObject extends Store {
   /** The turtle of a `Turtle` object. */
   turtle?: TurtleState;
   /** The message of a library exception, which `what()` returns, as bytes. */
-  message?: string;
+  private messageText?: string;
+  messageStorage?: ArrayStore;
   private memberStorage?: Map<number, MemberStorage>;
 
   /**
@@ -124,13 +125,24 @@ export class CObject extends Store {
    */
   constructor(
     public cls: ClassInfo,
-    readonly values: Value[]
+    readonly values: Value[],
+    readonly zeroInitialized = false
   ) {
     super();
   }
 
   get length(): number {
     return this.values.length;
+  }
+
+  get message(): string | undefined {
+    return this.messageText;
+  }
+
+  set message(text: string | undefined) {
+    if (this.messageStorage) endLifetime(this.messageStorage);
+    this.messageStorage = undefined;
+    this.messageText = text;
   }
 
   get(index: number): Value {
@@ -194,6 +206,7 @@ export function endLifetime(value: Value, liveness = Liveness.Dead): void {
   value.liveness = liveness;
   if (value instanceof Box && !value.ownsValue) return;
   if (value instanceof MemberStorage) return;
+  if (value instanceof CObject && value.messageStorage) endLifetime(value.messageStorage, liveness);
   for (const child of childValues(value)) endLifetime(child, liveness);
 }
 

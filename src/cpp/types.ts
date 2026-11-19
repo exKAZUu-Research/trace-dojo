@@ -132,6 +132,7 @@ export interface FunctionInfo {
   /** The library's implementation, which runs instead of a body. */
   native?: NativeFunction;
   nativeUses?: (row: number) => void;
+  evaluateConstant?: (args: readonly (number | bigint)[]) => number | bigint;
   /** The syntax of the definition, which the compiler compiles once the declarations it may use are known. */
   definition?: Syntax;
   /** Whether the function takes any number of further arguments, as `printf` does. */
@@ -326,6 +327,20 @@ export function isSigned(type: IntType): boolean {
 export function decay(type: Type): Type {
   if (type.kind === 'array') return pointerTo(type.of);
   return type;
+}
+
+/** Whether two functions take the same parameter types, as redeclarations and overloads compare them. */
+export function sameParameters(a: FunctionInfo, b: FunctionInfo): boolean {
+  return (
+    a.params.length === b.params.length &&
+    a.params.every((param, index) => sameType(adjustParameter(param.type), adjustParameter(b.params[index].type))) &&
+    (!a.owner || a.isConst === b.isConst)
+  );
+}
+
+/** A parameter's type as overloading compares it: without top-level `const`. */
+function adjustParameter(type: Type): Type {
+  return type.kind === 'reference' ? type : unqualified(type);
 }
 
 /** Whether two types are the same, comparing qualifiers only when `withQualifiers`. */

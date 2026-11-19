@@ -488,6 +488,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const type = isDeduced ? referenceTo(this.deduceAutoReference(declared.to, target)) : declared;
     // A const reference bound to a temporary extends the temporary's lifetime to the reference's, whether the
     // temporary is the initializer's object or a converted value (C++20 [class.temporary]).
+    return this.referenceBinding(type, target, row);
+  }
+
+  private referenceBinding(type: Extract<Type, { kind: 'reference' }>, target: Expr, row: number): ReferenceBinding {
     const isDirect = target.isLvalue && isReferenceRelated(target.type, type.to);
     const isTemporaryClass =
       !target.isLvalue &&
@@ -618,14 +622,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const expr = this.compileExpression(expressionNode);
     if (expr.functions)
       return this.error(node.row, `関数 ${expr.functions.name} の後に (...) を書いて呼び出してください。`);
-    const destroy = expr.isTemporaryObject ? this.destroyerOf(expr.type, node.row) : undefined;
-    const run = expr.run;
+    const run = this.discardedValue(expr);
     const exec = this.fullExpression<Completion>((frame) => {
-      const value = run(frame);
-      if (expr.isTemporaryObject && !(value instanceof Ptr)) {
-        destroy?.(frame, value as Value);
-        endLifetime(value as Value);
-      }
+      run(frame);
       return;
     });
     return this.withStep(node.row, exec, onlyCalls(expressionNode));
@@ -705,13 +704,14 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         initRecords = fieldsOf(initNode, 'declarator').some((d) => d.type === 'init_declarator');
       } else if (initNode) {
         const expr = this.compileExpression(initNode);
-        init = this.fullExpression((frame) => (expr.run(frame), undefined));
+        const discard = this.discardedValue(expr);
+        init = this.fullExpression((frame) => (discard(frame), undefined));
         initRecords = true;
       }
       const conditionNode = fieldOf(node, 'condition');
       const condition = conditionNode ? this.conditionOf(conditionNode) : () => true;
       const updateNodes = fieldsOf(node, 'update');
-      const updates = updateNodes.map((update) => this.compileExpression(update).run);
+      const updates = updateNodes.map((update) => this.discardedValue(this.compileExpression(update)));
       const update = this.fullExpression<undefined>((frame) => {
         for (const run of updates) run(frame);
         return;
@@ -880,7 +880,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
     const type: Type = { kind: 'array', of: withConst(elementType), length: values.length };
     const run = this.listInitializer({ ...type, of: elementType }, list, list.row);
-    return { type, isLvalue: false, row: list.row, run };
+    return { type, isLvalue: false, row: list.row, run: (frame) => run(frame) };
   }
 
   /** Declares the variable of a range-based for loop, which each iteration binds to an element. */
@@ -893,12 +893,16 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       const type = hasAuto(declared.type.to)
         ? referenceTo(this.deduceAutoReference(declared.type.to, element))
         : declared.type;
-      const location = this.convert(element, type, node.row).run;
+      const binding = this.referenceBinding(type, element, node.row);
       const local = this.context.declareLocal(name, type, false);
       this.context.scope.names.set(name, { kind: 'local', local, isReference: true });
+      if ('lifetime' in binding) {
+        const { type: held, make, locate } = binding.lifetime;
+        return { bind: this.extendedReference(local.slot, name, held, make, locate).exec, type: type.to };
+      }
       return {
         bind: (frame) => {
-          frame.slots[local.slot] = location(frame) as Ptr;
+          frame.slots[local.slot] = binding.loc(frame);
           return;
         },
         type: type.to,

@@ -297,13 +297,29 @@ export abstract class CompilerBase {
   /** The types of a template argument list; a template argument that is not a type is a constant. */
   templateArguments(list: Syntax): Type[] {
     return list.children.map((argument) => {
-      if (argument.type === 'type_descriptor') return this.typeDescriptor(argument);
+      if (argument.type === 'type_descriptor') {
+        const name = fieldOf(argument, 'type');
+        if (name && !fieldOf(argument, 'declarator')) {
+          const entity =
+            name.type === 'qualified_identifier'
+              ? this.lookupQualified(name)
+              : name.type === 'type_identifier'
+                ? this.findName(name.text)
+                : undefined;
+          if (entity && entity.kind !== 'type' && entity.kind !== 'class' && entity.kind !== 'template')
+            return this.integralTemplateArgument(name);
+        }
+        return this.typeDescriptor(argument);
+      }
       // The grammar may read a nested template type (`std::pair<int, int>`) as an expression.
       const type = this.expressionAsType(argument);
       if (type) return type;
-      const constant = this.constantArgument(argument);
-      return { kind: 'int', name: 'long', constant } as unknown as Type;
+      return this.integralTemplateArgument(argument);
     });
+  }
+
+  private integralTemplateArgument(argument: Syntax): Type {
+    return { kind: 'int', name: 'long', constant: this.constantArgument(argument) } as unknown as Type;
   }
 
   /** The type an expression-shaped template argument names, or undefined when it names no type. */

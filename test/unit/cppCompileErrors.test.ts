@@ -265,6 +265,31 @@ test.each([
     '#include <set>\nstruct P { int x; };\nint main() { std::set<P> s;\n  s.insert(P{1}); }',
     3,
   ],
+  ['a global variable named index after <iostream>', '#include <iostream>\nint index = 3;', 1],
+  [
+    'a global function with div parameters and the wrong return type',
+    '#include <cstdlib>\nint div(int a, int b) { return a / b; }',
+    1,
+  ],
+  ['std::cout with only <initializer_list>', '#include <initializer_list>\nint main() { std::cout << 7; }', 1],
+  ['std::map with only <cassert>', '#include <cassert>\nint main() { std::map<int, int> data; }', 1],
+  ['emplace on a const map', '#include <map>\nint main() { const std::map<int, int> m; m.emplace(1, 2); }', 1],
+  [
+    'try_emplace on a const unordered_map',
+    '#include <unordered_map>\nint main() { const std::unordered_map<int, int> m; m.try_emplace(1, 2); }',
+    1,
+  ],
+  ['a call of a const random engine', '#include <random>\nint main() { const std::mt19937 engine; engine(); }', 1],
+  [
+    'a distribution called with a const engine',
+    '#include <random>\nint main() { const std::mt19937 engine; std::uniform_int_distribution<int> draw; draw(engine); }',
+    1,
+  ],
+  [
+    'a call of a const distribution',
+    '#include <random>\nint main() { std::mt19937 engine; const std::uniform_int_distribution<int> draw; draw(engine); }',
+    1,
+  ],
   ['std::sqrt with only <cstdio>', '#include <cstdio>\nint main() {\n  double x = std::sqrt(2.0); }', 2],
   ['std::abs with only <cstdio>', '#include <cstdio>\nint main() {\n  int x = std::abs(-2); }', 2],
 ])('the interpreter rejects %s', (_, program, row) => {

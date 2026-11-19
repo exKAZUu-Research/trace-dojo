@@ -8,6 +8,7 @@ import {
   DOUBLE,
   INT,
   intMax,
+  isConstType,
   isInteger,
   isSigned,
   isWide,
@@ -233,6 +234,7 @@ export function randomEngines(): Map<string, ClassInfo> {
       align: 8,
       call: (compiler, object, args, row) => {
         if (args.length > 0) return;
+        if (isConstType(object.type)) return compiler.error(row, `const の ${cls.name} には () を使えません。`);
         const engine = compiler.objectOf(object);
         return {
           type: resultType,
@@ -359,8 +361,14 @@ export function randomClasses(library: Library): LibraryTemplate[] {
       align: 8,
       call: (compiler: ExpressionCompiler, object: Expr, args: Expr[], row_: number) => {
         if (args.length !== 1) return;
+        if (isConstType(object.type)) return compiler.error(row_, `const の ${cls.name} には () を使えません。`);
         const engineType = args[0].type;
-        if (engineType.kind !== 'class' || engineType.cls.library?.kind !== 'engine' || !args[0].isLvalue) {
+        if (
+          engineType.kind !== 'class' ||
+          engineType.cls.library?.kind !== 'engine' ||
+          isConstType(engineType) ||
+          !args[0].isLvalue
+        ) {
           return compiler.error(
             row_,
             `${cls.name} の () には乱数のエンジン（std::mt19937 など）の変数を書いてください。`

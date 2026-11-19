@@ -502,9 +502,24 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       isLvalue: isReference,
       row,
       run,
+      constant: !object ? this.constantCall(fn, args) : undefined,
       onlyCalls: true,
       isTemporaryObject: !isReference && type.kind === 'class',
     };
+  }
+
+  private constantCall(fn: FunctionInfo, args: Expr[]): number | bigint | undefined {
+    if (!fn.evaluateConstant || args.length !== fn.params.length) return;
+    const values: (number | bigint)[] = [];
+    for (const [index, arg] of args.entries()) {
+      const value = this.rvalue(arg);
+      const target = nonReference(fn.params[index].type);
+      if (value.constant === undefined || !isArithmeticType(value.type) || !isArithmeticType(target)) return;
+      const constant = convertArithmetic(value, target).constant;
+      if (constant === undefined) return;
+      values.push(constant);
+    }
+    return fn.evaluateConstant(values);
   }
 
   /** Evaluates the location of the object of a member function call, materializing a prvalue as a temporary. */
@@ -529,11 +544,11 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     this.checkDefined(fn, row);
     this.requireVirtualDefinitions(cls, row);
     const argRuns = this.callArguments(resolved, args, row);
-    const run: Eval<Value> = fn.native
+    const run: Expr['run'] = fn.native
       ? (frame) => holdAll(frame, argRuns, (values) => invoke(frame, fn, values, undefined, row, true) as Value)
-      : (frame) =>
+      : (frame, zeroInitialize) =>
           holdAll(frame, argRuns, (values) => {
-            const object = newObject(frame, cls);
+            const object = newObject(frame, cls, zeroInitialize);
             invoke(frame, fn, values, new Ptr(new Box(object), 0), row, true);
             return object;
           });
@@ -598,11 +613,12 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
 }
 
 /** A new object of a class, whose members its constructor initializes. */
-export function newObject(frame: Frame, cls: ClassInfo): CObject {
+export function newObject(frame: Frame, cls: ClassInfo, zeroInitialize = false): CObject {
   frame.runtime.reserve(cls.fields.length);
   return new CObject(
     cls,
-    Array.from({ length: cls.fields.length }, () => UNINIT)
+    cls.fields.map((field) => (zeroInitialize ? zeroOf(field.type) : UNINIT)),
+    zeroInitialize
   );
 }
 

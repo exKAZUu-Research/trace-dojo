@@ -2,7 +2,7 @@ import { CompileError } from '../../interpreter/diagnostics';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { type Eval, type Frame, holdAll } from '../runtime';
-import { type ClassInfo, type Type, typeName, unqualified, VOID, withConst } from '../types';
+import { type ClassInfo, isConstType, type Type, typeName, unqualified, VOID, withConst } from '../types';
 import { CObject, type Ptr, type Value } from '../values';
 import type { ElementOperations } from './elements';
 import type { Source } from './sequenceEdits';
@@ -64,6 +64,7 @@ export function emplacementCall<T, Position>(
     arg.type.cls.library?.kind === 'pair' &&
     arg.type.cls !== (entryType as Extract<Type, { kind: 'class' }>).cls;
   if (member !== 'emplace' && member !== 'try_emplace' && !isPairInsert) return;
+  if (isConstType(object.type)) return compiler.error(row, `const のオブジェクトには ${member} を使えません。`);
   const self = compiler.objectOf(object);
   const emplace = compileEmplacing(compiler, args, call.types, member === 'try_emplace', row);
   return {

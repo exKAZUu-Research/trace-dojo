@@ -182,6 +182,40 @@ int main() { Value value{1, 2}; ${body} }`;
   });
 });
 
+test.each([
+  ['insertion', 'auto added = values.insert(values.begin() + 1, 4); std::cout << *added;'],
+  ['erasure', 'auto next = values.erase(values.begin() + 1); std::cout << *next;'],
+])('vector %s retains positions before the edit and invalidates its suffix', (_, edit) => {
+  const program = `#include <iostream>
+#include <vector>
+int main() {
+  std::vector<int> values{4, 5, 4};
+  values.reserve(12);
+  auto first = values.begin();
+  auto stale = first + 1;
+  ${edit}
+  std::cout << *first << *stale;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '44',
+    uncaughtException: expect.stringContaining('使えなくなったイテレータ'),
+  });
+});
+
+test('an exception message ends its lifetime with the exception object', () => {
+  const program = `#include <stdexcept>
+int main() {
+  const char* text;
+  { std::runtime_error error("message"); text = error.what(); }
+  return *text;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('有効期間が終わった'),
+  });
+});
+
 test('a scalar character member needs its own string terminator', () => {
   const program = `#include <iostream>
 struct Text { char marker; char padding; };

@@ -854,13 +854,17 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
             : new CObject(result, [a as Ptr, b as Ptr])
         );
       }
-      return native(name, types, referenceTo(withConst(type)), ([a, b], { frame }) => {
+      const fn = native(name, types, referenceTo(withConst(type)), ([a, b], { frame }) => {
         const x = (a as Ptr).read();
         const y = (b as Ptr).read();
         // Both return the first of equal values (C++20 [alg.min.max]).
         if (name === 'min') return less(frame)(y, x) ? b : a;
         return less(frame)(x, y) ? b : a;
       });
+      if (args.length === 2 && isArithmetic(type)) {
+        fn.evaluateConstant = ([a, b]) => ((name === 'min' ? b < a : a < b) ? b : a);
+      }
+      return fn;
     });
   }
   define('clamp', (args) => {

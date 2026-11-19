@@ -80,6 +80,7 @@ export class SequenceEditor {
       this.moveRange(frame, items, at, length, at + 1);
       this.assignAt(frame, items, at, temporary);
       this.ops.destroy?.(frame, temporary);
+      self.invalidateVectorSuffix(at);
     }
   }
 
@@ -98,6 +99,7 @@ export class SequenceEditor {
     else {
       this.moveRange(frame, items, at, length, at + 1);
       this.assignAt(frame, items, at, shifted(value, self, at, 1).read());
+      self.invalidateVectorSuffix(at);
     }
   }
 
@@ -113,7 +115,10 @@ export class SequenceEditor {
       );
       self.splice(at, 0, ...made);
     } else if (this.kind === 'deque') this.dequeInsertCopies(frame, self, at, count, value);
-    else this.vectorInsertCopies(frame, self, at, count, value);
+    else {
+      this.vectorInsertCopies(frame, self, at, count, value);
+      self.invalidateVectorSuffix(at);
+    }
   }
 
   /** `insert(position, first, last)`, whose elements `source` holds. */
@@ -121,8 +126,10 @@ export class SequenceEditor {
     if (source.values.length === 0) return;
     if (this.kind === 'list') {
       self.splice(at, 0, ...source.values.map((value) => source.construct(frame, value)));
-    } else if (this.kind === 'vector') this.vectorInsertRange(frame, self, at, source);
-    else if (isForwardOnly) {
+    } else if (this.kind === 'vector') {
+      this.vectorInsertRange(frame, self, at, source);
+      self.invalidateVectorSuffix(at);
+    } else if (isForwardOnly) {
       // A deque copies a forward-only range into a buffer first, and moves the buffer's elements in.
       const buffer = source.values.map((value) => source.construct(frame, value));
       this.dequeInsertBidirectional(frame, self, at, {
@@ -152,6 +159,7 @@ export class SequenceEditor {
       for (let index = to; index < items.length; index++) this.assignAt(frame, items, index - count, items[index]);
       if (this.kind === 'deque' && to < items.length) self.editPositions(from, count, 0);
       this.truncate(frame, self, items.length - count);
+      self.invalidateVectorSuffix(from);
     }
   }
 

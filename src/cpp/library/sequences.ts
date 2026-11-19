@@ -94,19 +94,21 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   };
   // std::array destroys its elements as a built-in array does, from the last.
   const editor = new SequenceEditor(kind === 'array' ? 'vector' : kind, ops);
-  const arrayDefault = (compiler: ExpressionCompiler, row: number, valueInitialize: boolean): Eval<Value> => {
-    const initialize = valueInitialize
-      ? (compiler.valueInitialized(element, row).run as Eval<Value>)
-      : compiler.defaultInitializer(element, row);
+  const arrayDefault = (compiler: ExpressionCompiler, row: number, valueInitialize: boolean): Expr['run'] => {
+    if (fixedLength === 0) return () => make([]);
+    const defaultInitialize = valueInitialize ? undefined : compiler.defaultInitializer(element, row);
+    const initialize = defaultInitialize
+      ? (frame: Frame, zeroInitialize?: boolean) => defaultInitialize(frame, undefined, zeroInitialize)
+      : compiler.valueInitialized(element, row).run;
     const destroy = compiler.destroyerOf(element, row);
     const length = fixedLength ?? 0;
-    return (frame) => {
+    return (frame, zeroInitialize) => {
       frame.runtime.reserve(length);
       return make(
         makeEach(
           frame,
           length,
-          () => initialize(frame),
+          () => initialize(frame, zeroInitialize) as Value,
           () => destroy
         )
       );
@@ -121,8 +123,12 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
     align: kind === 'array' ? alignOf(element) : 8,
     operator: (compiler, operator, operands, row) =>
       sequenceOperator(compiler, cls, element, kind, operator, operands, row, editor, ops),
-    listInitializer: (compiler, elements, row) =>
-      sequenceList(compiler, element, elements, row, make, fixedLength, editor),
+    aggregateArray:
+      fixedLength === undefined ? undefined : { type: { kind: 'array', of: element, length: fixedLength }, make },
+    listInitializer:
+      fixedLength === undefined
+        ? (compiler, elements, row) => sequenceList(compiler, element, elements, row, make, editor)
+        : undefined,
     defaultInitializer: kind === 'array' ? arrayDefault : undefined,
     memberCall: (compiler, object, member, args, row) => {
       checkElementRequirement(compiler, { kind, element, ops }, member, args, row);
@@ -928,27 +934,8 @@ function sequenceList(
   elements: Syntax[],
   row: number,
   make: (items: Value[]) => SequenceValue,
-  fixedLength: number | undefined,
   editor: SequenceEditor
 ): Eval<Value> | undefined {
-  if (fixedLength !== undefined) {
-    if (elements.length > fixedLength)
-      return compiler.error(row, `std::array の要素は ${fixedLength} 個なので、初期値が多すぎます。`);
-    const inits = elements.map((node) => compiler.elementInitializer(element, node));
-    const zero = compiler.valueInitialized(element, row).run as Eval<Value>;
-    const destroy = compiler.destroyerOf(element, row);
-    return (frame) => {
-      frame.runtime.reserve(fixedLength);
-      return make(
-        makeEach(
-          frame,
-          fixedLength,
-          (index) => (inits[index] ?? zero)(frame),
-          () => destroy
-        )
-      );
-    };
-  }
   // A list of one or two sizes is still an initializer list of elements when the elements can take them.
   let inits: Eval<Value>[];
   try {
