@@ -45,3 +45,9 @@ Unknown named parameter $value
 #1 {main}
 MagicBindingChild:missing
 MagicBinding:missing
+int(3)
+int(4)
+
+Notice: Only variables should be assigned by reference in /main.php on line 58
+int(5)
+int(9)

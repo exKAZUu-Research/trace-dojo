@@ -37,3 +37,30 @@ foreach ([$original->missing(...), Closure::fromCallable([$original, 'missing'])
 $static = MagicBindingChild::missing(...);
 $static();
 $static->bindTo(null)();
+
+class MagicReference {
+    public $value = 1;
+    public static $shared = 2;
+    function &__call($name, $args) { return $this->value; }
+    static function &__callStatic($name, $args) { return self::$shared; }
+}
+$object = new MagicReference;
+foreach ([$object->alias(...), Closure::fromCallable([$object, 'alias'])] as $fn) {
+    $alias = &$fn();
+    $alias++;
+}
+foreach ([MagicReference::alias(...), Closure::fromCallable('MagicReference::alias')] as $fn) {
+    $alias = &call_user_func_array($fn, []);
+    $alias++;
+}
+var_dump($object->value, MagicReference::$shared);
+$dynamic = 'call_user_func';
+$alias = &$dynamic($fn);
+$alias++;
+var_dump(MagicReference::$shared);
+
+class TemporaryMagicReference extends MagicReference {
+    function __destruct() { $this->value = 9; }
+}
+$alias = &(new TemporaryMagicReference)->alias(...)();
+var_dump($alias);

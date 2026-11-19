@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 953 -- Holds assignment and offset access modes with their shared helpers.
+// code-gauge-allow-file fileNcss 956 -- Holds assignment and offset access modes with their shared helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -945,6 +945,10 @@ export function assignReference(target: Expr, source: Expr): Value {
     if (returned) ref = returned;
     else {
       notice('Only variables should be assigned by reference');
+      if (target.k !== 'prop' && target.k !== 'sprop') {
+        runtime.row = target.row;
+        return placeOf(target).set(share(value));
+      }
       ref = Ref.temporary(value);
     }
   } else ref = placeOf(source, 'write', true).ref();

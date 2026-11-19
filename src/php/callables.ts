@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 702 -- Keeps implicit dispatch and native result ownership together.
+// code-gauge-allow-file fileNcss 704 -- Keeps implicit dispatch and native result ownership together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr, ResolvedName } from './ast';
@@ -295,7 +295,9 @@ function callNamedExpression(e: Extract<Expr, { k: 'call' }>, name: ResolvedName
     fn.kind === 'native' && !name.fallback && lower(fn.name) === 'sprintf' ? simpleSprintfFormat(e.args) : undefined;
   if (format !== undefined) {
     const reads = e.args.slice(1).map((arg) => prepareOperand(arg.e));
-    return renderSimpleSprintf(format, reads, e.row);
+    const result = renderSimpleSprintf(format, reads, e.row);
+    runtime.lastReturnRef = undefined;
+    return result;
   }
   const specialized = name.fallback ? undefined : specializedCall(fn, e.args);
   const frameless = specialized === 'frameless';
@@ -434,6 +436,7 @@ function magicForwarder(method: Method, name: string, allowNamed: boolean): Call
     kind: 'native',
     name,
     acceptsNamed: allowNamed ? true : 'positional-only',
+    forwardsReference: method.fn.kind === 'user' && method.fn.decl.byRefReturn,
     params: [{ name: 'arguments', byRef: false, variadic: true, optional: true }],
     impl: ({ args, named, thisObj, calledClass }) => {
       const argumentsToPack: ArgValue[] = args.map((v) => ({ v }));

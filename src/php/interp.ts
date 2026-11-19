@@ -234,28 +234,21 @@ export function evChain(e: Expr, discardResult = false): Chain {
     }
     case 'call': {
       const mark = runtime.frame.temporaries.length;
-      return keepResult(mark, callExpression(e, discardResult));
+      return keepResult(mark, callExpression(e, discardResult), !e.fcc);
     }
     case 'mcall': {
       const mark = runtime.frame.temporaries.length;
-      return keepResult(mark, methodCallExpression(e, discardResult));
+      return keepResult(mark, methodCallExpression(e, discardResult), !e.fcc);
     }
     case 'scall': {
       const mark = runtime.frame.temporaries.length;
-      return keepResult(mark, staticCallExpression(e, discardResult));
+      return keepResult(mark, staticCallExpression(e, discardResult), !e.fcc);
     }
-    case 'new': {
-      return keepingResult(() => {
-        runtime.row = e.row;
-        const cls = resolveClassRef(e.cls);
-        const callRow = runtime.instructionRow;
-        return instantiate(cls, () => constructorArgs(cls, e.args, callRow), callRow, runtime.frame.scope);
-      });
-    }
+    case 'new':
     case 'newAnon': {
       return keepingResult(() => {
         runtime.row = e.row;
-        const cls = anonymousClass(e.decl, e.row);
+        const cls = e.k === 'new' ? resolveClassRef(e.cls) : anonymousClass(e.decl, e.row);
         const callRow = runtime.instructionRow;
         return instantiate(cls, () => constructorArgs(cls, e.args, callRow), callRow, runtime.frame.scope);
       });
@@ -376,14 +369,15 @@ function keepingResult(run: () => Chain): Chain {
 }
 
 /** Releases the temporaries held since `mark`, keeping only a call's result, as {@link keepingResult} describes. */
-function keepResult(mark: number, result: Chain): Chain {
+function keepResult(mark: number, result: Chain, allowsReference?: boolean): Chain {
   const runtime = rt();
-  const frame = runtime.frame;
-  const keep = result instanceof PhpObject || result instanceof PhpArray;
-  // The result stays held while the temporaries it was made from are released.
-  if (keep) frame.temporaries.splice(mark, 0, result);
-  runtime.dropTemporaries(frame, keep ? mark + 1 : mark);
-  return result;
+  const reference = allowsReference && result !== SHORT ? runtime.lastReturnRef : undefined;
+  const retained = reference ?? (result instanceof PhpObject || result instanceof PhpArray ? result : undefined);
+  if (reference) reference.rc++;
+  if (retained) runtime.frame.temporaries.splice(mark, 0, retained);
+  runtime.dropTemporaries(runtime.frame, retained ? mark + 1 : mark);
+  if (allowsReference !== undefined) runtime.lastReturnRef = reference;
+  return reference ? share(reference.v) : result;
 }
 
 function isThrowableObject(object: PhpObject): boolean {

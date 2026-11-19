@@ -384,8 +384,8 @@ defineFunction(
     return callValue(args[0], forwarded, row, 'callback', discardResult, compiledCallback);
   }
 );
-markInlined('call_user_func');
-markInlined('call_user_func_array');
+markInlined('call_user_func', true);
+markInlined('call_user_func_array', true);
 
 export function isCallable(value: Value): boolean {
   return checkCallable(value);

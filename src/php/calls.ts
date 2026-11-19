@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 745 -- Keeps call binding, completion and frame cleanup together.
+// code-gauge-allow-file fileNcss 753 -- Keeps call binding, completion and frame cleanup together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -252,6 +252,7 @@ function invokeNative(
   const caller = runtime.frame;
   const name = functionDisplayName(target);
   const inline = target.inline && row !== undefined;
+  const forwardsReference = fn.forwardsReference === true || (inline && fn.forwardsReference === 'inlined');
   const strict = callerIsStrict();
   let record: CallRecord | undefined;
   if (!inline) {
@@ -279,6 +280,7 @@ function invokeNative(
   handOverArgs(caller, args);
   const savedRow = runtime.row;
   let result: Value = null;
+  let returnedReference: Ref | undefined;
   let failed = false;
   let failure: unknown;
   try {
@@ -302,6 +304,7 @@ function invokeNative(
       held.references.push(ref);
       held.values.splice(held.argumentCount++, 0, ref);
     }
+    if (forwardsReference) runtime.lastReturnRef = undefined;
     result = runNative(runtime, fn, {
       args: values,
       refs,
@@ -314,6 +317,10 @@ function invokeNative(
       row: inline || target.frameless ? row : undefined,
       discardResult: Boolean(inline && discardResult),
     });
+    if (forwardsReference && !discardResult) {
+      returnedReference = runtime.lastReturnRef;
+      if (returnedReference) runtime.holdTemporaryReference(returnedReference);
+    }
     target.captureReturn?.(result);
   } catch (error) {
     failed = true;
@@ -335,7 +342,7 @@ function invokeNative(
       for (const ref of held.references) ref.releaseWithoutGc();
     }
   }
-  runtime.lastReturnRef = undefined;
+  runtime.lastReturnRef = returnedReference;
   return result;
 }
 
