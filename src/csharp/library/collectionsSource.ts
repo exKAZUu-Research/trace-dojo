@@ -99,6 +99,7 @@ namespace System.Collections.Generic {
     public System.Collections.ObjectModel.ReadOnlyCollection<T> AsReadOnly();
     public int BinarySearch(T item);
     public int BinarySearch(T item, IComparer<T>? comparer);
+    public int BinarySearch(int index, int count, T item, IComparer<T>? comparer);
     public void Clear();
     public bool Contains(T item);
     public List<TOutput> ConvertAll<TOutput>(Converter<T, TOutput> converter);
@@ -475,6 +476,7 @@ namespace System.Linq {
     public static TSource? LastOrDefault<TSource>(this IEnumerable<TSource> source);
     public static TSource LastOrDefault<TSource>(this IEnumerable<TSource> source, TSource defaultValue);
     public static TSource? LastOrDefault<TSource>(this IEnumerable<TSource> source, Func<TSource, bool> predicate);
+    public static TSource LastOrDefault<TSource>(this IEnumerable<TSource> source, Func<TSource, bool> predicate, TSource defaultValue);
     public static long LongCount<TSource>(this IEnumerable<TSource> source);
     public static decimal Max(this IEnumerable<decimal> source);
     public static double Max(this IEnumerable<double> source);
@@ -523,7 +525,9 @@ namespace System.Linq {
     public static TSource Single<TSource>(this IEnumerable<TSource> source);
     public static TSource Single<TSource>(this IEnumerable<TSource> source, Func<TSource, bool> predicate);
     public static TSource? SingleOrDefault<TSource>(this IEnumerable<TSource> source);
+    public static TSource SingleOrDefault<TSource>(this IEnumerable<TSource> source, TSource defaultValue);
     public static TSource? SingleOrDefault<TSource>(this IEnumerable<TSource> source, Func<TSource, bool> predicate);
+    public static TSource SingleOrDefault<TSource>(this IEnumerable<TSource> source, Func<TSource, bool> predicate, TSource defaultValue);
     public static IEnumerable<TSource> Skip<TSource>(this IEnumerable<TSource> source, int count);
     public static IEnumerable<TSource> SkipLast<TSource>(this IEnumerable<TSource> source, int count);
     public static IEnumerable<TSource> SkipWhile<TSource>(this IEnumerable<TSource> source, Func<TSource, bool> predicate);
@@ -570,6 +574,10 @@ namespace System.Linq {
     public static IEnumerable<TSource> Where<TSource>(this IEnumerable<TSource> source, Func<TSource, int, bool> predicate);
     public static IEnumerable<(TFirst First, TSecond Second)> Zip<TFirst, TSecond>(this IEnumerable<TFirst> first, IEnumerable<TSecond> second);
     public static IEnumerable<TResult> Zip<TFirst, TSecond, TResult>(this IEnumerable<TFirst> first, IEnumerable<TSecond> second, Func<TFirst, TSecond, TResult> resultSelector);
+    public static IEnumerable<(TFirst First, TSecond Second, TThird Third)> Zip<TFirst, TSecond, TThird>(this IEnumerable<TFirst> first, IEnumerable<TSecond> second, IEnumerable<TThird> third);
+    public static IEnumerable<KeyValuePair<TKey, TAccumulate>> AggregateBy<TSource, TKey, TAccumulate>(this IEnumerable<TSource> source, Func<TSource, TKey> keySelector, TAccumulate seed, Func<TAccumulate, TSource, TAccumulate> func, IEqualityComparer<TKey>? keyComparer = null) where TKey : notnull;
+    public static IEnumerable<KeyValuePair<TKey, TAccumulate>> AggregateBy<TSource, TKey, TAccumulate>(this IEnumerable<TSource> source, Func<TSource, TKey> keySelector, Func<TKey, TAccumulate> seedSelector, Func<TAccumulate, TSource, TAccumulate> func, IEqualityComparer<TKey>? keyComparer = null) where TKey : notnull;
+    public static bool TryGetNonEnumeratedCount<TSource>(this IEnumerable<TSource> source, out int count);
   }
 }
 
@@ -606,6 +614,7 @@ namespace System.Text {
     public StringBuilder();
     public StringBuilder(int capacity);
     public StringBuilder(string? value);
+    public StringBuilder(string? value, int capacity);
     public int Length { get; set; }
     public int Capacity { get; set; }
     public char this[int index] { get; set; }

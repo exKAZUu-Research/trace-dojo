@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 663 -- The nativesLinq module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 786 -- The nativesLinq module keeps one stage of the C# interpreter together.
 import { CsDecimal } from '../decimal';
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { arithmetic, PendingException } from '../numeric';
@@ -6,10 +6,10 @@ import { runtimeTypeName } from '../objects';
 import type { NativeState } from '../runtime';
 import { type NamedType, nullableUnderlying, specialOf, type SpecialType, type Type } from '../types';
 import { CsArray, CsBox, CsObject, CsStruct, type Value } from '../values';
-import { iterate, LibraryEnumerator } from './iteration';
+import { isEnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { comparisonOf, type Equality, equalityOf, HashState, ListState, newList } from './nativesCollections';
 import { stableSort } from './sort';
-import { evaluatorOf, fail, failNull, failOutOfRange, libraryType, newArray } from './support';
+import { evaluatorOf, fail, failNull, failOutOfRange, libraryType, newArray, refOf } from './support';
 
 /** The message of LINQ's argument errors, which name no value. */
 const OUT_OF_RANGE = 'Specified argument was out of the range of valid values.';
@@ -31,6 +31,11 @@ export class QueryState implements NativeState {
     readonly ordering?: { source: Value; keys: SortKey[] }
   ) {}
 
+  /** What .NET's iterator class implements beyond `IEnumerable<T>`, which `Select`, `Skip`, and `Take` look for. */
+  shape?: QueryShape;
+  /** For `Skip` and `Take`, the items skipped and taken from the source, which tell the count without enumerating. */
+  bounds?: { skipped: number; taken: number | undefined };
+
   enumerate(): Iterable<Value> {
     return this.run();
   }
@@ -39,6 +44,15 @@ export class QueryState implements NativeState {
     return this.holds;
   }
 }
+
+/**
+ * An iterator that is an `IList<T>`: `Range` and `Repeat`, which `Skip` and `Take` narrow to another such iterator,
+ * or `Skip` and `Take` of a list.
+ */
+type QueryShape =
+  | { kind: 'range'; start: number; count: number }
+  | { kind: 'repeat'; element: Value; count: number }
+  | { kind: 'list' };
 
 interface SortKey {
   select: (value: Value) => Value;
@@ -64,9 +78,138 @@ function iteratorName(name: string, types: Type[]): string {
   return `System.Linq.Enumerable+${name}\`${types.length}[${types.map(runtimeTypeName).join(',')}]`;
 }
 
-/** Whether a source is an array or a list, for which .NET's iterators have their own classes. */
+/**
+ * The name of a LINQ iterator that the C# compiler generates from a `yield` method, numbered as in .NET 10's
+ * System.Linq, such as `System.Linq.Enumerable+<SkipWhileIterator>d__281\`1[System.Int32]`.
+ */
+function generatedIterator(call: NativeCall, method: string, number: number): string {
+  return iteratorName(`<${method}>d__${number}`, call.typeArgs);
+}
+
+/** Whether a sequence is an `IEnumerable<T>` of a type, which `Cast` and `OfType` return as they are. */
+function isEnumerableOf(call: NativeCall, items: Value, type: Type): boolean {
+  return evaluatorOf(call).isInstanceOf(items, libraryType(call, 'System.Collections.Generic.IEnumerable', [type]));
+}
+
+/** Whether a sequence is a non-generic `ICollection`, as .NET's collections other than HashSet and the iterators are. */
+function isNonGenericCollection(call: NativeCall, items: Value): boolean {
+  if (items instanceof CsArray) return true;
+  if (!(items instanceof CsObject)) return false;
+  const { native } = items;
+  if (native instanceof QueryState || (native instanceof HashState && native.valueType === undefined)) return false;
+  if (native !== undefined) return true;
+  return evaluatorOf(call).isInstanceOf(items, libraryType(call, 'System.Collections.ICollection'));
+}
+
+/** Whether a source is an `IList<T>`, for which .NET's iterators have their own classes. */
 function isList(value: Value): boolean {
+  return isArrayOrList(value) || shapeOf(value) !== undefined;
+}
+
+/** Whether a source is an array or a `List<T>`, which `Where` specializes, unlike the LINQ iterators that are lists. */
+function isArrayOrList(value: Value): boolean {
   return value instanceof CsArray || (value instanceof CsObject && value.native instanceof ListState);
+}
+
+function shapeOf(value: Value): QueryShape | undefined {
+  return value instanceof CsObject && value.native instanceof QueryState ? value.native.shape : undefined;
+}
+
+function isEmptyArray(value: Value): boolean {
+  return value instanceof CsArray && value.values.length === 0;
+}
+
+/** `Range` or `Repeat`, which an empty count makes an empty array. */
+function fixedSequence(call: NativeCall, shape: Extract<QueryShape, { kind: 'range' | 'repeat' }>): Value {
+  const elementType = shape.kind === 'range' ? libraryType(call, 'System.Int32') : call.typeArgs[0];
+  if (shape.count <= 0) return newArray(call, elementType, []);
+  const object = query(
+    call,
+    elementType,
+    iteratorName(shape.kind === 'range' ? 'RangeIterator' : 'RepeatIterator', [elementType]),
+    shape.kind === 'repeat' ? [shape.element] : [],
+    function* () {
+      for (let index = 0; index < shape.count; index++)
+        yield shape.kind === 'range' ? shape.start + index : shape.element;
+    }
+  );
+  (object.native as QueryState).shape = shape;
+  return object;
+}
+
+/** `Skip`, which returns a LINQ iterator itself for no count, and narrows `Range` and `Repeat`. */
+function skip(call: NativeCall, items: Value, count: number): Value {
+  const all = source(call, items);
+  if (isEmptyArray(items)) return newArray(call, call.typeArgs[0], []);
+  if (count <= 0 && items instanceof CsObject && items.native instanceof QueryState) return items;
+  const shape = shapeOf(items);
+  if (shape?.kind === 'range')
+    return fixedSequence(call, { kind: 'range', start: shape.start + count, count: shape.count - count });
+  if (shape?.kind === 'repeat') return fixedSequence(call, { ...shape, count: shape.count - count });
+  return skipTake(call, items, all, Math.max(count, 0), undefined);
+}
+
+/** .NET's `IListSkipTakeIterator` or `IEnumerableSkipTakeIterator` over the items from `skipped` on, `taken` of them. */
+function skipTake(
+  call: NativeCall,
+  items: Value,
+  all: Iterable<Value>,
+  skipped: number,
+  taken: number | undefined
+): Value {
+  const isListSource = isList(items);
+  const object = query(
+    call,
+    call.typeArgs[0],
+    iteratorName(isListSource ? 'IListSkipTakeIterator' : 'IEnumerableSkipTakeIterator', [call.typeArgs[0]]),
+    [items],
+    function* () {
+      if (taken !== undefined && taken <= 0) return;
+      let index = 0;
+      // Stopping right after the last item taken keeps a lazy source from producing one more.
+      for (const item of all) {
+        if (index++ < skipped) continue;
+        yield item;
+        if (taken !== undefined && index >= skipped + taken) return;
+      }
+    }
+  );
+  const state = object.native as QueryState;
+  if (isListSource) state.shape = { kind: 'list' };
+  state.bounds = { skipped, taken };
+  return object;
+}
+
+/**
+ * The count that `TryGetNonEnumeratedCount` finds without enumerating, as .NET's collections and the LINQ iterators
+ * that know theirs give it, or undefined.
+ */
+// code-gauge-allow functionCognitiveComplexity 23 -- Each branch handles one kind of .NET iterator that knows its count.
+function cheapCount(call: NativeCall, items: Value): number | undefined {
+  if (items instanceof CsArray) return items.values.length;
+  if (!(items instanceof CsObject) || items.native === undefined) return undefined;
+  const { native } = items;
+  if (!(native instanceof QueryState)) return isEnumerableState(native) ? [...native.enumerate()].length : undefined;
+  if (native.shape?.kind === 'range' || native.shape?.kind === 'repeat') return native.shape.count;
+  if (native.ordering) return cheapCount(call, native.ordering.source);
+  const [first, second] = native.holds;
+  if (native.bounds) {
+    const total = cheapCount(call, first);
+    if (total === undefined) return undefined;
+    const rest = Math.max(0, total - native.bounds.skipped);
+    return native.bounds.taken === undefined ? rest : Math.min(rest, native.bounds.taken);
+  }
+  const name = native.displayName;
+  if (name.includes('+ReverseIterator') || name.includes('+CastICollectionIterator')) return cheapCount(call, first);
+  if (name.includes('+AppendPrepend1Iterator')) {
+    const count = cheapCount(call, first);
+    return count === undefined ? undefined : count + 1;
+  }
+  if (name.includes('+Concat2Iterator')) {
+    const [a, b] = [cheapCount(call, first), cheapCount(call, second)];
+    return a === undefined || b === undefined ? undefined : a + b;
+  }
+  return undefined;
 }
 
 function delegateCall(call: NativeCall, delegate: Value, name: string): (...args: Value[]) => Value {
@@ -464,9 +607,13 @@ const linq: Record<string, NativeMethod> = {
     const target = call.typeArgs[0];
     const evaluator = evaluatorOf(call);
     const all = source(call, items as Value);
+    if (isEnumerableOf(call, items as Value, target)) return items as Value;
     // The elements of a collection of a value type come unboxed, which Cast sees in their boxes.
     const elementType = elementTypeOf(items as Value);
-    return query(call, target, iteratorName('CastICollectionIterator', [target]), [items as Value], function* () {
+    const name = isNonGenericCollection(call, items as Value)
+      ? iteratorName('CastICollectionIterator', [target])
+      : `System.Linq.Enumerable+<CastIterator>d__36\`1[${runtimeTypeName(target)}]`;
+    return query(call, target, name, [items as Value], function* () {
       for (const item of all) {
         const boxed =
           elementType && typeof item !== 'object' && typeof item !== 'string' ? new CsBox(elementType, item) : item;
@@ -483,6 +630,9 @@ const linq: Record<string, NativeMethod> = {
     const target = call.typeArgs[0];
     const evaluator = evaluatorOf(call);
     const all = source(call, items as Value);
+    // A sequence of a value type has no nulls to drop, so .NET returns it as it is.
+    const isValueType = target.kind === 'named' && target.symbol.isValueType && !nullableUnderlying(target);
+    if (isValueType && isEnumerableOf(call, items as Value, target)) return items as Value;
     return query(call, target, iteratorName('OfTypeIterator', [target]), [items as Value], function* () {
       for (const item of all)
         if (item !== undefined && evaluator.isInstanceOf(item, target))
@@ -553,15 +703,10 @@ const linq: Record<string, NativeMethod> = {
       libraryType(call, 'System.Int32'),
     ]);
     const all = source(call, items as Value);
-    return query(
-      call,
-      pairType,
-      `System.Linq.Enumerable+<CountByIterator>d__49\`2[${runtimeTypeName(call.typeArgs[0])},${runtimeTypeName(call.typeArgs[1])}]`,
-      [items as Value],
-      () =>
-        groupsOf(call, all, keyOf, (item) => item, (comparer as Value | undefined) ?? undefined).map(
-          (group) => new CsStruct(pairType, [group.key, group.elements.length])
-        )
+    return query(call, pairType, generatedIterator(call, 'CountByIterator', 53), [items as Value], () =>
+      groupsOf(call, all, keyOf, (item) => item, (comparer as Value | undefined) ?? undefined).map(
+        (group) => new CsStruct(pairType, [group.key, group.elements.length])
+      )
     );
   },
   [`${ENUMERABLE}.DefaultIfEmpty`]: (call, _receiver, args) => {
@@ -601,7 +746,7 @@ const linq: Record<string, NativeMethod> = {
     return query(
       call,
       call.typeArgs[0],
-      `System.Linq.Enumerable+<DistinctByIterator>d__75\`2[${runtimeTypeName(call.typeArgs[0])},${runtimeTypeName(call.typeArgs[1])}]`,
+      generatedIterator(call, 'DistinctByIterator', 67),
       [items as Value],
       function* () {
         const seen = seenSet(equalityOf(call, undefined));
@@ -641,7 +786,7 @@ const linq: Record<string, NativeMethod> = {
     return query(
       call,
       call.typeArgs[0],
-      'System.Linq.Enumerable+<UnionByIterator>d__0',
+      generatedIterator(call, 'UnionByIterator', 344),
       [first as Value, second as Value],
       function* () {
         const seen = seenSet(equalityOf(call, undefined));
@@ -720,7 +865,7 @@ const linq: Record<string, NativeMethod> = {
     return query(
       call,
       call.typeArgs[3],
-      `System.Linq.Enumerable+<GroupJoinIterator>d__0`,
+      generatedIterator(call, 'GroupJoinIterator', 113),
       [outer as Value, inner as Value],
       function* () {
         const groups = groupsOf(call, inners, innerKeyOf, (item) => item, undefined);
@@ -744,7 +889,7 @@ const linq: Record<string, NativeMethod> = {
     return query(
       call,
       call.typeArgs[3],
-      `System.Linq.Enumerable+<JoinIterator>d__0`,
+      generatedIterator(call, 'JoinIterator', 126),
       [outer as Value, inner as Value],
       function* () {
         const groups = groupsOf(call, inners, innerKeyOf, (item) => item, undefined);
@@ -764,7 +909,7 @@ const linq: Record<string, NativeMethod> = {
     return query(
       call,
       tupleTypeOf(call, types),
-      `System.Linq.Enumerable+<IndexIterator>d__0\`1[${runtimeTypeName(call.typeArgs[0])}]`,
+      generatedIterator(call, 'IndexIterator', 115),
       [items as Value],
       function* () {
         let index = 0;
@@ -785,27 +930,11 @@ const linq: Record<string, NativeMethod> = {
   [`${ENUMERABLE}.Range`]: (call, _receiver, [start, count]) => {
     if ((count as number) < 0 || (start as number) + (count as number) - 1 > 2_147_483_647)
       failOutOfRange(call, 'count', OUT_OF_RANGE);
-    return query(
-      call,
-      libraryType(call, 'System.Int32'),
-      iteratorName('RangeIterator', [libraryType(call, 'System.Int32')]),
-      [],
-      function* () {
-        for (let index = 0; index < (count as number); index++) yield (start as number) + index;
-      }
-    );
+    return fixedSequence(call, { kind: 'range', start: start as number, count: count as number });
   },
   [`${ENUMERABLE}.Repeat`]: (call, _receiver, [element, count]) => {
     if ((count as number) < 0) failOutOfRange(call, 'count', OUT_OF_RANGE);
-    return query(
-      call,
-      call.typeArgs[0],
-      iteratorName('RepeatIterator', [call.typeArgs[0]]),
-      [element as Value],
-      function* () {
-        for (let index = 0; index < (count as number); index++) yield element as Value;
-      }
-    );
+    return fixedSequence(call, { kind: 'repeat', element: element as Value, count: count as number });
   },
   [`${ENUMERABLE}.Reverse`]: (call, _receiver, [items]) => {
     const all = source(call, items as Value);
@@ -868,27 +997,14 @@ const linq: Record<string, NativeMethod> = {
       )
     );
   },
-  [`${ENUMERABLE}.Skip`]: (call, _receiver, [items, count]) => {
-    const all = source(call, items as Value);
-    return query(
-      call,
-      call.typeArgs[0],
-      iteratorName(isList(items as Value) ? 'IListSkipTakeIterator' : 'IEnumerableSkipTakeIterator', [
-        call.typeArgs[0],
-      ]),
-      [items as Value],
-      function* () {
-        let index = 0;
-        for (const item of all) if (index++ >= (count as number)) yield item;
-      }
-    );
-  },
+  [`${ENUMERABLE}.Skip`]: (call, _receiver, [items, count]) => skip(call, items as Value, count as number),
   [`${ENUMERABLE}.SkipLast`]: (call, _receiver, [items, count]) => {
     const all = source(call, items as Value);
+    if ((count as number) <= 0) return skip(call, items as Value, 0);
     return query(
       call,
       call.typeArgs[0],
-      `System.Linq.Enumerable+<SkipLastIterator>d__0\`1[${runtimeTypeName(call.typeArgs[0])}]`,
+      generatedIterator(call, 'TakeRangeFromEndIterator', 316),
       [items as Value],
       () => {
         const buffered = [...all];
@@ -903,7 +1019,7 @@ const linq: Record<string, NativeMethod> = {
     return query(
       call,
       call.typeArgs[0],
-      `System.Linq.Enumerable+<SkipWhileIterator>d__0\`1[${runtimeTypeName(call.typeArgs[0])}]`,
+      generatedIterator(call, 'SkipWhileIterator', withIndex ? 283 : 281),
       [items as Value],
       function* () {
         let skipping = true;
@@ -919,29 +1035,19 @@ const linq: Record<string, NativeMethod> = {
   [`${ENUMERABLE}.Sum`]: (call, _receiver, args) => sum(call, args as Value[]),
   [`${ENUMERABLE}.Take`]: (call, _receiver, [items, count]) => {
     const all = source(call, items as Value);
-    return query(
-      call,
-      call.typeArgs[0],
-      iteratorName(isList(items as Value) ? 'IListSkipTakeIterator' : 'IEnumerableSkipTakeIterator', [
-        call.typeArgs[0],
-      ]),
-      [items as Value],
-      function* () {
-        if ((count as number) <= 0) return;
-        let index = 0;
-        for (const item of all) {
-          yield item;
-          if (++index >= (count as number)) return;
-        }
-      }
-    );
+    const shape = shapeOf(items as Value);
+    if ((count as number) <= 0 || isEmptyArray(items as Value)) return newArray(call, call.typeArgs[0], []);
+    if (shape?.kind === 'range' || shape?.kind === 'repeat')
+      return fixedSequence(call, { ...shape, count: Math.min(shape.count, count as number) });
+    return skipTake(call, items as Value, all, 0, count as number);
   },
   [`${ENUMERABLE}.TakeLast`]: (call, _receiver, [items, count]) => {
     const all = source(call, items as Value);
+    if ((count as number) <= 0) return newArray(call, call.typeArgs[0], []);
     return query(
       call,
       call.typeArgs[0],
-      `System.Linq.Enumerable+<TakeLastIterator>d__0\`1[${runtimeTypeName(call.typeArgs[0])}]`,
+      generatedIterator(call, 'TakeRangeFromEndIterator', 316),
       [items as Value],
       () => {
         const buffered = [...all];
@@ -956,7 +1062,7 @@ const linq: Record<string, NativeMethod> = {
     return query(
       call,
       call.typeArgs[0],
-      `System.Linq.Enumerable+<TakeWhileIterator>d__0\`1[${runtimeTypeName(call.typeArgs[0])}]`,
+      generatedIterator(call, 'TakeWhileIterator', withIndex ? 320 : 318),
       [items as Value],
       function* () {
         let index = 0;
@@ -1017,14 +1123,64 @@ const linq: Record<string, NativeMethod> = {
     const withIndex = (call.method.parameters[1].type as NamedType).args.length === 3;
     const all = source(call, items as Value);
     const name = withIndex
-      ? `System.Linq.Enumerable+<WhereIterator>d__0\`1[${runtimeTypeName(call.typeArgs[0])}]`
-      : iteratorName(isList(items as Value) ? 'SizeOptIListWhereIterator' : 'IEnumerableWhereIterator', [
+      ? generatedIterator(call, 'WhereIterator', 350)
+      : iteratorName(isArrayOrList(items as Value) ? 'SizeOptIListWhereIterator' : 'IEnumerableWhereIterator', [
           call.typeArgs[0],
         ]);
     return query(call, call.typeArgs[0], name, [items as Value], function* () {
       let index = 0;
       for (const item of all) if (withIndex ? test(item, index++) : test(item)) yield item;
     });
+  },
+  [`${ENUMERABLE}.Zip(IEnumerable<TFirst>, IEnumerable<TSecond>, IEnumerable<TThird>)`]: (call, _receiver, args) => {
+    const [first, second, third] = args as Value[];
+    const sources = [source(call, first, 'first'), source(call, second, 'second'), source(call, third, 'third')];
+    const types = call.typeArgs;
+    return query(
+      call,
+      tupleTypeOf(call, types),
+      generatedIterator(call, 'ZipIterator', 363),
+      [first, second, third],
+      function* () {
+        const iterators = sources.map((items) => items[Symbol.iterator]());
+        for (;;) {
+          const values: Value[] = [];
+          for (const iterator of iterators) {
+            const next = iterator.next();
+            if (next.done) return;
+            values.push(next.value);
+          }
+          yield tuple(call, types, values);
+        }
+      }
+    );
+  },
+  [`${ENUMERABLE}.AggregateBy`]: (call, _receiver, [items, keySelector, seed, func, comparer]) => {
+    const keyOf = delegateCall(call, keySelector as Value, 'keySelector');
+    const accumulate = delegateCall(call, func as Value, 'func');
+    const hasSeedSelector = (call.method.parameters[2].type as NamedType).symbol.kind === 'delegate';
+    const seedOf = hasSeedSelector ? delegateCall(call, seed as Value, 'seedSelector') : () => seed as Value;
+    const [, keyType, accumulateType] = call.typeArgs;
+    const pairType = libraryType(call, 'System.Collections.Generic.KeyValuePair', [keyType, accumulateType]);
+    const all = source(call, items as Value);
+    return query(
+      call,
+      pairType,
+      generatedIterator(call, 'AggregateByIterator', hasSeedSelector ? 51 : 50),
+      [items as Value],
+      () =>
+        groupsOf(call, all, keyOf, (item) => item, (comparer as Value | undefined) ?? undefined).map((group) => {
+          let accumulated = seedOf(group.key);
+          for (const element of group.elements) accumulated = accumulate(accumulated, element);
+          return new CsStruct(pairType, [group.key, accumulated]);
+        })
+    );
+  },
+  [`${ENUMERABLE}.TryGetNonEnumeratedCount`]: (call, _receiver, [items, count]) => {
+    if (items === undefined) failNull('source');
+    const found = cheapCount(call, items as Value);
+    refOf(count).set(found ?? 0);
+    return found !== undefined;
   },
   [`${ENUMERABLE}.Zip`]: (call, _receiver, args) => {
     const [first, second, resultSelector] = args as Value[];
@@ -1067,32 +1223,28 @@ function setOperation(
 ): CsObject {
   const a = source(call, first, 'first');
   const b = source(call, second, 'second');
-  return query(
-    call,
-    call.typeArgs[0],
-    `System.Linq.Enumerable+<${operation}Iterator>d__0\`1[${runtimeTypeName(call.typeArgs[0])}]`.replace(
-      '<UnionIterator>d__0',
-      'UnionIterator2'
-    ),
-    [first, second],
-    function* () {
-      const equality = equalityOf(call, undefined);
-      const seen = seenSet(equality);
-      if (operation === 'Union') {
-        for (const item of a) if (seen.add(item)) yield item;
-        for (const item of b) if (seen.add(item)) yield item;
-        return;
-      }
-      const others = seenSet(equality);
-      for (const item of b) others.add(item);
-      for (const item of a) {
-        const isInSecond = !others.add(item);
-        if (operation === 'Except') {
-          if (!isInSecond && seen.add(item)) yield item;
-        } else if (isInSecond && seen.add(item)) yield item;
-      }
+  return query(call, call.typeArgs[0], setIteratorName(call, operation), [first, second], function* () {
+    const equality = equalityOf(call, undefined);
+    const seen = seenSet(equality);
+    if (operation === 'Union') {
+      for (const item of a) if (seen.add(item)) yield item;
+      for (const item of b) if (seen.add(item)) yield item;
+      return;
     }
-  );
+    const others = seenSet(equality);
+    for (const item of b) others.add(item);
+    for (const item of a) {
+      const isInSecond = !others.add(item);
+      if (operation === 'Except') {
+        if (!isInSecond && seen.add(item)) yield item;
+      } else if (isInSecond && seen.add(item)) yield item;
+    }
+  });
+}
+
+function setIteratorName(call: NativeCall, operation: 'Except' | 'Intersect' | 'Union'): string {
+  if (operation === 'Union') return iteratorName('UnionIterator2', call.typeArgs);
+  return generatedIterator(call, `${operation}Iterator`, operation === 'Except' ? 88 : 121);
 }
 
 function setOperationBy(
@@ -1108,7 +1260,7 @@ function setOperationBy(
   return query(
     call,
     call.typeArgs[0],
-    `System.Linq.Enumerable+<${operation}ByIterator>d__0`,
+    generatedIterator(call, `${operation}ByIterator`, operation === 'Except' ? 89 : 122),
     [first, second],
     function* () {
       const equality = equalityOf(call, undefined);

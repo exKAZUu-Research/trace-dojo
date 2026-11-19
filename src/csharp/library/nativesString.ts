@@ -1,10 +1,11 @@
-// code-gauge-allow-file fileNcss 515 -- The nativesString module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 580 -- The nativesString module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { compareCulture, primitiveHash, unboxed } from '../objects';
 import type { NativeState } from '../runtime';
 import { specialOf, type Type } from '../types';
-import { type CsArray, CsObject, type Value, type VariableReference } from '../values';
+import { type CsArray, CsBox, CsObject, type Value, type VariableReference } from '../values';
+import { BuilderChunks } from './builderChunks';
 import { iterate } from './iteration';
 import { compositeFormat } from './nativesCore';
 import {
@@ -375,10 +376,23 @@ const stringNatives: Record<string, NativeMethod> = {
     if (typeof args[2] === 'number') return compareWith(a, b, args[2]);
     return compareCulture(a, b);
   },
-  [`${STRING}.CompareOrdinal`]: (_call, _receiver, [a, b]) => {
+  [`${STRING}.CompareOrdinal(string?, string?)`]: (_call, _receiver, [a, b]) => {
     if (a === undefined) return b === undefined ? 0 : -1;
     if (b === undefined) return 1;
     return ordinalDifference(a as string, b as string);
+  },
+  [`${STRING}.CompareOrdinal(string?, int, string?, int, int)`]: (call, _receiver, args) => {
+    const [a, indexA, b, indexB, length] = args as [string | undefined, number, string | undefined, number, number];
+    if (a === undefined) return b === undefined ? 0 : -1;
+    if (b === undefined) return 1;
+    const message =
+      'Index was out of range. Must be non-negative and less than or equal to the size of the collection.';
+    if (length < 0) failOutOfRange(call, 'length', 'Count cannot be less than zero.');
+    if (indexA < 0 || indexB < 0) failOutOfRange(call, indexA < 0 ? 'indexA' : 'indexB', message);
+    const lengthA = Math.min(length, a.length - indexA);
+    const lengthB = Math.min(length, b.length - indexB);
+    if (lengthA < 0 || lengthB < 0) failOutOfRange(call, lengthA < 0 ? 'indexA' : 'indexB', message);
+    return ordinalDifference(a.slice(indexA, indexA + lengthA), b.slice(indexB, indexB + lengthB));
   },
   [`${STRING}.Concat`]: (call, _receiver, args) => {
     const parameters = call.method.parameters;
@@ -539,15 +553,26 @@ const CHAR = 'System.Char';
 const charTest =
   (test: (char: string) => boolean): NativeMethod =>
   (_call, _receiver, args) => {
-    const [value, index] = args as Value[];
-    if (typeof value === 'string') return test(value.charAt(index as number));
-    return test(String.fromCodePoint(value as number));
+    if (args.length === 1) return test(String.fromCodePoint(args[0] as number));
+    return test(charOfString(args[0] as Value, args[1] as number));
   };
+
+/** The character at an index of a string that `char.IsDigit(s, index)` and its kin test. */
+function charOfString(text: Value, index: number): string {
+  if (text === undefined) failNull('s');
+  if (index < 0 || index >= (text as string).length)
+    fail('System.ArgumentOutOfRangeException', 'Specified argument was out of the range of valid values.', 'index');
+  return (text as string).charAt(index);
+}
 
 defineNatives({
   [`${CHAR}.ToString()`]: (_call, receiver) => String.fromCodePoint(unboxed(receiver) as number),
   [`${CHAR}.ToString(char)`]: (_call, _receiver, [value]) => String.fromCodePoint(value as number),
-  [`${CHAR}.Equals`]: (_call, receiver, [other]) => unboxed(receiver) === unboxed(other as Value),
+  // `Equals(object)` receives a box, which must hold a char.
+  [`${CHAR}.Equals`]: (_call, receiver, [other]) =>
+    other instanceof CsBox
+      ? specialOf(other.type) === 'char' && unboxed(receiver) === other.value
+      : unboxed(receiver) === other,
   [`${CHAR}.GetHashCode`]: (_call, receiver) => {
     const code = unboxed(receiver) as number;
     return code | (code << 16);
@@ -597,8 +622,31 @@ defineNatives({
     return ok;
   },
   [`${CHAR}.ConvertFromUtf32`]: (_call, _receiver, [code]) => String.fromCodePoint(code as number),
-  [`${CHAR}.ConvertToUtf32`]: (_call, _receiver, [high, low]) =>
+  [`${CHAR}.ConvertToUtf32(char, char)`]: (_call, _receiver, [high, low]) =>
     ((high as number) - 0xd8_00) * 0x4_00 + ((low as number) - 0xdc_00) + 0x1_00_00,
+  [`${CHAR}.ConvertToUtf32(string, int)`]: (call, _receiver, [text, index]) => {
+    if (text === undefined) failNull('s');
+    const value = text as string;
+    const position = index as number;
+    if (position < 0 || position >= value.length)
+      failOutOfRange(
+        call,
+        'index',
+        'Index was out of range. Must be non-negative and less than the size of the collection.'
+      );
+    const code = value.charCodeAt(position);
+    const invalid = (what: string): never =>
+      fail(
+        'System.ArgumentException',
+        `Found a ${what} at index: ${position}. The input may not be in this encoding, or may not contain valid Unicode (UTF-16) characters.`,
+        's'
+      );
+    if (code >= 0xdc_00 && code <= 0xdf_ff) invalid('low surrogate char without a preceding high surrogate');
+    if (code < 0xd8_00 || code > 0xdb_ff) return code;
+    const next = value.charCodeAt(position + 1);
+    if (!(next >= 0xdc_00 && next <= 0xdf_ff)) invalid('high surrogate char without a following low surrogate');
+    return (code - 0xd8_00) * 0x4_00 + (next - 0xdc_00) + 0x1_00_00;
+  },
 });
 
 /** A character's case mapping, which keeps characters whose mapping is longer than one character. */
@@ -735,12 +783,43 @@ defineNatives({
 
 const BUILDER = 'System.Text.StringBuilder';
 
-/** A StringBuilder's text, which `Append` and the other methods change in place. */
+/** A StringBuilder's text, which `Append` and the other methods change in place, and the chunks that hold it in .NET. */
 class BuilderState implements NativeState {
-  constructor(public text: string) {}
+  readonly chunks: BuilderChunks;
+
+  constructor(
+    public text: string,
+    capacity: number
+  ) {
+    this.chunks = new BuilderChunks(capacity, text.length);
+  }
 
   references(): Value[] {
     return [];
+  }
+
+  append(text: string): void {
+    this.text += text;
+    this.chunks.append(text.length);
+  }
+
+  insert(index: number, text: string): void {
+    this.text = this.text.slice(0, index) + text + this.text.slice(index);
+    this.chunks.insert(index, text.length);
+  }
+
+  remove(start: number, length: number): void {
+    this.text = this.text.slice(0, start) + this.text.slice(start + length);
+    this.chunks.remove(start, length);
+  }
+
+  setLength(length: number): void {
+    this.text = this.text.slice(0, length).padEnd(length, '\0');
+    this.chunks.setLength(length);
+  }
+
+  replace(oldValue: string, newValue: string, start: number, count: number): void {
+    this.text = this.chunks.replace(this.text, oldValue, newValue, start, count);
   }
 }
 
@@ -751,23 +830,37 @@ function builder(receiver: Value): BuilderState {
 function append(call: NativeCall, receiver: Value, text: string): Value {
   const state = builder(receiver);
   call.frame.runtime.allocateString(state.text.length + text.length, text.length);
-  state.text += text;
+  state.append(text);
   return receiver;
 }
 
 defineNatives({
-  [`${BUILDER}..ctor()`]: (_call, receiver) => setBuilder(receiver, ''),
-  [`${BUILDER}..ctor(int)`]: (_call, receiver) => setBuilder(receiver, ''),
-  [`${BUILDER}..ctor(string?)`]: (_call, receiver, [text]) => setBuilder(receiver, (text as string | undefined) ?? ''),
+  [`${BUILDER}..ctor()`]: (_call, receiver) => setBuilder(receiver, '', 0),
+  [`${BUILDER}..ctor(int)`]: (call, receiver, [capacity]) => {
+    if ((capacity as number) < 0) failNegative(call, 'capacity', capacity as number);
+    return setBuilder(receiver, '', capacity as number);
+  },
+  [`${BUILDER}..ctor(string?)`]: (_call, receiver, [text]) =>
+    setBuilder(receiver, (text as string | undefined) ?? '', 0),
+  [`${BUILDER}..ctor(string?, int)`]: (call, receiver, [text, capacity]) => {
+    if ((capacity as number) < 0) failNegative(call, 'capacity', capacity as number);
+    return setBuilder(receiver, (text as string | undefined) ?? '', capacity as number);
+  },
   [`${BUILDER}.get_Length`]: (_call, receiver) => builder(receiver).text.length,
   [`${BUILDER}.set_Length`]: (call, receiver, [length]) => {
     if ((length as number) < 0) failNegative(call, 'value', length as number);
-    const state = builder(receiver);
-    state.text = state.text.slice(0, length as number).padEnd(length as number, '\0');
+    builder(receiver).setLength(length as number);
     return;
   },
-  [`${BUILDER}.get_Capacity`]: (_call, receiver) => Math.max(16, builder(receiver).text.length),
-  [`${BUILDER}.set_Capacity`]: () => {},
+  [`${BUILDER}.get_Capacity`]: (_call, receiver) => builder(receiver).chunks.capacity,
+  [`${BUILDER}.set_Capacity`]: (call, receiver, [capacity]) => {
+    const state = builder(receiver);
+    if ((capacity as number) < 0) failNegative(call, 'value', capacity as number);
+    if ((capacity as number) < state.text.length)
+      failOutOfRange(call, 'value', 'capacity was less than the current size.');
+    state.chunks.setCapacity(capacity as number);
+    return;
+  },
   [`${BUILDER}.get_Item`]: (_call, receiver, [index]) => {
     const { text } = builder(receiver);
     if ((index as number) < 0 || (index as number) >= text.length)
@@ -807,8 +900,9 @@ defineNatives({
       return append(call, receiver, value.native.text);
     return append(call, receiver, textOf(call, value, parameterType(call, 0)));
   },
+  // `AppendLine` appends its text and the new line separately, which the chunks can tell apart.
   [`${BUILDER}.AppendLine`]: (call, receiver, args) =>
-    append(call, receiver, `${(args[0] as string | undefined) ?? ''}\n`),
+    append(call, append(call, receiver, (args[0] as string | undefined) ?? ''), '\n'),
   [`${BUILDER}.AppendFormat`]: (call, receiver, args) => append(call, receiver, formatCall(call, args as Value[])),
   [`${BUILDER}.AppendJoin`]: (call, receiver, args) => {
     const separator =
@@ -816,7 +910,7 @@ defineNatives({
     return append(call, receiver, joinValues(call, separator, args as Value[]));
   },
   [`${BUILDER}.Clear`]: (_call, receiver) => {
-    builder(receiver).text = '';
+    builder(receiver).setLength(0);
     return receiver;
   },
   [`${BUILDER}.Equals`]: (_call, receiver, [other]) =>
@@ -836,7 +930,7 @@ defineNatives({
         : textOf(call, args[1] as Value, parameterType(call, 1));
     if (call.method.parameters[1].type.kind === 'named' && specialOf(call.method.parameters[1].type) === 'char')
       text = String.fromCodePoint(args[1] as number);
-    state.text = state.text.slice(0, index) + text + state.text.slice(index);
+    state.insert(index, text);
     return receiver;
   },
   [`${BUILDER}.Remove`]: (call, receiver, [start, length]) => {
@@ -849,7 +943,7 @@ defineNatives({
         'length',
         'Index was out of range. Must be non-negative and less than or equal to the size of the collection.'
       );
-    state.text = state.text.slice(0, start as number) + state.text.slice((start as number) + (length as number));
+    state.remove(start as number, length as number);
     return receiver;
   },
   [`${BUILDER}.Replace(char, char)`]: (_call, receiver, [from, to]) => {
@@ -861,7 +955,7 @@ defineNatives({
     if (from === undefined) failNull('oldValue');
     if (from === '') fail('System.ArgumentException', 'The value cannot be an empty string.', 'oldValue');
     const state = builder(receiver);
-    state.text = state.text.replaceAll(from as string, (to as string | undefined) ?? '');
+    state.replace(from as string, (to as string | undefined) ?? '', 0, state.text.length);
     return receiver;
   },
   [`${BUILDER}.Replace(char, char, int, int)`]: (call, receiver, [from, to, start, count]) => {
@@ -872,10 +966,10 @@ defineNatives({
   },
   [`${BUILDER}.Replace(string, string?, int, int)`]: (call, receiver, [from, to, start, count]) => {
     const state = builder(receiver);
-    const [before, middle, after] = builderRange(call, state.text, start as number, count as number);
+    builderRange(call, state.text, start as number, count as number);
     if (from === undefined) failNull('oldValue');
     if (from === '') fail('System.ArgumentException', 'The value cannot be an empty string.', 'oldValue');
-    state.text = `${before}${middle.replaceAll(from as string, (to as string | undefined) ?? '')}${after}`;
+    state.replace(from as string, (to as string | undefined) ?? '', start as number, count as number);
     return receiver;
   },
   [`${BUILDER}.ToString()`]: (_call, receiver) => builder(receiver).text,
@@ -889,8 +983,8 @@ defineNatives({
   },
 });
 
-function setBuilder(receiver: Value, text: string): Value {
-  (receiver as CsObject).native = new BuilderState(text);
+function setBuilder(receiver: Value, text: string, capacity: number): Value {
+  (receiver as CsObject).native = new BuilderState(text, capacity);
   return undefined;
 }
 

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 888 -- The nativesCollections module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 916 -- The nativesCollections module keeps one stage of the C# interpreter together.
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import { defaultCompare, environmentOf, hashOf, stringOf, valuesEqual } from '../objects';
@@ -308,11 +308,17 @@ const listNatives: Record<string, NativeMethod> = {
     readOnly.native = listOf(receiver);
     return readOnly;
   },
-  [`${LIST}.BinarySearch`]: (call, receiver, [value, comparer]) =>
-    binarySearch(
+  [`${LIST}.BinarySearch(T)`]: (call, receiver, [value]) =>
+    binarySearch(listOf(receiver).items, value as Value, comparisonOf(call, undefined)),
+  [`${LIST}.BinarySearch(T, IComparer<T>?)`]: (call, receiver, [value, comparer]) =>
+    binarySearch(listOf(receiver).items, value as Value, comparisonOf(call, comparer as Value)),
+  [`${LIST}.BinarySearch(int, int, T, IComparer<T>?)`]: (call, receiver, [index, count, value, comparer]) =>
+    rangeBinarySearch(
+      call,
       listOf(receiver).items,
+      { index: index as number, count: count as number, countName: 'count' },
       value as Value,
-      comparisonOf(call, (comparer as Value | undefined) ?? undefined)
+      comparer as Value
     ),
   [`${LIST}.Clear`]: (_call, receiver) => {
     const list = listOf(receiver);
@@ -577,6 +583,29 @@ const listNatives: Record<string, NativeMethod> = {
 defineNatives(listNatives);
 
 /** `List<T>`'s capacity, which starts at 4 and doubles. */
+/**
+ * `BinarySearch` within `count` items from an index, whose result counts from the start of the whole list; the count
+ * is named `count` for a list and `length` for an array.
+ */
+function rangeBinarySearch(
+  call: NativeCall,
+  items: Value[],
+  range: { index: number; count: number; countName: string },
+  value: Value,
+  comparer: Value
+): number {
+  const { index, count, countName } = range;
+  if (index < 0) failOutOfRange(call, 'index', 'Non-negative number required.');
+  if (count < 0) failOutOfRange(call, countName, 'Non-negative number required.');
+  if (items.length - index < count)
+    fail(
+      'System.ArgumentException',
+      'Offset and length were out of bounds for the array or count is greater than the number of elements from index to the end of the source collection.'
+    );
+  const found = binarySearch(items.slice(index, index + count), value, comparisonOf(call, comparer));
+  return found >= 0 ? found + index : ~(~found + index);
+}
+
 function binarySearch(items: Value[], value: Value, compare: Comparison): number {
   let low = 0;
   let high = items.length - 1;
@@ -1315,6 +1344,28 @@ defineNatives({
 
 const ARRAY = 'System.Array';
 
+/** `Array.LastIndexOf` over the `count` elements that end at `start`, searching backward. */
+function arrayLastIndexOf(call: NativeCall, values: Value[], value: Value, start: number, count: number): number {
+  if (values.length === 0) return -1;
+  if (start < 0 || start >= values.length)
+    failOutOfRange(
+      call,
+      'startIndex',
+      'Index was out of range. Must be non-negative and less than the size of the collection.'
+    );
+  if (count < 0 || start - count + 1 < 0) failCount(call);
+  const found = indexOfValue(call, values.slice(start - count + 1, start + 1), value, 0, true);
+  return found < 0 ? -1 : found + start - count + 1;
+}
+
+function failCount(call: NativeCall): never {
+  return failOutOfRange(
+    call,
+    'count',
+    'Count must be positive and count must refer to a location within the string/array/collection.'
+  );
+}
+
 function failStartIndex(call: NativeCall): never {
   return failOutOfRange(
     call,
@@ -1393,8 +1444,30 @@ defineNatives({
     enumerator.native = new LibraryEnumerator(boxed[Symbol.iterator](), [receiver]);
     return enumerator;
   },
-  [`${ARRAY}.BinarySearch`]: (call, _receiver, [array, value]) =>
+  [`${ARRAY}.BinarySearch(T[], T)`]: (call, _receiver, [array, value]) =>
     binarySearch(arrayOf(array as Value).values, value as Value, comparisonOf(call, undefined)),
+  [`${ARRAY}.BinarySearch(T[], T, IComparer<T>?)`]: (call, _receiver, [array, value, comparer]) =>
+    binarySearch(arrayOf(array as Value).values, value as Value, comparisonOf(call, comparer as Value)),
+  [`${ARRAY}.BinarySearch(T[], int, int, T)`]: (call, _receiver, [array, index, length, value]) =>
+    rangeBinarySearch(
+      call,
+      arrayOf(array as Value).values,
+      { index: index as number, count: length as number, countName: 'length' },
+      value as Value,
+      undefined
+    ),
+  [`${ARRAY}.BinarySearch(T[], int, int, T, IComparer<T>?)`]: (
+    call,
+    _receiver,
+    [array, index, length, value, comparer]
+  ) =>
+    rangeBinarySearch(
+      call,
+      arrayOf(array as Value).values,
+      { index: index as number, count: length as number, countName: 'length' },
+      value as Value,
+      comparer as Value
+    ),
   [`${ARRAY}.Clear(Array)`]: (call, _receiver, [array]) => {
     const target = arrayOf(array as Value);
     target.values.fill(evaluatorOf(call).defaultOf(elementTypeOf(target)));
@@ -1503,10 +1576,21 @@ defineNatives({
     if ((start as number) < 0 || (start as number) > values.length) failStartIndex(call);
     return indexOfValue(call, values, value as Value, start as number);
   },
+  [`${ARRAY}.IndexOf(T[], T, int, int)`]: (call, _receiver, [array, value, start, count]) => {
+    const { values } = arrayOf(array as Value);
+    const [from, length] = [start, count] as number[];
+    if (from < 0 || from > values.length) failStartIndex(call);
+    if (length < 0 || from + length > values.length) failCount(call);
+    return indexOfValue(call, values.slice(0, from + length), value as Value, from);
+  },
   [`${ARRAY}.IndexOf(Array, object?)`]: (call, _receiver, [array, value]) =>
     indexOfValue(call, arrayOf(array as Value).values, value as Value),
-  [`${ARRAY}.LastIndexOf`]: (call, _receiver, [array, value]) =>
+  [`${ARRAY}.LastIndexOf(T[], T)`]: (call, _receiver, [array, value]) =>
     indexOfValue(call, arrayOf(array as Value).values, value as Value, 0, true),
+  [`${ARRAY}.LastIndexOf(T[], T, int)`]: (call, _receiver, [array, value, start]) =>
+    arrayLastIndexOf(call, arrayOf(array as Value).values, value as Value, start as number, (start as number) + 1),
+  [`${ARRAY}.LastIndexOf(T[], T, int, int)`]: (call, _receiver, [array, value, start, count]) =>
+    arrayLastIndexOf(call, arrayOf(array as Value).values, value as Value, start as number, count as number),
   [`${ARRAY}.Resize`]: (call, _receiver, [reference, size]) => {
     if ((size as number) < 0) failOutOfRange(call, 'newSize', 'Non-negative number required.');
     const ref = refOf(reference);

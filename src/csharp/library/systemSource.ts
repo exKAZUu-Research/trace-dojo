@@ -136,6 +136,7 @@ namespace System {
     public static int Compare(string? strA, string? strB, StringComparison comparisonType);
     public static int Compare(string? strA, int indexA, string? strB, int indexB, int length);
     public static int CompareOrdinal(string? strA, string? strB);
+    public static int CompareOrdinal(string? strA, int indexA, string? strB, int indexB, int length);
     public static string Concat(object? arg0);
     public static string Concat(object? arg0, object? arg1);
     public static string Concat(object? arg0, object? arg1, object? arg2);
@@ -214,12 +215,20 @@ namespace System {
     public static bool IsLower(char c);
     public static bool IsLower(string s, int index);
     public static bool IsNumber(char c);
+    public static bool IsNumber(string s, int index);
     public static bool IsPunctuation(char c);
+    public static bool IsPunctuation(string s, int index);
     public static bool IsSeparator(char c);
+    public static bool IsSeparator(string s, int index);
     public static bool IsSurrogate(char c);
+    public static bool IsSurrogate(string s, int index);
     public static bool IsHighSurrogate(char c);
+    public static bool IsHighSurrogate(string s, int index);
     public static bool IsLowSurrogate(char c);
+    public static bool IsLowSurrogate(string s, int index);
     public static bool IsSymbol(char c);
+    public static bool IsSymbol(string s, int index);
+    public static bool IsControl(string s, int index);
     public static bool IsUpper(char c);
     public static bool IsUpper(string s, int index);
     public static bool IsWhiteSpace(char c);
@@ -233,6 +242,7 @@ namespace System {
     public static char ToUpperInvariant(char c);
     public static string ConvertFromUtf32(int utf32);
     public static int ConvertToUtf32(char highSurrogate, char lowSurrogate);
+    public static int ConvertToUtf32(string s, int index);
   }
 ` +
   [
@@ -281,6 +291,8 @@ namespace System {
     public static ${keyword} RotateRight(${keyword} value, int rotateAmount);
     public static bool IsNegative(${keyword} value);
     public static bool IsPositive(${keyword} value);
+    public static (${keyword} Quotient, ${keyword} Remainder) DivRem(${keyword} left, ${keyword} right);
+    public static ${keyword} CopySign(${keyword} value, ${keyword} sign);
   }`;
     })
     .join('\n') +
@@ -454,6 +466,9 @@ namespace System {
     public static double Atan2(double y, double x);
     public static double Atanh(double d);
     public static long BigMul(int a, int b);
+    public static ulong BigMul(uint a, uint b);
+    public static long BigMul(long a, long b, out long low);
+    public static ulong BigMul(ulong a, ulong b, out ulong low);
     public static double Cbrt(double d);
     public static decimal Ceiling(decimal d);
     public static double Ceiling(double a);
@@ -591,22 +606,28 @@ namespace System {
     public static bool ToBoolean(string? value);
     public static bool ToBoolean(int value);
     public static bool ToBoolean(double value);
+    public static bool ToBoolean(char value);
     public static char ToChar(int value);
     public static char ToChar(object? value);
     public static char ToChar(string value);
     public static char ToChar(byte value);
     public static char ToChar(long value);
+    public static char ToChar(bool value);
+    public static char ToChar(double value);
     public static byte ToByte(object? value);
     public static byte ToByte(string? value);
+    public static byte ToByte(string? value, int fromBase);
     public static byte ToByte(int value);
     public static byte ToByte(double value);
     public static byte ToByte(char value);
     public static sbyte ToSByte(object? value);
     public static sbyte ToSByte(string? value);
+    public static sbyte ToSByte(string? value, int fromBase);
     public static sbyte ToSByte(int value);
     public static sbyte ToSByte(double value);
     public static short ToInt16(object? value);
     public static short ToInt16(string? value);
+    public static short ToInt16(string? value, int fromBase);
     public static short ToInt16(int value);
     public static short ToInt16(double value);
     public static int ToInt32(object? value);
@@ -635,6 +656,7 @@ namespace System {
     public static long ToInt64(string? value, int fromBase);
     public static double ToDouble(object? value);
     public static double ToDouble(bool value);
+    public static double ToDouble(char value);
     public static double ToDouble(int value);
     public static double ToDouble(long value);
     public static double ToDouble(float value);
@@ -643,14 +665,17 @@ namespace System {
     public static double ToDouble(string? value);
     public static float ToSingle(object? value);
     public static float ToSingle(double value);
+    public static float ToSingle(char value);
     public static float ToSingle(string? value);
     public static decimal ToDecimal(object? value);
     public static decimal ToDecimal(int value);
+    public static decimal ToDecimal(char value);
     public static decimal ToDecimal(long value);
     public static decimal ToDecimal(double value);
     public static decimal ToDecimal(float value);
     public static decimal ToDecimal(string? value);
     public static string ToString(object? value);
+    public static string? ToString(string? value);
     public static string ToString(bool value);
     public static string ToString(char value);
     public static string ToString(int value);
@@ -817,6 +842,12 @@ namespace System {
   }
   public class Tuple<T1, T2> { public Tuple(T1 item1, T2 item2); public T1 Item1 { get; } public T2 Item2 { get; } public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); }
   public class Tuple<T1, T2, T3> { public Tuple(T1 item1, T2 item2, T3 item3); public T1 Item1 { get; } public T2 Item2 { get; } public T3 Item3 { get; } public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); }
+  public static class TupleExtensions {
+    public static Tuple<T1, T2> ToTuple<T1, T2>(this ValueTuple<T1, T2> value);
+    public static Tuple<T1, T2, T3> ToTuple<T1, T2, T3>(this ValueTuple<T1, T2, T3> value);
+    public static ValueTuple<T1, T2> ToValueTuple<T1, T2>(this Tuple<T1, T2> value);
+    public static ValueTuple<T1, T2, T3> ToValueTuple<T1, T2, T3>(this Tuple<T1, T2, T3> value);
+  }
   public static class Tuple {
     public static Tuple<T1, T2> Create<T1, T2>(T1 item1, T2 item2);
     public static Tuple<T1, T2, T3> Create<T1, T2, T3>(T1 item1, T2 item2, T3 item3);
@@ -835,6 +866,9 @@ namespace System {
     public void SetValue(object? value, int index);
     public System.Collections.IEnumerator GetEnumerator();
     public static int BinarySearch<T>(T[] array, T value);
+    public static int BinarySearch<T>(T[] array, T value, System.Collections.Generic.IComparer<T>? comparer);
+    public static int BinarySearch<T>(T[] array, int index, int length, T value);
+    public static int BinarySearch<T>(T[] array, int index, int length, T value, System.Collections.Generic.IComparer<T>? comparer);
     public static void Clear(Array array);
     public static void Clear(Array array, int index, int length);
     public static TOutput[] ConvertAll<TInput, TOutput>(TInput[] array, Converter<TInput, TOutput> converter);
@@ -853,8 +887,11 @@ namespace System {
     public static void ForEach<T>(T[] array, Action<T> action);
     public static int IndexOf<T>(T[] array, T value);
     public static int IndexOf<T>(T[] array, T value, int startIndex);
+    public static int IndexOf<T>(T[] array, T value, int startIndex, int count);
     public static int IndexOf(Array array, object? value);
     public static int LastIndexOf<T>(T[] array, T value);
+    public static int LastIndexOf<T>(T[] array, T value, int startIndex);
+    public static int LastIndexOf<T>(T[] array, T value, int startIndex, int count);
     public static void Resize<T>(ref T[]? array, int newSize);
     public static void Reverse(Array array);
     public static void Reverse(Array array, int index, int length);

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 647 -- The nativesCore module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 717 -- The nativesCore module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { TURTLE_METHOD_NAMES } from '../../interpreter/turtleWorld';
 import { CsDecimal } from '../decimal';
@@ -53,6 +53,7 @@ import {
   failOutOfRange,
   libraryType,
   newArray,
+  nullReference,
   parameterType,
   refOf,
   textOf,
@@ -252,7 +253,27 @@ for (const [name, special] of INTEGRAL) {
   const prefix = `System.${name}`;
   const [min, max] = integerRange(special);
   const fromBig = (value: bigint): Value => (isBigIntKind(special) ? value : Number(value));
+  const isSigned = min < 0n;
+  const width = (max + 1n).toString(2).length - 1 + (isSigned ? 1 : 0);
+  const bitsOf = (value: Value): bigint => BigInt.asUintN(width, toBig(value));
+  const fromBits = (bits: bigint): Value => fromBig(isSigned ? BigInt.asIntN(width, bits) : bits);
   Object.assign(parsers, {
+    [`${prefix}.PopCount`]: (_call: NativeCall, _receiver: Value, [value]: Value[]) =>
+      fromBig(BigInt([...bitsOf(value).toString(2)].filter((digit) => digit === '1').length)),
+    [`${prefix}.LeadingZeroCount`]: (_call: NativeCall, _receiver: Value, [value]: Value[]) =>
+      fromBig(BigInt(width - bitLength(bitsOf(value)))),
+    [`${prefix}.TrailingZeroCount`]: (_call: NativeCall, _receiver: Value, [value]: Value[]) => {
+      const bits = bitsOf(value);
+      return fromBig(BigInt(bits === 0n ? width : bits.toString(2).length - 1 - bits.toString(2).lastIndexOf('1')));
+    },
+    [`${prefix}.Log2`]: (call: NativeCall, _receiver: Value, [value]: Value[]) => {
+      if (toBig(value) < 0n) failOutOfRange(call, 'value', 'Non-negative number required.');
+      return fromBig(BigInt(Math.max(0, bitLength(bitsOf(value)) - 1)));
+    },
+    [`${prefix}.RotateLeft`]: (_call: NativeCall, _receiver: Value, [value, amount]: Value[]) =>
+      rotated(bitsOf(value), (amount as number) % width, width, fromBits),
+    [`${prefix}.RotateRight`]: (_call: NativeCall, _receiver: Value, [value, amount]: Value[]) =>
+      rotated(bitsOf(value), (width - ((amount as number) % width)) % width, width, fromBits),
     [`${prefix}.ToString()`]: (_call: NativeCall, receiver: Value) => String(unboxed(receiver)),
     [`${prefix}.ToString(string?)`]: (call: NativeCall, receiver: Value, [format]: Value[]) =>
       formatValue(
@@ -314,11 +335,34 @@ for (const [name, special] of INTEGRAL) {
       const integer = toBig(value);
       return integer > 0n && (integer & (integer - 1n)) === 0n;
     },
+    [`${prefix}.DivRem`]: (call: NativeCall, _receiver: Value, [left, right]: Value[]) => {
+      const [a, b] = [toBig(left), toBig(right)];
+      if (b === 0n) fail('System.DivideByZeroException', 'Attempted to divide by zero.');
+      if (a / b > max) fail('System.OverflowException', 'Arithmetic operation resulted in an overflow.');
+      return new CsStruct(call.method.returnType as NamedType, [fromBig(a / b), fromBig(a % b)]);
+    },
+    [`${prefix}.CopySign`]: (_call: NativeCall, _receiver: Value, [value, sign]: Value[]) => {
+      const magnitude = toBig(value) < 0n ? -toBig(value) : toBig(value);
+      const result = toBig(sign) < 0n ? -magnitude : magnitude;
+      if (result > max)
+        fail('System.OverflowException', 'Negating the minimum value of a twos complement number is invalid.');
+      return fromBig(result);
+    },
     [`${prefix}.IsNegative`]: (_call: NativeCall, _receiver: Value, [value]: Value[]) => toBig(value) < 0n,
     [`${prefix}.IsPositive`]: (_call: NativeCall, _receiver: Value, [value]: Value[]) => toBig(value) >= 0n,
   });
 }
 defineNatives(parsers);
+
+function bitLength(bits: bigint): number {
+  return bits === 0n ? 0 : bits.toString(2).length;
+}
+
+/** The bits of an integer rotated left within its width, as `int.RotateLeft` does. */
+function rotated(bits: bigint, amount: number, width: number, fromBits: (bits: bigint) => Value): Value {
+  const shift = BigInt((amount + width) % width);
+  return fromBits(BigInt.asUintN(width, (bits << shift) | (bits >> (BigInt(width) - shift))));
+}
 
 function clampInteger(value: Value, low: Value, high: Value, toBig: (value: Value) => bigint): Value {
   if (toBig(low) > toBig(high))
@@ -725,7 +769,19 @@ defineNatives({
   'System.Math.FusedMultiplyAdd': (_call, _receiver, [x, y, z]) => (x as number) * (y as number) + (z as number),
   'System.Math.IEEERemainder': (_call, _receiver, [x, y]) =>
     (x as number) - (y as number) * roundEven((x as number) / (y as number)),
-  'System.Math.BigMul': (_call, _receiver, [a, b]) => BigInt(a as number) * BigInt(b as number),
+  'System.Math.BigMul(int, int)': (_call, _receiver, [a, b]) => BigInt(a as number) * BigInt(b as number),
+  'System.Math.BigMul(uint, uint)': (_call, _receiver, [a, b]) => BigInt(a as number) * BigInt(b as number),
+  // The 128-bit product's high half is returned and its low half stored, each as the operands' type.
+  'System.Math.BigMul(long, long, long)': (_call, _receiver, [a, b, low]) => {
+    const product = (a as bigint) * (b as bigint);
+    refOf(low).set(BigInt.asIntN(64, product));
+    return BigInt.asIntN(64, product >> 64n);
+  },
+  'System.Math.BigMul(ulong, ulong, ulong)': (_call, _receiver, [a, b, low]) => {
+    const product = (a as bigint) * (b as bigint);
+    refOf(low).set(BigInt.asUintN(64, product));
+    return BigInt.asUintN(64, product >> 64n);
+  },
   'System.Math.DivRem(int, int, int)': (_call, _receiver, [a, b, result]) =>
     divRem('int', a as number, b as number, result),
   'System.Math.DivRem(long, long, long)': (_call, _receiver, [a, b, result]) =>
@@ -801,6 +857,8 @@ defineNatives({
     const inner = unboxed(value as Value);
     if (inner === undefined) return false;
     if (typeof inner === 'boolean') return inner;
+    const source = value instanceof CsBox ? specialOf(value.type) : special;
+    if (source === 'char') checkConvertible('char', 'bool');
     if (typeof inner === 'string')
       return (
         parseBool(inner) ?? fail('System.FormatException', `String '${inner}' was not recognized as a valid Boolean.`)
@@ -815,6 +873,7 @@ defineNatives({
     radixText(BigInt(value as number), base as number, 16),
   'System.Convert.ToString(byte, int)': (_call, _receiver, [value, base]) =>
     radixText(BigInt(value as number), base as number, 8),
+  'System.Convert.ToString(string?)': (_call, _receiver, [value]) => value as Value,
   'System.Convert.ToString': (call, _receiver, [value]) =>
     value === undefined ? '' : textOf(call, value as Value, parameterType(call, 0)),
 });
@@ -831,6 +890,7 @@ function convertTo(call: NativeCall, args: (Value | VariableReference)[], target
   const isUntyped = declared === 'object' || declared === undefined;
   if (isUntyped && value === undefined) return zeroOf(target);
   const { source, inner } = isUntyped ? convertibleOf(call, value) : { source: declared, inner: value };
+  checkConvertible(source, target);
   if (source === 'string') return convertString(inner as string | undefined, fromBase, target);
   if (source === 'bool') return boolNumber(inner as boolean, target);
   if (isIntegral(target)) {
@@ -839,6 +899,25 @@ function convertTo(call: NativeCall, args: (Value | VariableReference)[], target
     checkIntegerRange(BigInt(inner as number | bigint), target);
   }
   return convertNumeric(inner as NumericValue, source, target);
+}
+
+/** .NET's IConvertible names, for the conversions between a char and a bool or a non-integral number that it rejects. */
+const CONVERTIBLE_NAMES: Partial<Record<SpecialType, string>> = {
+  char: 'Char',
+  bool: 'Boolean',
+  double: 'Double',
+  float: 'Single',
+  decimal: 'Decimal',
+};
+
+function checkConvertible(source: SpecialType, target: SpecialType): void {
+  if (source !== 'char' && target !== 'char') return;
+  const other = source === 'char' ? target : source;
+  if (other === 'char' || CONVERTIBLE_NAMES[other] === undefined) return;
+  fail(
+    'System.InvalidCastException',
+    `Invalid cast from '${CONVERTIBLE_NAMES[source]}' to '${CONVERTIBLE_NAMES[target]}'.`
+  );
 }
 
 /** Whether `Convert` rounds a value to the type, which every target but the floating ones and decimal needs. */
@@ -905,20 +984,49 @@ function overflowFor(target: SpecialType): never {
   return fail('System.OverflowException', `Value was either too large or too small for ${OVERFLOW_NAMES[target]}.`);
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Each branch handles one case of the C# rule that the function applies.
+/**
+ * `Convert.ToInt32(text, fromBase)` and its kin, as .NET's `ParseNumbers` reads a string: an optional sign and `0x`,
+ * digits up to the end, and for a base other than 10, the bits of an unsigned number that the type reinterprets.
+ */
+// code-gauge-allow functionCognitiveComplexity 28 -- Each branch handles one case of .NET's rule that the function applies.
+// code-gauge-allow functionNcss 35 -- Each branch handles one case of .NET's rule that the function applies.
 function parseRadix(text: string, base: number, target: SpecialType): Value {
   if (![2, 8, 10, 16].includes(base)) fail('System.ArgumentException', 'Invalid Base.');
-  if (base !== 10 && text.startsWith('-'))
+  if (text === '')
+    fail(
+      'System.ArgumentOutOfRangeException',
+      'Specified argument was out of the range of valid values.',
+      'Index was out of range. Must be non-negative and less than the size of the collection.'
+    );
+  let index = 0;
+  const isNegative = text[0] === '-';
+  if (isNegative && base !== 10)
     fail('System.ArgumentException', 'String cannot contain a minus sign if the base is not 10.');
-  if (base !== 10 && text.startsWith('-'))
-    fail('System.ArgumentException', 'String cannot contain a minus sign if the base is not 10.');
-  const pattern = { 2: /^[01]+$/, 8: /^[0-7]+$/, 10: /^-?\d+$/, 16: /^(0[xX])?[\dA-Fa-f]+$/ }[base as 2 | 8 | 10 | 16];
-  if (!pattern.test(text)) fail('System.FormatException', 'Could not find any recognizable digits.');
-  const digits = base === 16 ? text.replace(/^0[xX]/, '') : text;
+  if (text[0] === '-' || text[0] === '+') index++;
+  if (base === 16 && /^0[xX]/.test(text.slice(index))) index += 2;
+  const digitPattern = { 2: /^[01]+/, 8: /^[0-7]+/, 10: /^\d+/, 16: /^[\dA-Fa-f]+/ }[base as 2 | 8 | 10 | 16];
+  const digits = digitPattern.exec(text.slice(index))?.[0];
+  if (digits === undefined) fail('System.FormatException', 'Could not find any recognizable digits.');
+  if (index + digits.length < text.length)
+    fail('System.FormatException', 'Additional non-parsable characters are at the end of the string.');
   const prefix = { 2: '0b', 8: '0o', 10: '', 16: '0x' }[base as 2 | 8 | 10 | 16];
-  const unsigned = BigInt(digits.startsWith('-') ? digits : `${prefix}${digits}`);
-  const bits = target === 'long' ? 64 : target === 'short' ? 16 : target === 'byte' ? 8 : 32;
-  const value = base === 10 ? unsigned : BigInt.asIntN(bits, unsigned);
+  const magnitude = BigInt(`${prefix}${digits}`);
+  const bits = target === 'long' ? 64 : 32;
+  if (base !== 10) {
+    // The digits make an unsigned number of the parse's width, which a narrower type must hold as unsigned.
+    if (magnitude >= 1n << BigInt(bits)) overflowFor(target === 'long' ? 'ulong' : 'uint');
+    const narrow = { short: 16, byte: 8, sbyte: 8 }[target as 'short' | 'byte' | 'sbyte'];
+    if (narrow !== undefined && magnitude >= 1n << BigInt(narrow)) overflowFor(target);
+    const value = target === 'byte' ? magnitude : BigInt.asIntN(narrow ?? bits, magnitude);
+    return target === 'long' ? value : Number(value);
+  }
+  if (isNegative && target === 'byte')
+    fail(
+      'System.OverflowException',
+      'The string was being parsed as an unsigned number and could not have a negative sign.'
+    );
+  const value = isNegative ? -magnitude : magnitude;
+  checkIntegerRange(value, target);
   return target === 'long' ? value : Number(value);
 }
 
@@ -1184,6 +1292,17 @@ for (const arity of [2, 3]) {
   };
   tupleNatives[`${name}.GetHashCode`] = (call, receiver) => tupleHash(call, (receiver as CsObject).native as Value[]);
 }
+tupleNatives['System.TupleExtensions.ToTuple'] = (call, _receiver, [value]) => {
+  const tuple = new CsObject(libraryType(call, 'System.Tuple', call.typeArgs), []);
+  tuple.native = [...(value as CsStruct).fields];
+  return tuple;
+};
+tupleNatives['System.TupleExtensions.ToValueTuple'] = (call, _receiver, [value]) => {
+  if (value === undefined) nullReference();
+  return new CsStruct(libraryType(call, 'System.ValueTuple', call.typeArgs), [
+    ...((value as CsObject).native as Value[]),
+  ]);
+};
 tupleNatives['System.Tuple.Create'] = (call, _receiver, args) => {
   const type = libraryType(call, 'System.Tuple', call.typeArgs);
   const tuple = new CsObject(type, []);

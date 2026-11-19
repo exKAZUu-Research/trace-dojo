@@ -761,7 +761,6 @@ export abstract class CallBinder extends OperatorBinder {
   }
 
   /** Converts the arguments to their parameters' types and orders them as the parameters, filling defaults and packing `params`. */
-  // code-gauge-allow functionCognitiveComplexity 22 -- Each branch handles one case of the C# rule that the function applies.
   private finishArguments(applicable: Applicable, args: ArgumentInfo[], row: number): BoundArguments {
     const { method } = applicable.candidate;
     const substitution = this.callSubstitution(applicable.candidate, applicable.typeArgs);
