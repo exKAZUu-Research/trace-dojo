@@ -1183,6 +1183,7 @@ export class Compiler extends ConstructorCompiler {
       })),
       typeParams,
     });
+    if (parameters.named.length > 1) type.namedOrder = parameters.named.map((parameter) => parameter.name);
     return { type, positionalTypes, namedTypes };
   }
 

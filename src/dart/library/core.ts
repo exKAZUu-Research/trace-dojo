@@ -166,7 +166,7 @@ abstract final class int extends num {
   external double truncateToDouble();
   external String toString();
   external String toRadixString(int radix);
-  external static int parse(String source, {int? radix});
+  external static int parse(String source, {int? radix, int Function(String source)? onError});
   external static int? tryParse(String source, {int? radix});
 }
 
@@ -1744,6 +1744,23 @@ abstract interface class Map<K, V> {
 
 class _Map<K, V> extends Map<K, V> implements LinkedHashMap<K, V> {
   _Map._() : super._base();
+}
+
+/** The VM's classes of constant and unmodifiable maps and sets, which only their runtimeType shows. */
+class _ConstMap<K, V> extends Map<K, V> {
+  _ConstMap._() : super._base();
+}
+
+class UnmodifiableMapView<K, V> extends Map<K, V> {
+  UnmodifiableMapView._() : super._base();
+}
+
+class _ConstSet<E> extends Set<E> {
+  _ConstSet._() : super._base();
+}
+
+class UnmodifiableSetView<E> extends Set<E> {
+  UnmodifiableSetView._() : super._base();
 }
 
 abstract final class LinkedHashMap<K, V> implements Map<K, V> {

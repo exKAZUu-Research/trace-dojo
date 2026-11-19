@@ -321,6 +321,10 @@ define('int.parse', (runtime, _self, [source], namedArgs) => {
   const text = stringArg(runtime, source, 'source');
   const radix = checkRadix(runtime, named(namedArgs, 'radix', undefined));
   const result = parseInt(text, radix);
+  const onError = named(namedArgs, 'onError', undefined);
+  if (result === undefined && onError !== undefined) {
+    return runtime.callValue(onError, { positional: [text], named: undefined }, [], runtime.userCallRow);
+  }
   if (result === undefined) {
     if (text.trim().length === 0 && radix === undefined) throwFormat(runtime, 'Invalid number', text, 0n);
     // The VM reports digits that are all valid but too many for 64 bits separately, without the position.

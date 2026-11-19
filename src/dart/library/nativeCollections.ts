@@ -724,14 +724,14 @@ function store(value: Value): HashStore {
 }
 
 export function newSet(runtime: Runtime, elementType: DartType, isConst = false): DartObject {
-  const set = new DartObject(runtime.links.classNamed('_Set'), [elementType], []);
+  const set = new DartObject(runtime.links.classNamed(isConst ? '_ConstSet' : '_Set'), [elementType], []);
   set.native = new HashStore(runtime, false) as unknown as DartObject['native'];
   (set as DartObject & { unmodifiable?: boolean }).unmodifiable = isConst;
   return set;
 }
 
 export function newMap(runtime: Runtime, keyType: DartType, valueType: DartType, isConst = false): DartObject {
-  const map = new DartObject(runtime.links.classNamed('_Map'), [keyType, valueType], []);
+  const map = new DartObject(runtime.links.classNamed(isConst ? '_ConstMap' : '_Map'), [keyType, valueType], []);
   map.native = new HashStore(runtime, true) as unknown as DartObject['native'];
   (map as DartObject & { unmodifiable?: boolean }).unmodifiable = isConst;
   return map;
@@ -770,9 +770,11 @@ defineConstructor('Set.from', (runtime, _instance, args, typeArgs) =>
 defineConstructor('Set.of', (runtime, _instance, args, typeArgs) =>
   setFrom(runtime, args.positional[0], typeArgs[0] ?? DYNAMIC, false)
 );
-defineConstructor('Set.unmodifiable', (runtime, _instance, args, typeArgs) =>
-  setFrom(runtime, args.positional[0], typeArgs[0] ?? DYNAMIC, false, true)
-);
+defineConstructor('Set.unmodifiable', (runtime, _instance, args, typeArgs) => {
+  const set = setFrom(runtime, args.positional[0], typeArgs[0] ?? DYNAMIC, false, true);
+  set.cls = runtime.links.classNamed('UnmodifiableSetView');
+  return set;
+});
 
 interface StoreIteratorState {
   store: HashStore;
@@ -974,9 +976,11 @@ defineConstructor('Map.from', (runtime, _instance, args, typeArgs) =>
 defineConstructor('Map.of', (runtime, _instance, args, typeArgs) =>
   mapFrom(runtime, args.positional[0], typeArgs, false)
 );
-defineConstructor('Map.unmodifiable', (runtime, _instance, args, typeArgs) =>
-  mapFrom(runtime, args.positional[0], typeArgs, true, true)
-);
+defineConstructor('Map.unmodifiable', (runtime, _instance, args, typeArgs) => {
+  const map = mapFrom(runtime, args.positional[0], typeArgs, true, true);
+  map.cls = runtime.links.classNamed('UnmodifiableMapView');
+  return map;
+});
 defineConstructor('Map.fromIterable', (runtime, _instance, args, typeArgs) => {
   const map = newMap(runtime, typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC);
   const keyOf = named(args.named, 'key', undefined);

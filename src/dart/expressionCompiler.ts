@@ -745,8 +745,9 @@ export abstract class ExpressionCompiler extends CompilerBase {
         type = resolution.declaration.global.type;
     } else if (value.kind === 'list') {
       return 'set';
-    } else if (value.kind === 'setOrMap' && value.typeArguments) {
-      return value.typeArguments.length === 2 ? 'map' : 'set';
+    } else if (value.kind === 'setOrMap') {
+      if (value.typeArguments) return value.typeArguments.length === 2 ? 'map' : 'set';
+      return this.setOrMapFromElements(value.elements, undefined);
     }
     if (!type) return undefined;
     const base = resolveBound(nonNullable(type));
@@ -924,6 +925,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
           type: interfaceType(coreTypes.type),
           run: (frame) => new DartTypeValue(coreTypes.type, resolve(frame)),
           isConst: false,
+        };
+      }
+      if (name === 'dynamic') {
+        return {
+          type: interfaceType(coreTypes.type),
+          run: () => new DartTypeValue(coreTypes.type, DYNAMIC),
+          isConst: true,
         };
       }
       return this.undefinedName(expression, name);

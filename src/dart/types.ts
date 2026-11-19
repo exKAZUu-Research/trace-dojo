@@ -29,8 +29,10 @@ export interface FunctionType {
   typeParams: readonly TypeParam[];
   positional: readonly DartType[];
   requiredCount: number;
-  /** Sorted by name, as Dart compares and prints them. */
+  /** Sorted by name, as Dart compares them. */
   named: readonly NamedParameterType[];
+  /** The order a declared function lists its named parameters in, which the VM prints them in; closures sort them. */
+  namedOrder?: readonly string[];
   returnType: DartType;
   nullable: boolean;
 }
@@ -506,6 +508,14 @@ function structuralUpperBound(a: DartType, b: DartType): DartType {
   if (!left || !right) return objectType();
   if (isSubtype(left, right)) return right;
   if (isSubtype(right, left)) return left;
+  // Two types of the same generic class bound to that class of the bounds of their arguments: List<num> for
+  // List<int> and List<double>.
+  if (left.cls === right.cls && left.args.length > 0) {
+    return interfaceType(
+      left.cls,
+      left.args.map((arg, index) => upperBound(arg, right.args[index] ?? DYNAMIC))
+    );
+  }
   return interfaceUpperBound(left, right);
 }
 

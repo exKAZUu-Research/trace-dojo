@@ -22,6 +22,7 @@ import {
   isSubtype,
   iterableElementOf,
   makeNullable,
+  NEVER,
   nonNullable,
   numericClassOf,
   resolveBound,
@@ -345,7 +346,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
   private localTarget(variable: LocalVar, span: Span, isPlainAssignment: boolean): AssignableTarget {
     const { options, name } = variable;
     if (options.isConst) this.error(span, `const の変数 ${name} には代入できません。`);
-    if (options.isFinal && options.isLate && this.flow.assigned.has(variable)) {
+    if (options.isFinal && options.isLate && (options.hasInitializer || this.flow.assigned.has(variable))) {
       this.error(span, `late final の変数 ${name} には、もう値を代入できません。`);
     }
     if (options.isFinal && !options.isLate) {
@@ -593,11 +594,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         return { ...this.compileMapEntryElement(element, kind, elementContext, valueContext, types), creates: false };
       }
       case 'spread': {
-        return {
-          run: this.compileSpread(element, kind, elementContext, valueContext, types),
-          isConst: false,
-          creates: false,
-        };
+        return { ...this.compileSpread(element, kind, elementContext, valueContext, types), creates: false };
       }
       case 'nullAwareElement': {
         return { ...this.compileNullAwareElement(element, kind, elementContext, types), creates: false };
@@ -724,20 +721,31 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     elementContext: DartType | undefined,
     valueContext: DartType | undefined,
     types: ElementTypes[]
-  ): (frame: Frame, add: AddElement) => void {
-    const contextType =
-      kind === 'map'
+  ): { run: (frame: Frame, add: AddElement) => void; isConst: boolean } {
+    // Without a context of its own, the spread value is inferred alone, as `[...[1], ...[2.0]]` makes List<num>.
+    const hasContext =
+      kind === 'map' ? elementContext !== undefined || valueContext !== undefined : elementContext !== undefined;
+    const contextType = !hasContext
+      ? undefined
+      : kind === 'map'
         ? interfaceType(coreTypes.map, [elementContext ?? DYNAMIC, valueContext ?? DYNAMIC])
         : interfaceType(coreTypes.iterable, [elementContext ?? DYNAMIC]);
-    const compiled = this.compileExpression(element.value, element.nullAware ? makeNullable(contextType) : contextType);
+    const compiled = this.compileExpression(
+      element.value,
+      contextType && element.nullAware ? makeNullable(contextType) : contextType
+    );
     if (!element.nullAware && isNullable(compiled.type) && compiled.type.kind !== 'dynamic') {
       this.error(
         element,
         `${typeName(compiled.type)} 型の値は null かもしれないので、... では展開できません。...? を使ってください。`
       );
     }
-    if (kind === 'map') return this.compileMapSpread(element, compiled, elementContext, valueContext, types);
-    return this.compileIterableSpread(element, compiled, elementContext, types);
+    // A spread of a constant is constant, as `const b = {...a}` with a constant `a`.
+    const run =
+      kind === 'map'
+        ? this.compileMapSpread(element, compiled, elementContext, valueContext, types)
+        : this.compileIterableSpread(element, compiled, elementContext, types);
+    return { run, isConst: compiled.isConst };
   }
 
   private compileMapSpread(
@@ -751,14 +759,15 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     const resolved = resolveBound(base);
     const instance =
       resolved.kind === 'interface' ? asInstanceOf({ ...resolved, nullable: false }, coreTypes.map) : undefined;
-    if (!instance && base.kind !== 'dynamic' && base.kind !== 'null')
+    const spreadsNull = base.kind === 'null' || base.kind === 'never';
+    if (!instance && base.kind !== 'dynamic' && !spreadsNull)
       this.error(element, `${typeName(compiled.type)} 型の値は Map ではないので、マップの中では展開できません。`);
     const [keyType, valueType] = instance?.args ?? [DYNAMIC, DYNAMIC];
     if (keyContext && !isSubtype(keyType, keyContext))
       this.error(element, `${typeName(keyType)} 型のキーは、${typeName(keyContext)} 型のマップに入れられません。`);
     if (valueContext && !isSubtype(valueType, valueContext))
       this.error(element, `${typeName(valueType)} 型の値は、${typeName(valueContext)} 型のマップに入れられません。`);
-    types.push({ key: keyType, value: valueType });
+    if (!spreadsNull) types.push({ key: keyType, value: valueType });
     const { run } = compiled;
     const { nullAware } = element;
     return (frame, add) => {
@@ -776,13 +785,15 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     types: ElementTypes[]
   ): (frame: Frame, add: AddElement) => void {
     const base = element.nullAware ? nonNullable(compiled.type) : compiled.type;
-    const elementType = base.kind === 'null' ? DYNAMIC : iterableElementOf(base);
+    // `...?null` adds nothing, so it constrains nothing.
+    const spreadsNull = base.kind === 'null' || base.kind === 'never';
+    const elementType = spreadsNull ? NEVER : iterableElementOf(base);
     if (!elementType)
       this.error(element, `${typeName(compiled.type)} 型の値は Iterable ではないので、展開できません。`);
     if (elementContext && elementType.kind !== 'dynamic' && !isSubtype(elementType, elementContext)) {
       this.error(element, `${typeName(elementType)} 型の要素は、${typeName(elementContext)} 型の要素にできません。`);
     }
-    types.push({ key: elementType });
+    if (!spreadsNull) types.push({ key: elementType });
     const castElements =
       elementType.kind === 'dynamic' && elementContext && elementContext.kind !== 'dynamic'
         ? this.runtimeCast((frame) => frame.temporaries.at(-1), elementContext, false)

@@ -72,10 +72,11 @@ function describeUncaught(runtime: Runtime, error: unknown): string | undefined 
   if (!(error instanceof DartThrow)) throw error;
   runtime.frames.length = 0;
   try {
-    return `Unhandled exception:\n${LINKS.stringify(runtime, error.value)}`;
+    const text = runtime.invoke(error.value, 'toString', { positional: [], named: undefined }, [], undefined);
+    return `Unhandled exception:\n${typeof text === 'string' ? text : LINKS.stringify(runtime, text)}`;
   } catch (formattingError) {
     if (formattingError instanceof DartThrow || isHostStackOverflow(formattingError)) {
-      return `Unhandled exception:\nInstance of '${runtime.classOf(error.value).name}'`;
+      return 'Unhandled exception:\n<Received error while converting exception to string>';
     }
     throw formattingError;
   }

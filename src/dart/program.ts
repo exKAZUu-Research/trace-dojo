@@ -122,6 +122,8 @@ export function libraries(): Libraries {
           'LateError',
           'CodeUnits',
           'CastList',
+          'UnmodifiableMapView',
+          'UnmodifiableSetView',
         ]) {
           core.hiddenNames.add(name);
         }

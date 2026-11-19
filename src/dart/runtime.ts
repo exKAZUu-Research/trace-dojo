@@ -340,7 +340,7 @@ export class Runtime implements TracedRuntime<Frame> {
       (runtime, _receiver, args, typeArgs, callRow) => impl(runtime, receiver, args, typeArgs, callRow),
       receiver,
       [],
-      { name: member.name, origin: undefined },
+      { name: member.name, origin: `Function '${member.name}':${member.isStatic ? ' static' : ''}.` },
       member
     );
   }

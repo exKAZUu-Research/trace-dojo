@@ -38,6 +38,8 @@ interface PatternOptions {
   isFinal: boolean;
   /** The variables the other side of an `||` pattern declared, which this side must declare alike. */
   shared?: Map<string, LocalVar>;
+  /** The names of `shared` this side has declared. */
+  sharedUsed?: Set<string>;
 }
 
 export abstract class PatternCompiler extends CallCompiler {
@@ -135,7 +137,7 @@ export abstract class PatternCompiler extends CallCompiler {
         if (!pattern.type) return { match: () => true, irrefutable: true };
         const type = this.resolveType(pattern.type);
         this.requireAssignable(type, matchedType, options, pattern);
-        return this.typeTest(type, matchedType, () => true, true);
+        return this.typeTest(type, matchedType, () => true, true, options.mode);
       }
       case 'variable': {
         return this.variablePattern(pattern, matchedType, options, variables);
@@ -217,7 +219,7 @@ export abstract class PatternCompiler extends CallCompiler {
     };
     if (!declared) return { match: bind, irrefutable: true };
     this.requireAssignable(declared, matchedType, options, pattern);
-    return this.typeTest(declared, matchedType, bind, true);
+    return this.typeTest(declared, matchedType, bind, true, options.mode);
   }
 
   /** `a || b`, whose two sides must declare the same variables. */
@@ -227,16 +229,26 @@ export abstract class PatternCompiler extends CallCompiler {
     options: PatternOptions,
     variables: Map<string, LocalVar>
   ): Omit<CompiledPattern, 'variables'> {
-    const left = this.compilePatternInner(pattern.left, matchedType, { ...options, shared: undefined }, variables);
+    const before = new Set(variables.keys());
+    const left = this.compilePatternInner(
+      pattern.left,
+      matchedType,
+      { ...options, shared: undefined, sharedUsed: undefined },
+      variables
+    );
     const leftVariables = new Map(variables);
+    const sharedUsed = new Set<string>();
     const right = this.compilePatternInner(
       pattern.right,
       matchedType,
-      { ...options, shared: leftVariables },
+      { ...options, shared: leftVariables, sharedUsed },
       variables
     );
-    for (const name of leftVariables.keys()) {
-      if (!variables.has(name)) this.error(pattern, `|| の両側で、同じ変数を宣言してください（${name}）。`);
+    for (const name of variables.keys()) {
+      const declaredByLeft = leftVariables.has(name) && !before.has(name);
+      if (declaredByLeft ? !sharedUsed.has(name) : !leftVariables.has(name)) {
+        this.error(pattern, `|| の両側で、同じ変数を宣言してください（${name}）。`);
+      }
     }
     return {
       match: (frame, value) => left.match(frame, value) || right.match(frame, value),
@@ -276,6 +288,7 @@ export abstract class PatternCompiler extends CallCompiler {
     if (variables.has(name) && !options.shared) this.error(span, `変数 ${name} がパターンの中で重複しています。`);
     const shared = options.shared?.get(name);
     if (shared) {
+      options.sharedUsed?.add(name);
       if (!sameType(shared.type, type)) this.error(span, `|| の両側で、変数 ${name} の型を同じにしてください。`);
       variables.set(name, shared);
       return shared;
@@ -330,10 +343,26 @@ export abstract class PatternCompiler extends CallCompiler {
     type: DartType,
     matchedType: DartType,
     then: (frame: Frame, value: Value) => boolean,
-    thenIrrefutable: boolean
+    thenIrrefutable: boolean,
+    mode: PatternMode = 'match'
   ): Omit<CompiledPattern, 'variables'> {
     if (isSubtype(matchedType, type)) return { match: then, irrefutable: thenIrrefutable };
     const resolve = this.runtimeType(type);
+    // A declaration or an assignment casts a dynamic value to the type the pattern needs, as Dart does.
+    if (mode !== 'match') {
+      return {
+        match: (frame, value) => {
+          const required = resolve(frame);
+          if (!this.valueIsAt(frame, value, required)) {
+            frame.runtime.throwTypeError(
+              `type '${typeToString(frame.runtime.runtimeTypeOf(value))}' is not a subtype of type '${typeToString(required)}'`
+            );
+          }
+          return then(frame, value);
+        },
+        irrefutable: false,
+      };
+    }
     return {
       match: (frame, value) => this.valueIsAt(frame, value, resolve(frame)) && then(frame, value),
       irrefutable: false,
@@ -444,7 +473,7 @@ export abstract class PatternCompiler extends CallCompiler {
     const hasRest = restIndex !== -1;
     const parts: ListPatternParts = { head, rest, tail, hasRest, resolveElement: this.runtimeType(elementType) };
     this.requireAssignable(listType, matchedType, options, pattern);
-    const typeCheck = this.typeTest(listType, matchedType, () => true, true);
+    const typeCheck = this.typeTest(listType, matchedType, () => true, true, options.mode);
     return {
       match: (frame, value) => typeCheck.match(frame, value) && matchListParts(frame, value, parts),
       irrefutable: typeCheck.irrefutable && hasRest && head.length + tail.length === 0 && (!rest || rest.irrefutable),
@@ -488,7 +517,7 @@ export abstract class PatternCompiler extends CallCompiler {
       return { key: key.run, value: this.compilePatternInner(entry.value, valueType, options, variables) };
     });
     this.requireAssignable(mapType, matchedType, options, pattern);
-    const typeCheck = this.typeTest(mapType, matchedType, () => true, true);
+    const typeCheck = this.typeTest(mapType, matchedType, () => true, true, options.mode);
     return {
       match: (frame, value) => {
         if (!typeCheck.match(frame, value)) return false;
@@ -551,8 +580,20 @@ export abstract class PatternCompiler extends CallCompiler {
       this.error(pattern, `${typeName(matchedType)} 型の値は、このレコードのパターンと形が合いません。`);
     }
     const sortedNames = [...names].toSorted();
+    const shape: DartType = {
+      kind: 'record',
+      positional: positional.map(() => DYNAMIC),
+      named: sortedNames.map((name) => ({ name, type: DYNAMIC })),
+      nullable: false,
+    };
+    const castsDynamic = options.mode !== 'match' && matchedType.kind === 'dynamic';
     return {
       match: (frame, value) => {
+        if (castsDynamic && !this.valueIsAt(frame, value, shape)) {
+          frame.runtime.throwTypeError(
+            `type '${typeToString(frame.runtime.runtimeTypeOf(value))}' is not a subtype of type '${typeToString(shape)}'`
+          );
+        }
         if (!(value instanceof DartRecord)) return false;
         if (value.positional.length !== positional.length || value.named.length !== sortedNames.length) return false;
         if (!value.named.every(([name], index) => name === sortedNames[index])) return false;
@@ -602,7 +643,7 @@ export abstract class PatternCompiler extends CallCompiler {
         member,
       };
     });
-    const typeCheck = this.typeTest(type, matchedType, () => true, true);
+    const typeCheck = this.typeTest(type, matchedType, () => true, true, options.mode);
     return {
       match: (frame, value) => {
         if (!typeCheck.match(frame, value)) return false;

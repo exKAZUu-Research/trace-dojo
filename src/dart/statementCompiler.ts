@@ -5,12 +5,14 @@ import type {
   ForInBinding,
   FormalParameter,
   FormalParameters,
+  MethodDeclaration,
   Statement,
   TypeSyntax,
   VariableDeclaration,
 } from './ast';
 import { assignedNames, namesAssignedIn } from './astWalk';
 import type { CompiledFunction, FunctionSpec } from './callCompiler';
+import type { ClassInfo } from './classes';
 import { type Compiled, type Eval, typeName } from './compilerBase';
 import { SHORTED } from './expressionCompiler';
 import { type CompiledPattern, isRefutableSyntax, PatternCompiler } from './patternCompiler';
@@ -28,6 +30,7 @@ import {
   isTop,
   iterableElementOf,
   makeNullable,
+  mentionsTypeParams,
   NEVER,
   nonNullable,
   NULL,
@@ -206,12 +209,25 @@ export abstract class StatementCompiler extends PatternCompiler {
   private compileParameters(spec: FunctionSpec): (frame: Frame, args: Arguments) => void {
     const { parameters } = spec;
     const binders: ((frame: Frame, args: Arguments) => void)[] = [];
+    // A covariant parameter, or one typed by its class's type parameter, may receive what a reference of a
+    // supertype lets through (`A c = Cat(); c.chase(Animal())`), so it is checked on every call.
+    const classParams =
+      spec.kind.hasThis && !spec.kind.isConstructor ? new Set(spec.kind.thisClass?.typeParams) : undefined;
+    const thisClass = spec.kind.hasThis && !spec.kind.isConstructor ? spec.kind.thisClass : undefined;
+    const isCovariant = (parameter: FormalParameter, type: DartType, index?: number): boolean =>
+      parameter.isCovariant ||
+      (classParams !== undefined && classParams.size > 0 && mentionsTypeParams(type, classParams)) ||
+      (thisClass !== undefined && inheritsCovariance(thisClass, spec.name, parameter.name, index));
     for (const [index, parameter] of parameters.positional.entries()) {
       const type = spec.positionalTypes[index] ?? DYNAMIC;
       const { variable, defaultValue } = this.declareParameter(parameter, type, index >= parameters.requiredCount);
       binders.push(
-        parameterBinder(variable.slot, defaultValue, this.parameterCheck(type, parameter.name), (args) =>
-          index < args.positional.length ? { value: args.positional[index] } : undefined
+        parameterBinder(
+          variable.slot,
+          defaultValue,
+          this.parameterCheck(type, parameter.name),
+          isCovariant(parameter, type, index),
+          (args) => (index < args.positional.length ? { value: args.positional[index] } : undefined)
         )
       );
     }
@@ -220,8 +236,12 @@ export abstract class StatementCompiler extends PatternCompiler {
       const { variable, defaultValue } = this.declareParameter(parameter, type, true);
       const { name } = parameter;
       binders.push(
-        parameterBinder(variable.slot, defaultValue, this.parameterCheck(type, name), (args) =>
-          args.named?.has(name) ? { value: args.named.get(name) } : undefined
+        parameterBinder(
+          variable.slot,
+          defaultValue,
+          this.parameterCheck(type, name),
+          isCovariant(parameter, type),
+          (args) => (args.named?.has(name) ? { value: args.named.get(name) } : undefined)
         )
       );
     }
@@ -1065,11 +1085,32 @@ export abstract class StatementCompiler extends PatternCompiler {
   static readonly SHORTED = SHORTED;
 }
 
+/** Whether a method overrides one whose parameter at the position or of the name is `covariant`, making it so. */
+function inheritsCovariance(
+  cls: ClassInfo,
+  methodName: string,
+  parameterName: string,
+  index: number | undefined
+): boolean {
+  for (const { cls: supertype } of cls.directSupertypes) {
+    const method = supertype.declaration?.members.find(
+      (member): member is MethodDeclaration => member.kind === 'method' && member.name === methodName
+    );
+    const parameter =
+      index === undefined
+        ? method?.parameters.named.find((named) => named.name === parameterName)
+        : method?.parameters.positional[index];
+    if (parameter?.isCovariant || inheritsCovariance(supertype, methodName, parameterName, index)) return true;
+  }
+  return false;
+}
+
 /** Stores an argument, or the default value when the call passes none, in a parameter's slot. */
 function parameterBinder(
   slot: number,
   defaultValue: Eval | undefined,
   check: ((frame: Frame, value: Value) => void) | undefined,
+  alwaysChecks: boolean,
   passed: (args: Arguments) => { value: Value } | undefined
 ): (frame: Frame, args: Arguments) => void {
   return (frame, args) => {
@@ -1077,7 +1118,7 @@ function parameterBinder(
     let value: Value;
     if (argument) {
       value = argument.value;
-      if (args.isDynamic && check) check(frame, value);
+      if ((args.isDynamic || alwaysChecks) && check) check(frame, value);
     } else {
       value = defaultValue ? defaultValue(frame) : undefined;
     }

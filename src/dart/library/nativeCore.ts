@@ -53,9 +53,11 @@ function vmFunctionString(type: FunctionType): string {
   const parts = type.positional.slice(0, type.requiredCount).map(vmTypeString);
   const optional = type.positional.slice(type.requiredCount).map(vmTypeString);
   if (optional.length > 0) parts.push(`[${optional.join(', ')}]`);
-  if (type.named.length > 0)
+  const order = type.namedOrder;
+  const named = order ? type.named.toSorted((a, b) => order.indexOf(a.name) - order.indexOf(b.name)) : type.named;
+  if (named.length > 0)
     parts.push(
-      `{${type.named.map((named) => `${named.isRequired ? 'required ' : ''}${vmTypeString(named.type)} ${named.name}`).join(', ')}}`
+      `{${named.map((field) => `${field.isRequired ? 'required ' : ''}${vmTypeString(field.type)} ${field.name}`).join(', ')}}`
     );
   const text = `(${parts.join(', ')}) => ${vmTypeString(type.returnType)}`;
   return type.nullable ? `(${text})?` : text;

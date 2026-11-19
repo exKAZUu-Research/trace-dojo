@@ -396,7 +396,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
       type: NEVER,
       run: (frame) => {
         const thrown = run(frame);
-        if (thrown === undefined) frame.runtime.throwTypeError('Throw of null.');
+        if (thrown === undefined) frame.runtime.throwTypeError("type 'Null' is not a subtype of type 'Object'");
         throw this.newThrow(frame, thrown);
       },
       isConst: false,
