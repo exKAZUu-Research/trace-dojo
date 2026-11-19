@@ -689,7 +689,6 @@ export class PhpArray {
   }
 
   keepsValuesTable(): boolean {
-    if (!this.map.countsUndefinedSlots) return this.isList();
     return this.hasDensePackedStorage() && this.nextFree === BigInt(this.size);
   }
 

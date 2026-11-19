@@ -64,6 +64,7 @@ import { FatalError, PhpThrow, rt } from './runtime';
 import { incrementString } from './strings';
 import { coerce, describePropertyType, matches, NO_MATCH, typeToString } from './types';
 import {
+  dropped,
   type Key,
   PhpArray,
   type PhpClass,
@@ -990,7 +991,7 @@ function bindDimensionRef(target: Extract<Expr, { k: 'idx' }>, ref: Ref): void {
       ? nativeRefDimension(container, rawKey)
       : ([container, rawKey === undefined ? undefined : toKey(rawKey)] as const);
   ref.isRef = true;
-  if (key !== undefined && array.map.get(key) === ref) return;
+  if (key !== undefined && array.map.get(key) === ref) return dropped(ref);
   ref.rc++;
   if (key !== undefined) array.setSlot(key, ref);
   else if (!array.append(ref)) {

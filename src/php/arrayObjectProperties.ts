@@ -7,7 +7,7 @@ import type { ArrayStorage } from './libArrayObject';
 import { nativeArrayStorage } from './nativeArrayStorage';
 import { type CompoundRead, ElementPlace, type NestMode, type Place, RefPlace, share } from './places';
 import { rt } from './runtime';
-import { type Key, type PhpClass, type PhpObject, type PropDecl, Ref, UNINIT, type Value } from './values';
+import { dropped, type Key, type PhpClass, type PhpObject, type PropDecl, Ref, UNINIT, type Value } from './values';
 
 export function arrayObjectProperty(
   object: PhpObject,
@@ -140,7 +140,7 @@ class ArrayObjectProperty implements Place {
       ref.v = element.set(share(ref.v));
       return;
     }
-    if (element.reference() === ref) return;
+    if (element.reference() === ref) return dropped(ref);
     ref.isRef = true;
     ref.rc++;
     element.array.setSlot(this.key, ref);

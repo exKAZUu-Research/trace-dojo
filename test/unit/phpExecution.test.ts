@@ -3885,4 +3885,35 @@ echo json_encode([key($e), current($e)]);
     kind: 'executed',
     stdout: '[3,4]|NULL|[0,1,null,false]|[null,false]|[2,3]|[0,1]',
   });
+
+  for (const [held, expected] of [
+    ['$d', 'ca|db2;'],
+    ['[$d]', 'ca|db3;'],
+  ] as const) {
+    expect(
+      run(String.raw`<?php
+class N { public $p; public $q; function __construct(public $id) {} function __destruct() { echo $this->id; } }
+$a = new N('a'); $b = new N('b'); $c = new N('c'); $d = new N('d');
+gc_collect_cycles();
+$c->q =& $a; $d->p = $b; $c->q =& $a; $b->p = ${held};
+unset($b, $d, $a, $c);
+echo '|', gc_collect_cycles(), ';';
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+
+  const arrayValuesPointer = run(String.raw`<?php
+$a = [1, 2, 3]; ksort($a); next($a); $a = array_values($a);
+echo json_encode([key($a), current($a)]), '|';
+$b = [1, 2, 3]; asort($b); next($b); $b = array_values($b);
+echo json_encode([key($b), current($b)]), '|';
+$c = [1, 2, 3]; $c[] = 4; unset($c[3]); next($c); $c = array_values($c);
+echo json_encode([key($c), current($c)]), '|';
+$d = [1, 2, 3]; sort($d); next($d); $d = array_values($d);
+echo json_encode([key($d), current($d)]);
+`);
+  expect(arrayValuesPointer).toMatchObject({
+    kind: 'executed',
+    stdout: '[0,1]|[0,1]|[0,1]|[1,2]',
+  });
 });

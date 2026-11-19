@@ -1623,7 +1623,7 @@ export function bindPropertyReference(
     }
     return;
   }
-  if (old === ref) return;
+  if (old === ref) return dropped(old);
   if (old instanceof Ref) old.rc--;
   ref.isRef = true;
   ref.rc++;
@@ -1925,7 +1925,7 @@ export function bindStaticPropertyReference(
   function bind(warning?: UpdateWarning, pending?: () => PhpThrow | undefined): Value {
     const old = staticPropRef(cls, name, scope, true, warning);
     const found = cls.findStatic(name);
-    if (!found || old === ref) return null;
+    if (!found || old === ref) return (old === ref && dropped(old), null);
     return rt().withPropertyDiagnostic(pending?.(), () => {
       if (found.decl.type) attachPropertyReference(ref, found.decl);
       ref.isRef = true;
