@@ -228,7 +228,7 @@ function operatorDiagnostic(
 
 // code-gauge-allow functionCognitiveComplexity 27 -- Applies operator-specific coercion and overflow rules before producing a result.
 export function arithmetic(op: string, left: Value, right: Value, pending?: PhpThrow): Value {
-  if (op === '+' && left instanceof PhpArray && right instanceof PhpArray) return arrayUnion(left, right);
+  if (op === '+' && left instanceof PhpArray && right instanceof PhpArray) return mergeArrayUnion(left.copy(), right);
   if (op === '%') return modulo(left, right, pending);
   const a = arithmeticOperand(left, op, left, right, pending);
   const b = arithmeticOperand(right, op, left, right, pending);
@@ -322,12 +322,11 @@ export function formatFloatForMessage(value: number): string {
   return formatFloatRepr(value);
 }
 
-function arrayUnion(left: PhpArray, right: PhpArray): PhpArray {
-  const result = left.copy();
-  for (const [key, slot] of right.map) {
-    if (!result.map.has(key)) result.setSlot(key, copyValueSlot(slot));
+export function mergeArrayUnion(target: PhpArray, right: PhpArray): PhpArray {
+  if (target !== right) {
+    for (const [key, slot] of right.map) if (!target.map.has(key)) target.setSlot(key, copyValueSlot(slot));
   }
-  return result;
+  return target;
 }
 
 export function concat(left: Value, right: Value, pending?: PhpThrow): string {

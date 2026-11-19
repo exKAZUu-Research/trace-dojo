@@ -36,8 +36,9 @@ import {
 import type { ArrayStorage } from './libArrayObject';
 import { nativeArrayStorage } from './nativeArrayStorage';
 import { compiledOperandRow, dimensionWriteRow, operandAstRow } from './opcodeRows';
-import { arithmetic, bitwise, concat, toKey, toStr } from './operators';
+import { arithmetic, bitwise, concat, mergeArrayUnion, toKey, toStr } from './operators';
 import {
+  arrayIsShared,
   type BeforeOffsetGet,
   type CompoundRead,
   ElementPlace,
@@ -1222,7 +1223,10 @@ function storeCompoundResult(
   const current = fetched.value;
   let result: Value;
   try {
-    result = applyOperator(op, current, value, pending);
+    result =
+      op === '+' && current instanceof PhpArray && value instanceof PhpArray
+        ? mergeArrayUnion(current === value || !arrayIsShared(current) ? current : current.copy(), value)
+        : applyOperator(op, current, value, pending);
   } catch (error) {
     if (pending && error === pending) return current;
     if (error instanceof PhpThrow && !(op === '.' && typeof current === 'string')) {

@@ -3866,4 +3866,23 @@ for ($i = 0; $i < 3; $i++) { if ($i === 1) continue ((1)); echo $i; }
   expect(run('<?php for ($i = 0; $i < 3; $i++) { break (+1); }').kind).toBe('compileError');
   expect(run('<?php for ($i = 0; $i < 3; $i++) { break (1 + 1); }').kind).toBe('compileError');
   expect(run('<?php for ($i = 0; $i < 3; $i++) { break (0); }').kind).toBe('compileError');
+
+  const arrayCompoundUnionPointer = run(String.raw`<?php
+$a = [1, 2, 3]; next($a); next($a); next($a); $a += [3 => 4];
+echo json_encode([key($a), current($a)]), '|';
+$b = ['a' => 1, 'b' => 2]; end($b); next($b); $b += ['a' => 9];
+echo var_export(key($b), true), '|';
+$c = [1, 2, 3]; next($c); next($c); next($c); $copy = $c; $c += [3 => 4];
+echo json_encode([key($c), current($c), key($copy), current($copy)]), '|';
+$d = [1, 2, 3]; next($d); next($d); next($d); $d += $d;
+echo json_encode([key($d), current($d)]), '|';
+$o = (object)['a' => [1, 2]]; end($o->a); next($o->a); $o->a += [2 => 3];
+echo json_encode([key($o->a), current($o->a)]), '|';
+$e = [1, 2, 3]; next($e); next($e); next($e); $e = $e + [3 => 4];
+echo json_encode([key($e), current($e)]);
+`);
+  expect(arrayCompoundUnionPointer).toMatchObject({
+    kind: 'executed',
+    stdout: '[3,4]|NULL|[0,1,null,false]|[null,false]|[2,3]|[0,1]',
+  });
 });
