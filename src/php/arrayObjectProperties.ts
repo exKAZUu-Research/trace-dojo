@@ -94,9 +94,9 @@ class ArrayObjectProperty implements Place {
     const value = element.get();
     if (value === undefined) {
       warning(() => element.warnUndefined());
-      element.resetNull(warning);
+      return { value: null, write: this.storage.resetFetchedBucket(element.array, this.key, warning) };
     }
-    return { value: value ?? null, sources: element.typeSources(), write: (result) => element.set(result) };
+    return { value, sources: element.typeSources(), write: (result) => element.set(result) };
   }
 
   incrementTarget(): Place {

@@ -3180,6 +3180,14 @@ echo 'aoResetThrow:' . $chain . ':' . json_encode($ao5->getArrayCopy()) . "\n";
 
 test('leaves deferred closure static initializers null in debug output before first call', () => {
   const result = run(String.raw`<?php
+class Prior { const K = 3; }
+function makeForward() {
+  return function () {
+    static $fw = Forward::K + 1;
+    static $pr = Prior::K + 1;
+  };
+}
+class Forward { const K = 3; }
 class P { const PK = 7; }
 trait T {
   function tf() {
@@ -3200,14 +3208,16 @@ class C extends P {
 $c = new C();
 $f1 = $c->cf();
 $f2 = $c->tf();
-var_dump($f1, $f2);
+$f3 = makeForward();
+var_dump($f1, $f2, $f3);
 $f1();
 $f2();
-var_dump($f1, $f2);
+$f3();
+var_dump($f1, $f2, $f3);
 `);
   expect(result.kind).toBe('executed');
   if (result.kind === 'executed') {
-    const statics = [...result.stdout.matchAll(/\["(s|p|n|x)"\]=>\n\s+(NULL|int\(\d+\)|string\(1\) "C")/g)].map(
+    const statics = [...result.stdout.matchAll(/\["(s|p|n|x|fw|pr)"\]=>\n\s+(NULL|int\(\d+\)|string\(1\) "C")/g)].map(
       (match) => `${match[1]}=${match[2]}`
     );
     expect(statics).toEqual([
@@ -3215,16 +3225,20 @@ var_dump($f1, $f2);
       'p=NULL',
       'n=int(3)',
       'x=NULL',
+      'fw=NULL',
+      'pr=int(4)',
       's=int(3)',
       'p=int(7)',
       'n=int(3)',
       'x=string(1) "C"',
+      'fw=int(4)',
+      'pr=int(4)',
     ]);
   }
 });
 
-test('finishes SPL property updates before propagating exit from a displaced destructor', () => {
-  const result = run(String.raw`<?php
+test('finishes SPL property updates before propagating exit or bucket reuse from a displaced destructor', () => {
+  const exitResult = run(String.raw`<?php
 class ExitOnReset { function __destruct() { exit('exit;'); } }
 class Observer { function __destruct() { global $a; echo json_encode($a->getArrayCopy()); } }
 $a = new ArrayObject([], ArrayObject::ARRAY_AS_PROPS);
@@ -3232,5 +3246,15 @@ $obs = new Observer();
 set_error_handler(function () use ($a) { $a['x'] = new ExitOnReset(); return true; });
 $a->x += 2;
 `);
-  expect(result).toMatchObject({ kind: 'executed', stdout: 'exit;{"x":2}' });
+  expect(exitResult).toMatchObject({ kind: 'executed', stdout: 'exit;{"x":2}' });
+
+  const reuseResult = run(String.raw`<?php
+class ReuseBucket { function __destruct() { global $a; unset($a['x']); $a['y'] = 9; } }
+class Observer { function __destruct() { global $a; echo json_encode($a->getArrayCopy()); } }
+$a = new ArrayObject([], ArrayObject::ARRAY_AS_PROPS);
+$obs = new Observer();
+set_error_handler(function () use ($a) { $a['x'] = new ReuseBucket(); return true; });
+$a->x .= 'b';
+`);
+  expect(reuseResult).toMatchObject({ kind: 'executed', stdout: '{"y":"b"}' });
 });

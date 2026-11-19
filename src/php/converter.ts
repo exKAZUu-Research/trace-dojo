@@ -238,9 +238,11 @@ export class Converter extends DeclarationConverter {
             const name = this.variableName(nameNode);
             if (name === 'this') this.error(nameNode, 'Cannot use $this as static variable');
             const value = child.childForFieldName('value');
+            const init = value ? this.initializerExpr(value, 'static') : undefined;
             return {
               name,
-              init: value ? this.initializerExpr(value, 'static') : undefined,
+              init,
+              preview: init && this.fn.isClosure ? this.compiledValue(init, true) : undefined,
             };
           });
         let names = this.staticNames.get(this.fn);

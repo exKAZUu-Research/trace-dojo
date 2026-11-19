@@ -201,6 +201,30 @@ export class ArrayStorage {
     }
   }
 
+  resetFetchedBucket(array: PhpArray, offset: Key, warning: UpdateWarning): (value: Value) => Value {
+    const previous = array.getSlot(offset);
+    const runtime = rt();
+    if (previous === null || typeof previous !== 'object' || runtime.destructibles === 0) {
+      array.setSlot(offset, null);
+      return (value) => array.set(offset, value);
+    }
+    const order = array.ordered();
+    const bucket = order.get(offset)?.index;
+    const storageVersion = order.storageVersion;
+    const wasPacked = order.isPacked;
+    const reset = (): void => {
+      runtime.release([array.releaseSlot(offset)], true, runtime.nativeCalls > 0);
+    };
+    warning(reset, reset);
+    return (value) => {
+      const replacement = share(value);
+      if (!arrayHasHolders(runtime, array, 1) || bucket === undefined || order.storageVersion !== storageVersion)
+        return value;
+      finishBucketWrite(runtime, array, order, bucket, wasPacked, replacement);
+      return value;
+    };
+  }
+
   writable(): PhpArray {
     const root = this.chain().at(-1) as ArrayStorage;
     root.checkMutation();

@@ -1,17 +1,9 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import type { ClassRef, Expr, FunctionDecl, Stmt } from './ast';
+import type { FunctionDecl, Stmt } from './ast';
 import { nestedBodies } from './astAnalysis';
 import { callMethod, consumeInvokedResult } from './callables';
-import { canAccessConstant } from './classConstants';
-import {
-  declForKey,
-  findClass,
-  nativePropertySlot,
-  objectPropertyKeys,
-  propNameOf,
-  snapshotDynamicProperties,
-} from './classes';
-import { type Constant, foldedConstant } from './constantDefaults';
+import { declForKey, nativePropertySlot, objectPropertyKeys, propNameOf, snapshotDynamicProperties } from './classes';
+import type { Constant } from './constantDefaults';
 import { formatFloat, formatFloatRepr } from './conversions';
 import {
   type CleanupException,
@@ -229,29 +221,29 @@ function closureDebug(object: PhpObject): [string, Value, string][] {
   return entries;
 }
 
-const staticDeclarations = new WeakMap<FunctionDecl, [string, Expr | undefined][]>();
+const staticDeclarations = new WeakMap<FunctionDecl, [string, Constant | undefined][]>();
 
 function closureStatics(data: ClosureData): Map<string, Value | Ref> {
   const slots = new Map<string, Value | Ref>(data.bound);
   if (data.fn.kind === 'user') {
-    for (const [name, init] of declaredStatics(data.fn.decl)) {
+    for (const [name, preview] of declaredStatics(data.fn.decl)) {
       const live = data.fn.statics.get(name);
-      slots.set(name, live ?? previewStatic(init, data));
+      slots.set(name, live ?? materializeConstant(preview));
     }
     for (const [name, ref] of data.fn.statics) slots.set(name, ref);
   }
   return slots;
 }
 
-function declaredStatics(decl: FunctionDecl): [string, Expr | undefined][] {
+function declaredStatics(decl: FunctionDecl): [string, Constant | undefined][] {
   const cached = staticDeclarations.get(decl);
   if (cached) return cached;
-  const entries: [string, Expr | undefined][] = [];
+  const entries: [string, Constant | undefined][] = [];
   const pending: Stmt[] = decl.body.toReversed();
   while (pending.length > 0) {
     const statement = pending.pop()!;
     if (statement.k === 'static') {
-      for (const { name, init } of statement.vars) entries.push([name, init]);
+      for (const { name, preview } of statement.vars) entries.push([name, preview]);
     }
     for (const [body] of nestedBodies(statement).toReversed()) {
       for (let index = body.length - 1; index >= 0; index--) pending.push(body[index]);
@@ -259,26 +251,6 @@ function declaredStatics(decl: FunctionDecl): [string, Expr | undefined][] {
   }
   staticDeclarations.set(decl, entries);
   return entries;
-}
-
-function previewStatic(init: Expr | undefined, data: ClosureData): Value {
-  if (!init) return null;
-  if (init.k === 'magic') {
-    if (init.name === '__CLASS__') return null;
-    if (init.name === '__TRAIT__') return data.scope?.kind === 'trait' ? data.scope.name : '';
-    return data.fn.kind === 'user' ? data.fn.decl.name : data.fn.name;
-  }
-  return materializeConstant(foldedConstant(init, { classConstant: (cls, name) => previewConstant(cls, name, data) }));
-}
-
-function previewConstant(ref: ClassRef, name: string, data: ClosureData): Constant | undefined {
-  if (ref.k !== 'named') return undefined;
-  const entry = findClass(ref.name)?.findConst(name);
-  if (!entry || !canAccessConstant(entry, data.scope)) return undefined;
-  const value = entry.value;
-  if (value !== undefined && value !== UNDEFINED_RESULT && !(value instanceof PhpObject || value instanceof PhpArray))
-    return value;
-  return entry.initializer ? foldedConstant(entry.initializer, {}) : undefined;
 }
 
 function materializeConstant(value: Constant | undefined): Value {

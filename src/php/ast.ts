@@ -1,3 +1,4 @@
+import type { Constant } from './constantDefaults';
 import type { Param, TypeDecl, Visibility } from './values';
 
 /** A name a program refers to, resolved against its namespace and `use` imports. */
@@ -121,7 +122,7 @@ export type Stmt = { row: number } & (
   | { k: 'block'; body: Stmt[] }
   | { k: 'try'; body: Stmt[]; catches: CatchClause[]; fin?: Stmt[] }
   | { k: 'global'; names: Expr[] }
-  | { k: 'static'; vars: { name: string; init?: Expr }[] }
+  | { k: 'static'; vars: { name: string; init?: Expr; preview?: Constant }[] }
   | { k: 'unset'; targets: Expr[] }
   | { k: 'func'; decl: FunctionDecl }
   | { k: 'class'; decl: ClassDecl }
