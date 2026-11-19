@@ -153,13 +153,18 @@ export class InnerIterator extends EngineIteratorOwner {
     return this.cached ? [this.cached.v, this.object] : [this.object];
   }
 
-  rewind(): void {
-    this.invalidate();
-    callIteratorMethod(this.object, 'rewind');
+  runsWhileThrowing(): boolean {
+    // Overriding any of these methods switches ArrayIterator to the user iterator handlers, which skip pending calls.
+    return iteratorMethods.every((method) => this.object.cls.findMethod(method)?.scope.lname === 'arrayiterator');
   }
 
-  valid(): boolean {
-    return callIteratorMethod(this.object, 'valid');
+  rewind(throwing = false): void {
+    this.invalidate();
+    if (!throwing || this.runsWhileThrowing()) callIteratorMethod(this.object, 'rewind');
+  }
+
+  valid(throwing = false): boolean {
+    return (!throwing || this.runsWhileThrowing()) && callIteratorMethod(this.object, 'valid');
   }
 
   current(): Value {
@@ -178,9 +183,9 @@ export class InnerIterator extends EngineIteratorOwner {
     return callIteratorMethod(this.object, 'key');
   }
 
-  next(): void {
+  next(throwing = false): void {
     this.invalidate();
-    callIteratorMethod(this.object, 'next');
+    if (!throwing || this.runsWhileThrowing()) callIteratorMethod(this.object, 'next');
   }
 
   invalidate(): void {

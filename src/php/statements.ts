@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 644 -- Keeps statement execution with its binding and unwind scopes.
+// code-gauge-allow-file fileNcss 652 -- Keeps statement execution with its binding and unwind scopes.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
@@ -336,35 +336,46 @@ function loopBody(body: Stmt[]): 'next' | Completion {
   return completion;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- One case per statement kind, as PHP runs each kind differently.
 function forStatement(statement: Extract<Stmt, { k: 'for' }>, held: number): Completion {
   const runtime = rt();
   const frame = runtime.frame;
-  if (statement.init.length > 0) {
-    for (const e of statement.init) ev(e);
-    runtime.steps.step(statement.row);
-  }
+  runForClause(statement.init, statement.row, frame, held);
   for (;;) {
-    runtime.dropTemporaries(frame, held);
     runtime.row = statement.row;
-    let proceed = true;
-    for (const [index, e] of statement.cond.entries()) {
-      if (index === statement.cond.length - 1) proceed = evBool(e);
-      else {
-        ev(e);
-        runtime.dropTemporaries(frame, held);
-      }
-    }
-    if (!proceed) return undefined;
+    for (const [index, e] of statement.cond.entries())
+      if (!evaluateForExpression(e, frame, held, index === statement.cond.length - 1)) return undefined;
     const result = loopBody(statement.body);
     if (result !== 'next') return result;
-    if (statement.update.length > 0) {
-      runtime.row = statement.row;
-      for (const e of statement.update) ev(e);
-      runtime.steps.step(statement.row);
-    }
+    runForClause(statement.update, statement.row, frame, held);
     runtime.spend();
   }
+}
+
+function runForClause(expressions: Expr[], row: number, frame: Frame, held: number): void {
+  if (expressions.length === 0) return;
+  const runtime = rt();
+  runtime.row = row;
+  for (const expression of expressions) evaluateForExpression(expression, frame, held);
+  runtime.steps.step(row);
+}
+
+function evaluateForExpression(e: Expr, frame: Frame, held: number, condition = false): boolean {
+  const runtime = rt();
+  try {
+    if (condition) return evBool(e);
+    if (e.k === 'var') evQuiet(e);
+    else ev(e, true);
+  } catch (error) {
+    releaseLoopTemporariesOnThrow(runtime, frame, held, error);
+  }
+  runtime.dropTemporaries(frame, held);
+  return true;
+}
+
+function releaseLoopTemporariesOnThrow(runtime: Runtime, frame: Frame, mark: number, error: unknown): never {
+  if (error instanceof PhpThrow && frame.temporaries.length > mark)
+    withPendingException(runtime, error, () => runtime.dropTemporaries(frame, mark));
+  throw error;
 }
 
 // code-gauge-allow functionCognitiveComplexity 16 -- One case per statement kind, as PHP runs each kind differently.
@@ -499,9 +510,7 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
       ? foreachReferenceSubject(statement)
       : foreachValueSubject(statement, subjectMark);
   } catch (error) {
-    if (error instanceof PhpThrow && frame.temporaries.length > subjectMark)
-      withPendingException(runtime, error, () => runtime.dropTemporaries(frame, subjectMark));
-    throw error;
+    releaseLoopTemporariesOnThrow(runtime, frame, subjectMark, error);
   }
 }
 
@@ -518,7 +527,7 @@ function foreachValueSubject(statement: Extract<Stmt, { k: 'foreach' }>, subject
       runtime.discardNativeResult(subject, nativeMark, subjectMark)
     );
   subject.shared = true;
-  for (const [key, slot] of subject.map) {
+  for (const [key, slot] of subject.foreachEntries()) {
     runtime.spend();
     const value = slot instanceof Ref ? slot.v : slot;
     const completion = foreachIteration(statement, key, value);

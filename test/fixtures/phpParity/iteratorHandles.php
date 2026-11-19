@@ -74,3 +74,29 @@ class VisibleRewind extends ArrayIterator {
 foreach (new TemporaryAggregate as $value) echo 'body;';
 echo "end;\n";
 printFreshHandle();
+
+$appending = new AppendIterator;
+$appending->append(new ArrayIterator([1]));
+$appending->append(new ArrayIterator([2]));
+foreach (['rewind', 'rewind', 'next', 'next', 'rewind'] as $method) {
+    printFreshHandle();
+    $appending->$method();
+}
+printFreshHandle();
+
+class AppendedValue {
+    function __destruct() { throw new Exception('release'); }
+}
+class ReturningAppendedValue implements Iterator {
+    function current(): mixed { return new AppendedValue; }
+    function key(): int { return 0; }
+    function rewind(): void {}
+    function valid(): bool { return true; }
+    function next(): void {}
+}
+$appending = new AppendIterator;
+$appending->append(new ReturningAppendedValue);
+$appending->append(new ArrayIterator(['next']));
+try { $appending->rewind(); }
+catch (Exception $error) { echo $error->getMessage(), ':'; }
+echo $appending->getIteratorIndex(), ':', $appending->current(), "\n";

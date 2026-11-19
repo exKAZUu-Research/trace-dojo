@@ -53,3 +53,6 @@ Array
     [ArrayAccess] => ArrayAccess
     [Countable] => Countable
 )
+drop:a;drop:b;65792:{"fresh":3}:{"fresh":3}
+drop:a;drop:b;b:a;256:[]:[]
+old:1;next:2;{"fresh":3,"next":2}

@@ -35,3 +35,12 @@ $k = 5; echo $k > 3 ? "big" : "small", " ", $k ?: "zero", " ", null ?: "fallback
 echo true && false ? 'T' : 'F', true and false, "\n";
 $z = false or true; var_dump($z);
 echo 10 <=> 5, 'a' <=> 'b', [1,2] <=> [1,3], "\n";
+
+class HeaderValue {
+    function __construct(private $label) { echo "new:$this->label;"; }
+    function __destruct() { echo "drop:$this->label;"; }
+}
+for ($unused, new HeaderValue('init-a'), new HeaderValue('init-b'); new HeaderValue('condition'), false; ) {}
+echo "\n";
+for ($i = 0; $i < 1; new HeaderValue('update-a'), $unused, new HeaderValue('update-b'), $i++) {}
+echo "\n";

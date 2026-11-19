@@ -1,13 +1,14 @@
+// code-gauge-allow-file fileNcss 431 -- Keeps the wrappers with their shared iterator state and retirement phases.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callCallback, callMethod, consumeInvokedResult, discardInvokedResult } from './callables';
 import { createObject, findClass } from './classes';
 import { toBool } from './conversions';
-import { throwError, warn } from './errors';
+import { type CleanupException, throwError, warn, withCleanupExceptions } from './errors';
 import { acquireIterator, InnerIterator, releaseIteratorValues } from './iteratorAcquisition';
 import { arrayIteratorOver } from './libArrayObject';
 import { defineClass, type NativeMethod } from './native';
 import { toKey, toStr } from './operators';
-import { rt } from './runtime';
+import { PhpThrow, rt } from './runtime';
 import { nativeOwnershipChanged, PhpArray, type PhpClass, PhpObject, type Value } from './values';
 
 /** The engine's iterator for a Traversable object, which asks an IteratorAggregate for its iterator. */
@@ -103,13 +104,15 @@ export class DualState {
   limitCount = -1n;
   cachingFlags = 0;
   cachingString: string | undefined;
-  cache = new PhpArray();
+  readonly cache = new PhpArray();
   /** The iterator over the ArrayIterator that holds an AppendIterator's iterators. */
   appended: InnerIterator | undefined;
   callback: Value = null;
   regex = { pattern: '', mode: 0, flags: 0n, pregFlags: 0n };
 
-  constructor(private readonly owner: PhpObject) {}
+  constructor(private readonly owner: PhpObject) {
+    this.cache.nativeSharedWrites = true;
+  }
 
   clone(): never {
     throwError('Error', `Trying to clone an uncloneable object of class ${this.owner.cls.name}`);
@@ -130,7 +133,28 @@ export class DualState {
 
   setInner(object: PhpObject): void {
     this.innerObject = object;
+    nativeOwnershipChanged(this.owner);
     this.inner = innerIteratorOf(object);
+    nativeOwnershipChanged(this.owner);
+  }
+
+  releaseInner(): void {
+    const object = this.innerObject;
+    const handle = this.inner?.handle;
+    if (!object && !handle) return;
+    this.innerObject = undefined;
+    this.inner = undefined;
+    nativeOwnershipChanged(this.owner);
+    const runtime = rt();
+    withIteratorTransition((transition) => {
+      transition.run(() => releaseIteratorValues([object]));
+      if (handle) runtime.discardNativeResult(handle, Infinity, 0);
+    });
+  }
+
+  clearCache(): void {
+    const slots = this.cache.clearSlots();
+    if (slots.length > 0) rt().release(slots, true, true);
   }
 
   free(): void {
@@ -146,24 +170,22 @@ export class DualState {
     releaseIteratorValues([current, sourceData?.v, data?.v, key]);
   }
 
-  rewind(): void {
+  rewind(throwing = false): void {
     this.free();
     this.pos = 0n;
-    this.inner?.rewind();
+    this.inner?.rewind(throwing);
   }
 
-  valid(): boolean {
-    return this.inner?.valid() ?? false;
+  valid(throwing = false): boolean {
+    return this.inner?.valid(throwing) ?? false;
   }
 
   /** Copies the inner iterator's element, after checking that it has one when `checkMore` asks to. */
   fetch(checkMore: boolean): boolean {
     this.free();
     if (checkMore && !this.valid()) return false;
+    this.fetchCurrent();
     const inner = this.inner as InnerIterator;
-    this.data = { v: inner.current() };
-    inner.takeCurrent();
-    nativeOwnershipChanged(this.owner);
     consumeInvokedResult(
       () => inner.key(),
       (key) => {
@@ -172,6 +194,18 @@ export class DualState {
       }
     );
     return true;
+  }
+
+  fetchWithPendingException(checkMore: boolean): void {
+    this.free();
+    if ((!checkMore || this.valid(true)) && this.inner?.runsWhileThrowing()) this.fetchCurrent();
+  }
+
+  private fetchCurrent(): void {
+    const inner = this.inner as InnerIterator;
+    this.data = { v: inner.current() };
+    inner.takeCurrent();
+    nativeOwnershipChanged(this.owner);
   }
 
   replaceData(value: Value): void {
@@ -199,12 +233,32 @@ export class DualState {
     this.inner?.next();
   }
 
-  next(free: boolean): void {
+  next(free: boolean, throwing = false): void {
     if (free) this.free();
     else if (!this.inner) throwError('Error', "The inner constructor wasn't initialized with an iterator instance");
-    this.inner?.next();
+    this.inner?.next(throwing);
     this.pos = BigInt.asIntN(64, this.pos + 1n);
   }
+}
+
+class IteratorTransition {
+  failed = false;
+
+  constructor(private readonly capture: (error: CleanupException) => void) {}
+
+  run(work: () => void): void {
+    try {
+      work();
+    } catch (error) {
+      if (!(error instanceof PhpThrow)) throw error;
+      this.capture(error);
+      this.failed = true;
+    }
+  }
+}
+
+function withIteratorTransition(work: (transition: IteratorTransition) => void): void {
+  withCleanupExceptions(rt(), (capture) => work(new IteratorTransition(capture)), 'latest');
 }
 
 export function dualOf(object: PhpObject): DualState {
@@ -481,6 +535,19 @@ function cachingNext(state: DualState): void {
   state.next(false);
 }
 
+function cachingRewind(state: DualState): void {
+  withIteratorTransition((transition) => {
+    transition.run(() => state.rewind());
+    transition.run(() => state.clearCache());
+    if (!transition.failed) {
+      cachingNext(state);
+      return;
+    }
+    state.cachingFlags &= ~CIT_VALID;
+    state.fetchWithPendingException(true);
+  });
+}
+
 function fullCache(object: PhpObject): DualState {
   const state = dualOf(object);
   if (!(state.cachingFlags & CIT_FULL_CACHE))
@@ -516,13 +583,7 @@ defineClass({
     },
     {
       signature: 'rewind(): void',
-      impl: ({ thisObj }) => {
-        const state = dualOf(thisObj);
-        state.rewind();
-        state.cache = new PhpArray();
-        cachingNext(state);
-        return null;
-      },
+      impl: ({ thisObj }) => (cachingRewind(dualOf(thisObj)), null),
     },
     { signature: 'valid(): bool', impl: ({ thisObj }) => (dualOf(thisObj).cachingFlags & CIT_VALID) !== 0 },
     { signature: 'next(): void', impl: ({ thisObj }) => (cachingNext(dualOf(thisObj)), null) },
@@ -553,8 +614,11 @@ defineClass({
           throwError('InvalidArgumentException', 'Unsetting flag CALL_TO_STRING is not possible');
         if (state.cachingFlags & CIT_TOSTRING_USE_INNER && !(flags & CIT_TOSTRING_USE_INNER))
           throwError('InvalidArgumentException', 'Unsetting flag TOSTRING_USE_INNER is not possible');
-        if (flags & CIT_FULL_CACHE && !(state.cachingFlags & CIT_FULL_CACHE)) state.cache = new PhpArray();
-        state.cachingFlags = (state.cachingFlags & ~CIT_PUBLIC) | flags;
+        withIteratorTransition((transition) => {
+          if (flags & CIT_FULL_CACHE && !(state.cachingFlags & CIT_FULL_CACHE))
+            transition.run(() => state.clearCache());
+          state.cachingFlags = (state.cachingFlags & ~CIT_PUBLIC) | flags;
+        });
         return null;
       },
     },
@@ -649,23 +713,23 @@ defineClass({
 // AppendIterator -----------------------------------------------------------------------------------------------------
 
 /** Transcribes spl_append_it_next_iterator: moves on to the iterator the list's position is at. */
-function appendNextIterator(state: DualState): boolean {
-  state.free();
-  state.innerObject = undefined;
-  state.inner = undefined;
+function appendNextIterator(state: DualState, transition: IteratorTransition): boolean {
+  transition.run(() => state.free());
+  transition.run(() => state.releaseInner());
   const list = state.appended as InnerIterator;
   if (!list.valid()) return false;
   state.setInner(list.current() as PhpObject);
-  state.rewind();
+  transition.run(() => state.rewind(transition.failed));
   return true;
 }
 
-function appendFetch(state: DualState): void {
-  while (!state.valid()) {
+function appendFetch(state: DualState, transition: IteratorTransition): void {
+  while (!state.valid(transition.failed)) {
     (state.appended as InnerIterator).next();
-    if (!appendNextIterator(state)) return;
+    if (!appendNextIterator(state, transition)) return;
   }
-  state.fetch(false);
+  if (transition.failed) state.fetchWithPendingException(false);
+  else state.fetch(false);
 }
 
 defineClass({
@@ -692,9 +756,13 @@ defineClass({
         if (advance) list.next();
         if (state.inner && state.valid()) return null;
         if (!list.valid()) list.rewind();
-        do appendNextIterator(state);
-        while (state.innerObject !== iterator);
-        appendFetch(state);
+        withIteratorTransition((transition) => {
+          while (appendNextIterator(state, transition)) {
+            if (state.innerObject !== iterator) continue;
+            appendFetch(state, transition);
+            return;
+          }
+        });
         return null;
       },
     },
@@ -703,7 +771,9 @@ defineClass({
       impl: ({ thisObj }) => {
         const state = dualOf(thisObj);
         (state.appended as InnerIterator).rewind();
-        if (appendNextIterator(state)) appendFetch(state);
+        withIteratorTransition((transition) => {
+          if (appendNextIterator(state, transition)) appendFetch(state, transition);
+        });
         return null;
       },
     },
@@ -720,8 +790,13 @@ defineClass({
       signature: 'next(): void',
       impl: ({ thisObj }) => {
         const state = dualOf(thisObj);
-        if (state.valid()) state.next(true);
-        appendFetch(state);
+        withIteratorTransition((transition) => {
+          if (state.valid()) {
+            transition.run(() => state.free());
+            transition.run(() => state.next(false, transition.failed));
+          }
+          appendFetch(state, transition);
+        });
         return null;
       },
     },

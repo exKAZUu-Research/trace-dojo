@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 964 -- Keeps class defaults with PHP value storage and ownership helpers.
+// code-gauge-allow-file fileNcss 986 -- Keeps class defaults with PHP value storage and ownership helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
@@ -151,6 +151,7 @@ export class PhpArray {
   private nextFree = INT_MIN;
   /** Whether more than one holder may see this array, so that a write must copy it first. */
   shared = false;
+  nativeSharedWrites = false;
   persistentHolder = false;
   uncollectable = false;
   /** Whether an element may hold an object, an array, or a reference, which garbage collection must visit. */
@@ -188,6 +189,23 @@ export class PhpArray {
     const order = this.ordered();
     if (!previous) return order.cursor(order.first?.key, { generation: 0 });
     return order.resumeCursor(this.currentKey(), previous, retainPosition);
+  }
+
+  foreachEntries(): Iterable<[Key, Value | Ref]> {
+    return this.nativeSharedWrites ? this.liveForeachEntries() : this.map;
+  }
+
+  private *liveForeachEntries(): Iterable<[Key, Value | Ref]> {
+    const cursor = this.foreachCursor();
+    try {
+      for (let key = cursor.key; key !== undefined; key = cursor.key) {
+        const slot = this.map.get(key);
+        cursor.next();
+        if (slot !== undefined && slot !== UNDEFINED_RESULT) yield [key, slot];
+      }
+    } finally {
+      cursor.close();
+    }
   }
 
   prepareSort(): void {
@@ -460,12 +478,26 @@ export class PhpArray {
     trackOwner(slot, this, key);
   }
 
+  clearSlots(): (Value | Ref)[] {
+    const slots = this.detachSlots();
+    this.order?.replace([], this.order.isPacked);
+    this.nextFree = INT_MIN;
+    this.pointer = null;
+    this.invalidate();
+    return slots;
+  }
+
   retire(): (Value | Ref)[] {
+    const slots = this.detachSlots();
+    this.mutationVersion++;
+    invalidateOwner(this);
+    return slots;
+  }
+
+  private detachSlots(): (Value | Ref)[] {
     const slots = [...this.map.values()];
     this.map.clear();
     this.composite = false;
-    this.mutationVersion++;
-    invalidateOwner(this);
     for (const slot of slots) if (slot instanceof Ref) slot.rc--;
     return slots;
   }

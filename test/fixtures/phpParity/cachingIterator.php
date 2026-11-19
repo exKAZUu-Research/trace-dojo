@@ -29,3 +29,36 @@ $it = new CachingIterator(new ArrayIterator($names));
 foreach ($it as $n) { echo $n; if ($it->hasNext()) echo ', '; }
 echo "\n";
 print_r(class_implements('CachingIterator'));
+
+class CacheValue {
+    function __construct(private $label, private $throws = false) {}
+    function __destruct() {
+        echo "drop:$this->label;";
+        if ($this->throws) throw new Exception($this->label);
+    }
+}
+foreach (['rewind', 'enable'] as $mode) {
+    $it = new CachingIterator(new ArrayIterator(['fresh' => 3]), CachingIterator::FULL_CACHE);
+    $it['a'] = new CacheValue('a', $mode === 'enable');
+    $it['b'] = new CacheValue('b', $mode === 'enable');
+    $cache = $it->getCache();
+    try {
+        if ($mode === 'rewind') $it->rewind();
+        else {
+            $it->setFlags(0);
+            $it->setFlags(CachingIterator::FULL_CACHE);
+        }
+    } catch (Throwable $error) {
+        echo $error->getMessage(), ':', $error->getPrevious()?->getMessage(), ';';
+    }
+    echo $it->getFlags(), ':', json_encode($cache), ':', json_encode($it->getCache()), "\n";
+}
+$it['old'] = 1;
+foreach ($cache as $key => $value) {
+    echo "$key:$value;";
+    if ($key === 'old') {
+        $it->rewind();
+        $it['next'] = 2;
+    }
+}
+echo json_encode($cache), "\n";

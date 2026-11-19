@@ -23,3 +23,5 @@ big 5 fallback
 F
 bool(false)
 1-1-1
+new:init-a;drop:init-a;new:init-b;drop:init-b;new:condition;drop:condition;
+new:update-a;drop:update-a;new:update-b;drop:update-b;
