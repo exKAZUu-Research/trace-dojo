@@ -1,9 +1,10 @@
 import { type AST, RegExpParser, visitRegExpAST } from '@eslint-community/regexpp';
+import { toUnicodeSet } from 'regexp-ast-analysis';
 import { analyse } from 'scslre';
 
-// code-gauge-allow functionNcss 33 -- Tracks scoped flags and repetition shapes in one AST traversal.
+// code-gauge-allow functionNcss 36 -- Tracks scoped flags and repetition shapes in one AST traversal.
 export function hasAmbiguousRepetition(tree: AST.Pattern, unicode: boolean, ignoreCase: boolean): boolean {
-  const flags = new RegExpParser({ ecmaVersion: 2025 }).parseFlags(`${unicode ? 'u' : ''}${ignoreCase ? 'i' : ''}`);
+  const baseIgnoreCase = ignoreCase;
   const cases: boolean[] = [];
   const caseless = new WeakSet<AST.Element>();
   const alphabets = new WeakMap<AST.Element, bigint>();
@@ -28,6 +29,9 @@ export function hasAmbiguousRepetition(tree: AST.Pattern, unicode: boolean, igno
     onCharacterClassEnter(node) {
       if (ignoreCase) caseless.add(node);
     },
+    onCharacterSetEnter(node) {
+      if (ignoreCase) caseless.add(node);
+    },
     onAlternativeLeave(node) {
       ambiguous ||= overlapsInSequence(node, alphabets, caseless);
     },
@@ -39,14 +43,76 @@ export function hasAmbiguousRepetition(tree: AST.Pattern, unicode: boolean, igno
         branchChoices(node, choiceCounts) > MAX_REPEAT_CHOICES;
     },
   });
-  // The grouped analysis uses one case-sensitivity setting for the whole pattern.
-  return ambiguous || (!changesCaseSensitivity && overlappingUnboundedGroups(tree, flags, unbounded));
+  return (
+    ambiguous ||
+    overlappingUnboundedGroups(tree, unicode, baseIgnoreCase, unbounded, changesCaseSensitivity ? caseless : undefined)
+  );
 }
 
-function overlappingUnboundedGroups(tree: AST.Pattern, flags: AST.Flags, count: number): boolean {
+const MAX_GROUP_ANALYSIS_SOURCE = 8192;
+
+function overlappingUnboundedGroups(
+  tree: AST.Pattern,
+  unicode: boolean,
+  ignoreCase: boolean,
+  count: number,
+  scopedCase?: WeakSet<AST.Element>
+): boolean {
   if (count < 2) return false;
-  if (count > 32 || tree.raw.length > 8192) return true;
-  return analyse({ pattern: tree, flags }, { maxReports: 1, reportTypes: { Move: false } }).reports.length > 0;
+  if (count > 32 || tree.raw.length > MAX_GROUP_ANALYSIS_SOURCE) return true;
+  const parser = new RegExpParser({ ecmaVersion: 2025 });
+  if (!scopedCase) {
+    const flags = parser.parseFlags(`${unicode ? 'u' : ''}${ignoreCase ? 'i' : ''}`);
+    return hasGroupedOverlap(tree, flags);
+  }
+  const source = expandScopedCase(tree, scopedCase, unicode);
+  if (source === undefined) return true;
+  return hasGroupedOverlap(
+    parser.parsePattern(source, 0, source.length, { unicode }),
+    parser.parseFlags(unicode ? 'u' : '')
+  );
+}
+
+function hasGroupedOverlap(pattern: AST.Pattern, flags: AST.Flags): boolean {
+  return analyse({ pattern, flags }, { maxReports: 1, reportTypes: { Move: false } }).reports.length > 0;
+}
+
+function expandScopedCase(tree: AST.Pattern, caseless: WeakSet<AST.Element>, unicode: boolean): string | undefined {
+  let output = '';
+  let end = 0;
+  let exceeded = false;
+  const replace = (node: AST.Node, text: string): void => {
+    output += tree.raw.slice(end, node.start) + text;
+    end = node.end;
+    exceeded ||= output.length > MAX_GROUP_ANALYSIS_SOURCE;
+  };
+  const expand = (node: AST.Character | AST.CharacterClass | AST.CharacterSet): void => {
+    if (exceeded || node.start < end || !caseless.has(node)) return;
+    const { ranges } = toUnicodeSet(node, { unicode, ignoreCase: true }).chars;
+    if (ranges.length > MAX_GROUP_ANALYSIS_SOURCE / 6) {
+      exceeded = true;
+      return;
+    }
+    replace(node, `[${ranges.map(({ min, max }) => escapeRange(min, max, unicode)).join('')}]`);
+  };
+  visitRegExpAST(tree, {
+    onModifiersEnter(node) {
+      if (exceeded || !node.raw.includes('i')) return;
+      const flags = node.raw.replaceAll('i', '').replace(/-$/, '');
+      replace(node, flags);
+    },
+    onCharacterEnter: expand,
+    onCharacterClassEnter: expand,
+    onCharacterSetEnter: expand,
+  });
+  const source = output + tree.raw.slice(end);
+  return exceeded || source.length > MAX_GROUP_ANALYSIS_SOURCE ? undefined : source;
+}
+
+function escapeRange(min: number, max: number, unicode: boolean): string {
+  const escape = (code: number): string =>
+    unicode ? `\\u{${code.toString(16)}}` : `\\u${code.toString(16).padStart(4, '0')}`;
+  return min === max ? escape(min) : `${escape(min)}-${escape(max)}`;
 }
 
 const MAX_REPEAT_CHOICES = 1024;

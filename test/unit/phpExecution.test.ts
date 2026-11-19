@@ -868,25 +868,31 @@ test.each([
   });
 });
 
-test.each(['a*a*a*a*', 'a+a?a+a+', '[a-c]+b[a-d]+', '(?:a*)(a*)(?:a*)', '(?i:a*)A*a*'])(
-  'bounds overlapping repeated atoms: %s',
-  (pattern) => {
-    expect(run(`<?php preg_match('/^${pattern}x$/', str_repeat('a', 22).'!');`)).toMatchObject({
-      kind: 'executed',
-      uncaughtException: expect.stringContaining('この採点環境では使えません。'),
-    });
-  }
-);
+test.each([
+  'a*a*a*a*',
+  'a+a?a+a+',
+  '[a-c]+b[a-d]+',
+  '(?:a*)(a*)(?:a*)',
+  '(?i:a*)A*a*',
+  '(?i:z)(a+|b)(a+|b)(a+|b)',
+  '(?i:z)(a*|b)(a*|b)(a*|b)',
+])('bounds overlapping repeated atoms: %s', (pattern) => {
+  expect(run(`<?php preg_match('/^${pattern}x$/', str_repeat('a', 22).'!');`)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+  });
+});
 
 test('allows case-sensitive disjoint repetitions and small bounded repetitions on long subjects', () => {
   expect(
     run(String.raw`<?php
 var_dump(preg_match('/^[a-z]*[A-Z]*$/', 'abcdefghijklmnopQ'));
 var_dump(preg_match('/^(?-i:a*A*)$/i', 'aaaaaaaaaaaaaaaaA'));
+var_dump(preg_match('/^(?i:z)[a-z]*[A-Z]*$/', 'ZabcdefghijklmnopQ'));
 var_dump(preg_match('/^\d{1,2}\d{1,2}$/', '12345678901234567'));
 var_dump(preg_match('/^a{1,3}a{1,3}$/', str_repeat('a', 17)));
 `)
-  ).toMatchObject({ kind: 'executed', stdout: 'int(1)\nint(1)\nint(0)\nint(0)\n' });
+  ).toMatchObject({ kind: 'executed', stdout: 'int(1)\nint(1)\nint(1)\nint(0)\nint(0)\n' });
 });
 
 test('retains short ambiguous repetitions and long unambiguous repetitions', () => {

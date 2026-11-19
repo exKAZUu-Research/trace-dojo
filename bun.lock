@@ -65,6 +65,7 @@
         "react-icons": "5.7.0",
         "react-idle-timer": "5.7.3",
         "react-syntax-highlighter": "16.1.2",
+        "regexp-ast-analysis": "0.7.1",
         "scslre": "0.3.0",
         "seedrandom": "3.0.5",
         "server-only": "0.0.1",
