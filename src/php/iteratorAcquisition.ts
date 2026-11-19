@@ -94,7 +94,11 @@ function acquireDirectIterator(object: PhpObject, byRef: boolean): AcquiredItera
       }
     | undefined;
   if (object.cls.isSubclassOf(iteratorClass)) {
-    if (byRef && typeof internal?.writable !== 'function')
+    if (
+      byRef &&
+      (typeof internal?.writable !== 'function' ||
+        !iteratorMethods.every((name) => object.cls.findMethod(name)?.fn.kind === 'native'))
+    )
       throwError('Error', 'An iterator cannot be used with foreach by reference');
     if (usesNativeRecursiveIterator(object.cls)) internal?.prepareEngineIteration?.();
     const handle = newEngineIterator(object);

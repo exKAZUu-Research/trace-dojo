@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 659 -- Keeps statement execution with its binding and unwind scopes.
+// code-gauge-allow-file fileNcss 675 -- Keeps statement execution with its binding and unwind scopes.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
@@ -584,31 +584,45 @@ function foreachArrayByRef(
   subject: Ref | NativeForeachStorage
 ): ForeachCompletion {
   const runtime = rt();
-  let cursor = array.foreachCursor();
+  const isRefSubject = subject instanceof Ref;
+  let state = { array, cursor: array.foreachCursor() };
   try {
     for (;;) {
-      const next = subject instanceof Ref ? subject.v : subject.array;
-      if (next !== array) {
-        if (!(next instanceof PhpArray)) return FOREACH_REPLACED;
-        array =
-          subject instanceof Ref ? (writableContainer(new RefPlace(subject), next) as PhpArray) : subject.writable();
-        cursor = array.foreachCursor(cursor, !(subject instanceof Ref));
-      }
-      const key = cursor.key;
+      const synced = syncForeachArray(state.array, state.cursor, subject);
+      if (!synced) return FOREACH_REPLACED;
+      state = synced;
+      const key = state.cursor.key;
       if (key === undefined) return undefined;
       runtime.spend();
-      cursor.next();
-      if (array.map.get(key) === UNDEFINED_RESULT) continue;
-      const ref = new ElementPlace(array, key).ref();
-      bindForeachRef(statement, ref);
+      const hole = state.array.map.get(key) === UNDEFINED_RESULT;
+      if (isRefSubject || hole) state.cursor.next();
+      if (hole) continue;
+      bindForeachRef(statement, new ElementPlace(state.array, key).ref());
       if (statement.key) assignTo(statement.key, key);
       runtime.steps.stepBinding(statement.row, true);
       const result = loopBody(statement.body);
       if (result !== 'next') return result;
+      if (!isRefSubject) {
+        state = syncForeachArray(state.array, state.cursor, subject) ?? state;
+        state.cursor.next();
+      }
     }
   } finally {
-    cursor.close();
+    state.cursor.close();
   }
+}
+
+function syncForeachArray(
+  array: PhpArray,
+  cursor: ReturnType<PhpArray['foreachCursor']>,
+  subject: Ref | NativeForeachStorage
+): { array: PhpArray; cursor: ReturnType<PhpArray['foreachCursor']> } | undefined {
+  const isRefSubject = subject instanceof Ref;
+  const next = isRefSubject ? subject.v : subject.array;
+  if (next === array) return { array, cursor };
+  if (!(next instanceof PhpArray)) return undefined;
+  const updated = isRefSubject ? (writableContainer(new RefPlace(subject), next) as PhpArray) : subject.writable();
+  return { array: updated, cursor: updated.foreachCursor(cursor, !isRefSubject) };
 }
 
 function foreachPropertyByRef(

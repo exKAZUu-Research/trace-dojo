@@ -3693,4 +3693,24 @@ unset($d, $b);
 echo '|', gc_collect_cycles();
 `);
   expect(cycleBehindDestructor).toMatchObject({ kind: 'executed', stdout: '|D2;|DD2;|D1' });
+
+  const splByRefForeach = run(String.raw`<?php
+$ao = new ArrayObject([1, 2, 3]);
+foreach ($ao as $k => &$v) { echo "$v;"; if ($k === 0) unset($ao[$k]); }
+unset($v);
+echo '|';
+$ai = new ArrayIterator([1, 2, 3]);
+foreach ($ai as $k => &$v) { echo "$v;"; if ($k === 0) unset($ai[$k]); }
+unset($v);
+echo '|';
+$ao2 = new ArrayObject([1, 2, 3]);
+foreach ($ao2 as $k => &$v) { echo "$v;"; if ($k === 0) $ao2->exchangeArray([10, 20, 30]); }
+unset($v);
+echo '|';
+class SubValid extends ArrayIterator { function valid(): bool { return false; } }
+$s = new SubValid([1, 2]);
+try { foreach ($s as &$v) { $v = 9; } } catch (Error $e) { echo 'err:'; }
+echo json_encode($s->getArrayCopy());
+`);
+  expect(splByRefForeach).toMatchObject({ kind: 'executed', stdout: '1;3;|1;3;|1;20;30;|err:[1,2]' });
 });
