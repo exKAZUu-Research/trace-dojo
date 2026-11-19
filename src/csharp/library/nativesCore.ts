@@ -86,10 +86,13 @@ defineNatives({
     copy.native = object.native;
     return copy;
   },
+  // A call through `object` passes the struct in its box, since ValueType is a class.
   'System.ValueType.Equals': (call, receiver, [other]) =>
-    structEquals(evaluatorOf(call), receiver as CsStruct, other as Value, call.frame),
-  'System.ValueType.GetHashCode': (call, receiver) =>
-    receiver instanceof CsStruct ? structHash(evaluatorOf(call), receiver, call.frame) : (primitiveHash(receiver) ?? 0),
+    structEquals(evaluatorOf(call), unboxed(receiver) as CsStruct, other as Value, call.frame),
+  'System.ValueType.GetHashCode': (call, receiver) => {
+    const value = unboxed(receiver);
+    return value instanceof CsStruct ? structHash(evaluatorOf(call), value, call.frame) : (primitiveHash(value) ?? 0);
+  },
   'System.ValueType.ToString': (call, receiver) => defaultToString(evaluatorOf(call), receiver),
   'System.Type.get_Name': (_call, receiver) => {
     const type = typeOf(receiver);
@@ -253,8 +256,12 @@ for (const [name, special] of INTEGRAL) {
     [`${prefix}.GetHashCode`]: (_call: NativeCall, receiver: Value) => primitiveHash(unboxed(receiver)) ?? 0,
     [`${prefix}.CompareTo`]: (_call: NativeCall, receiver: Value, [other]: Value[]) => {
       if (other === undefined) return 1;
-      if (other instanceof CsBox && specialOf(other.type) !== special)
-        fail('System.ArgumentException', `Object must be of type ${name}.`);
+      // `CompareTo(object)` receives a box, which must hold the same type; `CompareTo(int)` receives the number.
+      const isSameType =
+        other instanceof CsBox
+          ? specialOf(other.type) === special
+          : typeof other !== 'object' && typeof other !== 'string';
+      if (!isSameType) fail('System.ArgumentException', `Object must be of type ${name}.`);
       const a = toBig(receiver);
       const b = toBig(other);
       return a < b ? -1 : a > b ? 1 : 0;

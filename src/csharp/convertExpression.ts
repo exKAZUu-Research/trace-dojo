@@ -464,9 +464,7 @@ export class ExpressionConverter {
       return { name: undefined, modifier: undefined, value: this.convertExpression(node), ...positionOf(node) };
     }
     const nameNode = field(node, 'name');
-    // `this` and `base` are anonymous tokens in the grammar, so an argument of either has no named child.
-    const valueNode = (namedChildren(node).find((child) => !sameNode(child, nameNode)) ??
-      childrenOf(node).find((child) => child.type === 'this' || child.type === 'base')) as Node;
+    const valueNode = namedChildren(node).find((child) => !sameNode(child, nameNode)) as Node;
     const modifier = (['ref', 'out', 'in'] as const).find((token) => hasToken(node, token));
     return { name: nameNode?.text, modifier, value: this.convertExpression(valueNode), ...positionOf(node) };
   }

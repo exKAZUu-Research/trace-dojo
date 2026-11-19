@@ -15,6 +15,10 @@ export function positionOf(node: Node): Position {
 
 /** The named children of a node, without the comments that tree-sitter places among them. */
 export function namedChildren(node: Node): Node[] {
+  // The grammar makes `this` an anonymous token even where it is an expression, such as in `return this;`.
+  if (node.type !== 'constructor_initializer' && node.children.some((child) => child?.type === 'this')) {
+    return childrenOf(node).filter((child) => child.isNamed || child.type === 'this');
+  }
   return node.namedChildren.filter((child): child is Node => child?.type !== undefined && child.type !== 'comment');
 }
 

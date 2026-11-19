@@ -708,10 +708,20 @@ export class Evaluator extends StatementExecutor {
         const implementationOwner =
           this.ownerOfImplementation(implementation, receiver) ??
           (staticType && nullableUnderlying(staticType) ? (staticType as NamedType) : owner);
+        // An enum's or a primitive's value runs an implementation of a class (Enum, ValueType) in its box.
+        const self =
+          staticType &&
+          receiver !== undefined &&
+          !implementation.owner.isValueType &&
+          !(receiver instanceof CsStruct) &&
+          this.isValueTypeValue(receiver, staticType) &&
+          !nullableUnderlying(staticType)
+            ? new CsBox(staticType, receiver)
+            : receiver;
         return this.invoke(
           frame,
           implementation,
-          receiver,
+          self,
           args,
           expression.row,
           this.environmentOf(implementation, implementationOwner, typeArgs)
