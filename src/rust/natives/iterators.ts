@@ -6,7 +6,6 @@ import type { Interpreter } from '../interpreter';
 import { type DebugValue, described, fieldsPart, iteratorDebug, numberPart, optionPart } from '../iterDebug';
 import { intoIterShape } from '../iterTypes';
 import { castValue, cloneValue, compareValues, copyValue, hashKey, needsCopy, valuesEqual, wrap } from '../ops';
-import { RustPanic } from '../runtime';
 import { iteratorCapability } from '../traits';
 import { shallow, type Type } from '../types';
 import {
@@ -16,7 +15,7 @@ import {
   IterValue,
   MapValue,
   type Next,
-  RangeValue,
+  type RangeValue,
   SetValue,
   sliceBase,
   sliceItems,
@@ -25,6 +24,7 @@ import {
   type Value,
 } from '../values';
 import { layoutOf, sizeOf } from './layout';
+import { rangeIterator } from './rangeIterator';
 import { call, define, deref, libraryPanic, type NativeContext, none, option, placeOf, some } from './support';
 
 /** An iterator over an array's elements from `start` to `end`, from both ends. */
@@ -152,74 +152,6 @@ export function setIter(set: SetValue, elemType: Type): IterValue {
   if (set.sorted) values.sort((a, b) => compareValues(elemType, a, b) ?? 0);
   const iter = arrayIter(values);
   iter.roots.push(set);
-  return iter;
-}
-
-/**
- * An iterator over a range that advances the range itself, as `Range`'s `Iterator` impl does: integers, or `char`s
- * (which skip the surrogates).
- */
-export function rangeIterator(range: RangeValue, elem: Type): IterValue {
-  const t = normalize(shallow(elem));
-  const isChar = t.kind === 'char';
-  const name = t.kind === 'int' ? t.name : 'i32';
-  const toNumber = (value: Value): bigint => (isChar ? BigInt((value as string).codePointAt(0)!) : (value as bigint));
-  const fromNumber = (value: bigint): Value => (isChar ? String.fromCodePoint(Number(value)) : value);
-  const step = (value: bigint, delta: bigint): bigint => {
-    let next = value + delta;
-    if (isChar && next >= 0xd8_00n && next <= 0xdf_ffn) next = delta > 0n ? 0xe0_00n : 0xd7_ffn;
-    return next;
-  };
-  const next = (): Next => {
-    if (range.exhausted) return DONE;
-    const start = toNumber(range.start);
-    if (range.end === undefined) {
-      if (!isChar && start === wrap(name as never, start) && start + 1n !== wrap(name as never, start + 1n)) {
-        // `RangeFrom` overflows past the type's maximum, as a debug build panics.
-        range.start = fromNumber(start);
-        throw new RustPanic('attempt to add with overflow', { row: 0, col: 0 });
-      }
-      range.start = fromNumber(step(start, 1n));
-      return fromNumber(start);
-    }
-    const end = toNumber(range.end);
-    if (range.inclusive) {
-      if (start > end) return DONE;
-      if (start === end) {
-        range.exhausted = true;
-        return fromNumber(start);
-      }
-    } else if (start >= end) {
-      return DONE;
-    }
-    range.start = fromNumber(step(start, 1n));
-    return fromNumber(start);
-  };
-  const nextBack = (): Next => {
-    if (range.exhausted || range.end === undefined) return DONE;
-    const start = toNumber(range.start);
-    const end = toNumber(range.end);
-    if (range.inclusive) {
-      if (start > end) return DONE;
-      if (start === end) {
-        range.exhausted = true;
-        return fromNumber(end);
-      }
-      range.end = fromNumber(step(end, -1n));
-      return fromNumber(end);
-    }
-    if (start >= end) return DONE;
-    const last = step(end, -1n);
-    range.end = fromNumber(last);
-    return fromNumber(last);
-  };
-  const remaining = (): number => {
-    if (range.exhausted || range.end === undefined) return 0;
-    const count = Number(toNumber(range.end) - toNumber(range.start)) + (range.inclusive ? 1 : 0);
-    return Math.max(0, count);
-  };
-  const iter = new IterValue(next, nextBack, remaining, [range]);
-  iter.fork = () => rangeIterator(new RangeValue(range.start, range.end, range.inclusive, range.exhausted), elem);
   return iter;
 }
 

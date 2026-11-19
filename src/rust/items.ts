@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 788 -- Follows Rust's name resolution case by case.
+// code-gauge-allow-file fileNcss 803 -- Follows Rust's name resolution case by case.
 import { CompileError } from '../interpreter/diagnostics';
 import type {
   BoundAst,
@@ -626,40 +626,40 @@ export class ItemCollector {
     if (item.selfParam && !impl && !trait) {
       compileError(item.selfParam.span, 'self は、impl やトレイトの中の関数にだけ書けます。');
     }
-    this.lowering.push(() => {
-      const params = new Map(def.params.map((param) => [param.name, param]));
-      if (trait) params.delete('Self');
-      const selfType: Type | undefined = trait ? { kind: 'param', param: trait.self } : impl?.selfType;
-      const assocParams: TypeParam[] = [];
-      const scope: TypeScope = { module, params, selfType, assocParams };
-      for (const [index, param] of item.generics.params.entries()) {
-        // A method's type parameter may not shadow its impl's.
-        if (params.get(param.name) !== own[index] && impl?.params.some((p) => p.name === param.name)) {
-          compileError(param.span, `型引数 ${param.name} は、impl の型引数と同じ名前です。`);
-        }
-        own[index].bounds = param.bounds.map((bound) => lowerBound(bound, scope, { kind: 'param', param: own[index] }));
-      }
-      addWherePredicates(item.generics, scope, (param, bounds) => {
-        // A method's bounds on its impl's parameters constrain only the method.
-        if (own.includes(param) || assocParams.includes(param)) return false;
-        def.extraBounds ??= [];
-        def.extraBounds.push(...bounds.map((bound) => ({ param, bound })));
-        return true;
-      });
-      const implParams: TypeParam[] = [];
-      const paramScope: TypeScope = { ...scope, implParams };
-      def.paramTypes = item.params.map((param) => lowerType(param.type, paramScope));
-      def.params.push(...implParams);
-      def.ret = item.ret ? lowerType(item.ret, { ...scope, allowOpaque: true }) : UNIT;
-      for (const param of own) assocItem(param, scope);
-      def.params.push(...assocParams);
-      if (item.name === 'main' && module === this.program.root && !impl && !trait) {
-        if (item.generics.params.length > 0) compileError(item.span, 'main 関数には型引数を書けません。');
-        if (item.params.length > 0) compileError(item.span, 'main 関数には引数を書けません。');
-      }
-    });
+    this.lowering.push(() => this.lowerFnSignature(def, item, module, own));
     if (!module.isStd && item.body) this.program.pendingFns.push(def);
     return def;
+  }
+
+  private lowerFnSignature(def: FnDef, item: FnItem, module: Module, own: TypeParam[]): void {
+    const { impl, trait } = def;
+    const params = new Map(def.params.map((param) => [param.name, param]));
+    if (trait) params.delete('Self');
+    const selfType: Type | undefined = trait ? { kind: 'param', param: trait.self } : impl?.selfType;
+    const assocParams: TypeParam[] = [];
+    const scope: TypeScope = { module, params, selfType, assocParams };
+    for (const [index, param] of item.generics.params.entries()) {
+      // A method's type parameter may not shadow its impl's.
+      if (params.get(param.name) !== own[index] && impl?.params.some((p) => p.name === param.name)) {
+        compileError(param.span, `型引数 ${param.name} は、impl の型引数と同じ名前です。`);
+      }
+      own[index].bounds = param.bounds.map((bound) => lowerBound(bound, scope, { kind: 'param', param: own[index] }));
+    }
+    addWherePredicates(item.generics, scope, (param, bounds) => {
+      // A method's bounds on its impl's parameters constrain only the method.
+      if (own.includes(param) || assocParams.includes(param)) return false;
+      def.extraBounds ??= [];
+      def.extraBounds.push(...bounds.map((bound) => ({ param, bound })));
+      return true;
+    });
+    const implParams: TypeParam[] = [];
+    const paramScope: TypeScope = { ...scope, implParams };
+    def.paramTypes = item.params.map((param) => lowerType(param.type, paramScope));
+    def.params.push(...implParams);
+    def.ret = item.ret ? lowerType(item.ret, { ...scope, allowOpaque: true }) : UNIT;
+    for (const param of own) assocItem(param, scope);
+    def.params.push(...assocParams);
+    if (item.name === 'main' && module === this.program.root && !impl && !trait) checkMainSignature(item);
   }
 
   private useItem(item: UseItem, module: Module): void {
@@ -682,6 +682,11 @@ export class ItemCollector {
       });
     }
   }
+}
+
+function checkMainSignature(item: FnItem): void {
+  if (item.generics.params.length > 0) compileError(item.span, 'main 関数には型引数を書けません。');
+  if (item.params.length > 0) compileError(item.span, 'main 関数には引数を書けません。');
 }
 
 function checkDuplicateFields(fields: { name: string; span: Span }[]): void {
@@ -1065,25 +1070,7 @@ function resolveImport(module: Module, entry: Import): void {
     } else if (path.length === 1 && EXTERN_CRATES.has(last)) {
       entry.types = { binding: { kind: 'mod', module: module.program.std }, isPublic: entry.isPublic };
     } else {
-      const parent = path.length > 1 ? resolveTypePath(path.slice(0, -1), module, span) : undefined;
-      let types: TypeBinding | undefined;
-      let values: ValueBinding | undefined;
-      if (!parent) {
-        const scope = module.lexicalParent ?? module;
-        types = lookupType(scope, last, span);
-        values = lookupValue(scope, last, span);
-      } else if (parent.kind === 'mod') {
-        const typeEntry = ownType(parent.module, last, span, new Set());
-        const valueEntry = ownValue(parent.module, last, span, new Set());
-        if (!typeEntry && !valueEntry && parent.module.isStd)
-          checkUnavailableStd(path[0] === 'std' || path[0] === 'core' ? path : ['std', ...path], span);
-        checkVisible<TypeBinding | ValueBinding>(typeEntry ?? valueEntry, parent.module, module, last, span);
-        types = typeEntry?.binding;
-        values = valueEntry?.binding;
-      } else if (parent.kind === 'adt' && parent.def.kind === 'enum') {
-        const variant = parent.def.variants.find((v) => v.name === last);
-        if (variant) values = { kind: 'ctor', def: parent.def, variant: variant.index };
-      }
+      const { types, values } = resolveImportedName(path, module, span);
       if (!types && !values) {
         compileError(span, `use ${path.join('::')} の ${last} が見つかりません。`);
       }
@@ -1094,6 +1081,32 @@ function resolveImport(module: Module, entry: Import): void {
   } finally {
     entry.resolving = false;
   }
+}
+
+function resolveImportedName(
+  path: string[],
+  module: Module,
+  span: Span
+): { types?: TypeBinding; values?: ValueBinding } {
+  const last = path.at(-1) as string;
+  const parent = path.length > 1 ? resolveTypePath(path.slice(0, -1), module, span) : undefined;
+  if (!parent) {
+    const scope = module.lexicalParent ?? module;
+    return { types: lookupType(scope, last, span), values: lookupValue(scope, last, span) };
+  }
+  if (parent.kind === 'mod') {
+    const typeEntry = ownType(parent.module, last, span, new Set());
+    const valueEntry = ownValue(parent.module, last, span, new Set());
+    if (!typeEntry && !valueEntry && parent.module.isStd)
+      checkUnavailableStd(path[0] === 'std' || path[0] === 'core' ? path : ['std', ...path], span);
+    checkVisible<TypeBinding | ValueBinding>(typeEntry ?? valueEntry, parent.module, module, last, span);
+    return { types: typeEntry?.binding, values: valueEntry?.binding };
+  }
+  if (parent.kind === 'adt' && parent.def.kind === 'enum') {
+    const variant = parent.def.variants.find((v) => v.name === last);
+    if (variant) return { values: { kind: 'ctor', def: parent.def, variant: variant.index } };
+  }
+  return {};
 }
 
 function checkVisible<T>(entry: Entry<T> | undefined, owner: Module, from: Module, name: string, span: Span): void {
@@ -1294,25 +1307,12 @@ function lowerPathType(path: PathAst, scope: TypeScope): Type {
   const names = path.segments.map((segment) => segment.name);
   const last = path.segments.at(-1)!;
   const owner = names.length === 2 ? scope.params.get(names[0]) : undefined;
-  if (owner) {
-    if (last.name !== 'Item' || last.args)
-      compileError(path.span, `${names.join('::')} は、この採点環境では使えません。`);
-    const item = assocItem(owner, scope);
-    if (!item) compileError(path.span, `${owner.name} に関連型 Item がありません（Iterator の境界を書いてください）。`);
-    return item;
-  }
+  if (owner) return lowerAssocItemPath(path, names, owner, scope);
   if (last.bindings)
     compileError(last.bindings[0].span, '関連型の指定（Item = ...）は、トレイトの境界にだけ書けます。');
   if (names.length === 1) {
-    const param = scope.params.get(last.name);
-    if (param) {
-      if (last.args) compileError(path.span, `型引数 ${last.name} には型引数を書けません。`);
-      return { kind: 'param', param };
-    }
-    if (last.name === 'Self') {
-      if (!scope.selfType) compileError(path.span, 'Self は、impl やトレイトの中にだけ書けます。');
-      return scope.selfType;
-    }
+    const local = lowerLocalTypeName(path, scope);
+    if (local) return local;
   }
   if (names[0] === 'Self' && names.length > 1) {
     compileError(path.span, 'Self::Item のような関連型は、この採点環境では使えません。');
@@ -1325,29 +1325,10 @@ function lowerPathType(path: PathAst, scope: TypeScope): Type {
       return binding.type;
     }
     case 'adt': {
-      const def = binding.def;
-      if (args.length !== def.params.length) {
-        if (args.length === 0 && scope.allowInfer)
-          return adt(
-            def,
-            def.params.map(() => freshVar())
-          );
-        if (def.builtin === 'HashMap' && args.length === 2) return adt(def, args);
-        compileError(
-          path.span,
-          def.params.length === 0
-            ? `${def.name} には型引数を書けません。`
-            : `${def.name} には型引数を ${def.params.length} 個書いてください（${def.name}<${def.params.map((p) => p.name).join(', ')}>）。`
-        );
-      }
-      return last.lifetimes?.length ? { kind: 'adt', def, args, lifetimes: last.lifetimes } : adt(def, args);
+      return lowerAdtPath(path, binding.def, args, scope);
     }
     case 'alias': {
-      if (binding.params.length === 0) return binding.resolve();
-      if (args.length !== binding.params.length) {
-        compileError(path.span, `${last.name} には型引数を ${binding.params.length} 個書いてください。`);
-      }
-      return substitute(binding.resolve(), new Map(binding.params.map((param, index) => [param, args[index]])));
+      return lowerAliasPath(path, binding, args);
     }
     case 'trait': {
       return compileError(
@@ -1359,6 +1340,56 @@ function lowerPathType(path: PathAst, scope: TypeScope): Type {
       return compileError(path.span, `${names.join('::')} はモジュールで、型ではありません。`);
     }
   }
+}
+
+function lowerAssocItemPath(path: PathAst, names: string[], owner: TypeParam, scope: TypeScope): Type {
+  const last = path.segments.at(-1)!;
+  if (last.name !== 'Item' || last.args)
+    compileError(path.span, `${names.join('::')} は、この採点環境では使えません。`);
+  const item = assocItem(owner, scope);
+  if (!item) compileError(path.span, `${owner.name} に関連型 Item がありません（Iterator の境界を書いてください）。`);
+  return item;
+}
+
+function lowerLocalTypeName(path: PathAst, scope: TypeScope): Type | undefined {
+  const last = path.segments.at(-1)!;
+  const param = scope.params.get(last.name);
+  if (param) {
+    if (last.args) compileError(path.span, `型引数 ${last.name} には型引数を書けません。`);
+    return { kind: 'param', param };
+  }
+  if (last.name === 'Self') {
+    if (!scope.selfType) compileError(path.span, 'Self は、impl やトレイトの中にだけ書けます。');
+    return scope.selfType;
+  }
+  return undefined;
+}
+
+function lowerAliasPath(path: PathAst, binding: TypeBinding & { kind: 'alias' }, args: Type[]): Type {
+  if (binding.params.length === 0) return binding.resolve();
+  if (args.length !== binding.params.length) {
+    compileError(path.span, `${path.segments.at(-1)!.name} には型引数を ${binding.params.length} 個書いてください。`);
+  }
+  return substitute(binding.resolve(), new Map(binding.params.map((param, index) => [param, args[index]])));
+}
+
+function lowerAdtPath(path: PathAst, def: AdtDef, args: Type[], scope: TypeScope): Type {
+  const last = path.segments.at(-1)!;
+  if (args.length !== def.params.length) {
+    if (args.length === 0 && scope.allowInfer)
+      return adt(
+        def,
+        def.params.map(() => freshVar())
+      );
+    if (def.builtin === 'HashMap' && args.length === 2) return adt(def, args);
+    compileError(
+      path.span,
+      def.params.length === 0
+        ? `${def.name} には型引数を書けません。`
+        : `${def.name} には型引数を ${def.params.length} 個書いてください（${def.name}<${def.params.map((p) => p.name).join(', ')}>）。`
+    );
+  }
+  return last.lifetimes?.length ? { kind: 'adt', def, args, lifetimes: last.lifetimes } : adt(def, args);
 }
 
 /** Lowers a bound on `self`, which closure traits complete with their signature. */

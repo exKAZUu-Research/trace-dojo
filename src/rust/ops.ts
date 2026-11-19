@@ -1,5 +1,5 @@
 import type { Span } from './ast';
-// code-gauge-allow-file fileNcss 449 -- One case per kind of type.
+// code-gauge-allow-file fileNcss 456 -- One case per kind of type.
 import { sizeTable } from './capacity';
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
@@ -159,19 +159,8 @@ export function castValue(value: Value, from: Type, to: Type): Value {
   const source = normalize(shallow(from));
   const target = normalize(shallow(to));
   if (target.kind === 'int') {
-    if (typeof value === 'bigint') return wrap(target.name, value);
-    if (typeof value === 'boolean') return value ? 1n : 0n;
-    if (typeof value === 'string') return wrap(target.name, BigInt(value.codePointAt(0) ?? 0));
-    if (typeof value === 'number') {
-      if (Number.isNaN(value)) return 0n;
-      const min = intMin(target.name);
-      const max = intMax(target.name);
-      if (value === Number.POSITIVE_INFINITY) return max;
-      if (value === Number.NEGATIVE_INFINITY) return min;
-      const truncated = BigInt(Math.trunc(value));
-      return truncated < min ? min : truncated > max ? max : truncated;
-    }
-    if (value instanceof EnumValue) return wrap(target.name, value.def.variants[value.variant].discriminant);
+    const cast = castToInt(value, target.name);
+    if (cast !== undefined) return cast;
   }
   if (target.kind === 'float') {
     if (typeof value === 'bigint') return target.name === 'f32' ? bigintToF32(value) : Number(value);
@@ -180,6 +169,25 @@ export function castValue(value: Value, from: Type, to: Type): Value {
   if (target.kind === 'char') return String.fromCodePoint(Number(value as bigint));
   void source;
   return value;
+}
+
+function castToInt(value: Value, name: IntName): Value | undefined {
+  if (typeof value === 'bigint') return wrap(name, value);
+  if (typeof value === 'boolean') return value ? 1n : 0n;
+  if (typeof value === 'string') return wrap(name, BigInt(value.codePointAt(0) ?? 0));
+  if (typeof value === 'number') return saturatingFloatToInt(value, name);
+  if (value instanceof EnumValue) return wrap(name, value.def.variants[value.variant].discriminant);
+  return undefined;
+}
+
+function saturatingFloatToInt(value: number, name: IntName): bigint {
+  if (Number.isNaN(value)) return 0n;
+  const min = intMin(name);
+  const max = intMax(name);
+  if (value === Number.POSITIVE_INFINITY) return max;
+  if (value === Number.NEGATIVE_INFINITY) return min;
+  const truncated = BigInt(Math.trunc(value));
+  return truncated < min ? min : truncated > max ? max : truncated;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

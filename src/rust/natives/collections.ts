@@ -18,7 +18,7 @@ import { defaultValue } from './core';
 import { arrayIter, mapIter, setIter } from './iterators';
 import { sizeOf } from './layout';
 import { btreeSetOp, orderOf, type SetOp } from './setOps';
-import { call, define, deref, type NativeContext, none, option, some } from './support';
+import { call, define, deref, type Native, type NativeContext, none, option, some } from './support';
 
 /** A new `HashMap` or `HashSet` with its entries' size, and with room for `capacity` elements. */
 export function withTable<T extends MapValue | SetValue>(collection: T, size: number, capacity?: Value): T {
@@ -118,26 +118,24 @@ function setValues(ctx: NativeContext, s: SetValue): Value[] {
   return values;
 }
 
-function mapNatives(sorted: boolean): Record<string, (args: Value[], ctx: NativeContext) => Value> {
+function mapNatives(sorted: boolean): Record<string, Native> {
+  return { ...mapCapacityNatives(sorted), ...mapEntryNatives(), ...mapIterNatives(), ...mapEndNatives() };
+}
+
+function mapCapacityNatives(sorted: boolean): Record<string, Native> {
   return {
     new: (_args, ctx) => withTable(new MapValue(sorted), entrySize(ctx)),
     with_capacity: ([capacity], ctx) => tableWithCapacity(ctx, new MapValue(sorted), entrySize(ctx), capacity),
     reserve: ([self, additional], ctx) => reserveTable(ctx, map(self), additional, entrySize(ctx)),
     shrink_to_fit: ([self]) => resize(map(self), (table) => table.shrinkTo(0)),
     shrink_to: ([self, min]) => resize(map(self), (table) => table.shrinkTo(Number(min as bigint))),
-    insert: ([self, k, v], ctx) => {
-      const m = map(self);
-      const hash = hashKey(keyType(ctx), k);
-      const existing = m.entries.get(hash);
-      if (existing) {
-        const old = existing[1];
-        existing[1] = v;
-        return some(ctx, old);
-      }
-      ctx.runtime.allocate(2);
-      m.entries.set(hash, [k, v]);
-      return none(ctx);
-    },
+    capacity: ([self]) => BigInt((map(self).entries as TableMap<string, unknown>).capacity),
+  };
+}
+
+function mapEntryNatives(): Record<string, Native> {
+  return {
+    insert: ([self, k, v], ctx) => insertEntry(ctx, map(self), k, v),
     get: ([self, k], ctx) => {
       const entry = map(self).entries.get(hashKey(keyType(ctx), k));
       return option(ctx, entry?.[1], entry !== undefined);
@@ -172,6 +170,25 @@ function mapNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
       map(self).entries.clear();
       return UNIT_VALUE;
     },
+  };
+}
+
+function insertEntry(ctx: NativeContext, m: MapValue, k: Value, v: Value): Value {
+  const hash = hashKey(keyType(ctx), k);
+  const existing = m.entries.get(hash);
+  if (existing) {
+    const old = existing[1];
+    existing[1] = v;
+    return some(ctx, old);
+  }
+  ctx.runtime.allocate(2);
+  m.entries.set(hash, [k, v]);
+  return none(ctx);
+}
+
+function mapIterNatives(): Record<string, Native> {
+  return {
+    into_iter: ([self], ctx) => mapIter(ctx.interp, map(self), keyType(ctx), 'value'),
     iter: ([self], ctx) => mapIter(ctx.interp, map(self), keyType(ctx), 'ref'),
     iter_mut: ([self], ctx) => mapIter(ctx.interp, map(self), keyType(ctx), 'mut'),
     keys: ([self], ctx) => arrayIter(entriesOf(ctx, map(self)).map((entry) => entry[0])),
@@ -191,23 +208,26 @@ function mapNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
       }
       return UNIT_VALUE;
     },
-    extend: ([self, iter], ctx) => {
-      const m = map(self);
-      const iterator = deref(iter) as IterValue;
-      for (;;) {
-        ctx.runtime.spend();
-        const item = iterator.next();
-        if (item === DONE) break;
-        const [k, v] = item as Value[];
-        const hash = hashKey(keyType(ctx), k);
-        const existing = m.entries.get(hash);
-        if (existing) existing[1] = v;
-        else m.entries.set(hash, [k, v]);
-      }
-      return UNIT_VALUE;
-    },
-    capacity: ([self]) => BigInt((map(self).entries as TableMap<string, unknown>).capacity),
-    into_iter: ([self], ctx) => mapIter(ctx.interp, map(self), keyType(ctx), 'value'),
+    extend: ([self, iter], ctx) => extendMap(ctx, map(self), deref(iter) as IterValue),
+  };
+}
+
+function extendMap(ctx: NativeContext, m: MapValue, iterator: IterValue): Value {
+  for (;;) {
+    ctx.runtime.spend();
+    const item = iterator.next();
+    if (item === DONE) break;
+    const [k, v] = item as Value[];
+    const hash = hashKey(keyType(ctx), k);
+    const existing = m.entries.get(hash);
+    if (existing) existing[1] = v;
+    else m.entries.set(hash, [k, v]);
+  }
+  return UNIT_VALUE;
+}
+
+function mapEndNatives(): Record<string, Native> {
+  return {
     first_key_value: ([self], ctx) => {
       const entries = entriesOf(ctx, map(self));
       return option(ctx, entries[0] && [entries[0][0], entries[0][1]], entries.length > 0);

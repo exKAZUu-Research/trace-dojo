@@ -220,57 +220,68 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
 
 function containerNodeOf(v: Value, t: Type, seen: Set<unknown>): DisplayNode | undefined {
   const elem = elementType(t);
-  if (elem && (Array.isArray(v) || v instanceof SliceView)) {
-    const entries: Record<string, DisplayNode> = {};
-    for (const [index, item] of sliceItems(v).entries()) entries[index] = displayNodeOf(item, elem, seen) ?? NULL_NODE;
-    return { kind: 'array', entries };
-  }
-  if (t.kind === 'tuple' && Array.isArray(v)) {
-    const entries: Record<string, DisplayNode> = {};
-    for (const [index, item] of v.entries()) {
-      if (item !== MOVED) entries[index] = displayNodeOf(item, t.elems[index], seen) ?? NULL_NODE;
-    }
-    return { kind: 'object', entries };
-  }
+  if (elem && (Array.isArray(v) || v instanceof SliceView)) return arrayNodeOf(sliceItems(v), elem, seen);
+  if (t.kind === 'tuple' && Array.isArray(v)) return tupleNodeOf(v, t.elems, seen);
   if (t.kind !== 'adt') return undefined;
   if (v instanceof StructValue) {
     const types = fieldTypes(t.def, t.args, 0);
-    const entries: Record<string, DisplayNode> = {};
-    for (const [index, field] of t.def.variants[0].fields.entries()) {
-      const node = displayNodeOf(v.fields[index], types[index], seen);
-      if (node) entries[field.name] = node;
-    }
-    return { kind: 'object', entries };
+    return { kind: 'object', entries: fieldEntries(v.fields, t.def.variants[0].fields, types, seen) };
   }
-  if (v instanceof EnumValue) {
-    const variant = t.def.variants[v.variant];
-    // `None` shows as null and `Some(x)` as x, as Java shows null and a reference.
-    if (t.def.builtin === 'Option') return v.variant === 0 ? NULL_NODE : displayNodeOf(v.fields[0], t.args[0], seen);
-    if (v.fields.length === 0) return { kind: 'value', value: variant.name };
-    const types = fieldTypes(t.def, t.args, v.variant);
-    const entries: Record<string, DisplayNode> = {};
-    for (const [index, field] of variant.fields.entries()) {
-      const node = displayNodeOf(v.fields[index], types[index], seen);
-      if (node) entries[field.name] = node;
-    }
-    return { kind: 'object', entries: { [variant.name]: { kind: 'object', entries } } };
-  }
-  if (v instanceof MapValue) {
-    const entries = Object.create(null) as Record<string, DisplayNode>;
-    const items = [...v.entries.values()];
-    if (v.sorted) items.sort((a, b) => compareValues(t.args[0], a[0], b[0]) ?? 0);
-    for (const [key, item] of items)
-      entries[keyLabel(key, t.args[0])] = displayNodeOf(item, t.args[1], seen) ?? NULL_NODE;
-    return { kind: 'object', entries };
-  }
+  if (v instanceof EnumValue) return enumNodeOf(v, t, seen);
+  if (v instanceof MapValue) return mapNodeOf(v, t, seen);
   if (v instanceof SetValue) {
     const items = [...v.entries.values()];
     if (v.sorted) items.sort((a, b) => compareValues(t.args[0], a, b) ?? 0);
-    const entries: Record<string, DisplayNode> = {};
-    for (const [index, item] of items.entries()) entries[index] = displayNodeOf(item, t.args[0], seen) ?? NULL_NODE;
-    return { kind: 'array', entries };
+    return arrayNodeOf(items, t.args[0], seen);
   }
   return undefined;
+}
+
+function arrayNodeOf(items: Value[], elem: Type, seen: Set<unknown>): DisplayNode {
+  const entries: Record<string, DisplayNode> = {};
+  for (const [index, item] of items.entries()) entries[index] = displayNodeOf(item, elem, seen) ?? NULL_NODE;
+  return { kind: 'array', entries };
+}
+
+function tupleNodeOf(items: Value[], types: Type[], seen: Set<unknown>): DisplayNode {
+  const entries: Record<string, DisplayNode> = {};
+  for (const [index, item] of items.entries()) {
+    if (item !== MOVED) entries[index] = displayNodeOf(item, types[index], seen) ?? NULL_NODE;
+  }
+  return { kind: 'object', entries };
+}
+
+function fieldEntries(
+  values: Value[],
+  fields: { name: string }[],
+  types: Type[],
+  seen: Set<unknown>
+): Record<string, DisplayNode> {
+  const entries: Record<string, DisplayNode> = {};
+  for (const [index, field] of fields.entries()) {
+    const node = displayNodeOf(values[index], types[index], seen);
+    if (node) entries[field.name] = node;
+  }
+  return entries;
+}
+
+function enumNodeOf(v: EnumValue, t: Type & { kind: 'adt' }, seen: Set<unknown>): DisplayNode | undefined {
+  const variant = t.def.variants[v.variant];
+  // `None` shows as null and `Some(x)` as x, as Java shows null and a reference.
+  if (t.def.builtin === 'Option') return v.variant === 0 ? NULL_NODE : displayNodeOf(v.fields[0], t.args[0], seen);
+  if (v.fields.length === 0) return { kind: 'value', value: variant.name };
+  const types = fieldTypes(t.def, t.args, v.variant);
+  const entries = fieldEntries(v.fields, variant.fields, types, seen);
+  return { kind: 'object', entries: { [variant.name]: { kind: 'object', entries } } };
+}
+
+function mapNodeOf(v: MapValue, t: Type & { kind: 'adt' }, seen: Set<unknown>): DisplayNode {
+  const entries = Object.create(null) as Record<string, DisplayNode>;
+  const items = [...v.entries.values()];
+  if (v.sorted) items.sort((a, b) => compareValues(t.args[0], a[0], b[0]) ?? 0);
+  for (const [key, item] of items)
+    entries[keyLabel(key, t.args[0])] = displayNodeOf(item, t.args[1], seen) ?? NULL_NODE;
+  return { kind: 'object', entries };
 }
 
 /** Writes map keys that are no scalars as `{:?}` does, without running the program's own `Debug` impls. */

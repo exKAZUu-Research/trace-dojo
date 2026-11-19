@@ -333,14 +333,28 @@ export function allSupertraits(bounds: TraitRef[]): TraitRef[] {
   return result;
 }
 
+interface Associated {
+  fn: FnDef;
+  typeArgs: Type[];
+}
+
 /** Finds an associated function or method by a path such as `Type::name`, for calls like `String::from` or `Point::new`. */
 export function lookupAssociated(
   program: Program,
   solver: TraitSolver,
   selfType: Type,
   name: string
-): { fn: FnDef; typeArgs: Type[] } | undefined {
+): Associated | undefined {
   const t = normalize(shallow(selfType));
+  return (
+    inherentAssociated(program, solver, t, name) ??
+    boundAssociated(t, name) ??
+    traitImplAssociated(program, solver, t, name) ??
+    builtinTraitAssociated(program, solver, t, name)
+  );
+}
+
+function inherentAssociated(program: Program, solver: TraitSolver, t: Type, name: string): Associated | undefined {
   for (const impl of program.impls) {
     if (impl.trait) continue;
     const fn = impl.methods.get(name);
@@ -348,13 +362,20 @@ export function lookupAssociated(
     const subst = solver.matchImpl(impl, t);
     if (subst) return { fn, typeArgs: [...impl.params.map((param) => subst.get(param) as Type), ...ownParams(fn)] };
   }
+  return undefined;
+}
+
+function boundAssociated(t: Type, name: string): Associated | undefined {
   const bounds = boundsOf(t);
-  if (bounds) {
-    for (const bound of allSupertraits(bounds)) {
-      const fn = bound.trait.methods.get(name);
-      if (fn) return { fn, typeArgs: [t, ...bound.args, ...ownParams(fn)] };
-    }
+  if (!bounds) return undefined;
+  for (const bound of allSupertraits(bounds)) {
+    const fn = bound.trait.methods.get(name);
+    if (fn) return { fn, typeArgs: [t, ...bound.args, ...ownParams(fn)] };
   }
+  return undefined;
+}
+
+function traitImplAssociated(program: Program, solver: TraitSolver, t: Type, name: string): Associated | undefined {
   for (const impl of program.impls) {
     if (!impl.trait) continue;
     const declared = impl.trait.trait.methods.get(name);
@@ -368,6 +389,10 @@ export function lookupAssociated(
       typeArgs: [t, ...impl.trait.args.map((arg) => substitute(arg, subst)), ...ownParams(declared)],
     };
   }
+  return undefined;
+}
+
+function builtinTraitAssociated(program: Program, solver: TraitSolver, t: Type, name: string): Associated | undefined {
   for (const trait of program.traits) {
     if (!trait.builtin) continue;
     const fn = trait.methods.get(name);
