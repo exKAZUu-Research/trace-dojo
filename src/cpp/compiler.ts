@@ -28,6 +28,7 @@ import {
   staticZero,
   virtualKey,
   withTemporaries,
+  zeroMembers,
   zeroOf,
 } from './objectCompiler';
 import { type CompiledFunction, type Eval, type Exec, type Frame, holdAll, RETURN, type Runtime } from './runtime';
@@ -145,7 +146,12 @@ export class Compiler extends StatementCompiler {
     return {
       main: mainFunction,
       globals: this.globals,
-      createGlobals: (runtime) => types.map((type) => new Box(staticZero(runtime, type))),
+      createGlobals: (runtime) =>
+        types.map((type) => {
+          const box = new Box();
+          box.value = staticZero(runtime, type, box.location(0));
+          return box;
+        }),
       initializeGlobals: (frame) => {
         frame.runtime.libcOverrides = libcOverrides;
         for (const init of this.constantInitializers) init(frame);
@@ -972,7 +978,7 @@ export class Compiler extends StatementCompiler {
         object.cls = base;
         const zeroInitialized = object.zeroInitialized;
         if (initializer && !zeroInitialized) {
-          for (const field of base.fields) object.values[field.index] = staticZero(frame.runtime, field.type);
+          zeroMembers(frame.runtime, base, object);
           object.zeroInitialized = true;
         }
         try {
@@ -1830,7 +1836,7 @@ export class Compiler extends StatementCompiler {
     const signed = type.of.kind === 'int' && type.of.name !== 'uchar';
     return (frame, target) => {
       if (!target) frame.runtime.reserve(length);
-      const storage = arrayStorage(target) ?? new ArrayStore([]);
+      const storage = arrayStorage(target) ?? new ArrayStore([], type.of);
       for (let index = 0; index < length; index++) {
         const byte = index < bytes.length ? byteAt(bytes, index) : 0;
         storage.values[index] = signed && byte >= 128 ? byte - 256 : byte;
@@ -2488,19 +2494,11 @@ function deletedDefaultMessage(cls: ClassInfo): string {
   return `${cls.name} のオブジェクトは初期値なしでは作れません（デフォルトコンストラクタが削除されています）。`;
 }
 
-/** Copies a member's value as the implicit copy constructor does. */
-function copyValue(frame: Frame, type: Type, value: Value): Value {
-  if (value === UNINIT) return UNINIT;
-  if (type.kind === 'class') return type.cls.operations?.copy(frame, value) ?? value;
-  if (type.kind === 'array')
-    return new ArrayStore((value as ArrayStore).values.map((item) => copyValue(frame, type.of, item)));
-  return value;
-}
-
 /** Assigns a member's value as the implicit copy assignment operator does, giving the member's new value. */
 function assignValue(frame: Frame, type: Type, target: Value, source: Value): Value {
   if (type.kind === 'class') {
-    if (target === UNINIT || source === UNINIT) return copyValue(frame, type, source);
+    if (source === UNINIT) return UNINIT;
+    if (target === UNINIT) return type.cls.operations?.copy(frame, source) ?? source;
     return type.cls.operations?.assign(frame, target, source) ?? target;
   }
   if (type.kind === 'array') {

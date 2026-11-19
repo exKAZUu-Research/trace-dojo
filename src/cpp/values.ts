@@ -123,12 +123,21 @@ export function destroyRetainedTemporary(frame: Frame, value: Value): void {
 export class ArrayStore extends Store {
   allocatedElementType?: Type;
   elementSize?: number;
-  enclosingLocation?: Ptr;
   /** Whether the array is a string literal, which the program must not write. */
   isLiteral = false;
 
-  constructor(readonly values: Value[]) {
+  constructor(
+    readonly values: Value[],
+    element?: Type,
+    private enclosingLocation?: Ptr
+  ) {
     super();
+    if (element) this.elementSize = sizeOf(element);
+  }
+
+  bindLocation(element: Type, location: Ptr): void {
+    this.elementSize = sizeOf(element);
+    this.enclosingLocation = location;
   }
 
   get length(): number {

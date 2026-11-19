@@ -133,7 +133,7 @@ export function cStringStore(bytes: string): ArrayStore {
   const values: Value[] = [];
   for (let index = 0; index < bytes.length; index++) values.push(signedChar(byteAt(bytes, index)));
   values.push(0);
-  const store = new ArrayStore(values);
+  const store = new ArrayStore(values, CONST_CHAR);
   store.isLiteral = true;
   return store;
 }

@@ -243,7 +243,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     let box = this.literalStores.get(bytes);
     if (!box) {
-      const store = new ArrayStore([...bytes, '\0'].map((byte) => signedByte(byteAt(byte))));
+      const store = new ArrayStore(
+        [...bytes, '\0'].map((byte) => signedByte(byteAt(byte))),
+        CHAR
+      );
       store.isLiteral = true;
       box = new Box(store);
       this.literalStores.set(bytes, box);

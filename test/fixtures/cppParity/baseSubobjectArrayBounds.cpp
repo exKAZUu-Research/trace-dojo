@@ -24,6 +24,14 @@ struct ArrayBase { int values[2][2]; };
 struct TaggedArray : ArrayBase { virtual void identify() {} };
 struct PlainArray : ArrayBase {};
 
+int globalZeros[2][2];
+static int fileZeros[2][2];
+int explicitZeros[2][2] = {};
+
+void showMatrix(void* whole, void* first, void* rowsEnd, void* arrayEnd, int last) {
+  std::cout << (whole == first) << (rowsEnd == arrayEnd) << ' ' << last << '\n';
+}
+
 void showArray(ArrayBase* p) {
   std::cout << (static_cast<void*>(p) == static_cast<void*>(&p->values))
             << (static_cast<void*>(p) == static_cast<void*>(p->values[0]))
@@ -83,4 +91,9 @@ int main() {
   showArray(&plainArray);
   showArray(taggedArray);
   delete taggedArray;
+  static int localZeros[2][2];
+  showMatrix(&globalZeros, globalZeros[0], globalZeros + 2, &globalZeros + 1, globalZeros[1][1]);
+  showMatrix(&fileZeros, fileZeros[0], fileZeros + 2, &fileZeros + 1, fileZeros[1][1]);
+  showMatrix(&localZeros, localZeros[0], localZeros + 2, &localZeros + 1, localZeros[1][1]);
+  showMatrix(&explicitZeros, explicitZeros[0], explicitZeros + 2, &explicitZeros + 1, explicitZeros[1][1]);
 }

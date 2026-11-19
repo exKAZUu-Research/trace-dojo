@@ -13,7 +13,7 @@ import { invoke } from './objectCompiler';
 import { parseCpp } from './parse';
 import type { Frame, Runtime } from './runtime';
 import { Runtime as CppRuntime } from './runtime';
-import { type ClassInfo, type Type, typeName } from './types';
+import { CHAR, type ClassInfo, pointerTo, type Type, typeName } from './types';
 import { ArrayStore, Box, CObject, Ptr } from './values';
 
 // code-gauge-allow duplicateLines 15 -- Each language's runner wraps its own parser and runtime.
@@ -86,7 +86,7 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
 }
 
 function mainArguments(): unknown[] {
-  const argv = new ArrayStore([new Ptr(cStringStore(PROGRAM_NAME), 0), new Ptr(undefined, 0)]);
+  const argv = new ArrayStore([new Ptr(cStringStore(PROGRAM_NAME), 0), new Ptr(undefined, 0)], pointerTo(CHAR));
   return [1, new Ptr(argv, 0)];
 }
 

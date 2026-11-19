@@ -34,7 +34,6 @@ import {
   nonReference,
   pointerTo,
   sameParameters,
-  sizeOf,
   type Type,
   typeName,
   unqualified,
@@ -230,8 +229,12 @@ export function constructArray(
   target?: ArrayStore
 ): ArrayStore {
   if (!target) frame.runtime.reserve(length);
-  const store = target ?? new ArrayStore(Array.from({ length }, (): Value => UNINIT));
-  store.elementSize = sizeOf(element);
+  const store =
+    target ??
+    new ArrayStore(
+      Array.from({ length }, (): Value => UNINIT),
+      element
+    );
   return holdValues(frame, [store], () => {
     try {
       makeEach(
@@ -273,10 +276,7 @@ export function initializeAt(
   try {
     const value = initialize(target);
     if (type.kind === 'class' && value instanceof CObject) value.completeLocation = location;
-    if (type.kind === 'array' && value instanceof ArrayStore) {
-      value.elementSize = sizeOf(type.of);
-      value.enclosingLocation = location;
-    }
+    if (type.kind === 'array' && value instanceof ArrayStore) value.bindLocation(type.of, location);
     if (target instanceof CObject && target !== value && target.needsConstruction) endLifetime(target);
     location.write(value);
     return value;
@@ -1011,7 +1011,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
 export function newObject(frame: Frame, cls: ClassInfo, zeroInitialize = false, destination?: CObject): CObject {
   if (destination?.liveness !== Liveness.Alive) return allocateObject(frame.runtime, cls, zeroInitialize);
   if (zeroInitialize && destination.needsConstruction && !destination.zeroInitialized) {
-    for (const field of cls.fields) destination.values[field.index] = staticZero(frame.runtime, field.type);
+    zeroMembers(frame.runtime, cls, destination);
     destination.zeroInitialized = true;
   }
   destination.needsConstruction = false;
@@ -1026,23 +1026,33 @@ export function installBaseValue(base: ClassInfo, target: CObject, initialized: 
 
 function allocateObject(runtime: Frame['runtime'], cls: ClassInfo, zeroInitialize: boolean): CObject {
   runtime.reserve(cls.fields.length);
-  return new CObject(
+  const object = new CObject(
     cls,
-    cls.fields.map((field) => (zeroInitialize ? staticZero(runtime, field.type) : UNINIT)),
+    cls.fields.map(() => UNINIT),
     zeroInitialize
   );
+  if (zeroInitialize) zeroMembers(runtime, cls, object);
+  return object;
 }
 
-export function staticZero(runtime: Frame['runtime'], type: Type): Value {
+export function zeroMembers(runtime: Frame['runtime'], cls: ClassInfo, object: CObject): void {
+  for (const field of cls.fields)
+    object.values[field.index] = staticZero(runtime, field.type, object.location(field.index));
+}
+
+export function staticZero(runtime: Frame['runtime'], type: Type, location?: Ptr): Value {
   if (type.kind === 'class' && !type.cls.library) {
     const object = allocateObject(runtime, type.cls, true);
+    object.completeLocation = location;
     object.needsConstruction = true;
     return object;
   }
   if (type.kind !== 'array') return zeroOf(type);
   const length = type.length ?? 0;
   runtime.reserve(length);
-  return new ArrayStore(Array.from({ length }, () => staticZero(runtime, type.of)));
+  const store = new ArrayStore([], type.of, location);
+  for (let index = 0; index < length; index++) store.values.push(staticZero(runtime, type.of, store.location(index)));
+  return store;
 }
 
 /** Copies an object as the copy constructor of `cls` does, slicing an object of a derived class. */
