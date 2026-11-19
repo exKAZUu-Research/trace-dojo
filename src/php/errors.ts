@@ -267,13 +267,12 @@ export function withOperandWarnings(
   withCleanupExceptions(rt(), (capture) => {
     let pending: PhpThrow | undefined;
     const warning: UpdateWarning = (emit, whilePending) => {
-      if (pending) {
-        whilePending?.();
-        return false;
-      }
+      const action = pending ? whilePending : emit;
+      if (!action) return false;
+      const hadPending = pending !== undefined;
       try {
-        emit();
-        return true;
+        action();
+        return !hadPending;
       } catch (error) {
         if (!(error instanceof PhpThrow)) throw error;
         capture(error);

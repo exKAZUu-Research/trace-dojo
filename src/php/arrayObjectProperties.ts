@@ -94,7 +94,7 @@ class ArrayObjectProperty implements Place {
     const value = element.get();
     if (value === undefined) {
       warning(() => element.warnUndefined());
-      element.resetNull();
+      element.resetNull(warning);
     }
     return { value: value ?? null, sources: element.typeSources(), write: (result) => element.set(result) };
   }

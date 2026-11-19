@@ -3142,6 +3142,16 @@ set_error_handler(function () use ($p3) { unset($p3->x); throw new Exception('st
 try { --$p3->x; } catch (Exception $e) {}
 restore_error_handler();
 echo 'propUnsetThrow:' . json_encode([$p2, $p3]) . "\n";
+
+class ThrowOnReset { function __destruct() { throw new Exception('d'); } }
+$ao5 = new ArrayObject([], ArrayObject::ARRAY_AS_PROPS);
+set_error_handler(function () use ($ao5) { $ao5['x'] = new ThrowOnReset(); return true; });
+try { $ao5->x++; } catch (Exception $e) {}
+set_error_handler(function () use ($ao5) { $ao5['y'] = new ThrowOnReset(); throw new Exception('h'); });
+$chain = '';
+try { $ao5->y += 2; } catch (Exception $e) { $chain = $e->getMessage() . '->' . $e->getPrevious()?->getMessage(); }
+restore_error_handler();
+echo 'aoResetThrow:' . $chain . ':' . json_encode($ao5->getArrayCopy()) . "\n";
 `);
   expect(result).toMatchObject({
     kind: 'executed',
@@ -3162,6 +3172,7 @@ echo 'propUnsetThrow:' . json_encode([$p2, $p3]) . "\n";
       'aoThrow:{"x":null,"y":1}',
       'aoRef:[5,1,2]',
       'propUnsetThrow:[{"x":null},{"x":null}]',
+      'aoResetThrow:d->h:{"x":1,"y":2}',
       '',
     ].join('\n'),
   });

@@ -306,7 +306,7 @@ export class ElementPlace implements Place {
     if (this.objectBacked) {
       if (warning) warning(() => this.warnUndefined());
       else this.warnUndefined();
-      this.resetNull();
+      this.resetNull(warning);
       return true;
     }
     if (this.unbound || !sharingCheck(this.array, 1)) {
@@ -340,8 +340,11 @@ export class ElementPlace implements Place {
     return { value: null };
   }
 
-  resetNull(): void {
-    if (this.key !== undefined) this.array.setSlot(this.key, null);
+  resetNull(warning?: UpdateWarning): void {
+    if (this.key === undefined) return;
+    const reset = (): void => this.array.setSlot(this.key!, null);
+    if (warning) warning(reset, reset);
+    else reset();
   }
 
   set(value: Value): Value {

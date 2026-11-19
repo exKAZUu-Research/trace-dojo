@@ -789,7 +789,7 @@ function nativeArrayNestedPlace(
       place = element;
       if (element.get() === undefined) {
         if (mode === 'update') warning(() => element.warnUndefined());
-        element.resetNull();
+        element.resetNull(warning);
       }
       return null;
     })
