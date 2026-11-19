@@ -18,7 +18,7 @@ import {
   type ClosureData,
   isClosure,
   type Method,
-  type PhpArray,
+  PhpArray,
   type PhpClass,
   PhpObject,
   Ref,
@@ -182,7 +182,7 @@ export class Runtime {
   errorHandlers: { handler: Value; mask: bigint }[] = [];
   exceptionHandler: Value = null;
   retiringExceptionHandler: Value | undefined;
-  readonly nativeShutdownHolders = new Set<PhpArray | PhpObject>();
+  readonly nativeShutdownHolders = new Set<PhpArray | PhpObject | Ref>();
   assertionCallback: Value | undefined;
   /** The handlers `set_exception_handler` replaced, latest last, which `restore_exception_handler` brings back. */
   replacedExceptionHandlers: Value[] = [];
@@ -394,6 +394,12 @@ export class Runtime {
   releaseCallResult(value: Value): void {
     this.release([value], true, this.nativeCalls > 0);
     this.flushReleases();
+  }
+
+  holdForShutdown(slot: unknown): void {
+    if (!(slot instanceof PhpArray || slot instanceof PhpObject || slot instanceof Ref)) return;
+    if (slot instanceof Ref && !this.nativeShutdownHolders.has(slot)) slot.rc++;
+    this.nativeShutdownHolders.add(slot);
   }
 
   holdTemporaryReference(ref: Ref): void {

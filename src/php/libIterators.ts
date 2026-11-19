@@ -9,7 +9,7 @@ import { arrayIteratorOver } from './libArrayObject';
 import { defineClass, type NativeMethod } from './native';
 import { toKey, toStr } from './operators';
 import { PhpThrow, rt } from './runtime';
-import { deref, nativeOwnershipChanged, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
+import { nativeOwnershipChanged, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
 
 /** The engine's iterator for a Traversable object, which asks an IteratorAggregate for its iterator. */
 export function innerIteratorOf(object: PhpObject): InnerIterator {
@@ -183,10 +183,7 @@ export class DualState {
             transition.run(() => runtime.release([slot], true, true));
         }
       } finally {
-        for (const slot of this.cache.clearSlots()) {
-          const value = deref(slot);
-          if (value instanceof PhpArray || value instanceof PhpObject) runtime.nativeShutdownHolders.add(value);
-        }
+        for (const slot of this.cache.clearSlots()) runtime.holdForShutdown(slot);
       }
     });
   }

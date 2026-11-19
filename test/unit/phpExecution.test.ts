@@ -527,6 +527,73 @@ ${target} = 5;`);
   expect(execution).toMatchObject({ kind: 'executed', stdout: `first;exit;{"item":5}${output}` });
 });
 
+test.each([
+  ['ArrayObject', '$settings->item = 5;', '$x = new C;', 'A;exit;{"item":5};B;observer;C;'],
+  ['ArrayIterator', '$settings->item = 5;', '$x = new C;', 'A;exit;{"item":5};B;observer;C;'],
+  ['ArrayObject', "$settings['item'] = 5;", '$x = new C;', 'A;exit;{"item":5};B;observer;C;'],
+  ['ArrayIterator', "$settings->offsetSet('item', 5);", '$x = new C;', 'A;exit;{"item":5};B;observer;C;'],
+  ['ArrayObject', '$settings->item = 5;', 'unset($x);', 'A;exit;{"item":5};observer;B;'],
+])('preserves displaced %s reference semantics for %s and %s during shutdown', (name, write, observe, stdout) => {
+  const execution = run(`<?php
+class B { function __destruct() { echo 'B;'; } }
+class C { function __destruct() { echo 'C;'; } }
+class A {
+    function __destruct() {
+        global $settings, $once, $x;
+        echo 'A;';
+        if (!$once) {
+            $once = true;
+            $x = new B;
+            $settings['item'] = &$x;
+        }
+        exit('exit;');
+    }
+}
+class R {
+    function __destruct() {
+        global $settings, $x;
+        echo json_encode($settings->getArrayCopy()) . ';';
+        ${observe}
+        echo 'observer;';
+    }
+}
+$once = false;
+$settings = new ${name}(['item' => new A], ${name}::ARRAY_AS_PROPS);
+$reader = new R;
+${write}`);
+  expect(execution).toMatchObject({ kind: 'executed', stdout });
+});
+
+test('keeps a displaced shared array separated during shutdown', () => {
+  const execution = run(`<?php
+class B { function __destruct() { echo 'B;'; } }
+class A {
+    function __destruct() {
+        global $settings, $once, $items;
+        echo 'A;';
+        if (!$once) {
+            $once = true;
+            $items = [new B];
+            $settings->item = $items;
+        }
+        exit('exit;');
+    }
+}
+class R {
+    function __destruct() {
+        global $settings, $items;
+        echo json_encode($settings->getArrayCopy()) . ';';
+        $items[0] = 99;
+        echo 'observer;';
+    }
+}
+$once = false;
+$settings = new ArrayObject(['item' => new A], ArrayObject::ARRAY_AS_PROPS);
+$reader = new R;
+$settings->item = 5;`);
+  expect(execution).toMatchObject({ kind: 'executed', stdout: 'A;exit;{"item":5};observer;B;' });
+});
+
 test.each(['<?php echo "hello"; declare(strict_types=1);', '<?php function f() {} declare(strict_types=1);'])(
   'rejects a late strict_types declaration before execution: %s',
   (source) => {

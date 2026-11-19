@@ -1152,7 +1152,7 @@ function objectFree(array: PhpArray, runtime: Runtime): boolean {
 
 // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function arrayHasHolders(runtime: Runtime, target: PhpArray, minimum: 1 | 2): boolean {
-  let count = arrayHolderCount(target);
+  let count = arrayHolderCount(target) + Number(runtime.nativeShutdownHolders.has(target));
   if (count >= minimum) return true;
   for (const frame of runtime.frames) {
     for (const value of frame.temporaries) if (value === target && ++count >= minimum) return true;
