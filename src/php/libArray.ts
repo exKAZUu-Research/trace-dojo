@@ -1577,6 +1577,7 @@ defineFunction('array_multisort(&~$array, &~...$rest): bool', (ctx) => {
   if (columns.some((column) => (column.ref.v as PhpArray).size !== size)) {
     throwError('ValueError', 'Array sizes are inconsistent');
   }
+  if (size === 0) return true;
   const rows = columns.map((column) => [...(column.ref.v as PhpArray).map]);
   const order = Array.from({ length: size }, (_, index) => index);
   zendSort(order, (a, b) => {
@@ -1589,11 +1590,13 @@ defineFunction('array_multisort(&~$array, &~...$rest): bool', (ctx) => {
     return a - b;
   });
   for (const [index, column] of columns.entries()) {
-    column.ref.v = rebuild(
+    const array = rebuild(
       order.map((position) => rows[index][position]),
       true,
       writableArrayRef(column.ref)
     );
+    array.resetAfterMultisort();
+    column.ref.v = array;
   }
   return true;
 });

@@ -437,3 +437,29 @@ int(6)
 int(6)
 int(6)
 int(2)
+int(0)
+string(1) "a"
+array(4) {
+  [0]=>
+  int(0)
+  [1]=>
+  string(4) "left"
+  [2]=>
+  string(5) "right"
+  [3]=>
+  int(3)
+}
+array(4) {
+  [0]=>
+  string(1) "a"
+  [1]=>
+  string(1) "b"
+  [2]=>
+  string(1) "c"
+  [3]=>
+  int(3)
+}
+array(1) {
+  [0]=>
+  int(5)
+}

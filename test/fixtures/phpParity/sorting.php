@@ -58,3 +58,18 @@ foreach (['ksort', 'asort', 'uasort', 'sort'] as $sorter) {
     $values[] = 2;
     var_dump(array_key_last($values));
 }
+
+$mixed = ['left' => 2, 6 => 1, 'right' => 3];
+$text = ['b' => 'z', 'a' => 'y', 'c' => 'x'];
+end($mixed);
+end($text);
+array_multisort($mixed, $text);
+var_dump(key($mixed), key($text));
+$mixed[] = 'appended';
+$text[] = 'appended';
+var_dump(array_keys($mixed), array_keys($text));
+$empty = [4 => 'deleted'];
+unset($empty[4]);
+array_multisort($empty);
+$empty[] = 'appended';
+var_dump(array_keys($empty));

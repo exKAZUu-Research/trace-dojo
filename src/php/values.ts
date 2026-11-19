@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 957 -- Keeps PHP value storage and the ownership helpers it uses together.
+// code-gauge-allow-file fileNcss 960 -- Keeps PHP value storage and the ownership helpers it uses together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
@@ -319,6 +319,11 @@ export class PhpArray {
       if (slot !== null && typeof slot === 'object') this.composite = true;
     }
     this.invalidate();
+  }
+
+  resetAfterMultisort(): void {
+    this.nextFree = BigInt(this.size);
+    this.pointer = null;
   }
 
   private table(entries?: Iterable<readonly [Key, Value | Ref]>): ArrayTable {
