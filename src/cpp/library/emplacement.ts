@@ -83,13 +83,14 @@ export function emplacementCall<T, Position>(
     isLvalue: false,
     row,
     isTemporaryObject: call.isTemporaryObject,
-    run: (frame) => {
-      const target = (self(frame) as Ptr).read() as T;
-      return emplace(frame, (emplacing) => {
-        const [at, inserted] = emplaceEntry(call.table, frame, target, emplacing, mappedLocation);
-        return call.result(frame, target, at, inserted);
-      });
-    },
+    run: (frame) =>
+      holdAll(frame, [self], ([receiver]) => {
+        const target = (receiver as Ptr).read() as T;
+        return emplace(frame, (emplacing) => {
+          const [at, inserted] = emplaceEntry(call.table, frame, target, emplacing, mappedLocation);
+          return call.result(frame, target, at, inserted);
+        });
+      }),
   };
 }
 

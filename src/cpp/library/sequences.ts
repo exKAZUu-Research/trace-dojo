@@ -1187,21 +1187,22 @@ function emplacement(
     type: ret.kind === 'reference' ? ret.to : ret,
     isLvalue: ret.kind === 'reference',
     row,
-    run: (frame) => {
-      const sequence = (self(frame) as Ptr).read() as SequenceValue;
-      frame.runtime.reserve(1);
-      if (member === 'emplace_front') {
-        sequence.splice(0, 0, value(frame));
-        return sequence.location(0);
-      }
-      if (member === 'emplace_back') {
-        editor.append(frame, sequence, 1, (target) => value(frame, target));
-        return sequence.location(sequence.items.length - 1);
-      }
-      const at = positionOf(sequence, (position as Eval)(frame));
-      editor.emplace(frame, sequence, at, (target) => value(frame, target));
-      return sequence.iteratorLocation(at);
-    },
+    run: (frame) =>
+      holdAll(frame, [self], ([receiver]) => {
+        const sequence = (receiver as Ptr).read() as SequenceValue;
+        frame.runtime.reserve(1);
+        if (member === 'emplace_front') {
+          sequence.splice(0, 0, value(frame));
+          return sequence.location(0);
+        }
+        if (member === 'emplace_back') {
+          editor.append(frame, sequence, 1, (target) => value(frame, target));
+          return sequence.location(sequence.items.length - 1);
+        }
+        const at = positionOf(sequence, (position as Eval)(frame));
+        editor.emplace(frame, sequence, at, (target) => value(frame, target));
+        return sequence.iteratorLocation(at);
+      }),
   };
 }
 

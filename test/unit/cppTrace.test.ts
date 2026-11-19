@@ -234,6 +234,30 @@ int main() { (new Walker)->go(probe()); }`;
 });
 
 test.each([
+  ['map', 'int, Turtle', 'try_emplace(1, 0, 1)', 'try_emplace(2, probe(), 2)'],
+  ['unordered_map', 'int, Turtle', 'try_emplace(1, 0, 1)', 'try_emplace(2, probe(), 2)'],
+  ['list', 'Turtle', 'emplace_back(0, 1)', 'emplace_back(probe(), 2)'],
+])('keeps a heap %s receiver reachable through emplacement', (header, types, first, next) => {
+  const container = `std::${header}<${types}>`;
+  const program = `#include <${header}>
+#include <iostream>
+Turtle observer(0, 0);
+${container}& make() {
+  auto* receiver = new ${container}();
+  receiver->${first};
+  return *receiver;
+}
+int probe() {
+  std::cout << observer.canMoveForward();
+  return 0;
+}
+int main() { make().${next}; }`;
+  const result = executeProgram('cpp', program);
+  if (result.kind !== 'executed') throw new Error(JSON.stringify(result));
+  expect(result.stdout).toBe('0');
+});
+
+test.each([
   ['a member buffer', 'struct Row { std::vector<Turtle*> items; Token token; };', 'items'],
   ['a base buffer', 'struct Row : Storage { Token token; };', 'items'],
   ['a built-in array', 'struct Row { Entry cells[2]; };', 'cells[0].items'],
