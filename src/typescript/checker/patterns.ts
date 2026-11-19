@@ -382,7 +382,7 @@ export class BindingPatterns {
       this.c.error(node, `プロパティ '${name}' は型 '${this.c.print(type)}' にありません。`);
       return errorType;
     }
-    this.c.members.checkPropertyUse(node, node, node, type, name, property);
+    this.c.members.checkPropertyUse(node, node, node, type, property);
     const propertyType = property.type();
     return property.optional ? unionOf([propertyType, undefinedType]) : propertyType;
   }
@@ -393,7 +393,7 @@ export class BindingPatterns {
     if (types.includes(errorType)) return undefined;
     for (const member of type.types) {
       const property = this.c.propertyOf(member, name);
-      if (property) this.c.members.checkPropertyUse(node, node, node, member, name, property);
+      if (property) this.c.members.checkPropertyUse(node, node, node, member, property);
     }
     return unionOf(types);
   }

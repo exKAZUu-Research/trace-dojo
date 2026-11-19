@@ -1626,6 +1626,19 @@ console.table([{ b: 1, 2: 3, a: 4 }], ["b", "a", "2"]);
 console.table({ r: { a: 1 } }, ["a", undefined]);`,
   ],
   [
+    'bound functions inherit the target prototype and delegate custom instance checks',
+    `class Base { static label = "base"; }
+class Derived extends Base {
+  static [Symbol.hasInstance](value) { return value === 7; }
+}
+const Bound = Derived.bind(null);
+const Rebound = Bound.bind(null);
+console.log(Object.getPrototypeOf(Bound) === Base, Bound.label, 7 instanceof Rebound, 8 instanceof Rebound);
+Object.setPrototypeOf(Derived, null);
+const Detached = Function.prototype.bind.call(Derived, null);
+console.log(Object.getPrototypeOf(Detached), 7 instanceof Detached);`,
+  ],
+  [
     'string conversions stop at the first failure',
     `try { String.fromCodePoint(-1, { valueOf() { console.log("side effect"); return 0; } }); } catch (e) { console.log(e.message); }
 try { String.fromCodePoint(65, 1.5, { valueOf() { throw new Error("later"); } }); } catch (e) { console.log(e.message); }

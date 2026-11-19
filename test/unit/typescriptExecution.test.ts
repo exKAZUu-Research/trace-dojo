@@ -10,6 +10,23 @@ const diagnosticsOf = (source: string): string[] => {
   return execution.diagnostics.map((diagnostic) => `${diagnostic.row + 1}: ${diagnostic.message}`);
 };
 
+test.each([
+  ['LF before the closing quote', "console.log('text\n');"],
+  ['CRLF in an empty double-quoted string', 'console.log("\r\n");'],
+  ['an even number of backslashes before a newline', "console.log('text\\\\\n');"],
+])('rejects a quoted string with %s', (_description, source) => {
+  expect(diagnosticsOf(source)).toContain('1: 文字列リテラルが閉じられていません。');
+});
+
+test('escaped line continuations and Unicode line separators remain valid in strings', () => {
+  const source = "console.log('line\\\r\ncontinuation', 'line\u2028separator');";
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'linecontinuation line\u2028separator\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('the turtle takes both the Japanese and the English names of its methods', () => {
   const execution = executeProgram(
     'typescript',
@@ -300,15 +317,15 @@ const tagged = { get [Symbol.toStringTag]() { return 'tagged'; } };`;
   expect(execution.diagnostics.every(({ message }) => message.includes('この採点環境では使えません'))).toBe(true);
 });
 
-test('unsupported library members are rejected through destructuring, brackets, and unions', () => {
+test('reading unavailable values and calling unavailable methods are rejected through indirection', () => {
   const sources = [
     'const {stack} = new Error("bad"); console.log(stack);',
     'const {random} = Math; console.log(random());',
-    'const key = "random"; const {[key]: random} = Math;',
+    'const key = "random"; const {[key]: random} = Math; random();',
     'const key = "stack"; const {[key]: stack} = new Error("bad");',
-    'const key = "random" as "random" | "abs"; const {[key]: selected} = Math;',
-    'function select<K extends "random">(key: K) { const {[key]: selected} = Math; }',
-    'const key = "random"; let selected: () => number; ({[key]: selected} = Math);',
+    'const key = "random" as "random" | "abs"; const {[key]: selected} = Math; selected(1);',
+    'function select<K extends "random">(key: K) { const {[key]: selected} = Math; selected(); } select("random");',
+    'const key = "random"; let selected: () => number; ({[key]: selected} = Math); selected();',
     'const key = "stack"; let selected: string | undefined; ({[key]: selected = "none"} = new Error("bad"));',
     'console["time"]("start");',
     'function show(error: Error | TypeError) { const {stack} = error; console.log(stack); }',

@@ -164,6 +164,7 @@ export interface ClassField {
 export class JsFunction extends JsObject {
   /** Values a native function's closure keeps, such as what `bind` bound, which garbage collection must see. */
   captured: Value[] = [];
+  boundTarget?: JsFunction;
 
   constructor(
     proto: JsObject | null,
@@ -185,6 +186,8 @@ export const UNINITIALIZED = Symbol('uninitialized');
 
 export interface Binding {
   value: Value | typeof UNINITIALIZED;
+  /** The class object visible to trace snapshots before the declaration finishes initializing its binding. */
+  initializingClass?: JsFunction;
   isMutable: boolean;
   /** What the TypeError of an assignment to an immutable binding calls it, `constant` unless set. */
   immutableKind?: 'using' | 'await using';

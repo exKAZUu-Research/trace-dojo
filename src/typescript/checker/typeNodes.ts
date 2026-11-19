@@ -723,7 +723,12 @@ export class TypeNodes {
     symbol.resolving = false;
     symbol.pendingUnion = undefined;
     if (pending) pending.types = type.kind === 'union' ? type.types : [type];
-    const declared = aliasedDeclaredType(type, symbol.name, this.c.signatures.typeParametersOfSymbol(symbol));
+    const declared = aliasedDeclaredType(
+      type,
+      symbol.name,
+      this.c.signatures.typeParametersOfSymbol(symbol),
+      symbol.id
+    );
     return this.recursiveAliases.complete(symbol, declared);
   }
 

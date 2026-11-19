@@ -1,0 +1,5 @@
+const wide: Record<string, number> = { a: 1 };
+const plain: { a: number } = wide;
+const incompatible: Record<'a', string> = wide;
+type Alias<K extends string, V> = Record<K, V>;
+const different: Alias<'a', number> = wide;

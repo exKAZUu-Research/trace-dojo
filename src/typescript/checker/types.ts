@@ -82,6 +82,7 @@ export interface Property {
   isMethod: boolean;
   /** For a class member, its visibility and the class that declares it. */
   visibility: 'public' | 'private' | 'protected';
+  writeVisibility?: Property['visibility'];
   declaringClass?: ClassInfo;
   /** A `#name` field, which only the declaring class sees. */
   isPrivateName?: boolean;
@@ -176,6 +177,7 @@ export interface ObjectType {
   /** The alias the type was written with, for printing. */
   aliasName?: string;
   aliasArguments?: Type[];
+  aliasId?: number;
   /** Whether it is a function type, printed as `(x: T) => U`. */
   isFunction?: boolean;
   /** Whether it is the instance type of a class or interface with a `this` type. */
@@ -372,15 +374,16 @@ export function isAnyLike(type: Type): boolean {
  * The declared type of an alias, printed by the alias's name, unless it is another alias applied to this alias's own
  * type parameters, as `type A<T> = Partial<T>` is, which TypeScript keeps printing by the other alias.
  */
-export function aliasedDeclaredType(type: Type, name: string, typeParameters: TypeParameter[]): Type {
+export function aliasedDeclaredType(type: Type, name: string, typeParameters: TypeParameter[], aliasId: number): Type {
   if (type.kind !== 'object' && type.kind !== 'conditional') return type;
   const arguments_ = type.aliasArguments ?? [];
   const renames =
     type.aliasName !== undefined &&
     arguments_.length === typeParameters.length &&
     arguments_.every((argument, index) => argument === typeParameters[index]);
+  if (type.kind === 'object')
+    return withAlias(type, renames ? (type.aliasName ?? name) : name, typeParameters, aliasId);
   if (renames) return type;
-  if (type.kind === 'object') return withAlias(type, name, typeParameters);
   // A copy would read the branches, which a conditional type declared by an alias resolves lazily; it is its own.
   type.aliasName = name;
   type.aliasArguments = typeParameters;
@@ -388,9 +391,9 @@ export function aliasedDeclaredType(type: Type, name: string, typeParameters: Ty
 }
 
 /** An anonymous or mapped object type printed as an alias applied to type arguments; any other type as it is. */
-export function withAlias<T extends Type>(type: T, name: string, typeArguments: Type[]): T {
+export function withAlias<T extends Type>(type: T, name: string, typeArguments: Type[], aliasId?: number): T {
   if (type.kind !== 'object' || (type.objectKind !== 'anonymous' && type.objectKind !== 'mapped')) return type;
-  return { ...type, aliasName: name, aliasArguments: typeArguments };
+  return { ...type, aliasName: name, aliasArguments: typeArguments, aliasId };
 }
 
 /** The regular version of a type that may be a fresh literal or a fresh object literal. */

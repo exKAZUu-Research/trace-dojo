@@ -168,8 +168,11 @@ export class ConditionChecker {
 
   /** The condition a call is, narrowing what its signature's type predicate tests. */
   private callCondition(expression: TreeNode): Condition {
-    const type = this.c.expressions.check(expression);
-    const predicate = this.c.expressions.calls.predicateOf(expression);
+    const cached = this.c.flow.narrowingScope?.reuseCallPredicates
+      ? this.c.expressions.calls.predicateOf(expression)
+      : undefined;
+    const type = cached ? booleanType : this.c.expressions.check(expression);
+    const predicate = cached ?? this.c.expressions.calls.predicateOf(expression);
     if (!predicate) return { ...this.truthiness(expression), type };
     const { target, type: predicateType } = predicate;
     const { whenTrue, whenFalse } = this.narrowed(target, (current, assumeTrue) =>

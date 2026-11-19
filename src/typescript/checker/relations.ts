@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 711 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 717 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -24,6 +24,7 @@ import {
   type IntersectionType,
   isAnyLike,
   isIntrinsic,
+  literalType,
   numberType,
   type ObjectType,
   type Property,
@@ -634,7 +635,7 @@ export class Relations {
     const sourceStructure = this.c.structureOf(source);
     const targetStructure = this.c.structureOf(target);
     return (
-      this.propertiesRelated(source, sourceStructure, targetStructure, relation) &&
+      this.propertiesRelated(source, sourceStructure, target, targetStructure, relation) &&
       this.signaturesRelated(sourceStructure.callSignatures, targetStructure.callSignatures, relation) &&
       this.signaturesRelated(sourceStructure.constructSignatures, targetStructure.constructSignatures, relation) &&
       keyedIndexes(targetStructure).every((index) =>
@@ -684,12 +685,15 @@ export class Relations {
     return undefined;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- Checks declared properties, optional omissions, and same-alias index compatibility in a single pass.
   private propertiesRelated(
     source: Type,
     sourceStructure: Structure,
+    target: ObjectType,
     targetStructure: Structure,
     relation: Relation
   ): boolean {
+    const allowMappedIndex = relation === 'assignable' && this.sharesMappedAlias(source, target);
     for (const [name, targetProperty] of targetStructure.properties) {
       this.c.budget.spend();
       const sourceProperty =
@@ -698,11 +702,25 @@ export class Relations {
           : this.c.propertyOf(source, name);
       if (!sourceProperty) {
         if (targetProperty.optional) continue;
-        return false;
+        const indexed = allowMappedIndex
+          ? applicableIndex(this.c, sourceStructure, targetProperty.nameType ?? literalType(name))
+          : undefined;
+        if (!indexed || !this.isRelated(indexed.type, targetProperty.type(), relation)) return false;
+        continue;
       }
       if (!this.propertyRelated(sourceProperty, targetProperty, relation)) return false;
     }
     return true;
+  }
+
+  private sharesMappedAlias(source: Type, target: ObjectType): boolean {
+    return (
+      source.kind === 'object' &&
+      source.aliasId !== undefined &&
+      source.aliasId === target.aliasId &&
+      source.mappedKeys !== undefined &&
+      target.mappedKeys !== undefined
+    );
   }
 
   /**

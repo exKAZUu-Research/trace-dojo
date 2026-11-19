@@ -88,7 +88,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         return undefined;
       }
       case 'class': {
-        this.writeVariable(statement.cls.name, this.evaluateClass(statement.cls), 'initialize');
+        this.writeVariable(statement.cls.name, this.evaluateClass(statement.cls, undefined, true), 'initialize');
         return undefined;
       }
       case 'return': {

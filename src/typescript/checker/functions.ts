@@ -194,7 +194,7 @@ export class FunctionChecker {
 
   declaredReturnType(node: TreeNode): Type | undefined {
     const returnNode = node.childForFieldName('return_type');
-    return returnNode ? this.c.typeNodes.annotationType(returnNode) : undefined;
+    return returnNode ? this.c.typeNodes.annotationType(returnNode) : this.c.signatures.pairedSetterType(node);
   }
 
   /** Records the types of a function's parameters for its body. */
@@ -288,7 +288,6 @@ export class FunctionChecker {
     if (this.reentersBody(node)) return anyType;
     const body = node.childForFieldName('body');
     const context = this.newContext(node, contextualReturn);
-    const { declaredReturn } = context;
     this.bindParameters(node, signature);
     this.contexts.push(context);
     this.capturedTypes.push(this.capture());
@@ -302,7 +301,7 @@ export class FunctionChecker {
       if (!body) return anyType;
       this.checkBody(body, context);
       this.recordReturnFlow(context);
-      if (declaredReturn) this.checkMissingReturn(node, context, declaredReturn);
+      this.checkBodyReturns(context);
       if (this.circular.has(node.id) && this.c.silent === 0) this.reportCircularReturn(node);
       if (context.isConstructor && node.parent?.parent) {
         this.c.classDeclarations.checkPropertyInitialization(
@@ -318,6 +317,13 @@ export class FunctionChecker {
       this.contexts.pop();
       this.capturedTypes.pop();
     }
+  }
+
+  private checkBodyReturns(context: FunctionContext): void {
+    const { node, declaredReturn } = context;
+    if (declaredReturn) this.checkMissingReturn(node, context, declaredReturn);
+    if (hasToken(node, 'get') && context.endReachable && !context.returnStates.some((state) => state && !state.dead))
+      this.c.error(node.childForFieldName('name') ?? node, 'get アクセサーは値を返さなければいけません。');
   }
 
   markCircularReturn(): void {

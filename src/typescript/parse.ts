@@ -106,7 +106,9 @@ function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagno
   const visit = (node: Node): void => {
     const message = numericEscapeError(node, source) ?? characterEscapeError(node) ?? optionalAccessorError(node);
     if (message) errors.push({ row: node.startPosition.row, message });
+    checkMixedLogicalOperators(node, errors);
     const located =
+      stringLineBreakError(node) ??
       superTypeArgumentError(node) ??
       exponentiationBaseError(node) ??
       operandAssignmentError(node) ??
@@ -116,6 +118,33 @@ function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagno
   };
   visit(root);
   return errors.toSorted((left, right) => left.row - right.row);
+}
+
+function stringLineBreakError(node: Node): SourceDiagnostic | undefined {
+  if (node.type !== 'string') return undefined;
+  let row = node.startPosition.row;
+  for (const [token] of node.text.matchAll(/\\(?:\r\n|[\s\S])|[\r\n]/g)) {
+    if (token === '\r' || token === '\n') return { row, message: '文字列リテラルが閉じられていません。' };
+    if (token === '\\\r\n' || token === '\\\r' || token === '\\\n') row++;
+  }
+  return undefined;
+}
+
+function checkMixedLogicalOperators(node: Node, errors: SourceDiagnostic[]): void {
+  if (node.type !== 'binary_expression') return;
+  const operator = node.childForFieldName('operator')?.type;
+  if (operator !== '??' && operator !== '&&' && operator !== '||') return;
+  for (const field of ['left', 'right']) {
+    const operand = node.childForFieldName(field);
+    if (operand?.type !== 'binary_expression') continue;
+    const other = operand.childForFieldName('operator');
+    if (operator === '??' ? other?.type === '&&' || other?.type === '||' : other?.type === '??') {
+      errors.push({
+        row: operand.startPosition.row,
+        message: '?? と && または || を組み合わせるときは、括弧で囲んでください。',
+      });
+    }
+  }
 }
 
 function numericEscapeError(node: Node, source: string): string | undefined {

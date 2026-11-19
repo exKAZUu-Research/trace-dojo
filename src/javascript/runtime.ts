@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 768 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 786 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -72,6 +72,8 @@ const readOnlyLengthMessage = "Cannot assign to read only property 'length' of o
 export class Runtime {
   private readonly unavailableValues = new WeakMap<symbol, CompileError>();
   private readonly functionConstructor: Value;
+  private readonly functionToString: Value;
+  private readonly functionHasInstance: Value;
   readonly world = new TurtleWorld();
   readonly budget = new ExecutionBudget();
   readonly regExpStatics = new Map<string, string>();
@@ -97,6 +99,8 @@ export class Runtime {
     this.io = new ProgramIO(this.budget, input);
     this.realm = createRealm(this);
     this.functionConstructor = this.realm.globals.lookup('Function')?.value;
+    this.functionToString = this.get(this.realm.functionPrototype, 'toString');
+    this.functionHasInstance = this.get(this.realm.functionPrototype, WELL_KNOWN_SYMBOLS.hasInstance);
     this.evaluator = new Evaluator(this);
   }
 
@@ -848,7 +852,8 @@ export class Runtime {
 
   // Conversions -------------------------------------------------------------------------------------------------------
 
-  toPrimitive(value: Value, hint: 'number' | 'string' | 'default'): Primitive {
+  // code-gauge-allow functionCognitiveComplexity 17 -- Preserves the two coercion hooks and the outcome of numeric-only conversion in their evaluation order.
+  toPrimitive(value: Value, hint: 'number' | 'string' | 'default', numericOnly = false): Primitive {
     if (!isObject(value)) return value;
     const exotic = this.get(value, WELL_KNOWN_SYMBOLS.toPrimitive);
     if (exotic !== undefined && exotic !== null) {
@@ -859,6 +864,7 @@ export class Runtime {
     for (const name of hint === 'string' ? ['toString', 'valueOf'] : ['valueOf', 'toString']) {
       const method = this.get(value, name);
       if (isCallable(method)) {
+        if (numericOnly && this.hidesFunctionSource(value, method)) return Number.NaN;
         const result = this.call(method, value, [], this.currentRow);
         if (!isObject(result)) return result;
       }
@@ -866,8 +872,12 @@ export class Runtime {
     return this.throwError('TypeError', 'Cannot convert object to primitive value');
   }
 
+  private hidesFunctionSource(value: JsObject, method: JsFunction): boolean {
+    return this.rejectsFunctionText && value instanceof JsFunction && method === this.functionToString;
+  }
+
   toNumber(value: Value): number {
-    const primitive = this.toPrimitive(value, 'number');
+    const primitive = this.toPrimitive(value, 'number', true);
     if (typeof primitive === 'string') this.scan(primitive.length);
     if (typeof primitive === 'symbol') this.throwError('TypeError', 'Cannot convert a Symbol value to a number');
     if (typeof primitive === 'bigint') this.throwError('TypeError', 'Cannot convert a BigInt value to a number');
@@ -876,7 +886,7 @@ export class Runtime {
 
   /** Converts a value to a number or a BigInt, as arithmetic operators do before deciding which they compute with. */
   toNumeric(value: Value): number | bigint {
-    const primitive = this.toPrimitive(value, 'number');
+    const primitive = this.toPrimitive(value, 'number', true);
     return typeof primitive === 'bigint' ? primitive : this.toNumber(primitive);
   }
 
@@ -921,17 +931,26 @@ export class Runtime {
 
   /** Evaluates `value instanceof constructor`, which a `Symbol.hasInstance` method of the right side decides. */
   instanceOf(value: Value, constructor: Value): boolean {
-    if (!isObject(constructor)) this.throwError('TypeError', "Right-hand side of 'instanceof' is not an object");
-    const method = this.get(constructor, WELL_KNOWN_SYMBOLS.hasInstance);
-    if (method !== undefined && method !== null)
-      return toBoolean(this.call(method, constructor, [value], this.currentRow));
-    if (!isCallable(constructor)) this.throwError('TypeError', "Right-hand side of 'instanceof' is not callable");
-    return this.ordinaryHasInstance(constructor, value);
+    for (;;) {
+      if (!isObject(constructor)) this.throwError('TypeError', "Right-hand side of 'instanceof' is not an object");
+      const method = this.get(constructor, WELL_KNOWN_SYMBOLS.hasInstance);
+      if (method !== undefined && method !== null && method !== this.functionHasInstance)
+        return toBoolean(this.call(method, constructor, [value], this.currentRow));
+      if (!isCallable(constructor)) {
+        if (method === this.functionHasInstance) return false;
+        this.throwError('TypeError', "Right-hand side of 'instanceof' is not callable");
+      }
+      if (!constructor.boundTarget) return this.ordinaryHasInstance(constructor, value);
+      this.spend();
+      constructor = constructor.boundTarget;
+    }
   }
 
   /** Whether `value` inherits the prototype of `constructor`, as `Function.prototype[Symbol.hasInstance]` checks. */
   ordinaryHasInstance(constructor: Value, value: Value): boolean {
-    if (!isCallable(constructor) || !isObject(value)) return false;
+    if (!isCallable(constructor)) return false;
+    if (constructor.boundTarget) return this.instanceOf(value, constructor.boundTarget);
+    if (!isObject(value)) return false;
     const prototype = this.get(constructor, 'prototype');
     if (!isObject(prototype)) {
       this.throwError(

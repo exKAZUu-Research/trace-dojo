@@ -239,7 +239,14 @@ export class MemberChecker {
   }
 
   /** The type of `object.name`, reporting a missing or inaccessible property. */
-  propertyAccess(node: TreeNode, objectNode: TreeNode, propertyNode: TreeNode, objectType: Type, name: string): Type {
+  propertyAccess(
+    node: TreeNode,
+    objectNode: TreeNode,
+    propertyNode: TreeNode,
+    objectType: Type,
+    name: string,
+    isWrite = false
+  ): Type {
     if (isAnyLike(objectType)) return objectType;
     if (propertyNode.type === 'private_property_identifier')
       return this.c.classes.privateNameAccess(node, propertyNode, objectType);
@@ -254,7 +261,7 @@ export class MemberChecker {
         return errorType;
       }
       return unionOf(
-        objectType.types.map((member) => this.propertyAccess(node, objectNode, propertyNode, member, name)),
+        objectType.types.map((member) => this.propertyAccess(node, objectNode, propertyNode, member, name, isWrite)),
         true
       );
     }
@@ -265,7 +272,7 @@ export class MemberChecker {
       this.reportMissingProperty(propertyNode, name, objectType);
       return errorType;
     }
-    this.checkPropertyUse(node, objectNode, propertyNode, objectType, name, property);
+    this.checkPropertyUse(node, objectNode, propertyNode, objectType, property, isWrite);
     const type = property.type();
     return property.optional ? unionOf([type, undefinedType]) : type;
   }
@@ -275,10 +282,10 @@ export class MemberChecker {
     objectNode: TreeNode,
     propertyNode: TreeNode,
     objectType: Type,
-    name: string,
-    property: Property
+    property: Property,
+    isWrite = false
   ): void {
-    this.c.classes.checkPropertyAccessibility(node, propertyNode, objectNode, objectType, property);
+    this.c.classes.checkPropertyAccessibility(node, propertyNode, objectNode, property, isWrite);
     this.c.classes.checkInitializedBefore(node, objectNode, property);
     this.c.expressions.expandos.checkAssignedBefore(node, propertyNode, property);
     this.checkPropertyAvailability(propertyNode, objectType, property);
@@ -313,15 +320,10 @@ export class MemberChecker {
     if (!declaration || !this.c.isLibrary(declaration)) return undefined;
     const owner = declaration.parent?.parent?.childForFieldName('name')?.text;
     const { name } = property;
-    // The interpreter leaves out Math.random so that a program always draws the same board.
-    if (owner === 'Math' && name === 'random') return 'Math.random';
     // The well-known symbols replace the protocols of the language, which this interpreter does not support yet.
     if (owner === 'SymbolConstructor' && wellKnownSymbols.has(name)) return `Symbol.${name} などの well-known シンボル`;
-    // Timers print how long they took, which differs on every run.
-    if (owner === 'Console' && ['time', 'timeEnd', 'timeLog', 'timeStamp'].includes(name)) return `console.${name}`;
     // A stack trace names the files and lines of the host, which differ from the program's.
     if (owner === 'Error' && name === 'stack') return 'Error の stack';
-    if (owner === 'RegExp' && name === 'compile') return 'RegExp の compile';
     // Node.js shows a function's source as tsx's esbuild printed it, which this interpreter does not reproduce.
     if (owner === 'Function' && name === 'toString' && !this.isNeverCalled(propertyNode.parent))
       return '関数やクラスの文字列への変換';

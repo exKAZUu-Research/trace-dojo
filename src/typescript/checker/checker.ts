@@ -477,6 +477,7 @@ export class Checker {
       mappedKeys: type.mappedKeys,
       name: type.name,
       aliasName: type.aliasName,
+      aliasId: type.aliasId,
       aliasArguments: type.aliasArguments?.map((argument) => this.instantiate(argument, mapper)),
       origin: type.origin ?? type,
       mapper: type.mapper ? this.composeMappers(type.mapper, mapper) : mapper,
@@ -517,7 +518,8 @@ export class Checker {
       ? withAlias(
           instantiated,
           type.aliasName,
-          (type.aliasArguments ?? []).map((argument) => this.instantiate(argument, mapper))
+          (type.aliasArguments ?? []).map((argument) => this.instantiate(argument, mapper)),
+          type.aliasId
         )
       : instantiated;
   }

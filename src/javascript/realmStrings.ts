@@ -270,9 +270,9 @@ function defineBuilders(method: StringMethod): void {
 
 function padText({ runtime, args }: NativeCall, text: string, atStart: boolean): string {
   const length = integerArgument(runtime, args[0], 0);
-  // The filler is not converted when the text is already long enough.
   if (length <= text.length) return text;
   const filler = args[1] === undefined ? ' ' : runtime.toString(args[1]);
+  if (filler.length === 0) return text;
   runtime.buildString(length);
   return atStart ? text.padStart(length, filler) : text.padEnd(length, filler);
 }

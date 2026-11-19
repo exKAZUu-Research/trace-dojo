@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 624 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 629 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -475,6 +475,20 @@ export class ClassChecker {
 
   private accessorProperty(name: string, { getter, setter }: AccessorEntry, info: ClassInfo): Property {
     const declaration = (getter ?? setter) as TreeNode;
+    const visibility = this.visibilityOf(declaration);
+    const writeVisibility = setter ? this.visibilityOf(setter) : undefined;
+    if (
+      getter &&
+      setter &&
+      writeVisibility !== visibility &&
+      (visibility === 'private' || writeVisibility === 'public')
+    ) {
+      for (const accessor of [getter, setter])
+        this.c.error(
+          accessor.childForFieldName('name') ?? accessor,
+          'get アクセサーは、set アクセサーと同じか広いアクセス範囲を持つ必要があります。'
+        );
+    }
     return {
       name,
       type: () => this.accessorType(getter, setter),
@@ -483,7 +497,8 @@ export class ClassChecker {
       readonly: !setter,
       getterOnly: !setter,
       isMethod: false,
-      visibility: this.visibilityOf(declaration),
+      visibility,
+      writeVisibility,
       declaringClass: info,
       isPrivateName: declaration.childForFieldName('name')?.type === 'private_property_identifier',
       declaration,
@@ -919,18 +934,18 @@ export class ClassChecker {
     node: TreeNode,
     propertyNode: TreeNode,
     objectNode: TreeNode,
-    objectType: Type,
-    property: Property
+    property: Property,
+    isWrite: boolean
   ): void {
-    void objectType;
     if (!property.declaringClass || (objectNode.type === 'super' && this.reportSuperAccess(propertyNode, property)))
       return;
-    if (property.visibility === 'public') return;
+    const visibility = (isWrite ? property.writeVisibility : undefined) ?? property.visibility;
+    if (visibility === 'public') return;
     const enclosingClasses: ClassInfo[] = [];
     for (let enclosing = this.enclosingClass(node); enclosing; enclosing = this.enclosingClass(enclosing))
       enclosingClasses.push(this.classInfoOfNode(enclosing));
     const declaring = property.declaringClass;
-    if (property.visibility === 'private') {
+    if (visibility === 'private') {
       if (!enclosingClasses.some((enclosing) => enclosing.declaration.id === declaring.declaration.id)) {
         this.c.error(
           propertyNode,

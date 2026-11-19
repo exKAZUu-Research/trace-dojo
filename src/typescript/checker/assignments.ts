@@ -443,7 +443,14 @@ export class AssignmentChecker {
       this.c.error(propertyNode, `プロパティ '${propertyNode.text}' は型 '${this.c.print(objectType)}' にありません。`);
       return errorType;
     }
-    const type = this.c.members.propertyAccess(expression, objectNode, propertyNode, objectType, propertyNode.text);
+    const type = this.c.members.propertyAccess(
+      expression,
+      objectNode,
+      propertyNode,
+      objectType,
+      propertyNode.text,
+      true
+    );
     if (compound) return this.narrowedType(expression) ?? type;
     return unionOf(
       (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) => this.namedWriteType(member, key))

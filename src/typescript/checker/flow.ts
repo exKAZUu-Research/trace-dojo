@@ -84,7 +84,7 @@ export class Flow {
   current: State = new FlowState();
   readonly exceptions: ExceptionFlow;
   /** While set, only the references it accepts narrow, and their keys are collected, as for an aliased condition. */
-  narrowingScope?: { accepts: (node: TreeNode) => boolean; keys: Set<string> };
+  narrowingScope?: { accepts: (node: TreeNode) => boolean; keys: Set<string>; reuseCallPredicates: boolean };
   constructor(private readonly c: Checker) {
     this.exceptions = new ExceptionFlow(c, this, (types) => this.joinTypes(types));
   }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 618 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 621 -- Follows the flow of control through each kind of statement.
 import assert from 'node:assert/strict';
 
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
@@ -878,7 +878,9 @@ export class StatementChecker {
       context.inReturn = true;
       const type = this.c.expressions.check(expression, declared ?? context.contextualReturn);
       context.inReturn = false;
-      if (declared) {
+      if (hasToken(context.node, 'set')) {
+        this.c.error(node, 'set アクセサーは値を返せません。');
+      } else if (declared) {
         if (context.isConstructor) this.checkConstructorReturn(expression, type, declared);
         else this.c.expressions.checkReturnValue(expression, type, declared);
       }

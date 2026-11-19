@@ -193,6 +193,7 @@ function defineFunction(builder: RealmBuilder): void {
 function bindFunction({ runtime, thisValue, args }: NativeCall): JsFunction {
   const target = thisValue;
   if (!isCallable(target)) return runtime.throwError('TypeError', 'Bind must be called on a function');
+  const prototype = target.proto;
   const boundThis = args[0];
   const boundArgs = args.slice(1);
   runtime.allocate(boundArgs.length + 1);
@@ -213,6 +214,8 @@ function bindFunction({ runtime, thisValue, args }: NativeCall): JsFunction {
         : runtime.call(target, boundThis, [...boundArgs, ...call.args], call.callRow),
     target.isConstructor
   );
+  bound.proto = prototype;
+  bound.boundTarget = target;
   bound.captured = [target, boundThis, ...boundArgs];
   return bound;
 }
@@ -511,7 +514,7 @@ function defineConsole(builder: RealmBuilder): void {
   let groupIndentation = '';
   const write = (runtime: Runtime, stream: 'stdout' | 'stderr', text: string): void => {
     const indented = groupIndentation ? groupIndentation + text.replaceAll('\n', `\n${groupIndentation}`) : text;
-    runtime.io[stream].write(`${indented}\n`);
+    runtime.io[stream].write(`${indented.toWellFormed()}\n`);
   };
   // Node.js writes warnings and errors to standard error.
   for (const [name, stream] of [

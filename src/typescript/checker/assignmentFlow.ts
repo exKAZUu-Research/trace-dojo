@@ -224,6 +224,7 @@ class AssignmentFlow {
       return { tested, next: tested };
     }
     const tested = condition ? this.expression(condition, start) : start;
+    if (condition && constantCondition(condition) === false) return { tested, next: undefined };
     const iteration =
       node.type === 'for_in_statement' && this.bindings
         ? this.bindValues(tested, (assign, evaluate) => this.bindings!.iteration(node, assign, evaluate))

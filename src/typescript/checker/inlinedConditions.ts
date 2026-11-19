@@ -42,13 +42,13 @@ export class InlinedConditions {
     if (declarator.childForFieldName('name')?.type !== 'identifier' || declarator.childForFieldName('type')) {
       return undefined;
     }
-    if (!value || this.aliasDepth >= 5 || hasSideEffects(value)) return undefined;
+    if (!value || this.aliasDepth >= 5 || hasSideEffects(value, this.c)) return undefined;
     const type = this.c.expressions.check(identifier);
     const base = this.c.flow.current;
     this.aliasDepth++;
     let inlined: InlinedCondition;
     try {
-      inlined = this.inlinedCondition(value, (node) => isConstantReference(this.c, node));
+      inlined = this.inlinedCondition(value, (node) => isConstantReference(this.c, node), true);
     } finally {
       this.aliasDepth--;
     }
@@ -67,11 +67,19 @@ export class InlinedConditions {
    * The states of `expression` checked again as a condition, with the keys of the references it narrowed that
    * `accepts` allows; the current state and diagnostics stay as they were.
    */
-  private inlinedCondition(expression: TreeNode, accepts: (node: TreeNode) => boolean): InlinedCondition {
+  private inlinedCondition(
+    expression: TreeNode,
+    accepts: (node: TreeNode) => boolean,
+    reuseCallPredicates = false
+  ): InlinedCondition {
     const outerScope = this.c.flow.narrowingScope;
     const base = this.c.flow.current;
     const keys = new Set<string>();
-    this.c.flow.narrowingScope = { accepts, keys };
+    this.c.flow.narrowingScope = {
+      accepts,
+      keys,
+      reuseCallPredicates: reuseCallPredicates || (outerScope?.reuseCallPredicates ?? false),
+    };
     try {
       const { whenTrue, whenFalse } = this.c.silently(() => this.c.conditions.condition(expression, false));
       for (const key of keys) outerScope?.keys.add(key);
@@ -124,8 +132,9 @@ export class InlinedConditions {
 }
 
 /** Whether checking an expression again would declare or assign something, which an aliased condition must not. */
-function hasSideEffects(expression: TreeNode): boolean {
-  return sideEffectTypes.has(expression.type) || named(expression).some((child) => hasSideEffects(child));
+function hasSideEffects(expression: TreeNode, reuseFrom?: Checker): boolean {
+  if (expression.type === 'call_expression' && reuseFrom?.expressions.calls.predicateOf(expression)) return false;
+  return sideEffectTypes.has(expression.type) || named(expression).some((child) => hasSideEffects(child, reuseFrom));
 }
 
 function isAccessExpression(expression: TreeNode): boolean {

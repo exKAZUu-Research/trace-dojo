@@ -1,0 +1,4 @@
+function evaluate(left: number | undefined, right: number) {
+  console.log(left || right ?? 2);
+  console.log(left ?? right && 3);
+}

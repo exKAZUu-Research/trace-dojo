@@ -74,7 +74,7 @@ class Snapshotter {
     while (top?.parent && top.parent !== this.runtime.realm.globals) top = top.parent;
     if (!top) return;
     for (const [className, binding] of top.bindings) {
-      const cls = binding.value;
+      const cls = binding.initializingClass ?? binding.value;
       if (!(cls instanceof JsFunction) || cls.behavior.kind !== 'class') continue;
       // Its private static fields show as instance ones do.
       for (const [key, value] of displayedEntries(cls, this.runtime))

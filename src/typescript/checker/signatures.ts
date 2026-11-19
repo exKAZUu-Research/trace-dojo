@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 420 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { erasedStatementTypes } from '../erasedSyntax';
@@ -71,7 +72,7 @@ export class Signatures {
         if (returnType) return returnType;
         if (returnNode) returnType = this.c.typeNodes.annotationType(returnNode) ?? anyType;
         else if (node.childForFieldName('body')) returnType = this.c.functions.inferredReturnType(node, signature);
-        else returnType = this.implicitReturnType(node);
+        else returnType = this.pairedSetterType(node) ?? anyType;
         return returnType;
       },
     };
@@ -88,6 +89,7 @@ export class Signatures {
    */
   private checkParameterGrammar(node: TreeNode): void {
     this.checkStrictParameterList(node);
+    this.checkAccessorGrammar(node);
     const hasBody = node.childForFieldName('body') !== null;
     let optional = false;
     let listError = false;
@@ -100,6 +102,43 @@ export class Signatures {
       listError ||= this.checkParameterListGrammar(parameterNode, hasDefault, optional);
       if (parameterNode.type === 'optional_parameter') optional = true;
     }
+  }
+
+  private checkAccessorGrammar(node: TreeNode): void {
+    if (!accessorDeclarationTypes.has(node.type)) return;
+    const getter = hasToken(node, 'get');
+    if (!getter && !hasToken(node, 'set')) return;
+    const name = node.childForFieldName('name') ?? node;
+    const typeParameters = node.childForFieldName('type_parameters');
+    if (typeParameters) {
+      this.c.errorWhileResolving(typeParameters, 'アクセサーには型引数を書けません。');
+      return;
+    }
+    const returnNode = returnTypeNode(node);
+    if (!getter && returnNode) {
+      this.c.errorWhileResolving(returnNode, 'set アクセサーには戻り値の型を書けません。');
+      return;
+    }
+    const parameters = argumentParameters(parameterNodes(node));
+    if (getter ? parameters.length > 0 : parameters.length !== 1) {
+      this.c.errorWhileResolving(
+        name,
+        getter ? 'get アクセサーには引数を書けません。' : 'set アクセサーには引数が1つ必要です。'
+      );
+      return;
+    }
+    const parameter = parameters[0];
+    if (!parameter) return;
+    const message = this.setterParameterError(parameter);
+    if (message) this.c.errorWhileResolving(parameter, message);
+  }
+
+  private setterParameterError(parameter: TreeNode): string | undefined {
+    const hasDefault = parameter.childForFieldName('value') !== null;
+    if (parameter.type === 'optional_parameter')
+      return hasDefault ? undefined : 'set アクセサーの引数に ? は付けられません。';
+    if (hasDefault) return 'set アクセサーの引数には既定値を書けません。';
+    return patternOf(parameter).type === 'rest_pattern' ? 'set アクセサーには残余引数を書けません。' : undefined;
   }
 
   private checkStrictParameterList(node: TreeNode): void {
@@ -306,12 +345,11 @@ export class Signatures {
     ];
   }
 
-  /** The return type of a declaration without an annotation or a body: a getter's is its setter's parameter type. */
-  private implicitReturnType(node: TreeNode): Type {
+  pairedSetterType(node: TreeNode): Type | undefined {
     const setter = accessorDeclarationTypes.has(node.type) && hasToken(node, 'get') && this.pairedAccessor(node, 'set');
     return setter && firstArgumentParameter(setter)?.childForFieldName('type')
-      ? this.signatureOf(setter).parameters[0].type
-      : anyType;
+      ? this.signatureOf(setter).parameters[0]?.type
+      : undefined;
   }
 
   /**
@@ -320,6 +358,7 @@ export class Signatures {
    */
   checkImplicitReturnTypes(root: TreeNode): void {
     for (const node of root.descendantsOfType(bodilessSignatureTypes)) {
+      this.checkAccessorGrammar(node);
       if (returnTypeNode(node) || node.childForFieldName('body')) continue;
       const name = node.childForFieldName('name');
       if (accessorDeclarationTypes.has(node.type) && (hasToken(node, 'get') || hasToken(node, 'set'))) {

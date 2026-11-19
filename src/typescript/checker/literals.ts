@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 589 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 603 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { spreadLength, tupleArgumentContexts } from './callArity';
@@ -57,6 +57,7 @@ interface ObjectLiteral {
    * computed key of no literal type has: the names of those with a name, and the key kinds and types of the others.
    */
   writtenNames: Set<string>;
+  explicitMembers: Map<string, TreeNode>;
   computedMembers: { key: IndexKey; type: Type }[];
   /** Whether members are written since the last spread, which TypeScript spreads as one object literal. */
   hasPendingMembers?: boolean;
@@ -304,6 +305,7 @@ export class LiteralChecker {
       ),
       genericSpreads: [],
       writtenNames: new Set(),
+      explicitMembers: new Map(),
       computedMembers: [],
       seenKeys: new Map(),
       object: anonymousObject(
@@ -521,6 +523,7 @@ export class LiteralChecker {
   private setWritten(literal: ObjectLiteral, name: string, property: Property): void {
     literal.properties.set(name, property);
     literal.writtenNames.add(name);
+    if (property.declaration) literal.explicitMembers.set(name, property.declaration);
   }
 
   private memberValue(literal: ObjectLiteral, value: TreeNode, context: Type | undefined): Type {
@@ -669,6 +672,7 @@ export class LiteralChecker {
       literal.spreadsAny = true;
       return;
     }
+    this.checkSpreadOverrides(literal, spread);
     if (spread.kind === 'typeParameter') {
       literal.genericSpreads.push(spread);
       return;
@@ -686,6 +690,18 @@ export class LiteralChecker {
       return;
     }
     this.spreadObjectUnion(literal, member, spread, [...objectMembers, ...(mayBeNullish ? [undefined] : [])]);
+  }
+
+  private checkSpreadOverrides(literal: ObjectLiteral, spread: Type): void {
+    if (literal.explicitMembers.size === 0) return;
+    const structures = (spread.kind === 'union' ? spread.types : [spread]).map((type) => this.c.structureOf(type));
+    for (const [name, declaration] of literal.explicitMembers) {
+      const overwrites = structures.every((structure) => {
+        this.c.budget.spend();
+        return structure.properties.get(name)?.optional === false;
+      });
+      if (overwrites) this.c.error(declaration, `プロパティ '${name}' は後のスプレッドによって上書きされます。`);
+    }
   }
 
   /** Spreads a union of several objects, unless the alternatives it makes are more than TypeScript represents. */

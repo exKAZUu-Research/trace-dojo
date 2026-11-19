@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 515 -- Evaluates every kind of function call, class, and statement of the language in one evaluator.
+// code-gauge-allow-file fileNcss 523 -- Evaluates every kind of function call, class, and statement of the language in one evaluator.
 import assert from 'node:assert/strict';
 
 import { createArgumentsObject, mapArguments } from './argumentsObject';
@@ -35,6 +35,7 @@ import {
 } from './suspendableStatements';
 import {
   appendAll,
+  type Binding,
   type ClassField,
   type FunctionBehavior,
   type FunctionFrame,
@@ -97,7 +98,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
         return undefined;
       }
       case 'class': {
-        this.writeVariable(statement.cls.name, this.evaluateClass(statement.cls), 'initialize');
+        this.writeVariable(statement.cls.name, this.evaluateClass(statement.cls, undefined, true), 'initialize');
         return undefined;
       }
       case 'return': {
@@ -556,7 +557,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
   // Classes -----------------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the specification's ClassDefinitionEvaluation step by step, whose branches mirror its steps.
-  evaluateClass(cls: ClassNode, inferredName?: Key): JsFunction {
+  evaluateClass(cls: ClassNode, inferredName?: Key, isDeclaration = false): JsFunction {
     const { runtime } = this;
     const { prototypeParent, constructorParent } = this.classParents(cls);
     const classScope = new Scope(runtime.frame.scope);
@@ -599,10 +600,27 @@ export class Evaluator extends SuspendableStatementEvaluator {
     });
     const staticInitializers = this.inScope(classScope, () => this.defineMembers(cls, fn, prototype, behavior.fields));
     if (cls.name) classScope.bindings.set(cls.name, { value: fn, isMutable: false });
-    this.inScope(classScope, () => {
-      for (const initialize of staticInitializers) initialize();
-    });
+    const binding = isDeclaration ? classScope.parent?.bindings.get(cls.name) : undefined;
+    this.initializeStaticMembers(classScope, fn, staticInitializers, binding);
     return fn;
+  }
+
+  private initializeStaticMembers(
+    classScope: Scope,
+    fn: JsFunction,
+    initializers: (() => void)[],
+    binding: Binding | undefined
+  ): void {
+    if (binding) binding.initializingClass = fn;
+    try {
+      this.runtime.hold(fn, () =>
+        this.inScope(classScope, () => {
+          for (const initialize of initializers) initialize();
+        })
+      );
+    } finally {
+      if (binding) binding.initializingClass = undefined;
+    }
   }
 
   /** The prototypes of a class's prototype object and of the class itself, which `extends` decides. */

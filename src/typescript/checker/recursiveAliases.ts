@@ -12,7 +12,7 @@ import {
 
 /** The members a deferred alias reference reads from the instantiation it stands for, which it makes when first read. */
 const forwardedMembers: {
-  [K in Exclude<keyof ObjectType, 'kind' | 'id' | 'aliasName' | 'aliasArguments' | 'aliasMapper'>]-?: true;
+  [K in Exclude<keyof ObjectType, 'kind' | 'id' | 'aliasName' | 'aliasArguments' | 'aliasId' | 'aliasMapper'>]-?: true;
 } = {
   objectKind: true,
   name: true,
@@ -87,6 +87,7 @@ export class RecursiveAliases {
       kind: 'object',
       id: newTypeId(),
       aliasName: symbol.name,
+      aliasId: symbol.id,
       aliasArguments: own.map((parameter) => mapper.get(parameter.id) ?? parameter),
       aliasMapper: mapper,
     } as ObjectType;
