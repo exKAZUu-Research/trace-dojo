@@ -1172,14 +1172,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type,
       isLvalue: true,
       row,
-      run: (frame) => {
-        const base = p(frame) as Ptr;
-        const at = base.index + Number(n(frame));
-        const store = base.target();
-        // `&a[n]` may form the address one past the end, which only reading or writing through rejects.
-        if (at < 0 || at > store.length) throw new CppRuntimeError('outOfBounds');
-        return store.location(at);
-      },
+      run: (frame) => (p(frame) as Ptr).offset(Number(n(frame))),
     };
   }
 
@@ -1796,19 +1789,21 @@ function thisLocation(frame: Frame): Ptr {
 function comparePointers(operator: string, a: Ptr, b: Ptr): number {
   if (operator === '==') return a.equals(b) ? 1 : 0;
   if (operator === '!=') return a.equals(b) ? 0 : 1;
-  if (a.store !== b.store) throw new CppRuntimeError('pointerComparison');
+  const left = a.storageAddress;
+  const right = b.storageAddress;
+  if (left.store !== right.store) throw new CppRuntimeError('pointerComparison');
   switch (operator) {
     case '<': {
-      return a.index < b.index ? 1 : 0;
+      return left.index < right.index ? 1 : 0;
     }
     case '<=': {
-      return a.index <= b.index ? 1 : 0;
+      return left.index <= right.index ? 1 : 0;
     }
     case '>': {
-      return a.index > b.index ? 1 : 0;
+      return left.index > right.index ? 1 : 0;
     }
     default: {
-      return a.index >= b.index ? 1 : 0;
+      return left.index >= right.index ? 1 : 0;
     }
   }
 }

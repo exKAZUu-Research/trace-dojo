@@ -154,7 +154,7 @@ export class Streams {
     this.istream = this.streamClass('std::istream', undefined, false, true);
     this.ostringstream = this.streamClass('std::ostringstream', this.ostream, true, false);
     this.istringstream = this.streamClass('std::istringstream', this.istream, false, true);
-    this.stringstream = this.streamClass('std::stringstream', this.ostream, true, true);
+    this.stringstream = this.streamClass('std::stringstream', this.ostream, true, true, [this.istream]);
   }
 
   private iosClass(): ClassInfo {
@@ -183,7 +183,13 @@ export class Streams {
     return cls;
   }
 
-  private streamClass(name: string, base: ClassInfo | undefined, isOutput: boolean, isInput: boolean): ClassInfo {
+  private streamClass(
+    name: string,
+    base: ClassInfo | undefined,
+    isOutput: boolean,
+    isInput: boolean,
+    additionalPublicBases?: readonly ClassInfo[]
+  ): ClassInfo {
     const cls = new ClassInfo(name, 'class');
     cls.isComplete = true;
     cls.isNoncopyable = true;
@@ -191,6 +197,7 @@ export class Streams {
     cls.library = {
       kind: name.replace('std::', ''),
       args: [],
+      additionalPublicBases,
       size: 160,
       align: 8,
       operator: (compiler, operator, operands, row) =>

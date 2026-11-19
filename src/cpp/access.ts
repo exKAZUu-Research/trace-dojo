@@ -47,6 +47,9 @@ export function isBaseAccessible(derived: ClassInfo, base: ClassInfo, here: Clas
 export function accessAsMemberOf(access: Access, owner: ClassInfo, cls: ClassInfo): Access | undefined {
   if (cls === owner) return access;
   const inBase = cls.base && accessAsMemberOf(access, owner, cls.base);
-  if (!inBase || inBase === 'private') return undefined;
-  return cls.baseAccess === 'public' ? inBase : cls.baseAccess;
+  if (inBase && inBase !== 'private') return cls.baseAccess === 'public' ? inBase : cls.baseAccess;
+  for (const base of cls.library?.additionalPublicBases ?? []) {
+    const inherited = accessAsMemberOf(access, owner, base);
+    if (inherited && inherited !== 'private') return inherited;
+  }
 }

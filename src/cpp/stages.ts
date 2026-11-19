@@ -25,7 +25,6 @@ const UNSUPPORTED_NODES: Record<string, string> = {
   delete_method_clause: '= delete',
   ref_qualifier: '参照修飾子（& や &&）の付いたメンバ関数',
   trailing_return_type: '後置の戻り値の型（-> 型）',
-  noexcept: 'noexcept',
   throw_specifier: '例外の指定（throw(...)）',
   parenthesized_declarator: '括弧で囲んだ宣言子（関数ポインタ・配列へのポインタなど）',
   abstract_parenthesized_declarator: '括弧で囲んだ宣言子（関数ポインタ・配列へのポインタなど）',
@@ -130,6 +129,10 @@ export function rejectUnsupportedSyntax(root: Syntax): void {
       case 'storage_class_specifier':
       case 'type_qualifier': {
         checkSpecifier(node);
+        break;
+      }
+      case 'noexcept': {
+        if (node.all.some((child) => child.type === '(')) unsupported(node.row, 'noexcept(式)');
         break;
       }
       default: {

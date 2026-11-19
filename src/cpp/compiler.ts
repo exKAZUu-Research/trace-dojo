@@ -6,7 +6,7 @@ import { CppException, CppRuntimeError } from './errors';
 import type { Expr } from './expr';
 import { SequenceValue } from './library/containerValues';
 import type { Library } from './library/registry';
-import { invoke, makeEach, newObject, virtualKey, zeroOf } from './objectCompiler';
+import { invoke, makeEach, newObject, type Resolved, virtualKey, zeroOf } from './objectCompiler';
 import { type CompiledFunction, type Eval, type Exec, type Frame, RETURN, type Runtime } from './runtime';
 import { type Entity, FunctionContext } from './scopes';
 import {
@@ -409,6 +409,7 @@ export class Compiler extends StatementCompiler {
     fn.access = access;
     fn.isConstructor = isConstructor;
     fn.isDestructor = isDestructor;
+    if (isDestructor) fn.isNoexcept = true;
     fn.isStatic = this.hasSpecifier(node, 'static');
     fn.isVirtual = hasToken(node, 'virtual');
     fn.isInline = isDefinition || this.hasSpecifier(node, 'inline');
@@ -498,6 +499,7 @@ export class Compiler extends StatementCompiler {
       isVirtual: false,
       isInline: this.hasSpecifier(node, 'inline'),
       isConst: qualifiers.has('const'),
+      isNoexcept: declarator.children.some((child) => child.type === 'noexcept'),
       isPure: false,
       isConstructor: false,
       isDestructor: false,
@@ -557,25 +559,12 @@ export class Compiler extends StatementCompiler {
   private completeClass(cls: ClassInfo, isFinalClass: boolean): void {
     cls.isFinal = isFinalClass;
     if (cls.base) for (const [key, fn] of cls.base.virtuals) cls.virtuals.set(key, fn);
-    for (const [name, overloads] of cls.methods) {
-      for (const fn of overloads) {
-        const key = virtualKey(fn);
-        const overridden = cls.base ? this.findVirtual(cls.base, key) : undefined;
-        if (overridden) {
-          this.checkOverrider(fn, overridden);
-          fn.isVirtual = true;
-        } else if (fn.isOverride) {
-          this.error(fn.row, `override を付けた ${name} は、親クラスの仮想関数を上書きしていません。`);
-        } else if (fn.isFinal && !fn.isVirtual) {
-          this.error(fn.row, `final は仮想関数にしか付けられません。`);
-        }
-        if (fn.isVirtual) cls.virtuals.set(key, fn);
-      }
+    for (const overloads of cls.methods.values()) {
+      for (const fn of overloads) this.completeVirtual(cls, fn, virtualKey(fn));
     }
     const baseDestructor = cls.base?.destructor;
-    if (cls.destructor && (cls.destructor.isVirtual || baseDestructor?.isVirtual)) cls.destructor.isVirtual = true;
     if (!cls.destructor && baseDestructor?.isVirtual) cls.destructor = this.implicitDestructor(cls);
-    if (cls.destructor?.isVirtual) cls.virtuals.set('~', cls.destructor);
+    if (cls.destructor) this.completeVirtual(cls, cls.destructor, '~');
     const userCopy = cls.constructors.find((ctor) => isCopyConstructor(ctor, cls));
     cls.isNoncopyable =
       !userCopy &&
@@ -597,21 +586,30 @@ export class Compiler extends StatementCompiler {
     cls.operations = this.classOperations(cls, userCopy);
   }
 
+  private completeVirtual(cls: ClassInfo, fn: FunctionInfo, key: string): void {
+    const overridden = cls.base?.virtuals.get(key);
+    if (overridden) {
+      this.checkOverrider(fn, overridden);
+      fn.isVirtual = true;
+    } else if (fn.isOverride) {
+      this.error(fn.row, `override を付けた ${fn.name} は、親クラスの仮想関数を上書きしていません。`);
+    } else if (fn.isFinal && !fn.isVirtual) {
+      this.error(fn.row, 'final は仮想関数にしか付けられません。');
+    }
+    if (fn.isVirtual) cls.virtuals.set(key, fn);
+  }
+
   private checkOverrider(fn: FunctionInfo, overridden: FunctionInfo): void {
     if (!sameType(unqualified(overridden.ret), unqualified(fn.ret)) && !covariant(overridden.ret, fn.ret)) {
       this.error(fn.row, `${fn.displayName} の戻り値の型が、上書きする ${overridden.displayName} と違います。`);
     }
     if (overridden.isFinal) this.error(fn.row, `${overridden.displayName} は final なので上書きできません。`);
-    if (overridden.isNoexcept) {
+    if (overridden.isNoexcept && !fn.isNoexcept) {
       this.error(
         fn.row,
-        `${overridden.displayName} は noexcept なので、上書きする ${fn.displayName} にも noexcept が要ります（noexcept は、この採点環境では使えません）。`
+        `${overridden.displayName} は noexcept なので、上書きする ${fn.displayName} にも noexcept が要ります。`
       );
     }
-  }
-
-  private findVirtual(cls: ClassInfo, key: string): FunctionInfo | undefined {
-    return cls.virtuals.get(key);
   }
 
   private isNoncopyableType(type: Type): boolean {
@@ -625,6 +623,7 @@ export class Compiler extends StatementCompiler {
       ...this.syntheticFunction(cls, `~${cls.name}`),
       isDestructor: true,
       isVirtual: true,
+      isNoexcept: true,
       isDefined: true,
     };
   }
@@ -768,7 +767,12 @@ export class Compiler extends StatementCompiler {
 
   private delegation(cls: ClassInfo, initializer: Syntax): Exec {
     const args = this.initializerArguments(initializer);
-    const resolved = this.resolve(`${cls.name} のコンストラクタ`, cls.constructors, args, undefined, initializer.row);
+    const resolved = this.resolveConstructor(
+      cls,
+      args,
+      initializer.row,
+      initializer.children[1]?.type === 'initializer_list'
+    );
     this.checkDefined(resolved.fn, initializer.row);
     const runs = this.callArguments(resolved, args, initializer.row);
     const { row } = initializer;
@@ -781,9 +785,7 @@ export class Compiler extends StatementCompiler {
 
   private initializerArguments(initializer: Syntax): Expr[] {
     const argumentsNode = initializer.children[1];
-    if (!argumentsNode) return [];
-    if (argumentsNode.type === 'initializer_list') return argumentsNode.children.map((arg) => this.argument(arg));
-    return argumentsNode.children.map((arg) => this.argument(arg));
+    return (argumentsNode?.children ?? []).filter((arg) => arg.type !== 'comment').map((arg) => this.argument(arg));
   }
 
   private baseInitialization(cls: ClassInfo, base: ClassInfo, initializer: Syntax | undefined): Exec {
@@ -800,7 +802,7 @@ export class Compiler extends StatementCompiler {
         return;
       };
     }
-    const resolved = this.resolve(`${base.name} のコンストラクタ`, base.constructors, args, undefined, row);
+    const resolved = this.resolveConstructor(base, args, row, initializer?.children[1]?.type === 'initializer_list');
     this.checkDefined(resolved.fn, row);
     if (!resolved.fn.native && resolved.fn.access === 'private')
       this.error(row, `${base.name} のコンストラクタは private です。`);
@@ -823,9 +825,12 @@ export class Compiler extends StatementCompiler {
       row = explicit.row;
       const argumentsNode = explicit.children[1];
       if (type.kind === 'reference') {
-        const args = this.initializerArguments(explicit);
+        const args =
+          argumentsNode?.type === 'initializer_list'
+            ? [this.argument(argumentsNode)]
+            : this.initializerArguments(explicit);
         if (args.length !== 1) this.error(row, `参照のメンバ ${field.name} には値を1つ書いてください。`);
-        value = this.convert(args[0], type, row).run;
+        value = this.constructorReference(type, args[0], row);
       } else if (argumentsNode?.type === 'initializer_list') {
         value = this.listInitializer(type, argumentsNode, row);
         isCreation = type.kind === 'class' && !type.cls.library;
@@ -844,7 +849,7 @@ export class Compiler extends StatementCompiler {
       }
     } else if (field.initializer) {
       const node = field.initializer;
-      if (type.kind === 'reference') value = this.convert(this.compileExpression(node), type, row).run;
+      if (type.kind === 'reference') value = this.constructorReference(type, this.argument(node), row);
       else if (node.type === 'initializer_list') {
         value = this.listInitializer(type, node, row);
         isCreation = type.kind === 'class' && !type.cls.library;
@@ -875,6 +880,13 @@ export class Compiler extends StatementCompiler {
       return;
     });
     return this.withStep(row, exec, isCreation);
+  }
+
+  private constructorReference(type: Extract<Type, { kind: 'reference' }>, expr: Expr, row: number): Eval<Value | Ptr> {
+    const target = this.referenceMemberTarget(type, expr, row);
+    if (!target.isLvalue || target.temporaryMember || !isReferenceRelated(target.type, type.to))
+      return this.error(row, 'コンストラクタで参照メンバを一時的な値に束縛できません。');
+    return this.convert(target, type, row).run;
   }
 
   private isClassType(type: Type): boolean {
@@ -1006,6 +1018,7 @@ export class Compiler extends StatementCompiler {
     const overloads = existing?.kind === 'functions' ? existing.functions : [];
     const same = overloads.find((other) => sameParameters(other, fn));
     if (same) {
+      this.checkExceptionSpecifier(same, fn, node.row);
       if (!sameType(same.ret, fn.ret))
         this.error(node.row, `関数 ${name} は、戻り値の型だけが違う宣言をすでにされています。`);
       if (isDefinition && same.isDefined) this.error(node.row, `関数 ${name} はすでに定義されています。`);
@@ -1071,6 +1084,7 @@ export class Compiler extends StatementCompiler {
           `${cls.name} に ${qualified.text} という（この引数の）メンバ関数は宣言されていません。`
         );
       if (fn.isDefined) return this.error(node.row, `${fn.displayName} はすでに定義されています。`);
+      this.checkExceptionSpecifier(fn, probe, node.row);
       if (typeNode && !sameType(fn.ret, probe.ret))
         return this.error(node.row, `${fn.displayName} の戻り値の型が宣言と違います。`);
       if (probe.params.some((param) => param.defaultValue)) {
@@ -1091,6 +1105,11 @@ export class Compiler extends StatementCompiler {
     } finally {
       this.memberClass = savedClass;
     }
+  }
+
+  private checkExceptionSpecifier(previous: FunctionInfo, declared: FunctionInfo, row: number): void {
+    if (!previous.isDestructor && Boolean(previous.isNoexcept) !== Boolean(declared.isNoexcept))
+      this.error(row, `${declared.displayName} の noexcept 指定が前の宣言と違います。`);
   }
 
   private checkSpecialMemberReturnType(cls: ClassInfo, name: string, node: Syntax): void {
@@ -1589,12 +1608,7 @@ export class Compiler extends StatementCompiler {
       if (this.isAggregate(type.cls)) return this.aggregateInitializer(type.cls, elements, row);
       if (elements.length === 0) return this.defaultConstructed(type.cls, row, true).run as Eval<Value>;
       const args = elements.map((element) => this.argument(element));
-      const resolved = this.resolve(`${type.cls.name} のコンストラクタ`, type.cls.constructors, args, undefined, row);
-      for (const [index, arg] of args.entries()) {
-        const param = resolved.fn.params[index];
-        if (param && !arg.braced)
-          this.checkNarrowing(arg, param.type.kind === 'reference' ? param.type.to : param.type, row);
-      }
+      const resolved = this.resolveConstructor(type.cls, args, row, true);
       if (type.cls.constructors.length === 0)
         return this.error(row, `${type.cls.name} は {...} では初期化できません。`);
       return this.constructWith(type.cls, resolved, args, row).run as Eval<Value>;
@@ -1608,6 +1622,18 @@ export class Compiler extends StatementCompiler {
     if (elements[0].type === 'initializer_list')
       return this.error(row, `${typeName(type)} 型の値は、入れ子の {...} では初期化できません。`);
     return this.copyInitializer(type, this.compileExpression(elements[0]), row, true);
+  }
+
+  private resolveConstructor(cls: ClassInfo, args: Expr[], row: number, isList: boolean): Resolved {
+    const resolved = this.resolve(`${cls.name} のコンストラクタ`, cls.constructors, args, undefined, row);
+    if (isList) {
+      for (const [index, arg] of args.entries()) {
+        const param = resolved.fn.params[index];
+        if (param && !arg.braced)
+          this.checkNarrowing(arg, param.type.kind === 'reference' ? param.type.to : param.type, arg.row);
+      }
+    }
+    return resolved;
   }
 
   /** Whether a class is an aggregate, which braces initialize member by member (C++20 [dcl.init.aggr]). */
@@ -1688,14 +1714,15 @@ export class Compiler extends StatementCompiler {
         return this.takeMemberClauses(type.cls, clauses, row);
     }
     clauses.next++;
+    if (type.kind === 'reference') return () => this.memberReference(type, this.argument(node), node.row);
     if (node.type === 'initializer_list') return () => this.listInitializer(type, node, node.row);
     const expr = this.clauseExpression(node, clauses);
-    if (type.kind === 'reference') return () => this.memberReference(type, expr, node.row);
     return () => this.copyInitializer(type, expr, node.row, true);
   }
 
   /** Binds a reference member of an aggregate, whose lifetime a temporary it binds to takes (C++20 [class.temporary]). */
   private memberReference(type: Extract<Type, { kind: 'reference' }>, expr: Expr, row: number): Eval<Value> {
+    expr = this.referenceMemberTarget(type, expr, row);
     if ((expr.isLvalue && isReferenceRelated(expr.type, type.to)) || !isConstType(type.to))
       return this.convert(expr, type, row).run as Eval<Value>;
     const heldType = unqualified(type.to);
@@ -1710,6 +1737,13 @@ export class Compiler extends StatementCompiler {
       frame.slots[holder.slot] = box;
       return new Ptr(box, 0);
     };
+  }
+
+  private referenceMemberTarget(type: Extract<Type, { kind: 'reference' }>, expr: Expr, row: number): Expr {
+    if (!expr.braced) return expr;
+    return (
+      this.listReferenceValue(expr.braced, type.to) ?? this.error(row, '参照メンバを {...} の値に束縛できません。')
+    );
   }
 
   private clauseExpression(node: Syntax, clauses: Clauses): Expr {
@@ -1819,6 +1853,8 @@ export class Compiler extends StatementCompiler {
     const previous = this.context;
     this.context = new FunctionContext(undefined, field.owner, VOID);
     try {
+      if (field.type.kind === 'reference')
+        return this.fullExpression(this.memberReference(field.type, this.argument(node), node.row));
       const initialize =
         node.type === 'initializer_list'
           ? this.listInitializer(field.type, node, node.row)

@@ -136,6 +136,7 @@ export class Runtime implements TracedRuntime<Frame> {
    * program at once, without unwinding the stack, as libc++abi's two-phase exception handling does.
    */
   readonly tryBlocks: ((exception: CppException) => boolean)[] = [];
+  private tryBoundary = 0;
   /** Describes an exception that no handler catches, as libc++abi does when it terminates the program. */
   describeUncaught: (frame: Frame, exception: CppException) => string = () => 'libc++abi: terminating';
   /** Receives `main`'s frame when its body completes, before its variables end their lifetime. */
@@ -154,12 +155,21 @@ export class Runtime implements TracedRuntime<Frame> {
     return stream;
   }
 
-  /** Throws a C++ exception, or ends the program when no handler catches it. */
-  throwException(frame: Frame, exception: CppException): never {
-    if (!this.tryBlocks.some((matches) => matches(exception))) {
-      throw new ProgramAbort(this.describeUncaught(frame, exception));
+  withoutOuterHandlers<T>(run: () => T): T {
+    const previous = this.tryBoundary;
+    this.tryBoundary = this.tryBlocks.length;
+    try {
+      return run();
+    } finally {
+      this.tryBoundary = previous;
     }
-    throw exception;
+  }
+
+  /** Throws a C++ exception, or ends the program when no reachable handler catches it. */
+  throwException(frame: Frame, exception: CppException): never {
+    for (let index = this.tryBlocks.length - 1; index >= this.tryBoundary; index--)
+      if (this.tryBlocks[index](exception)) throw exception;
+    throw new ProgramAbort(this.describeUncaught(frame, exception));
   }
 
   constructor(input?: ProgramInput) {

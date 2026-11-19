@@ -1133,8 +1133,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     let body: Exec;
     let bind: (frame: Frame, error: CppException) => void = doNothing;
     try {
-      if (declared.name) {
-        const name = declared.name;
+      if (declared.name || (caught.kind === 'class' && handlerType.kind !== 'reference')) {
+        const name = declared.name ?? '\0catch';
         if (handlerType.kind === 'reference') {
           const local = this.context.declareLocal(name, handlerType, false);
           scope.names.set(name, { kind: 'local', local, isReference: true });
@@ -1143,15 +1143,16 @@ export abstract class StatementCompiler extends ExpressionCompiler {
           };
         } else {
           const local = this.context.declareLocal(name, handlerType, false);
-          scope.names.set(name, { kind: 'local', local, isReference: false });
+          if (declared.name) scope.names.set(name, { kind: 'local', local, isReference: false });
           // A handler's variable is no candidate for returning without a copy (C++20 [class.copy.elision]).
           scope.returnSlots.delete(local);
           const copy = caught.kind === 'class' ? caught.cls : undefined;
+          this.requireObjectUse(handlerType, 'copy', param.row);
           bind = (frame, error) => {
             const value = copy ? copy.operations?.copy(frame, error.value) : error.value;
             frame.slots[local.slot] = new Box(value as Value);
           };
-          const destroy = this.destroyerOf(handlerType);
+          const destroy = this.destroyerOf(handlerType, param.row);
           if (destroy) scope.destructibles.set(local.slot, destroy);
         }
       }
@@ -1160,14 +1161,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       this.context.popScope();
     }
     const run = this.withScopeExit((frame) => {
-      const { handling, tryBlocks } = frame.runtime;
+      const { handling } = frame.runtime;
       // A throw escaping the handler parameter initializer terminates, even when an outer handler matches.
-      const outerHandlers = tryBlocks.splice(0);
-      try {
-        bind(frame, handling.at(-1) as CppException);
-      } finally {
-        tryBlocks.push(...outerHandlers);
-      }
+      frame.runtime.withoutOuterHandlers(() => bind(frame, handling.at(-1) as CppException));
       return body(frame);
     }, scope);
     return { matches: (error) => exceptionMatches(handlerType, error.type), run: (frame) => run(frame) };

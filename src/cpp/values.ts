@@ -116,6 +116,7 @@ export class CObject extends Store {
   turtle?: TurtleState;
   /** The message of a library exception, which `what()` returns, as bytes. */
   message?: string;
+  private memberStorage?: Map<number, MemberStorage>;
 
   /**
    * @param cls The dynamic type, which construction and destruction set to the class whose constructor or destructor
@@ -143,6 +144,48 @@ export class CObject extends Store {
     this.checkAlive();
     this.values[index] = value;
   }
+
+  member(index: number): MemberStorage {
+    this.memberStorage ??= new Map();
+    let storage = this.memberStorage.get(index);
+    if (!storage) {
+      storage = new MemberStorage(this, index);
+      this.memberStorage.set(index, storage);
+    }
+    return storage;
+  }
+}
+
+class MemberStorage extends Store {
+  readonly length = 1;
+
+  constructor(
+    readonly owner: CObject,
+    readonly field: number
+  ) {
+    super();
+  }
+
+  override checkAlive(): void {
+    this.owner.checkAlive();
+  }
+
+  get(index: number): Value {
+    return this.owner.get(this.fieldAt(index));
+  }
+
+  set(index: number, value: Value): void {
+    this.owner.set(this.fieldAt(index), value);
+  }
+
+  getRaw(index: number): Value {
+    return this.owner.values[this.fieldAt(index)];
+  }
+
+  private fieldAt(index: number): number {
+    if (index !== 0) throw new CppRuntimeError('outOfBounds');
+    return this.field;
+  }
 }
 
 /** Ends the lifetime of a store and its owned subobjects. Pointer values do not own their target. */
@@ -150,23 +193,27 @@ export function endLifetime(value: Value, liveness = Liveness.Dead): void {
   if (!(value instanceof Store) || value.liveness !== Liveness.Alive) return;
   value.liveness = liveness;
   if (value instanceof Box && !value.ownsValue) return;
+  if (value instanceof MemberStorage) return;
   for (const child of childValues(value)) endLifetime(child, liveness);
 }
 
 /** The values a store holds, including pointers that may reach stores it does not own. */
 export function childValues(store: Store): Iterable<Value> {
   if (store instanceof Box) return [store.value];
+  if (store instanceof MemberStorage) return [store.owner];
   if (store instanceof ArrayStore || store instanceof CObject) return store.values;
   return (store as Store & { children?: () => Iterable<Value> }).children?.() ?? [];
 }
 
 /** A pointer, an iterator into a sequence, or the location an lvalue or a reference designates. */
 export class Ptr {
-  constructor(
-    private readonly initialStore: Store | undefined,
-    private readonly initialIndex: number,
-    private readonly memberIndex = initialStore instanceof CObject ? initialIndex : undefined
-  ) {}
+  private readonly initialStore: Store | undefined;
+  private readonly initialIndex: number;
+
+  constructor(store: Store | undefined, index: number) {
+    this.initialStore = store instanceof CObject ? store.member(index) : store;
+    this.initialIndex = store instanceof CObject ? 0 : index;
+  }
 
   get store(): Store | undefined {
     return this.initialStore;
@@ -189,48 +236,34 @@ export class Ptr {
   }
 
   read(): Value {
-    const value = this.target().get(this.valueIndex());
+    const value = this.target().get(this.index);
     if (value instanceof Store) value.checkAlive();
     return value;
   }
 
   write(value: Value): void {
-    this.target().set(this.valueIndex(), value);
+    this.target().set(this.index, value);
   }
 
   /** Reads the value without checking that it was written, for copying objects member by member. */
   readRaw(): Value {
     const store = this.target();
-    const index = this.valueIndex();
+    const { index } = this;
+    if (store instanceof MemberStorage) return store.getRaw(index);
     if (store instanceof Box) return store.value;
     if (store instanceof ArrayStore || store instanceof CObject) return store.values[index];
     return store.get(index);
   }
 
-  private valueIndex(): number {
-    const index = this.index;
-    if (this.memberIndex !== undefined && index !== this.memberIndex) throw new CppRuntimeError('outOfBounds');
-    return index;
-  }
-
   offset(delta: number, asIterator = false): Ptr {
     const store = this.target();
     const index = this.index + delta;
-    if (this.memberIndex !== undefined) {
-      if (index < this.memberIndex || index > this.memberIndex + 1) throw new CppRuntimeError('pointerOutOfRange');
-      return new Ptr(store, index, this.memberIndex);
-    }
     if (index < 0 || index > (asIterator ? store.iteratorLength : store.length))
       throw new CppRuntimeError('pointerOutOfRange');
     return asIterator ? store.iteratorLocation(index) : store.location(index);
   }
 
   element(isReverse: boolean): Ptr {
-    if (this.memberIndex !== undefined) {
-      const element = this.offset(isReverse ? -1 : 0);
-      element.valueIndex();
-      return element;
-    }
     const store = this.target();
     const index = this.index - (isReverse ? 1 : 0);
     if (index < 0 || index >= store.iteratorLength) throw new CppRuntimeError('invalidIterator');
@@ -238,7 +271,7 @@ export class Ptr {
   }
 
   sharesRange(other: Ptr): boolean {
-    return this.store === other.store && this.memberIndex === other.memberIndex;
+    return this.store === other.store;
   }
 
   equals(other: Ptr): boolean {
@@ -250,9 +283,13 @@ export class Ptr {
 
   /** Constructor and destructor receivers can wrap the same object in different storage cells. */
   get address(): { store: Store | undefined; index: number } {
-    const { store, index } = this;
     const object = this.addressedObject();
-    return object ? { store: object, index: 0 } : { store, index };
+    return object ? { store: object, index: 0 } : this.storageAddress;
+  }
+
+  get storageAddress(): { store: Store | undefined; index: number } {
+    const { store, index } = this;
+    return store instanceof MemberStorage ? { store: store.owner, index: store.field + index } : { store, index };
   }
 
   private addressedObject(): CObject | undefined {

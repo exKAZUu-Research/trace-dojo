@@ -279,12 +279,7 @@ function notNull(run: Expr['run']): Expr['run'] {
 
 /** How many classes up from `from` the class `to` is, or 0 when `to` is no proper base of `from`. */
 function baseDistance(from: Type, to: Type): number {
-  if (from.kind !== 'class' || to.kind !== 'class' || from.cls === to.cls) return 0;
-  let distance = 0;
-  for (let cls: ClassInfo | undefined = from.cls; cls; cls = cls.base, distance++) {
-    if (cls === to.cls) return distance;
-  }
-  return 0;
+  return from.kind === 'class' && to.kind === 'class' ? (from.cls.distanceToBase(to.cls) ?? 0) : 0;
 }
 
 /**

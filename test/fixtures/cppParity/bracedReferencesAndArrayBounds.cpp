@@ -9,6 +9,9 @@
 struct Reference { const int& value; };
 struct Position { int first; int second; };
 const Position& global = {5, 6};
+int shared = 5;
+struct Alias { int& value{shared}; };
+struct RefMember { int& value; };
 struct Print {
   Print() { std::cout << 'C'; }
   ~Print() { std::cout << 'D'; }
@@ -54,4 +57,9 @@ int main() {
   int& alias = {n};
   ++alias;
   std::cout << list.size() << single[0] << empty.size() << zero << global.first << pair.second << n;
+  Alias defaultMember;
+  RefMember nested{{n}};
+  ++defaultMember.value;
+  ++nested.value;
+  std::cout << shared << n;
 }

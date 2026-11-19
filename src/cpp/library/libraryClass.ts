@@ -2,7 +2,7 @@ import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import type { Eval, Frame } from '../runtime';
 import type { Syntax } from '../syntax';
-import type { FunctionInfo, Type } from '../types';
+import type { ClassInfo, FunctionInfo, Type } from '../types';
 import type { Value } from '../values';
 
 export type IteratorCategory = 'forward' | 'bidirectional' | 'randomAccess';
@@ -14,6 +14,7 @@ export interface LibraryClass {
   readonly args: readonly Type[];
   readonly ownedTypes?: readonly Type[];
   readonly assignmentCopies?: boolean;
+  readonly additionalPublicBases?: readonly ClassInfo[];
   /** `sizeof` of the class in libc++ on arm64. */
   readonly size: number;
   readonly align: number;

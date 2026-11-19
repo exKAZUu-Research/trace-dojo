@@ -121,7 +121,6 @@ export interface FunctionInfo {
   isDestructor: boolean;
   isOverride: boolean;
   isFinal: boolean;
-  /** Whether the function is `noexcept`, which only the library's functions are. */
   isNoexcept?: boolean;
   access: Access;
   row: number;
@@ -213,7 +212,17 @@ export class ClassInfo {
   }
 
   isDerivedFrom(other: ClassInfo): boolean {
-    return this === other || (this.base?.isDerivedFrom(other) ?? false);
+    return this.distanceToBase(other) !== undefined;
+  }
+
+  distanceToBase(other: ClassInfo): number | undefined {
+    if (this === other) return 0;
+    const primary = this.base?.distanceToBase(other);
+    if (primary !== undefined) return primary + 1;
+    for (const base of this.library?.additionalPublicBases ?? []) {
+      const distance = base.distanceToBase(other);
+      if (distance !== undefined) return distance + 1;
+    }
   }
 }
 

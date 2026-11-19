@@ -26,7 +26,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { CObject, endLifetime, Ptr, type Store, type Value } from '../values';
+import { Box, CObject, endLifetime, Ptr, type Store, type Value } from '../values';
 import { pairClass } from './associative';
 import {
   assignElement,
@@ -143,7 +143,7 @@ class Range {
 
   /** The iterator at a position, which may be one past the last element. */
   iterator(position: number): Ptr {
-    return this.store.iteratorLocation(this.isReverse ? this.first.index - position : this.first.index + position);
+    return this.first.offset(this.isReverse ? -position : position, true);
   }
 }
 
@@ -700,9 +700,8 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       for (let index = 0; index < source.length; index++) {
         withTemporaries(frame, () => {
           const result = others
-            ? operation.run(frame, source.get(index), others.get(index))
-            : operation.run(frame, source.get(index));
-          if (operation.destroyResult) frame.temporaries.push({ object: result, destroy: operation.destroyResult });
+            ? operationValue(frame, operation, source.get(index), others.get(index))
+            : operationValue(frame, operation, source.get(index));
           out.write(result);
         });
       }
@@ -730,18 +729,17 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       initial.type.kind === 'array' ? { kind: 'pointer', to: initial.type.of } : initial.type
     );
     const combine = args[3]
-      ? compileOperation(compiler(), args[3], [sumType, info.element], sumType)?.run
-      : accumulateStep(compiler(), sumType, info.element, initial.row);
+      ? compileOperation(compiler(), args[3], [sumType, info.element])
+      : binaryStep(compiler(), '+', sumType, info.element, initial.row);
     if (!combine) return;
+    const accumulator = numericAccumulator(compiler(), sumType, combine, initial.row);
     return native(
       'accumulate',
       [...params(args).slice(0, 2), sumType, ...params(args).slice(3)],
       sumType,
       ([first, last, start], { frame }) => {
         const values = range(first, last, info);
-        let sum = start as Value;
-        for (let index = 0; index < values.length; index++) sum = combine(frame, sum, values.get(index)) as Value;
-        return sum;
+        return foldValues(frame, accumulator, start as Value, values.length, (index) => values.get(index));
       }
     );
   });
@@ -756,9 +754,10 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       : binaryStep(compiler(), '*', info.element, other.element, args[0].row);
     if (!product) return;
     const add = args[4]
-      ? compileOperation(compiler(), args[4], [sumType, product.type], sumType)?.run
-      : accumulateStep(compiler(), sumType, product.type, args[0].row);
-    if (!product || !add) return;
+      ? compileOperation(compiler(), args[4], [sumType, product.type])
+      : binaryStep(compiler(), '+', sumType, product.type, args[0].row);
+    if (!add) return;
+    const accumulator = numericAccumulator(compiler(), sumType, add, args[0].row);
     return native(
       'inner_product',
       [...params(args).slice(0, 3), sumType, ...params(args).slice(4)],
@@ -766,10 +765,9 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       ([first, last, start, initial], { frame }) => {
         const values = range(first, last, info);
         const others = rangeWithLength(start, values.length, other);
-        let sum = initial as Value;
-        for (let index = 0; index < values.length; index++)
-          sum = add(frame, sum, product.run(frame, values.get(index), others.get(index)));
-        return sum;
+        return foldValues(frame, accumulator, initial as Value, values.length, (index) =>
+          operationValue(frame, product, values.get(index), others.get(index))
+        );
       }
     );
   });
@@ -777,10 +775,12 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const info = rangeAt(args, 0);
     const output = outputOf(args[2]);
     if (!info || !output || (args.length !== 3 && args.length !== 4)) return;
+    const sumType = unqualified(info.element);
     const add = args[3]
-      ? compileOperation(compiler(), args[3], [info.element, info.element], unqualified(info.element))?.run
-      : accumulateStep(compiler(), unqualified(info.element), info.element, args[0].row);
+      ? compileOperation(compiler(), args[3], [sumType, info.element])
+      : binaryStep(compiler(), '+', sumType, info.element, args[0].row);
     if (!add) return;
+    const accumulator = numericAccumulator(compiler(), sumType, add, args[0].row);
     const ops = elementOperations(
       compiler(),
       unqualified(output.element),
@@ -791,12 +791,17 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     return native('partial_sum', params(args), unqualified(args[2].type), ([first, last, start], { frame }) => {
       const values = range(first, last, info);
       const out = new Output(start as Ptr, output, frame, ops, convert);
-      let sum: Value | undefined;
-      for (let index = 0; index < values.length; index++) {
-        sum = sum === undefined ? values.get(index) : (add(frame, sum, values.get(index)) as Value);
-        out.write(sum);
-      }
-      return out.end;
+      if (values.length === 0) return out.end;
+      return withTemporaries(frame, () => {
+        const initial = accumulator.ops.copy(frame, values.get(0));
+        const sum = holdAccumulator(frame, accumulator, initial);
+        out.write(initial);
+        for (let index = 1; index < values.length; index++) {
+          withTemporaries(frame, () => accumulator.update(frame, sum, values.get(index)));
+          out.write(sum.read());
+        }
+        return out.end;
+      });
     });
   });
   for (const name of ['gcd', 'lcm']) {
@@ -1089,18 +1094,61 @@ function assignmentSource(
   };
 }
 
-function compileOperation(
+interface ElementOperation {
+  type: Type;
+  run: (frame: Frame, ...values: Value[]) => Value;
+  destroy?: (frame: Frame, value: Value) => void;
+}
+
+interface NumericAccumulator {
+  ops: ElementOperations;
+  update: (frame: Frame, sum: Ptr, value: Value) => void;
+}
+
+function numericAccumulator(
   compiler: ExpressionCompiler,
-  operation: Expr,
-  types: Type[],
-  resultType?: Type
-):
-  | {
-      type: Type;
-      run: (frame: Frame, ...values: Value[]) => Value;
-      destroyResult?: ReturnType<ExpressionCompiler['destroyerOf']>;
-    }
-  | undefined {
+  type: Type,
+  operation: ElementOperation,
+  row: number
+): NumericAccumulator {
+  const ops = elementOperations(compiler, type, row, 'relocate');
+  const convert = assignmentSource(compiler, operation.type, type, row);
+  return {
+    ops,
+    update: (frame, sum, value) => {
+      const result = operationValue(frame, operation, sum.read(), value);
+      convert(frame, result, (converted) => assignElement(frame, sum, ops, converted));
+    },
+  };
+}
+
+function foldValues(
+  frame: Frame,
+  accumulator: NumericAccumulator,
+  initial: Value,
+  length: number,
+  item: (index: number) => Value
+): Value {
+  const sum = holdAccumulator(frame, accumulator, initial);
+  for (let index = 0; index < length; index++) {
+    withTemporaries(frame, () => accumulator.update(frame, sum, item(index)));
+  }
+  return accumulator.ops.copy(frame, sum.read());
+}
+
+function holdAccumulator(frame: Frame, accumulator: NumericAccumulator, value: Value): Ptr {
+  const { destroy } = accumulator.ops;
+  if (destroy) frame.temporaries.push({ object: value, destroy });
+  return new Ptr(new Box(value), 0);
+}
+
+function operationValue(frame: Frame, operation: ElementOperation, ...args: Value[]): Value {
+  const result = operation.run(frame, ...args);
+  if (operation.destroy) frame.temporaries.push({ object: result, destroy: operation.destroy });
+  return result;
+}
+
+function compileOperation(compiler: ExpressionCompiler, operation: Expr, types: Type[]): ElementOperation | undefined {
   const type = operation.type;
   if (!operation.functions && !(type.kind === 'class' && type.cls.library?.kind === 'functor')) return;
   const calls: Ptr[][] = [];
@@ -1113,38 +1161,15 @@ function compileOperation(
   }));
   const callee: Expr = operation.functions ? operation : { ...operation, run: () => {} };
   const result = compiler.callWith(callee, args, row);
-  const evaluate = resultType
-    ? compiler.copyInitializer(resultType, result, row, false)
-    : (compiler.rvalue(result).run as (frame: Frame) => Value);
-  const hasObjectResult = !resultType && result.isTemporaryObject && result.type.kind === 'class';
-  const destroy = hasObjectResult ? compiler.destroyerOf(result.type, row) : undefined;
-  return {
-    type: resultType ?? result.type,
-    destroyResult: hasObjectResult
-      ? (frame, value) => {
-          destroy?.(frame, value);
-          endLifetime(value);
-        }
-      : undefined,
-    run: (frame, ...values) => {
-      calls.push(values.map(locationOf));
-      try {
-        return withTemporaries(frame, evaluate);
-      } finally {
-        calls.pop();
-      }
-    },
-  };
-}
-
-/** The step of `std::accumulate`: `sum + element` (or another operator) converted back to the sum's type. */
-function accumulateStep(
-  compiler: ExpressionCompiler,
-  sumType: Type,
-  element: Type,
-  row: number
-): ((frame: Frame, sum: Value, item: Value) => Value) | undefined {
-  return binaryStep(compiler, '+', sumType, element, row, sumType)?.run;
+  const evaluate = compiler.rvalue(result).run;
+  return describeOperation(compiler, result, (frame, ...values) => {
+    calls.push(values.map(locationOf));
+    try {
+      return evaluate(frame) as Value;
+    } finally {
+      calls.pop();
+    }
+  });
 }
 
 function binaryStep(
@@ -1152,9 +1177,8 @@ function binaryStep(
   operator: string,
   left: Type,
   right: Type,
-  row: number,
-  resultType?: Type
-): { type: Type; run: (frame: Frame, left: Value, right: Value) => Value } | undefined {
+  row: number
+): ElementOperation | undefined {
   try {
     const sum: Expr = { type: unqualified(left), isLvalue: false, row, run: (frame) => frame.pending.at(-2) as Value };
     const item: Expr = {
@@ -1164,25 +1188,33 @@ function binaryStep(
       run: (frame) => frame.pending.at(-1) as Value,
     };
     const result = compiler.binary(operator, sum, item, row);
-    const evaluate = resultType
-      ? compiler.copyInitializer(resultType, result, row, false)
-      : compiler.rvalue(result).run;
-    return {
-      type: resultType ?? result.type,
-      run: (frame, total, value) => {
-        frame.pending.push(total, value);
-        try {
-          return evaluate(frame) as Value;
-        } finally {
-          frame.pending.pop();
-          frame.pending.pop();
-        }
-      },
-    };
+    const evaluate = compiler.rvalue(result).run;
+    return describeOperation(compiler, result, (frame, total, value) => {
+      frame.pending.push(total, value);
+      try {
+        return evaluate(frame) as Value;
+      } finally {
+        frame.pending.pop();
+        frame.pending.pop();
+      }
+    });
   } catch (error) {
     if (error instanceof CompileError) return undefined;
     throw error;
   }
+}
+
+function describeOperation(compiler: ExpressionCompiler, result: Expr, run: ElementOperation['run']): ElementOperation {
+  if (!result.isTemporaryObject || result.type.kind !== 'class') return { type: result.type, run };
+  const destroy = compiler.destroyerOf(result.type, result.row);
+  return {
+    type: result.type,
+    run,
+    destroy: (frame, value) => {
+      destroy?.(frame, value);
+      endLifetime(value);
+    },
+  };
 }
 
 /** The element type of a braced list argument: the template argument, or the type all the elements have. */

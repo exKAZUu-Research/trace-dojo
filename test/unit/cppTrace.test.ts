@@ -168,12 +168,27 @@ int main() { static const Value& value = Value(); return value.n; }`;
   });
 });
 
-test('a pointer one past a member cannot be dereferenced', () => {
-  const program = `struct Value { int first; int second; };
-int main() { Value value{1, 2}; const int* past = &value.first + 1; return *past; }`;
+test.each([
+  ['a direct pointer', 'const int* past = &value.first + 1; return *past;'],
+  ['a subscript', 'const int* start = &value.first; return start[1];'],
+  ['a returned end iterator', 'auto past = std::find(&value.first, &value.first + 1, 9); return *past;'],
+])('rejects dereferencing one past a member through %s', (_, body) => {
+  const program = `#include <algorithm>
+struct Value { int first; int second; };
+int main() { Value value{1, 2}; ${body} }`;
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'executed',
     uncaughtException: expect.stringContaining('範囲'),
+  });
+});
+
+test('a scalar character member needs its own string terminator', () => {
+  const program = `#include <iostream>
+struct Text { char marker; char padding; };
+int main() { Text text{'A', '\\0'}; std::cout << &text.marker; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('文字列の終わり'),
   });
 });
 
@@ -190,6 +205,17 @@ int main() {
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'executed',
     stdout: 'C',
+    uncaughtException: 'libc++abi: terminating due to uncaught exception of type int',
+  });
+});
+
+test('an exception escaping a noexcept function terminates before outer handlers', () => {
+  const program = `#include <iostream>
+void stop() noexcept { throw 1; }
+int main() { try { stop(); } catch (int) { std::cout << 'X'; } }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
     uncaughtException: 'libc++abi: terminating due to uncaught exception of type int',
   });
 });

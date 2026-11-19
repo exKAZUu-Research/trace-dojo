@@ -58,7 +58,8 @@ export function invoke(
           ? (args[index] as Ptr)
           : new Box(args[index] as Value, param.type.kind !== 'class');
     }
-    compiled.body(callee);
+    if (fn.isNoexcept) runtime.withoutOuterHandlers(() => compiled.body(callee));
+    else compiled.body(callee);
     if (!isCallerDestroying) destroyParameters(callee, fn, args);
     return callee.returnValue;
   } catch (error) {

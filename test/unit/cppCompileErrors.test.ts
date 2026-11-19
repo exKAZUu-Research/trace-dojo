@@ -105,6 +105,32 @@ test.each([
     4,
   ],
   ['a named void parameter', 'void f(void x) {}\nint main() {}', 0],
+  ['an inconsistent noexcept declaration', 'void f() noexcept;\nvoid f() {}\nint main() {}', 1],
+  [
+    'an override on a nonvirtual destructor',
+    'struct Base { ~Base() {} };\nstruct Derived : Base { ~Derived() override {} };\nint main() {}',
+    1,
+  ],
+  [
+    'an implicit override of a final destructor',
+    'struct Base { virtual ~Base() final {} };\nstruct Derived : Base {};\nint main() {}',
+    1,
+  ],
+  [
+    'narrowing in a braced base initializer',
+    'struct Base { Base(int) {} };\nstruct Derived : Base { Derived() : Base{2.5} {} };\nint main() {}',
+    1,
+  ],
+  [
+    'narrowing in a braced delegated initializer',
+    'struct Value { Value(int) {}\n  Value() : Value{2.5} {} };\nint main() {}',
+    1,
+  ],
+  [
+    'a throwing override of std::exception::what',
+    '#include <exception>\nstruct Error : std::exception { const char* what() const override { return "error"; } };\nint main() {}',
+    1,
+  ],
   ['a default value for a mutable reference', 'void f(int& n = 1) {}\nint main() {}', 0],
   ['an incomplete array parameter element', 'void f(int cells[2][]) {}\nint main() {}', 0],
   ['an incomplete global array', 'int cells[];\nint main() {}', 0],
