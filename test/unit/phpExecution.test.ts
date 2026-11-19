@@ -3107,6 +3107,19 @@ set_error_handler(function () { echo 'warn;'; $GLOBALS['missingUnpack'] = [1]; r
 try { takeRef(...$missingUnpack); } catch (TypeError $e) { echo 'TypeError;'; }
 restore_error_handler();
 echo 'unpack:' . (isset($missingUnpack) ? 'set' : 'unset') . "\n";
+
+$p1 = new stdClass();
+set_error_handler(function () use ($p1) { $p1->x = 5; throw new Exception('stop'); });
+try { $p1->x += 2; } catch (Exception $e) {}
+restore_error_handler();
+echo 'propThrow:' . json_encode($p1) . "\n";
+
+$ao2 = new ArrayObject([], ArrayObject::ARRAY_AS_PROPS);
+set_error_handler(function () { throw new Exception('stop'); });
+try { $ao2->x--; } catch (Exception $e) {}
+try { $ao2->y++; } catch (Exception $e) {}
+restore_error_handler();
+echo 'aoThrow:' . json_encode($ao2->getArrayCopy()) . "\n";
 `);
   expect(result).toMatchObject({
     kind: 'executed',
@@ -3123,6 +3136,8 @@ echo 'unpack:' . (isset($missingUnpack) ? 'set' : 'unset') . "\n";
       'ai:[null,1]',
       'foreach:unbound:2',
       'warn;TypeError;unpack:set',
+      'propThrow:{"x":5}',
+      'aoThrow:{"x":null,"y":1}',
       '',
     ].join('\n'),
   });

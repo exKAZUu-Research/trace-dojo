@@ -53,7 +53,7 @@ export interface Place {
   incrementTarget?(): Place;
   writeAfterFailedIncrement?(value: Value): void;
   /** Warns that the place does not exist, as a read-modify-write (`++`, `.=`) of it does, creating what PHP creates. */
-  warnUndefined?(warning?: UpdateWarning): void;
+  warnUndefined?(warning?: UpdateWarning): boolean | void;
   /** The value as `isset` and `??` read it, asking `__isset` or `offsetExists` first; undefined when unset. */
   getForIsset?(): Value | undefined;
 }
@@ -65,6 +65,30 @@ export function withIncrementCleanup<T>(place: Place, old: Value, update: () => 
     if (error instanceof PhpThrow && place.writeAfterFailedIncrement)
       withPendingException(rt(), error, () => place.writeAfterFailedIncrement?.(old));
     throw error;
+  }
+}
+
+export function warnPropertySlot(
+  props: { has(key: Key): boolean },
+  name: string,
+  declared: boolean,
+  warning: UpdateWarning,
+  message: string
+): boolean {
+  const emit = (): boolean =>
+    warning(
+      () => warn(message),
+      () => warn(message, true)
+    );
+  if (declared) {
+    emit();
+    return true;
+  }
+  const watch = watchSlot(props, name);
+  try {
+    return emit() || watch.current() || !props.has(name);
+  } finally {
+    watch.close();
   }
 }
 
@@ -268,9 +292,11 @@ export class ElementPlace implements Place {
       warn(`Undefined array key ${typeof this.key === 'bigint' ? this.key : `"${this.key}"`}`);
   }
 
-  warnMissingUpdate(): boolean {
+  warnMissingUpdate(warning?: UpdateWarning): boolean {
     if (this.objectBacked) {
-      this.warnUndefined();
+      if (warning) warning(() => this.warnUndefined());
+      else this.warnUndefined();
+      this.set(null);
       return true;
     }
     if (this.unbound || !sharingCheck(this.array, 1)) {

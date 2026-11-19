@@ -51,6 +51,7 @@ import {
   SKIP_COMPOUND,
   ValuePlace,
   VarPlace,
+  warnPropertySlot,
   watchStringSlot,
   withIncrementCleanup,
   writableContainer,
@@ -503,10 +504,12 @@ function propPlace(object: PhpObject, name: string, unbound = false): Place {
       const decl = lookup(false);
       if (decl) object.props.set(decl.key, null);
       else classesModule.createDynamicProp(object, name, null, (message) => warning(() => deprecated(message)));
-      const message = `Undefined property: ${object.cls.name}::$${name}`;
-      warning(
-        () => warn(message),
-        () => warn(message, true)
+      return warnPropertySlot(
+        object.props,
+        name,
+        decl !== undefined,
+        warning,
+        `Undefined property: ${object.cls.name}::$${name}`
       );
     },
     nested(mode = 'write') {
@@ -522,7 +525,7 @@ function fetchCompoundProperty(
   scope: PhpClass | undefined,
   decl: PropDecl | undefined,
   warning: UpdateWarning
-): CompoundRead {
+): CompoundRead | typeof SKIP_COMPOUND {
   const ordinary =
     decl &&
     !decl.isReadonly &&
@@ -532,7 +535,7 @@ function fetchCompoundProperty(
     !object.unsetProperties?.has(decl.key);
   let value = readPropertyPlace(object, name, scope, 'assignOp');
   if (value === undefined) {
-    place.warnUndefined?.(warning);
+    if (place.warnUndefined?.(warning) === false) return SKIP_COMPOUND;
     value = readPropertyPlace(object, name, scope, 'assignOp');
   }
   return {
@@ -1283,10 +1286,10 @@ function incrementPlace(e: Extract<Expr, { k: 'incdec' }>, warning: UpdateWarnin
   let writeDetached = false;
   if (old === undefined) {
     if (place instanceof VarPlace && e.target.k !== 'idx') place.fetchCompound(warning);
-    else if (place instanceof ElementPlace) writeDetached = !place.warnMissingUpdate();
+    else if (place instanceof ElementPlace) writeDetached = !place.warnMissingUpdate(warning);
     else {
-      place.warnUndefined?.(warning);
-      if (e.target.k === 'prop') old = place.get('incdec', warning);
+      writeDetached = place.warnUndefined?.(warning) === false;
+      if (e.target.k === 'prop' && !writeDetached) old = place.get('incdec', warning);
     }
     old ??= null;
   }
