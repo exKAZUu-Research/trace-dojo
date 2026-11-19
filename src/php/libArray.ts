@@ -816,10 +816,8 @@ defineFunction('array_reduce(array $array, callable $callback, mixed $initial = 
     carry = consumeCallbackResult(args[1], [carry, value], (next) => {
       const previous = holders[slot];
       holders[slot] = next;
-      if (previous !== next && (previous instanceof PhpObject || previous instanceof PhpArray)) {
-        runtime.release([previous], true);
-        runtime.flushReleases();
-      }
+      if (previous !== next && (previous instanceof PhpObject || previous instanceof PhpArray))
+        runtime.releaseCallResult(previous);
       return next;
     });
   }

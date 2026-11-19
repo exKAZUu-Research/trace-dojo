@@ -1387,6 +1387,25 @@ test('keeps the native offsetSet frame in SplObjectStorage append errors', () =>
   });
 });
 
+test.each(['new TemporaryValue($number)', '[new TemporaryValue($number)]'])(
+  'uses the native frame when retiring a reduce result held as %s',
+  (carry) => {
+    expect(
+      run(`<?php
+class TemporaryValue {
+  public function __construct(private int $number) {}
+  public function __destruct() { if ($this->number === 1) throw new Exception('drop'); }
+}
+try { array_reduce([1, 2], fn($carry, $number) => ${carry}); }
+catch (Exception $error) { echo $error->getTraceAsString(); }
+`)
+    ).toMatchObject({
+      kind: 'executed',
+      stdout: expect.stringContaining('#0 [internal function]: TemporaryValue->__destruct()'),
+    });
+  }
+);
+
 test.each([
   "json_encode(array_fill(0,100000,str_repeat('x',10000)));",
   "json_encode(array_fill(0,100,str_repeat('x',10000)),JSON_PRETTY_PRINT);",

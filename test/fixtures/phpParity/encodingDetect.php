@@ -72,3 +72,10 @@ foreach ([
     mb_detect_encoding(hex2bin($bytes), [$encoding, 'SJIS', 'UTF-8']),
   ]), "\n";
 }
+
+foreach (['ff','80ff','8140','8120','a8bc'] as $bytes) {
+  echo $bytes, " ", json_encode([
+    mb_detect_encoding(hex2bin($bytes), 'CP-936', true),
+    mb_detect_encoding(hex2bin($bytes), ['GBK', 'GB18030', 'UTF-8']),
+  ]), "\n";
+}

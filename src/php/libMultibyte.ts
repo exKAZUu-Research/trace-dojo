@@ -959,8 +959,7 @@ function encodingReader(name: string): EncodingReader {
 
 function legacyTextDecoder(name: string): TextDecoder | undefined {
   let label = name;
-  if (name === 'CP936') label = 'gbk';
-  else if (name === 'UHC') label = 'euc-kr';
+  if (name === 'UHC') label = 'euc-kr';
   try {
     return new TextDecoder(label, { ignoreBOM: true });
   } catch {

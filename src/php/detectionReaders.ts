@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/prefer-code-point -- Each code unit is one PHP byte.
 import { detectionCodePoint, mobileDetectionTable } from './detectionDecodeTables';
-import { decodeEucCn, decodeGb18030, gb2312CodePoint } from './gb18030Detection';
+import { decodeCp936, decodeEucCn, decodeGb18030, gb2312CodePoint } from './gb18030Detection';
 import { readEucJp, readExtendedJisEncoding, readJisEncoding, readSjis2004 } from './jisDetectionReader';
 import { appendLegacyMapping, legacyDetectionCodePoint } from './legacyDetectionTables';
 import { rt } from './runtime';
@@ -19,6 +19,7 @@ type Decode = (bytes: string) => number[];
 const FIXED_READERS = new Map<string, Decode>([
   ['GB18030', (bytes) => decodeGb18030(bytes, false, BAD)],
   ['GB18030-2022', (bytes) => decodeGb18030(bytes, true, BAD)],
+  ['CP936', (bytes) => decodeCp936(bytes, BAD)],
   ['EUC-CN', (bytes) => decodeEucCn(bytes, BAD)],
   ['JIS', readJisCodes],
   ['ISO-2022-JP', readJisCodes],

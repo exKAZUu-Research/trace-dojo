@@ -72,6 +72,37 @@ export function gb2312CodePoint(lead: number, trail: number, bad: number, hz = f
   return code === 0xff_fd ? bad : code;
 }
 
+export function decodeCp936(bytes: string, bad: number): number[] {
+  const input = Buffer.from(bytes, 'latin1');
+  const result: number[] = [];
+  rt().spend(Math.ceil(bytes.length / 64));
+  for (let index = 0; index < input.length;) {
+    const start = index;
+    const lead = input[index++];
+    if (lead < 0x80) result.push(lead);
+    else if (lead === 0x80) result.push(0x20_ac);
+    else if (lead === 0xff) result.push(0xf8_f5);
+    else if (index === input.length) result.push(bad);
+    else {
+      const trail = input[index++];
+      result.push(
+        trail >= 0x40 && trail <= 0xfe && trail !== 0x7f
+          ? cp936CodePoint(input.subarray(start, index), lead, trail, bad)
+          : bad
+      );
+    }
+  }
+  return result;
+}
+
+function cp936CodePoint(bytes: Uint8Array, lead: number, trail: number, bad: number): number {
+  const column = trail - (trail < 0x7f ? 0x40 : 0x41);
+  const delta = legacyDetectionCodePoint('cp936', (lead - 0x81) * 190 + column);
+  // A stored offset of one lets a CP936 mapping to NUL differ from the host table.
+  const code = delta ? delta - 1 : decoder.decode(bytes).codePointAt(0);
+  return code === undefined || code === 0xff_fd ? bad : code;
+}
+
 // code-gauge-allow functionCognitiveComplexity 19 -- Reads sequences in mbfl's order, including which bytes a malformed unit consumes.
 export function decodeGb18030(bytes: string, revised: boolean, bad: number): number[] {
   const input = Buffer.from(bytes, 'latin1');

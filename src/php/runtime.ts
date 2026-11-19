@@ -367,6 +367,10 @@ export class Runtime {
       if (temporaries[index] !== value) continue;
       temporaries.splice(index, 1);
     }
+    this.releaseCallResult(value);
+  }
+
+  releaseCallResult(value: Value): void {
     this.release([value], true, this.nativeCalls > 0);
     this.flushReleases();
   }

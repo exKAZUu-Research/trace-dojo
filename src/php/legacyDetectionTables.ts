@@ -1154,6 +1154,12 @@ const data = {
     'qJC81KDvjt2wBxaTYz/3dhD57d37jJHL813Nzqd/IU5AzoM7wDzqKh2+U3czJ/TXMT4LT0POsAvfYb4tOWo/x5nPsXbHc3LhLDYh3zV/CvfN1R+cEEIIIYT4',
     'M/wG',
   ].join(''),
+  cp936: [
+    '7dFHThdwEAXg3ylc2LCDXYINiL1LUVCjIqCiLr2KvVxJD6LzQAFFD0BCXLgxcWP+qN+3mMkks3jJaw0AAAAAAAAAAAAAAIB/WT1u/6EPHzudAOBPqif1tJ7V',
+    '83pRL+vVL79e15ufrrc6YTWodyvzfadzrC6Vmq25+lSfa74WarG+1Ndaqm/1vdPJAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAH5f1vzYa7Mu67Mh',
+    'G9OVTdmcLdmabdmeHelOT3ZmV3ZnT/ZmX/bnQHpbS18O5lAO50iOpj8DGWwtx3I8J3Iyp3I6Z3I253I+F3Ixl3I5QxnOSEZzJVczlvFcy/XcaC03cyu3M5E7',
+    'mcxUpnM393I/M3mQh3n0N3e5DA==',
+  ].join(''),
 };
 
 const sequences: readonly (readonly number[])[] = [
