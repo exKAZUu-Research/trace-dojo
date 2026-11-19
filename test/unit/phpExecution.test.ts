@@ -473,6 +473,24 @@ echo json_encode($settings->getArrayCopy());`);
   expect(execution).toMatchObject({ kind: 'executed', stdout: `drop;{"item":${expected}}` });
 });
 
+test.each(['ArrayObject', 'ArrayIterator'])('publishes %s property replacement before shutdown on exit', (name) => {
+  const execution = run(`<?php
+class RetiredSetting {
+    function __destruct() { exit('exit;'); }
+}
+class SettingsObserver {
+    function __destruct() {
+        global $settings;
+        echo json_encode($settings->getArrayCopy());
+    }
+}
+$settings = new ${name}(['item' => new RetiredSetting], ${name}::ARRAY_AS_PROPS);
+$observer = new SettingsObserver;
+$settings->item = 5;
+echo 'after';`);
+  expect(execution).toMatchObject({ kind: 'executed', stdout: 'exit;{"item":5}' });
+});
+
 test.each(['<?php echo "hello"; declare(strict_types=1);', '<?php function f() {} declare(strict_types=1);'])(
   'rejects a late strict_types declaration before execution: %s',
   (source) => {

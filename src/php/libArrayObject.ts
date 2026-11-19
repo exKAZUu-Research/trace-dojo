@@ -19,7 +19,7 @@ import { setNativeArrayStorage } from './nativeArrayStorage';
 import { toKey } from './operators';
 import { arrayIsShared, share } from './places';
 import './splInterfaces';
-import { PhpThrow, rt } from './runtime';
+import { rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import { dropped, type Key, NativeValueIndex, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
 
@@ -180,7 +180,7 @@ export class ArrayStorage {
         try {
           dropped(array.releaseSlot(offset));
         } catch (error) {
-          if (!(error instanceof PhpThrow)) throw error;
+          if (!isCleanupException(error)) throw error;
           capture(error);
         }
         if (arrayHasHolders(runtime, array, 1)) array.setSlot(offset, replacement);
