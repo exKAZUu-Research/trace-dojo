@@ -101,7 +101,7 @@ export class ArrayStorage {
     return copy;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Uses the fetched table and preserves key diagnostic ordering together.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Uses the fetched table and preserves key diagnostic ordering together.
   offsetValue(key: Value, className: string, warning?: UpdateWarning, hasPendingWarning = false): Value {
     const array = this.array;
     return withArrayReadView(array, (view) => {
@@ -109,7 +109,7 @@ export class ArrayStorage {
       const report: UpdateWarning | undefined =
         warning && !hasPendingWarning ? (emit) => (completed = warning(emit)) : warning;
       const offset = toKey(key, 'access', className, report);
-      if (!completed) return null;
+      if (!completed && this.array !== array) return null;
       const slot = view.get(offset);
       const value = slot instanceof Ref ? slot.v : slot;
       if (

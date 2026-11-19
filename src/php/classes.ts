@@ -1387,15 +1387,17 @@ function allowsDynamicProps(cls: PhpClass): boolean {
 export function coerceProperty(decl: PropDecl, value: Value, object?: PhpObject, holder = 'property'): Value {
   const type = decl.type;
   if (!type) return value;
+  const runtime = rt();
   const coerced = coerce(value, type, {
-    strict: rt().strictTypes,
+    strict: runtime.strictTypes,
     internal: false,
     scope: decl.cls,
     staticClass: object?.cls,
+    pendingPropertyDiagnostic: runtime.pendingPropertyCoercion !== undefined,
   });
   if (coerced === NO_MATCH) {
-    const pending = rt().pendingAssignmentWarning;
-    if (pending) throw pending;
+    const pending = runtime.pendingAssignmentWarning;
+    if (pending && runtime.pendingPropertyCoercion !== 'reference-update') throw pending;
     throwError(
       'TypeError',
       `Cannot assign ${valueName(value)} to ${holder} ${decl.cls.name}::$${decl.name} of type ${describePropertyType(decl)}`
@@ -1911,7 +1913,7 @@ export function bindStaticPropertyReference(
     const old = staticPropRef(cls, name, scope, true, warning);
     const found = cls.findStatic(name);
     if (!found || old === ref) return null;
-    return rt().withAssignmentWarning(pending?.(), () => {
+    return rt().withPropertyDiagnostic(pending?.(), () => {
       if (found.decl.type) attachPropertyReference(ref, found.decl);
       ref.isRef = true;
       ref.rc++;

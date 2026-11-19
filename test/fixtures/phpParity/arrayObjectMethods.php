@@ -65,10 +65,11 @@ $result = ($container[0][1] = 'KL');
 restore_error_handler();
 var_dump($result, $container[0], $alias);
 
-foreach (['read', 'add', 'increment', 'write after exception', 'unset after exception', 'add after exception'] as $action) {
+foreach (['read', 'add', 'increment', 'write after exception', 'unset after exception', 'add after exception', 'add after in-place exception'] as $action) {
     $table = new ArrayObject([1 => 4]);
     set_error_handler(function () use ($table, $action) {
-        $table->exchangeArray([1 => 20]);
+        if ($action === 'add after in-place exception') $table[1] = 20;
+        else $table->exchangeArray([1 => 20]);
         if (str_ends_with($action, 'exception')) throw new Exception('offset');
         return true;
     });

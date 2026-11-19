@@ -198,12 +198,16 @@ export class Runtime {
   depth = 0;
   shuttingDown = false;
   releasingGlobalsAtShutdown = false;
-  assignmentWarning?: { frame: Frame; exception: PhpThrow };
+  assignmentWarning?: { frame: Frame; exception: PhpThrow; propertyCoercion?: 'write' | 'reference-update' };
 
-  withAssignmentWarning<T>(exception: PhpThrow | undefined, use: () => T): T {
+  withPropertyDiagnostic<T>(
+    exception: PhpThrow | undefined,
+    use: () => T,
+    propertyCoercion: 'write' | 'reference-update' = 'write'
+  ): T {
     if (!exception) return use();
     const previous = this.assignmentWarning;
-    this.assignmentWarning = { frame: this.frame, exception };
+    this.assignmentWarning = { frame: this.frame, exception, propertyCoercion };
     try {
       return use();
     } finally {
@@ -227,6 +231,10 @@ export class Runtime {
 
   get pendingAssignmentWarning(): PhpThrow | undefined {
     return this.assignmentWarning?.frame === this.frame ? this.assignmentWarning.exception : undefined;
+  }
+
+  get pendingPropertyCoercion(): 'write' | 'reference-update' | undefined {
+    return this.assignmentWarning?.frame === this.frame ? this.assignmentWarning.propertyCoercion : undefined;
   }
 
   compiledNames(frame = this.frame): ReadonlySet<string> {

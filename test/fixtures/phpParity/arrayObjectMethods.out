@@ -166,6 +166,11 @@ array(1) {
   [1]=>
   int(3)
 }
+offset
+array(1) {
+  [1]=>
+  int(23)
+}
 int(20)
 drop;handler;bool(false)
 drop;handler;bool(false)

@@ -30,3 +30,23 @@ int(2)
 Deprecated: Accessing static trait property T::$y is deprecated, it should only be accessed on a class using the trait in /main.php on line 16
 Exception: trait access
 int(2)
+
+Deprecated: Accessing static trait property T::$y is deprecated, it should only be accessed on a class using the trait in /main.php on line 16
+Exception: trait access
+int(2)
+
+Deprecated: Accessing static trait property T::$y is deprecated, it should only be accessed on a class using the trait in /main.php on line 16
+Exception: trait access
+int(4)
+
+Deprecated: Accessing static trait property T::$y is deprecated, it should only be accessed on a class using the trait in /main.php on line 16
+Exception: trait access
+int(1)
+
+Deprecated: Accessing static trait property T::$y is deprecated, it should only be accessed on a class using the trait in /main.php on line 16
+TypeError: Cannot assign float to reference held by property T::$y of type int
+int(2)
+
+Deprecated: Accessing static trait property T::$y is deprecated, it should only be accessed on a class using the trait in /main.php on line 16
+TypeError: Cannot assign string to reference held by property T::$y of type int
+int(2)

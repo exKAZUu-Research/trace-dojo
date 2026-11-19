@@ -421,12 +421,16 @@ class StaticPlace implements Place {
   }
 
   private write(target: Ref, value: Value, operation?: 'assignOp'): Value {
-    return rt().withAssignmentWarning(this.pendingTraitDiagnostic, () => {
-      const decl = this.decl;
-      const assigned =
-        decl?.type && !(operation === 'assignOp' && target.isRef) ? classesModule.coerceProperty(decl, value) : value;
-      return target.assign(assigned);
-    });
+    return rt().withPropertyDiagnostic(
+      this.pendingTraitDiagnostic,
+      () => {
+        const decl = this.decl;
+        const assigned =
+          decl?.type && !(operation === 'assignOp' && target.isRef) ? classesModule.coerceProperty(decl, value) : value;
+        return target.assign(assigned);
+      },
+      operation === 'assignOp' && target.isRef ? 'reference-update' : 'write'
+    );
   }
 
   private reportTraitDiagnostic(emit: () => void): void {
@@ -1153,7 +1157,7 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
   return withOperandWarnings((warning, warningPending) => {
     place.readCompoundName?.(warning);
     let readAfterFetch =
-      (e.target.k === 'idx' || e.target.k === 'varvar') &&
+      (e.target.k === 'idx' || e.target.k === 'varvar' || e.target.k === 'sprop') &&
       isCompiledVariable(e.value) &&
       !dimensionWritesOwnVariable(e.target, e.value);
     let value = readAfterFetch ? null : share(readUpdateValue(e, read, warning, row));

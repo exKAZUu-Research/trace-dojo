@@ -94,6 +94,7 @@ export interface CoercionContext {
   staticClass?: PhpClass;
   /** Whether the value goes to a builtin function, which coerces null for scalar types with a deprecation. */
   internal: boolean;
+  pendingPropertyDiagnostic?: boolean;
   /** Describes the parameter in a deprecation for a null argument, e.g. `strlen(): Passing null to parameter #1 ($string) of type string`. */
   nullDeprecation?: () => string;
 }
@@ -104,6 +105,7 @@ const NO_MATCH = Symbol('noMatch');
  * Coerces a value to a declared type as PHP's coercive typing mode does, or returns NO_MATCH. `float` accepts an int
  * even in strict mode.
  */
+// code-gauge-allow functionCognitiveComplexity 16 -- Collects exact, strict and pending property assignment modes.
 export function coerce(value: Value, type: TypeDecl, context: CoercionContext): Value | typeof NO_MATCH {
   if (context.internal && type.k === 'named' && type.name === 'resource') {
     return value instanceof PhpObject && value.isResource ? value : NO_MATCH;
@@ -121,6 +123,7 @@ export function coerce(value: Value, type: TypeDecl, context: CoercionContext): 
     if (typeof value === 'bigint' && acceptsName(type, 'float')) return Number(value);
     return NO_MATCH;
   }
+  if (context.pendingPropertyDiagnostic) return coerceDuringPropertyDiagnostic(value, type);
   return coerceScalar(value, type);
 }
 
@@ -147,6 +150,20 @@ function acceptsName(type: TypeDecl, name: string): boolean {
   if (type.k === 'named') return type.name === name;
   if (type.k === 'union') return type.types.some((part) => acceptsName(part, name));
   return false;
+}
+
+function coerceDuringPropertyDiagnostic(value: Value, type: TypeDecl): Value | typeof NO_MATCH {
+  const wantsInt = acceptsName(type, 'int');
+  if (typeof value === 'number')
+    return wantsInt && Number.isInteger(value) && floatFitsInt(value) ? BigInt(value) : NO_MATCH;
+  if (typeof value === 'boolean' && wantsInt) return BigInt(value);
+  if (!acceptsName(type, 'float')) return NO_MATCH;
+  if (typeof value === 'bigint' || typeof value === 'boolean') return Number(value);
+  if (typeof value === 'string' && wantsInt) {
+    const prefix = numericPrefix(value);
+    if (prefix?.whole) return prefix.value;
+  }
+  return NO_MATCH;
 }
 
 function coerceScalar(value: Value, type: TypeDecl): Value | typeof NO_MATCH {
