@@ -1641,15 +1641,16 @@ test.each([
   expect(result.kind === 'executed' && result.stdout).toMatch(/^\nFatal error: Allowed memory size/);
 });
 
-test.each(['/(?<=(a{1,3})(a{1,3}))b/', '/(?<=a{1,3}(a{1,3}))b/'])(
-  'rejects variable lookbehind capture order the host cannot preserve: %s',
-  (pattern) => {
-    expect(run(`<?php preg_match('${pattern}','aaaab',$m);`)).toMatchObject({
-      kind: 'executed',
-      uncaughtException: expect.stringContaining('この採点環境では使えません。'),
-    });
-  }
-);
+test.each([
+  ['/(?<=(a{1,3})(a{1,3}))b/', 'aaaab', '["b","aaa","a"]'],
+  ['/(?<=a{1,3}(a{1,3}))b/', 'aaaab', '["b","a"]'],
+  ['/(?<=(a)|bc)d/', 'ad', '["d","a"]'],
+])('preserves PHP capture order for variable-length and uneven lookbehinds: %s', (pattern, subject, stdout) => {
+  expect(run(`<?php preg_match('${pattern}','${subject}',$m);echo json_encode($m);`)).toMatchObject({
+    kind: 'executed',
+    stdout,
+  });
+});
 
 test.each([
   String.raw`preg_match('/(?<=(a)\1)b/', 'aab')`,
@@ -3630,4 +3631,15 @@ echo '|', gc_collect_cycles();
 `);
     expect(replacedWithLoopValue).toMatchObject({ kind: 'executed', stdout: 'a|cb2' });
   }
+
+  const capturedLookbehind = run(String.raw`<?php
+preg_match('/(?<=(a)|bc)d/', 'ad', $m1);
+preg_match('/(?<=(a{1,2}))b/', 'aab', $m2);
+preg_match('/(?<=(a{1,2}?))b/', 'aab', $m3);
+echo json_encode([$m1, $m2, $m3]);
+`);
+  expect(capturedLookbehind).toMatchObject({
+    kind: 'executed',
+    stdout: '[["d","a"],["b","aa"],["b","aa"]]',
+  });
 });

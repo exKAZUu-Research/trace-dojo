@@ -62,7 +62,7 @@ export function analyzeRegex(
       if (node.kind !== 'lookbehind') return;
       lookbehinds.pop();
       if (validateLookbehind(node, lengths, invalidLookbehind) && captureCount !== capturesAtEntry.get(node))
-        throw new UnsupportedFeatureError('可変長後読みのキャプチャ');
+        needsNative = true;
     },
     onQuantifierLeave(node) {
       needsNative ||= nullableRepeatNeedsNative(node, lengths);
