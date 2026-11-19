@@ -3282,4 +3282,19 @@ set_error_handler(function () use ($a) { $a['x'] = new ReuseExit(); return true;
 --$a->x;
 `);
   expect(reuseExitDec).toMatchObject({ kind: 'executed', stdout: 'exit;{"10":null}' });
+
+  const secondWarnExit = run(String.raw`<?php
+class Observer { function __destruct() { global $a; echo json_encode($a->getArrayCopy()); } }
+$a = new ArrayObject([], ArrayObject::ARRAY_AS_PROPS);
+$obs = new Observer();
+$n = 0;
+set_error_handler(function () use ($a, &$n) {
+  if (++$n === 1) { $a['x'] = 5; return true; }
+  unset($a['x']);
+  $a['y'] = 9;
+  exit('exit;');
+});
+$a->x--;
+`);
+  expect(secondWarnExit).toMatchObject({ kind: 'executed', stdout: 'exit;{"y":null}' });
 });

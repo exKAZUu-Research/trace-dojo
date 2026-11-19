@@ -1308,10 +1308,7 @@ function incrementedValue(old: Value, increment: boolean, warning: UpdateWarning
   else if (old === null) {
     if (increment) updated = 1n;
     else {
-      if (
-        !warning(() => warn('Decrement on type null has no effect, this will change in the next major version of PHP'))
-      )
-        return undefined;
+      warning(() => warn('Decrement on type null has no effect, this will change in the next major version of PHP'));
       updated = null;
     }
   } else if (typeof old === 'boolean') {
