@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { callCallback } from './callables';
+import { consumeCallbackResult } from './callables';
 import { backtraceLimit, callArguments, callNamedArguments, type CallRecord, callStack } from './calls';
 import * as conversionsModule from './conversions';
 import { clearLastError, deprecated, lastError, throwError, warn } from './errors';
@@ -128,12 +128,23 @@ defineFunction('assert(mixed $assertion, Throwable|string|null $description = nu
   if (description instanceof PhpObject) throw new PhpThrow(description);
   if (options.bail) throw new UnsupportedFeatureError('assert_options() の ASSERT_BAIL');
   const text = typeof description === 'string' ? description : undefined;
-  const callback = rt().assertionCallback;
-  if (callback !== undefined) {
-    const line = BigInt((row ?? rt().row) + 1);
-    callCallback(callback, text === undefined ? [SCRIPT_PATH, line, null] : [SCRIPT_PATH, line, null, text]);
-  }
-  if (options.exception) throwError('AssertionError', text ?? '');
-  if (options.warning) warn(`assert(): ${text ?? 'Assertion'} failed`);
+  const pending = runAssertionCallback(text, row);
+  if (options.exception) throwError('AssertionError', text ?? '', pending?.object);
+  if (options.warning) warn(`assert(): ${text ?? 'Assertion'} failed`, pending !== undefined);
+  if (pending) throw pending;
   return false;
 });
+
+function runAssertionCallback(text: string | undefined, row: number | undefined): PhpThrow | undefined {
+  const callback = rt().assertionCallback;
+  if (callback === undefined) return undefined;
+  const line = BigInt((row ?? rt().row) + 1);
+  const parameters = text === undefined ? [SCRIPT_PATH, line, null] : [SCRIPT_PATH, line, null, text];
+  try {
+    consumeCallbackResult(callback, parameters, () => {});
+  } catch (error) {
+    if (!(error instanceof PhpThrow)) throw error;
+    return error;
+  }
+  return undefined;
+}

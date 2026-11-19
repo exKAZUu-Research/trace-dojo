@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss 576 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { byteAt, lower, untilNul } from './bytes';
-import { callableClosureName, callValue, checkCallable, explainCallable } from './callables';
+import { callableClosureName, callValue, checkCallable, consumeInvokedResult, explainCallable } from './callables';
 import { type ArgValue, backtraceLimit, callStack, frameArguments, setCallableExplainer } from './calls';
 import * as classesModule from './classes';
 import { classConstant, findClass, requireClassScope } from './classes';
@@ -180,7 +180,7 @@ defineFunction(
       const owner = value.get(0n);
       const method = value.get(1n);
       if ((typeof owner === 'string' || owner instanceof PhpObject) && typeof method === 'string') {
-        name = (typeof owner === 'string' ? owner : owner.cls.name) + '::' + method;
+        name = (typeof owner === 'string' ? owner : owner.cls.fullName) + '::' + method;
         syntax = true;
       }
     } else if (!(value instanceof PhpArray)) name = toStr(value);
@@ -593,7 +593,7 @@ defineFunction('iterator_apply(Traversable $iterator, callable $callback, ?array
     while (!iterator.next().done) {
       count++;
       const extra = args[2] instanceof PhpArray ? callbackArrayArguments(args[2]) : [];
-      if (!toBool(callValue(args[1], extra, undefined))) break;
+      if (!consumeInvokedResult(() => callValue(args[1], extra, undefined), toBool)) break;
     }
     return count;
   } catch (error) {

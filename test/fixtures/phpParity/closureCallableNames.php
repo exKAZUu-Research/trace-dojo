@@ -10,3 +10,11 @@ foreach ([strlen(...), $creator->method(...), $creator->literal(), fn () => 1] a
     var_dump(is_callable($closure, true, $name));
     echo $name, "\n";
 }
+
+$anonymous = new class {
+    function method() {}
+};
+foreach ([false, true] as $syntaxOnly) {
+    var_dump(is_callable([$anonymous, 'method'], $syntaxOnly, $name));
+    var_dump($name === get_class($anonymous) . '::method');
+}

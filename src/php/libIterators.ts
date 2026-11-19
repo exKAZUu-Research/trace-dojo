@@ -284,7 +284,7 @@ function aggregateIterator(object: PhpObject, className: Value): PhpObject {
 /** Transcribes spl_filter_it_fetch: skips the elements `accept` rejects. */
 export function filterFetch(object: PhpObject, state: DualState): void {
   while (state.fetch(true)) {
-    if (toBool(callMethod(object, 'accept', []))) return;
+    if (consumeInvokedResult(() => callMethod(object, 'accept', []), toBool)) return;
     state.inner?.next();
   }
   state.free();

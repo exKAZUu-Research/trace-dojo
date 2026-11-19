@@ -24,4 +24,30 @@ class JsonView implements JsonSerializable {
 }
 echo json_encode([new JsonView(true), new JsonView(false)], JSON_PARTIAL_OUTPUT_ON_ERROR), "\n";
 
+$releaseCount = 0;
+$callback = function () {
+    echo "callback ", $GLOBALS['releaseCount'], "\n";
+    return [new JsonResult];
+};
+var_dump(iterator_apply(new ArrayIterator([1, 2]), $callback));
+foreach (new CallbackFilterIterator(new ArrayIterator([1, 2]), $callback) as $value) {
+    echo "item $value after ", $releaseCount, " releases\n";
+}
+error_reporting(0);
+assert_options(ASSERT_EXCEPTION, 0);
+assert_options(ASSERT_CALLBACK, $callback);
+set_error_handler(function () { echo "assertion after ", $GLOBALS['releaseCount'], " releases\n"; }, E_WARNING);
+var_dump(assert(false));
+restore_error_handler();
+assert_options(ASSERT_EXCEPTION, 1);
+class ThrowingAssertionResult {
+    function __destruct() { throw new Exception("assertion result"); }
+}
+assert_options(ASSERT_CALLBACK, fn() => new ThrowingAssertionResult);
+try {
+    assert(false);
+} catch (AssertionError $error) {
+    echo $error->getPrevious()?->getMessage(), "\n";
+}
+
 echo "end\n";
