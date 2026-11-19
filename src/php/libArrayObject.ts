@@ -613,7 +613,6 @@ defineClass({
   consts: flagConstants,
   methods: [
     ...arrayMethods('ArrayObject'),
-    nativeDebugInfoMethod,
     {
       signature: 'getIterator(): Iterator',
       impl: ({ thisObj }) => {
@@ -641,6 +640,7 @@ defineClass({
       },
     },
     { signature: 'getIteratorClass(): string', impl: ({ thisObj }) => storageOf(thisObj).iteratorClass },
+    nativeDebugInfoMethod,
   ],
   createInternal: (object) => holdStorage(object, new ArrayStorage('ArrayObject', new PhpArray())),
 });

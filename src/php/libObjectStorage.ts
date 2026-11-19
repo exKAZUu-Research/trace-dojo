@@ -358,7 +358,6 @@ defineClass({
   compare: compareObjectStorage,
   interfaces: ['Countable', 'SeekableIterator', 'Traversable', 'Iterator', 'Serializable', 'ArrayAccess'],
   methods: [
-    nativeDebugInfoMethod,
     {
       signature: 'attach(object $object, mixed $info = null): void',
       impl: ({ thisObj, args }) => {
@@ -460,6 +459,7 @@ defineClass({
       impl: ({ args }) => (rt().functions.get('spl_object_hash') as NativeFunction).impl({ args, refs: [] }),
     },
     ...magicSerializationMethods,
+    nativeDebugInfoMethod,
   ],
   createInternal: (object) =>
     new ObjectStorage(object, object.cls.findMethod('gethash')?.scope.lname !== 'splobjectstorage'),

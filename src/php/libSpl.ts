@@ -171,6 +171,7 @@ const listMethods: NativeMethod[] = [
     signature: 'bottom(): mixed',
     impl: ({ thisObj }) => nonEmptyList(thisObj, 'peek at').nodes[0].v,
   },
+  nativeDebugInfoMethod,
   { signature: 'count(): int', impl: ({ thisObj }) => BigInt(listOf(thisObj).nodes.length) },
   { signature: 'isEmpty(): bool', impl: ({ thisObj }) => listOf(thisObj).nodes.length === 0 },
   {
@@ -239,7 +240,7 @@ const listMethods: NativeMethod[] = [
 defineClass({
   name: 'SplDoublyLinkedList',
   interfaces: ['Iterator', 'Traversable', 'Countable', 'ArrayAccess', 'Serializable'],
-  methods: [...listMethods, nativeDebugInfoMethod, ...serializationMethods, ...magicSerializationMethods],
+  methods: [...listMethods, ...serializationMethods, ...magicSerializationMethods],
   consts: { IT_MODE_LIFO: 2n, IT_MODE_FIFO: 0n, IT_MODE_DELETE: 1n, IT_MODE_KEEP: 0n },
   createInternal: () => new ListStorage(),
 });
