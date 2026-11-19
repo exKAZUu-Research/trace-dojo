@@ -36,3 +36,14 @@ function unionSource(value: string | number) { const target: symbol | undefined 
 const either: string | number | null | undefined = true;
 const voidOrString: void | null | undefined | string = true;
 const onlyNullish: undefined | null = true;
+const intersection: { a: number } & { b: string } = { a: 1, b: 's' };
+const intersectionTarget1: string | undefined = intersection;
+const intersectionTarget2: number | undefined = intersection;
+const intersectionTarget3: string | null = intersection;
+function branded(value: string & { __brand: 'b' }) { const target: number | undefined = value; }
+function objectUnion(value: { a: number } | { b: string }) { const target: string | undefined = value; }
+function laterFailure(value: string | number) { const target: string | boolean = value; }
+function unionArgument(value: string | number) {
+  function accepts(value: symbol | undefined) {}
+  accepts(value);
+}

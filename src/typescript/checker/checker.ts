@@ -932,7 +932,6 @@ export class Checker {
 
   private usesSingleDiagnosticTarget(type: Type): boolean {
     this.budget.spend();
-    if (type.kind === 'intersection') return type.types.some((member) => this.usesSingleDiagnosticTarget(member));
     return (
       type === booleanType ||
       type.kind === 'object' ||

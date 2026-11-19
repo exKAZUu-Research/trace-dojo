@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 507 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss 516 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -33,6 +33,7 @@ import {
 } from './templateContexts';
 import {
   anyType,
+  booleanType,
   errorType,
   freshLiteralType,
   isAnyLike,
@@ -685,12 +686,23 @@ export class ExpressionChecker {
     const types = this.c.typesForMessage(source, target);
     this.c.error(
       node,
-      `型 '${this.c.print(types.source)}' を型 '${this.c.print(types.target)}' に代入することはできません。${this.elaborate(source, types.target)}`
+      `型 '${this.c.print(types.source)}' を型 '${this.c.print(types.target)}' に代入することはできません。${this.assignmentDetails(source, types.target)}`
     );
   }
 
-  /** A hint about why a source is not assignable to a target, as TypeScript's second line gives it. */
-  private elaborate(source: Type, target: Type): string {
+  assignmentDetails(source: Type, target: Type): string {
+    if (source.kind !== 'union' || source === booleanType) return this.missingMembers(source, target);
+    this.c.budget.spend(source.types.length);
+    const failing = source.types.find((member) => !this.c.relations.isAssignable(member, target));
+    if (!failing) return '';
+    const types = this.c.typesForMessage(failing, target);
+    return (
+      this.missingMembers(failing, types.target) ||
+      `\n  型 '${this.c.print(types.source)}' を型 '${this.c.print(types.target)}' に代入することはできません。`
+    );
+  }
+
+  private missingMembers(source: Type, target: Type): string {
     if (source.kind !== 'object' || target.kind !== 'object' || this.c.isArrayOrTuple(target)) return '';
     const sourceStructure = this.c.structureOf(source);
     const missing = [...target.resolve().properties]

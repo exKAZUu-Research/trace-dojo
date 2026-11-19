@@ -712,7 +712,7 @@ export class Calls {
     const types = this.c.typesForMessage(argType, parameterType);
     this.c.error(
       arg,
-      `型 '${this.c.print(types.source)}' の引数を型 '${this.c.print(types.target)}' のパラメーターに渡すことはできません。`
+      `型 '${this.c.print(types.source)}' の引数を型 '${this.c.print(types.target)}' のパラメーターに渡すことはできません。${this.c.expressions.assignmentDetails(argType, types.target)}`
     );
   }
 

@@ -37,6 +37,8 @@ export interface Condition {
   type: Type;
 }
 
+const parenthesizedConditionStatements = new Set(['if_statement', 'while_statement', 'do_statement']);
+
 /** The kinds of expressions that are objects, which are always truthy. */
 const alwaysTruthyTypes = new Set(['array', 'arrow_function', 'class', 'function_expression', 'object', 'regex']);
 
@@ -50,25 +52,33 @@ export class ConditionChecker {
 
   /** Checks a condition, returning the flow states where it is true and where it is false. */
   checkCondition(node: TreeNode): { whenTrue: State; whenFalse: State } {
-    const { whenTrue, whenFalse } = this.condition(node);
+    // Tree-sitter includes the statement's required parentheses, while tsc's condition starts inside them.
+    const expression =
+      node.type === 'parenthesized_expression' && parenthesizedConditionStatements.has(node.parent?.type ?? '')
+        ? named(node)[0]
+        : node;
+    const { whenTrue, whenFalse } = this.condition(expression);
     return { whenTrue, whenFalse };
   }
 
   condition(node: TreeNode, testsTruthiness = true): Condition {
     const result = this.conditionOf(node);
-    const literal = skipParentheses(node).type;
-    if (literal === 'true') result.whenFalse = undefined;
-    if (literal === 'false') result.whenTrue = undefined;
+    if (node.type === 'true') result.whenFalse = undefined;
+    if (node.type === 'false') result.whenTrue = undefined;
     if (testsTruthiness) this.checkTruthiness(node, result.type);
     return result;
   }
 
+  // code-gauge-allow functionNcss 31 -- Computes branch states for each kind of narrowing expression.
   private conditionOf(node: TreeNode): Condition {
     const expression = skipParentheses(node);
     switch (expression.type) {
       case 'unary_expression': {
         if (expression.childForFieldName('operator')?.text !== '!') break;
-        const inner = this.condition(expression.childForFieldName('argument') as TreeNode);
+        const argument = expression.childForFieldName('argument') as TreeNode;
+        // The binder folds Boolean literal condition nodes, without folding a literal inside unary negation.
+        const inner = this.conditionOf(argument);
+        this.checkTruthiness(argument, inner.type);
         return { whenTrue: inner.whenFalse, whenFalse: inner.whenTrue, type: booleanType };
       }
       case 'binary_expression': {

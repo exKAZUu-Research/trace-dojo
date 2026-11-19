@@ -203,6 +203,34 @@ test.each([
   expect(diagnosticsOf(source)).toEqual([`${source.split('\n').length}: ${message}`]);
 });
 
+test('reflecting keys cannot hand a well-known symbol to a TypeScript program', () => {
+  const expose = 'const keys = Object.getOwnPropertySymbols(Array.prototype);';
+  const message = '1: Symbol.iterator などの well-known シンボルは、この採点環境では使えません。';
+  expect(diagnosticsOf(`${expose}\nconsole.log(keys[0]);`)).toEqual([message]);
+  expect(
+    diagnosticsOf(`${expose}
+const iterable: any = {};
+iterable[keys[0]] = () => [3].values();
+console.log([...iterable]);`)
+  ).toEqual([message]);
+  expect(executeProgram('javascript', `${expose}\nconsole.log(keys[0] === Symbol.iterator);`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true\n',
+  });
+});
+
+test('symbol reflection preserves user-created symbols and builtin shape queries', () => {
+  const source = `const key = Symbol('Symbol.iterator');
+const keys = Object.getOwnPropertySymbols({[key]: 1});
+const descriptors = Object.getOwnPropertyDescriptors(Array.prototype);
+console.log(keys[0] === key, Object.getOwnPropertyNames(descriptors).includes('length'));
+console.log(Object.hasOwn(Symbol, 'iterator'), Object.getOwnPropertyNames(Symbol).includes('iterator'));`;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true true\ntrue true\n',
+  });
+});
+
 test('turning a function or a class into text is not supported, as Node.js shows the source tsx printed', () => {
   const source = `function add(a: number, b: number): number { return a + b; }
 class A {}
@@ -515,12 +543,15 @@ test('nullable assignment diagnostics retain the source and target types reporte
     new URL('../fixtures/typescriptTypeErrors/rejects-nullable-assignment-message-types.out', import.meta.url),
     'utf8'
   );
-  const expected = reference.split('\n').flatMap((line) => {
+  const referenceLines = reference.split('\n');
+  const expected = referenceLines.flatMap((line, index) => {
     const match =
       /^\((\d+),\d+\).*?[Tt]ype '(.+?)' (?:is not assignable to (?:type|parameter of type)|does not satisfy the constraint) '(.+?)'\./.exec(
         line
       );
-    return match ? [{ row: Number(match[1]) - 1, source: match[2], target: match[3] }] : [];
+    if (!match) return [];
+    const detail = /^  Type '(.+?)' is not assignable to type '(.+?)'\./.exec(referenceLines[index + 1]);
+    return [{ row: Number(match[1]) - 1, source: match[2], target: match[3], detail: detail?.slice(1) }];
   });
   const execution = executeProgram('typescript', fs.readFileSync(fixture, 'utf8'));
   if (execution.kind !== 'compileError') throw new Error(`not rejected: ${JSON.stringify(execution)}`);
@@ -530,6 +561,8 @@ test('nullable assignment diagnostics retain the source and target types reporte
   for (const [index, diagnostic] of execution.diagnostics.entries()) {
     const reported = /^型 '(.+?)' (?:を型|の引数を型|は制約) '(.+?)'/.exec(diagnostic.message);
     expect(reported?.slice(1)).toEqual([expected[index].source, expected[index].target]);
+    const detail = /\n  型 '(.+?)' を型 '(.+?)'/.exec(diagnostic.message);
+    expect(detail?.slice(1)).toEqual(expected[index].detail);
   }
 });
 

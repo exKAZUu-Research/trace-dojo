@@ -2,6 +2,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import { orderBuiltinMembers } from './builtinOrder';
 import { defineFunctionProperties } from './memberProperties';
 import type { Realm } from './realm';
+import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import { JsFunction, JsObject, type Key, type Value } from './values';
 
 /** Names an unavailable library member on a receiver, or gives undefined for any other. */
@@ -23,6 +24,12 @@ export const unavailableWellKnownSymbols = new Set([
   'unscopables',
 ]);
 
+const unavailableSymbolNames = new Map(
+  Object.entries(WELL_KNOWN_SYMBOLS)
+    .filter(([name]) => unavailableWellKnownSymbols.has(name))
+    .map(([name, value]) => [value, name])
+);
+
 const consoleTimers = new Set<Key | undefined>(['time', 'timeEnd', 'timeLog', 'timeStamp']);
 
 /**
@@ -35,15 +42,19 @@ export function unavailableMemberCheck(realm: Realm): UnavailableMemberCheck {
   const console = realm.globals.lookup('console')?.value;
   defineUnavailableMethods(realm, math, console);
   return (value, key, readValue) => {
-    if (readValue)
-      return value === symbol && typeof key === 'string' && unavailableWellKnownSymbols.has(key)
-        ? `Symbol.${key} などの well-known シンボル`
-        : undefined;
+    if (readValue) return unavailableSymbolFeature(value, key, symbol);
     // Node.js gives every error its own stack, whatever its prototype becomes.
     if ((key === 'stack' || key === undefined) && value instanceof JsObject && value.isError) return 'Error の stack';
     if (key === 'stack' && inherits(value, realm.errorPrototypes.Error)) return 'Error の stack';
     return;
   };
+}
+
+function unavailableSymbolFeature(value: Value, key: Key | undefined, constructor: Value): string | undefined {
+  const name = typeof value === 'symbol' ? unavailableSymbolNames.get(value) : key;
+  if (typeof name !== 'string') return undefined;
+  if (typeof value !== 'symbol' && (value !== constructor || !unavailableWellKnownSymbols.has(name))) return undefined;
+  return `Symbol.${name} などの well-known シンボル`;
 }
 
 /** Ends the program on the row reading an unavailable member, as the type checker would have rejected it. */

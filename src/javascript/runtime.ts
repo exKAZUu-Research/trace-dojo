@@ -563,6 +563,12 @@ export class Runtime {
     return this.findProperty(object, key) !== undefined;
   }
 
+  reflectOwnSymbols(object: JsObject): symbol[] {
+    const symbols = this.ownSymbols(object);
+    for (const symbol of symbols) this.checkUnavailableMember(symbol, undefined, true);
+    return symbols;
+  }
+
   /** Own symbol keys in the order they were added, which follow the string keys. */
   ownSymbols(object: JsObject): symbol[] {
     return [...object.properties.keys()].filter((key) => typeof key === 'symbol');

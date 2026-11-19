@@ -128,7 +128,7 @@ function defineReflection(method: ObjectMethod): void {
     runtime.newArray(runtime.ownPropertyNames(runtime.toObject(args[0])))
   );
   method('getOwnPropertySymbols', 1, (runtime, args) =>
-    runtime.newArray(runtime.ownSymbols(runtime.toObject(args[0])))
+    runtime.newArray(runtime.reflectOwnSymbols(runtime.toObject(args[0])))
   );
   method('getOwnPropertyDescriptor', 2, (runtime, args) => {
     const object = runtime.toObject(args[0]);
