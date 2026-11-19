@@ -17,6 +17,7 @@ import {
   INT,
   isArithmetic,
   isCharType,
+  isConstType,
   LDOUBLE,
   LLONG,
   LONG,
@@ -852,6 +853,8 @@ function stringOperator(
   const type = classType(cls);
   const [left, right] = operands;
   const isString = (expr: Expr): boolean => expr.type.kind === 'class' && expr.type.cls === cls;
+  const canMoveString = (expr: Expr): boolean =>
+    isString(expr) && !isConstType(expr.type) && (!expr.isLvalue || expr.isXvalue === true);
   const textRun = (expr: Expr): Eval<string> | undefined => {
     if (isString(expr)) {
       const run = compiler.rvalue(expr).run;
@@ -885,7 +888,7 @@ function stringOperator(
       const b = operandRun(right);
       if (!a || !b) return undefined;
       // A temporary string operand gives its buffer to the result, as libc++ appends to it or inserts into it.
-      const reused = operands.findIndex((operand) => isString(operand) && !operand.isLvalue);
+      const reused = operands.findIndex(canMoveString);
       const constantStringLength = shortConcatenationLength(left, right);
       return {
         type,
@@ -902,7 +905,7 @@ function stringOperator(
       if (!isString(left)) return undefined;
       compiler.checkAssignable(left, row, operator);
       const append = operator === '+=';
-      if (!append && isString(right) && !right.isLvalue) return moveAssignment(compiler, left, right, row);
+      if (!append && canMoveString(right)) return moveAssignment(compiler, left, right, row);
       const location = left.run;
       const source = textRun(right) ?? charRun(scalarValue(compiler, right), isArithmetic);
       if (!source) return undefined;

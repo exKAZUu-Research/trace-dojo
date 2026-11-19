@@ -2,6 +2,19 @@
 #include <string>
 #include <vector>
 using namespace std;
+
+const string constText() {
+  string text(30, 'a');
+  text.reserve(100);
+  return text;
+}
+
+string movableText() {
+  string text(30, 'a');
+  text.reserve(100);
+  return text;
+}
+
 int main() {
   string s = "abcdef", t = "XYZ";
   s.insert(2, t, 1, 1); cout << s << '\n';
@@ -43,6 +56,15 @@ int main() {
   string m = "a", n = "b"; swap(m, n); cout << m << n << '\n'; std::swap(m, n); cout << m << n << '\n'; m.swap(n); cout << m << n << '\n';
   cout << string("a").compare("B") << ' ' << string("a").compare("\xff") << ' ' << string("abc").compare("abd") << ' ' << string("abc").compare("a") << '\n';
   cout << (s + 'c') << ' ' << ('c' + s) << '\n';
+  auto left = constText() + "b";
+  auto right = "b" + constText();
+  auto moved = movableText() + "b";
+  string empty, reserved(40, 'b');
+  reserved.reserve(200);
+  empty = constText();
+  reserved = constText();
+  cout << left.capacity() << ' ' << right.capacity() << ' ' << moved.capacity() << ' '
+       << empty.capacity() << ' ' << reserved.capacity() << '\n';
   try { s.insert(100, t, 0, 1); } catch (const out_of_range& e) { cout << e.what() << '\n'; }
   try { s.insert(0, t, 100, 1); } catch (const out_of_range& e) { cout << e.what() << '\n'; }
   try { s.compare(0, 1, t, 100, 1); } catch (const out_of_range& e) { cout << e.what() << '\n'; }
