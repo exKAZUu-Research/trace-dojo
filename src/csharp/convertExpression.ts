@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 570 -- The convertExpression module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 575 -- The convertExpression module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -241,6 +241,18 @@ export class ExpressionConverter {
       }
       case 'element_access_expression': {
         const subscript = requiredField(node, 'subscript');
+        const target = requiredField(node, 'expression');
+        // `new int[2][2]` reads as indexing a new array, which C# takes as a second rank with a size.
+        if (
+          target.type === 'array_creation_expression' &&
+          !namedChildren(target).some((child) => child.type === 'initializer_expression')
+        )
+          throw new CompileError(
+            namedChildren(subscript).map((size) => ({
+              row: size.startPosition.row,
+              message: "CS0178: 無効な次元指定子です: ',' または ']' を指定してください",
+            }))
+          );
         return {
           kind: 'elementAccess',
           target: this.convertOperand(requiredField(node, 'expression')),
@@ -473,6 +485,11 @@ export class ExpressionConverter {
     }
     const nameNode = field(node, 'name');
     const valueNode = namedChildren(node).find((child) => !sameNode(child, nameNode)) as Node;
+    // The grammar puts an empty identifier where an argument is left out, as in `f(a, )`.
+    if (valueNode.text === '')
+      throw new CompileError([
+        { row: valueNode.startPosition.row, message: `CS1525: '${node.nextSibling?.text ?? ')'}' は無効です` },
+      ]);
     const modifier = (['ref', 'out', 'in'] as const).find((token) => hasToken(node, token));
     return {
       name: nameNode?.text,
