@@ -4,7 +4,7 @@
  * declared as structs whose values the runtime represents in its own way.
  *
  * Pseudo-traits that rustc does not have stand for groups of types that the natives handle alike: `Integer`,
- * `SignedInteger`, `UnsignedInteger`, `Float`, `Pattern` (what `str::split` and its kin accept), `Borrow` (keys that
+ * `SignedInteger`, `UnsignedInteger`, `Float`, `Pattern` (what `str::split` and its kin accept), `DoubleEndedPattern` (a `Pattern` but a string), `Borrow` (keys that
  * look up a map), `FromStrTarget`, `StringPart`, `RangeBounds`, `ExtendInto`, `SliceOf` (what borrows as a slice), `JoinSeparator`, and `SliceIndex` (what `<[T]>::get`
  * accepts: a `usize` or a range of them, giving `Indexed<I, T>`, an element or a slice).
  *
@@ -300,6 +300,7 @@ pub mod slice {
     }
     impl<T> [T] {
         pub fn into_iter(self) -> IterImpl<T, ArrayIntoIterShape>;
+        pub fn map<U, F: FnMut(T) -> U>(self, f: F) -> [U];
     }
     impl<T> &[T] {
         pub fn into_iter(self) -> IterImpl<&T, SliceIterShape>;
@@ -342,7 +343,7 @@ pub mod str {
         pub fn trim(&self) -> &str;
         pub fn trim_start(&self) -> &str;
         pub fn trim_end(&self) -> &str;
-        pub fn trim_matches<P: Pattern>(&self, pat: P) -> &str;
+        pub fn trim_matches<P: DoubleEndedPattern>(&self, pat: P) -> &str;
         pub fn trim_start_matches<P: Pattern>(&self, pat: P) -> &str;
         pub fn trim_end_matches<P: Pattern>(&self, pat: P) -> &str;
         pub fn strip_prefix<P: Pattern>(&self, prefix: P) -> Option<&str>;
@@ -1421,6 +1422,7 @@ pub mod pseudo {
     pub trait SliceIndex {}
     pub trait Float {}
     pub trait Pattern {}
+    pub trait DoubleEndedPattern {}
     pub trait Borrow<Q> {}
     pub trait FromStrTarget {}
     pub trait StringPart {}

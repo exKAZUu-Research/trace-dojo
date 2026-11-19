@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 888 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
+// code-gauge-allow-file fileNcss 891 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
 import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindings } from './astWalk';
@@ -41,6 +41,8 @@ type Value = Var | undefined;
 interface ClosureSummary {
   edges: [number, number, number][];
   captures: number[];
+  /** The closure's body, where rustc reports a result that outlives its parameters' borrows. */
+  body: Span;
 }
 
 /** What the builders of a function and of the closures in it share. */
@@ -951,15 +953,15 @@ export class LoanBuilder {
     const signature = new SignatureInstance(fn, typeArgs, this.fresh, this.outlives, () => this.static());
     signature.bindInputs(inputs);
     signature.bindOutput(result, inputs);
-    signature.relateBounds((callee, args, ret) => this.applyClosure(callee, args, ret));
+    signature.relateBounds((callee, args, ret, higherRanked) => this.applyClosure(callee, args, ret, higherRanked));
   }
 
   /**
    * Relates the arguments and the result of a call of a closure (or of what a type parameter or a trait object for one
    * stands for): as its summary says for a closure of this function, conservatively otherwise.
    */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Applies a closure's summary, or relates every region without one.
-  private applyClosure(callee: Layout, args: Layout[], result: Layout): void {
+  // code-gauge-allow functionCognitiveComplexity 20 -- Applies a closure's summary, or relates every region without one.
+  private applyClosure(callee: Layout, args: Layout[], result: Layout, higherRanked: boolean[] = []): void {
     const closure = callee.kind === 'opaque' ? callee.closure : undefined;
     const summary = closure && this.shared.summaries.get(closure);
     if (!closure || !summary || callee.kind !== 'opaque') {
@@ -974,6 +976,14 @@ export class LoanBuilder {
     relate(this.outlives, ret, result);
     const retRegions = regionsOf(ret);
     for (const [param, region, retRegion] of summary.edges) {
+      // A bound `F: FnMut(&T) -> K` takes every lifetime of its reference, which `K` cannot name.
+      if (higherRanked[param] && region === 0) {
+        this.shared.errors.push({
+          span: summary.body,
+          message:
+            'このクロージャーは、引数の参照から借りた値を返せません（呼び出すたびに違う寿命の参照を受け取るため）。',
+        });
+      }
       const from = regionsOf(params[param] ?? NONE)[region];
       if (from !== undefined && retRegions[retRegion] !== undefined) this.outlives(from, retRegions[retRegion]);
     }
@@ -997,7 +1007,7 @@ export class LoanBuilder {
     const params = expr.params.map((param, index) => ({ pattern: param.pattern, type: type.closure.params[index] }));
     const end = expr.body.kind === 'block' ? { row: expr.body.endRow, col: 0 } : expr.body.span;
     const paramVars = body.build(params, expr.body, type.closure.ret, end);
-    this.shared.summaries.set(type.closure, body.summarize(paramVars));
+    this.shared.summaries.set(type.closure, body.summarize(paramVars, expr.body.span));
     const temp = this.newVar('{closure}', type);
     const closureRegion = (this.layouts[temp] as Layout & { kind: 'opaque' }).region;
     const uses: Var[] = [];
@@ -1029,7 +1039,7 @@ export class LoanBuilder {
 
   /** Which regions of the parameters (and of the captures) the result of this closure's body may hold. */
   // code-gauge-allow functionCognitiveComplexity 23 -- Searches the outlives graph from each region of the parameters.
-  private summarize(paramVars: Var[]): ClosureSummary {
+  private summarize(paramVars: Var[], bodySpan: Span): ClosureSummary {
     const edges = new Map<RVar, RVar[]>();
     for (const [sup, sub] of this.graph.outlives) {
       const list = edges.get(sup);
@@ -1050,7 +1060,7 @@ export class LoanBuilder {
       }
       return ret.flatMap((region, index) => (seen.has(region) ? [index] : []));
     };
-    const summary: ClosureSummary = { edges: [], captures: [] };
+    const summary: ClosureSummary = { edges: [], captures: [], body: bodySpan };
     for (const [param, v] of paramVars.entries()) {
       for (const [index, region] of this.graph.varRegions[v].entries()) {
         for (const retRegion of reached([region])) summary.edges.push([param, index, retRegion]);

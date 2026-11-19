@@ -1,7 +1,16 @@
 import type { Annotations, Coercion, FnContext, LocalVar, MethodRes, PathRes, ReceiverAdjust } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, MacroCall, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindings } from './astWalk';
-import { changeString, claimMadeString, concatStrings, forgetMadeString, sizeTable, TableMap } from './capacity';
+import {
+  changeString,
+  claimString,
+  claimStrings,
+  concatStrings,
+  moveString,
+  settleStrings,
+  sizeTable,
+  TableMap,
+} from './capacity';
 import type { Checker } from './checker';
 import type { Formatter, Spec } from './fmt';
 import { normalize } from './infer';
@@ -127,10 +136,7 @@ export class Compiler {
       const params: { local: LocalVar | undefined; pattern: Pattern | undefined }[] = [];
       if (item.selfParam) params.push({ local: context.locals.find((local) => local.isSelf), pattern: undefined });
       for (const param of item.params) params.push({ local: undefined, pattern: param.pattern });
-      const binders = params.map(({ local, pattern }) => {
-        if (local) return (frame: Frame, value: Value) => void (frame.locals[local.slot] = value);
-        return this.compileBinder(pattern!);
-      });
+      const binders = params.map(({ local, pattern }) => this.paramBinder(local, pattern));
       compiled.bind = (frame, args) => {
         for (const [index, binder] of binders.entries()) binder(frame, args[index]);
       };
@@ -241,6 +247,7 @@ export class Compiler {
         const value = this.value(stmt.expr);
         const run: Eval = (frame) => {
           frame.runtime.spend();
+          settleStrings();
           value(frame);
           return UNIT_VALUE;
         };
@@ -273,38 +280,31 @@ export class Compiler {
     const local =
       stmt.pattern.kind === 'binding' && !stmt.pattern.sub ? this.annotations.bindings.get(stmt.pattern) : undefined;
     const refer = local && this.referent(stmt.init, local.slot);
-    const store = this.storeString(stmt.init, local);
+    const claim = this.claimInLocal(local);
     const run: Eval = (frame) => {
       frame.runtime.spend();
-      store.before(frame);
+      settleStrings();
       bind(frame, init(frame));
-      store.after(frame);
+      claim?.(frame);
       refer?.(frame);
       return UNIT_VALUE;
     };
     return this.withStep(stmt.span, run, isObjectCreation(stmt.init, this.annotations));
   }
 
-  /**
-   * Around storing a value in a variable: when it is a `String`, the capacity it was made with or had where it is moved
-   * from stays with it.
-   */
-  private storeString(value: Expr, local: LocalVar | undefined): { before: Eval; after: Eval } {
-    if (!local || !isStringType(local.type)) return { before: () => UNIT_VALUE, after: () => UNIT_VALUE };
-    const movedFrom = this.movedLocal(value);
-    const { slot } = local;
-    return {
-      before: (frame) => (forgetMadeString(movedFrom?.(frame)), UNIT_VALUE),
-      after: (frame) => (claimMadeString(new LocalPlace(frame, slot)), UNIT_VALUE),
-    };
+  /** Binds an argument to `self` or to a parameter's pattern; a `String` parameter keeps the argument's capacity. */
+  private paramBinder(local: LocalVar | undefined, pattern: Pattern | undefined): (frame: Frame, value: Value) => void {
+    if (local) return (frame, value) => void (frame.locals[local.slot] = value);
+    const bind = this.compileBinder(pattern!);
+    const claim = this.claimInLocal(pattern?.kind === 'binding' ? this.annotations.bindings.get(pattern) : undefined);
+    return claim ? (frame, value) => (bind(frame, value), claim(frame)) : bind;
   }
 
-  /** The variable an expression moves its value out of, when it is just a variable. */
-  private movedLocal(expr: Expr): ((frame: Frame) => Place) | undefined {
-    const res = expr.kind === 'path' ? this.annotations.paths.get(expr) : undefined;
-    if (res?.kind !== 'local' || res.local.mode !== 'move') return undefined;
-    const { slot } = res.local;
-    return (frame) => new LocalPlace(frame, slot);
+  /** A `String` variable claims the capacity of the `String` in flight that it stores. */
+  private claimInLocal(local: LocalVar | undefined): ((frame: Frame) => void) | undefined {
+    if (!local || !isStringType(local.type)) return undefined;
+    const { slot } = local;
+    return (frame) => claimString(new LocalPlace(frame, slot));
   }
 
   /**
@@ -514,6 +514,8 @@ export class Compiler {
   // Expressions
 
   /** An expression's value where it is moved or copied: a `Copy` aggregate read from a place is copied. */
+  // code-gauge-allow functionCognitiveComplexity 17 -- One case per way a value leaves its place: copied or moved.
+  // code-gauge-allow functionNcss 31 -- One case per way a value leaves its place: copied or moved.
   value(expr: Expr): Eval {
     const read = this.read(expr);
     const coercion = this.annotations.coercions.get(expr);
@@ -527,8 +529,10 @@ export class Compiler {
       const res = this.annotations.paths.get(expr);
       if (res?.kind === 'local' && res.local.mode === 'move' && !isRefType(res.local.type)) {
         const slot = res.local.slot;
+        const movesString = isStringType(type) || normalize(shallow(type)).kind === 'adt';
         return (frame) => {
           const value = coerced(frame);
+          if (movesString) moveString(new LocalPlace(frame, slot));
           frame.locals[slot] = UNASSIGNED;
           return value;
         };
@@ -540,6 +544,7 @@ export class Compiler {
       return (frame) => {
         const target = place(frame);
         const value = target.get();
+        moveString(target);
         target.set(MOVED);
         return value;
       };
@@ -663,13 +668,13 @@ export class Compiler {
       case 'tuple': {
         if (expr.elems.length === 0) return () => UNIT_VALUE;
         const elems = expr.elems.map((elem) => this.value(elem));
-        return (frame) => elems.map((elem) => elem(frame));
+        return (frame) => claimStrings(elems.map((elem) => elem(frame)));
       }
       case 'array': {
         const elems = expr.elems.map((elem) => this.value(elem));
         return (frame) => {
           frame.runtime.allocate(elems.length);
-          return elems.map((elem) => elem(frame));
+          return claimStrings(elems.map((elem) => elem(frame)));
         };
       }
       case 'arrayRepeat': {
@@ -977,6 +982,7 @@ export class Compiler {
       for (const { index, value } of values) result[index] = value(frame);
       if (base) takeFromBase(base(frame) as StructValue, result, given, moved);
       frame.runtime.allocate(fields.length);
+      claimStrings(result);
       return def.kind === 'enum' ? new EnumValue(def, variant, result) : new StructValue(def, result);
     };
   }
@@ -1086,24 +1092,21 @@ export class Compiler {
     if (res?.kind === 'local' && res.local.mode === 'move') {
       const slot = res.local.slot;
       const refer = this.referent(expr.value, slot);
-      const store = this.storeString(expr.value, res.local);
+      const claim = this.claimInLocal(res.local);
       return (frame) => {
-        store.before(frame);
         frame.locals[slot] = value(frame);
-        store.after(frame);
+        claim?.(frame);
         refer?.(frame);
         return UNIT_VALUE;
       };
     }
     const place = this.place(expr.target);
     const storesString = isStringType(expr.target.ty!);
-    const movedFrom = this.movedLocal(expr.value);
     return (frame) => {
-      if (storesString) forgetMadeString(movedFrom?.(frame));
       const v = value(frame);
       const target = place(frame);
       target.set(v);
-      if (storesString) claimMadeString(target);
+      if (storesString) claimString(target);
       return UNIT_VALUE;
     };
   }
@@ -1648,7 +1651,7 @@ export class Compiler {
         const elems = macro.elems.map((elem) => this.value(elem));
         return (frame) => {
           frame.runtime.allocate(elems.length);
-          return elems.map((elem) => elem(frame));
+          return claimStrings(elems.map((elem) => elem(frame)));
         };
       }
       case 'vecRepeat': {
@@ -1718,6 +1721,7 @@ export class Compiler {
 }
 
 function construct(def: AdtDef, variant: number, args: Value[]): Value {
+  claimStrings(args);
   return def.kind === 'enum' ? new EnumValue(def, variant, args) : new StructValue(def, args);
 }
 

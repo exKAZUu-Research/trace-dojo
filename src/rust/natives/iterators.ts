@@ -261,11 +261,12 @@ function lengthOf(iter: IterValue): number {
 }
 
 /** Takes the elements left, up to and including one that `stop` picks. */
-function collectAll(ctx: NativeContext, iter: IterValue, stop?: (item: Value) => boolean): Value[] {
+function collectAll(ctx: NativeContext, iter: IterValue, stop?: (item: Value) => boolean, fold = false): Value[] {
   const items: Value[] = [];
+  const source = fold ? foldingView(iter) : iter;
   for (;;) {
     ctx.runtime.spend();
-    const item = nextOf(iter);
+    const item = nextOf(source);
     if (item === DONE) return items;
     items.push(item);
     if (stop?.(item)) return items;
@@ -288,12 +289,24 @@ function adapter<S extends object>(
   source: IterValue,
   state: S,
   parts: (source: IterValue, state: S) => AdapterParts,
-  forkState: (state: S, cloneItem: (value: Value) => Value) => S = (s) => ({ ...s })
+  forkState: (state: S, cloneItem: (value: Value) => Value) => S = (s) => ({ ...s }),
+  folds = false
 ): IterValue {
   const { next, nextBack, remaining } = parts(source, state);
   const iter = new IterValue(next, nextBack, remaining, [source, state]);
-  iter.fork = (cloneItem) => adapter(forkIter(source, cloneItem), forkState(state, cloneItem), parts, forkState);
+  // An adapter whose `fold` folds its source (`Map`, `Filter`, ...) takes its source's elements as it folds.
+  if (folds && source.foldNext) iter.foldNext = parts(foldingView(source), state).next;
+  iter.fork = (cloneItem) => adapter(forkIter(source, cloneItem), forkState(state, cloneItem), parts, forkState, folds);
   return iter;
+}
+
+/** The iterator as a fold takes it: its pushed-back elements, then its `foldNext`. */
+function foldingView(iter: IterValue): IterValue {
+  return new IterValue(
+    () => (iter.peeked && iter.peeked.length > 0 ? (iter.peeked.shift() as Next) : (iter.foldNext ?? iter.next)()),
+    iter.nextBack,
+    iter.remaining
+  );
 }
 
 /** An independent copy of an iterator, with the elements `peek` looked at. */
@@ -307,11 +320,17 @@ function forkIter(iter: IterValue, cloneItem: (value: Value) => Value): IterValu
 /** An adapter that maps each element, from either end. */
 function mapped(source: IterValue, map: (item: Value) => Value): IterValue {
   const take = (item: Next): Next => (item === DONE ? DONE : map(item));
-  return adapter(source, {}, (src) => ({
-    next: () => take(nextOf(src)),
-    nextBack: src.nextBack && (() => take(src.nextBack!())),
-    remaining: src.remaining,
-  }));
+  return adapter(
+    source,
+    {},
+    (src) => ({
+      next: () => take(nextOf(src)),
+      nextBack: src.nextBack && (() => take(src.nextBack!())),
+      remaining: src.remaining,
+    }),
+    undefined,
+    true
+  );
 }
 
 /** An adapter that finds the next element `pick` keeps (mapped), from either end. */
@@ -325,10 +344,16 @@ function picked(ctx: NativeContext, source: IterValue, pick: (item: Value) => Ne
       if (result !== DONE) return result;
     }
   };
-  return adapter(source, {}, (src) => ({
-    next: () => find(() => nextOf(src)),
-    nextBack: src.nextBack && (() => find(src.nextBack!)),
-  }));
+  return adapter(
+    source,
+    {},
+    (src) => ({
+      next: () => find(() => nextOf(src)),
+      nextBack: src.nextBack && (() => find(src.nextBack!)),
+    }),
+    undefined,
+    true
+  );
 }
 
 /** An adapter that yields the elements until `stop` (given each element) returns DONE for one, then nothing. */
@@ -430,22 +455,27 @@ define({
   'IterImpl<_, _>::flatten': ([self], ctx) =>
     flattened(ctx, iterOf(self), (item) => innerIter(ctx, item, ctx.typeArgs[0])),
   'IterImpl<_, _>::enumerate': ([self]) =>
-    adapter(iterOf(self), { index: 0 }, (src, state) => ({
-      next: () => {
-        const item = nextOf(src);
-        return item === DONE ? DONE : [BigInt(state.index++), item];
-      },
-      nextBack: () => {
-        const total = state.index + lengthOf(src);
-        const item = src.nextBack!();
-        return item === DONE ? DONE : [BigInt(total - 1), item];
-      },
-      remaining: () => lengthOf(src),
-    })),
+    adapter(
+      iterOf(self),
+      { index: 0 },
+      (src, state) => ({
+        next: () => {
+          const item = nextOf(src);
+          return item === DONE ? DONE : [BigInt(state.index++), item];
+        },
+        nextBack: () => {
+          const total = state.index + lengthOf(src);
+          const item = src.nextBack!();
+          return item === DONE ? DONE : [BigInt(total - 1), item];
+        },
+        remaining: () => lengthOf(src),
+      }),
+      undefined,
+      true
+    ),
   'IterImpl<_, _>::zip': ([self, other], ctx) =>
-    zipped(iterOf(self), iterOf(other), isTrustedRandomAccess(ctx.typeArgs[1], ctx.typeArgs[3])),
-  'std::iter::zip': ([a, b], ctx) =>
-    zipped(iterOf(a), iterOf(b), isTrustedRandomAccess(ctx.typeArgs[2], ctx.typeArgs[3])),
+    zipped(iterOf(self), iterOf(other), [ctx.typeArgs[1], ctx.typeArgs[3]]),
+  'std::iter::zip': ([a, b], ctx) => zipped(iterOf(a), iterOf(b), [ctx.typeArgs[2], ctx.typeArgs[3]]),
   'IterImpl<_, _>::chain': ([self, other]) =>
     adapter(
       iterOf(self),
@@ -634,9 +664,10 @@ function peekSource(self: Value): IterValue {
  * `next_back` does. When both are `TrustedRandomAccess`, `next` stops at the shorter one's end without taking from the
  * longer one, as `Zip`'s specialization for them reads by index.
  */
-// code-gauge-allow functionCognitiveComplexity 20 -- Follows `Zip`'s `next` and `next_back`.
-function zipped(first: IterValue, second: IterValue, trusted: boolean): IterValue {
-  return adapter(
+// code-gauge-allow functionCognitiveComplexity 21 -- Follows `Zip`'s `next` and `next_back`.
+function zipped(first: IterValue, second: IterValue, shapes: [Type, Type]): IterValue {
+  const trusted = isTrustedRandomAccess(...shapes);
+  const iter = adapter(
     first,
     { second },
     (src, state) => ({
@@ -660,6 +691,18 @@ function zipped(first: IterValue, second: IterValue, trusted: boolean): IterValu
     }),
     (state, cloneItem) => ({ second: forkIter(state.second, cloneItem) })
   );
+  if (isTrustedLen(...shapes)) iter.foldNext = zipFoldNext(first, second);
+  return iter;
+}
+
+/** `Zip`'s `fold` of two `TrustedLen` iterators: as many pairs as its size hint, and no more from the longer. */
+function zipFoldNext(first: IterValue, second: IterValue): () => Next {
+  return () => {
+    if (Math.min(lengthOf(first), lengthOf(second)) === 0) return DONE;
+    const a = nextOf(first);
+    const b = nextOf(second);
+    return a === DONE || b === DONE ? DONE : [a, b];
+  };
 }
 
 /** The shapes of the iterators that are `TrustedRandomAccess` themselves. */
@@ -762,10 +805,16 @@ function isTrustedRandomAccess(...shapes: Type[]): boolean {
 }
 
 /** Calls `f` on the elements in order until it returns a value, which it returns; undefined at the end. */
-function each<T>(ctx: NativeContext, iter: IterValue, f: (item: Value, index: number) => T | undefined): T | undefined {
+function each<T>(
+  ctx: NativeContext,
+  iter: IterValue,
+  f: (item: Value, index: number) => T | undefined,
+  fold = false
+): T | undefined {
+  const source = fold ? foldingView(iter) : iter;
   for (let index = 0; ; index++) {
     ctx.runtime.spend();
-    const item = nextOf(iter);
+    const item = nextOf(source);
     if (item === DONE) return undefined;
     const result = f(item, index);
     if (result !== undefined) return result;
@@ -781,14 +830,14 @@ define({
     const stop =
       stopVariant === undefined ? undefined : (item: Value) => (deref(item) as EnumValue).variant === stopVariant;
     if (builtin === 'Vec') return collectVec(ctx, iterOf(self), ctx.typeArgs[1], ctx.typeArgs[0]);
-    return collectInto(ctx, collectAll(ctx, iterOf(self), stop), ctx.typeArgs[2], ctx.typeArgs[0]);
+    return collectInto(ctx, collectAll(ctx, iterOf(self), stop, !stop), ctx.typeArgs[2], ctx.typeArgs[0]);
   },
   'IterImpl<_, _>::sum': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[2], '+'),
   'IterImpl<_, _>::product': ([self], ctx) => sumOrProduct(ctx, iterOf(self), ctx.typeArgs[2], '*'),
-  'IterImpl<_, _>::count': ([self], ctx) => BigInt(collectAll(ctx, iterOf(self)).length),
+  'IterImpl<_, _>::count': ([self], ctx) => BigInt(collectAll(ctx, iterOf(self), undefined, true).length),
   'IterImpl<_, _>::len': ([self]) => BigInt(lengthOf(iterOf(self))),
   'IterImpl<_, _>::last': ([self], ctx) => {
-    const items = collectAll(ctx, iterOf(self));
+    const items = collectAll(ctx, iterOf(self), undefined, true);
     return option(ctx, items.at(-1), items.length > 0);
   },
   'IterImpl<_, _>::nth': ([self, n], ctx) => {
@@ -801,7 +850,7 @@ define({
   },
   'IterImpl<_, _>::fold': ([self, init, f], ctx) => {
     let acc = init;
-    each(ctx, iterOf(self), (item) => void (acc = call(ctx, f, [acc, item])));
+    each(ctx, iterOf(self), (item) => void (acc = call(ctx, f, [acc, item])), true);
     return acc;
   },
   'IterImpl<_, _>::reduce': ([self, f], ctx) => {
@@ -809,11 +858,11 @@ define({
     const first = nextOf(iter);
     if (first === DONE) return none(ctx);
     let acc = first;
-    each(ctx, iter, (item) => void (acc = call(ctx, f, [acc, item])));
+    each(ctx, iter, (item) => void (acc = call(ctx, f, [acc, item])), true);
     return some(ctx, acc);
   },
   'IterImpl<_, _>::for_each': ([self, f], ctx) => {
-    each(ctx, iterOf(self), (item) => void call(ctx, f, [item]));
+    each(ctx, iterOf(self), (item) => void call(ctx, f, [item]), true);
     return [];
   },
   'IterImpl<_, _>::any': ([self, f], ctx) =>
@@ -942,9 +991,10 @@ function extreme(ctx: NativeContext, iter: IterValue, compare: (a: Value, b: Val
   const first = nextOf(iter);
   if (first === DONE) return none(ctx);
   let best = first;
+  const rest = foldingView(iter);
   for (;;) {
     ctx.runtime.spend();
-    const item = nextOf(iter);
+    const item = nextOf(rest);
     if (item === DONE) return some(ctx, best);
     if (!keepsBest(compare(best, item), sign)) best = item;
   }
@@ -956,9 +1006,10 @@ function extremeByKey(ctx: NativeContext, iter: IterValue, f: Value, keyType: Ty
   if (first === DONE) return none(ctx);
   let best = first;
   let bestKey = call(ctx, f, [first]);
+  const rest = foldingView(iter);
   for (;;) {
     ctx.runtime.spend();
-    const item = nextOf(iter);
+    const item = nextOf(rest);
     if (item === DONE) return some(ctx, best);
     const key = call(ctx, f, [item]);
     if (!keepsBest(compareValues(keyType, bestKey, key) ?? 0, sign)) {
@@ -972,12 +1023,38 @@ function keepsBest(order: number, sign: 1 | -1): boolean {
   return sign === 1 ? order > 0 : order <= 0;
 }
 
+/**
+ * The sum or product of `Result`s or `Option`s: of the values in `Ok` or `Some`, or the first `Err` or `None`, after
+ * which it takes no more elements.
+ */
+function sumOfOutcomes(ctx: NativeContext, iter: IterValue, t: Type & { kind: 'adt' }, op: '+' | '*'): Value {
+  const success = t.def.builtin === 'Result' ? 0 : 1;
+  let failure: EnumValue | undefined;
+  const values: Value[] = [];
+  each(ctx, iter, (item) => {
+    const outcome = deref(item) as EnumValue;
+    if (outcome.variant !== success) {
+      failure = outcome;
+      return true;
+    }
+    values.push(outcome.fields[0]);
+    return;
+  });
+  if (failure) return failure;
+  const total = sumOrProduct(ctx, arrayIter(values), t.args[0], op);
+  return new EnumValue(t.def, success, [total]);
+}
+
 function sumOrProduct(ctx: NativeContext, iter: IterValue, type: Type, op: '+' | '*'): Value {
   const t = normalize(shallow(type));
+  if (t.kind === 'adt' && (t.def.builtin === 'Result' || t.def.builtin === 'Option')) {
+    return sumOfOutcomes(ctx, iter, t, op);
+  }
   let total: Value = op === '+' ? (t.kind === 'float' ? -0 : 0n) : t.kind === 'float' ? 1 : 1n;
+  const source = foldingView(iter);
   for (;;) {
     ctx.runtime.spend();
-    const item = nextOf(iter);
+    const item = nextOf(source);
     if (item === DONE) return total;
     total =
       t.kind === 'float'
@@ -1011,7 +1088,8 @@ function intStep(ctx: NativeContext, type: Type, op: '+' | '*', total: bigint, v
 export function collectVec(ctx: NativeContext, iter: IterValue, shape: Type, elem: Type): Value[] {
   const exact = iteratorCapability(shape, 'exact') === 'yes' ? lengthOf(iter) : undefined;
   const source = inPlaceSource(iter, shape);
-  const items = collectAll(ctx, iter);
+  // `Vec::from_iter` folds a `TrustedLen` iterator and calls `next` on others.
+  const items = collectAll(ctx, iter, undefined, isTrustedLen(shape));
   ctx.runtime.allocate(items.length);
   const inPlace = source && inPlaceCapacity(source, layoutOf(elem));
   if (inPlace !== undefined) setVecCapacity(items, inPlace);

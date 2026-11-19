@@ -1,6 +1,8 @@
 import {
   changeString,
+  claimStrings,
   keepVecCapacity,
+  moveString,
   reservedCapacity,
   reserveVec,
   reserveVecExact,
@@ -13,7 +15,7 @@ import {
 } from '../capacity';
 import { iteratorCapability } from '../traits';
 import type { Type } from '../types';
-import { type IterValue, sliceLength, UNIT_VALUE, type Value } from '../values';
+import { ElementPlace, type IterValue, sliceLength, UNIT_VALUE, type Value } from '../values';
 import { isTrustedLen } from './iterators';
 import { sizeOf } from './layout';
 import { deref, type NativeContext, placeOf } from './support';
@@ -40,6 +42,15 @@ const VEC_GROWING: Record<string, (args: Value[]) => number> = {
   extend_from_slice: ([, other]) => sliceLength(deref(other)),
   append: ([, other]) => vec(other).length,
   resize: ([self, newLen]) => Math.max(0, Number(newLen as bigint) - vec(self).length),
+};
+
+/** The natives that give back the element at this index, which takes its capacity along when it is a `String`. */
+const TAKEN: Record<string, (args: Value[], len: number) => number> = {
+  pop: (_args, len) => len - 1,
+  pop_back: (_args, len) => len - 1,
+  pop_front: () => 0,
+  remove: ([, index]) => Number(index as bigint),
+  swap_remove: ([, index]) => Number(index as bigint),
 };
 
 /** The natives that may remove elements, after which the collection keeps its capacity. */
@@ -101,11 +112,16 @@ export function withCapacity(
       tracked[name] = (args, ctx) => {
         const items = vec(args[0]);
         reserveVec(items, items.length, additional(args), sizeOf(elemType(ctx)));
-        return native(args, ctx);
+        const result = native(args, ctx);
+        claimStrings(items);
+        return result;
       };
     } else if (VEC_SHRINKING.has(name)) {
       tracked[name] = (args, ctx) => {
-        keepVecCapacity(vec(args[0]), vec(args[0]).length);
+        const items = vec(args[0]);
+        keepVecCapacity(items, items.length);
+        const taken = TAKEN[name]?.(args, items.length);
+        if (taken !== undefined && taken < items.length) moveString(new ElementPlace(items, taken));
         return native(args, ctx);
       };
     }

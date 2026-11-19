@@ -138,8 +138,8 @@ export class SignatureInstance {
    * Relates the type parameters as their bounds say: `B: FromIterator<T>` builds a `B` of `T`s, and a closure
    * parameter `F: FnMut(T) -> B` makes `B`s of `T`s as its summary says.
    */
-  // code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of bound.
-  relateBounds(applyClosure: (callee: Layout, args: Layout[], result: Layout) => void): void {
+  // code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of bound.
+  relateBounds(applyClosure: (callee: Layout, args: Layout[], result: Layout, higherRanked: boolean[]) => void): void {
     const { fn } = this;
     for (const param of fn.params) {
       const layout = this.params.get(param) as Layout;
@@ -147,7 +147,11 @@ export class SignatureInstance {
       for (const bound of [...param.bounds, ...extra]) {
         if (bound.fnSig) {
           const args = bound.fnSig.params.map((type) => instantiate(type, this.subst, this.fresh));
-          applyClosure(layout, args, instantiate(bound.fnSig.ret, this.subst, this.fresh));
+          const { ret } = bound.fnSig;
+          const higherRanked = bound.fnSig.params.map(
+            (type) => type.kind === 'ref' && type.lifetime === undefined && !namesLifetime(ret)
+          );
+          applyClosure(layout, args, instantiate(ret, this.subst, this.fresh), higherRanked);
           continue;
         }
         for (const arg of bound.args) {
@@ -194,5 +198,14 @@ function forEachPart(
     visit(t.elem, actual.elem, invariant);
     return true;
   }
+  return false;
+}
+
+/** Whether a declared type holds a reference or a type with lifetimes, which a closure's result may borrow through. */
+function namesLifetime(type: Type): boolean {
+  if (type.kind === 'ref') return true;
+  if (type.kind === 'adt') return (type.lifetimes?.length ?? 0) > 0 || type.args.some(namesLifetime);
+  if (type.kind === 'tuple') return type.elems.some(namesLifetime);
+  if (type.kind === 'array' || type.kind === 'slice') return namesLifetime(type.elem);
   return false;
 }

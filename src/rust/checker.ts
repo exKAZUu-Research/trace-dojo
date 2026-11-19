@@ -122,6 +122,13 @@ export class Checker {
   private obligations: Obligation[] = [];
   /** The errors `?` converts whose type waits on a parse's target (`ParseError<F>`), to settle once it is known. */
   private pendingTryErrors: { from: Type; to: Type; span: Span }[] = [];
+  /** Arithmetic whose left operand's type is not known yet, with the variable its result's type is. */
+  private pendingBinaries: {
+    expr: Extract<Expr, { kind: 'binary' }>;
+    leftType: Type;
+    rightType: Type;
+    result: Type;
+  }[] = [];
   /** Bodies of functions declared in blocks, checked after the function around them. */
   private readonly nestedFns: FnDef[] = [];
   /** The context of each checked function, which the compiler reads. */
@@ -324,8 +331,22 @@ export class Checker {
     }
     this.finishBody(item.span);
     this.requireKnownTypes();
-    new BorrowChecker(this.annotations, this.solver).checkFn(item, this.body.fn, this.body.retType);
+    this.checkBorrows(() =>
+      new BorrowChecker(this.annotations, this.solver).checkFn(item, this.body.fn, this.body.retType)
+    );
     new ConstLint(this.annotations, this.body.module).check(item.body);
+  }
+
+  /** Runs the borrow checker, reporting its first error or a move by a `&` pattern, whichever comes first. */
+  private checkBorrows(check: () => void): void {
+    const moves = this.patternMoves.splice(0).toSorted((a, b) => a.span.row - b.span.row);
+    try {
+      check();
+    } catch (error) {
+      if (!(error instanceof CompileError) || moves.length === 0) throw error;
+      if (moves[0].span.row >= error.diagnostics[0].row) throw error;
+    }
+    if (moves.length > 0) compileError(moves[0].span, moves[0].message);
   }
 
   /** Coerces the value a function's body ends with to its result type. */
@@ -354,6 +375,24 @@ export class Checker {
         );
       }
       compileError(span, `関数 ${item.name} は ${typeToString(expected)} を返すはずですが、値を返していません。`);
+    }
+  }
+
+  /**
+   * Rejects an expression whose type is not known yet at the variable it is read from, whose type rustc asks for
+   * (E0282), when its type is not known either.
+   */
+  private unknownLocal(expr: Expr): void {
+    let root = expr;
+    while (root.kind === 'index' || root.kind === 'field') root = root.operand;
+    const res = root.kind === 'path' ? this.annotations.paths.get(root) : undefined;
+    if (res?.kind !== 'local') return;
+    const type = resolve(res.local.type);
+    if (hasVars(type)) {
+      compileError(
+        res.local.span,
+        `変数 ${res.local.name} の型が決まりません（${typeToString(type)} の型を書いてください）。`
+      );
     }
   }
 
@@ -399,7 +438,7 @@ export class Checker {
     this.settleTryErrors(final);
     let progress = true;
     while (progress) {
-      progress = false;
+      progress = this.settleBinaries(false);
       const pending = this.obligations;
       this.obligations = [];
       for (const obligation of pending) {
@@ -410,6 +449,7 @@ export class Checker {
       }
     }
     if (!final) return;
+    this.settleBinaries(true);
     // Literal variables take their defaults, which may settle what remains.
     for (const obligation of this.obligations) resolve(obligation.type, true);
     const remaining = this.obligations;
@@ -422,6 +462,58 @@ export class Checker {
         this.requireKnownTypes();
         compileError(obligation.span, `型が決まりません（${typeToString(obligation.type)} の型を書いてください）。`);
       }
+    }
+  }
+
+  /**
+   * Gives each pending operator its result type once its operands' types are known: rustc waits while the left one is
+   * a type variable or an untyped number, which finally takes its default type (`i32`, `f64`), or the right one is a
+   * type variable. Whether any was settled.
+   */
+  private settleBinaries(final: boolean): boolean {
+    const pending = this.pendingBinaries;
+    this.pendingBinaries = [];
+    let settled = false;
+    for (const binary of pending) {
+      const left = normalize(shallow(final ? resolve(binary.leftType, true) : binary.leftType));
+      const right = normalize(shallow(binary.rightType));
+      // An untyped number on the right takes the left's type, as the one impl for it does.
+      const rightUnknown = this.numericOperand(right);
+      if (
+        !final &&
+        (this.numericOperand(left).kind === 'var' || (rightUnknown.kind === 'var' && !rightUnknown.v.literal))
+      ) {
+        this.pendingBinaries.push(binary);
+        continue;
+      }
+      settled = true;
+      this.settleBinary(binary, left, right);
+    }
+    return settled;
+  }
+
+  private settleBinary(
+    { expr, leftType, rightType, result }: (typeof this.pendingBinaries)[number],
+    left: Type,
+    right: Type
+  ): void {
+    const l = this.numericOperand(left);
+    const r = this.numericOperand(right);
+    if (l.kind === 'var' || (r.kind === 'var' && !r.v.literal)) {
+      this.requireKnownTypes();
+      compileError(expr.opSpan, `型が決まりません（${typeToString(resolve(leftType))} の型を書いてください）。`);
+    }
+    let output: Type;
+    const bitwise = expr.op === '&' || expr.op === '|' || expr.op === '^';
+    if (expr.op === '+' && l.kind === 'adt' && l.def.builtin === 'String' && isStrLike(r)) output = l;
+    else if (bitwise && l.kind === 'bool' && this.unifier.tryUnify(l, r)) output = l;
+    else if (isArithmeticOperand(l) && !(bitwise && l.kind === 'float') && this.unifier.tryUnify(l, r)) output = l;
+    else this.badOperands(expr, leftType, rightType);
+    if (!this.unifier.tryUnify(result, output)) {
+      compileError(
+        expr.opSpan,
+        `${typeToString(resolve(left))} ${expr.op} ${typeToString(resolve(right))} の結果は ${typeToString(resolve(output))} ですが、${typeToString(resolve(result))} が必要です。`
+      );
     }
   }
 
@@ -1713,13 +1805,14 @@ export class Checker {
     });
   }
 
-  // code-gauge-allow functionNcss 34 -- Follows rustc's method probe and its checks step by step.
+  // code-gauge-allow functionNcss 37 -- Follows rustc's method probe and its checks step by step.
   private methodCall(expr: Extract<Expr, { kind: 'methodCall' }>, expected: Type | undefined): Type {
     const receiverType = this.settled(this.expr(expr.receiver, undefined));
     const resolvedReceiver = normalize(shallow(receiverType));
     let stripped = resolvedReceiver;
     while (stripped.kind === 'ref') stripped = normalize(shallow(stripped.target));
     if (stripped.kind === 'var' && !stripped.v.literal) {
+      this.unknownLocal(expr.receiver);
       compileError(
         expr.methodSpan,
         `型が決まらないので、メソッド ${expr.method} を呼べません（変数の型を書いてください）。`
@@ -1762,6 +1855,7 @@ export class Checker {
     this.args(expr.args, sig.params, this.expectations(sig.ret, sig.params, expected));
     this.annotations.methods.set(expr, { fn, typeArgs: found.typeArgs, receiver: found.adjust });
     if (fn.selfMode === 'value') this.checkMoveOutOfRef(expr, found.adjust, found.selfType);
+    if (expr.method === 'map') return arrayMapResult(stripped, found.selfType, sig.ret);
     return sig.ret;
   }
 
@@ -2003,6 +2097,13 @@ export class Checker {
       isArithmetic || op === '&' || op === '|' || op === '^' ? expected : undefined
     );
     const left = this.numericOperand(leftType);
+    // rustc picks the impl of an operator on a type not known yet (a closure's parameter) once it is known, and the
+    // result's type with it, as the projection `<L as Add<R>>::Output` does.
+    if (left.kind === 'var' && !left.v.literal && op !== '<<' && op !== '>>') {
+      const result = freshVar();
+      this.pendingBinaries.push({ expr, leftType, rightType: this.expr(expr.right, undefined), result });
+      return result;
+    }
     if (op === '+' && left.kind === 'adt' && left.def.builtin === 'String') {
       this.coerceExpr(expr.right, REF_STR);
       return left;
@@ -2664,7 +2765,8 @@ export class Checker {
    * Checks a pattern against the type of the value it matches, declaring its bindings. Matching a reference with a
    * pattern that is not a reference pattern looks through it and binds by reference, as Rust's match ergonomics do.
    */
-  checkPattern(pattern: Pattern, type: Type, mode: LocalVar['mode']): void {
+  /** `inherited`: the outer reference of `type` is the one a default binding mode gives the field (`ref`). */
+  checkPattern(pattern: Pattern, type: Type, mode: LocalVar['mode'], inherited = false): void {
     pattern.ty = type;
     let t = normalize(shallow(type));
     let bindingMode = mode;
@@ -2703,6 +2805,8 @@ export class Checker {
         return;
       }
       case 'lit': {
+        // A string literal is a reference, which rustc matches against the type as it is, without its references.
+        if (pattern.expr.kind === 'str') this.strLiteralPattern(pattern, type, inherited);
         derefForMatch();
         const litType = this.expr(pattern.expr, t);
         if (pattern.expr.kind === 'str') {
@@ -2736,7 +2840,8 @@ export class Checker {
           this.checkPattern(
             elem,
             bindingMode === 'move' ? t.elems[index] : ref(t.elems[index], bindingMode === 'refMut'),
-            bindingMode === 'move' ? mode : 'move'
+            bindingMode === 'move' ? mode : 'move',
+            bindingMode !== 'move'
           );
           this.fixBindingMode(elem, bindingMode);
         }
@@ -2766,7 +2871,10 @@ export class Checker {
             `パターンの型が合いません（${typeToString(resolve(type))} に ${pattern.mutable ? '&mut' : '&'} のパターンは合いません）。`
           );
         }
-        if (mode !== 'move') compileError(pattern.span, '参照に合わせたパターンの中には、& のパターンを書けません。');
+        // Edition 2024 rejects `&` where the default binding mode borrows.
+        if (mode !== 'move' || inherited) {
+          compileError(pattern.span, '参照に合わせたパターンの中には、& のパターンを書けません。');
+        }
         const target = t.target;
         this.checkPattern(pattern.pattern, target, 'move');
         this.deferredChecks.push(() => {
@@ -2775,10 +2883,10 @@ export class Checker {
             !this.annotations.paths.has(pattern.pattern) &&
             !this.solver.isCopy(resolve(target, true))
           ) {
-            compileError(
-              pattern.span,
-              `& のパターンで取り出すと値が動くので、${typeToString(resolve(target))} には使えません（& を外してください）。`
-            );
+            this.patternMoves.push({
+              span: pattern.span,
+              message: `& のパターンで取り出すと値が動くので、${typeToString(resolve(target))} には使えません（& を外してください）。`,
+            });
           }
         });
         return;
@@ -2809,6 +2917,19 @@ export class Checker {
   }
 
   private orBindings: Map<string, LocalVar> | undefined;
+  /** Moves out of a reference by `&` patterns, which rustc's borrow checker reports in order with its other errors. */
+  private patternMoves: { span: Span; message: string }[] = [];
+
+  /** A string literal pattern matches a `&str`, or a `str` behind it; a `&&str` it does not reach (E0308). */
+  private strLiteralPattern(pattern: Pattern, type: Type, inherited: boolean): void {
+    let t = normalize(shallow(type));
+    if (inherited && t.kind === 'ref') t = normalize(shallow(t.target));
+    if (t.kind !== 'ref') return;
+    const target = normalize(shallow(t.target));
+    if (target.kind === 'ref') {
+      compileError(pattern.span, `型が合いません（${typeToString(resolve(type))} が必要ですが、&str です）。`);
+    }
+  }
 
   /** Subpatterns of a tuple matched by reference already have their types as references. */
   private fixBindingMode(_pattern: Pattern, _mode: LocalVar['mode']): void {}
@@ -2903,7 +3024,9 @@ export class Checker {
           `${variant.name} のパターンの要素の数が合いません（${variant.fields.length} 個です）。`
         );
       }
-      for (const [index, elem] of pattern.elems.entries()) this.checkPattern(elem, fieldType(index), subMode);
+      for (const [index, elem] of pattern.elems.entries()) {
+        this.checkPattern(elem, fieldType(index), subMode, bindingMode !== 'move');
+      }
       return;
     }
     if (variant.shape !== 'named')
@@ -2914,7 +3037,7 @@ export class Checker {
       if (index === -1) compileError(field.span, `${variant.name} にフィールド ${field.name} がありません。`);
       seen.add(field.name);
       if (res.def.kind === 'struct') this.checkFieldVisible(res.def, variant.fields[index], field.span);
-      this.checkPattern(field.pattern, fieldType(index), subMode);
+      this.checkPattern(field.pattern, fieldType(index), subMode, bindingMode !== 'move');
     }
     const missing = variant.fields.filter((f) => !seen.has(f.name));
     if (missing.length > 0) {
@@ -3306,4 +3429,14 @@ function mentionsParam(type: Type, param: TypeParam): boolean {
   const t = shallow(type);
   if (t.kind === 'param') return t.param === param;
   return childTypes(t).some((child) => mentionsParam(child, param));
+}
+
+/** An array's `map` gives an array of its length, which the declaration on `[T]` cannot say. */
+function arrayMapResult(receiver: Type, selfType: Type, ret: Type): Type {
+  const self = normalize(shallow(selfType));
+  const r = normalize(shallow(ret));
+  if (receiver.kind === 'array' && self.kind === 'slice' && r.kind === 'slice') {
+    return { kind: 'array', elem: r.elem, len: receiver.len };
+  }
+  return ret;
 }

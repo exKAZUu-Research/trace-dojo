@@ -302,6 +302,18 @@ test.each([
     2,
     'fn f(s: &str) -> Result<f64, std::num::ParseIntError> {\n    let x: f64 = s.parse()?;\n    Ok(x)\n}',
   ],
+  [
+    "an operator's result whose type a closure's parameter decides only after it is used",
+    '    let add = |a, b| a + b;\n    let x: u8 = add(200, 50);',
+    2,
+  ],
+  ['a & pattern where the default binding mode borrows (edition 2024)', '    for (a, &b) in &vec![(1, &2)] {}', 2],
+  [
+    'a key that borrows from the element in sort_by_key',
+    '    let mut v = vec![String::from("a")];\n    v.sort_by_key(|s| s);',
+    3,
+  ],
+  ['trim_matches with a string pattern', '    let t = "xxaxx".trim_matches("xx");', 2],
   ['mismatched types', '    let x: i32 = "a";', 2],
 ])('rustc rejects %s before running', (_name, body, row, items = '') => {
   const execution = executeProgram('rust', rustMain(body, items));
@@ -512,6 +524,28 @@ fn main() {
   expect(executeProgram('rust', program)).toMatchObject({
     kind: 'executed',
     stdout: '4 4 4 4 8 8 8 3\n1 24 24 8\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('closures, sums of Results, arrays, ranges, moved Strings, and zips run as rustc runs them', () => {
+  const program = `fn make() -> String {
+    let mut t = String::with_capacity(9);
+    t.push('a');
+    t
+}
+fn main() {
+    let square = |x| x * x;
+    let w: Vec<i32> = vec![1, 2, 3].iter().map(square).collect();
+    let s: Result<i32, String> = vec![Ok(1), Ok(2)].into_iter().sum();
+    let a = [1, 2, 3].map(|x| x * 10);
+    let names = vec![make()];
+    let z: Vec<(i32, i32)> = [1, 2, 3].iter().map(|&x| { print!("L{} ", x); x }).zip([7, 8].iter().map(|&x| x).take(1)).collect();
+    println!("{:?} {:?} {:?} {} {} {:?}", w, s, a, (1..4).eq(vec![1, 2, 3]), names[0].capacity(), z);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'L1 [1, 4, 9] Ok(3) [10, 20, 30] true 9 [(1, 7)]\n',
     uncaughtException: undefined,
   });
 });

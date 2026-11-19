@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 760 -- One rule per trait or conversion of the standard library.
+// code-gauge-allow-file fileNcss 774 -- One rule per trait or conversion of the standard library.
 import { isPseudo, normalize, type Unifier } from './infer';
 import type { Module, Program } from './items';
 import { supportsDebug } from './iterDebug';
@@ -10,6 +10,7 @@ import {
   type ImplDef,
   INT_NAMES,
   intType,
+  isBuiltin,
   isIteratorShape,
   isSigned,
   shallow,
@@ -453,6 +454,12 @@ export class TraitSolver {
         if (t.kind === 'int' || t.kind === 'float' || t.kind === 'bool' || t.kind === 'char') return 'yes';
         return t.kind === 'adt' && t.def.builtin === 'String' ? 'yes' : 'no';
       }
+      case 'DoubleEndedPattern': {
+        // A pattern whose searcher finds the same matches from either end: not a string (`DoubleEndedSearcher`).
+        const target = t.kind === 'ref' ? normalize(shallow(t.target)) : undefined;
+        if (target && (target.kind === 'str' || target.kind === 'ref' || isBuiltin(target, 'String'))) return 'no';
+        return this.builtinImplements(t, { trait: this.program.traitDef('Pattern'), args: [] });
+      }
       case 'Pattern': {
         if (t.kind === 'char') return 'yes';
         if (t.kind === 'fn') {
@@ -562,6 +569,14 @@ export class TraitSolver {
       case 'Sum':
       case 'Product': {
         const [item] = ref.args;
+        // `Result<T, E>` sums `Result<U, E>`s and `Option<T>` sums `Option<U>`s when `T` sums `U`s, stopping at an error.
+        if (t.kind === 'adt' && (t.def.builtin === 'Result' || t.def.builtin === 'Option')) {
+          const element = normalize(shallow(item));
+          if (element.kind === 'var') return 'unknown';
+          if (element.kind !== 'adt' || element.def !== t.def) return 'no';
+          if (t.def.builtin === 'Result' && !this.unifier.tryUnify(t.args[1], element.args[1])) return 'no';
+          return this.implements(t.args[0], { trait: ref.trait, args: [element.args[0]] });
+        }
         if (t.kind !== 'int' && t.kind !== 'float') return 'no';
         const element = shallow(item);
         const inner = element.kind === 'ref' ? shallow(element.target) : element;

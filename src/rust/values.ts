@@ -177,6 +177,12 @@ export class IterValue {
   /** Elements pushed back by `peekable`. */
   peeked: Next[] | undefined;
 
+  /**
+   * The next element when a consumer folds the iterator (`collect`, `sum`, `for_each`), where it differs from `next`:
+   * a `zip` of two `TrustedLen` iterators folds as many pairs as the shorter has, taking nothing more from the longer.
+   */
+  foldNext: (() => Next) | undefined;
+
   /** The elements left, for iterators over an array (`Chars::as_str` reads them without taking them). */
   rest: (() => Value[]) | undefined;
 

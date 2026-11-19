@@ -1,4 +1,4 @@
-import { isPlace, type Place, type Value } from './values';
+import { ElementPlace, EnumValue, isPlace, type Place, StructValue, type Value } from './values';
 
 /**
  * The capacities of the collections: as `RawVec` grows a `Vec`, a `VecDeque`, and a `BinaryHeap`, whose arrays do not
@@ -126,33 +126,54 @@ export function setStringCapacity(place: Place, capacity: number): void {
 }
 
 /**
- * A `String` just made with a capacity other than its length (`String::with_capacity`, `i32::to_string`, `a + b`),
- * which the `let` or the assignment that stores it claims, if it stores it before any other is made.
+ * The `String`s in flight in the current statement with a capacity other than their length, by their text: made by
+ * `String::with_capacity`, an integer's `to_string`, or `a + b`, or moved out of where they were stored. The place
+ * that stores one next (a variable, a parameter, a field, an element) claims its capacity.
  */
-let made: { text: string; capacity: number } | undefined;
+const inFlight = new Map<string, number>();
 
 export function madeString(text: string, capacity: number): string {
-  made = capacity === utf8Length(text) ? undefined : { text, capacity };
+  if (capacity === utf8Length(text)) inFlight.delete(text);
+  else inFlight.set(text, capacity);
   return text;
 }
 
-/**
- * Before a `let` or an assignment of a `String`: what was made before it is not what it stores, but the `String` it
- * moves from a variable keeps its capacity.
- */
-export function forgetMadeString(movedFrom?: Place): void {
-  made = movedFrom && { text: movedFrom.get() as string, capacity: stringCapacity(movedFrom) };
+/** A `String` moved out of a place takes its capacity along, as do the `String` fields of a struct or an enum. */
+export function moveString(place: Place): void {
+  const value = place.get();
+  if (typeof value === 'string') madeString(value, stringCapacity(place));
+  else if (value instanceof StructValue || value instanceof EnumValue) {
+    for (let index = 0; index < value.fields.length; index++) {
+      if (typeof value.fields[index] === 'string') moveString(new ElementPlace(value.fields, index));
+    }
+  }
 }
 
-/** After a `let` or an assignment of a `String`: the place it stored keeps the capacity it was made with. */
-export function claimMadeString(place: Place): void {
-  if (made && made.text === place.get()) setStringCapacity(place, made.capacity);
-  made = undefined;
+/** At the start of a statement: the strings in flight before it have been stored or dropped. */
+export function settleStrings(): void {
+  if (inFlight.size > 0) inFlight.clear();
+}
+
+/** A place that stores a `String` in flight keeps the capacity it had. */
+export function claimString(place: Place): void {
+  if (inFlight.size === 0) return;
+  const text = place.get();
+  const capacity = typeof text === 'string' ? inFlight.get(text) : undefined;
+  if (capacity === undefined) return;
+  setStringCapacity(place, capacity);
+  inFlight.delete(text as string);
+}
+
+/** The elements of a new struct, tuple, array, or `Vec` that are `String`s in flight keep their capacities. */
+export function claimStrings(elements: Value[]): Value[] {
+  if (inFlight.size > 0)
+    for (let index = 0; index < elements.length; index++) claimString(new ElementPlace(elements, index));
+  return elements;
 }
 
 /** `a + b` of a `String` and a `&str`, which pushes onto `a` and so grows it as `push_str` does. */
 export function concatStrings(left: string, right: string): string {
-  const capacity = made && made.text === left ? made.capacity : utf8Length(left);
+  const capacity = inFlight.get(left) ?? utf8Length(left);
   return madeString(left + right, reservedCapacity(capacity, utf8Length(left), utf8Length(right), 1));
 }
 

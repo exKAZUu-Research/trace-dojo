@@ -79,7 +79,7 @@ const RANGE_ITERATORS = new Set(['Range', 'RangeInclusive', 'RangeFrom']);
  * then by shared reference, then by mutable reference; inherent methods before trait methods, of the standard
  * library's traits those that `inScope` accepts.
  */
-// code-gauge-allow functionCognitiveComplexity 18 -- Follows rustc's method probe step by step.
+// code-gauge-allow functionCognitiveComplexity 22 -- Follows rustc's method probe step by step.
 export function lookupMethod(
   program: Program,
   solver: TraitSolver,
@@ -91,14 +91,13 @@ export function lookupMethod(
   for (const step of steps) {
     const stepType = normalize(shallow(step.type));
     if (stepType.kind === 'var' && !stepType.v.literal) return 'ambiguous';
+    // A range is its own iterator: its `Iterator` methods come at each autoref with its other trait methods.
+    const asIter = isRangeIterator(stepType) ? rangeAsIter(program, stepType) : undefined;
     for (const autoref of ['none', 'ref', 'mut'] as const) {
       const found = probe(program, solver, stepType, autoref, name, inScope);
-      if (found) {
-        return {
-          ...found,
-          adjust: { derefs: step.derefs, autoref, asIter: false },
-        };
-      }
+      if (found) return { ...found, adjust: { derefs: step.derefs, autoref, asIter: false } };
+      const iterFound = asIter && probe(program, solver, asIter, autoref, name);
+      if (iterFound) return { ...iterFound, adjust: { derefs: step.derefs, autoref, asIter: true } };
     }
     if (stepType.kind === 'var') return 'ambiguous';
   }
@@ -111,18 +110,23 @@ export function lookupMethod(
       return probeAsIter(program, solver, bounded, name, true);
     }
   }
-  // A range is an iterator: its methods are those of `Iter`.
-  const range = steps.find((step) => {
-    const t = shallow(step.type);
-    return t.kind === 'adt' && RANGE_ITERATORS.has(t.def.builtin as string);
-  });
-  if (range) return probeAsIter(program, solver, range, name, true);
   // `char::to_uppercase`'s iterator is an iterator of `char`s that also displays as its text.
   const caseIter = steps.find((step) => isBuiltin(shallow(step.type), 'CaseIter'));
   return caseIter && probeAsIter(program, solver, caseIter, name, false);
 }
 
-/** Finds a method of iterators for a receiver that is an iterator of another type (a range). */
+function isRangeIterator(type: Type): boolean {
+  return type.kind === 'adt' && RANGE_ITERATORS.has(type.def.builtin as string);
+}
+
+/** The `Iter` type a range is as an iterator, when its elements step. */
+function rangeAsIter(program: Program, range: Type): Type | undefined {
+  const item = intoIterItem(range);
+  const shape = intoIterShape(program, range);
+  return item && shape && program.iterType(item, shape);
+}
+
+/** Finds a method of iterators for a receiver that is an iterator of another type. */
 function probeAsIter(
   program: Program,
   solver: TraitSolver,
@@ -263,10 +267,21 @@ function matchSelf(
 ): Omit<MethodMatch, 'adjust'> | undefined {
   const selfType = selfForMode(fn.selfMode!, receiverType);
   if (!selfType) return undefined;
-  const subst = solver.matchImpl(impl, selfType);
+  const subst = solver.matchImpl(impl, arrayAsSlice(fn, selfType));
   if (!subst) return undefined;
   const implArgs = impl.params.map((param) => subst.get(param) as Type);
   return { fn, typeArgs: [...implArgs, ...ownParams(fn)], selfType: substitute(impl.selfType, subst) };
+}
+
+/**
+ * An array taken by value as the slice of its elements, for the methods of `[T; N]` that the standard library's
+ * declarations write on `[T]`, having no length parameters (`map`, whose result has the array's length).
+ */
+function arrayAsSlice(fn: FnDef, selfType: Type): Type {
+  const t = normalize(shallow(selfType));
+  const declared = fn.impl && normalize(shallow(fn.impl.selfType));
+  const takesArray = fn.selfMode === 'value' && declared?.kind === 'slice' && (fn.module as { isStd?: boolean }).isStd;
+  return takesArray && t.kind === 'array' ? { kind: 'slice', elem: t.elem } : selfType;
 }
 
 /** A trait's default method, called on a type with an impl of the trait that does not override it. */
