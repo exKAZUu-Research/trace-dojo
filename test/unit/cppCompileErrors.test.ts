@@ -306,6 +306,16 @@ test.each([
     2,
   ],
   ['int main() { const int& value = 3;\nconstexpr int copied = value; }', 1],
+  [
+    'const int count = 3;\nint main() { int calls = 0; const int& a = count; const int& b = (++calls, a);\nconstexpr int copied = b; }',
+    2,
+  ],
+  [
+    'const double rate = 1.5;\nstruct Holder { inline static const double& value = rate; };\nconstexpr double copied = Holder::value;\nint main() {}',
+    2,
+  ],
+  ['const float rate = 1.5f;\nconst float& value = rate + 1.0f;\nconstexpr float copied = value;\nint main() {}', 2],
+  ['int main() { const double rate = 1.5;\nconstexpr double copied = rate * 2; }', 1],
 ])('a reference must designate a readable constant for constexpr initialization', (source, row) => {
   expect(executeProgram('cpp', source)).toMatchObject({
     kind: 'compileError',

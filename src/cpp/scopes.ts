@@ -1,12 +1,26 @@
-import type { Expr } from './expr';
+import type { ConstantLocation, Expr } from './expr';
 import type { LibraryTemplate } from './library/registry';
-import type { Frame, LocalInfo } from './runtime';
+import type { Eval, Frame, LocalInfo } from './runtime';
 import type { ClassInfo, FieldInfo, FunctionInfo, GlobalInfo, StaticFieldInfo, Type } from './types';
-import type { Value } from './values';
+import type { Ptr, Value } from './values';
+
+export interface ConstantReference {
+  value?: number | bigint;
+  constantLocation?: ConstantLocation;
+  locateBeforeEntry?: Eval<Ptr>;
+}
 
 /** What a name denotes. */
 export type Entity =
-  | { kind: 'local'; local: LocalInfo; isReference: boolean; constant?: number | bigint }
+  | {
+      kind: 'local';
+      local: LocalInfo;
+      isReference: boolean;
+      isConstexpr?: boolean;
+      constant?: number | bigint;
+      constantReference?: ConstantReference;
+      staticStorage?: GlobalInfo;
+    }
   | { kind: 'global'; global: GlobalInfo; isReference: boolean; constant?: number | bigint }
   | { kind: 'functions'; functions: FunctionInfo[] }
   | { kind: 'field'; field: FieldInfo }

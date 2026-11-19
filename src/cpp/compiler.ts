@@ -462,6 +462,7 @@ export class Compiler extends StatementCompiler {
     const global = this.declareStaticStorage(`${cls.name}::${name}`, type, row, !isConstType(type));
     info.global = global;
     global.isDefined = isInline;
+    global.isConstexpr = isConstexpr;
     if (initializer || (isInline && (type.kind === 'reference' || this.isClassType(type))))
       info.constant = this.initializeGlobal(global, type, initializer, row, directInitializer, isConstexpr);
     if (!isInline && initializer && info.constant === undefined)
@@ -1562,6 +1563,7 @@ export class Compiler extends StatementCompiler {
     const isConstant = isConstType(type) && isArithmetic(type);
     const global = this.declareStaticStorage(name, type, declarator.row, !isConstant);
     global.isDefined = true;
+    global.isConstexpr = isConstexpr;
     global.isConstexprPointer = isConstexpr && type.kind === 'pointer';
     const direct = !hasToken(declarator, '=');
     const constant = isConstexpr ? this.requireConstantInitializer(type, value, declarator.row, direct) : undefined;
@@ -1596,7 +1598,7 @@ export class Compiler extends StatementCompiler {
     if (isConstexpr && !binding.isConstant) this.error(row, 'constexpr の変数の初期値には定数式を書いてください。');
     global.hasStaticReferenceBinding = binding.isConstant;
     global.constantLocation = binding.isConstant ? binding.constantLocation : undefined;
-    global.referentConstant = this.constantReferenceValue(binding, true);
+    global.referentConstant = this.constantReference(binding, true)?.value;
     const initializers = binding.isConstant ? this.constantInitializers : this.dynamicInitializers;
     initializers.push(this.staticReferenceInitializer(global, binding, row, true));
   }
@@ -1746,6 +1748,8 @@ export class Compiler extends StatementCompiler {
     const init = this.staticInitialization(type, value, row, direct);
     const { index } = global;
     if (!init) return { run: () => {}, isCreation: false };
+    if ((type.kind === 'class' || type.kind === 'array') && isConstType(type))
+      global.hasConstantObjectValue = init.isConstant;
     const register = this.staticRegistration(type, row);
     const initialize = this.fullExpression<undefined>((frame) => {
       const box = frame.runtime.globals[index] as Box;

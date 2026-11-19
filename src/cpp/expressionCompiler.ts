@@ -275,19 +275,26 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         const { slot, type } = entity.local;
         const constant = entity.constant;
         if (entity.isReference) {
+          const reference = entity.constantReference;
+          const locate = reference?.locateBeforeEntry;
           return {
             type: nonReference(type),
             isLvalue: true,
             row,
-            constant,
-            run: (frame) => frame.slots[slot] as Ptr,
+            constant: reference?.value,
+            constantReferenceBinding: reference !== undefined,
+            staticAddress: locate !== undefined,
+            constantInitialization: locate !== undefined && hasConstantObject(reference?.constantLocation),
+            constantLocation: locate ? reference?.constantLocation : undefined,
+            run: locate ?? ((frame) => frame.slots[slot] as Ptr),
           };
         }
+        if (entity.staticStorage) return this.staticStorageExpr(entity.staticStorage, row, constant);
         return {
           type,
           isLvalue: true,
           row,
-          constant,
+          ...arithmeticVariableValue(type, constant, entity.isConstexpr),
           constantDesignation: true,
           run: (frame) => {
             const store = frame.slots[slot];
@@ -514,7 +521,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type: nonReference(type),
       isLvalue: true,
       row,
-      constant: evaluateObject ? undefined : known,
+      ...arithmeticVariableValue(type, evaluateObject ? undefined : known, global.isConstexpr),
       staticAddress: !evaluateObject && (!isReference || global.hasStaticReferenceBinding),
       constantInitialization:
         !evaluateObject && (isReference ? hasConstantObject(constantLocation) : global.hasConstantObjectValue),
@@ -700,10 +707,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       run: (frame) => operation(aRun(frame) as number, bRun(frame) as number),
       memberConstant: mapMemberConstants([a, b], ([first, second]) => operation(first, second)),
     };
-    if (a.constant !== undefined && b.constant !== undefined) {
+    const knownA = a.constant ?? a.foldedValue;
+    const knownB = b.constant ?? b.foldedValue;
+    if (knownA !== undefined && knownB !== undefined) {
       try {
-        const constant = operation(a.constant, b.constant);
-        expr.constant = constant;
+        const constant = operation(knownA, knownB);
+        if (a.constant !== undefined && b.constant !== undefined) expr.constant = constant;
+        else expr.foldedValue = constant;
         expr.run = () => constant;
       } catch {
         // An operation that fails (such as dividing by zero) is no constant; it stops the program when it runs.
@@ -925,9 +935,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         return [-left, right];
       });
     }
-    if (converted.constant !== undefined) {
+    const known = converted.constant ?? converted.foldedValue;
+    if (known !== undefined) {
       try {
-        expr.constant = operation(converted.constant);
+        const constant = operation(known);
+        if (converted.constant !== undefined) expr.constant = constant;
+        else expr.foldedValue = constant;
       } catch {
         // Overflow is no constant.
       }
@@ -1196,6 +1209,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       isXvalue: isLvalue && left.isXvalue,
       row: node.row,
       constant: chosen?.constant,
+      foldedValue: chosen?.foldedValue,
       memberConstant: memberCondition
         ? (members) => {
             const value = memberCondition(members);
@@ -1209,6 +1223,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       constantStringLength: chosen?.constantStringLength,
       staticAddress: chosen?.staticAddress,
       constantDesignation: chosen?.constantDesignation,
+      constantReferenceBinding: chosen?.constantReferenceBinding,
       constantPointerValue: chosen?.constantPointerValue,
       run: (...args) => choose(args[0]).run(...args),
       temporaryBinding:
@@ -1298,6 +1313,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const expr: Expr = {
       ...right,
       constant: hasConstantLeft ? right.constant : undefined,
+      foldedValue: hasConstantLeft ? right.foldedValue : undefined,
       memberConstant: hasConstantLeft
         ? right.memberConstant
         : mapMemberConstants([value, right], ([, result]) => result),
@@ -1310,6 +1326,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       constantStringLength: hasConstantLeft ? right.constantStringLength : undefined,
       staticAddress: hasConstantLeft ? right.staticAddress : undefined,
       constantDesignation: hasConstantLeft ? right.constantDesignation : undefined,
+      constantReferenceBinding: hasConstantLeft ? right.constantReferenceBinding : undefined,
       constantPointerValue: hasConstantLeft ? right.constantPointerValue : undefined,
       temporaryBinding:
         temporaryBinding &&
@@ -2039,6 +2056,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return this.error(row, `auto* の初期値にポインタを書いてください（${typeName(actual)}）。`);
     return pointerTo(this.deduceAutoPattern(declared.to, actual.to, row), isConst);
   }
+}
+
+function arithmeticVariableValue(
+  type: Type,
+  value: number | bigint | undefined,
+  isConstexpr: boolean | undefined
+): Pick<Expr, 'constant' | 'foldedValue'> {
+  return type.kind === 'float' && !isConstexpr ? { foldedValue: value } : { constant: value };
 }
 
 function compoundAssignmentFactors(frame: Frame): FloatingFactors {

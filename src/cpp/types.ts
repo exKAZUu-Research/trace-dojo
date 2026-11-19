@@ -90,6 +90,7 @@ export interface GlobalInfo {
   index: number;
   row: number;
   isDefined: boolean;
+  isConstexpr?: boolean;
   hasStaticReferenceBinding?: boolean;
   referentConstant?: number | bigint;
   isConstexprPointer?: boolean;

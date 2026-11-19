@@ -304,15 +304,16 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
 
   rvalue(expr: Expr): Expr {
     if (!expr.isLvalue) return expr;
-    if (expr.constant !== undefined || expr.readConstant) {
-      const constant = expr.constant;
+    const known = expr.constant ?? expr.foldedValue;
+    if (known !== undefined || expr.readConstant) {
       return {
         type: unqualified(expr.type),
         isLvalue: false,
         row: expr.row,
-        constant,
+        constant: expr.constant,
+        foldedValue: expr.foldedValue,
         onlyCalls: expr.onlyCalls,
-        run: expr.readConstant ?? (() => constant),
+        run: expr.readConstant ?? (() => known),
       };
     }
     const { type, run } = expr;

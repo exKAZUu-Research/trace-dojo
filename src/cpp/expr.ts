@@ -53,6 +53,8 @@ export interface Expr extends ConstantValue {
   row: number;
   /** The value of a constant expression of arithmetic type, which array lengths and `case` labels need. */
   constant?: number | bigint;
+  /** A value clang++ folds when generating code but which C++ constant expressions cannot read. */
+  foldedValue?: number | bigint;
   isThis?: boolean;
   /** Reads a static member's integral constant without requiring its addressable definition. */
   readConstant?: Eval<Value>;
@@ -62,6 +64,8 @@ export interface Expr extends ConstantValue {
   staticAddress?: boolean;
   /** The lvalue can be evaluated in a constant expression, even when its address and stored value are not constant. */
   constantDesignation?: boolean;
+  /** A stable reference binding whose runtime location can still require its local frame. */
+  constantReferenceBinding?: boolean;
   constantPointerValue?: boolean;
   constantInitialization?: boolean;
   constantLocation?: ConstantLocation;

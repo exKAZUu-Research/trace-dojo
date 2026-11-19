@@ -18,7 +18,7 @@ import { SequenceValue } from './library/containerValues';
 import { bindRetainedTemporary, withTemporaries, zeroOf } from './objectCompiler';
 import { parseInitializerArguments } from './parse';
 import { BREAK, type Completion, CONTINUE, type Eval, type Exec, type Frame, type LocalInfo, RETURN } from './runtime';
-import { type Entity, Scope } from './scopes';
+import { type ConstantReference, type Entity, Scope } from './scopes';
 import { isObjectCreation, onlyCalls } from './stepRules';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
@@ -59,6 +59,7 @@ import {
 export type ReferenceBinding = {
   type: Extract<Type, { kind: 'reference' }>;
   isConstant?: boolean;
+  locatesBeforeEntry?: boolean;
   memberConstant?: MemberConstant;
   constantLocation?: ConstantLocation;
 } & ({ loc: Eval<Ptr> } | { lifetime: TemporaryBinding });
@@ -300,7 +301,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       entity.constant = compiled.constant;
       createsObject = compiled.createsObject;
     }
-    if (this.isConstexpr(declaration))
+    entity.isConstexpr = this.isConstexpr(declaration);
+    if (entity.isConstexpr)
       entity.constant = this.requireConstantInitializer(type, value, declarator.row, !hasToken(declarator, '='));
     if (this.isClassLike(type) && !value) createsObject = true;
     const { local } = entity;
@@ -518,7 +520,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       kind: 'local',
       local,
       isReference: true,
-      constant: this.constantReferenceValue(binding, false),
+      constantReference: this.constantReference(binding, false),
     });
     const { slot } = local;
     if ('lifetime' in binding) {
@@ -594,16 +596,21 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
     return {
       type,
-      isConstant: isDirect && target.staticAddress,
+      isConstant: isDirect && (target.staticAddress || target.constantReferenceBinding),
+      locatesBeforeEntry: isDirect && target.staticAddress,
       memberConstant: isDirect ? memberConstantOf(target) : undefined,
       constantLocation: isDirect ? constantLocationOf(target) : undefined,
       loc: this.convert(target, type, row).run as Eval<Ptr>,
     };
   }
 
-  protected constantReferenceValue(binding: ReferenceBinding, isStatic: boolean): number | bigint | undefined {
-    if (!isArithmetic(binding.type.to) || !binding.isConstant || (!isStatic && 'lifetime' in binding)) return;
-    return binding.memberConstant?.(NO_CONSTANT_MEMBERS);
+  protected constantReference(binding: ReferenceBinding, isStatic: boolean): ConstantReference | undefined {
+    if (!binding.isConstant || (!isStatic && 'lifetime' in binding)) return;
+    return {
+      value: isArithmetic(binding.type.to) ? binding.memberConstant?.(NO_CONSTANT_MEMBERS) : undefined,
+      constantLocation: binding.constantLocation,
+      locateBeforeEntry: 'loc' in binding && binding.locatesBeforeEntry ? binding.loc : undefined,
+    };
   }
 
   private extendedReference(
@@ -645,18 +652,18 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       return this.error(row, `配列 ${name} の大きさを書いてください。`);
     if (type.kind === 'void') return this.error(row, `void 型の変数 ${name} は作れません。`);
     const global = this.declareStaticStorage(name, type, row, false);
+    global.isConstexpr = this.isConstexpr(declaration);
     const local = this.context.declareLocal(name, type, false);
     const direct = !hasToken(declarator, '=');
-    const constant = reference
-      ? this.constantReferenceValue(reference, true)
-      : this.isConstexpr(declaration)
-        ? this.requireConstantInitializer(type, value, row, direct)
-        : undefined;
+    const constant =
+      !reference && global.isConstexpr ? this.requireConstantInitializer(type, value, row, direct) : undefined;
     const entity: Extract<Entity, { kind: 'local' }> = {
       kind: 'local',
       local,
       isReference: reference !== undefined,
       constant,
+      constantReference: reference && this.constantReference(reference, true),
+      staticStorage: reference ? undefined : global,
     };
     this.context.scope.names.set(name, entity);
     const { slot } = local;

@@ -223,10 +223,12 @@ export function convertArithmetic(expr: Expr, to: Extract<Type, { kind: 'int' | 
     run: (frame) => convertScalar(run(frame) as number | bigint, from, to),
     memberConstant: mapMemberConstants([expr], ([value]) => convertScalar(value, from, to)),
   };
-  if (expr.constant !== undefined) {
+  const known = expr.constant ?? expr.foldedValue;
+  if (known !== undefined) {
     try {
-      converted.constant = convertScalar(expr.constant, from, to);
-      const constant = converted.constant;
+      const constant = convertScalar(known, from, to);
+      if (expr.constant !== undefined) converted.constant = constant;
+      else converted.foldedValue = constant;
       converted.run = () => constant;
     } catch {
       // A conversion that overflows is no constant; it stops the program when it runs.
