@@ -81,10 +81,10 @@ export class SequenceEditor {
     else if (length >= self.capacity) this.reallocate(frame, self, recommend(self, length + 1), at, [make()]);
     else if (at === length) self.append(make());
     else {
-      const temporary = make();
-      this.moveRange(frame, items, at, length, at + 1);
-      this.assignAt(frame, items, at, temporary);
-      this.ops.destroy?.(frame, temporary);
+      this.withTemporaryElement(frame, make(), (temporary) => {
+        this.moveRange(frame, items, at, length, at + 1);
+        this.assignAt(frame, items, at, temporary);
+      });
       self.invalidateVectorSuffix(at);
     }
   }
@@ -210,9 +210,17 @@ export class SequenceEditor {
       this.assignAt(frame, items, index, value);
       return;
     }
-    const temporary = source.construct(frame, value);
-    this.assignAt(frame, items, index, temporary);
-    this.ops.destroy?.(frame, temporary);
+    this.withTemporaryElement(frame, source.construct(frame, value), (temporary) =>
+      this.assignAt(frame, items, index, temporary)
+    );
+  }
+
+  private withTemporaryElement(frame: Frame, object: Value, use: (value: Value) => void): void {
+    const destroy = this.ops.destroy ?? (() => {});
+    withTemporaries(frame, () => {
+      frame.temporaries.push({ object, destroy });
+      use(object);
+    });
   }
 
   // std::vector ------------------------------------------------------------------------------------------------------
@@ -323,29 +331,21 @@ export class SequenceEditor {
   private dequeEmplace(frame: Frame, self: SequenceValue, at: number, make: () => Value): void {
     const items = self.items;
     const length = items.length;
-    if (at < length - at) {
-      if (at === 0) {
-        self.splice(0, 0, make());
-        return;
-      }
-      const temporary = make();
-      self.editPositions(at, 0, 1);
-      items.unshift(this.ops.copy(frame, items[0]));
-      for (let index = 1; index < at; index++) this.assignAt(frame, items, index, items[index + 1]);
-      this.assignAt(frame, items, at, temporary);
-      this.ops.destroy?.(frame, temporary);
-      return;
+    if (at === length) self.append(make());
+    else if (at === 0) self.splice(0, 0, make());
+    else {
+      this.withTemporaryElement(frame, make(), (temporary) => {
+        self.editPositions(at, 0, 1);
+        if (at < length - at) {
+          items.unshift(this.ops.copy(frame, items[0]));
+          for (let index = 1; index < at; index++) this.assignAt(frame, items, index, items[index + 1]);
+        } else {
+          items.push(this.ops.copy(frame, items[length - 1]));
+          for (let index = length - 2; index >= at; index--) this.assignAt(frame, items, index + 1, items[index]);
+        }
+        this.assignAt(frame, items, at, temporary);
+      });
     }
-    if (at === length) {
-      self.append(make());
-      return;
-    }
-    const temporary = make();
-    self.editPositions(at, 0, 1);
-    items.push(this.ops.copy(frame, items[length - 1]));
-    for (let index = length - 2; index >= at; index--) this.assignAt(frame, items, index + 1, items[index]);
-    this.assignAt(frame, items, at, temporary);
-    this.ops.destroy?.(frame, temporary);
   }
 
   private dequeInsertCopies(frame: Frame, self: SequenceValue, at: number, count: number, value: Ptr): void {

@@ -302,6 +302,31 @@ int main() {
   expect(traceProgram('cpp', program, program)).toMatchObject({ stdout: '100000', uncaughtException: undefined });
 });
 
+test.each([
+  ['deque', 1, [2, 3, 4, 5]],
+  ['deque', 2, [1, 2, 4, 5]],
+  ['vector', 1, [1, 2, 4, 5]],
+  ['vector', 2, [1, 2, 4, 5]],
+] as const)('retains the new %s element while emplacement shifts position %s', (type, at, expected) => {
+  const program = `#include <${type}>
+int copies = 0;
+struct Item {
+  Turtle* turtle = nullptr;
+  Item() {}
+  Item(const Item&) { turtle = new Turtle(++copies, 0); }
+};
+int main() {
+  Item source;
+  std::${type}<Item> items;
+  ${type === 'vector' ? 'items.reserve(8);' : ''}
+  items.emplace_back(source);
+  items.emplace_back(source);
+  items.emplace_back(source);
+  items.emplace(items.begin() + ${at}, source);
+}`;
+  expect(traceProgram('cpp', program, program).finalTurtles.map(({ x }) => x)).toEqual(expected);
+});
+
 test('an uncaught exception preserves the turtles reached from main before unwinding', () => {
   const program = `int main() {
   Turtle t(3, 5);
