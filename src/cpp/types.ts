@@ -89,6 +89,7 @@ export interface GlobalInfo {
   row: number;
   isDefined: boolean;
   hasStaticReferenceBinding?: boolean;
+  isConstexprPointer?: boolean;
   /** Whether learners see the variable: constants never change, so they would only crowd the variable table. */
   isShown: boolean;
 }

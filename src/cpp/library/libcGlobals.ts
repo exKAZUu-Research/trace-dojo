@@ -2,6 +2,7 @@ import { type FunctionInfo, type Type, typeName, unqualified } from '../types';
 import sdk from './libcGlobalDeclarations.json';
 
 const declarations: Readonly<Record<string, (string | number)[][]>> = sdk.declarations;
+const macros: Readonly<Record<string, number>> = sdk.macros;
 const headerGroups = sdk.headers.map((group) => new Set(group));
 
 export function conflictsWithLibcGlobal(
@@ -13,7 +14,7 @@ export function conflictsWithLibcGlobal(
   const isVariable = 'kind' in entity;
   for (const [group, kind, signature] of declarations[name]) {
     if (typeof group !== 'number' || typeof signature !== 'string') continue;
-    if (![...headers].some((header) => headerGroups[group].has(header))) continue;
+    if (!visibleIn(group, headers)) continue;
     if (isVariable) {
       if (kind !== 'var' || compact(typeName(entity)) !== compact(signature)) return true;
     } else if (kind === 'var' || hasConflictingSignature(entity, kind === 'using', signature)) {
@@ -21,6 +22,14 @@ export function conflictsWithLibcGlobal(
     }
   }
   return false;
+}
+
+export function isLibcHeaderMacro(name: string, headers: ReadonlySet<string>): boolean {
+  return Object.hasOwn(macros, name) && visibleIn(macros[name], headers);
+}
+
+function visibleIn(group: number, headers: ReadonlySet<string>): boolean {
+  return [...headers].some((header) => headerGroups[group].has(header));
 }
 
 function hasConflictingSignature(declared: FunctionInfo, fromUsingDeclaration: boolean, signature: string): boolean {

@@ -277,6 +277,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
           row,
           constant: entity.constant,
           staticAddress: true,
+          constantPointerValue: entity.global.isConstexprPointer,
           run: (frame) => new Ptr(frame.runtime.globals[index], 0),
         };
       }
@@ -516,6 +517,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return {
         type,
         isLvalue: true,
+        staticAddress: object.staticAddress,
         row,
         run: (frame) => {
           const target = (run(frame) as Ptr).read();
@@ -1082,17 +1084,24 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   private conditionalExpression(node: Syntax): Expr {
-    const condition = this.condition(this.compileExpression(fieldOf(node, 'condition') as Syntax), node.row);
+    const test = this.compileExpression(fieldOf(node, 'condition') as Syntax);
+    const condition = this.condition(test, node.row);
     const consequenceNode = fieldOf(node, 'consequence');
     if (!consequenceNode) return this.unsupported(node.row, '条件演算子の省略形（x ?: y）');
     const a = this.compileExpression(consequenceNode);
     const b = this.compileExpression(fieldOf(node, 'alternative') as Syntax);
     const { left, right, type, isLvalue } = this.conditionalOperands(a, b, node.row);
+    const known = this.rvalue(test).constant;
+    const chosen = known === undefined ? undefined : known === 0 || known === 0n ? right : left;
     return {
       type,
       isLvalue,
       row: node.row,
-      run: (frame) => (condition(frame) ? left.run(frame) : right.run(frame)),
+      constant: chosen?.constant,
+      staticAddress: chosen?.staticAddress,
+      constantPointerValue: chosen?.constantPointerValue,
+      run: (frame, zeroInitialize, destination) =>
+        (condition(frame) ? left : right).run(frame, zeroInitialize, destination),
       isTemporaryObject: !isLvalue && type.kind === 'class',
     };
   }
@@ -1354,7 +1363,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type,
       isLvalue: false,
       row: node.row,
-      run: (frame, zeroInitialize) => run(frame, undefined, zeroInitialize),
+      run: (frame, zeroInitialize, destination) => run(frame, destination, zeroInitialize),
       onlyCalls: type.kind === 'class',
       isTemporaryObject: type.kind === 'class',
     };
@@ -1500,7 +1509,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type,
       isLvalue: false,
       row: list.row,
-      run: (frame, zeroInitialize) => run(frame, undefined, zeroInitialize),
+      run: (frame, zeroInitialize, destination) => run(frame, destination, zeroInitialize),
       isTemporaryObject: type.kind === 'class',
     };
   }
@@ -1586,6 +1595,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   /** Compiles a braced initializer list for an object of a type, as list-initialization does. */
   abstract listInitializer(type: Type, list: Syntax, row: number): Initializer;
 
+  protected abstract initializeList(type: Type, elements: Syntax[], row: number): Initializer;
+
   // new and delete ---------------------------------------------------------------------------------------------------
 
   private newExpression(node: Syntax): Expr {
@@ -1618,8 +1629,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const type = unqualified(baseType);
     let value: Eval<Value>;
     if (!argsNode) value = this.defaultInitializer(baseType, node.row);
-    else if (argsNode.type === 'initializer_list') value = this.listInitializer(type, argsNode, node.row);
-    else {
+    else if (argsNode.type === 'initializer_list') {
+      const initialize = this.listInitializer(type, argsNode, node.row);
+      value = (frame) => initialize(frame, undefined, false, 'full-expression');
+    } else {
       const args = argsNode.children.map((arg) => this.argument(arg));
       if (type.kind === 'class') value = this.constructObject(type.cls, args, node.row, false).run as Eval<Value>;
       else if (args.length === 0) value = this.valueInitialized(type, node.row).run as Eval<Value>;
@@ -1657,9 +1670,11 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     // The elements without initializers need a default constructor only when some may exist.
     const hasRest = lengthExpr.constant === undefined || Number(lengthExpr.constant) > initial.length;
     const rest = hasRest
-      ? argsNode
-        ? (this.valueInitialized(elementType, row).run as Eval<Value>)
-        : this.defaultInitializer(elementType, row)
+      ? argsNode?.type === 'initializer_list'
+        ? this.initializeList(elementType, [], row)
+        : argsNode
+          ? (this.valueInitialized(elementType, row).run as Eval<Value>)
+          : this.defaultInitializer(elementType, row)
       : undefined;
     const destroy = this.destroyerOf(elementType);
     return {
@@ -1671,7 +1686,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         if (count < initial.length) return throwLibrary(frame, badAlloc, 'std::bad_alloc');
         frame.runtime.reserve(count);
         const make = (index: number): Value =>
-          index < initial.length ? initial[index](frame) : (rest as Eval<Value>)(frame);
+          index < initial.length
+            ? initial[index](frame, undefined, false, 'full-expression')
+            : (rest as Initializer)(frame, undefined, false, 'full-expression');
         const store = new ArrayStore(makeEach(frame, count, make, () => destroy));
         store.allocation = 'newArray';
         store.allocatedElementType = elementType;
@@ -1681,13 +1698,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   /** The value of one element of a braced list, which may itself be a braced list. */
-  elementInitializer(type: Type, node: Syntax): Eval<Value> {
+  elementInitializer(type: Type, node: Syntax): Initializer {
     if (node.type === 'initializer_list') return this.listInitializer(type, node, node.row);
     return this.copyInitializer(type, this.compileExpression(node), node.row, true);
   }
 
   /** The value copy-initialization gives an object of a type; `isList` checks for narrowing conversions. */
-  abstract copyInitializer(type: Type, expr: Expr, row: number, isList: boolean): Eval<Value>;
+  abstract copyInitializer(type: Type, expr: Expr, row: number, isList: boolean): Initializer;
 
   /** The value default-initialization gives an object of a type. */
   abstract defaultInitializer(type: Type, row: number): Initializer;

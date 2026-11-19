@@ -37,7 +37,7 @@ import { constantsOf } from './constants';
 import { containerTemplates } from './containers';
 import { exceptionClasses } from './exceptions';
 import { FLAGS, ManipulatorValue, Streams, type StreamValue } from './iostream';
-import { conflictsWithLibcGlobal } from './libcGlobals';
+import { conflictsWithLibcGlobal, isLibcHeaderMacro } from './libcGlobals';
 import { randomEngines } from './random';
 import { stringClass, stringFunctions } from './string';
 import { asNumber, generic, native } from './support';
@@ -229,6 +229,10 @@ export class Library {
 
   conflictsWithGlobal(name: string, entity: Type | FunctionInfo): boolean {
     return conflictsWithLibcGlobal(name, entity, this.headers);
+  }
+
+  isHeaderMacro(name: string): boolean {
+    return isLibcHeaderMacro(name, this.headers);
   }
 
   /** The header to include for a library name the program uses without including it, if the library has the name. */

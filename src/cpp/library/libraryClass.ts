@@ -3,7 +3,7 @@ import type { ExpressionCompiler } from '../expressionCompiler';
 import type { Eval, Frame } from '../runtime';
 import type { Syntax } from '../syntax';
 import type { ArrayType, ClassInfo, FunctionInfo, Type } from '../types';
-import type { Value } from '../values';
+import type { CObject, Value } from '../values';
 
 export type IteratorCategory = 'forward' | 'bidirectional' | 'randomAccess';
 
@@ -60,7 +60,7 @@ export interface LibraryClass {
 /** How objects of a class are copied, assigned, and destroyed, which the compiler or the library provides. */
 export interface ClassOperations {
   /** Copies an object, as the copy constructor does. */
-  copy: (frame: Frame, source: Value) => Value;
+  copy: (frame: Frame, source: Value, destination?: CObject) => Value;
   /**
    * Assigns an object's value to another existing object, as the copy assignment operator does: in place, or, for an
    * object that is an immutable value (an iterator), by giving the value that replaces the target.

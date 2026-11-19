@@ -11,33 +11,23 @@ TREE_NODE = re.compile(r"^((?:[| ] )*)(?:\|-|`-)(\w+) (.*)")
 TYPE_NAME = re.compile(r"\b\w+\b")
 USING_SHADOW = re.compile(r" (Function|FunctionTemplate|Var) 0x\w+ '([^']+)'(?: '([^']+)')?")
 
+
 def probe(header):
     result = subprocess.run(
         ["clang++", "-std=c++20", "-x", "c++", "-fsyntax-only", "-Xclang", "-ast-dump", "-"],
         input=f"#include <{header}>\n", capture_output=True, text=True, check=True,
     )
-    ancestors = []
     aliases = {}
-    globals_ = set()
-    for line in result.stdout.splitlines():
-        match = TREE_NODE.match(line)
-        if not match:
-            continue
-        prefix, category, declaration = match.groups()
-        depth = len(prefix) // 2
-        del ancestors[depth:]
-        global_scope = all(node == "LinkageSpecDecl" for node in ancestors)
-        ancestors.append(category)
-        if not global_scope:
-            continue
+    declarations = set()
+    for category, syntax in global_nodes(result.stdout):
         if category == "UsingShadowDecl":
-            shadow = USING_SHADOW.search(declaration)
+            shadow = USING_SHADOW.search(syntax)
             if shadow:
                 target, name, signature = shadow.groups()
-                globals_.add((name, "var" if target == "Var" else "using", signature or ""))
+                declarations.add((name, "var" if target == "Var" else "using", signature or ""))
         if category not in {"TypedefDecl", "TypeAliasDecl", "FunctionDecl", "VarDecl"}:
             continue
-        head, sep, full_type = declaration.partition(" '")
+        head, sep, full_type = syntax.partition(" '")
         if not sep:
             continue
         name = head.rsplit(None, 1)[-1]
@@ -46,18 +36,45 @@ def probe(header):
             if name not in TYPE_NAME.findall(signature):
                 aliases[name] = signature
             continue
-        globals_.add((name, "var" if category == "VarDecl" else "function", signature))
+        declarations.add((name, "var" if category == "VarDecl" else "function", signature))
 
-    def normalize(signature):
-        signature = re.split(r"\s+(?:noexcept\b|__attribute__)", signature, maxsplit=1)[0]
-        for _ in range(4):
-            following = TYPE_NAME.sub(lambda match: aliases.get(match[0], match[0]), signature)
-            if following == signature:
-                break
-            signature = following
-        return re.sub(r"\b_(?:Nonnull|Nullable|Null_unspecified)\b", "", signature).strip()
+    symbols = {
+        (name, kind, normalize_type(signature, aliases))
+        for name, kind, signature in declarations
+        if name.isidentifier() and not name.startswith("_")
+    }
 
-    return {(name, kind, normalize(signature)) for name, kind, signature in globals_ if name.isidentifier() and not name.startswith("_")}
+    macros = subprocess.run(
+        ["clang++", "-std=c++20", "-x", "c++", "-dM", "-E", "-"],
+        input=f"#include <{header}>\n", capture_output=True, text=True, check=True,
+    ).stdout
+    for name in re.findall(r"^#define ([A-Za-z]\w*)(?= |$)", macros, re.M):
+        symbols.add((name, "macro", ""))
+    return symbols
+
+
+def global_nodes(tree):
+    ancestors = []
+    for line in tree.splitlines():
+        match = TREE_NODE.match(line)
+        if not match:
+            continue
+        prefix, category, syntax = match.groups()
+        depth = len(prefix) // 2
+        del ancestors[depth:]
+        if all(node == "LinkageSpecDecl" for node in ancestors):
+            yield category, syntax
+        ancestors.append(category)
+
+
+def normalize_type(signature, aliases):
+    signature = re.split(r"\s+(?:noexcept\b|__attribute__)", signature, maxsplit=1)[0]
+    for _ in range(4):
+        following = TYPE_NAME.sub(lambda match: aliases.get(match[0], match[0]), signature)
+        if following == signature:
+            break
+        signature = following
+    return re.sub(r"\b_(?:Nonnull|Nullable|Null_unspecified)\b", "", signature).strip()
 
 
 def main():
@@ -74,10 +91,15 @@ def main():
     groups = sorted({tuple(found) for found in presence.values()})
     group_id = {group: i for i, group in enumerate(groups)}
     names = defaultdict(list)
+    macros = {}
     for (name, kind, signature), found in sorted(presence.items()):
-        names[name].append([group_id[tuple(found)], kind, signature])
+        group = group_id[tuple(found)]
+        if kind == "macro":
+            macros[name] = group
+        else:
+            names[name].append([group, kind, signature])
     output = Path("src/cpp/library/libcGlobalDeclarations.json")
-    output.write_text(json.dumps({"headers": groups, "declarations": names}, indent=2) + "\n")
+    output.write_text(json.dumps({"headers": groups, "declarations": names, "macros": macros}, indent=2) + "\n")
     subprocess.run(["bun", "fmt", "--no-script", "--no-config", str(output)], check=True)
 
 

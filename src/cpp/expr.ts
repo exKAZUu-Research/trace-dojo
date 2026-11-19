@@ -1,9 +1,17 @@
 import type { Eval, Frame } from './runtime';
 import type { Syntax } from './syntax';
 import type { ClassInfo, FunctionInfo, Type } from './types';
-import type { ArrayStore, Ptr, Value } from './values';
+import type { ArrayStore, CObject, Ptr, Value } from './values';
 
-export type Initializer = (frame: Frame, target?: ArrayStore, zeroInitialize?: boolean) => Value;
+export type ReferenceLifetime = CObject | 'full-expression';
+export type InitializerTarget = ArrayStore | CObject;
+
+export type Initializer = (
+  frame: Frame,
+  target?: InitializerTarget,
+  zeroInitialize?: boolean,
+  referenceLifetime?: ReferenceLifetime
+) => Value;
 
 /**
  * A compiled expression. An lvalue evaluates to the location it designates (a `Ptr`); a prvalue evaluates to its
@@ -13,7 +21,7 @@ export interface Expr {
   isAssignmentList?: boolean;
   type: Type;
   isLvalue: boolean;
-  run: (frame: Frame, zeroInitialize?: boolean) => Value | Ptr;
+  run: (frame: Frame, zeroInitialize?: boolean, destination?: CObject) => Value | Ptr;
   row: number;
   /** The value of a constant expression of arithmetic type, which array lengths and `case` labels need. */
   constant?: number | bigint;
@@ -25,6 +33,7 @@ export interface Expr {
   isNullConstant?: boolean;
   /** An lvalue location or pointer value that can be formed before dynamic initialization. */
   staticAddress?: boolean;
+  constantPointerValue?: boolean;
   /** The bytes of a string literal, which may initialize a `char` array. */
   literalBytes?: string;
   /** The functions a name denotes, which a call resolves among. */

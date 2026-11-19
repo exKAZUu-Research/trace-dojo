@@ -307,6 +307,9 @@ test.each([
   ['a surrogate Unicode string escape', String.raw`int main() { const char* s = "\uD800"; }`, 0],
   ['a Unicode string escape beyond the last code point', String.raw`int main() { const char* s = "\U00110000"; }`, 0],
   ['a partially written Unicode string escape', String.raw`int main() { const char* s = "\u123"; }`, 0],
+  ['a local variable using a macro from <cmath>', '#include <cmath>\nint main() { double M_PI = 3; }', 1],
+  ['a parameter using a macro from <cstdio>', '#include <cstdio>\nvoid report(int EOF) {}', 1],
+  ['a global variable using a transitive macro from <iostream>', '#include <iostream>\nint RAND_MAX = 3;', 1],
   ['std::sqrt with only <cstdio>', '#include <cstdio>\nint main() {\n  double x = std::sqrt(2.0); }', 2],
   ['std::abs with only <cstdio>', '#include <cstdio>\nint main() {\n  int x = std::abs(-2); }', 2],
 ])('the interpreter rejects %s', (_, program, row) => {

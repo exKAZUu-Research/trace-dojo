@@ -4,10 +4,19 @@ import { misplacedAtomicMessage, type TraceOptions } from '../interpreter/traceA
 import { byteAt } from './bytes';
 import { hasAuto } from './compilerBase';
 import { CppException, CppRuntimeError } from './errors';
-import type { Expr, Initializer } from './expr';
+import type { Expr, Initializer, InitializerTarget } from './expr';
 import { SequenceValue } from './library/containerValues';
 import type { Library } from './library/registry';
-import { invoke, makeEach, newObject, type Resolved, staticZero, virtualKey, zeroOf } from './objectCompiler';
+import {
+  invoke,
+  makeEach,
+  newObject,
+  type Resolved,
+  staticZero,
+  virtualKey,
+  withTemporaries,
+  zeroOf,
+} from './objectCompiler';
 import { type CompiledFunction, type Eval, type Exec, type Frame, RETURN, type Runtime } from './runtime';
 import { type Entity, FunctionContext } from './scopes';
 import {
@@ -72,7 +81,7 @@ export class Compiler extends StatementCompiler {
   private readonly usedFunctions = new Map<FunctionInfo, number>();
   private readonly inlineDependencies = new WeakMap<FunctionInfo, () => void>();
   private readonly usedStaticMembers = new Map<GlobalInfo, number>();
-  private readonly aggregateDefaults = new WeakMap<FieldInfo, () => Eval<Value>>();
+  private readonly aggregateDefaults = new WeakMap<FieldInfo, () => Initializer>();
   private readonly implicitDefaults = new WeakMap<ClassInfo, () => FunctionInfo | undefined>();
   private defaultDependencies?: { functions: Map<FunctionInfo, number>; staticMembers: Map<GlobalInfo, number> };
 
@@ -189,6 +198,7 @@ export class Compiler extends StatementCompiler {
 
   protected classSpecifierType(node: Syntax): Type {
     const nameNode = fieldOf(node, 'name');
+    if (nameNode) this.checkHeaderMacro(nameNode.text, nameNode.row);
     const body = fieldOf(node, 'body');
     if (!nameNode) return this.unsupported(node.row, '名前のないクラス');
     if (nameNode.type !== 'type_identifier') return this.unsupported(node.row, `クラス ${nameNode.text} の定義`);
@@ -857,7 +867,7 @@ export class Compiler extends StatementCompiler {
         const args = this.initializerArguments(explicit);
         if (type.kind === 'class') {
           const run = this.constructObject(type.cls, args, row, false).run;
-          value = (frame, _target, zeroInitialize) => run(frame, zeroInitialize) as Value;
+          value = (frame, target, zeroInitialize) => run(frame, zeroInitialize, asObject(target));
           isCreation = !type.cls.library;
         } else if (args.length === 0) {
           value = this.valueInitialized(type, row).run as Eval<Value>;
@@ -889,7 +899,7 @@ export class Compiler extends StatementCompiler {
       const init = this.defaultInitializer(type, row);
       return (frame) => {
         const object = frame.self?.read() as CObject;
-        object.values[index] = init(frame, arrayStorage(object.values[index]), object.zeroInitialized);
+        object.values[index] = init(frame, initializerTarget(object.values[index]), object.zeroInitialized);
         return;
       };
     } else {
@@ -897,7 +907,7 @@ export class Compiler extends StatementCompiler {
     }
     const exec = this.fullExpression<undefined>((frame) => {
       const object = frame.self?.read() as CObject;
-      object.values[index] = value(frame, arrayStorage(object.values[index]), object.zeroInitialized);
+      object.values[index] = value(frame, initializerTarget(object.values[index]), object.zeroInitialized);
       return;
     });
     return this.withStep(row, exec, isCreation);
@@ -958,9 +968,10 @@ export class Compiler extends StatementCompiler {
     };
     const destroy = this.destructionOf(cls);
     return {
-      copy: (frame, source) => {
-        const target = newObject(frame, cls);
+      copy: (frame, source, destination) => {
+        const target = newObject(frame, cls, false, destination);
         copyInto(frame, target, source as CObject);
+        target.needsConstruction = false;
         return target;
       },
       assign: (frame, target, source) => {
@@ -991,10 +1002,12 @@ export class Compiler extends StatementCompiler {
       .toReversed();
     const baseDestroy = cls.base?.operations?.destroy;
     const destructor = cls.destructor;
-    if (!destructor && !members.some((member) => member.destroy) && !baseDestroy) return undefined;
+    const mayOwnReferenceTemporaries = cls.ownFields.some((field) => field.type.kind === 'reference');
+    if (!destructor && !members.some((member) => member.destroy) && !baseDestroy && !mayOwnReferenceTemporaries)
+      return undefined;
     return (frame, value) => {
       const object = value as CObject;
-      if (object.liveness !== Liveness.Alive) return;
+      if (object.liveness !== Liveness.Alive || object.needsConstruction) return;
       object.cls = cls;
       if (destructor?.compiled)
         invoke(frame, destructor, [], new Ptr(new Box(object), 0), undefined as unknown as number);
@@ -1004,6 +1017,7 @@ export class Compiler extends StatementCompiler {
         endLifetime(member);
       }
       if (baseDestroy) baseDestroy(frame, object);
+      object.destroyReferenceTemporaries(frame);
     };
   }
 
@@ -1349,6 +1363,7 @@ export class Compiler extends StatementCompiler {
     const isConstant = isConstType(type) && isArithmetic(type);
     const global = this.declareStaticStorage(name, type, declarator.row, !isConstant);
     global.isDefined = true;
+    global.isConstexprPointer = isConstexpr && type.kind === 'pointer';
     let constant: number | bigint | undefined;
     if (isConstexpr) constant = this.requireConstantInitializer(type, value, declarator.row);
     else if (isConstant && value && value.type !== 'initializer_list' && value.type !== 'argument_list') {
@@ -1420,11 +1435,13 @@ export class Compiler extends StatementCompiler {
     try {
       const init = this.staticInitialization(type, value, row);
       if (!init) return;
+      if (global.isConstexprPointer && !init.isConstant)
+        this.error(row, 'constexpr の変数の初期値には定数式を書いてください。');
       const { index } = global;
       const store = this.staticStore(type, row);
       const exec = this.fullExpression<undefined>((frame) => {
         const box = frame.runtime.globals[index] as Box;
-        store(frame, box, init.run(frame, arrayStorage(box.value), true));
+        store(frame, box, init.run(frame, initializerTarget(box.value), true));
         return;
       });
       if (init.isConstant) this.constantInitializers.push(exec);
@@ -1451,7 +1468,7 @@ export class Compiler extends StatementCompiler {
       const run = this.listInitializer(type, value, row);
       return {
         run,
-        isConstant: !this.isClassType(type) && this.isConstantList(value),
+        isConstant: this.hasConstantListElements(type) && this.isConstantList(value),
         isCreation: type.kind === 'class' && !type.cls.library,
       };
     }
@@ -1460,7 +1477,7 @@ export class Compiler extends StatementCompiler {
       if (type.kind === 'class') {
         const construct = this.constructObject(type.cls, args, row, false).run;
         return {
-          run: (frame, _target, zeroInitialize) => construct(frame, zeroInitialize) as Value,
+          run: (frame, target, zeroInitialize) => construct(frame, zeroInitialize, asObject(target)),
           isConstant: false,
           isCreation: !type.cls.library,
         };
@@ -1473,6 +1490,17 @@ export class Compiler extends StatementCompiler {
     const run = this.copyInitializer(type, expr, row, false);
     const isConstant = !this.isClassType(type) && this.isConstantInitializer(expr);
     return { run, isConstant, isCreation: value.type === 'new_expression' };
+  }
+
+  private hasConstantListElements(type: Type): boolean {
+    if (type.kind === 'array') return this.hasConstantListElements(type.of);
+    if (type.kind !== 'class') return type.kind !== 'reference';
+    const { cls } = type;
+    return (
+      !cls.base &&
+      this.isAggregate(cls) &&
+      cls.ownFields.every((field) => !field.initializer && this.hasConstantListElements(field.type))
+    );
   }
 
   private isConstantList(list: Syntax): boolean {
@@ -1492,14 +1520,14 @@ export class Compiler extends StatementCompiler {
     if (init.isConstant) {
       this.constantInitializers.push((frame) => {
         const box = frame.runtime.globals[index] as Box;
-        box.value = init.run(frame, arrayStorage(box.value), true);
+        box.value = init.run(frame, initializerTarget(box.value), true);
         return;
       });
       return () => {};
     }
     const initialized = new WeakSet<Box>();
     const run = this.fullExpression((frame) =>
-      init.run(frame, arrayStorage((frame.runtime.globals[index] as Box).value), true)
+      init.run(frame, initializerTarget((frame.runtime.globals[index] as Box).value), true)
     );
     const store = this.staticStore(type, row);
     return (frame) => {
@@ -1535,9 +1563,12 @@ export class Compiler extends StatementCompiler {
       expr.isTemporaryObject &&
       !expr.isLvalue
     ) {
-      return (frame, _target, zeroInitialize) => expr.run(frame, zeroInitialize) as Value;
+      return (frame, target, zeroInitialize) => expr.run(frame, zeroInitialize, asObject(target));
     }
-    return this.convert(expr, unqualified(type), row).run as Eval<Value>;
+    const converted = this.convert(expr, unqualified(type), row).run;
+    return type.kind === 'class'
+      ? (frame, target, zeroInitialize) => converted(frame, zeroInitialize, asObject(target))
+      : (converted as Eval<Value>);
   }
 
   private charArrayFromLiteral(type: Extract<Type, { kind: 'array' }>, bytes: string, row: number): Initializer {
@@ -1547,7 +1578,7 @@ export class Compiler extends StatementCompiler {
       this.error(row, `文字列リテラル（${bytes.length + 1} バイト）が、配列（${length} 要素）に収まりません。`);
     return (frame, target) => {
       if (!target) frame.runtime.reserve(length);
-      const storage = target ?? new ArrayStore([]);
+      const storage = arrayStorage(target) ?? new ArrayStore([]);
       for (let index = 0; index < length; index++) {
         const byte = index < bytes.length ? byteAt(bytes, index) : 0;
         storage.values[index] = byte >= 128 ? byte - 256 : byte;
@@ -1575,14 +1606,24 @@ export class Compiler extends StatementCompiler {
     this.checkConstDefault(type, row);
     if (type.kind === 'class') {
       const run = this.defaultConstructed(type.cls, row, false).run;
-      return (frame, _target, zeroInitialize) => run(frame, zeroInitialize) as Value;
+      return (frame, target, zeroInitialize) => run(frame, zeroInitialize, asObject(target));
     }
     if (type.kind === 'array') {
       const length = type.length ?? 0;
       const element = this.defaultInitializer(type.of, row);
       const destroy = this.destroyerOf(type.of);
-      return (frame, target, zeroInitialize) =>
-        this.fillArray(frame, length, (f, storage) => element(f, storage, zeroInitialize), destroy, target);
+      if (type.of.kind !== 'array' && type.of.kind !== 'class')
+        return (frame, target, zeroInitialize) =>
+          arrayStorage(target) ??
+          this.fillArray(frame, length, (f) => element(f, undefined, zeroInitialize), destroy, undefined);
+      return (frame, target, zeroInitialize, referenceLifetime) =>
+        this.fillArray(
+          frame,
+          length,
+          (f, storage) => element(f, storage, zeroInitialize, referenceLifetime),
+          destroy,
+          arrayStorage(target)
+        );
     }
     return (_frame, _target, zeroInitialize) => (zeroInitialize ? zeroOf(type) : UNINIT);
   }
@@ -1624,18 +1665,26 @@ export class Compiler extends StatementCompiler {
       row,
       isTemporaryObject: true,
       onlyCalls: true,
-      run: (frame, zeroInitialize) => {
-        const object = newObject(frame, cls, zeroInitialize);
+      run: (frame, zeroInitialize, destination) => {
+        const object = newObject(frame, cls, zeroInitialize, destination);
         if (zeroed && !zeroInitialize) for (const [index, zero] of zeroFields.entries()) object.values[index] = zero;
         if (implicit) invoke(frame, implicit, [], new Ptr(new Box(object), 0), row);
         else object.cls = cls;
+        object.needsConstruction = false;
         return zeroed ? zeroFilled(object, classType(cls)) : object;
       },
     };
   }
 
   listInitializer(type: Type, list: Syntax, row: number): Initializer {
-    const elements = list.children.filter((child) => child.type !== 'comment');
+    return this.initializeList(
+      type,
+      list.children.filter((child) => child.type !== 'comment'),
+      row
+    );
+  }
+
+  protected initializeList(type: Type, elements: Syntax[], row: number): Initializer {
     if (type.kind === 'reference') return this.error(row, '参照は {...} で初期化できません。');
     if (type.kind === 'array') return this.arrayInitializer(type, elements, row);
     if (type.kind === 'class') {
@@ -1666,14 +1715,12 @@ export class Compiler extends StatementCompiler {
       if (isAggregate) return this.aggregateInitializer(type.cls, elements, row);
       if (elements.length === 0) {
         const run = this.defaultConstructed(type.cls, row, true).run;
-        return (frame, _target, zeroInitialize) => run(frame, zeroInitialize) as Value;
+        return (frame, target, zeroInitialize) => run(frame, zeroInitialize, asObject(target));
       }
       const args = elements.map((element) => this.argument(element));
       const resolved = this.resolveConstructor(type.cls, args, row, true);
-      if (type.cls.constructors.length === 0)
-        return this.error(row, `${type.cls.name} は {...} では初期化できません。`);
       const run = this.constructWith(type.cls, resolved, args, row).run;
-      return (frame, _target, zeroInitialize) => run(frame, zeroInitialize) as Value;
+      return (frame, target, zeroInitialize) => run(frame, zeroInitialize, asObject(target));
     }
     if (elements.length === 0) {
       const zero = zeroOf(type);
@@ -1706,7 +1753,7 @@ export class Compiler extends StatementCompiler {
     return cls.ownFields.every((field) => field.access === 'public');
   }
 
-  private aggregateInitializer(cls: ClassInfo, elements: Syntax[], row: number): Eval<Value> {
+  private aggregateInitializer(cls: ClassInfo, elements: Syntax[], row: number): Initializer {
     const clauses: Clauses = { nodes: elements, next: 0, compiled: new Map() };
     const run = this.takeMemberClauses(cls, clauses, row)();
     if (clauses.next < elements.length) return this.error(row, `${cls.name} を初期化する {...} の値が多すぎます。`);
@@ -1722,12 +1769,13 @@ export class Compiler extends StatementCompiler {
       if (arg.braced && type.kind === 'array') return this.listInitializer(type, arg.braced, arg.row);
       return this.copyInitializer(type, arg, row, false);
     });
+    const initialize = this.initializeAggregate(cls, initializers, row);
     return {
       type: classType(cls),
       isLvalue: false,
       isTemporaryObject: true,
       row,
-      run: this.initializeAggregate(cls, initializers, row),
+      run: (frame, zeroInitialize, destination) => initialize(frame, destination, zeroInitialize, 'full-expression'),
     };
   }
 
@@ -1786,17 +1834,28 @@ export class Compiler extends StatementCompiler {
   }
 
   /** Binds a reference member of an aggregate, whose lifetime a temporary it binds to takes (C++20 [class.temporary]). */
-  private memberReference(type: Extract<Type, { kind: 'reference' }>, expr: Expr, row: number): Eval<Value> {
+  private memberReference(
+    type: Extract<Type, { kind: 'reference' }>,
+    expr: Expr,
+    row: number,
+    hasDefault = false
+  ): Initializer {
     const binding = this.referenceBinding(type, this.referenceMemberTarget(type, expr, row), row);
-    if (!('lifetime' in binding)) return binding.loc;
+    if (!('lifetime' in binding)) return hasDefault ? this.fullExpression(binding.loc) : binding.loc;
     const { type: heldType, make, locate } = binding.lifetime;
+    const create = hasDefault ? this.fullExpression(make) : make;
     const destroy = this.destroyerOf(heldType);
-    if (!this.context.fn) return (frame) => locate(new Box(make(frame)));
-    const holder = this.context.declareLocal(`\0member${row}`, heldType, false);
-    if (destroy) this.context.scope.destructibles.set(holder.slot, destroy);
-    return (frame) => {
-      const box = new Box(make(frame));
-      frame.slots[holder.slot] = box;
+    return (frame, _target, _zeroInitialize, owner) => {
+      const box = new Box(create(frame));
+      const temporary = {
+        object: box,
+        destroy: (f: Frame) => {
+          destroy?.(f, box.value);
+          endLifetime(box);
+        },
+      };
+      if (owner instanceof CObject) (owner.referenceTemporaries ??= []).push(temporary);
+      else frame.temporaries.push(temporary);
       return locate(box);
     };
   }
@@ -1825,8 +1884,8 @@ export class Compiler extends StatementCompiler {
     const take = this.takeClausesForArrayMember(array.type, clauses, row);
     return () => {
       const initialize = take();
-      return (frame, _target, zeroInitialize) =>
-        array.make((initialize(frame, undefined, zeroInitialize) as ArrayStore).values);
+      return (frame, _target, zeroInitialize, referenceLifetime) =>
+        array.make((initialize(frame, undefined, zeroInitialize, referenceLifetime) as ArrayStore).values);
     };
   }
 
@@ -1849,20 +1908,15 @@ export class Compiler extends StatementCompiler {
       const length = type.length ?? taken.length;
       const inits = taken.map((take) => take());
       const elementType = type.of;
-      const rest =
-        inits.length === length
-          ? undefined
-          : elementType.kind === 'array'
-            ? this.arrayInitializer(elementType, [], row)
-            : (this.valueInitialized(elementType, row).run as Eval<Value>);
+      const rest = inits.length === length ? undefined : this.initializeList(elementType, [], row);
       const destroy = this.destroyerOf(elementType);
-      return (frame, target, zeroInitialize) =>
+      return (frame, target, zeroInitialize, referenceLifetime) =>
         this.fillArray(
           frame,
           length,
-          (f, storage, index) => (inits[index] ?? (rest as Initializer))(f, storage, zeroInitialize),
+          (f, storage, index) => (inits[index] ?? (rest as Initializer))(f, storage, zeroInitialize, referenceLifetime),
           destroy,
-          target
+          arrayStorage(target)
         );
     };
   }
@@ -1870,7 +1924,7 @@ export class Compiler extends StatementCompiler {
   private fillArray(
     frame: Frame,
     length: number,
-    initialize: (frame: Frame, target: ArrayStore | undefined, index: number) => Value,
+    initialize: (frame: Frame, target: InitializerTarget | undefined, index: number) => Value,
     destroy: ((frame: Frame, value: Value) => void) | undefined,
     target: ArrayStore | undefined
   ): ArrayStore {
@@ -1878,14 +1932,14 @@ export class Compiler extends StatementCompiler {
     const values = makeEach(
       frame,
       length,
-      (index) => initialize(frame, arrayStorage(target?.values[index]), index),
+      (index) => initialize(frame, initializerTarget(target?.values[index]), index),
       () => destroy,
       target?.values
     );
     return target ?? new ArrayStore(values);
   }
 
-  private takeMemberClauses(cls: ClassInfo, clauses: Clauses, row: number): () => Eval<Value> {
+  private takeMemberClauses(cls: ClassInfo, clauses: Clauses, row: number): () => Initializer {
     const taken = cls.ownFields.map((field) =>
       clauses.next < clauses.nodes.length ? this.takeClauses(field.type, clauses, row) : undefined
     );
@@ -1897,14 +1951,15 @@ export class Compiler extends StatementCompiler {
       );
   }
 
-  private initializeAggregate(cls: ClassInfo, supplied: (Eval<Value> | undefined)[], row: number): Eval<Value> {
+  private initializeAggregate(cls: ClassInfo, supplied: (Initializer | undefined)[], row: number): Initializer {
     const fields = cls.ownFields;
     const defaults = fields.map((field, index) =>
       supplied[index] ? undefined : (this.aggregateDefaults.get(field)?.() ?? this.bindAggregateDefault(field, row))
     );
     const destroyers = fields.map((field) => this.destroyerOf(field.type));
-    return (frame) => {
-      const object = newObject(frame, cls);
+    return (frame, target, zeroInitialize, referenceLifetime) => {
+      const object = newObject(frame, cls, zeroInitialize, asObject(target));
+      const owner = referenceLifetime === 'full-expression' ? referenceLifetime : object;
       const receiver = new Ptr(new Box(object, false), 0);
       const mark = frame.pending.length;
       frame.pending.push(object);
@@ -1914,14 +1969,21 @@ export class Compiler extends StatementCompiler {
           fields.length,
           (index) => {
             const init = supplied[index];
-            const value = init ? init(frame) : frame.runtime.withReceiver(receiver, defaults[index] as Eval<Value>);
+            const target = initializerTarget(object.values[fields[index].index]);
+            const value = init
+              ? init(frame, target, zeroInitialize, owner)
+              : frame.runtime.withReceiver(receiver, (f) =>
+                  (defaults[index] as Initializer)(f, target, zeroInitialize, owner)
+                );
             object.values[fields[index].index] = value;
             return value;
           },
           (index) => destroyers[index]
         );
+        object.needsConstruction = false;
         return object;
       } catch (error) {
+        if (error instanceof CppException) object.destroyReferenceTemporaries(frame);
         endLifetime(object);
         throw error;
       } finally {
@@ -1930,22 +1992,22 @@ export class Compiler extends StatementCompiler {
     };
   }
 
-  private bindAggregateDefault(field: FieldInfo, row: number): Eval<Value> {
+  private bindAggregateDefault(field: FieldInfo, row: number): Initializer {
     const node = field.initializer;
     if (!node) {
       if (field.type.kind === 'reference') return this.error(row, `参照のメンバ ${field.name} に初期値がありません。`);
-      return this.valueInitialized(field.type, row).run as Eval<Value>;
+      return this.initializeList(field.type, [], row);
     }
     const previous = this.context;
     this.context = new FunctionContext(undefined, field.owner, VOID);
     try {
-      if (field.type.kind === 'reference')
-        return this.fullExpression(this.memberReference(field.type, this.argument(node), node.row));
+      if (field.type.kind === 'reference') return this.memberReference(field.type, this.argument(node), node.row, true);
       const initialize =
         node.type === 'initializer_list'
           ? this.listInitializer(field.type, node, node.row)
           : this.copyInitializer(field.type, this.compileExpression(node), node.row, false);
-      return this.fullExpression(initialize);
+      return (frame, target, zeroInitialize, referenceLifetime) =>
+        withTemporaries(frame, (f) => initialize(f, target, zeroInitialize, referenceLifetime));
     } finally {
       this.context = previous;
     }
@@ -2018,6 +2080,14 @@ export class Compiler extends StatementCompiler {
 }
 
 class TemporaryConstructorReferenceError extends CompileError {}
+
+function initializerTarget(value: Value): InitializerTarget | undefined {
+  return value instanceof CObject || value instanceof ArrayStore ? value : undefined;
+}
+
+function asObject(value: InitializerTarget | undefined): CObject | undefined {
+  return value instanceof CObject ? value : undefined;
+}
 
 function arrayStorage(value: Value): ArrayStore | undefined {
   return value instanceof ArrayStore ? value : undefined;

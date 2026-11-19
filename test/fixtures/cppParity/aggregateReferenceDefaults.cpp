@@ -1,3 +1,4 @@
+#include <array>
 #include <iostream>
 
 struct DefaultRef { const int& value{7}; };
@@ -11,6 +12,10 @@ struct Derived : Base {
   ~Derived() { std::cout << 'D'; }
 };
 struct Ref { const Base& value; };
+struct DefaultBase { const Base& value{Derived{}}; };
+struct DefaultDerived { const Derived& value{Derived{}}; };
+
+void take(Ref value) { std::cout << 'T'; }
 
 int main() {
   DefaultRef first{};
@@ -22,4 +27,22 @@ int main() {
     std::cout << 'X';
   }
   std::cout << 'Y';
+  {
+    DefaultBase base{};
+    DefaultDerived derived{};
+    std::cout << 'Z';
+  }
+  {
+    DefaultRef builtIn[2]{};
+    std::array<DefaultRef, 2> library{};
+    DefaultBase explicitBuiltIn[2]{{}, {}};
+    std::array<DefaultDerived, 2> explicitLibrary{{{}, {}}};
+    std::cout << 'A';
+  }
+  take(Ref{Derived{}});
+  static_cast<void>(Ref{Derived{}});
+  std::cout << 'Q';
+  Ref* heap = new Ref{Derived{}};
+  std::cout << 'H';
+  delete heap;
 }

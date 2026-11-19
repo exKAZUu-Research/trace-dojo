@@ -7,7 +7,14 @@ int array[2][2] = {{8}, {9}};
 int* addresses[] = {array[0] + 1, &array[1][0], &scalar};
 int& alias = array[0][0];
 const int& temporary = 2;
-int observe() { return *addresses[0] + *addresses[1] + *addresses[2] + alias + temporary; }
+struct Plain { int value; };
+Plain plain{7};
+int* member = &plain.value;
+int& memberAlias = plain.value;
+int* chosen = true ? &scalar : &plain.value;
+constexpr const int* source = &scalar;
+const int* copied = source;
+int observe() { return *addresses[0] + *addresses[1] + *addresses[2] + alias + temporary + *member + memberAlias + *chosen + *copied; }
 
 struct Part {
   int field;
@@ -21,6 +28,13 @@ struct Counter {
   Counter() : field(entries[1]) { std::cout << entries[1] << field; }
 };
 Counter global;
+
+struct Writes {
+  int assigned;
+  int entries[2][1];
+  Writes() : assigned(entries[1][0] = 7) { std::cout << assigned << entries[1][0]; }
+};
+Writes writes;
 
 int save(int n) {
   if (n < 0) throw n;

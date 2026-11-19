@@ -27,7 +27,7 @@ import {
   typeName,
   unqualified,
 } from './types';
-import { ArrayStore, Box, CObject, endLifetime, NULL_PTR, Ptr, Store, UNINIT, type Value } from './values';
+import { ArrayStore, Box, CObject, endLifetime, Liveness, NULL_PTR, Ptr, Store, UNINIT, type Value } from './values';
 
 /**
  * Calls a function with its arguments as its parameters declare them: a `Ptr` for a reference, else a value. A member
@@ -197,6 +197,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     return {
       type: type.kind === 'class' ? type : unqualified(type),
       isLvalue: false,
+      staticAddress: expr.constantPointerValue,
       row: expr.row,
       run: (frame) => (run(frame) as Ptr).read(),
       onlyCalls: expr.onlyCalls,
@@ -244,7 +245,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       row: expr.row,
       isTemporaryObject: true,
       onlyCalls: expr.onlyCalls,
-      run: (frame) => copyAs(frame, cls, source.run(frame) as Value),
+      run: (frame, _zeroInitialize, destination) => copyAs(frame, cls, source.run(frame), destination),
     };
   }
 
@@ -547,10 +548,11 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     const argRuns = this.callArguments(resolved, args, row);
     const run: Expr['run'] = fn.native
       ? (frame) => holdAll(frame, argRuns, (values) => invoke(frame, fn, values, undefined, row, true) as Value)
-      : (frame, zeroInitialize) =>
+      : (frame, zeroInitialize, destination) =>
           holdAll(frame, argRuns, (values) => {
-            const object = newObject(frame, cls, zeroInitialize);
+            const object = newObject(frame, cls, zeroInitialize, destination);
             invoke(frame, fn, values, new Ptr(new Box(object), 0), row, true);
+            object.needsConstruction = false;
             return object;
           });
     return { type: classType(cls), isLvalue: false, row, run, onlyCalls: true, isTemporaryObject: true };
@@ -614,16 +616,25 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
 }
 
 /** A new object of a class, whose members its constructor initializes. */
-export function newObject(frame: Frame, cls: ClassInfo, zeroInitialize = false): CObject {
-  frame.runtime.reserve(cls.fields.length);
+export function newObject(frame: Frame, cls: ClassInfo, zeroInitialize = false, destination?: CObject): CObject {
+  return destination?.liveness === Liveness.Alive ? destination : allocateObject(frame.runtime, cls, zeroInitialize);
+}
+
+function allocateObject(runtime: Frame['runtime'], cls: ClassInfo, zeroInitialize: boolean): CObject {
+  runtime.reserve(cls.fields.length);
   return new CObject(
     cls,
-    cls.fields.map((field) => (zeroInitialize ? staticZero(frame.runtime, field.type) : UNINIT)),
+    cls.fields.map((field) => (zeroInitialize ? staticZero(runtime, field.type) : UNINIT)),
     zeroInitialize
   );
 }
 
 export function staticZero(runtime: Frame['runtime'], type: Type): Value {
+  if (type.kind === 'class' && !type.cls.library) {
+    const object = allocateObject(runtime, type.cls, true);
+    object.needsConstruction = true;
+    return object;
+  }
   if (type.kind !== 'array') return zeroOf(type);
   const length = type.length ?? 0;
   runtime.reserve(length);
@@ -631,8 +642,8 @@ export function staticZero(runtime: Frame['runtime'], type: Type): Value {
 }
 
 /** Copies an object as the copy constructor of `cls` does, slicing an object of a derived class. */
-export function copyAs(frame: Frame, cls: ClassInfo, source: Value): Value {
+export function copyAs(frame: Frame, cls: ClassInfo, source: Value, destination?: CObject): Value {
   const operations = cls.operations;
   if (!operations) throw new Error(`${cls.name} cannot be copied`);
-  return operations.copy(frame, source);
+  return operations.copy(frame, source, destination);
 }

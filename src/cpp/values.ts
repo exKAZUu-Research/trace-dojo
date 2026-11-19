@@ -1,5 +1,6 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { CppRuntimeError } from './errors';
+import type { Frame, Temporary } from './runtime';
 import type { ClassInfo, FunctionInfo, Type } from './types';
 
 /** The value of a variable or an element that the program has not written yet. */
@@ -117,6 +118,8 @@ export class CObject extends Store {
   /** The message of a library exception, which `what()` returns, as bytes. */
   private messageText?: string;
   messageStorage?: ArrayStore;
+  referenceTemporaries?: Temporary[];
+  needsConstruction = false;
   private memberStorage?: Map<number, MemberStorage>;
 
   /**
@@ -155,6 +158,16 @@ export class CObject extends Store {
   set(index: number, value: Value): void {
     this.checkAlive();
     this.values[index] = value;
+  }
+
+  destroyReferenceTemporaries(frame: Frame): void {
+    const temporaries = this.referenceTemporaries;
+    if (!temporaries) return;
+    this.referenceTemporaries = undefined;
+    for (let index = temporaries.length - 1; index >= 0; index--) {
+      const temporary = temporaries[index];
+      temporary.destroy(frame, temporary.object);
+    }
   }
 
   member(index: number): MemberStorage {
@@ -214,6 +227,8 @@ export function endLifetime(value: Value, liveness = Liveness.Dead): void {
 export function childValues(store: Store): Iterable<Value> {
   if (store instanceof Box) return [store.value];
   if (store instanceof MemberStorage) return [store.owner];
+  if (store instanceof CObject && store.referenceTemporaries)
+    return [...store.values, ...store.referenceTemporaries.map(({ object }) => object)];
   if (store instanceof ArrayStore || store instanceof CObject) return store.values;
   return (store as Store & { children?: () => Iterable<Value> }).children?.() ?? [];
 }

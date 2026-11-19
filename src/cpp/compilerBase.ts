@@ -42,6 +42,10 @@ export abstract class CompilerBase {
     return compileError(row, message);
   }
 
+  protected checkHeaderMacro(name: string, row: number): void {
+    if (this.library.isHeaderMacro(name)) this.error(row, `${name} はヘッダーにあるマクロなので名前に使えません。`);
+  }
+
   unsupported(row: number, feature: string): never {
     return unsupported(row, feature);
   }
@@ -377,7 +381,9 @@ export abstract class CompilerBase {
       case 'template_function': {
         if (declarator.type === 'operator_name')
           return this.unsupported(declarator.row, '演算子のオーバーロード（operator）');
-        return { name: this.declaredName(declarator), nameNode: declarator, type: base };
+        const name = this.declaredName(declarator);
+        if (name !== undefined) this.checkHeaderMacro(name.split('::').at(-1) ?? name, declarator.row);
+        return { name, nameNode: declarator, type: base };
       }
       case 'pointer_declarator':
       case 'abstract_pointer_declarator': {
