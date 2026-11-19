@@ -3617,4 +3617,17 @@ foreach ($b as &$v) { echo "$v;"; if ($v === 1) array_shift($b); }
 unset($v);
 `);
   expect(mixedHoleShift).toMatchObject({ kind: 'executed', stdout: '1;3;4;|1;4;' });
+
+  for (const replacement of ['[$c, $a]', "['z' => $c, 'q' => $a]", "(object)['z' => $c, 'q' => $a]"]) {
+    const replacedWithLoopValue = run(String.raw`<?php
+class N { public $p; function __construct(public $id) {} function __destruct() { echo $this->id; } }
+(function () {
+  $a = new N('a'); $b = new N('b'); $c = new N('c'); $x = [$a, $b];
+  foreach ($x as &$v) { $x = ${replacement}; gc_collect_cycles(); break; }
+  unset($v); $b->p = $c; $c->p = $b; $a->p = $b;
+})();
+echo '|', gc_collect_cycles();
+`);
+    expect(replacedWithLoopValue).toMatchObject({ kind: 'executed', stdout: 'a|cb2' });
+  }
 });

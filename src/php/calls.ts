@@ -1,10 +1,17 @@
-// code-gauge-allow-file fileNcss 753 -- Keeps call binding, completion and frame cleanup together.
+// code-gauge-allow-file fileNcss 780 -- Keeps call binding, completion and frame cleanup together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
 import { lower, untilNul } from './bytes';
 import { valueName } from './conversions';
-import { notice, throwError, withPendingException } from './errors';
+import {
+  type CleanupException,
+  isCleanupException,
+  notice,
+  throwError,
+  withCleanupExceptions,
+  withPendingException,
+} from './errors';
 import { decodeLiteral } from './literals';
 import { share } from './places';
 import {
@@ -776,19 +783,47 @@ function releaseFrame(
   if (frame.thisObj) runtime.pendingGcRoots.add(frame.thisObj);
   const holder = fromNative ? runtime.nativeHeld.at(-1) : undefined;
   if (returned instanceof PhpObject || returned instanceof PhpArray) (holder ?? caller.temporaries).push(returned);
-  releaseCallValues(
-    runtime,
-    [
-      ...Array.from(runtime.variableBindings(frame), ([, ref]) => ref.v),
-      ...frame.argumentHolders,
-      ...frame.temporaries,
-      frame.returning,
-      frame.thisObj,
-      frame.closure,
-    ],
-    pending,
-    fromNative
-  );
+  const locals = Array.from(runtime.variableBindings(frame), ([, ref]) => ref.v).filter(isComposite);
+  const tail = [...frame.argumentHolders, ...frame.temporaries, frame.returning, frame.thisObj, frame.closure];
+  if (locals.length === 0) {
+    releaseCallValues(runtime, tail, pending, fromNative);
+    return;
+  }
+  const heldTail = tail.map((value) => (value instanceof Ref ? value.v : value)).filter(isComposite);
+  withPendingException(runtime, pending, () => {
+    const base = runtime.held.length;
+    runtime.held.push(...heldTail, ...locals);
+    try {
+      withCleanupExceptions(runtime, (capture) => {
+        for (const [index, value] of locals.entries()) {
+          runtime.held[base + heldTail.length + index] = null;
+          releaseFrameStep(runtime, [value], fromNative, capture);
+        }
+        for (let index = 0; index < heldTail.length; index++) runtime.held[base + index] = null;
+        releaseFrameStep(runtime, tail, fromNative, capture);
+      });
+    } finally {
+      runtime.held.length = base;
+    }
+  });
+}
+
+function isComposite(value: unknown): value is PhpObject | PhpArray {
+  return value instanceof PhpObject || value instanceof PhpArray;
+}
+
+function releaseFrameStep(
+  runtime: Runtime,
+  values: unknown[],
+  fromNative: boolean,
+  capture: (error: CleanupException) => void
+): void {
+  try {
+    runtime.release(values, false, fromNative);
+  } catch (error) {
+    if (!isCleanupException(error)) throw error;
+    capture(error);
+  }
 }
 
 function releaseCallValues(runtime: Runtime, values: unknown[], pending?: PhpThrow, fromNative = false): void {
