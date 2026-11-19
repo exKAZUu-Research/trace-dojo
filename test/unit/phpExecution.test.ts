@@ -492,11 +492,13 @@ echo 'after';`);
 });
 
 test.each([
-  ['ArrayObject', "echo 'second;';", 'second;'],
-  ['ArrayIterator', "echo 'second;';", 'second;'],
-  ['ArrayObject', "exit('second-exit;');", 'second-exit;'],
-  ['ArrayIterator', "exit('second-exit;');", 'second-exit;'],
-])('defers a displaced %s value to shutdown when its destructor will %s', (name, action, output) => {
+  ['ArrayObject', '$settings->item', "echo 'second;';", 'second;'],
+  ['ArrayIterator', '$settings->item', "echo 'second;';", 'second;'],
+  ['ArrayObject', '$settings->item', "exit('second-exit;');", 'second-exit;'],
+  ['ArrayIterator', '$settings->item', "exit('second-exit;');", 'second-exit;'],
+  ['ArrayObject', "$settings['item']", "echo 'second;';", 'second;'],
+  ['ArrayIterator', "$settings['item']", "exit('second-exit;');", 'second-exit;'],
+])('defers a displaced %s value on %s to shutdown when its destructor will %s', (name, target, action, output) => {
   const execution = run(`<?php
 class DisplacedSetting {
     function __destruct() { ${action} }
@@ -507,7 +509,7 @@ class RetiredSetting {
         echo 'first;';
         if (!$releasing) {
             $releasing = true;
-            $settings->item = new DisplacedSetting;
+            ${target} = new DisplacedSetting;
         }
         exit('exit;');
     }
@@ -521,7 +523,7 @@ class SettingsObserver {
 $releasing = false;
 $settings = new ${name}(['item' => new RetiredSetting], ${name}::ARRAY_AS_PROPS);
 $observer = new SettingsObserver;
-$settings->item = 5;`);
+${target} = 5;`);
   expect(execution).toMatchObject({ kind: 'executed', stdout: `first;exit;{"item":5}${output}` });
 });
 

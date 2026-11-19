@@ -19,19 +19,9 @@ import { setNativeArrayStorage } from './nativeArrayStorage';
 import { toKey } from './operators';
 import { arrayIsShared, share } from './places';
 import './splInterfaces';
-import { ExitSignal, rt } from './runtime';
+import { ExitSignal, rt, type Runtime } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
-import {
-  deref,
-  dropped,
-  type Key,
-  NativeValueIndex,
-  PhpArray,
-  type PhpClass,
-  PhpObject,
-  Ref,
-  type Value,
-} from './values';
+import { deref, type Key, NativeValueIndex, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
 
 const STD_PROP_LIST = 1;
 const ARRAY_AS_PROPS = 2;
@@ -189,17 +179,14 @@ export class ArrayStorage {
       withCleanupExceptions(runtime, (capture) => {
         let exiting = false;
         try {
-          dropped(array.releaseSlot(offset));
+          runtime.release([array.releaseSlot(offset)], true, runtime.nativeCalls > 0);
         } catch (error) {
           if (!isCleanupException(error)) throw error;
           exiting = error instanceof ExitSignal;
           capture(error);
         }
         if (!arrayHasHolders(runtime, array, 1)) return;
-        if (exiting) {
-          const value = deref(array.releaseSlot(offset) ?? null);
-          if (value instanceof PhpArray || value instanceof PhpObject) runtime.nativeShutdownHolders.add(value);
-        }
+        if (exiting) deferSlotCleanup(runtime, array, offset);
         array.setSlot(offset, replacement);
       });
     } finally {
@@ -481,6 +468,11 @@ function sortStorage(object: PhpObject, name: string, args: Value[]): Value {
   } finally {
     ref.releaseWithoutGc();
   }
+}
+
+function deferSlotCleanup(runtime: Runtime, array: PhpArray, offset: Key): void {
+  const value = deref(array.releaseSlot(offset) ?? null);
+  if (value instanceof PhpArray || value instanceof PhpObject) runtime.nativeShutdownHolders.add(value);
 }
 
 function keyAt(storage: ArrayStorage): Key | undefined {
