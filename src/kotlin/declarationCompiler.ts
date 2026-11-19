@@ -1,36 +1,22 @@
+// code-gauge-allow-file fileNcss 811 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type {
   ClassDecl,
   ClassParameterDecl,
   Declaration,
-  Expression,
   FunctionDecl,
+  Import,
   KotlinFile,
   MemberDecl,
   Modifiers,
   ParameterDecl,
   PropertyDecl,
-  Statement,
   SuperSpec,
   TypeParameterDecl,
 } from './ast';
-import type { ArgumentSyntax, Candidate, ResolvedCall } from './callCompiler';
-import {
-  type Compiled,
-  convertRepr,
-  type Eval,
-  Flow,
-  FunctionContext,
-  Handoff,
-  PackageScope,
-  ReceiverSymbol,
-  type Repr,
-  reprOf,
-  Scope,
-  typeMismatchMessage,
-} from './compilerBase';
+import { type Compiled, convertRepr, FunctionContext, PackageScope, type Repr, Scope } from './compilerBase';
 import { DEFAULT_IMPORTS, type FileContext } from './compilerCore';
 import { unavailableMessage } from './convertSupport';
-import { callFunction, isVirtual, parameterReprs, propertyRepr, receiverRepr, returnRepr } from './dispatch';
+import { callFunction, isVirtual, parameterReprs, propertyRepr, receiverRepr } from './dispatch';
 import { defaultToString, hashOf, identityHash, stringHash, stringOf, valueEquals } from './format';
 import { type NativeFunction, type NativeProperty, typeRefText } from './nativeTypes';
 import { toInt32 } from './operators';
@@ -44,10 +30,9 @@ import {
   type ParameterSymbol,
   PropertySymbol,
   TypeParameterSymbol,
-  VariableSymbol,
   type Visibility,
 } from './symbols';
-import { anyType, asSuper, isSameType, isSubtype, substitutionOf } from './typeRelations';
+import { anyType, asSuper, isSameType, isSubtype } from './typeRelations';
 import {
   type ClassType,
   type KType,
@@ -58,9 +43,9 @@ import {
   type Substitution,
   typeToString,
 } from './types';
-import { Boxed, KObject, UNIT, type Value } from './values';
+import { Boxed, KObject, type Value } from './values';
 
-interface ClassEntry {
+export interface ClassEntry {
   decl: ClassDecl;
   symbol: ClassSymbol;
   file: FileContext;
@@ -74,7 +59,7 @@ interface ClassEntry {
   parameterProperties: { param: ClassParameterDecl; symbol: PropertySymbol; index: number }[];
 }
 
-interface FunctionEntry {
+export interface FunctionEntry {
   kind: 'function';
   decl: FunctionDecl;
   symbol: FunctionSymbol;
@@ -84,7 +69,7 @@ interface FunctionEntry {
   state: 'pending' | 'compiling' | 'done';
 }
 
-interface PropertyEntry {
+export interface PropertyEntry {
   kind: 'property';
   decl: PropertyDecl;
   symbol: PropertySymbol;
@@ -117,11 +102,11 @@ function visibilityOf(modifiers: Modifiers): Visibility {
 
 export abstract class DeclarationCompiler extends StatementCompiler {
   protected readonly classEntries: ClassEntry[] = [];
-  private readonly entryOfClass = new Map<ClassSymbol, ClassEntry>();
+  protected readonly entryOfClass = new Map<ClassSymbol, ClassEntry>();
   protected readonly functionEntries: FunctionEntry[] = [];
   protected readonly propertyEntries: PropertyEntry[] = [];
-  private readonly entryOfFunction = new Map<FunctionSymbol, FunctionEntry>();
-  private readonly entryOfProperty = new Map<PropertySymbol, PropertyEntry>();
+  protected readonly entryOfFunction = new Map<FunctionSymbol, FunctionEntry>();
+  protected readonly entryOfProperty = new Map<PropertySymbol, PropertyEntry>();
   protected globalCount = 0;
   protected natives: ReadonlyMap<string, NativeFunction> = new Map();
   protected nativeProperties: ReadonlyMap<string, NativeProperty> = new Map();
@@ -228,43 +213,49 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         continue;
       }
       const name = path.at(-1) as string;
-      const packagePath = path.slice(0, -1).join('.');
-      const packageScope = this.packages.get(packagePath);
-      if (packageScope) {
-        const cls = packageScope.classes.get(name);
-        const functions = packageScope.functions.get(name);
-        const properties = packageScope.properties.get(name);
-        if (!cls && !functions && !properties) this.rejectImport(row, path.join('.'));
-        if (cls) context.importedClasses.set(name, cls);
-        if (functions)
-          context.importedFunctions.set(name, [
-            ...new Set([...(context.importedFunctions.get(name) ?? []), ...functions]),
-          ]);
-        if (properties)
-          context.importedProperties.set(name, [
-            ...new Set([...(context.importedProperties.get(name) ?? []), ...properties]),
-          ]);
-        continue;
-      }
-      const owner = this.findQualifiedClass(path.slice(0, -1));
-      if (owner) {
-        const nested = owner.nested.get(name);
-        if (nested) {
-          context.importedClasses.set(name, nested);
-          continue;
-        }
-        const members = owner.members.get(name) ?? [];
-        if (members.length === 0 || !owner.isObject) this.rejectImport(row, path.join('.'));
-        this.importObjectMembers(context, owner, name, members);
-        continue;
-      }
-      const cls = this.findQualifiedClass(path);
-      if (cls) {
-        context.importedClasses.set(name, cls);
-        continue;
-      }
-      this.rejectImport(row, path.join('.'));
+      const packageScope = this.packages.get(path.slice(0, -1).join('.'));
+      if (packageScope) this.importFromPackage(context, packageScope, name, declaration);
+      else this.importFromClass(context, name, declaration);
     }
+  }
+
+  /** Imports a class, functions, or properties of a package by their name. */
+  private importFromPackage(
+    context: FileContext,
+    packageScope: PackageScope,
+    name: string,
+    { path, row }: Import
+  ): void {
+    const cls = packageScope.classes.get(name);
+    const functions = packageScope.functions.get(name);
+    const properties = packageScope.properties.get(name);
+    if (!cls && !functions && !properties) this.rejectImport(row, path.join('.'));
+    if (cls) context.importedClasses.set(name, cls);
+    if (functions)
+      context.importedFunctions.set(name, [...new Set([...(context.importedFunctions.get(name) ?? []), ...functions])]);
+    if (properties)
+      context.importedProperties.set(name, [
+        ...new Set([...(context.importedProperties.get(name) ?? []), ...properties]),
+      ]);
+  }
+
+  /** Imports a nested class or the members of an object, or a class by its qualified name. */
+  private importFromClass(context: FileContext, name: string, { path, row }: Import): void {
+    const owner = this.findQualifiedClass(path.slice(0, -1));
+    const nested = owner?.nested.get(name);
+    if (nested) {
+      context.importedClasses.set(name, nested);
+      return;
+    }
+    if (owner) {
+      const members = owner.members.get(name) ?? [];
+      if (members.length === 0 || !owner.isObject) this.rejectImport(row, path.join('.'));
+      this.importObjectMembers(context, owner, name, members);
+      return;
+    }
+    const cls = this.findQualifiedClass(path);
+    if (cls) context.importedClasses.set(name, cls);
+    else this.rejectImport(row, path.join('.'));
   }
 
   /** Imports members of an object, such as `Delegates.observable`, as if they were top-level. */
@@ -349,50 +340,12 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   private declareSupertypes(entry: ClassEntry): void {
-    const { symbol, decl } = entry;
-    for (const spec of decl.supers) {
+    const { symbol } = entry;
+    for (const spec of entry.decl.supers) {
       const type = this.resolveType(entry.scope, spec.type) as ClassType;
       if (type.kind !== 'class') this.error(spec.row, '親にはクラスかインターフェースを書いてください。');
-      const parent = type.cls;
-      if (parent.isInterface) {
-        if (spec.kind === 'constructorCall')
-          this.error(spec.row, `インターフェース ${parent.name} にはコンストラクタがないので、() を付けられません。`);
-        if (symbol.interfaces.some((existing) => existing.cls === parent))
-          this.error(spec.row, `${parent.name} が2回書かれています。`);
-        symbol.interfaces.push(type);
-        if (parent.isSealed) {
-          if (parent.isLibrary !== symbol.isLibrary)
-            this.error(spec.row, `sealed interface ${parent.name} は継承できません。`);
-          parent.sealedSubclasses.push(symbol);
-        }
-        if (spec.kind === 'delegated') {
-          entry.delegateFields.push({ type, slot: -1, spec });
-        }
-        continue;
-      }
-      if (spec.kind === 'delegated') this.error(spec.row, '委譲（by）できるのはインターフェースだけです。');
-      if (symbol.superclass) this.error(spec.row, '親のクラスは1つだけ書けます。');
-      if (symbol.isInterface) this.error(spec.row, 'インターフェースの親にはインターフェースだけを書けます。');
-      if (!parent.isInheritable && !parent.isLibrary)
-        this.error(spec.row, `クラス ${parent.name} は open ではないので、継承できません。`);
-      if (!parent.isInheritable && parent.isLibrary && parent !== this.core.any)
-        this.error(spec.row, `クラス ${parent.name} は継承できません。`);
-      if (parent.isObject || parent.kind === 'enum') this.error(spec.row, `${parent.name} は継承できません。`);
-      if (
-        spec.kind === 'type' &&
-        !symbol.isInterface &&
-        // A class of the program has its primary constructor, which phase 2 declares only after the supertypes.
-        (parent.constructors.length > 0 || !parent.isLibrary) &&
-        !this.hasSecondaryConstructors(decl)
-      ) {
-        this.error(spec.row, `${parent.name} の後に、コンストラクタを呼ぶ () を書いてください。`);
-      }
-      if (parent.isSealed) {
-        if (parent.isLibrary !== symbol.isLibrary)
-          this.error(spec.row, `sealed class ${parent.name} は継承できません。`);
-        parent.sealedSubclasses.push(symbol);
-      }
-      symbol.superclass = type;
+      if (type.cls.isInterface) this.declareInterface(entry, spec, type);
+      else this.declareSuperclass(entry, spec, type);
     }
     if (symbol.kind === 'enum') {
       symbol.superclass = {
@@ -406,53 +359,65 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       symbol.superclass = this.core ? anyType() : undefined;
   }
 
+  private declareInterface(entry: ClassEntry, spec: SuperSpec, type: ClassType): void {
+    const { symbol } = entry;
+    const parent = type.cls;
+    if (spec.kind === 'constructorCall')
+      this.error(spec.row, `インターフェース ${parent.name} にはコンストラクタがないので、() を付けられません。`);
+    if (symbol.interfaces.some((existing) => existing.cls === parent))
+      this.error(spec.row, `${parent.name} が2回書かれています。`);
+    symbol.interfaces.push(type);
+    if (parent.isSealed) this.declareSealedCase(symbol, parent, spec, 'sealed interface');
+    if (spec.kind === 'delegated') entry.delegateFields.push({ type, slot: -1, spec });
+  }
+
+  private declareSuperclass(entry: ClassEntry, spec: SuperSpec, type: ClassType): void {
+    const { symbol, decl } = entry;
+    const parent = type.cls;
+    if (spec.kind === 'delegated') this.error(spec.row, '委譲（by）できるのはインターフェースだけです。');
+    if (symbol.superclass) this.error(spec.row, '親のクラスは1つだけ書けます。');
+    if (symbol.isInterface) this.error(spec.row, 'インターフェースの親にはインターフェースだけを書けます。');
+    this.checkInheritable(parent, spec.row);
+    if (
+      spec.kind === 'type' &&
+      !symbol.isInterface &&
+      // A class of the program has its primary constructor, which phase 2 declares only after the supertypes.
+      (parent.constructors.length > 0 || !parent.isLibrary) &&
+      !this.hasSecondaryConstructors(decl)
+    ) {
+      this.error(spec.row, `${parent.name} の後に、コンストラクタを呼ぶ () を書いてください。`);
+    }
+    if (parent.isSealed) this.declareSealedCase(symbol, parent, spec, 'sealed class');
+    symbol.superclass = type;
+  }
+
+  private checkInheritable(parent: ClassSymbol, row: number): void {
+    if (!parent.isInheritable && !parent.isLibrary)
+      this.error(row, `クラス ${parent.name} は open ではないので、継承できません。`);
+    if (!parent.isInheritable && parent.isLibrary && parent !== this.core.any)
+      this.error(row, `クラス ${parent.name} は継承できません。`);
+    if (parent.isObject || parent.kind === 'enum') this.error(row, `${parent.name} は継承できません。`);
+  }
+
+  /** Makes a class one of the cases of a sealed class or interface, which only its own file may extend. */
+  private declareSealedCase(symbol: ClassSymbol, parent: ClassSymbol, spec: SuperSpec, what: string): void {
+    if (parent.isLibrary !== symbol.isLibrary) this.error(spec.row, `${what} ${parent.name} は継承できません。`);
+    parent.sealedSubclasses.push(symbol);
+  }
+
   private hasSecondaryConstructors(decl: ClassDecl): boolean {
     return decl.members.some((member) => member.kind === 'constructor');
   }
 
   private declareMembers(entry: ClassEntry): void {
-    const { symbol, decl, scope } = entry;
+    const { symbol, decl } = entry;
     const primary = decl.primaryConstructor;
     if (primary && symbol.isObject) this.error(decl.row, 'object にはコンストラクタを書けません。');
     if (primary && symbol.isInterface) this.error(decl.row, 'インターフェースにはコンストラクタを書けません。');
     if (!symbol.isInterface && !symbol.isObject) {
-      const constructorSymbol = new FunctionSymbol(symbol.name);
-      constructorSymbol.isConstructor = true;
-      constructorSymbol.owner = symbol;
-      constructorSymbol.row = primary?.row ?? decl.row;
-      constructorSymbol.isLibrary = entry.file.isLibrary;
-      constructorSymbol.returnType = this.unitTypeOrUndefined();
-      constructorSymbol.visibility =
-        symbol.kind === 'enum'
-          ? 'private'
-          : symbol.isSealed
-            ? 'protected'
-            : visibilityOf(primary?.modifiers ?? { keywords: new Set(), annotations: [] });
-      const ctorScope = new Scope(scope, undefined);
-      constructorSymbol.params = (primary?.params ?? []).map((param) => this.declareParameter(ctorScope, param));
-      // An external class of the library has only the constructors it declares: the natives make the others' instances,
-      // as `EmptyList`'s, which a program cannot create.
-      const isExternal = entry.file.isLibrary && decl.modifiers.keywords.has('external');
-      if (!(entry.file.isLibrary && primary === undefined && (this.hasSecondaryConstructors(decl) || isExternal))) {
-        symbol.constructors.push(constructorSymbol);
-      }
-      entry.constructorSymbol = constructorSymbol;
+      const constructorSymbol = this.declarePrimaryConstructor(entry);
       for (const [index, param] of (primary?.params ?? []).entries()) {
-        if (!param.binding) {
-          if (param.modifiers.keywords.has('override') || param.modifiers.keywords.has('open')) {
-            this.error(param.row, 'val か var を付けていない引数には、override や open を付けられません。');
-          }
-          continue;
-        }
-        const property = new PropertySymbol(param.name);
-        property.owner = symbol;
-        property.type = constructorSymbol.params[index].type;
-        property.isVar = param.binding === 'var';
-        this.applyMemberModifiers(property, param.modifiers, symbol);
-        property.row = param.row;
-        property.isLibrary = entry.file.isLibrary;
-        symbol.addMember(property);
-        entry.parameterProperties.push({ param, symbol: property, index });
+        this.declareParameterProperty(entry, param, constructorSymbol.params[index].type, index);
       }
     }
     for (const member of decl.members) this.declareMember(entry, member);
@@ -460,6 +425,54 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       this.error(decl.row, 'value class には、プロパティを1つだけ持つコンストラクタが要ります。');
     if (symbol.isData || symbol.isValue || (symbol.isObject && decl.modifiers.keywords.has('data')))
       this.declareDataMembers(entry);
+  }
+
+  /** The primary constructor, written or implicit, which an enum's and a sealed class's own code alone may call. */
+  private declarePrimaryConstructor(entry: ClassEntry): FunctionSymbol {
+    const { symbol, decl, scope } = entry;
+    const primary = decl.primaryConstructor;
+    const constructorSymbol = new FunctionSymbol(symbol.name);
+    constructorSymbol.isConstructor = true;
+    constructorSymbol.owner = symbol;
+    constructorSymbol.row = primary?.row ?? decl.row;
+    constructorSymbol.isLibrary = entry.file.isLibrary;
+    constructorSymbol.returnType = this.unitTypeOrUndefined();
+    constructorSymbol.visibility =
+      symbol.kind === 'enum'
+        ? 'private'
+        : symbol.isSealed
+          ? 'protected'
+          : visibilityOf(primary?.modifiers ?? { keywords: new Set(), annotations: [] });
+    const ctorScope = new Scope(scope, undefined);
+    constructorSymbol.params = (primary?.params ?? []).map((param) => this.declareParameter(ctorScope, param));
+    // An external class of the library has only the constructors it declares: the natives make the others' instances,
+    // as `EmptyList`'s, which a program cannot create.
+    const isExternal = entry.file.isLibrary && decl.modifiers.keywords.has('external');
+    if (!(entry.file.isLibrary && primary === undefined && (this.hasSecondaryConstructors(decl) || isExternal))) {
+      symbol.constructors.push(constructorSymbol);
+    }
+    entry.constructorSymbol = constructorSymbol;
+    return constructorSymbol;
+  }
+
+  /** The property that a primary constructor's parameter declares with `val` or `var`. */
+  private declareParameterProperty(entry: ClassEntry, param: ClassParameterDecl, type: KType, index: number): void {
+    const { symbol } = entry;
+    if (!param.binding) {
+      if (param.modifiers.keywords.has('override') || param.modifiers.keywords.has('open')) {
+        this.error(param.row, 'val か var を付けていない引数には、override や open を付けられません。');
+      }
+      return;
+    }
+    const property = new PropertySymbol(param.name);
+    property.owner = symbol;
+    property.type = type;
+    property.isVar = param.binding === 'var';
+    this.applyMemberModifiers(property, param.modifiers, symbol);
+    property.row = param.row;
+    property.isLibrary = entry.file.isLibrary;
+    symbol.addMember(property);
+    entry.parameterProperties.push({ param, symbol: property, index });
   }
 
   private unitTypeOrUndefined(): KType {
@@ -759,35 +772,33 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   /** The members a data class, a value class, and a data object get: `toString`, `equals`, `hashCode`, `copy`, `componentN`. */
-  // code-gauge-allow functionNcss 60 -- The members Kotlin generates for data classes.
   private declareDataMembers(entry: ClassEntry): void {
     const { symbol } = entry;
     const properties = entry.parameterProperties.map((item) => item.symbol);
-    const declares = (name: string, paramCount: number): boolean =>
-      symbol.members.get(name)?.some((member) => member.kind === 'function' && member.params.length === paramCount) ??
-      false;
-    const add = (
-      name: string,
-      params: ParameterSymbol[],
-      returnType: KType,
-      invoke: FunctionSymbol['invoke'],
-      isOverride: boolean
-    ): FunctionSymbol => {
-      const generated = new FunctionSymbol(name);
-      generated.owner = symbol;
-      generated.params = params;
-      generated.returnType = returnType;
-      generated.isOverride = isOverride;
-      generated.isOperator = name.startsWith('component');
-      generated.isLibrary = symbol.isLibrary;
-      generated.invoke = invoke;
-      generated.row = symbol.row;
-      symbol.addMember(generated);
-      return generated;
-    };
+    this.declareDataAnyMembers(symbol, properties);
+    if (symbol.isObject || symbol.isValue) return;
+    for (const [index, property] of properties.entries()) {
+      const name = `component${index + 1}`;
+      if (declaresFunction(symbol, name, 0)) continue;
+      addGenerated(
+        symbol,
+        name,
+        [],
+        property.type as KType,
+        (_frame, receiver) => (receiver as KObject).fields[property.slot as number],
+        false
+      );
+    }
+    this.declareCopy(entry);
+  }
+
+  /** `toString`, `hashCode`, and `equals` of a data class, a value class, or a data object, unless it declares its own. */
+  // code-gauge-allow functionCognitiveComplexity 23 -- one generated member after another, each as Kotlin defines it for data classes.
+  private declareDataAnyMembers(symbol: ClassSymbol, properties: PropertySymbol[]): void {
     const isDataObject = symbol.isObject;
-    if (!declares('toString', 0)) {
-      add(
+    if (!declaresFunction(symbol, 'toString', 0)) {
+      addGenerated(
+        symbol,
         'toString',
         [],
         this.core.string.type,
@@ -802,8 +813,9 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         true
       );
     }
-    if (!declares('hashCode', 0)) {
-      add(
+    if (!declaresFunction(symbol, 'hashCode', 0)) {
+      addGenerated(
+        symbol,
         'hashCode',
         [],
         this.primitiveType('Int'),
@@ -819,8 +831,9 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         true
       );
     }
-    if (!declares('equals', 1)) {
-      add(
+    if (!declaresFunction(symbol, 'equals', 1)) {
+      addGenerated(
+        symbol,
         'equals',
         [{ name: 'other', type: anyType(true), hasDefault: false, isVararg: false }],
         this.booleanType,
@@ -835,18 +848,10 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         true
       );
     }
-    if (isDataObject || symbol.isValue) return;
-    for (const [index, property] of properties.entries()) {
-      const name = `component${index + 1}`;
-      if (declares(name, 0)) continue;
-      add(
-        name,
-        [],
-        property.type as KType,
-        (_frame, receiver) => (receiver as KObject).fields[property.slot as number],
-        false
-      );
-    }
+  }
+
+  /** `copy` of a data class, whose omitted arguments are the receiver's properties. */
+  private declareCopy(entry: ClassEntry): void {
     const ctor = entry.constructorSymbol as FunctionSymbol;
     const copyParams: ParameterSymbol[] = ctor.params.map((param) => ({
       name: param.name,
@@ -858,10 +863,11 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     const copiedProperties = ctor.params.map(
       (_, index) => entry.parameterProperties.find((item) => item.index === index)?.symbol
     );
-    add(
+    addGenerated(
+      entry.symbol,
       'copy',
       copyParams,
-      symbol.selfType,
+      entry.symbol.selfType,
       (frame, receiver, args) => {
         const values = args.map((arg, index) => {
           if (arg !== MISSING) return arg;
@@ -882,7 +888,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   /** The JVM's default value of a field of the type, before its initializer runs. */
-  private defaultValueOf(type: KType | undefined): Value {
+  protected defaultValueOf(type: KType | undefined): Value {
     const kind = type ? this.primitiveOf(type) : undefined;
     if (kind === undefined)
       return type && this.isClass(type, this.core.boolean) && !resolved(type).nullable ? false : undefined;
@@ -935,14 +941,14 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     symbol.fieldCount = count;
   }
 
-  private findOwnProperty(cls: ClassSymbol, name: string): PropertySymbol {
+  protected findOwnProperty(cls: ClassSymbol, name: string): PropertySymbol {
     return cls.members
       .get(name)
       ?.find((member): member is PropertySymbol => member.kind === 'property') as PropertySymbol;
   }
 
   /** Whether a property stores a value: unless it is abstract, external, or has accessors that never use `field`. */
-  private hasBackingField(decl: PropertyDecl, symbol: PropertySymbol): boolean {
+  protected hasBackingField(decl: PropertyDecl, symbol: PropertySymbol): boolean {
     if (symbol.isAbstract || decl.modifiers.keywords.has('external') || decl.receiver) return false;
     // An accessor left to its default, or one that reads or writes `field`, keeps the value in a backing field.
     const getterUses = !decl.getter?.body || usesField(decl.getter.body);
@@ -977,53 +983,59 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         if (!symbol.vtable.has(root) || !implementation.isAbstract) symbol.vtable.set(root, implementation);
       }
     }
-    for (const members of symbol.members.values()) {
-      for (const member of members) {
-        const overridden = this.findOverridden(symbol, member);
-        if (overridden.length === 0) {
-          if (member.isOverride && !(member.kind === 'function' && symbol.isLibrary)) {
-            this.error(member.row, `override を付けた ${member.name} は、親のクラスやインターフェースにありません。`);
-          }
-          if (isVirtual(member) || member.isOpen || member.isAbstract) symbol.vtable.set(member, member);
-          continue;
-        }
-        if (!member.isOverride && !symbol.isLibrary && !this.isGenerated(member)) {
-          this.error(member.row, `${member.name} は親の ${member.name} を上書きするので、override を付けてください。`);
-        }
-        for (const base of overridden) {
-          if (!isVirtual(base) && !base.isOpen && !base.isAbstract && !base.isOverride) {
-            this.error(member.row, `${base.owner?.name ?? ''}.${member.name} は open ではないので、上書きできません。`);
-          }
-          if (base.kind === 'property' && member.kind === 'property' && base.isVar && !member.isVar) {
-            this.error(member.row, `var の ${member.name} を val で上書きすることはできません。`);
-          }
-        }
-        member.overridden = overridden;
-        member.root = overridden[0].root;
-        // An override of an operator or infix function is one as well, as Kotlin inherits these modifiers.
-        if (member.kind === 'function') {
-          for (const base of overridden) {
-            if (base.kind !== 'function') continue;
-            member.isOperator ||= base.isOperator;
-            member.isInfix ||= base.isInfix;
-          }
-        }
-        if (member.kind === 'function' && !member.isOverride && this.isGenerated(member)) member.isOverride = true;
-        for (const base of overridden) symbol.vtable.set(base.root, member);
-        symbol.vtable.set(member.root, member);
-      }
-    }
+    for (const members of symbol.members.values()) for (const member of members) this.linkMember(symbol, member);
     this.linkDelegates(entry);
-    if (!symbol.isAbstract && !symbol.isLibrary) {
-      for (const [root, implementation] of symbol.vtable) {
-        if (implementation.isAbstract) {
-          const kind = root.kind === 'function' ? '関数' : 'プロパティ';
-          this.error(
-            symbol.row,
-            `クラス ${symbol.name} は abstract ではないので、${kind} ${root.name} を実装してください。`
-          );
-        }
+    if (!symbol.isAbstract && !symbol.isLibrary) this.checkImplemented(symbol);
+  }
+
+  /** Links a member to the members of the supertypes that it overrides, checking that it may override them. */
+  // code-gauge-allow functionCognitiveComplexity 21 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  private linkMember(symbol: ClassSymbol, member: MemberSymbol): void {
+    const overridden = this.findOverridden(symbol, member);
+    if (overridden.length === 0) {
+      if (member.isOverride && !(member.kind === 'function' && symbol.isLibrary)) {
+        this.error(member.row, `override を付けた ${member.name} は、親のクラスやインターフェースにありません。`);
       }
+      if (isVirtual(member) || member.isOpen || member.isAbstract) symbol.vtable.set(member, member);
+      return;
+    }
+    if (!member.isOverride && !symbol.isLibrary && !this.isGenerated(member)) {
+      this.error(member.row, `${member.name} は親の ${member.name} を上書きするので、override を付けてください。`);
+    }
+    for (const base of overridden) this.checkOverridable(member, base);
+    member.overridden = overridden;
+    member.root = overridden[0].root;
+    // An override of an operator or infix function is one as well, as Kotlin inherits these modifiers.
+    if (member.kind === 'function') {
+      for (const base of overridden) {
+        if (base.kind !== 'function') continue;
+        member.isOperator ||= base.isOperator;
+        member.isInfix ||= base.isInfix;
+      }
+      if (!member.isOverride && this.isGenerated(member)) member.isOverride = true;
+    }
+    for (const base of overridden) symbol.vtable.set(base.root, member);
+    symbol.vtable.set(member.root, member);
+  }
+
+  private checkOverridable(member: MemberSymbol, base: MemberSymbol): void {
+    if (!isVirtual(base) && !base.isOpen && !base.isAbstract && !base.isOverride) {
+      this.error(member.row, `${base.owner?.name ?? ''}.${member.name} は open ではないので、上書きできません。`);
+    }
+    if (base.kind === 'property' && member.kind === 'property' && base.isVar && !member.isVar) {
+      this.error(member.row, `var の ${member.name} を val で上書きすることはできません。`);
+    }
+  }
+
+  /** Rejects a class that is not abstract but leaves an abstract member without an implementation. */
+  private checkImplemented(symbol: ClassSymbol): void {
+    for (const [root, implementation] of symbol.vtable) {
+      if (!implementation.isAbstract) continue;
+      const kind = root.kind === 'function' ? '関数' : 'プロパティ';
+      this.error(
+        symbol.row,
+        `クラス ${symbol.name} は abstract ではないので、${kind} ${root.name} を実装してください。`
+      );
     }
   }
 
@@ -1132,808 +1144,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     return forward;
   }
 
-  // Phase 4: bodies.
-
-  protected compileBodies(): void {
-    for (const entry of this.propertyEntries) this.ensurePropertyCompiled(entry);
-    // The defaults need the types of the fields, which inferred properties have only now.
-    const done = new Set<ClassSymbol>();
-    const setDefaults = (cls: ClassSymbol): void => {
-      if (done.has(cls) || !this.entryOfClass.has(cls)) return;
-      done.add(cls);
-      if (cls.superclass) setDefaults(cls.superclass.cls);
-      const defaults: Value[] = [...(cls.superclass?.cls.fieldDefaults ?? [])];
-      defaults.length = cls.fieldCount;
-      for (const property of cls.ownFields) defaults[property.slot as number] = this.defaultValueOf(property.type);
-      cls.fieldDefaults = defaults;
-    };
-    for (const entry of this.classEntries) setDefaults(entry.symbol);
-    for (const entry of this.functionEntries) this.ensureFunctionCompiled(entry);
-    for (const entry of this.classEntries) {
-      this.file = entry.file;
-      this.compileClassInitializer(entry);
-    }
-  }
-
-  protected ensureReturnType(func: FunctionSymbol, row: number): KType {
-    if (func.returnType) return func.returnType;
-    const entry = this.entryOfFunction.get(func);
-    if (!entry) return this.core.unit.type;
-    if (entry.state === 'compiling')
-      this.error(row, `関数 ${func.name} は自分を呼んでいるので、戻り値の型を書いてください。`);
-    this.ensureFunctionCompiled(entry);
-    return func.returnType ?? this.core.unit.type;
-  }
-
-  protected ensurePropertyType(property: PropertySymbol, row: number): KType {
-    if (property.type) return property.type;
-    const entry = this.entryOfProperty.get(property);
-    if (!entry) return anyType(true);
-    if (entry.state === 'compiling')
-      this.error(row, `プロパティ ${property.name} は自分を使っているので、型を書いてください。`);
-    this.ensurePropertyCompiled(entry);
-    return property.type ?? anyType(true);
-  }
-
-  /** Runs a compilation of another declaration in the middle of one, restoring what the current one had. */
-  private withSavedState<T>(file: FileContext, compile: () => T): T {
-    const savedFile = this.file;
-    const savedFlow = this.flow;
-    this.file = file;
-    this.flow = new Flow();
-    for (const variable of this.initializerVariables) this.flow.assigned.add(variable);
-    try {
-      return compile();
-    } finally {
-      this.file = savedFile;
-      this.flow = savedFlow;
-    }
-  }
-
-  // code-gauge-allow functionCognitiveComplexity 30 -- Parameters, receivers, defaults, the body, and the frame of a function.
-  // code-gauge-allow functionNcss 52 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-  private ensureFunctionCompiled(entry: FunctionEntry): void {
-    if (entry.state !== 'pending') return;
-    entry.state = 'compiling';
-    this.withSavedState(entry.file, () => {
-      const { decl, symbol } = entry;
-      const context = new FunctionContext(undefined, false, symbol.name, entry.file.isLibrary, undefined);
-      Object.defineProperty(context, 'returnTarget', { value: context });
-      context.info.isAtomic = symbol.isAtomic;
-      const scope = new Scope(entry.scope, context);
-      const thisType = this.addReceivers(scope, context, entry.cls, symbol.extensionReceiver, symbol.name);
-      // An object's members show its properties as `Name.x`, as Java's static members do, rather than as `this.x`.
-      context.info.showsThis =
-        thisType !== undefined && entry.cls !== undefined && !entry.cls.symbol.isObject && !entry.file.isLibrary;
-      const variables = symbol.params.map((param, index) =>
-        this.newParameter(
-          scope,
-          context,
-          param.name,
-          param.isVararg ? this.varargType(param.type) : param.type,
-          decl.params[index].row
-        )
-      );
-      // A default value sees only the parameters before its own.
-      const defaults = symbol.params.map((param, index) => {
-        this.flow.assigned.add(variables[index]);
-        const value = decl.params[index].defaultValue;
-        if (!value) return;
-        const compiled = this.compileExpression(scope, context, value, param.type);
-        return convertRepr(
-          this.expectType(compiled, param.type, value.row),
-          reprOf(this.core, param.type),
-          reprOf(this.core, param.type)
-        );
-      });
-      for (const [index, evaluate] of defaults.entries()) {
-        if (evaluate) symbol.params[index].defaultValue = evaluate;
-      }
-      if (!decl.body) {
-        symbol.defaultsInfo = context.info;
-        entry.state = 'done';
-        return;
-      }
-      let body: Eval;
-      if (decl.body.kind === 'expression') {
-        const compiled = this.compileExpression(scope, context, decl.body.expression, symbol.returnType);
-        symbol.returnType ??= this.inferredResultType(compiled);
-        context.returnType = symbol.returnType;
-        body = convertRepr(
-          this.expectType(compiled, symbol.returnType, decl.body.expression.row),
-          reprOf(this.core, symbol.returnType),
-          returnRepr(symbol)
-        );
-      } else {
-        const returnType = symbol.returnType as KType;
-        context.returnType = returnType;
-        context.returnRepr = returnRepr(symbol);
-        const compiled = this.compileStatementsValue(
-          scope,
-          context,
-          decl.body.block.statements,
-          undefined,
-          true,
-          false
-        );
-        const isUnit = this.isClass(returnType, this.core.unit);
-        if (!isUnit && !this.flow.isDead && !(resolved(returnType).kind === 'nothing')) {
-          this.error(decl.body.block.endRow, `関数 ${symbol.name} の最後に return を書いてください。`);
-        }
-        const evaluate = compiled.eval;
-        body = isUnit
-          ? (frame) => {
-              evaluate(frame);
-              return UNIT;
-            }
-          : (frame) => {
-              evaluate(frame);
-              return UNIT;
-            };
-      }
-      this.finishFunction(symbol, context, defaults, body);
-      entry.state = 'done';
-    });
-  }
-
-  /** The type a `vararg` parameter has inside its function: an array of its elements. */
-  protected abstract varargType(elementType: KType): KType;
-
-  private inferredResultType(compiled: Compiled): KType {
-    const type = resolved(compiled.type);
-    if (compiled.integerLiteral) return this.primitiveType(this.primitiveOf(type) ?? 'Int');
-    return type;
-  }
-
-  /** Adds the implicit receivers of a member or extension: the class's instance, and an extension's receiver. */
-  private addReceivers(
-    scope: Scope,
-    context: FunctionContext,
-    cls: ClassEntry | undefined,
-    extension: KType | undefined,
-    label?: string
-  ): KType | undefined {
-    let thisType: KType | undefined;
-    if (cls) {
-      thisType = this.thisTypeOf(cls.symbol);
-      if (!extension) scope.receiver = new ReceiverSymbol(thisType, context, cls.symbol, cls.symbol.name);
-      // An extension declared in an object, as `Int.minutes` in `Duration.Companion`, needs no instance of it.
-      else if (!cls.symbol.isObject || !cls.file.isLibrary)
-        this.unavailable(cls.symbol.row, 'クラスの中での拡張関数・拡張プロパティの宣言');
-    }
-    if (extension) {
-      scope.receiver = new ReceiverSymbol(extension, context, undefined, label);
-      thisType = extension;
-    }
-    return thisType;
-  }
-
-  private finishFunction(
-    symbol: FunctionSymbol,
-    context: FunctionContext,
-    defaults: (Eval | undefined)[],
-    body: Eval
-  ): void {
-    const { info } = context;
-    const fillsDefaults = defaults.some((evaluate) => evaluate !== undefined);
-    const run: Eval = fillsDefaults
-      ? (frame) => {
-          for (const [index, evaluate] of defaults.entries()) {
-            if (evaluate && frame.locals[index] === MISSING) frame.locals[index] = evaluate(frame);
-          }
-          return body(frame);
-        }
-      : body;
-    const none: unknown[] = [];
-    symbol.invoke = (caller, receiver, args, callRow) =>
-      caller.runtime.call(info, caller, none, receiver, args, callRow, run);
-  }
-
-  // code-gauge-allow functionCognitiveComplexity 24 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-  private ensurePropertyCompiled(entry: PropertyEntry): void {
-    if (entry.state !== 'pending') return;
-    entry.state = 'compiling';
-    this.withSavedState(entry.file, () => {
-      const { decl, symbol } = entry;
-      // Initializers run in the class's initializer, whose scope sees the primary constructor's parameters.
-      if (decl.initializer && !symbol.type) {
-        const context = this.initializerContext(entry);
-        const scope = this.initializerScope(entry, context);
-        const compiled = this.compileExpression(scope, context, decl.initializer);
-        const type = resolved(compiled.type);
-        symbol.type = compiled.integerLiteral ? this.primitiveType(this.primitiveOf(type) ?? 'Int') : type;
-      }
-      if (decl.delegate) this.compileMemberDelegate(entry);
-      else if (!symbol.type && decl.getter?.body) {
-        symbol.type = this.compileAccessorType(entry);
-      }
-      const isPlainTopLevel = !entry.cls && !decl.delegate;
-      // The global comes first, as the accessors' `field` is the global and the accessors replace its plain ones.
-      if (isPlainTopLevel && this.hasBackingField(decl, symbol)) this.bindGlobal(entry);
-      if (decl.getter?.body) this.compileGetter(entry);
-      if (decl.setter?.body) this.compileSetter(entry);
-      entry.state = 'done';
-    });
-  }
-
-  private initializerContexts = new Map<ClassEntry | FileContext, FunctionContext>();
-
-  /** The context of a class's initializer, or of the file's for top-level properties. */
-  protected initializerContext(entry: { cls: ClassEntry | undefined; file: FileContext }): FunctionContext {
-    const key = entry.cls ?? entry.file;
-    let context = this.initializerContexts.get(key);
-    if (!context) {
-      const name = entry.cls ? entry.cls.symbol.name : '<init>';
-      context = new FunctionContext(undefined, false, name, entry.file.isLibrary, undefined);
-      context.info.showsThis = entry.cls !== undefined && !entry.cls.symbol.isObject && !entry.file.isLibrary;
-      this.initializerContexts.set(key, context);
-    }
-    return context;
-  }
-
-  private initializerScopes = new Map<FunctionContext, Scope>();
-
-  protected initializerScope(
-    entry: { cls: ClassEntry | undefined; scope: Scope; file: FileContext },
-    context: FunctionContext
-  ): Scope {
-    let scope = this.initializerScopes.get(context);
-    if (scope) return scope;
-    scope = new Scope(entry.cls ? entry.cls.scope : entry.scope, context);
-    if (entry.cls) {
-      scope.receiver = new ReceiverSymbol(
-        this.thisTypeOf(entry.cls.symbol),
-        context,
-        entry.cls.symbol,
-        entry.cls.symbol.name
-      );
-      const ctor = entry.cls.constructorSymbol;
-      for (const [index, param] of (ctor?.params ?? []).entries()) {
-        const row = entry.cls.decl.primaryConstructor?.params[index]?.row ?? entry.cls.decl.row;
-        const variable = this.newParameter(scope, context, param.name, param.type, row);
-        this.flow.assigned.add(variable);
-        this.initializerVariables.add(variable);
-      }
-    }
-    this.initializerScopes.set(context, scope);
-    return scope;
-  }
-
-  /** The constructor parameters that class initializers see, which every initializer has assigned. */
-  protected readonly initializerVariables = new Set<VariableSymbol>();
-
-  private bindGlobal(entry: PropertyEntry): void {
-    const { symbol } = entry;
-    const slot = this.globalCount++;
-    symbol.slot = slot;
-    symbol.get = (frame) => frame.runtime.globals[slot];
-    symbol.set = (frame, _receiver, value) => {
-      frame.runtime.globals[slot] = value;
-    };
-  }
-
-  /** The type of a property whose getter gives it, as `val isEmpty get() = size == 0` does. */
-  private compileAccessorType(entry: PropertyEntry): KType {
-    const body = entry.decl.getter?.body;
-    if (body?.kind !== 'expression') this.error(entry.decl.row, `プロパティ ${entry.decl.name} の型を書いてください。`);
-    const { context, scope } = this.accessorContext(entry, 'get');
-    const compiled = this.compileExpression(scope, context, body.expression);
-    return this.inferredResultType(compiled);
-  }
-
-  private accessorContext(entry: PropertyEntry, kind: 'get' | 'set'): { context: FunctionContext; scope: Scope } {
-    const context = new FunctionContext(
-      undefined,
-      false,
-      `${kind}-${entry.symbol.name}`,
-      entry.file.isLibrary,
-      undefined
-    );
-    Object.defineProperty(context, 'returnTarget', { value: context });
-    context.info.showsThis = entry.cls !== undefined && !entry.cls.symbol.isObject && !entry.file.isLibrary;
-    const scope = new Scope(entry.scope, context);
-    this.addReceivers(scope, context, entry.cls, entry.symbol.extensionReceiver);
-    const { slot } = entry.symbol;
-    if (slot !== undefined) {
-      const field = new VariableSymbol(
-        'field',
-        entry.symbol.type ?? anyType(true),
-        entry.symbol.isVar,
-        0,
-        -1,
-        entry.decl.row
-      );
-      field.owner = context;
-      const storage = (frame: Frame): Value[] =>
-        entry.cls ? (frame.thisValue as KObject).fields : frame.runtime.globals;
-      field.delegateRead = (frame) => storage(frame)[slot];
-      if (entry.symbol.isVar) {
-        field.delegateWrite = (frame, value) => {
-          storage(frame)[slot] = value;
-        };
-      }
-      scope.variables.set('field', field);
-      this.flow.assigned.add(field);
-    }
-    return { context, scope };
-  }
-
-  private compileGetter(entry: PropertyEntry): void {
-    const { symbol, decl } = entry;
-    const body = decl.getter?.body;
-    if (!body) return;
-    const { context, scope } = this.accessorContext(entry, 'get');
-    const type = symbol.type as KType;
-    context.returnType = type;
-    context.returnRepr = propertyRepr(symbol);
-    let run: Eval;
-    if (body.kind === 'expression') {
-      const compiled = this.compileExpression(scope, context, body.expression, type);
-      run = convertRepr(
-        this.expectType(compiled, type, body.expression.row),
-        reprOf(this.core, type),
-        propertyRepr(symbol)
-      );
-    } else {
-      const compiled = this.compileStatementsValue(scope, context, body.block.statements, undefined, true, false);
-      if (!this.flow.isDead) this.error(body.block.endRow, `get の最後に return を書いてください。`);
-      const evaluate = compiled.eval;
-      run = (frame) => {
-        evaluate(frame);
-        return UNIT;
-      };
-    }
-    const { info } = context;
-    const none: unknown[] = [];
-    symbol.get = (frame, receiver) => frame.runtime.call(info, frame, none, receiver, [], undefined, run);
-  }
-
-  private compileSetter(entry: PropertyEntry): void {
-    const { symbol, decl } = entry;
-    const setter = decl.setter;
-    if (!setter?.body) return;
-    const { context, scope } = this.accessorContext(entry, 'set');
-    const type = symbol.type as KType;
-    context.returnType = this.core.unit.type;
-    const value = this.newVariable(scope, context, setter.parameterName ?? 'value', type, false, setter.row);
-    this.flow.assigned.add(value);
-    const compiled =
-      setter.body.kind === 'expression'
-        ? this.compileForEffect(scope, context, setter.body.expression)
-        : this.compileStatementsValue(scope, context, setter.body.block.statements, undefined, true, false);
-    const evaluate = compiled.eval;
-    const { info } = context;
-    const none: unknown[] = [];
-    const repr = propertyRepr(symbol);
-    void repr;
-    symbol.set = (frame, receiver, newValue) => {
-      frame.runtime.call(info, frame, none, receiver, [newValue], undefined, (inner) => {
-        evaluate(inner);
-        return UNIT;
-      });
-    };
-  }
-
-  /** A property delegated with `by`, whose delegate's `getValue` and `setValue` read and write it. */
-  // code-gauge-allow functionNcss 41 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-  private compileMemberDelegate(entry: PropertyEntry): void {
-    const { symbol, decl } = entry;
-    const context = this.initializerContext(entry);
-    const scope = this.initializerScope(entry, context);
-    const delegate = this.compileExpression(scope, context, decl.delegate as Expression);
-    entry.initializer = delegate;
-    const slot = entry.delegateSlot;
-    const holderScope = new Scope(scope, context);
-    const holder = new VariableSymbol('\0delegate', delegate.type, false, 0, -1, decl.row);
-    holder.owner = context;
-    const held = new Handoff<{ delegate: Value; value: Value }>();
-    holder.delegateRead = () => held.get().delegate;
-    holderScope.variables.set(holder.name, holder);
-    this.flow.assigned.add(holder);
-    const holderCompiled = this.compileName(holderScope, context, holder.name, decl.row);
-    const thisArgument: ArgumentSyntax = entry.cls
-      ? { row: decl.row, name: undefined, value: { kind: 'this', row: decl.row, label: undefined } }
-      : { row: decl.row, name: undefined, value: { kind: 'null', row: decl.row } };
-    const getter = this.compileDelegateCall(
-      holderScope,
-      context,
-      holderCompiled,
-      'getValue',
-      [thisArgument, this.propertyReference(holderScope, decl.name, decl.row)],
-      decl.row
-    );
-    if (!symbol.type) symbol.type = getter.type;
-    else if (!isSubtype(getter.type, symbol.type)) this.error(decl.row, typeMismatchMessage(symbol.type, getter.type));
-    const getEval = convertRepr(getter.eval, getter.repr, propertyRepr(symbol));
-    // A top-level property's delegate lives in the globals, which the file's initializers fill when the run starts.
-    const globalSlot = slot === undefined ? this.globalCount++ : undefined;
-    if (globalSlot !== undefined) entry.delegateGlobal = globalSlot;
-    const readDelegate = (frame: Frame, receiver: Value): Value =>
-      globalSlot === undefined ? (receiver as KObject).fields[slot as number] : frame.runtime.globals[globalSlot];
-    const { info } = context;
-    const none: unknown[] = [];
-    const runHeld = (frame: Frame, receiver: Value, run: Eval, value?: Value): Value =>
-      frame.runtime.call(info, frame, none, receiver, [], undefined, (inner) =>
-        held.run(inner, { delegate: readDelegate(frame, receiver), value }, () => run(inner))
-      );
-    symbol.get = (frame, receiver) => runHeld(frame, receiver, getEval);
-    if (decl.isVar) {
-      const valueVariable = new VariableSymbol('\0value', symbol.type, false, 0, -1, decl.row);
-      valueVariable.owner = context;
-      valueVariable.delegateRead = () => held.get().value;
-      holderScope.variables.set(valueVariable.name, valueVariable);
-      this.flow.assigned.add(valueVariable);
-      const setter = this.compileDelegateCall(
-        holderScope,
-        context,
-        holderCompiled,
-        'setValue',
-        [
-          thisArgument,
-          this.propertyReference(holderScope, decl.name, decl.row),
-          { row: decl.row, name: undefined, value: { kind: 'name', row: decl.row, name: '\0value' } },
-        ],
-        decl.row
-      );
-      const setEval = setter.eval;
-      symbol.set = (frame, receiver, value) => {
-        runHeld(frame, receiver, setEval, value);
-      };
-    }
-  }
-
-  // Classes' initializers.
-
-  private compileClassInitializer(entry: ClassEntry): void {
-    const { symbol, decl } = entry;
-    if (symbol.isInterface || symbol.isNative) return;
-    const owner = { cls: entry, scope: entry.scope, file: entry.file };
-    const context = this.initializerContext(owner);
-    const scope = this.initializerScope(owner, context);
-    this.flow = new Flow();
-    for (const variable of this.initializerVariables) this.flow.assigned.add(variable);
-    const ctor = entry.constructorSymbol;
-    // Default values of the constructor's parameters.
-    const defaults = (ctor?.params ?? []).map((param, index) => {
-      const value = decl.primaryConstructor?.params[index]?.defaultValue;
-      if (!value) return;
-      const compiled = this.compileExpression(scope, context, value, param.type);
-      return this.expectType(compiled, param.type, value.row);
-    });
-    for (const [index, evaluate] of defaults.entries())
-      if (evaluate && ctor) ctor.params[index].defaultValue = evaluate;
-    const superCall = this.compileSuperConstructorCall(entry, scope, context);
-    const steps: ((frame: Frame) => void)[] = [];
-    for (const field of entry.delegateFields) {
-      const compiled = this.compileExpression(scope, context, field.spec.delegate, field.type);
-      const evaluate = this.expectType(compiled, field.type, field.spec.row);
-      const { slot } = field;
-      steps.push((frame) => {
-        (frame.thisValue as KObject).fields[slot] = evaluate(frame);
-      });
-    }
-    for (const { symbol: property, index } of entry.parameterProperties) {
-      const slot = property.slot as number;
-      steps.push((frame) => {
-        (frame.thisValue as KObject).fields[slot] = frame.locals[index] as Value;
-      });
-    }
-    const uninitialized = new Set(
-      decl.members.flatMap((member) =>
-        member.kind === 'property' && member.initializer ? [this.findOwnProperty(symbol, member.name)] : []
-      )
-    );
-    this.uninitializedProperties = { context, properties: uninitialized };
-    for (const member of decl.members) {
-      if (member.kind === 'property') {
-        const property = this.findOwnProperty(symbol, member.name);
-        uninitialized.delete(property);
-        const propertyEntry = this.entryOfProperty.get(property) as PropertyEntry;
-        if (member.delegate) {
-          const delegate = propertyEntry.initializer as Compiled;
-          const slot = propertyEntry.delegateSlot as number;
-          const evaluate = delegate.eval;
-          steps.push(
-            this.withStep(
-              member.row,
-              (frame) => {
-                (frame.thisValue as KObject).fields[slot] = evaluate(frame);
-              },
-              delegate.isCreation === true
-            )
-          );
-          continue;
-        }
-        if (!member.initializer || property.slot === undefined) continue;
-        const compiled = this.compileExpression(scope, context, member.initializer, property.type);
-        const type = property.type as KType;
-        const evaluate = convertRepr(
-          this.expectType(compiled, type, member.initializer.row),
-          reprOf(this.core, type),
-          propertyRepr(property)
-        );
-        const slot = property.slot;
-        const store = (frame: Frame): void => {
-          (frame.thisValue as KObject).fields[slot] = evaluate(frame);
-        };
-        if (compiled.constant !== undefined) property.constantInitializer = compiled.constant;
-        // An object's property initialized with a constant records no step, as a Java static field's does: the trace
-        // shows the constant from the start.
-        const isQuiet = symbol.isObject && compiled.constant !== undefined;
-        steps.push(isQuiet ? store : this.withStep(member.row, store, compiled.isCreation === true));
-      } else if (member.kind === 'init') {
-        const compiled = this.compileBlockValue(scope, context, member.block, undefined, true);
-        const evaluate = compiled.eval;
-        steps.push((frame) => {
-          evaluate(frame);
-        });
-      }
-    }
-    this.uninitializedProperties = undefined;
-    this.checkValsInitialized(entry);
-    if (symbol.kind === 'enum') this.compileEnumArguments(entry);
-    const { info } = context;
-    const run = (frame: Frame): Value => {
-      for (const [index, evaluate] of defaults.entries()) {
-        if (evaluate && frame.locals[index] === MISSING) frame.locals[index] = evaluate(frame);
-      }
-      superCall?.(frame);
-      for (const step of steps) step(frame);
-      return UNIT;
-    };
-    const none: unknown[] = [];
-    const initialize = (caller: Frame, instance: Value, args: Value[], callRow: number | undefined): void => {
-      caller.runtime.call(info, caller, none, instance, args, callRow, run);
-    };
-    symbol.initialize = (frame, instance) => initialize(frame, instance, [], undefined);
-    if (symbol.isObject) {
-      this.objectInitializers.set(symbol, initialize);
-      return;
-    }
-    if (!ctor) return;
-    ctor.initialize = initialize;
-    const fieldCount = (): number => symbol.fieldCount;
-    const companionInit = symbol.companion ? this.objectInstance(symbol.companion) : undefined;
-    const isAbstract = symbol.isAbstract;
-    ctor.invoke = (caller, _receiver, args, callRow) => {
-      if (isAbstract) return caller.runtime.throwError(caller, 'java.lang.InstantiationError', symbol.qualifiedName);
-      companionInit?.(caller);
-      const instance = new KObject(symbol, fieldCount());
-      caller.runtime.allocate(caller, instance.fields.length + 1);
-      initialize(caller, instance, args, callRow);
-      return instance;
-    };
-  }
-
-  protected readonly objectInitializers = new Map<
-    ClassSymbol,
-    (caller: Frame, instance: Value, args: Value[], callRow: number | undefined) => void
-  >();
-
-  /** Rejects a `val` property that neither an initializer nor an `init` block gives a value. */
-  private checkValsInitialized(entry: ClassEntry): void {
-    for (const member of entry.decl.members) {
-      // A property with accessors needs a value only when they use its backing field, which then has a slot.
-      if (member.kind !== 'property' || member.initializer || member.delegate) continue;
-      const property = this.findOwnProperty(entry.symbol, member.name);
-      if (property.isAbstract || property.slot === undefined || property.isLateinit) continue;
-      if (!this.assignedInInit(entry.decl, member.name)) {
-        this.error(member.row, `プロパティ ${member.name} には初期値を書くか、init で値を入れてください。`);
-      }
-    }
-  }
-
-  /** Whether an `init` block assigns a property, as `name = ...` or `this.name = ...`. */
-  private assignedInInit(decl: ClassDecl, name: string): boolean {
-    const isTarget = (target: Expression): boolean =>
-      (target.kind === 'name' && target.name === name) ||
-      (target.kind === 'member' && target.name === name && target.receiver.kind === 'this');
-    const visit = (statements: Statement[]): boolean =>
-      statements.some((statement) => {
-        if (statement.kind === 'assignment') return isTarget(statement.target);
-        if (statement.kind === 'expressionStatement' && statement.expression.kind === 'if') {
-          const { thenBranch, elseBranch } = statement.expression;
-          return elseBranch !== undefined && visit(thenBranch.statements) && visit(elseBranch.statements);
-        }
-        return false;
-      });
-    return decl.members.some((member) => member.kind === 'init' && visit(member.block.statements));
-  }
-
-  protected mayInitializeVal(scope: Scope, symbol: PropertySymbol): boolean {
-    if (!symbol.owner || symbol.slot === undefined) return false;
-    const entry = this.entryOfProperty.get(symbol);
-    if (!entry || entry.decl.initializer) return false;
-    // Only the class's own initializer, which `init` blocks belong to, may give a val its value.
-    const context = this.initializerContexts.get(this.entryOfClass.get(symbol.owner) as ClassEntry);
-    return context !== undefined && this.receiversOf(scope).some((receiver) => receiver.context === context);
-  }
-
-  private compileSuperConstructorCall(
-    entry: ClassEntry,
-    scope: Scope,
-    context: FunctionContext
-  ): ((frame: Frame) => void) | undefined {
-    const { symbol, decl } = entry;
-    if (symbol.kind === 'enum') {
-      const enumCtor = this.core.enum.constructors[0];
-      return (frame) => {
-        const instance = frame.thisValue as KObject;
-        const native = instance.native as { name: string; ordinal: number };
-        (enumCtor.initialize as NonNullable<FunctionSymbol['initialize']>)(
-          frame,
-          instance,
-          [native.name, native.ordinal],
-          undefined
-        );
-      };
-    }
-    const superclass = symbol.superclass;
-    if (!superclass || superclass.cls === this.core.any) return undefined;
-    if (superclass.cls.isNative && superclass.cls.constructors.length === 0) return undefined;
-    const spec = decl.supers.find(
-      (candidate) =>
-        candidate.kind === 'constructorCall' &&
-        this.resolveType(entry.scope, candidate.type).kind === 'class' &&
-        (this.resolveType(entry.scope, candidate.type) as ClassType).cls === superclass.cls
-    );
-    const args: ArgumentSyntax[] =
-      spec?.kind === 'constructorCall'
-        ? spec.args.map((argument) => ({ row: argument.row, name: argument.name, value: argument.value }))
-        : [];
-    const candidates: Candidate[] = superclass.cls.constructors.map((ctor) => ({
-      symbol: ctor,
-      kind: 'constructor',
-      substitution: substitutionOf(superclass),
-      receiverType: undefined,
-    }));
-    if (candidates.length === 0) this.error(decl.row, `${superclass.cls.name} のコンストラクタを呼べません。`);
-    const savedRecords = this.recordsSteps;
-    const call = this.resolveCall(
-      scope,
-      context,
-      [candidates],
-      args,
-      false,
-      [],
-      undefined,
-      undefined,
-      spec?.row ?? decl.row,
-      superclass.cls.name
-    );
-    this.recordsSteps = savedRecords;
-    // A superclass constructor called without arguments, as in `: MyTurtle()`, is part of the step of the
-    // constructor that calls it, as Java's implicit `super()` is.
-    const isExplicit = spec?.kind === 'constructorCall' && spec.args.length > 0;
-    const initializer = this.superInitializer(
-      call,
-      isExplicit && this.recordsSteps && !entry.file.isLibrary ? spec.row : undefined
-    );
-    return (frame) => initializer(frame, frame.thisValue);
-  }
-
-  /** Runs the superclass's constructor on the instance being created, with the arguments the subclass passes. */
-  protected abstract superInitializer(
-    call: ResolvedCall,
-    callRow: number | undefined
-  ): (frame: Frame, instance: Value) => void;
-
-  // Objects and enums.
-
-  objectInstance(cls: ClassSymbol): (frame: Frame) => Value {
-    return (frame) => {
-      const existing = frame.runtime.objects.get(cls);
-      if (existing) return existing;
-      return this.createObject(frame, cls);
-    };
-  }
-
-  /** Creates an object, a companion object, or an enum class's constants when the program first uses them. */
-  private createObject(frame: Frame, cls: ClassSymbol): Value {
-    const { runtime } = frame;
-    if (cls.kind === 'enum') {
-      const marker = new KObject(cls, 0);
-      runtime.objects.set(cls, marker);
-      this.createEnumEntries(frame, cls);
-      if (cls.companion) this.objectInstance(cls.companion)(frame);
-      return marker;
-    }
-    const instance = new KObject(cls);
-    runtime.objects.set(cls, instance);
-    const initialize = this.objectInitializers.get(cls);
-    if (initialize) initialize(frame, instance, [], undefined);
-    else cls.initialize?.(frame, instance);
-    return instance;
-  }
-
-  private createEnumEntries(frame: Frame, cls: ClassSymbol): void {
-    const entry = this.entryOfClass.get(cls);
-    if (!entry) return;
-    const ctor = entry.constructorSymbol as FunctionSymbol;
-    const instances: KObject[] = [];
-    frame.runtime.enumEntries.set(cls, instances);
-    for (const [ordinal, enumEntry] of entry.decl.enumEntries.entries()) {
-      const instance = new KObject(cls);
-      instance.native = { name: enumEntry.name, ordinal };
-      instances.push(instance);
-      const args = this.enumArguments.get(cls)?.[ordinal];
-      (ctor.initialize as NonNullable<FunctionSymbol['initialize']>)(
-        frame,
-        instance,
-        args ? args(frame) : [],
-        undefined
-      );
-    }
-  }
-
-  /** Compiles the arguments each enum constant passes to its class's constructor, as `RED(0xFF0000)` does. */
-  private compileEnumArguments(entry: ClassEntry): void {
-    const ctor = entry.constructorSymbol as FunctionSymbol;
-    const context = new FunctionContext(
-      undefined,
-      false,
-      `${entry.symbol.name}-entries`,
-      entry.file.isLibrary,
-      undefined
-    );
-    const scope = new Scope(entry.scope, context);
-    const candidates: Candidate[] = [
-      { symbol: ctor, kind: 'constructor', substitution: new Map(), receiverType: undefined },
-    ];
-    const savedRecords = this.recordsSteps;
-    this.recordsSteps = false;
-    try {
-      const evaluators = entry.decl.enumEntries.map((enumEntry) => {
-        const args: ArgumentSyntax[] = enumEntry.args.map((argument) => ({
-          row: argument.row,
-          name: argument.name,
-          value: argument.value,
-        }));
-        return this.resolveCall(
-          scope,
-          context,
-          [candidates],
-          args,
-          false,
-          [],
-          undefined,
-          undefined,
-          enumEntry.row,
-          enumEntry.name
-        ).evaluateArgs;
-      });
-      this.enumArguments.set(entry.symbol, evaluators);
-    } finally {
-      this.recordsSteps = savedRecords;
-    }
-  }
-
-  /** The arguments of each enum constant's constructor, compiled with the class. */
-  protected readonly enumArguments = new Map<ClassSymbol, ((frame: Frame) => Value[])[]>();
-
-  protected compileEnumEntries(cls: ClassSymbol): Compiled {
-    const instance = this.objectInstance(cls);
-    const entries = this.enumEntriesValue(cls);
-    return {
-      type: {
-        kind: 'class',
-        cls: this.enumEntriesClass(),
-        args: [{ variance: 'inv', type: cls.type }],
-        nullable: false,
-      },
-      repr: 'ref',
-      eval: (frame) => {
-        instance(frame);
-        return entries(frame, frame.runtime.enumEntries.get(cls) ?? []);
-      },
-    };
-  }
-
-  /** The class of `entries`, a read-only list of an enum class's constants. */
-  protected abstract enumEntriesClass(): ClassSymbol;
-
-  protected abstract enumEntriesValue(cls: ClassSymbol): (frame: Frame, entries: KObject[]) => Value;
-
   // Helpers for subclasses.
 
   protected declaredFunctionEntry(symbol: FunctionSymbol): FunctionEntry | undefined {
@@ -2039,4 +1249,33 @@ export function describeUnavailableImport(path: string): string | undefined {
   if (path.startsWith('java.') || path.startsWith('javax.')) return `Java のクラスの直接の利用（${path}）`;
   if (path.startsWith('kotlin.')) return `標準ライブラリの ${path} `;
   return `標準ライブラリ以外のライブラリ（${path}）`;
+}
+
+function declaresFunction(symbol: ClassSymbol, name: string, paramCount: number): boolean {
+  return (
+    symbol.members.get(name)?.some((member) => member.kind === 'function' && member.params.length === paramCount) ??
+    false
+  );
+}
+
+/** Adds a member that Kotlin generates for a data class, such as `toString` or `component1`. */
+function addGenerated(
+  symbol: ClassSymbol,
+  name: string,
+  params: ParameterSymbol[],
+  returnType: KType,
+  invoke: FunctionSymbol['invoke'],
+  isOverride: boolean
+): FunctionSymbol {
+  const generated = new FunctionSymbol(name);
+  generated.owner = symbol;
+  generated.params = params;
+  generated.returnType = returnType;
+  generated.isOverride = isOverride;
+  generated.isOperator = name.startsWith('component');
+  generated.isLibrary = symbol.isLibrary;
+  generated.invoke = invoke;
+  generated.row = symbol.row;
+  symbol.addMember(generated);
+  return generated;
 }

@@ -1,4 +1,5 @@
 import type { KotlinFile } from './ast';
+import { BodyCompiler } from './bodyCompiler';
 import type { ArgumentSyntax, Candidate, ResolvedCall } from './callCompiler';
 import {
   type Compiled,
@@ -12,7 +13,6 @@ import {
 } from './compilerBase';
 import { type FileContext, TURTLE_PACKAGE } from './compilerCore';
 import { unavailableMessage } from './convertSupport';
-import { DeclarationCompiler } from './declarationCompiler';
 import { callFunction, parameterReprs, receiverRepr } from './dispatch';
 import { libraryClass } from './natives/registry';
 import type { NativeFunction, NativeProperty } from './nativeTypes';
@@ -118,7 +118,7 @@ const UNAVAILABLE_FUNCTIONS: Record<string, string> = {
   exitProcess: 'プログラムの終了（exitProcess）',
 };
 
-export class Compiler extends DeclarationCompiler {
+export class Compiler extends BodyCompiler {
   constructor(
     packages: Map<string, PackageScope>,
     core: Core | undefined,
