@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 574 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 576 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -651,7 +651,7 @@ export class Checker {
     // A tuple of only an array's rest is that array, as TypeScript normalizes `[...values: number[]]`.
     const [only] = flat;
     if (flat.length === 1 && only.rest && (this.isArrayType(only.type) || this.isReadonlyArrayType(only.type)))
-      return readonly ? this.arrayType(this.elementTypeOf(only.type as ObjectType), true) : (only.type as ObjectType);
+      return this.arrayType(this.restElementType(only.type), readonly);
     let structure: Structure | undefined;
     const tuple: ObjectType = {
       kind: 'object',
@@ -1023,10 +1023,16 @@ function baseTypeOfUnit(type: Type): Type {
 
 /** Tuple elements with each rest element of a tuple type spread into its own elements. */
 function flattenTupleElements(elements: TupleElement[]): TupleElement[] {
-  return elements.flatMap((element) =>
+  const flat = elements.flatMap((element) =>
     element.rest && element.type.kind === 'object' && element.type.objectKind === 'tuple'
       ? (element.type.tuple?.elements ?? [])
       : [element]
+  );
+  const lastRequired = flat.findLastIndex((element) => !element.optional && !element.rest);
+  return flat.map((element, index) =>
+    element.optional && index < lastRequired
+      ? { ...element, optional: false, type: unionOf([element.type, undefinedType]) }
+      : element
   );
 }
 

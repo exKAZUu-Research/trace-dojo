@@ -1,0 +1,12 @@
+const empty = new Error();
+const error = new TypeError("bad", { cause: 1 });
+console.log(Object.getOwnPropertyNames(empty), Object.getOwnPropertyNames(error), Object.keys(error));
+console.log(Object.hasOwn(error, "stack"), "stack" in error, Object.hasOwn(Error.prototype, "stack"));
+const descriptor = Object.getOwnPropertyDescriptor(error, "stack")!;
+console.log(Object.keys(descriptor), descriptor.get!.length, descriptor.set!.length, descriptor.configurable);
+console.log(descriptor.get === Object.getOwnPropertyDescriptors(empty).stack!.get);
+let thrown = false;
+try { JSON.parse("{"); } catch (caught) {
+  if (caught instanceof Error) thrown = Object.hasOwn(caught, "stack");
+}
+console.log(thrown);

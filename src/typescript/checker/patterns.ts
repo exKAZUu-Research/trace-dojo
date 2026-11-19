@@ -446,12 +446,9 @@ export class BindingPatterns {
     const elements = type.tuple?.elements ?? [];
     const restIndex = elements.findIndex((member) => member.rest);
     // At or past a rest element, any of the rest's values or the elements after it may take the position.
-    if (restIndex !== -1 && index >= restIndex && restIndex < elements.length - 1)
-      return this.valuesFrom(elements, restIndex);
+    if (restIndex !== -1 && index >= restIndex) return this.valuesFrom(elements, restIndex);
     const element = elements[index];
-    if (element?.rest) return this.c.restElementType(element.type);
     if (element) return element.optional ? unionOf([element.type, undefinedType]) : element.type;
-    if (restIndex !== -1) return unionOf([this.c.restElementType(elements[restIndex].type), undefinedType]);
     // An element with a default, as in `const [a = 1] = []`, takes the default where the tuple ends.
     if (node.type === 'assignment_pattern') return undefinedType;
     this.c.error(

@@ -239,15 +239,16 @@ export class TypeInference {
   ): void {
     const inference = run.inferences.get(target.id);
     if (!inference || inference.fixed || isIntrinsic(source, 'never')) return;
-    if (inference.candidates.length > 0 && run.priority > inference.priority) return;
-    if (!covariant) {
-      inference.contravariant.push(source);
-      return;
+    if (run.priority > inference.priority) return;
+    if (run.priority < inference.priority) {
+      inference.candidates.length = 0;
+      inference.contravariant.length = 0;
+      inference.topLevel = false;
+      inference.priority = run.priority;
     }
-    if (inference.candidates.length > 0 && run.priority < inference.priority) inference.candidates.length = 0;
-    inference.priority = run.priority;
-    if (!inference.candidates.some((candidate) => candidate.id === source.id)) inference.candidates.push(source);
-    if (topLevel) inference.topLevel = true;
+    const candidates = covariant ? inference.candidates : inference.contravariant;
+    if (!candidates.some((candidate) => candidate.id === source.id)) candidates.push(source);
+    if (covariant && topLevel) inference.topLevel = true;
   }
 
   private templateCapture(text: string, constraint: Type): Type {
@@ -651,7 +652,7 @@ export function newInferenceRun(parameters: TypeParameter[], contextualSignature
     inferences: new Map(
       parameters.map((parameter) => [
         parameter.id,
-        { candidates: [], contravariant: [], priority: InferencePriority.Direct, topLevel: false },
+        { candidates: [], contravariant: [], priority: Number.POSITIVE_INFINITY, topLevel: false },
       ])
     ),
     parameters,

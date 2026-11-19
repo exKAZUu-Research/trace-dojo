@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 487 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 491 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -632,6 +632,11 @@ export class TypeNodes {
   memberName(nameNode: TreeNode): string | undefined {
     const written = propertyNameText(nameNode);
     if (written !== undefined || nameNode.type !== 'computed_property_name') return written;
+    if (this.c.isLibrary(nameNode)) {
+      const symbol = named(nameNode)[0];
+      if (symbol?.type === 'member_expression' && symbol.childForFieldName('object')?.text === 'Symbol')
+        return `__@${symbol.childForFieldName('property')?.text}`;
+    }
     const names = this.c.silently(() => this.c.patterns.capturePropertyNames(nameNode));
     return names?.length === 1 ? names[0] : undefined;
   }

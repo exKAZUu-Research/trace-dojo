@@ -394,7 +394,7 @@ export class ConditionChecker {
     // remaining member of a union still narrows it.
     const declared = source ? nonNull : this.c.relations.removeNullish(this.unnarrowedType(object!));
     const discriminantSource = declared.kind === 'union' || nonNull.kind === 'union' ? declared : nonNull;
-    if (!this.c.flow.isDiscriminant(discriminantSource, name) && !this.c.relations.isNullable(objectType)) return;
+    if (!this.c.flow.isDiscriminant(discriminantSource, name)) return;
     const apply = (state: State, assumeTrue: boolean): void => {
       if (!state) return;
       const outer = this.c.flow.current;

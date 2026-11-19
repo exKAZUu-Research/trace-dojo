@@ -467,13 +467,13 @@ test.each([
   });
 });
 
-test('reflected unavailable methods still reject invocation and error stacks reject reflection', () => {
+test('reflected unavailable methods and error stack accessors reject invocation', () => {
   for (const source of [
     'Object.getOwnPropertyDescriptor(Math, "random")!.value();',
     'Object.getOwnPropertyDescriptors(RegExp.prototype).compile.value!.call(/a/, "b");',
     'Object.getOwnPropertyDescriptor(console, "time")!.value("start");',
-    'Object.getOwnPropertyNames(new Error("bad"));',
-    'Object.getOwnPropertyDescriptor(new Error("bad"), "stack");',
+    'const e = new Error("bad"); Object.getOwnPropertyDescriptor(e, "stack")!.get!.call(e);',
+    'const e = new Error("bad"); Object.getOwnPropertyDescriptors(e).stack!.set!.call(e, "fake");',
   ]) {
     expect(executeProgram('typescript', source)).toMatchObject({
       kind: 'compileError',

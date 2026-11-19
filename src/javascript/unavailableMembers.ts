@@ -6,7 +6,7 @@ import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import { JsFunction, JsObject, type Key, type Value } from './values';
 
 /** Names an unavailable library member on a receiver, or gives undefined for any other. */
-export type UnavailableMemberCheck = (value: Value, key: Key | undefined, readValue: boolean) => string | undefined;
+export type UnavailableMemberCheck = (value: Value, key: Key | undefined) => string | undefined;
 
 export const unavailableWellKnownSymbols = new Set([
   'iterator',
@@ -64,13 +64,7 @@ export function unavailableMemberCheck(realm: Realm): UnavailableMemberCheck {
   const math = realm.globals.lookup('Math')?.value;
   const console = realm.globals.lookup('console')?.value;
   defineUnavailableMethods(realm, math, console);
-  return (value, key, readValue) => {
-    if (readValue) return unavailableSymbolFeature(value, key, symbol);
-    // Node.js gives every error its own stack, whatever its prototype becomes.
-    if ((key === 'stack' || key === undefined) && value instanceof JsObject && value.isError) return 'Error の stack';
-    if (key === 'stack' && inherits(value, realm.errorPrototypes.Error)) return 'Error の stack';
-    return;
-  };
+  return (value, key) => unavailableSymbolFeature(value, key, symbol);
 }
 
 function unavailableSymbolFeature(value: Value, key: Key | undefined, constructor: Value): string | undefined {
@@ -93,12 +87,6 @@ function defineUnavailableMethods(realm: Realm, math: Value, console: Value): vo
       defineUnavailableMethod(realm, console, String(name), `console.${String(name)}`, { enumerable: true });
   defineUnavailableMethod(realm, realm.regExpPrototype, 'compile', 'RegExp の compile', { length: 2 });
   orderBuiltinMembers(realm);
-}
-
-function inherits(value: Value, prototype: JsObject): boolean {
-  if (!(value instanceof JsObject)) return false;
-  for (let current: JsObject | null = value; current; current = current.proto) if (current === prototype) return true;
-  return false;
 }
 
 function defineUnavailableMethod(

@@ -193,7 +193,8 @@ export class ClassDeclarationChecker {
 
   private checkFieldInitializer(member: TreeNode, info: ClassInfo, isStatic: boolean): void {
     const value = member.childForFieldName('value');
-    const annotation = this.c.typeNodes.annotationType(member.childForFieldName('type'));
+    const declared = this.c.typeNodes.annotationType(member.childForFieldName('type'));
+    const annotation = declared && hasToken(member, '?') ? unionOf([declared, undefinedType]) : declared;
     if (value) {
       if (hasToken(member, 'abstract'))
         this.c.error(

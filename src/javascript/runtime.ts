@@ -70,6 +70,7 @@ type Primitive = undefined | null | boolean | number | bigint | string | symbol;
 const readOnlyLengthMessage = "Cannot assign to read only property 'length' of object '[object Array]'";
 
 export class Runtime {
+  private stackAccessors?: AccessorProperty;
   private readonly unavailableValues = new WeakMap<symbol, CompileError>();
   private readonly functionConstructor: Value;
   private readonly functionToString: Value;
@@ -162,9 +163,21 @@ export class Runtime {
 
   newError(name: ErrorName, message: string): JsObject {
     const error = new JsObject(this.realm.errorPrototypes[name]);
-    error.isError = true;
+    this.markError(error);
     defineHidden(error, 'message', message);
     return error;
+  }
+
+  markError(error: JsObject): void {
+    error.isError = true;
+    if (!this.unavailableMember) return;
+    this.stackAccessors ??= {
+      get: this.newNativeFunction('', 0, rejectStackAccess),
+      set: this.newNativeFunction('', 1, rejectStackAccess),
+      configurable: true,
+      enumerable: false,
+    };
+    error.properties.set('stack', { ...this.stackAccessors });
   }
 
   readPropertyValue(property: DataProperty): Value {
@@ -204,9 +217,7 @@ export class Runtime {
         };
       }
     }
-    const property = object.properties.get(key);
-    if (!property) this.checkUnavailableMember(object, key);
-    return property;
+    return object.properties.get(key);
   }
 
   get(value: Value, key: Key, receiver: Value = value): Value {
@@ -214,17 +225,16 @@ export class Runtime {
     if (element !== MISSING) return element;
     for (let current: JsObject | null = this.objectFor(value, key); current; current = current.proto) {
       const property = this.getOwnProperty(current, key);
-      this.checkUnavailableMember(current, key, true);
+      this.checkUnavailableMember(current, key);
       if (!property) continue;
       if (!isAccessor(property)) return this.readPropertyValue(property);
       return property.get ? this.call(property.get, receiver, [], this.currentRow) : undefined;
     }
-    this.checkUnavailableMember(value, key);
     return undefined;
   }
 
-  private checkUnavailableMember(value: Value, key?: Key, readValue = false): void {
-    const unavailable = this.unavailableMember?.(value, key, readValue);
+  private checkUnavailableMember(value: Value, key?: Key): void {
+    const unavailable = this.unavailableMember?.(value, key);
     if (unavailable) rejectUnavailableMember(unavailable, this.currentRow);
   }
 
@@ -305,7 +315,7 @@ export class Runtime {
   }
 
   reflectedOwnProperty(object: JsObject, key: Key): Property | undefined {
-    this.checkUnavailableMember(object, key, true);
+    this.checkUnavailableMember(object, key);
     return this.getOwnProperty(object, key);
   }
 
@@ -564,7 +574,7 @@ export class Runtime {
 
   reflectOwnSymbols(object: JsObject): symbol[] {
     const symbols = this.ownSymbols(object);
-    for (const symbol of symbols) this.checkUnavailableMember(symbol, undefined, true);
+    for (const symbol of symbols) this.checkUnavailableMember(symbol);
     return symbols;
   }
 
@@ -605,7 +615,6 @@ export class Runtime {
 
   /** Own string keys with the `length` an array or a String object holds, as `Object.getOwnPropertyNames` lists them. */
   ownPropertyNames(object: JsObject): string[] {
-    this.checkUnavailableMember(object);
     const keys = this.ownKeys(object);
     if (!(object instanceof JsArray) && typeof object.primitive !== 'string') return keys;
     const indexCount = keys.findIndex((key) => arrayIndexOf(key) === undefined);
@@ -1082,6 +1091,9 @@ export class Runtime {
 }
 
 const MISSING = Symbol('missing');
+
+const rejectStackAccess: NativeFunction = ({ runtime }) =>
+  rejectUnavailableMember('Error の stack', runtime.currentRow);
 
 /** Reads an array element, an array's length, a string's character, or a string's length without a lookup. */
 // code-gauge-allow functionCognitiveComplexity 16 -- Reads a string's or an array's element without its descriptor, unless an accessor defines it.

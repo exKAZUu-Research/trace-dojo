@@ -301,7 +301,7 @@ function defineErrors(builder: RealmBuilder): void {
 
 function createError({ runtime, args, newTarget }: NativeCall, prototype: JsObject): JsObject {
   const error = runtime.newObject(runtime.prototypeFor(newTarget, prototype));
-  error.isError = true;
+  runtime.markError(error);
   const [message, options] = args;
   if (message !== undefined) defineHidden(error, 'message', runtime.toString(message));
   if (isObject(options) && runtime.hasProperty(options, 'cause'))

@@ -1,0 +1,12 @@
+type Prefix<T extends unknown[]> = [string?, ...T];
+const missing: Prefix<[number]> = ["x"];
+const fixedLength: Prefix<[number]>["length"] = 1;
+
+type Frozen<T extends readonly unknown[]> = readonly [...T];
+function write(fixed: Frozen<number[]>): void {
+  fixed[0] = 1;
+}
+function optional(tuple: [string?, ...number[]]): void {
+  const [first] = tuple;
+  first.toUpperCase();
+}

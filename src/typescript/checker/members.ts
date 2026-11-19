@@ -113,37 +113,32 @@ export class MemberChecker {
   memberAccess(node: TreeNode): Type {
     const objectNode = node.childForFieldName('object') as TreeNode;
     const propertyNode = node.childForFieldName('property') as TreeNode;
-    const optional = node.childForFieldName('optional_chain') !== null;
     const name = propertyNode.text;
     if (objectNode.type === 'super') return this.c.classes.superProperty(node, propertyNode);
-    let objectType = this.c.expressions.check(objectNode);
-    if (optional) this.continueChain(objectNode);
+    const { type: receiver, shortCircuits } = this.readReceiver(node, objectNode);
+    const declared = this.propertyAccess(node, objectNode, propertyNode, receiver, name);
+    const type = this.narrowedReference(node, declared);
+    return shortCircuits ? this.chainResult(node, type) : type;
+  }
+
+  private readReceiver(node: TreeNode, object: TreeNode): { type: Type; shortCircuits: boolean } {
+    const checked = this.c.expressions.check(object);
+    const optional = node.childForFieldName('optional_chain') !== null;
+    if (optional) this.continueChain(object);
+    const continued = this.continuedObjectType(object, checked);
+    const receiver = continued ?? checked;
+    return {
+      type: optional ? this.c.relations.removeNullish(receiver) : this.checkNonNullable(object, receiver),
+      shortCircuits: continued !== undefined || (optional && this.c.relations.isNullable(receiver)),
+    };
+  }
+
+  private narrowedReference(node: TreeNode, declared: Type | (() => Type)): Type {
     const key = this.c.flow.referenceKey(node);
-    const continued = this.continuedObjectType(objectNode, objectType);
-    if (optional) {
-      if (isAnyLike(objectType)) return anyType;
-      const nonNull = this.c.relations.removeNullish(continued ?? objectType);
-      const propertyType = this.propertyAccess(node, objectNode, propertyNode, nonNull, name);
-      return this.c.relations.isNullable(objectType) || continued ? this.chainResult(node, propertyType) : propertyType;
-    }
-    if (continued) {
-      const propertyType = this.propertyAccess(
-        node,
-        objectNode,
-        propertyNode,
-        this.checkNonNullable(objectNode, continued),
-        name
-      );
-      return this.chainResult(node, propertyType);
-    }
-    objectType = this.checkNonNullable(objectNode, objectType);
-    const propertyType = this.propertyAccess(node, objectNode, propertyNode, objectType, name);
-    if (key) {
-      const entry = this.c.flow.entry(key);
-      if (entry && !this.c.expressions.isAssignmentTarget(node))
-        return flowReferenceType(this.c, node, entry.type, propertyType);
-    }
-    return propertyType;
+    const entry = key ? this.c.flow.entry(key) : undefined;
+    if (entry && !this.c.expressions.isAssignmentTarget(node))
+      return flowReferenceType(this.c, node, entry.type, declared);
+    return typeof declared === 'function' ? declared() : declared;
   }
 
   /**
@@ -154,20 +149,16 @@ export class MemberChecker {
     const isElement = callee.type === 'subscript_expression';
     if ((callee.type !== 'member_expression' && !isElement) || !this.isInOptionalChain(callee)) return undefined;
     const objectNode = callee.childForFieldName('object') as TreeNode;
-    const checked = this.c.expressions.check(objectNode);
-    const optional = callee.childForFieldName('optional_chain') !== null;
-    if (optional) this.continueChain(objectNode);
-    if (isAnyLike(checked)) return anyType;
-    const objectType = this.continuedObjectType(objectNode, checked) ?? checked;
-    const nonNull = optional
-      ? this.c.relations.removeNullish(objectType)
-      : this.checkNonNullable(objectNode, objectType);
+    const { type: nonNull } = this.readReceiver(callee, objectNode);
+    if (isAnyLike(nonNull)) return anyType;
     if (isElement) {
       const indexNode = callee.childForFieldName('index') as TreeNode;
-      return this.indexedType(callee, objectNode, indexNode, nonNull, this.indexTypeOf(indexNode));
+      const indexType = this.indexTypeOf(indexNode);
+      return this.narrowedReference(callee, () => this.indexedType(callee, objectNode, indexNode, nonNull, indexType));
     }
     const propertyNode = callee.childForFieldName('property') as TreeNode;
-    return this.propertyAccess(callee, objectNode, propertyNode, nonNull, propertyNode.text);
+    const declared = this.propertyAccess(callee, objectNode, propertyNode, nonNull, propertyNode.text);
+    return this.narrowedReference(callee, declared);
   }
 
   private isInOptionalChain(node: TreeNode): boolean {
@@ -397,23 +388,11 @@ export class MemberChecker {
   elementAccess(node: TreeNode): Type {
     const objectNode = node.childForFieldName('object') as TreeNode;
     const indexNode = node.childForFieldName('index') as TreeNode;
-    const optional = node.childForFieldName('optional_chain') !== null;
-    const checked = this.c.expressions.check(objectNode);
-    if (optional) this.continueChain(objectNode);
+    const { type: objectType, shortCircuits } = this.readReceiver(node, objectNode);
     const indexType = this.indexTypeOf(indexNode);
-    const continued = this.continuedObjectType(objectNode, checked);
-    const objectType = optional
-      ? this.c.relations.removeNullish(continued ?? checked)
-      : this.checkNonNullable(objectNode, continued ?? checked);
-    const key = this.c.flow.referenceKey(node);
-    const entry = key ? this.c.flow.entry(key) : undefined;
-    if (entry && !this.c.expressions.isAssignmentTarget(node))
-      return flowReferenceType(this.c, node, entry.type, () =>
-        this.indexedType(node, objectNode, indexNode, objectType, indexType)
-      );
-    const result = this.indexedType(node, objectNode, indexNode, objectType, indexType);
-    // As for a property, `?.` adds `undefined` only where it can short-circuit.
-    const shortCircuits = (optional && this.c.relations.isNullable(continued ?? checked)) || continued;
+    const result = this.narrowedReference(node, () =>
+      this.indexedType(node, objectNode, indexNode, objectType, indexType)
+    );
     return shortCircuits ? this.chainResult(node, result) : result;
   }
 
