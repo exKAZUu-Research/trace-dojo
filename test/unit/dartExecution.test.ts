@@ -120,6 +120,37 @@ void main() {
   });
 });
 
+// The SDK solves a generic call's type arguments from its context first (Object? for print's argument), clamps them to
+// their bounds, promotes through a bool local holding a condition, and lets a closure with a void body take any context.
+test('inference and flow analysis follow the SDK', () => {
+  const program = `T maxOf<T extends Comparable<T>>(List<T> xs) => xs.reduce((a, b) => a.compareTo(b) >= 0 ? a : b);
+T id<T>(T x) {
+  print(T);
+  return x;
+}
+
+void main() {
+  int? x = 3;
+  final ok = x != null;
+  if (ok) print(x + 1);
+  Object? Function() f = () => [1].add(2);
+  print(f());
+  print(id(1));
+  num n = id(2);
+  print(n);
+  print(maxOf(['b', 'a']));
+  print([[1], [2.5]].runtimeType);
+  print(maxOf([3, 9, 2]));
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '4\nnull\nObject?\n1\nnum\n2\nb\nList<List<num>>\n',
+    uncaughtException:
+      "Unhandled exception:\ntype '(num, num) => num' is not a subtype of type '(int, int) => int' of 'combine'",
+  });
+});
+
 test('stdout is shown, stderr is accepted without being shown, and exit stops the program', () => {
   const program = `import 'dart:io';
 
@@ -143,6 +174,7 @@ test.each([
   { name: "a missing ';' at the end of the line", body: '  var x = 1\n  print(x);', row: 1 },
   { name: "a missing '}' of an inner block", body: '  if (true) {\n    print(1);\n', row: 1 },
   { name: 'a non-exhaustive switch', body: '  var b = true;\n  print(switch (b) { true => 1 });', row: 2 },
+  { name: 'a closure typed by the context Object?', body: '  print([1, 2].fold(0, (a, b) => a + b));', row: 1 },
 ])('$name is a compile error', ({ body, row }) => {
   const result = executeProgram('dart', `void main() {\n${body}\n}\n`);
   expect(result.kind).toBe('compileError');
