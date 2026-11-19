@@ -21,6 +21,7 @@ int main() {
   printf("%a paren\n", (a * b) - c);
   printf("%a three\n", a * b * d - c);
   float fa = 0.1f, fb = 10.0f, fc = 1.0f; printf("%a float\n", (double)(fa * fb - fc));
+  printf("%a %a %a\n", double{a * b} - c, float{fa * fb} - fc, double{fa * fb} - c);
   int i = 3; printf("%a mixed\n", a * i - 0.3);
   printf("%a neg\n", -(a * b) + c);
   printf("%a div\n", a / b + c);
@@ -39,6 +40,7 @@ int main() {
   printf(" %a\n", f);
   int calls = 0;
   printf("%a\n", (++calls, a * b) - c);
+  printf("%a\n", double{(++calls, a * b)} - c);
   double negated = c + -(++calls, a * b);
   printf("%a %d\n", negated, calls);
   int values[]{9, 0}, index = 0;

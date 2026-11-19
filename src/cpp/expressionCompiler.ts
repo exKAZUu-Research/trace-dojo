@@ -1624,18 +1624,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const typeNode = fieldOf(node, 'type') as Syntax;
     if (typeNode.type === 'type_descriptor') return this.unsupported(node.row, '複合リテラル（(型){...}）');
     const type = this.resolveTypeSpecifier(typeNode);
-    const run = this.listInitializer(type, fieldOf(node, 'value') as Syntax, node.row, true);
-    return {
-      type,
-      isLvalue: false,
-      row: node.row,
-      run: (frame, zeroInitialize, destination, referenceLifetime) =>
-        run(frame, destination, zeroInitialize, referenceLifetime),
-      constantInitialization: run.isConstant,
-      constantStringLength: run.constantStringLength,
-      onlyCalls: type.kind === 'class',
-      isTemporaryObject: type.kind === 'class',
-    };
+    const value = this.listValue(type, fieldOf(node, 'value') as Syntax, true, node.row);
+    return { ...value, onlyCalls: type.kind === 'class' };
   }
 
   // Calls -------------------------------------------------------------------------------------------------------------
@@ -1783,16 +1773,20 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (first && rest.length === 0 && first.type !== 'initializer_list') return this.compileExpression(first);
   }
 
-  private listValue(type: Type, list: Syntax, direct = false): Expr {
-    const run = this.listInitializer(type, list, list.row, direct);
+  private listValue(type: Type, list: Syntax, direct = false, row = list.row): Expr {
+    const initialize = this.listInitializer(type, list, row, direct);
+    const run: Expr['run'] =
+      type.kind === 'class' || type.kind === 'array'
+        ? (frame, zeroInitialize, destination, referenceLifetime) =>
+            initialize(frame, destination, zeroInitialize, referenceLifetime)
+        : (initialize as Eval<Value>);
     return {
       type,
       isLvalue: false,
-      row: list.row,
-      run: (frame, zeroInitialize, destination, referenceLifetime) =>
-        run(frame, destination, zeroInitialize, referenceLifetime),
-      constantInitialization: run.isConstant,
-      constantStringLength: run.constantStringLength,
+      row,
+      run,
+      constantInitialization: initialize.isConstant,
+      constantStringLength: initialize.constantStringLength,
       isTemporaryObject: type.kind === 'class',
     };
   }
