@@ -1,6 +1,10 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
-import { unavailableWellKnownSymbols } from '../../javascript/unavailableMembers';
+import {
+  legacyRegExpStaticsFeature,
+  unavailableRegExpStatics,
+  unavailableWellKnownSymbols,
+} from '../../javascript/unavailableMembers';
 import { unsupportedMessage } from '../unsupported';
 import type { Checker } from './checker';
 import type { State } from './flow';
@@ -311,6 +315,7 @@ export class MemberChecker {
       return `Symbol.${name} などの well-known シンボル`;
     // A stack trace names the files and lines of the host, which differ from the program's.
     if (owner === 'Error' && name === 'stack') return 'Error の stack';
+    if (owner === 'RegExpConstructor' && unavailableRegExpStatics.has(name)) return legacyRegExpStaticsFeature;
     // Node.js shows a function's source as tsx's esbuild printed it, which this interpreter does not reproduce.
     if (owner === 'Function' && name === 'toString' && !this.isNeverCalled(propertyNode.parent))
       return '関数やクラスの文字列への変換';

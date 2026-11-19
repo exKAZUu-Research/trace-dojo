@@ -76,7 +76,6 @@ export class Runtime {
   private readonly functionHasInstance: Value;
   readonly world = new TurtleWorld();
   readonly budget = new ExecutionBudget();
-  readonly regExpStatics = new Map<string, string>();
   readonly io: ProgramIO;
   readonly frames: Frame[] = [];
   readonly eventLoop = new EventLoop(this);

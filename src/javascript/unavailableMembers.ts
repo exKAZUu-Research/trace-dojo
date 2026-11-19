@@ -24,6 +24,29 @@ export const unavailableWellKnownSymbols = new Set([
   'unscopables',
 ]);
 
+export const legacyRegExpStaticsFeature = 'RegExp の旧式の静的プロパティ';
+export const unavailableRegExpStatics = new Set([
+  'input',
+  '$_',
+  'lastMatch',
+  '$&',
+  'lastParen',
+  '$+',
+  'leftContext',
+  '$`',
+  'rightContext',
+  "$'",
+  '$1',
+  '$2',
+  '$3',
+  '$4',
+  '$5',
+  '$6',
+  '$7',
+  '$8',
+  '$9',
+]);
+
 const unavailableSymbolNames = new Map(
   Object.entries(WELL_KNOWN_SYMBOLS)
     .filter(([name]) => unavailableWellKnownSymbols.has(name))

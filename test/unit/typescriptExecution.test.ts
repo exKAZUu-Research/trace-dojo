@@ -452,11 +452,18 @@ test('unsupported type syntax and omitted host globals stop execution before eff
   }
 });
 
-test('RegExp match state starts fresh for each execution', () => {
-  executeProgram('typescript', '/(a)/.test("a");');
-  expect(executeProgram('typescript', 'console.log(RegExp.$1 === "", RegExp.input === "");')).toMatchObject({
-    kind: 'executed',
-    stdout: 'true true\n',
+test.each([
+  'console.log(RegExp.$1);',
+  '/(a)/.test("a"); console.log({ key: 1 }); console.log(RegExp.lastMatch);',
+  'RegExp.input = "override";',
+  'const C: any = RegExp; console.log(C["$&"]);',
+  'const C: any = RegExp; C.$_ = "override";',
+  'Object.getOwnPropertyDescriptor(RegExp, "$1")!.get!.call(RegExp);',
+  'Object.getOwnPropertyDescriptor(RegExp, "input")!.set!.call(RegExp, "override");',
+])('RegExp legacy statics are unavailable through %s', (source) => {
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 0, message: 'RegExp の旧式の静的プロパティは、この採点環境では使えません。' }],
   });
 });
 

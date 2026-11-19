@@ -3,6 +3,7 @@ import { DONE } from './iteration';
 import type { RealmBuilder } from './realm';
 import { defineHostIteratorPrototype, newHostIterator, WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
+import { legacyRegExpStaticsFeature, rejectUnavailableMember, unavailableRegExpStatics } from './unavailableMembers';
 import {
   isAccessor,
   isCallable,
@@ -13,30 +14,6 @@ import {
   throwingHostErrors,
   type Value,
 } from './values';
-
-const legacyRegExpNames = [
-  'input',
-  'lastMatch',
-  'lastParen',
-  'leftContext',
-  'rightContext',
-  '$1',
-  '$2',
-  '$3',
-  '$4',
-  '$5',
-  '$6',
-  '$7',
-  '$8',
-  '$9',
-] as const;
-const legacyRegExpAliases: Record<string, (typeof legacyRegExpNames)[number]> = {
-  $_: 'input',
-  '$&': 'lastMatch',
-  '$+': 'lastParen',
-  '$`': 'leftContext',
-  "$'": 'rightContext',
-};
 
 const FLAG_GETTERS = [
   ['hasIndices', 'd'],
@@ -77,23 +54,12 @@ export function defineRegExpBuiltins(builder: RealmBuilder): void {
 }
 
 function defineLegacyStatics(builder: RealmBuilder, constructor: JsObject): void {
-  for (const [name, canonical] of [
-    ...legacyRegExpNames.map((name) => [name, name] as const),
-    ...Object.entries(legacyRegExpAliases),
-  ]) {
-    builder.getter(
-      constructor,
-      name,
-      ({ runtime }) => runtime.regExpStatics.get(canonical) ?? '',
-      ({ runtime, args }) => {
-        if (canonical === 'input') runtime.regExpStatics.set('input', runtime.toString(args[0]));
-      }
-    );
-  }
+  for (const name of unavailableRegExpStatics)
+    builder.getter(constructor, name, rejectLegacyRegExpStatic, rejectLegacyRegExpStatic);
 }
 
-function recordHostMatch(runtime: Runtime): void {
-  for (const name of legacyRegExpNames) runtime.regExpStatics.set(name, RegExp[name]);
+function rejectLegacyRegExpStatic({ runtime }: NativeCall): never {
+  return rejectUnavailableMember(legacyRegExpStaticsFeature, runtime.currentRow);
 }
 
 /** Creates a regular expression object, throwing JavaScript's SyntaxError for an invalid pattern or flags. */
@@ -178,11 +144,7 @@ function withHostRegExp<T>(runtime: Runtime, object: RegExpObject, run: (regexp:
 
 function exec(runtime: Runtime, object: RegExpObject, text: string, prescanned = false): JsObject | null {
   if (!prescanned) runtime.scan(text.length);
-  const match = withHostRegExp(runtime, object, (regexp) => {
-    const result = regexp.exec(text);
-    if (result) recordHostMatch(runtime);
-    return result;
-  });
+  const match = withHostRegExp(runtime, object, (regexp) => regexp.exec(text));
   // oxlint-disable-next-line unicorn/no-null -- exec returns null when nothing matches, as in JavaScript.
   return match ? matchArray(runtime, match) : null;
 }
@@ -537,7 +499,6 @@ function splitMatcher(runtime: Runtime, { matcher: splitter, isPrivate }: RegExp
       matcher.lastIndex = position;
       const match = matcher.exec(text);
       if (!match) return;
-      recordHostMatch(runtime);
       return { end: Math.min(matcher.lastIndex, text.length), captures: match.slice(1) };
     };
   }
