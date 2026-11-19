@@ -3,12 +3,12 @@
 import { callCallback, callMethod, consumeInvokedResult, discardInvokedResult } from './callables';
 import { createObject, findClass } from './classes';
 import { toBool } from './conversions';
-import { type CleanupException, throwError, warn, withCleanupExceptions } from './errors';
+import { type CleanupException, isCleanupException, throwError, warn, withCleanupExceptions } from './errors';
 import { acquireIterator, InnerIterator, releaseIteratorValues } from './iteratorAcquisition';
 import { arrayIteratorOver } from './libArrayObject';
 import { defineClass, type NativeMethod } from './native';
 import { toKey, toStr } from './operators';
-import { PhpThrow, rt } from './runtime';
+import { rt } from './runtime';
 import { nativeOwnershipChanged, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
 
 /** The engine's iterator for a Traversable object, which asks an IteratorAggregate for its iterator. */
@@ -281,7 +281,7 @@ class IteratorTransition {
     try {
       work();
     } catch (error) {
-      if (!(error instanceof PhpThrow)) throw error;
+      if (!isCleanupException(error)) throw error;
       this.capture(error);
       this.failed = true;
     }

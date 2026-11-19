@@ -3362,3 +3362,28 @@ foreach (['ArrayObject', 'ArrayIterator', 'SplObjectStorage', 'SplStack', 'SplMi
     ].join('\n'),
   });
 });
+
+test('completes CachingIterator cache transitions when a destructor exits', () => {
+  const setFlagsExit = run(String.raw`<?php
+class Probe { function __construct(public $it) {} function __destruct() { echo 'flags:' . $this->it->getFlags() . ';'; } }
+class ExitItem { function __construct(public $n) {} function __destruct() { echo 'd' . $this->n . ';'; if ($this->n === 1) exit; } }
+$it = new CachingIterator(new ArrayIterator([]), CachingIterator::FULL_CACHE);
+$p = new Probe($it);
+$it['a'] = new ExitItem(1);
+$it['b'] = new ExitItem(2);
+$it->setFlags(0);
+$it->setFlags(CachingIterator::FULL_CACHE | CachingIterator::TOSTRING_USE_KEY);
+`);
+  expect(setFlagsExit).toMatchObject({ kind: 'executed', stdout: 'd1;d2;flags:258;' });
+
+  const rewindExit = run(String.raw`<?php
+class Probe { function __construct(public $it) {} function __destruct() { echo 'valid:' . (int)$this->it->valid() . ';'; } }
+class ExitItem { function __destruct() { echo 'exit;'; exit; } }
+$it = new CachingIterator(new ArrayIterator([1]), CachingIterator::FULL_CACHE);
+$p = new Probe($it);
+$it->rewind();
+$it['x'] = new ExitItem();
+$it->rewind();
+`);
+  expect(rewindExit).toMatchObject({ kind: 'executed', stdout: 'exit;valid:0;' });
+});
