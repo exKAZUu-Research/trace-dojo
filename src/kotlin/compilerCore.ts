@@ -1,0 +1,377 @@
+import type { TypeProjectionRef, TypeRef } from './ast';
+import {
+  type Compiled,
+  compileError,
+  type Core,
+  type Eval,
+  findClassInScope,
+  Flow,
+  FunctionContext,
+  PackageScope,
+  readSlot,
+  ReceiverSymbol,
+  Scope,
+} from './compilerBase';
+import { unavailableMessage } from './convertSupport';
+import type { Frame } from './runtime';
+import type { ClassSymbol, FunctionSymbol, MemberSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
+import { VariableSymbol } from './symbols';
+import { anyType, asSuper, substitutionOf } from './typeRelations';
+import {
+  type ClassType,
+  type KType,
+  NOTHING,
+  nullable,
+  resolved,
+  substitute,
+  type Substitution,
+  type TypeArgument,
+} from './types';
+import { Cell, type Value } from './values';
+
+/** The package of `Turtle`, which no program can name. */
+export const TURTLE_PACKAGE = 'tracedojo';
+
+/** The packages every Kotlin file imports, and `Turtle`'s, which trace-dojo provides to every program. */
+export const DEFAULT_IMPORTS = [
+  TURTLE_PACKAGE,
+  'kotlin',
+  'kotlin.annotation',
+  'kotlin.collections',
+  'kotlin.comparisons',
+  'kotlin.io',
+  'kotlin.ranges',
+  'kotlin.sequences',
+  'kotlin.text',
+  'java.lang',
+  'kotlin.jvm',
+];
+
+/** The names a file sees beyond its own scopes: its package, its imports, and the default imports. */
+export interface FileContext {
+  packageName: string;
+  isLibrary: boolean;
+  importedClasses: Map<string, ClassSymbol>;
+  importedFunctions: Map<string, FunctionSymbol[]>;
+  importedProperties: Map<string, PropertySymbol[]>;
+  /** The packages of the file's `import p.*`, which come before the default imports. */
+  starPackages: string[];
+}
+
+/** A member found on a receiver's type, with the type arguments that the receiver gives its class. */
+export interface MemberRef<T extends MemberSymbol = MemberSymbol> {
+  symbol: T;
+  substitution: Substitution;
+}
+
+export abstract class CompilerCore {
+  protected core!: Core;
+  readonly packages: Map<string, PackageScope>;
+  protected file!: FileContext;
+  protected flow = new Flow();
+  /** The rows of `// atomic` annotations, which mark the functions declared on or before them. */
+  protected atomicRows: ReadonlySet<number> = new Set();
+  /** Whether the program records the steps of its statements, which only traces do. */
+  protected recordsSteps = false;
+
+  constructor(packages: Map<string, PackageScope>) {
+    this.packages = packages;
+  }
+
+  protected error(row: number, message: string): never {
+    throw compileError(row, message);
+  }
+
+  protected unavailable(row: number, what: string): never {
+    throw compileError(row, unavailableMessage(what));
+  }
+
+  protected packageScope(name: string): PackageScope {
+    let scope = this.packages.get(name);
+    if (!scope) {
+      scope = new PackageScope();
+      this.packages.set(name, scope);
+    }
+    return scope;
+  }
+
+  /** The packages whose top-level declarations a file sees, nearest first, grouped by how near they are. */
+  protected visiblePackageLevels(): string[][] {
+    return [[this.file.packageName], this.file.starPackages, DEFAULT_IMPORTS];
+  }
+
+  // Types.
+
+  resolveType(scope: Scope, ref: TypeRef): KType {
+    if (ref.kind === 'function') {
+      return {
+        kind: 'function',
+        receiver: ref.receiver ? this.resolveType(scope, ref.receiver) : undefined,
+        params: ref.params.map((param) => this.resolveType(scope, param)),
+        returnType: this.resolveType(scope, ref.returnType),
+        nullable: ref.nullable,
+      };
+    }
+    const [first, ...rest] = ref.parts;
+    if (rest.length === 0) {
+      const param = this.findTypeParameter(scope, first.name);
+      if (param) {
+        if (first.args.length > 0) this.error(ref.row, `型引数 ${first.name} には型引数を書けません。`);
+        return { kind: 'param', param, nullable: ref.nullable };
+      }
+      if (first.name === 'Nothing' && !this.findClass(scope, 'Nothing')) {
+        return ref.nullable ? nullable(NOTHING) : NOTHING;
+      }
+    }
+    let cls = this.findClass(scope, first.name) ?? this.findQualifiedClass(ref.parts.map((part) => part.name));
+    let consumed = 1;
+    if (!cls) this.error(ref.row, `型 ${ref.parts.map((part) => part.name).join('.')} が見つかりません。`);
+    if (this.findQualifiedClass(ref.parts.map((part) => part.name)) && !this.findClass(scope, first.name)) {
+      consumed = ref.parts.length;
+    }
+    // A qualifier such as `Map` in `Map.Entry<K, V>` names a scope, whose own type arguments it may leave out.
+    const isQualifier = consumed < ref.parts.length;
+    let args: TypeArgument[] =
+      isQualifier && first.args.length === 0 ? [] : this.resolveArguments(scope, cls, first.args, ref.row);
+    for (const part of ref.parts.slice(consumed)) {
+      const nested: ClassSymbol | undefined = cls.nested.get(part.name);
+      if (!nested) this.error(ref.row, `型 ${cls.name}.${part.name} が見つかりません。`);
+      cls = nested;
+      args = this.resolveArguments(scope, cls, part.args, ref.row);
+    }
+    return { kind: 'class', cls, args, nullable: ref.nullable };
+  }
+
+  private resolveArguments(scope: Scope, cls: ClassSymbol, refs: TypeProjectionRef[], row: number): TypeArgument[] {
+    if (refs.length !== cls.typeParameters.length) {
+      if (refs.length === 0) this.error(row, `型 ${cls.name} には型引数が ${cls.typeParameters.length} 個要ります。`);
+      this.error(row, `型 ${cls.name} の型引数の数が違います。`);
+    }
+    return refs.map((projection): TypeArgument => {
+      if (projection.star) return { variance: 'star' };
+      return { variance: projection.variance ?? 'inv', type: this.resolveType(scope, projection.type) };
+    });
+  }
+
+  protected findTypeParameter(scope: Scope | undefined, name: string): TypeParameterSymbol | undefined {
+    for (let current = scope; current; current = current.parent) {
+      const found = current.typeParameters.get(name);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  /** The class a simple name stands for: in the scopes, then in the file's package, its imports, and the defaults. */
+  findClass(scope: Scope | undefined, name: string): ClassSymbol | undefined {
+    const local = findClassInScope(scope, name);
+    if (local) return local;
+    const imported = this.file.importedClasses.get(name);
+    const own = this.packages.get(this.file.packageName)?.classes.get(name);
+    if (own) return own;
+    if (imported) return imported;
+    for (const level of this.visiblePackageLevels().slice(1)) {
+      for (const packageName of level) {
+        const found = this.packages.get(packageName)?.classes.get(name);
+        if (found) return found;
+      }
+    }
+    return undefined;
+  }
+
+  /** The class a fully qualified name such as `kotlin.collections.List` stands for. */
+  protected findQualifiedClass(path: string[]): ClassSymbol | undefined {
+    for (let split = path.length - 1; split >= 1; split--) {
+      const scope = this.packages.get(path.slice(0, split).join('.'));
+      let cls = scope?.classes.get(path[split]);
+      if (!cls) continue;
+      for (const name of path.slice(split + 1)) {
+        cls = cls.nested.get(name);
+        if (!cls) return undefined;
+      }
+      return cls;
+    }
+    return undefined;
+  }
+
+  /** The functions of a name in the visible packages, nearest first, each level a group of equally near ones. */
+  protected topLevelFunctions(name: string): FunctionSymbol[][] {
+    const levels: FunctionSymbol[][] = [];
+    const own = this.packages.get(this.file.packageName)?.functions.get(name) ?? [];
+    levels.push([...own, ...(this.file.importedFunctions.get(name) ?? [])]);
+    for (const level of this.visiblePackageLevels().slice(1)) {
+      levels.push(level.flatMap((packageName) => this.packages.get(packageName)?.functions.get(name) ?? []));
+    }
+    return levels.filter((level) => level.length > 0);
+  }
+
+  protected topLevelProperties(name: string): PropertySymbol[][] {
+    const levels: PropertySymbol[][] = [];
+    const own = this.packages.get(this.file.packageName)?.properties.get(name) ?? [];
+    levels.push([...own, ...(this.file.importedProperties.get(name) ?? [])]);
+    for (const level of this.visiblePackageLevels().slice(1)) {
+      levels.push(level.flatMap((packageName) => this.packages.get(packageName)?.properties.get(name) ?? []));
+    }
+    return levels.filter((level) => level.length > 0);
+  }
+
+  // Members.
+
+  /** The members of a name on a receiver type, those of subclasses hiding the ones they override. */
+  protected membersOf<T extends MemberSymbol>(type: KType, name: string, kind: T['kind']): MemberRef<T>[] {
+    const actual = resolved(type);
+    if (actual.kind === 'param') {
+      const bounds = actual.param.bounds.length > 0 ? actual.param.bounds : [anyType()];
+      return bounds.flatMap((bound) => this.membersOf<T>(bound, name, kind));
+    }
+    if (actual.kind === 'function') {
+      return this.membersOf<T>(
+        { kind: 'class', cls: this.core.function, args: [{ variance: 'star' }], nullable: false },
+        name,
+        kind
+      );
+    }
+    if (actual.kind === 'nothing') return [];
+    if (actual.kind !== 'class') return [];
+    const found: MemberRef<T>[] = [];
+    const visited = new Set<ClassSymbol>();
+    const queue: ClassType[] = [actual];
+    while (queue.length > 0) {
+      const current = queue.shift() as ClassType;
+      if (visited.has(current.cls)) continue;
+      visited.add(current.cls);
+      const substitution = substitutionOf(current);
+      for (const member of current.cls.members.get(name) ?? []) {
+        if (member.kind !== kind) continue;
+        if (found.some((existing) => existing.symbol.root === member.root || overrides(existing.symbol, member)))
+          continue;
+        found.push({ symbol: member as T, substitution });
+      }
+      for (const supertype of current.cls.supertypes) queue.push(substitute(supertype, substitution) as ClassType);
+      if (current.cls.supertypes.length === 0 && current.cls !== this.core.any) {
+        queue.push(anyType());
+      }
+    }
+    return found;
+  }
+
+  /** The type of a class's own `this`, with the class's type parameters as its arguments. */
+  protected thisTypeOf(cls: ClassSymbol): ClassType {
+    return cls.selfType;
+  }
+
+  /** The supertype `asSuper` finds, or the type itself for a type that is not a class type. */
+  protected supertypeAs(type: KType, cls: ClassSymbol): ClassType | undefined {
+    const actual = resolved(type);
+    if (actual.kind === 'class') return asSuper(actual, cls);
+    if (actual.kind === 'param') {
+      for (const bound of actual.param.bounds) {
+        const found = this.supertypeAs(bound, cls);
+        if (found) return found;
+      }
+    }
+    return undefined;
+  }
+
+  // Variables, receivers, and captures.
+
+  /** The implicit receivers a scope sees, innermost first. */
+  protected receiversOf(scope: Scope): ReceiverSymbol[] {
+    const receivers: ReceiverSymbol[] = [];
+    for (let current: Scope | undefined = scope; current; current = current.parent) {
+      if (current.receiver) receivers.push(current.receiver);
+    }
+    return receivers;
+  }
+
+  protected findVariable(scope: Scope, name: string): VariableSymbol | undefined {
+    for (let current: Scope | undefined = scope; current; current = current.parent) {
+      const found = current.variables.get(name);
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  /** Where a variable's value lives as `context` sees it: its own frame's slot, or what a lambda captured. */
+  protected variableAccess(
+    context: FunctionContext,
+    variable: VariableSymbol
+  ): { read: Eval; write: (frame: Frame, value: Value) => void } {
+    if (variable.owner === context) {
+      const { slot } = variable;
+      return {
+        read: (frame) => readSlot(frame.locals[slot]),
+        write: (frame, value) => {
+          const current = frame.locals[slot];
+          if (current instanceof Cell) current.value = value;
+          else frame.locals[slot] = variable.isCell ? new Cell(value) : value;
+        },
+      };
+    }
+    if (variable.isVar) variable.isCell = true;
+    const index = context.captureIndex(variable);
+    return {
+      read: (frame) => readSlot(frame.captured[index]),
+      write: (frame, value) => {
+        (frame.captured[index] as Cell).value = value;
+      },
+    };
+  }
+
+  /** Reads an implicit receiver, which a lambda inside the function that has it captures. */
+  protected receiverAccess(context: FunctionContext, receiver: ReceiverSymbol): Eval {
+    if (receiver.context === context) return (frame) => frame.thisValue;
+    const index = context.captureIndex(receiver);
+    return (frame) => frame.captured[index] as Value;
+  }
+
+  /** The frame of an enclosing function, which a `return` in a lambda of an inline call leaves. */
+  protected frameAccess(context: FunctionContext, target: FunctionContext): (frame: Frame) => Frame {
+    if (target === context) return (frame) => frame;
+    const index = context.captureIndex(target);
+    return (frame) => frame.captured[index] as Frame;
+  }
+
+  /** Builds what a lambda captures, as the function creating it sees each captured thing. */
+  protected captureBuilder(outer: FunctionContext, lambda: FunctionContext): (frame: Frame) => unknown[] {
+    const readers = lambda.captures.map((source): ((frame: Frame) => unknown) => {
+      if (source instanceof VariableSymbol) {
+        if (source.owner === outer) {
+          const { slot } = source;
+          return (frame) => frame.locals[slot];
+        }
+        const index = outer.captureIndex(source);
+        return (frame) => frame.captured[index];
+      }
+      if (source instanceof ReceiverSymbol) return this.receiverAccess(outer, source);
+      return this.frameAccess(outer, source);
+    });
+    return (frame) => readers.map((read) => read(frame));
+  }
+
+  protected newVariable(
+    scope: Scope,
+    context: FunctionContext,
+    name: string,
+    type: KType,
+    isVar: boolean,
+    row: number,
+    isShown = true
+  ): VariableSymbol {
+    const slot = context.allocate(name, type, isShown && !context.info.isLibrary);
+    const variable = new VariableSymbol(name, type, isVar, 0, slot, row);
+    variable.owner = context;
+    scope.variables.set(name, variable);
+    return variable;
+  }
+
+  protected compiledConstant(compiled: Compiled): Value | undefined {
+    return compiled.constant;
+  }
+}
+
+/** Whether `member` overrides `other`, directly or through members in between. */
+function overrides(member: MemberSymbol, other: MemberSymbol): boolean {
+  return member.overridden.some((overridden) => overridden === other || overrides(overridden, other));
+}
+
+export { FunctionContext, Scope };

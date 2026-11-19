@@ -1,0 +1,323 @@
+import { CompileError } from '../interpreter/diagnostics';
+import type { TypeRef } from './ast';
+import type { Frame, FunctionInfo, LocalInfo } from './runtime';
+import { UNASSIGNED } from './runtime';
+import {
+  ClassSymbol,
+  type FunctionSymbol,
+  type PropertySymbol,
+  type TypeParameterSymbol,
+  VariableSymbol,
+} from './symbols';
+import { anyType, isSubtype } from './typeRelations';
+import {
+  type ClassType,
+  isNullable,
+  type KType,
+  nonNull,
+  NOTHING,
+  resolved,
+  type TypeArgument,
+  typeToString,
+} from './types';
+import { box, Boxed, Cell, type PrimitiveKind, type Value } from './values';
+
+export type Eval = (frame: Frame) => Value;
+
+/** How a compiled expression's value is held at run time: unboxed as a primitive, or as a reference. */
+export type Repr = 'ref' | PrimitiveKind;
+
+export interface Compiled {
+  /** The static type, which a smart cast may have narrowed. */
+  type: KType;
+  repr: Repr;
+  eval: Eval;
+  /** Whether the expression only calls a function or creates an object, which the step rules read. */
+  isCall?: boolean;
+  isCreation?: boolean;
+  /** The value of an integer literal, which may also stand for a `Long`, `Short`, `Byte`, or unsigned value. */
+  integerLiteral?: { value: bigint; isUnsigned: boolean; isLong: boolean };
+  /** The value of an expression made only of literals, which never changes. */
+  constant?: Value;
+  /** The key of the variable or property the expression reads, which smart casts narrow. */
+  stableKey?: string;
+  /** For a condition, the smart casts that hold when it is true and when it is false. */
+  narrowing?: { whenTrue: Map<string, KType>; whenFalse: Map<string, KType> };
+}
+
+/** The classes of the standard library that the compiler gives meaning to. */
+export interface Core {
+  any: ClassSymbol;
+  unit: ClassSymbol;
+  boolean: ClassSymbol;
+  string: ClassSymbol;
+  charSequence: ClassSymbol;
+  number: ClassSymbol;
+  comparable: ClassSymbol;
+  throwable: ClassSymbol;
+  array: ClassSymbol;
+  iterable: ClassSymbol;
+  iterator: ClassSymbol;
+  collection: ClassSymbol;
+  list: ClassSymbol;
+  mutableList: ClassSymbol;
+  set: ClassSymbol;
+  mutableSet: ClassSymbol;
+  map: ClassSymbol;
+  mutableMap: ClassSymbol;
+  function: ClassSymbol;
+  enum: ClassSymbol;
+  intRange: ClassSymbol;
+  longRange: ClassSymbol;
+  charRange: ClassSymbol;
+  kProperty: ClassSymbol;
+  turtle: ClassSymbol;
+  /** The primitive classes, by the kind of value they hold. */
+  primitives: Map<ClassSymbol, PrimitiveKind>;
+  primitiveClasses: Record<PrimitiveKind, ClassSymbol>;
+}
+
+export class PackageScope {
+  readonly classes = new Map<string, ClassSymbol>();
+  readonly functions = new Map<string, FunctionSymbol[]>();
+  readonly properties = new Map<string, PropertySymbol[]>();
+
+  addFunction(symbol: FunctionSymbol): void {
+    const existing = this.functions.get(symbol.name);
+    if (existing) existing.push(symbol);
+    else this.functions.set(symbol.name, [symbol]);
+  }
+
+  addProperty(symbol: PropertySymbol): void {
+    const existing = this.properties.get(symbol.name);
+    if (existing) existing.push(symbol);
+    else this.properties.set(symbol.name, [symbol]);
+  }
+}
+
+/** An implicit receiver: `this` of a class, of an extension, or of a lambda with a receiver. */
+export class ReceiverSymbol {
+  constructor(
+    readonly type: KType,
+    readonly context: FunctionContext,
+    /** The class whose `this` the receiver is, for a class's members. */
+    readonly cls: ClassSymbol | undefined
+  ) {}
+}
+
+export interface LoopContext {
+  identity: object;
+  /** The variables declared before the loop, which an assignment in it may assign more than once. */
+  outerVals: Set<VariableSymbol>;
+}
+
+/** The function or lambda being compiled, which owns a frame. */
+export class FunctionContext {
+  readonly info: FunctionInfo;
+  private nextSlot = 0;
+  /** What a lambda captures from enclosing functions, in the order of its frame's captures. */
+  readonly captures: (VariableSymbol | ReceiverSymbol | FunctionContext)[] = [];
+  private readonly captureIndexes = new Map<object, number>();
+  /** The declared or expected result type, or `undefined` while a lambda's or expression body's is inferred. */
+  returnType: KType | undefined;
+  /** How the function returns its value, which a `return` in a lambda converts to. */
+  returnRepr: Repr | undefined;
+  readonly returnedTypes: KType[] = [];
+  loops: LoopContext[] = [];
+  /** The captured variables a lambda assigns. */
+  readonly assignedCaptures = new Set<VariableSymbol>();
+
+  constructor(
+    readonly parent: FunctionContext | undefined,
+    readonly isLambda: boolean,
+    name: string,
+    isLibrary: boolean,
+    /** The function a `return` leaves: the function itself, or for a lambda of an inline call, the one around it. */
+    readonly returnTarget: FunctionContext | undefined
+  ) {
+    this.info = {
+      name,
+      locals: [],
+      captures: [],
+      slotCount: 0,
+      isAtomic: false,
+      isLibrary,
+      isLambda,
+      showsThis: false,
+    };
+  }
+
+  allocate(name: string, type: KType, isShown: boolean): number {
+    const slot = this.nextSlot++;
+    this.info.slotCount = this.nextSlot;
+    if (isShown) this.info.locals.push({ name, slot, type });
+    return slot;
+  }
+
+  /** The index of a captured variable, receiver, or frame in this lambda's captures, adding it when it is new. */
+  captureIndex(source: VariableSymbol | ReceiverSymbol | FunctionContext): number {
+    const existing = this.captureIndexes.get(source);
+    if (existing !== undefined) return existing;
+    const index = this.captures.length;
+    this.captures.push(source);
+    this.captureIndexes.set(source, index);
+    if (source instanceof VariableSymbol && !this.info.isLibrary) {
+      const info: LocalInfo = { name: source.name, slot: index, type: source.type };
+      this.info.captures.push(info);
+    }
+    return index;
+  }
+
+  /** Whether `context` is this function or a function around it. */
+  isWithin(context: FunctionContext): boolean {
+    if (context === this) return true;
+    return this.parent?.isWithin(context) ?? false;
+  }
+}
+
+/** A scope of names: of a file, a class, a function, or a block. */
+export class Scope {
+  readonly variables = new Map<string, VariableSymbol>();
+  readonly classes = new Map<string, ClassSymbol>();
+  readonly typeParameters = new Map<string, TypeParameterSymbol>();
+  receiver: ReceiverSymbol | undefined;
+  /** A class whose companion object's members and nested classes the scope's names reach. */
+  staticClass: ClassSymbol | undefined;
+
+  constructor(
+    readonly parent: Scope | undefined,
+    readonly context: FunctionContext | undefined
+  ) {}
+}
+
+/** What the compiler knows at a point of a function: narrowed types and which variables are assigned. */
+export class Flow {
+  constructor(
+    readonly narrowed = new Map<string, KType>(),
+    readonly assigned = new Set<VariableSymbol>(),
+    /** The `val`s that may be assigned at this point, which cannot be assigned again. */
+    readonly maybeAssigned = new Set<VariableSymbol>(),
+    /** Whether the point cannot be reached, after a `return`, `throw`, `break`, or `continue`. */
+    public isDead = false
+  ) {}
+
+  copy(): Flow {
+    return new Flow(new Map(this.narrowed), new Set(this.assigned), new Set(this.maybeAssigned), this.isDead);
+  }
+
+  /** The state where two branches meet. */
+  static merge(flows: Flow[]): Flow {
+    const live = flows.filter((flow) => !flow.isDead);
+    if (live.length === 0) {
+      const dead = flows[0].copy();
+      for (const flow of flows.slice(1)) for (const variable of flow.maybeAssigned) dead.maybeAssigned.add(variable);
+      dead.isDead = true;
+      return dead;
+    }
+    const [first, ...rest] = live;
+    const narrowed = new Map(
+      [...first.narrowed].filter(([key, type]) =>
+        rest.every((flow) => {
+          const other = flow.narrowed.get(key);
+          return other !== undefined && isSubtype(other, type) && isSubtype(type, other);
+        })
+      )
+    );
+    const assigned = new Set(
+      [...first.assigned].filter((variable) => rest.every((flow) => flow.assigned.has(variable)))
+    );
+    const maybeAssigned = new Set(flows.flatMap((flow) => [...flow.maybeAssigned]));
+    return new Flow(narrowed, assigned, maybeAssigned, false);
+  }
+}
+
+export function compileError(row: number, message: string): CompileError {
+  return new CompileError([{ row, message }]);
+}
+
+export function typeMismatchMessage(expected: KType, actual: KType): string {
+  return `型が合いません。${typeToString(resolved(expected))} が必要ですが、${typeToString(resolved(actual))} です。`;
+}
+
+export function nullableReceiverMessage(type: KType): string {
+  return `null かもしれない ${typeToString(resolved(type))} の値には、?. か !! を使ってください。`;
+}
+
+/** How values of the type are held: unboxed for non-null primitive types other than `Boolean`. */
+export function reprOf(core: Core, type: KType): Repr {
+  const actual = resolved(type);
+  if (actual.kind !== 'class' || actual.nullable) return 'ref';
+  return core.primitives.get(actual.cls) ?? 'ref';
+}
+
+/** Converts a value between representations, boxing primitives where a reference is expected. */
+export function convertRepr(eval_: Eval, from: Repr, to: Repr): Eval {
+  if (from === to) return eval_;
+  if (from === 'ref') {
+    return (frame) => {
+      const value = eval_(frame);
+      return value instanceof Boxed ? value.value : value;
+    };
+  }
+  if (to === 'ref') return (frame) => box(from, eval_(frame) as number | bigint);
+  // Representations of different primitives meet only through a reference, which the checker rules out.
+  return eval_;
+}
+
+export function coerce(compiled: Compiled, to: Repr): Eval {
+  return convertRepr(compiled.eval, compiled.repr, to);
+}
+
+/** Reads a local, which lives in a cell when a lambda captures it. */
+export function readSlot(slot: unknown): Value {
+  return slot instanceof Cell ? slot.value : (slot as Value);
+}
+
+export function isUnassigned(slot: unknown): boolean {
+  return slot === UNASSIGNED;
+}
+
+/** The type of the elements a class type's argument at `index` holds, with a star read as `Any?`. */
+export function typeArgument(type: ClassType, index: number): KType {
+  const argument: TypeArgument | undefined = type.args[index];
+  if (!argument || argument.variance === 'star') return anyType(true);
+  return argument.type;
+}
+
+export function isNothingType(type: KType): boolean {
+  const actual = resolved(type);
+  return actual.kind === 'nothing' && !actual.nullable;
+}
+
+export function nonNullType(type: KType): KType {
+  return nonNull(resolved(type));
+}
+
+export function mayBeNull(type: KType): boolean {
+  return isNullable(resolved(type));
+}
+
+export { NOTHING };
+
+export interface TypeResolver {
+  resolveType(scope: Scope, ref: TypeRef): KType;
+}
+
+/** The class a name in a scope stands for, looking in enclosing classes' nested classes too. */
+export function findClassInScope(scope: Scope | undefined, name: string): ClassSymbol | undefined {
+  for (let current = scope; current; current = current.parent) {
+    const found = current.classes.get(name);
+    if (found) return found;
+    for (let cls = current.staticClass; cls; cls = cls.outer) {
+      const nested = cls.nested.get(name);
+      if (nested) return nested;
+      for (const supertype of cls.supertypes) {
+        const inherited = supertype.cls.nested.get(name);
+        if (inherited) return inherited;
+      }
+    }
+  }
+  return undefined;
+}
+
+export { ClassSymbol };
