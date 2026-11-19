@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 504 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
+// code-gauge-allow-file fileNcss 507 -- Resolves expressions, lexical references, closure captures, and contextual assignment diagnostics; memoization is separate.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -148,6 +148,11 @@ export class ExpressionChecker {
     return !isAnyLike(type) && !isIntrinsic(type, 'never') && this.c.relations.isAssignable(type, symbolType);
   }
 
+  mayBeSymbol(type: Type): boolean {
+    const constraint = this.c.baseConstraint(type);
+    return (constraint.kind === 'union' ? constraint.types : [constraint]).some((member) => this.isSymbolLike(member));
+  }
+
   private templateString(node: TreeNode, contextual: Type | undefined): Type {
     const texts = [''];
     const types: Type[] = [];
@@ -179,7 +184,7 @@ export class ExpressionChecker {
   private templateSubstitution(expression: TreeNode): Type {
     const type = this.check(expression);
     this.checkFunctionText(expression, type);
-    if (this.isSymbolLike(type)) {
+    if (this.mayBeSymbol(type)) {
       this.c.error(
         expression,
         "symbol を文字列に暗黙に変換すると、実行時にエラーになります。'String(...)' で囲んでください。"

@@ -132,14 +132,14 @@ function defineReflection(method: ObjectMethod): void {
   );
   method('getOwnPropertyDescriptor', 2, (runtime, args) => {
     const object = runtime.toObject(args[0]);
-    return descriptorObject(runtime, runtime.getOwnProperty(object, runtime.toPropertyKey(args[1])));
+    return descriptorObject(runtime, runtime.reflectedOwnProperty(object, runtime.toPropertyKey(args[1])));
   });
   method('getOwnPropertyDescriptors', 1, (runtime, args) => {
     const object = runtime.toObject(args[0]);
     const result = runtime.newObject();
     return runtime.hold(result, () => {
       for (const key of [...runtime.ownPropertyNames(object), ...runtime.ownSymbols(object)]) {
-        runtime.createDataProperty(result, key, descriptorObject(runtime, runtime.getOwnProperty(object, key)));
+        runtime.createDataProperty(result, key, descriptorObject(runtime, runtime.reflectedOwnProperty(object, key)));
       }
       return result;
     });

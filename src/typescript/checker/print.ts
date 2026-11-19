@@ -5,6 +5,7 @@ import {
   falseType,
   type LiteralValue,
   type MappedInfo,
+  nullType,
   type ObjectType,
   type Property,
   type Signature,
@@ -57,7 +58,10 @@ export class Printer {
       case 'union': {
         if (type === booleanType) return 'boolean';
         // TypeScript lists `null` and `undefined` last, as in `string | undefined`.
-        const members = [...type.types.filter((member) => !isNullish(member)), ...type.types.filter(isNullish)];
+        const members = [
+          ...type.types.filter((member) => !isNullish(member)),
+          ...[nullType, undefinedType].filter((member) => type.types.includes(member)),
+        ];
         const hasBoolean = members.includes(trueType) && members.includes(falseType);
         const printed: string[] = [];
         for (const member of members) {

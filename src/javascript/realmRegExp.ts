@@ -1,8 +1,10 @@
+import { ArrayOps } from './arrayOps';
 import { DONE } from './iteration';
 import type { RealmBuilder } from './realm';
-import { defineHostIteratorPrototype, newHostIterator } from './realmIterators';
+import { defineHostIteratorPrototype, newHostIterator, WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
 import {
+  isAccessor,
   isCallable,
   isObject,
   type JsArray,
@@ -47,10 +49,6 @@ const FLAG_GETTERS = [
   ['sticky', 'y'],
 ] as const;
 
-/**
- * Defines RegExp and the String methods that take one. Each runs on a copy of the host's `RegExp` that starts at the
- * object's `lastIndex` and writes back where the host left it, so the host's matching decides every result.
- */
 export function defineRegExpBuiltins(builder: RealmBuilder): void {
   const { regExpPrototype } = builder.realm;
   const constructor = builder.defineClass('RegExp', 2, regExpPrototype, ({ runtime, args, newTarget }) => {
@@ -71,6 +69,8 @@ export function defineRegExpBuiltins(builder: RealmBuilder): void {
     runtime.buildString(escaped.length);
     return escaped;
   });
+  builder.realm.regExpConstructor = constructor;
+  builder.getter(constructor, WELL_KNOWN_SYMBOLS.species, ({ thisValue }) => thisValue);
   defineLegacyStatics(builder, constructor);
   defineRegExpPrototype(builder);
   defineStringMethods(builder);
@@ -112,13 +112,17 @@ export function newRegExp(runtime: Runtime, source: string, flags: string): JsOb
 
 function defineRegExpPrototype(builder: RealmBuilder): void {
   const { regExpPrototype } = builder.realm;
-  builder.method(regExpPrototype, 'exec', 1, ({ runtime, thisValue, args }) => {
+  builder.realm.regExpExec = builder.method(regExpPrototype, 'exec', 1, ({ runtime, thisValue, args }) => {
     const object = thisRegExp(runtime, thisValue, 'exec');
     return exec(runtime, object, runtime.toString(args[0]));
   });
   builder.method(regExpPrototype, 'test', 1, ({ runtime, thisValue, args }) => {
-    const object = thisRegExp(runtime, thisValue, 'test');
-    return exec(runtime, object, runtime.toString(args[0])) !== null;
+    if (!isObject(thisValue))
+      return runtime.throwError(
+        'TypeError',
+        `Method RegExp.prototype.test called on incompatible receiver ${runtime.describePlain(thisValue)}`
+      );
+    return regExpExec(runtime, thisValue, runtime.toString(args[0])) !== null;
   });
   builder.method(regExpPrototype, 'toString', 0, ({ runtime, thisValue }) => {
     const object = runtime.toObject(thisValue);
@@ -172,8 +176,8 @@ function withHostRegExp<T>(runtime: Runtime, object: RegExpObject, run: (regexp:
   return result;
 }
 
-function exec(runtime: Runtime, object: RegExpObject, text: string): JsObject | null {
-  runtime.scan(text.length);
+function exec(runtime: Runtime, object: RegExpObject, text: string, prescanned = false): JsObject | null {
+  if (!prescanned) runtime.scan(text.length);
   const match = withHostRegExp(runtime, object, (regexp) => {
     const result = regexp.exec(text);
     if (result) recordHostMatch(runtime);
@@ -181,6 +185,16 @@ function exec(runtime: Runtime, object: RegExpObject, text: string): JsObject | 
   });
   // oxlint-disable-next-line unicorn/no-null -- exec returns null when nothing matches, as in JavaScript.
   return match ? matchArray(runtime, match) : null;
+}
+
+function regExpExec(runtime: Runtime, object: JsObject, text: string, prescanned = false): JsObject | null {
+  const method = runtime.get(object, 'exec');
+  if (isCallable(method) && method !== runtime.realm.regExpExec) {
+    const result = runtime.call(method, object, [text], runtime.currentRow);
+    if (result === null || isObject(result)) return result;
+    return runtime.throwError('TypeError', 'RegExp exec method returned something other than an Object or null');
+  }
+  return exec(runtime, thisRegExp(runtime, object, 'exec'), text, prescanned);
 }
 
 /** Converts the host's match to JavaScript's: an array with `index`, `input`, `groups`, and `indices` for `d`. */
@@ -241,16 +255,15 @@ function defineStringMethods(builder: RealmBuilder): void {
     });
   };
   method('match', ({ runtime, args }, text) => matchWithRegExp(runtime, regExpArgument(runtime, args[0], ''), text));
-  method('search', ({ runtime, args }, text) => {
-    const object = regExpArgument(runtime, args[0], '');
-    const index = text.search(new RegExp(object.regexp.source, object.regexp.flags));
-    if (index >= 0) recordHostMatch(runtime);
-    return index;
-  });
+  method('search', ({ runtime, args }, text) => searchWithRegExp(runtime, regExpArgument(runtime, args[0], ''), text));
   const regExpStringIteratorPrototype = defineHostIteratorPrototype(builder, 'RegExp String Iterator');
   method('matchAll', ({ runtime, args }, text) => {
     const pattern = args[0];
-    if (pattern instanceof JsObject && pattern.regexp && !pattern.regexp.global) {
+    if (
+      pattern instanceof JsObject &&
+      pattern.regexp &&
+      !runtime.toString(runtime.get(pattern, 'flags')).includes('g')
+    ) {
       return runtime.throwError('TypeError', 'String.prototype.matchAll called with a non-global RegExp argument');
     }
     const object = regExpArgument(runtime, pattern, 'g');
@@ -258,29 +271,84 @@ function defineStringMethods(builder: RealmBuilder): void {
   });
 }
 
+function searchWithRegExp(runtime: Runtime, object: RegExpObject, text: string): Value {
+  const previous = runtime.get(object, 'lastIndex');
+  if (!Object.is(previous, 0)) runtime.set(object, 'lastIndex', 0);
+  const result = regExpExec(runtime, object, text, true);
+  if (!Object.is(runtime.get(object, 'lastIndex'), previous)) runtime.set(object, 'lastIndex', previous);
+  return result ? runtime.get(result, 'index') : -1;
+}
+
 function matchWithRegExp(runtime: Runtime, object: RegExpObject, text: string): JsObject | null {
-  if (!object.regexp.global) return exec(runtime, object, text);
-  runtime.set(object, 'lastIndex', 0);
-  const matches = withHostRegExp(runtime, object, (regexp) => {
-    const result = text.match(regexp);
-    if (result) recordHostMatch(runtime);
-    return result;
+  const flags = runtime.toString(runtime.get(object, 'flags'));
+  if (!flags.includes('g')) return regExpExec(runtime, object, text, true);
+  const array = runtime.newArray([]);
+  runtime.hold(array, () => {
+    for (const match of globalMatches(runtime, object, text, flags)) {
+      runtime.allocate(1);
+      array.elements.push(match.text);
+    }
   });
-  // oxlint-disable-next-line unicorn/no-null -- match returns null when nothing matches, as in JavaScript.
-  return matches ? runtime.newArray([...matches]) : null;
+  // oxlint-disable-next-line unicorn/no-null -- String.prototype.match returns null on no match.
+  return array.elements.length > 0 ? array : null;
+}
+
+function* globalMatches(
+  runtime: Runtime,
+  object: JsObject,
+  text: string,
+  flags: string
+): Generator<{ result: JsObject; text: string }> {
+  runtime.set(object, 'lastIndex', 0);
+  while (true) {
+    runtime.spend();
+    const result = regExpExec(runtime, object, text, true);
+    if (!result) return;
+    const matched = runtime.toString(runtime.get(result, '0'));
+    yield { result, text: matched };
+    if (matched === '') advanceLastIndex(runtime, object, text, flags);
+  }
+}
+
+function advanceLastIndex(runtime: Runtime, object: JsObject, text: string, flags: string): void {
+  const index = matchIndex(runtime, object, 'lastIndex');
+  runtime.set(object, 'lastIndex', advanceIndex(text, index, flags.includes('u') || flags.includes('v')));
 }
 
 function matchAllIterator(runtime: Runtime, object: RegExpObject, text: string, prototype: JsObject): JsObject {
-  const regexp = new RegExp(object.regexp.source, object.regexp.flags);
-  regexp.lastIndex = runtime.toNumber(runtime.get(object, 'lastIndex'));
-  const matches = text.matchAll(regexp);
+  const flags = runtime.toString(runtime.get(object, 'flags'));
+  const { matcher } = cloneRegExp(runtime, object, flags);
+  const index = matchIndex(runtime, object, 'lastIndex');
+  runtime.set(matcher, 'lastIndex', index);
+  let done = false;
   return newHostIterator(runtime, prototype, {
+    source: matcher,
     next: () => {
-      const next = matches.next();
-      if (!next.done) recordHostMatch(runtime);
-      return next.done ? DONE : matchArray(runtime, next.value);
+      if (done) return DONE;
+      const match = regExpExec(runtime, matcher, text, true);
+      done = match === null || !flags.includes('g');
+      if (!match) return DONE;
+      if (!done && runtime.toString(runtime.get(match, '0')) === '') advanceLastIndex(runtime, matcher, text, flags);
+      return match;
     },
   });
+}
+
+interface RegExpClone {
+  matcher: JsObject;
+  isPrivate: boolean;
+}
+
+function cloneRegExp(runtime: Runtime, object: RegExpObject, flags: string): RegExpClone {
+  const constructor = runtime.get(object, 'constructor');
+  if (constructor !== undefined && !isObject(constructor))
+    return runtime.throwError('TypeError', 'The .constructor property is not an object');
+  const species = constructor && runtime.get(constructor, WELL_KNOWN_SYMBOLS.species);
+  if (species === undefined || species === null || species === runtime.realm.regExpConstructor)
+    return { matcher: newRegExp(runtime, object.regexp.source, flags), isPrivate: true };
+  if (!isCallable(species) || !species.isConstructor)
+    return runtime.throwError('TypeError', 'object.constructor[Symbol.species] is not a constructor');
+  return { matcher: runtime.construct(species, [object, flags], species, runtime.currentRow), isPrivate: false };
 }
 
 /** The regular expression a String method uses: its argument when it is one, else one made from its text. */
@@ -301,56 +369,83 @@ export function replaceWithRegExp(
   replacement: Value,
   all: boolean
 ): string {
-  if (all && !object.regexp.global) {
+  const flags = runtime.toString(runtime.get(object, 'flags'));
+  if (all && !flags.includes('g')) {
     return runtime.throwError('TypeError', 'String.prototype.replaceAll called with a non-global RegExp argument');
   }
   const template = isCallable(replacement) ? undefined : runtime.toString(replacement);
   runtime.scan(text.length);
-  if (object.regexp.global) runtime.set(object, 'lastIndex', 0);
-  const matches = withHostRegExp(runtime, object, (regexp) => matchesToReplace(runtime, regexp, text));
+  const matches = matchesToReplace(runtime, object, text, flags);
   let result = '';
   let position = 0;
-  for (const match of matches) {
+  for (const match of matches.elements) {
+    if (!isObject(match)) continue;
     runtime.spend();
-    const [matched] = match;
-    const captures = match.slice(1);
+    const { matched, captures, index, groups } = replacementMatch(runtime, match, text.length);
     const inserted =
       template === undefined
         ? runtime.toString(
             runtime.call(
               replacement,
               undefined,
-              [matched, ...captures, match.index, text, ...(match.groups ? [groupsObject(runtime, match.groups)] : [])],
+              [matched, ...captures, index, text, ...(groups === undefined ? [] : [groups])],
               callRow
             )
           )
-        : substitution(runtime, template, matched, text, match.index, captures, match.groups);
-    const part = text.slice(position, match.index) + inserted;
+        : substitution(runtime, template, matched, text, index, captures, groupLookup(runtime, groups));
+    if (index < position) continue;
+    const part = text.slice(position, index) + inserted;
     runtime.extendString(result.length + part.length, part.length);
     result += part;
-    position = match.index + matched.length;
+    position = index + matched.length;
   }
   const suffix = text.slice(position);
   runtime.extendString(result.length + suffix.length, suffix.length);
   return result + suffix;
 }
 
-function matchesToReplace(runtime: Runtime, regexp: RegExp, text: string): RegExpExecArray[] {
-  if (!regexp.global) {
-    const match = regexp.exec(text);
-    if (match) recordHostMatch(runtime);
-    return match ? [match] : [];
+function matchesToReplace(runtime: Runtime, object: JsObject, text: string, flags: string): JsArray {
+  if (!flags.includes('g')) {
+    const result = regExpExec(runtime, object, text, true);
+    return runtime.newArray(result ? [result] : []);
   }
-  regexp.lastIndex = 0;
-  // The host's matchAll steps over empty matches as JavaScript's replace does, and leaves lastIndex at 0.
-  const matches: RegExpExecArray[] = [];
-  for (const match of text.matchAll(regexp)) {
-    recordHostMatch(runtime);
-    // Charged as the match arrays JavaScript keeps until the replacements run, captures included.
-    runtime.allocate(match.length + 1);
-    matches.push(match);
-  }
-  return matches;
+  const matches = runtime.newArray([]);
+  return runtime.hold(matches, () => {
+    for (const { result } of globalMatches(runtime, object, text, flags)) {
+      runtime.allocate(1);
+      matches.elements.push(result);
+    }
+    return matches;
+  });
+}
+
+interface ReplacementMatch {
+  matched: string;
+  captures: (string | undefined)[];
+  index: number;
+  groups: Value;
+}
+
+function replacementMatch(runtime: Runtime, match: JsObject, length: number): ReplacementMatch {
+  const values = new ArrayOps(runtime, match);
+  const captureCount = Math.max(0, values.length - 1);
+  const matched = runtime.toString(runtime.get(match, '0'));
+  const index = matchIndex(runtime, match, 'index', length);
+  runtime.allocate(captureCount);
+  const captures = Array.from({ length: captureCount }, (_, offset) => {
+    const capture = values.get(offset + 1);
+    return capture === undefined ? undefined : runtime.toString(capture);
+  });
+  return { matched, captures, index, groups: runtime.get(match, 'groups') };
+}
+
+function groupLookup(runtime: Runtime, groups: Value): ((key: string) => string) | undefined {
+  if (groups === undefined) return undefined;
+  const object = runtime.toObject(groups);
+  return (key) => {
+    const value = runtime.get(object, key);
+    return value === undefined ? '' : runtime.toString(value);
+  };
 }
 
 /** Expands a replacement template for one match as the spec's GetSubstitution does: `$&`, `$1`, `$<name>`, and so on. */
@@ -362,7 +457,7 @@ function substitution(
   text: string,
   position: number,
   captures: (string | undefined)[],
-  groups: Record<string, string | undefined> | undefined
+  group: ((key: string) => string) | undefined
 ): string {
   let result = '';
   // Each piece is charged before it is appended, so a template repeating a long expansion stays within the limit.
@@ -379,7 +474,7 @@ function substitution(
       index = end;
       continue;
     }
-    const expansion = dollarExpansion(template, index, matched, text, position, captures, groups);
+    const expansion = dollarExpansion(template, index, matched, text, position, captures, group);
     append(expansion ? expansion.text : '$');
     index += expansion ? expansion.length : 1;
   }
@@ -394,7 +489,7 @@ function dollarExpansion(
   text: string,
   position: number,
   captures: (string | undefined)[],
-  groups: Record<string, string | undefined> | undefined
+  group: ((key: string) => string) | undefined
 ): { text: string; length: number } | undefined {
   const next = template[index + 1];
   if (next === '$') return { text: '$', length: 2 };
@@ -402,10 +497,10 @@ function dollarExpansion(
   if (next === '`') return { text: text.slice(0, position), length: 2 };
   if (next === "'") return { text: text.slice(position + matched.length), length: 2 };
   if (next === '<') {
-    if (groups === undefined) return undefined;
+    if (!group) return undefined;
     const close = template.indexOf('>', index + 2);
     if (close === -1) return undefined;
-    return { text: groups[template.slice(index + 2, close)] ?? '', length: close - index + 1 };
+    return { text: group(template.slice(index + 2, close)), length: close - index + 1 };
   }
   if (!/\d/.test(next)) return undefined;
   // Two digits name a capture when there is one of that number, else the first digit does.
@@ -418,48 +513,95 @@ function dollarExpansion(
   return undefined;
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
-// code-gauge-allow functionNcss 37 -- Transcribes the specification's algorithm step by step, whose branches mirror its steps.
-/**
- * The spec's RegExp.prototype[Symbol.split], which matches at each position with a sticky copy of the expression and
- * charges each part before it is kept.
- */
-export function splitWithRegExp(runtime: Runtime, text: string, object: RegExpObject, limit: number): JsArray {
-  const { flags } = object.regexp;
-  const splitter = new RegExp(object.regexp.source, flags.includes('y') ? flags : `${flags}y`);
+export function splitWithRegExp(runtime: Runtime, text: string, object: RegExpObject, limitValue: Value): JsArray {
+  const flags = runtime.toString(runtime.get(object, 'flags'));
+  const splitter = cloneRegExp(runtime, object, flags.includes('y') ? flags : `${flags}y`);
+  const limit = limitValue === undefined ? 2 ** 32 - 1 : runtime.toNumber(limitValue) >>> 0;
   const array = runtime.newArray([]);
-  const push = (part: string | undefined): boolean => {
+  const matchAt = splitMatcher(runtime, splitter, text);
+  const unicode = flags.includes('u') || flags.includes('v');
+  return runtime.hold(array, () => splitMatches(runtime, text, array, { limit, matchAt, unicode }));
+}
+
+interface SplitMatch {
+  end: number;
+  captures: Iterable<Value>;
+}
+type SplitMatcher = (position: number) => SplitMatch | undefined;
+
+function splitMatcher(runtime: Runtime, { matcher: splitter, isPrivate }: RegExpClone, text: string): SplitMatcher {
+  const regexp = isPrivate ? asRegExp(splitter) : undefined;
+  if (regexp && usesBuiltinExec(runtime, regexp)) {
+    const matcher = new RegExp(regexp.regexp.source, regexp.regexp.flags);
+    return (position) => {
+      matcher.lastIndex = position;
+      const match = matcher.exec(text);
+      if (!match) return;
+      recordHostMatch(runtime);
+      return { end: Math.min(matcher.lastIndex, text.length), captures: match.slice(1) };
+    };
+  }
+  return (position) => {
+    runtime.spend();
+    runtime.set(splitter, 'lastIndex', position);
+    const match = regExpExec(runtime, splitter, text, true);
+    if (!match) return;
+    return { end: matchIndex(runtime, splitter, 'lastIndex', text.length), captures: splitCaptures(runtime, match) };
+  };
+}
+
+/** A data-only lookup proves native matching cannot execute learner code between positions. */
+function usesBuiltinExec(runtime: Runtime, object: JsObject): boolean {
+  for (let current: JsObject | null = object; current; current = current.proto) {
+    const property = runtime.getOwnProperty(current, 'exec');
+    if (property) return !isAccessor(property) && property.value === runtime.realm.regExpExec;
+  }
+  return false;
+}
+
+function* splitCaptures(runtime: Runtime, match: JsObject): Generator<Value> {
+  const captures = new ArrayOps(runtime, match);
+  const count = captures.length;
+  for (let index = 1; index < count; index++) yield captures.get(index);
+}
+
+// code-gauge-allow functionCognitiveComplexity 18 -- The branches follow the split algorithm's stopping conditions.
+function splitMatches(
+  runtime: Runtime,
+  text: string,
+  array: JsArray,
+  { limit, matchAt, unicode }: { limit: number; matchAt: SplitMatcher; unicode: boolean }
+): JsArray {
+  const push = (part: Value): boolean => {
     runtime.allocate(1);
     array.elements.push(part);
     return array.elements.length >= limit;
   };
   if (limit === 0) return array;
   if (text.length === 0) {
-    if (splitter.test(text)) recordHostMatch(runtime);
-    else push(text);
+    if (!matchAt(0)) push(text);
     return array;
   }
   let start = 0;
   let position = 0;
-  // The positions tried are charged as a scan of the text, as other native string work is; each part kept is charged
-  // as it is kept.
   runtime.scan(text.length);
   while (position < text.length) {
-    splitter.lastIndex = position;
-    const match = splitter.exec(text);
-    if (match) recordHostMatch(runtime);
-    const end = match ? Math.min(splitter.lastIndex, text.length) : start;
-    if (!match || end === start) {
-      position = advanceIndex(text, position, splitter.unicode || splitter.unicodeSets);
+    const match = matchAt(position);
+    if (!match || match.end === start) {
+      position = advanceIndex(text, position, unicode);
       continue;
     }
     if (push(text.slice(start, position))) return array;
-    for (const capture of match.slice(1)) if (push(capture)) return array;
-    start = end;
-    position = end;
+    for (const capture of match.captures) if (push(capture)) return array;
+    start = match.end;
+    position = start;
   }
   push(text.slice(start));
   return array;
+}
+
+function matchIndex(runtime: Runtime, object: JsObject, key: string, max = Number.MAX_SAFE_INTEGER): number {
+  return Math.max(0, Math.min(Math.trunc(runtime.toNumber(runtime.get(object, key))) || 0, max));
 }
 
 /** The spec's AdvanceStringIndex, which steps over a whole surrogate pair in a Unicode-aware expression. */

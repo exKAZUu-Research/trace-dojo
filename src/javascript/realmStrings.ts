@@ -19,8 +19,6 @@ const collator = new Intl.Collator('en');
 // code-gauge-allow functionNcss 42 -- Lists the String builtins, each a small closure of its own.
 export function defineStringBuiltins(builder: RealmBuilder): void {
   const { stringPrototype } = builder.realm;
-  // String.prototype is a String object for the empty string, which shows only as its own `length`.
-  stringPrototype.properties.set('length', { value: 0, writable: false, enumerable: false, configurable: false });
   const stringConstructor = builder.defineClass('String', 1, stringPrototype, constructString);
   builder.method(stringConstructor, 'fromCharCode', 1, ({ runtime, args }) => {
     runtime.buildString(args.length);
@@ -210,12 +208,12 @@ function defineExtractions(method: StringMethod): void {
     if (!['NFC', 'NFD', 'NFKC', 'NFKD'].includes(form)) {
       runtime.throwError('RangeError', 'The normalization form should be one of NFC, NFD, NFKC, NFKD.');
     }
-    return text.normalize(form);
+    return built(runtime, text.normalize(form));
   });
   method('split', 2, ({ runtime, args }, text) => {
-    const limit = args[1] === undefined ? 2 ** 32 - 1 : runtime.toNumber(args[1]) >>> 0;
     const regexp = asRegExp(args[0]);
-    if (regexp) return splitWithRegExp(runtime, text, regexp, limit);
+    if (regexp) return splitWithRegExp(runtime, text, regexp, args[1]);
+    const limit = args[1] === undefined ? 2 ** 32 - 1 : runtime.toNumber(args[1]) >>> 0;
     // The separator converts before a zero limit returns, as its conversion can throw.
     const separator = args[0] === undefined ? undefined : runtime.toString(args[0]);
     if (limit === 0) return runtime.newArray([]);

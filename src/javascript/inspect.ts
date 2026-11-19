@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 573 -- One port of Node.js's util.inspect, whose formatters share its context.
+// code-gauge-allow-file fileNcss 576 -- One port of Node.js's util.inspect, whose formatters share its context.
 import { eastAsianWidthType } from 'get-east-asian-width';
 
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
@@ -362,7 +362,7 @@ function isBuiltinPrototype(object: JsObject): boolean {
 }
 
 /** What surrounds the entries of an object, or its whole text when it has no entries to list. */
-// code-gauge-allow functionCognitiveComplexity 23 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionCognitiveComplexity 24 -- Ports Node.js's util.inspect, so the two stay comparable.
 // code-gauge-allow functionNcss 39 -- Ports Node.js's util.inspect, so the two stay comparable.
 function frameOf(ctx: Context, value: JsObject, constructor: string | undefined, hasKeys: boolean): Frame | string {
   const { runtime } = ctx;
@@ -381,7 +381,8 @@ function frameOf(ctx: Context, value: JsObject, constructor: string | undefined,
   else if (dateValueOf(value) !== undefined) base = dateBase(value, constructor);
   else if (value.isError && constructor !== 'Object')
     base = errorText(runtime, value, constructor, ctx.errorStacks.get(value));
-  else if (value.primitive !== undefined) base = boxedBase(ctx, value.primitive, constructor, toStringTagOf(value));
+  else if (value.primitive !== undefined && !isPrimitivePrototype(runtime, value))
+    base = boxedBase(ctx, value.primitive, constructor, toStringTagOf(value));
   else if (value.isArguments) open = '[Arguments] {';
   else {
     const tag = toStringTagOf(value);
@@ -391,6 +392,11 @@ function frameOf(ctx: Context, value: JsObject, constructor: string | undefined,
   }
   if (!hasKeys) return base || `${open}}`;
   return { base, braces: [open, '}'] };
+}
+
+function isPrimitivePrototype(runtime: Runtime, object: JsObject): boolean {
+  const { stringPrototype, numberPrototype, booleanPrototype } = runtime.realm;
+  return object === stringPrototype || object === numberPrototype || object === booleanPrototype;
 }
 
 /** Reads an error's tag and works out its stack, as Node.js does before checking the error's own keys against it. */

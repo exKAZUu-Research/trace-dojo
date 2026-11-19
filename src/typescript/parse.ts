@@ -27,6 +27,25 @@ const optionalAnnotationTypes = new Set([
   'adding_type_annotation',
 ]);
 
+const strictIdentifierTypes = new Set([
+  'identifier',
+  'type_identifier',
+  'statement_identifier',
+  'shorthand_property_identifier',
+  'shorthand_property_identifier_pattern',
+]);
+const strictReservedWords = new Set([
+  'implements',
+  'interface',
+  'let',
+  'package',
+  'private',
+  'protected',
+  'public',
+  'static',
+  'yield',
+]);
+
 const parser = await loadParser('@willbooster/tree-sitter-typescript/tree-sitter-typescript.wasm');
 
 /**
@@ -104,7 +123,11 @@ function decodedName(node: Node): string {
 /** The syntax errors tsc's parser reports where the tree-sitter grammar accepts the program. */
 function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagnostic[]): SourceDiagnostic[] {
   const visit = (node: Node): void => {
-    const message = numericEscapeError(node, source) ?? characterEscapeError(node) ?? optionalAccessorError(node);
+    const message =
+      numericEscapeError(node, source) ??
+      characterEscapeError(node) ??
+      optionalAccessorError(node) ??
+      strictIdentifierError(node);
     if (message) errors.push({ row: node.startPosition.row, message });
     checkMixedLogicalOperators(node, errors);
     const located =
@@ -118,6 +141,12 @@ function typeScriptSyntaxErrors(root: Node, source: string, errors: SourceDiagno
   };
   visit(root);
   return errors.toSorted((left, right) => left.row - right.row);
+}
+
+function strictIdentifierError(node: Node): string | undefined {
+  if (!strictIdentifierTypes.has(node.type)) return undefined;
+  const name = decodedName(node);
+  return strictReservedWords.has(name) ? `識別子が必要です。'${name}' は Strict モードでは予約語です。` : undefined;
 }
 
 function stringLineBreakError(node: Node): SourceDiagnostic | undefined {

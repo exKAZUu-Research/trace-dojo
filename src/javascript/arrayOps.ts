@@ -37,8 +37,7 @@ export class ArrayOps {
   }
 
   set(index: number, value: Value): void {
-    if (this.array instanceof JsArray) this.runtime.setElement(this.array, index, value);
-    else this.runtime.set(this.array, String(index), value);
+    this.runtime.set(this.array, String(index), value);
   }
 
   create(index: number, value: Value): void {

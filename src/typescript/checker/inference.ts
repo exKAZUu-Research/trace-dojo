@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 433 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 434 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import type { Checker, Mapper } from './checker';
 import { childTypes, objectMemberTypes } from './genericTypes';
 import { applicableIndex, isIndexKeyOf, isPropertyKeyOf, keyedIndexes } from './indexInfos';
@@ -225,13 +225,8 @@ export class TypeInference {
     if (!captures) return;
     const { types } = target;
     for (const [index, type] of types.entries()) {
-      const constraint = type.kind === 'typeParameter' ? type.constraint?.() : type;
-      const text = captures[index];
-      const candidate =
-        constraint && isIntrinsic(constraint, 'number') && text.trim() !== '' && Number.isFinite(Number(text))
-          ? literalType(Number(text))
-          : literalType(text);
-      recurse(candidate, type);
+      const constraint = this.c.baseConstraint(type);
+      recurse(this.templateCapture(captures[index], constraint), type);
     }
   }
 
@@ -253,6 +248,19 @@ export class TypeInference {
     inference.priority = run.priority;
     if (!inference.candidates.some((candidate) => candidate.id === source.id)) inference.candidates.push(source);
     if (topLevel) inference.topLevel = true;
+  }
+
+  private templateCapture(text: string, constraint: Type): Type {
+    const literal = literalType(text);
+    if (this.c.relations.isAssignable(literal, constraint)) return literal;
+    const members = constraint.kind === 'union' ? constraint.types : [constraint];
+    const number = Number(text);
+    // Only a numeric spelling that round-trips through the primitive can represent a literal type.
+    if (String(number) === text && Number.isFinite(number) && members.some((member) => isIntrinsic(member, 'number')))
+      return literalType(number);
+    if (/^(?:0|-?[1-9]\d*)$/.test(text) && members.some((member) => isIntrinsic(member, 'bigint')))
+      return literalType(BigInt(text));
+    return literal;
   }
 
   private inferToUnion(run: InferenceRun, source: Type, target: UnionType, recurse: Recurse): void {

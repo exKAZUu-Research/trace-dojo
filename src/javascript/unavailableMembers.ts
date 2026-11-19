@@ -5,7 +5,23 @@ import type { Realm } from './realm';
 import { JsFunction, JsObject, type Key, type Value } from './values';
 
 /** Names an unavailable library member on a receiver, or gives undefined for any other. */
-export type UnavailableMemberCheck = (value: Value, key?: Key) => string | undefined;
+export type UnavailableMemberCheck = (value: Value, key: Key | undefined, readValue: boolean) => string | undefined;
+
+export const unavailableWellKnownSymbols = new Set([
+  'iterator',
+  'asyncIterator',
+  'hasInstance',
+  'isConcatSpreadable',
+  'match',
+  'matchAll',
+  'replace',
+  'search',
+  'species',
+  'split',
+  'toPrimitive',
+  'toStringTag',
+  'unscopables',
+]);
 
 const consoleTimers = new Set<Key | undefined>(['time', 'timeEnd', 'timeLog', 'timeStamp']);
 
@@ -14,10 +30,15 @@ const consoleTimers = new Set<Key | undefined>(['time', 'timeEnd', 'timeLog', 't
  * cannot resolve, such as those through `any`.
  */
 export function unavailableMemberCheck(realm: Realm): UnavailableMemberCheck {
+  const symbol = realm.globals.lookup('Symbol')?.value;
   const math = realm.globals.lookup('Math')?.value;
   const console = realm.globals.lookup('console')?.value;
   defineUnavailableMethods(realm, math, console);
-  return (value, key) => {
+  return (value, key, readValue) => {
+    if (readValue)
+      return value === symbol && typeof key === 'string' && unavailableWellKnownSymbols.has(key)
+        ? `Symbol.${key} などの well-known シンボル`
+        : undefined;
     // Node.js gives every error its own stack, whatever its prototype becomes.
     if ((key === 'stack' || key === undefined) && value instanceof JsObject && value.isError) return 'Error の stack';
     if (key === 'stack' && inherits(value, realm.errorPrototypes.Error)) return 'Error の stack';
@@ -27,7 +48,8 @@ export function unavailableMemberCheck(realm: Realm): UnavailableMemberCheck {
 
 /** Ends the program on the row reading an unavailable member, as the type checker would have rejected it. */
 export function rejectUnavailableMember(feature: string, row: number | undefined): never {
-  throw new CompileError([{ row: row ?? 0, message: `${feature} は、この採点環境では使えません。` }]);
+  const separator = /[\u0021-\u007E]$/.test(feature) ? ' ' : '';
+  throw new CompileError([{ row: row ?? 0, message: `${feature}${separator}は、この採点環境では使えません。` }]);
 }
 
 function defineUnavailableMethods(realm: Realm, math: Value, console: Value): void {

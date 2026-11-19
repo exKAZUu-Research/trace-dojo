@@ -11,7 +11,7 @@ import {
   isPropertyKeyOf,
   keyedIndexes,
 } from './indexInfos';
-import { templateParts } from './templateParts';
+import { isBigintTemplateText, isNumberTemplateText, templateParts } from './templateParts';
 import {
   anonymousObject,
   anyType,
@@ -536,9 +536,9 @@ export class Relations {
 
   private matchesPlaceholder(text: string, type: Type): boolean {
     if (isIntrinsic(type, 'string') || isAnyLike(type)) return true;
-    if (isIntrinsic(type, 'number')) return text !== '' && Number.isFinite(Number(text));
+    if (isIntrinsic(type, 'number')) return isNumberTemplateText(text);
     // TypeScript accepts what scans as a bigint literal, so radix prefixes but no leading zero, sign, or separator.
-    if (isIntrinsic(type, 'bigint')) return /^-?(?:0|[1-9]\d*|0[xX][\dA-Fa-f]+|0[bB][01]+|0[oO][0-7]+)$/.test(text);
+    if (isIntrinsic(type, 'bigint')) return isBigintTemplateText(text);
     if (type.kind === 'literal') return String(type.value) === text;
     if (type.kind === 'union') return type.types.some((member) => this.matchesPlaceholder(text, member));
     if (type.kind === 'templateLiteral' || type.kind === 'stringMapping') return this.matchesTemplate(text, type);

@@ -189,6 +189,16 @@ test.each([
     'Symbol.iterator;',
     'Symbol.iterator などの well-known シンボルは、この採点環境では使えません。',
   ],
+  [
+    'a well-known symbol through any',
+    'const constructor: any = Symbol;\nconsole.log(constructor.iterator);',
+    'Symbol.iterator などの well-known シンボルは、この採点環境では使えません。',
+  ],
+  [
+    'a reflected well-known symbol',
+    'const constructor: any = Symbol;\nconsole.log(Object.getOwnPropertyDescriptor(constructor, "toStringTag")?.value);',
+    'Symbol.toStringTag などの well-known シンボルは、この採点環境では使えません。',
+  ],
 ])('%s is not supported yet', (_, source, message) => {
   expect(diagnosticsOf(source)).toEqual([`${source.split('\n').length}: ${message}`]);
 });
@@ -353,6 +363,15 @@ test('template literal type products of 100,000 combinations or more are rejecte
   expect(executeProgram('typescript', source)).toEqual({
     kind: 'compileError',
     diagnostics: [{ row: 13, message: 'この式の型は、表せないほど複雑な共用体型になります。' }],
+  });
+});
+
+test('Unicode normalization checks the length after expansion', () => {
+  const source = 'console.log("ﬃ".repeat(400000).normalize("NFKD").length);';
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: 'RangeError: Invalid string length',
   });
 });
 

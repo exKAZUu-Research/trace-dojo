@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 564 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 566 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
@@ -611,20 +611,20 @@ export class Calls {
     if (
       (isTrailingRestTuple(signature) || genericRest) &&
       !args.slice(0, restIndex).some((arg) => arg.type === 'spread_element')
-    )
-      return (
-        this.checkArguments(
-          { ...signature, parameters: signature.parameters.slice(0, -1) },
-          args.slice(0, restIndex),
-          report
-        ) &&
-        this.checkRestTupleArguments(
-          signature.parameters[restIndex].type,
-          args.slice(restIndex),
-          report,
-          args[restIndex] ?? call
-        )
+    ) {
+      const fixedFit = this.checkArguments(
+        { ...signature, parameters: signature.parameters.slice(0, -1) },
+        args.slice(0, restIndex),
+        report
       );
+      const restFits = this.checkRestTupleArguments(
+        signature.parameters[restIndex].type,
+        args.slice(restIndex),
+        report,
+        fixedFit ? (args[restIndex] ?? call) : undefined
+      );
+      return fixedFit && restFits;
+    }
     let ok = true;
     let index = 0;
     for (const arg of args) {

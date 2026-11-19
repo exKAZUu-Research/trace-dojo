@@ -620,7 +620,7 @@ function defineConsoleOutputs(
   write: (runtime: Runtime, stream: 'stdout' | 'stderr', text: string) => void
 ): void {
   builder.method(console, 'table', 0, ({ runtime, args }) => {
-    write(runtime, 'stdout', formatTable(runtime, args[0], args[1]) ?? formatLogArguments(runtime, args.slice(0, 1)));
+    write(runtime, 'stdout', formatTable(runtime, args[0], args[1]) ?? formatLogArguments(runtime, [args[0]]));
     return;
   });
   builder.method(console, 'dirxml', 0, ({ runtime, args }) => {

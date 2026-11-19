@@ -81,3 +81,11 @@ function templatePart(
     source.types.slice(segment, endSegment)
   );
 }
+
+export function isNumberTemplateText(text: string): boolean {
+  return text !== '' && Number.isFinite(Number(text));
+}
+
+export function isBigintTemplateText(text: string): boolean {
+  return /^-?(?:0|[1-9]\d*|0[xX][\dA-Fa-f]+|0[bB][01]+|0[oO][0-7]+)$/.test(text);
+}

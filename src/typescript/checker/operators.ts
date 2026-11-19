@@ -19,7 +19,6 @@ import {
   type Property,
   regularOf,
   stringType,
-  symbolType,
   type Type,
   undefinedType,
   unionOf,
@@ -80,7 +79,7 @@ export class OperatorChecker {
     }
     if (!this.checkNonNullOperand(argument, type)) return numberType;
     // TypeScript rejects a numeric unary operator on a value that may be a symbol, even through a constraint.
-    if (this.maySymbol(type)) {
+    if (this.c.expressions.mayBeSymbol(type)) {
       this.c.error(argument, `演算子 '${operator}' は型 'symbol' には使えません。`);
       return numberType;
     }
@@ -108,16 +107,6 @@ export class OperatorChecker {
     if (!isAnyLike(constraint) && this.c.relations.isNullable(constraint))
       this.c.members.checkNonNullable(argument, constraint);
     return true;
-  }
-
-  private maySymbol(type: Type): boolean {
-    if (isAnyLike(type)) return false;
-    const constraint = this.c.baseConstraint(type);
-    const members = constraint.kind === 'union' ? constraint.types : [constraint];
-    return members.some(
-      (member) =>
-        !isAnyLike(member) && !isIntrinsic(member, 'never') && this.c.relations.isAssignable(member, symbolType)
-    );
   }
 
   private checkDelete(argument: TreeNode): void {
@@ -152,7 +141,8 @@ export class OperatorChecker {
       properties.every((property) => !property.optional) &&
       !isAnyLike(type) &&
       !isIntrinsic(type, 'unknown') &&
-      !this.c.relations.isNullable(type)
+      !isIntrinsic(type, 'never') &&
+      !includesUndefined(type)
     )
       this.c.error(argument, 'delete 演算子のオペランドは、省略できるプロパティでなければいけません。');
   }
@@ -255,8 +245,8 @@ export class OperatorChecker {
   }
 
   private plus(node: TreeNode, left: TreeNode, right: TreeNode, leftType: Type, rightType: Type): Type {
-    if (this.reportsSymbolOperand(left, right, leftType, rightType)) return errorType;
     const concatenates = this.isStringLike(leftType) || this.isStringLike(rightType);
+    if (this.reportsSymbolOperand(left, right, leftType, rightType, concatenates)) return errorType;
     if (!concatenates && (isAnyLike(leftType) || isAnyLike(rightType))) return anyType;
     const l = concatenates ? leftType : this.c.members.checkNonNullable(left, leftType);
     const r = concatenates ? rightType : this.c.members.checkNonNullable(right, rightType);
@@ -272,10 +262,17 @@ export class OperatorChecker {
     return errorType;
   }
 
-  private reportsSymbolOperand(left: TreeNode, right: TreeNode, leftType: Type, rightType: Type): boolean {
-    const operand = [left, right].find((_, index) =>
-      this.c.expressions.isSymbolLike(index === 0 ? leftType : rightType)
-    );
+  private reportsSymbolOperand(
+    left: TreeNode,
+    right: TreeNode,
+    leftType: Type,
+    rightType: Type,
+    concatenates: boolean
+  ): boolean {
+    const operand = [left, right].find((_, index) => {
+      const type = index === 0 ? leftType : rightType;
+      return concatenates ? this.c.expressions.mayBeSymbol(type) : this.c.expressions.isSymbolLike(type);
+    });
     if (operand) this.c.error(operand, "演算子 '+' は 'symbol' 型には使えません。");
     return operand !== undefined;
   }
@@ -425,12 +422,7 @@ export class OperatorChecker {
   private instanceofExpression(left: TreeNode, right: TreeNode): Type {
     const leftType = this.c.expressions.check(left);
     const rightType = this.c.expressions.check(right);
-    const l = regularOf(leftType);
-    if (
-      !isAnyLike(l) &&
-      !isIntrinsic(l, 'unknown') &&
-      (l.kind === 'literal' || (l.kind === 'intrinsic' && l.name !== 'object'))
-    ) {
+    if (isInvalidInstanceofLeft(regularOf(leftType))) {
       this.c.error(left, 'instanceof の左辺は、any 型、オブジェクト型、型パラメーターのいずれかでなければいけません。');
     }
     if (
@@ -619,4 +611,17 @@ function falsyValuesOf(type: Type): Type {
     if (isIntrinsic(member, 'string')) return literalType('');
     return isIntrinsic(member, 'bigint') ? literalType(0n) : member;
   });
+}
+
+function isInvalidInstanceofLeft(type: Type): boolean {
+  return type.kind === 'union'
+    ? type.types.every(isInvalidInstanceofLeft)
+    : type.kind === 'literal' ||
+        type.kind === 'templateLiteral' ||
+        type.kind === 'stringMapping' ||
+        (type.kind === 'intrinsic' && !isAnyLike(type) && type.name !== 'unknown' && type.name !== 'object');
+}
+
+function includesUndefined(type: Type): boolean {
+  return (type.kind === 'union' ? type.types : [type]).some((member) => isIntrinsic(member, 'undefined'));
 }

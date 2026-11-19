@@ -33,3 +33,6 @@ function objectDefault<T extends string | undefined = { x: 1 }>() {}
 function opaque(value: unknown) { const target: string | undefined = value; }
 function anyObject(value: object) { const target: string | undefined = value; }
 function unionSource(value: string | number) { const target: symbol | undefined = value; }
+const either: string | number | null | undefined = true;
+const voidOrString: void | null | undefined | string = true;
+const onlyNullish: undefined | null = true;

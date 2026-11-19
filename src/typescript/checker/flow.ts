@@ -611,6 +611,13 @@ export class Flow {
 
   /** The type of a variable after assigning `assigned` to it when it is declared as `declared`. */
   assignmentReduced(declared: Type, assigned: Type): Type {
+    if (declared.kind === 'indexedAccess') {
+      const constraint = this.c.baseConstraint(declared);
+      if (constraint.kind === 'union') {
+        const narrowed = this.assignmentReduced(constraint, assigned);
+        if (narrowed !== constraint) return narrowed;
+      }
+    }
     if (declared.kind !== 'union') {
       return declared;
     }

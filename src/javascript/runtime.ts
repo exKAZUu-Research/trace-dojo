@@ -215,6 +215,7 @@ export class Runtime {
     if (element !== MISSING) return element;
     for (let current: JsObject | null = this.objectFor(value, key); current; current = current.proto) {
       const property = this.getOwnProperty(current, key);
+      this.checkUnavailableMember(current, key, true);
       if (!property) continue;
       if (!isAccessor(property)) return this.readPropertyValue(property);
       return property.get ? this.call(property.get, receiver, [], this.currentRow) : undefined;
@@ -223,8 +224,8 @@ export class Runtime {
     return undefined;
   }
 
-  private checkUnavailableMember(value: Value, key?: Key): void {
-    const unavailable = this.unavailableMember?.(value, key);
+  private checkUnavailableMember(value: Value, key?: Key, readValue = false): void {
+    const unavailable = this.unavailableMember?.(value, key, readValue);
     if (unavailable) rejectUnavailableMember(unavailable, this.currentRow);
   }
 
@@ -251,7 +252,6 @@ export class Runtime {
       this.setOnPrimitive(target, key, value, strict);
       return;
     }
-    if (!lookupStart && target instanceof JsArray && this.setArrayProperty(target, key, value, strict)) return;
     const property = this.findProperty(lookupStart ?? target, key);
     if (property && isAccessor(property)) {
       if (property.set) this.call(property.set, target, [value], this.currentRow);
@@ -288,18 +288,26 @@ export class Runtime {
 
   /** Stores a data property of the object assigned to, which an own accessor or a read-only property refuses. */
   private writeOwnData(target: JsObject, key: Key, value: Value, strict: boolean): void {
-    const own = target.properties.get(key);
+    const own = this.getOwnProperty(target, key);
     if (own && isAccessor(own)) {
       this.refuse(strict, `Cannot redefine property: ${String(key)}`);
+    } else if (own?.writable === false) {
+      this.refuse(strict, () => this.readOnlyMessage(key, target));
+    } else if (!own && !target.extensible) {
+      this.refuse(strict, `Cannot add property ${String(key)}, object is not extensible`);
+    } else if (target instanceof JsArray && this.writeArrayData(target, key, value, strict)) {
+      return;
     } else if (own) {
-      if (own.writable) own.value = value;
-      else this.refuse(strict, () => this.readOnlyMessage(key, target));
-    } else if (target.extensible) {
+      own.value = value;
+    } else {
       this.allocate(1);
       target.properties.set(key, { value, writable: true, enumerable: true, configurable: true });
-    } else {
-      this.refuse(strict, `Cannot add property ${String(key)}, object is not extensible`);
     }
+  }
+
+  reflectedOwnProperty(object: JsObject, key: Key): Property | undefined {
+    this.checkUnavailableMember(object, key, true);
+    return this.getOwnProperty(object, key);
   }
 
   private readOnlyMessage(key: Key, target: Value): string {
@@ -377,55 +385,30 @@ export class Runtime {
     }
   }
 
-  /** Sets an element or the length of an array, returning false for any other property. */
-  private setArrayProperty(array: JsArray, key: Key, value: Value, strict: boolean): boolean {
+  private writeArrayData(array: JsArray, key: Key, value: Value, strict: boolean): boolean {
+    if (key === 'length') {
+      this.setLength(array, value, strict);
+      return true;
+    }
     const index = arrayIndexOf(key);
-    if (index !== undefined) this.setElement(array, index, value, strict);
-    else if (key === 'length') this.setLength(array, value, strict);
-    else return false;
+    if (index === undefined) return false;
+    if (index >= array.elements.length) {
+      if (!array.isLengthWritable) {
+        this.refuse(strict, readOnlyLengthMessage);
+        return true;
+      }
+      this.grow(array, index + 1);
+    }
+    array.elements[index] = value;
     return true;
   }
 
-  /** The property `key` of an object or of the nearest prototype that has it. */
   private findProperty(object: JsObject, key: Key): Property | undefined {
     for (let current: JsObject | null = object; current; current = current.proto) {
       const property = this.getOwnProperty(current, key);
       if (property) return property;
     }
     return undefined;
-  }
-
-  /**
-   * The spec's OrdinarySet of an element: an own element, or for an absent one the nearest prototype's property, may
-   * be an accessor or read-only; otherwise the element is written, which a non-extensible array refuses where it has
-   * none and a read-only length refuses beyond the length.
-   */
-  // code-gauge-allow functionCognitiveComplexity 16 -- Transcribes the spec's array element assignment, whose refusals mirror its steps.
-  setElement(array: JsArray, index: number, value: Value, strict = true): void {
-    const { elements } = array;
-    const absent = index >= elements.length || elements[index] === HOLE;
-    const property = absent
-      ? array.proto && this.findProperty(array.proto, String(index))
-      : array.definedElements?.get(index);
-    if (property && isAccessor(property)) {
-      if (property.set) this.call(property.set, array, [value], this.currentRow);
-      else this.refuse(strict, `Cannot set property ${index} of [object Array] which has only a getter`);
-      return;
-    }
-    if ((!absent && array.frozen) || property?.writable === false) {
-      this.refuse(strict, `Cannot assign to read only property '${index}' of object '[object Array]'`);
-      return;
-    }
-    if (absent && !array.extensible) {
-      this.refuse(strict, `Cannot add property ${index}, object is not extensible`);
-      return;
-    }
-    if (index >= elements.length && !array.isLengthWritable) {
-      this.refuse(strict, readOnlyLengthMessage);
-      return;
-    }
-    if (index >= elements.length) this.grow(array, index + 1);
-    elements[index] = value;
   }
 
   /** The spec's ArraySetLength, which stops shrinking at the last non-configurable element. */

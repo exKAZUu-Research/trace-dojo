@@ -1,5 +1,6 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { unavailableWellKnownSymbols } from '../../javascript/unavailableMembers';
 import { unsupportedMessage } from '../unsupported';
 import type { Checker } from './checker';
 import type { State } from './flow';
@@ -27,22 +28,6 @@ import {
   unionOf,
   type UnionType,
 } from './types';
-
-const wellKnownSymbols = new Set([
-  'iterator',
-  'asyncIterator',
-  'hasInstance',
-  'isConcatSpreadable',
-  'match',
-  'matchAll',
-  'replace',
-  'search',
-  'species',
-  'split',
-  'toPrimitive',
-  'toStringTag',
-  'unscopables',
-]);
 
 /** The nodes of an element access, where its errors are reported. */
 interface IndexAccess {
@@ -321,7 +306,8 @@ export class MemberChecker {
     const owner = declaration.parent?.parent?.childForFieldName('name')?.text;
     const { name } = property;
     // The well-known symbols replace the protocols of the language, which this interpreter does not support yet.
-    if (owner === 'SymbolConstructor' && wellKnownSymbols.has(name)) return `Symbol.${name} などの well-known シンボル`;
+    if (owner === 'SymbolConstructor' && unavailableWellKnownSymbols.has(name))
+      return `Symbol.${name} などの well-known シンボル`;
     // A stack trace names the files and lines of the host, which differ from the program's.
     if (owner === 'Error' && name === 'stack') return 'Error の stack';
     // Node.js shows a function's source as tsx's esbuild printed it, which this interpreter does not reproduce.

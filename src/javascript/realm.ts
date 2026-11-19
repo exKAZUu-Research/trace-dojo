@@ -43,6 +43,8 @@ export interface Realm {
   bigintPrototype: JsObject;
   promisePrototype: JsObject;
   regExpPrototype: JsObject;
+  regExpConstructor?: JsFunction;
+  regExpExec?: JsFunction;
   datePrototype: JsObject;
   mapPrototype: JsObject;
   setPrototype: JsObject;
@@ -88,9 +90,9 @@ export class RealmBuilder {
       }),
       // Array.prototype is itself an empty array, as `Array.isArray(Array.prototype)` shows.
       arrayPrototype: new JsArray(objectPrototype, []),
-      stringPrototype: new JsObject(objectPrototype),
-      numberPrototype: new JsObject(objectPrototype),
-      booleanPrototype: new JsObject(objectPrototype),
+      stringPrototype: Object.assign(new JsObject(objectPrototype), { primitive: '' }),
+      numberPrototype: Object.assign(new JsObject(objectPrototype), { primitive: 0 }),
+      booleanPrototype: Object.assign(new JsObject(objectPrototype), { primitive: false }),
       symbolPrototype: new JsObject(objectPrototype),
       bigintPrototype: new JsObject(objectPrototype),
       promisePrototype: new JsObject(objectPrototype),
