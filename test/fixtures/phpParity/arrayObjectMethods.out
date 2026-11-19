@@ -174,3 +174,23 @@ array(1) {
 int(20)
 drop;handler;bool(false)
 drop;handler;bool(false)
+offset
+array(1) {
+  [1]=>
+  int(4)
+}
+array(1) {
+  [1]=>
+  int(1)
+}
+
+Deprecated: ArrayObject::__construct(): Using an object as a backing array for ArrayObject is deprecated, as it allows violating class constraints and invariants in /main.php on line 112
+offset
+array(1) {
+  [1]=>
+  int(4)
+}
+array(1) {
+  [1]=>
+  int(1)
+}

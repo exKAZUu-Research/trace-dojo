@@ -106,3 +106,20 @@ foreach (['ArrayObject', 'ArrayIterator'] as $storageClass) {
     var_dump($table->offsetExists(1.5));
     restore_error_handler();
 }
+
+foreach (['iterator', 'wrapper'] as $kind) {
+    $backing = new ArrayObject([1 => 1]);
+    $receiver = $kind === 'iterator' ? $backing->getIterator() : new ArrayObject($backing);
+    set_error_handler(function () use ($receiver) {
+        if ($receiver instanceof ArrayIterator) $receiver->__construct([1 => 2]);
+        else $receiver->exchangeArray([1 => 2]);
+        throw new Exception('offset');
+    });
+    try {
+        $receiver[1.5] += 3;
+    } catch (Exception $error) {
+        echo $error->getMessage(), "\n";
+    }
+    restore_error_handler();
+    var_dump($receiver->getArrayCopy(), $backing->getArrayCopy());
+}

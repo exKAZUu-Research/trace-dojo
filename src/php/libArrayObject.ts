@@ -14,6 +14,7 @@ import {
   withCleanupExceptions,
   withOperandWarnings,
 } from './errors';
+import { arrayHasHolders } from './garbage';
 import { defineClass, type NativeMethod } from './native';
 import { toKey } from './operators';
 import { arrayIsShared, share } from './places';
@@ -109,7 +110,7 @@ export class ArrayStorage {
       const report: UpdateWarning | undefined =
         warning && !hasPendingWarning ? (emit) => (completed = warning(emit)) : warning;
       const offset = toKey(key, 'access', className, report);
-      if (!completed && this.array !== array) return null;
+      if (!completed && !arrayHasHolders(rt(), array, 1)) return null;
       const slot = view.get(offset);
       const value = slot instanceof Ref ? slot.v : slot;
       if (

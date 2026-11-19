@@ -8,7 +8,7 @@ import type { Expr, FunctionDecl, Program } from './ast';
 import { collectScopeVars } from './astAnalysis';
 import { dec, enc, stringToBytes } from './bytes';
 import type { CompileNotice } from './converter';
-import { arrayIsShared, collectGarbage, GC_THRESHOLD_DEFAULT, releaseDropped, type ReleaseMode } from './garbage';
+import { arrayHasHolders, collectGarbage, GC_THRESHOLD_DEFAULT, releaseDropped, type ReleaseMode } from './garbage';
 import { GcRoots } from './gcRoots';
 import { ObjectHeap } from './objectHeap';
 import { setArraySharingCheck } from './places';
@@ -547,6 +547,6 @@ export function withRuntime<T>(runtime: Runtime, run: () => T): T {
 
 export type { PhpArray, Value };
 
-setArraySharingCheck((array) => (current ? arrayIsShared(current, array) : array.shared));
+setArraySharingCheck((array) => (current ? arrayHasHolders(current, array, 2) : array.shared));
 
 setInternalHandler((object) => current?.internalObjects.add(object));
