@@ -43,7 +43,7 @@ export function exceptionClasses(stringType: () => Type): Map<string, ClassInfo>
       copyIsNoexcept: true,
       copy: (_frame, source) => {
         const object = source as CObject;
-        const copy = new CObject(cls, [...object.values]);
+        const copy = new CObject(cls, []);
         // Copying as `std::exception` slices the message off, as its copy constructor keeps none.
         if (hasMessage) copy.shareMessageFrom(object);
         else copy.message = defaultMessage;

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
+import { LIMITS } from '../../src/interpreter/limits';
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
 // The interpreter's clock stands still in these tests, so that the program, not the load of the host, decides each one.
@@ -16,6 +17,27 @@ function steps(language: 'cpp' | 'java', program: string): { vars: Record<string
     board,
   }));
 }
+
+test('counts nested pair fields toward the C++ storage limit', () => {
+  const program = `#include <iostream>
+#include <utility>
+#include <vector>
+int main() {
+  std::vector<std::pair<int, std::pair<int, int>>> entries(COUNT);
+  std::cout << entries.size();
+}`;
+  const previousLimit = LIMITS.maxSlots;
+  LIMITS.maxSlots = 5;
+  try {
+    expect(executeProgram('cpp', program.replace('COUNT', '1'))).toMatchObject({ kind: 'executed', stdout: '1' });
+    expect(executeProgram('cpp', program.replace('COUNT', '2'))).toMatchObject({
+      kind: 'executed',
+      uncaughtException: 'メモリを確保しすぎました。',
+    });
+  } finally {
+    LIMITS.maxSlots = previousLimit;
+  }
+});
 
 test('unordered map assignment retains earlier copied entries while later entries allocate turtles', () => {
   const program = `#include <unordered_map>

@@ -62,4 +62,16 @@ int main() {
   ++defaultMember.value;
   ++nested.value;
   std::cout << shared << n;
+
+  auto rows = new int[2][2]{1, 2, 3, 4};
+  auto points = new Position[2]{5, 6, 7, 8};
+  int count = 3;
+  auto partial = new int[count][2]{9, 8, 7};
+  char* text = new char[4]{"hi"};
+  std::cout << ' ' << rows[1][1] << points[1].second << partial[1][0]
+            << partial[1][1] << partial[2][0] << text << int(text[3]);
+  delete[] rows;
+  delete[] points;
+  delete[] partial;
+  delete[] text;
 }

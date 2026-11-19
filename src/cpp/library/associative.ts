@@ -27,7 +27,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { CObject, Ptr, type Value } from '../values';
+import { type CObject, Ptr, type Value } from '../values';
 import { MapValue, NodePositions } from './containerValues';
 import {
   assignElement,
@@ -53,6 +53,7 @@ import {
   type EntryTable,
   insertCopy,
   type PairMemberInitializer,
+  pairResult,
 } from './emplacement';
 import { positionOf, randomAccessIterator, rangePositions } from './iterators';
 import type { Library } from './registry';
@@ -600,7 +601,7 @@ export function orderedClass(
       const existing = find(self, key);
       if (existing >= 0) return [existing, false];
     }
-    frame.runtime.reserve(isMap ? 3 : 1);
+    frame.runtime.reserve(1);
     // A multimap inserts after the entries with an equal key, keeping the order of insertion among them.
     const at = bound(self, key, true);
     self.splice(at, 0, entry);
@@ -620,9 +621,9 @@ export function orderedClass(
     ops,
   };
   const insertResult = pairClass(library, types.iterator, BOOL);
-  const insertionResult = (self: OrderedValue, at: number, inserted: boolean): Value => {
+  const insertionResult = (frame: Frame, self: OrderedValue, at: number, inserted: boolean): Value => {
     const position = self.location(at);
-    return isMulti ? position : new CObject(insertResult, [position, inserted ? 1 : 0]);
+    return isMulti ? position : pairResult(frame, insertResult, position, inserted ? 1 : 0);
   };
   cls.library = {
     kind,
@@ -720,12 +721,17 @@ export function orderedClass(
     elementUseOnAssignment: 'copy',
   };
   cls.operations = {
-    copy: (frame, source) => make(copyEntries(frame, (source as OrderedValue).entries, ops())),
+    copy: (frame, source) => {
+      const { entries } = source as OrderedValue;
+      frame.runtime.reserve(entries.length);
+      return make(copyEntries(frame, entries, ops()));
+    },
     assign: (frame, target, source) => {
       const to = target as OrderedValue;
       const from = source as OrderedValue;
       if (to === from) return;
       const old = to.entries;
+      frame.runtime.reserve(from.entries.length);
       to.replace(copyEntries(frame, from.entries, ops()));
       destroyAll(frame, old);
     },
@@ -768,9 +774,14 @@ export function orderedClass(
       'equal_range',
       [constRef(keyType)],
       classType(range),
-      (self, [key]) => {
+      (self, [key], frame) => {
         const value = keyArg(key);
-        return new CObject(range, [self.location(bound(self, value, false)), self.location(bound(self, value, true))]);
+        return pairResult(
+          frame,
+          range,
+          self.location(bound(self, value, false)),
+          self.location(bound(self, value, true))
+        );
       },
       { isConst }
     );
@@ -821,7 +832,7 @@ export function orderedClass(
     'insert',
     [constRef(unqualified(entryType))],
     isMulti ? types.iterator : classType(insertResult),
-    (self, [entry], frame) => insertionResult(self, ...insertCopy(table, frame, self, (entry as Ptr).read())),
+    (self, [entry], frame) => insertionResult(frame, self, ...insertCopy(table, frame, self, (entry as Ptr).read())),
     copyEntry
   );
   if (valueType && !isMulti) {
@@ -852,7 +863,7 @@ export function orderedClass(
               entry.values[1] = valueMoves
                 ? moveValue(frame, valueType, entry.values[1], source)
                 : mapped().assign(frame, entry.values[1], source);
-              return insertionResult(self, at, false);
+              return insertionResult(frame, self, at, false);
             }
             const entry = constructPair(
               frame,
@@ -869,7 +880,7 @@ export function orderedClass(
               ],
               (index) => (index === 0 ? keyOps.destroy : mapped().destroy)
             );
-            return insertionResult(self, ...insert(frame, self, entry));
+            return insertionResult(frame, self, ...insert(frame, self, entry));
           },
           {
             owner: cls,

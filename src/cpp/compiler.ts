@@ -1837,10 +1837,7 @@ export class Compiler extends StatementCompiler {
     return (frame, target) => {
       if (!target) frame.runtime.reserve(length);
       const storage = arrayStorage(target) ?? new ArrayStore([], type.of);
-      for (let index = 0; index < length; index++) {
-        const byte = index < bytes.length ? byteAt(bytes, index) : 0;
-        storage.values[index] = signed && byte >= 128 ? byte - 256 : byte;
-      }
+      for (let index = 0; index < length; index++) storage.values[index] = characterValue(bytes, index, signed);
       return storage;
     };
   }
@@ -2063,9 +2060,21 @@ export class Compiler extends StatementCompiler {
     const literal = this.bracedStringLiteral(type, elements);
     if (literal) return (literal.literalBytes as string).length + 1;
     const clauses: Clauses = { nodes: elements, next: 0, compiled: new Map() };
-    let length = 0;
-    for (; clauses.next < elements.length; length++) this.takeClauses(type.of, clauses, list.row);
-    return length;
+    return this.takeArrayElements(type.of, Infinity, clauses, list.row).length;
+  }
+
+  protected bracedArrayInitializers(element: Type, list: Syntax): Initializer[] {
+    const literal = this.bracedStringLiteral({ kind: 'array', of: element }, list.children);
+    const bytes = literal?.literalBytes;
+    if (bytes !== undefined) {
+      const signed = element.kind === 'int' && element.name !== 'uchar';
+      return Array.from({ length: bytes.length + 1 }, (_, index) => {
+        const value = characterValue(bytes, index, signed);
+        return () => value;
+      });
+    }
+    const clauses: Clauses = { nodes: list.children, next: 0, compiled: new Map() };
+    return this.takeArrayElements(element, Infinity, clauses, list.row).map((take) => take());
   }
 
   /** The string literal that initializes a character array in braces (`char s[4] = {"abc"}`, C++20 [dcl.init.string]). */
@@ -2190,9 +2199,7 @@ export class Compiler extends StatementCompiler {
   }
 
   private takeArrayClauses(type: Extract<Type, { kind: 'array' }>, clauses: Clauses, row: number): () => Initializer {
-    const taken: (() => Initializer)[] = [];
-    while (taken.length < (type.length ?? Infinity) && clauses.next < clauses.nodes.length)
-      taken.push(this.takeClauses(type.of, clauses, row));
+    const taken = this.takeArrayElements(type.of, type.length ?? Infinity, clauses, row);
     return () => {
       const length = type.length ?? taken.length;
       const inits = taken.map((take) => take());
@@ -2219,6 +2226,13 @@ export class Compiler extends StatementCompiler {
         inits.every((init) => init.isConstant) && (!rest || rest.isConstant === true)
       );
     };
+  }
+
+  private takeArrayElements(element: Type, limit: number, clauses: Clauses, row: number): (() => Initializer)[] {
+    const taken: (() => Initializer)[] = [];
+    while (taken.length < limit && clauses.next < clauses.nodes.length)
+      taken.push(this.takeClauses(element, clauses, row));
+    return taken;
   }
 
   private takeMemberClauses(cls: ClassInfo, clauses: Clauses, row: number): () => Initializer {
@@ -2443,6 +2457,11 @@ interface Clauses {
 function isCharacterArray(type: Extract<Type, { kind: 'array' }>): boolean {
   const element = type.of;
   return element.kind === 'int' && (element.name === 'char' || element.name === 'schar' || element.name === 'uchar');
+}
+
+function characterValue(bytes: string, index: number, signed: boolean): number {
+  const byte = index < bytes.length ? byteAt(bytes, index) : 0;
+  return signed && byte >= 128 ? byte - 256 : byte;
 }
 
 function mergeDefaults(

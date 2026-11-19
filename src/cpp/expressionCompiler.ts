@@ -823,24 +823,15 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       };
     }
     if (COMPARISONS.has(operator) && (isPointerLike(lt) || isPointerLike(rt))) {
-      const comparable =
-        (isPointerLike(lt) && isPointerLike(rt) && this.pointersComparable(lt, rt)) ||
-        (isPointerLike(lt) && right.isNullConstant) ||
-        (isPointerLike(rt) && left.isNullConstant);
-      if (!comparable) return this.error(row, `${typeName(lt)} と ${typeName(rt)} は比べられません。`);
-      if (operator !== '==' && operator !== '!=' && (left.isNullConstant || right.isNullConstant)) {
+      const lnull = lt.kind === 'nullptr' || left.isNullConstant;
+      const rnull = rt.kind === 'nullptr' || right.isNullConstant;
+      const common = commonPointerType(left, right);
+      if (!common && !(lnull && rnull)) return this.error(row, `${typeName(lt)} と ${typeName(rt)} は比べられません。`);
+      if (operator !== '==' && operator !== '!=' && (lnull || rnull)) {
         return this.error(row, `ポインタと nullptr の大小は比べられません。`);
       }
-      const base =
-        lt.kind === 'pointer' &&
-        rt.kind === 'pointer' &&
-        lt.to.kind === 'class' &&
-        rt.to.kind === 'class' &&
-        lt.to.cls !== rt.to.cls
-          ? commonConditionalPointer(left, right)
-          : undefined;
-      const a = (base ? this.convert(left, base, row) : left).run;
-      const b = (base ? this.convert(right, base, row) : right).run;
+      const a = (common ? this.convert(left, common, row) : left).run;
+      const b = (common ? this.convert(right, common, row) : right).run;
       return {
         type: BOOL,
         isLvalue: false,
@@ -849,18 +840,6 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       };
     }
     return this.error(row, `演算子 ${operator} は ${typeName(lt)} と ${typeName(rt)} には使えません。`);
-  }
-
-  private pointersComparable(a: Type, b: Type): boolean {
-    if (a.kind === 'nullptr' || b.kind === 'nullptr') return true;
-    if (a.kind !== 'pointer' || b.kind !== 'pointer') return false;
-    if (a.to.kind === 'void' || b.to.kind === 'void') return true;
-    if (sameType(unqualified(a.to), unqualified(b.to), false)) return true;
-    return (
-      a.to.kind === 'class' &&
-      b.to.kind === 'class' &&
-      (a.to.cls.isDerivedFrom(b.to.cls) || b.to.cls.isDerivedFrom(a.to.cls))
-    );
   }
 
   /** A pointer moved by a number of elements, which must stay within its array or one past its end. */
@@ -1275,7 +1254,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const type = classType(av.type.cls);
       return { left: this.convert(a, type, row), right: this.convert(b, type, row), type, isLvalue: false };
     }
-    const pointer = commonConditionalPointer(av, bv);
+    const pointer = commonPointerType(av, bv);
     if (pointer) {
       return {
         left: this.convert(av, pointer, row),
@@ -1881,6 +1860,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   protected abstract initializeList(type: Type, elements: readonly Syntax[], row: number): Initializer;
 
+  protected abstract bracedArrayInitializers(element: Type, list: Syntax): Initializer[];
+
   // new and delete ---------------------------------------------------------------------------------------------------
 
   private newExpression(node: Syntax): Expr {
@@ -1955,11 +1936,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return this.error(row, `new[] の要素の数には整数を書いてください（${typeName(lengthExpr.type)}）。`);
     const length = convertArithmetic(lengthExpr, LONG).run;
     // C++20 initializes the elements from parentheses as from braces, except for narrowing (C++20 [dcl.init.general]).
-    const initial = (argsNode?.children ?? []).map((child) =>
+    const initial =
       argsNode?.type === 'initializer_list'
-        ? this.elementInitializer(elementType, child)
-        : this.copyInitializer(elementType, this.compileExpression(child), child.row, false)
-    );
+        ? this.bracedArrayInitializers(elementType, argsNode)
+        : (argsNode?.children ?? []).map((child) =>
+            this.copyInitializer(elementType, this.compileExpression(child), child.row, false)
+          );
     if (lengthExpr.constant !== undefined && Number(lengthExpr.constant) < initial.length)
       return this.error(row, 'new[] の要素の数が足りません。');
     const badAlloc = this.library.exception('bad_alloc');
@@ -2085,11 +2067,11 @@ function compoundAssignmentFactors(frame: Frame): FloatingFactors {
   return [frame.pending.at(-3) as number, frame.pending.at(-2) as number];
 }
 
-function commonConditionalPointer(left: Expr, right: Expr): Type | undefined {
+function commonPointerType(left: Expr, right: Expr): Type | undefined {
   const a = left.type;
   const b = right.type;
-  if (a.kind === 'pointer' && right.isNullConstant) return a;
-  if (b.kind === 'pointer' && left.isNullConstant) return b;
+  if (a.kind === 'pointer' && (b.kind === 'nullptr' || right.isNullConstant)) return a;
+  if (b.kind === 'pointer' && (a.kind === 'nullptr' || left.isNullConstant)) return b;
   if (a.kind !== 'pointer' || b.kind !== 'pointer') return;
   const x = a.to;
   const y = b.to;

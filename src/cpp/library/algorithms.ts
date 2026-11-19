@@ -28,7 +28,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { Box, CObject, endLifetime, NULL_PTR, Ptr, type Store, type Value } from '../values';
+import { Box, endLifetime, NULL_PTR, Ptr, type Store, type Value } from '../values';
 import { pairClass } from './associative';
 import {
   assignElement,
@@ -49,7 +49,7 @@ import {
   swapElements,
   truthy,
 } from './elements';
-import { constructPair } from './emplacement';
+import { constructPair, pairResult } from './emplacement';
 import { elementLocation } from './iterators';
 import type { IteratorCategory } from './libraryClass';
 import type { EngineValue } from './random';
@@ -604,6 +604,8 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       if (!predicate && !equal) return;
       const ops = elementOperations(compiler(), unqualified(info.element), args[0].row, 'assign');
       const types = params(args);
+      if (name === 'replace') types[2] = constRef(decayed(args[2].type));
+      types[3] = constRef(decayed(args[3].type));
       const convert = assignmentSource(
         compiler(),
         { type: withConst(nonReference(types[3])) },
@@ -612,13 +614,12 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       );
       return native(name, types, VOID, ([first, last, old, replacement], { frame }) => {
         const values = range(first, last, info);
-        const target = name === 'replace' ? readArg(old, types[2]) : undefined;
-        const value = types[3].kind === 'reference' ? (replacement as Ptr) : locationOf(replacement as Value);
+        const value = replacement as Ptr;
         for (let index = 0; index < values.length; index++) {
           if (
             predicate
               ? truthy(predicate(frame, values.location(index)))
-              : (equal as ValueEquality).test(frame, values.get(index), target)
+              : (equal as ValueEquality).test(frame, values.get(index), (old as Ptr).read())
           )
             convert(frame, value, (converted) => assignElement(frame, values.location(index), ops, converted));
         }
@@ -631,13 +632,13 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const info = writableRangeAt(args, 0);
       if (!info) return;
       if (name === 'unique' ? args.length > 3 : args.length !== 3) return;
+      const types = params(args);
       let keep: (frame: Frame, values: Range, index: number, out: number) => boolean;
       if (name === 'remove') {
         const equal = valueEquality(compiler(), info.element, decayed(args[2].type), args[0].row);
         if (!equal) return;
-        const types = params(args);
-        keep = (frame, values, index) =>
-          !equal.test(frame, values.get(index), readArg(frame.pending.at(-1) as Ptr, types[2]));
+        types[2] = constRef(decayed(args[2].type));
+        keep = (frame, values, index) => !equal.test(frame, values.get(index), (frame.pending.at(-1) as Ptr).read());
       } else if (name === 'remove_if') {
         const predicate = predicateOf(args[2], iteratorOperand(info));
         if (!predicate) return;
@@ -655,7 +656,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       }
       const element = unqualified(info.element);
       compiler().requireLibraryObjectUse(element, 'move-assign', args[0].row);
-      return native(name, params(args), unqualified(args[0].type), ([first, last, value], { frame }) => {
+      return native(name, types, unqualified(args[0].type), ([first, last, value], { frame }) => {
         const values = range(first, last, info);
         frame.pending.push(value as Value);
         try {
@@ -908,8 +909,8 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         const result = pairClass(library, referenceTo(withConst(type)), referenceTo(withConst(type)));
         return native('minmax', types, classType(result), ([a, b], { frame }) =>
           less(frame)((b as Ptr).read(), (a as Ptr).read())
-            ? new CObject(result, [b as Ptr, a as Ptr])
-            : new CObject(result, [a as Ptr, b as Ptr])
+            ? pairResult(frame, result, b as Ptr, a as Ptr)
+            : pairResult(frame, result, a as Ptr, b as Ptr)
         );
       }
       const fn = native(name, types, referenceTo(withConst(type)), ([a, b], { frame }) => {

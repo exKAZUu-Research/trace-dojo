@@ -17,7 +17,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { CObject, Ptr, Store, type Value } from '../values';
+import { type CObject, Ptr, Store, type Value } from '../values';
 import { keyText, mappedNotDefaultConstructible, pairClass } from './associative';
 import { MapValue } from './containerValues';
 import {
@@ -36,6 +36,7 @@ import {
   emplacementCall,
   type EntryTable,
   insertCopy,
+  pairResult,
 } from './emplacement';
 import { randomAccessIterator } from './iterators';
 import type { Library } from './registry';
@@ -618,8 +619,8 @@ export function unorderedClass(
     insert: (frame, self, entry) => self.insert(frame, entry),
     ops,
   };
-  const insertionResult = (self: HashValue, node: HashNode, inserted: boolean): Value =>
-    new CObject(insertResult, [self.iterator(node), inserted ? 1 : 0]);
+  const insertionResult = (frame: Frame, self: HashValue, node: HashNode, inserted: boolean): Value =>
+    pairResult(frame, insertResult, self.iterator(node), inserted ? 1 : 0);
   cls.library = {
     kind,
     args,
@@ -801,7 +802,7 @@ export function unorderedClass(
       classType(insertResult),
       ([entry], { self, frame }) => {
         const hash = self as HashValue;
-        return insertionResult(hash, ...insertCopy(table, frame, hash, (entry as Ptr).read()));
+        return insertionResult(frame, hash, ...insertCopy(table, frame, hash, (entry as Ptr).read()));
       },
       { uses: (row) => requireElementUse(compiler, entryType, row, 'copy') }
     )

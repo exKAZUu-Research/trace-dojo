@@ -844,6 +844,7 @@ test.each([
     1,
   ],
   ['a static local variable of type void', 'int main() { static void v; }', 0],
+  ['excess initializers for a multidimensional allocation', 'int main() { new int[1][2]{1, 2, 3}; }', 0],
   [
     'pointer overloads with competing qualification conversions',
     'void f(int* const*, const int* const*);\nvoid f(const int* const*, int* const*);\nint main() { int value; int* p = &value; f(&p, &p); }',

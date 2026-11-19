@@ -2,11 +2,11 @@ import { CompileError } from '../../interpreter/diagnostics';
 import { CppException } from '../errors';
 import type { Expr, Initializer } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { constructCells, makeEach } from '../objectCompiler';
+import { constructCells, makeEach, newObject } from '../objectCompiler';
 import { type Eval, type Frame, holdAll } from '../runtime';
 import type { Syntax } from '../syntax';
 import { type ClassInfo, isConstType, type Type, typeName, unqualified, VOID, withConst } from '../types';
-import { CObject, endLifetime, type Ptr, type Store, UNINIT, type Value } from '../values';
+import { CObject, endLifetime, type Ptr, type Store, type Value } from '../values';
 import { type ElementOperations, requireElementUse } from './elements';
 import type { Source } from './sequenceEdits';
 import { constructElement, initializerList, iteratorRange, listElementsOf } from './sequences';
@@ -36,7 +36,7 @@ export interface EmplacementCall<T, Position> {
   resultType: Type;
   isTemporaryObject: boolean;
   /** The call's result for the entry at a position, which it inserted or found. */
-  result: (self: T, at: Position, inserted: boolean) => Value;
+  result: (frame: Frame, self: T, at: Position, inserted: boolean) => Value;
 }
 
 /** The arguments of an emplacement: the key they give directly, if any, and how to construct the entry from them. */
@@ -81,7 +81,7 @@ export function emplacementCall<T, Position>(
       const target = (self(frame) as Ptr).read() as T;
       return emplace(frame, (emplacing) => {
         const [at, inserted] = emplaceEntry(call.table, frame, target, emplacing);
-        return call.result(target, at, inserted);
+        return call.result(frame, target, at, inserted);
       });
     },
   };
@@ -235,7 +235,7 @@ export function constructPair(
   members: readonly [PairMemberInitializer, PairMemberInitializer],
   destroyAt: (index: number) => ElementOperations['destroy']
 ): CObject {
-  const pair = new CObject(cls, [UNINIT, UNINIT]);
+  const pair = newObject(frame, cls);
   return constructCells(
     frame,
     pair,
@@ -244,6 +244,13 @@ export function constructPair(
     (current, target, index) => members[index](current, target instanceof CObject ? target : undefined),
     destroyAt
   );
+}
+
+export function pairResult(frame: Frame, cls: ClassInfo, first: Value, second: Value): CObject {
+  const pair = newObject(frame, cls);
+  pair.values[0] = first;
+  pair.values[1] = second;
+  return pair;
 }
 
 /**

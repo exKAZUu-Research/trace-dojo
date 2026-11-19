@@ -22,5 +22,10 @@ int main() {
   choose(indirect);
   choose(&constant);
   deeper(&indirect);
+  const int** qualified = &constant;
+  std::cout << (indirect != qualified) << ((true ? indirect : qualified) == indirect);
+  indirect = nullptr;
+  qualified = nullptr;
+  std::cout << (indirect == qualified);
   std::cout << '\n';
 }
