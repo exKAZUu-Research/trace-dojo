@@ -65,6 +65,25 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         constValue,
       };
     }
+    if (value.type.kind === 'dynamic') {
+      const { run } = value;
+      return {
+        type: DYNAMIC,
+        run: (frame) => {
+          const operandValue = run(frame);
+          if (typeof operandValue === 'bigint' || typeof operandValue === 'number')
+            return negate(operandValue, operator);
+          return frame.runtime.invoke(
+            operandValue,
+            methodName,
+            { positional: [], named: undefined, isDynamic: true },
+            [],
+            expression.row
+          );
+        },
+        isConst: false,
+      };
+    }
     return this.compileOperatorCall(value, methodName, [], expression);
   }
 

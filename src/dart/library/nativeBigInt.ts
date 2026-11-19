@@ -1,7 +1,7 @@
 import { formatDouble } from '../format';
 import type { Runtime } from '../runtime';
 import { DartObject, type Value } from '../values';
-import { bitLength, modInverse, numberHash } from './nativeNumbers';
+import { bitLength, modInverse } from './nativeNumbers';
 import { define, defineConstructor, intArg, named, numArg, stringArg } from './nativeSupport';
 
 interface BigIntState {
@@ -159,7 +159,22 @@ define('BigInt.==', (runtime, receiver, [other]) => {
   const state = other instanceof DartObject ? (other.native as unknown as BigIntState | undefined) : undefined;
   return typeof state?.value === 'bigint' && state.value === valueOf(runtime, receiver);
 });
-define('BigInt.hashCode', (runtime, receiver) => numberHash(BigInt.asIntN(64, valueOf(runtime, receiver))));
+function jenkinsCombine(hash: number, digit: number): number {
+  let next = 0x1f_ff_ff_ff & (hash + digit);
+  next = 0x1f_ff_ff_ff & (next + ((0x00_07_ff_ff & next) << 10));
+  return next ^ (next >> 6);
+}
+
+// The Jenkins hash over the 32-bit digits of the magnitude, as the VM's _BigIntImpl.hashCode.
+define('BigInt.hashCode', (runtime, receiver) => {
+  const value = valueOf(runtime, receiver);
+  if (value === 0n) return 6707n;
+  let hash = value < 0n ? 83_585 : 429_689;
+  for (const digit of digitsOf(value < 0n ? -value : value)) hash = jenkinsCombine(hash, Number(digit));
+  hash = 0x1f_ff_ff_ff & (hash + ((0x03_ff_ff_ff & hash) << 3));
+  hash ^= hash >> 11;
+  return BigInt(0x1f_ff_ff_ff & (hash + ((0x00_00_3f_ff & hash) << 15)));
+});
 define('BigInt.compareTo', (runtime, receiver, [other]) => {
   const a = valueOf(runtime, receiver);
   const b = valueOf(runtime, other);

@@ -266,6 +266,8 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   getProperty(receiver: Value, name: string, callRow: number | undefined): Value {
+    // A function's `call` is the function itself.
+    if (name === 'call' && receiver instanceof DartClosure) return receiver;
     const cls = this.classOf(receiver);
     const member = cls.implementation(name);
     if (!member) return this.noSuchMethod(receiver, name, 'getter', NO_ARGUMENTS);

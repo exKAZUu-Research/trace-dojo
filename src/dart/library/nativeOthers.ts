@@ -1,5 +1,5 @@
 import type { OutputChannel } from '../../interpreter/programIo';
-import { stringOf } from '../format';
+import { encodableText, stringOf } from '../format';
 import { ProgramExit, type Runtime } from '../runtime';
 import { DartObject, type Value } from '../values';
 import { compareNumbers, toDouble } from './nativeNumbers';
@@ -146,9 +146,10 @@ define('Random.nextBool', (runtime, receiver) => randomOf(receiver).nextInt(runt
 
 // dart:io
 
-function sinkOf(runtime: Runtime, receiver: Value): OutputChannel {
+function sinkOf(runtime: Runtime, receiver: Value): Pick<OutputChannel, 'write'> {
   const isError = (receiver as DartObject).fields[0] === true;
-  return isError ? runtime.io.stderr : runtime.io.stdout;
+  const channel = isError ? runtime.io.stderr : runtime.io.stdout;
+  return { write: (text: string) => channel.write(encodableText(text)) };
 }
 
 define('_StandardSink.write', (runtime, receiver, [value]) => {

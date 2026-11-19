@@ -1,5 +1,5 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../../interpreter/turtleWorld';
-import { formatDouble, safeToString, stringOf } from '../format';
+import { encodableText, formatDouble, safeToString, stringOf } from '../format';
 import { HashStore } from '../hashStore';
 import type { Runtime } from '../runtime';
 import { coreTypes, type DartType, vmTypeString } from '../types';
@@ -202,7 +202,7 @@ define('NoSuchMethodError._describe', (runtime, _receiver, [receiver, invocation
 // Top-level functions
 
 define('print', (runtime, _receiver, [value]) => {
-  runtime.io.stdout.write(`${stringOf(runtime, value)}\n`);
+  runtime.io.stdout.write(encodableText(`${stringOf(runtime, value)}\n`));
   return;
 });
 define('identical', (_runtime, _receiver, [a, b]) => identical(a, b));

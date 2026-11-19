@@ -101,9 +101,13 @@ define('String.substring', (runtime, receiver, [start, end]) => {
   if (to < from || to > BigInt(text.length)) rangeError(runtime, to, Number(from), text.length, 'end');
   return text.slice(index(from), index(to));
 });
-define('String.trim', (_runtime, receiver) => self(receiver).trim());
-define('String.trimLeft', (_runtime, receiver) => self(receiver).trimStart());
-define('String.trimRight', (_runtime, receiver) => self(receiver).trimEnd());
+// Dart's whitespace, which unlike JavaScript's includes U+0085.
+const DART_SPACE = String.raw`[\t-\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]`;
+const LEADING_SPACE = new RegExp(`^${DART_SPACE}+`);
+const TRAILING_SPACE = new RegExp(`${DART_SPACE}+$`);
+define('String.trim', (_runtime, receiver) => self(receiver).replace(LEADING_SPACE, '').replace(TRAILING_SPACE, ''));
+define('String.trimLeft', (_runtime, receiver) => self(receiver).replace(LEADING_SPACE, ''));
+define('String.trimRight', (_runtime, receiver) => self(receiver).replace(TRAILING_SPACE, ''));
 define('String.*', (runtime, receiver, [times]) => {
   const count = intArg(runtime, times, 'times');
   if (count <= 0n) return '';

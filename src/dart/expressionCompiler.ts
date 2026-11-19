@@ -16,7 +16,7 @@ import type { Declaration, ExtensionInfo, GlobalVariable, TopLevelFunction } fro
 import { formatDouble, stringOf } from './format';
 import { concatenate } from './operators';
 import type { Frame } from './runtime';
-import { type ConditionFlow, Flow, LocalVar } from './scope';
+import { type ConditionFlow, Flow, LocalVar, type StoredFlow } from './scope';
 import {
   coreTypes,
   type DartType,
@@ -199,10 +199,42 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
   }
 
+  /**
+   * A condition variable's stored flow holds while neither it nor the variables it promotes may have been assigned
+   * since: they are final, or nothing in the function assigns them.
+   */
+  private usableCondition(variable: LocalVar): LocalVar['condition'] {
+    const { condition } = variable;
+    if (!condition) return undefined;
+    if (!isStable(variable)) return undefined;
+    const promoted = [...condition.whenTrue.promotions, ...condition.whenFalse.promotions];
+    return promoted.every(([local]) => isStable(local)) ? condition : undefined;
+  }
+
+  private applyStoredFlow(stored: StoredFlow): Flow {
+    if (!stored.reachable) return this.flow.unreachable;
+    let flow = this.flow;
+    for (const [local, type] of stored.promotions) flow = flow.promote(local, type);
+    return flow;
+  }
+
   protected compileConditionInner(expression: Expression): { compiled: Compiled; flow: ConditionFlow } {
     switch (expression.kind) {
       case 'parenthesized': {
         return this.compileConditionInner(expression.expression);
+      }
+      case 'identifier': {
+        const resolution = this.resolveName(expression.name);
+        const condition = resolution?.kind === 'local' ? this.usableCondition(resolution.variable) : undefined;
+        if (!condition) break;
+        const compiled = this.compileExpression(expression);
+        return {
+          compiled,
+          flow: {
+            whenTrue: this.applyStoredFlow(condition.whenTrue),
+            whenFalse: this.applyStoredFlow(condition.whenFalse),
+          },
+        };
       }
       case 'bool': {
         const compiled = this.compileExpression(expression);
@@ -934,10 +966,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
           isConst: false,
         };
       }
-      if (name === 'dynamic') {
+      if (name === 'dynamic' || name === 'Never') {
+        const type = name === 'dynamic' ? DYNAMIC : NEVER;
         return {
           type: interfaceType(coreTypes.type),
-          run: () => new DartTypeValue(coreTypes.type, DYNAMIC),
+          run: () => new DartTypeValue(coreTypes.type, type),
           isConst: true,
         };
       }
@@ -1595,6 +1628,11 @@ function mapTypesOfContext(context: DartType | undefined): [DartType, DartType] 
 }
 
 /** The element type of a literal without type arguments: the least upper bound of its elements' types. */
+/** Whether a local keeps its value from its declaration on: final, or assigned nowhere else, closures included. */
+function isStable(local: LocalVar): boolean {
+  return (local.options.isFinal || !local.owner.assignedNames.has(local.name)) && !local.isWriteCaptured;
+}
+
 export function inferElementType(types: DartType[]): DartType {
   if (types.length === 0) return DYNAMIC;
   let result = types[0];

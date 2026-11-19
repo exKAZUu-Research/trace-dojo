@@ -17,7 +17,7 @@ import { type Compiled, type Eval, typeName } from './compilerBase';
 import { SHORTED } from './expressionCompiler';
 import { type CompiledPattern, isRefutableSyntax, PatternCompiler } from './patternCompiler';
 import { type DartThrow, type Frame } from './runtime';
-import { type ConditionFlow, Flow, FunctionContext, type LocalVar } from './scope';
+import { type ConditionFlow, Flow, FunctionContext, type LocalVar, type StoredFlow } from './scope';
 import {
   coreTypes,
   type DartType,
@@ -195,6 +195,8 @@ export abstract class StatementCompiler extends PatternCompiler {
       }
       return compiled;
     }
+    // A closure's return type is inferred, so a void body makes it return void whatever its context.
+    if (compiled.type.kind === 'void' && !spec.returnType) return compiled;
     if (compiled.type.kind === 'void' && !isTop(expected)) {
       this.error(expression, 'void の値は返せません。');
     }
@@ -471,6 +473,8 @@ export abstract class StatementCompiler extends PatternCompiler {
         variable.hasConstant = true;
       }
       if (compiled && !declaration.isLate) this.flowAfterInitializer(variable, compiled, declaredType);
+      variable.condition = this.pendingCondition;
+      this.pendingCondition = undefined;
       parts.push({ slot: variable.slot, run: compiled?.run, isLate: declaration.isLate });
     }
     const exec: Exec = (frame) => {
@@ -486,6 +490,9 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   /** A declarator's initializer, checked against the declared type; a late one leaves the flow as it was. */
+  /** The condition the initializer being compiled gave, for the local it initializes. */
+  private pendingCondition: LocalVar['condition'];
+
   private compileLocalInitializer(
     declaration: VariableDeclaration,
     declarator: VariableDeclaration['variables'][number],
@@ -496,7 +503,24 @@ export abstract class StatementCompiler extends PatternCompiler {
       this.error(declarator, `const の変数 ${declarator.name} には、初期値が必要です。`);
     if (!initializer) return undefined;
     const savedFlow = this.flow;
-    let compiled = this.withConstContext(declaration.isConst, () => this.compileExpression(initializer, declaredType));
+    this.pendingCondition = undefined;
+    const isCondition =
+      !declaration.isLate &&
+      !declaration.isConst &&
+      (!declaredType || isBoolType(declaredType)) &&
+      isConditionShaped(initializer);
+    let compiled: Compiled;
+    if (isCondition) {
+      const result = this.compileConditionInner(initializer);
+      compiled = result.compiled;
+      this.flow = Flow.join(result.flow.whenTrue, result.flow.whenFalse);
+      this.pendingCondition = {
+        whenTrue: storeFlow(result.flow.whenTrue, savedFlow),
+        whenFalse: storeFlow(result.flow.whenFalse, savedFlow),
+      };
+    } else {
+      compiled = this.withConstContext(declaration.isConst, () => this.compileExpression(initializer, declaredType));
+    }
     if (declaration.isLate) this.flow = savedFlow;
     if (declaration.isConst && !compiled.isConst)
       this.error(initializer, `const の変数 ${declarator.name} の初期値は、定数でなければなりません。`);
@@ -1194,3 +1218,35 @@ function displayName(name: string): string {
 }
 
 export { makeNullable, resolveBound };
+
+function isBoolType(type: DartType): boolean {
+  return type.kind === 'interface' && type.cls === coreTypes.bool && !type.nullable;
+}
+
+/** Expressions whose truth tells flow analysis something: comparisons, type tests, negations, and literals. */
+function isConditionShaped(expression: Expression): boolean {
+  switch (expression.kind) {
+    case 'binary': {
+      return ['==', '!=', '&&', '||'].includes(expression.operator);
+    }
+    case 'is':
+    case 'bool': {
+      return true;
+    }
+    case 'prefix': {
+      return expression.operator === '!';
+    }
+    case 'parenthesized': {
+      return isConditionShaped(expression.expression);
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+/** What a branch's flow adds to the flow before the condition. */
+function storeFlow(flow: Flow, before: Flow): StoredFlow {
+  const promotions = [...flow.promotions].filter(([variable, type]) => before.promotions.get(variable) !== type);
+  return { reachable: flow.reachable, promotions };
+}

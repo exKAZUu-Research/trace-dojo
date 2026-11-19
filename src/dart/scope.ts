@@ -6,6 +6,12 @@ import type { Value } from './values';
 let nextLocalId = 0;
 
 /** A local variable or parameter. */
+/** What a condition told flow analysis: whether its branch is reachable and the variables it promoted. */
+export interface StoredFlow {
+  reachable: boolean;
+  promotions: readonly (readonly [LocalVar, DartType])[];
+}
+
 export class LocalVar {
   readonly id = nextLocalId++;
   /** Assigned inside a closure, which stops Dart from promoting it. */
@@ -14,6 +20,11 @@ export class LocalVar {
   isCaptured = false;
   /** A primitive value a `const` local holds. */
   constant: Value | undefined;
+  /**
+   * For a bool local initialized with a condition (`final ok = x != null;`), what the condition told flow analysis
+   * when true and when false, which `if (ok)` applies again as Dart does.
+   */
+  condition: { whenTrue: StoredFlow; whenFalse: StoredFlow } | undefined;
   hasConstant = false;
 
   constructor(

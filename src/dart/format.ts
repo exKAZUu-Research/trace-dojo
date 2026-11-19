@@ -74,3 +74,8 @@ export function quoteForError(text: string): string {
   }
   return `${result}"`;
 }
+
+/** Text as the VM writes it to stdout: encoded as UTF-8, where a lone surrogate becomes U+FFFD. */
+export function encodableText(text: string): string {
+  return text.replaceAll(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD');
+}
