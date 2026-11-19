@@ -272,7 +272,7 @@ export class Library {
   rebindCOverloads(name: string, standard: FunctionInfo[], declared: FunctionInfo[]): FunctionInfo[] {
     const global = this.global(name);
     if (global?.kind !== 'functions') return standard;
-    const definitions = declared.filter((fn) => redeclaresLibcFunction(fn, this.headers));
+    const definitions = declared.filter((fn) => this.isLibcDefinition(fn));
     if (definitions.length === 0) return standard;
     return standard.map((fn) => {
       if (fn.mathIntrinsic || !global.functions.includes(fn)) return fn;
@@ -285,8 +285,10 @@ export class Library {
     const visible = this.rebindCOverloads(name, standard, declared);
     const overloads = declared.filter(
       (fn) =>
-        !visible.some((candidate) => candidate.mathIntrinsic && sameParameters(candidate, fn)) ||
-        !redeclaresLibcFunction(fn, this.headers)
+        !redeclaresLibcFunction(fn, this.headers) ||
+        !visible.some(
+          (candidate) => candidate.native && sameParameters(candidate, fn) && (!fn.isDefined || candidate.mathIntrinsic)
+        )
     );
     return [...new Set([...overloads, ...visible])];
   }
@@ -351,6 +353,9 @@ export class Library {
 
   private addFunctions(names: Map<string, FunctionInfo[]>, target: Map<string, Entity>): void {
     for (const [name, functions] of names) {
+      if (target === this.globalNames) {
+        for (const fn of functions) fn.libcGlobal = !fn.mathIntrinsic && !fn.instantiate;
+      }
       const existing = target.get(name);
       if (existing?.kind === 'functions') existing.functions.push(...functions);
       else target.set(name, { kind: 'functions', functions: [...functions] });
@@ -364,6 +369,53 @@ export class Library {
     this.addStd('FILE', file);
     this.addStd('string', { kind: 'class', cls: this.stringClass });
     for (const [name, cls] of this.exceptions) this.addStd(name, { kind: 'class', cls });
+    this.addStreams();
+    this.addFunctions(stringFunctions(this, this.stringClass), this.stdNames);
+    const c = cFunctions(this);
+    this.addFunctions(c, this.stdNames);
+    this.addFunctions(c, this.globalNames);
+    // The global namespace shares <cmath>'s functions with std, as one overload set.
+    const math = mathFunctions();
+    this.addFunctions(math, this.stdNames);
+    this.addFunctions(math, this.globalNames);
+    for (const [name, entity] of constantsOf(this)) {
+      if (name.startsWith('std::')) this.addStd(name.slice(5), entity);
+      else this.globalNames.set(name, entity);
+    }
+    for (const template of containerTemplates(this)) this.addStd(template.name, { kind: 'template', template });
+    for (const [name, cls] of randomEngines()) this.addStd(name, { kind: 'class', cls });
+    this.addFunctions(algorithmFunctions(this), this.stdNames);
+    this.addFunctions(new Map([['make_pair', [makePair(this)]]]), this.stdNames);
+    const exit = native('exit', [INT], VOID, ([status]) => {
+      throw new ProgramExit(asNumber(status));
+    });
+    this.addFunctions(new Map([['exit', [exit]]]), this.stdNames);
+    this.addFunctions(new Map([['exit', [exit]]]), this.globalNames);
+    for (const [name, type] of [
+      ['size_t', ULONG],
+      ['ptrdiff_t', LONG],
+      ['intptr_t', LONG],
+      ['uintptr_t', ULONG],
+      ['intmax_t', LONG],
+      ['uintmax_t', ULONG],
+      ['int8_t', SCHAR],
+      ['int16_t', SHORT],
+      ['int32_t', INT],
+      ['int64_t', LLONG],
+      ['uint8_t', UCHAR],
+      ['uint16_t', USHORT],
+      ['uint32_t', UINT],
+      ['uint64_t', ULLONG],
+      ['nullptr_t', { kind: 'nullptr' }],
+    ] as const) {
+      const entity = { kind: 'type', type } as const;
+      this.addStd(name, entity);
+      this.globalNames.set(name, entity);
+    }
+    this.globalNames.set('ssize_t', { kind: 'type', type: LONG });
+  }
+
+  private addStreams(): void {
     const { streams } = this;
     const ostreamType = classType(streams.ostream);
     for (const [name, target] of [
@@ -433,49 +485,6 @@ export class Library {
     }
     this.addFunctions(manipulatorFunctions, this.stdNames);
     this.addFunctions(new Map([['getline', streams.getline()]]), this.stdNames);
-    this.addFunctions(stringFunctions(this, this.stringClass), this.stdNames);
-    const c = cFunctions(this);
-    this.addFunctions(c, this.stdNames);
-    this.addFunctions(c, this.globalNames);
-    // The global namespace shares <cmath>'s functions with std, as one overload set.
-    const math = mathFunctions();
-    this.addFunctions(math, this.stdNames);
-    this.addFunctions(math, this.globalNames);
-    for (const [name, entity] of constantsOf(this)) {
-      if (name.startsWith('std::')) this.addStd(name.slice(5), entity);
-      else this.globalNames.set(name, entity);
-    }
-    for (const template of containerTemplates(this)) this.addStd(template.name, { kind: 'template', template });
-    for (const [name, cls] of randomEngines()) this.addStd(name, { kind: 'class', cls });
-    this.addFunctions(algorithmFunctions(this), this.stdNames);
-    this.addFunctions(new Map([['make_pair', [makePair(this)]]]), this.stdNames);
-    const exit = native('exit', [INT], VOID, ([status]) => {
-      throw new ProgramExit(asNumber(status));
-    });
-    this.addFunctions(new Map([['exit', [exit]]]), this.stdNames);
-    this.addFunctions(new Map([['exit', [exit]]]), this.globalNames);
-    for (const [name, type] of [
-      ['size_t', ULONG],
-      ['ptrdiff_t', LONG],
-      ['intptr_t', LONG],
-      ['uintptr_t', ULONG],
-      ['intmax_t', LONG],
-      ['uintmax_t', ULONG],
-      ['int8_t', SCHAR],
-      ['int16_t', SHORT],
-      ['int32_t', INT],
-      ['int64_t', LLONG],
-      ['uint8_t', UCHAR],
-      ['uint16_t', USHORT],
-      ['uint32_t', UINT],
-      ['uint64_t', ULLONG],
-      ['nullptr_t', { kind: 'nullptr' }],
-    ] as const) {
-      const entity = { kind: 'type', type } as const;
-      this.addStd(name, entity);
-      this.globalNames.set(name, entity);
-    }
-    this.globalNames.set('ssize_t', { kind: 'type', type: LONG });
   }
 }
 

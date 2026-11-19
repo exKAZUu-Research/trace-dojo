@@ -5,6 +5,7 @@ import {
   ClassInfo,
   classType,
   isConstType,
+  nonReference,
   referenceTo,
   SIZE_T,
   type Type,
@@ -72,6 +73,10 @@ export function adapterClass(
   cls.memberTypes.set('value_type', element);
   cls.memberTypes.set('size_type', SIZE_T);
   cls.memberTypes.set('container_type', storage);
+  const reference = storage.cls.memberTypes.get('reference') ?? referenceTo(element);
+  const constReference = storage.cls.memberTypes.get('const_reference') ?? referenceTo(withConst(element));
+  cls.memberTypes.set('reference', reference);
+  cls.memberTypes.set('const_reference', constReference);
   if (compareType) cls.memberTypes.set('value_compare', compareType);
   cls.library = {
     kind,
@@ -96,12 +101,15 @@ export function adapterClass(
       if (isConstType(object.type)) return compiler_.error(row, `const の ${cls.name} には emplace を使えません。`);
       const value = constructElement(compiler_, element, args, row);
       const self = compiler_.objectOf(object);
+      const result = kind === 'priority_queue' ? VOID : reference;
       return {
-        type: VOID,
-        isLvalue: false,
+        type: nonReference(result),
+        isLvalue: result.kind === 'reference',
         row,
         run: (frame) => {
-          push(frame, (self(frame) as Ptr).read() as SequenceValue, () => value(frame));
+          const sequence = (self(frame) as Ptr).read() as SequenceValue;
+          push(frame, sequence, () => value(frame));
+          if (result.kind !== 'void') return sequence.location(sequence.items.length - 1);
           return;
         },
       };
@@ -194,7 +202,7 @@ export function adapterClass(
       method(
         memberName,
         [],
-        referenceTo(isConst ? withConst(element) : element),
+        isConst ? constReference : reference,
         (self) => {
           nonEmpty(self);
           return self.location(at(self));

@@ -33,6 +33,12 @@ int main() {
   auto it = std::lower_bound(p.begin(), p.end(), 2);
   std::cout << *it << " " << std::binary_search(p.begin(), p.end(), 5) << "\n";
   std::cout << std::gcd(-3, 6u) << ' ' << std::lcm(-3, 6u) << ' ' << std::gcd(6u, -3LL) << '\n';
+  short x = 12, y = 8;
+  auto narrowGcd = std::gcd(x, y);
+  auto narrowLcm = std::lcm(x, y);
+  auto mixedLcm = std::lcm(x, 8u);
+  std::cout << sizeof(narrowGcd) << ' ' << narrowGcd << ' ' << sizeof(narrowLcm) << ' ' << narrowLcm << ' '
+            << sizeof(mixedLcm) << ' ' << mixedLcm << '\n';
   std::vector<std::string> words{"fox", "dog", "fox", "owl"};
   const char* fox = "fox";
   const char* expected[] = {"fox", "dog", "fox", "owl"};

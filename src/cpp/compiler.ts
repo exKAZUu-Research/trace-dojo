@@ -156,7 +156,7 @@ export class Compiler extends StatementCompiler {
       if (entity.kind === 'global' && this.library.conflictsWithGlobal(name, entity.global.type))
         this.error(entity.global.row, `${name} はヘッダーにある名前の宣言と重複しています。`);
       if (entity.kind === 'functions') {
-        const conflict = entity.functions.find((fn) => this.library.conflictsWithGlobal(name, fn));
+        const conflict = entity.functions.find((fn) => !fn.native && this.library.conflictsWithGlobal(name, fn));
         if (conflict) this.error(conflict.row, `${name} はヘッダーにある宣言と重複しています。`);
       }
     }
@@ -317,7 +317,9 @@ export class Compiler extends StatementCompiler {
     const bases = clause.children.filter((child) => child.type !== 'access_specifier');
     if (bases.length > 1) return this.unsupported(clause.row, '多重継承');
     if (hasToken(clause, 'virtual')) return this.unsupported(clause.row, '仮想継承（virtual で継承すること）');
-    const baseType = this.resolveTypeSpecifier(bases[0]);
+    const baseName = bases[0];
+    const declaration = baseName.type === 'type_identifier' ? this.globalScope.names.get(baseName.text) : undefined;
+    const baseType = declaration?.kind === 'class' ? classType(declaration.cls) : this.resolveTypeSpecifier(baseName);
     if (baseType.kind !== 'class')
       return this.error(clause.row, `${bases[0].text} はクラスではないので継承できません。`);
     const base = baseType.cls;

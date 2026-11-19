@@ -142,6 +142,7 @@ export interface FunctionInfo {
   constantAccess?: (object: Expr, args: readonly Expr[]) => ConstantLocation | undefined;
   streamManipulator?: 'both' | 'output';
   mathIntrinsic?: boolean;
+  libcGlobal?: boolean;
   /** The syntax of the definition, which the compiler compiles once the declarations it may use are known. */
   definition?: Syntax;
   /** Whether the function takes any number of further arguments, as `printf` does. */

@@ -4,7 +4,15 @@
 #include <iomanip>
 #include <iostream>
 
-struct time { int value; };
+struct time {
+  int value;
+  time(int n) : value(n) {}
+  time twice() const { time copy{2 * value}; return copy; }
+};
+struct timer : time {
+  timer(int n) : time(n) {}
+  time elapsed() const { return twice(); }
+};
 struct log { int value; };
 int data = 2;
 int id = 3;
@@ -27,4 +35,6 @@ int main() {
   cout << std::right << setw(3) << 1 << ' ' << log(1.0) << '\n';
   handle plain{6};
   cout << id << target << insert << plain.value << '\n';
+  timer elapsed(7);
+  cout << first.twice().value << ' ' << elapsed.elapsed().value << '\n';
 }

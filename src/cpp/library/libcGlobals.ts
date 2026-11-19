@@ -46,7 +46,7 @@ export function redeclaresLibcFunction(fn: FunctionInfo, headers: ReadonlySet<st
   return declarations[fn.name].some(
     ([group, kind, signature]) =>
       typeof group === 'number' &&
-      kind === 'function' &&
+      (kind === 'function' || kind === 'definition') &&
       typeof signature === 'string' &&
       visibleIn(group, headers) &&
       matchingReturnType(fn, signature) &&

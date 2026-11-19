@@ -1,7 +1,7 @@
 import { binaryOperation, convertScalar, type Scalar } from '../../c/arith';
 import { commonType, promote } from '../../c/types';
 import { CompileError } from '../../interpreter/diagnostics';
-import { CppRuntimeError } from '../errors';
+import { CppRuntimeError, overflowError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { destroyTemporaries, invoke, makeEach, withTemporaries } from '../objectCompiler';
@@ -11,6 +11,7 @@ import {
   ClassInfo,
   classType,
   type FunctionInfo,
+  intMax,
   isArithmetic,
   isConstType,
   isInteger,
@@ -817,22 +818,21 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   for (const name of ['gcd', 'lcm']) {
     define(name, (args) => {
       if (args.length !== 2) return;
-      const types = args.map((arg) => unqualified(arg.type));
-      if (!types.every((type) => isInteger(type) && type.name !== 'bool')) return;
-      const common = compiler().arithmetic(
-        '+',
-        { ...args[0], isLvalue: false, constant: undefined },
-        { ...args[1], isLvalue: false, constant: undefined },
-        args[0].row
-      ).type;
+      const left = unqualified(args[0].type);
+      const right = unqualified(args[1].type);
+      if (!isInteger(left) || !isInteger(right) || left.name === 'bool' || right.name === 'bool') return;
+      const common = sameType(left, right) ? left : commonType(left, right);
       if (!isInteger(common)) return;
-      return native(name, types, common, ([a, b]) => {
+      const limit = intMax(common.name);
+      return native(name, [left, right], common, ([a, b]) => {
         let x = BigInt(a as number | bigint);
         let y = BigInt(b as number | bigint);
         if (x < 0n) x = -x;
         if (y < 0n) y = -y;
+        if (x > limit || y > limit) throw overflowError(typeName(common));
         const gcd = (p: bigint, q: bigint): bigint => (q === 0n ? p : gcd(q, p % q));
         const result = name === 'gcd' ? gcd(x, y) : x === 0n || y === 0n ? 0n : (x / gcd(x, y)) * y;
+        if (result > limit) throw overflowError(typeName(common));
         return isWide(common) ? result : Number(result);
       });
     });

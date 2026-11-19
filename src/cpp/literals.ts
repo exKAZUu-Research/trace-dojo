@@ -1,3 +1,4 @@
+import { roundBinary } from '../c/library/binaryFloat';
 import { compileError, unsupported } from './errors';
 import type { Syntax } from './syntax';
 import { type FloatType, intMax, type IntName, type IntType } from './types';
@@ -62,17 +63,18 @@ function floatLiteral(node: Syntax, lower: string, isHex: boolean): { type: Floa
       body = body.slice(0, -1);
     }
   }
-  const value = isHex ? hexFloat(body) : Number(body);
+  const value = isHex ? hexFloat(body, name === 'float') : Number(body);
   if (Number.isNaN(value)) return compileError(node.row, `${node.text} は数として読めません。`);
-  return { type: { kind: 'float', name }, value: name === 'float' ? Math.fround(value) : value };
+  return { type: { kind: 'float', name }, value: !isHex && name === 'float' ? Math.fround(value) : value };
 }
 
-function hexFloat(text: string): number {
+function hexFloat(text: string, isFloat: boolean): number {
   const match = /^0x([\da-f]*)\.?([\da-f]*)p([+-]?\d+)$/.exec(text);
   if (!match) return Number.NaN;
   const [, whole, fraction, exponent] = match;
-  const mantissa = BigInt(`0x${whole}${fraction}` || '0');
-  return Number(mantissa) * 2 ** (Number(exponent) - 4 * fraction.length);
+  const digits = whole + fraction;
+  if (!digits) return Number.NaN;
+  return roundBinary(BigInt(`0x${digits}`), 1n, Number(exponent) - 4 * fraction.length, isFloat);
 }
 
 /** The bytes a character or string literal's content stands for, in UTF-8, with its escapes resolved. */

@@ -24,6 +24,7 @@ import {
   isCopyConstructor,
   nonReference,
   pointerTo,
+  sameParameters,
   type Type,
   typeName,
   unqualified,
@@ -46,6 +47,8 @@ export function invoke(
 ): Value | Ptr {
   const { runtime } = frame;
   if (fn.native) {
+    const override = fn.libcGlobal ? runtime.libcOverrides.get(fn.name) : undefined;
+    if (override && sameParameters(fn, override)) return invoke(frame, override, args, self, row, isCallerDestroying);
     runtime.spend();
     return fn.native(args, { self: self?.read(), frame, row }) as Value | Ptr;
   }

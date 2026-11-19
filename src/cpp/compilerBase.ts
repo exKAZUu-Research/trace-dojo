@@ -64,6 +64,7 @@ export abstract class CompilerBase {
     for (let cls = this.enclosingClass; cls; cls = cls.base) {
       const member = this.memberEntity(cls, name);
       if (member) return member;
+      if (name === cls.name) return { kind: 'class', cls };
     }
     return this.findGlobalName(name);
   }
