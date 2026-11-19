@@ -464,7 +464,10 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** `a == b`, calling the left operand's `==` for objects of the program. */
   equals(a: Value, b: Value): boolean {
-    if (a === b) return typeof a !== 'number' || !Number.isNaN(a);
+    // `==` calls an object's operator even on itself; only a record's own `==` starts with `identical`.
+    if (a === b && (!(a instanceof DartObject) || a instanceof DartRecord)) {
+      return typeof a !== 'number' || !Number.isNaN(a);
+    }
     if (a === undefined || b === undefined) return false;
     switch (typeof a) {
       case 'bigint': {
