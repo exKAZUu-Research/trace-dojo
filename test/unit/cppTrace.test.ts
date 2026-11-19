@@ -147,6 +147,51 @@ test('an uncaught exception preserves the turtles reached from main before unwin
   expect(trace.finalTurtles.map(({ x, y }) => [x, y])).toEqual([[3, 5]]);
 });
 
+test('an uncaught exception terminates before full-expression temporary destruction', () => {
+  const program = `#include <iostream>
+struct Print { ~Print() { std::cout << 'D' << std::flush; } };
+void stop(const Print&) { throw 1; }
+int main() { stop(Print{}); }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: 'libc++abi: terminating due to uncaught exception of type int',
+  });
+});
+
+test('an exception escaping a catch parameter copy terminates before outer handlers', () => {
+  const program = `#include <iostream>
+struct Print {
+  Print() {}
+  Print(const Print&) { std::cout << 'C' << std::flush; throw 2; }
+};
+int main() {
+  try { try { throw Print(); } catch (Print value) {} }
+  catch (int) { std::cout << 'X'; }
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'C',
+    uncaughtException: 'libc++abi: terminating due to uncaught exception of type int',
+  });
+});
+
+test.each([
+  ['array', 'std::array<int, 2> a; return a[0];', '値を入れていない'],
+  [
+    'vector',
+    'std::vector<int> v; v.reserve(1); v.push_back(1); int* p = v.data(); v.push_back(2); return *p;',
+    'イテレータ',
+  ],
+  ['random', 'std::uniform_real_distribution<float> d(-3e38f, 3e38f);', '範囲が広すぎ'],
+])('reports an invalid operation from <%s>', (header, body, reason) => {
+  const program = `#include <${header}>\nint main() { ${body} }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining(reason),
+  });
+});
+
 test('the interpreter rejects the syntax it leaves out with a message naming it', () => {
   const execution = executeProgram('cpp', 'int main() {\n  auto f = [](int x) { return x; };\n}');
   expect(execution).toEqual({

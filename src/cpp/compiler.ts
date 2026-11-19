@@ -4,11 +4,19 @@ import { byteAt } from './bytes';
 import { hasAuto } from './compilerBase';
 import { CppException, CppRuntimeError } from './errors';
 import type { Expr } from './expr';
+import { SequenceValue } from './library/containerValues';
 import type { Library } from './library/registry';
 import { invoke, makeEach, newObject, virtualKey, zeroOf } from './objectCompiler';
 import { type CompiledFunction, type Eval, type Exec, type Frame, RETURN, type Runtime } from './runtime';
 import { type Entity, FunctionContext } from './scopes';
-import { type AutoDeduction, bindsDirectly, deducedType, endScope, StatementCompiler } from './statementCompiler';
+import {
+  type AutoDeduction,
+  bindsDirectly,
+  deducedType,
+  endScope,
+  type ReferenceBinding,
+  StatementCompiler,
+} from './statementCompiler';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
   type Access,
@@ -920,7 +928,7 @@ export class Compiler extends StatementCompiler {
     const destroy = this.destructionOf(cls);
     return {
       copy: (frame, source) => {
-        const target = newObject(cls);
+        const target = newObject(frame, cls);
         copyInto(frame, target, source as CObject);
         return target;
       },
@@ -1312,10 +1320,15 @@ export class Compiler extends StatementCompiler {
     const global = this.declareStaticStorage(name, binding.type, row, true);
     global.isDefined = true;
     this.globalScope.names.set(name, { kind: 'global', global, isReference: true });
+    this.globalInitializers.push({ index: global.index, init: this.staticReferenceInitializer(global, binding, row) });
+    return binding.type;
+  }
+
+  staticReferenceInitializer(global: GlobalInfo, binding: ReferenceBinding, row: number): Eval<undefined> {
     let locate: Eval<Ptr>;
     if ('lifetime' in binding) {
       const { type, make, locate: locateHeld } = binding.lifetime;
-      const holder = this.declareStaticStorage(`\0${name}`, type, row, false);
+      const holder = this.declareStaticStorage(`\0${global.name}`, type, row, false);
       const store = this.staticStore(type, row);
       locate = (frame) => {
         const box = frame.runtime.globals[holder.index] as Box;
@@ -1325,12 +1338,12 @@ export class Compiler extends StatementCompiler {
     } else {
       locate = binding.loc;
     }
-    const init = this.fullExpression<undefined>((frame) => {
-      (frame.runtime.globals[global.index] as Box).value = locate(frame);
+    const run = this.fullExpression(locate);
+    return (frame) => {
+      const box = frame.runtime.globals[global.index] as Box;
+      if (!(box.value instanceof Ptr)) box.value = run(frame);
       return;
-    });
-    this.globalInitializers.push({ index: global.index, init });
-    return binding.type;
+    };
   }
 
   declareStaticStorage(name: string, type: Type, row: number, isShown: boolean): GlobalInfo {
@@ -1523,6 +1536,16 @@ export class Compiler extends StatementCompiler {
     if (!cls.isComplete) return this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
     if (cls.isAbstract)
       return this.error(row, `${cls.name} は抽象クラス（純粋仮想関数があるクラス）なので、オブジェクトを作れません。`);
+    const libraryDefault = cls.library?.defaultInitializer;
+    if (libraryDefault) {
+      return {
+        type: classType(cls),
+        isLvalue: false,
+        isTemporaryObject: true,
+        row,
+        run: libraryDefault(this, row, isValueInitialized),
+      };
+    }
     if (cls.constructors.length > 0) {
       const resolved = this.resolve(`${cls.name} のコンストラクタ`, cls.constructors, [], undefined, row);
       return this.constructWith(cls, resolved, [], row);
@@ -1541,7 +1564,7 @@ export class Compiler extends StatementCompiler {
       isTemporaryObject: true,
       onlyCalls: true,
       run: (frame) => {
-        const object = newObject(cls);
+        const object = newObject(frame, cls);
         if (zeroed) for (const [index, zero] of zeroFields.entries()) object.values[index] = zero;
         if (implicit) invoke(frame, implicit, [], new Ptr(new Box(object), 0), row);
         else object.cls = cls;
@@ -1605,7 +1628,16 @@ export class Compiler extends StatementCompiler {
     if (args.length > fields.length) return this.error(row, `${cls.name} を初期化する値が多すぎます。`);
     const initializers = args.map((arg, index) => {
       const type = fields[index].type;
-      return arg.braced ? this.listInitializer(type, arg.braced, arg.row) : this.copyInitializer(type, arg, row, false);
+      if (arg.braced && type.kind === 'array') return this.listInitializer(type, arg.braced, arg.row);
+      if (arg.braced && type.kind === 'reference' && arg.braced.children.length === 1) {
+        const clause = arg.braced.children[0];
+        if (clause.type !== 'initializer_list') {
+          const target = this.compileExpression(clause);
+          if (target.isLvalue && bindsDirectly(target.type, type.to))
+            return this.copyInitializer(type, target, arg.row, false);
+        }
+      }
+      return this.copyInitializer(type, arg, row, false);
     });
     return {
       type: classType(cls),
@@ -1757,7 +1789,7 @@ export class Compiler extends StatementCompiler {
     );
     const destroyers = fields.map((field) => this.destroyerOf(field.type));
     return (frame) => {
-      const object = newObject(cls);
+      const object = newObject(frame, cls);
       const receiver = new Ptr(new Box(object, false), 0);
       const mark = frame.pending.length;
       frame.pending.push(object);
@@ -1971,6 +2003,8 @@ function zeroFilled(value: Value, type: Type): Value {
   if (value === UNINIT) return type.kind === 'class' || type.kind === 'array' ? value : zeroOf(type);
   if (type.kind === 'array' && value instanceof ArrayStore) {
     for (const [index, item] of value.values.entries()) value.values[index] = zeroFilled(item, type.of);
+  } else if (type.kind === 'class' && type.cls.library?.kind === 'array' && value instanceof SequenceValue) {
+    for (const [index, item] of value.items.entries()) value.items[index] = zeroFilled(item, value.elementType);
   } else if (type.kind === 'class' && value instanceof CObject && !type.cls.library) {
     for (const field of value.cls.fields) {
       if (field.type.kind !== 'reference')

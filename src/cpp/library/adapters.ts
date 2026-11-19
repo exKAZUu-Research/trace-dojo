@@ -1,4 +1,5 @@
 import { CppRuntimeError } from '../errors';
+import { makeEach } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import {
   BOOL,
@@ -100,12 +101,21 @@ export function adapterClass(
     },
     constructingMembers: ['emplace'],
   };
+  const copyItems = (frame: Frame, { items }: SequenceValue): Value[] => {
+    frame.runtime.reserve(items.length);
+    return makeEach(
+      frame,
+      items.length,
+      (index) => ops().copy(frame, items[index]),
+      () => ops().destroy
+    );
+  };
   cls.operations = {
-    copy: (frame, source) => make((source as SequenceValue).items.map((item) => ops().copy(frame, item))),
+    copy: (frame, source) => make(copyItems(frame, source as SequenceValue)),
     assign: (frame, target, source) => {
       const to = target as SequenceValue;
       if (to !== source) {
-        const values = (source as SequenceValue).items.map((item) => ops().copy(frame, item));
+        const values = copyItems(frame, source as SequenceValue);
         const previous = to.replaceItems(values);
         const destroy = ops().destroy;
         if (destroy) for (const item of previous) destroy(frame, item);
@@ -117,11 +127,6 @@ export function adapterClass(
     },
   };
   cls.constructors = [nativeConstructor(cls, [], () => make([]))];
-  const copyItems = (frame: Frame, from: unknown): Value[] => {
-    const { items } = (from as Ptr).read() as SequenceValue;
-    frame.runtime.reserve(items.length);
-    return items.map((item) => ops().copy(frame, item));
-  };
   if (compareType) {
     const fromItems = (items: Value[]): SequenceValue => {
       makeHeap(items, less);
@@ -130,7 +135,7 @@ export function adapterClass(
     cls.constructors.push(
       nativeConstructor(cls, [constRef(compareType)], () => make([]), { isExplicit: true }),
       nativeConstructor(cls, [constRef(compareType), constRef(storage)], ([, from], { frame }) =>
-        fromItems(copyItems(frame, from))
+        fromItems(copyItems(frame, (from as Ptr).read() as SequenceValue))
       ),
       {
         ...nativeConstructor(cls, [], () => make([])),
@@ -142,16 +147,28 @@ export function adapterClass(
           return nativeConstructor(cls, params, ([first, last], { frame }) => {
             const source = range.read(first, last);
             frame.runtime.reserve(source.values.length);
-            return fromItems(source.values.map((item) => source.construct(frame, item)));
+            return fromItems(
+              makeEach(
+                frame,
+                source.values.length,
+                (index) => source.construct(frame, source.values[index]),
+                () => ops().destroy
+              )
+            );
           });
         },
       }
     );
   } else {
     cls.constructors.push(
-      nativeConstructor(cls, [constRef(storage)], ([from], { frame }) => make(copyItems(frame, from)), {
-        isExplicit: true,
-      })
+      nativeConstructor(
+        cls,
+        [constRef(storage)],
+        ([from], { frame }) => make(copyItems(frame, (from as Ptr).read() as SequenceValue)),
+        {
+          isExplicit: true,
+        }
+      )
     );
   }
   const method = (

@@ -648,8 +648,81 @@ for (const [group, names] of Object.entries({
   for (const name of names) (NAME_GROUPS[name] ??= []).push(group);
 }
 
+const COMMON_TYPEDEF_HEADERS = new Set([
+  'iostream',
+  'iomanip',
+  'ios',
+  'ostream',
+  'istream',
+  'string',
+  'vector',
+  'map',
+  'set',
+  'unordered_map',
+  'unordered_set',
+  'deque',
+  'list',
+  'stack',
+  'queue',
+  'array',
+  'utility',
+  'algorithm',
+  'numeric',
+  'functional',
+  'iterator',
+  'sstream',
+  'stdexcept',
+  'exception',
+  'new',
+  'random',
+]);
+
+function typedefHeader(name: string): string | undefined {
+  if (name === 'ssize_t') return 'sys/types.h';
+  if (name === 'size_t' || name === 'ptrdiff_t' || name === 'nullptr_t') return 'cstddef';
+  if (/^u?int(?:8|16|32|64|ptr|max)_t$/.test(name)) return 'cstdint';
+}
+
+function typedefVisible(name: string, headers: ReadonlySet<string>, scope: 'std' | 'global'): boolean {
+  const has = (...names: string[]): boolean => names.some((header) => headers.has(header));
+  if (name === 'ssize_t') {
+    return (
+      scope === 'global' &&
+      (has('unistd.h', 'sys/types.h', 'cstring', 'cstdio', 'stdio.h', 'string.h') ||
+        [...headers].some(
+          (header) =>
+            COMMON_TYPEDEF_HEADERS.has(header) && !['utility', 'stdexcept', 'exception', 'new'].includes(header)
+        ))
+    );
+  }
+  if ([...headers].some((header) => COMMON_TYPEDEF_HEADERS.has(header))) return true;
+  if (name === 'size_t') {
+    return scope === 'global'
+      ? has(
+          'cstddef',
+          'cstdlib',
+          'cctype',
+          'cstring',
+          'cstdio',
+          'stdio.h',
+          'stdlib.h',
+          'string.h',
+          'stddef.h',
+          'unistd.h',
+          'sys/types.h'
+        )
+      : has('cstddef', 'cmath', 'cstdlib', 'cstring', 'limits', 'cstdio');
+  }
+  if (name === 'ptrdiff_t') return has('cstddef') || (scope === 'global' && has('stddef.h'));
+  if (name === 'nullptr_t') return has('cstddef') || (scope === 'std' ? has('cmath', 'limits') : has('stddef.h'));
+  return (
+    has('cstdint', 'cmath', 'limits') || (scope === 'global' && has('cstdlib', 'stdint.h', 'stdlib.h', 'unistd.h'))
+  );
+}
+
 /** Whether a library name is visible to a program that includes `headers`. Names of no group stay visible. */
-export function isVisible(name: string, headers: ReadonlySet<string>): boolean {
+export function isVisible(name: string, headers: ReadonlySet<string>, scope: 'std' | 'global'): boolean {
+  if (typedefHeader(name)) return typedefVisible(name, headers, scope);
   const nameGroups = NAME_GROUPS[name];
   if (!nameGroups) return true;
   for (const header of headers) {
@@ -661,7 +734,7 @@ export function isVisible(name: string, headers: ReadonlySet<string>): boolean {
 
 /** The header that declares a library name, for the message that asks to include it. */
 export function headerOf(name: string): string | undefined {
-  return NAME_GROUPS[name]?.[0];
+  return typedefHeader(name) ?? NAME_GROUPS[name]?.[0];
 }
 
 export function hasLocaleCtypeOverload(name: string, headers: ReadonlySet<string>): boolean {

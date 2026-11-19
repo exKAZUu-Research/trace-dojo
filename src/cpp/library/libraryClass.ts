@@ -28,6 +28,7 @@ export interface LibraryClass {
    * constructor that takes the elements, or gives undefined to initialize through the other constructors.
    */
   listInitializer?: (compiler: ExpressionCompiler, elements: Syntax[], row: number) => Eval<Value> | undefined;
+  defaultInitializer?: (compiler: ExpressionCompiler, row: number, valueInitialize: boolean) => Eval<Value>;
   /**
    * Compiles a call of a member function that constructs an element from its arguments, such as `emplace_back`,
    * or gives undefined for an ordinary member function.

@@ -122,6 +122,17 @@ class Range {
     return object;
   }
 
+  withTemporary<T>(position: number, use: (value: Value) => T): T {
+    const frame = this.write?.frame;
+    if (!frame) return use(this.get(position));
+    const mark = frame.temporaries.length;
+    try {
+      return use(this.take(position));
+    } finally {
+      destroyTemporaries(frame, mark);
+    }
+  }
+
   swap(a: number, b: number): void {
     if (a === b) return;
     if (this.write) {
@@ -756,16 +767,13 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     if (!info || !other || (args.length !== 4 && args.length !== 6)) return;
     const sumType = unqualified(args[3].type);
     // inner_product(first1, last1, first2, init, op1, op2) sums with op1 the products op2 makes.
-    const explicitProduct =
-      args.length === 6 ? compileOperation(compiler(), args[5], [info.element, other.element]) : undefined;
-    const product =
-      args.length === 6
-        ? explicitProduct?.run
-        : accumulateStep(compiler(), unqualified(info.element), other.element, args[0].row, '*');
-    const add =
-      args.length === 6
-        ? explicitProduct && compileOperation(compiler(), args[4], [sumType, explicitProduct.type], sumType)?.run
-        : product && accumulateStep(compiler(), sumType, unqualified(info.element), args[0].row);
+    const product = args[5]
+      ? compileOperation(compiler(), args[5], [info.element, other.element])
+      : binaryStep(compiler(), '*', info.element, other.element, args[0].row);
+    if (!product) return;
+    const add = args[4]
+      ? compileOperation(compiler(), args[4], [sumType, product.type], sumType)?.run
+      : accumulateStep(compiler(), sumType, product.type, args[0].row);
     if (!product || !add) return;
     return native(
       'inner_product',
@@ -776,7 +784,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         const others = range(start, (start as Ptr).offset(values.length), other);
         let sum = initial as Value;
         for (let index = 0; index < values.length; index++)
-          sum = add(frame, sum, product(frame, values.get(index), others.get(index)) as Value) as Value;
+          sum = add(frame, sum, product.run(frame, values.get(index), others.get(index)));
         return sum;
       }
     );
@@ -1148,26 +1156,42 @@ function accumulateStep(
   compiler: ExpressionCompiler,
   sumType: Type,
   element: Type,
-  row: number,
-  operator = '+'
+  row: number
 ): ((frame: Frame, sum: Value, item: Value) => Value) | undefined {
+  return binaryStep(compiler, '+', sumType, element, row, sumType)?.run;
+}
+
+function binaryStep(
+  compiler: ExpressionCompiler,
+  operator: string,
+  left: Type,
+  right: Type,
+  row: number,
+  resultType?: Type
+): { type: Type; run: (frame: Frame, left: Value, right: Value) => Value } | undefined {
   try {
-    const sum: Expr = { type: sumType, isLvalue: false, row, run: (frame) => frame.pending.at(-2) as Value };
+    const sum: Expr = { type: unqualified(left), isLvalue: false, row, run: (frame) => frame.pending.at(-2) as Value };
     const item: Expr = {
-      type: unqualified(element),
+      type: unqualified(right),
       isLvalue: false,
       row,
       run: (frame) => frame.pending.at(-1) as Value,
     };
-    const combined = compiler.convert(compiler.binary(operator, sum, item, row), sumType, row).run;
-    return (frame, total, value) => {
-      frame.pending.push(total, value);
-      try {
-        return combined(frame) as Value;
-      } finally {
-        frame.pending.pop();
-        frame.pending.pop();
-      }
+    const result = compiler.binary(operator, sum, item, row);
+    const evaluate = resultType
+      ? compiler.copyInitializer(resultType, result, row, false)
+      : compiler.rvalue(result).run;
+    return {
+      type: resultType ?? result.type,
+      run: (frame, total, value) => {
+        frame.pending.push(total, value);
+        try {
+          return evaluate(frame) as Value;
+        } finally {
+          frame.pending.pop();
+          frame.pending.pop();
+        }
+      },
     };
   } catch (error) {
     if (error instanceof CompileError) return undefined;
@@ -1303,14 +1327,15 @@ function insertionSort(values: Range, first: number, last: number, less: Less, g
   for (let i = first + 1; i !== last; i++) {
     let j = i - 1;
     if (less(values.get(i), values.get(j))) {
-      const value = values.take(i);
-      let k = j;
-      j = i;
-      do {
-        values.set(j, values.get(k));
-        j = k;
-      } while ((!guarded || j !== first) && less(value, values.get(--k)));
-      values.set(j, value);
+      values.withTemporary(i, (value) => {
+        let k = j;
+        j = i;
+        do {
+          values.set(j, values.get(k));
+          j = k;
+        } while ((!guarded || j !== first) && less(value, values.get(--k)));
+        values.set(j, value);
+      });
     }
   }
 }
@@ -1343,14 +1368,15 @@ function insertionSortIncomplete(values: Range, first: number, last: number, les
   let count = 0;
   for (let i = j + 1; i !== last; i++) {
     if (less(values.get(i), values.get(j))) {
-      const value = values.take(i);
-      let k = j;
-      j = i;
-      do {
-        values.set(j, values.get(k));
-        j = k;
-      } while (j !== first && less(value, values.get(--k)));
-      values.set(j, value);
+      values.withTemporary(i, (value) => {
+        let k = j;
+        j = i;
+        do {
+          values.set(j, values.get(k));
+          j = k;
+        } while (j !== first && less(value, values.get(--k)));
+        values.set(j, value);
+      });
       if (++count === 8) return i + 1 === last;
     }
     j = i;

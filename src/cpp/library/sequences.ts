@@ -86,17 +86,30 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   const outOfRange = (frame: Frame): never =>
     throwLibrary(frame, library.exception('out_of_range'), kind === 'array' ? 'array::at' : kind);
   const make = (items: Value[]): SequenceValue => {
-    const value = new SequenceValue(
-      items,
-      element,
-      kind !== 'list',
-      kind === 'list' || kind === 'deque' ? kind : undefined
-    );
+    const value = new SequenceValue(items, element, kind !== 'list', kind === 'array' ? undefined : kind);
     value.capacity = items.length;
     return value;
   };
   // std::array destroys its elements as a built-in array does, from the last.
   const editor = new SequenceEditor(kind === 'array' ? 'vector' : kind, ops);
+  const arrayDefault = (compiler: ExpressionCompiler, row: number, valueInitialize: boolean): Eval<Value> => {
+    const initialize = valueInitialize
+      ? (compiler.valueInitialized(element, row).run as Eval<Value>)
+      : compiler.defaultInitializer(element, row);
+    const destroy = compiler.destroyerOf(element, row);
+    const length = fixedLength ?? 0;
+    return (frame) => {
+      frame.runtime.reserve(length);
+      return make(
+        makeEach(
+          frame,
+          length,
+          () => initialize(frame),
+          () => destroy
+        )
+      );
+    };
+  };
   cls.library = {
     kind,
     args: [element],
@@ -106,6 +119,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
       sequenceOperator(compiler, cls, element, kind, operator, operands, row, editor, ops),
     listInitializer: (compiler, elements, row) =>
       sequenceList(compiler, element, elements, row, make, fixedLength, ops),
+    defaultInitializer: kind === 'array' ? arrayDefault : undefined,
     memberCall: (compiler, object, member, args, row) => {
       checkElementRequirement(compiler, { kind, element, ops }, member, args, row);
       return emplacement(compiler, library, object, member, args, row, element, editor);
@@ -121,7 +135,14 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
     copy: (frame, source) => {
       const items = (source as SequenceValue).items;
       reserve(frame, items.length);
-      return make(items.map((item) => ops().copy(frame, item)));
+      return make(
+        makeEach(
+          frame,
+          items.length,
+          (index) => ops().copy(frame, items[index]),
+          () => ops().destroy
+        )
+      );
     },
     assign: (frame, target, source) => {
       const to = target as SequenceValue;
@@ -144,11 +165,6 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
       row,
       run: () => BigInt(fixedLength ?? 0),
     }));
-    cls.constructors = [
-      nativeConstructor(cls, [], (_args, { frame }) =>
-        make(Array.from({ length: fixedLength ?? 0 }, () => ops().make(frame)))
-      ),
-    ];
   } else {
     const countConstructor = nativeConstructor(
       cls,
@@ -157,7 +173,14 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
         checkVectorLength(frame, library, kind, element, count);
         const n = asNumber(count);
         reserve(frame, n);
-        return make(Array.from({ length: n }, () => ops().make(frame)));
+        return make(
+          makeEach(
+            frame,
+            n,
+            () => ops().make(frame),
+            () => ops().destroy
+          )
+        );
       },
       { isExplicit: true }
     );
@@ -182,7 +205,14 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
         const n = asNumber(count);
         reserve(frame, n);
         const source = (value as Ptr).read();
-        return make(Array.from({ length: n }, () => ops().copy(frame, source)));
+        return make(
+          makeEach(
+            frame,
+            n,
+            () => ops().copy(frame, source),
+            () => ops().destroy
+          )
+        );
       }),
       {
         ...nativeConstructor(cls, [], () => {}),
@@ -192,7 +222,14 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
           return nativeConstructor(cls, range.params, ([first, last], { frame }) => {
             const source = range.read(first, last);
             reserve(frame, source.values.length);
-            return make(source.values.map((value) => source.construct(frame, value)));
+            return make(
+              makeEach(
+                frame,
+                source.values.length,
+                (index) => source.construct(frame, source.values[index]),
+                () => ops().destroy
+              )
+            );
           });
         },
         isTemplate: true,
@@ -461,18 +498,10 @@ function sequenceMethods(
     method('reserve', [SIZE_T], VOID, (self, [count], frame) => {
       checkVectorLength(frame, library, kind, element, count);
       const n = asNumber(count);
-      if (n > self.capacity) {
-        self.capacity = n;
-        const { hasEffects, copy, destroy } = ops();
-        if (hasEffects) {
-          const old = self.items;
-          self.items = old.map((item) => copy(frame, item));
-          if (destroy) for (const item of old) destroy(frame, item);
-        }
-      }
+      if (n > self.capacity) editor.reallocate(frame, self, n);
     });
-    method('shrink_to_fit', [], VOID, (self) => {
-      self.capacity = self.items.length;
+    method('shrink_to_fit', [], VOID, (self, _args, frame) => {
+      if (self.capacity > self.length) editor.reallocate(frame, self, self.length);
     });
   }
   method('insert', [types.constIterator, constRef(element)], types.iterator, (self, [at, value], frame) => {
@@ -593,13 +622,15 @@ function listElementsOf(
   inits: Eval<Value>[],
   ops: () => ElementOperations
 ): (frame: Frame, use: (source: Source) => void) => void {
-  return (frame, use) =>
-    holdAll(frame, inits, (values) => {
-      const temporaries = values as Value[];
-      use({ values: temporaries, construct: ops().copy, isSameType: true });
-      const destroy = ops().destroy;
-      if (destroy) for (let index = temporaries.length - 1; index >= 0; index--) destroy(frame, temporaries[index]);
+  return (frame, use) => {
+    const { destroy, copy } = ops();
+    const values = inits.map((init) => {
+      const object = init(frame);
+      if (destroy) frame.temporaries.push({ object, destroy });
+      return object;
     });
+    use({ values, construct: copy, isSameType: true });
+  };
 }
 
 const nonEmpty = (self: SequenceValue): void => {
@@ -884,14 +915,18 @@ function sequenceList(
       return compiler.error(row, `std::array の要素は ${fixedLength} 個なので、初期値が多すぎます。`);
     const inits = elements.map((node) => compiler.elementInitializer(element, node));
     const zero = compiler.valueInitialized(element, row).run as Eval<Value>;
-    return (frame) =>
-      holdAll(frame, inits, (values) =>
-        make(
-          Array.from({ length: fixedLength }, (_, index) =>
-            index < values.length ? (values[index] as Value) : zero(frame)
-          )
+    const destroy = compiler.destroyerOf(element, row);
+    return (frame) => {
+      frame.runtime.reserve(fixedLength);
+      return make(
+        makeEach(
+          frame,
+          fixedLength,
+          (index) => (inits[index] ?? zero)(frame),
+          () => destroy
         )
       );
+    };
   }
   // A list of one or two sizes is still an initializer list of elements when the elements can take them.
   let inits: Eval<Value>[];

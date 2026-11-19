@@ -231,7 +231,7 @@ export abstract class CompilerBase {
     switch (node.type) {
       case 'primitive_type': {
         if (WIDE_CHARACTER_TYPES.has(node.text)) return this.unsupported(node.row, `ワイド文字の型（${node.text}）`);
-        return primitiveType(node.text) ?? this.error(node.row, `${node.text} という型はありません。`);
+        return primitiveType(node.text) ?? this.typeOfEntity(this.lookupName(node.text, node.row), node);
       }
       case 'sized_type_specifier': {
         return this.sizedType(node);
@@ -472,23 +472,6 @@ const PRIMITIVE_TYPES: Record<string, Type> = {
   signed: { kind: 'int', name: 'int' },
   float: { kind: 'float', name: 'float' },
   double: { kind: 'float', name: 'double' },
-  // The grammar reads these names of <cstdint> and <cstddef> as primitive types; their definitions are macOS's.
-  size_t: { kind: 'int', name: 'ulong' },
-  ssize_t: { kind: 'int', name: 'long' },
-  ptrdiff_t: { kind: 'int', name: 'long' },
-  intptr_t: { kind: 'int', name: 'long' },
-  uintptr_t: { kind: 'int', name: 'ulong' },
-  intmax_t: { kind: 'int', name: 'long' },
-  uintmax_t: { kind: 'int', name: 'ulong' },
-  int8_t: { kind: 'int', name: 'schar' },
-  int16_t: { kind: 'int', name: 'short' },
-  int32_t: { kind: 'int', name: 'int' },
-  int64_t: { kind: 'int', name: 'llong' },
-  uint8_t: { kind: 'int', name: 'uchar' },
-  uint16_t: { kind: 'int', name: 'ushort' },
-  uint32_t: { kind: 'int', name: 'uint' },
-  uint64_t: { kind: 'int', name: 'ullong' },
-  nullptr_t: { kind: 'nullptr' },
 };
 
 function primitiveType(text: string): Type | undefined {

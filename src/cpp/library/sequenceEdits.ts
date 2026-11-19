@@ -1,3 +1,5 @@
+import { CppException } from '../errors';
+import { makeEach } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import { Ptr, UNINIT, type Value } from '../values';
 import type { SequenceValue } from './containerValues';
@@ -44,7 +46,7 @@ export class SequenceEditor {
   append(frame: Frame, self: SequenceValue, count: number, make: () => Value): void {
     const length = self.items.length;
     if (this.kind === 'vector' && length + count > self.capacity) {
-      const made = Array.from({ length: count }, make);
+      const made = makeEach(frame, count, make, () => this.ops.destroy);
       this.reallocate(frame, self, recommend(self, length + count), length, made);
     } else for (let index = 0; index < count; index++) self.append(make());
   }
@@ -61,7 +63,7 @@ export class SequenceEditor {
     if (this.kind === 'list') self.splice(at, 0, make());
     else if (this.kind === 'deque') this.dequeEmplace(frame, self, at, make);
     else if (length >= self.capacity) this.reallocate(frame, self, recommend(self, length + 1), at, [make()]);
-    else if (at === length) items.push(make());
+    else if (at === length) self.append(make());
     else {
       const temporary = make();
       this.moveRange(frame, items, at, length, at + 1);
@@ -81,7 +83,7 @@ export class SequenceEditor {
     if (length >= self.capacity) {
       const made = this.ops.copy(frame, value.read());
       this.reallocate(frame, self, recommend(self, length + 1), at, [made]);
-    } else if (at === length) items.push(this.ops.copy(frame, value.read()));
+    } else if (at === length) self.append(this.ops.copy(frame, value.read()));
     else {
       this.moveRange(frame, items, at, length, at + 1);
       this.assignAt(frame, items, at, shifted(value, self, at, 1).read());
@@ -92,7 +94,12 @@ export class SequenceEditor {
   insertCopies(frame: Frame, self: SequenceValue, at: number, count: number, value: Ptr): void {
     if (count === 0) return;
     if (this.kind === 'list') {
-      const made = Array.from({ length: count }, () => this.ops.copy(frame, value.read()));
+      const made = makeEach(
+        frame,
+        count,
+        () => this.ops.copy(frame, value.read()),
+        () => this.ops.destroy
+      );
       self.splice(at, 0, ...made);
     } else if (this.kind === 'deque') this.dequeInsertCopies(frame, self, at, count, value);
     else this.vectorInsertCopies(frame, self, at, count, value);
@@ -142,7 +149,7 @@ export class SequenceEditor {
     const { values } = source;
     if (this.kind === 'vector' && values.length > self.capacity) {
       this.truncate(frame, self, 0);
-      self.capacity = values.length;
+      self.replaceAllocation([], values.length);
       for (const value of values) self.append(source.construct(frame, value));
       return;
     }
@@ -156,7 +163,7 @@ export class SequenceEditor {
   assignCopies(frame: Frame, self: SequenceValue, count: number, value: Ptr): void {
     if (this.kind === 'vector' && count > self.capacity) {
       this.truncate(frame, self, 0);
-      self.capacity = count;
+      self.replaceAllocation([], count);
       for (let index = 0; index < count; index++) self.append(this.ops.copy(frame, value.read()));
       return;
     }
@@ -190,23 +197,43 @@ export class SequenceEditor {
   // std::vector ------------------------------------------------------------------------------------------------------
 
   /** `__swap_out_circular_buffer(v, p)`: relocates the elements after `at`, then those before, around `made`. */
-  private reallocate(frame: Frame, self: SequenceValue, capacity: number, at: number, made: Value[]): void {
-    self.capacity = capacity;
-    if (!this.ops.hasEffects) {
-      self.splice(at, 0, ...made);
+  reallocate(frame: Frame, self: SequenceValue, capacity: number, at = self.length, made: Value[] = []): void {
+    const old = self.items;
+    const { copy, destroy, type } = this.ops;
+    if (type.kind !== 'class') {
+      self.replaceAllocation([...old.slice(0, at), ...made, ...old.slice(at)], capacity);
       return;
     }
-    const back = this.relocate(frame, self.items.slice(at));
-    const front = this.relocate(frame, self.items.slice(0, at));
-    self.items = [...front, ...made, ...back];
-  }
-
-  /** `__uninitialized_allocator_relocate`: copies the elements, then destroys the originals from the first. */
-  private relocate(frame: Frame, values: Value[]): Value[] {
-    const copies = values.map((value) => this.ops.copy(frame, value));
-    const destroy = this.ops.destroy;
-    if (destroy) for (const value of values) destroy(frame, value);
-    return copies;
+    const mark = frame.pending.length;
+    let back: Value[] = [];
+    try {
+      for (const value of made) frame.pending.push(value);
+      back = makeEach(
+        frame,
+        old.length - at,
+        (index) => copy(frame, old[at + index]),
+        () => destroy
+      );
+      for (const value of back) frame.pending.push(value);
+      if (destroy) for (let index = at; index < old.length; index++) destroy(frame, old[index]);
+      if (old.length > at) self.splice(at, old.length - at);
+      const front = makeEach(
+        frame,
+        at,
+        (index) => copy(frame, old[index]),
+        () => destroy
+      );
+      if (destroy) for (const item of old) destroy(frame, item);
+      self.replaceAllocation([...front, ...made, ...back], capacity);
+    } catch (error) {
+      if (error instanceof CppException) {
+        this.destroy(frame, back);
+        this.destroy(frame, made);
+      }
+      throw error;
+    } finally {
+      frame.pending.length = mark;
+    }
   }
 
   /** `__move_range(from, fromEnd, to)`: constructs the elements that pass the end, then assigns the rest backward. */
@@ -220,7 +247,12 @@ export class SequenceEditor {
     const items = self.items;
     const length = items.length;
     if (count > self.capacity - length) {
-      const made = Array.from({ length: count }, () => this.ops.copy(frame, value.read()));
+      const made = makeEach(
+        frame,
+        count,
+        () => this.ops.copy(frame, value.read()),
+        () => this.ops.destroy
+      );
       this.reallocate(frame, self, recommend(self, length + count), at, made);
       return;
     }
@@ -242,7 +274,12 @@ export class SequenceEditor {
     const items = self.items;
     const length = items.length;
     if (count > self.capacity - length) {
-      const made = values.map((value) => source.construct(frame, value));
+      const made = makeEach(
+        frame,
+        count,
+        (index) => source.construct(frame, values[index]),
+        () => this.ops.destroy
+      );
       this.reallocate(frame, self, recommend(self, length + count), at, made);
       return;
     }

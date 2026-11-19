@@ -395,6 +395,11 @@ export function randomClasses(library: Library): LibraryTemplate[] {
           const low = a as number | bigint;
           const high = (b ?? max) as number | bigint;
           if (!(low <= high)) throw new CppRuntimeError('custom', '乱数を作る範囲の下限は上限以下にしてください。');
+          if (!isIntegral) {
+            const width = Number(high) - Number(low);
+            const limit = sizeOf(type) === 4 ? Math.fround(3.4028234663852886e38) : Number.MAX_VALUE;
+            if (!(width <= limit)) throw new CppRuntimeError('custom', '乱数を作る範囲が広すぎます。');
+          }
           return new DistributionValue(low, high);
         },
         { optional: 1, isExplicit: false }

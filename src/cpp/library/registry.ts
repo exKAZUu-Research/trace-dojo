@@ -211,7 +211,7 @@ export class Library {
   }
 
   std(name: string): Entity | undefined {
-    if (!isVisible(name, this.headers)) return undefined;
+    if (!isVisible(name, this.headers, 'std')) return undefined;
     const entity = this.stdNames.get(name);
     if (entity?.kind === 'functions' && hasLocaleCtypeOverload(name, this.headers)) {
       let overload = this.localeCtypeOverloads.get(name);
@@ -228,13 +228,18 @@ export class Library {
   }
 
   global(name: string): Entity | undefined {
-    if (name !== 'Turtle' && !isVisible(name, this.headers)) return undefined;
+    if (name !== 'Turtle' && !isVisible(name, this.headers, 'global')) return undefined;
     return this.globalNames.get(name);
   }
 
   /** The header to include for a library name the program uses without including it, if the library has the name. */
   missingHeader(name: string): string | undefined {
-    if (isVisible(name, this.headers) || !(this.stdNames.has(name) || this.globalNames.has(name))) return undefined;
+    if (
+      isVisible(name, this.headers, 'global') ||
+      isVisible(name, this.headers, 'std') ||
+      !(this.stdNames.has(name) || this.globalNames.has(name))
+    )
+      return undefined;
     return headerOf(name);
   }
 
@@ -367,15 +372,11 @@ export class Library {
       ['uint64_t', ULLONG],
       ['nullptr_t', { kind: 'nullptr' }],
     ] as const) {
-      this.addStd(name, { kind: 'type', type });
+      const entity = { kind: 'type', type } as const;
+      this.addStd(name, entity);
+      this.globalNames.set(name, entity);
     }
-    // The grammar reads the other names of <cstdint> as primitive types.
-    for (const [name, type] of [
-      ['intmax_t', LONG],
-      ['uintmax_t', ULONG],
-    ] as const) {
-      this.globalNames.set(name, { kind: 'type', type });
-    }
+    this.globalNames.set('ssize_t', { kind: 'type', type: LONG });
   }
 }
 

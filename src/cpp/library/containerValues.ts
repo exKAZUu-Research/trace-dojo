@@ -57,7 +57,7 @@ class DequeIterator extends Ptr {
 /** Associates a node's address with its current position in a container's traversal order. */
 export class NodePositions {
   private positions = new Map<number, NodePosition>();
-  private readonly end: NodePosition;
+  private end: NodePosition;
 
   constructor(private readonly owner: Store) {
     this.end = new NodePosition(owner, undefined);
@@ -72,6 +72,11 @@ export class NodePositions {
       this.positions.set(index, node);
     }
     return node;
+  }
+
+  invalidateEnd(): void {
+    this.end.position = -1;
+    this.end = new NodePosition(this.owner, undefined);
   }
 
   splice(from: number, remove: number, insert: number): void {
@@ -123,7 +128,7 @@ export class SequenceValue extends Store {
     readonly elementType: Type,
     /** Whether the trace shows the container as an array, as it shows a Java array. */
     readonly isArrayLike: boolean,
-    storageKind?: 'list' | 'deque'
+    private readonly storageKind?: 'list' | 'deque' | 'vector'
   ) {
     super();
     this.nodes = storageKind ? new NodePositions(this) : undefined;
@@ -144,12 +149,14 @@ export class SequenceValue extends Store {
 
   append(value: Value): void {
     if (this.dequeEpoch) this.dequeEpoch.all++;
+    if (this.storageKind === 'vector') this.nodes?.invalidateEnd();
     this.items.push(value);
   }
 
   splice(from: number, remove: number, ...items: Value[]): Value[] {
-    this.editPositions(from, remove, items.length);
-    return this.items.splice(from, remove, ...items);
+    const start = from < 0 ? Math.max(0, this.length + from) : from;
+    this.editPositions(start, remove, items.length);
+    return this.items.splice(start, remove, ...items);
   }
 
   replaceItems(items: Value[]): Value[] {
@@ -159,10 +166,17 @@ export class SequenceValue extends Store {
     return previous;
   }
 
+  replaceAllocation(items: Value[], capacity: number): void {
+    this.nodes?.invalidateEnd();
+    this.replaceItems(items);
+    this.capacity = capacity;
+  }
+
   editPositions(from: number, remove: number, insert: number): void {
     const atEnd = from + remove === this.length;
     const changesMiddle = from > 0 && !atEnd;
     const epoch = this.dequeEpoch;
+    if (this.storageKind === 'vector' && (remove || insert)) this.nodes?.invalidateEnd();
     if (epoch && changesMiddle) this.nodes?.splice(0, this.length, this.length - remove + insert);
     else this.nodes?.splice(from, remove, insert);
     if (epoch && (insert || changesMiddle)) epoch.all++;

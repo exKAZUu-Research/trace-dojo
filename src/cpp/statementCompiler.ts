@@ -26,7 +26,7 @@ import {
 import { Box, type CObject, endLifetime, Liveness, Ptr, type Store, UNINIT, type Value } from './values';
 
 /** The type an `auto` declarator deduced, which the declaration's other declarators must agree with. */
-type ReferenceBinding = { type: Extract<Type, { kind: 'reference' }> } & (
+export type ReferenceBinding = { type: Extract<Type, { kind: 'reference' }> } & (
   | { loc: Eval<Ptr> }
   | { lifetime: { type: Type; make: Eval<Value | Ptr>; locate: (box: Box) => Ptr } }
 );
@@ -51,11 +51,15 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   fullExpression<T>(run: Eval<T>): Eval<T> {
     return (frame) => {
       const mark = frame.temporaries.length;
+      let result: T;
       try {
-        return run(frame);
-      } finally {
-        if (frame.temporaries.length > mark) destroyTemporaries(frame, mark);
+        result = run(frame);
+      } catch (error) {
+        if (error instanceof CppException) destroyTemporaries(frame, mark);
+        throw error;
       }
+      destroyTemporaries(frame, mark);
+      return result;
     };
   }
 
@@ -542,15 +546,18 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       const declared = this.applyDeclarator(base, declarator);
       const name = declared.name as string;
       this.checkRedeclaration(name, declarator.row);
-      if (declared.type.kind === 'reference') return this.unsupported(declarator.row, 'static の参照');
       const value = declarator.type === 'init_declarator' ? fieldOf(declarator, 'value') : undefined;
       let type: Type = declared.type;
-      if (hasAuto(type)) {
+      const reference = type.kind === 'reference' ? this.bindReference(name, type, value, declarator.row) : undefined;
+      if (reference) type = reference.type;
+      else if (hasAuto(type)) {
         type = this.deduceAuto(
           type,
           this.compileExpression(this.autoInitializer(declarator, value, name)),
           declarator.row
         );
+      }
+      if (hasAuto(declared.type)) {
         firstDeduced = this.checkAutoDeduction(
           firstDeduced,
           { name, type: deducedType(declared.type, type) },
@@ -562,19 +569,22 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return this.error(declarator.row, `配列 ${name} の大きさを書いてください。`);
       const global = this.declareStaticStorage(name, type, declarator.row, false);
       const local = this.context.declareLocal(name, type, false);
-      const constant = this.isConstexpr(node)
-        ? this.requireConstantInitializer(type, value, declarator.row)
-        : undefined;
-      this.context.scope.names.set(name, { kind: 'local', local, isReference: false, constant });
+      const constant =
+        !reference && this.isConstexpr(node) ? this.requireConstantInitializer(type, value, declarator.row) : undefined;
+      this.context.scope.names.set(name, { kind: 'local', local, isReference: reference !== undefined, constant });
       const { slot } = local;
       const { index } = global;
-      const initialize = this.staticInitializer(global, type, value, declarator.row);
+      const initialize = reference
+        ? this.staticReferenceInitializer(global, reference, declarator.row)
+        : this.staticInitializer(global, type, value, declarator.row);
       this.context.scope.slots.splice(this.context.scope.slots.indexOf(slot), 1);
       this.context.scope.returnSlots.delete(local);
       this.context.scope.statics.push(slot);
       return (frame: Frame) => {
-        frame.slots[slot] = frame.runtime.globals[index];
+        const store = frame.runtime.globals[index];
+        if (!reference) frame.slots[slot] = store;
         initialize(frame);
+        if (reference) frame.slots[slot] = (store as Box).value as Ptr;
       };
     });
     return (frame) => {
@@ -585,6 +595,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   /** Declares a variable with static storage duration, which the program's start creates. */
   abstract declareStaticStorage(name: string, type: Type, row: number, isShown: boolean): GlobalInfo;
+
+  abstract staticReferenceInitializer(
+    global: GlobalInfo,
+    binding: ReferenceBinding,
+    row: number
+  ): (frame: Frame) => void;
 
   /** Initializes a function's static variable the first time its declaration runs. */
   abstract staticInitializer(
@@ -1145,7 +1161,14 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       this.context.popScope();
     }
     const run = this.withScopeExit((frame) => {
-      bind(frame, frame.runtime.handling.at(-1) as CppException);
+      const { handling, tryBlocks } = frame.runtime;
+      // A throw escaping the handler parameter initializer terminates, even when an outer handler matches.
+      const outerHandlers = tryBlocks.splice(0);
+      try {
+        bind(frame, handling.at(-1) as CppException);
+      } finally {
+        tryBlocks.push(...outerHandlers);
+      }
       return body(frame);
     }, scope);
     return { matches: (error) => exceptionMatches(handlerType, error.type), run: (frame) => run(frame) };

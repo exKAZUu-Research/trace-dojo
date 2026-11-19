@@ -502,7 +502,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       ? (frame) => holdAll(frame, argRuns, (values) => invoke(frame, fn, values, undefined, row, true) as Value)
       : (frame) =>
           holdAll(frame, argRuns, (values) => {
-            const object = newObject(cls);
+            const object = newObject(frame, cls);
             invoke(frame, fn, values, new Ptr(new Box(object), 0), row, true);
             return object;
           });
@@ -547,7 +547,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
 }
 
 /** A new object of a class, whose members its constructor initializes. */
-export function newObject(cls: ClassInfo): CObject {
+export function newObject(frame: Frame, cls: ClassInfo): CObject {
+  frame.runtime.reserve(cls.fields.length);
   return new CObject(
     cls,
     Array.from({ length: cls.fields.length }, () => UNINIT)

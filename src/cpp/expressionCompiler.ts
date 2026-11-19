@@ -8,6 +8,7 @@ import { hasAuto, isAuto } from './compilerBase';
 import { type ConversionSequence, convertArithmetic, implicitConversion, Rank, sequence } from './conversions';
 import { CppRuntimeError } from './errors';
 import { constantExpr, type Expr, type FunctionCandidates } from './expr';
+import { throwLibrary } from './library/support';
 import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
 import { makeEach, ObjectCompiler, zeroOf } from './objectCompiler';
 import { type Eval, type Frame, holdAll } from './runtime';
@@ -1305,6 +1306,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (type.kind === 'void') return this.error(node.row, 'void 型には sizeof を使えません。');
     if (type.kind === 'array' && type.length === undefined)
       return this.error(node.row, '大きさの決まっていない配列には sizeof を使えません。');
+    let element: Type = type;
+    while (element.kind === 'array') element = element.of;
+    if (element.kind === 'class' && !element.cls.isComplete)
+      return this.error(node.row, `クラス ${element.cls.name} はまだ定義されていません。`);
     return constantExpr(SIZE_T, BigInt(sizeOf(type)), node.row);
   }
 
@@ -1466,6 +1471,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** A prvalue object of a class made from constructor arguments, or by aggregate initialization when braced. */
   constructObject(cls: ClassInfo, args: Expr[], row: number, isBraced: boolean): Expr {
+    if (args.length === 0 && cls.library?.defaultInitializer) return this.defaultConstructed(cls, row, true);
     const list = args.length === 1 ? args[0].braced : undefined;
     if (list && cls.library?.listInitializer) {
       const elements = list.children.filter((child) => child.type !== 'comment');
@@ -1580,7 +1586,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       row: node.row,
       onlyCalls: type.kind === 'class',
       run: (frame) => {
-        frame.runtime.reserve(type.kind === 'class' ? Math.max(type.cls.fields.length, 1) : 1);
+        if (type.kind !== 'class' || type.cls.library || type.cls.fields.length === 0) frame.runtime.reserve(1);
         const box = new Box(value(frame));
         box.allocation = 'new';
         return new Ptr(box, 0);
@@ -1599,6 +1605,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         ? this.elementInitializer(elementType, child)
         : this.copyInitializer(elementType, this.compileExpression(child), child.row, false)
     );
+    if (lengthExpr.constant !== undefined && Number(lengthExpr.constant) < initial.length)
+      return this.error(row, 'new[] の要素の数が足りません。');
+    const badAlloc = this.library.exception('bad_alloc');
     // The elements without initializers need a default constructor only when some may exist.
     const hasRest = lengthExpr.constant === undefined || Number(lengthExpr.constant) > initial.length;
     const rest = hasRest
@@ -1613,7 +1622,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       row,
       run: (frame) => {
         const count = Number(length(frame));
-        if (count < 0 || count < initial.length) throw new CppRuntimeError('badLength');
+        if (count < initial.length) return throwLibrary(frame, badAlloc, 'std::bad_alloc');
         frame.runtime.reserve(count);
         const make = (index: number): Value =>
           index < initial.length ? initial[index](frame) : (rest as Eval<Value>)(frame);
