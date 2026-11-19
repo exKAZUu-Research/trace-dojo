@@ -289,3 +289,14 @@ $copy->forward();`;
   expect(phpTrace(program).at(-1)?.turtles).toEqual([moved]);
   expect(executeProgram('php', program)).toMatchObject({ kind: 'executed', stdout: 'cloned', finalTurtles: [moved] });
 });
+
+test('records a growing array without charging display expansion as program operations', () => {
+  const program = `<?php
+$values = [];
+for ($i = 0; $i < 800; $i++) {
+    $values[] = $i;
+}`;
+  const result = traceProgram('php', program, program);
+  expect(result.traceItems).toHaveLength(1603);
+  expect(result.finalVars.$values).toEqual(Array.from({ length: 800 }, (_, index) => index));
+});

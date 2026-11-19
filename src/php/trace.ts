@@ -8,7 +8,7 @@ import { dec } from './bytes';
 import { canAccessProp, declForKey, type LazyRef, lookupProp, propNameOf } from './classes';
 import { parsePhp } from './parse';
 import { runProgram } from './run';
-import { type Frame, rt, Runtime } from './runtime';
+import { type Frame, Runtime } from './runtime';
 import { isClosure, type Key, PhpArray, PhpObject, Ref, UNDEFINED_RESULT, UNINIT, type Value } from './values';
 
 export function tracePhpProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
@@ -33,6 +33,7 @@ export function tracePhpProgram(program: string, trace: TraceOptions, input?: Pr
  * fields).
  */
 function variablesOf(runtime: Runtime, frame: Frame, withContext: boolean): TraceVariables {
+  runtime.budget.checkClock();
   const variables: TraceVariables = { vars: {}, referenceVars: {} };
   for (const [name, ref] of frame.vars) {
     if (name === 'GLOBALS') continue;
@@ -98,7 +99,6 @@ type Scalar = TraceItemVariable[string];
 
 function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }): Scalar | typeof NOT_SCALAR {
   if (budget.remaining-- <= 0) throw new ExecutionLimitError('trace');
-  rt().spend();
   // oxlint-disable-next-line unicorn/no-null -- The trace format shows null as null.
   if (value === null) return null;
   switch (typeof value) {
@@ -138,7 +138,6 @@ const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 // code-gauge-allow functionNcss 40 -- Each branch maps a PHP value shape to the shared trace display tree.
 function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: number }): DisplayNode | undefined {
   if (budget.remaining-- <= 0) return { kind: 'value', value: '…' };
-  rt().spend();
   if (value === UNDEFINED_RESULT) return undefined;
   if (value === null) return NULL_NODE;
   if (typeof value === 'bigint') return { kind: 'value', value: traceInt(value) };
