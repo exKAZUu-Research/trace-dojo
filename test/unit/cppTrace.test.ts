@@ -372,8 +372,23 @@ test.each([
     'Base& value = make();',
     'value.number',
   ],
+  [
+    'a std::array data pointer',
+    'std::array<int, 1> values{7};',
+    'int* make() { return (new Owner)->values.data(); }',
+    'int* p = make();',
+    '*p',
+  ],
+  [
+    'a nested std::array element reference',
+    'std::array<std::array<int, 1>, 1> values{7};',
+    'int& make() { return (new Owner)->values[0][0]; }',
+    'int& value = make();',
+    'value',
+  ],
 ])('retains the heap owner through %s', (_, field, factory, bind, value) => {
-  const program = `#include <iostream>
+  const program = `#include <array>
+#include <iostream>
 Turtle observer(0, 0);
 struct Base { int number = 7; };
 struct Entry : Base { virtual void marker() {} };

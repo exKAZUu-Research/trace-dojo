@@ -243,6 +243,14 @@ export class SequenceValue extends Store {
     return this.dequeEpoch ? new DequeIterator(location, this.dequeEpoch, index === this.length) : location;
   }
 
+  bindInlineStorage(location: Ptr): void {
+    this.inlineArray?.bindLocation(this.elementType, location);
+  }
+
+  override get inlineArray(): ArrayStore | undefined {
+    if (this.fixedStorage?.length) return this.fixedStorage;
+  }
+
   append(value: Value): void {
     if (this.dequeEpoch) this.dequeEpoch.all++;
     if (this.storageKind === 'vector') this.nodes?.invalidateEnd();
@@ -320,6 +328,7 @@ export class SequenceValue extends Store {
     for (let index = from; index < to; index++) {
       const item = this.items[index];
       if (item instanceof CObject) item.bindContainerCell(this.location(index));
+      else if (item instanceof SequenceValue && item.inlineArray) item.bindInlineStorage(this.location(index));
     }
   }
 

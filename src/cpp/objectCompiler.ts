@@ -17,6 +17,7 @@ import {
   mapMemberConstants,
   type TemporaryBinding,
 } from './expr';
+import { SequenceValue } from './library/containerValues';
 import { constructElementFromRvalue, moveConstruction } from './library/elements';
 import { type Eval, type Frame, holdAll, type Temporary } from './runtime';
 import type { Syntax } from './syntax';
@@ -295,6 +296,7 @@ export function initializeAt(
     const value = initialize(target);
     if (type.kind === 'class' && value instanceof CObject) value.completeLocation = location;
     if (type.kind === 'array' && value instanceof ArrayStore) value.bindLocation(type.of, location);
+    if (value instanceof SequenceValue) value.bindInlineStorage(location);
     if (target instanceof CObject && target !== value && target.needsConstruction) endLifetime(target);
     location.write(value);
     return value;

@@ -61,6 +61,10 @@ export abstract class Store {
     return this.length;
   }
 
+  get inlineArray(): ArrayStore | undefined {
+    return undefined;
+  }
+
   /** Reads an element, which must exist and have a value. */
   abstract get(index: number): Value;
   abstract set(index: number, value: Value): void;
@@ -522,9 +526,13 @@ export class Ptr {
     const embedded = this.embeddedAddress(0);
     if (embedded) return embedded;
     const value = this.addressedValue();
-    if (value instanceof CObject || value instanceof ArrayStore) return value.addressAt(0);
-    if (store instanceof Box && this.index === 1 && store.value instanceof ArrayStore && store.value.elementSize)
-      return store.value.addressAt(store.value.length * store.value.elementSize);
+    if (value instanceof CObject) return value.addressAt(0);
+    const array = inlineArrayOf(value);
+    if (array) return array.addressAt(0);
+    if (store instanceof Box && this.index === 1) {
+      const enclosed = inlineArrayOf(store.value);
+      if (enclosed?.elementSize) return enclosed.addressAt(enclosed.length * enclosed.elementSize);
+    }
     return this.storageAddress;
   }
 
@@ -554,6 +562,11 @@ export class Ptr {
       if (!(error instanceof CppRuntimeError)) throw error;
     }
   }
+}
+
+function inlineArrayOf(value: Value): ArrayStore | undefined {
+  if (value instanceof ArrayStore) return value;
+  if (value instanceof Store) return value.inlineArray;
 }
 
 export const NULL_PTR = new Ptr(undefined, 0);
