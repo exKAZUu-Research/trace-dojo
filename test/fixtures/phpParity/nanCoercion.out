@@ -1,4 +1,14 @@
 
+Warning: unexpected NAN value was coerced to string in /main.php on line 12
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 13
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 16
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 17
+
+Warning: unexpected NAN value was coerced to string in /main.php on line 18
+
 Warning: unexpected NAN value was coerced to string in /main.php on line 2
 string(3) "NAN"
 
@@ -14,3 +24,8 @@ string(3) "NAN"
 
 Warning: unexpected NAN value was coerced to bool in /main.php on line 8
 bool(true)
+sampleNAN
+NANsample
+
+Warning: Array to string conversion in /main.php on line 18
+NANArray

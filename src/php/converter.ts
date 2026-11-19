@@ -1425,10 +1425,7 @@ export class Converter extends DeclarationConverter {
       if (specifier === '%') continue;
       const arg = args[index++];
       if (specifier !== 's') continue;
-      const value = this.compiledValue(arg.e);
-      if (value === undefined || value instanceof Map) continue;
-      if (Number.isNaN(value)) this.notices.push({ level: 'Warning', message: NAN_STRING_WARNING, row });
-      arg.e = { k: 'lit', v: scalarString(value), row: arg.e.row };
+      arg.e = this.compileStringOperand(arg.e, row);
     }
   }
 
@@ -1645,14 +1642,28 @@ export class Converter extends DeclarationConverter {
   }
 
   private compileConcatenation(expression: Extract<Expr, { k: 'bin' }>): string | undefined {
-    const value = this.compiledValue(expression);
-    if (typeof value !== 'string') return;
-    const row = this.initializerContext?.row ?? expression.r.row;
-    for (const operand of [expression.l, expression.r]) {
-      if (Number.isNaN(this.compiledValue(operand)))
-        this.notices.push({ level: 'Warning', message: NAN_STRING_WARNING, row });
+    const row = this.initializerContext?.row ?? compiledOperandRow(expression.r);
+    const left = this.compileStringOperand(expression.l, row);
+    const right = this.compileStringOperand(expression.r, row);
+    if (left.k === 'lit' && right.k === 'lit') {
+      const folded = this.compiledValue({ ...expression, l: left, r: right });
+      if (typeof folded === 'string') return folded;
     }
-    return value;
+    expression.l = left;
+    expression.r = right;
+    return undefined;
+  }
+
+  private compileStringOperand(operand: Expr, row: number): Expr {
+    if (operand.k === 'lit' && typeof operand.v === 'string') return operand;
+    const value = this.compiledValue(operand);
+    if (value === undefined || value instanceof Map) return operand;
+    if (Number.isNaN(value)) this.notices.push({ level: 'Warning', message: NAN_STRING_WARNING, row });
+    return recordOperandRows(
+      { k: 'lit', v: scalarString(value), row: operand.row },
+      operandAstRow(operand),
+      compiledOperandRow(operand)
+    );
   }
 
   private operandRank(operand: Expr): number {
