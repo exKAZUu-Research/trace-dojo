@@ -950,17 +950,19 @@ export class Compiler extends StatementCompiler {
     this.requireVirtualDefinitions(base, row);
     const braces = initializer?.children[1];
     if (braces?.type === 'initializer_list' && this.isAggregate(base)) {
-      const initialize = this.listInitializer(classType(base), braces, row);
-      return this.fullExpression<undefined>((frame) => {
-        const target = frame.self?.read() as CObject;
-        target.cls = base;
-        installBaseValue(base, target, initialize(frame, target) as CObject);
-        return;
-      });
+      return this.initializeBaseInPlace(base, this.listInitializer(classType(base), braces, row));
     }
     const args = initializer ? this.initializerArguments(initializer) : [];
     if (base.constructors.length === 0) {
-      if (args.length > 0) this.error(row, `${base.name} には引数をとるコンストラクタがありません。`);
+      if (args.length > 0) {
+        const [source] = args;
+        const object =
+          args.length === 1 && source.type.kind === 'class' && source.type.cls.isDerivedFrom(base)
+            ? this.copyObject(source, base)
+            : this.parenthesizedAggregate(base, args, row);
+        if (!object) return this.error(row, `${base.name} には引数をとるコンストラクタがありません。`);
+        return this.initializeBaseInPlace(base, this.objectInitializer(object));
+      }
       if (base.isDefaultConstructorDeleted) this.error(row, deletedDefaultMessage(base));
       const implicit = this.implicitDefaults.get(base)?.();
       return (frame) => {
@@ -991,6 +993,15 @@ export class Compiler extends StatementCompiler {
         return;
       })
     );
+  }
+
+  private initializeBaseInPlace(base: ClassInfo, initialize: Initializer): Exec {
+    return this.fullExpression<undefined>((frame) => {
+      const target = frame.self?.read() as CObject;
+      target.cls = base;
+      installBaseValue(base, target, initialize(frame, target) as CObject);
+      return;
+    });
   }
 
   /** Initializes one member as a constructor does, recording the step of an initializer that learners see. */

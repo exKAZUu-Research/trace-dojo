@@ -24,18 +24,7 @@ import {
   type Type,
   withConst,
 } from '../types';
-import {
-  ArrayStore,
-  Box,
-  CObject,
-  endLifetime,
-  FunctionRef,
-  holdValues,
-  Ptr,
-  Store,
-  UNINIT,
-  type Value,
-} from '../values';
+import { ArrayStore, CObject, endLifetime, FunctionRef, holdValues, Ptr, Store, UNINIT, type Value } from '../values';
 import { SequenceValue } from './containerValues';
 import type { LibraryClass } from './libraryClass';
 import { StringValue } from './string';
@@ -551,11 +540,6 @@ function compareReferences<T>(
   compare: ((a: Value, b: Value) => T) | undefined
 ): ((a: Value, b: Value) => T) | undefined {
   if (compare) return (a, b) => compare((a as Ptr).read(), (b as Ptr).read());
-}
-
-/** The location of a value, for passing it by reference to a function the program wrote. */
-export function locationOf(value: Value): Ptr {
-  return new Ptr(new Box(value), 0);
 }
 
 export interface CallbackOperand {

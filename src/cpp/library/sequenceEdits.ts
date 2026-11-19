@@ -11,13 +11,22 @@ import {
   moveValue,
 } from './elements';
 
-/** The values a range insertion or assignment takes, which may have another type than the elements. */
+/** The source elements of a range edit, read or converted when the edit reaches them. */
 export interface Source {
-  values: Value[];
-  /** Constructs an element from a value, as the container's allocator does. */
-  construct: (frame: Frame, value: Value, destination?: CObject) => Value;
+  length: number;
+  read: (index: number) => Value;
+  construct: (frame: Frame, index: number, destination?: CObject) => Value;
   /** Whether the values have the element type, which assigns them directly instead of through a temporary. */
   isSameType: boolean;
+}
+
+export function storedSource(values: Value[], copy: ElementOperations['copy']): Source {
+  return {
+    length: values.length,
+    read: (index) => values[index],
+    construct: (frame, index, destination) => copy(frame, values[index], destination),
+    isSameType: true,
+  };
 }
 
 type ElementFactory = (destination?: CObject) => Value;
@@ -208,14 +217,9 @@ export class SequenceEditor {
 
   /** `insert(position, first, last)`, whose elements `source` holds. */
   insertRange(frame: Frame, self: SequenceValue, at: number, source: Source, isForwardOnly: boolean): void {
-    if (source.values.length === 0) return;
+    if (source.length === 0) return;
     if (this.kind === 'list') {
-      const values = this.build(
-        frame,
-        source.values.length,
-        (index) => source.construct(frame, source.values[index]),
-        this.ops.destroy
-      );
+      const values = this.build(frame, source.length, (index) => source.construct(frame, index), this.ops.destroy);
       self.insertValues(at, values);
     } else if (this.kind === 'vector') this.vectorInsertRange(frame, self, at, source);
     else if (isForwardOnly) this.dequeInsertBuffered(frame, self, at, source);
@@ -243,18 +247,16 @@ export class SequenceEditor {
 
   /** `assign(first, last)` and copy assignment, which assign over the existing elements. */
   assignRange(frame: Frame, self: SequenceValue, source: Source): void {
-    const { values } = source;
-    if (this.kind === 'vector' && values.length > self.capacity) {
+    const { length } = source;
+    if (this.kind === 'vector' && length > self.capacity) {
       this.truncate(frame, self, 0);
-      self.replaceAllocation([], values.length);
-      for (const value of values) this.appendElement(frame, self, (target) => source.construct(frame, value, target));
-      return;
+      self.replaceAllocation([], length);
     }
-    const assigned = Math.min(values.length, self.items.length);
-    for (let index = 0; index < assigned; index++) this.assignFrom(frame, self.items, index, source, values[index]);
-    for (let index = assigned; index < values.length; index++)
-      this.appendElement(frame, self, (target) => source.construct(frame, values[index], target));
-    this.truncate(frame, self, values.length);
+    const assigned = Math.min(length, self.items.length);
+    for (let index = 0; index < assigned; index++) this.assignFrom(frame, self.items, index, source, index);
+    for (let index = assigned; index < length; index++)
+      this.appendElement(frame, self, (target) => source.construct(frame, index, target));
+    this.truncate(frame, self, length);
   }
 
   /** `assign(count, value)`. */
@@ -292,12 +294,12 @@ export class SequenceEditor {
   }
 
   /** Assigns a value of a source, through a temporary element when the value has another type. */
-  private assignFrom(frame: Frame, items: Value[], index: number, source: Source, value: Value): void {
+  private assignFrom(frame: Frame, items: Value[], index: number, source: Source, sourceIndex: number): void {
     if (source.isSameType) {
-      this.assignAt(frame, items, index, value);
+      this.assignAt(frame, items, index, source.read(sourceIndex));
       return;
     }
-    this.withTemporaryElement(frame, source.construct(frame, value), (temporary) =>
+    this.withTemporaryElement(frame, source.construct(frame, sourceIndex), (temporary) =>
       this.assignAt(frame, items, index, temporary)
     );
   }
@@ -414,15 +416,14 @@ export class SequenceEditor {
   }
 
   private vectorInsertRange(frame: Frame, self: SequenceValue, at: number, source: Source): void {
-    const { values } = source;
-    const count = values.length;
+    const count = source.length;
     const items = self.items;
     const length = items.length;
     if (count > self.capacity - length) {
       this.reallocate(frame, self, recommend(self, length + count), {
         at,
         count,
-        make: (index, target) => source.construct(frame, values[index], target),
+        make: (index, target) => source.construct(frame, index, target),
       });
       return;
     }
@@ -430,7 +431,7 @@ export class SequenceEditor {
     let assigned = count;
     if (count > after) {
       for (let index = after; index < count; index++)
-        this.appendElement(frame, self, (target) => source.construct(frame, values[index], target));
+        this.appendElement(frame, self, (target) => source.construct(frame, index, target));
       assigned = after;
     }
     if (assigned === 0) {
@@ -438,7 +439,7 @@ export class SequenceEditor {
       return;
     }
     this.moveRange(frame, self, at, length, at + count);
-    for (let index = 0; index < assigned; index++) this.assignFrom(frame, items, at + index, source, values[index]);
+    for (let index = 0; index < assigned; index++) this.assignFrom(frame, items, at + index, source, index);
     self.finishVectorEdit(at, length);
   }
 
@@ -541,52 +542,50 @@ export class SequenceEditor {
         object: new ArrayStore(values),
         destroy: (f) => destroyElements(f, values, destroy, 'reverse'),
       });
-      for (const value of source.values) values.push(source.construct(frame, value));
-      this.dequeInsertBidirectional(frame, self, at, { values, construct: copy, isSameType: true });
+      for (let index = 0; index < source.length; index++) values.push(source.construct(frame, index));
+      this.dequeInsertBidirectional(frame, self, at, storedSource(values, copy));
     });
   }
 
   /** libc++'s `deque::__insert_bidirectional`. */
   private dequeInsertBidirectional(frame: Frame, self: SequenceValue, at: number, source: Source): void {
-    this.editDequeInsertion(frame, self, at, source.values.length, (cells, atFront) => {
+    this.editDequeInsertion(frame, self, at, source.length, (cells, atFront) => {
       if (atFront) this.dequeInsertRangeAtFront(frame, cells, at, source);
       else this.dequeInsertRangeAtBack(frame, cells, at, source);
     });
   }
 
   private dequeInsertRangeAtFront(frame: Frame, cells: Value[], at: number, source: Source): void {
-    const { values } = source;
-    const count = values.length;
+    const count = source.length;
     const oldBegin = count;
     let first = oldBegin;
     // The values before `middle` go before the old first element; the rest are assigned over moved elements.
     const middle = Math.max(0, count - at);
-    for (let index = middle; index > 0;) cells[--first] = source.construct(frame, values[--index]);
+    for (let index = middle; index > 0;) cells[--first] = source.construct(frame, --index);
     const remaining = count - middle;
     if (remaining > 0) {
       const moved = oldBegin + remaining;
       for (let index = moved; index !== oldBegin;) cells[--first] = this.moveConstruct(frame, cells[--index]);
       let begin = oldBegin;
       for (let index = moved; index < oldBegin + at; index++) this.moveAt(frame, cells, begin++, cells[index]);
-      for (let index = middle; index < count; index++) this.assignFrom(frame, cells, begin++, source, values[index]);
+      for (let index = middle; index < count; index++) this.assignFrom(frame, cells, begin++, source, index);
     }
   }
 
   private dequeInsertRangeAtBack(frame: Frame, cells: Value[], at: number, source: Source): void {
-    const { values } = source;
-    const count = values.length;
+    const count = source.length;
     const length = cells.length;
     const after = length - at;
     let last = length;
     // The values from `middle` on go after the old last element; the rest are assigned over moved elements.
     const middle = Math.min(count, after);
-    for (let index = middle; index < count; index++) cells[last++] = source.construct(frame, values[index]);
+    for (let index = middle; index < count; index++) cells[last++] = source.construct(frame, index);
     if (middle > 0) {
       const moved = length - middle;
       for (let index = moved; index < length; index++) cells[last++] = this.moveConstruct(frame, cells[index]);
       let end = length;
       for (let index = moved; index > at;) this.moveAt(frame, cells, --end, cells[--index]);
-      for (let index = middle; index > 0;) this.assignFrom(frame, cells, --end, source, values[--index]);
+      for (let index = middle; index > 0;) this.assignFrom(frame, cells, --end, source, --index);
     }
   }
 

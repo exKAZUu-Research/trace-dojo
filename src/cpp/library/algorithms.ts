@@ -28,7 +28,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { ArrayStore, Box, endLifetime, NULL_PTR, Ptr, type Store, UNINIT, type Value } from '../values';
+import { ArrayStore, Box, CObject, endLifetime, NULL_PTR, Ptr, type Store, UNINIT, type Value } from '../values';
 import { pairClass } from './associative';
 import {
   assignElement,
@@ -44,6 +44,7 @@ import {
   moveAssignElement,
   moveValue,
   predicateCallback,
+  requireMoveConstruction,
   requireMoves,
   swapElements,
   truthy,
@@ -54,6 +55,7 @@ import type { IteratorCategory } from './libraryClass';
 import type { EngineValue } from './random';
 import { uniformInteger } from './random';
 import type { Library } from './registry';
+import { elementConstruction } from './sequences';
 import type { StringValue } from './string';
 import { constRef, generic, native, readCString } from './support';
 
@@ -778,6 +780,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       : binaryStep(compiler(), '+', operands, initial.row);
     if (!combine) return;
     const accumulator = numericAccumulator(compiler(), sumType, combine, initial.row);
+    requireMoveConstruction(compiler(), sumType, initial.row);
     return native(
       'accumulate',
       [...params(args).slice(0, 2), sumType, ...params(args).slice(3)],
@@ -804,6 +807,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       : binaryStep(compiler(), '+', operands, args[0].row);
     if (!add) return;
     const accumulator = numericAccumulator(compiler(), sumType, add, args[0].row);
+    requireMoveConstruction(compiler(), sumType, args[0].row);
     return native(
       'inner_product',
       [...params(args).slice(0, 3), sumType, ...params(args).slice(4)],
@@ -832,14 +836,14 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       : binaryStep(compiler(), '+', operands, args[0].row);
     if (!add) return;
     const accumulator = numericAccumulator(compiler(), sumType, add, args[0].row);
+    const makeInitial = accumulatorInitializer(compiler(), accumulator.ops, iteratorOperand(info), args[0].row);
     const assign = outputAssignment(compiler(), { type: sumType }, output, args[2].row);
     return native('partial_sum', params(args), unqualified(args[2].type), ([first, last, start], { frame }) => {
       const values = range(first, last, info);
       const out = new Output(start as Ptr, output, frame, assign);
       if (values.length === 0) return out.end;
       return withTemporaries(frame, () => {
-        const initial = accumulator.ops.copy(frame, values.get(0));
-        const sum = holdAccumulator(frame, accumulator, initial);
+        const sum = makeInitial(frame, values.location(0));
         out.write(sum);
         for (let index = 1; index < values.length; index++) {
           withTemporaries(frame, () => accumulator.update(frame, sum, values.location(index)));
@@ -1390,17 +1394,55 @@ function numericAccumulator(
   operation: ElementOperation,
   row: number
 ): NumericAccumulator {
-  const ops = elementOperations(compiler, type, row, 'relocate');
-  const convert = assignmentSource(compiler, operation, type, row);
+  const ops = elementOperations(compiler, type, row);
+  compiler.requireLibraryObjectUse(type, 'destroy', row);
   const movesResult =
     operation.category !== undefined && !isConstType(operation.type) && sameType(operation.type, type, false);
+  if (movesResult) {
+    compiler.requireLibraryObjectUse(type, 'move-assign', row);
+    return {
+      ops,
+      update: (frame, sum, operand) =>
+        moveAssignElement(
+          frame,
+          sum,
+          type,
+          readOperandValue(operation, invokeOperation(frame, operation, sum, operand))
+        ),
+    };
+  }
+  compiler.requireLibraryObjectUse(type, 'assign', row);
+  const convert = assignmentSource(compiler, operation, type, row);
   return {
     ops,
     update: (frame, sum, operand) => {
       const result = invokeOperation(frame, operation, sum, operand);
-      if (movesResult) moveAssignElement(frame, sum, type, readOperandValue(operation, result));
-      else convert(frame, result, (converted) => assignElement(frame, sum, ops, converted));
+      convert(frame, result, (converted) => assignElement(frame, sum, ops, converted));
     },
+  };
+}
+
+function accumulatorInitializer(
+  compiler: ExpressionCompiler,
+  ops: ElementOperations,
+  operand: CallbackOperand,
+  row: number
+): (frame: Frame, source: Ptr) => Ptr {
+  const [argument] = callbackOperands([operand], row, (frame) => frame.pending.at(-1));
+  const { run } = elementConstruction(compiler, ops.type, [argument], row);
+  return (frame, source) => {
+    const storage = new Box();
+    const location = storage.location(0);
+    holdAll(frame, [() => storage, () => source], () =>
+      initializeAt(
+        frame,
+        ops.type,
+        location,
+        UNINIT,
+        (target) => run(frame, false, target instanceof CObject ? target : undefined) as Value
+      )
+    );
+    return holdAccumulator(frame, ops, storage);
   };
 }
 
@@ -1411,17 +1453,22 @@ function foldValues(
   length: number,
   item: (index: number) => OperationArgument
 ): Value {
-  const sum = holdAccumulator(frame, accumulator, initial);
+  const sum = holdAccumulator(frame, accumulator.ops, new Box(initial));
   for (let index = 0; index < length; index++) {
     withTemporaries(frame, () => accumulator.update(frame, sum, item(index)));
   }
   return constructElementFromRvalue(frame, accumulator.ops.type, sum.read());
 }
 
-function holdAccumulator(frame: Frame, accumulator: NumericAccumulator, value: Value): Ptr {
-  const { destroy } = accumulator.ops;
-  if (destroy) frame.temporaries.push({ object: value, destroy });
-  return new Ptr(new Box(value), 0);
+function holdAccumulator(frame: Frame, ops: ElementOperations, storage: Box): Ptr {
+  frame.temporaries.push({
+    object: storage,
+    destroy: (current) => {
+      ops.destroy?.(current, storage.value);
+      endLifetime(storage);
+    },
+  });
+  return storage.location(0);
 }
 
 function accumulatorOperands(type: Type, item: CallbackOperand): CallbackOperand[] {

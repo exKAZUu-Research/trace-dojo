@@ -207,11 +207,11 @@ export function adapterClass(
             params,
             ([first, last], { frame }) => {
               const source = range.read(first, last);
-              frame.runtime.reserve(source.values.length);
+              frame.runtime.reserve(source.length);
               return heapify(
                 frame,
-                editor.construct(frame, make([]), source.values.length, (index, destination) =>
-                  source.construct(frame, source.values[index], destination)
+                editor.construct(frame, make([]), source.length, (index, destination) =>
+                  source.construct(frame, index, destination)
                 )
               );
             },

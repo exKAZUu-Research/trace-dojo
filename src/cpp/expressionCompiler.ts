@@ -2003,6 +2003,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const exec = (frame: Frame): Value => {
       const source = run(frame) as Ptr;
       if (source.isNull) return undefined;
+      if (pointee.kind === 'void' || pointee.kind === 'function') throw new CppRuntimeError('invalidDelete');
       const pointer = source.allocationLocation();
       if (pointer.store?.liveness === Liveness.Deleted) throw new CppRuntimeError('doubleDelete');
       const store = pointer.target();

@@ -37,7 +37,6 @@ import {
   elementOperations,
   equalTo,
   lessThan,
-  locationOf,
   movedArgument,
   predicateCallback,
   requireDefaultConstruction,
@@ -49,7 +48,7 @@ import {
 } from './elements';
 import { elementLocation, positionOf, randomAccessIterator, rangePositions } from './iterators';
 import type { Library } from './registry';
-import { listSort, SequenceEditor, type Source } from './sequenceEdits';
+import { listSort, SequenceEditor, type Source, storedSource } from './sequenceEdits';
 import { addMethod, asNumber, constRef, native, nativeConstructor, type NativeOptions, throwLibrary } from './support';
 import { typeKey } from './templates';
 
@@ -209,11 +208,11 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
         return;
       }
       reserve(frame, Math.max(0, from.items.length - to.items.length));
-      editor.assignRange(frame, to, {
-        values: from.items,
-        construct: (f, value, destination) => ops().copy(f, value, destination, ownedCopyFromConst),
-        isSameType: true,
-      });
+      editor.assignRange(
+        frame,
+        to,
+        storedSource(from.items, (f, value, destination) => ops().copy(f, value, destination, ownedCopyFromConst))
+      );
     },
     destroy: (frame, value) => {
       const self = value as SequenceValue;
@@ -285,9 +284,9 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
             range.params,
             ([first, last], { frame }) => {
               const source = range.read(first, last);
-              reserve(frame, source.values.length);
-              return editor.construct(frame, make([]), source.values.length, (index, destination) =>
-                source.construct(frame, source.values[index], destination)
+              reserve(frame, source.length);
+              return editor.construct(frame, make([]), source.length, (index, destination) =>
+                source.construct(frame, index, destination)
               );
             },
             { uses: (row) => library.compiler.requireLibraryObjectUse(element, 'destroy', row) }
@@ -356,8 +355,8 @@ export function iteratorRange(
     typeName(unqualified(from)) === typeName(target) &&
     (target.kind !== 'class' || (from.kind === 'class' && from.cls === target.cls));
   const sourceIsConst = isConstType(from);
-  let construct: Source['construct'] = (frame, value, destination) =>
-    ops().copy(frame, value, destination, sourceIsConst);
+  let construct = (frame: Frame, location: Ptr, destination?: CObject): Value =>
+    ops().copy(frame, location.read(), destination, sourceIsConst);
   if (isSameType) requireElementUse(compiler, element, first.row, 'copy', sourceIsConst);
   if (!isSameType) {
     const [slot] = callbackOperands([{ type: from, category: proxy ? 'prvalue' : undefined }], first.row, (frame) =>
@@ -373,17 +372,23 @@ export function iteratorRange(
       if (error instanceof CompileError) return;
       throw error;
     }
-    construct = (frame, value, destination) =>
-      holdValues(frame, [proxy ? value : locationOf(value)], () => run(frame, undefined, destination) as Value);
+    construct = (frame, location, destination) =>
+      holdValues(frame, [location], () => run(frame, undefined, destination) as Value);
   }
   return {
     params,
     isForwardOnly: type.kind === 'class' && type.cls.name.startsWith('std::unordered_'),
-    read: (a, b) => ({
-      values: rangeValues(a as Ptr, b as Ptr, isReverse, proxy !== undefined),
-      construct,
-      isSameType,
-    }),
+    read: (a, b) => {
+      const first = a as Ptr;
+      const length = first.rangeLength(b as Ptr, isReverse);
+      const locate = (index: number): Ptr => first.offset(isReverse ? -index : index, true).element(isReverse);
+      return {
+        length,
+        read: (index) => locate(index).read(),
+        construct: (frame, index, destination) => construct(frame, locate(index), destination),
+        isSameType,
+      };
+    },
   };
 }
 
@@ -391,18 +396,6 @@ function iteratorElement(type: Type): Type | undefined {
   if (type.kind === 'pointer' && type.to.kind !== 'void' && type.to.kind !== 'function') return type.to;
   if (type.kind === 'class' && type.cls.library?.kind === 'iterator') return type.cls.library.args[0];
   return undefined;
-}
-
-/** The values between two iterators of a sequence, a container, or an array. */
-function rangeValues(first: Ptr, last: Ptr, isReverse: boolean, keepsLocations: boolean): Value[] {
-  const length = first.rangeLength(last, isReverse);
-  if (length === 0) return [];
-  const store = first.target();
-  const start = first.index - (isReverse ? 1 : 0);
-  return Array.from({ length }, (_, offset) => {
-    const index = start + (isReverse ? -offset : offset);
-    return keepsLocations ? store.location(index) : store.get(index);
-  });
 }
 
 /** A member function template, such as `insert(position, first, last)`, whose instance the call's arguments decide. */
@@ -641,7 +634,7 @@ function sequenceMethods(
       return instance('insert', [types.constIterator, AS_WRITTEN], types.iterator, (self, [at], frame) => {
         const index = positionOf(self, at);
         list(frame, (source) => {
-          reserve(frame, source.values.length);
+          reserve(frame, source.length);
           editor.insertRange(frame, self, index, source, false);
         });
         return self.iteratorLocation(index);
@@ -659,7 +652,7 @@ function sequenceMethods(
       (self, [at, first, last], frame) => {
         const index = positionOf(self, at);
         const source = range.read(first, last);
-        reserve(frame, source.values.length);
+        reserve(frame, source.length);
         editor.insertRange(frame, self, index, source, range.isForwardOnly);
         return self.iteratorLocation(index);
       }
@@ -704,7 +697,7 @@ function sequenceMethods(
       const list = initializerList(library.compiler, element, args[0].braced, ops);
       return instance('assign', [AS_WRITTEN], VOID, (self, _args, frame) =>
         list(frame, (source) => {
-          reserve(frame, source.values.length);
+          reserve(frame, source.length);
           editor.assignRange(frame, self, source);
         })
       );
@@ -713,7 +706,7 @@ function sequenceMethods(
     if (!range) return;
     return instance('assign', range.params, VOID, (self, [first, last], frame) => {
       const source = range.read(first, last);
-      reserve(frame, source.values.length);
+      reserve(frame, source.length);
       editor.assignRange(frame, self, source);
     });
   });
@@ -752,7 +745,7 @@ export function listElementsOf(
         frame.pending.push(object);
         if (destroy) frame.temporaries.push({ object, destroy });
       }
-      return use({ values, construct: copy, isSameType: true });
+      return use(storedSource(values, copy));
     } finally {
       frame.pending.length = mark;
     }
@@ -1135,12 +1128,10 @@ function sequenceList(
   if (elements.length > 0) requireElementUse(compiler, element, row, 'copy');
   const list = listElementsOf(inits, () => editor.ops);
   const run: Eval<Value> = (frame) =>
-    list(frame, ({ values, construct }) =>
+    list(frame, ({ length, read, construct }) =>
       editor.ops.destroy
-        ? editor.construct(frame, make([]), values.length, (index, destination) =>
-            construct(frame, values[index], destination)
-          )
-        : make(values)
+        ? editor.construct(frame, make([]), length, (index, destination) => construct(frame, index, destination))
+        : make(Array.from({ length }, (_, index) => read(index)))
     );
   listElements.set(run, inits);
   return run;

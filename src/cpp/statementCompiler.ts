@@ -888,34 +888,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const { row } = node;
     const range =
       rangeNode.type === 'initializer_list' ? this.braceArray(rangeNode) : this.compileExpression(rangeNode);
-    // The range lives in a variable of the loop, as `auto&& __range = range;` holds it.
     const rangeType = range.type;
-    const rangeLocal = this.context.declareLocal('\0range', rangeType, false);
-    const rangeSlot = rangeLocal.slot;
-    // A temporary range lives in the slot until the loop ends, as binding it to the reference extends its lifetime.
-    const keepRange: Eval<void> = range.isLvalue
-      ? (frame) => {
-          frame.slots[rangeSlot] = range.run(frame) as Ptr;
-        }
-      : (frame) => {
-          this.initializeLocal(
-            frame,
-            rangeLocal,
-            (target) => range.run(frame, false, target instanceof CObject ? target : undefined) as Value
-          );
-        };
-    if (!range.isLvalue) {
-      const destroy = this.destroyerOf(rangeType);
-      if (destroy) this.context.scope.destructibles.set(rangeSlot, destroy);
-    }
-    const rangeRef: Expr = {
-      type: rangeType,
-      isLvalue: true,
-      row,
-      run: range.isLvalue
-        ? (frame) => frame.slots[rangeSlot] as Ptr
-        : (frame) => new Ptr(frame.slots[rangeSlot] as Box, 0),
-    };
+    const { initializeRange, rangeRef } = this.bindRangeFor(range, row);
     let begin: Expr;
     let end: Expr;
     if (rangeType.kind === 'array') {
@@ -952,8 +926,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       row,
       run: (frame) => new Ptr(frame.slots[endLocal.slot] as Store, 0),
     };
-    const notDone = this.condition(this.binary('!=', iterator, endRef, row), row);
-    const advance = this.increment(iterator, '++', true, row).run;
+    const notDone = this.fullExpression(this.condition(this.binary('!=', iterator, endRef, row), row));
+    const advance = this.fullExpression(this.increment(iterator, '++', true, row).run);
     const element = this.dereferenceOperator(iterator, row);
     const bodyScope = new Scope();
     this.context.scopes.push(bodyScope);
@@ -971,13 +945,16 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       if (this.recordsSteps) frame.runtime.steps.stepBinding(row, this.isAnswered(variableType));
       return body(frame);
     }, bodyScope);
-    const beginRun = begin.run;
-    const endRun = end.run;
-    const initializeRange = range.isLvalue ? keepRange : this.fullExpression(keepRange);
-    return this.fullExpression((frame) => {
+    const saveIterator = (local: LocalInfo, run: Expr['run']): Eval<void> =>
+      this.fullExpression((frame) => {
+        frame.slots[local.slot] = new Box(run(frame) as Value);
+      });
+    const initializeBegin = saveIterator(iteratorLocal, begin.run);
+    const initializeEnd = saveIterator(endLocal, end.run);
+    return (frame) => {
       initializeRange(frame);
-      frame.slots[iteratorLocal.slot] = new Box(beginRun(frame) as Value);
-      frame.slots[endLocal.slot] = new Box(endRun(frame) as Value);
+      initializeBegin(frame);
+      initializeEnd(frame);
       while (notDone(frame)) {
         frame.runtime.spend();
         const completion = iteration(frame);
@@ -986,7 +963,39 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         advance(frame);
       }
       return;
-    });
+    };
+  }
+
+  private bindRangeFor(range: Expr, row: number): { initializeRange: Eval<void>; rangeRef: Expr } {
+    const { type } = range;
+    const local = this.context.declareLocal('\0range', type, false);
+    const { slot } = local;
+    const rangeRef: Expr = {
+      type,
+      isLvalue: true,
+      row,
+      run: range.isLvalue ? (frame) => frame.slots[slot] as Ptr : (frame) => new Ptr(frame.slots[slot] as Box, 0),
+    };
+    if (range.isLvalue) {
+      const initializeRange = range.temporaryBinding
+        ? this.extendedReference(slot, 'range', range.temporaryBinding).exec
+        : this.fullExpression((frame) => {
+            frame.slots[slot] = range.run(frame) as Ptr;
+          });
+      return { initializeRange, rangeRef };
+    }
+    const destroy = this.destroyerOf(type);
+    if (destroy) this.context.scope.destructibles.set(slot, destroy);
+    return {
+      initializeRange: this.fullExpression((frame) => {
+        this.initializeLocal(
+          frame,
+          local,
+          (target) => range.run(frame, false, target instanceof CObject ? target : undefined) as Value
+        );
+      }),
+      rangeRef,
+    };
   }
 
   /** A temporary array holding the values of a braced list, for `for (int x : {1, 2, 3})`. */
