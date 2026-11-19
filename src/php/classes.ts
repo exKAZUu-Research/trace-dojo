@@ -256,14 +256,8 @@ function checkPropertyOverride(
       cls.declaredRow
     );
   }
-  if (inherited.type && !propertyTypeCompatible(inherited, ast, cls, declarationScope)) {
+  if (!propertyTypeCompatible(inherited, ast, cls, declarationScope)) {
     propertyTypeError(inherited, cls, ast.name, cls.declaredRow);
-  }
-  if (!inherited.type && ast.type && !propertyTypeCompatible(inherited, ast, cls, declarationScope)) {
-    throw new FatalError(
-      `Type of ${cls.name}::$${ast.name} must not be defined (as in class ${inherited.cls.name})`,
-      cls.declaredRow
-    );
   }
 }
 

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 907 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 935 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -282,10 +282,10 @@ export abstract class DeclarationConverter extends ConverterBase {
         defaultReportRow: defaultExpr ? this.constantCompileRow(defaultExpr, child.startPosition.row, true) : undefined,
         row: child.startPosition.row,
       };
-      if (defaultExpr?.k === 'lit' && defaultExpr.v === null && type && !typeAllowsNull(type))
-        param.implicitNullable = true;
       if (child.type === 'property_promotion_parameter')
         param.promote = this.parameterPromotion(child, functionName, className);
+      else if (defaultExpr?.k === 'lit' && defaultExpr.v === null && type && !typeAllowsNull(type))
+        param.implicitNullable = true;
       params.push(param);
     }
     this.parameterDeprecations(params, className === undefined ? functionName : `${className}::${functionName}`);
@@ -663,7 +663,7 @@ export abstract class DeclarationConverter extends ConverterBase {
       classConstant: property ? this.compileClasses.lookup(property) : undefined,
       className: property ? (cls) => this.compileClasses.className(cls, property) : undefined,
     });
-    if (literalType === 'null' && !property) return;
+    if (literalType === 'null' && !property && node.type !== 'property_promotion_parameter') return;
     if (literalType === undefined || defaultFits(type, literalType)) return;
     const display = describeType(
       type,
@@ -726,9 +726,10 @@ export abstract class DeclarationConverter extends ConverterBase {
 
   // Classes -----------------------------------------------------------------------------------------------------------
 
-  // code-gauge-allow functionNcss 47 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+  // code-gauge-allow functionNcss 48 -- Builds one declaration and validates its scoped members in source order.
   // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
   classDecl(node: Node, anonymous = false, topLevel = true): ClassDecl {
+    this.checkUnscopedModifiers(node);
     if (!this.preserveSyntax && !anonymous && this.currentClass !== undefined)
       this.error(node, 'Class declarations may not be nested');
     const attributes = node.childForFieldName('attributes');
@@ -841,6 +842,41 @@ export abstract class DeclarationConverter extends ConverterBase {
           promoted: true,
         });
       }
+    }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 22 -- Chooses the PHP parser expectation from the prefix already read.
+  protected checkUnscopedModifiers(node: Node): void {
+    const classModifiers = new Set(['abstract_modifier', 'final_modifier', 'readonly_modifier']);
+    const namedClass = node.type === 'class_declaration';
+    const anonymous = node.type === 'anonymous_class';
+    let expectingClass = false;
+    for (const child of node.children) {
+      if (child.type === 'comment' || child.type === 'attribute_list') continue;
+      if (!child.type.endsWith('_modifier')) break;
+      if (classModifiers.has(child.type) && node.type !== 'const_declaration') {
+        expectingClass = true;
+        continue;
+      }
+      const following = child.nextSibling;
+      if (expectingClass)
+        this.error(
+          child,
+          `syntax error, unexpected token "${lower(child.text)}", expecting "abstract" or "final" or "readonly" or "class"`
+        );
+      if (anonymous) this.error(child, `syntax error, unexpected token "${lower(child.text)}", expecting "class"`);
+      if (child.type === 'static_modifier' && following)
+        this.error(following, `syntax error, unexpected token "${lower(following.text)}", expecting "::"`);
+      const end = node.parent?.type === 'program' ? ', expecting end of file' : '';
+      this.error(child, `syntax error, unexpected token "${lower(child.text)}"${end}`);
+    }
+    if (expectingClass && !namedClass && !anonymous) {
+      const keyword = node.children.find((child) => ['interface', 'trait', 'enum'].includes(child.type));
+      if (keyword)
+        this.error(
+          keyword,
+          `syntax error, unexpected token "${keyword.type}", expecting "abstract" or "final" or "readonly" or "class"`
+        );
     }
   }
 

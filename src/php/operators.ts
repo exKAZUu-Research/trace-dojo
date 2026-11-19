@@ -226,7 +226,7 @@ function operatorDiagnostic(
   else report(message);
 }
 
-// code-gauge-allow functionCognitiveComplexity 27 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 27 -- Applies operator-specific coercion and overflow rules before producing a result.
 export function arithmetic(op: string, left: Value, right: Value, pending?: PhpThrow): Value {
   if (op === '+' && left instanceof PhpArray && right instanceof PhpArray) return arrayUnion(left, right);
   if (op === '%') return modulo(left, right, pending);

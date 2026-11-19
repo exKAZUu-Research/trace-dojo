@@ -245,7 +245,7 @@ function offsetError(name: string, argument = 3, parameter = 'offset', haystack 
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 22 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 22 -- Resolves back and forward byte searches with shared case folding and offset checks.
 function search(
   name: string,
   haystack: string,
@@ -480,7 +480,7 @@ function compareLeft(a: string, ap: number, b: string, bp: number): { result: nu
 }
 
 /** Compares two runs of digits as integers: the longer run wins, then the first different digit. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 16 -- Compares an entire digit run while preserving first difference and run length.
 function compareRight(a: string, ap: number, b: string, bp: number): { result: number; ap: number; bp: number } {
   let bias = 0;
   for (; ; ap++, bp++) {
@@ -495,7 +495,7 @@ function compareRight(a: string, ap: number, b: string, bp: number): { result: n
 }
 
 /** Compares strings in natural order, as PHP's strnatcmp_ex does. */
-// code-gauge-allow functionNcss 51 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 51 -- Preserves the numeric and byte comparison order while advancing both cursors.
 export function naturalCompare(a: string, b: string, insensitive: boolean): number {
   if (a.length === 0 || b.length === 0) return a.length === b.length ? 0 : a.length > b.length ? 1 : -1;
   let ap = 0;
@@ -679,8 +679,8 @@ defineFunction(
     )
 );
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 44 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 17 -- Keeps the last break and current column through each emitted segment.
+// code-gauge-allow functionNcss 44 -- Keeps the last break and current column through each emitted segment.
 function wordwrap(text: string, width: number, breakText: string, cut: boolean): string {
   if (text === '') return '';
   if (breakText === '') throwError('ValueError', 'wordwrap(): Argument #3 ($break) must not be empty');
@@ -1142,7 +1142,7 @@ defineFunction('soundex(string $string): string', ({ args }) => {
   }
   return result.padEnd(4, '0');
 });
-// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 17 -- Shares one byte histogram across modes that expose counts or character lists.
 defineFunction('count_chars(string $string, int $mode = 0): array|string', ({ args }) => {
   const text = s(args[0]);
   const mode = args[1] === undefined ? 0 : n(args[1]);
@@ -1270,7 +1270,7 @@ defineFunction('str_increment(string $string): string', ({ args }) => {
     );
   return incrementString(text);
 });
-// code-gauge-allow functionCognitiveComplexity 18 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 18 -- Propagates borrow over ASCII character classes and handles a shortened result.
 defineFunction('str_decrement(string $string): string', ({ args }) => {
   const text = s(args[0]);
   if (text === '') throwError('ValueError', 'str_decrement(): Argument #1 ($string) must not be empty');

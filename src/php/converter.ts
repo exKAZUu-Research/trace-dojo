@@ -21,9 +21,11 @@ import {
   type CompileNotice,
   isReservedClassName,
   MAGIC_RUNTIME,
+  PHP_NUMBER,
   relativeClassName,
   reservedIdentifierToken,
   semanticChildren,
+  unexpectedTextToken,
 } from './converterBase';
 import { DeclarationConverter } from './declarationConverter';
 import { exportExpr, UnexportableSyntax } from './export';
@@ -277,11 +279,13 @@ export class Converter extends DeclarationConverter {
         return [{ k: 'class', decl: this.classDecl(node, false, topLevel), row }];
       }
       case 'enum_declaration': {
+        this.checkUnscopedModifiers(node);
         if (this.currentClass !== undefined) this.error(node, 'Class declarations may not be nested');
         this.unsupported(node, '列挙型（enum）');
         break;
       }
       case 'const_declaration': {
+        this.checkUnscopedModifiers(node);
         if (!topLevel || isPlainBlockChild(node)) this.error(node, 'syntax error, unexpected token "const"');
         let declarationRow: number | undefined;
         let opcodeRow: number | undefined;
@@ -1486,11 +1490,6 @@ export class Converter extends DeclarationConverter {
       if (nameNode) {
         named = true;
         const name = this.nameText(nameNode);
-        if (args.some((arg) => arg.name === name))
-          this.error(
-            child,
-            `名前付き引数 $${name} が重なっています（Named parameter $${name} overwrites previous argument）。`
-          );
         args.push({ e: this.expr(valueNode), spread: false, name });
       } else {
         if (named)
@@ -1542,8 +1541,7 @@ export class Converter extends DeclarationConverter {
     const op = lower(token.type);
     const leftNode = node.childForFieldName('left') as Node;
     const rightNode = node.childForFieldName('right') as Node;
-    const invalid = chainedComparison(token, leftNode, rightNode);
-    if (invalid) this.error(invalid, `syntax error, unexpected token "${invalid.text}"`);
+    this.validateBinarySyntax(node, token, leftNode, rightNode);
     const l = this.expr(leftNode);
     if (op === 'instanceof') return this.instanceOf(l, rightNode, row);
     if (!this.preserveSyntax && (op === '&&' || op === 'and' || op === '||' || op === 'or')) {
@@ -1562,6 +1560,29 @@ export class Converter extends DeclarationConverter {
     return op === '.' && directiveLiteral(node, expression)
       ? recordOperandRows(compiled, followingTokenRow(node))
       : compiled;
+  }
+
+  private validateBinarySyntax(node: Node, token: Node, left: Node, right: Node): void {
+    if (token.type === '.' && /[0-9]/.test(this.source[token.endIndex] ?? ''))
+      this.rejectFractionAfterExpression(token, node);
+    const invalid = chainedComparison(token, left, right);
+    if (invalid) this.error(invalid, `syntax error, unexpected token "${invalid.text}"`);
+  }
+
+  private rejectFractionAfterExpression(token: Node, expression: Node): never {
+    const spelling = PHP_NUMBER.exec(this.source.slice(token.startIndex))?.[0] ?? '.';
+    let context = expression.parent;
+    while (context?.type.endsWith('_expression') && context.type !== 'parenthesized_expression')
+      context = context.parent;
+    const expected =
+      context?.type === 'echo_statement'
+        ? ', expecting "," or ";"'
+        : context?.type === 'return_statement'
+          ? ', expecting ";"'
+          : context?.type === 'argument'
+            ? ', expecting ")"'
+            : '';
+    this.error(token, `syntax error, unexpected ${unexpectedTextToken('floating-point number', spelling)}${expected}`);
   }
 
   private instanceOf(l: Expr, right: Node, row: number): Expr {

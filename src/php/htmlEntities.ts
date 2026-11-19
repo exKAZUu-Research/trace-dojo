@@ -389,7 +389,7 @@ function doctypeOf(flags: bigint): Doctype {
 }
 
 /** The length and code point of the UTF-8 character at `index`, without a code point when invalid, as PHP's get_next_char reads them. */
-// code-gauge-allow functionCognitiveComplexity 17 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 17 -- Decodes PHP byte strings to Unicode scalars and advances past malformed bytes.
 export function nextChar(text: string, index: number): [number, number | undefined] {
   const lead = text.charCodeAt(index);
   if (lead < 0x80) return [1, lead];

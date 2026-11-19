@@ -218,7 +218,7 @@ function coerceScalar(value: Value, type: TypeDecl): Value | typeof NO_MATCH {
 }
 
 /** Whether a value has a declared type exactly, without coercion. */
-// code-gauge-allow functionNcss 46 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 46 -- Checks compound and scalar PHP types under the same coercion and class context.
 export function matches(
   value: Value,
   type: TypeDecl,

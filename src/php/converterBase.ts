@@ -5,9 +5,18 @@ import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget } from '../interpreter/limits';
 import type { ClassRef, Expr, ResolvedName, Stmt } from './ast';
 import { nestedBodies } from './astAnalysis';
-import { enc, lower } from './bytes';
+import { dec, enc, lower } from './bytes';
 import { unavailableVariable, unsupportedMessage } from './unsupported';
 import type { TypeDecl } from './values';
+
+export const PHP_NUMBER =
+  /^(?:0[xX][\dA-Fa-f](?:_?[\dA-Fa-f])*|0[bB][01](?:_?[01])*|0[oO][0-7](?:_?[0-7])*|(?:(?:\d(?:_?\d)*)?\.\d(?:_?\d)*|\d(?:_?\d)*\.?)(?:[eE][+-]?\d(?:_?\d)*)?)/;
+
+export function unexpectedTextToken(kind: string, raw: string): string {
+  const bytes = enc(raw.split('\n', 1)[0]);
+  const spelling = bytes.length > 33 ? `${dec(bytes.slice(0, 30))}...` : dec(bytes);
+  return `${kind} "${spelling}"`;
+}
 
 export function semanticChildren(node: Node): Node[] {
   return node.namedChildren.filter((child) => child.type !== 'comment');

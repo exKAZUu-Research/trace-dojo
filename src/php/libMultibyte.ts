@@ -641,8 +641,8 @@ function wordBytes(word: number, size: number, littleEndian: boolean): string {
 }
 
 /** Decodes UTF-16 as mb_utf16_to_wchar does; without a byte order, a BOM decides it, and big-endian is the default. */
-// code-gauge-allow functionNcss 38 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 38 -- Keeps pending high surrogates with byte-order and malformed-input checks.
+// code-gauge-allow functionCognitiveComplexity 25 -- Keeps pending high surrogates with byte-order and malformed-input checks.
 function decodeUtf16(bytes: string, littleEndian: boolean | undefined): number[] {
   let index = 0;
   let little = littleEndian ?? false;
@@ -867,7 +867,7 @@ const NON_ENCODINGS = new Set(
 );
 
 /** Resolves encoding lists before selecting a reader or a conversion codec. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 24 -- Resolves supplied encoding names in order through one validation path.
 function encodingList(
   value: Value,
   functionName: string,
@@ -1104,7 +1104,7 @@ const KANA_ZEN2HAN_KATAKANA = 0x10_00;
 const KANA_ZEN2HAN_HIRAGANA = 0x20_00;
 const KANA_KATA2HIRA = 0x80_00;
 /** Reads the mode letters as PHP_FUNCTION(mb_convert_kana) does, refusing pairs of conversions that undo each other. */
-// code-gauge-allow functionCognitiveComplexity 29 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 29 -- Validates and combines conversion flags before their shared dispatch.
 function kanaMode(letters: string): number {
   let mode = 0;
   for (const letter of letters) {
@@ -1253,7 +1253,7 @@ const HAN_TO_ZEN_HIRAGANA = Buffer.from(
 );
 
 /** The halfwidth-to-fullwidth conversions of mb_convert_kana_codepoint, which come before the others. */
-// code-gauge-allow functionCognitiveComplexity 29 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 29 -- Returns the converted scalar together with whether the following mark was consumed.
 function halfToFull(code: number, next: number, mode: number): [number, boolean] | undefined {
   const ascii = code >= 0x21 && code <= 0x7d && code !== 0x22 && code !== 0x27 && code !== 0x5c;
   if (mode & KANA_HAN2ZEN_ALL && ascii) return [code + 0xfe_e0, false];

@@ -467,7 +467,7 @@ export class Runtime {
 }
 
 /** The length of the longest prefix of a byte string that does not end inside a UTF-8 sequence. */
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 16 -- Locates the largest UTF-8 prefix that ends before a partial final sequence.
 function completePrefix(bytes: string): number {
   let index = bytes.length;
   for (let back = 1; back <= 3 && index - back >= 0; back++) {

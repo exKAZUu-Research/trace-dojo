@@ -456,7 +456,7 @@ class JsonParser {
     throw new JsonError(4);
   }
 
-  // code-gauge-allow functionNcss 45 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+  // code-gauge-allow functionNcss 45 -- Keeps JSON member parsing, duplicate writes and cleanup in source order.
   // code-gauge-allow functionCognitiveComplexity 17 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private object(depth: number): Value {
     this.index++;

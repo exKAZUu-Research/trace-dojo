@@ -136,7 +136,7 @@ function debugLabel(key: string | bigint): string {
   return owner === '*' ? `"${name}":protected` : `"${name}":"${owner}":private`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 25 -- Collects closure display fields from its declaration, captures, and bindings.
 function closureDebug(object: PhpObject): [string, Value, string][] {
   const data = object.internal as ClosureData;
   const entries: [string, Value, string][] = [];
@@ -413,8 +413,8 @@ function quoteExport(text: string): string {
   return `'${text.replaceAll(/['\\]/g, String.raw`\$&`).replaceAll('\0', `' . "\\0" . '`)}'`;
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 41 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 28 -- Preserves depth and recursion state while rendering different value kinds.
+// code-gauge-allow functionNcss 41 -- Preserves depth and recursion state while rendering different value kinds.
 function exportValue(value: Value, level: number, state: Inspection): string {
   if (value === null || value === UNDEFINED_RESULT || (value instanceof PhpObject && value.isResource)) return 'NULL';
   switch (typeof value) {

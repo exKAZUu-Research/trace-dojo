@@ -189,8 +189,8 @@ export function installNatives(): void {
   for (const definition of classDefinitions) runtime.classes.set(lower(definition.name), buildClass(definition));
 }
 
-// code-gauge-allow functionCognitiveComplexity 25 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 46 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 25 -- Registers a native class and resolves its related declarations in dependency order.
+// code-gauge-allow functionNcss 46 -- Registers a native class and resolves its related declarations in dependency order.
 function buildClass(definition: ClassDefinition): PhpClass {
   const runtime = rt();
   const cls = new PhpClass(definition.name, definition.kind ?? 'class');

@@ -74,8 +74,8 @@ function guard(runtime: Runtime, run: () => void): string | undefined {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 24 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 32 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 24 -- Dispatches uncaught outcomes before runtime shutdown.
+// code-gauge-allow functionNcss 32 -- Dispatches uncaught outcomes before runtime shutdown.
 function report(runtime: Runtime, error: unknown): string | undefined {
   if (error instanceof ExitSignal) return undefined;
   if (error instanceof UnsupportedFeatureError) {

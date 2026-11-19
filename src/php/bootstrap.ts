@@ -220,7 +220,7 @@ function turtleOf(object: PhpObject): TurtleState {
   if (!state) throwError('Error', 'Turtle method called on an object that is not a turtle');
   return state;
 }
-// code-gauge-allow functionNcss 34 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionNcss 34 -- The Turtle registrations share receiver state and movement helpers.
 function defineTurtleMethods(): NativeMethod[] {
   const methods: NativeMethod[] = [
     {

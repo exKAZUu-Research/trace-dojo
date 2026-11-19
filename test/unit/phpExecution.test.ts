@@ -865,6 +865,13 @@ test.each([
   });
 });
 
+test.each(['a*a*a*a*', 'a+a?a+a+', '[a-c]+b[a-d]+'])('bounds overlapping repeated atoms: %s', (pattern) => {
+  expect(run(`<?php preg_match('/^${pattern}x$/', str_repeat('a', 22).'!');`)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+  });
+});
+
 test('retains short ambiguous repetitions and long unambiguous repetitions', () => {
   expect(
     run('<?php var_dump(preg_match("/^(?:a|aa)+$/","aaaa"),preg_match("/^(?:ab|ac)+$/",str_repeat("ab", 30)));')
@@ -1444,6 +1451,43 @@ echo 'never';`)
   ).toMatchObject({
     kind: 'compileError',
     diagnostics: [{ row: 3, message }],
+  });
+});
+
+test.each([
+  ['public class A {}', 'unexpected token "public", expecting end of file'],
+  ['static class A {}', 'unexpected token "class", expecting "::"'],
+  ['final public class A {}', 'unexpected token "public", expecting "abstract"'],
+  ['private const A = 1;', 'unexpected token "private", expecting end of file'],
+  ['echo "a".1 + 2;', 'unexpected floating-point number ".1", expecting "," or ";"'],
+  ['$a = 1; echo $a.5;', 'unexpected floating-point number ".5"'],
+  ['echo 1.2.3;', 'unexpected floating-point number ".3"'],
+  [
+    'class A { function __construct(public int $a = null) {} }',
+    'Cannot use null as default value for parameter $a of type int',
+  ],
+  [
+    'class A { function __construct(public int|string $a = null) {} }',
+    'Cannot use null as default value for parameter $a of type string|int',
+  ],
+])('reports PHP lexical and declaration errors: %s', (source, message) => {
+  const result = run(`<?php\n${source}`);
+  expect(result.kind).toBe('compileError');
+  if (result.kind === 'compileError') expect(result.diagnostics[0]?.message).toContain(message);
+});
+
+test('handles duplicate named arguments when a call executes', () => {
+  expect(
+    run(`<?php
+function named($argument) {}
+echo 'start;';
+if (false) named(argument: 1, argument: 2);
+try { named(argument: 1, argument: 2); } catch (Error $error) { echo $error->getMessage(), ';'; }
+try { missing(argument: 1, argument: 2); } catch (Error $error) { echo $error->getMessage(); }
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: 'start;Named parameter $argument overwrites previous argument;Call to undefined function missing()',
   });
 });
 

@@ -220,8 +220,8 @@ defineFunction('settype(mixed &$var, string $type): bool', ({ args, refs }) => {
 });
 
 /** Parses an integer in a base as `intval($string, $base)` does, with base 0 detecting a prefix. */
-// code-gauge-allow functionCognitiveComplexity 28 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 45 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 28 -- Keeps prefix selection, digit validation and overflow in the same scan.
+// code-gauge-allow functionNcss 45 -- Keeps prefix selection, digit validation and overflow in the same scan.
 function parseIntBase(text: string, base: number): bigint {
   if (base !== 0 && (base < 2 || base > 36)) return 0n;
   const runtime = rt();

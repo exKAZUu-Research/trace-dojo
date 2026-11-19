@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 /** The next string in PHP's alphanumeric increment (`"a"` → `"b"`, `"Az"` → `"Ba"`, `"zz"` → `"aaa"`). */
-// code-gauge-allow functionCognitiveComplexity 16 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 16 -- Propagates carry over ASCII character classes and handles a longer result.
 export function incrementString(text: string): string {
   const chars = [...text];
   let index = chars.length - 1;

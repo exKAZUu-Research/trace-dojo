@@ -73,7 +73,7 @@ type PlaceMode = WriteMode | 'deferred' | 'coalesce';
 
 /** The location a writable expression names, evaluating its keys and creating containers as PHP's writes do. */
 // code-gauge-allow functionNcss 52 -- Handles each kind of writable expression, whose write rules PHP defines separately.
-// code-gauge-allow functionCognitiveComplexity 30 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 30 -- Writable kinds share operand preparation and defer their writes through places.
 export function placeOf(e: Expr, mode: PlaceMode = 'write', through = false): Place {
   const runtime = rt();
   const frame = runtime.frame;

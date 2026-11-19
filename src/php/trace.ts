@@ -134,8 +134,8 @@ function traceInt(value: bigint): number | bigint {
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows null as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-// code-gauge-allow functionNcss 40 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+// code-gauge-allow functionCognitiveComplexity 29 -- Each branch maps a PHP value shape to the shared trace display tree.
+// code-gauge-allow functionNcss 40 -- Each branch maps a PHP value shape to the shared trace display tree.
 function displayNodeOf(value: Value, seen: Set<object>, budget: { remaining: number }): DisplayNode | undefined {
   if (budget.remaining-- <= 0) return { kind: 'value', value: '…' };
   rt().spend();

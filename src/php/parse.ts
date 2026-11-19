@@ -9,9 +9,13 @@ import {
 } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from './ast';
-import { dec, enc } from './bytes';
 import { castType, type CompileNotice, Converter } from './converter';
-import { reservedIdentifierToken, traitAdaptationModifierError } from './converterBase';
+import {
+  PHP_NUMBER,
+  reservedIdentifierToken,
+  traitAdaptationModifierError,
+  unexpectedTextToken,
+} from './converterBase';
 
 const parser = await loadParser('@willbooster/tree-sitter-php/tree-sitter-php.wasm');
 
@@ -33,8 +37,6 @@ const CLOSING_DELIMITERS = new Map([
 const PHP_TRIVIA = /^(?:[ \t\r\n\v\f]|\/\*[\s\S]*?\*\/|(?:\/\/|#(?!\[))(?:[^?\r\n]|\?(?!>))*)*/;
 const PHP_PUNCTUATOR =
   /^(?:\?->|\?\?=|===|!==|<=>|\.\.\.|<<=|>>=|\*\*=|->|::|=>|\?\?|==|!=|<>|<=|>=|<<|>>|\*\*|\+\+|--|\|\||&&|\|>|[+\-*/%.&|^]=|#\[|[)\][{},;=<>+\-*/%.&|^!?~:@\u0060])/;
-const PHP_NUMBER =
-  /^(?:0[xX][\dA-Fa-f](?:_?[\dA-Fa-f])*|0[bB][01](?:_?[01])*|0[oO][0-7](?:_?[0-7])*|(?:(?:\d(?:_?\d)*)?\.\d(?:_?\d)*|\d(?:_?\d)*\.?)(?:[eE][+-]?\d(?:_?\d)*)?)/;
 
 export interface ParsedProgram {
   program: Program;
@@ -302,12 +304,6 @@ function unexpectedQuotedToken(text: string, quote: string): string {
     for (const [token] of tokens) if (!token.startsWith('\\')) return 'double-quote mark';
   }
   return unexpectedTextToken(quote === '"' ? 'double-quoted string' : 'single-quoted string', contents);
-}
-
-function unexpectedTextToken(kind: string, raw: string): string {
-  const bytes = enc(raw.split('\n', 1)[0]);
-  const spelling = bytes.length > 33 ? `${dec(bytes.slice(0, 30))}...` : dec(bytes);
-  return `${kind} "${spelling}"`;
 }
 
 function unclosedDelimiterAt(root: Node, offset: number): Node | undefined {

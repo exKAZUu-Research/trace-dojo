@@ -543,8 +543,8 @@ defineFunction(
 );
 defineFunction(
   'preg_split(string $pattern, string $subject, int $limit = -1, int $flags = 0): array|false',
-  // code-gauge-allow functionCognitiveComplexity 29 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
-  // code-gauge-allow functionNcss 39 -- Transcribes PHP's algorithm for this function step by step, whose branches mirror PHP's.
+  // code-gauge-allow functionCognitiveComplexity 29 -- Keeps the match iterator, capture offsets and split flags on the same state.
+  // code-gauge-allow functionNcss 39 -- Keeps the match iterator, capture offsets and split flags on the same state.
   ({ args }) => {
     const compiled = compile('preg_split', args[0] as string);
     if (!compiled) return false;
