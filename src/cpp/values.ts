@@ -65,6 +65,10 @@ export abstract class Store {
     return undefined;
   }
 
+  projectAddress(_index: number, _byteOffset: number): Address | undefined {
+    return undefined;
+  }
+
   /** Reads an element, which must exist and have a value. */
   abstract get(index: number): Value;
   abstract set(index: number, value: Value): void;
@@ -95,6 +99,11 @@ export class Box extends Store {
 
   get length(): number {
     return 1;
+  }
+
+  override projectAddress(index: number, byteOffset: number): Address | undefined {
+    const array = inlineArrayOf(this.value);
+    if (array?.elementSize) return { store: this, index: index * array.length * array.elementSize + byteOffset };
   }
 
   get(index: number): Value {
@@ -154,6 +163,10 @@ export class ArrayStore extends Store {
 
   addressAt(offset: number): Address {
     return this.enclosingLocation?.embeddedAddress(offset) ?? { store: this, index: offset };
+  }
+
+  override projectAddress(index: number, byteOffset: number): Address | undefined {
+    if (this.elementSize !== undefined) return this.addressAt(index * this.elementSize + byteOffset);
   }
 
   get(index: number): Value {
@@ -380,6 +393,10 @@ class MemberStorage extends Store {
     this.owner.checkAlive();
   }
 
+  override projectAddress(index: number, byteOffset: number): Address {
+    return this.owner.memberAddress(this.field, index, byteOffset);
+  }
+
   get(index: number): Value {
     return this.owner.get(this.fieldAt(index));
   }
@@ -529,18 +546,11 @@ export class Ptr {
     if (value instanceof CObject) return value.addressAt(0);
     const array = inlineArrayOf(value);
     if (array) return array.addressAt(0);
-    if (store instanceof Box && this.index === 1) {
-      const enclosed = inlineArrayOf(store.value);
-      if (enclosed?.elementSize) return enclosed.addressAt(enclosed.length * enclosed.elementSize);
-    }
     return this.storageAddress;
   }
 
   embeddedAddress(offset: number): Address | undefined {
-    const { store, index } = this;
-    if (store instanceof MemberStorage) return store.owner.memberAddress(store.field, index, offset);
-    if (store instanceof ArrayStore && store.elementSize !== undefined)
-      return store.addressAt(index * store.elementSize + offset);
+    return this.store?.projectAddress(this.index, offset);
   }
 
   get storageAddress(): { store: Store | undefined; index: number } {

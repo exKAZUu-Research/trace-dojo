@@ -1,7 +1,7 @@
 import type { DisplayNode } from '../../problems/trace';
 import { CppRuntimeError } from '../errors';
 import type { Frame } from '../runtime';
-import type { Type } from '../types';
+import { sizeOf, type Type } from '../types';
 import { type ArrayStore, Box, CObject, holdValues, Ptr, Store, UNINIT, type Value } from '../values';
 
 interface IndexedValue {
@@ -28,8 +28,8 @@ class NodePosition extends Ptr {
     return this.position ?? this.owner.length;
   }
 
-  get cellLocation(): Ptr {
-    this.cell ??= new NodeCell(this).location(0);
+  cellLocation(type: Type): Ptr {
+    this.cell ??= new NodeCell(this, type).location(0);
     return this.cell;
   }
 }
@@ -37,12 +37,19 @@ class NodePosition extends Ptr {
 class NodeCell extends Store {
   readonly length = 1;
 
-  constructor(private readonly node: NodePosition) {
+  constructor(
+    private readonly node: NodePosition,
+    private readonly type: Type
+  ) {
     super();
   }
 
   override checkAlive(): void {
     this.node.target();
+  }
+
+  override projectAddress(index: number, byteOffset: number): { store: Store; index: number } {
+    return { store: this, index: index * sizeOf(this.type) + byteOffset };
   }
 
   get(index: number): Value {
@@ -234,7 +241,8 @@ export class SequenceValue extends Store {
 
   override location(index: number): Ptr {
     if (this.constructingEnd && index === this.length + 1) return new Ptr(this, index);
-    if (this.storageKind === 'list' && this.nodes && index !== this.length) return this.nodes.at(index).cellLocation;
+    if (this.storageKind === 'list' && this.nodes && index !== this.length)
+      return this.nodes.at(index).cellLocation(this.elementType);
     return this.fixedStorage?.location(index) ?? this.nodes?.at(index) ?? super.location(index);
   }
 
@@ -251,6 +259,10 @@ export class SequenceValue extends Store {
     if (this.fixedStorage?.length) return this.fixedStorage;
   }
 
+  override projectAddress(index: number, byteOffset: number): { store: Store; index: number } | undefined {
+    if (this.storageKind === 'vector') return { store: this, index: index * sizeOf(this.elementType) + byteOffset };
+  }
+
   append(value: Value): void {
     if (this.dequeEpoch) this.dequeEpoch.all++;
     if (this.storageKind === 'vector') this.nodes?.invalidateEnd();
@@ -262,7 +274,7 @@ export class SequenceValue extends Store {
     const location = new NodePosition(this, this.length);
     this.constructingEnd = { location, value: UNINIT };
     try {
-      const value = initialize(this.storageKind === 'list' ? location.cellLocation : location);
+      const value = initialize(this.storageKind === 'list' ? location.cellLocation(this.elementType) : location);
       this.nodes?.install(location);
       this.append(value);
     } catch (error) {

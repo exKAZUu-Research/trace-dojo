@@ -39,6 +39,8 @@ int main() {
   std::array<int, 2> standalone{6, 7};
   std::array<std::array<int, 2>, 1> nested{8, 9};
   std::array<int, 0> empty{};
+  std::vector<std::array<int, 2>> vectorArrays{{1, 2}, {3, 4}};
+  std::list<std::array<int, 2>> listArrays{{1, 2}, {3, 4}};
   std::cout << (static_cast<void*>(owner.values.data()) == static_cast<void*>(&owner))
             << (static_cast<void*>(copied.values.data()) == static_cast<void*>(&copied))
             << (owner.values.data() != copied.values.data()) << '\n';
@@ -46,4 +48,8 @@ int main() {
             << (static_cast<void*>(&standalone + 1) == static_cast<void*>(standalone.data() + standalone.size()))
             << (static_cast<void*>(&nested) == static_cast<void*>(nested[0].data()))
             << (static_cast<void*>(&empty) != static_cast<void*>(empty.data())) << '\n';
+  auto* node = &listArrays.front();
+  std::cout << (static_cast<void*>(&vectorArrays.front() + 1) == static_cast<void*>(vectorArrays.front().data() + 2))
+            << (static_cast<void*>(&vectorArrays.back() + 1) == static_cast<void*>(vectorArrays.back().data() + 2))
+            << (static_cast<void*>(node + 1) == static_cast<void*>(node->data() + 2)) << '\n';
 }
