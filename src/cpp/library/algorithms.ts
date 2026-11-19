@@ -244,7 +244,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const compare = valueComparison(compiler(), '<', left, right, row);
       return compare ? (frame) => (a, b) => compare(frame, a, b) : undefined;
     }
-    const call = comparatorOf(compiler(), unqualified(arg.type), arg.functions?.candidates, types, arg.row);
+    const call = comparatorOf(compiler(), unqualified(arg.type), arg.functions, types, arg.row);
     if (!call) return undefined;
     return (frame) => (a, b) => truthy(call(frame, a, b));
   };
@@ -255,7 +255,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     arity = 1
   ): ((frame: Frame, ...values: Value[]) => Value) | undefined => {
     if (!arg) return undefined;
-    return comparatorOf(compiler(), unqualified(arg.type), arg.functions?.candidates, element, arg.row, arity);
+    return comparatorOf(compiler(), unqualified(arg.type), arg.functions, element, arg.row, arity);
   };
 
   /** Stops when an algorithm gets iterators of a weaker category than it needs, as libc++ rejects them. */
@@ -724,7 +724,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const info = rangeAt(args, 0);
     const callback = args[2];
     if (!info || args.length !== 3 || !callback.functions) return;
-    const action = functionCallback(compiler(), callback.functions.candidates, [info.element], callback.row);
+    const action = functionCallback(compiler(), callback.functions, [info.element], callback.row);
     return native('for_each', params(args), VOID, ([first, last], { frame }) => {
       const values = range(first, last, info);
       for (let index = 0; index < values.length; index++) action(frame, values.location(index));
@@ -1303,7 +1303,7 @@ function compileOperation(compiler: ExpressionCompiler, operation: Expr, types: 
     run: () => calls.at(-1)?.[index],
   }));
   const result = operation.functions
-    ? compiler.callCallback(operation.functions.candidates, args, row)
+    ? compiler.callCallback(operation.functions, args, row)
     : compiler.callWith({ ...operation, run: () => {} }, args, row);
   const evaluate = compiler.rvalue(result).run;
   return describeOperation(compiler, result, (frame, ...values) => {

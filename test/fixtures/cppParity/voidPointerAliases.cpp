@@ -2,6 +2,8 @@
 
 struct Base { int value = 7; };
 struct Hidden : private Base {};
+struct Nested { Base base; double next; };
+struct Derived : Base {};
 
 int main() {
   int values[] = {1, 0x11223344};
@@ -19,4 +21,16 @@ int main() {
   std::cout << (static_cast<const int*>(nil) == nullptr) << '\n';
   Hidden hidden;
   std::cout << ((Base&)hidden).value << '\n';
+  Nested nested{{8}, 2};
+  void* erasedNested = &nested;
+  int* first = static_cast<int*>(erasedNested);
+  std::cout << *first << ' ' << (*static_cast<Nested*>(static_cast<void*>(&nested.base))).base.value << '\n';
+  std::cout << static_cast<Nested*>(static_cast<void*>(&nested.base.value))->base.value << '\n';
+  Base base;
+  void* erasedMember = &base.value;
+  std::cout << static_cast<Base*>(erasedMember)->value << ' ' << (static_cast<Base*>(erasedMember) == &base) << '\n';
+  Derived derived;
+  void* erasedDerived = &derived;
+  Base* recoveredBase = static_cast<Base*>(erasedDerived);
+  std::cout << recoveredBase->value << ' ' << (static_cast<Derived*>(static_cast<void*>(recoveredBase)) == &derived) << '\n';
 }

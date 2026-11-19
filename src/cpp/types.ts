@@ -184,6 +184,7 @@ export class ClassInfo {
   methods = new Map<string, FunctionInfo[]>();
   constructors: FunctionInfo[] = [];
   destructor?: FunctionInfo;
+  hasUserDestructor = false;
   isComplete = false;
   /** The final overrider of each virtual function, by its signature. */
   virtuals = new Map<string, FunctionInfo>();
@@ -515,6 +516,30 @@ export function alignOf(type: Type): number {
       return Math.max(1, Math.min(sizeOf(type), 8));
     }
   }
+}
+
+export function isStandardLayout(cls: ClassInfo): boolean {
+  if (!cls.isComplete || cls.isPolymorphic) return false;
+  if (cls.library?.aggregateArray) return standardLayoutMember(cls.library.aggregateArray.type);
+  if (cls.library && cls.library.kind !== 'pair') return false;
+  const first = cls.fields[0];
+  if (
+    cls.fields.some(
+      (field) => field.owner !== first.owner || field.access !== first.access || !standardLayoutMember(field.type)
+    )
+  )
+    return false;
+  const firstTypes = first && typesAtOrigin(first.type);
+  for (let base = cls.base; base; base = base.base) {
+    if (firstTypes?.has(base)) return false;
+  }
+  return !cls.base || isStandardLayout(cls.base);
+}
+
+function standardLayoutMember(type: Type): boolean {
+  if (type.kind === 'reference') return false;
+  if (type.kind === 'array') return standardLayoutMember(type.of);
+  return type.kind !== 'class' || isStandardLayout(type.cls);
 }
 
 interface ClassLayout {

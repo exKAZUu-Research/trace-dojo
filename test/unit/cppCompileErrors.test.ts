@@ -538,6 +538,16 @@ test.each([
     2,
   ],
   [
+    'private copying for an algorithm callback initiated inside the element class',
+    '#include <algorithm>\nclass X; void f(X);\nclass X { X(const X&) {} public: X() {} void run() { X a[1]; std::for_each(a, a + 1, f); } };\nvoid f(X) {}',
+    2,
+  ],
+  [
+    'private allocator construction initiated inside the element class',
+    '#include <vector>\nclass X { X(int) {} public: void run() { std::vector<X> values; values.emplace_back(2); } };',
+    1,
+  ],
+  [
     'default arguments on a function passed to transform',
     '#include <algorithm>\nint twice(int x, int scale = 2) { return x * scale; }\nint main() { int a[] = {1}, b[1]; std::transform(a, a + 1, b, twice); }',
     2,

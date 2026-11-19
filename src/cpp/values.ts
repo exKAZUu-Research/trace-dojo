@@ -238,7 +238,11 @@ export class Ptr {
   private readonly initialStore: Store | undefined;
   private readonly initialIndex: number;
 
-  constructor(store: Store | undefined, index: number) {
+  constructor(
+    store: Store | undefined,
+    index: number,
+    readonly enclosingObject?: { location: Ptr; cls: ClassInfo }
+  ) {
     this.initialStore = store instanceof CObject ? store.member(index) : store;
     this.initialIndex = store instanceof CObject ? 0 : index;
   }
@@ -288,6 +292,7 @@ export class Ptr {
     const index = this.index + delta;
     if (index < 0 || index > (asIterator ? store.iteratorLength : store.length))
       throw new CppRuntimeError('pointerOutOfRange');
+    if (delta === 0 && !asIterator) return this;
     return asIterator ? store.iteratorLocation(index) : store.location(index);
   }
 
@@ -318,6 +323,11 @@ export class Ptr {
   get storageAddress(): { store: Store | undefined; index: number } {
     const { store, index } = this;
     return store instanceof MemberStorage ? { store: store.owner, index: store.field + index } : { store, index };
+  }
+
+  get memberOwner(): { object: CObject; field: number } | undefined {
+    const { store, index } = this;
+    if (store instanceof MemberStorage && index === 0) return { object: store.owner, field: store.field };
   }
 
   private addressedObject(): CObject | undefined {

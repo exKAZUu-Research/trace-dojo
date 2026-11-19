@@ -11,6 +11,12 @@ struct Inner {
   Inner(const Inner&) { std::cout << 'C'; }
 };
 struct Outer { Inner inner; };
+struct Token {
+  Token() {}
+  Token(const Token&) noexcept { std::cout << 'N'; }
+};
+struct MemberFallback { Token token; std::vector<int> values; };
+struct BaseFallback : Token { std::vector<int> values; };
 
 int main() {
   std::vector<std::vector<int>> rows{{1}, {4}, {5}, {2}, {3}, {6}};
@@ -40,4 +46,14 @@ int main() {
 
   std::vector<Outer> copies{Outer{}};
   std::cout << copies.size() << '\n';
+
+  std::vector<MemberFallback> memberFallback(1);
+  memberFallback[0].values.push_back(5);
+  int* savedMemberFallback = memberFallback[0].values.data();
+  memberFallback.reserve(16);
+  std::vector<BaseFallback> baseFallback(1);
+  baseFallback[0].values.push_back(6);
+  int* savedBaseFallback = baseFallback[0].values.data();
+  baseFallback.reserve(16);
+  std::cout << *savedMemberFallback << *savedBaseFallback << '\n';
 }

@@ -18,6 +18,7 @@ import {
   allowsConstantCopy,
   allowsMemberAssignment,
   type ClassInfo,
+  type ClassType,
   classType,
   type FunctionInfo,
   isArithmetic as isArithmeticType,
@@ -93,7 +94,7 @@ function parameterDestroyer(type: Type): ((frame: Frame, value: Value) => void) 
 
 /** The key that identifies a virtual function across a hierarchy: its name and its parameters. */
 export function virtualKey(fn: FunctionInfo): string {
-  return `${fn.name}(${fn.params.map((param) => typeName(param.type)).join(',')})${fn.isConst ? 'const' : ''}`;
+  return `${fn.name}(${fn.params.map((param) => typeName(unqualified(param.type))).join(',')})${fn.isConst ? 'const' : ''}`;
 }
 
 export function withTemporaries<T>(frame: Frame, run: Eval<T>): T {
@@ -172,8 +173,30 @@ export interface Resolved {
 }
 type MatchingOverload = Resolved & { objectConversion?: ConversionSequence };
 
+interface ObjectUseContext {
+  access?: ClassInfo;
+  seen: Set<ClassInfo>;
+  sourceIsConst?: boolean;
+  baseObject?: ClassInfo;
+}
+
 /** Making, copying, and destroying objects, converting values, and calling functions. */
 export abstract class ObjectCompiler extends CompilerBase implements ConversionHost {
+  private usingLibraryAccess = false;
+
+  withLibraryAccess<T>(compile: () => T): T {
+    const previous = this.usingLibraryAccess;
+    this.usingLibraryAccess = true;
+    try {
+      return compile();
+    } finally {
+      this.usingLibraryAccess = previous;
+    }
+  }
+
+  private get accessClass(): ClassInfo | undefined {
+    return this.usingLibraryAccess ? undefined : this.enclosingClass;
+  }
   // Values and conversions ------------------------------------------------------------------------------------------
 
   rvalue(expr: Expr): Expr {
@@ -303,13 +326,13 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     name: string,
     objectClass?: ClassInfo
   ): void {
-    if (isMemberAccessible(access, owner, naming, this.enclosingClass, objectClass)) return;
+    if (isMemberAccessible(access, owner, naming, this.accessClass, objectClass)) return;
     const word = accessAsMemberOf(access, owner, naming) === 'protected' ? 'protected' : 'private';
     this.error(row, `${name} は ${owner.name} の ${word} のメンバなので、ここでは使えません。`);
   }
 
   checkBaseConversion(from: ClassInfo, to: ClassInfo, row: number): void {
-    if (from === to || !from.isDerivedFrom(to) || isBaseAccessible(from, to, this.enclosingClass)) return;
+    if (from === to || !from.isDerivedFrom(to) || isBaseAccessible(from, to, this.accessClass)) return;
     this.error(row, `${to.name} は ${from.name} の public な親クラスではないので、${from.name} から変換できません。`);
   }
 
@@ -679,7 +702,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   }
 
   requireObjectUse(type: Type, operation: 'copy' | 'assign' | 'destroy', row: number): void {
-    this.checkObjectUse(type, operation, row, { access: this.enclosingClass, seen: new Set() });
+    this.checkObjectUse(type, operation, row, { access: this.accessClass, seen: new Set() });
   }
 
   requireLibraryObjectUse(type: Type, operation: 'copy' | 'assign' | 'destroy', row: number): void {
@@ -704,7 +727,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     type: Type,
     operation: 'copy' | 'assign' | 'destroy',
     row: number,
-    context: { access?: ClassInfo; seen: Set<ClassInfo>; sourceIsConst?: boolean; baseObject?: ClassInfo }
+    context: ObjectUseContext
   ): void {
     if (type.kind === 'array') {
       if ((type.length ?? 1) > 0) this.checkObjectUse(type.of, operation, row, context);
@@ -725,24 +748,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     if (seen.has(cls)) return;
     seen.add(cls);
 
-    if (operation === 'copy') {
-      this.requireVirtualDefinitions(cls, row);
-      const sourceIsConst = context.sourceIsConst === true || isConstType(type);
-      const constructors = this.writtenCopyConstructors(cls);
-      const constructor = constructors.length > 0 ? this.selectCopyConstructor(cls, sourceIsConst, row) : undefined;
-      if (cls.isNoncopyable || (constructors.length > 0 ? !constructor : sourceIsConst && !cls.implicitCopyFromConst))
-        this.error(row, `${cls.name} のオブジェクトはコピーできません。`);
-      if (constructor) {
-        if (!isMemberAccessible(constructor.access, cls, cls, access, baseObject ?? cls))
-          this.error(row, `${cls.name} のコピーコンストラクタは ${constructor.access} なので、ここでは使えません。`);
-        this.checkDefined(constructor, row);
-        if (constructor.params.length > 1) {
-          const defaults = this.callArguments(constructor, [this.copySource(cls, sourceIsConst, row)], row).slice(1);
-          this.copyDefaults.set(constructor, defaults);
-        }
-        return;
-      }
-    }
+    if (operation === 'copy' && this.checkCopyOperation(type, row, context)) return;
     if (operation === 'destroy' && destructor) this.checkDefined(destructor, row);
     const nested = { access: cls, seen, sourceIsConst: cls.implicitCopyFromConst };
     if (cls.base) this.checkObjectUse(classType(cls.base), operation, row, { ...nested, baseObject: cls });
@@ -755,6 +761,25 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       if (operation === 'assign' && cls.library?.elementUseOnAssignment)
         this.checkObjectUse(owned, 'copy', row, { ...library, seen: new Set() });
     }
+  }
+
+  private checkCopyOperation(type: ClassType, row: number, context: ObjectUseContext): boolean {
+    const { cls } = type;
+    this.requireVirtualDefinitions(cls, row);
+    const sourceIsConst = context.sourceIsConst === true || isConstType(type);
+    const hasWrittenCopy = this.writtenCopyConstructors(cls).length > 0;
+    const constructor = hasWrittenCopy ? this.selectCopyConstructor(cls, sourceIsConst, row) : undefined;
+    if (cls.isNoncopyable || (hasWrittenCopy ? !constructor : sourceIsConst && !cls.implicitCopyFromConst))
+      this.error(row, `${cls.name} のオブジェクトはコピーできません。`);
+    if (!constructor) return false;
+    if (!isMemberAccessible(constructor.access, cls, cls, context.access, context.baseObject ?? cls))
+      this.error(row, `${cls.name} のコピーコンストラクタは ${constructor.access} なので、ここでは使えません。`);
+    this.checkDefined(constructor, row);
+    if (constructor.params.length > 1) {
+      const defaults = this.callArguments(constructor, [this.copySource(cls, sourceIsConst, row)], row).slice(1);
+      this.copyDefaults.set(constructor, defaults);
+    }
+    return true;
   }
 }
 

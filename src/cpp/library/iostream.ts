@@ -324,33 +324,35 @@ export class Streams {
       stream.failed = false;
       stream.atEnd = false;
     });
-    if (isOutput) {
-      const result = referenceTo(classType(this.ostream ?? cls));
-      const output = (
-        name: string,
-        params: Type[],
-        run: (stream: StreamValue, args: unknown[], frame: Frame) => void
-      ): void => {
-        addMethod(
-          cls,
-          native(name, params, result, (args, { self: object, selfLocation, frame }) => {
-            run(self(object), args, frame);
-            return selfLocation;
-          })
-        );
-      };
-      output('put', [CHAR], (stream, [char], frame) => {
-        stream.write(frame, String.fromCodePoint(asNumber(char) & 0xff));
-      });
-      output('write', [CONST_CHAR_PTR, LONG], (stream, [pointer, count], frame) => {
-        const start = pointer as Ptr;
-        let bytes = '';
-        for (let index = 0; index < Number(count); index++)
-          bytes += String.fromCodePoint(asNumber(start.offset(index).read()) & 0xff);
-        stream.write(frame, bytes);
-      });
-      output('flush', [], () => {});
-    }
+    if (isOutput) this.addOutputMembers(cls);
+  }
+
+  private addOutputMembers(cls: ClassInfo): void {
+    const result = referenceTo(classType(this.ostream ?? cls));
+    const output = (
+      name: string,
+      params: Type[],
+      run: (stream: StreamValue, args: unknown[], frame: Frame) => void
+    ): void => {
+      addMethod(
+        cls,
+        native(name, params, result, (args, { self: object, selfLocation, frame }) => {
+          run(self(object), args, frame);
+          return selfLocation;
+        })
+      );
+    };
+    output('put', [CHAR], (stream, [char], frame) => {
+      stream.write(frame, String.fromCodePoint(asNumber(char) & 0xff));
+    });
+    output('write', [CONST_CHAR_PTR, LONG], (stream, [pointer, count], frame) => {
+      const start = pointer as Ptr;
+      let bytes = '';
+      for (let index = 0; index < Number(count); index++)
+        bytes += String.fromCodePoint(asNumber(start.offset(index).read()) & 0xff);
+      stream.write(frame, bytes);
+    });
+    output('flush', [], () => {});
   }
 
   manipulatorType(isOutputOnly: boolean): Type {

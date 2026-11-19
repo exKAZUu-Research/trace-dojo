@@ -746,13 +746,7 @@ function listMethods(
   const callable = (args: Expr[]): ((frame: Frame, a: Value, b: Value) => boolean) | undefined => {
     const [arg] = args;
     if (args.length !== 1) return;
-    const call = comparatorOf(
-      library.compiler,
-      unqualified(arg.type),
-      arg.functions?.candidates,
-      unqualified(element),
-      arg.row
-    );
+    const call = comparatorOf(library.compiler, unqualified(arg.type), arg.functions, unqualified(element), arg.row);
     return call ? (frame, a, b) => truthy(call(frame, a, b)) : undefined;
   };
   addTemplateMethod(cls, 'sort', (args) => {
@@ -1073,10 +1067,12 @@ function emplacement(
 
 /** Compiles the construction of an element from arguments, as `emplace_back` and the like do. */
 export function constructElement(compiler: ExpressionCompiler, element: Type, args: Expr[], row: number): Eval<Value> {
-  if (element.kind === 'class') return compiler.constructObject(element.cls, args, row, false).run as Eval<Value>;
-  if (args.length === 0) return compiler.valueInitialized(element, row).run as Eval<Value>;
-  if (args.length !== 1) return compiler.error(row, `${typeName(element)} の値には引数を1つだけ書いてください。`);
-  return compiler.convert(args[0], unqualified(element), row).run as Eval<Value>;
+  return compiler.withLibraryAccess(() => {
+    if (element.kind === 'class') return compiler.constructObject(element.cls, args, row, false).run as Eval<Value>;
+    if (args.length === 0) return compiler.valueInitialized(element, row).run as Eval<Value>;
+    if (args.length !== 1) return compiler.error(row, `${typeName(element)} の値には引数を1つだけ書いてください。`);
+    return compiler.convert(args[0], unqualified(element), row).run as Eval<Value>;
+  });
 }
 
 export { elementLocation };

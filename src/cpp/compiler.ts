@@ -607,6 +607,7 @@ export class Compiler extends StatementCompiler {
       for (const fn of overloads) this.completeVirtual(cls, fn, virtualKey(fn));
     }
     const baseDestructor = cls.base?.destructor;
+    cls.hasUserDestructor = cls.destructor !== undefined;
     if (!cls.destructor && baseDestructor?.isVirtual) cls.destructor = this.implicitDestructor(cls);
     if (cls.destructor) this.completeVirtual(cls, cls.destructor, '~');
     const copies = this.writtenCopyConstructors(cls);
@@ -1034,10 +1035,7 @@ export class Compiler extends StatementCompiler {
       try {
         if (base) {
           const baseCopy = base.operations?.copy(frame, source, target, cls.implicitCopyFromConst) as CObject;
-          if (baseCopy !== target) {
-            target.message = baseCopy.message;
-            for (let index = 0; index < base.fields.length; index++) target.values[index] = baseCopy.values[index];
-          }
+          installBaseValue(base, target, baseCopy);
           isBaseComplete = true;
         }
         target.cls = cls;
@@ -1072,6 +1070,7 @@ export class Compiler extends StatementCompiler {
     };
     const destroy = this.destructionOf(cls);
     return {
+      copyIsNoexcept: constCopy?.isNoexcept === true && constCopy.params.length === 1,
       copy: (frame, source, destination, sourceIsConst = true) => {
         const target = newObject(frame, cls, false, destination);
         copyInto(frame, target, source as CObject, sourceIsConst);
@@ -1241,7 +1240,11 @@ export class Compiler extends StatementCompiler {
       }
       fn.isDefined = true;
       fn.definition = node;
-      fn.params = fn.params.map((param, index) => ({ ...param, name: probe.params[index].name }));
+      fn.params = fn.params.map((param, index) => ({
+        ...param,
+        name: probe.params[index].name,
+        type: probe.params[index].type,
+      }));
       if (probe.isInline) fn.isInline = true;
       this.claimAtomic(fn, node);
       if (cls === fn.owner && fn.isDestructor) {
@@ -2122,10 +2125,7 @@ export class Compiler extends StatementCompiler {
         if (base && initializeBase) {
           object.cls = base;
           const initialized = initializeBase(frame, object, zeroInitialize, owner) as CObject;
-          if (initialized !== object) {
-            object.message = initialized.message;
-            for (const field of base.fields) object.values[field.index] = initialized.values[field.index];
-          }
+          installBaseValue(base, object, initialized);
           baseComplete = true;
         }
         object.cls = cls;
@@ -2275,6 +2275,12 @@ export class Compiler extends StatementCompiler {
 
 class TemporaryConstructorReferenceError extends CompileError {}
 
+function installBaseValue(base: ClassInfo, target: CObject, initialized: CObject): void {
+  if (initialized === target) return;
+  target.message = initialized.message;
+  for (const field of base.fields) target.values[field.index] = initialized.values[field.index];
+}
+
 function initializerTarget(value: Value): InitializerTarget | undefined {
   return value instanceof CObject || value instanceof ArrayStore ? value : undefined;
 }
@@ -2311,7 +2317,7 @@ function mergeDefaults(
     const other = defined[index];
     if (param.defaultValue && other.defaultValue)
       error(row, '引数の既定値は、宣言と定義のどちらか一方にだけ書いてください。');
-    return { ...param, name: other.name, defaultValue: param.defaultValue ?? other.defaultValue };
+    return { ...param, name: other.name, type: other.type, defaultValue: param.defaultValue ?? other.defaultValue };
   });
 }
 

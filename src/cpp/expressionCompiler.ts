@@ -536,6 +536,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         run: (frame) => (objectRun(frame).read() as CObject).get(index) as unknown as Ptr,
       };
     }
+    const cls = object.type.kind === 'class' ? object.type.cls : field.owner;
+    const locate = (location: Ptr): Ptr => new Ptr(location.read() as CObject, index, { location, cls });
     if (object.isLvalue) {
       const { run } = object;
       return {
@@ -545,10 +547,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         constantInitialization: object.constantInitialization,
         memberConstant: object.isThis && isArithmetic(type) ? (members) => members.get(field) : undefined,
         row,
-        run: (frame) => {
-          const target = (run(frame) as Ptr).read();
-          return new Ptr(target as CObject, index);
-        },
+        run: (frame) => locate(run(frame) as Ptr),
         description: field.name,
         temporaryMember: object.temporaryMember && {
           object: object.temporaryMember.object,
@@ -562,7 +561,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type,
       isLvalue: true,
       row,
-      run: (frame) => new Ptr((materialized(frame) as Ptr).read() as CObject, index),
+      run: (frame) => locate(materialized(frame) as Ptr),
       temporaryMember: { object, path: [index] },
     };
   }
@@ -1340,53 +1339,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const run = this.discardedValue(expr);
       return { type, isLvalue: false, row, run: (frame) => (run(frame), undefined), onlyCalls: expr.onlyCalls };
     }
-    if (type.kind === 'reference') {
-      const from = expr.type;
-      const to = type.to;
-      if (
-        expr.isLvalue &&
-        !expr.temporaryMember &&
-        from.kind === 'class' &&
-        to.kind === 'class' &&
-        (to.cls.isDerivedFrom(from.cls) || from.cls.isDerivedFrom(to.cls)) &&
-        (!isConstType(from) || isConstType(to))
-      ) {
-        return this.castClassLocation(expr, to, from.cls, to.cls, row, kind);
-      }
-      const converted = this.convert(expr, type, row);
-      return { ...converted, type: to, isLvalue: true };
-    }
+    if (type.kind === 'reference') return this.castReference(expr, type, row, kind);
     const explicitBool = this.libraryBool(expr, row, type);
     if (explicitBool) return explicitBool;
     const value = this.rvalue(expr);
     if (isArithmetic(type) && isArithmetic(value.type))
       return convertArithmetic(value, unqualified(type) as ArithmeticType);
-    if (type.kind === 'pointer' && value.type.kind === 'pointer') {
-      const from = value.type.to;
-      const to = type.to;
-      const related =
-        sameType(unqualified(from), unqualified(to), false) ||
-        to.kind === 'void' ||
-        from.kind === 'void' ||
-        (from.kind === 'class' &&
-          to.kind === 'class' &&
-          (from.cls.isDerivedFrom(to.cls) || to.cls.isDerivedFrom(from.cls)));
-      if (!related)
-        return this.unsupported(
-          row,
-          kind === 'C' ? '関係のない型のポインタへのキャスト（reinterpret_cast にあたる）' : 'reinterpret_cast'
-        );
-      if (isConstType(from) && !isConstType(to)) return this.unsupported(row, 'const を外すキャスト（const_cast）');
-      if (from.kind === 'void' || to.kind === 'void') {
-        const run = value.run;
-        if (from.kind === 'void' && to.kind !== 'void')
-          return { ...value, type, run: (frame) => recoverPointee(run(frame) as Ptr, to) };
-        if (from.kind !== 'void') return { ...value, type, run: (frame) => erasePointee(run(frame) as Ptr, from) };
-      }
-      if (from.kind === 'class' && to.kind === 'class')
-        return this.castClassLocation(value, type, from.cls, to.cls, row, kind);
-      return { ...value, type };
-    }
+    if (type.kind === 'pointer' && value.type.kind === 'pointer')
+      return this.castPointer(value, value.type.to, type, row, kind);
     if (
       isArithmetic(type) &&
       (value.type.kind === 'pointer' || value.type.kind === 'nullptr') &&
@@ -1407,6 +1367,59 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     if (type.kind === 'class') return this.constructObject(type.cls, [expr], row, false);
     return this.convert(expr, unqualified(type), row);
+  }
+
+  private castReference(
+    expr: Expr,
+    type: Extract<Type, { kind: 'reference' }>,
+    row: number,
+    kind: 'static' | 'C'
+  ): Expr {
+    const { type: from } = expr;
+    const { to } = type;
+    if (
+      expr.isLvalue &&
+      !expr.temporaryMember &&
+      from.kind === 'class' &&
+      to.kind === 'class' &&
+      (to.cls.isDerivedFrom(from.cls) || from.cls.isDerivedFrom(to.cls)) &&
+      (!isConstType(from) || isConstType(to))
+    ) {
+      return this.castClassLocation(expr, to, from.cls, to.cls, row, kind);
+    }
+    const converted = this.convert(expr, type, row);
+    return { ...converted, type: to, isLvalue: true };
+  }
+
+  private castPointer(
+    value: Expr,
+    from: Type,
+    type: Extract<Type, { kind: 'pointer' }>,
+    row: number,
+    kind: 'static' | 'C'
+  ): Expr {
+    const { to } = type;
+    const related =
+      sameType(from, to, false) ||
+      to.kind === 'void' ||
+      from.kind === 'void' ||
+      (from.kind === 'class' &&
+        to.kind === 'class' &&
+        (from.cls.isDerivedFrom(to.cls) || to.cls.isDerivedFrom(from.cls)));
+    if (!related)
+      return this.unsupported(
+        row,
+        kind === 'C' ? '関係のない型のポインタへのキャスト（reinterpret_cast にあたる）' : 'reinterpret_cast'
+      );
+    if (isConstType(from) && !isConstType(to)) return this.unsupported(row, 'const を外すキャスト（const_cast）');
+    if (from.kind === 'class' && to.kind === 'class')
+      return this.castClassLocation(value, type, from.cls, to.cls, row, kind);
+    const run = value.run;
+    if (from.kind === 'void' && to.kind !== 'void')
+      return { ...value, type, run: (frame) => recoverPointee(run(frame) as Ptr, to) };
+    if (to.kind === 'void' && from.kind !== 'void')
+      return { ...value, type, run: (frame) => erasePointee(run(frame) as Ptr, from) };
+    return { ...value, type };
   }
 
   private castClassLocation(
@@ -1605,12 +1618,15 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return this.callExpr(resolved, args, object, row, candidates.isQualified === true);
   }
 
-  callCallback(candidates: FunctionInfo[], args: Expr[], row: number): Expr {
-    const resolved = this.resolve('関数', candidates, args, undefined, row, undefined, true);
+  callCallback(candidates: FunctionCandidates, args: Expr[], row: number): Expr {
+    const resolved = this.resolve('関数', candidates.candidates, args, undefined, row, candidates.templateArgs, true);
     const { fn } = resolved;
-    if (fn.owner && !fn.isStatic) return this.error(row, `メンバ関数 ${fn.displayName} は、関数として渡せません。`);
+    if (fn.owner) {
+      if (!fn.isStatic) return this.error(row, `メンバ関数 ${fn.displayName} は、関数として渡せません。`);
+      if (!fn.native) this.checkAccess(fn.access, fn.owner, candidates.namingClass ?? fn.owner, row, fn.name);
+    }
     this.checkDefined(fn, row);
-    return this.callExpr(resolved, args, undefined, row);
+    return this.withLibraryAccess(() => this.callExpr(resolved, args, undefined, row));
   }
 
   /** Adds the library's functions an unqualified call finds through its arguments' types (C++20 [basic.lookup.argdep]). */

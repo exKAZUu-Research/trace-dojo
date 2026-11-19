@@ -9,9 +9,9 @@ struct Derived : Base { int second = 4; };
 struct FixedBase { int first; FixedBase(int value) : first(value) {} };
 struct FixedDerived : FixedBase { int second; };
 
-struct Abstract { virtual int value() const = 0; };
-struct Intermediate : Abstract { int value() const override = 0; };
-struct Concrete : Intermediate { int value() const { return 7; } };
+struct Abstract { virtual int value(int n) const = 0; };
+struct Intermediate : Abstract { int value(const int n) const override = 0; };
+struct Concrete : Intermediate { int value(int n) const { return ++n; } };
 
 struct Holder {
   std::vector<int> values;
@@ -38,7 +38,7 @@ int main() {
   Concrete impl;
   Intermediate* iface = &impl;
   Intermediate* null = NULL;
-  std::cout << (/* dispatch */ iface->value()) << twice(/* argument */ 3) << (null == nullptr) << '\n';
+  std::cout << (/* dispatch */ iface->value(6)) << twice(/* argument */ 3) << (null == nullptr) << '\n';
   unsigned char bytes[] = "\xc3\xa9";
   std::cout << int(bytes[0]) << ' ' << int(bytes[1]) << '\n';
 }

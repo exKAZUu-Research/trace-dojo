@@ -6,7 +6,7 @@ import { CObject, type Value } from '../values';
 import { equalTo, lessThan } from './elements';
 import type { Library } from './registry';
 import { StringValue } from './string';
-import { nativeConstructor } from './support';
+import { native, nativeConstructor } from './support';
 import { typeKey } from './templates';
 
 const FUNCTORS: Record<string, { isComparison: boolean; operator: string }> = {
@@ -147,6 +147,22 @@ const LIMITS: Record<
   },
 };
 
+const INTEGER_EXPONENTS = { max_digits10: 0, min_exponent: 0, max_exponent: 0, min_exponent10: 0, max_exponent10: 0 };
+const BINARY32_EXPONENTS = {
+  max_digits10: 9,
+  min_exponent: -125,
+  max_exponent: 128,
+  min_exponent10: -37,
+  max_exponent10: 38,
+};
+const BINARY64_EXPONENTS = {
+  max_digits10: 17,
+  min_exponent: -1021,
+  max_exponent: 1024,
+  min_exponent10: -307,
+  max_exponent10: 308,
+};
+
 /** `std::numeric_limits<T>`, whose static members tell the range of an arithmetic type. */
 export function numericLimitsClass(library: Library, type: Type): ClassInfo {
   const key = `numeric_limits<${typeKey(type)}>`;
@@ -163,53 +179,34 @@ export function numericLimitsClass(library: Library, type: Type): ClassInfo {
   const binary32 = target.name === 'float';
   const signed = floating || limits.min < 0;
   const zero = typeof limits.max === 'bigint' ? 0n : 0;
+  const special = floating
+    ? {
+        round_error: 0.5,
+        infinity: Infinity,
+        quiet_NaN: Number.NaN,
+        signaling_NaN: Number.NaN,
+        denorm_min: binary32 ? 2 ** -149 : Number.MIN_VALUE,
+      }
+    : { round_error: zero, infinity: zero, quiet_NaN: zero, signaling_NaN: zero, denorm_min: zero };
   const staticFunction = (name: string, value: number | bigint): void => {
-    cls.methods.set(name, [
-      {
-        name,
-        displayName: `${cls.name}::${name}`,
-        params: [],
-        ret: target,
-        owner: cls,
-        isStatic: true,
-        isVirtual: false,
-        isConst: false,
-        isPure: false,
-        isConstructor: false,
-        isDestructor: false,
-        isOverride: false,
-        isFinal: false,
-        access: 'public',
-        row: -1,
-        isAtomic: false,
-        isDefined: true,
-        native: () => value,
-        evaluateConstant: () => value,
-      },
-    ]);
+    const evaluate = (): number | bigint => value;
+    const method = native(name, [], target, evaluate, { owner: cls, isStatic: true });
+    cls.methods.set(name, [{ ...method, evaluateConstant: evaluate }]);
   };
   for (const [name, value] of Object.entries({
     max: limits.max,
     min: limits.min,
     lowest: limits.lowest ?? limits.min,
     epsilon: limits.epsilon ?? zero,
-    round_error: floating ? 0.5 : zero,
-    infinity: floating ? Infinity : zero,
-    quiet_NaN: floating ? Number.NaN : zero,
-    signaling_NaN: floating ? Number.NaN : zero,
-    denorm_min: floating ? (binary32 ? 2 ** -149 : Number.MIN_VALUE) : zero,
+    ...special,
   }))
     staticFunction(name, value);
   const int: Type = { kind: 'int', name: 'int' };
   for (const [name, value] of Object.entries({
     digits: limits.digits,
     digits10: limits.digits10,
-    max_digits10: floating ? (binary32 ? 9 : 17) : 0,
     radix: 2,
-    min_exponent: floating ? (binary32 ? -125 : -1021) : 0,
-    max_exponent: floating ? (binary32 ? 128 : 1024) : 0,
-    min_exponent10: floating ? (binary32 ? -37 : -307) : 0,
-    max_exponent10: floating ? (binary32 ? 38 : 308) : 0,
+    ...(floating ? (binary32 ? BINARY32_EXPONENTS : BINARY64_EXPONENTS) : INTEGER_EXPONENTS),
     has_denorm: Number(floating),
     round_style: Number(floating),
   }))

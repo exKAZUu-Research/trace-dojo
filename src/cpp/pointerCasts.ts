@@ -1,16 +1,19 @@
 import { CppRuntimeError } from './errors';
 import {
   type ArithmeticType,
+  type ClassType,
+  classType,
   type IntType,
   isArithmetic,
   isSigned,
+  isStandardLayout,
   isWide,
   sameType,
   sizeOf,
   type Type,
   typeName,
 } from './types';
-import { CObject, Ptr, Store, type Value } from './values';
+import { Box, CObject, Ptr, Store, type Value } from './values';
 
 export function erasePointee(pointer: Ptr, pointee: Type): Ptr {
   if (pointer instanceof IncompatiblePointer) return pointer.erased;
@@ -23,10 +26,8 @@ export function recoverPointee(pointer: Ptr, target: Type): Ptr {
   if (pointer.isNull || !(pointer instanceof ErasedPointer)) return pointer;
   const { original, pointee } = pointer;
   if (sameType(pointee, target, false)) return original;
-  if (pointee.kind === 'class' && target.kind === 'class') {
-    const object = original.readRaw();
-    if (object instanceof CObject && object.cls.isDerivedFrom(target.cls)) return original;
-  }
+  const related = pointerInterconvertible(original, pointee, target);
+  if (related) return related;
   if (isArithmetic(pointee) && target.kind === 'int') {
     const byteView = target.name === 'char' || target.name === 'uchar';
     if (byteView || correspondingIntegers(pointee, target)) {
@@ -35,6 +36,49 @@ export function recoverPointee(pointer: Ptr, target: Type): Ptr {
     }
   }
   return new IncompatiblePointer(pointer, target);
+}
+
+function pointerInterconvertible(pointer: Ptr, source: Type, target: Type): Ptr | undefined {
+  const inside = firstSubobject(pointer, source, target);
+  if (inside) return inside;
+  if (target.kind === 'class' && isStandardLayout(target.cls)) return enclosingSubobject(pointer, source, target);
+}
+
+function firstSubobject(pointer: Ptr, source: Type, target: Type): Ptr | undefined {
+  if (sameType(source, target, false)) return pointer;
+  if (source.kind !== 'class' || !isStandardLayout(source.cls)) return;
+  if (target.kind === 'class' && source.cls.isDerivedFrom(target.cls)) return pointer;
+  const object = pointer.readRaw();
+  if (!(object instanceof CObject)) return;
+  if (
+    target.kind === 'class' &&
+    target.cls.isDerivedFrom(source.cls) &&
+    object.cls.isDerivedFrom(target.cls) &&
+    isStandardLayout(object.cls)
+  )
+    return pointer;
+  const first = source.cls.fields[0];
+  if (!first) return;
+  const location = new Ptr(object, first.index, { location: pointer, cls: source.cls });
+  return firstSubobject(location, first.type, target);
+}
+
+function enclosingSubobject(pointer: Ptr, source: Type, target: ClassType): Ptr | undefined {
+  const member = pointer.memberOwner;
+  if (!member) return;
+  const context = pointer.enclosingObject;
+  const location = context?.location ?? new Ptr(new Box(member.object, false), 0);
+  const requestedMember = target.cls.fields[0];
+  if (
+    member.object.cls.isDerivedFrom(target.cls) &&
+    requestedMember?.index === member.field &&
+    sameType(requestedMember.type, source, false)
+  )
+    return location;
+  const owner = context?.cls ?? member.object.cls;
+  const first = owner.fields[0];
+  if (isStandardLayout(owner) && first?.index === member.field && sameType(first.type, source, false))
+    return enclosingSubobject(location, classType(owner), target);
 }
 
 function correspondingIntegers(from: ArithmeticType, to: IntType): boolean {

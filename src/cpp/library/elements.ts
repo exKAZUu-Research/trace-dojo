@@ -1,9 +1,17 @@
 import { CppRuntimeError } from '../errors';
-import type { Expr } from '../expr';
+import type { Expr, FunctionCandidates } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { destroyTemporaries, invoke, newObject, withTemporaries, zeroOf } from '../objectCompiler';
 import type { Frame } from '../runtime';
-import { type ClassInfo, type FunctionInfo, isArithmetic, isConstType, isCopyConstructor, type Type } from '../types';
+import {
+  type ClassInfo,
+  classType,
+  type FunctionInfo,
+  isArithmetic,
+  isConstType,
+  isCopyConstructor,
+  type Type,
+} from '../types';
 import { ArrayStore, Box, CObject, endLifetime, FunctionRef, Ptr, Store, UNINIT, type Value } from '../values';
 import { SequenceValue } from './containerValues';
 import { StringValue } from './string';
@@ -90,42 +98,65 @@ export function canTransferElementStorage(type: Type): boolean {
   if (type.kind === 'array') return type.length === 0 || canTransferElementStorage(type.of);
   if (type.kind !== 'class') return true;
   const { cls } = type;
-  if (isConstType(type) || !cls.isComplete || cls.isNoncopyable) return false;
+  if (!cls.isComplete || cls.isNoncopyable) return false;
+  if (isConstType(type)) return canCopyWithoutThrow(type);
   const library = cls.library;
   if (library?.kind === 'string' || ownsMovableSequence(type)) return true;
   const fixedArray = library?.aggregateArray;
   if (fixedArray) return canTransferElementStorage(fixedArray.type);
+  if (!canMoveFields(cls)) return canCopyWithoutThrow(type);
   return (
-    canMoveFields(cls) &&
-    (!cls.base || canTransferElementStorage({ kind: 'class', cls: cls.base })) &&
+    (!cls.base || canTransferElementStorage(classType(cls.base))) &&
     cls.ownFields.every((field) => canTransferElementStorage(field.type))
   );
 }
 
-function transferElement(frame: Frame, type: Type, source: Value): Value {
+function canCopyWithoutThrow(type: Type): boolean {
+  if (type.kind === 'array') return type.length === 0 || canCopyWithoutThrow(type.of);
+  if (type.kind !== 'class') return true;
+  const { cls } = type;
+  if (!cls.isComplete || cls.isNoncopyable) return false;
+  const fixedArray = cls.library?.aggregateArray;
+  if (fixedArray) return canCopyWithoutThrow(fixedArray.type);
+  if (cls.library && cls.library.kind !== 'pair') return cls.operations?.copyIsNoexcept === true;
+  if (cls.constructors.some((ctor) => !ctor.native && isCopyConstructor(ctor, cls)))
+    return cls.operations?.copyIsNoexcept === true;
+  return (
+    cls.implicitCopyFromConst &&
+    (!cls.base || canCopyWithoutThrow(classType(cls.base))) &&
+    cls.ownFields.every((field) => canCopyWithoutThrow(field.type))
+  );
+}
+
+function transferElement(frame: Frame, type: Type, source: Value, target?: CObject): Value {
+  if (source === UNINIT) return UNINIT;
   if (type.kind === 'array' && source instanceof ArrayStore) {
     frame.runtime.reserve(source.values.length);
     return new ArrayStore(source.values.map((value) => transferElement(frame, type.of, value)));
   }
   if (type.kind !== 'class') return source;
+  const { cls } = type;
+  if (isConstType(type)) return cls.operations?.copy(frame, source, target) ?? source;
   if (source instanceof StringValue) {
     const target = new StringValue('');
     target.moveFrom(source);
     return target;
   }
   if (source instanceof SequenceValue) {
-    const array = type.cls.library?.aggregateArray;
+    const array = cls.library?.aggregateArray;
     if (!array) return source.moveStorage();
     frame.runtime.reserve(source.items.length);
     return array.make(source.items.map((value) => transferElement(frame, array.type.of, value)));
   }
-  if (source instanceof CObject) {
-    const destination = newObject(frame, type.cls);
-    for (const field of type.cls.fields)
+  if (source instanceof CObject && canMoveFields(cls)) {
+    const destination = newObject(frame, cls, false, target);
+    if (cls.base) transferElement(frame, classType(cls.base), source, destination);
+    destination.cls = cls;
+    for (const field of cls.ownFields)
       destination.values[field.index] = transferElement(frame, field.type, source.values[field.index]);
     return destination;
   }
-  return source;
+  return cls.operations?.copy(frame, source, target) ?? source;
 }
 
 function ownsMovableSequence(type: Type): boolean {
@@ -211,7 +242,8 @@ export function moveValue(frame: Frame, type: Type, target: Value, source: Value
   } else if (canMoveFields(cls)) {
     const to = target as CObject;
     const from = source as CObject;
-    for (const field of cls.fields)
+    if (cls.base) moveValue(frame, classType(cls.base), to, from);
+    for (const field of cls.ownFields)
       to.values[field.index] = moveField(frame, field.type, to.values[field.index], from.values[field.index]);
   } else cls.operations?.assign(frame, target, source);
   return target;
@@ -229,16 +261,10 @@ function moveField(frame: Frame, type: Type, target: Value, source: Value): Valu
 }
 
 function canMoveFields(cls: ClassInfo): boolean {
-  return cls.library?.kind === 'pair' || (!cls.library && !declaresCopyOrDestructor(cls));
-}
-
-/** Whether a class or a base declares a copy constructor or a destructor, which leaves it without an implicit move. */
-function declaresCopyOrDestructor(cls: ClassInfo): boolean {
-  for (let current: ClassInfo | undefined = cls; current; current = current.base) {
-    if (current.destructor || current.constructors.some((ctor) => isCopyConstructor(ctor, current as ClassInfo)))
-      return true;
-  }
-  return false;
+  return (
+    cls.library?.kind === 'pair' ||
+    (!cls.library && !cls.hasUserDestructor && !cls.constructors.some((ctor) => isCopyConstructor(ctor, cls)))
+  );
 }
 
 function defaultConstructor(
@@ -347,7 +373,7 @@ export function locationOf(value: Value): Ptr {
 export function comparatorOf(
   compiler: ExpressionCompiler,
   argumentType: Type,
-  functions: FunctionInfo[] | undefined,
+  functions: FunctionCandidates | undefined,
   elementType: Type | Type[],
   row: number,
   arity = 2
@@ -367,7 +393,7 @@ export function comparatorOf(
 
 export function functionCallback(
   compiler: ExpressionCompiler,
-  candidates: FunctionInfo[],
+  candidates: FunctionCandidates,
   types: Type[],
   row: number,
   predicate = false
