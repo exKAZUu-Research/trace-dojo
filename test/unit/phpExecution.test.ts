@@ -686,6 +686,15 @@ echo 'after;';`);
   expect(execution).toMatchObject({ kind: 'executed', stdout: 'alive;D;after;' });
 });
 
+test.each([
+  ["preg_match_all('/(a?)+/', str_repeat('a ', 50000))", '100001'],
+  ["strlen(preg_replace('/(a?)+/', 'x', str_repeat('a ', 50000)))", '150001'],
+  ["preg_match_all('/(あ?)+/u', str_repeat('あ ', 10000))", '20001'],
+])('completes bounded native regex scan within time budget: %s', (expression, stdout) => {
+  const execution = run(`<?php echo ${expression};`);
+  expect(execution).toMatchObject({ kind: 'executed', stdout });
+});
+
 test.each(['<?php echo "hello"; declare(strict_types=1);', '<?php function f() {} declare(strict_types=1);'])(
   'rejects a late strict_types declaration before execution: %s',
   (source) => {

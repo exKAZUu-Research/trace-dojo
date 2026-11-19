@@ -7,7 +7,7 @@ import { isCallable } from './libCore';
 import { defineConstant, defineFunction } from './native';
 import { toStr } from './operators';
 import { type Compiled, groupName, PatternError, translate } from './pcrePattern';
-import { boundedRegexMatch, type MatchOffsets } from './regexExecution';
+import { createBoundedRegexScanner, type MatchOffsets } from './regexExecution';
 import { ExitSignal, PhpThrow, rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import { copyValueSlot, deref, PhpArray, PhpObject, type Ref, type Value } from './values';
@@ -101,8 +101,9 @@ interface PreparedSubject {
 interface ScanPlan<T> {
   length: number;
   position: number;
+  handlesRetry?: boolean;
   advance(position: number): number;
-  match(position: number, retry: boolean): MatchOffsets | { pregError: number } | null;
+  match(position: number, retry: boolean): MatchOffsets | { pregError: number } | null | undefined;
   value(result: MatchOffsets, retry: boolean): T;
 }
 
@@ -124,14 +125,14 @@ function* scanMatches<T>(
   let retry = false;
   while (position <= plan.length) {
     rt().spend();
-    const result: MatchOffsets | { pregError: number } | null = plan.match(position, retry);
+    const result: MatchOffsets | { pregError: number } | null | undefined = plan.match(position, retry);
     if (result && 'pregError' in result) {
       rt().lastPregError = result.pregError;
       if (status) status.error = result.pregError;
       return;
     }
     if (!result) {
-      if (!retry || position >= plan.length) return;
+      if (plan.handlesRetry || !retry || position >= plan.length) return;
       retry = false;
       position = plan.advance(position);
       continue;
@@ -152,11 +153,14 @@ function scanPlan<T>(
   const native = compiled.boundedPattern;
   if (native) {
     const projection = { ...compiled, utf8: false };
+    const startPosition = prepared.byteOffset(prepared.position);
+    const nextMatch = createBoundedRegexScanner(native, subject, startPosition, compiled.utf8, rt().budget);
     return {
       length: subject.length,
-      position: prepared.byteOffset(prepared.position),
+      position: startPosition,
+      handlesRetry: true,
       advance: (position) => (compiled.utf8 ? nextUtf8Byte(subject, position) : position + 1),
-      match: (position, retry) => boundedRegexMatch(native, subject, position, retry, rt().budget),
+      match: nextMatch,
       value: (result) => project(projection, result, subject, result.range, (index) => index),
     };
   }

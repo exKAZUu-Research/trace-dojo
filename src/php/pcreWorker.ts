@@ -1,5 +1,9 @@
 export const PCRE_WORKER_SOURCE = `
 let pcre;
+let sharedContext;
+let sharedStack;
+const patternCache = new Map();
+const MAX_CACHED_PATTERNS = 16;
 
 function pcreFunctions() {
   const koffi = require('koffi');
@@ -48,46 +52,119 @@ function compilePcre({ source, options, restrictCaseless }) {
   }
 }
 
-function matchPcre(pattern, subject, position, retry) {
-  if (pcre === undefined) pcre = pcreFunctions();
-  if (!pcre) return 'unsupported';
+function ensureContext() {
+  if (sharedContext) return sharedContext;
+  sharedContext = pcre.makeContext(null);
+  if (!sharedContext) return null;
+  sharedStack = pcre.makeStack(32 * 1024, 192 * 1024, null);
+  if (sharedStack) pcre.attachStack(sharedContext, null, sharedStack);
+  pcre.setMatchLimit(sharedContext, 1_000_000);
+  pcre.setDepthLimit(sharedContext, 100_000);
+  return sharedContext;
+}
+
+function cachedPattern(pattern) {
+  const key = pattern.options + ':' + (pattern.restrictCaseless ? 1 : 0) + ':' + pattern.source;
+  const existing = patternCache.get(key);
+  if (existing) {
+    patternCache.delete(key);
+    patternCache.set(key, existing);
+    return existing;
+  }
   const code = compilePcre(pattern);
   if (!code) return 'unsupported';
-  let data, context, stack;
-  try {
-    context = pcre.makeContext(null);
-    data = pcre.makeData(code, null);
-    if (!context || !data) return { pregError: 1 };
-    if (pcre.jit(code, 1) === 0) { // PCRE2_JIT_COMPLETE
-      stack = pcre.makeStack(32 * 1024, 192 * 1024, null);
-      if (stack) pcre.attachStack(context, null, stack);
-    }
-    pcre.setMatchLimit(context, 1_000_000);
-    pcre.setDepthLimit(context, 100_000);
-    const retryFlags = 0x80000008; // PCRE2_ANCHORED | PCRE2_NOTEMPTY_ATSTART
-    const count = pcre.match(code, subject, subject.length, position, retry ? retryFlags : 0, data, context);
-    if (count === -1) return null;
-    if (count <= 0) {
-      const pregError = ({ [-47]: 2, [-53]: 3, [-46]: 6 })[count] ?? 1;
-      return { pregError };
-    }
-    if (count > 257) return 'unsupported';
-    return matchOffsetRanges(pcre.decodeOffsets(pcre.offsets(data), count * 2), subject.length);
-  } finally {
-    if (data) pcre.freeData(data);
-    if (context) pcre.freeContext(context);
+  const data = pcre.makeData(code, null);
+  if (!data) {
     pcre.freeCode(code);
-    if (stack) pcre.freeStack(stack);
+    return { pregError: 1 };
+  }
+  pcre.jit(code, 1); // PCRE2_JIT_COMPLETE
+  if (patternCache.size >= MAX_CACHED_PATTERNS) {
+    const oldestKey = patternCache.keys().next().value;
+    const oldest = patternCache.get(oldestKey);
+    patternCache.delete(oldestKey);
+    pcre.freeData(oldest.data);
+    pcre.freeCode(oldest.code);
+  }
+  const entry = { code, data };
+  patternCache.set(key, entry);
+  return entry;
+}
+
+function disposePcre() {
+  if (!pcre) return;
+  for (const entry of patternCache.values()) {
+    pcre.freeData(entry.data);
+    pcre.freeCode(entry.code);
+  }
+  patternCache.clear();
+  if (sharedContext) {
+    pcre.freeContext(sharedContext);
+    sharedContext = undefined;
+  }
+  if (sharedStack) {
+    pcre.freeStack(sharedStack);
+    sharedStack = undefined;
   }
 }
 
-function matchOffsetRanges(offsets, subjectLength) {
-  const groups = {};
-  for (let i = 2; i < offsets.length; i += 2) {
-    const start = Number(offsets[i]);
-    const end = Number(offsets[i + 1]);
-    if (start <= end && end <= subjectLength) groups['$' + i / 2] = [start, end];
+function nextUtf8Byte(subject, position) {
+  do {
+    position++;
+  } while (position < subject.length && (subject[position] & 0xc0) === 0x80);
+  return position;
+}
+
+function matchPcreBatch(pattern, subject, position, retry, utf8, limit) {
+  if (pcre === undefined) pcre = pcreFunctions();
+  if (!pcre) return 'unsupported';
+  const context = ensureContext();
+  if (!context) return { offsets: new Int32Array(0), nextPosition: position, nextRetry: retry, done: true, pregError: 1 };
+  const entry = cachedPattern(pattern);
+  if (entry === 'unsupported') return 'unsupported';
+  if ('pregError' in entry) {
+    return { offsets: new Int32Array(0), nextPosition: position, nextRetry: retry, done: true, pregError: entry.pregError };
   }
-  return { range: [Number(offsets[0]), Number(offsets[1])], groups };
+  const retryFlags = 0x80000008; // PCRE2_ANCHORED | PCRE2_NOTEMPTY_ATSTART
+  const out = [];
+  let matches = 0;
+  let done = false;
+  let pregError;
+  while (position <= subject.length && matches < limit) {
+    const count = pcre.match(entry.code, subject, subject.length, position, retry ? retryFlags : 0, entry.data, context);
+    if (count === -1) {
+      if (!retry || position >= subject.length) {
+        done = true;
+        break;
+      }
+      retry = false;
+      position = utf8 ? nextUtf8Byte(subject, position) : position + 1;
+      continue;
+    }
+    if (count <= 0) {
+      pregError = ({ [-47]: 2, [-53]: 3, [-46]: 6 })[count] ?? 1;
+      done = true;
+      break;
+    }
+    if (count > 257) {
+      if (matches === 0) return 'unsupported';
+      break;
+    }
+    const raw = pcre.decodeOffsets(pcre.offsets(entry.data), count * 2);
+    const start = Number(raw[0]);
+    const end = Number(raw[1]);
+    out.push(count, start, end);
+    for (let i = 2; i < raw.length; i += 2) {
+      const gs = Number(raw[i]);
+      const ge = Number(raw[i + 1]);
+      if (gs <= ge && ge <= subject.length) out.push(gs, ge);
+      else out.push(-1, -1);
+    }
+    matches++;
+    position = end;
+    retry = start === end;
+  }
+  if (position > subject.length) done = true;
+  return { offsets: Int32Array.from(out), nextPosition: position, nextRetry: retry, done, pregError };
 }
 `;
