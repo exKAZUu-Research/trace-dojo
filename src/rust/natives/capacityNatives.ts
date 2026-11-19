@@ -18,12 +18,42 @@ import type { Type } from '../types';
 import { ElementPlace, type IterValue, sliceLength, UNIT_VALUE, type Value } from '../values';
 import { isTrustedLen } from './iterators';
 import { sizeOf } from './layout';
-import { deref, type NativeContext, placeOf } from './support';
+import { deref, libraryPanic, type NativeContext, placeOf } from './support';
 
 /**
  * The natives that keep the capacities of `Vec`, `VecDeque`, `BinaryHeap`, and `String`, which their values (arrays
  * and JS strings) do not hold, as `RawVec` grows and keeps them.
  */
+
+const USIZE_MAX = 2n ** 64n - 1n;
+const ISIZE_MAX = 2n ** 63n - 1n;
+
+/**
+ * `RawVec`'s check of a length and the room asked beyond it (`with_capacity`, `reserve`), which panics when they
+ * overflow a `usize` or their elements' bytes overflow an `isize`.
+ */
+export function checkVecCapacity(ctx: NativeContext, len: number, additional: Value, elemSize: number): void {
+  const capacity = BigInt(len) + (additional as bigint);
+  if (capacity > USIZE_MAX || capacity * BigInt(elemSize) > ISIZE_MAX) {
+    libraryPanic(ctx, 'capacity overflow', 'alloc/src/raw_vec/mod.rs:28:5');
+  }
+}
+
+/**
+ * hashbrown's check of the elements a table must hold (`with_capacity`, `reserve`): it panics when their buckets
+ * (eight for every seven elements, rounded up to a power of two) or the table's bytes overflow.
+ */
+export function checkTableCapacity(ctx: NativeContext, len: number, additional: Value, entrySize: number): void {
+  const capacity = BigInt(len) + (additional as bigint);
+  let overflows = capacity > USIZE_MAX || capacity * 8n > USIZE_MAX;
+  if (!overflows && capacity >= 15n) {
+    let buckets = 1n;
+    while (buckets < (capacity * 8n) / 7n) buckets *= 2n;
+    // The entries, then a control byte for each bucket and a group's more.
+    overflows = buckets > 2n ** 63n || buckets * BigInt(entrySize + 1) + 8n > ISIZE_MAX;
+  }
+  if (overflows) libraryPanic(ctx, 'Hash table capacity overflow', '/rust/deps/hashbrown-0.17.1/src/raw.rs:36:40');
+}
 
 function vec(self: Value): Value[] {
   return deref(self) as Value[];
@@ -74,7 +104,8 @@ const VEC_SHRINKING = new Set([
 
 /** The natives of a `Vec`, a `VecDeque`, or a `BinaryHeap` that read and change its capacity. */
 const vecCapacityNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
-  with_capacity: ([capacity]) => {
+  with_capacity: ([capacity], ctx) => {
+    checkVecCapacity(ctx, 0, capacity, sizeOf(elemType(ctx)));
     const items: Value[] = [];
     setVecCapacity(items, Number(capacity as bigint));
     return items;
@@ -84,10 +115,12 @@ const vecCapacityNatives: Record<string, (args: Value[], ctx: NativeContext) => 
     return size === 0 ? 2n ** 64n - 1n : BigInt(vecCapacity(vec(self), vec(self).length, size));
   },
   reserve: ([self, additional], ctx) => {
+    checkVecCapacity(ctx, vec(self).length, additional, sizeOf(elemType(ctx)));
     reserveVec(vec(self), vec(self).length, Number(additional as bigint), sizeOf(elemType(ctx)));
     return UNIT_VALUE;
   },
-  reserve_exact: ([self, additional]) => {
+  reserve_exact: ([self, additional], ctx) => {
+    checkVecCapacity(ctx, vec(self).length, additional, sizeOf(elemType(ctx)));
     reserveVecExact(vec(self), vec(self).length, Number(additional as bigint));
     return UNIT_VALUE;
   },
@@ -168,14 +201,16 @@ const STRING_RESIZING = new Set([
 /** The natives that read and change a `String`'s capacity. */
 const stringCapacityNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   capacity: ([self]) => BigInt(stringCapacity(self)),
-  reserve: ([self, additional]) => {
+  reserve: ([self, additional], ctx) => {
     const place = placeOf(self);
     const len = utf8Length(place.get() as string);
+    checkVecCapacity(ctx, len, additional, 1);
     setStringCapacity(place, reservedCapacity(stringCapacity(place), len, Number(additional as bigint), 1));
     return UNIT_VALUE;
   },
-  reserve_exact: ([self, additional]) => {
+  reserve_exact: ([self, additional], ctx) => {
     const place = placeOf(self);
+    checkVecCapacity(ctx, utf8Length(place.get() as string), additional, 1);
     const needed = utf8Length(place.get() as string) + Number(additional as bigint);
     setStringCapacity(place, Math.max(stringCapacity(place), needed));
     return UNIT_VALUE;

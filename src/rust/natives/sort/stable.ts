@@ -94,7 +94,7 @@ function createRun(
   if (len >= minGoodRunLen) {
     const [runLen, wasReversed] = findExistingRun(v, base, len, sorter.isLess);
     if (runLen >= minGoodRunLen) {
-      if (wasReversed) v.splice(base, runLen, ...v.slice(base, base + runLen).toReversed());
+      if (wasReversed) reverseRange(v, base, base + runLen);
       return { len: runLen, sorted: true };
     }
   }
@@ -218,4 +218,8 @@ function stablePartition(
   for (let index = 0; index < numLeft; index++) v[base + index] = scratch[index];
   for (let index = 0; index < len - numLeft; index++) v[base + numLeft + index] = scratch[len - 1 - index];
   return numLeft;
+}
+
+function reverseRange(v: unknown[], from: number, to: number): void {
+  for (let i = from, j = to - 1; i < j; i++, j--) [v[i], v[j]] = [v[j], v[i]];
 }

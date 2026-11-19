@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 420 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 433 -- One native per method of the standard library.
 import { keepVecCapacity, setIntoIterBuffer, vecCapacity } from '../capacity';
 import { sliceRange } from '../compiler';
 import { type DebugPart } from '../debugText';
@@ -287,8 +287,8 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     for (let index = 0; index < sliceLength(slice); index++) sliceSet(slice, index, cloneValue(elemType(ctx), value));
     return UNIT_VALUE;
   },
-  to_vec: ([self], ctx) => sliceItems(deref(self)).map((item) => cloneValue(elemType(ctx), item)),
-  to_owned: ([self], ctx) => sliceItems(deref(self)).map((item) => cloneValue(elemType(ctx), item)),
+  to_vec: ([self], ctx) => clonedItems(ctx, sliceItems(deref(self))),
+  to_owned: ([self], ctx) => clonedItems(ctx, sliceItems(deref(self))),
   into_vec: ([self]) => sliceItems(deref(self)),
   rotate_left: ([self, mid], ctx) => {
     const slice = deref(self);
@@ -307,10 +307,12 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   copy_from_slice: ([self, src], ctx) => copyFrom(ctx, deref(self), deref(src), (item) => copyValue(item)),
   clone_from_slice: ([self, src], ctx) =>
     copyFrom(ctx, deref(self), deref(src), (item) => cloneValue(elemType(ctx), item)),
-  repeat: ([self, n]) => {
+  repeat: ([self, n], ctx) => {
     const items = sliceItems(deref(self));
+    const count = Number(n as bigint);
+    ctx.runtime.allocate(items.length * count);
     const result: Value[] = [];
-    for (let index = 0; index < Number(n as bigint); index++) result.push(...items.map(copyValue));
+    for (let index = 0; index < count; index++) for (const item of items) result.push(copyValue(item));
     return result;
   },
 };
@@ -359,8 +361,12 @@ function chunkDebug(
   return described(iter, (show, item) => {
     const elem = sliceElem(item);
     const views = (iter.rest?.() ?? []) as SliceView[];
-    const from = Math.min(...views.map((view) => view.start));
-    const to = Math.max(...views.map((view) => view.end));
+    let from = Number.POSITIVE_INFINITY;
+    let to = 0;
+    for (const view of views) {
+      from = Math.min(from, view.start);
+      to = Math.max(to, view.end);
+    }
     const covered = views.length > 0 ? sliceItems(new SliceView(views[0].base, from, to)) : sliceItems(done());
     const part = (values: Value[]): DebugPart => listPart(values, elem, show);
     return fieldsPart(name, [['v', part(covered)], ...fields(part)]);
@@ -401,10 +407,18 @@ function copyFrom(ctx: NativeContext, target: Value, source: Value, copy: (item:
   return UNIT_VALUE;
 }
 
-function joinStrings(self: Value, sep: Value): string {
-  return sliceItems(deref(self))
-    .map((item) => deref(item) as string)
-    .join(deref(sep) as string);
+/** Clones of a slice's elements, as a new `Vec` holds them. */
+function clonedItems(ctx: NativeContext, items: Value[]): Value[] {
+  ctx.runtime.allocate(items.length);
+  return items.map((item) => cloneValue(elemType(ctx), item));
+}
+
+function joinStrings(ctx: NativeContext, self: Value, sep: Value): string {
+  const parts = sliceItems(deref(self)).map((item) => deref(item) as string);
+  const separator = deref(sep) as string;
+  const length = parts.reduce((sum, part) => sum + part.length, 0) + separator.length * Math.max(0, parts.length - 1);
+  ctx.runtime.allocateString(length);
+  return parts.join(separator);
 }
 
 const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
@@ -476,16 +490,14 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   },
   extend_from_slice: ([self, other], ctx) => {
     const items = vec(self);
-    const added = sliceItems(deref(other)).map((item) => cloneValue(elemType(ctx), item));
-    ctx.runtime.allocate(added.length);
-    items.push(...added);
+    for (const item of clonedItems(ctx, sliceItems(deref(other)))) items.push(item);
     return UNIT_VALUE;
   },
   append: ([self, other]) => {
     const target = vec(self);
     const source = vec(other);
     keepVecCapacity(source, source.length);
-    target.push(...source);
+    for (const item of source) target.push(item);
     source.length = 0;
     return UNIT_VALUE;
   },
@@ -677,21 +689,24 @@ natives['&mut Vec<_>::into_iter'] = ([self]) => sliceIter(deref(self), true);
 natives['&VecDeque<_>::into_iter'] = ([self]) => sliceIter(deref(self), false);
 natives['&mut VecDeque<_>::into_iter'] = ([self]) => sliceIter(deref(self), true);
 natives['&BinaryHeap<_>::into_iter'] = ([self]) => sliceIter(deref(self), false);
-natives['[String]::join'] = ([self, sep]) => joinStrings(self, sep);
-natives['[String]::concat'] = ([self]) => joinStrings(self, '');
-natives['[&str]::join'] = ([self, sep]) => joinStrings(self, sep);
-natives['[&str]::concat'] = ([self]) => joinStrings(self, '');
+natives['[String]::join'] = ([self, sep], ctx) => joinStrings(ctx, self, sep);
+natives['[String]::concat'] = ([self], ctx) => joinStrings(ctx, self, '');
+natives['[&str]::join'] = ([self, sep], ctx) => joinStrings(ctx, self, sep);
+natives['[&str]::concat'] = ([self], ctx) => joinStrings(ctx, self, '');
 natives['[SliceOf]::concat'] = ([self], ctx) =>
-  sliceItems(deref(self)).flatMap((item) => sliceItems(deref(item)).map((e) => cloneValue(elemType(ctx), e)));
+  clonedItems(
+    ctx,
+    sliceItems(deref(self)).flatMap((item) => sliceItems(deref(item)))
+  );
 natives['[SliceOf]::join'] = ([self, sep], ctx) => {
   const separator = normalize(shallow((normalize(shallow(ctx.typeArgs[2])) as Type & { kind: 'ref' }).target));
   const parts = separator.kind === 'slice' ? sliceItems(deref(sep)) : [deref(sep)];
-  const result: Value[] = [];
+  const joined: Value[] = [];
   for (const [index, item] of sliceItems(deref(self)).entries()) {
-    if (index > 0) result.push(...parts.map((e) => cloneValue(elemType(ctx), e)));
-    result.push(...sliceItems(deref(item)).map((e) => cloneValue(elemType(ctx), e)));
+    if (index > 0) for (const part of parts) joined.push(part);
+    for (const element of sliceItems(deref(item))) joined.push(element);
   }
-  return result;
+  return clonedItems(ctx, joined);
 };
 void ordering;
 void placeOf;

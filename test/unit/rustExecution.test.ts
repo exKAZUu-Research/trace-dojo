@@ -599,3 +599,53 @@ test('an endless loop stops at the operation limit', () => {
     limit: 'operations',
   });
 });
+
+test.each([
+  ['a doubled String', 'let mut s = String::from("ab"); for _ in 0..40 { s = s.clone() + &s; }'],
+  ['a String written to', 'let mut s = String::from("ab"); for _ in 0..40 { let t = s.clone(); s.push_str(&t); }'],
+  ['a formatted String', 'let mut s = String::from("ab"); for _ in 0..40 { s = format!("{s}{s}"); }'],
+  ['a wide format', 'let w = 100_000_000; let s = format!("{:>w$}", 1);'],
+  ['a precise float', 'println!("{:.100000000}", 1.0);'],
+  ['nested Vecs', 'let v = vec![vec![0u8; 10_000]; 10_000];'],
+  ['nested arrays', 'let a = [[0u8; 10_000]; 10_000];'],
+  ['a concatenated Vec', 'let mut v = vec![1u8]; for _ in 0..40 { v = [v.clone(), v.clone()].concat(); }'],
+  ['clones of a Vec', 'let v = vec![0u8; 900_000]; let mut w = Vec::new(); for _ in 0..100 { w.push(v.clone()); }'],
+])('%s stops at the memory limit', (_name, body) => {
+  const execution = executeProgram('rust', rustMain(`    ${body}`));
+  expect(execution.kind === 'executed' && execution.uncaughtException).toMatch(
+    /^memory allocation of \d+ bytes failed\n/
+  );
+});
+
+test.each([
+  ['replacements', 'let s = "ab".repeat(400_000); for _ in 0..100 { let _ = s.replace("a", "c"); }'],
+  ['case mappings', 'let s = "é".repeat(900_000); for _ in 0..100 { let _ = s.to_uppercase(); }'],
+  ['clones of a String', 'let s = "a".repeat(900_000); for _ in 0..1000 { let _ = s.clone(); }'],
+])('%s of long strings stop at the operation limit', (_name, body) => {
+  expect(executeProgram('rust', rustMain(`    ${body}`))).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('capacities that overflow panic as std and hashbrown do', () => {
+  const vec = executeProgram(
+    'rust',
+    rustMain('    let s = String::with_capacity(usize::MAX);\n    println!("{}", s.len());')
+  );
+  expect(vec).toMatchObject({
+    kind: 'executed',
+    uncaughtException: `thread 'main' (1) panicked at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/alloc/src/raw_vec/mod.rs:28:5:
+capacity overflow
+note: run with \`RUST_BACKTRACE=1\` environment variable to display a backtrace`,
+  });
+  const table = executeProgram(
+    'rust',
+    rustMain(
+      '    let m: std::collections::HashMap<u8, u8> = std::collections::HashMap::with_capacity(usize::MAX);\n    println!("{}", m.len());'
+    )
+  );
+  expect(table).toMatchObject({
+    kind: 'executed',
+    uncaughtException: `thread 'main' (1) panicked at /rust/deps/hashbrown-0.17.1/src/raw.rs:36:40:
+Hash table capacity overflow
+note: run with \`RUST_BACKTRACE=1\` environment variable to display a backtrace`,
+  });
+});

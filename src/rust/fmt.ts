@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 414 -- Follows std::fmt's formatting rules case by case.
 import type { FormatPiece, FormatSpec } from './ast';
 import { type DebugPart, list, structText, tupleText } from './debugText';
 import { debugFloat, displayFloat, expFloat, fixedFloat } from './floatFormat';
@@ -50,6 +51,8 @@ export interface FormatHooks {
   fieldTypes(def: AdtDef, args: Type[], variant: number): Type[];
   /** The concrete type of a type that may mention the running function's type parameters. */
   concrete(type: Type): Type;
+  /** Checks the length of a string the formatting builds, and charges for the `written` characters. */
+  allocateString(length: number, written?: number): void;
 }
 
 export class Formatter {
@@ -65,7 +68,9 @@ export class Formatter {
       }
       const spec = this.resolveSpec(piece, values);
       try {
-        text += this.formatOne(piece.trait, values[piece.arg], types[piece.arg], spec);
+        const written = this.formatOne(piece.trait, values[piece.arg], types[piece.arg], spec);
+        this.hooks.allocateString(text.length + written.length, written.length);
+        text += written;
       } catch (error) {
         if (error instanceof FmtFailure) throw new FmtFailure(text + error.written);
         throw error;
@@ -80,13 +85,16 @@ export class Formatter {
       if (c.kind === 'literal') return c.value;
       return Number(deref(values[c.arg]) as bigint);
     };
+    const width = count(piece.width);
+    // Padding writes at least `width` characters.
+    if (width !== undefined) this.hooks.allocateString(width, 0);
     return {
       fill: piece.fill,
       align: piece.align,
       sign: piece.sign,
       alternate: piece.alternate,
       zero: piece.zero,
-      width: count(piece.width),
+      width,
       precision: count(piece.precision),
       debugHex: piece.debugHex,
     };
@@ -162,6 +170,8 @@ export class Formatter {
   }
 
   private floatText(value: number, f32: boolean, spec: Spec): string {
+    // A float writes all the digits its precision asks for.
+    if (spec.precision !== undefined) this.hooks.allocateString(spec.precision, 0);
     let text = spec.precision === undefined ? displayFloat(value, f32) : fixedFloat(value, spec.precision);
     if (spec.sign === '+' && !text.startsWith('-') && !Number.isNaN(value)) text = `+${text}`;
     return text;
@@ -171,14 +181,21 @@ export class Formatter {
    * `{:?}` of a value; `indent` is the nesting depth of `{:#?}`, or undefined for the compact form. Containers pass the
    * placeholder's options on to the values in them, as Rust's builders do.
    */
+  debug(value: Value, type: Type, spec: Spec, indent: number | undefined): string {
+    const text = this.debugOf(value, type, spec, indent);
+    // A container's elements are charged as they are written, before the container joins them.
+    this.hooks.allocateString(text.length);
+    return text;
+  }
+
   // code-gauge-allow functionCognitiveComplexity 16 -- Follows std::fmt's formatting rules case by case.
   // code-gauge-allow functionNcss 41 -- Follows std::fmt's formatting rules case by case.
-  debug(value: Value, type: Type, spec: Spec, indent: number | undefined): string {
+  private debugOf(value: Value, type: Type, spec: Spec, indent: number | undefined): string {
     const t = this.concrete(type);
     const v = deref(value);
     switch (t.kind) {
       case 'ref': {
-        return this.debug(value, t.target, spec, indent);
+        return this.debugOf(value, t.target, spec, indent);
       }
       case 'int': {
         if (spec.debugHex) return this.radix(spec.debugHex === 'x' ? 'lowerHex' : 'upperHex', v, t, spec);
@@ -362,12 +379,13 @@ export class Formatter {
     return entries;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Follows std::fmt's formatting rules case by case.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Follows std::fmt's formatting rules case by case.
   private radix(trait: FormatSpec['trait'], value: Value, type: Type, spec: Spec): string {
     let t = this.concrete(type);
     while (t.kind === 'ref') t = this.concrete(t.target);
     const v = deref(value);
     if (trait === 'lowerExp' || trait === 'upperExp') {
+      if (spec.precision !== undefined) this.hooks.allocateString(spec.precision, 0);
       const letter = trait === 'lowerExp' ? 'e' : 'E';
       if (t.kind === 'float') {
         let text = expFloat(v as number, t.name === 'f32', spec.precision, letter);

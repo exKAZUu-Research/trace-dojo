@@ -66,8 +66,10 @@ export class Interpreter implements CallSupport {
         while (t.kind === 'opaque' && t.opaque.hidden) t = shallow(resolve(t.opaque.hidden, true));
         return t;
       },
+      allocateString: (length, written) => this.runtime.allocateString(length, written),
     });
     setUserImpls({
+      allocate: (count) => this.runtime.allocate(count),
       eq: (type, a, b, rhs) => {
         const found = this.userTraitMethod('PartialEq', type, 'eq', rhs);
         if (!found) return;
@@ -209,7 +211,15 @@ export class Interpreter implements CallSupport {
     const native = NATIVES[key];
     if (!native) throw new RustPanic(`${key} は、この採点環境では使えません。`, span);
     const context: NativeContext = { interp: this, runtime: this.runtime, frame, span, typeArgs };
-    return native(args, context);
+    const before = receiverText(args[0]);
+    const result = native(args, context);
+    // Library functions build `String`s through these two ways out: a result, and a receiver they write to.
+    if (typeof result === 'string' && shallow(def.ret).kind !== 'ref') this.runtime.allocateString(result.length);
+    if (before !== undefined) {
+      const after = receiverText(args[0]) ?? '';
+      if (after.length > before.length) this.runtime.allocateString(after.length, after.length - before.length);
+    }
+    return result;
   }
 
   callValue(callee: Value, args: Value[], callRow: number | undefined): Value {
@@ -441,3 +451,11 @@ export function strSliceBytes(text: string, start: number | undefined, end: numb
 
 export { cloneValue, compareValues, valuesEqual, StructValue, EnumValue, UNIT_VALUE };
 export type { FunctionInfo, ImplDef };
+
+/** The text of a `String` or a `fmt::Formatter` a method is called on, which it may write to. */
+function receiverText(receiver: Value | undefined): string | undefined {
+  let value = receiver;
+  while (isPlace(value)) value = value.get();
+  if (typeof value === 'string') return isPlace(receiver) ? value : undefined;
+  return value instanceof FormatterValue ? value.text : undefined;
+}

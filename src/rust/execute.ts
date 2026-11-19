@@ -3,10 +3,11 @@ import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramExecution, ProgramRun } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import { buildProgram, type BuiltProgram } from './build';
+import { settleStrings } from './capacity';
 import { DEFAULT_SPEC } from './fmt';
 import { Interpreter } from './interpreter';
 import { type Module } from './items';
-import { ControlSignal, type Frame, ProcessExit, Runtime, RustPanic, StackOverflow } from './runtime';
+import { ControlSignal, type Frame, OutOfMemory, ProcessExit, Runtime, RustPanic, StackOverflow } from './runtime';
 import { resolve, shallow } from './types';
 import { EnumValue } from './values';
 
@@ -33,9 +34,12 @@ const RUSTC_COMMIT = '58cf8f9c35b355199727627d07ae34a4e2846d67';
 /** The text Rust prints when a panic ends the program. */
 export function describePanic(panic: RustPanic): string {
   const { row, col } = panic.span;
-  const location = panic.libraryLocation
-    ? `/rustc/${RUSTC_COMMIT}/library/${panic.libraryLocation}`
-    : `src/main.rs:${row + 1}:${col}`;
+  // A location in a dependency of the standard library is a full path (`/rust/deps/...`).
+  const location = panic.libraryLocation?.startsWith('/')
+    ? panic.libraryLocation
+    : panic.libraryLocation
+      ? `/rustc/${RUSTC_COMMIT}/library/${panic.libraryLocation}`
+      : `src/main.rs:${row + 1}:${col}`;
   return `thread 'main' (1) panicked at ${location}:\n${panic.message}\nnote: run with \`RUST_BACKTRACE=1\` environment variable to display a backtrace`;
 }
 
@@ -70,6 +74,9 @@ export function runProgram(
     }
   } catch (error) {
     uncaughtException = describeUncaught(error);
+  } finally {
+    // The `String`s in flight are kept by their text, which must not outlive the run.
+    settleStrings();
   }
   return {
     finalBoard: runtime.world.boardText(),
@@ -84,6 +91,9 @@ function describeUncaught(error: unknown): string | undefined {
   if (error instanceof RustPanic) return describePanic(error);
   if (error instanceof StackOverflow || (error instanceof RangeError && /call stack/i.test(error.message))) {
     return "\nthread 'main' (1) has overflowed its stack\nfatal runtime error: stack overflow, aborting";
+  }
+  if (error instanceof OutOfMemory) {
+    return `memory allocation of ${error.bytes} bytes failed\nnote: run with \`RUST_BACKTRACE=1\` environment variable to display a backtrace`;
   }
   if (error instanceof ControlSignal) throw new TypeError(`Unexpected ${error.kind} outside its loop or function`);
   throw error;

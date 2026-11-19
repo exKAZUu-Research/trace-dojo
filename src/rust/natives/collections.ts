@@ -13,6 +13,7 @@ import {
   UNIT_VALUE,
   type Value,
 } from '../values';
+import { checkTableCapacity } from './capacityNatives';
 import { defaultValue } from './core';
 import { arrayIter, mapIter, setIter } from './iterators';
 import { sizeOf } from './layout';
@@ -31,6 +32,23 @@ export function withTable<T extends MapValue | SetValue>(collection: T, size: nu
 /** The size of a `HashMap`'s key and value together, as its table stores them. */
 function entrySize(ctx: NativeContext): number {
   return sizeOf({ kind: 'tuple', elems: [ctx.typeArgs[0], ctx.typeArgs[1]] });
+}
+
+/** `with_capacity` of a `HashMap` or a `HashSet`, which panics as hashbrown does when the table would overflow. */
+function tableWithCapacity<T extends MapValue | SetValue>(
+  ctx: NativeContext,
+  collection: T,
+  size: number,
+  capacity: Value
+): T {
+  checkTableCapacity(ctx, 0, capacity, size);
+  return withTable(collection, size, capacity);
+}
+
+/** `reserve` of a `HashMap` or a `HashSet`, which panics as hashbrown does when the table would overflow. */
+function reserveTable(ctx: NativeContext, collection: MapValue | SetValue, additional: Value, size: number): Value {
+  checkTableCapacity(ctx, collection.entries.size, additional, size);
+  return resize(collection, (table) => table.reserve(Number(additional as bigint)));
 }
 
 function resize(collection: MapValue | SetValue, change: (table: TableMap<string, unknown>) => void): Value {
@@ -103,8 +121,8 @@ function setValues(ctx: NativeContext, s: SetValue): Value[] {
 function mapNatives(sorted: boolean): Record<string, (args: Value[], ctx: NativeContext) => Value> {
   return {
     new: (_args, ctx) => withTable(new MapValue(sorted), entrySize(ctx)),
-    with_capacity: ([capacity], ctx) => withTable(new MapValue(sorted), entrySize(ctx), capacity),
-    reserve: ([self, additional]) => resize(map(self), (table) => table.reserve(Number(additional as bigint))),
+    with_capacity: ([capacity], ctx) => tableWithCapacity(ctx, new MapValue(sorted), entrySize(ctx), capacity),
+    reserve: ([self, additional], ctx) => reserveTable(ctx, map(self), additional, entrySize(ctx)),
     shrink_to_fit: ([self]) => resize(map(self), (table) => table.shrinkTo(0)),
     shrink_to: ([self, min]) => resize(map(self), (table) => table.shrinkTo(Number(min as bigint))),
     insert: ([self, k, v], ctx) => {
@@ -221,9 +239,9 @@ function mapNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
 function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: NativeContext) => Value> {
   return {
     new: (_args, ctx) => withTable(new SetValue(sorted), sizeOf(ctx.typeArgs[0])),
-    with_capacity: ([capacity], ctx) => withTable(new SetValue(sorted), sizeOf(ctx.typeArgs[0]), capacity),
+    with_capacity: ([capacity], ctx) => tableWithCapacity(ctx, new SetValue(sorted), sizeOf(ctx.typeArgs[0]), capacity),
     capacity: ([self]) => BigInt((set(self).entries as TableMap<string, unknown>).capacity),
-    reserve: ([self, additional]) => resize(set(self), (table) => table.reserve(Number(additional as bigint))),
+    reserve: ([self, additional], ctx) => reserveTable(ctx, set(self), additional, sizeOf(ctx.typeArgs[0])),
     shrink_to_fit: ([self]) => resize(set(self), (table) => table.shrinkTo(0)),
     shrink_to: ([self, min]) => resize(set(self), (table) => table.shrinkTo(Number(min as bigint))),
     insert: ([self, value], ctx) => {

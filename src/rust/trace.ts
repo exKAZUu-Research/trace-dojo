@@ -278,6 +278,7 @@ const keyFormatter = new Formatter({
   userFmt: () => {},
   fieldTypes,
   concrete: (type) => type,
+  allocateString: () => {},
 });
 
 function keyLabel(key: Value, type: Type): string {

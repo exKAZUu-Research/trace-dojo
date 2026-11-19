@@ -1,5 +1,5 @@
 import type { Span } from './ast';
-// code-gauge-allow-file fileNcss 429 -- One case per kind of type.
+// code-gauge-allow-file fileNcss 449 -- One case per kind of type.
 import { sizeTable } from './capacity';
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
@@ -19,8 +19,10 @@ import {
   type Value,
 } from './values';
 
-/** Hooks into the program's own impls, which the type-directed operations call for user types. */
+/** Hooks into the program's own impls, which the type-directed operations call for user types, and into its run. */
 export interface UserImpls {
+  /** Counts the elements a clone makes against the run's limit. */
+  allocate(count: number): void;
   eq?(type: Type, a: Value, b: Value, rhs: Type): boolean | undefined;
   cmp?(type: Type, a: Value, b: Value): number | undefined;
   clone?(type: Type, value: Value): { value: Value } | undefined;
@@ -481,7 +483,6 @@ export function hashKey(type: Type, value: Value): string {
 }
 
 /** A deep copy of a value as `Clone::clone` makes it, calling the program's own `clone` for its types. */
-// code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of type.
 // code-gauge-allow functionNcss 60 -- One case per kind of value.
 export function cloneValue(type: Type, value: Value): Value {
   const t = normalize(shallow(type));
@@ -499,7 +500,9 @@ export function cloneValue(type: Type, value: Value): Value {
     }
     case 'array':
     case 'slice': {
-      return sliceItems(value).map((item) => cloneValue(t.elem, item));
+      const items = sliceItems(value);
+      hooks?.allocate(items.length);
+      return items.map((item) => cloneValue(t.elem, item));
     }
     case 'adt': {
       const { def } = t;
@@ -507,28 +510,17 @@ export function cloneValue(type: Type, value: Value): Value {
         case 'Vec':
         case 'VecDeque':
         case 'BinaryHeap': {
+          hooks?.allocate((value as Value[]).length);
           return (value as Value[]).map((item) => cloneValue(t.args[0], item));
         }
         case 'Box': {
           return cloneValue(t.args[0], value);
         }
         case 'HashMap':
-        case 'BTreeMap': {
-          const source = value as MapValue;
-          const copy = new MapValue(source.sorted);
-          for (const [hash, [key, item]] of source.entries) {
-            copy.entries.set(hash, [cloneValue(t.args[0], key), cloneValue(t.args[1], item)]);
-          }
-          sizeTable(copy.entries, 0, source.entries);
-          return copy;
-        }
+        case 'BTreeMap':
         case 'HashSet':
         case 'BTreeSet': {
-          const source = value as SetValue;
-          const copy = new SetValue(source.sorted);
-          for (const [hash, item] of source.entries) copy.entries.set(hash, cloneValue(t.args[0], item));
-          sizeTable(copy.entries, 0, source.entries);
-          return copy;
+          return cloneCollection(t.args, value as MapValue | SetValue);
         }
         case 'Range':
         case 'RangeInclusive':
@@ -601,4 +593,33 @@ export function copyValue(value: Value): Value {
     return value.fields.length === 0 ? value : new EnumValue(value.def, value.variant, value.fields.map(copyValue));
   }
   return value;
+}
+
+/** A clone of a map or a set, with its table's size, of keys (and values) of the types `args`. */
+function cloneCollection(args: Type[], source: MapValue | SetValue): MapValue | SetValue {
+  if (source instanceof MapValue) {
+    hooks?.allocate(source.entries.size * 2);
+    const copy = new MapValue(source.sorted);
+    for (const [hash, [key, item]] of source.entries) {
+      copy.entries.set(hash, [cloneValue(args[0], key), cloneValue(args[1], item)]);
+    }
+    sizeTable(copy.entries, 0, source.entries);
+    return copy;
+  }
+  hooks?.allocate(source.entries.size);
+  const copy = new SetValue(source.sorted);
+  for (const [hash, item] of source.entries) copy.entries.set(hash, cloneValue(args[0], item));
+  sizeTable(copy.entries, 0, source.entries);
+  return copy;
+}
+
+/** How many elements and fields {@link copyValue} makes in copying a value. */
+export function copiedSlots(value: Value): number {
+  let fields: Value[];
+  if (Array.isArray(value)) fields = value;
+  else if (value instanceof StructValue || value instanceof EnumValue) fields = value.fields;
+  else return 0;
+  let count = fields.length;
+  for (const field of fields) count += copiedSlots(field);
+  return count;
 }

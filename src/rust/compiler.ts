@@ -19,6 +19,7 @@ import {
   castValue,
   cloneValue,
   compareValues,
+  copiedSlots,
   copyValue,
   floatArith,
   hashKey,
@@ -685,6 +686,7 @@ export class Compiler {
           frame.runtime.allocate(length);
           frame.runtime.spend(Math.ceil(length / 16));
           const item = value(frame);
+          frame.runtime.allocate(length * copiedSlots(item));
           return Array.from({ length }, () => copyValue(item));
         };
       }
@@ -1017,7 +1019,7 @@ export class Compiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of expression, statement, or pattern.
-  // code-gauge-allow functionNcss 41 -- One case per kind of expression, statement, or pattern.
+  // code-gauge-allow functionNcss 45 -- One case per kind of expression, statement, or pattern.
   private binary(expr: Extract<Expr, { kind: 'binary' }>): Eval {
     const { op } = expr;
     if (op === '&&' || op === '||') {
@@ -1061,7 +1063,12 @@ export class Compiler {
     }
     if (type.kind === 'adt') {
       // String + &str
-      return (frame) => concatStrings(left(frame) as string, derefAll(rightCoerced(frame)) as string);
+      return (frame) => {
+        const text = left(frame) as string;
+        const addition = derefAll(rightCoerced(frame)) as string;
+        frame.runtime.allocateString(text.length + addition.length, addition.length);
+        return concatStrings(text, addition);
+      };
     }
     if (type.kind === 'bool') {
       const fn = {
@@ -1111,7 +1118,7 @@ export class Compiler {
     };
   }
 
-  // code-gauge-allow functionNcss 32 -- One case per kind of expression, statement, or pattern.
+  // code-gauge-allow functionNcss 33 -- One case per kind of expression, statement, or pattern.
   private compoundAssign(expr: Extract<Expr, { kind: 'compoundAssign' }>): Eval {
     const place = this.place(expr.target);
     const value = this.value(expr.value);
@@ -1122,6 +1129,7 @@ export class Compiler {
       return (frame) => {
         const target = place(frame);
         const addition = derefAll(value(frame)) as string;
+        frame.runtime.allocateString((target.get() as string).length + addition.length, addition.length);
         changeString(target, () => target.set((target.get() as string) + addition));
         return UNIT_VALUE;
       };
@@ -1569,7 +1577,9 @@ export class Compiler {
           return (frame) => {
             const p = throughRef ? (target(frame) as Place) : place(frame);
             const { text, failed } = formatPartly(format, frame);
-            p.set((p.get() as string) + text + (failed ? '' : newline));
+            const written = text + (failed ? '' : newline);
+            frame.runtime.allocateString((p.get() as string).length + written.length, written.length);
+            p.set((p.get() as string) + written);
             return failed ? errValue() : okValue();
           };
         }
@@ -1577,7 +1587,9 @@ export class Compiler {
           let formatter = target(frame);
           while (isPlace(formatter)) formatter = formatter.get();
           const { text, failed } = formatPartly(format, frame);
-          (formatter as FormatterValue).text += text + (failed ? '' : newline);
+          const written = text + (failed ? '' : newline);
+          frame.runtime.allocateString((formatter as FormatterValue).text.length + written.length, written.length);
+          (formatter as FormatterValue).text += written;
           return failed ? errValue() : okValue();
         };
       }

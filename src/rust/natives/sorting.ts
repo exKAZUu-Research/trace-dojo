@@ -92,7 +92,7 @@ export function dedupBy(items: Value[], sameBucket: (current: ElementPlace, kept
     if (!repeats) kept.push(items[index]);
   }
   items.length = 0;
-  items.push(...kept);
+  for (const item of kept) items.push(item);
   return UNIT_VALUE;
 }
 

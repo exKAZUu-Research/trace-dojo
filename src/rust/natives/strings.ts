@@ -16,7 +16,7 @@ import {
   UNIT_VALUE,
   type Value,
 } from '../values';
-import { withStringCapacity } from './capacityNatives';
+import { checkVecCapacity, withStringCapacity } from './capacityNatives';
 import { arrayIter } from './iterators';
 import { parseFloatText, parseInteger } from './numbers';
 import {
@@ -404,7 +404,7 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     str(a).replaceAll(/[A-Z]/g, (c) => c.toLowerCase()) === str(b).replaceAll(/[A-Z]/g, (c) => c.toLowerCase()),
   repeat: ([s, n], ctx) => {
     const count = Number(n as bigint);
-    ctx.runtime.spend(Math.ceil((str(s).length * count) / 64));
+    ctx.runtime.allocateString(str(s).length * count);
     return str(s).repeat(count);
   },
   parse: ([s], ctx) => parse(ctx, str(s)),
@@ -437,7 +437,7 @@ function replaceN(ctx: NativeContext, text: string, from: Value, to: string, cou
   while (replaced < count) {
     const found = match(text, position);
     if (!found) break;
-    result += text.slice(position, found.index) + to;
+    result = appended(ctx, result, text.slice(position, found.index) + to);
     if (found.length === 0) {
       if (found.index >= text.length) {
         position = text.length;
@@ -445,7 +445,7 @@ function replaceN(ctx: NativeContext, text: string, from: Value, to: string, cou
         break;
       }
       const char = String.fromCodePoint(text.codePointAt(found.index)!);
-      result += char;
+      result = appended(ctx, result, char);
       position = found.index + char.length;
     } else {
       position = found.index + found.length;
@@ -457,13 +457,16 @@ function replaceN(ctx: NativeContext, text: string, from: Value, to: string, cou
 
 const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   new: () => '',
-  with_capacity: ([capacity]) => madeString('', Number(capacity as bigint)),
+  with_capacity: ([capacity], ctx) => {
+    checkVecCapacity(ctx, 0, capacity, 1);
+    return madeString('', Number(capacity as bigint));
+  },
   from_iter: ([iter], ctx) => {
     const iterator = deref(iter) as IterValue;
     let text = '';
     for (let item = iterator.next(); item !== DONE; item = iterator.next()) {
       ctx.runtime.spend();
-      text += deref(item) as string;
+      text = appended(ctx, text, deref(item) as string);
     }
     return text;
   },
@@ -578,12 +581,18 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
       ctx.runtime.spend();
       const item = iterator.next();
       if (item === DONE) break;
-      text += deref(item) as string;
+      text = appended(ctx, text, deref(item) as string);
     }
     place.set(text);
     return UNIT_VALUE;
   },
 };
+
+/** A string a native builds piece by piece, with a piece added, checked before it is built. */
+function appended(ctx: NativeContext, text: string, piece: string): string {
+  ctx.runtime.allocateString(text.length + piece.length, piece.length);
+  return text + piece;
+}
 
 function charCode(value: Value): number {
   return (deref(value) as string).codePointAt(0)!;

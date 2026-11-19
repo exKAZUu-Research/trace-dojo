@@ -130,7 +130,17 @@ export class Runtime implements TracedRuntime<Frame> {
   /** Counts allocated elements against {@link LIMITS.maxSlots}. */
   allocate(count: number): void {
     this.slots += count;
-    if (this.slots > LIMITS.maxSlots) throw new RustPanic('memory allocation failed', { row: 0, col: 0 });
+    if (this.slots > LIMITS.maxSlots) throw new OutOfMemory(count * SLOT_BYTES);
+  }
+
+  /**
+   * Checks the length of a string built at run time against {@link LIMITS.maxStringLength}, and charges an operation
+   * for each 64 characters of the `written` ones that end it, which bounds what a run builds in all; a string grown a
+   * character at a time is charged as one built at once.
+   */
+  allocateString(length: number, written = length): void {
+    if (length > LIMITS.maxStringLength) throw new OutOfMemory(length);
+    this.spend(Math.floor(length / 64) - Math.floor((length - written) / 64));
   }
 
   write(stream: 'stdout' | 'stderr', text: string): void {
@@ -147,14 +157,15 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   /** Removes the turtles that no variable or value in use reaches, as dropping them in Rust does. */
-  // code-gauge-allow duplicateLines 16 -- Each language's runtime collects the turtles its values no longer reach alike.
   collectGarbage(): void {
     const reached = new Set<unknown>();
     const stack: unknown[] = [];
     for (const frame of this.frames) {
-      stack.push(...frame.locals, ...frame.temporaries, ...frame.captures);
+      pushAll(stack, frame.locals);
+      pushAll(stack, frame.temporaries);
+      pushAll(stack, frame.captures);
     }
-    for (const roots of this.nativeRoots) stack.push(...roots);
+    for (const roots of this.nativeRoots) pushAll(stack, roots);
     const turtles = new Set<unknown>();
     while (stack.length > 0) {
       const item = stack.pop();
@@ -172,12 +183,23 @@ export class Runtime implements TracedRuntime<Frame> {
 
 export class StackOverflow {}
 
+/** The size this interpreter counts for an element against {@link LIMITS.maxSlots}: a `usize` of a 64-bit target. */
+const SLOT_BYTES = 8;
+
+/**
+ * An allocation over this interpreter's memory limits, which aborts the program as Rust's default allocation error
+ * handler does when the system has no more memory.
+ */
+export class OutOfMemory {
+  constructor(readonly bytes: number) {}
+}
+
 // code-gauge-allow functionNcss 31 -- One case per kind of value.
 function pushChildren(item: object, stack: unknown[]): void {
   if (Array.isArray(item)) {
-    stack.push(...item);
+    pushAll(stack, item);
   } else if (item instanceof StructValue || item instanceof EnumValue) {
-    stack.push(...item.fields);
+    pushAll(stack, item.fields);
   } else if (item instanceof CellPlace) {
     stack.push(item.value);
   } else if (item instanceof ElementPlace) {
@@ -187,12 +209,17 @@ function pushChildren(item: object, stack: unknown[]): void {
   } else if (item instanceof MapValue) {
     for (const [key, value] of item.entries.values()) stack.push(key, value);
   } else if (item instanceof SetValue) {
-    stack.push(...item.entries.values());
+    pushAll(stack, item.entries.values());
   } else if (item instanceof DynValue) {
     stack.push(item.value);
   } else if (item instanceof FnValue || item instanceof IterValue) {
-    stack.push(...item.roots);
+    pushAll(stack, item.roots);
   } else if (item instanceof EntryValue) {
     stack.push(item.map, item.key);
   }
+}
+
+/** Pushes many items, which spreading them as arguments would overflow the call stack with. */
+function pushAll(stack: unknown[], items: Iterable<unknown>): void {
+  for (const item of items) stack.push(item);
 }
