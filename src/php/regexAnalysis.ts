@@ -30,7 +30,6 @@ export function analyzeRegex(
   const contexts: boolean[] = [];
   const lookbehinds: AST.LookaroundAssertion[] = [];
   const lengths = new Map<AST.Element, Length>();
-  let backwardCaptureReference = false;
   let needsNative = false;
   visitRegExpAST(tree, {
     onGroupEnter(node) {
@@ -50,8 +49,7 @@ export function analyzeRegex(
     },
     onBackreferenceEnter(node) {
       const groups = node.ambiguous ? node.resolved : [node.resolved];
-      backwardCaptureReference ||= referencesLocalLookbehindGroup(groups, lookbehinds);
-      needsNative ||= !utf8 && ignoreCase;
+      needsNative ||= (!utf8 && ignoreCase) || referencesLocalLookbehindGroup(groups, lookbehinds);
     },
     onAssertionEnter(node) {
       if (node.kind !== 'lookbehind') return;
@@ -71,7 +69,6 @@ export function analyzeRegex(
       captureCount++;
     },
   });
-  if (backwardCaptureReference) throw new UnsupportedFeatureError('後読みの内部キャプチャへの後方参照');
   return {
     emptySource: emptyMarkers.size === 0 ? undefined : specializeForEmptySubject(tree, emptyMarkers),
     needsNative: needsNative || hasAmbiguousRepetition(tree, unicode, ignoreCase),

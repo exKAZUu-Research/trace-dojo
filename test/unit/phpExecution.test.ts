@@ -1653,15 +1653,15 @@ test.each([
 });
 
 test.each([
-  String.raw`preg_match('/(?<=(a)\1)b/', 'aab')`,
-  String.raw`preg_match('/(?<!(a)\1)b/', 'aab')`,
-  String.raw`preg_replace('/(?<=(.)\1)x/', 'Y', 'aax bcx')`,
-  String.raw`preg_match_all('/(?<=(\d)\1)-/', '11-23-', $matches)`,
-])('rejects references to captures within the same lookbehind: %s', (call) => {
-  expect(run(`<?php ${call}; echo 'done';`)).toMatchObject({
+  [String.raw`preg_match('/(?<=(a)\1)b/', 'aab', $m); echo json_encode($m);`, '["b","a"]'],
+  [String.raw`echo preg_match('/(?<!(a)\1)b/', 'aab');`, '0'],
+  [String.raw`echo preg_replace('/(?<=(.)\1)x/', 'Y', 'aax bcx');`, 'aaY bcx'],
+  [String.raw`preg_match_all('/(?<=(\d)\1)-/', '11-23-', $m); echo json_encode($m);`, '[["-"],["1"]]'],
+  [String.raw`preg_match('/(?<=(?<x>a)\k<x>)b/', 'aab', $m); echo json_encode($m);`, '{"0":"b","x":"a","1":"a"}'],
+])('matches backreferences within lookbehinds via native PCRE: %s', (call, stdout) => {
+  expect(run(`<?php ${call}`)).toMatchObject({
     kind: 'executed',
-    stdout: '',
-    uncaughtException: expect.stringContaining('後読みの内部キャプチャへの後方参照'),
+    stdout,
   });
 });
 
