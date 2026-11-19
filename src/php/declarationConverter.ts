@@ -32,7 +32,6 @@ import {
   isReservedClassName,
   relativeClassName,
   semanticChildren,
-  traitAdaptationModifierError,
 } from './converterBase';
 import { decodeLiteral, decodeSingleQuoted } from './literals';
 import { compiledOperandRow } from './opcodeRows';
@@ -1474,23 +1473,18 @@ export abstract class DeclarationConverter extends ConverterBase {
   }
 
   private traitAlias(clause: Node): Extract<TraitRule, { k: 'as' }> {
-    const [target, ...rest] = semanticChildren(clause);
+    const [target] = semanticChildren(clause);
     const qualified = target.type === 'class_constant_access_expression';
     const [trait, method] = qualified ? semanticChildren(target) : [undefined, target];
-    const modifier = clause.childForFieldName('modifier') ?? rest.find((child) => child.type === 'visibility_modifier');
-    const aliasField = clause.childForFieldName('alias');
-    const alias = aliasField ?? rest.find((child) => child.type === 'name');
-    const legacyModifier = !modifier && !aliasField ? lower(alias?.text ?? '') : '';
-    const error = traitAdaptationModifierError(modifier?.text ?? legacyModifier);
-    if (error) this.error(clause.parent?.parent ?? clause, error);
-    const legacyFinal = legacyModifier === 'final';
+    const modifier = clause.childForFieldName('modifier');
+    const alias = clause.childForFieldName('alias');
     return {
       k: 'as',
       trait: trait ? this.namedClass(trait, '', 'trait') : undefined,
       method: this.nameText(method),
-      alias: alias && !legacyFinal ? this.nameText(alias) : undefined,
+      alias: alias ? this.nameText(alias) : undefined,
       visibility: modifier?.type === 'visibility_modifier' ? (lower(modifier.text) as Visibility) : undefined,
-      isFinal: legacyFinal || modifier?.type === 'final_modifier',
+      isFinal: modifier?.type === 'final_modifier',
     };
   }
 

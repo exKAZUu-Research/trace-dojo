@@ -91,7 +91,7 @@ export function stripTags(text: string, allowed: string): string {
         if (last === char) last = '';
         else if (last !== '\\') last = char;
         if (!quote || quote === char) quote = quote ? '' : char;
-      } else if ((char === 'l' || char === 'L') && lower(text.slice(index - 4, index + 1)) === '<?xml') {
+      } else if (index > 4 && (char === 'l' || char === 'L') && lower(text.slice(index - 4, index + 1)) === '<?xml') {
         state = 'tag';
         xml = true;
       }
