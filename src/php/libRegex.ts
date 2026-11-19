@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 459 -- The regex functions share matching, offsets, capture handling, and error state.
+// code-gauge-allow-file fileNcss 462 -- The regex functions share matching, offsets, capture handling, and error state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { dec, enc } from './bytes';
 import { callCallback, consumeInvokedResult } from './callables';
@@ -82,12 +82,16 @@ interface Match {
  */
 interface MatchScanOptions {
   maxMatches?: number;
-  allowBatching?: boolean;
+  batchBudgetMs?: number;
+  noEmptyLimit?: number;
 }
+
+const CALLBACK_BATCH_BUDGET_MS = 5;
 
 function splitScanOptions(limit: number, noEmpty: boolean): MatchScanOptions {
   if (limit === -1) return {};
-  return noEmpty ? { allowBatching: false } : { maxMatches: Math.max(0, limit - 1) };
+  const needed = Math.max(0, limit - 1);
+  return noEmpty && needed > 0 ? { noEmptyLimit: needed } : { maxMatches: needed };
 }
 
 function matchesOf(
@@ -179,7 +183,8 @@ function scanPlan<T>(
       utf8: compiled.utf8,
       budget: rt().budget,
       maxMatches: options?.maxMatches,
-      allowBatching: options?.allowBatching,
+      batchBudgetMs: options?.batchBudgetMs,
+      noEmptyLimit: options?.noEmptyLimit,
     });
     return {
       length: subject.length,
@@ -453,7 +458,7 @@ function replaceOne(
   const status = { error: 0 };
   const matches = matchesOf(compiled, subject, 0, status, {
     maxMatches: limit < 0 ? Infinity : limit,
-    allowBatching: name === 'preg_replace' || name === 'preg_filter',
+    batchBudgetMs: name === 'preg_replace' || name === 'preg_filter' ? 0 : CALLBACK_BATCH_BUDGET_MS,
   });
   let result = '';
   let last = 0;

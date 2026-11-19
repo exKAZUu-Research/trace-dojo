@@ -690,6 +690,8 @@ echo 'after;';`);
 test.each([
   ["preg_match_all('/(a?)+/', str_repeat('a ', 50000))", '100001'],
   ["strlen(preg_replace('/(a?)+/', 'x', str_repeat('a ', 50000)))", '150001'],
+  ["strlen(preg_replace_callback('/(a?)+/', fn($m) => 'x', str_repeat('a ', 80000)))", '240001'],
+  ["count(preg_split('/(a?)+/', str_repeat('a ', 80000), 80001, PREG_SPLIT_NO_EMPTY))", '80000'],
   ["preg_match_all('/(あ?)+/u', str_repeat('あ ', 10000))", '20001'],
 ])('completes bounded native regex scan within time budget: %s', (expression, stdout) => {
   vi.restoreAllMocks();

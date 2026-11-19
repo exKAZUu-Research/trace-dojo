@@ -22,6 +22,8 @@ const batchResponse = z.union([
     nextPosition: z.number().int().nonnegative(),
     nextRetry: z.boolean(),
     done: z.boolean(),
+    noEmptyRemaining: z.number().int().nonnegative(),
+    lastEnd: z.number().int().nonnegative(),
     pregError: z.number().int().min(1).max(6).optional(),
   }),
   z.literal('unsupported'),
@@ -47,7 +49,8 @@ export interface BoundedScanOptions {
   utf8: boolean;
   budget: ExecutionBudget;
   maxMatches?: number;
-  allowBatching?: boolean;
+  batchBudgetMs?: number;
+  noEmptyLimit?: number;
 }
 
 export function createBoundedRegexScanner({
@@ -57,38 +60,47 @@ export function createBoundedRegexScanner({
   utf8,
   budget,
   maxMatches = Infinity,
-  allowBatching = true,
+  batchBudgetMs = 0,
+  noEmptyLimit = 0,
 }: BoundedScanOptions): () => MatchOffsets | { pregError: number } | undefined {
-  let offsets = new Int32Array(0);
+  let batch: Exclude<z.infer<typeof batchResponse>, 'unsupported'> = {
+    offsets: new Int32Array(0),
+    nextPosition: startPosition,
+    nextRetry: false,
+    done: false,
+    noEmptyRemaining: noEmptyLimit,
+    lastEnd: 0,
+  };
   let cursor = 0;
-  let position = startPosition;
-  let retry = false;
-  let done = false;
-  let pregError: number | undefined;
   let batchIndex = 0;
   let remaining = maxMatches;
 
   return () => {
     for (;;) {
-      if (cursor < offsets.length) {
+      if (cursor < batch.offsets.length) {
         remaining--;
-        return decodeMatch(() => offsets[cursor++]);
+        return decodeMatch(() => batch.offsets[cursor++]);
       }
-      if (pregError !== undefined) {
-        const error = pregError;
-        pregError = undefined;
+      if (batch.pregError !== undefined) {
+        const error = batch.pregError;
+        batch.pregError = undefined;
         return { pregError: error };
       }
-      if (done || remaining <= 0) return;
-      const targetBatch = allowBatching ? BATCH_SIZES[Math.min(batchIndex++, BATCH_SIZES.length - 1)] : 1;
-      const limit = Math.min(targetBatch, remaining);
-      const batch = boundedRegexBatch({ pattern, text, position, retry, utf8, limit, budget });
-      offsets = batch.offsets;
+      if (batch.done || remaining <= 0) return;
+      const limit = Math.min(BATCH_SIZES[Math.min(batchIndex++, BATCH_SIZES.length - 1)], remaining);
+      batch = boundedRegexBatch({
+        pattern,
+        text,
+        position: batch.nextPosition,
+        retry: batch.nextRetry,
+        utf8,
+        limit,
+        batchBudgetMs,
+        noEmptyRemaining: batch.noEmptyRemaining,
+        lastEnd: batch.lastEnd,
+        budget,
+      });
       cursor = 0;
-      position = batch.nextPosition;
-      retry = batch.nextRetry;
-      done = batch.done;
-      pregError = batch.pregError;
     }
   };
 }
@@ -113,6 +125,9 @@ interface BatchRequest {
   retry: boolean;
   utf8: boolean;
   limit: number;
+  batchBudgetMs: number;
+  noEmptyRemaining: number;
+  lastEnd: number;
   budget: ExecutionBudget;
 }
 
@@ -123,6 +138,9 @@ function boundedRegexBatch({
   retry,
   utf8,
   limit,
+  batchBudgetMs,
+  noEmptyRemaining,
+  lastEnd,
   budget,
 }: BatchRequest): Exclude<z.infer<typeof batchResponse>, 'unsupported'> {
   if (budget.remainingMilliseconds === 0) throw new ExecutionLimitError('time');
@@ -134,6 +152,9 @@ function boundedRegexBatch({
     retry,
     utf8,
     limit,
+    batchBudgetMs,
+    noEmptyRemaining,
+    lastEnd,
     subject: state.subject === text ? undefined : text,
     signal: state.signal,
   });
@@ -206,7 +227,7 @@ const WORKER_SOURCE = `
 const { workerData: port } = require('node:worker_threads');
 ${PCRE_WORKER_SOURCE}
 let text = Buffer.alloc(0);
-port.on('message', ({ pattern, position, retry, utf8, limit, subject, signal, reset, stop }) => {
+port.on('message', ({ pattern, position, retry, utf8, limit, batchBudgetMs, noEmptyRemaining, lastEnd, subject, signal, reset, stop }) => {
   if (stop) {
     disposePcre();
     port.close();
@@ -218,7 +239,7 @@ port.on('message', ({ pattern, position, retry, utf8, limit, subject, signal, re
   }
   if (subject !== undefined) text = Buffer.from(subject, 'latin1');
   try {
-    port.postMessage(matchPcreBatch(pattern, text, position, retry, utf8, limit));
+    port.postMessage(matchPcreBatch(pattern, text, position, retry, utf8, limit, batchBudgetMs, noEmptyRemaining, lastEnd));
   } catch {
     port.postMessage(undefined);
   } finally {

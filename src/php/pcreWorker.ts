@@ -115,22 +115,26 @@ function nextUtf8Byte(subject, position) {
   return position;
 }
 
-function matchPcreBatch(pattern, subject, position, retry, utf8, limit) {
+function matchPcreBatch(pattern, subject, position, retry, utf8, limit, batchBudgetMs, noEmptyRemaining, lastEnd) {
   if (pcre === undefined) pcre = pcreFunctions();
   if (!pcre) return 'unsupported';
   const context = ensureContext();
-  if (!context) return { offsets: new Int32Array(0), nextPosition: position, nextRetry: retry, done: true, pregError: 1 };
+  if (!context) {
+    return { offsets: new Int32Array(0), nextPosition: position, nextRetry: retry, done: true, noEmptyRemaining, lastEnd, pregError: 1 };
+  }
   const entry = cachedPattern(pattern);
   if (entry === 'unsupported') return 'unsupported';
   if ('pregError' in entry) {
-    return { offsets: new Int32Array(0), nextPosition: position, nextRetry: retry, done: true, pregError: entry.pregError };
+    return { offsets: new Int32Array(0), nextPosition: position, nextRetry: retry, done: true, noEmptyRemaining, lastEnd, pregError: entry.pregError };
   }
   const retryFlags = 0x80000008; // PCRE2_ANCHORED | PCRE2_NOTEMPTY_ATSTART
+  const deadline = batchBudgetMs > 0 ? performance.now() + batchBudgetMs : Infinity;
   const out = [];
   let matches = 0;
   let done = false;
   let pregError;
   while (position <= subject.length && matches < limit) {
+    if (matches > 0 && batchBudgetMs > 0 && performance.now() >= deadline) break;
     const count = pcre.match(entry.code, subject, subject.length, position, retry ? retryFlags : 0, entry.data, context);
     if (count === -1) {
       if (!retry || position >= subject.length) {
@@ -163,8 +167,16 @@ function matchPcreBatch(pattern, subject, position, retry, utf8, limit) {
     matches++;
     position = end;
     retry = start === end;
+    if (noEmptyRemaining > 0) {
+      if (start !== lastEnd) noEmptyRemaining--;
+      lastEnd = end;
+      if (noEmptyRemaining === 0) {
+        done = true;
+        break;
+      }
+    }
   }
   if (position > subject.length) done = true;
-  return { offsets: Int32Array.from(out), nextPosition: position, nextRetry: retry, done, pregError };
+  return { offsets: Int32Array.from(out), nextPosition: position, nextRetry: retry, done, noEmptyRemaining, lastEnd, pregError };
 }
 `;
