@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 451 -- Keeps array bucket layout, mutations and their cursor positions together.
+// code-gauge-allow-file fileNcss 466 -- Keeps array bucket layout, mutations and their cursor positions together.
 import type { Key } from './values';
 
 class ArrayEntry {
@@ -61,7 +61,7 @@ export class ArrayOrder {
   keyOffset = 0n;
   indexOffset = 0;
   storageVersion = 0;
-  invalidPointer: number | undefined;
+  detachedPointer: number | undefined;
   private listLayout = false;
   private nextIndex = 0;
   private capacity = 8;
@@ -81,6 +81,15 @@ export class ArrayOrder {
 
   keyAtBucket(index: number): Key | undefined {
     return this.buckets.get(index + this.indexOffset)?.key;
+  }
+
+  firstKeyFrom(index: number, includes?: (key: Key) => boolean): Key | undefined {
+    if (index >= this.nextIndex) return undefined;
+    const direct = this.buckets.get(index + this.indexOffset);
+    if (direct && (!includes || includes(direct.key))) return direct.key;
+    for (let entry = this.first; entry; entry = entry.next)
+      if (entry.index >= index && (!includes || includes(entry.key))) return entry.key;
+    return undefined;
   }
 
   get isPacked(): boolean {
@@ -228,12 +237,16 @@ export class ArrayOrder {
     if (this.nextIndex === this.entries.size) return;
     const previousEnd = this.nextIndex;
     let index = 0;
+    let mappedPointer: number | undefined;
     this.buckets.clear();
     for (const entry of this.orderedEntries()) {
+      if (mappedPointer === undefined && this.detachedPointer !== undefined && entry.index >= this.detachedPointer)
+        mappedPointer = index;
       entry.index = index++;
       this.buckets.set(entry.rawIndex, entry);
     }
     this.nextIndex = index;
+    if (mappedPointer !== undefined) this.detachedPointer = mappedPointer;
     for (const cursor of this.liveCursors())
       if (cursor.index === undefined || cursor.index <= previousEnd) cursor.refreshPosition();
   }
@@ -315,7 +328,7 @@ export class ArrayOrder {
     this.entries.delete(entry.rawKey);
     this.buckets.delete(entry.rawIndex);
     if (!entry.next) {
-      if (this.invalidPointer !== undefined) this.invalidPointer = Math.min(this.invalidPointer, this.nextIndex);
+      if (this.detachedPointer !== undefined) this.detachedPointer = Math.min(this.detachedPointer, this.nextIndex);
       for (const cursor of this.liveCursors()) cursor.clamp(this.nextIndex);
     }
   }

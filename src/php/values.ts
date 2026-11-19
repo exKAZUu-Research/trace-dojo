@@ -5,7 +5,15 @@ import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
 import { ArrayTable, detachArrayTable } from './arrayTable';
 import type { ClassDecl, Expr, FunctionDecl, PropertyDeclAst } from './ast';
 import { lower } from './bytes';
-import { OwnerLinks } from './ownerLinks';
+import {
+  invalidateOwner,
+  OwnerLinks,
+  ownershipProof,
+  proofChildrenOf,
+  proofRoot,
+  rememberOwnership,
+  setOwnershipWorkHandler,
+} from './ownerLinks';
 import { replaceWatchedSlot, replaceWatchedSlots } from './slotWatch';
 
 export const UNDEFINED_RESULT = Symbol('undefined native result');
@@ -168,7 +176,7 @@ export class PhpArray {
   set pointer(value: Key | undefined | null) {
     this.pointerKey = value;
     if (value === undefined || this.order)
-      this.ordered().invalidPointer = value === undefined ? this.ordered().endPosition : undefined;
+      this.ordered().detachedPointer = value === undefined ? this.ordered().endPosition : undefined;
   }
 
   constructor(
@@ -264,7 +272,7 @@ export class PhpArray {
     dropped(old);
   }
 
-  /** The key that `$array[] = ...` uses: the next integer after the largest one, or 0 when there is none. */
+  /** The stored next-free integer key for `$array[] = ...` (retained across `delete`), or 0 before any integer key is assigned. */
   get appendKey(): bigint {
     return this.nextFree === INT_MIN ? 0n : this.nextFree;
   }
@@ -307,15 +315,20 @@ export class PhpArray {
     const inserted = order?.insert(key, count);
     if (order?.isPacked && !existed) this.nextFree = BigInt(order.endPosition);
     else this.advanceAppendKey(key);
-    if (!existed && this.pointer === undefined && (inserted === undefined || inserted >= (order?.invalidPointer ?? 0)))
+    if (
+      !existed &&
+      this.pointerKey === undefined &&
+      (order?.detachedPointer === undefined || inserted === undefined || inserted === order.detachedPointer)
+    )
       this.pointer = key;
   }
 
   private removeUndefinedSlot(key: Key, preserveEndPosition = false): void {
-    if (this.pointer === key) this.pointer = this.keyAfter(key);
+    const detached = this.pointerKey === key ? this.order?.get(key)?.index : undefined;
     this.map.removedUndefinedSlots++;
     this.map.delete(key);
     this.order?.delete(key, preserveEndPosition);
+    if (detached !== undefined) this.setDetachedPointer(Math.min(detached, this.ordered().endPosition));
   }
 
   private advanceAppendKey(key: Key): void {
@@ -549,16 +562,20 @@ export class PhpArray {
     const trim = this.map.mayHaveUndefinedSlots && order.isPacked && order.last?.key === key;
     const old = this.map.ownedSlot(key);
     if (old instanceof Ref) old.rc--;
-    // PHP moves a pointer at the deleted element on to the next one.
-    const nextPointer = this.pointer === key ? this.keyAfter(key) : null;
+    const detached = this.pointerKey === key ? order.get(key)?.index : undefined;
     this.invalidate();
     this.map.delete(key);
     order.delete(key);
     if (trim) {
       while (order.last && this.map.get(order.last.key) === UNDEFINED_RESULT) this.removeUndefinedSlot(order.last.key);
     }
-    if (this.pointer === key) this.pointer = nextPointer;
+    if (detached !== undefined) this.setDetachedPointer(Math.min(detached, order.endPosition));
     dropped(old);
+  }
+
+  private setDetachedPointer(index: number): void {
+    this.pointerKey = undefined;
+    this.ordered().detachedPointer = index;
   }
 
   sampleKey(draw: (max: number) => number): Key {
@@ -615,10 +632,12 @@ export class PhpArray {
 
   /** The key the internal pointer is at, starting at the first element. */
   currentKey(): Key | undefined {
-    if (this.pointer === null) return this.map.keys().next().value;
-    if (this.pointer !== undefined && this.map.get(this.pointer) === UNDEFINED_RESULT)
-      return this.keyAfter(this.pointer);
-    return this.pointer;
+    if (this.pointerKey === null) return this.map.keys().next().value;
+    if (this.pointerKey === undefined)
+      return this.order?.detachedPointer === undefined
+        ? undefined
+        : this.order.firstKeyFrom(this.order.detachedPointer, (key) => this.map.get(key) !== UNDEFINED_RESULT);
+    return this.map.get(this.pointerKey) === UNDEFINED_RESULT ? this.keyAfter(this.pointerKey) : this.pointerKey;
   }
 
   /**
@@ -638,7 +657,12 @@ export class PhpArray {
     copy.orderPacked = this.orderPacked;
     copy.nextFree = this.nextFree;
     copy.composite = this.composite;
-    copy.pointer = this.currentKey() === undefined ? null : this.pointer;
+    if (this.currentKey() === undefined) copy.pointer = null;
+    else if (this.pointerKey === undefined && order?.detachedPointer !== undefined) {
+      const target = copy.order?.keyAtBucket(order.detachedPointer);
+      if (target !== undefined && copy.map.get(target) !== UNDEFINED_RESULT) copy.pointer = target;
+      else copy.setDetachedPointer(order.detachedPointer);
+    } else copy.pointer = this.pointerKey;
     return copy;
   }
 
@@ -1201,21 +1225,13 @@ class PropertyMap extends Map<string, Slot> {
   }
 }
 
-const reachProofs = new WeakMap<object, object>();
-const proofChildren = new WeakMap<object, Set<object>>();
-const proofParents = new WeakMap<object, object>();
-let ownershipWorkHandler: (cost: number) => void = () => {};
-
-export function setOwnershipWorkHandler(handler: typeof ownershipWorkHandler): void {
-  ownershipWorkHandler = handler;
-}
+export { ownershipProof, rememberOwnership, setOwnershipWorkHandler };
 
 function rewireOwnership(owner: Owner, key: Key | undefined, value: unknown): void {
-  const root = reachProofs.get(owner);
+  const root = proofRoot(owner);
   if (root && value !== owner && (value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject))
     rememberOwnership([owner, value], root);
-  const children = proofChildren.get(owner);
-  for (const child of children ?? []) {
+  for (const child of proofChildrenOf(owner) ?? []) {
     if (child === value || retainsChild(owner, key, child)) continue;
     invalidateOwner(child);
   }
@@ -1229,69 +1245,6 @@ function retainsChild(owner: Owner, replacedKey: Key | undefined, child: object)
     const actual = owner instanceof PhpArray ? owner.map.ownedSlot(key as Key) : owner.props.get(key as string);
     if (actual === child) return true;
   }
-  return false;
-}
-
-function invalidateOwner(owner: object): void {
-  const pending = [owner];
-  const visited = new Set<object>();
-  while (pending.length > 0) {
-    const value = pending.pop() as object;
-    if (visited.has(value)) continue;
-    visited.add(value);
-    reachProofs.delete(value);
-    const parent = proofParents.get(value);
-    if (parent) proofChildren.get(parent)?.delete(value);
-    proofParents.delete(value);
-    const children = proofChildren.get(value);
-    if (children) {
-      for (const child of children) if (proofParents.get(child) === value) pending.push(child);
-      proofChildren.delete(value);
-    }
-  }
-}
-
-export function ownershipProof(value: object, isRoot: (value: object) => boolean): object | undefined {
-  const root = reachProofs.get(value);
-  return root !== undefined && isRoot(root) ? root : undefined;
-}
-
-// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-export function rememberOwnership(path: object[], root: object): void {
-  for (let index = 0; index < path.length; index++) {
-    const value = path[index];
-    reachProofs.set(value, root);
-    if (value === root) {
-      const parent = proofParents.get(value);
-      if (parent) proofChildren.get(parent)?.delete(value);
-      proofParents.delete(value);
-    }
-    const child = path[index + 1];
-    if (child && child !== value) {
-      if (proofChildren.get(child)?.size && wouldProofCycle(value, child)) return;
-      const previous = proofParents.get(child);
-      if (previous) proofChildren.get(previous)?.delete(child);
-      proofParents.set(child, value);
-      let children = proofChildren.get(value);
-      if (!children) {
-        children = new Set();
-        proofChildren.set(value, children);
-      }
-      children.add(child);
-    }
-  }
-}
-
-function wouldProofCycle(owner: object, child: object): boolean {
-  let work = 0;
-  for (let parent: object | undefined = owner; parent; parent = proofParents.get(parent)) {
-    if ((++work & 63) === 0) ownershipWorkHandler(8);
-    if (parent === child) {
-      ownershipWorkHandler(Math.ceil((work & 63) / 8));
-      return true;
-    }
-  }
-  ownershipWorkHandler(Math.ceil((work & 63) / 8));
   return false;
 }
 

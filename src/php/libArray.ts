@@ -1662,6 +1662,7 @@ defineFunction('reset(array|object &$array): mixed', (ctx) =>
   withPointer(pointerValue(ctx), 'reset', (array) => {
     array.pointer = null;
     const key = array.currentKey();
+    if (key !== undefined) array.pointer = key;
     return key === undefined ? false : (array.get(key) as Value);
   })
 );

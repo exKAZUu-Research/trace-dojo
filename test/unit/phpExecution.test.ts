@@ -3562,4 +3562,18 @@ foreach ($a as &$v) { echo "$v;"; if ($v === 2) { array_shift($a); $a[] = 9; } }
 unset($v);
 `);
   expect(sparsePackedShiftCursor).toMatchObject({ kind: 'executed', stdout: '1;2;' });
+
+  const compactedPointerCopy = run(String.raw`<?php
+$a = ['a' => 1, 'b' => 2, 'c' => 3, 'd' => 4];
+unset($a['a']); reset($a); unset($a['b']);
+$b = $a; $a['new'] = 5;
+echo key($a), ':', current($a), ',', key($b), ':', current($b), ';';
+$c = ['k0' => 0, 'k1' => 1, 'k2' => 2, 'k3' => 3, 'k4' => 4];
+unset($c['k0'], $c['k1']); reset($c); unset($c['k2'], $c['k3']);
+$d = $c; $c['new1'] = 10;
+echo key($c) ?? 'null', ',';
+$c['new2'] = 20;
+echo key($c), ',', key($d);
+`);
+  expect(compactedPointerCopy).toMatchObject({ kind: 'executed', stdout: 'd:4,c:3;null,new2,k4' });
 });
