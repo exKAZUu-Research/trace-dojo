@@ -1,8 +1,8 @@
 import { CppRuntimeError } from '../errors';
 import type { Expr, FunctionCandidates } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { destroyTemporaries, invoke, newObject, withTemporaries, zeroOf } from '../objectCompiler';
-import type { Frame } from '../runtime';
+import { destroyTemporaries, invoke, makeEach, newObject, withTemporaries, zeroOf } from '../objectCompiler';
+import { type Frame, holdAll } from '../runtime';
 import {
   type ClassInfo,
   classType,
@@ -133,8 +133,7 @@ function canCopyWithoutThrow(type: Type): boolean {
 function transferElement(frame: Frame, type: Type, source: Value, target?: CObject): Value {
   if (source === UNINIT) return UNINIT;
   if (type.kind === 'array' && source instanceof ArrayStore) {
-    frame.runtime.reserve(source.values.length);
-    return new ArrayStore(source.values.map((value) => transferElement(frame, type.of, value)));
+    return new ArrayStore(transferElements(frame, type.of, source.values));
   }
   if (type.kind !== 'class') return source;
   const { cls } = type;
@@ -147,22 +146,33 @@ function transferElement(frame: Frame, type: Type, source: Value, target?: CObje
   if (source instanceof SequenceValue) {
     const array = cls.library?.aggregateArray;
     if (!array) return source.moveStorage();
-    frame.runtime.reserve(source.items.length);
-    return frame.runtime.withoutOuterHandlers(() =>
-      array.make(source.items.map((value) => transferElement(frame, array.type.of, value)))
-    );
+    return frame.runtime.withoutOuterHandlers(() => array.make(transferElements(frame, array.type.of, source.items)));
   }
-  if (source instanceof CObject && canMoveFields(cls)) {
-    return frame.runtime.withoutOuterHandlers(() => {
-      const destination = newObject(frame, cls, false, target);
+  if (source instanceof CObject && canMoveFields(cls)) return transferSubobjects(frame, cls, source, target);
+  return cls.operations?.copy(frame, source, target) ?? source;
+}
+
+function transferElements(frame: Frame, type: Type, values: Value[]): Value[] {
+  frame.runtime.reserve(values.length);
+  return makeEach(
+    frame,
+    values.length,
+    (index) => transferElement(frame, type, values[index]),
+    () => {}
+  );
+}
+
+function transferSubobjects(frame: Frame, cls: ClassInfo, source: CObject, target: CObject | undefined): CObject {
+  return frame.runtime.withoutOuterHandlers(() => {
+    const destination = newObject(frame, cls, false, target);
+    return holdAll(frame, [() => destination], () => {
       if (cls.base) transferElement(frame, classType(cls.base), source, destination);
       destination.cls = cls;
       for (const field of cls.ownFields)
         destination.values[field.index] = transferElement(frame, field.type, source.values[field.index]);
       return destination;
     });
-  }
-  return cls.operations?.copy(frame, source, target) ?? source;
+  });
 }
 
 function ownsMovableSequence(type: Type): boolean {

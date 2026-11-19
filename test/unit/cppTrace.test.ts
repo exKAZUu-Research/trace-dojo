@@ -183,6 +183,33 @@ int main() { (new Walker)->go(probe()); }`;
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '0' });
 });
 
+test.each([
+  ['a member buffer', 'struct Row { std::vector<Turtle*> items; Token token; };', 'items'],
+  ['a base buffer', 'struct Row : Storage { Token token; };', 'items'],
+  ['a built-in array', 'struct Row { Entry cells[2]; };', 'cells[0].items'],
+  ['a library array', 'struct Row { std::array<Entry, 2> cells; };', 'cells[0].items'],
+])('keeps turtles reachable through %s during relocation', (_, definition, member) => {
+  const program = `#include <array>
+#include <vector>
+int defaultValue() { int value = 1; return value; }
+struct Token {
+  Token() {}
+  Token(const Token&, int = defaultValue()) noexcept {}
+  ~Token() { int destroying = 1; }
+};
+struct Storage { std::vector<Turtle*> items; };
+struct Entry : Storage { Token token; };
+${definition}
+int main() {
+  std::vector<Row> rows(1);
+  rows[0].${member}.push_back(new Turtle);
+  rows.reserve(8);
+  rows[0].${member}[0]->forward();
+}`;
+  const trace = traceProgram('cpp', program, program);
+  expect(trace.finalTurtles.map(({ x, y }) => [x, y])).toEqual([[0, 1]]);
+});
+
 test('an uncaught exception preserves the turtles reached from main before unwinding', () => {
   const program = `int main() {
   Turtle t(3, 5);

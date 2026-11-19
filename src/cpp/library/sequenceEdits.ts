@@ -256,6 +256,7 @@ export class SequenceEditor {
         (index) => moveConstructElement(frame, this.ops, old[index]),
         () => destroy
       );
+      for (const value of front) frame.pending.push(value);
       if (destroy) for (const item of old) destroy(frame, item);
       self.replaceAllocation([...front, ...made, ...back], capacity);
     } catch (error) {
