@@ -120,7 +120,7 @@ export class SequenceEditor {
       self.splice(from, count);
       return;
     }
-    self.editPositions(dequeEraseAt, count, 0);
+    self.editPositions(dequeEraseAt, count, 0, from === 0);
     self.items.splice(from, count);
     self.bindElements(0, self.length);
   }
@@ -456,7 +456,7 @@ export class SequenceEditor {
       this.withTemporaryElement(frame, make(), (temporary) => {
         if (at < length - at) {
           items.unshift(this.moveConstruct(frame, items[0]));
-          self.editPositions(at, 0, 1);
+          self.editPositions(at, 0, 1, true);
           for (let index = 1; index < at; index++) this.moveAt(frame, items, index, items[index + 1]);
         } else {
           items.push(this.moveConstruct(frame, items[length - 1]));
@@ -610,7 +610,7 @@ export class SequenceEditor {
         }
         throw error;
       }
-      self.editPositions(at, 0, count);
+      self.editPositions(at, 0, count, atFront);
       self.items = cells;
     });
   }

@@ -3,6 +3,8 @@
 #include <iostream>
 #include <list>
 #include <map>
+#include <queue>
+#include <stack>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -16,6 +18,19 @@ struct ArrayOwner {
   std::array<int, 2> values;
   int tag;
 };
+
+bool endAddress(std::array<int, 2>* value) {
+  return static_cast<void*>(value + 1) == static_cast<void*>(value->data() + 2);
+}
+
+void inspect(std::array<int, 2> value) {
+  std::cout << (static_cast<void*>(&value) == static_cast<void*>(value.data())) << endAddress(&value);
+}
+
+std::array<int, 2> make() {
+  std::array<int, 2> value{7, 8};
+  return value;
+}
 
 int main() {
   std::array<int, 2> array{};
@@ -52,4 +67,18 @@ int main() {
   std::cout << (static_cast<void*>(&vectorArrays.front() + 1) == static_cast<void*>(vectorArrays.front().data() + 2))
             << (static_cast<void*>(&vectorArrays.back() + 1) == static_cast<void*>(vectorArrays.back().data() + 2))
             << (static_cast<void*>(node + 1) == static_cast<void*>(node->data() + 2)) << '\n';
+  inspect(standalone);
+  inspect(make());
+  std::cout << '\n';
+
+  std::deque<std::array<int, 2>> dequeArrays(514);
+  auto* boundary = &dequeArrays[511];
+  std::stack<std::array<int, 2>> stack;
+  std::queue<std::array<int, 2>> queue;
+  stack.emplace();
+  queue.emplace();
+  std::cout << endAddress(&dequeArrays.front()) << endAddress(boundary) << endAddress(&dequeArrays.back())
+            << endAddress(&stack.top()) << endAddress(&queue.front()) << '\n';
+  dequeArrays.push_front({1, 2});
+  std::cout << (&dequeArrays[512] == boundary) << endAddress(boundary) << endAddress(&dequeArrays.front()) << '\n';
 }

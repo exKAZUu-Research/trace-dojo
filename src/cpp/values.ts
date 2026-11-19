@@ -531,7 +531,6 @@ export class Ptr {
   }
 
   equals(other: Ptr): boolean {
-    if (this.store === other.store && this.index === other.index) return true;
     const a = this.address;
     const b = other.address;
     return a.store === b.store && a.index === b.index;

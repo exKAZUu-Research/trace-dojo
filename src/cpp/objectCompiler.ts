@@ -81,12 +81,7 @@ export function invoke(
   try {
     for (const [index, param] of fn.params.entries()) {
       const value = args[index] as Value;
-      callee.slots[index] =
-        param.type.kind === 'reference'
-          ? (value as Ptr)
-          : param.type.kind === 'class' && value instanceof CObject
-            ? value.parameterStorage()
-            : new Box(value, param.type.kind !== 'class');
+      callee.slots[index] = parameterLocation(param.type, value);
     }
     if (fn.isNoexcept) runtime.withoutOuterHandlers(() => compiled.body(callee));
     else compiled.body(callee);
@@ -98,6 +93,14 @@ export function invoke(
   } finally {
     runtime.popFrame();
   }
+}
+
+function parameterLocation(type: Type, value: Value): Ptr | Box {
+  if (type.kind === 'reference') return value as Ptr;
+  if (type.kind === 'class' && value instanceof CObject) return value.parameterStorage();
+  const storage = new Box(value, type.kind !== 'class');
+  bindPlacedValue(type, value, storage.location(0));
+  return storage;
 }
 
 function destroyParameters(frame: Frame, fn: FunctionInfo, args: unknown[]): void {
@@ -294,9 +297,7 @@ export function initializeAt(
   }
   try {
     const value = initialize(target);
-    if (type.kind === 'class' && value instanceof CObject) value.completeLocation = location;
-    if (type.kind === 'array' && value instanceof ArrayStore) value.bindLocation(type.of, location);
-    if (value instanceof SequenceValue) value.bindInlineStorage(location);
+    bindPlacedValue(type, value, location);
     if (target instanceof CObject && target !== value && target.needsConstruction) endLifetime(target);
     location.write(value);
     return value;
@@ -304,6 +305,12 @@ export function initializeAt(
     if (target instanceof CObject) endLifetime(target);
     throw error;
   }
+}
+
+function bindPlacedValue(type: Type, value: Value, location: Ptr): void {
+  if (type.kind === 'class' && value instanceof CObject) value.completeLocation = location;
+  if (type.kind === 'array' && value instanceof ArrayStore) value.bindLocation(type.of, location);
+  if (value instanceof SequenceValue) value.bindInlineStorage(location);
 }
 
 /** A zero of a scalar type, as static storage and value-initialization start with. */

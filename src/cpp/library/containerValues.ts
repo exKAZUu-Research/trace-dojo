@@ -11,6 +11,7 @@ interface IndexedValue {
 
 class NodePosition extends Ptr {
   private cell?: Ptr;
+  private dequeCell?: Ptr;
 
   constructor(
     public owner: Store,
@@ -31,6 +32,11 @@ class NodePosition extends Ptr {
   cellLocation(type: Type): Ptr {
     this.cell ??= new NodeCell(this, type).location(0);
     return this.cell;
+  }
+
+  dequeLocation(type: Type): Ptr {
+    this.dequeCell ??= new DequeElementPointer(this, sizeOf(type));
+    return this.dequeCell;
   }
 }
 
@@ -93,6 +99,77 @@ class DequeIterator extends Ptr {
       throw new CppRuntimeError('invalidIterator');
     return this.location.index;
   }
+}
+
+class DequeElementPointer extends Ptr {
+  constructor(
+    private readonly node: NodePosition,
+    private readonly elementSize: number,
+    private readonly displacement = 0
+  ) {
+    super(undefined, 0);
+  }
+
+  override get store(): Store {
+    return this.node.store;
+  }
+
+  override get index(): number {
+    return this.node.index + this.displacement;
+  }
+
+  override embeddedAddress(byteOffset: number): Ptr['address'] {
+    const address = this.node.store.projectAddress(this.node.index, this.displacement * this.elementSize + byteOffset);
+    if (!address) throw new Error('Deque element has no block storage');
+    return address;
+  }
+
+  override sharesRange(other: Ptr): boolean {
+    return other instanceof DequeElementPointer && this.address.store === other.address.store;
+  }
+
+  override offset(delta: number): Ptr {
+    const index = this.index + delta;
+    if (index < 0 || index > this.target().pointerLength) throw new CppRuntimeError('pointerOutOfRange');
+    if (delta === 0) return this;
+    const next = new DequeElementPointer(this.node, this.elementSize, this.displacement + delta);
+    const offset = next.address.index;
+    if (offset < 0 || offset > dequeBlockElements(this.elementSize) * this.elementSize)
+      throw new CppRuntimeError('pointerOutOfRange');
+    return next;
+  }
+
+  override read(): Value {
+    this.checkElement();
+    return super.read();
+  }
+
+  override readRaw(): Value {
+    this.checkElement();
+    return super.readRaw();
+  }
+
+  override write(value: Value): void {
+    this.checkElement();
+    super.write(value);
+  }
+
+  private checkElement(): void {
+    if (this.address.index === dequeBlockElements(this.elementSize) * this.elementSize)
+      throw new CppRuntimeError('outOfBounds');
+  }
+}
+
+interface DequeStorage {
+  all: number;
+  end: number;
+  start: number;
+  blocks: Map<number, Store>;
+  hasStorage: boolean;
+}
+
+function dequeBlockElements(elementSize: number): number {
+  return elementSize < 256 ? Math.floor(4096 / elementSize) : 16;
 }
 
 /** Associates a node's address with its current position in a container's traversal order. */
@@ -222,11 +299,12 @@ export class SequenceValue extends Store {
   ) {
     super();
     this.nodes = storageKind ? new NodePositions(this) : undefined;
-    this.dequeEpoch = storageKind === 'deque' ? { all: 0, end: 0 } : undefined;
+    if (storageKind === 'deque')
+      this.deque = { all: 0, end: 0, start: 0, blocks: new Map(), hasStorage: cells.length > 0 };
   }
 
   private readonly nodes?: NodePositions;
-  private dequeEpoch?: { all: number; end: number };
+  private deque?: DequeStorage;
   private constructingEnd?: { location: NodePosition; value: Value };
   private pendingListDestructions = 0;
 
@@ -236,19 +314,22 @@ export class SequenceValue extends Store {
 
   set items(values: Value[]) {
     this.cells = values;
+    if (this.deque && values.length > 0) this.deque.hasStorage = true;
     this.bindElements(0, values.length);
   }
 
   override location(index: number): Ptr {
     if (this.constructingEnd && index === this.length + 1) return new Ptr(this, index);
-    if (this.storageKind === 'list' && this.nodes && index !== this.length)
-      return this.nodes.at(index).cellLocation(this.elementType);
-    return this.fixedStorage?.location(index) ?? this.nodes?.at(index) ?? super.location(index);
+    if (this.fixedStorage) return this.fixedStorage.location(index);
+    const node = this.nodes?.at(index);
+    if (!node) return super.location(index);
+    if (this.storageKind === 'list' && index !== this.length) return node.cellLocation(this.elementType);
+    return this.deque ? node.dequeLocation(this.elementType) : node;
   }
 
   override iteratorLocation(index: number): Ptr {
     const location = this.nodes?.at(index) ?? this.location(index);
-    return this.dequeEpoch ? new DequeIterator(location, this.dequeEpoch, index === this.length) : location;
+    return this.deque ? new DequeIterator(location, this.deque, index === this.length) : location;
   }
 
   bindInlineStorage(location: Ptr): void {
@@ -260,11 +341,26 @@ export class SequenceValue extends Store {
   }
 
   override projectAddress(index: number, byteOffset: number): { store: Store; index: number } | undefined {
-    if (this.storageKind === 'vector') return { store: this, index: index * sizeOf(this.elementType) + byteOffset };
+    const width = sizeOf(this.elementType);
+    if (this.storageKind === 'vector') return { store: this, index: index * width + byteOffset };
+    const deque = this.deque;
+    if (!deque) return;
+    const blockWidth = dequeBlockElements(width);
+    const slot = deque.start + index;
+    const block = Math.floor(slot / blockWidth);
+    let storage = deque.blocks.get(block);
+    if (!storage) {
+      storage = new Box();
+      deque.blocks.set(block, storage);
+    }
+    return { store: storage, index: (slot - block * blockWidth) * width + byteOffset };
   }
 
   append(value: Value): void {
-    if (this.dequeEpoch) this.dequeEpoch.all++;
+    if (this.deque) {
+      this.deque.all++;
+      this.deque.hasStorage = true;
+    }
     if (this.storageKind === 'vector') this.nodes?.invalidateEnd();
     const index = this.items.push(value) - 1;
     this.bindElements(index, index + 1);
@@ -274,7 +370,12 @@ export class SequenceValue extends Store {
     const location = new NodePosition(this, this.length);
     this.constructingEnd = { location, value: UNINIT };
     try {
-      const value = initialize(this.storageKind === 'list' ? location.cellLocation(this.elementType) : location);
+      const receiver = this.deque
+        ? location.dequeLocation(this.elementType)
+        : this.storageKind === 'list'
+          ? location.cellLocation(this.elementType)
+          : location;
+      const value = initialize(receiver);
       this.nodes?.install(location);
       this.append(value);
     } catch (error) {
@@ -344,10 +445,17 @@ export class SequenceValue extends Store {
     }
   }
 
-  editPositions(from: number, remove: number, insert: number): void {
+  editPositions(from: number, remove: number, insert: number, shiftsFront = from === 0): void {
     const atEnd = from + remove === this.length;
     const changesMiddle = from > 0 && !atEnd;
-    const epoch = this.dequeEpoch;
+    const epoch = this.deque;
+    if (epoch) {
+      if (shiftsFront) {
+        if (insert && !epoch.hasStorage) epoch.start = Math.floor(dequeBlockElements(sizeOf(this.elementType)) / 2);
+        epoch.start += remove - insert;
+      }
+      if (insert) epoch.hasStorage = true;
+    }
     if (this.storageKind === 'vector' && (remove || insert)) {
       this.invalidateVectorSuffix(from);
       return;
@@ -407,9 +515,10 @@ export class SequenceValue extends Store {
   }
 
   takeItems(other: SequenceValue): void {
-    if (this.dequeEpoch && other.dequeEpoch) {
-      this.dequeEpoch.all++;
-      [this.dequeEpoch, other.dequeEpoch] = [other.dequeEpoch, this.dequeEpoch];
+    if (this.deque && other.deque) {
+      this.deque.all++;
+      this.deque = other.deque;
+      other.deque = { all: 0, end: 0, start: 0, blocks: new Map(), hasStorage: false };
     }
     if (this.nodes && other.nodes) this.nodes.take(other.nodes);
     this.items = other.items;
@@ -425,10 +534,10 @@ export class SequenceValue extends Store {
   }
 
   swapItems(other: SequenceValue): void {
-    if (this.dequeEpoch && other.dequeEpoch) {
-      this.dequeEpoch.end++;
-      other.dequeEpoch.end++;
-      [this.dequeEpoch, other.dequeEpoch] = [other.dequeEpoch, this.dequeEpoch];
+    if (this.deque && other.deque) {
+      this.deque.end++;
+      other.deque.end++;
+      [this.deque, other.deque] = [other.deque, this.deque];
     }
     if (this.nodes && other.nodes) this.nodes.swap(other.nodes);
     [this.cells, other.cells] = [other.cells, this.cells];
