@@ -234,8 +234,8 @@ function pointerConversion(
   }
   if (isConstType(fromTarget) && !isConstType(to.to)) return undefined;
   const addsQualification = !isConstType(fromTarget) && isConstType(to.to);
-  if (sameType(unqualified(fromTarget), unqualified(to.to), false)) {
-    return sequence(Rank.Exact, apply, { addsQualification });
+  if (permitsQualificationConversion(fromTarget, to.to)) {
+    return sequence(Rank.Exact, apply, { addsQualification: !sameType(fromTarget, to.to) });
   }
   if (to.to.kind === 'void') return sequence(Rank.Conversion, apply, { addsQualification });
   const distance = baseDistance(fromTarget, to.to);
@@ -246,6 +246,19 @@ function pointerConversion(
     });
   }
   return undefined;
+}
+
+export function permitsQualificationConversion(from: Type, to: Type, canAdd = true): boolean {
+  const fromConst = isConstType(from);
+  const toConst = isConstType(to);
+  if (fromConst !== toConst && (fromConst || !canAdd)) return false;
+  if (from.kind === 'pointer' && to.kind === 'pointer') {
+    return permitsQualificationConversion(from.to, to.to, canAdd && toConst);
+  }
+  if (from.kind === 'array' && to.kind === 'array') {
+    return from.length === to.length && permitsQualificationConversion(from.of, to.of, canAdd);
+  }
+  return sameType(from, to, false);
 }
 
 /** An expression of a derived class (or a pointer to one) unchanged, once its conversion to `base` is accessible. */

@@ -6,7 +6,11 @@ import {
   classType,
   DOUBLE,
   INT,
+  intMax,
   isInteger,
+  isSigned,
+  isWide,
+  sizeOf,
   type Type,
   typeName,
   UINT,
@@ -265,8 +269,11 @@ export function randomEngines(library: Library): Map<string, ClassInfo> {
       );
       addMethod(
         cls,
-        native('discard', [ULLONG], VOID, ([count], { self }) => {
-          for (let index = 0n; index < BigInt(count as bigint); index++) (self as EngineValue).next();
+        native('discard', [ULLONG], VOID, ([count], { frame, self }) => {
+          for (let remaining = count as bigint; remaining > 0n; remaining--) {
+            frame.runtime.spend();
+            (self as EngineValue).next();
+          }
         })
       );
       const max = (1n << BigInt(parameters.w)) - 1n;
@@ -329,29 +336,21 @@ export function randomClasses(library: Library): LibraryTemplate[] {
     library.instances.set(key, cls);
     cls.isComplete = true;
     cls.memberTypes.set('result_type', type);
-    const isWide = type.kind === 'int' && ['long', 'ulong', 'llong', 'ullong'].includes(type.name);
-    const resultBits = type.kind === 'int' && isWide ? 64 : 32;
-    const max: Value =
-      type.kind === 'int'
-        ? isWide
-          ? type.name.startsWith('u')
-            ? 2n ** 64n - 1n
-            : 2n ** 63n - 1n
-          : type.name.startsWith('u')
-            ? 0xff_ff_ff_ff
-            : 0x7f_ff_ff_ff
-        : 1;
+    const wide = type.kind === 'int' && isWide(type);
+    const intValue = (value: bigint): number | bigint => (wide ? value : Number(value));
+    const resultBits = sizeOf(type) * 8;
+    const max = type.kind === 'int' ? intValue(intMax(type.name)) : 1;
     const draw = (engine: EngineValue, a: Value, b: Value): Value => {
-      if (!isIntegral) {
-        const isFloat = type.kind === 'float' && type.name === 'float';
+      if (type.kind === 'float') {
+        const isFloat = type.name === 'float';
         const width = isFloat ? Math.fround((b as number) - (a as number)) : (b as number) - (a as number);
         // `(b - a) * u + a` in the result type, which clang fuses into one rounding.
         return fma(width, canonical(engine, isFloat ? 24 : 53, isFloat), a as number, isFloat);
       }
       const result = uniformInteger(engine, BigInt(a as number | bigint), BigInt(b as number | bigint), resultBits);
-      const signed = type.kind === 'int' && !type.name.startsWith('u');
-      const value = signed ? BigInt.asIntN(resultBits, result) : BigInt.asUintN(resultBits, result);
-      return isWide ? value : Number(value);
+      const value =
+        type.kind === 'int' && isSigned(type) ? BigInt.asIntN(resultBits, result) : BigInt.asUintN(resultBits, result);
+      return intValue(value);
     };
     cls.library = {
       kind,
@@ -388,7 +387,7 @@ export function randomClasses(library: Library): LibraryTemplate[] {
       },
     };
     cls.constructors = [
-      nativeConstructor(cls, [], () => new DistributionValue(isIntegral ? (isWide ? 0n : 0) : 0, max)),
+      nativeConstructor(cls, [], () => new DistributionValue(intValue(0n), max)),
       nativeConstructor(
         cls,
         [type, type],

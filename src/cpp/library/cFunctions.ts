@@ -1,6 +1,5 @@
 import { byteAt } from '../bytes';
-import { CppRuntimeError } from '../errors';
-import { CHAR, CHAR_POINTER, type FunctionInfo, INT, LONG, pointerTo, SIZE_T, type Type, UINT, VOID } from '../types';
+import { CHAR_POINTER, type FunctionInfo, INT, LONG, pointerTo, SIZE_T, type Type, UINT, VOID } from '../types';
 import type { Ptr } from '../values';
 import { NULL_PTR } from '../values';
 import { formatPrintf, type PrintfArgument } from './formatting';
@@ -166,9 +165,16 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
     )
   );
   add(
-    native('strncmp', [CONST_CHAR_PTR, CONST_CHAR_PTR, SIZE_T], INT, ([a, b, n]) =>
-      compareBytes(readCString(a as Ptr).slice(0, asNumber(n)), readCString(b as Ptr).slice(0, asNumber(n)))
-    )
+    native('strncmp', [CONST_CHAR_PTR, CONST_CHAR_PTR, SIZE_T], INT, ([a, b, n], { frame }) => {
+      const count = asNumber(n);
+      for (let index = 0; index < count; index++) {
+        frame.runtime.spend();
+        const left = asNumber((a as Ptr).offset(index).read()) & 0xff;
+        const right = asNumber((b as Ptr).offset(index).read()) & 0xff;
+        if (left !== right || left === 0) return left - right;
+      }
+      return 0;
+    })
   );
   add(
     native('strcpy', [CHAR_POINTER, CONST_CHAR_PTR], CHAR_POINTER, ([target, source]) => {
@@ -177,10 +183,15 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
     })
   );
   add(
-    native('strncpy', [CHAR_POINTER, CONST_CHAR_PTR, SIZE_T], CHAR_POINTER, ([target, source, n]) => {
+    native('strncpy', [CHAR_POINTER, CONST_CHAR_PTR, SIZE_T], CHAR_POINTER, ([target, source, n], { frame }) => {
       const count = asNumber(n);
-      const bytes = readCString(source as Ptr).slice(0, count);
-      writeBytes(target as Ptr, bytes.padEnd(count, '\0'));
+      let padding = false;
+      for (let index = 0; index < count; index++) {
+        frame.runtime.spend();
+        const byte: number = padding ? 0 : asNumber((source as Ptr).offset(index).read());
+        (target as Ptr).offset(index).write(byte);
+        padding = byte === 0;
+      }
       return target;
     })
   );
@@ -212,8 +223,6 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
       return match ? BigInt.asIntN(64, BigInt(match[1])) : 0n;
     })
   );
-  void CHAR;
-  void CppRuntimeError;
   return functions;
 }
 

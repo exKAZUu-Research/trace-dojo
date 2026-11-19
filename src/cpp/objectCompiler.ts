@@ -28,7 +28,7 @@ import {
   typeName,
   unqualified,
 } from './types';
-import { type ArrayStore, Box, CObject, Liveness, NULL_PTR, Ptr, Store, UNINIT, type Value } from './values';
+import { type ArrayStore, Box, CObject, endLifetime, NULL_PTR, Ptr, Store, UNINIT, type Value } from './values';
 
 /**
  * Calls a function with its arguments as its parameters declare them: a `Ptr` for a reference, else a value. A member
@@ -54,7 +54,10 @@ export function invoke(
   const callee = runtime.pushFrame(fn, row, compiled, self);
   try {
     for (const [index, param] of fn.params.entries()) {
-      callee.slots[index] = param.type.kind === 'reference' ? (args[index] as Ptr) : new Box(args[index] as Value);
+      callee.slots[index] =
+        param.type.kind === 'reference'
+          ? (args[index] as Ptr)
+          : new Box(args[index] as Value, param.type.kind !== 'class');
     }
     compiled.body(callee);
     if (!isCallerDestroying) destroyParameters(callee, fn, args);
@@ -75,7 +78,12 @@ function destroyParameters(frame: Frame, fn: FunctionInfo, args: unknown[]): voi
 }
 
 function parameterDestroyer(type: Type): ((frame: Frame, value: Value) => void) | undefined {
-  return type.kind === 'class' ? type.cls.operations?.destroy : undefined;
+  if (type.kind !== 'class') return undefined;
+  const destroy = type.cls.operations?.destroy;
+  return (frame, value) => {
+    destroy?.(frame, value);
+    endLifetime(value);
+  };
 }
 
 /** The key that identifies a virtual function across a hierarchy: its name and its parameters. */
@@ -114,7 +122,11 @@ export function makeEach(
     return values;
   } catch (error) {
     if (error instanceof CppException) {
-      for (let index = values.length - 1; index >= 0; index--) destroyerAt(index)?.(frame, values[index]);
+      for (let index = values.length - 1; index >= 0; index--) {
+        const value = values[index];
+        destroyerAt(index)?.(frame, value);
+        endLifetime(value);
+      }
     }
     throw error;
   } finally {
@@ -180,7 +192,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
           object: box,
           destroy: (f) => {
             if (destroy && box.value !== UNINIT) destroy(f, box.value);
-            box.liveness = Liveness.Dead;
+            endLifetime(box);
           },
         });
         return new Ptr(box, 0);
@@ -423,10 +435,11 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   callExpr(resolved: Resolved, args: Expr[], object: Expr | undefined, row: number, isQualified = false): Expr {
     const { fn } = resolved;
     const argRuns = this.callArguments(resolved, args, row);
-    const self = object && !fn.isStatic ? this.objectOf(object) : undefined;
+    const evaluateObject = object && (fn.isStatic ? this.materialize(object).run : this.objectOf(object));
     const virtualKeyText = fn.isVirtual && !isQualified ? virtualKey(fn) : undefined;
     const run: Eval<Value | Ptr> = (frame) => {
-      const location = self?.(frame);
+      const receiver = evaluateObject?.(frame);
+      const location = fn.isStatic ? undefined : (receiver as Ptr | undefined);
       return holdAll(frame, argRuns, (values) => {
         let callee = fn;
         if (virtualKeyText !== undefined && location) {

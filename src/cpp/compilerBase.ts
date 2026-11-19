@@ -2,7 +2,7 @@ import { compileError, unsupported } from './errors';
 import type { Expr } from './expr';
 import type { Library } from './library/registry';
 import { type Entity, FunctionContext, Scope } from './scopes';
-import { fieldOf, hasToken, type Syntax, unfieldedChildren } from './syntax';
+import { fieldOf, hasToken, type Syntax } from './syntax';
 import {
   type ClassInfo,
   classType,
@@ -203,9 +203,11 @@ export abstract class CompilerBase {
     const typeNode = fieldOf(declaration, 'type');
     if (!typeNode) return this.error(declaration.row, '型を書いてください。');
     const type = this.resolveTypeSpecifier(typeNode);
-    const isConst = unfieldedChildren(declaration).some(
-      (child) => child.type === 'type_qualifier' && (child.text === 'const' || child.text === 'constexpr')
-    );
+    const isConst =
+      this.hasSpecifier(declaration, 'const') ||
+      this.hasSpecifier(declaration, 'constexpr') ||
+      (typeNode.type === 'sized_type_specifier' &&
+        (this.hasSpecifier(typeNode, 'const') || this.hasSpecifier(typeNode, 'constexpr')));
     return isConst ? withConst(type) : type;
   }
 

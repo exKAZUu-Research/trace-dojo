@@ -1,6 +1,6 @@
 import { CompileError } from '../interpreter/diagnostics';
 import type { Type } from './types';
-import { Box, Ptr, type Value } from './values';
+import { Box, endLifetime, Ptr, type Value } from './values';
 
 const MESSAGES = {
   nullAccess: 'nullptr（NULL）のポインタの指す先を読み書きしました。',
@@ -97,5 +97,9 @@ export class CppException extends Error {
   location(): Ptr {
     this.box ??= new Box(this.value);
     return new Ptr(this.box, 0);
+  }
+
+  endLifetime(): void {
+    endLifetime(this.box ?? this.value);
   }
 }

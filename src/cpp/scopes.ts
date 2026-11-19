@@ -24,8 +24,8 @@ export type Entity =
 
 export class Scope {
   readonly names = new Map<string, Entity>();
-  /** The variables declared in this block whose destruction has an effect, in declaration order. */
-  readonly destructibles: { slot: number; destroy: (frame: Frame, value: Value) => void }[] = [];
+  /** The variables declared in this block whose destruction has an effect, by slot. */
+  readonly destructibles = new Map<number, (frame: Frame, value: Value) => void>();
   /** The slots of the variables declared in this block, which go out of scope with it. */
   readonly slots: number[] = [];
   /** The slots of the block's static variables, whose storage outlives the block. */
@@ -37,6 +37,8 @@ export class Scope {
    * must copy, and undefined before any.
    */
   namedReturn: LocalInfo | false | undefined;
+
+  constructor(readonly conflictingDeclarations?: ReadonlyMap<string, Entity>) {}
 }
 
 /** What the compiler knows about the function whose body it compiles. */

@@ -8,7 +8,7 @@ import { byteAt } from './bytes';
 import { type CppException, CppRuntimeError, ProgramAbort } from './errors';
 import { StreamValue } from './library/iostream';
 import type { FunctionInfo, Type } from './types';
-import { ArrayStore, Box, CObject, Liveness, Ptr, Store, type Value } from './values';
+import { Box, childValues, CObject, endLifetime, Liveness, Ptr, Store, type Value } from './values';
 
 /** How a statement ended: normally (undefined), or by `break`, `continue`, or `return`. */
 export const BREAK = 1;
@@ -121,6 +121,7 @@ export class Runtime implements TracedRuntime<Frame> {
           destroy: (frame: Frame, value: Value) => void;
         };
         destroy(frame, box.value);
+        endLifetime(box);
       }
     } finally {
       this.popFrame();
@@ -248,11 +249,4 @@ export class Runtime implements TracedRuntime<Frame> {
     this.spend(Math.ceil(scanned / 64));
     this.world.retain((turtle) => turtles.has(turtle));
   }
-}
-
-/** The values a store holds, which may reach other stores. */
-export function childValues(store: Store): Iterable<Value> {
-  if (store instanceof Box) return [store.value];
-  if (store instanceof ArrayStore || store instanceof CObject) return store.values;
-  return (store as Store & { children?: () => Iterable<Value> }).children?.() ?? [];
 }

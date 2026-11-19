@@ -88,6 +88,10 @@ export class StringValue extends Store {
     return this.cStringCache.store;
   }
 
+  children(): Iterable<Value> {
+    return this.cStringCache ? [this.cStringCache.store] : [];
+  }
+
   get length(): number {
     return this.bytes.length;
   }
@@ -375,7 +379,7 @@ export function stringClass(library: Library): ClassInfo {
       [CONST_CHAR_PTR, SIZE_T, SIZE_T],
       SIZE_T,
       (s, [needle, start, count]) => {
-        const bytes = readCString(needle as Ptr).slice(0, asNumber(count));
+        const bytes = pointerBytes(needle as Ptr, count);
         return found(find(s.bytes, bytes, position(start, defaultStart)));
       },
       { isConst: true }

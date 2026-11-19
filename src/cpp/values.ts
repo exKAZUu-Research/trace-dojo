@@ -42,7 +42,10 @@ export abstract class Store {
 
 /** A variable of a type that is not an array, or an object that `new` created. */
 export class Box extends Store {
-  constructor(public value: Value = UNINIT) {
+  constructor(
+    public value: Value = UNINIT,
+    readonly ownsValue = true
+  ) {
     super();
   }
 
@@ -129,6 +132,21 @@ export class CObject extends Store {
   }
 }
 
+/** Ends the lifetime of a store and its owned subobjects. Pointer values do not own their target. */
+export function endLifetime(value: Value, liveness = Liveness.Dead): void {
+  if (!(value instanceof Store) || value.liveness !== Liveness.Alive) return;
+  value.liveness = liveness;
+  if (value instanceof Box && !value.ownsValue) return;
+  for (const child of childValues(value)) endLifetime(child, liveness);
+}
+
+/** The values a store holds, including pointers that may reach stores it does not own. */
+export function childValues(store: Store): Iterable<Value> {
+  if (store instanceof Box) return [store.value];
+  if (store instanceof ArrayStore || store instanceof CObject) return store.values;
+  return (store as Store & { children?: () => Iterable<Value> }).children?.() ?? [];
+}
+
 /** A pointer, an iterator into a sequence, or the location an lvalue or a reference designates. */
 export class Ptr {
   constructor(
@@ -149,7 +167,9 @@ export class Ptr {
   }
 
   read(): Value {
-    return this.target().get(this.index);
+    const value = this.target().get(this.index);
+    if (value instanceof Store) value.checkAlive();
+    return value;
   }
 
   write(value: Value): void {

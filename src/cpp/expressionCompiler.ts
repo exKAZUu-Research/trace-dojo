@@ -40,7 +40,18 @@ import {
   unqualified,
   withConst,
 } from './types';
-import { ArrayStore, Box, CObject, FunctionRef, Liveness, NULL_PTR, Ptr, type Store, type Value } from './values';
+import {
+  ArrayStore,
+  Box,
+  CObject,
+  endLifetime,
+  FunctionRef,
+  Liveness,
+  NULL_PTR,
+  Ptr,
+  type Store,
+  type Value,
+} from './values';
 
 const RELATIONAL_OPERATORS = ['<', '<=', '>', '>='];
 const COMPARISONS = new Set(['==', '!=', ...RELATIONAL_OPERATORS]);
@@ -418,18 +429,33 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         };
       }
       const constant = owner.constants.get(name);
-      if (constant) return constant(row);
+      if (constant) {
+        const value = constant(row);
+        const evaluateObject = this.materialize(object).run;
+        return {
+          ...value,
+          constant: undefined,
+          run: (frame) => {
+            evaluateObject(frame);
+            return value.run(frame);
+          },
+        };
+      }
       const staticField = owner.staticFields.get(name);
       if (staticField) {
         this.checkAccess(staticField.access, owner, cls, row, name);
         if (!staticField.global)
           return this.error(row, `static のメンバ変数 ${owner.name}::${name} が定義されていません。`);
         const index = staticField.global.index;
+        const evaluateObject = this.materialize(object).run;
         return {
           type: staticField.type,
           isLvalue: true,
           row,
-          run: (frame) => new Ptr(frame.runtime.globals[index], 0),
+          run: (frame) => {
+            evaluateObject(frame);
+            return new Ptr(frame.runtime.globals[index], 0);
+          },
         };
       }
     }
@@ -1420,10 +1446,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   private newExpression(node: Syntax): Expr {
     if (fieldOf(node, 'placement')) return this.unsupported(node.row, '配置 new（new (場所) 型）');
-    let baseType = this.resolveTypeSpecifier(fieldOf(node, 'type') as Syntax);
+    let baseType = this.specifiedType(node);
     let declarator = fieldOf(node, 'declarator');
     for (; declarator?.type === 'abstract_pointer_declarator'; declarator = fieldOf(declarator, 'declarator'))
-      baseType = pointerTo(baseType);
+      baseType = pointerTo(baseType, this.hasSpecifier(declarator, 'const'));
     const argsNode = fieldOf(node, 'arguments');
     if (declarator) {
       const lengths: Syntax[] = [];
@@ -1442,7 +1468,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (baseType.kind === 'void') return this.error(node.row, 'void のオブジェクトは new で作れません。');
     const type = unqualified(baseType);
     let value: Eval<Value>;
-    if (!argsNode) value = this.defaultInitializer(type, node.row);
+    if (!argsNode) value = this.defaultInitializer(baseType, node.row);
     else if (argsNode.type === 'initializer_list') value = this.listInitializer(type, argsNode, node.row);
     else {
       const args = argsNode.children.map((arg) => this.argument(arg));
@@ -1540,7 +1566,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
           hasVirtualDestructor && object instanceof CObject ? object.cls.operations?.destroy : destroyStatic;
         destroy?.(frame, object);
       }
-      store.liveness = Liveness.Deleted;
+      endLifetime(store, Liveness.Deleted);
       return undefined;
     };
     return { type: { kind: 'void' }, isLvalue: false, row: node.row, run: exec, onlyCalls: true };

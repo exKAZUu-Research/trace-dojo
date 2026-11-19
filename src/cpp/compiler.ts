@@ -30,7 +30,7 @@ import {
   unqualified,
   VOID,
 } from './types';
-import { ArrayStore, Box, CObject, Liveness, Ptr, UNINIT, type Value } from './values';
+import { ArrayStore, Box, CObject, endLifetime, Liveness, Ptr, UNINIT, type Value } from './values';
 
 export interface CompileOptions {
   trace?: TraceOptions;
@@ -697,7 +697,9 @@ export class Compiler extends StatementCompiler {
       const object = frame.self?.read() as CObject;
       for (let index = destroyers.length - 1; index >= 0; index--) {
         const { field, destroy } = destroyers[index];
-        if (destroy && object.values[field.index] !== UNINIT) destroy(frame, object.values[field.index]);
+        const member = object.values[field.index];
+        if (member !== UNINIT) destroy?.(frame, member);
+        endLifetime(member);
       }
       const baseDestroy = base?.operations?.destroy;
       if (baseDestroy && base && isBaseComplete) {
@@ -876,11 +878,10 @@ export class Compiler extends StatementCompiler {
   private destructionOf(cls: ClassInfo): ((frame: Frame, value: Value) => void) | undefined {
     const members = cls.ownFields
       .map((field) => ({ index: field.index, destroy: this.destroyerOf(field.type) }))
-      .filter((member) => member.destroy !== undefined)
       .toReversed();
     const baseDestroy = cls.base?.operations?.destroy;
     const destructor = cls.destructor?.compiled || cls.destructor?.definition ? cls.destructor : undefined;
-    if (!destructor && members.length === 0 && !baseDestroy) return undefined;
+    if (!destructor && !members.some((member) => member.destroy) && !baseDestroy) return undefined;
     return (frame, value) => {
       const object = value as CObject;
       if (object.liveness !== Liveness.Alive) return;
@@ -890,6 +891,7 @@ export class Compiler extends StatementCompiler {
       for (const { index, destroy } of members) {
         const member = object.values[index];
         if (member !== UNINIT) destroy?.(frame, member);
+        endLifetime(member);
       }
       if (baseDestroy) baseDestroy(frame, object);
     };
@@ -1558,7 +1560,7 @@ export class Compiler extends StatementCompiler {
     // The object holding the member lives until its block ends, as does a variable the aggregate initializes.
     if (!destroy || !this.context.fn) return (frame) => new Ptr(new Box(value(frame) as Value), 0);
     const holder = this.context.declareLocal(`\0member${row}`, heldType, false);
-    this.context.scope.destructibles.push({ slot: holder.slot, destroy });
+    this.context.scope.destructibles.set(holder.slot, destroy);
     return (frame) => {
       const box = new Box(value(frame) as Value);
       frame.slots[holder.slot] = box;

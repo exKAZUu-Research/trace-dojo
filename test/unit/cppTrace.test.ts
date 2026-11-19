@@ -132,3 +132,22 @@ test('the interpreter rejects the syntax it leaves out with a message naming it'
     diagnostics: [{ row: 1, message: 'ラムダ式は、この採点環境では使えません。' }],
   });
 });
+
+test.each([
+  ['a block-local array', 'int* p; { int a[2] = {7, 8}; p = a; } return *p;', '有効期間'],
+  ['a freed array member', 'auto object = new A; int* p = object->cells; delete object; return *p;', 'delete'],
+  ['a temporary object', 'int* p = A{}.data(); return *p;', '有効期間'],
+  ['a by-value parameter', 'save(A{}); return *saved;', '有効期間'],
+  ['a string buffer', 'const char* p; { std::string s = "c"; p = s.c_str(); } return *p;', '有効期間'],
+])('rejects a pointer into %s after its lifetime ends', (_, body, message) => {
+  const program = `#include <string>
+struct A {
+  int cells[1] = {5};
+  int* data() { return cells; }
+};
+int* saved;
+void save(A a) { saved = a.cells; }
+int main() { ${body} }`;
+  const execution = executeProgram('cpp', program);
+  expect(execution).toMatchObject({ kind: 'executed', uncaughtException: expect.stringContaining(message) });
+});

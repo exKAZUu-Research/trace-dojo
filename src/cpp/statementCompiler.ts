@@ -1,4 +1,6 @@
+import { isBaseAccessible } from './access';
 import { AUTO, isAuto } from './compilerBase';
+import { permitsQualificationConversion } from './conversions';
 import { CppException, ProgramAbort } from './errors';
 import type { Expr } from './expr';
 import { ExpressionCompiler } from './expressionCompiler';
@@ -21,7 +23,7 @@ import {
   unqualified,
   withConst,
 } from './types';
-import { Box, type CObject, Liveness, Ptr, type Store, UNINIT, type Value } from './values';
+import { Box, type CObject, endLifetime, Liveness, Ptr, type Store, UNINIT, type Value } from './values';
 
 /** The type an `auto` declarator deduced, which the declaration's other declarators must agree with. */
 export interface AutoDeduction {
@@ -269,7 +271,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (this.isClassLike(type) && !value) createsObject = true;
     const { local } = entity;
     const destroy = this.destroyerOf(type, declarator.row);
-    if (destroy) this.context.scope.destructibles.push({ slot: local.slot, destroy });
+    if (destroy) this.context.scope.destructibles.set(local.slot, destroy);
     const { slot } = local;
     // A variable must be declared before its initializer runs, which may name it (C++20 [basic.scope.pdecl]).
     const exec: Exec = (frame) => {
@@ -495,7 +497,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   ): { exec: Exec; hasInitializer: boolean; createsObject: boolean } {
     const destroy = this.destroyerOf(heldType);
     const holder = this.context.declareLocal(`\0${name}`, heldType, false);
-    if (destroy) this.context.scope.destructibles.push({ slot: holder.slot, destroy });
+    if (destroy) this.context.scope.destructibles.set(holder.slot, destroy);
     return {
       exec: this.fullExpression<undefined>((frame) => {
         const box = new Box(make(frame) as Value);
@@ -510,7 +512,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   private staticLocal(node: Syntax): Exec {
     const base = this.specifiedType(node);
-    for (const written of fieldsOf(node, 'declarator')) {
+    const initializers = fieldsOf(node, 'declarator').map((written) => {
       const declarator = this.variableOrFunctionDeclarator(base, written);
       const declared = this.applyDeclarator(base, declarator);
       const name = declared.name as string;
@@ -525,17 +527,18 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       const { slot } = local;
       const { index } = global;
       const initialize = this.staticInitializer(global, type, value, declarator, name);
-      const exec: Exec = (frame) => {
-        frame.slots[slot] = frame.runtime.globals[index];
-        initialize(frame);
-        return;
-      };
       this.context.scope.slots.splice(this.context.scope.slots.indexOf(slot), 1);
       this.context.scope.returnSlots.delete(local);
       this.context.scope.statics.push(slot);
-      return exec;
-    }
-    return () => {};
+      return (frame: Frame) => {
+        frame.slots[slot] = frame.runtime.globals[index];
+        initialize(frame);
+      };
+    });
+    return (frame) => {
+      for (const initialize of initializers) initialize(frame);
+      return;
+    };
   }
 
   /** Declares a variable with static storage duration, which the program's start creates. */
@@ -558,8 +561,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   ): (frame: Frame) => void;
 
   checkRedeclaration(name: string, row: number): void {
-    const existing = this.context.scope.names.get(name);
-    if (existing) this.error(row, `${name} は、同じブロックの中ですでに宣言されています。`);
+    const { names, conflictingDeclarations } = this.context.scope;
+    if (names.has(name) || conflictingDeclarations?.has(name))
+      this.error(row, `${name} は、同じブロックの中ですでに宣言されています。`);
   }
 
   // Statements --------------------------------------------------------------------------------------------------------
@@ -574,7 +578,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const run = expr.run;
     const exec = this.fullExpression<Completion>((frame) => {
       const value = run(frame);
-      if (destroy && !(value instanceof Ptr)) destroy(frame, value as Value);
+      if (expr.isTemporaryObject && !(value instanceof Ptr)) {
+        destroy?.(frame, value as Value);
+        endLifetime(value as Value);
+      }
       return;
     });
     return this.withStep(node.row, exec, onlyCalls(expressionNode));
@@ -600,10 +607,14 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return (frame) => (condition(frame) ? consequence(frame) : alternative?.(frame));
   }
 
-  private loopBody(node: Syntax): Exec {
+  private loopBody(node: Syntax, header?: Scope): Exec {
     this.context.loopDepth++;
     try {
-      return this.inScope(() => this.compileStatement(node));
+      return this.inScope(
+        () =>
+          node.type === 'compound_statement' ? this.compileStatements(node.children) : this.compileStatement(node),
+        new Scope(header?.names)
+      );
     } finally {
       this.context.loopDepth--;
     }
@@ -661,7 +672,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         for (const run of updates) run(frame);
         return;
       });
-      const body = this.loopBody(fieldOf(node, 'body') as Syntax);
+      const body = this.loopBody(fieldOf(node, 'body') as Syntax, scope);
       const stepInit = this.recordsSteps && initRecords;
       const stepUpdate = this.recordsSteps && updates.length > 0;
       const { row } = node;
@@ -730,7 +741,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         };
     if (!range.isLvalue) {
       const destroy = this.destroyerOf(rangeType);
-      if (destroy) this.context.scope.destructibles.push({ slot: rangeSlot, destroy });
+      if (destroy) this.context.scope.destructibles.set(rangeSlot, destroy);
     }
     const rangeRef: Expr = {
       type: rangeType,
@@ -786,12 +797,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     let body: Exec;
     try {
       ({ bind, type: variableType } = this.rangeVariable(node, element));
-      this.context.loopDepth++;
-      try {
-        body = this.inScope(() => this.compileStatement(fieldOf(node, 'body') as Syntax));
-      } finally {
-        this.context.loopDepth--;
-      }
+      body = this.loopBody(fieldOf(node, 'body') as Syntax, bodyScope);
     } finally {
       this.context.popScope();
     }
@@ -853,7 +859,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const local = this.context.declareLocal(name, type, false);
     this.context.scope.names.set(name, { kind: 'local', local, isReference: false });
     const destroy = this.destroyerOf(type);
-    if (destroy) this.context.scope.destructibles.push({ slot: local.slot, destroy });
+    if (destroy) this.context.scope.destructibles.set(local.slot, destroy);
     return {
       bind: this.fullExpression<undefined>((frame) => {
         frame.slots[local.slot] = new Box(value(frame));
@@ -884,63 +890,74 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     ).type;
     const value = this.fullExpression(this.convert(subject, promoted, node.row).run);
     const body = fieldOf(node, 'body') as Syntax;
-    const scope = new Scope();
-    this.context.scopes.push(scope);
-    this.context.switchDepth++;
+    return this.inScope(() => {
+      this.context.switchDepth++;
+      try {
+        return this.compileSwitchBody(body, promoted, value);
+      } finally {
+        this.context.switchDepth--;
+      }
+    });
+  }
+
+  private compileSwitchBody(body: Syntax, promoted: Type, value: Eval<unknown>): Exec {
     const labels = new Map<string, number>();
     let defaultIndex: number | undefined;
-    const groups: Exec[] = [];
+    const statements: Exec[] = [];
+    const uninitializedDeclarations: { index: number; execute: Exec }[] = [];
     let initializedBefore: Syntax | undefined;
-    try {
-      for (const child of body.children) {
-        if (child.type !== 'case_statement') {
-          if (child.type !== 'comment') groups.push(this.compileStatement(child));
+    const compile = (nodes: readonly Syntax[]): void => {
+      for (const node of nodes) {
+        if (node.type === 'comment') continue;
+        if (node.type !== 'case_statement') {
+          const execute = this.compileStatement(node);
+          if (node.type === 'declaration' && !this.hasSpecifier(node, 'static')) {
+            if (this.initializes(node)) initializedBefore = node;
+            else uninitializedDeclarations.push({ index: statements.length, execute });
+          }
+          statements.push(execute);
           continue;
         }
         if (initializedBefore) {
           this.error(
-            child.row,
+            node.row,
             `case の前の変数（${initializedBefore.text.split('\n')[0]}）の初期化を飛び越えて case に移れません。変数の宣言を {} で囲んでください。`
           );
         }
-        const caseValue = fieldOf(child, 'value');
+        const caseValue = fieldOf(node, 'value');
         if (caseValue) {
-          const label = this.convert(this.compileExpression(caseValue), promoted, child.row);
-          if (label.constant === undefined) this.error(child.row, 'case の値には定数を書いてください。');
+          const label = this.convert(this.compileExpression(caseValue), promoted, node.row);
+          if (label.constant === undefined) this.error(node.row, 'case の値には定数を書いてください。');
           const key = String(label.constant);
-          if (labels.has(key)) this.error(child.row, `case ${caseValue.text} が重複しています。`);
-          labels.set(key, groups.length);
+          if (labels.has(key)) this.error(node.row, `case ${caseValue.text} が重複しています。`);
+          labels.set(key, statements.length);
         } else {
-          if (defaultIndex !== undefined) this.error(child.row, 'default が重複しています。');
-          defaultIndex = groups.length;
+          if (defaultIndex !== undefined) this.error(node.row, 'default が重複しています。');
+          defaultIndex = statements.length;
         }
-        const statements = child.children.filter((statement) => statement.field !== 'value');
-        groups.push(this.compileStatements(statements));
-        for (const statement of statements) {
-          if (statement.type === 'declaration' && this.initializes(statement)) initializedBefore = statement;
-        }
+        compile(node.children.filter((child) => child.field !== 'value'));
       }
-    } finally {
-      this.context.switchDepth--;
-      this.context.popScope();
-    }
-    const exec: Exec = (frame) => {
-      const key = String(value(frame));
+    };
+    compile(body.type === 'compound_statement' ? body.children : [body]);
+    return (frame) => {
+      const key = String(value(frame) as number | bigint);
       const start = labels.get(key) ?? defaultIndex;
       if (start === undefined) return;
-      for (let index = start; index < groups.length; index++) {
-        const completion = groups[index](frame);
+      for (const { index, execute } of uninitializedDeclarations) {
+        if (index >= start) break;
+        execute(frame);
+      }
+      for (let index = start; index < statements.length; index++) {
+        const completion = statements[index](frame);
         if (completion === BREAK) return;
         if (completion !== undefined) return completion;
       }
       return;
     };
-    return this.withScopeExit(exec, scope);
   }
 
   /** Whether a declaration initializes a variable, which a jump to a later `case` must not skip. */
   private initializes(declaration: Syntax): boolean {
-    if (this.hasSpecifier(declaration, 'static')) return false;
     const type = fieldOf(declaration, 'type');
     const isClass = type !== undefined && !['primitive_type', 'sized_type_specifier'].includes(type.type);
     return fieldsOf(declaration, 'declarator').some((declarator) => declarator.type === 'init_declarator' || isClass);
@@ -1077,7 +1094,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
             frame.slots[local.slot] = new Box(value as Value);
           };
           const destroy = this.destroyerOf(handlerType);
-          if (destroy) scope.destructibles.push({ slot: local.slot, destroy });
+          if (destroy) scope.destructibles.set(local.slot, destroy);
         }
       }
       body = this.compileStatements(bodyNode.children);
@@ -1088,7 +1105,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       bind(frame, frame.runtime.handling.at(-1) as CppException);
       return body(frame);
     }, scope);
-    return { matches: (error) => exceptionMatches(caught, error.type), run: (frame) => run(frame) };
+    return { matches: (error) => exceptionMatches(handlerType, error.type), run: (frame) => run(frame) };
   }
 
   private throwStatement(node: Syntax): Exec {
@@ -1119,16 +1136,18 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
 /** Whether a handler of type `handler` catches an exception of type `thrown` (C++20 [except.handle]). */
 function exceptionMatches(handler: Type, thrown: Type): boolean {
-  if (handler.kind === 'class' && thrown.kind === 'class') return thrown.cls.isDerivedFrom(handler.cls);
-  if (handler.kind === 'pointer' && thrown.kind === 'pointer') {
-    const from = thrown.to;
-    const to = handler.to;
-    if (to.kind === 'void') return true;
-    if (from.kind === 'class' && to.kind === 'class') return from.cls.isDerivedFrom(to.cls);
-    return sameType(unqualified(from), unqualified(to), false);
-  }
-  if (handler.kind === 'pointer' && thrown.kind === 'nullptr') return true;
-  return sameType(unqualified(handler), unqualified(thrown), false);
+  const caught = nonReference(handler);
+  if (sameType(caught, thrown, false)) return true;
+  if (caught.kind === 'class' && thrown.kind === 'class') return isBaseAccessible(thrown.cls, caught.cls, undefined);
+  if (caught.kind !== 'pointer' || (handler.kind === 'reference' && !isConstType(handler.to))) return false;
+  if (thrown.kind === 'nullptr') return true;
+  if (thrown.kind !== 'pointer') return false;
+  const from = thrown.to;
+  const to = caught.to;
+  if (isConstType(from) && !isConstType(to)) return false;
+  if (to.kind === 'void') return from.kind !== 'function';
+  if (from.kind === 'class' && to.kind === 'class') return isBaseAccessible(from.cls, to.cls, undefined);
+  return permitsQualificationConversion(from, to);
 }
 
 /** Runs a handler for an exception, which ends the exception unless the handler rethrows it. */
@@ -1164,24 +1183,22 @@ function endException(frame: Frame, exception: CppException): void {
   if (exception.handlerCount > 0 || exception.isDestroyed) return;
   exception.isDestroyed = true;
   if (exception.type.kind === 'class') exception.type.cls.operations?.destroy?.(frame, exception.value);
+  exception.endLifetime();
 }
 
 /** Ends a scope: destroys its objects, the last first, and makes its variables' storage unusable. */
 export function endScope(
   frame: Frame,
   slots: readonly number[],
-  destructibles: readonly { slot: number; destroy: (frame: Frame, value: Value) => void }[]
+  destructibles: ReadonlyMap<number, (frame: Frame, value: Value) => void>
 ): void {
-  for (let index = destructibles.length - 1; index >= 0; index--) {
-    const { slot, destroy } = destructibles[index];
+  for (let index = slots.length - 1; index >= 0; index--) {
+    const slot = slots[index];
     const store = frame.slots[slot];
-    if (!(store instanceof Box) || store.liveness !== Liveness.Alive || store.value === UNINIT) continue;
-    if (frame.nrvoSlot === slot) continue;
-    destroy(frame, store.value);
-  }
-  for (const slot of slots) {
-    const store = frame.slots[slot];
-    if (store instanceof Box && frame.nrvoSlot !== slot) store.liveness = Liveness.Dead;
+    if (store instanceof Box && store.liveness === Liveness.Alive && frame.nrvoSlot !== slot) {
+      if (store.value !== UNINIT) destructibles.get(slot)?.(frame, store.value);
+      endLifetime(store);
+    }
     frame.slots[slot] = undefined;
   }
 }
