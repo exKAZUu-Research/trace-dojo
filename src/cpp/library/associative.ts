@@ -37,7 +37,13 @@ import {
   requireElementUse,
   swapElements,
 } from './elements';
-import { addRangeMembers, emplacementCall, type EntryTable, insertCopy } from './emplacement';
+import {
+  addRangeMembers,
+  associativeInitializerList,
+  emplacementCall,
+  type EntryTable,
+  insertCopy,
+} from './emplacement';
 import { positionOf, randomAccessIterator, rangePositions } from './iterators';
 import type { Library } from './registry';
 import { StringValue } from './string';
@@ -535,6 +541,7 @@ export function orderedClass(
     if (destroy) for (const entry of entries) destroy(frame, entry);
   };
   const table: EntryTable<OrderedValue> = {
+    make: () => make([]),
     keyOf,
     lookup: (self, key) => {
       const at = isMulti ? -1 : find(self, key);
@@ -556,21 +563,7 @@ export function orderedClass(
     listElementType: unqualified(entryType),
     listInitializer: (compiler_, elements, row) => {
       checkOrder(compiler_, row);
-      const inits = elements.map((node) => compiler_.elementInitializer(unqualified(entryType), node));
-      return (frame) => {
-        const self = make([]);
-        frame.pending.push(self);
-        try {
-          for (const init of inits) {
-            const entry = init(frame);
-            const [, inserted] = insert(frame, self, entry);
-            if (!inserted) ops().destroy?.(frame, entry);
-          }
-        } finally {
-          frame.pending.pop();
-        }
-        return self;
-      };
+      return associativeInitializerList(compiler_, cls, entryType, elements, row, table);
     },
     operator: (compiler_, operator, operands, row) => {
       const [left, right] = operands;
@@ -665,7 +658,7 @@ export function orderedClass(
     destroy: (frame, value) => destroyAll(frame, (value as OrderedValue).entries),
   };
   cls.constructors = [nativeConstructor(cls, [], () => make([]))];
-  addRangeMembers(compiler, cls, entryType, table, () => make([]));
+  addRangeMembers(compiler, cls, entryType, table);
   const method = (
     memberName: string,
     params: Type[],

@@ -1,12 +1,14 @@
 import { CompileError } from '../../interpreter/diagnostics';
-import type { Expr } from '../expr';
+import { CppException } from '../errors';
+import type { Expr, Initializer } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { type Eval, type Frame, holdAll } from '../runtime';
+import type { Syntax } from '../syntax';
 import { type ClassInfo, isConstType, type Type, typeName, unqualified, VOID, withConst } from '../types';
-import { CObject, type Ptr, type Value } from '../values';
-import type { ElementOperations } from './elements';
+import { CObject, endLifetime, type Ptr, type Store, type Value } from '../values';
+import { type ElementOperations, requireElementUse } from './elements';
 import type { Source } from './sequenceEdits';
-import { constructElement, initializerList, iteratorRange } from './sequences';
+import { constructElement, initializerList, iteratorRange, listElementsOf } from './sequences';
 import { addMethod, constRef, native, nativeConstructor } from './support';
 
 /** The types of an associative container's entries: the key, the entry, and the mapped value of a map. */
@@ -18,6 +20,7 @@ export interface EntryTypes {
 
 /** What the insertions of an associative container need: looking a key up and inserting an entry it made. */
 export interface EntryTable<T, Position = number> {
+  make: () => T;
   keyOf: (entry: Value) => Value;
   /** The position of an entry with the key, or undefined when there is none or the container takes equal keys. */
   lookup: (self: T, key: Value) => Position | undefined;
@@ -86,12 +89,11 @@ export function emplacementCall<T, Position>(
  * Adds the range constructor and `insert(first, last)` of an associative container, which take iterators of any
  * container or pointers whose elements construct entries.
  */
-export function addRangeMembers<T, Position>(
+export function addRangeMembers<T extends Store, Position>(
   compiler: ExpressionCompiler,
   cls: ClassInfo,
   entryType: Type,
-  table: EntryTable<T, Position>,
-  make: () => T
+  table: EntryTable<T, Position>
 ): void {
   const rangeOf = (args: Expr[]): ReturnType<typeof iteratorRange> =>
     args.length === 2 ? iteratorRange(compiler, args, unqualified(entryType), table.ops) : undefined;
@@ -100,11 +102,9 @@ export function addRangeMembers<T, Position>(
     instantiate: (args) => {
       const range = rangeOf(args);
       if (!range) return;
-      return nativeConstructor(cls, range.params, ([first, last], { frame }) => {
-        const self = make();
-        insertRange(table, frame, self, range.read(first, last));
-        return self;
-      });
+      return nativeConstructor(cls, range.params, ([first, last], { frame }) =>
+        constructEntries(frame, cls, table, range.read(first, last))
+      );
     },
     isTemplate: true,
   });
@@ -146,6 +146,44 @@ export function addRangeMembers<T, Position>(
       );
     },
     isTemplate: true,
+  });
+}
+
+export function associativeInitializerList<T extends Store, Position>(
+  compiler: ExpressionCompiler,
+  cls: ClassInfo,
+  entryType: Type,
+  elements: readonly Syntax[],
+  row: number,
+  table: EntryTable<T, Position>
+): Initializer {
+  const type = unqualified(entryType);
+  if (elements.length > 0) requireElementUse(compiler, type, row, 'copy');
+  const list = listElementsOf(
+    elements.map((node) => compiler.elementInitializer(type, node)),
+    table.ops
+  );
+  return (frame) => list(frame, (source) => constructEntries(frame, cls, table, source));
+}
+
+function constructEntries<T extends Store, Position>(
+  frame: Frame,
+  cls: ClassInfo,
+  table: EntryTable<T, Position>,
+  source: Source
+): T {
+  const self = table.make();
+  return holdAll(frame, [() => self], () => {
+    try {
+      insertRange(table, frame, self, source);
+      return self;
+    } catch (error) {
+      if (error instanceof CppException) {
+        cls.operations?.destroy?.(frame, self);
+        endLifetime(self);
+      }
+      throw error;
+    }
   });
 }
 

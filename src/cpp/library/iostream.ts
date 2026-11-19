@@ -5,7 +5,7 @@ import { scalarValue } from '../conversions';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import type { Frame } from '../runtime';
+import { type Frame, holdAll } from '../runtime';
 import {
   BOOL,
   CHAR,
@@ -478,11 +478,10 @@ export class Streams {
       return compiler.error(row, '>> の右には、値を入れられる変数を書いてください。');
     }
     const type = right.type;
-    const target = right.run;
     let read: (stream: StreamValue) => Value | undefined;
     if (type.kind === 'class' && type.cls === this.library.stringClass) {
-      return this.extractWith(compiler, left, row, (frame, stream) => {
-        ((target(frame) as Ptr).read() as StringValue).bytes = readWord(stream);
+      return this.extractWith(compiler, left, right, row, (stream, target) => {
+        (target.read() as StringValue).bytes = readWord(stream);
       });
     }
     if (type.kind === 'int' && isCharType(type)) {
@@ -504,9 +503,9 @@ export class Streams {
     } else {
       return compiler.error(row, `演算子 >> は ${typeName(left.type)} と ${typeName(type)} には使えません。`);
     }
-    return this.extractWith(compiler, left, row, (frame, stream) => {
+    return this.extractWith(compiler, left, right, row, (stream, target) => {
       const value = read(stream);
-      if (value !== undefined) (target(frame) as Ptr).write(value);
+      if (value !== undefined) target.write(value);
     });
   }
 
@@ -530,20 +529,22 @@ export class Streams {
   private extractWith(
     compiler: ExpressionCompiler,
     left: Expr,
+    right: Expr,
     row: number,
-    extract: (frame: Frame, stream: StreamValue) => void
+    extract: (stream: StreamValue, target: Ptr) => void
   ): Expr {
     const location = left.isLvalue ? left.run : compiler.materialize(left).run;
     return {
       type: left.type,
       isLvalue: true,
       row,
-      run: (frame) => {
-        const place = location(frame) as Ptr;
-        const stream = place.read() as StreamValue;
-        if (inputSentry(stream)) extract(frame, stream);
-        return place;
-      },
+      run: (frame) =>
+        holdAll(frame, [location, right.run], ([receiver, destination]) => {
+          const place = receiver as Ptr;
+          const stream = place.read() as StreamValue;
+          if (inputSentry(stream)) extract(stream, destination as Ptr);
+          return place;
+        }),
     };
   }
 

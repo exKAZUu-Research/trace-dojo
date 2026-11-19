@@ -4,7 +4,7 @@ import { CppRuntimeError, NarrowingConversionError } from '../errors';
 import { type ConstantLocation, type Expr, hasConstantObject, offsetConstantLocation } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { makeEach } from '../objectCompiler';
-import { type Eval, type Frame, holdAll } from '../runtime';
+import type { Eval, Frame } from '../runtime';
 import type { Syntax } from '../syntax';
 import {
   alignOf,
@@ -669,10 +669,10 @@ export function initializerList(
   );
 }
 
-function listElementsOf(
+export function listElementsOf(
   inits: Eval<Value>[],
   ops: () => ElementOperations
-): (frame: Frame, use: (source: Source) => void) => void {
+): <T>(frame: Frame, use: (source: Source) => T) => T {
   return (frame, use) => {
     const { destroy, copy } = ops();
     const mark = frame.pending.length;
@@ -684,7 +684,7 @@ function listElementsOf(
         frame.pending.push(object);
         if (destroy) frame.temporaries.push({ object, destroy });
       }
-      use({ values, construct: copy, isSameType: true });
+      return use({ values, construct: copy, isSameType: true });
     } finally {
       frame.pending.length = mark;
     }
@@ -1002,16 +1002,13 @@ function sequenceList(
     throw error;
   }
   if (elements.length > 0) requireElementUse(compiler, element, row, 'copy');
-  const run: Eval<Value> = (frame) => {
-    const { copy, destroy } = editor.ops;
-    if (!destroy) return holdAll(frame, inits, (values) => make(values as Value[]));
-    const temporaries = inits.map((init) => {
-      const object = init(frame);
-      frame.temporaries.push({ object, destroy });
-      return object;
-    });
-    return make(editor.construct(frame, temporaries.length, (index) => copy(frame, temporaries[index])));
-  };
+  const list = listElementsOf(inits, () => editor.ops);
+  const run: Eval<Value> = (frame) =>
+    list(frame, ({ values, construct }) =>
+      make(
+        editor.ops.destroy ? editor.construct(frame, values.length, (index) => construct(frame, values[index])) : values
+      )
+    );
   listElements.set(run, inits);
   return run;
 }

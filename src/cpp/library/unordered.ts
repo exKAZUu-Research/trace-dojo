@@ -21,7 +21,13 @@ import { CObject, Ptr, Store, type Value } from '../values';
 import { keyText, mappedNotDefaultConstructible, pairClass } from './associative';
 import { MapValue } from './containerValues';
 import { type ElementOperations, elementOperations, equalTo } from './elements';
-import { addRangeMembers, emplacementCall, type EntryTable, insertCopy } from './emplacement';
+import {
+  addRangeMembers,
+  associativeInitializerList,
+  emplacementCall,
+  type EntryTable,
+  insertCopy,
+} from './emplacement';
 import { randomAccessIterator } from './iterators';
 import type { Library } from './registry';
 import type { StringValue } from './string';
@@ -583,6 +589,7 @@ export function unorderedClass(
   };
   const insertResult = pairClass(library, iterator, BOOL);
   const table: EntryTable<HashValue, HashNode> = {
+    make,
     keyOf,
     lookup: (self, key) => self.lookup(key),
     insert: (frame, self, entry) => self.insert(frame, entry),
@@ -596,23 +603,8 @@ export function unorderedClass(
     size: 40,
     align: 8,
     listElementType: unqualified(entryType),
-    listInitializer: (compiler_, elements) => {
-      const inits = elements.map((node) => compiler_.elementInitializer(unqualified(entryType), node));
-      return (frame) => {
-        const self = make();
-        frame.pending.push(self);
-        try {
-          for (const init of inits) {
-            const entry = init(frame);
-            const [, inserted] = self.insert(frame, entry);
-            if (!inserted) ops().destroy?.(frame, entry);
-          }
-        } finally {
-          frame.pending.pop();
-        }
-        return self;
-      };
-    },
+    listInitializer: (compiler_, elements, row) =>
+      associativeInitializerList(compiler_, cls, entryType, elements, row, table),
     operator: (compiler_, operator, operands, row) => {
       const [left, right] = operands;
       if (
@@ -725,7 +717,7 @@ export function unorderedClass(
       ),
   };
   cls.constructors = [nativeConstructor(cls, [], () => make())];
-  addRangeMembers(compiler, cls, entryType, table, make);
+  addRangeMembers(compiler, cls, entryType, table);
   const method = (
     memberName: string,
     params: Type[],
