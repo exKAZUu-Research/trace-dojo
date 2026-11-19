@@ -91,10 +91,9 @@ class ArrayObjectProperty implements Place {
       return { value };
     }
     const element = this.element();
-    let value = element.get();
-    if (value === undefined && warning(() => element.warnUndefined())) {
-      value = element.get();
-      if (value === undefined) element.set(null);
+    const value = element.get();
+    if (value === undefined && warning(() => element.warnUndefined()) && element.get() === undefined) {
+      element.set(null);
     }
     return { value: value ?? null, sources: element.typeSources(), write: (result) => element.set(result) };
   }
@@ -143,7 +142,7 @@ class ArrayObjectProperty implements Place {
   }
 
   private element(): ElementPlace {
-    return new ElementPlace(this.storage.writable(), this.key, this.unbound);
+    return new ElementPlace(this.storage.writable(), this.key, this.unbound, true);
   }
 
   private readReference(): Ref {

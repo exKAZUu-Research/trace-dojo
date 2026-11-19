@@ -549,4 +549,4 @@ export function withRuntime<T>(runtime: Runtime, run: () => T): T {
 
 export type { PhpArray, Value };
 
-setArraySharingCheck((array) => (current ? arrayHasHolders(current, array, 2) : array.shared));
+setArraySharingCheck((array, minimum = 2) => (current ? arrayHasHolders(current, array, minimum) : array.shared));

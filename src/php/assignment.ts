@@ -530,8 +530,11 @@ function fetchCompoundProperty(
     classesModule.canAccessProp(decl, scope) &&
     classesModule.canWriteProp(decl, scope) &&
     !object.unsetProperties?.has(decl.key);
-  const value = readPropertyPlace(object, name, scope, 'assignOp');
-  if (value === undefined) place.warnUndefined?.(warning);
+  let value = readPropertyPlace(object, name, scope, 'assignOp');
+  if (value === undefined) {
+    place.warnUndefined?.(warning);
+    value = readPropertyPlace(object, name, scope, 'assignOp');
+  }
   return {
     value: value ?? null,
     declaration: ordinary ? decl : undefined,
@@ -1273,21 +1276,24 @@ export function incDec(e: Extract<Expr, { k: 'incdec' }>): Value {
 }
 
 function incrementPlace(e: Extract<Expr, { k: 'incdec' }>, warning: UpdateWarning): Value {
-  const runtime = rt();
   const target = placeOf(e.target, 'incdec');
   const place = target.incrementTarget?.() ?? target;
-  runtime.row = compiledOperandRow(e.target);
+  rt().row = compiledOperandRow(e.target);
   let old = place.get('incdec', warning);
+  let writeDetached = false;
   if (old === undefined) {
     if (place instanceof VarPlace && e.target.k !== 'idx') place.fetchCompound(warning);
-    else if (e.target.k === 'prop') place.warnUndefined?.(warning);
-    else place.warnUndefined?.();
-    old = null;
+    else if (place instanceof ElementPlace) writeDetached = !place.warnMissingUpdate();
+    else {
+      place.warnUndefined?.(warning);
+      if (e.target.k === 'prop') old = place.get('incdec', warning);
+    }
+    old ??= null;
   }
   const updated = withIncrementCleanup(place, old, () => incrementedValue(old, e.inc, warning));
   if (updated === undefined) return old;
   if (typeof old === 'bigint' && typeof updated === 'number') checkIntOverflow(place, e.inc);
-  const stored = place.set(updated);
+  const stored = writeDetached ? updated : place.set(updated);
   return e.prefix ? stored : old;
 }
 

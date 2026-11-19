@@ -245,7 +245,8 @@ export class ElementPlace implements Place {
     readonly array: PhpArray,
     /** The key, or undefined to append. */
     public key: Key | undefined,
-    readonly unbound = false
+    readonly unbound = false,
+    private readonly objectBacked = false
   ) {}
 
   get(): Value | undefined {
@@ -258,11 +259,38 @@ export class ElementPlace implements Place {
       warn(`Undefined array key ${typeof this.key === 'bigint' ? this.key : `"${this.key}"`}`);
   }
 
+  warnMissingUpdate(): boolean {
+    if (this.objectBacked) {
+      this.warnUndefined();
+      return true;
+    }
+    if (this.unbound || !sharingCheck(this.array, 1)) {
+      this.warnUndefined();
+      return this.get() === undefined;
+    }
+    const runtime = rt();
+    this.array.shared = true;
+    runtime.held.push(this.array);
+    let thrown: unknown;
+    try {
+      this.warnUndefined();
+    } catch (error) {
+      thrown = error;
+      throw error;
+    } finally {
+      runtime.held.pop();
+      if (!sharingCheck(this.array, 1)) {
+        if (thrown instanceof PhpThrow) withPendingException(runtime, thrown, () => dropped(this.array));
+        else dropped(this.array);
+      }
+    }
+    return sharingCheck(this.array, 1) && !arrayIsShared(this.array) && this.get() === undefined;
+  }
+
   fetchCompound(): CompoundRead | typeof SKIP_COMPOUND {
     const current = this.get();
     if (current !== undefined) return { value: current, sources: this.typeSources() };
-    this.warnUndefined();
-    if (this.get() !== undefined) return SKIP_COMPOUND;
+    if (!this.warnMissingUpdate()) return SKIP_COMPOUND;
     this.set(null);
     return { value: null };
   }
@@ -378,7 +406,10 @@ function readContainerForWrite(place: Place, update: boolean, lookupRow: number 
   if (lookupRow !== undefined) runtime.row = lookupRow;
   try {
     const value = place.get(update ? 'nestedUpdate' : 'nested');
-    if (update && value === undefined) place.warnUndefined?.();
+    if (update && value === undefined) {
+      if (place instanceof ElementPlace) return place.warnMissingUpdate() ? undefined : new PhpArray();
+      place.warnUndefined?.();
+    }
     return value;
   } finally {
     if (lookupRow !== undefined) runtime.row = operationRow;
@@ -413,7 +444,7 @@ export function readElement(array: PhpArray, key: Key, quiet: boolean): Value {
   return value;
 }
 
-let sharingCheck: (array: PhpArray) => boolean = (array) => array.shared;
+let sharingCheck: (array: PhpArray, minimum?: 1 | 2) => boolean = (array) => array.shared;
 
 export function setArraySharingCheck(check: typeof sharingCheck): void {
   sharingCheck = check;
@@ -421,7 +452,7 @@ export function setArraySharingCheck(check: typeof sharingCheck): void {
 
 export function arrayIsShared(array: PhpArray): boolean {
   if (!array.shared) return false;
-  const shared = sharingCheck(array);
+  const shared = sharingCheck(array, 2);
   if (!shared) array.shared = false;
   return shared;
 }

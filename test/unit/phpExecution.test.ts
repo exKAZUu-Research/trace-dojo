@@ -3049,3 +3049,61 @@ class C { const S = 'K', K = 1; function f() { return namespace\self::{${name}};
     diagnostics: [{ row: 3, message: String.raw`'namespace\self' is an invalid class name` }],
   });
 });
+
+test('preserves array elements created or shared by undefined-key handlers during updates', () => {
+  const result = run(String.raw`<?php
+foreach (['post++', 'pre++', 'post--', 'pre--', '+=1'] as $op) {
+  $a = [];
+  set_error_handler(function () use (&$a) { $a['x'] = 5; return true; });
+  $r = match ($op) {
+    'post++' => $a['x']++,
+    'pre++' => ++$a['x'],
+    'post--' => $a['x']--,
+    'pre--' => --$a['x'],
+    '+=1' => $a['x'] += 1,
+  };
+  restore_error_handler();
+  echo "$op:" . json_encode([$r, $a]) . "\n";
+}
+$a = ['init' => 1];
+$b = null;
+set_error_handler(function () use (&$a, &$b) { $b = $a; return true; });
+$r1 = $a['x']++;
+restore_error_handler();
+echo 'share:' . json_encode([$r1, $a, $b]) . "\n";
+
+$a = [];
+$n = 0;
+set_error_handler(function () use (&$a, &$n) { if (++$n === 1) $a['x'] = ['y' => 5]; return true; });
+$r2 = $a['x']['y'] += 1;
+restore_error_handler();
+echo 'nested:' . json_encode([$n, $r2, $a]) . "\n";
+
+$o = new stdClass();
+set_error_handler(function () use ($o) { $o->p = 5; return true; });
+$r3 = $o->p++;
+restore_error_handler();
+echo 'prop:' . json_encode([$r3, $o->p]) . "\n";
+
+$ao = new ArrayObject([], ArrayObject::ARRAY_AS_PROPS);
+set_error_handler(function () use ($ao) { $ao['p'] = 5; return true; });
+$r4 = $ao->p += 1;
+restore_error_handler();
+echo 'ao:' . json_encode([$r4, $ao->getArrayCopy()]) . "\n";
+`);
+  expect(result).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      'post++:[null,{"x":5}]',
+      'pre++:[1,{"x":5}]',
+      'post--:[null,{"x":5}]',
+      'pre--:[null,{"x":5}]',
+      '+=1:[null,{"x":5}]',
+      'share:[null,{"init":1},{"init":1}]',
+      'nested:[2,1,{"x":{"y":5}}]',
+      'prop:[5,6]',
+      'ao:[1,{"p":1}]',
+      '',
+    ].join('\n'),
+  });
+});
