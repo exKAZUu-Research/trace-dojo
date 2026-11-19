@@ -235,7 +235,18 @@ export class SequenceValue extends Store {
   }
 
   /** The capacity a `std::vector` has, which libc++ grows by doubling. */
-  capacity = 0;
+  private reserved = 0;
+
+  get capacity(): number {
+    return this.reserved;
+  }
+
+  set capacity(value: number) {
+    this.reserved =
+      this.storageKind === 'vector' && this.elementType.kind === 'int' && this.elementType.name === 'bool'
+        ? Math.ceil(value / 64) * 64
+        : value;
+  }
 
   get length(): number {
     return this.items.length;

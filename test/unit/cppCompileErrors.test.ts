@@ -2,6 +2,46 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
+test.each(['values.data();', 'bool& bit = values[0];', 'for (auto& bit : values) bit = false;'])(
+  'vector<bool> does not expose bit addresses: %s',
+  (body) => {
+    const program = `#include <vector>
+int main() { std::vector<bool> values{true}; ${body} }`;
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 1 }] });
+  }
+);
+
+test.each(['time', 'log', 'index', 'random', 'floor', 'free', 'signal'])(
+  'a C header function hides an untagged class name %s',
+  (name) => {
+    const program = `#include <cmath>
+#include <csignal>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+struct ${name} { int value; };
+int main() { ${name} value; }`;
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 6 }] });
+  }
+);
+
+test.each(['data', 'rank', 'empty', 'ref', 'hash', 'search', 'merge', 'byte', 'tuple', 'move', 'cin'])(
+  'using namespace std makes an unqualified global named %s ambiguous',
+  (name) => {
+    const program = `#include <algorithm>
+#include <iostream>
+#include <string>
+#include <vector>
+using namespace std;
+int ${name} = 1;
+int main() { cout << ${name}; }`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 6, message: expect.stringContaining('どちらを指すのか決まりません') }],
+    });
+  }
+);
+
 test.each([
   ['cstdio', 'int value; scanf("%d", &value);'],
   ['cstdio', 'std::scanf("%*d");'],

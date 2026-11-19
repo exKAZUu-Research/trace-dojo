@@ -14,6 +14,7 @@ export type Entity =
   /** A name both the program and `using namespace std;` declare, which clang++ cannot choose between. */
   | { kind: 'ambiguous'; name: string }
   | { kind: 'class'; cls: ClassInfo }
+  | { kind: 'hiddenClass'; cls: ClassInfo }
   | { kind: 'type'; type: Type }
   | { kind: 'template'; template: LibraryTemplate }
   /** A library object or constant, such as `std::cout` or `INT_MAX`. */

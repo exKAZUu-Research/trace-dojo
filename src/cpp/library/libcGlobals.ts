@@ -3,6 +3,7 @@ import sdk from './libcGlobalDeclarations.json';
 
 const declarations: Readonly<Record<string, (string | number)[][]>> = sdk.declarations;
 const macros: Readonly<Record<string, number>> = sdk.macros;
+const standard: Readonly<Record<string, (number | boolean)[][]>> = sdk.standard;
 const headerGroups = sdk.headers.map((group) => new Set(group));
 
 export function conflictsWithLibcGlobal(
@@ -48,6 +49,16 @@ export function redeclaresLibcFunction(fn: FunctionInfo, headers: ReadonlySet<st
       visibleIn(group, headers) &&
       matchingReturnType(fn, signature) &&
       matchingParameters(fn, signature)
+  );
+}
+
+export function conflictsWithStdName(name: string, isFunction: boolean, headers: ReadonlySet<string>): boolean {
+  return (
+    Object.hasOwn(standard, name) &&
+    standard[name].some(
+      ([group, isStdFunction]) =>
+        typeof group === 'number' && (!isFunction || !isStdFunction) && visibleIn(group, headers)
+    )
   );
 }
 

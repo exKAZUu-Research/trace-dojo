@@ -2,7 +2,7 @@ import type { Expr, Initializer } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import type { Frame } from '../runtime';
 import type { Syntax } from '../syntax';
-import type { ArrayType, ClassInfo, FunctionInfo, Type } from '../types';
+import type { ArithmeticType, ArrayType, ClassInfo, FunctionInfo, Type } from '../types';
 import type { CObject, Value } from '../values';
 
 export type IteratorCategory = 'forward' | 'bidirectional' | 'randomAccess';
@@ -15,6 +15,7 @@ export interface LibraryClass {
   readonly ownedTypes?: readonly Type[];
   readonly assignmentCopies?: boolean;
   readonly allowsConstantCopy?: boolean;
+  readonly scalarValue?: { type: ArithmeticType; read: (value: Value) => number | bigint };
   readonly aggregateArray?: { type: ArrayType; make: (items: Value[]) => Value };
   readonly additionalPublicBases?: readonly ClassInfo[];
   /** `sizeof` of the class in libc++ on arm64. */
@@ -53,6 +54,7 @@ export interface LibraryClass {
   isReverse?: boolean;
   /** The category of an iterator, which decides its operators and the algorithms that accept it. */
   iteratorCategory?: IteratorCategory;
+  readonly iteratorReference?: Type;
   appendMethod?: FunctionInfo;
   /** Whether a program's class may derive from this one, as from the exception classes. */
   isInheritable?: boolean;

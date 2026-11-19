@@ -5,6 +5,7 @@ import { TraceRecorder, type TraceVariables } from '../interpreter/traceRecorder
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import { byteArray } from './bytes';
 import type { CompiledProgram } from './compiler';
+import { CppRuntimeError } from './errors';
 import { compileCpp, runProgram } from './execute';
 import { MapValue, SequenceValue } from './library/containerValues';
 import { StringValue } from './library/string';
@@ -134,6 +135,15 @@ function scalarOf(value: Value, type: Type): Scalar | typeof NOT_SCALAR | undefi
       }) as Scalar;
     }
     case 'class': {
+      const scalar = type.cls.library?.scalarValue;
+      if (scalar) {
+        try {
+          return scalarOf(scalar.read(value), scalar.type);
+        } catch (error) {
+          if (error instanceof CppRuntimeError) return;
+          throw error;
+        }
+      }
       if (value instanceof StringValue) return value.text;
       if (value instanceof SequenceValue && value.isArrayLike && hasScalarElements(value.elementType)) {
         return value.items.map((item) => {

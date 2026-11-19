@@ -221,6 +221,8 @@ export class Compiler extends StatementCompiler {
     } else {
       if (existing) return this.error(node.row, `${name} はすでに別のものとして宣言されています。`);
       if (this.context.fn) return this.unsupported(node.row, '関数の中のクラスの定義');
+      if (this.library.global(name)?.kind === 'type')
+        return this.error(node.row, `${name} はヘッダーで型として宣言されています。`);
       cls = new ClassInfo(name, node.type === 'struct_specifier' ? 'struct' : 'class');
       cls.row = node.row;
       this.globalScope.names.set(name, { kind: 'class', cls });

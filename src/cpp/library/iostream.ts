@@ -1,6 +1,7 @@
 import { isFloatUnderflow, isSpaceByte, parseFloatPrefix, parseIntegerPrefix } from '../../c/library/numberParsing';
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import { byteArray, byteAt } from '../bytes';
+import { scalarValue } from '../conversions';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
@@ -161,8 +162,8 @@ export class Streams {
     this.ios = this.iosClass();
     this.manipulator = manipulatorClass('std::__manipulator');
     this.outputManipulator = manipulatorClass('std::__output_manipulator');
-    this.ostream = this.streamClass('std::ostream', undefined, true, false);
-    this.istream = this.streamClass('std::istream', undefined, false, true);
+    this.ostream = this.streamClass('std::ostream', undefined, true, false, [this.ios]);
+    this.istream = this.streamClass('std::istream', undefined, false, true, [this.ios]);
     this.ostringstream = this.streamClass('std::ostringstream', this.ostream, true, false);
     this.istringstream = this.streamClass('std::istringstream', this.istream, false, true);
     this.stringstream = this.streamClass('std::stringstream', this.ostream, true, true, [this.istream]);
@@ -340,17 +341,6 @@ export class Streams {
     }
   }
 
-  /** A manipulator as a value, which `<<` (and `>>` unless `isOutputOnly`) applies to the stream. */
-  manipulatorExpr(
-    row: number,
-    apply: (stream: StreamValue, frame: Frame) => void,
-    name: string,
-    isOutputOnly: boolean
-  ): Expr {
-    const value = new ManipulatorValue(apply, name);
-    return { type: this.manipulatorType(isOutputOnly), isLvalue: false, row, run: () => value };
-  }
-
   manipulatorType(isOutputOnly: boolean): Type {
     return classType(isOutputOnly ? this.outputManipulator : this.manipulator);
   }
@@ -378,8 +368,11 @@ export class Streams {
       };
     }
     if (left.type.kind !== 'class' || !left.type.cls.isDerivedFrom(cls) || !right) return undefined;
-    if (operator === '<<' && isOutput) return this.insertion(compiler, left, right, row);
+    if (operator === '<<' && isOutput)
+      return this.namedManipulator(compiler, left, right, row, true) ?? this.insertion(compiler, left, right, row);
     if (operator === '>>' && isInput) {
+      const named = this.namedManipulator(compiler, left, right, row, false);
+      if (named) return named;
       const isManipulator = right.type.kind === 'class' && right.type.cls === this.manipulator;
       return isManipulator ? this.applyTo(compiler, left, right, row) : this.extraction(compiler, left, right, row);
     }
@@ -390,6 +383,21 @@ export class Streams {
       );
     }
     return undefined;
+  }
+
+  private namedManipulator(
+    compiler: ExpressionCompiler,
+    stream: Expr,
+    operand: Expr,
+    row: number,
+    output: boolean
+  ): Expr | undefined {
+    const candidate = operand.functions?.candidates.find(
+      (fn) => fn.streamManipulator === 'both' || (output && fn.streamManipulator === 'output')
+    );
+    if (!candidate) return;
+    const resolved = compiler.resolve(candidate.displayName, [candidate], [stream], undefined, row);
+    return { ...compiler.callExpr(resolved, [stream], undefined, row), type: stream.type };
   }
 
   private insertion(compiler: ExpressionCompiler, left: Expr, right: Expr, row: number): Expr {
@@ -421,7 +429,7 @@ export class Streams {
       const run = compiler.rvalue(right).run;
       return (frame, stream) => stream.writeField(frame, (run(frame) as StringValue).bytes);
     }
-    const value = compiler.rvalue(right);
+    const value = scalarValue(compiler, right);
     const run = value.run;
     const valueType = value.type;
     if (valueType.kind === 'void') return compiler.error(row, '値を返さない関数（void）の結果は表示できません。');

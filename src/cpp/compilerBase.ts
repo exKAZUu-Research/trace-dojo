@@ -70,10 +70,13 @@ export abstract class CompilerBase {
 
   /** Looks a name up in the global namespace, including the names `using` brought in. */
   findGlobalName(name: string): Entity | undefined {
-    const own = this.globalScope.names.get(name);
-    const library = this.library.global(name);
-    const std = this.usesStd || this.context.scopes.some((scope) => scope.usesStd) ? this.findStdName(name) : undefined;
-    const found = own ?? library;
+    const found = this.ordinaryGlobalName(name);
+    const own = found === this.globalScope.names.get(name) ? found : undefined;
+    const usesStd = this.usesStd || this.context.scopes.some((scope) => scope.usesStd);
+    if (own && usesStd && this.library.conflictsWithStdName(name, own.kind === 'functions')) {
+      return { kind: 'ambiguous', name };
+    }
+    const std = usesStd ? this.findStdName(name) : undefined;
     if (found && std && found !== std) {
       if (found.kind === 'functions' && std.kind === 'functions') {
         return { kind: 'functions', functions: [...new Set([...found.functions, ...std.functions])] };
@@ -83,6 +86,15 @@ export abstract class CompilerBase {
       }
     }
     return found ?? std;
+  }
+
+  private ordinaryGlobalName(name: string): Entity | undefined {
+    const own = this.globalScope.names.get(name);
+    const library = this.library.global(name);
+    if (own?.kind === 'class' && this.library.hasGlobalDeclaration(name)) {
+      return library ?? { kind: 'hiddenClass', cls: own.cls };
+    }
+    return own ?? library;
   }
 
   protected findStdName(name: string): Entity | undefined {
@@ -135,7 +147,7 @@ export abstract class CompilerBase {
 
   private lookupInGlobal(nameNode: Syntax): Entity {
     const name = this.plainName(nameNode);
-    const entity = this.globalScope.names.get(name) ?? this.library.global(name);
+    const entity = this.ordinaryGlobalName(name);
     if (!entity) return this.error(nameNode.row, `::${name} は宣言されていません。`);
     return entity;
   }
@@ -286,6 +298,9 @@ export abstract class CompilerBase {
     const nameNode = node.type === 'qualified_identifier' ? (fieldOf(node, 'name') as Syntax) : node;
     if (nameNode.type === 'template_type') return this.templateType(nameNode, entity);
     switch (entity.kind) {
+      case 'hiddenClass': {
+        return this.error(node.row, `型 ${entity.cls.name} には class または struct を付けてください。`);
+      }
       case 'class': {
         return classType(entity.cls);
       }

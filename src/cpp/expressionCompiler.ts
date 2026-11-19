@@ -322,6 +322,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         return entity.make(row);
       }
       case 'class':
+      case 'hiddenClass':
       case 'type':
       case 'template': {
         return this.error(row, `${node.text} は型の名前なので、値としては使えません。`);
@@ -1023,12 +1024,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         type: target.type,
         isLvalue: true,
         row,
-        run: (frame) => {
-          const result = value(frame);
-          const place = location(frame) as Ptr;
-          place.write(result as Value);
-          return place;
-        },
+        run: (frame) =>
+          holdAll(frame, [value, location], ([result, destination]) => {
+            const place = destination as Ptr;
+            place.write(result as Value);
+            return place;
+          }),
       };
     }
     const binaryOperator = operator.slice(0, -1);

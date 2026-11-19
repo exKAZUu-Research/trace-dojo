@@ -20,6 +20,7 @@ import {
   LLONG,
   LONG,
   nonReference,
+  referenceTo,
   sameParameters,
   SCHAR,
   SHORT,
@@ -43,6 +44,7 @@ import { exceptionClasses } from './exceptions';
 import { FLAGS, ManipulatorValue, Streams, type StreamValue } from './iostream';
 import {
   conflictsWithLibcGlobal,
+  conflictsWithStdName,
   isLibcGlobalDeclared,
   isLibcHeaderMacro,
   redeclaresLibcFunction,
@@ -292,6 +294,14 @@ export class Library {
     return conflictsWithLibcGlobal(name, entity, this.headers);
   }
 
+  conflictsWithStdName(name: string, isFunction: boolean): boolean {
+    return conflictsWithStdName(name, isFunction, this.headers);
+  }
+
+  hasGlobalDeclaration(name: string): boolean {
+    return isLibcGlobalDeclared(name, this.headers);
+  }
+
   isHeaderMacro(name: string): boolean {
     return isLibcHeaderMacro(name, this.headers);
   }
@@ -368,10 +378,14 @@ export class Library {
     this.addStd('streamsize', { kind: 'type', type: LONG });
     for (const [name, apply] of Object.entries(MANIPULATORS)) {
       const isOutputOnly = OUTPUT_MANIPULATORS.has(name);
-      this.addStd(name, {
-        kind: 'value',
-        make: (row) => streams.manipulatorExpr(row, apply, `std::${name}`, isOutputOnly),
+      const streamType = referenceTo(classType(isOutputOnly ? streams.ostream : streams.ios));
+      const fn = native(name, [streamType], streamType, ([location], { frame }) => {
+        const stream = location as Ptr;
+        apply(stream.read() as StreamValue, frame);
+        return stream;
       });
+      fn.streamManipulator = isOutputOnly ? 'output' : 'both';
+      this.addStd(name, { kind: 'functions', functions: [fn] });
     }
     const manipulatorFunctions = new Map<string, FunctionInfo[]>();
     const parameterized: [string, Type, (stream: StreamValue, value: number) => void][] = [

@@ -113,6 +113,32 @@ int main() { Result result; }`;
   ]);
 });
 
+test.each(['destinations[index()]', 'location()'])(
+  'tracing keeps an assignment value alive while its destination runs: %s',
+  (destination) => {
+    const program = `Turtle* destinations[1];
+int index() { int zero = 0; return zero; }
+Turtle*& location() { int zero = 0; return destinations[zero]; }
+int main() { ${destination} = new Turtle(1, 1); }`;
+    const trace = traceProgram('cpp', program, program);
+    expect(trace.finalTurtles.map(({ x, y }) => [x, y])).toEqual([[1, 1]]);
+  }
+);
+
+test.each(['v.assign({new Turtle(0, 0), second()});', 'v.insert(v.begin(), {new Turtle(0, 0), second()});'])(
+  'sequence edits keep pointer elements alive while evaluating the remaining elements: %s',
+  (edit) => {
+    const program = `#include <vector>
+Turtle* second() { Turtle* result = new Turtle(1, 1); return result; }
+int main() { std::vector<Turtle*> v; ${edit} }`;
+    const trace = traceProgram('cpp', program, program);
+    expect(trace.finalTurtles.map(({ x, y }) => [x, y])).toEqual([
+      [0, 0],
+      [1, 1],
+    ]);
+  }
+);
+
 // The declaration of m records no step of its own: the member's construction recorded one, as in Java.
 test('// atomic on a member function makes each call of it one step of the caller', () => {
   const program = `class Mover {

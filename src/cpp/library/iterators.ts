@@ -4,6 +4,7 @@ import type { ExpressionCompiler } from '../expressionCompiler';
 import type { Eval } from '../runtime';
 import { BOOL, ClassInfo, classType, isInteger, LONG, PTRDIFF_T, type Type, typeName, withConst } from '../types';
 import { NULL_PTR, Ptr, type Store } from '../values';
+import type { BitReferences } from './bitReference';
 import type { IteratorCategory } from './libraryClass';
 import { nativeConstructor } from './support';
 
@@ -24,7 +25,8 @@ export function randomAccessIterator(
   element: Type,
   isConst: boolean,
   isReverse: boolean,
-  category: IteratorCategory = 'randomAccess'
+  category: IteratorCategory = 'randomAccess',
+  bits?: BitReferences
 ): ClassInfo {
   const name = `${container}::${isReverse ? (isConst ? 'const_reverse_iterator' : 'reverse_iterator') : isConst ? 'const_iterator' : 'iterator'}`;
   const cached = cache.get(name);
@@ -38,6 +40,7 @@ export function randomAccessIterator(
     args: [elementType],
     isReverse,
     iteratorCategory: category,
+    iteratorReference: isConst ? bits?.constant : bits?.mutable,
     size: 8,
     align: 8,
     operator: (compiler, operator, operands, row) =>
@@ -56,7 +59,7 @@ export function randomAccessIterator(
   cls.operations = { copy: (_frame, value) => value, assign: (_frame, _target, source) => source };
   cls.constructors = [nativeConstructor(cls, [], () => NULL_PTR)];
   if (isConst) {
-    const mutable = randomAccessIterator(cache, container, element, false, isReverse, category);
+    const mutable = randomAccessIterator(cache, container, element, false, isReverse, category, bits);
     cls.constructors.push(nativeConstructor(cls, [classType(mutable)], ([value]) => value));
   }
   return cls;
@@ -127,12 +130,14 @@ function iteratorOperator(
   if (!isSelf(first) && !(operator === '+' && isSelf(second))) return undefined;
   const value = (expr: Expr): Eval<Ptr> => compiler.rvalue(expr).run as Eval<Ptr>;
   const type = classType(cls);
+  const proxy = cls.library?.iteratorReference;
   switch (operator) {
     case '*':
     case '->': {
       if (operands.length !== 1) return undefined;
+      if (proxy && operator === '->') return compiler.error(row, `${cls.name} には -> を使えません。`);
       const run = value(first);
-      return { type: element, isLvalue: true, row, run: (frame) => elementLocation(run(frame), isReverse) };
+      return { type: proxy ?? element, isLvalue: !proxy, row, run: (frame) => elementLocation(run(frame), isReverse) };
     }
     case '++':
     case '--': {
@@ -217,8 +222,8 @@ function iteratorOperator(
       const it = value(first);
       const n = compiler.convert(second, LONG, row).run;
       return {
-        type: element,
-        isLvalue: true,
+        type: proxy ?? element,
+        isLvalue: !proxy,
         row,
         run: (frame) => elementLocation(moveIterator(it(frame), Number(n(frame)), isReverse), isReverse),
       };

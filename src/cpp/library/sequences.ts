@@ -26,6 +26,7 @@ import {
   withConst,
 } from '../types';
 import { type Ptr, type Value } from '../values';
+import { bitReferences } from './bitReference';
 import { SequenceValue } from './containerValues';
 import {
   comparatorOf,
@@ -77,10 +78,15 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   };
   const container = name;
   const category = kind === 'list' ? 'bidirectional' : 'randomAccess';
-  const iterator = randomAccessIterator(library.iterators, container, element, false, false, category);
-  const constIterator = randomAccessIterator(library.iterators, container, element, true, false, category);
-  const reverseIterator = randomAccessIterator(library.iterators, container, element, false, true, category);
-  const constReverseIterator = randomAccessIterator(library.iterators, container, element, true, true, category);
+  const bits = kind === 'vector' && element.kind === 'int' && element.name === 'bool' ? bitReferences() : undefined;
+  const iterator = randomAccessIterator(library.iterators, container, element, false, false, category, bits);
+  const constIterator = randomAccessIterator(library.iterators, container, element, true, false, category, bits);
+  const reverseIterator = randomAccessIterator(library.iterators, container, element, false, true, category, bits);
+  const constReverseIterator = randomAccessIterator(library.iterators, container, element, true, true, category, bits);
+  if (bits) {
+    cls.memberTypes.set('reference', bits.mutable);
+    cls.memberTypes.set('const_reference', bits.constant);
+  }
   cls.memberTypes.set('value_type', element);
   cls.memberTypes.set('size_type', SIZE_T);
   cls.memberTypes.set('iterator', classType(iterator));
@@ -393,8 +399,17 @@ function sequenceMethods(
     isConst: true,
   });
   method('empty', [], BOOL, (self) => (self.items.length === 0 ? 1 : 0), { isConst: true });
+  const bitProxy = cls.memberTypes.get('reference');
+  if (bitProxy) {
+    method('flip', [], VOID, (self, _args, frame) => {
+      frame.runtime.spend(Math.ceil(self.items.length / 64));
+      for (const [index, bit] of self.items.entries()) self.items[index] = bit === 0 ? 1 : 0;
+    });
+  }
   for (const isConst of [false, true]) {
-    const ref = referenceTo(isConst ? withConst(element) : element);
+    const ref =
+      cls.memberTypes.get(isConst ? 'const_reference' : 'reference') ??
+      referenceTo(isConst ? withConst(element) : element);
     if (kind !== 'list') {
       method(
         'at',
@@ -456,7 +471,7 @@ function sequenceMethods(
         isConst,
       }
     );
-    if (kind === 'vector' || kind === 'array') {
+    if ((kind === 'vector' || kind === 'array') && !bitProxy) {
       method('data', [], pointerTo(isConst ? withConst(element) : element), (self) => self.location(0), { isConst });
     }
   }
@@ -642,12 +657,19 @@ function listElementsOf(
 ): (frame: Frame, use: (source: Source) => void) => void {
   return (frame, use) => {
     const { destroy, copy } = ops();
-    const values = inits.map((init) => {
-      const object = init(frame);
-      if (destroy) frame.temporaries.push({ object, destroy });
-      return object;
-    });
-    use({ values, construct: copy, isSameType: true });
+    const mark = frame.pending.length;
+    const values: Value[] = [];
+    try {
+      for (const init of inits) {
+        const object = init(frame);
+        values.push(object);
+        frame.pending.push(object);
+        if (destroy) frame.temporaries.push({ object, destroy });
+      }
+      use({ values, construct: copy, isSameType: true });
+    } finally {
+      frame.pending.length = mark;
+    }
   };
 }
 
@@ -804,10 +826,12 @@ function sequenceOperator(
   if (operator === '[]' && isSelf(left) && kind !== 'list') {
     const index = compiler.convert(right, SIZE_T, row).run;
     const object = left.isLvalue ? left.run : compiler.materialize(left).run;
-    const type = isConstType(left.type) ? withConst(element) : element;
+    const isConst = isConstType(left.type);
+    const proxy = cls.memberTypes.get(isConst ? 'const_reference' : 'reference');
+    const type = proxy ?? (isConst ? withConst(element) : element);
     return {
       type,
-      isLvalue: true,
+      isLvalue: !proxy,
       row,
       run: (frame) => {
         const target = (object(frame) as Ptr).read() as SequenceValue;
@@ -999,7 +1023,8 @@ function emplacement(
       ? object.type.kind === 'class'
         ? (object.type.cls.memberTypes.get('iterator') as Type)
         : VOID
-      : referenceTo(element);
+      : ((object.type.kind === 'class' ? object.type.cls.memberTypes.get('reference') : undefined) ??
+        referenceTo(element));
   return {
     type: ret.kind === 'reference' ? ret.to : ret,
     isLvalue: ret.kind === 'reference',

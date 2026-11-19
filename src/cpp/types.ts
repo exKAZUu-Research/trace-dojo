@@ -137,6 +137,7 @@ export interface FunctionInfo {
   nativeUses?: (row: number) => void;
   evaluateConstant?: (args: readonly (number | bigint)[]) => number | bigint;
   libraryConstant?: (args: readonly Expr[]) => LibraryConstant | undefined;
+  streamManipulator?: 'both' | 'output';
   /** The syntax of the definition, which the compiler compiles once the declarations it may use are known. */
   definition?: Syntax;
   /** Whether the function takes any number of further arguments, as `printf` does. */

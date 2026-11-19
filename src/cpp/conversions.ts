@@ -88,7 +88,20 @@ export function implicitConversion(
   }
   if (to.kind === 'reference') return referenceBinding(host, expr, to.to, allowUser);
   if (to.kind === 'class') return classConversion(host, expr, to.cls, allowUser);
+  if (allowUser && expr.type.kind === 'class' && expr.type.cls.library?.scalarValue) {
+    const scalar = scalarValue(host, expr);
+    const conversion = standardConversion(host, scalar, to);
+    if (conversion) return sequence(Rank.UserDefined, (e) => conversion.apply(scalarValue(host, e)));
+  }
   return standardConversion(host, expr, to);
+}
+
+export function scalarValue(host: ConversionHost, expr: Expr): Expr {
+  const value = host.rvalue(expr);
+  const scalar = value.type.kind === 'class' ? value.type.cls.library?.scalarValue : undefined;
+  if (!scalar) return value;
+  const { run, row } = value;
+  return { type: scalar.type, isLvalue: false, row, run: (frame) => scalar.read(run(frame)) };
 }
 
 function referenceBinding(
