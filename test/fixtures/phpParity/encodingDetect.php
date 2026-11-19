@@ -5,3 +5,23 @@ foreach ($tests as $t) {
 }
 var_dump(mb_detect_encoding("x", "BASE64"), mb_detect_encoding("x", "BASE64, UTF-8"), mb_detect_encoding("x", ","), mb_detect_encoding("x", "8bit, ascii"));
 foreach (["", [], "nope", ["UTF-8", "x"]] as $l) { try { var_dump(mb_detect_encoding("x", $l)); } catch (ValueError $e) { echo $e->getMessage(), "\n"; } }
+
+foreach ([
+  ["\xA4\xA2", 'ISO-2022-JP-MS'],
+  ["\x1b\x24(?\x21\x21", 'ISO-2022-JP-MS'],
+  ["\xC3\xB1", 'CP50220'],
+  ["\x0e\x24!\x0f", 'CP50221'],
+  ["\xC5", 'CP50222'],
+  ["\x1b\x24(Q\x24\x77", 'ISO-2022-JP-2004'],
+  ["\x1b\x24(P\x21\x21", 'ISO-2022-JP-2004'],
+  ["\x82\xA0", 'EUC-KR'],
+  ["\xB0\xA1", 'EUC-KR'],
+  ["\x81\x60", 'CP950'],
+  ["\x81\x7f", 'CP950'],
+] as [$bytes, $encoding]) {
+  echo bin2hex($bytes), " ", json_encode([
+    mb_detect_encoding($bytes, $encoding, true),
+    mb_detect_encoding($bytes, [$encoding, 'UTF-8', 'ISO-8859-1'], true),
+    mb_detect_encoding($bytes, ['EUC-KR', 'CP950', $encoding]),
+  ]), "\n";
+}

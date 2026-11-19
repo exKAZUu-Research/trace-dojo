@@ -961,8 +961,8 @@ function legacyTextDecoder(name: string): TextDecoder | undefined {
   let label = name;
   if (/^(?:SJIS|CP932)/.test(name)) label = 'shift_jis';
   else if (/^(?:EUC-JP|eucJP|CP51932)/.test(name)) label = 'euc-jp';
-  else if (/^(?:ISO-2022-JP|JIS|CP5022)/.test(name)) label = 'iso-2022-jp';
-  else if (name === 'BIG-5' || name === 'CP950') label = 'big5';
+  else if (/^(?:ISO-2022-JP|JIS)/.test(name)) label = 'iso-2022-jp';
+  else if (name === 'BIG-5') label = 'big5';
   else if (name === 'CP936') label = 'gbk';
   else if (name === 'UHC') label = 'euc-kr';
   try {

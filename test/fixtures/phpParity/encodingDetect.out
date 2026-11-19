@@ -22,3 +22,14 @@ mb_detect_encoding(): Argument #2 ($encodings) must specify at least one encodin
 mb_detect_encoding(): Argument #2 ($encodings) must specify at least one encoding
 mb_detect_encoding(): Argument #2 ($encodings) contains invalid encoding "nope"
 mb_detect_encoding(): Argument #2 ($encodings) contains invalid encoding "x"
+a4a2 ["ISO-2022-JP-MS","ISO-2022-JP-MS","EUC-KR"]
+1b24283f2121 ["ISO-2022-JP-MS","ISO-2022-JP-MS","ISO-2022-JP-MS"]
+c3b1 ["CP50220","UTF-8","CP950"]
+0e24210f ["CP50221","CP50221","CP50221"]
+c5 ["CP50222","CP50222","CP50222"]
+1b2428512477 ["ISO-2022-JP-2004","ISO-2022-JP-2004","ISO-2022-JP-2004"]
+1b2428502121 ["ISO-2022-JP-2004","ISO-2022-JP-2004","ISO-2022-JP-2004"]
+82a0 [false,"ISO-8859-1","CP950"]
+b0a1 ["EUC-KR","EUC-KR","EUC-KR"]
+8160 ["CP950","CP950","CP950"]
+817f [false,"ISO-8859-1","EUC-KR"]

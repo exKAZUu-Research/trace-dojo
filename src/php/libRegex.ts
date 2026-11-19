@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 414 -- The regex functions share matching, offsets, capture handling, and error state.
+// code-gauge-allow-file fileNcss 418 -- The regex functions share matching, offsets, capture handling, and error state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { dec, enc } from './bytes';
 import { callCallback, consumeInvokedResult } from './callables';
@@ -494,21 +494,37 @@ defineFunction(
     const flags = (args[5] as bigint | undefined) ?? 0n;
     return pregReplace('preg_replace_callback', args, refs[4], (_index, state) => (compiled, match) => {
       if (state.callbackFailed) return;
-      try {
-        return callbackReplacement(args[1], compiled, match, flags);
-      } catch (error) {
-        if (!(error instanceof PhpThrow || error instanceof ExitSignal)) throw error;
+      return callbackReplacement(args[1], compiled, match, flags, (error) => {
         state.callbackFailed = true;
         state.capture(error);
-        return;
-      }
+      });
     });
   }
 );
 
-function callbackReplacement(callback: Value, compiled: Compiled, match: Match, flags: bigint): string {
+function callbackReplacement(
+  callback: Value,
+  compiled: Compiled,
+  match: Match,
+  flags: bigint,
+  retain?: (error: CleanupException) => void
+): string | undefined {
   const args = matchArray(compiled, match, (flags & 256n) !== 0n, (flags & 512n) !== 0n, true);
-  return consumeInvokedResult(() => callCallback(callback, [args]), toStr, true);
+  let converted: string | undefined;
+  try {
+    return consumeInvokedResult(
+      () => callCallback(callback, [args]),
+      (value) => {
+        converted = toStr(value);
+        return converted;
+      },
+      true
+    );
+  } catch (error) {
+    if (!retain || !(error instanceof PhpThrow || error instanceof ExitSignal)) throw error;
+    retain(error);
+    return converted;
+  }
 }
 
 defineFunction(

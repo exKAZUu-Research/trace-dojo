@@ -891,6 +891,25 @@ echo 'unreachable';
 });
 
 test.each([
+  ["exit('exit;');", 'drop;exit;count:2'],
+  ["throw new Exception('cleanup');", 'drop;caught:cleanup;count:2'],
+])('counts the match after a converted regex result fails during cleanup with %s', (failure, stdout) => {
+  expect(
+    run(`<?php
+$count = 99;
+class Reader { function __destruct() { global $count; echo 'count:', $count; } }
+class Replacement {
+    function __toString() { return 'X'; }
+    function __destruct() { echo 'drop;'; ${failure} }
+}
+$reader = new Reader;
+try { preg_replace_callback('/a/', fn() => new Replacement, 'aa', -1, $count); }
+catch (Throwable $error) { echo 'caught:', $error->getMessage(), ';'; }
+`)
+  ).toMatchObject({ kind: 'executed', stdout });
+});
+
+test.each([
   String.raw`<?php preg_match('/\xe9/i',"\xc9");`,
   String.raw`<?php preg_match('/[\xe0-\xef]/i',"\xc9");`,
   '<?php preg_match("/(a*)+/","aaa");',

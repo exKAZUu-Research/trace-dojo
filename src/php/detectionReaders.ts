@@ -1,7 +1,8 @@
 // oxlint-disable unicorn/prefer-code-point -- Each code unit is one PHP byte.
 import { detectionCodePoint, mobileDetectionTable } from './detectionDecodeTables';
 import { decodeEucCn, decodeGb18030 } from './gb18030Detection';
-import { readJisEncoding } from './jisDetectionReader';
+import { readExtendedJisEncoding, readJisEncoding } from './jisDetectionReader';
+import { legacyDetectionCodePoint } from './legacyDetectionTables';
 import { rt } from './runtime';
 
 const BAD = -1;
@@ -13,6 +14,22 @@ const IMAP_BASE64 = BASE64.slice(0, -1) + ',';
 const MOBILE_CARRIERS = ['DOCOMO', 'KDDI-A', 'KDDI-B', 'SOFTBANK'];
 type Decode = (bytes: string) => number[];
 
+const FIXED_READERS = new Map<string, Decode>([
+  ['GB18030', (bytes) => decodeGb18030(bytes, false, BAD)],
+  ['GB18030-2022', (bytes) => decodeGb18030(bytes, true, BAD)],
+  ['EUC-CN', (bytes) => decodeEucCn(bytes, BAD)],
+  ['JIS', readJisCodes],
+  ['ISO-2022-JP', readJisCodes],
+  ['CP50220', readCp5022x],
+  ['CP50221', readCp5022x],
+  ['CP50222', readCp5022x],
+  ['ISO-2022-JP-MS', (bytes) => readExtendedJisEncoding(bytes, 'ms')],
+  ['ISO-2022-JP-2004', (bytes) => readExtendedJisEncoding(bytes, '2004')],
+  ['EUC-KR', (bytes) => decodeMappedPairs(bytes, false)],
+  ['CP950', (bytes) => decodeMappedPairs(bytes, true)],
+  ['EUC-TW', decodeEucTw],
+]);
+
 export function encodingValidator(name: string, utf16: Decode): ((bytes: string) => boolean) | undefined {
   if (name === 'UTF-7' || name === 'UTF7-IMAP') {
     return (bytes) => !decodeShiftedUtf16(bytes, name === 'UTF7-IMAP', utf16, true).includes(BAD);
@@ -20,25 +37,15 @@ export function encodingValidator(name: string, utf16: Decode): ((bytes: string)
   if (name === 'JIS' || name === 'ISO-2022-JP') return (bytes) => readJisEncoding(bytes, name === 'ISO-2022-JP').valid;
 }
 
-// code-gauge-allow functionNcss 36 -- Keeps the encoding dispatch and its codec-specific reader construction together.
 export function extraEncodingReader(name: string, utf8: Decode, utf16: Decode): Decode | undefined {
+  const reader = FIXED_READERS.get(name);
+  if (reader) return reader;
   if (name.startsWith('UTF-8-Mobile#')) return mobileReader(name, utf8);
   if (name.startsWith('UCS-')) {
     const size = name[4] === '2' ? 2 : 4;
     return (bytes) => decodeFixedWidth(bytes, size, name.endsWith('LE'), name.length === 5);
   }
   switch (name) {
-    case 'GB18030':
-    case 'GB18030-2022': {
-      return (bytes) => decodeGb18030(bytes, name === 'GB18030-2022', BAD);
-    }
-    case 'EUC-CN': {
-      return (bytes) => decodeEucCn(bytes, BAD);
-    }
-    case 'JIS':
-    case 'ISO-2022-JP': {
-      return (bytes) => readJisEncoding(bytes).codes;
-    }
     case 'ArmSCII-8':
     case 'CP850': {
       const offset = name === 'CP850' ? 256 : 0;
@@ -46,9 +53,6 @@ export function extraEncodingReader(name: string, utf8: Decode, utf16: Decode): 
         rt().spend(Math.ceil(bytes.length / 64));
         return Array.from(bytes, (byte) => tableCode(offset + byte.charCodeAt(0)));
       };
-    }
-    case 'EUC-TW': {
-      return decodeEucTw;
     }
     case 'SJIS':
     case 'CP932': {
@@ -67,6 +71,49 @@ export function extraEncodingReader(name: string, utf8: Decode, utf16: Decode): 
     }
   }
   return undefined;
+}
+
+function readJisCodes(bytes: string): number[] {
+  return readJisEncoding(bytes).codes;
+}
+
+function readCp5022x(bytes: string): number[] {
+  return readExtendedJisEncoding(bytes, 'cp5022x');
+}
+
+function decodeMappedPairs(bytes: string, cp950: boolean): number[] {
+  const result: number[] = [];
+  const validLead = cp950 ? (lead: number) => lead >= 0x81 && lead <= 0xfe : isEucKrLead;
+  const table = cp950 ? 'cp950' : 'eucKr';
+  const width = cp950 ? 157 : PLANE_WIDTH;
+  const firstLead = cp950 ? 0x81 : 0xa1;
+  rt().spend(Math.ceil(bytes.length / 64));
+  for (let at = 0; at < bytes.length;) {
+    const lead = bytes.charCodeAt(at++);
+    if (lead < 0x80) {
+      result.push(lead);
+      continue;
+    }
+    if (!validLead(lead) || at === bytes.length) {
+      result.push(BAD);
+      continue;
+    }
+    const trail = bytes.charCodeAt(at++);
+    const column = mappedPairColumn(trail, cp950);
+    const code = column < 0 ? TABLE_REPLACEMENT : legacyDetectionCodePoint(table, (lead - firstLead) * width + column);
+    result.push(code === TABLE_REPLACEMENT ? BAD : code);
+  }
+  return result;
+}
+
+function isEucKrLead(lead: number): boolean {
+  return (lead >= 0xa1 && lead <= 0xac) || (lead >= 0xb0 && lead <= 0xfd && lead !== 0xc9);
+}
+
+function mappedPairColumn(trail: number, cp950: boolean): number {
+  if (cp950 && trail >= 0x40 && trail <= 0x7e) return trail - 0x40;
+  if (trail >= 0xa1 && trail <= 0xfe) return trail - 0xa1 + (cp950 ? 63 : 0);
+  return -1;
 }
 
 function mobileReader(name: string, utf8: Decode): Decode {
