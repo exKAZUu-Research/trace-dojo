@@ -81,38 +81,45 @@ export class LookupBinder extends DeclarationBinder {
     if (element >= 0) return this.lookupMember(type, `Item${element + 1}`, context, arity, isInvoked);
     for (const owner of this.searchChain(type)) {
       const symbol = owner.symbol;
-      const field = symbol.fields.find((candidate) => candidate.name === name && !candidate.property);
-      const property = symbol.properties.find((candidate) => candidate.name === name && !candidate.isIndexer);
+      const member = memberNamed(symbol, name, isInvoked);
+      const isAccessibleMember = member !== undefined && this.isAccessible(member.access, symbol, context, type);
+      if (isAccessibleMember && candidates.length > 0) break;
+      if (isAccessibleMember) return { found: memberLookupOf(member, owner), inaccessible };
+      inaccessible ??= member;
       const nested = symbol.nestedTypes.find(
         (candidate) => candidate.name === name && candidate.typeParameters.length === arity
       );
-      const found = field ?? property;
-      const member = found && isInvoked && !isInvocable(found.type) ? undefined : found;
-      if (member) {
-        if (this.isAccessible(member.access, symbol, context, type)) {
-          if (candidates.length > 0) break;
-          return member instanceof FieldSymbol
-            ? { found: { kind: 'field', field: member, owner }, inaccessible }
-            : { found: { kind: 'property', property: member, owner }, inaccessible };
-        }
-        inaccessible ??= member;
-      }
       if (nested && candidates.length === 0)
         return { found: { kind: 'type', symbol: nested, outerArgs: owner.args }, inaccessible };
-      for (const method of symbol.methods) {
-        if (method.name !== name || method.kind === 'operator' || method.property) continue;
-        if (method.isOverride) continue;
-        if (!this.isAccessible(method.access, symbol, context, type)) {
-          inaccessible ??= method;
-          continue;
-        }
-        if (candidates.some((existing) => this.sameParameters(existing.method, method, existing.owner, owner)))
-          continue;
-        candidates.push({ method, owner });
-      }
+      const inaccessibleMethod = this.gatherMethods(owner, name, context, type, candidates);
+      inaccessible ??= inaccessibleMethod;
     }
     if (candidates.length > 0) return { found: { kind: 'methods', candidates }, inaccessible };
     return { found: undefined, inaccessible };
+  }
+
+  /**
+   * Adds the accessible methods of a name that one level of the search chain declares, except overrides and those whose
+   * signature a more derived level already gave; returns the first inaccessible one.
+   */
+  private gatherMethods(
+    owner: NamedType,
+    name: string,
+    context: TypeContext,
+    type: Type,
+    candidates: MethodCandidate[]
+  ): MethodSymbol | undefined {
+    let inaccessible: MethodSymbol | undefined;
+    for (const method of owner.symbol.methods) {
+      if (method.name !== name || method.kind === 'operator' || method.property || method.isOverride) continue;
+      if (!this.isAccessible(method.access, owner.symbol, context, type)) {
+        inaccessible ??= method;
+        continue;
+      }
+      if (candidates.some((existing) => this.sameParameters(existing.method, method, existing.owner, owner))) continue;
+      candidates.push({ method, owner });
+    }
+    return inaccessible;
   }
 
   /** The indexers of a type, from the most derived level that declares any. */
@@ -207,6 +214,20 @@ export class LookupBinder extends DeclarationBinder {
   protected isSpecialMethod(method: MethodSymbol): boolean {
     return method.kind !== 'method';
   }
+}
+
+/** The field or property of a name that a type declares, leaving out one that a call cannot invoke. */
+function memberNamed(symbol: TypeSymbol, name: string, isInvoked: boolean): FieldSymbol | PropertySymbol | undefined {
+  const found =
+    symbol.fields.find((candidate) => candidate.name === name && !candidate.property) ??
+    symbol.properties.find((candidate) => candidate.name === name && !candidate.isIndexer);
+  return found && isInvoked && !isInvocable(found.type) ? undefined : found;
+}
+
+function memberLookupOf(member: FieldSymbol | PropertySymbol, owner: NamedType): MemberLookup {
+  return member instanceof FieldSymbol
+    ? { kind: 'field', field: member, owner }
+    : { kind: 'property', property: member, owner };
 }
 
 /** Whether a member of the type can be called, as a delegate can. */

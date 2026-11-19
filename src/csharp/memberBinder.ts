@@ -1,4 +1,5 @@
 import type { Argument, Expression, Initializer, MemberInitializer, Position, TypeNode } from './ast';
+import type { TypeContext } from './binderBase';
 import type { BoundArgument, BoundExpression, BoundInitializerEntry, BoundLValue, BoundMemberInit } from './bound';
 import { type ArgumentInfo, CallBinder, type CallDescription, type ResolvedCall } from './callBinder';
 import type { BindContext } from './convertBinder';
@@ -131,36 +132,65 @@ export abstract class MemberBinder extends CallBinder {
     return { kind: 'this', type: fn.thisType, row: position.row };
   }
 
-  // code-gauge-allow functionNcss 80 -- Each step of C#'s simple name lookup.
   /** Binds a simple name: a local, a member of an enclosing type, a type, or a namespace. */
   bindSimpleName(name: string, typeArgs: TypeNode[] | undefined, position: Position, context: BindContext): BindResult {
-    const { scope, fn } = context;
     if (!typeArgs) {
-      const found = scope.lookup(name);
-      if (found?.isDeclaredLater) {
-        this.error(position, 'CS0841', `宣言する前にローカル変数 '${name}' を使用できません`);
-        return { kind: 'default', type: ERROR_TYPE, row: position.row };
-      }
-      if (found?.local) return this.localReference(found.local, position, context);
-      if (found?.localFunction) {
-        return {
-          kind: 'methodGroup',
-          name,
-          candidates: [{ method: found.localFunction, owner: found.localFunction.owner.declaredType }],
-          receiver: undefined,
-          isSimpleName: true,
-          typeArgs: undefined,
-          extensions: [],
-          isBaseAccess: false,
-          row: position.row,
-        };
-      }
-      const transparent = this.transparentMember(name, position, context);
-      if (transparent) return transparent;
+      const local = this.bindLocalName(name, position, context);
+      if (local) return local;
     }
-    const typeContext = fn.typeContext;
+    const typeContext = context.fn.typeContext;
     const isCallee = this.takeCallee();
     const resolvedTypeArgs = typeArgs?.map((arg) => this.resolveType(arg, typeContext));
+    const member = this.bindEnclosingMember(name, typeArgs, resolvedTypeArgs, isCallee, position, context);
+    if (member) return member;
+    const parameter = typeArgs ? undefined : typeParameterNamed(name, typeContext);
+    if (parameter) return { kind: 'typeRef', type: parameter, row: position.row };
+    const symbol = this.findTypeInScope(name, resolvedTypeArgs?.length ?? 0, typeContext);
+    if (symbol)
+      return { kind: 'typeRef', type: this.construct(position, symbol, resolvedTypeArgs ?? []), row: position.row };
+    const namespaces = this.namespacesAt([name]);
+    if (namespaces.length > 0 && !typeArgs)
+      return { kind: 'namespaceRef', path: [name], namespaces, row: position.row };
+    if (name === '_' && !typeArgs) return { kind: 'discard', row: position.row };
+    this.reportUndefinedName(name, position);
+    return { kind: 'default', type: ERROR_TYPE, row: position.row };
+  }
+
+  /** Binds a name that a local scope declares: a local, a local function, or a query's range variable. */
+  private bindLocalName(name: string, position: Position, context: BindContext): BindResult | undefined {
+    const found = context.scope.lookup(name);
+    if (found?.isDeclaredLater) {
+      this.error(position, 'CS0841', `宣言する前にローカル変数 '${name}' を使用できません`);
+      return { kind: 'default', type: ERROR_TYPE, row: position.row };
+    }
+    if (found?.local) return this.localReference(found.local, position, context);
+    if (found?.localFunction) {
+      return {
+        kind: 'methodGroup',
+        name,
+        candidates: [{ method: found.localFunction, owner: found.localFunction.owner.declaredType }],
+        receiver: undefined,
+        isSimpleName: true,
+        typeArgs: undefined,
+        extensions: [],
+        isBaseAccess: false,
+        row: position.row,
+      };
+    }
+    return this.transparentMember(name, position, context);
+  }
+
+  /** Binds a member of the enclosing types, from the innermost out, or a primary constructor's parameter. */
+  private bindEnclosingMember(
+    name: string,
+    typeArgs: TypeNode[] | undefined,
+    resolvedTypeArgs: Type[] | undefined,
+    isCallee: boolean,
+    position: Position,
+    context: BindContext
+  ): BindResult | undefined {
+    const { fn } = context;
+    const typeContext = fn.typeContext;
     for (let type = typeContext.type; type; type = type.containing) {
       const primary = !typeArgs && fn.kind !== 'initializer' ? this.primaryParameterField(type, name) : undefined;
       const lookup = this.lookupMember(
@@ -177,23 +207,7 @@ export abstract class MemberBinder extends CallBinder {
         return { kind: 'default', type: ERROR_TYPE, row: position.row };
       }
     }
-    if (!typeArgs) {
-      for (const parameter of typeContext.methodTypeParameters.toReversed())
-        if (parameter.name === name) return { kind: 'typeRef', type: parameter.type, row: position.row };
-      for (let type = typeContext.type; type; type = type.containing) {
-        const parameter = type.typeParameters.find((candidate) => candidate.name === name);
-        if (parameter) return { kind: 'typeRef', type: parameter.type, row: position.row };
-      }
-    }
-    const symbol = this.findTypeInScope(name, resolvedTypeArgs?.length ?? 0, typeContext);
-    if (symbol)
-      return { kind: 'typeRef', type: this.construct(position, symbol, resolvedTypeArgs ?? []), row: position.row };
-    const namespaces = this.namespacesAt([name]);
-    if (namespaces.length > 0 && !typeArgs)
-      return { kind: 'namespaceRef', path: [name], namespaces, row: position.row };
-    if (name === '_' && !typeArgs) return { kind: 'discard', row: position.row };
-    this.reportUndefinedName(name, position);
-    return { kind: 'default', type: ERROR_TYPE, row: position.row };
+    return undefined;
   }
 
   /**
@@ -372,7 +386,7 @@ export abstract class MemberBinder extends CallBinder {
     this.error(position, 'CS0122', `'${name}' はアクセスできない保護レベルになっています`);
   }
 
-  // code-gauge-allow functionNcss 90 -- Each kind of target of a member access.
+  // code-gauge-allow functionNcss 31 -- Each kind of target of a member access.
   /** Binds `target.name`, on a namespace, a type, or a value. */
   bindMemberAccess(node: Extract<Expression, { kind: 'memberAccess' }>, context: BindContext): BindResult {
     const position = { row: node.nameRow, column: node.column };
@@ -690,7 +704,6 @@ export abstract class MemberBinder extends CallBinder {
   /** Binds an expression as storage that an assignment or a `ref` argument writes. */
   abstract bindLValue(node: Expression, context: BindContext, use: 'assign' | 'ref' | 'out' | 'compound'): BoundLValue;
 
-  // code-gauge-allow functionNcss 60 -- Each kind of callee.
   /** Binds a call: of a method group, a delegate, or `nameof`. */
   bindInvocation(node: Extract<Expression, { kind: 'invocation' }>, context: BindContext): BoundExpression {
     if (node.target.kind === 'name' && node.target.name === 'nameof' && !context.scope.lookup('nameof'))
@@ -915,7 +928,6 @@ export abstract class MemberBinder extends CallBinder {
     };
   }
 
-  // code-gauge-allow functionNcss 60 -- Each kind of indexed value.
   /** Binds `target[args]`: an array element, or an indexer of the target's type. */
   bindElementAccess(
     target: BoundExpression,
@@ -983,7 +995,7 @@ export abstract class MemberBinder extends CallBinder {
     return accessor;
   }
 
-  // code-gauge-allow functionNcss 70 -- Each kind of created type.
+  // code-gauge-allow functionNcss 40 -- Each kind of created type.
   /** Binds `new T(args) { initializer }`. */
   bindCreation(
     type: Type,
@@ -1209,6 +1221,17 @@ export abstract class MemberBinder extends CallBinder {
   protected isSameMethodType(a: Type, b: Type): boolean {
     return sameType(a, b);
   }
+}
+
+/** The type parameter of a name that the enclosing method or types declare, from the innermost out. */
+function typeParameterNamed(name: string, typeContext: TypeContext): Type | undefined {
+  for (const parameter of typeContext.methodTypeParameters.toReversed())
+    if (parameter.name === name) return parameter.type;
+  for (let type = typeContext.type; type; type = type.containing) {
+    const parameter = type.typeParameters.find((candidate) => candidate.name === name);
+    if (parameter) return parameter.type;
+  }
+  return undefined;
 }
 
 export { LocalSymbol, PropertySymbol, FieldSymbol };

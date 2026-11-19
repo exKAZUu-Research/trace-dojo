@@ -1,5 +1,4 @@
 import type { BoundArgument, BoundExpression, BoundLValue } from './bound';
-import type { ConversionKind } from './conversions';
 import { displayMethodIn } from './declarations';
 import type { MethodCandidate } from './lookup';
 import { OperatorBinder } from './operatorBinder';
@@ -67,6 +66,19 @@ interface Bounds {
   exact: Type[];
   lower: Type[];
   upper: Type[];
+}
+
+/** The state of inferring a generic method's type arguments. */
+interface Inference {
+  parameters: TypeParameterSymbol[];
+  args: ArgumentInfo[];
+  bounds: Map<TypeParameterSymbol, Bounds>;
+  fixed: Map<TypeParameterSymbol, Type>;
+  ownerSubstitution: Map<TypeParameterSymbol, Type>;
+  /** The parameter type of each argument, with the owner's type arguments. */
+  formals: Type[];
+  /** The indices of the lambda arguments whose return types have not been inferred. */
+  pending: Set<number>;
 }
 
 /** Resolves overloads as C# does, inferring type arguments and binding target-typed arguments to their parameters. */
@@ -205,26 +217,58 @@ export abstract class CallBinder extends OperatorBinder {
     const filled = new Set<number>();
     const paramsIndex = expanded ? parameters.length - 1 : -1;
     for (const [index, arg] of args.entries()) {
-      if (arg.name !== undefined) {
-        const target = parameters.findIndex((parameter) => parameter.name === arg.name);
-        if (target === -1 || (filled.has(target) && target !== paramsIndex)) return undefined;
-        parameterOf.push(target);
-        filled.add(target);
-        continue;
-      }
-      if (
-        args
-          .slice(0, index)
-          .some((other) => other.name !== undefined && parameterOf[args.indexOf(other)] !== args.indexOf(other))
-      )
-        return undefined;
-      const target = index < parameters.length ? index : paramsIndex;
-      if (target < 0 || target >= parameters.length) return undefined;
-      if (expanded && target > paramsIndex) return undefined;
-      if (!expanded && index >= parameters.length) return undefined;
-      parameterOf.push(expanded && index >= paramsIndex ? paramsIndex : target);
-      filled.add(expanded && index >= paramsIndex ? paramsIndex : target);
+      const target =
+        arg.name === undefined
+          ? this.positionalTarget(args, index, parameterOf, parameters.length, expanded)
+          : this.namedTarget(arg.name, parameters, filled, paramsIndex);
+      if (target === undefined) return undefined;
+      parameterOf.push(target);
+      filled.add(target);
     }
+    const defaultsUsed = this.countDefaultsUsed(parameters, filled, expanded);
+    if (defaultsUsed === undefined) return undefined;
+    if (expanded && !filled.has(paramsIndex) && args.length < parameters.length - 1) return undefined;
+    return { parameterOf, defaultsUsed };
+  }
+
+  private namedTarget(
+    name: string,
+    parameters: MethodSymbol['parameters'],
+    filled: Set<number>,
+    paramsIndex: number
+  ): number | undefined {
+    const target = parameters.findIndex((parameter) => parameter.name === name);
+    if (target === -1 || (filled.has(target) && target !== paramsIndex)) return undefined;
+    return target;
+  }
+
+  /** The parameter of a positional argument, which may not follow a named argument out of its position. */
+  private positionalTarget(
+    args: ArgumentInfo[],
+    index: number,
+    parameterOf: number[],
+    parameterCount: number,
+    expanded: boolean
+  ): number | undefined {
+    if (
+      args
+        .slice(0, index)
+        .some((other) => other.name !== undefined && parameterOf[args.indexOf(other)] !== args.indexOf(other))
+    )
+      return undefined;
+    const paramsIndex = expanded ? parameterCount - 1 : -1;
+    const target = index < parameterCount ? index : paramsIndex;
+    if (target < 0) return undefined;
+    return expanded && index >= paramsIndex ? paramsIndex : target;
+  }
+
+  /** How many parameters without arguments take their default values, or undefined when one has none. */
+  private countDefaultsUsed(
+    parameters: MethodSymbol['parameters'],
+    filled: Set<number>,
+    expanded: boolean
+  ): number | undefined {
+    const paramsIndex = expanded ? parameters.length - 1 : -1;
     let defaultsUsed = 0;
     for (const [index, parameter] of parameters.entries()) {
       if (filled.has(index) || index === paramsIndex) continue;
@@ -232,8 +276,7 @@ export abstract class CallBinder extends OperatorBinder {
       if (parameter.defaultSyntax === undefined && parameter.defaultValue === undefined) return undefined;
       defaultsUsed++;
     }
-    if (expanded && !filled.has(paramsIndex) && args.length < parameters.length - 1) return undefined;
-    return { parameterOf, defaultsUsed };
+    return defaultsUsed;
   }
 
   private argumentFits(arg: ArgumentInfo, type: Type, refKind: 'ref' | 'out' | 'in' | undefined): boolean {
@@ -246,7 +289,6 @@ export abstract class CallBinder extends OperatorBinder {
     return this.implicitConversionOf(arg.expression, type) !== undefined;
   }
 
-  // code-gauge-allow functionNcss 60 -- Each step of C#'s two-phase type inference.
   /** Infers a generic method's type arguments from its arguments in C#'s two phases. */
   protected inferTypeArguments(
     candidate: MethodCandidate,
@@ -256,28 +298,42 @@ export abstract class CallBinder extends OperatorBinder {
   ): Type[] | undefined {
     const { method } = candidate;
     const parameters = method.typeParameters;
-    const bounds = new Map<TypeParameterSymbol, Bounds>(
-      parameters.map((parameter) => [parameter, { exact: [], lower: [], upper: [] }])
-    );
-    const fixed = new Map<TypeParameterSymbol, Type>();
     const ownerSubstitution = substitutionOf(candidate.owner);
-    const formals = args.map((_arg, index) => {
-      const parameter = method.parameters[parameterOf[index]];
-      const type = substitute(parameter.type, ownerSubstitution);
-      return expanded && parameter.isParams && type.kind === 'array' ? type.element : type;
-    });
-    const pending = new Set<number>();
-    for (const [index, arg] of args.entries()) {
-      const formal = formals[index];
+    const inference: Inference = {
+      parameters,
+      args,
+      bounds: new Map(parameters.map((parameter) => [parameter, { exact: [], lower: [], upper: [] }])),
+      fixed: new Map(),
+      ownerSubstitution,
+      formals: args.map((_arg, index) => {
+        const parameter = method.parameters[parameterOf[index]];
+        const type = substitute(parameter.type, ownerSubstitution);
+        return expanded && parameter.isParams && type.kind === 'array' ? type.element : type;
+      }),
+      pending: new Set(),
+    };
+    this.inferFromArguments(inference, method, parameterOf);
+    for (let round = 0; round <= parameters.length + args.length; round++) {
+      this.inferLambdaReturnTypes(inference);
+      const unfixed = parameters.filter((parameter) => !inference.fixed.has(parameter));
+      if (unfixed.length === 0) break;
+      const progress = this.fixBoundedParameters(inference, unfixed);
+      if (progress === 'failed') return undefined;
+      if (!progress && inference.pending.size === 0) break;
+      if (!progress && this.lambdasAwaitUnfixed(inference)) break;
+    }
+    if (parameters.some((parameter) => !inference.fixed.has(parameter))) return undefined;
+    return parameters.map((parameter) => inference.fixed.get(parameter) as Type);
+  }
+
+  /** The first phase: bounds from the arguments with types, and from the explicit parameter types of lambdas. */
+  private inferFromArguments(inference: Inference, method: MethodSymbol, parameterOf: number[]): void {
+    const { bounds } = inference;
+    for (const [index, arg] of inference.args.entries()) {
+      const formal = inference.formals[index];
       if (arg.expression.kind === 'unbound') {
-        pending.add(index);
-        const explicit = this.lambdaParameterTypes(arg.expression);
-        const invoke = this.delegateInvokeOf(formal);
-        if (explicit && invoke) {
-          for (const [position, parameterType] of invoke.parameterTypes.entries()) {
-            if (explicit[position]) this.exactInference(explicit[position], parameterType, bounds);
-          }
-        }
+        inference.pending.add(index);
+        this.inferFromLambdaParameters(arg.expression, formal, bounds);
         continue;
       }
       if (arg.isOutVar || arg.expression.type.kind === 'null') continue;
@@ -285,68 +341,82 @@ export abstract class CallBinder extends OperatorBinder {
       if (refKind === 'ref' || refKind === 'out') this.exactInference(arg.expression.type, formal, bounds);
       else this.lowerBoundInference(arg.expression.type, formal, bounds);
     }
-    const currentSubstitution = (): Map<TypeParameterSymbol, Type> => new Map([...ownerSubstitution, ...fixed]);
-    for (let round = 0; round <= parameters.length + args.length; round++) {
-      // Output type inference for lambdas whose parameter types are now known.
-      for (const index of pending) {
-        const invoke = this.delegateInvokeOf(formals[index]);
-        if (!invoke) {
-          pending.delete(index);
-          continue;
-        }
-        const substitution = currentSubstitution();
-        const inputs = invoke.parameterTypes.map((type) => substitute(type, substitution));
-        if (inputs.some((type) => this.mentionsUnfixed(type, parameters, fixed))) continue;
-        pending.delete(index);
-        const returnType = this.inferReturnType(
-          args[index].expression as Extract<BoundExpression, { kind: 'unbound' }>,
-          inputs
-        );
-        if (returnType && returnType.kind !== 'void')
-          this.lowerBoundInference(returnType, substitute(invoke.returnType, substitution), bounds);
-      }
-      const unfixed = parameters.filter((parameter) => !fixed.has(parameter));
-      if (unfixed.length === 0) break;
-      const dependsOnPending = (parameter: TypeParameterSymbol): boolean =>
-        [...pending].some((index) => {
-          const invoke = this.delegateInvokeOf(formals[index]);
-          return invoke?.parameterTypes.some((type) => this.mentions(type, parameter)) === true;
-        });
-      let progress = false;
-      for (const parameter of unfixed) {
-        const parameterBounds = bounds.get(parameter) as Bounds;
-        if (parameterBounds.exact.length + parameterBounds.lower.length + parameterBounds.upper.length === 0) continue;
-        if (
-          dependsOnPending(parameter) &&
-          pending.size > 0 &&
-          unfixed.some(
-            (other) => other !== parameter && !dependsOnPending(other) && (bounds.get(other) as Bounds).lower.length > 0
-          )
-        )
-          continue;
-        const chosen = this.fix(parameterBounds);
-        if (!chosen) return undefined;
-        fixed.set(parameter, chosen);
-        progress = true;
-      }
-      if (!progress && pending.size === 0) break;
-      // Lambdas whose inputs still mention unfixed parameters cannot contribute; inference fails.
-      if (
-        !progress &&
-        [...pending].every((index) => {
-          const invoke = this.delegateInvokeOf(formals[index]);
-          const substitution = currentSubstitution();
-          return (
-            invoke?.parameterTypes.some((type) =>
-              this.mentionsUnfixed(substitute(type, substitution), parameters, fixed)
-            ) === true
-          );
-        })
-      )
-        break;
+  }
+
+  private inferFromLambdaParameters(
+    expression: Extract<BoundExpression, { kind: 'unbound' }>,
+    formal: Type,
+    bounds: Map<TypeParameterSymbol, Bounds>
+  ): void {
+    const explicit = this.lambdaParameterTypes(expression);
+    const invoke = this.delegateInvokeOf(formal);
+    if (!explicit || !invoke) return;
+    for (const [position, parameterType] of invoke.parameterTypes.entries()) {
+      if (explicit[position]) this.exactInference(explicit[position], parameterType, bounds);
     }
-    if (parameters.some((parameter) => !fixed.has(parameter))) return undefined;
-    return parameters.map((parameter) => fixed.get(parameter) as Type);
+  }
+
+  /** Output type inference for lambdas whose parameter types are now known. */
+  private inferLambdaReturnTypes(inference: Inference): void {
+    const { pending } = inference;
+    for (const index of pending) {
+      const invoke = this.delegateInvokeOf(inference.formals[index]);
+      if (!invoke) {
+        pending.delete(index);
+        continue;
+      }
+      const substitution = currentSubstitution(inference);
+      const inputs = invoke.parameterTypes.map((type) => substitute(type, substitution));
+      if (inputs.some((type) => this.mentionsUnfixed(type, inference.parameters, inference.fixed))) continue;
+      pending.delete(index);
+      const returnType = this.inferReturnType(
+        inference.args[index].expression as Extract<BoundExpression, { kind: 'unbound' }>,
+        inputs
+      );
+      if (returnType && returnType.kind !== 'void')
+        this.lowerBoundInference(returnType, substitute(invoke.returnType, substitution), inference.bounds);
+    }
+  }
+
+  /** Fixes the unfixed parameters that have bounds, telling whether any was fixed. */
+  private fixBoundedParameters(inference: Inference, unfixed: TypeParameterSymbol[]): boolean | 'failed' {
+    const { bounds, pending } = inference;
+    const dependsOnPending = (parameter: TypeParameterSymbol): boolean =>
+      [...pending].some((index) => {
+        const invoke = this.delegateInvokeOf(inference.formals[index]);
+        return invoke?.parameterTypes.some((type) => this.mentions(type, parameter)) === true;
+      });
+    let progress = false;
+    for (const parameter of unfixed) {
+      const parameterBounds = bounds.get(parameter) as Bounds;
+      if (parameterBounds.exact.length + parameterBounds.lower.length + parameterBounds.upper.length === 0) continue;
+      if (
+        dependsOnPending(parameter) &&
+        pending.size > 0 &&
+        unfixed.some(
+          (other) => other !== parameter && !dependsOnPending(other) && (bounds.get(other) as Bounds).lower.length > 0
+        )
+      )
+        continue;
+      const chosen = this.fix(parameterBounds);
+      if (!chosen) return 'failed';
+      inference.fixed.set(parameter, chosen);
+      progress = true;
+    }
+    return progress;
+  }
+
+  /** Whether every pending lambda's inputs still mention unfixed parameters, so none can contribute. */
+  private lambdasAwaitUnfixed(inference: Inference): boolean {
+    return [...inference.pending].every((index) => {
+      const invoke = this.delegateInvokeOf(inference.formals[index]);
+      const substitution = currentSubstitution(inference);
+      return (
+        invoke?.parameterTypes.some((type) =>
+          this.mentionsUnfixed(substitute(type, substitution), inference.parameters, inference.fixed)
+        ) === true
+      );
+    });
   }
 
   private mentions(type: Type, parameter: TypeParameterSymbol): boolean {
@@ -473,7 +543,6 @@ export abstract class CallBinder extends OperatorBinder {
     return best.length === 1 ? best[0] : undefined;
   }
 
-  // code-gauge-allow functionNcss 40 -- The tie-breaking rules of C#'s better function member.
   /** Whether a candidate is a better function member than another for the arguments. */
   private isBetter(a: Applicable, b: Applicable, args: ArgumentInfo[]): boolean {
     let isBetterSomewhere = false;
@@ -532,44 +601,40 @@ export abstract class CallBinder extends OperatorBinder {
   protected compareConversions(arg: ArgumentInfo, a: Type, b: Type): number {
     if (sameType(a, b)) return 0;
     const expression = arg.expression;
-    if (expression.kind !== 'unbound' && !arg.isOutVar) {
+    if (expression.kind === 'unbound')
+      return this.compareLambdaConversions(expression, a, b) ?? this.betterTarget(a, b);
+    if (!arg.isOutVar) {
       const aExact = sameType(expression.type, a);
       const bExact = sameType(expression.type, b);
       if (aExact && !bExact) return 1;
       if (bExact && !aExact) return -1;
     }
-    if (expression.kind === 'unbound') {
-      const aInvoke = this.delegateInvokeOf(a);
-      const bInvoke = this.delegateInvokeOf(b);
-      if (
-        aInvoke &&
-        bInvoke &&
-        aInvoke.parameterTypes.length === bInvoke.parameterTypes.length &&
-        aInvoke.parameterTypes.every((type, index) => sameType(type, bInvoke.parameterTypes[index]))
-      ) {
-        const inferred = this.inferReturnType(expression, aInvoke.parameterTypes);
-        if (
-          aInvoke.returnType.kind !== 'void' &&
-          bInvoke.returnType.kind === 'void' &&
-          inferred &&
-          inferred.kind !== 'void'
-        )
-          return 1;
-        if (
-          bInvoke.returnType.kind !== 'void' &&
-          aInvoke.returnType.kind === 'void' &&
-          inferred &&
-          inferred.kind !== 'void'
-        )
-          return -1;
-        if (inferred) {
-          if (sameType(inferred, aInvoke.returnType) && !sameType(inferred, bInvoke.returnType)) return 1;
-          if (sameType(inferred, bInvoke.returnType) && !sameType(inferred, aInvoke.returnType)) return -1;
-          return this.betterTarget(aInvoke.returnType, bInvoke.returnType);
-        }
-      }
-    }
     return this.betterTarget(a, b);
+  }
+
+  /** Compares a lambda's conversions to delegate types of the same parameter types by its inferred return type. */
+  private compareLambdaConversions(
+    expression: Extract<BoundExpression, { kind: 'unbound' }>,
+    a: Type,
+    b: Type
+  ): number | undefined {
+    const aInvoke = this.delegateInvokeOf(a);
+    const bInvoke = this.delegateInvokeOf(b);
+    if (
+      !aInvoke ||
+      !bInvoke ||
+      aInvoke.parameterTypes.length !== bInvoke.parameterTypes.length ||
+      !aInvoke.parameterTypes.every((type, index) => sameType(type, bInvoke.parameterTypes[index]))
+    )
+      return undefined;
+    const inferred = this.inferReturnType(expression, aInvoke.parameterTypes);
+    if (!inferred) return undefined;
+    const aReturns = aInvoke.returnType.kind !== 'void';
+    const bReturns = bInvoke.returnType.kind !== 'void';
+    if (inferred.kind !== 'void' && aReturns !== bReturns) return aReturns ? 1 : -1;
+    if (sameType(inferred, aInvoke.returnType) && !sameType(inferred, bInvoke.returnType)) return 1;
+    if (sameType(inferred, bInvoke.returnType) && !sameType(inferred, aInvoke.returnType)) return -1;
+    return this.betterTarget(aInvoke.returnType, bInvoke.returnType);
   }
 
   /** Whether one type is a better conversion target than another: 1 for the first, -1 for the second. */
@@ -737,7 +802,7 @@ export abstract class CallBinder extends OperatorBinder {
     row: number
   ): BoundExpression;
 
-  // code-gauge-allow functionNcss 50 -- Roslyn reports a different error for each way a call fails.
+  // code-gauge-allow functionCognitiveComplexity 16 -- Roslyn reports a different error for each way a call fails.
   private reportInapplicable(
     candidates: MethodCandidate[],
     args: ArgumentInfo[],
@@ -745,128 +810,33 @@ export abstract class CallBinder extends OperatorBinder {
     row: number,
     description: CallDescription
   ): void {
-    const visibleCount = description.isExtension ? args.length - 1 : args.length;
     const byArity = candidates.filter(
       (candidate) =>
         this.mapArguments(candidate.method, args, false) !== undefined ||
         (candidate.method.parameters.at(-1)?.isParams && this.mapArguments(candidate.method, args, true))
     );
     if (byArity.length === 0) {
-      const named = args.find(
-        (arg) =>
-          arg.name !== undefined &&
-          candidates.length === 1 &&
-          !candidates[0].method.parameters.some((parameter) => parameter.name === arg.name)
-      );
-      if (named && candidates.length === 1) {
-        this.error(
-          named.row,
-          'CS1739',
-          `'${description.name}' に最も適しているオーバーロードには '${named.name}' という名前のパラメーターがありません`
-        );
-        return;
-      }
-      if (candidates.length === 1 && args.length < candidates[0].method.parameters.length) {
-        const method = candidates[0].method;
-        const missing =
-          method.parameters.find(
-            (parameter, index) => index >= args.length && parameter.defaultSyntax === undefined && !parameter.isParams
-          ) ?? method.parameters[args.length];
-        this.error(
-          row,
-          'CS7036',
-          `'${displayMethodIn(method, candidates[0].owner)}' の必要なパラメーター '${missing.name}' に対応する特定の引数がありません`
-        );
-        return;
-      }
-      if (description.kind === 'constructor') {
-        this.error(
-          row,
-          'CS1729',
-          `'${description.typeName}' には、引数 ${visibleCount} を指定するコンストラクターは含まれていません`
-        );
-      } else if (description.kind === 'delegate') {
-        this.error(row, 'CS1593', `デリゲート '${description.name}' には引数 ${visibleCount} を指定できません`);
-      } else if (description.kind === 'indexer') {
-        this.error(row, 'CS1501', `引数 ${visibleCount} を指定するメソッド 'this' のオーバーロードはありません`);
-      } else {
-        this.error(
-          row,
-          'CS1501',
-          `引数 ${visibleCount} を指定するメソッド '${description.name}' のオーバーロードはありません`
-        );
-      }
+      this.reportArityMismatch(candidates, args, row, description);
       return;
     }
     const candidate = byArity[0];
     const { method } = candidate;
-    if (method.typeParameters.length > 0 && !explicitTypeArgs) {
-      const mapping = this.mapArguments(method, args, false) ?? this.mapArguments(method, args, true);
-      if (
-        mapping &&
-        !this.inferTypeArguments(candidate, args, mapping.parameterOf, !this.mapArguments(method, args, false))
-      ) {
-        this.error(
-          row,
-          'CS0411',
-          `メソッド '${displayMethodIn(method, candidate.owner)}' の型引数を使い方から推論することはできません。型引数を明示的に指定してください。`
-        );
-        return;
-      }
-    }
+    if (this.reportUninferable(candidate, args, explicitTypeArgs, row)) return;
     const expanded = !this.mapArguments(method, args, false);
     const mapping = this.mapArguments(method, args, expanded);
     if (!mapping) return;
     const typeArgs =
-      method.typeParameters.length > 0
-        ? (explicitTypeArgs ?? this.inferTypeArguments(candidate, args, mapping.parameterOf, expanded) ?? [])
-        : [];
+      method.typeParameters.length === 0
+        ? []
+        : this.reportedTypeArguments(candidate, args, explicitTypeArgs, mapping.parameterOf, expanded);
     const substitution = this.callSubstitution(candidate, typeArgs);
     for (const [index, arg] of args.entries()) {
       const parameter = method.parameters[mapping.parameterOf[index]];
       const type = this.parameterType(method, mapping.parameterOf[index], expanded, substitution);
       const position = description.isExtension ? index : index + 1;
-      if (
-        parameter.refKind !== arg.refKind &&
-        (parameter.refKind === 'ref' || parameter.refKind === 'out' || arg.refKind === 'ref' || arg.refKind === 'out')
-      ) {
-        if (arg.refKind === undefined)
-          this.error(
-            arg.row,
-            'CS1620',
-            `引数 ${position} はキーワード '${parameter.refKind}' と共に渡す必要があります`
-          );
-        else if (parameter.refKind === undefined)
-          this.error(arg.row, 'CS1615', `引数 ${position} はキーワード '${arg.refKind}' と共に渡すことはできません`);
-        else
-          this.error(
-            arg.row,
-            'CS1620',
-            `引数 ${position} はキーワード '${parameter.refKind}' と共に渡す必要があります`
-          );
-        return;
-      }
+      if (this.reportRefKindMismatch(arg, parameter, position)) return;
       if (!this.argumentFits(arg, type, parameter.refKind)) {
-        if (arg.expression.kind === 'unbound') {
-          // Converting reports why the lambda or method group does not fit, as Roslyn reports the body's errors.
-          this.convert(arg.expression, type, arg.row);
-          return;
-        }
-        if (description.isExtension && index === 0) {
-          this.error(
-            row,
-            'CS1929',
-            `'${displayType(arg.expression.type)}' に '${description.name}' の定義が含まれておらず、最も適している拡張メソッド オーバーロード '${displayMethodIn(method, candidate.owner)}' には '${displayType(type)}' 型のレシーバーが必要です`
-          );
-          return;
-        }
-        const conversion: ConversionKind | undefined = this.conversions.explicit(arg.expression.type, type);
-        void conversion;
-        this.error(
-          arg.row,
-          'CS1503',
-          `引数 ${position}: は '${displayType(arg.expression.type)}' から '${displayType(type)}' へ変換することはできません`
-        );
+        this.reportInconvertible(candidate, arg, position, type, row, description);
         return;
       }
     }
@@ -875,4 +845,140 @@ export abstract class CallBinder extends OperatorBinder {
         return;
     }
   }
+
+  /** The type arguments that an inapplicable generic candidate's arguments are checked against. */
+  private reportedTypeArguments(
+    candidate: MethodCandidate,
+    args: ArgumentInfo[],
+    explicitTypeArgs: Type[] | undefined,
+    parameterOf: number[],
+    expanded: boolean
+  ): Type[] {
+    return explicitTypeArgs ?? this.inferTypeArguments(candidate, args, parameterOf, expanded) ?? [];
+  }
+
+  /** Reports a call that no candidate takes the number or the names of its arguments for. */
+  private reportArityMismatch(
+    candidates: MethodCandidate[],
+    args: ArgumentInfo[],
+    row: number,
+    description: CallDescription
+  ): void {
+    const named = args.find(
+      (arg) =>
+        arg.name !== undefined &&
+        candidates.length === 1 &&
+        !candidates[0].method.parameters.some((parameter) => parameter.name === arg.name)
+    );
+    if (named && candidates.length === 1) {
+      this.error(
+        named.row,
+        'CS1739',
+        `'${description.name}' に最も適しているオーバーロードには '${named.name}' という名前のパラメーターがありません`
+      );
+      return;
+    }
+    if (candidates.length === 1 && args.length < candidates[0].method.parameters.length) {
+      const method = candidates[0].method;
+      const missing =
+        method.parameters.find(
+          (parameter, index) => index >= args.length && parameter.defaultSyntax === undefined && !parameter.isParams
+        ) ?? method.parameters[args.length];
+      this.error(
+        row,
+        'CS7036',
+        `'${displayMethodIn(method, candidates[0].owner)}' の必要なパラメーター '${missing.name}' に対応する特定の引数がありません`
+      );
+      return;
+    }
+    const visibleCount = description.isExtension ? args.length - 1 : args.length;
+    if (description.kind === 'constructor') {
+      this.error(
+        row,
+        'CS1729',
+        `'${description.typeName}' には、引数 ${visibleCount} を指定するコンストラクターは含まれていません`
+      );
+    } else if (description.kind === 'delegate') {
+      this.error(row, 'CS1593', `デリゲート '${description.name}' には引数 ${visibleCount} を指定できません`);
+    } else if (description.kind === 'indexer') {
+      this.error(row, 'CS1501', `引数 ${visibleCount} を指定するメソッド 'this' のオーバーロードはありません`);
+    } else {
+      this.error(
+        row,
+        'CS1501',
+        `引数 ${visibleCount} を指定するメソッド '${description.name}' のオーバーロードはありません`
+      );
+    }
+  }
+
+  /** Reports a generic candidate whose type arguments cannot be inferred, telling whether it did. */
+  private reportUninferable(
+    candidate: MethodCandidate,
+    args: ArgumentInfo[],
+    explicitTypeArgs: Type[] | undefined,
+    row: number
+  ): boolean {
+    const { method } = candidate;
+    if (method.typeParameters.length === 0 || explicitTypeArgs) return false;
+    const mapping = this.mapArguments(method, args, false) ?? this.mapArguments(method, args, true);
+    if (
+      !mapping ||
+      this.inferTypeArguments(candidate, args, mapping.parameterOf, !this.mapArguments(method, args, false))
+    )
+      return false;
+    this.error(
+      row,
+      'CS0411',
+      `メソッド '${displayMethodIn(method, candidate.owner)}' の型引数を使い方から推論することはできません。型引数を明示的に指定してください。`
+    );
+    return true;
+  }
+
+  /** Reports an argument passed with `ref` or `out` unlike its parameter, telling whether it did. */
+  private reportRefKindMismatch(
+    arg: ArgumentInfo,
+    parameter: MethodSymbol['parameters'][number],
+    position: number
+  ): boolean {
+    if (
+      parameter.refKind === arg.refKind ||
+      (parameter.refKind !== 'ref' && parameter.refKind !== 'out' && arg.refKind !== 'ref' && arg.refKind !== 'out')
+    )
+      return false;
+    if (parameter.refKind === undefined)
+      this.error(arg.row, 'CS1615', `引数 ${position} はキーワード '${arg.refKind}' と共に渡すことはできません`);
+    else this.error(arg.row, 'CS1620', `引数 ${position} はキーワード '${parameter.refKind}' と共に渡す必要があります`);
+    return true;
+  }
+
+  /** Reports an argument that does not convert to its parameter's type. */
+  private reportInconvertible(
+    candidate: MethodCandidate,
+    arg: ArgumentInfo,
+    position: number,
+    type: Type,
+    row: number,
+    description: CallDescription
+  ): void {
+    if (arg.expression.kind === 'unbound') {
+      // Converting reports why the lambda or method group does not fit, as Roslyn reports the body's errors.
+      this.convert(arg.expression, type, arg.row);
+    } else if (description.isExtension && position === 0) {
+      this.error(
+        row,
+        'CS1929',
+        `'${displayType(arg.expression.type)}' に '${description.name}' の定義が含まれておらず、最も適している拡張メソッド オーバーロード '${displayMethodIn(candidate.method, candidate.owner)}' には '${displayType(type)}' 型のレシーバーが必要です`
+      );
+    } else {
+      this.error(
+        arg.row,
+        'CS1503',
+        `引数 ${position}: は '${displayType(arg.expression.type)}' から '${displayType(type)}' へ変換することはできません`
+      );
+    }
+  }
+}
+
+function currentSubstitution(inference: Inference): Map<TypeParameterSymbol, Type> {
+  return new Map([...inference.ownerSubstitution, ...inference.fixed]);
 }

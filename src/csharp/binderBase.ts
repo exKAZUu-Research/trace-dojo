@@ -247,14 +247,7 @@ export class BinderBase {
   resolveType(node: TypeNode, context: TypeContext): Type {
     switch (node.kind) {
       case 'predefinedType': {
-        const special = KEYWORD_TYPES[node.name];
-        if (special === 'void') return VOID_TYPE;
-        if (!special) {
-          if (node.name === 'nint' || node.name === 'nuint') this.unsupported(node, `\`${node.name}\` 型`);
-          if (node.name === 'dynamic') this.unsupported(node, '`dynamic`');
-          return ERROR_TYPE;
-        }
-        return this.specialType(special);
+        return this.resolvePredefinedType(node);
       }
       case 'varType': {
         // `var` outside a declaration of a local names a type called `var`, which no program declares.
@@ -270,23 +263,10 @@ export class BinderBase {
         return this.resolveQualifiedType(node, context);
       }
       case 'arrayType': {
-        const element = this.resolveType(node.element, context);
-        if (element.kind === 'void') {
-          this.error(node, 'CS1547', "キーワード 'void' はこのコンテキストでは使用できません");
-          return ERROR_TYPE;
-        }
-        if (element.kind === 'named' && element.symbol.isStatic) {
-          this.error(node, 'CS0719', `'${displayType(element)}': 配列要素をスタティック型にすることはできません`);
-        }
-        return arrayType(element, node.rank);
+        return this.resolveArrayType(node, context);
       }
       case 'nullableType': {
-        const inner = this.resolveType(node.inner, context);
-        if (inner.kind === 'named' && inner.symbol.isValueType && inner.symbol.special !== 'nullable')
-          return this.nullableOf(inner);
-        if (inner.kind === 'typeParameter' && inner.symbol.hasValueConstraint) return this.nullableOf(inner);
-        // A nullable reference type is the type itself to the runtime; nullability only produces warnings.
-        return inner;
+        return this.resolveNullableType(node, context);
       }
       case 'tupleType': {
         if (node.elements.length < 2) {
@@ -299,6 +279,36 @@ export class BinderBase {
         );
       }
     }
+  }
+
+  private resolvePredefinedType(node: Extract<TypeNode, { kind: 'predefinedType' }>): Type {
+    const special = KEYWORD_TYPES[node.name];
+    if (special === 'void') return VOID_TYPE;
+    if (special) return this.specialType(special);
+    if (node.name === 'nint' || node.name === 'nuint') this.unsupported(node, `\`${node.name}\` 型`);
+    if (node.name === 'dynamic') this.unsupported(node, '`dynamic`');
+    return ERROR_TYPE;
+  }
+
+  private resolveArrayType(node: Extract<TypeNode, { kind: 'arrayType' }>, context: TypeContext): Type {
+    const element = this.resolveType(node.element, context);
+    if (element.kind === 'void') {
+      this.error(node, 'CS1547', "キーワード 'void' はこのコンテキストでは使用できません");
+      return ERROR_TYPE;
+    }
+    if (element.kind === 'named' && element.symbol.isStatic) {
+      this.error(node, 'CS0719', `'${displayType(element)}': 配列要素をスタティック型にすることはできません`);
+    }
+    return arrayType(element, node.rank);
+  }
+
+  private resolveNullableType(node: Extract<TypeNode, { kind: 'nullableType' }>, context: TypeContext): Type {
+    const inner = this.resolveType(node.inner, context);
+    if (inner.kind === 'named' && inner.symbol.isValueType && inner.symbol.special !== 'nullable')
+      return this.nullableOf(inner);
+    if (inner.kind === 'typeParameter' && inner.symbol.hasValueConstraint) return this.nullableOf(inner);
+    // A nullable reference type is the type itself to the runtime; nullability only produces warnings.
+    return inner;
   }
 
   private resolveQualifiedType(node: Extract<TypeNode, { kind: 'qualifiedType' }>, context: TypeContext): Type {

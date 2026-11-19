@@ -243,32 +243,29 @@ export class Compiler extends StatementBinder {
       return;
     }
     for (const field of symbol.fields) if (field.isConst) this.constantValueOf(field);
-    for (const method of [...symbol.methods, ...symbol.constructors]) {
-      for (const parameter of method.parameters)
-        if (parameter.defaultSyntax) this.bindParameterDefault(parameter, parameter.type);
-    }
-    for (const property of symbol.properties) {
-      for (const parameter of property.parameters)
-        if (parameter.defaultSyntax) this.bindParameterDefault(parameter, parameter.type);
-    }
+    const parameters = [...symbol.methods, ...symbol.constructors, ...symbol.properties].flatMap(
+      (owner) => owner.parameters
+    );
+    for (const parameter of parameters)
+      if (parameter.defaultSyntax) this.bindParameterDefault(parameter, parameter.type);
     symbol.instanceInitializer = this.bindFieldInitializers(symbol, context, false);
     symbol.staticInitializer = this.bindFieldInitializers(symbol, context, true);
-    for (const method of symbol.methods) {
-      const declaration = method.declaration;
-      if (method.native || !declaration || method.kind === 'delegateInvoke') continue;
-      const body = (declaration as MethodDeclaration).body;
-      if (body === undefined) continue;
-      this.bindMethod(method, this.methodContexts.get(method) ?? context, body, declaration as MethodDeclaration);
-    }
-    for (const property of symbol.properties) {
-      for (const accessor of [property.getter, property.setter]) {
-        if (!accessor?.declaration) continue;
-        const body = (accessor.declaration as unknown as { body: MethodDeclaration['body'] }).body;
-        this.bindMethod(accessor, context, body, undefined);
-      }
+    for (const method of symbol.methods) this.bindDeclaredMethod(method, context);
+    for (const accessor of symbol.properties.flatMap((property) => [property.getter, property.setter])) {
+      if (!accessor?.declaration) continue;
+      const body = (accessor.declaration as unknown as { body: MethodDeclaration['body'] }).body;
+      this.bindMethod(accessor, context, body, undefined);
     }
     for (const constructor of symbol.constructors) this.bindConstructor(constructor, type);
     if (symbol.staticConstructor) this.bindConstructor(symbol.staticConstructor, type);
+  }
+
+  private bindDeclaredMethod(method: MethodSymbol, context: TypeContext): void {
+    const declaration = method.declaration;
+    if (method.native || !declaration || method.kind === 'delegateInvoke') return;
+    const body = (declaration as MethodDeclaration).body;
+    if (body === undefined) return;
+    this.bindMethod(method, this.methodContexts.get(method) ?? context, body, declaration as MethodDeclaration);
   }
 
   /** Binds the initializers of a type's fields, which run as one block before a constructor's body. */

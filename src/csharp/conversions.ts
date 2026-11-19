@@ -117,36 +117,49 @@ export class Conversions {
 
   /** The implicit conversion from one type to another, if any, not counting conversions of constants. */
   implicit(from: Type, to: Type): ConversionKind | undefined {
-    if (to.kind === 'error' || from.kind === 'error') return 'identity';
-    if (sameType(from, to)) return 'identity';
+    if (to.kind === 'error' || from.kind === 'error' || sameType(from, to)) return 'identity';
     if (from.kind === 'null') return acceptsNullType(to) ? 'nullLiteral' : undefined;
-    const fromSpecial = specialOf(from);
-    const toSpecial = specialOf(to);
-    if (fromSpecial && toSpecial && implicitNumeric(fromSpecial, toSpecial)) return 'numeric';
+    if (isImplicitNumeric(from, to)) return 'numeric';
     const toUnderlying = nullableUnderlying(to);
     if (toUnderlying) {
-      const fromUnderlying = nullableUnderlying(from);
-      if (fromUnderlying) {
-        const inner = this.implicit(fromUnderlying, toUnderlying);
-        return inner === 'identity' || inner === 'numeric' ? 'nullableLifted' : undefined;
-      }
-      const inner = this.implicit(from, toUnderlying);
-      if (inner === 'identity') return 'nullableWrap';
-      if (inner === 'numeric') return 'nullableLifted';
+      const conversion = this.implicitToNullable(from, toUnderlying);
+      if (conversion) return conversion;
     }
-    if (
-      from.kind === 'named' &&
-      to.kind === 'named' &&
-      specialOf(from) === 'valueTuple' &&
-      specialOf(to) === 'valueTuple'
-    ) {
-      if (
-        from.args.length === to.args.length &&
-        from.args.every((arg, index) => this.implicit(arg, to.args[index]) !== undefined)
-      )
-        return 'tuple';
+    if (isValueTuple(from) && isValueTuple(to))
+      return elementsConvert(from, to, (a, b) => this.implicit(a, b)) ? 'tuple' : undefined;
+    return this.implicitReferenceOrBoxing(from, to);
+  }
+
+  private implicitToNullable(from: Type, toUnderlying: Type): ConversionKind | undefined {
+    const fromUnderlying = nullableUnderlying(from);
+    const inner = this.implicit(fromUnderlying ?? from, toUnderlying);
+    if (fromUnderlying) return inner === 'identity' || inner === 'numeric' ? 'nullableLifted' : undefined;
+    if (inner === 'identity') return 'nullableWrap';
+    if (inner === 'numeric') return 'nullableLifted';
+    return undefined;
+  }
+
+  /** The explicit conversion from one type to another that a cast performs, which includes the implicit ones. */
+  explicit(from: Type, to: Type): ConversionKind | undefined {
+    const implicit = this.implicit(from, to);
+    if (implicit) return implicit;
+    const numeric = explicitNumeric(from, to);
+    if (numeric) return numeric;
+    const fromUnderlying = nullableUnderlying(from);
+    const toUnderlying = nullableUnderlying(to);
+    if (toUnderlying) {
+      const inner = this.explicit(fromUnderlying ?? from, toUnderlying);
+      if (keepsValue(inner)) return 'nullableLifted';
+      if (inner === 'unboxing' && !fromUnderlying) return 'unboxing';
       return undefined;
     }
+    if (fromUnderlying) return keepsValue(this.explicit(fromUnderlying, to)) ? 'nullableUnwrap' : undefined;
+    if (isValueTuple(from) && isValueTuple(to))
+      return elementsConvert(from, to, (a, b) => this.explicit(a, b)) ? 'tuple' : undefined;
+    return this.explicitUnboxingOrReference(from, to);
+  }
+
+  private implicitReferenceOrBoxing(from: Type, to: Type): ConversionKind | undefined {
     if (from.kind === 'typeParameter') return this.fromTypeParameter(from.symbol, to);
     if (to.kind === 'typeParameter') return undefined;
     if (isReferenceType(from) || from.kind === 'array') {
@@ -156,57 +169,21 @@ export class Conversions {
     return undefined;
   }
 
-  /** The explicit conversion from one type to another that a cast performs, which includes the implicit ones. */
-  explicit(from: Type, to: Type): ConversionKind | undefined {
-    const implicit = this.implicit(from, to);
-    if (implicit) return implicit;
-    const fromSpecial = specialOf(from);
-    const toSpecial = specialOf(to);
-    const fromNumeric = isNumeric(from) || isEnum(from);
-    const toNumeric = isNumeric(to) || isEnum(to);
-    if (fromNumeric && toNumeric && fromSpecial !== undefined && toSpecial !== undefined)
-      return isEnum(from) || isEnum(to) ? 'enumNumeric' : 'numeric';
-    if (fromNumeric && toNumeric) return 'enumNumeric';
-    const fromUnderlying = nullableUnderlying(from);
-    const toUnderlying = nullableUnderlying(to);
-    if (fromUnderlying && !toUnderlying) {
-      const inner = this.explicit(fromUnderlying, to);
-      return inner === 'identity' || inner === 'numeric' || inner === 'enumNumeric' ? 'nullableUnwrap' : undefined;
-    }
-    if (toUnderlying) {
-      const inner = this.explicit(fromUnderlying ?? from, toUnderlying);
-      if (inner === 'identity' || inner === 'numeric' || inner === 'enumNumeric') return 'nullableLifted';
-      if (inner === 'unboxing' && !fromUnderlying) return 'unboxing';
-      return undefined;
-    }
-    if (
-      from.kind === 'named' &&
-      to.kind === 'named' &&
-      specialOf(from) === 'valueTuple' &&
-      specialOf(to) === 'valueTuple'
-    ) {
-      if (
-        from.args.length === to.args.length &&
-        from.args.every((arg, index) => this.explicit(arg, to.args[index]) !== undefined)
-      )
-        return 'tuple';
-      return undefined;
-    }
-    if (to.kind === 'typeParameter') {
-      if (from.kind === 'typeParameter' || isReferenceType(from) || this.isBoxingTarget(to, from))
-        return 'typeParameterUnbox';
-      return undefined;
-    }
-    if (from.kind === 'typeParameter') {
-      return isReferenceType(to) || to.kind === 'named' ? 'typeParameterUnbox' : undefined;
-    }
-    if (isValueType(to) && (isReferenceType(from) || from.kind === 'array')) {
-      return this.isBoxingTarget(to, from) ? 'unboxing' : undefined;
-    }
-    if ((isReferenceType(from) || from.kind === 'array') && (isReferenceType(to) || to.kind === 'array')) {
+  private explicitUnboxingOrReference(from: Type, to: Type): ConversionKind | undefined {
+    if (to.kind === 'typeParameter' || from.kind === 'typeParameter') return this.explicitTypeParameter(from, to);
+    const isFromReference = isReferenceType(from) || from.kind === 'array';
+    if (isFromReference && isValueType(to)) return this.isBoxingTarget(to, from) ? 'unboxing' : undefined;
+    if (isFromReference && (isReferenceType(to) || to.kind === 'array'))
       return this.isExplicitReference(from, to) ? 'referenceCheck' : undefined;
-    }
     return undefined;
+  }
+
+  private explicitTypeParameter(from: Type, to: Type): ConversionKind | undefined {
+    const converts =
+      to.kind === 'typeParameter'
+        ? from.kind === 'typeParameter' || isReferenceType(from) || this.isBoxingTarget(to, from)
+        : isReferenceType(to) || to.kind === 'named';
+    return converts ? 'typeParameterUnbox' : undefined;
   }
 
   /** Whether a value of type `from` is also of type `to` without changing its representation. */
@@ -321,4 +298,35 @@ function isEnumType(type: Type): boolean {
 
 function acceptsNullType(type: Type): boolean {
   return isReferenceType(type) || nullableUnderlying(type) !== undefined || type.kind === 'array';
+}
+
+function isImplicitNumeric(from: Type, to: Type): boolean {
+  const fromSpecial = specialOf(from);
+  const toSpecial = specialOf(to);
+  return fromSpecial !== undefined && toSpecial !== undefined && implicitNumeric(fromSpecial, toSpecial);
+}
+
+function isValueTuple(type: Type): type is NamedType {
+  return type.kind === 'named' && specialOf(type) === 'valueTuple';
+}
+
+function elementsConvert(
+  from: NamedType,
+  to: NamedType,
+  convert: (from: Type, to: Type) => ConversionKind | undefined
+): boolean {
+  return (
+    from.args.length === to.args.length && from.args.every((arg, index) => convert(arg, to.args[index]) !== undefined)
+  );
+}
+
+/** The explicit conversion between numeric and enum types, which C# allows in both directions. */
+function explicitNumeric(from: Type, to: Type): ConversionKind | undefined {
+  if (!(isNumeric(from) || isEnum(from)) || !(isNumeric(to) || isEnum(to))) return undefined;
+  if (specialOf(from) !== undefined && specialOf(to) !== undefined && !isEnum(from) && !isEnum(to)) return 'numeric';
+  return 'enumNumeric';
+}
+
+function keepsValue(conversion: ConversionKind | undefined): boolean {
+  return conversion === 'identity' || conversion === 'numeric' || conversion === 'enumNumeric';
 }
