@@ -54,20 +54,18 @@ export interface Place {
   writeAfterFailedIncrement?(value: Value): void;
   /** Warns that the place does not exist, as a read-modify-write (`++`, `.=`) of it does, creating what PHP creates. */
   warnUndefined?(warning?: UpdateWarning): boolean | void;
+  /** Whether the fetched non-overloaded slot still exists, without invoking user getters. */
+  hasSlot?(): boolean;
   /** The value as `isset` and `??` read it, asking `__isset` or `offsetExists` first; undefined when unset. */
   getForIsset?(): Value | undefined;
 }
 
+export function hasPropertySlot(object: PhpObject, name: string, decl: PropDecl | undefined): boolean {
+  return Boolean(decl) || object.props.has(name) || Boolean(object.cls.findMethod('__get'));
+}
+
 export function storeIncrement(place: Place, old: Value, updated: Value, detached: boolean): Value {
-  if (detached) return updated;
-  if (
-    updated === old &&
-    !(place instanceof VarPlace) &&
-    !place.declaration?.() &&
-    !(place instanceof ElementPlace && place.hasBucketWrite) &&
-    place.get() === undefined
-  )
-    return updated;
+  if (detached || (updated === old && place.hasSlot?.() === false)) return updated;
   return place.set(updated);
 }
 
@@ -315,8 +313,8 @@ export class ElementPlace implements Place {
     private readonly objectBacked: boolean | BucketReset = false
   ) {}
 
-  get hasBucketWrite(): boolean {
-    return this.bucketWrite !== undefined;
+  hasSlot(): boolean {
+    return this.bucketWrite !== undefined || this.key === undefined || this.array.has(this.key);
   }
 
   get(): Value | undefined {

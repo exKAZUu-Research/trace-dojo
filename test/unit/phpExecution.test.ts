@@ -3304,4 +3304,16 @@ set_error_handler(function () use ($a, &$n) {
 $a->x--;
 `);
   expect(secondWarnExit).toMatchObject({ kind: 'executed', stdout: 'exit;{"y":null}' });
+
+  const overloadedGet = run(String.raw`<?php
+class CustomAO extends ArrayObject {
+  function offsetGet(mixed $key): mixed { echo 'get;'; return null; }
+  function offsetSet(mixed $key, mixed $value): void { echo 'set;'; }
+}
+$a = new CustomAO([], ArrayObject::ARRAY_AS_PROPS);
+set_error_handler(function () { echo 'warn;'; return true; });
+$a->x--;
+restore_error_handler();
+`);
+  expect(overloadedGet).toMatchObject({ kind: 'executed', stdout: 'get;warn;set;' });
 });
