@@ -1465,4 +1465,56 @@ defineNatives({
   },
 });
 
+const ARRAY_HELPER = 'System.Linq.Internal.ArrayHelper`1';
+const fixedSize = (): never => fail('System.NotSupportedException', 'Collection was of a fixed size.');
+
+function arrayIndexOf(call: NativeCall, array: CsArray, item: Value): number {
+  const equality = equalityOf(call, undefined);
+  return array.values.findIndex((value) =>
+    value === undefined ? item === undefined : item !== undefined && equality.equals(value, item)
+  );
+}
+
+function checkedArrayIndex(call: NativeCall, array: CsArray, index: number): number {
+  if (index < 0 || index >= array.values.length) failIndex(call);
+  return index;
+}
+
+defineNatives({
+  [`${ARRAY_HELPER}.get_Count`]: (_call, receiver) => (receiver as CsArray).values.length,
+  [`${ARRAY_HELPER}.get_IsReadOnly`]: () => true,
+  [`${ARRAY_HELPER}.get_Item`]: (call, receiver, [index]) =>
+    (receiver as CsArray).values[checkedArrayIndex(call, receiver as CsArray, index as number)],
+  [`${ARRAY_HELPER}.set_Item`]: (call, receiver, [index, value]) => {
+    (receiver as CsArray).values[checkedArrayIndex(call, receiver as CsArray, index as number)] = value as Value;
+    return;
+  },
+  [`${ARRAY_HELPER}.Add`]: fixedSize,
+  [`${ARRAY_HELPER}.Clear`]: fixedSize,
+  [`${ARRAY_HELPER}.Insert`]: fixedSize,
+  [`${ARRAY_HELPER}.Remove`]: fixedSize,
+  [`${ARRAY_HELPER}.RemoveAt`]: fixedSize,
+  [`${ARRAY_HELPER}.Contains`]: (call, receiver, [item]) => arrayIndexOf(call, receiver as CsArray, item as Value) >= 0,
+  [`${ARRAY_HELPER}.IndexOf`]: (call, receiver, [item]) => arrayIndexOf(call, receiver as CsArray, item as Value),
+  [`${ARRAY_HELPER}.CopyTo`]: (call, receiver, [target, start]) => {
+    if (target === undefined) failNull('array');
+    const values = (receiver as CsArray).values;
+    const destination = (target as CsArray).values;
+    if ((start as number) < 0 || (start as number) + values.length > destination.length) {
+      fail(
+        'System.ArgumentException',
+        "Destination array was not long enough. Check the destination index, length, and the array's lower bounds.",
+        'destinationArray'
+      );
+    }
+    for (const [offset, value] of values.entries()) destination[(start as number) + offset] = value;
+    return;
+  },
+  [`${ARRAY_HELPER}.GetEnumerator`]: (call, receiver) => {
+    const enumerator = new CsObject(libraryType(call, 'System.Linq.Internal.Enumerator', [typeArgument(call)]), []);
+    enumerator.native = new LibraryEnumerator((receiver as CsArray).values[Symbol.iterator](), [receiver]);
+    return enumerator;
+  },
+});
+
 export { stringOf };

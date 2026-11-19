@@ -672,8 +672,8 @@ export class Evaluator extends StatementExecutor {
     let receiver: Value = undefined;
     if (expression.receiver) {
       receiver = this.evaluate(expression.receiver, frame);
-      // A nullable value's members run on its missing value too, as `HasValue` does.
-      if (receiver === undefined && !method.isStatic && method.owner.special !== 'nullable') throw NULL_REFERENCE();
+      // A nullable value's members run on its missing value too, as `HasValue` and its `ToString` override do.
+      if (receiver === undefined && !method.isStatic && !this.runsOnNullable(expression)) throw NULL_REFERENCE();
       // A method of a struct runs on a copy of a value that is not a variable, so it cannot change the original.
       if (receiver instanceof CsStruct && !this.isVariableExpression(expression.receiver)) receiver = receiver.clone();
       // A value calls a non-virtual method of a reference type, such as `GetType`, through a box of its own type.
@@ -698,13 +698,16 @@ export class Evaluator extends StatementExecutor {
       const owner = expression.owner ? (frame.resolve(expression.owner) as NamedType) : undefined;
       if (method.isStatic && owner && method.owner.staticConstructor) this.runtime.ensureInitialized(owner);
       const typeArgs = expression.typeArgs.map((type) => frame.resolve(type));
-      if (expression.isVirtual && receiver !== undefined) {
+      if (expression.isVirtual && (receiver !== undefined || expression.receiver !== undefined)) {
         const implementation = this.runtime.dispatch(
           method,
           receiver,
           expression.receiver ? frame.resolve(expression.receiver.type) : undefined
         );
-        const implementationOwner = this.ownerOfImplementation(implementation, receiver) ?? owner;
+        const staticType = expression.receiver ? frame.resolve(expression.receiver.type) : undefined;
+        const implementationOwner =
+          this.ownerOfImplementation(implementation, receiver) ??
+          (staticType && nullableUnderlying(staticType) ? (staticType as NamedType) : owner);
         return this.invoke(
           frame,
           implementation,
@@ -726,6 +729,15 @@ export class Evaluator extends StatementExecutor {
     } finally {
       frame.temporaries.pop();
     }
+  }
+
+  private runsOnNullable(expression: Extract<BoundExpression, { kind: 'call' }>): boolean {
+    if (expression.method.owner.special === 'nullable') return true;
+    return (
+      expression.isVirtual &&
+      expression.receiver !== undefined &&
+      nullableUnderlying(expression.receiver.type) !== undefined
+    );
   }
 
   /** Whether an expression denotes storage, whose struct a method call may change in place. */

@@ -854,7 +854,9 @@ export abstract class MemberBinder extends CallBinder {
       receiver &&
       receiver.kind !== 'this' &&
       nullableUnderlying(receiver.type) &&
-      method.owner !== this.wellKnown.nullable
+      method.owner !== this.wellKnown.nullable &&
+      // `ToString`, `Equals`, and `GetHashCode` run on the nullable value itself, which Nullable<T> overrides.
+      !this.wellKnown.nullable.methods.some((override) => override.isOverride && override.name === method.name)
     ) {
       receiver = this.convert(receiver, this.objectType, node);
     }

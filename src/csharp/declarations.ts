@@ -908,7 +908,8 @@ export class DeclarationBinder extends BinderBase {
   /** Links a library method without a body to its TypeScript implementation. */
   private attachNative(method: MethodSymbol, lacksBody: boolean): void {
     if (!this.isLibraryUnit || !lacksBody || (method.isAbstract && method.owner.kind === 'interface')) return;
-    if (method.isAbstract) return;
+    // An abstract method of the library has a native only when the library's own objects of the abstract class
+    // implement it, as `Comparer<T>.Default` does.
     method.native = nativeOf(method);
   }
 

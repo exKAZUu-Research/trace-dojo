@@ -263,7 +263,10 @@ export class Runtime {
   /** The implementation that a virtual call of a method runs for a receiver's runtime type. */
   dispatch(method: MethodSymbol, receiver: Value, staticType?: Type): MethodSymbol {
     // A primitive carries no type, which its static type with the frame's type arguments gives instead.
-    const type = this.runtimeTypeOf(receiver) ?? staticType;
+    let type = this.runtimeTypeOf(receiver) ?? staticType;
+    if (type?.kind === 'array' && type.rank === 1 && method.owner.kind === 'interface') {
+      type = namedType(this.library.typeNamed('System.Linq.Internal.ArrayHelper', 1), [type.element]);
+    }
     if (!type || type.kind !== 'named') return method;
     if (type.symbol === method.owner && !method.isAbstract) return method;
     let byType = this.dispatchCache.get(method);
