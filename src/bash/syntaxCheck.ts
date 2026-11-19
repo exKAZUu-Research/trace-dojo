@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 483 -- One port of Bash's grammar, whose rules call each other as its yacc rules do.
+// code-gauge-allow-file fileNcss 506 -- One port of Bash's grammar, whose rules call each other as its yacc rules do.
 /**
  * Bash's syntax errors, found by a port of the grammar of `parse.y` over a port of how its lexer reads words, so that
  * a program fails where Bash's does, with Bash's message and line. The tree-sitter grammar builds the statements, but
@@ -16,17 +16,25 @@ import {
 } from './syntaxWords';
 
 /**
- * The first syntax error Bash reports for a program, `undefined` when Bash reads it, or `'unknown'` for a program
- * with a here-document, whose body this port does not read, or with a nesting too deep to read.
+ * Checks a program as Bash's parser reads it, giving the first syntax error Bash reports, `undefined` when Bash reads
+ * it, or `'unknown'` for a program with a nesting too deep to read; and the backquoted command substitutions it
+ * found, whose bodies Bash reads only when it runs them.
  */
-export function findBashSyntaxError(source: string): BashSyntaxError | 'unknown' | undefined {
+export function checkBashSyntax(source: string): {
+  error: BashSyntaxError | 'unknown' | undefined;
+  backquotes: { start: number; end: number }[];
+} {
   const text = new SourceText(source);
   text.parseSubstitution = (start) => new CommandParser(text, start, true).parseSubstitution();
+  return { error: firstError(text), backquotes: text.backquotes };
+}
+
+function firstError(text: SourceText): BashSyntaxError | 'unknown' | undefined {
   try {
     new CommandParser(text, 0, false).parseProgram();
     return undefined;
   } catch (error) {
-    if (error instanceof SyntaxFailure) return { row: error.row, text: error.text };
+    if (error instanceof SyntaxFailure) return { row: error.row, text: error.text, near: error.near };
     if (error instanceof UnknownSyntax) return 'unknown';
     // The stack's size depends on where the program runs (a worker thread has less), so a nesting within the limit
     // may still exhaust it; the tree's own check then rejects the program as too deep.
@@ -73,13 +81,18 @@ const OPERATORS = [
   '(',
   ')',
 ];
-const REDIRECTIONS = new Set(['<', '>', '>>', '<>', '>|', '&>', '&>>', '<&', '>&', '<<<']);
+const REDIRECTIONS = new Set(['<', '>', '>>', '<>', '>|', '&>', '&>>', '<&', '>&', '<<<', '<<', '<<-']);
 const METACHARACTERS = new Set([' ', '\t', '\n', ';', '&', '|', '<', '>', '(', ')']);
 const DECLARATION_BUILTINS = new Set(['declare', 'typeset', 'local', 'export', 'readonly']);
 const ASSIGNMENT_PREFIX = /^[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=$/;
 
 /** Bash's lexer for commands: words, operators, and newlines, skipping blanks, comments, and joined lines. */
 class CommandLexer {
+  /** Whether the word read next ends a here-document, and whether the body's leading tabs are removed (`<<-`). */
+  private delimiterNext: { stripsTabs: boolean } | undefined;
+  /** The here-documents of the current line, whose bodies follow its newline. */
+  private readonly hereDocuments: { delimiter: string; stripsTabs: boolean }[] = [];
+
   constructor(
     private readonly text: SourceText,
     public index: number
@@ -95,16 +108,43 @@ class CommandLexer {
     const c = source[start];
     if (c === '\n') {
       this.index++;
+      this.skipHereDocuments();
       return this.token('newline', '\n', row, start, false);
     }
     if ((c === '<' || c === '>') && source[start + 1] === '(') return this.word(assignmentAllowed);
     const operator = OPERATORS.find((candidate) => source.startsWith(candidate, start));
     if (operator) {
-      if (operator === '<<' || operator === '<<-') throw new UnknownSyntax();
+      if (operator === '<<' || operator === '<<-') this.delimiterNext = { stripsTabs: operator === '<<-' };
       this.index += operator.length;
       return this.token('operator', operator, row, start, false);
     }
-    return this.word(assignmentAllowed);
+    const word = this.word(assignmentAllowed);
+    if (this.delimiterNext) {
+      // Quotes in the delimiter only keep the body from being expanded; the line that ends it has none.
+      this.hereDocuments.push({ delimiter: word.text.replaceAll(/\\(.)|["']/g, '$1'), ...this.delimiterNext });
+      this.delimiterNext = undefined;
+    }
+    return word;
+  }
+
+  /** Skips the bodies of the line's here-documents, each up to the line that is its delimiter, or the end of the file. */
+  private skipHereDocuments(): void {
+    for (const { delimiter, stripsTabs } of this.hereDocuments.splice(0)) {
+      let line: string | undefined;
+      do line = this.readLine();
+      while (line !== undefined && (stripsTabs ? line.replace(/^\t+/, '') : line) !== delimiter);
+    }
+  }
+
+  /** The next line without its newline, or `undefined` at the end of the file. */
+  private readLine(): string | undefined {
+    const { source } = this.text;
+    if (this.index >= source.length) return undefined;
+    const lineEnd = source.indexOf('\n', this.index);
+    const end = lineEnd === -1 ? source.length : lineEnd;
+    const line = source.slice(this.index, end);
+    this.index = lineEnd === -1 ? end : end + 1;
+    return line;
   }
 
   // code-gauge-allow functionCognitiveComplexity 18 -- A port of Bash's read_token_word: process substitutions, compound assignments, joined lines, and quotes.
@@ -523,7 +563,7 @@ class CommandParser {
   private conditional(token: Token): void {
     this.opened(token, () => {
       const result = parseConditional(this.text, token.end);
-      if ('error' in result) this.text.fail(result.error.row, result.error.text);
+      if ('error' in result) throw new SyntaxFailure(result.error.row, result.error.text, result.error.near);
       this.skipTo(result.end);
     });
   }

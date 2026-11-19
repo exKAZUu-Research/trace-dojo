@@ -17,7 +17,7 @@ export function parseConditional(text: SourceText, start: number): { end: number
   try {
     return { end: parser.parse() };
   } catch (error) {
-    if (error instanceof SyntaxFailure) return { error: { row: error.row, text: error.text } };
+    if (error instanceof SyntaxFailure) return { error: { row: error.row, text: error.text, near: error.near } };
     throw error;
   }
 }
@@ -71,8 +71,8 @@ class ConditionalParser {
   parse(): number {
     this.or();
     if (this.token.kind === 'end') return this.index;
-    if (this.token.kind === 'eof') this.text.fail(this.startRow, "unexpected EOF while looking for `]]'");
-    this.text.fail(this.startRow, `syntax error in conditional expression: unexpected token \`${this.tokenText()}'`);
+    if (this.token.kind === 'eof') this.fail(this.startRow, "unexpected EOF while looking for `]]'");
+    this.fail(this.startRow, `syntax error in conditional expression: unexpected token \`${this.tokenText()}'`);
   }
 
   private or(): void {
@@ -96,7 +96,7 @@ class ConditionalParser {
     if (token.kind === 'end') this.text.fail(token.row, `syntax error near \`${token.text}'`);
     if (this.isOperator('(')) {
       this.or();
-      if (!this.isOperator(')')) this.text.fail(token.row, `unexpected token \`${this.tokenText()}', expected \`)'`);
+      if (!this.isOperator(')')) this.fail(token.row, `unexpected token \`${this.tokenText()}', expected \`)'`);
       this.skipNewlines();
       return;
     }
@@ -107,13 +107,13 @@ class ConditionalParser {
     if (token.kind === 'word' && UNARY_OPERATORS.has(token.text)) {
       this.read('plain');
       if (this.token.kind !== 'word') {
-        this.text.fail(this.token.row, `unexpected argument \`${this.tokenText()}' to conditional unary operator`);
+        this.fail(this.token.row, `unexpected argument \`${this.tokenText()}' to conditional unary operator`);
       }
       this.skipNewlines();
       return;
     }
     if (token.kind !== 'word') {
-      this.text.fail(token.row, `unexpected token \`${this.tokenText()}' in conditional command`);
+      this.fail(token.row, `unexpected token \`${this.tokenText()}' in conditional command`);
     }
     this.binary();
   }
@@ -125,14 +125,19 @@ class ConditionalParser {
     const isWordOperator = operator.kind === 'word' && (BINARY_OPERATORS.has(operator.text) || operator.text === '=~');
     if (!isWordOperator && !this.isOperator('<') && !this.isOperator('>')) {
       if (operator.kind === 'end' || this.isOperator('&&') || this.isOperator('||') || this.isOperator(')')) return;
-      this.text.fail(operator.row, `unexpected token \`${this.tokenText()}', conditional binary operator expected`);
+      this.fail(operator.row, `unexpected token \`${this.tokenText()}', conditional binary operator expected`);
     }
     const mode = operator.text === '=~' ? 'regex' : PATTERN_OPERATORS.has(operator.text) ? 'pattern' : 'plain';
     this.read(isWordOperator ? mode : 'plain');
     if (this.token.kind !== 'word') {
-      this.text.fail(this.token.row, `unexpected argument \`${this.tokenText()}' to conditional binary operator`);
+      this.fail(this.token.row, `unexpected argument \`${this.tokenText()}' to conditional binary operator`);
     }
     this.skipNewlines();
+  }
+
+  /** Reports an error of the conditional parser, after which Bash's parser names the token it stopped at. */
+  private fail(row: number, text: string): never {
+    throw new SyntaxFailure(row, text, errorTokenFromText(this.text.source, this.index));
   }
 
   private skipNewlines(): void {
@@ -193,4 +198,23 @@ class ConditionalParser {
     }
     return source.slice(start, this.index);
   }
+}
+
+/**
+ * Bash's `error_token_from_text`: the text its parser names after an error, found by going back from where its lexer
+ * stopped in the current line over blanks, then to the blank or `;`, `|`, or `&` before it.
+ */
+function errorTokenFromText(source: string, index: number): string | undefined {
+  const end = Math.min(index, source.length);
+  const lineStart = source.lastIndexOf('\n', end - 2) + 1;
+  const lineEnd = source.indexOf('\n', lineStart);
+  const line = source.slice(lineStart, lineEnd === -1 ? source.length : lineEnd + 1);
+  let i = end - lineStart;
+  if (i > 0 && i >= line.length) i--;
+  while (i > 0 && ' \t\n'.includes(line[i])) i--;
+  const tokenEnd = i > 0 ? i + 1 : 0;
+  while (i > 0 && !' \n\t;|&'.includes(line[i])) i--;
+  while (i !== tokenEnd && ' \t\n'.includes(line[i])) i++;
+  if (tokenEnd > 0) return line.slice(i, tokenEnd);
+  return line[0];
 }

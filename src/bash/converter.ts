@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 446 -- Converts every node kind of the grammar in one converter, which shares the source and annotations.
+// code-gauge-allow-file fileNcss 454 -- Converts every node kind of the grammar in one converter, which shares the source and annotations.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -6,6 +6,7 @@ import type { MaskedArithmetic } from './arithmeticMasking';
 import type {
   ArithmeticSource,
   Assignment,
+  BackquoteSyntaxError,
   CaseItem,
   ParameterExpansion,
   Program,
@@ -41,13 +42,17 @@ export class Converter {
     private readonly masked: MaskedArithmetic,
     private readonly rawPieces: (raw: string) => (string | WordPart)[],
     /** Parses the text of a backquoted command substitution that Bash reads again after removing backslashes. */
-    private readonly reparse: (text: string, row: number) => Statement[]
+    private readonly reparse: (text: string, row: number) => Statement[],
+    /** The syntax errors of backquoted bodies, which Bash reports when it runs them, by the index of their `` ` ``. */
+    private readonly backquoteErrors: ReadonlyMap<number, BackquoteSyntaxError>
   ) {}
 
   convertProgram(root: Node): Program {
     const units: Statement[][] = [];
+    const unitEndRows: number[] = [];
     let unit: Statement[] = [];
     let previousEnd: number | undefined;
+    let previousEndRow = 0;
     for (const child of root.children) {
       if (!child.isNamed) {
         this.checkTerminator(child);
@@ -57,13 +62,18 @@ export class Converter {
       // Bash reads and runs a program one line at a time, so an error that discards a command discards its line.
       if (previousEnd !== undefined && this.source.slice(previousEnd, child.startIndex).includes('\n')) {
         units.push(unit);
+        unitEndRows.push(previousEndRow);
         unit = [];
       }
       unit.push(this.statement(child));
       previousEnd = child.endIndex;
+      previousEndRow = child.endPosition.row;
     }
-    if (unit.length > 0) units.push(unit);
-    return { units };
+    if (unit.length > 0) {
+      units.push(unit);
+      unitEndRows.push(previousEndRow);
+    }
+    return { units, unitEndRows };
   }
 
   private fail(node: Node, message: string): never {
@@ -550,6 +560,8 @@ export class Converter {
     if (opening && opening.type !== '$(' && opening.type !== '`') {
       this.unsupported(node, '現在のシェルで実行するコマンド置換（${ ...; }）');
     }
+    const syntaxError = opening?.type === '`' ? this.backquoteErrors.get(node.startIndex) : undefined;
+    if (syntaxError) return { kind: 'commandSubstitution', body: [], text: node.text, syntaxError };
     // Bash removes the backslashes before `$`, `` ` ``, and `\` in a backquoted body before reading it as commands.
     const inner = opening?.type === '`' ? node.text.slice(1, -1) : '';
     const body = /\\[$`\\]/.test(inner)

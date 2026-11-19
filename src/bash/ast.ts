@@ -17,8 +17,18 @@ export type WordPart =
   /** Double-quoted parts; `$"..."` is the same in the C and UTF-8 locales without message catalogs. */
   | { kind: 'double'; parts: WordPart[] }
   | ParameterExpansion
-  | { kind: 'commandSubstitution'; body: Statement[]; text: string }
+  | { kind: 'commandSubstitution'; body: Statement[]; text: string; syntaxError?: BackquoteSyntaxError }
   | { kind: 'arithmeticExpansion'; expression: ArithmeticSource };
+
+/** A syntax error in a backquoted body, which Bash reports when it runs the substitution, with the line it shows. */
+export interface BackquoteSyntaxError {
+  /** The 0-based row Bash reports. */
+  row: number;
+  /** The messages, which a conditional expression's error follows with the token Bash's parser stopped at. */
+  messages: string[];
+  /** The text of the line Bash prints after an unexpected token. */
+  line?: string;
+}
 
 export interface ParameterExpansion {
   kind: 'parameter';
@@ -123,4 +133,6 @@ export type Statement = StatementBase &
 export interface Program {
   /** The top-level statements, grouped by the lines Bash reads and runs one at a time. */
   units: Statement[][];
+  /** The row where each unit ends, the line Bash's parser is on when it runs the unit. */
+  unitEndRows: number[];
 }

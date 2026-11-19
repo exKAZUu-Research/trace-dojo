@@ -43,6 +43,12 @@ export class ExitSignal {
  * or the rest of a command substitution, with status 1.
  */
 export class DiscardSignal {
+  /**
+   * The line Bash's line counter is left at, 0-based, when a `case` or the words of a `for` set it and no command
+   * restored it, which makes Bash number the lines it reads next from there.
+   */
+  leftRow: number | undefined;
+
   constructor(readonly status = 1) {}
 }
 

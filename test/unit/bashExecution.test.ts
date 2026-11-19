@@ -179,6 +179,26 @@ test('a syntax error rejects the program before it runs, naming the token and li
   });
 });
 
+test('Bash reports a backquoted body it cannot parse when it runs it, and reads here-documents past their bodies', () => {
+  expect(executeProgram('bash', 'x=`fi`; echo "[$x] $?"\n')).toMatchObject({
+    kind: 'executed',
+    stdout: '[] 2\n',
+    stderr: [
+      "main.sh: command substitution: line 1: syntax error near unexpected token `fi'",
+      "main.sh: command substitution: line 1: `fi'",
+      '',
+    ].join('\n'),
+  });
+  expect(executeProgram('bash', 'cat <<EOF\nif then\nEOF\nfi\n')).toMatchObject({
+    diagnostics: [{ row: 3, message: "構文エラーです（syntax error near unexpected token `fi'）。" }],
+  });
+  // An expansion error in the word of a `case` leaves Bash's line counter at the `case`, which numbers the next line.
+  expect(executeProgram('bash', 'case $((1/0))\n in x) ;; esac\necho $LINENO\n')).toMatchObject({
+    stdout: '2\n',
+    stderr: 'main.sh: line 1: 1/0: division by 0 (error token is "0")\n',
+  });
+});
+
 function nestedSubstitutions(depth: number): string {
   return `x=${'$('.repeat(depth)}${')'.repeat(depth)}\necho ok\n`;
 }

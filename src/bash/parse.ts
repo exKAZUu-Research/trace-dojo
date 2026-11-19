@@ -5,8 +5,9 @@ import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import { maskInvalidArithmetic } from './arithmeticMasking';
 import type { Program, Statement, WordPart } from './ast';
+import { hideInvalidBackquotes } from './backquotes';
 import { Converter } from './converter';
-import { findBashSyntaxError } from './syntaxCheck';
+import { checkBashSyntax } from './syntaxCheck';
 import { syntaxErrorMessage, syntaxErrorsOf } from './syntaxErrors';
 
 const parser = await loadParser('@willbooster/tree-sitter-bash/tree-sitter-bash.wasm');
@@ -21,21 +22,28 @@ export const misplacedBashAtomicMessage =
  * @param trace Marks the functions whose headers hold `# atomic`, for a model program.
  */
 export function parseBash(source: string, trace?: TraceOptions): Program {
-  const syntaxError = findBashSyntaxError(source);
-  if (syntaxError && syntaxError !== 'unknown') {
-    throw new CompileError([{ row: syntaxError.row, message: syntaxErrorMessage(syntaxError.text) }]);
-  }
   return parseText(source, new Set(trace?.atomicAnnotations.keys()));
 }
 
 function parseText(source: string, atomicRows: ReadonlySet<number>): Program {
-  const { source: parsedSource, masked } = maskInvalidArithmetic(parser, source);
+  const { error, backquotes } = checkBashSyntax(source);
+  if (error && error !== 'unknown')
+    throw new CompileError([{ row: error.row, message: syntaxErrorMessage(error.text) }]);
+  const hidden = hideInvalidBackquotes(source, backquotes);
+  const { source: parsedSource, masked } = maskInvalidArithmetic(parser, hidden.source);
   return parseSource(
     parser,
     parsedSource,
     {},
     (root) => {
-      const converter = new Converter(parsedSource, atomicRows, masked, rawArithmeticPieces, reparseBackquoted);
+      const converter = new Converter(
+        parsedSource,
+        atomicRows,
+        masked,
+        rawArithmeticPieces,
+        reparseBackquoted,
+        hidden.errors
+      );
       const program = converter.convertProgram(root);
       for (const row of atomicRows) {
         if (!converter.claimedAtomicRows.has(row)) {
@@ -68,7 +76,9 @@ function rawArithmeticPieces(raw: string): (string | WordPart)[] {
   try {
     const string = tree.rootNode.descendantsOfType('string')[0];
     if (tree.rootNode.hasError || !string) return [raw];
-    const [part] = new Converter(wrapped, new Set(), new Map(), () => [raw], reparseBackquoted).word(string).parts;
+    const [part] = new Converter(wrapped, new Set(), new Map(), () => [raw], reparseBackquoted, new Map()).word(
+      string
+    ).parts;
     if (part?.kind !== 'double') return [raw];
     return part.parts.map((inner) => (inner.kind === 'literal' ? inner.text.replaceAll(String.raw`\"`, '"') : inner));
   } finally {

@@ -1,5 +1,5 @@
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
-import type { ArithmeticSource, ParameterExpansion, Word, WordPart } from './ast';
+import type { ArithmeticSource, BackquoteSyntaxError, ParameterExpansion, Word, WordPart } from './ast';
 import { expandBraces } from './braces';
 import { charactersOf } from './characters';
 import { FIELD_BREAK, FieldSplitter, type Fragment, isFieldBreak, type Piece, STAR_BREAK } from './fields';
@@ -162,6 +162,7 @@ export class Expander {
         return this.expandParameter(part, inDouble);
       }
       case 'commandSubstitution': {
+        if (part.syntaxError) return this.failBackquoted(part.syntaxError, inDouble);
         const { output, status } = this.shell.captureSubshell(part.body);
         this.lastSubstitutionStatus = status;
         this.shell.state.lastStatus = status;
@@ -453,6 +454,16 @@ export class Expander {
       );
     }
     return field.map((fragment) => fragment.text).join('');
+  }
+
+  /** A backquoted body Bash cannot parse: it reports the error as it runs the substitution, which gives nothing. */
+  private failBackquoted(error: BackquoteSyntaxError, inDouble: boolean): Piece[] {
+    const prefix = `${SCRIPT_NAME}: command substitution: line ${error.row + 1}: `;
+    for (const message of error.messages) this.shell.state.fd2.write(`${prefix}${message}\n`);
+    if (error.line !== undefined) this.shell.state.fd2.write(`${prefix}\`${error.line}'\n`);
+    this.lastSubstitutionStatus = 2;
+    this.shell.state.lastStatus = 2;
+    return [{ text: '', quoted: inDouble, split: !inDouble }];
   }
 
   /** Exits the shell after an error of `${x:?}`, as a non-interactive Bash does. */

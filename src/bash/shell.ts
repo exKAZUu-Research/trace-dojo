@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 895 -- Bash's execution, variables, and scopes share the shell state that subshells copy, so they stay in one class.
+// code-gauge-allow-file fileNcss 918 -- Bash's execution, variables, and scopes share the shell state that subshells copy, so they stay in one class.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { ArithmeticError, type ArithmeticHost, evaluateArithmetic, skipSubscript } from './arithmetic';
 import type { ArithmeticSource, Assignment, Program, Redirect, Statement, Word } from './ast';
@@ -40,6 +40,8 @@ export interface FunctionDefinition {
   name: string;
   body: Statement;
   isAtomic: boolean;
+  /** How far the lines Bash numbered the function with are behind its rows (see `Shell.lineShift`). */
+  lineShift: number;
 }
 
 interface CallInfo {
@@ -136,6 +138,14 @@ export class Shell implements ArithmeticHost {
   readonly expander: Expander;
   /** The 0-based row of the command running, which `LINENO` and error messages report. */
   currentRow = 0;
+  /**
+   * How far behind their rows Bash numbers the lines it reads next. Its parser counts lines with the counter that
+   * commands also set for their error messages, and an expansion error in a `case` or in the words of a `for` can
+   * leave it at that command's line, so the lines read after are numbered from there.
+   */
+  private readShift = 0;
+  /** How far behind its rows Bash numbered the code running now, which keeps the numbers it was read with. */
+  private lineShift = 0;
   /** The states of the shells that are waiting for the subshells they started, the outermost first. */
   private readonly suspended: ShellState[] = [];
   /** The loops running in the current function call or at the top level. */
@@ -190,12 +200,15 @@ export class Shell implements ArithmeticHost {
   runProgram(program: Program): number {
     this.runtime.frames.push({ callRow: undefined, isAtomic: false, scopeIndex: 0 });
     try {
-      for (const unit of program.units) {
+      for (const [index, unit] of program.units.entries()) {
+        this.lineShift = this.readShift;
         try {
           this.runStatements(unit);
         } catch (error) {
           if (!(error instanceof DiscardSignal)) throw error;
           this.state.lastStatus = error.status;
+          // The line after the unit is numbered one after the line the counter was left at.
+          if (error.leftRow !== undefined) this.readShift = (program.unitEndRows[index] as number) - error.leftRow;
         }
       }
     } catch (error) {
@@ -224,7 +237,7 @@ export class Shell implements ArithmeticHost {
   // code-gauge-allow functionNcss 54 -- One case per statement kind, each delegating to its own runner.
   execute(statement: Statement): number {
     this.runtime.spend();
-    this.currentRow = statement.lineRow;
+    this.currentRow = statement.lineRow - this.lineShift;
     let status: number;
     switch (statement.kind) {
       case 'command':
@@ -268,6 +281,7 @@ export class Shell implements ArithmeticHost {
           name: statement.name,
           body: statement.body,
           isAtomic: statement.isAtomic,
+          lineShift: this.lineShift,
         });
         status = 0;
         break;
@@ -393,37 +407,41 @@ export class Shell implements ArithmeticHost {
     });
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Bash's for: its words, which leave the line counter, and its loop, which restores it.
   private executeFor(statement: Extract<Statement, { kind: 'for' }>): number {
     if (!isIdentifier(statement.variable)) {
       this.reportError(`\`${statement.variable}': not a valid identifier`);
       return 1;
     }
     const values = statement.values
-      ? this.expander.expandWords(statement.values)
+      ? this.leavingLine(() => this.expander.expandWords(statement.values as Word[]))
       : [...(this.state.positional.at(-1) as string[])];
     // A list holding turtles is a list of objects, as Java's `Turtle[]` is, and an empty string stands for null; a
     // binding of either records a step only when it changes what the trace shows.
     const bindsObjects = values.some(
       (value) => this.runtime.turtleOf(value) !== undefined || this.namesStructure(value)
     );
-    return this.loop((last) => {
-      for (const value of values) {
-        this.runtime.spend();
-        this.currentRow = statement.row;
-        // A name reference as the loop variable refers to each word in turn, as Bash's `for` makes it.
-        const reference = this.findOwnVariable(statement.variable);
-        if (reference?.attributes.has('n')) reference.value = { kind: 'scalar', value };
-        else this.assignScalar(statement.variable, value);
-        this.runtime.steps.stepBinding(statement.row, !bindsObjects && value !== '');
-        if (this.iterate(statement.body, last) === 'stop') return;
-      }
-    });
+    // The words' expansion leaves Bash's line counter at the `for`, but the loop restores it however it ends.
+    return this.restoringLine(() =>
+      this.loop((last) => {
+        for (const value of values) {
+          this.runtime.spend();
+          this.currentRow = statement.row - this.lineShift;
+          // A name reference as the loop variable refers to each word in turn, as Bash's `for` makes it.
+          const reference = this.findOwnVariable(statement.variable);
+          if (reference?.attributes.has('n')) reference.value = { kind: 'scalar', value };
+          else this.assignScalar(statement.variable, value);
+          this.runtime.steps.stepBinding(statement.row, !bindsObjects && value !== '');
+          if (this.iterate(statement.body, last) === 'stop') return;
+        }
+      })
+    );
   }
 
   private executeArithmeticFor(statement: Extract<Statement, { kind: 'arithmeticFor' }>): number {
     const header = (source: ArithmeticSource | undefined): void => {
       if (!source) return;
-      this.currentRow = statement.row;
+      this.currentRow = statement.row - this.lineShift;
       this.evaluate(source, '((');
       this.runtime.steps.step(statement.row);
     };
@@ -431,7 +449,7 @@ export class Shell implements ArithmeticHost {
     return this.loop((last) => {
       for (;;) {
         this.runtime.spend();
-        this.currentRow = statement.row;
+        this.currentRow = statement.row - this.lineShift;
         if (statement.condition && this.evaluate(statement.condition, '((') === 0n) return;
         if (this.iterate(statement.body, last) === 'stop') return;
         header(statement.update);
@@ -439,8 +457,32 @@ export class Shell implements ArithmeticHost {
     });
   }
 
+  /** Runs a command that restores Bash's line counter however it ends, as a simple command or a `for` loop does. */
+  private restoringLine<T>(run: () => T): T {
+    try {
+      return run();
+    } catch (error) {
+      if (error instanceof DiscardSignal) error.leftRow = undefined;
+      throw error;
+    }
+  }
+
+  /**
+   * Expands the words of a `for` or the word of a `case`, for which Bash sets its line counter to the command's line
+   * without arranging to restore it, so that an expansion error leaves the counter there.
+   */
+  private leavingLine<T>(run: () => T): T {
+    const row = this.currentRow;
+    try {
+      return run();
+    } catch (error) {
+      if (error instanceof DiscardSignal) error.leftRow ??= row;
+      throw error;
+    }
+  }
+
   private executeCase(statement: Extract<Statement, { kind: 'case' }>): number {
-    const value = this.expander.expandString(statement.value);
+    const value = this.leavingLine(() => this.expander.expandString(statement.value));
     let status = 0;
     let falling = false;
     for (const item of statement.items) {
@@ -573,7 +615,7 @@ export class Shell implements ArithmeticHost {
 
   // ---------------------------------------------------------------- functions
 
-  // code-gauge-allow functionNcss 36 -- Sets up and restores every part of the shell state a function call changes.
+  // code-gauge-allow functionNcss 40 -- Sets up and restores every part of the shell state a function call changes.
   callFunction(fn: FunctionDefinition, args: string[], callRow: number, temporary?: Scope): number {
     if (this.runtime.frames.length >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
     const { state } = this;
@@ -583,21 +625,27 @@ export class Shell implements ArithmeticHost {
     const scopeIndex = state.scopes.length - 1;
     state.functionScopes.push(scopeIndex);
     state.positional.push(args);
-    state.calls.push({ name: fn.name, line: callRow + 1 });
+    // `BASH_LINENO` gives the line Bash numbered the call with; the trace keeps the row of the call's step.
+    const reportedRow = this.currentRow;
+    state.calls.push({ name: fn.name, line: reportedRow + 1 });
     const frame: Frame = { callRow, isAtomic: fn.isAtomic, scopeIndex };
     this.runtime.frames.push(frame);
     const savedLoopDepth = this.loopDepth;
     const savedCondition = this.conditionDepth;
+    const savedShift = this.lineShift;
     this.loopDepth = 0;
     this.conditionDepth = 0;
+    this.lineShift = fn.lineShift;
     try {
-      return this.execute(fn.body);
+      // The call is a simple command, which restores Bash's line counter however it ends.
+      return this.restoringLine(() => this.execute(fn.body));
     } catch (error) {
       if (error instanceof ReturnSignal) return error.status;
       throw error;
     } finally {
       this.loopDepth = savedLoopDepth;
       this.conditionDepth = savedCondition;
+      this.lineShift = savedShift;
       this.runtime.frames.pop();
       // A subshell's state replaces the caller's while it runs, so the call cleans up the state it started in.
       state.calls.pop();
@@ -606,7 +654,7 @@ export class Shell implements ArithmeticHost {
       state.scopes.length = scopeIndex;
       if (temporary && temporary.size > 0) state.scopes.splice(state.scopes.lastIndexOf(temporary), 1);
       if (fn.isAtomic) this.runtime.steps.completeAtomicCall();
-      this.currentRow = callRow;
+      this.currentRow = reportedRow;
     }
   }
 

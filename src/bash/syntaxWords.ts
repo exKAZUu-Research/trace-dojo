@@ -4,12 +4,18 @@
 export interface BashSyntaxError {
   row: number;
   text: string;
+  /**
+   * The token Bash's parser then names in a second message, `syntax error near`, after an error its conditional
+   * parser reports.
+   */
+  near?: string;
 }
 
 export class SyntaxFailure extends Error {
   constructor(
     readonly row: number,
-    readonly text: string
+    readonly text: string,
+    readonly near?: string
   ) {
     super(text);
   }
@@ -18,13 +24,15 @@ export class SyntaxFailure extends Error {
 /** The nesting the tree's own check allows, which no program needs to exceed. */
 const MAX_NESTING = 300;
 
-/** A here-document, whose body this port does not read, or a nesting too deep to read: the tree's diagnostics decide. */
+/** A nesting too deep to read, which the tree's own check then rejects. */
 export class UnknownSyntax extends Error {}
 
 /** A program's text, with its rows, and the parser of the command substitutions its words hold. */
 export class SourceText {
   private readonly lineStarts: number[] = [0];
   private depth = 0;
+  /** The backquoted command substitutions read, from the opening `` ` `` to just after the closing one. */
+  readonly backquotes: { start: number; end: number }[] = [];
   /** Parses the commands of `$(...)` from just after `$(`, returning the index after its `)`. */
   parseSubstitution: (start: number) => number = () => {
     throw new Error('No parser for command substitutions');
@@ -121,7 +129,10 @@ function skipBackquoted(text: SourceText, open: number): number {
   const { source } = text;
   let i = open + 1;
   while (i < source.length && source[i] !== '`') i += source[i] === '\\' ? 2 : 1;
-  return closeAt(text, open, i < source.length ? i : -1, '`');
+  const end = closeAt(text, open, i < source.length ? i : -1, '`');
+  // Bash reads a backquoted body only when it runs it, so its syntax is checked apart from the program's.
+  text.backquotes.push({ start: open, end });
+  return end;
 }
 
 function skipBraces(text: SourceText, open: number): number {
