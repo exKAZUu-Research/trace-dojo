@@ -72,7 +72,7 @@ export abstract class CompilerBase {
   findGlobalName(name: string): Entity | undefined {
     const own = this.globalScope.names.get(name);
     const library = this.library.global(name);
-    const std = this.usesStd || this.context.scopes.some((scope) => scope.usesStd) ? this.library.std(name) : undefined;
+    const std = this.usesStd || this.context.scopes.some((scope) => scope.usesStd) ? this.findStdName(name) : undefined;
     const found = own ?? library;
     if (found && std && found !== std) {
       if (found.kind === 'functions' && std.kind === 'functions') {
@@ -83,6 +83,15 @@ export abstract class CompilerBase {
       }
     }
     return found ?? std;
+  }
+
+  protected findStdName(name: string): Entity | undefined {
+    const std = this.library.std(name);
+    const local = this.globalScope.names.get(name);
+    if (std?.kind === 'functions' && local?.kind === 'functions') {
+      return { kind: 'functions', functions: this.library.rebindCOverloads(name, std.functions, local.functions) };
+    }
+    return std;
   }
 
   lookupName(name: string, row: number): Entity {
@@ -147,7 +156,7 @@ export abstract class CompilerBase {
       return this.lookupInClass(type.cls, fieldOf(nameNode, 'name') as Syntax, row);
     }
     const name = this.plainName(nameNode);
-    const entity = this.library.std(name);
+    const entity = this.findStdName(name);
     if (!entity) {
       const header = this.library.missingHeader(name);
       if (header) return this.error(row, `std::${name} を使うには #include <${header}> を書いてください。`);

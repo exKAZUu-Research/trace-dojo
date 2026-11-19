@@ -22,12 +22,23 @@ auto madeTextPair = std::make_pair(std::string("cd"), 3);
 const std::string prefix = std::string("ab") + "c";
 const std::string copiedPrefix = prefix;
 std::string expanded = 'x' + (std::string("ab") + "c") + std::string("yz");
+std::string maximum = std::max(std::string("a"), std::string("b"));
+struct Value { int number; };
+struct WithPair { std::pair<int, int> pair; int number; };
+struct WithString { std::string text; int number; };
+const Value initialValue{5};
+const WithPair initialPair{{1, 2}, 8};
+const WithString initialText{"cd", 7};
+Value valueCopy = initialValue;
+WithPair pairCopy = initialPair;
+WithString textCopy = initialText;
 
 void read() {
   std::cout << copied.first << made.first << converted.first << selected.first
             << text.size() << repeated.size() << counted.size() << listed.size()
             << copiedArray[1] << textPair.second << madeTextPair.second
-            << copiedPrefix.size() << expanded.size() << '\n';
+            << copiedPrefix.size() << expanded.size() << maximum << '\n'
+            << valueCopy.number << pairCopy.number << textCopy.number << textCopy.text.size() << '\n';
 }
 
 int calls = 0;

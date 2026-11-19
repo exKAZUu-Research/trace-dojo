@@ -21,6 +21,29 @@ struct ExplicitArrays {
   std::array<Item, 1> nonempty;
   std::array<Item, 0> empty;
 };
+class PrivateDefault {
+  PrivateDefault() {}
+public:
+  PrivateDefault(int number) : number(number) {}
+  int number;
+};
+class ProtectedDefault {
+protected:
+  ProtectedDefault() {}
+public:
+  ProtectedDefault(int number) : number(number) {}
+  int number;
+};
+struct AmbiguousDefault {
+  AmbiguousDefault() {}
+  AmbiguousDefault(int number = 0) : number(number) {}
+  int number;
+};
+struct Enclosed {
+  std::array<PrivateDefault, 1> first;
+  std::array<ProtectedDefault, 1> second;
+  AmbiguousDefault third[1];
+};
 struct DefaultBase { const Base& value{Derived{}}; };
 struct DefaultDerived { const Derived& value{Derived{}}; };
 
@@ -84,4 +107,6 @@ int main() {
   std::cout << 'W';
   ExplicitArrays withItems{{Item(7)}, {}};
   std::cout << withItems.nonempty[0].number << withItems.empty.size();
+  Enclosed enclosed{{PrivateDefault(7)}, {ProtectedDefault(8)}, {AmbiguousDefault(9)}};
+  std::cout << enclosed.first[0].number << enclosed.second[0].number << enclosed.third[0].number;
 }

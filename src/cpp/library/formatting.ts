@@ -1,6 +1,6 @@
 import { formatFixed, formatGeneral, formatHex, formatScientific } from '../../c/library/floatFormat';
 import { CppRuntimeError } from '../errors';
-import { type IntName, isWide, type Type } from '../types';
+import { type IntName, isCharType, isWide, type Type } from '../types';
 import { Ptr, type Value } from '../values';
 import { readCString } from './support';
 
@@ -151,7 +151,8 @@ function convert(spec: Spec, take: () => PrintfArgument, count: number): string 
     case 's': {
       if (length === 'l') throw new CppRuntimeError('custom', 'ワイド文字列（%ls）は、この採点環境では使えません。');
       const arg = take();
-      if (!(arg.value instanceof Ptr) || arg.type.kind !== 'pointer') throw new CppRuntimeError('formatArgumentType');
+      if (!(arg.value instanceof Ptr) || arg.type.kind !== 'pointer' || !isCharType(arg.type.to))
+        throw new CppRuntimeError('formatArgumentType');
       return readCString(arg.value, spec.precision);
     }
     case 'p': {

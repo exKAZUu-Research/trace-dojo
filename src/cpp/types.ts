@@ -242,6 +242,14 @@ export function isCopyConstructor(fn: FunctionInfo, cls: ClassInfo): boolean {
   );
 }
 
+export function sameParameters(a: FunctionInfo, b: FunctionInfo): boolean {
+  return (
+    a.params.length === b.params.length &&
+    a.params.every((param, index) => sameType(unqualified(param.type), unqualified(b.params[index].type))) &&
+    (!a.owner || a.isConst === b.isConst)
+  );
+}
+
 export function pointerTo(type: Type, isConst = false): PointerType {
   return isConst ? { kind: 'pointer', to: type, isConst } : { kind: 'pointer', to: type };
 }
@@ -255,7 +263,16 @@ export function classType(cls: ClassInfo, isConst = false): ClassType {
 }
 
 export function allowsConstantCopy(type: Type): boolean {
-  if (type.kind === 'class') return type.cls.library?.allowsConstantCopy === true;
+  if (type.kind === 'class') {
+    const { cls } = type;
+    if (cls.library) return cls.library.allowsConstantCopy === true;
+    return (
+      !cls.isNoncopyable &&
+      !cls.constructors.some((constructor) => isCopyConstructor(constructor, cls)) &&
+      (!cls.base || allowsConstantCopy(classType(cls.base))) &&
+      cls.ownFields.every((field) => allowsConstantCopy(field.type))
+    );
+  }
   if (type.kind === 'array') return allowsConstantCopy(type.of);
   return isArithmetic(type) || type.kind === 'pointer' || type.kind === 'nullptr';
 }

@@ -94,6 +94,25 @@ test('a turtle leaves the board when its object ends its lifetime or becomes unr
   expect(trace.finalTurtles.map(({ x, y }) => `${x},${y}`)).toEqual(['3,3', '5,5']);
 });
 
+test.each([
+  'struct Result : Pair { Result() : Pair(new Turtle(0, 0), second()) {} };',
+  'struct Result : Pair { Result() : Result(new Turtle(0, 0), second()) {} Result(Turtle* a, Turtle* b) : Pair(a, b) {} };',
+])('constructor initializers keep earlier arguments alive during later steps', (declaration) => {
+  const program = `struct Pair {
+  Turtle* first;
+  Turtle* last;
+  Pair(Turtle* a, Turtle* b) : first(a), last(b) {}
+};
+Turtle* second() { Turtle* result = new Turtle(1, 1); return result; }
+${declaration}
+int main() { Result result; }`;
+  const trace = traceProgram('cpp', program, program);
+  expect(trace.finalTurtles.map(({ x, y }) => [x, y])).toEqual([
+    [0, 0],
+    [1, 1],
+  ]);
+});
+
 // The declaration of m records no step of its own: the member's construction recorded one, as in Java.
 test('// atomic on a member function makes each call of it one step of the caller', () => {
   const program = `class Mover {
@@ -236,6 +255,18 @@ int main() {
 }`;
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '1000000' });
 });
+
+test.each(['std::printf("%s", values)', 'std::snprintf(buffer, 8, "%.*s", 0, values)'])(
+  'printf string conversions require character pointers: %s',
+  (call) => {
+    const program = `#include <cstdio>
+int main() { int values[2] = {65, 0}; char buffer[8]; ${call}; }`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('引数の型が合いません'),
+    });
+  }
+);
 
 test.each([
   ['std::set<int> a{1, 2}, b{3, 4}; a.erase(a.begin(), b.end());', 'イテレータ'],

@@ -40,4 +40,15 @@ int main() {
             << std::count(words.begin(), words.end(), fox) << ' '
             << std::equal(words.begin(), words.end(), expected) << ' '
             << (remove(words.begin(), words.end(), fox) - words.begin()) << '\n';
+  std::vector<std::string> ordered{"ant", "cat", "dog"};
+  std::vector<unsigned> positive{1, 2, 3};
+  std::cout << (std::lower_bound(ordered.begin(), ordered.end(), "cat") - ordered.begin()) << ' '
+            << (std::upper_bound(ordered.begin(), ordered.end(), "cat") - ordered.begin()) << ' '
+            << std::binary_search(ordered.begin(), ordered.end(), "cat") << ' '
+            << (std::lower_bound(positive.begin(), positive.end(), -1) - positive.begin()) << '\n';
+  int location = 1;
+  const int* address = &location;
+  std::vector<int*> pointers{&location, nullptr, &location};
+  std::cout << (std::find(pointers.begin(), pointers.end(), nullptr) - pointers.begin()) << ' '
+            << std::count(pointers.begin(), pointers.end(), address) << '\n';
 }

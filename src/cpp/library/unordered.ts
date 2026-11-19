@@ -1,3 +1,4 @@
+import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { DisplayNode } from '../../problems/trace';
 import { byteAt } from '../bytes';
 import { CppRuntimeError } from '../errors';
@@ -240,8 +241,10 @@ function constrain(hash: bigint, count: number): number {
   return Number(hash < bigCount ? hash : hash % bigCount);
 }
 
-function nextPrime(n: number): number {
+function nextPrime(frame: Frame, n: number): number {
   for (let candidate = Math.max(n, 2); ; candidate++) {
+    checkBucketCount(candidate);
+    frame.runtime.spend();
     let isPrime = true;
     for (let divisor = 2; divisor * divisor <= candidate; divisor++) {
       if (candidate % divisor === 0) {
@@ -251,6 +254,10 @@ function nextPrime(n: number): number {
     }
     if (isPrime) return candidate;
   }
+}
+
+function checkBucketCount(count: number): void {
+  if (!Number.isSafeInteger(count) || count < 0 || count > LIMITS.maxSlots) throw new ExecutionLimitError('storage');
 }
 
 /** The entries of `std::unordered_map` or `std::unordered_set`, in libc++'s `__hash_table` order. */
@@ -349,14 +356,16 @@ export class HashValue extends MapValue {
   }
 
   /** Inserts an entry as `__emplace_unique_key_args` does, giving its position and whether it was inserted. */
-  insert(entry: Value): [HashNode, boolean] {
+  insert(frame: Frame, entry: Value): [HashNode, boolean] {
     const key = this.keyOf(entry);
     const existing = this.lookup(key);
     if (existing) return [existing, false];
+    frame.runtime.reserve(3);
     const hash = this.hash(key);
     let count = this.buckets.length;
     if (this.size + 1 > count * this.maxLoadFactor || count === 0) {
       this.rehash(
+        frame,
         Math.max(
           2 * count + (isPowerOfTwo(count) ? 0 : 1),
           Math.ceil(Math.fround((this.size + 1) / this.maxLoadFactor))
@@ -409,9 +418,10 @@ export class HashValue extends MapValue {
    * Becomes a copy of another table holding `values` in place of its nodes' values: the same bucket count and the same
    * order, as libc++'s copy constructor and copy assignment make.
    */
-  copyStructure(other: HashValue, values: Value[]): void {
-    for (let node = this.head.next; node; node = node.next) node.owner = undefined;
+  copyStructure(frame: Frame, other: HashValue, values: Value[]): void {
     const count = other.size === 0 ? 0 : other.bucketCount;
+    frame.runtime.reserve(count + 3 * other.size);
+    for (let node = this.head.next; node; node = node.next) node.owner = undefined;
     this.maxLoadFactor = other.maxLoadFactor;
     this.buckets = Array.from({ length: count });
     this.head.next = undefined;
@@ -451,37 +461,42 @@ export class HashValue extends MapValue {
     other.ordered = undefined;
   }
 
-  clear(): Value[] {
+  clear(frame: Frame): Value[] {
+    frame.runtime.spend(Math.ceil((this.buckets.length + this.size) / 64));
     const values = this.nodes().map((node) => {
       node.owner = undefined;
       return node.value;
     });
     this.head.next = undefined;
-    this.buckets = Array.from<HashNode | undefined>({ length: this.buckets.length });
+    this.buckets.fill(undefined);
     this.size = 0;
     this.ordered = undefined;
     return values;
   }
 
   /** `__rehash_unique`: grows (or shrinks) to the requested bucket count, rounded up to a prime. */
-  rehash(requested: number): void {
+  rehash(frame: Frame, requested: number): void {
+    checkBucketCount(requested);
     let n = requested;
     if (n === 1) n = 2;
-    else if ((n & (n - 1)) !== 0) n = nextPrime(n);
+    else if (!isPowerOfTwo(n) && n !== 0) n = nextPrime(frame, n);
     const count = this.buckets.length;
-    if (n > count) this.redistribute(n);
+    if (n > count) this.redistribute(frame, n);
     else if (n < count) {
       const needed = Math.ceil(Math.fround(this.size / this.maxLoadFactor));
       n = Math.max(
         n,
-        isPowerOfTwo(count) ? (needed < 2 ? needed : 2 ** Math.ceil(Math.log2(needed))) : nextPrime(needed)
+        isPowerOfTwo(count) ? (needed < 2 ? needed : 2 ** Math.ceil(Math.log2(needed))) : nextPrime(frame, needed)
       );
-      if (n < count) this.redistribute(n);
+      if (n < count) this.redistribute(frame, n);
     }
   }
 
   /** `__do_rehash<true>`, which keeps each bucket's nodes together in the list. */
-  private redistribute(count: number): void {
+  private redistribute(frame: Frame, count: number): void {
+    checkBucketCount(count);
+    frame.runtime.reserve(count);
+    frame.runtime.spend(Math.ceil(this.size / 64));
     this.iteratorEpoch.generation++;
     const buckets: (HashNode | undefined)[] = Array.from({ length: count });
     this.buckets = buckets;
@@ -571,10 +586,7 @@ export function unorderedClass(
   const table: EntryTable<HashValue, HashNode> = {
     keyOf,
     lookup: (self, key) => self.lookup(key),
-    insert: (frame, self, entry) => {
-      frame.runtime.reserve(3);
-      return self.insert(entry);
-    },
+    insert: (frame, self, entry) => self.insert(frame, entry),
     ops,
   };
   const insertionResult = (self: HashValue, node: HashNode, inserted: boolean): Value =>
@@ -592,7 +604,7 @@ export function unorderedClass(
         try {
           for (const init of inits) {
             const entry = init(frame);
-            const [, inserted] = self.insert(entry);
+            const [, inserted] = self.insert(frame, entry);
             if (!inserted) ops().destroy?.(frame, entry);
           }
         } finally {
@@ -653,8 +665,8 @@ export function unorderedClass(
           const keyValue = (keyRun(frame) as Ptr).read();
           let node = self.lookup(keyValue);
           if (!node) {
-            frame.runtime.reserve(3);
             [node] = self.insert(
+              frame,
               new CObject((entryType as Extract<Type, { kind: 'class' }>).cls, [
                 keyOps.copy(frame, keyValue),
                 mappedOps.make(frame),
@@ -682,6 +694,7 @@ export function unorderedClass(
       const from = source as HashValue;
       const target = make();
       target.copyStructure(
+        frame,
         from,
         from.nodes().map((node) => ops().copy(frame, node.value))
       );
@@ -693,7 +706,7 @@ export function unorderedClass(
       if (to === from) return;
       to.maxLoadFactor = from.maxLoadFactor;
       if (from.size === 0) {
-        destroyAll(frame, to.clear());
+        destroyAll(frame, to.clear(frame));
         return;
       }
       // Copy assignment assigns to the nodes it has, in order, and destroys or adds the rest.
@@ -703,7 +716,7 @@ export function unorderedClass(
       const values = others.slice(0, reused).map((value, index) => ops().assign(frame, own[index], value));
       destroyAll(frame, own.slice(reused));
       for (const value of others.slice(reused)) values.push(ops().copy(frame, value));
-      to.copyStructure(from, values);
+      to.copyStructure(frame, from, values);
     },
     destroy: (frame, value) =>
       destroyAll(
@@ -738,11 +751,11 @@ export function unorderedClass(
     true
   );
   method('max_load_factor', [], FLOAT, (self) => self.maxLoadFactor, true);
-  method('rehash', [SIZE_T], VOID, (self, [count]) => self.rehash(Number(count)));
-  method('reserve', [SIZE_T], VOID, (self, [count]) =>
-    self.rehash(Math.ceil(Math.fround(Number(count) / self.maxLoadFactor)))
+  method('rehash', [SIZE_T], VOID, (self, [count], frame) => self.rehash(frame, Number(count)));
+  method('reserve', [SIZE_T], VOID, (self, [count], frame) =>
+    self.rehash(frame, Math.ceil(Math.fround(Number(count) / self.maxLoadFactor)))
   );
-  method('clear', [], VOID, (self, _callArgs, frame) => destroyAll(frame, self.clear()));
+  method('clear', [], VOID, (self, _callArgs, frame) => destroyAll(frame, self.clear(frame)));
   for (const isConst of [false, true]) {
     const it = isConst ? constIterator : iterator;
     method('begin', [], it, (self) => self.first(), isConst);

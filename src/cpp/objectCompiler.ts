@@ -15,6 +15,7 @@ import { type Eval, type Frame, holdAll } from './runtime';
 import type { Syntax } from './syntax';
 import {
   type Access,
+  allowsConstantCopy,
   type ClassInfo,
   classType,
   type FunctionInfo,
@@ -255,13 +256,14 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     }
     this.requireObjectUse(classType(cls), 'copy', expr.row);
     const source = this.rvalue(expr);
+    const constantInitialization = source.constantInitialization === true && allowsConstantCopy(classType(cls));
     return {
       type: classType(cls),
       isLvalue: false,
       row: expr.row,
       isTemporaryObject: true,
-      constantInitialization: cls.library?.allowsConstantCopy && source.constantInitialization,
-      constantStringLength: !expr.isLvalue && cls.library?.allowsConstantCopy ? source.constantStringLength : undefined,
+      constantInitialization,
+      constantStringLength: !expr.isLvalue && constantInitialization ? source.constantStringLength : undefined,
       onlyCalls: expr.onlyCalls,
       run: (frame, _zeroInitialize, destination) => copyAs(frame, cls, source.run(frame), destination),
     };

@@ -869,7 +869,7 @@ function stringOperator(
     const value = compiler.rvalue(expr);
     if (value.type.kind === 'pointer' && isCharType(value.type.to)) {
       const run = value.run;
-      return (frame) => readCString(run(frame) as Ptr);
+      return (frame) => readCString(run(frame) as Ptr, undefined, frame.runtime);
     }
     if (value.type.kind === 'class' && library.isStringLike(value.type)) return undefined;
     return undefined;

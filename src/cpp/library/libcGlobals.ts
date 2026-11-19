@@ -38,17 +38,37 @@ export function isLibcGlobalDeclared(name: string, headers: ReadonlySet<string>)
   );
 }
 
+export function redeclaresLibcFunction(fn: FunctionInfo, headers: ReadonlySet<string>): boolean {
+  if (!Object.hasOwn(declarations, fn.name)) return false;
+  return declarations[fn.name].some(
+    ([group, kind, signature]) =>
+      typeof group === 'number' &&
+      kind === 'function' &&
+      typeof signature === 'string' &&
+      visibleIn(group, headers) &&
+      matchingReturnType(fn, signature) &&
+      matchingParameters(fn, signature)
+  );
+}
+
 function visibleIn(group: number, headers: ReadonlySet<string>): boolean {
   return [...headers].some((header) => headerGroups[group].has(header));
 }
 
 function hasConflictingSignature(declared: FunctionInfo, cannotRedeclare: boolean, signature: string): boolean {
+  return matchingParameters(declared, signature) && (cannotRedeclare || !matchingReturnType(declared, signature));
+}
+
+function matchingParameters(declared: FunctionInfo, signature: string): boolean {
   const paramsStart = signature.indexOf('(');
   if (paramsStart === -1) return false;
   const params = declared.params.map(({ type }) => typeName(unqualified(type)));
   if (declared.isVariadic) params.push('...');
-  if (compact(`(${params.join(',')})`) !== compact(signature.slice(paramsStart))) return false;
-  return cannotRedeclare || compact(typeName(declared.ret)) !== compact(signature.slice(0, paramsStart));
+  return compact(`(${params.join(',')})`) === compact(signature.slice(paramsStart));
+}
+
+function matchingReturnType(declared: FunctionInfo, signature: string): boolean {
+  return compact(typeName(declared.ret)) === compact(signature.slice(0, signature.indexOf('(')));
 }
 
 function compact(type: string): string {

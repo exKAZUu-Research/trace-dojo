@@ -20,6 +20,7 @@ import {
   LLONG,
   LONG,
   nonReference,
+  sameParameters,
   SCHAR,
   SHORT,
   type Type,
@@ -40,7 +41,12 @@ import { constantsOf } from './constants';
 import { containerTemplates } from './containers';
 import { exceptionClasses } from './exceptions';
 import { FLAGS, ManipulatorValue, Streams, type StreamValue } from './iostream';
-import { conflictsWithLibcGlobal, isLibcGlobalDeclared, isLibcHeaderMacro } from './libcGlobals';
+import {
+  conflictsWithLibcGlobal,
+  isLibcGlobalDeclared,
+  isLibcHeaderMacro,
+  redeclaresLibcFunction,
+} from './libcGlobals';
 import { randomEngines } from './random';
 import { stringClass, stringFunctions } from './string';
 import { asNumber, CONST_CHAR_PTR, generic, native } from './support';
@@ -255,6 +261,18 @@ export class Library {
     if (cOverload) return { kind: 'functions', functions: [cOverload] };
     const visible = name === 'Turtle' || isVisible(name, this.headers, 'global');
     return (visible ? this.globalNames.get(name) : undefined) ?? this.unsupportedCName(name);
+  }
+
+  rebindCOverloads(name: string, standard: FunctionInfo[], declared: FunctionInfo[]): FunctionInfo[] {
+    const global = this.global(name);
+    if (global?.kind !== 'functions') return standard;
+    const definitions = declared.filter((fn) => redeclaresLibcFunction(fn, this.headers));
+    if (definitions.length === 0) return standard;
+    return standard.map((fn) => {
+      if (!global.functions.includes(fn)) return fn;
+      const definition = definitions.find((candidate) => sameParameters(candidate, fn));
+      return definition ?? fn;
+    });
   }
 
   private cOverload(name: string): FunctionInfo | undefined {

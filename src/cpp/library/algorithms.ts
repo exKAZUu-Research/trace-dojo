@@ -223,13 +223,15 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   };
   /** The comparison an algorithm uses: the argument at `index`, or `<`. */
   const lessOf = (args: Expr[], index: number, element: Type): ((frame: Frame) => Less) | undefined =>
-    orderOf(args[index], [element, element]);
+    orderOf(args[index], [element, element], args[0].row);
   /** The comparison `arg` makes between values of the two types, or `<` without it. */
-  const orderOf = (arg: Expr | undefined, types: Type[]): ((frame: Frame) => Less) | undefined => {
+  const orderOf = (arg: Expr | undefined, types: [Type, Type], row: number): ((frame: Frame) => Less) | undefined => {
     if (!arg) {
-      const less = lessThan(types[0]);
-      if (!less) return undefined;
-      return () => (a, b) => less(a, b) < 0;
+      const [left, right] = types;
+      const less = sameType(left, right, false) ? lessThan(left) : undefined;
+      if (less) return () => (a, b) => less(a, b) < 0;
+      const compare = valueComparison(compiler(), '<', left, right, row);
+      return compare ? (frame) => (a, b) => compare(frame, a, b) : undefined;
     }
     const call = comparatorOf(compiler(), unqualified(arg.type), arg.functions?.candidates, types, arg.row);
     if (!call) return undefined;
@@ -361,7 +363,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('find', (args) => {
     const info = rangeAt(args, 0);
     if (!info || args.length !== 3) return;
-    const equal = valueEquality(info.element, decayed(args[2].type));
+    const equal = valueEquality(compiler(), info.element, decayed(args[2].type), args[0].row);
     if (!equal) return;
     const types = params(args);
     return native('find', types, unqualified(args[0].type), ([first, last, value], { frame }) => {
@@ -389,7 +391,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('count', (args) => {
     const info = rangeAt(args, 0);
     if (!info || args.length !== 3) return;
-    const equal = valueEquality(info.element, decayed(args[2].type));
+    const equal = valueEquality(compiler(), info.element, decayed(args[2].type), args[0].row);
     if (!equal) return;
     const types = params(args);
     return native('count', types, PTRDIFF_T, ([first, last, value], { frame }) => {
@@ -434,17 +436,18 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     define(name, (args) => {
       const info = rangeAt(args, 0);
       if (!info || args.length < 3 || args.length > 4) return;
-      const valueType = params(args)[2];
+      const types = params(args);
+      const valueType = types[2];
       // A comparator may take the element and the value in different types: (element, value) for lower_bound and
       // (value, element) for upper_bound.
       const elementType = unqualified(info.element);
       const searched = unqualified(valueType.kind === 'reference' ? valueType.to : valueType);
-      const elementFirst = name !== 'upper_bound' ? orderOf(args[3], [elementType, searched]) : undefined;
-      const valueFirst = name !== 'lower_bound' ? orderOf(args[3], [searched, elementType]) : undefined;
+      const elementFirst = name !== 'upper_bound' ? orderOf(args[3], [elementType, searched], args[0].row) : undefined;
+      const valueFirst = name !== 'lower_bound' ? orderOf(args[3], [searched, elementType], args[0].row) : undefined;
       if ((name !== 'upper_bound' && !elementFirst) || (name !== 'lower_bound' && !valueFirst)) return;
       return native(
         name,
-        params(args),
+        types,
         name === 'binary_search' ? BOOL : unqualified(args[0].type),
         ([first, last, value], { frame }) => {
           const values = range(first, last, info);
@@ -478,7 +481,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const hasEnd = args.length === 5 || (args.length === 4 && rangeAt(args, 2) !== undefined);
     const predicateArg = args[hasEnd ? 4 : 3];
     const predicate = predicateArg ? predicateOf(predicateArg, [info.element, other.element]) : undefined;
-    const equal = valueEquality(info.element, other.element);
+    const equal = valueEquality(compiler(), info.element, other.element, args[0].row);
     if (predicateArg ? !predicate : !equal) return;
     const same = (frame: Frame, a: Value, b: Value): boolean =>
       predicate ? truthy(predicate(frame, a, b)) : (equal as ValueEquality).test(frame, a, b);
@@ -551,7 +554,8 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const info = writableRangeAt(args, 0);
       if (!info || args.length !== 4) return;
       const predicate = name === 'replace_if' ? predicateOf(args[2], info.element) : undefined;
-      const equal = name === 'replace' ? valueEquality(info.element, decayed(args[2].type)) : undefined;
+      const equal =
+        name === 'replace' ? valueEquality(compiler(), info.element, decayed(args[2].type), args[0].row) : undefined;
       if (!predicate && !equal) return;
       const ops = elementOperations(compiler(), unqualified(info.element), args[0].row, 'assign');
       const types = params(args);
@@ -576,7 +580,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       if (name === 'unique' ? args.length > 3 : args.length !== 3) return;
       let keep: (frame: Frame, item: Value, previous: Value | undefined) => boolean;
       if (name === 'remove') {
-        const equal = valueEquality(info.element, decayed(args[2].type));
+        const equal = valueEquality(compiler(), info.element, decayed(args[2].type), args[0].row);
         if (!equal) return;
         const types = params(args);
         keep = (frame, item) => !equal.test(frame, item, readArg(frame.pending.at(-1) as Ptr, types[2]));
@@ -834,7 +838,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   // min, max, clamp ------------------------------------------------------------------------------------------------
   /** The order of min, max, minmax, or clamp: the comparator argument at `index`, or `<`. */
   const extremumOrder = (args: Expr[], index: number, type: Type): ((frame: Frame) => Less) | undefined =>
-    orderOf(args[index], [type, type]);
+    orderOf(args[index], [type, type], args[0].row);
   for (const name of ['min', 'max', 'minmax']) {
     define(name, (args, templateArgs) => {
       if (args[0]?.braced && args.length <= 2) {
@@ -868,9 +872,8 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       if (args.length === 2 && isArithmetic(type)) {
         fn.evaluateConstant = ([a, b]) => ((name === 'min' ? b < a : a < b) ? b : a);
       }
-      if (args.length === 2 && type.kind === 'class' && type.cls.library?.kind === 'pair') {
-        const args = type.cls.library.args;
-        fn.libraryConstant = () => (args.every(isArithmetic) ? true : undefined);
+      if (args.length === 2 && supportsConstantOrder(type)) {
+        fn.libraryConstant = (operands) => (operands.every((operand) => !operand.isLvalue) ? true : undefined);
       }
       return fn;
     });
@@ -1068,7 +1071,12 @@ interface ValueEquality {
 }
 
 /** How `==` compares an element with an argument, after converting the argument to the element's type. */
-function valueEquality(element: Type, compared: Type): ValueEquality | undefined {
+function valueEquality(
+  compiler: ExpressionCompiler,
+  element: Type,
+  compared: Type,
+  row: number
+): ValueEquality | undefined {
   const type = unqualified(element);
   const argType = unqualified(compared);
   if (isArithmetic(type) && isArithmetic(argType)) {
@@ -1100,15 +1108,55 @@ function valueEquality(element: Type, compared: Type): ValueEquality | undefined
       return { test: (frame, a, b) => compareStringBytes(frame, stringValueBytes(a), stringValueBytes(b)) };
     }
   }
-  if (typeName(type) !== typeName(argType)) return undefined;
-  const equal = equalTo(type);
-  if (!equal) return;
+  const equal = sameType(type, argType, false) ? equalTo(type) : undefined;
+  if (!equal) {
+    const compare = valueComparison(compiler, '==', type, argType, row);
+    return compare ? { test: compare } : undefined;
+  }
   return {
     test: (frame, a, b) => {
       frame.runtime.spend();
       return equal(a, b);
     },
   };
+}
+
+function valueComparison(
+  compiler: ExpressionCompiler,
+  operator: '<' | '==',
+  left: Type,
+  right: Type,
+  row: number
+): ValueEquality['test'] | undefined {
+  const input = (type: Type, index: number): Expr => ({
+    type,
+    isLvalue: false,
+    row,
+    run: (frame) => frame.pending.at(index),
+  });
+  let run: Expr['run'];
+  try {
+    run = compiler.binary(operator, input(left, -2), input(right, -1), row).run;
+  } catch (error) {
+    if (error instanceof CompileError) return;
+    throw error;
+  }
+  return (frame, a, b) => {
+    frame.runtime.spend();
+    const mark = frame.pending.length;
+    frame.pending.push(a, b);
+    try {
+      return truthy(run(frame));
+    } finally {
+      frame.pending.length = mark;
+    }
+  };
+}
+
+function supportsConstantOrder(type: Type): boolean {
+  if (isArithmetic(type)) return true;
+  const library = type.kind === 'class' ? type.cls.library : undefined;
+  return library?.kind === 'string' || (library?.kind === 'pair' && library.args.every(supportsConstantOrder));
 }
 
 function bindEquality(equal: ValueEquality, frame: Frame, target: Value): (element: Value) => boolean {

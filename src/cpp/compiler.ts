@@ -2,6 +2,7 @@ import { CRuntimeError } from '../c/errors';
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionLimitError } from '../interpreter/limits';
 import { misplacedAtomicMessage, type TraceOptions } from '../interpreter/traceAnnotations';
+import { isMemberAccessible } from './access';
 import { byteAt } from './bytes';
 import { hasAuto } from './compilerBase';
 import { CppException, CppRuntimeError, NarrowingConversionError } from './errors';
@@ -25,7 +26,7 @@ import {
   withTemporaries,
   zeroOf,
 } from './objectCompiler';
-import { type CompiledFunction, type Eval, type Exec, type Frame, RETURN, type Runtime } from './runtime';
+import { type CompiledFunction, type Eval, type Exec, type Frame, holdAll, RETURN, type Runtime } from './runtime';
 import { type Entity, FunctionContext } from './scopes';
 import {
   type AutoDeduction,
@@ -51,6 +52,7 @@ import {
   isInteger,
   isReferenceRelated,
   type ParamInfo,
+  sameParameters,
   sameType,
   type Type,
   typeName,
@@ -603,13 +605,34 @@ export class Compiler extends StatementCompiler {
     cls.isComplete = true;
     if (cls.constructors.length === 0) {
       cls.isDefaultConstructorDeleted =
-        cls.base?.isDefaultConstructorDeleted === true ||
-        cls.ownFields.some((field) => !field.initializer && !isDefaultInitializable(field.type));
+        (cls.base !== undefined && !this.isDefaultInitializable(classType(cls.base), cls)) ||
+        cls.ownFields.some((field) => !field.initializer && !this.isDefaultInitializable(field.type, cls));
       if (!cls.isDefaultConstructorDeleted) {
         this.implicitDefaults.set(cls, this.bindImplicitDefault(cls));
       }
     }
     cls.operations = this.classOperations(cls, userCopy);
+  }
+
+  private isDefaultInitializable(type: Type, owner: ClassInfo): boolean {
+    if (type.kind === 'reference') return false;
+    if (type.kind === 'array') return type.length === 0 || this.isDefaultInitializable(type.of, owner);
+    if (type.kind !== 'class') return !isConstType(type);
+    const { cls } = type;
+    if (cls.isDefaultConstructorDeleted || (isConstType(type) && !isConstDefaultConstructible(type))) return false;
+    const fixed = cls.library?.aggregateArray;
+    if (fixed) return this.isDefaultInitializable(fixed.type, owner);
+    if (cls.library) return true;
+    if (cls.destructor && !isMemberAccessible(cls.destructor.access, cls, cls, owner)) return false;
+    if (cls.constructors.length === 0) return true;
+    try {
+      const viable = this.matchingOverloads(cls.constructors, []);
+      const selected = this.chooseOverload(cls.name, viable, owner.row)?.fn;
+      return selected !== undefined && isMemberAccessible(selected.access, cls, cls, owner);
+    } catch (error) {
+      if (error instanceof CompileError) return false;
+      throw error;
+    }
   }
 
   private bindImplicitDefault(cls: ClassInfo): () => FunctionInfo | undefined {
@@ -813,11 +836,12 @@ export class Compiler extends StatementCompiler {
     this.checkDefined(resolved.fn, initializer.row);
     const runs = this.callArguments(resolved.fn, this.convertArguments(resolved, args), initializer.row);
     const { row } = initializer;
-    return this.fullExpression<undefined>((frame) => {
-      const values = runs.map((run) => run(frame));
-      invoke(frame, resolved.fn, values, frame.self, row, true);
-      return;
-    });
+    return this.fullExpression<undefined>((frame) =>
+      holdAll<undefined>(frame, runs, (values) => {
+        invoke(frame, resolved.fn, values, frame.self, row, true);
+        return;
+      })
+    );
   }
 
   private initializerArguments(initializer: Syntax): Expr[] {
@@ -844,12 +868,13 @@ export class Compiler extends StatementCompiler {
     if (!resolved.fn.native && resolved.fn.access === 'private')
       this.error(row, `${base.name} のコンストラクタは private です。`);
     const runs = this.callArguments(resolved.fn, this.convertArguments(resolved, args), row);
-    return this.fullExpression<undefined>((frame) => {
-      const values = runs.map((run) => run(frame));
-      (frame.self?.read() as CObject).cls = base;
-      invoke(frame, resolved.fn, values, frame.self, row, true);
-      return;
-    });
+    return this.fullExpression<undefined>((frame) =>
+      holdAll<undefined>(frame, runs, (values) => {
+        (frame.self?.read() as CObject).cls = base;
+        invoke(frame, resolved.fn, values, frame.self, row, true);
+        return;
+      })
+    );
   }
 
   /** Initializes one member as a constructor does, recording the step of an initializer that learners see. */
@@ -2082,7 +2107,7 @@ export class Compiler extends StatementCompiler {
 
   protected withArgumentDependentLookup(name: string, functions: FunctionInfo[], args: Expr[]): FunctionInfo[] {
     if (!args.some((arg) => this.library.isStdType(arg.type))) return functions;
-    const found = this.library.std(name);
+    const found = this.findStdName(name);
     if (found?.kind !== 'functions') return functions;
     return [...new Set([...functions, ...found.functions])];
   }
@@ -2172,20 +2197,6 @@ function isCharacterArray(type: Extract<Type, { kind: 'array' }>): boolean {
   return element.kind === 'int' && (element.name === 'char' || element.name === 'schar' || element.name === 'uchar');
 }
 
-/** Whether two functions take the same parameter types, as redeclarations and overloads compare them. */
-function sameParameters(a: FunctionInfo, b: FunctionInfo): boolean {
-  return (
-    a.params.length === b.params.length &&
-    a.params.every((param, index) => sameType(adjustParameter(param.type), adjustParameter(b.params[index].type))) &&
-    (!a.owner || a.isConst === b.isConst)
-  );
-}
-
-/** A parameter's type as overloading compares it: without top-level `const`. */
-function adjustParameter(type: Type): Type {
-  return type.kind === 'reference' ? type : unqualified(type);
-}
-
 function mergeDefaults(
   declared: ParamInfo[],
   defined: ParamInfo[],
@@ -2233,22 +2244,6 @@ function isUnassignable(type: Type): boolean {
   if (type.kind === 'reference') return true;
   if (type.kind === 'array') return isUnassignable(type.of);
   return isConstType(type) || (type.kind === 'class' && type.cls.isAssignmentDeleted);
-}
-
-/** Whether a member of a type without an initializer leaves its class's implicit default constructor defined. */
-function isDefaultInitializable(type: Type): boolean {
-  if (type.kind === 'reference') return false;
-  if (type.kind === 'array') return type.length === 0 || isDefaultInitializable(type.of);
-  if (type.kind !== 'class') return !isConstType(type);
-  const { cls } = type;
-  if (cls.isDefaultConstructorDeleted || (isConstType(type) && !isConstDefaultConstructible(type))) return false;
-  const fixed = cls.library?.aggregateArray;
-  if (fixed) return isDefaultInitializable(fixed.type);
-  return (
-    cls.library !== undefined ||
-    cls.constructors.length === 0 ||
-    cls.constructors.some((ctor) => ctor.params.every((param) => param.defaultValue !== undefined))
-  );
 }
 
 /** Completes zero initialization for implicit value construction. */
