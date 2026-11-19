@@ -212,11 +212,15 @@ export abstract class StatementCompiler extends OperatorCompiler {
       return () => {};
     }
     const initializer = this.compileExpression(scope, context, statement.initializer, declared);
-    const type = declared ?? this.inferredVariableType(initializer);
+    // A `var` that a smart-cast value initializes takes the value's declared type, starting smart-cast, as kotlinc infers
+    // it, so that `var c = head` may later hold `c.next`.
+    const unnarrowed = statement.isVar && !declared ? initializer.unnarrowedType : undefined;
+    const type = declared ?? this.inferredVariableType(unnarrowed ? { ...initializer, type: unnarrowed } : initializer);
     const value = this.expectType(initializer, type, statement.initializer.row);
     const variable = this.newVariable(scope, context, name, type, statement.isVar, row);
     this.flow.assigned.add(variable);
     this.flow.maybeAssigned.add(variable);
+    if (unnarrowed) this.flow.narrowed.set(keyOf(variable), initializer.type);
     const write = this.variableAccess(context, variable).write;
     return this.withStep(
       row,
@@ -818,7 +822,10 @@ export abstract class StatementCompiler extends OperatorCompiler {
       elementRepr,
       statement.row
     );
+    const beforeBody = this.flow.copy();
     const body = this.compileLoopBody(loopScope, context, loop, statement.body);
+    // The body may run no times, so what it assigns or smart-casts holds after the loop only if it held before.
+    this.flow = Flow.merge([beforeBody, this.flow]);
     const lastSlot = context.info.slotCount;
     const iterableEval = iterable.eval;
     return (frame) => {

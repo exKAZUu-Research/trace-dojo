@@ -42,6 +42,8 @@ export interface Compiled {
   constant?: Value;
   /** The key of the variable or property the expression reads, which smart casts narrow. */
   stableKey?: string;
+  /** For a read that a smart cast narrows, the declared type, which a `var` that the read initializes takes. */
+  unnarrowedType?: KType;
   /** For a safe call such as `s?.length`, the smart casts of its receivers that hold when its value is not null. */
   whenNonNull?: Map<string, KType>;
   /** For a condition, the smart casts that hold when it is true and when it is false. */

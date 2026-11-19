@@ -536,6 +536,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       repr: reprOf(this.core, variable.type),
       eval: access.read,
       stableKey: variable.isCapturedAndModified ? undefined : key,
+      unnarrowedType: narrowed && variable.type,
     };
   }
 
@@ -609,6 +610,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const narrowed = key ? this.flow.narrowed.get(key) : undefined;
     return {
       type: narrowed ?? type,
+      unnarrowedType: narrowed && type,
       repr: propertyRepr(symbol),
       eval: (frame) => getPropertyValue(symbol, frame, receiverEval(frame)),
       stableKey: key,

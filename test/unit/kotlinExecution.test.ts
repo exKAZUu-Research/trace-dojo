@@ -307,6 +307,16 @@ test.each([
   ['an unknown escape', false, 'fun main() {\n    println("\\q")\n}'],
   ['a variable of the type Nothing?', true, 'fun main() {\n    val n = null\n    println(n)\n}'],
   ['a class of the library that Kotlin does not have', false, 'fun main() {\n    println(EmptyList<Int>())\n}'],
+  [
+    'a var that a smart-cast value initializes, which keeps the declared type',
+    true,
+    'class Node(val v: Int, var next: Node?)\nfun main() {\n    var head: Node? = null\n    for (i in 1..3) head = Node(i, head)\n    var c = head\n    while (c != null) {\n        println(c.v)\n        c = c.next\n    }\n}',
+  ],
+  [
+    'a smart cast from the body of a for loop, which may not run',
+    false,
+    'class Node(val v: Int, var next: Node?)\nfun main() {\n    var head: Node? = null\n    for (i in 1..3) head = Node(i, head)\n    println(head.v)\n}',
+  ],
 ])('decides whether %s compiles as kotlinc does', (_name, compiles, source) => {
   expect(executeProgram('kotlin', source).kind === 'compileError').toBe(!compiles);
 });
