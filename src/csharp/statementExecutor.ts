@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
-import type { BoundBlock, BoundExpression, BoundStatement, BoundSwitchSection, ForeachKind } from './bound';
+import type { BoundBlock, BoundCatch, BoundExpression, BoundStatement, BoundSwitchSection, ForeachKind } from './bound';
 import { NULL_REFERENCE } from './evaluatorBase';
 import { PendingException } from './numeric';
 import { PatternMatcher } from './patternMatcher';
@@ -291,6 +291,8 @@ export abstract class StatementExecutor extends PatternMatcher {
     if (!statement.value) {
       const current = this.currentExceptions.at(-1);
       if (!current) throw NULL_REFERENCE();
+      // `throw;` sends the exception on to the handlers outside, which choose its catch clause anew.
+      this.catchers.delete(current);
       throw current;
     }
     throw this.throwValue(this.evaluate(statement.value, frame));
@@ -299,11 +301,20 @@ export abstract class StatementExecutor extends PatternMatcher {
   private executeTry(statement: Extract<BoundStatement, { kind: 'try' }>, frame: Frame): Completion {
     let completion: Completion;
     try {
+      const hasCatches = statement.catches.length > 0;
+      if (hasCatches) this.handlers.push({ statement, frame });
+      let thrown: CsThrow | undefined;
       try {
         completion = this.executeBlock(statement.body, frame);
       } catch (error) {
-        const thrown = this.asThrow(error);
+        thrown = this.asThrow(error);
         if (!thrown) throw error;
+        // .NET finds the catch clause, running the filters on the way, before it runs any finally block.
+        if (!this.catchers.has(thrown)) this.catchers.set(thrown, this.findCatcher(thrown));
+      } finally {
+        if (hasCatches) this.handlers.pop();
+      }
+      if (thrown) {
         const handled = this.handle(statement, thrown, frame);
         if (handled === 'unhandled') throw thrown;
         completion = handled;
@@ -321,24 +332,41 @@ export abstract class StatementExecutor extends PatternMatcher {
     return this.executeBlock(block, frame);
   }
 
-  /** Runs the first catch clause that accepts an exception, or tells that none did. */
+  /** The try statements whose bodies are running, innermost last, with their catch clauses. */
+  private readonly handlers: { statement: Extract<BoundStatement, { kind: 'try' }>; frame: Frame }[] = [];
+
+  /** The catch clause that each exception in flight goes to, or undefined when none takes it. */
+  private readonly catchers = new WeakMap<CsThrow, { statement: BoundStatement; clause: BoundCatch } | undefined>();
+
+  /** The first catch clause from the innermost try out that accepts an exception, its filter evaluated in its frame. */
+  private findCatcher(thrown: CsThrow): { statement: BoundStatement; clause: BoundCatch } | undefined {
+    for (const { statement, frame } of this.handlers.toReversed()) {
+      for (const clause of statement.catches) {
+        if (!this.isInstanceOf(thrown.exception, clause.type)) continue;
+        if (clause.local) this.storeLocal(frame, clause.local, thrown.exception, true);
+        if (clause.filter && !(this.evaluate(clause.filter, frame) as boolean)) continue;
+        return { statement, clause };
+      }
+    }
+    return undefined;
+  }
+
+  /** Runs the catch clause of this try that the exception goes to, or tells that it goes elsewhere. */
   private handle(
     statement: Extract<BoundStatement, { kind: 'try' }>,
     thrown: CsThrow,
     frame: Frame
   ): Completion | 'unhandled' {
-    for (const clause of statement.catches) {
-      if (!this.isInstanceOf(thrown.exception, clause.type)) continue;
-      if (clause.local) this.storeLocal(frame, clause.local, thrown.exception, true);
-      if (clause.filter && !(this.evaluate(clause.filter, frame) as boolean)) continue;
-      this.currentExceptions.push(thrown);
-      try {
-        return this.executeBlock(clause.body, frame);
-      } finally {
-        this.currentExceptions.pop();
-      }
+    const catcher = this.catchers.get(thrown);
+    if (catcher?.statement !== statement) return 'unhandled';
+    const { clause } = catcher;
+    if (clause.local) this.storeLocal(frame, clause.local, thrown.exception, true);
+    this.currentExceptions.push(thrown);
+    try {
+      return this.executeBlock(clause.body, frame);
+    } finally {
+      this.currentExceptions.pop();
     }
-    return 'unhandled';
   }
 
   /** The C# exception that a host error stands for, if the program can catch it. */

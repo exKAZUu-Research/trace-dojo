@@ -12,6 +12,7 @@ import {
   type NamedType,
   namedType,
   nullableUnderlying,
+  type PropertySymbol,
   sameType,
   specialOf,
   substitute,
@@ -557,7 +558,7 @@ export function recordMember(
       return name === 'op_Equality' ? equal : !equal;
     }
     case 'Deconstruct': {
-      deconstructRecord(receiver as CsObject | CsStruct, args);
+      deconstructRecord(call.method.owner, receiver as CsObject | CsStruct, args);
       return undefined;
     }
     default: {
@@ -592,10 +593,15 @@ function recordEquals(evaluator: Evaluator, frame: Frame, value: CsObject | CsSt
   return value.fields.every((field, index) => valuesEqual(evaluator, field, other.fields[index], frame));
 }
 
-function deconstructRecord(value: CsObject | CsStruct, args: Value[]): void {
-  const symbol = value.type.symbol;
-  for (const [index, parameter] of (symbol.primaryParameters ?? []).entries()) {
-    const property = symbol.properties.find((candidate) => candidate.name === parameter.name);
+/**
+ * A record's `Deconstruct`, which reads the properties of the parameters of the record that declares it, whatever the
+ * object's own type, from that record or a base record that declares them.
+ */
+function deconstructRecord(owner: TypeSymbol, value: CsObject | CsStruct, args: Value[]): void {
+  for (const [index, parameter] of (owner.primaryParameters ?? []).entries()) {
+    let property: PropertySymbol | undefined;
+    for (let current: TypeSymbol | undefined = owner; current && !property; current = current.baseType?.symbol)
+      property = current.properties.find((candidate) => candidate.name === parameter.name);
     const field = property?.backingField;
     const memberValue = field ? value.fields[field.slot] : undefined;
     (args[index] as unknown as VariableReference).set(memberValue);

@@ -254,17 +254,24 @@ export class Runtime {
       byType = new Map();
       this.dispatchCache.set(method, byType);
     }
-    const key = typeKey(type);
+    // A class may implement one generic interface for several type arguments, which the call's static type picks.
+    const face =
+      method.owner.kind === 'interface' && staticType?.kind === 'named' && staticType.symbol === method.owner
+        ? staticType
+        : undefined;
+    const key = face ? `${typeKey(type)} as ${typeKey(face)}` : typeKey(type);
     let found = byType.get(key);
     if (!found) {
-      found = this.findImplementation(type, method) ?? method;
+      found = this.findImplementation(type, method, face) ?? method;
       byType.set(key, found);
     }
     return found;
   }
 
-  private findImplementation(type: NamedType, method: MethodSymbol): MethodSymbol | undefined {
+  private findImplementation(type: NamedType, method: MethodSymbol, face?: NamedType): MethodSymbol | undefined {
     const isInterface = method.owner.kind === 'interface';
+    const exact = face && isInterface ? this.findExactImplementation(type, method, face) : undefined;
+    if (exact) return exact;
     const implementsMethod = (candidate: MethodSymbol): boolean =>
       candidate.name === method.name &&
       (isInterface ? this.implementsByName(candidate, method) : this.overrides(candidate, method));
@@ -281,6 +288,29 @@ export class Runtime {
         if (!isInterface || start === type || !(found.isVirtual || found.isOverride || found.isAbstract)) return found;
         return this.findImplementation(type, found) ?? found;
       }
+    }
+    return undefined;
+  }
+
+  /** The method whose parameter types are those of an interface method for the interface's type arguments. */
+  private findExactImplementation(type: NamedType, method: MethodSymbol, face: NamedType): MethodSymbol | undefined {
+    const wanted = method.parameters.map((parameter) => substitute(parameter.type, substitutionOf(face)));
+    const start = this.declaringClass(type, method.owner) ?? type;
+    for (let current: NamedType | undefined = start; current; current = baseTypeOf(current)) {
+      const substitution = substitutionOf(current);
+      const found = current.symbol.methods.find(
+        (candidate) =>
+          candidate.name === method.name &&
+          !candidate.isStatic &&
+          candidate.typeParameters.length === method.typeParameters.length &&
+          candidate.parameters.length === wanted.length &&
+          candidate.parameters.every((parameter, index) =>
+            sameType(substitute(parameter.type, substitution), wanted[index])
+          )
+      );
+      if (found && start !== type && (found.isVirtual || found.isOverride || found.isAbstract))
+        return this.findImplementation(type, found) ?? found;
+      if (found) return found;
     }
     return undefined;
   }
