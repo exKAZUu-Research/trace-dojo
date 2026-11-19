@@ -634,7 +634,7 @@ class Followed {
   }
 }
 
-export function listSort(self: SequenceValue, less: (a: Ptr, b: Ptr) => boolean): void {
+export function listSort(frame: Frame, self: SequenceValue, less: (a: Ptr, b: Ptr) => boolean): void {
   const sort = (first: number, last: number): void => {
     if (last - first < 2) return;
     const middle = first + Math.floor((last - first) / 2);
@@ -650,6 +650,7 @@ export function listSort(self: SequenceValue, less: (a: Ptr, b: Ptr) => boolean)
       }
       let end = right + 1;
       while (end < last && less(self.location(end), item)) end++;
+      frame.runtime.spend(Math.ceil((end - left) / 64));
       self.moveNodesBefore(right, end, left);
       left += end - right + 1;
       right = end;

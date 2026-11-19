@@ -783,7 +783,7 @@ function listMethods(
   });
   method('sort', [], VOID, (self) => {
     if (!less) throw new CppRuntimeError('custom', `${typeName(element)} の値は < で比べられません。`);
-    listSort(self, (a, b) => less(a.read(), b.read()) < 0);
+    self.reorder((items) => items.toSorted((a, b) => less(a.value, b.value)));
   });
   const unique = (self: SequenceValue, frame: Frame, same: (a: Ptr, b: Ptr) => boolean): bigint =>
     removeListRuns(frame, self, editor, 1, (first, candidate) => same(self.location(first), self.location(candidate)));
@@ -808,7 +808,7 @@ function listMethods(
       VOID,
       (_args, { self, frame }) => {
         const list = self as SequenceValue;
-        listSort(list, (a, b) => compare(frame, a, b));
+        listSort(frame, list, (a, b) => compare(frame, a, b));
       },
       { owner: cls }
     );
