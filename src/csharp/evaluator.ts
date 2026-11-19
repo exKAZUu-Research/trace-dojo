@@ -1,23 +1,19 @@
-// oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
-import { BinderBase } from './binderBase';
 import type {
   BoundArgument,
   BoundBlock,
-  BoundDeconstructTarget,
   BoundExpression,
   BoundInitializerEntry,
   BoundLValue,
-  BoundPattern,
-  BoundStatement,
   LambdaInfo,
 } from './bound';
 import type { CompiledProgram } from './compiler';
-import type { ConversionKind, Conversions } from './conversions';
-import { CsDecimal } from './decimal';
+import { combineDelegates, delegatesEqual, removeDelegate } from './delegates';
+import { NULL_REFERENCE, type Place, Reference } from './evaluatorBase';
 import { formatValue } from './library/formatting';
 import type { NativeCall } from './natives';
 import {
   arithmetic,
+  booleanOperation,
   compareNumeric,
   convertNumeric,
   type NumericValue,
@@ -25,20 +21,18 @@ import {
   stepNumeric,
   unaryNumeric,
 } from './numeric';
-import { environmentOf, exceptionMessage, recordMember, runtimeTypeName, stringOf, valuesEqual } from './objects';
-import { CsThrow, type ExceptionState, Frame, type Runtime, type Slot, StackOverflow } from './runtime';
+import { environmentOf, exceptionMessage, recordMember, stringOf } from './objects';
+import { CsThrow, Frame, type Runtime, type Slot, StackOverflow } from './runtime';
+import { StatementExecutor } from './statementExecutor';
 import {
   type ArrayType,
   baseTypeOf,
-  type FieldSymbol,
   isReferenceType,
   type LocalSymbol,
   type MethodSymbol,
   type NamedType,
   namedType,
   nullableUnderlying,
-  type PropertySymbol,
-  sameType,
   specialOf,
   type SpecialType,
   substitute,
@@ -60,48 +54,57 @@ import {
   type VariableReference,
 } from './values';
 
-const BREAK = Symbol('break');
-const CONTINUE = Symbol('continue');
-interface ReturnCompletion {
-  value: Value;
-}
-type Completion = undefined | typeof BREAK | typeof CONTINUE | ReturnCompletion;
-
-/** A `ref` or `out` argument, which reads and writes the caller's variable. */
-export class Reference implements VariableReference {
-  constructor(
-    readonly get: () => Value,
-    readonly set: (value: Value) => void
-  ) {}
-}
-
-/** Storage that an assignment reads and writes after evaluating its receiver and indices once. */
-interface Place {
-  get(): Value;
-  set(value: Value): void;
-}
-
-const NULL_REFERENCE = (): PendingException =>
-  new PendingException('System.NullReferenceException', 'Object reference not set to an instance of an object.');
+type BinaryExpression = Extract<BoundExpression, { kind: 'binary' }>;
+type AccessExpression = Extract<
+  BoundExpression,
+  {
+    kind:
+      | 'constant'
+      | 'local'
+      | 'this'
+      | 'field'
+      | 'staticField'
+      | 'element'
+      | 'property'
+      | 'compoundOperand'
+      | 'conditionalAccess';
+  }
+>;
+type InvocationExpression = Extract<
+  BoundExpression,
+  { kind: 'call' | 'invokeDelegate' | 'new' | 'newArray' | 'newDelegate' | 'lambda' | 'tuple' | 'with' | 'default' }
+>;
+type OperationExpression = Extract<
+  BoundExpression,
+  {
+    kind:
+      | 'unary'
+      | 'binary'
+      | 'logical'
+      | 'coalesce'
+      | 'conditional'
+      | 'convert'
+      | 'is'
+      | 'as'
+      | 'switch'
+      | 'concat'
+      | 'interpolated'
+      | 'throw'
+      | 'sequence';
+  }
+>;
+type AssignmentExpression = Extract<
+  BoundExpression,
+  { kind: 'assign' | 'compoundAssign' | 'increment' | 'deconstructAssign' | 'eventAccessor' }
+>;
 
 /** Runs the bound tree of a compiled program. */
-export class Evaluator {
-  /** Whether statements record steps, which only traces need. */
-  tracing = false;
-
-  private readonly conversions: Conversions;
-
-  constructor(
-    readonly runtime: Runtime,
-    readonly program: CompiledProgram
-  ) {
+export class Evaluator extends StatementExecutor {
+  constructor(runtime: Runtime, program: CompiledProgram) {
+    super(runtime, program);
     runtime.evaluator = this;
-    this.conversions = new BinderBase(program.library).conversions;
   }
 
-  // ---- Calls ----
-
-  /** Calls a method with a receiver and arguments that the caller already evaluated. */
   invoke(
     caller: Frame,
     method: MethodSymbol,
@@ -341,398 +344,63 @@ export class Evaluator {
     return created;
   }
 
-  // ---- Statements ----
-
-  /** Runs a statement, recording its step when it completes as the trace's rules say. */
-  private withStep<T>(row: number, step: BoundStatement['step'], run: () => T): T {
-    if (!this.tracing || step === 'none') return run();
-    return this.runtime.steps.runStatement(row, step === 'callsOnly', run);
-  }
-
-  /**
-   * Runs a block. Its locals go out of scope when it ends, so the trace stops showing them, except those of a method's
-   * body (`isBody`), which the frame holds until the method exits, where the end of the program reads its locals.
-   */
-  executeBlock(block: BoundBlock, frame: Frame, isBody = false): Completion {
-    for (const local of block.capturedLocals) frame.slots[local.slot] = new Cell(UNASSIGNED);
-    try {
-      for (const statement of block.statements) {
-        const completion = this.execute(statement, frame);
-        if (completion !== undefined) return completion;
-      }
-      return undefined;
-    } finally {
-      if (!isBody) for (const local of block.locals) if (!local.isCaptured) frame.slots[local.slot] = UNASSIGNED;
-    }
-  }
-
-  // code-gauge-allow functionNcss 120 -- One case per kind of statement.
-  execute(statement: BoundStatement, frame: Frame): Completion {
-    this.runtime.spend();
-    switch (statement.kind) {
-      case 'block': {
-        if ((statement as { isDeclarationGroup?: boolean }).isDeclarationGroup) {
-          return this.withStep<Completion>(statement.row, statement.step, () => {
-            for (const inner of statement.statements) this.execute(inner, frame);
-            return;
-          });
-        }
-        return this.executeBlock(statement, frame);
-      }
-      case 'empty': {
-        return undefined;
-      }
-      case 'expression': {
-        this.withStep(statement.row, statement.step, () => this.evaluate(statement.expression, frame));
-        return undefined;
-      }
-      case 'localDeclaration': {
-        this.withStep(statement.row, statement.step, () => {
-          if (statement.value)
-            this.storeLocal(frame, statement.local, copyValue(this.evaluate(statement.value, frame)));
-        });
-        return undefined;
-      }
-      case 'if': {
-        if (this.evaluate(statement.condition, frame) as boolean) return this.execute(statement.consequence, frame);
-        return statement.alternative ? this.execute(statement.alternative, frame) : undefined;
-      }
-      case 'while': {
-        while (this.evaluate(statement.condition, frame) as boolean) {
-          const completion = this.execute(statement.body, frame);
-          if (completion === BREAK) break;
-          if (completion !== undefined && completion !== CONTINUE) return completion;
-        }
-        return undefined;
-      }
-      case 'do': {
-        do {
-          const completion = this.execute(statement.body, frame);
-          if (completion === BREAK) break;
-          if (completion !== undefined && completion !== CONTINUE) return completion;
-        } while (this.evaluate(statement.condition, frame) as boolean);
-        return undefined;
-      }
-      case 'for': {
-        return this.executeFor(statement, frame);
-      }
-      case 'foreach': {
-        return this.executeForeach(statement, frame);
-      }
-      case 'switch': {
-        return this.executeSwitch(statement, frame);
-      }
-      case 'break': {
-        return BREAK;
-      }
-      case 'continue': {
-        return CONTINUE;
-      }
-      case 'return': {
-        return { value: statement.value ? this.evaluate(statement.value, frame) : undefined };
-      }
-      case 'throw': {
-        if (!statement.value) {
-          const current = this.currentExceptions.at(-1);
-          if (!current) throw NULL_REFERENCE();
-          throw current;
-        }
-        throw this.throwValue(this.evaluate(statement.value, frame));
-      }
-      case 'try': {
-        return this.executeTry(statement, frame);
-      }
-    }
-  }
-
-  private executeFor(statement: Extract<BoundStatement, { kind: 'for' }>, frame: Frame): Completion {
-    for (const local of statement.capturedLocals) frame.slots[local.slot] = new Cell(UNASSIGNED);
-    try {
-      if (statement.initializers.length > 0) {
-        this.withStep(statement.row, this.headerStep(statement.initializers), () => {
-          for (const initializer of statement.initializers) this.execute(withoutStep(initializer), frame);
-        });
-      }
-      while (!statement.condition || (this.evaluate(statement.condition, frame) as boolean)) {
-        const completion = this.execute(statement.body, frame);
-        if (completion === BREAK) break;
-        if (completion !== undefined && completion !== CONTINUE) return completion;
-        if (statement.updates.length > 0) {
-          this.withStep(statement.row, 'step', () => {
-            for (const update of statement.updates) this.evaluate(update, frame);
-          });
-        }
-      }
-      return undefined;
-    } finally {
-      for (const local of statement.locals) if (!local.isCaptured) frame.slots[local.slot] = UNASSIGNED;
-    }
-  }
-
-  /** A for loop's initializers record one step, unless they declare without initializing. */
-  private headerStep(initializers: BoundStatement[]): BoundStatement['step'] {
-    const recordsStep = initializers.some(
-      (initializer) => initializer.step !== 'none' || initializer.kind === 'expression'
-    );
-    return recordsStep ? 'step' : 'none';
-  }
-
-  private executeForeach(statement: Extract<BoundStatement, { kind: 'foreach' }>, frame: Frame): Completion {
-    const collection = this.evaluate(statement.collection, frame);
-    if (collection === undefined) throw NULL_REFERENCE();
-    frame.temporaries.push(collection);
-    try {
-      const runIteration = (element: Value): Completion => {
-        const converted = statement.elementConversion
-          ? this.withOperand(frame, element, () => this.evaluate(statement.elementConversion as BoundExpression, frame))
-          : element;
-        this.storeLocal(frame, statement.variable, copyValue(converted), true);
-        if (statement.deconstruction) this.evaluate(statement.deconstruction, frame);
-        if (this.tracing) this.runtime.steps.stepBinding(statement.row, statement.bindingStoresAnswer);
-        return this.execute(statement.body, frame);
-      };
-      return this.iterate(statement, collection, frame, runIteration);
-    } finally {
-      frame.temporaries.pop();
-      for (const local of [statement.variable, ...statement.locals])
-        if (!local.isCaptured) frame.slots[local.slot] = UNASSIGNED;
-    }
-  }
-
-  private iterate(
-    statement: Extract<BoundStatement, { kind: 'foreach' }>,
-    collection: Value,
-    frame: Frame,
-    runIteration: (element: Value) => Completion
-  ): Completion {
-    const { iteration } = statement;
-    const handle = (completion: Completion): Completion | 'stop' | 'next' => {
-      if (completion === BREAK) return 'stop';
-      if (completion === undefined || completion === CONTINUE) return 'next';
-      return completion;
-    };
-    if (iteration.kind === 'array') {
-      const array = collection as CsArray;
-      for (let index = 0; index < array.values.length; index++) {
-        const result = handle(runIteration(array.values[index]));
-        if (result === 'stop') return undefined;
-        if (result !== 'next') return result;
-      }
-      return undefined;
-    }
-    if (iteration.kind === 'string') {
-      const text = collection as string;
-      for (let index = 0; index < text.length; index++) {
-        const result = handle(runIteration(text.charCodeAt(index)));
-        if (result === 'stop') return undefined;
-        if (result !== 'next') return result;
-      }
-      return undefined;
-    }
-    const receiverType = this.runtime.runtimeTypeOf(collection);
-    const getEnumerator =
-      iteration.getEnumerator.owner.kind === 'interface' || iteration.getEnumerator.isVirtual
-        ? this.runtime.dispatch(iteration.getEnumerator, collection)
-        : iteration.getEnumerator;
-    const enumerator = this.invoke(
-      frame,
-      getEnumerator,
-      collection,
-      [],
-      statement.row,
-      this.environmentFor(getEnumerator, receiverType)
-    );
-    if (enumerator === undefined) throw NULL_REFERENCE();
-    frame.temporaries.push(enumerator);
-    try {
-      const enumeratorType = this.runtime.runtimeTypeOf(enumerator);
-      const moveNext = this.runtime.dispatch(iteration.moveNext, enumerator);
-      const getter = iteration.current.getter as MethodSymbol;
-      const current = this.runtime.dispatch(getter, enumerator);
-      for (;;) {
-        if (
-          !(this.invoke(
-            frame,
-            moveNext,
-            enumerator,
-            [],
-            statement.row,
-            this.environmentFor(moveNext, enumeratorType)
-          ) as boolean)
-        )
-          return undefined;
-        const element = this.invoke(
-          frame,
-          current,
-          enumerator,
-          [],
-          statement.row,
-          this.environmentFor(current, enumeratorType)
-        );
-        const result = handle(runIteration(element));
-        if (result === 'stop') return undefined;
-        if (result !== 'next') return result;
-      }
-    } finally {
-      frame.temporaries.pop();
-      if (iteration.dispose) {
-        const dispose = this.runtime.dispatch(iteration.dispose, enumerator);
-        this.invoke(
-          frame,
-          dispose,
-          enumerator,
-          [],
-          statement.row,
-          this.environmentFor(dispose, this.runtime.runtimeTypeOf(enumerator))
-        );
-      }
-    }
-  }
-
-  /** The type environment of an instance method called on a receiver of a runtime type. */
-  private environmentFor(method: MethodSymbol, receiverType: Type | undefined): Map<TypeParameterSymbol, Type> {
-    if (!receiverType || receiverType.kind !== 'named') return new Map();
-    for (let current: NamedType | undefined = receiverType; current; current = baseTypeOf(current)) {
-      if (current.symbol === method.owner) return substitutionOf(current);
-    }
-    return substitutionOf(receiverType);
-  }
-
-  private executeSwitch(statement: Extract<BoundStatement, { kind: 'switch' }>, frame: Frame): Completion {
-    const value = this.evaluate(statement.value, frame);
-    let chosen: (typeof statement.sections)[number] | undefined;
-    let defaultSection: (typeof statement.sections)[number] | undefined;
-    search: for (const section of statement.sections) {
-      for (const label of section.labels) {
-        if (label === 'default') {
-          defaultSection = section;
-          continue;
-        }
-        if (
-          this.matches(label.pattern, value, frame) &&
-          (!label.guard || (this.evaluate(label.guard, frame) as boolean))
-        ) {
-          chosen = section;
-          break search;
-        }
-      }
-    }
-    chosen ??= defaultSection;
-    if (!chosen) return undefined;
-    for (const inner of chosen.statements) {
-      const completion = this.execute(inner, frame);
-      if (completion === BREAK) return undefined;
-      if (completion !== undefined) return completion;
-    }
-    return undefined;
-  }
-
-  /** The exceptions that catch clauses are handling, which `throw;` rethrows. */
-  private readonly currentExceptions: CsThrow[] = [];
-
-  private executeTry(statement: Extract<BoundStatement, { kind: 'try' }>, frame: Frame): Completion {
-    let completion: Completion;
-    try {
-      try {
-        completion = this.executeBlock(statement.body, frame);
-      } catch (error) {
-        const thrown = this.asThrow(error);
-        if (!thrown) throw error;
-        const handled = this.handle(statement, thrown, frame);
-        if (handled === 'unhandled') throw thrown;
-        completion = handled;
-      }
-    } finally {
-      if (statement.finally) {
-        const finallyCompletion = this.runFinally(statement.finally, frame);
-        if (finallyCompletion !== undefined) completion = finallyCompletion;
-      }
-    }
-    return completion;
-  }
-
-  private runFinally(block: BoundBlock, frame: Frame): Completion {
-    return this.executeBlock(block, frame);
-  }
-
-  /** Runs the first catch clause that accepts an exception, or tells that none did. */
-  private handle(
-    statement: Extract<BoundStatement, { kind: 'try' }>,
-    thrown: CsThrow,
-    frame: Frame
-  ): Completion | 'unhandled' {
-    for (const clause of statement.catches) {
-      if (!this.isInstanceOf(thrown.exception, clause.type)) continue;
-      if (clause.local) this.storeLocal(frame, clause.local, thrown.exception, true);
-      if (clause.filter && !(this.evaluate(clause.filter, frame) as boolean)) continue;
-      this.currentExceptions.push(thrown);
-      try {
-        return this.executeBlock(clause.body, frame);
-      } finally {
-        this.currentExceptions.pop();
-      }
-    }
-    return 'unhandled';
-  }
-
-  /** The C# exception that a host error stands for, if the program can catch it. */
-  asThrow(error: unknown): CsThrow | undefined {
-    if (error instanceof CsThrow) return error;
-    if (error instanceof PendingException) {
-      const exception = this.runtime.materialize(error);
-      (exception.native as ExceptionState).wasThrown = true;
-      return new CsThrow(exception);
-    }
-    return undefined;
-  }
-
-  private throwValue(value: Value): CsThrow {
-    if (!(value instanceof CsObject)) throw NULL_REFERENCE();
-    if (value.native) (value.native as ExceptionState).wasThrown = true;
-    return new CsThrow(value);
-  }
-
-  // ---- Locals ----
-
-  readLocal(frame: Frame, local: LocalSymbol): Value {
-    const slot: Slot =
-      local.owner === frame.method || !local.owner ? frame.slots[local.slot] : frame.captured.get(local);
-    if (slot === UNASSIGNED) return undefined;
-    if (slot instanceof Cell) return slot.value === UNASSIGNED ? undefined : (slot.value as Value);
-    if (slot instanceof Reference) return slot.get();
-    return slot as Value;
-  }
-
-  /** Stores a local's value; a fresh variable of a loop or a catch clause gets a fresh cell when lambdas capture it. */
-  storeLocal(frame: Frame, local: LocalSymbol, value: Value, isFresh = false): void {
-    if (local.owner !== frame.method && local.owner) {
-      const cell = frame.captured.get(local);
-      if (cell) cell.value = value;
-      return;
-    }
-    const slot = frame.slots[local.slot];
-    if (local.isCaptured && (isFresh || !(slot instanceof Cell))) {
-      frame.slots[local.slot] = new Cell(value);
-      return;
-    }
-    if (slot instanceof Cell) slot.value = value;
-    else if (slot instanceof Reference) slot.set(value);
-    else frame.slots[local.slot] = value;
-  }
-
   // ---- Expressions ----
 
-  private withOperand<T>(frame: Frame, value: Value, run: () => T): T {
-    frame.operands.push(value);
-    try {
-      return run();
-    } finally {
-      frame.operands.pop();
+  // code-gauge-allow functionNcss 44 -- One case label per kind of bound expression, grouped into sub-dispatchers.
+  evaluate(expression: BoundExpression, frame: Frame): Value {
+    switch (expression.kind) {
+      case 'constant':
+      case 'local':
+      case 'this':
+      case 'field':
+      case 'staticField':
+      case 'element':
+      case 'property':
+      case 'compoundOperand':
+      case 'conditionalAccess': {
+        return this.evaluateAccess(expression, frame);
+      }
+      case 'call':
+      case 'invokeDelegate':
+      case 'new':
+      case 'newArray':
+      case 'newDelegate':
+      case 'lambda':
+      case 'tuple':
+      case 'with':
+      case 'default': {
+        return this.evaluateInvocation(expression, frame);
+      }
+      case 'unary':
+      case 'binary':
+      case 'logical':
+      case 'coalesce':
+      case 'conditional':
+      case 'convert':
+      case 'is':
+      case 'as':
+      case 'switch':
+      case 'concat':
+      case 'interpolated':
+      case 'throw':
+      case 'sequence': {
+        return this.evaluateOperation(expression, frame);
+      }
+      case 'assign':
+      case 'compoundAssign':
+      case 'increment':
+      case 'deconstructAssign':
+      case 'eventAccessor': {
+        return this.evaluateAssignment(expression, frame);
+      }
+      case 'unbound': {
+        throw new Error(`Cannot evaluate ${expression.kind}`);
+      }
     }
   }
 
-  // code-gauge-allow functionNcss 220 -- One case per kind of bound expression.
-  evaluate(expression: BoundExpression, frame: Frame): Value {
+  /** Evaluates an expression that reads a value or a variable. */
+  private evaluateAccess(expression: AccessExpression, frame: Frame): Value {
     switch (expression.kind) {
       case 'constant': {
         return expression.value as Value;
@@ -753,21 +421,29 @@ export class Evaluator {
       case 'element': {
         return this.elementPlace(expression, frame).get();
       }
-      case 'call': {
-        return this.evaluateCall(expression, frame);
-      }
       case 'property': {
         return this.propertyPlace(expression, frame).get();
       }
+      case 'compoundOperand': {
+        return frame.operands.at(-1) as Value;
+      }
+      case 'conditionalAccess': {
+        const receiver = this.evaluate(expression.receiver, frame);
+        if (receiver === undefined) return undefined;
+        this.storeLocal(frame, expression.temporary, receiver);
+        return this.evaluate(expression.access, frame);
+      }
+    }
+  }
+
+  /** Evaluates an expression that calls a function or creates a value. */
+  private evaluateInvocation(expression: InvocationExpression, frame: Frame): Value {
+    switch (expression.kind) {
+      case 'call': {
+        return this.evaluateCall(expression, frame);
+      }
       case 'invokeDelegate': {
-        const target = this.evaluate(expression.target, frame);
-        frame.temporaries.push(target);
-        try {
-          const args = this.evaluateArguments(expression.args, frame);
-          return this.invokeDelegate(frame, target, args, expression.row);
-        } finally {
-          frame.temporaries.pop();
-        }
+        return this.evaluateInvokeDelegate(expression, frame);
       }
       case 'new': {
         return this.evaluateNew(expression, frame);
@@ -776,35 +452,28 @@ export class Evaluator {
         return this.evaluateNewArray(expression, frame);
       }
       case 'newDelegate': {
-        const receiver = expression.receiver ? this.evaluate(expression.receiver, frame) : undefined;
-        if (expression.receiver && receiver === undefined && !expression.method.isExtension) throw NULL_REFERENCE();
-        const entry: DelegateEntry = {
-          method: expression.method,
-          target: expression.method.isStatic && !expression.method.isExtension ? undefined : copyValue(receiver),
-          typeArgs: expression.typeArgs.map((type) => frame.resolve(type)),
-          owner: expression.owner ? (frame.resolve(expression.owner) as NamedType) : undefined,
-          isVirtual: expression.isVirtual,
-        };
-        if (expression.method.kind === 'localFunction') {
-          const cells = this.localFunctionCells(frame, expression.method);
-          return new CsDelegate(frame.resolve(expression.type) as NamedType, [
-            {
-              ...entry,
-              target: frame.thisValue,
-              lambda: {
-                info: { method: expression.method, captures: expression.method.captures, isStatic: false },
-                cells: cells ?? new Map(),
-                thisValue: frame.thisValue,
-                typeEnvironment: frame.typeEnvironment,
-              },
-            },
-          ]);
-        }
-        return new CsDelegate(frame.resolve(expression.type) as NamedType, [entry]);
+        return this.evaluateNewDelegate(expression, frame);
       }
       case 'lambda': {
         return this.createLambda(expression.lambda, expression.type, frame);
       }
+      case 'tuple': {
+        const type = frame.resolve(expression.type) as NamedType;
+        return new CsStruct(type, this.evaluateHeld(expression.elements, frame));
+      }
+      case 'with': {
+        return this.evaluateWith(expression, frame);
+      }
+      case 'default': {
+        return this.defaultOf(frame.resolve(expression.type));
+      }
+    }
+  }
+
+  /** Evaluates an expression that operates on the values of its operands. */
+  // code-gauge-allow functionNcss 36 -- One case per kind of operation.
+  private evaluateOperation(expression: OperationExpression, frame: Frame): Value {
+    switch (expression.kind) {
       case 'unary': {
         return this.evaluateUnary(expression, this.evaluate(expression.operand, frame));
       }
@@ -834,6 +503,35 @@ export class Evaluator {
           frame.resolve(expression.type)
         );
       }
+      case 'is': {
+        return this.matches(expression.pattern, this.evaluate(expression.operand, frame), frame);
+      }
+      case 'as': {
+        return this.evaluateAs(expression, frame);
+      }
+      case 'switch': {
+        return this.evaluateSwitch(expression, frame);
+      }
+      case 'concat': {
+        return this.evaluateConcat(expression, frame);
+      }
+      case 'interpolated': {
+        return this.evaluateInterpolated(expression, frame);
+      }
+      case 'throw': {
+        throw this.throwValue(this.evaluate(expression.value, frame));
+      }
+      case 'sequence': {
+        for (const effect of expression.sideEffects) this.evaluate(effect, frame);
+        return this.evaluate(expression.value, frame);
+      }
+    }
+  }
+
+  /** Evaluates an expression that stores into variables. */
+  // code-gauge-allow functionNcss 33 -- One case per kind of assignment.
+  private evaluateAssignment(expression: AssignmentExpression, frame: Frame): Value {
+    switch (expression.kind) {
       case 'assign': {
         if (expression.target.kind === 'discard') return this.evaluate(expression.value, frame);
         const place = this.place(expression.target, frame);
@@ -848,77 +546,12 @@ export class Evaluator {
         place.set(value);
         return value;
       }
-      case 'compoundOperand': {
-        return frame.operands.at(-1) as Value;
-      }
       case 'increment': {
         const place = this.place(expression.target, frame);
         const current = place.get();
         const next = this.withOperand(frame, current, () => this.evaluate(expression.operation, frame));
         place.set(next);
         return expression.isPrefix ? next : current;
-      }
-      case 'is': {
-        return this.matches(expression.pattern, this.evaluate(expression.operand, frame), frame);
-      }
-      case 'as': {
-        const value = this.evaluate(expression.operand, frame);
-        const target = frame.resolve(expression.targetType);
-        if (value === undefined) return undefined;
-        const underlying = nullableUnderlying(target);
-        if (underlying) return value instanceof CsBox && this.isInstanceOf(value, underlying) ? value.value : undefined;
-        return this.isInstanceOf(value, target) ? value : undefined;
-      }
-      case 'switch': {
-        const value = this.evaluate(expression.value, frame);
-        for (const arm of expression.arms) {
-          if (this.matches(arm.pattern, value, frame) && (!arm.guard || (this.evaluate(arm.guard, frame) as boolean)))
-            return this.evaluate(arm.value, frame);
-        }
-        throw new PendingException(
-          'System.Runtime.CompilerServices.SwitchExpressionException',
-          `Non-exhaustive switch expression failed to match its input.\nUnmatched value was ${this.evaluator().formatUnmatched(value, expression.value.type, frame)}.`
-        );
-      }
-      case 'concat': {
-        let text = '';
-        for (const part of expression.parts) {
-          const value = this.evaluate(part, frame);
-          text += this.stringOf(value, frame.resolve(part.type), frame);
-        }
-        this.runtime.allocateString(text.length);
-        return text;
-      }
-      case 'interpolated': {
-        return this.evaluateInterpolated(expression, frame);
-      }
-      case 'tuple': {
-        const type = frame.resolve(expression.type) as NamedType;
-        return new CsStruct(type, this.evaluateHeld(expression.elements, frame));
-      }
-      case 'conditionalAccess': {
-        const receiver = this.evaluate(expression.receiver, frame);
-        if (receiver === undefined) return undefined;
-        this.storeLocal(frame, expression.temporary, receiver);
-        return this.evaluate(expression.access, frame);
-      }
-      case 'throw': {
-        throw this.throwValue(this.evaluate(expression.value, frame));
-      }
-      case 'with': {
-        const source = this.evaluate(expression.value, frame);
-        if (source === undefined) throw NULL_REFERENCE();
-        const copy = source instanceof CsStruct ? source.clone() : this.cloneObject(source as CsObject);
-        this.storeLocal(frame, expression.temporary, copy);
-        for (const assignment of expression.assignments) {
-          if (assignment.target.kind === 'discard' || !assignment.value) continue;
-          const place = this.place(assignment.target, frame);
-          place.set(copyValue(this.evaluate(assignment.value, frame)));
-        }
-        return copy;
-      }
-      case 'default': {
-        return this.defaultOf(frame.resolve(expression.type));
       }
       case 'deconstructAssign': {
         const value = this.evaluate(expression.value, frame);
@@ -936,30 +569,102 @@ export class Evaluator {
         place.set(expression.isAdd ? combineDelegates(place.get(), value) : removeDelegate(place.get(), value));
         return undefined;
       }
-      case 'sequence': {
-        for (const effect of expression.sideEffects) this.evaluate(effect, frame);
-        return this.evaluate(expression.value, frame);
-      }
-      case 'unbound': {
-        throw new Error(`Cannot evaluate ${expression.kind}`);
-      }
     }
   }
 
-  private evaluator(): Evaluator {
+  private evaluateInvokeDelegate(
+    expression: Extract<BoundExpression, { kind: 'invokeDelegate' }>,
+    frame: Frame
+  ): Value {
+    const target = this.evaluate(expression.target, frame);
+    frame.temporaries.push(target);
+    try {
+      const args = this.evaluateArguments(expression.args, frame);
+      return this.invokeDelegate(frame, target, args, expression.row);
+    } finally {
+      frame.temporaries.pop();
+    }
+  }
+
+  private evaluateNewDelegate(expression: Extract<BoundExpression, { kind: 'newDelegate' }>, frame: Frame): Value {
+    const receiver = expression.receiver ? this.evaluate(expression.receiver, frame) : undefined;
+    if (expression.receiver && receiver === undefined && !expression.method.isExtension) throw NULL_REFERENCE();
+    const entry: DelegateEntry = {
+      method: expression.method,
+      target: expression.method.isStatic && !expression.method.isExtension ? undefined : copyValue(receiver),
+      typeArgs: expression.typeArgs.map((type) => frame.resolve(type)),
+      owner: expression.owner ? (frame.resolve(expression.owner) as NamedType) : undefined,
+      isVirtual: expression.isVirtual,
+    };
+    if (expression.method.kind === 'localFunction') {
+      const cells = this.localFunctionCells(frame, expression.method);
+      return new CsDelegate(frame.resolve(expression.type) as NamedType, [
+        {
+          ...entry,
+          target: frame.thisValue,
+          lambda: {
+            info: { method: expression.method, captures: expression.method.captures, isStatic: false },
+            cells: cells ?? new Map(),
+            thisValue: frame.thisValue,
+            typeEnvironment: frame.typeEnvironment,
+          },
+        },
+      ]);
+    }
+    return new CsDelegate(frame.resolve(expression.type) as NamedType, [entry]);
+  }
+
+  private evaluateWith(expression: Extract<BoundExpression, { kind: 'with' }>, frame: Frame): Value {
+    const source = this.evaluate(expression.value, frame);
+    if (source === undefined) throw NULL_REFERENCE();
+    const copy = source instanceof CsStruct ? source.clone() : this.cloneObject(source as CsObject);
+    this.storeLocal(frame, expression.temporary, copy);
+    for (const assignment of expression.assignments) {
+      if (assignment.target.kind === 'discard' || !assignment.value) continue;
+      const place = this.place(assignment.target, frame);
+      place.set(copyValue(this.evaluate(assignment.value, frame)));
+    }
+    return copy;
+  }
+
+  private evaluateAs(expression: Extract<BoundExpression, { kind: 'as' }>, frame: Frame): Value {
+    const value = this.evaluate(expression.operand, frame);
+    const target = frame.resolve(expression.targetType);
+    if (value === undefined) return undefined;
+    const underlying = nullableUnderlying(target);
+    if (underlying) return value instanceof CsBox && this.isInstanceOf(value, underlying) ? value.value : undefined;
+    return this.isInstanceOf(value, target) ? value : undefined;
+  }
+
+  private evaluateSwitch(expression: Extract<BoundExpression, { kind: 'switch' }>, frame: Frame): Value {
+    const value = this.evaluate(expression.value, frame);
+    for (const arm of expression.arms) {
+      if (this.matches(arm.pattern, value, frame) && (!arm.guard || (this.evaluate(arm.guard, frame) as boolean)))
+        return this.evaluate(arm.value, frame);
+    }
+    throw new PendingException(
+      'System.Runtime.CompilerServices.SwitchExpressionException',
+      `Non-exhaustive switch expression failed to match its input.\nUnmatched value was ${this.evaluator().formatUnmatched(value, expression.value.type, frame)}.`
+    );
+  }
+
+  private evaluateConcat(expression: Extract<BoundExpression, { kind: 'concat' }>, frame: Frame): Value {
+    let text = '';
+    for (const part of expression.parts) {
+      const value = this.evaluate(part, frame);
+      text += this.stringOf(value, frame.resolve(part.type), frame);
+    }
+    this.runtime.allocateString(text.length);
+    return text;
+  }
+
+  protected evaluator(): Evaluator {
     return this;
   }
 
   /** The text of the value that a switch expression failed to match, as `SwitchExpressionException` shows it. */
   formatUnmatched(value: Value, type: Type, frame: Frame): string {
     return this.stringOf(value, frame.resolve(type), frame);
-  }
-
-  /** The fields of an object or struct, failing on null as reading a member of null does. */
-  private fieldsOf(receiver: Value): Value[] {
-    if (receiver instanceof CsObject || receiver instanceof CsStruct) return receiver.fields;
-    if (receiver instanceof CsBox && receiver.value instanceof CsStruct) return receiver.value.fields;
-    throw NULL_REFERENCE();
   }
 
   private evaluateCall(expression: Extract<BoundExpression, { kind: 'call' }>, frame: Frame): Value {
@@ -1233,18 +938,6 @@ export class Evaluator {
     };
   }
 
-  private getterOf(property: PropertySymbol): MethodSymbol | undefined {
-    for (let current: PropertySymbol | undefined = property; current; current = current.overridden)
-      if (current.getter) return current.getter;
-    return undefined;
-  }
-
-  private setterOf(property: PropertySymbol): MethodSymbol | undefined {
-    for (let current: PropertySymbol | undefined = property; current; current = current.overridden)
-      if (current.setter) return current.setter;
-    return undefined;
-  }
-
   private evaluateNew(expression: Extract<BoundExpression, { kind: 'new' }>, frame: Frame): Value {
     const type = frame.resolve(expression.objectType);
     let created: Value;
@@ -1386,70 +1079,30 @@ export class Evaluator {
     return unaryNumeric(expression.operator, expression.operandKind, operand as NumericValue);
   }
 
-  // code-gauge-allow functionNcss 50 -- One case per kind of operand.
-  private evaluateBinary(expression: Extract<BoundExpression, { kind: 'binary' }>, frame: Frame): Value {
+  private evaluateBinary(expression: BinaryExpression, frame: Frame): Value {
     const left = this.evaluate(expression.left, frame);
     const right = this.evaluate(expression.right, frame);
     const { operator, operandKind } = expression;
-    const isComparison = ['==', '!=', '<', '>', '<=', '>='].includes(operator);
-    if (operandKind === 'object' || operandKind === 'delegate' || operandKind === 'string') {
-      if (operandKind === 'delegate' && (operator === '+' || operator === '-'))
-        return operator === '+' ? combineDelegates(left, right) : removeDelegate(left, right);
-      const equal =
-        operandKind === 'string'
-          ? left === right
-          : operandKind === 'delegate'
-            ? delegatesEqual(left, right)
-            : referenceEquals(left, right);
-      return operator === '==' ? equal : !equal;
-    }
+    if (operandKind === 'object' || operandKind === 'delegate' || operandKind === 'string')
+      return referenceBinary(operator, operandKind, left, right);
     if (left === undefined || right === undefined) {
       if (!expression.isLifted) throw NULL_REFERENCE();
-      if (operator === '==') return left === right;
-      if (operator === '!=') return left !== right;
-      if (isComparison) return false;
-      if (operandKind === 'bool' && (operator === '&' || operator === '|'))
-        return liftedBool(operator, left as boolean | undefined, right as boolean | undefined);
-      return undefined;
+      return liftedNullBinary(operator, operandKind, left, right);
     }
-    if (operandKind === 'bool') {
-      const a = left as boolean;
-      const b = right as boolean;
-      switch (operator) {
-        case '&': {
-          return a && b;
-        }
-        case '|': {
-          return a || b;
-        }
-        case '^': {
-          return a !== b;
-        }
-        case '==': {
-          return a === b;
-        }
-        default: {
-          return a !== b;
-        }
-      }
-    }
+    if (operandKind === 'bool') return booleanOperation(operator, left as boolean, right as boolean);
     if (operandKind === 'enum') return this.enumBinary(expression, left as NumericValue, right as NumericValue);
-    if (isComparison) return compareNumeric(operator, operandKind, left as NumericValue, right as NumericValue);
+    if (COMPARISONS.has(operator))
+      return compareNumeric(operator, operandKind, left as NumericValue, right as NumericValue);
     return arithmetic(operator, operandKind, left as NumericValue, right as NumericValue);
   }
 
-  private enumBinary(
-    expression: Extract<BoundExpression, { kind: 'binary' }>,
-    left: NumericValue,
-    right: NumericValue
-  ): Value {
+  private enumBinary(expression: BinaryExpression, left: NumericValue, right: NumericValue): Value {
     const enumType = [expression.left.type, expression.right.type]
       .map((type) => nullableUnderlying(type) ?? type)
       .find((type) => type.kind === 'named' && type.symbol.kind === 'enum') as NamedType;
     const underlying = specialOf(enumType.symbol.enumUnderlying as Type) as SpecialType;
     const kind = ['long', 'ulong', 'uint'].includes(underlying) ? (underlying as 'long') : 'int';
-    if (['==', '!=', '<', '>', '<=', '>='].includes(expression.operator))
-      return compareNumeric(expression.operator, kind, left, right);
+    if (COMPARISONS.has(expression.operator)) return compareNumeric(expression.operator, kind, left, right);
     const result = arithmetic(expression.operator, kind, left, right);
     return convertNumeric(result, kind, underlying);
   }
@@ -1545,388 +1198,45 @@ export class Evaluator {
     );
   }
 
-  // ---- Conversions ----
-
-  // code-gauge-allow functionNcss 80 -- One case per kind of conversion.
-  convertValue(value: Value, conversion: ConversionKind, from: Type, to: Type): Value {
-    switch (conversion) {
-      case 'identity':
-      case 'reference':
-      case 'nullableWrap':
-      case 'nullLiteral': {
-        return value;
-      }
-      case 'numeric':
-      case 'enumNumeric': {
-        if (value === undefined) throw NULL_REFERENCE();
-        return convertNumeric(value as NumericValue, numericKindOf(from), numericKindOf(to));
-      }
-      case 'referenceCheck': {
-        if (value === undefined || this.isInstanceOf(value, to)) return value;
-        throw this.invalidCast(value, to);
-      }
-      case 'boxing':
-      case 'typeParameterBox': {
-        if (value === undefined) return undefined;
-        if (!this.isValueTypeValue(value, from)) return value;
-        const underlying = nullableUnderlying(from);
-        const boxedType = underlying ?? from;
-        return new CsBox(boxedType, copyValue(value));
-      }
-      case 'unboxing':
-      case 'typeParameterUnbox': {
-        return this.unbox(value, to);
-      }
-      case 'nullableUnwrap': {
-        if (value === undefined)
-          throw new PendingException('System.InvalidOperationException', 'Nullable object must have a value.');
-        const underlying = nullableUnderlying(from) as Type;
-        return sameType(underlying, to)
-          ? value
-          : convertNumeric(value as NumericValue, numericKindOf(underlying), numericKindOf(to));
-      }
-      case 'nullableLifted': {
-        if (value === undefined) return undefined;
-        const fromType = nullableUnderlying(from) ?? from;
-        const toType = nullableUnderlying(to) ?? to;
-        if (sameType(fromType, toType)) return value;
-        if (value instanceof CsBox) return this.unbox(value, to);
-        return convertNumeric(value as NumericValue, numericKindOf(fromType), numericKindOf(toType));
-      }
-      case 'tuple': {
-        const tuple = value as CsStruct;
-        const fromArgs = (from as NamedType).args;
-        const toArgs = (to as NamedType).args;
-        return new CsStruct(
-          to as NamedType,
-          tuple.fields.map((field, index) => this.convertRuntime(field, fromArgs[index], toArgs[index]))
-        );
-      }
-      case 'userDefined': {
-        throw new Error('User-defined conversions are not supported');
-      }
-    }
-  }
-
-  /** Converts a value between types without a bound conversion, as tuple element conversions need. */
-  private convertRuntime(value: Value, from: Type, to: Type): Value {
-    if (sameType(from, to)) return value;
-    const fromSpecial = specialOf(from);
-    const toSpecial = specialOf(to);
-    if (
-      fromSpecial &&
-      toSpecial &&
-      typeof value !== 'string' &&
-      value !== undefined &&
-      !(value instanceof CsStruct) &&
-      !(value instanceof CsObject) &&
-      !(value instanceof CsBox) &&
-      typeof value !== 'boolean' &&
-      toSpecial !== 'object' &&
-      toSpecial !== 'string'
-    ) {
-      return convertNumeric(value as NumericValue, fromSpecial, toSpecial);
-    }
-    if (nullableUnderlying(to)) return value;
-    if (isReferenceType(to) && this.isValueTypeValue(value, from)) return new CsBox(from, copyValue(value));
-    return value;
-  }
-
-  private isValueTypeValue(value: Value, type: Type): boolean {
-    if (
-      value instanceof CsObject ||
-      value instanceof CsArray ||
-      value instanceof CsDelegate ||
-      value instanceof CsBox ||
-      typeof value === 'string'
-    )
-      return false;
-    return type.kind !== 'typeParameter' || true;
-  }
-
-  private unbox(value: Value, to: Type): Value {
-    const underlying = nullableUnderlying(to);
-    if (value === undefined) {
-      if (underlying || isReferenceType(to)) return undefined;
-      throw NULL_REFERENCE();
-    }
-    if (!(value instanceof CsBox)) {
-      if (this.isInstanceOf(value, to)) return value;
-      throw this.invalidCast(value, to);
-    }
-    const target = underlying ?? to;
-    if (this.boxMatches(value.type, target)) return copyValue(value.value);
-    if (isReferenceType(target) && this.isInstanceOf(value, target)) return value;
-    throw this.invalidCast(value, to);
-  }
-
-  /** Whether a box of one type unboxes to another, which an enum allows to its underlying type and back. */
-  private boxMatches(boxed: Type, target: Type): boolean {
-    if (sameType(boxed, target)) return true;
-    return sameType(enumUnderlyingOf(boxed), enumUnderlyingOf(target));
-  }
-
-  private invalidCast(value: Value, to: Type): PendingException {
-    const from = this.runtime.runtimeTypeOf(value);
-    return new PendingException(
-      'System.InvalidCastException',
-      `Unable to cast object of type '${from ? runtimeTypeName(from) : 'System.Object'}' to type '${runtimeTypeName(to)}'.`
-    );
-  }
-
-  /** Whether a value is of a type at run time, as `is` and casts test. */
-  isInstanceOf(value: Value, type: Type): boolean {
-    if (value === undefined) return false;
-    if (type.kind === 'named' && type.symbol.special === 'object') return true;
-    const actual = this.runtime.runtimeTypeOf(value instanceof CsBox ? value : value) ?? undefined;
-    if (value instanceof CsBox) {
-      if (sameType(value.type, type)) return true;
-      if (nullableUnderlying(type) && sameType(nullableUnderlying(type) as Type, value.type)) return true;
-      return this.isAssignable(value.type, type);
-    }
-    if (!actual) {
-      return this.primitiveIsInstance(value, type);
-    }
-    return this.isAssignable(actual, type);
-  }
-
-  private primitiveIsInstance(_value: Value, _type: Type): boolean {
-    return false;
-  }
-
-  /** Whether a runtime type converts to another by reference or boxing, as instance tests decide. */
-  isAssignable(actual: Type, type: Type): boolean {
-    if (sameType(actual, type)) return true;
-    const conversion = this.conversions.implicit(actual, type);
-    return conversion === 'reference' || conversion === 'boxing' || conversion === 'identity';
-  }
-
-  /** The default value of a type: null, zero, false, or an empty struct. */
-  defaultOf(type: Type): Value {
-    if (type.kind !== 'named') return undefined;
-    const special = type.symbol.special;
-    switch (special) {
-      case 'bool': {
-        return false;
-      }
-      case 'long':
-      case 'ulong': {
-        return 0n;
-      }
-      case 'decimal': {
-        return CsDecimal.ZERO;
-      }
-      case 'char':
-      case 'sbyte':
-      case 'byte':
-      case 'short':
-      case 'ushort':
-      case 'int':
-      case 'uint':
-      case 'float':
-      case 'double': {
-        return 0;
-      }
-      case 'nullable': {
-        return undefined;
-      }
-      default: {
-        break;
-      }
-    }
-    if (type.symbol.kind === 'enum') {
-      const underlying = specialOf(type.symbol.enumUnderlying as Type);
-      return underlying === 'long' || underlying === 'ulong' ? 0n : 0;
-    }
-    if (type.symbol.kind !== 'struct') return undefined;
-    const fields: Value[] = Array.from<Value>({ length: type.symbol.instanceFieldCount });
-    const substitution = substitutionOf(type);
-    for (const field of type.symbol.fields) {
-      if (!field.isStatic && !field.isConst) fields[field.slot] = this.defaultOf(substitute(field.type, substitution));
-    }
-    return new CsStruct(type, fields);
-  }
-
-  // ---- Patterns ----
-
-  // code-gauge-allow functionNcss 60 -- One case per kind of pattern.
-  matches(pattern: BoundPattern, value: Value, frame: Frame): boolean {
-    switch (pattern.kind) {
-      case 'any': {
-        if (pattern.local) this.storeLocal(frame, pattern.local, copyValue(value));
-        return true;
-      }
-      case 'constant': {
-        const constant = this.evaluate(pattern.value, frame);
-        if (constant === undefined) return value === undefined;
-        if (value === undefined) return false;
-        const inner = value instanceof CsBox ? value.value : value;
-        if (value instanceof CsBox && !sameType(value.type, pattern.type) && !this.boxMatches(value.type, pattern.type))
-          return false;
-        return valuesEqual(this, inner, constant, frame);
-      }
-      case 'type': {
-        if (value === undefined) return false;
-        const type = frame.resolve(pattern.testType);
-        const inputIsValue = !(value instanceof CsBox) && this.runtime.runtimeTypeOf(value) === undefined;
-        if (
-          !inputIsValue &&
-          !(value instanceof CsStruct && sameType(value.type, type)) &&
-          !this.isInstanceOf(value, type)
-        )
-          return false;
-        if (pattern.local)
-          this.storeLocal(
-            frame,
-            pattern.local,
-            value instanceof CsBox && !isReferenceType(type) ? copyValue(value.value) : copyValue(value)
-          );
-        return true;
-      }
-      case 'relational': {
-        if (value === undefined) return false;
-        const inner = value instanceof CsBox ? value.value : value;
-        if (value instanceof CsBox && !sameType(value.type, pattern.value.type)) return false;
-        const constant = this.evaluate(pattern.value, frame);
-        if (typeof inner === 'number' && Number.isNaN(inner)) return false;
-        return compareNumeric(
-          pattern.operator,
-          pattern.operandKind === 'enum' ? 'int' : pattern.operandKind,
-          inner as NumericValue,
-          constant as NumericValue
-        );
-      }
-      case 'not': {
-        return !this.matches(pattern.pattern, value, frame);
-      }
-      case 'and': {
-        return this.matches(pattern.left, value, frame) && this.matches(pattern.right, value, frame);
-      }
-      case 'or': {
-        return this.matches(pattern.left, value, frame) || this.matches(pattern.right, value, frame);
-      }
-      case 'recursive': {
-        return this.matchesRecursive(pattern, value, frame);
-      }
-    }
-  }
-
-  private matchesRecursive(pattern: Extract<BoundPattern, { kind: 'recursive' }>, value: Value, frame: Frame): boolean {
-    if (value === undefined) return false;
-    if (
-      pattern.testType &&
-      !this.isInstanceOf(value, frame.resolve(pattern.testType)) &&
-      !(value instanceof CsStruct && sameType(value.type, frame.resolve(pattern.testType)))
-    )
-      return false;
-    const target = value instanceof CsBox ? value.value : value;
-    if (pattern.positional.length > 0) {
-      let elements: Value[];
-      if (pattern.isTuple) elements = (target as CsStruct).fields;
-      else {
-        const references = pattern.positional.map(() => {
-          const cell = new Cell(undefined);
-          return new Reference(
-            () => cell.value as Value,
-            (stored) => (cell.value = stored)
-          );
-        });
-        const method = this.runtime.dispatch(pattern.deconstruct as MethodSymbol, target);
-        this.invoke(
-          frame,
-          method,
-          target,
-          references,
-          undefined,
-          this.environmentFor(method, this.runtime.runtimeTypeOf(target))
-        );
-        elements = references.map((reference) => reference.get());
-      }
-      for (const [index, sub] of pattern.positional.entries())
-        if (!this.matches(sub, elements[index], frame)) return false;
-    }
-    for (const property of pattern.properties) {
-      let current: Value = target;
-      for (const [index, member] of property.members.entries()) {
-        if (current === undefined) return false;
-        current = this.readMember(current, member, property.owners[index], frame);
-      }
-      if (!this.matches(property.pattern, current, frame)) return false;
-    }
-    if (pattern.local) this.storeLocal(frame, pattern.local, copyValue(target));
-    return true;
-  }
-
-  private readMember(receiver: Value, member: FieldSymbol | PropertySymbol, owner: NamedType, frame: Frame): Value {
-    if ('getter' in member) {
-      const getter = this.getterOf(member) as MethodSymbol;
-      const implementation = this.runtime.dispatch(getter, receiver);
-      return this.invoke(
-        frame,
-        implementation,
-        receiver,
-        [],
-        undefined,
-        this.environmentFor(implementation, this.runtime.runtimeTypeOf(receiver) ?? owner)
-      );
-    }
-    if (member.isStatic) return this.runtime.staticsOf(owner)[member.slot];
-    return this.fieldsOf(receiver)[member.slot];
-  }
-
-  private deconstruct(targets: BoundDeconstructTarget, value: Value, frame: Frame): void {
-    if (targets.kind === 'single') {
-      if (!targets.target) return;
-      const converted = targets.conversion
-        ? this.withOperand(frame, value, () => this.evaluate(targets.conversion as BoundExpression, frame))
-        : value;
-      this.place(targets.target, frame).set(copyValue(converted));
-      return;
-    }
-    let elements: Value[];
-    if (!targets.deconstruct) {
-      if (!(value instanceof CsStruct)) throw NULL_REFERENCE();
-      elements = value.fields;
-    } else {
-      if (value === undefined) throw NULL_REFERENCE();
-      const cells = targets.elements.map(() => new Cell(undefined));
-      const references = cells.map(
-        (cell) =>
-          new Reference(
-            () => cell.value as Value,
-            (stored) => (cell.value = stored)
-          )
-      );
-      const method = this.runtime.dispatch(targets.deconstruct, value);
-      this.invoke(
-        frame,
-        method,
-        value,
-        references,
-        undefined,
-        this.environmentFor(method, this.runtime.runtimeTypeOf(value))
-      );
-      elements = cells.map((cell) => cell.value as Value);
-    }
-    // Every element is evaluated before any target is assigned, as `(a, b) = (b, a)` swaps.
-    const snapshot = [...elements];
-    for (const [index, element] of targets.elements.entries()) this.deconstruct(element, snapshot[index], frame);
-  }
-
   /** Converts a host stack overflow into the fatal error .NET reports. */
   isStackOverflow(error: unknown): boolean {
     return error instanceof StackOverflow || (error instanceof RangeError && /call stack/i.test(error.message));
   }
 }
 
-function withoutStep(statement: BoundStatement): BoundStatement {
-  return statement.step === 'none' ? statement : ({ ...statement, step: 'none' } as BoundStatement);
+const COMPARISONS = new Set<string>(['==', '!=', '<', '>', '<=', '>=']);
+
+/** A binary operator on references, strings, or delegates: equality, or combining and removing delegates. */
+function referenceBinary(
+  operator: BinaryExpression['operator'],
+  operandKind: BinaryExpression['operandKind'],
+  left: Value,
+  right: Value
+): Value {
+  if (operandKind === 'delegate' && (operator === '+' || operator === '-'))
+    return operator === '+' ? combineDelegates(left, right) : removeDelegate(left, right);
+  const equal =
+    operandKind === 'string'
+      ? left === right
+      : operandKind === 'delegate'
+        ? delegatesEqual(left, right)
+        : referenceEquals(left, right);
+  return operator === '==' ? equal : !equal;
 }
 
-function numericKindOf(type: Type): SpecialType {
-  if (type.kind === 'named' && type.symbol.kind === 'enum')
-    return specialOf(type.symbol.enumUnderlying as Type) as SpecialType;
-  return (specialOf(nullableUnderlying(type) ?? type) ?? 'int') as SpecialType;
+/** A lifted binary operator with a null operand. */
+function liftedNullBinary(
+  operator: BinaryExpression['operator'],
+  operandKind: BinaryExpression['operandKind'],
+  left: Value,
+  right: Value
+): Value {
+  if (operator === '==') return left === right;
+  if (operator === '!=') return left !== right;
+  if (COMPARISONS.has(operator)) return false;
+  if (operandKind === 'bool' && (operator === '&' || operator === '|'))
+    return liftedBool(operator, left as boolean | undefined, right as boolean | undefined);
+  return undefined;
 }
 
 function referenceEquals(a: Value, b: Value): boolean {
@@ -1940,55 +1250,4 @@ function liftedBool(operator: '&' | '|', a: boolean | undefined, b: boolean | un
   }
   if (a === true || b === true) return true;
   return a === undefined || b === undefined ? undefined : false;
-}
-
-/** Combines two delegates into one that calls both, as `+` does. */
-export function combineDelegates(a: Value, b: Value): Value {
-  if (a === undefined) return b;
-  if (b === undefined) return a;
-  const first = a as CsDelegate;
-  const second = b as CsDelegate;
-  return new CsDelegate(first.type, [...first.entries, ...second.entries]);
-}
-
-/** Removes the last occurrence of a delegate's invocation list from another's, as `-` does. */
-export function removeDelegate(a: Value, b: Value): Value {
-  if (a === undefined || b === undefined) return a;
-  const source = (a as CsDelegate).entries;
-  const removed = (b as CsDelegate).entries;
-  for (let start = source.length - removed.length; start >= 0; start--) {
-    if (removed.every((entry, index) => entriesEqual(source[start + index], entry))) {
-      const remaining = [...source.slice(0, start), ...source.slice(start + removed.length)];
-      return remaining.length === 0 ? undefined : new CsDelegate((a as CsDelegate).type, remaining);
-    }
-  }
-  return a;
-}
-
-function entriesEqual(a: DelegateEntry, b: DelegateEntry): boolean {
-  if (a.lambda || b.lambda) {
-    // A delegate of a local function or a lambda equals another of the same function over the same captured variables.
-    if (
-      !a.lambda ||
-      !b.lambda ||
-      a.lambda.info.method !== b.lambda.info.method ||
-      a.lambda.thisValue !== b.lambda.thisValue
-    )
-      return false;
-    const other = b.lambda.cells;
-    return [...a.lambda.cells].every(([local, cell]) => other.get(local) === cell);
-  }
-  return a.method === b.method && a.target === b.target;
-}
-
-export function delegatesEqual(a: Value, b: Value): boolean {
-  if (a === undefined || b === undefined) return a === b;
-  const first = (a as CsDelegate).entries;
-  const second = (b as CsDelegate).entries;
-  return first.length === second.length && first.every((entry, index) => entriesEqual(entry, second[index]));
-}
-
-/** The underlying type of an enum, which its box unboxes to as well, or any other type itself. */
-function enumUnderlyingOf(type: Type): Type {
-  return type.kind === 'named' && type.symbol.kind === 'enum' ? (type.symbol.enumUnderlying as Type) : type;
 }
