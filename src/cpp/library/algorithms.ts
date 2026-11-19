@@ -189,13 +189,13 @@ class Output {
 
   private location(): Ptr {
     if (this.info.isOutput) return this.start;
-    const offset = this.info.isReverse ? -1 - this.position : this.position;
-    return this.start.offset(offset);
+    const offset = this.info.isReverse ? -this.position : this.position;
+    return this.start.offset(offset, true).element(this.info.isReverse);
   }
 
   get end(): Ptr {
     if (this.info.isOutput || this.position === 0) return this.start;
-    return this.start.offset(this.info.isReverse ? -this.position : this.position);
+    return this.start.offset(this.info.isReverse ? -this.position : this.position, true);
   }
 }
 
@@ -1158,7 +1158,7 @@ const range = (first: unknown, last: unknown, info: IteratorInfo): Range => new 
 
 function rangeWithLength(begin: unknown, length: number, info: IteratorInfo): Range {
   const first = begin as Ptr;
-  return range(first, first.offset(info.isReverse ? -length : length), info);
+  return range(first, first.offset(info.isReverse ? -length : length, true), info);
 }
 
 function mutableRange(

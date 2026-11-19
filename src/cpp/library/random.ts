@@ -3,6 +3,7 @@ import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import {
+  alignOf,
   ClassInfo,
   classType,
   DOUBLE,
@@ -359,8 +360,8 @@ export function randomClasses(library: Library): LibraryTemplate[] {
     cls.library = {
       kind,
       args: [type],
-      size: 16,
-      align: 8,
+      size: 2 * sizeOf(type),
+      align: alignOf(type),
       call: (compiler: ExpressionCompiler, object: Expr, args: Expr[], row_: number) => {
         if (args.length !== 1) return;
         if (isConstType(object.type)) return compiler.error(row_, `const の ${cls.name} には () を使えません。`);

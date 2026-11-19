@@ -9,6 +9,8 @@ interface IndexedValue {
 }
 
 class NodePosition extends Ptr {
+  private cell?: Ptr;
+
   constructor(
     public owner: Store,
     public position: number | undefined
@@ -23,6 +25,37 @@ class NodePosition extends Ptr {
   override get index(): number {
     if (this.position === -1) throw new CppRuntimeError('invalidIterator');
     return this.position ?? this.owner.length;
+  }
+
+  get cellLocation(): Ptr {
+    this.cell ??= new NodeCell(this).location(0);
+    return this.cell;
+  }
+}
+
+class NodeCell extends Store {
+  readonly length = 1;
+
+  constructor(private readonly node: NodePosition) {
+    super();
+  }
+
+  override checkAlive(): void {
+    this.node.target();
+  }
+
+  get(index: number): Value {
+    if (index !== 0) throw new CppRuntimeError('outOfBounds');
+    return this.node.read();
+  }
+
+  set(index: number, value: Value): void {
+    if (index !== 0) throw new CppRuntimeError('outOfBounds');
+    this.node.write(value);
+  }
+
+  children(): Value[] {
+    return [this.node];
   }
 }
 
@@ -63,7 +96,7 @@ export class NodePositions {
     this.end = new NodePosition(owner, undefined);
   }
 
-  at(index: number): Ptr {
+  at(index: number): NodePosition {
     if (index === this.owner.length) return this.end;
     if (index < 0 || index > this.owner.length) throw new CppRuntimeError('invalidIterator');
     let node = this.positions.get(index);
@@ -164,11 +197,12 @@ export class SequenceValue extends Store {
 
   override location(index: number): Ptr {
     if (this.constructingEnd && index === this.length + 1) return new Ptr(this, index);
+    if (this.storageKind === 'list' && this.nodes && index !== this.length) return this.nodes.at(index).cellLocation;
     return this.fixedStorage?.location(index) ?? this.nodes?.at(index) ?? super.location(index);
   }
 
   override iteratorLocation(index: number): Ptr {
-    const location = this.location(index);
+    const location = this.nodes?.at(index) ?? this.location(index);
     return this.dequeEpoch ? new DequeIterator(location, this.dequeEpoch, index === this.length) : location;
   }
 
@@ -183,7 +217,7 @@ export class SequenceValue extends Store {
     const location = new NodePosition(this, this.length);
     this.constructingEnd = { location, value: UNINIT };
     try {
-      const value = initialize(location);
+      const value = initialize(this.storageKind === 'list' ? location.cellLocation : location);
       this.nodes?.install(location);
       this.append(value);
     } catch (error) {

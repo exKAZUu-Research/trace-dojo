@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <deque>
 #include <iostream>
 #include <list>
@@ -69,4 +70,14 @@ int main() {
   show(copied.back());
   show(filled.back());
   show(ranged.front(), '\n');
+
+  std::list<int> nodes{1, 2};
+  int* saved = &nodes.front();
+  nodes.push_front(0);
+  auto oldFirst = nodes.begin();
+  ++oldFirst;
+  int inputs[] = {3, 4};
+  auto last = std::copy(inputs, inputs + 2, oldFirst);
+  std::cout << (saved == &*oldFirst) << ' ' << ((saved + 1) - saved) << ' '
+            << *saved << ' ' << (last == nodes.end()) << '\n';
 }
