@@ -69,7 +69,9 @@ export abstract class ExpressionConverter {
     };
   }
 
+  // code-gauge-allow functionNcss 35 -- one case per kind of tree-sitter's expression nodes.
   convertExpression(node: Node): Expression {
+    if (Object.hasOwn(UNAVAILABLE_EXPRESSIONS, node.type)) throw unavailable(node, UNAVAILABLE_EXPRESSIONS[node.type]);
     const row = rowOf(node);
     switch (node.type) {
       case 'number_literal': {
@@ -109,6 +111,16 @@ export abstract class ExpressionConverter {
       case 'call_expression': {
         return this.convertCall(node);
       }
+      default: {
+        return this.convertOperatorExpression(node);
+      }
+    }
+  }
+
+  /** Operators, indexes, and the `in`, `is`, and `as` tests. */
+  private convertOperatorExpression(node: Node): Expression {
+    const row = rowOf(node);
+    switch (node.type) {
       case 'index_expression': {
         const [receiver, ...indices] = named(node);
         return {
@@ -178,6 +190,16 @@ export abstract class ExpressionConverter {
           type: this.convertType(required(node.childForFieldName('right'))),
         };
       }
+      default: {
+        return this.convertControlExpression(node);
+      }
+    }
+  }
+
+  /** `if`, `when`, `try`, lambdas, and the jumps. */
+  private convertControlExpression(node: Node): Expression {
+    const row = rowOf(node);
+    switch (node.type) {
       case 'if_expression': {
         const alternative = node.childForFieldName('alternative');
         return {
@@ -209,27 +231,6 @@ export abstract class ExpressionConverter {
       case 'continue_expression': {
         if (node.childForFieldName('label')) throw unavailable(node, 'ラベル付きの break・continue');
         return { kind: node.type === 'break_expression' ? 'break' : 'continue', row };
-      }
-      case 'labeled_expression': {
-        throw unavailable(node, 'ラベル（名前@）');
-      }
-      case 'callable_reference': {
-        throw unavailable(node, '関数や型の参照（::）');
-      }
-      case 'object_literal': {
-        throw unavailable(node, 'オブジェクト式（object : 型 { ... }）');
-      }
-      case 'anonymous_function': {
-        throw unavailable(node, '無名関数（fun (...) { ... }）');
-      }
-      case 'annotated_expression': {
-        throw unavailable(node, '式へのアノテーション');
-      }
-      case 'collection_literal': {
-        throw unavailable(node, 'アノテーションの外での [...]');
-      }
-      case 'spread_expression': {
-        throw unavailable(node, '配列の展開（*配列）');
       }
       default: {
         throw syntaxError(node, '書き方に誤りがあります。');
@@ -599,6 +600,17 @@ function intoRightOperand(target: Expression, apply: (operand: Expression) => Ex
   if (target.kind !== 'binary') return apply(target);
   return { ...target, right: intoRightOperand(target.right, apply) };
 }
+
+/** The expressions of syntax this environment does not run, by tree-sitter's node type, with what the error names. */
+const UNAVAILABLE_EXPRESSIONS: Record<string, string> = {
+  labeled_expression: 'ラベル（名前@）',
+  callable_reference: '関数や型の参照（::）',
+  object_literal: 'オブジェクト式（object : 型 { ... }）',
+  anonymous_function: '無名関数（fun (...) { ... }）',
+  annotated_expression: '式へのアノテーション',
+  collection_literal: 'アノテーションの外での [...]',
+  spread_expression: '配列の展開（*配列）',
+};
 
 /** The annotations of the Kotlin tour, which change nothing a program prints. */
 const LEARNER_ANNOTATIONS = new Set(['JvmInline', 'OptIn']);
