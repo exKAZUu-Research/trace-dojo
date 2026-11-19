@@ -1,7 +1,7 @@
 import type { ConstructorImpl } from '../classes';
 import type { Runtime } from '../runtime';
-import { coreTypes, type DartType, DYNAMIC, vmTypeString } from '../types';
-import { type Arguments, type Callable, DartList, type DartObject, type Value } from '../values';
+import { coreTypes, type DartType, DYNAMIC, functionType, vmTypeString } from '../types';
+import { type Arguments, type Callable, DartClosure, DartList, type DartObject, type Value } from '../values';
 
 /** The natives of the interpreter's libraries, by `Class.member`, `Class.member=`, `Class.new`, or a function's name. */
 export const NATIVES = new Map<string, Callable | ConstructorImpl>();
@@ -115,5 +115,21 @@ export function implicitCast(runtime: Runtime, value: Value, type: DartType): vo
   if (type.kind === 'dynamic' || runtime.links.isValueOf(runtime, value, type)) return;
   runtime.throwTypeError(
     `type '${vmTypeString(runtime.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(type)}'`
+  );
+}
+
+/** A function value whose body is the interpreter's, for natives that pass a callback to the program's code. */
+export function nativeFunction(arity: number, body: (args: readonly Value[]) => Value): DartClosure {
+  return new DartClosure(
+    coreTypes.function,
+    functionType(
+      Array.from({ length: arity }, () => DYNAMIC),
+      DYNAMIC
+    ),
+    (_runtime, _receiver, args) => body(args.positional),
+    undefined,
+    [],
+    { name: undefined, origin: undefined },
+    undefined
   );
 }

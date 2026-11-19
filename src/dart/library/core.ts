@@ -901,7 +901,8 @@ abstract mixin class Iterable<E> {
   const Iterable();
   factory Iterable.generate(int count, [E Function(int index)? generator]) => _GeneratorIterable<E>(count, generator);
   factory Iterable.empty() => EmptyIterable<E>();
-  static Iterable<T> castFrom<S, T>(Iterable<S> source) => source.cast<T>();
+  static Iterable<T> castFrom<S, T>(Iterable<S> source) =>
+      _hasEfficientLength(source) ? _EfficientLengthCastIterable<S, T>(source) : CastIterable<S, T>(source);
   Iterator<E> get iterator;
   Iterable<R> cast<R>() => _hasEfficientLength(this) ? _EfficientLengthCastIterable<E, R>(this) : CastIterable<E, R>(this);
   Iterable<E> followedBy(Iterable<E> other) =>
@@ -1670,7 +1671,7 @@ abstract interface class List<E> extends Iterable<E> {
   external factory List.of(Iterable<E> elements, {bool growable = true});
   external factory List.generate(int length, E Function(int index) generator, {bool growable = true});
   external factory List.unmodifiable(Iterable elements);
-  static List<T> castFrom<S, T>(List<S> source) => source.cast<T>();
+  external static List<T> castFrom<S, T>(List<S> source);
   static void copyRange<T>(List<T> target, int at, List<T> source, [int? start, int? end]) {
     start ??= 0;
     end = RangeError.checkValidRange(start, end, source.length);
@@ -1832,7 +1833,7 @@ abstract interface class Set<E> extends Iterable<E> {
   external factory Set.from(Iterable elements);
   external factory Set.of(Iterable<E> elements);
   external factory Set.unmodifiable(Iterable<E> elements);
-  static Set<T> castFrom<S, T>(Set<S> source, {Set<R> Function<R>()? newSet}) => source.cast<T>();
+  external static Set<T> castFrom<S, T>(Set<S> source, {Set<R> Function<R>()? newSet});
   external Iterator<E> get iterator;
   external bool contains(Object? value);
   external bool add(E value);
@@ -1895,7 +1896,7 @@ abstract interface class Map<K, V> {
   external factory Map.fromIterable(Iterable iterable, {K Function(dynamic element)? key, V Function(dynamic element)? value});
   external factory Map.fromIterables(Iterable<K> keys, Iterable<V> values);
   external factory Map.fromEntries(Iterable<MapEntry<K, V>> entries);
-  static Map<K2, V2> castFrom<K, V, K2, V2>(Map<K, V> source) => source.cast<K2, V2>();
+  external static Map<K2, V2> castFrom<K, V, K2, V2>(Map<K, V> source);
   external Map<RK, RV> cast<RK, RV>();
   external bool containsValue(Object? value);
   external bool containsKey(Object? key);

@@ -16,6 +16,7 @@ import {
   intArg,
   iterableValues,
   named,
+  nativeFunction,
   newList,
 } from './nativeSupport';
 
@@ -311,6 +312,8 @@ define('List.add', (runtime, receiver, [value]) => {
 define('List.addAll', (runtime, receiver, [iterable]) => {
   const target = list(receiver);
   checkGrowable(runtime, target, 'add');
+  // The VM copies a list by index, which it refuses to do from the list itself.
+  if (iterable === target) runtime.throwError('ConcurrentModificationError', '', [target]);
   const values = iterableValues(runtime, iterable);
   for (const value of values) checkElement(runtime, value, elementTypeOf(target), 'value');
   runtime.allocate(values.length);
@@ -338,6 +341,16 @@ define('List.insertAll', (runtime, receiver, [at, iterable]) => {
     rangeError(runtime, position, 0, target.elements.length, undefined);
   const values = iterableValues(runtime, iterable);
   runtime.allocate(values.length);
+  if (iterable === target) {
+    // As the VM: the list grows first and then copies itself in, which the longer list no longer fits.
+    const start = index(position);
+    const oldLength = target.elements.length;
+    target.elements.length = oldLength + values.length;
+    target.elements.fill(undefined, oldLength);
+    target.elements.copyWithin(start + values.length, start, oldLength);
+    changed(target);
+    rangeError(runtime, start + target.elements.length, start, target.elements.length, 'end');
+  }
   target.elements.splice(index(position), 0, ...values);
   changed(target);
   return;
@@ -407,7 +420,7 @@ define('List.clear', (runtime, receiver) => {
 });
 define('List.+', (runtime, receiver, [other]) => {
   const target = list(receiver);
-  const values = [...target.elements, ...list(other).elements];
+  const values = [...target.elements, ...(other instanceof DartList ? other.elements : iterableValues(runtime, other))];
   return newList(runtime, elementTypeOf(target), values);
 });
 define('List.sublist', (runtime, receiver, [start, end]) => {
@@ -913,7 +926,7 @@ define('Set.containsAll', (runtime, receiver, [other]) =>
 );
 define('Set.intersection', (runtime, receiver, [other]) => {
   const result = newSet(runtime, elementTypeOf(receiver as DartObject));
-  for (const key of store(receiver).values()) if (store(other).has(key)) store(result).set(key, undefined);
+  for (const key of store(receiver).values()) if (setContains(runtime, other, key)) store(result).set(key, undefined);
   return result;
 });
 define('Set.union', (runtime, receiver, [other]) => {
@@ -924,7 +937,7 @@ define('Set.union', (runtime, receiver, [other]) => {
 });
 define('Set.difference', (runtime, receiver, [other]) => {
   const result = newSet(runtime, elementTypeOf(receiver as DartObject));
-  for (const key of store(receiver).values()) if (!store(other).has(key)) store(result).set(key, undefined);
+  for (const key of store(receiver).values()) if (!setContains(runtime, other, key)) store(result).set(key, undefined);
   return result;
 });
 define('Set.clear', (runtime, receiver) => {
@@ -972,10 +985,7 @@ function mapFrom(
   isConst = false
 ): DartObject {
   const map = newMap(runtime, typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC);
-  const source = store(other);
-  for (const position of source.positions()) {
-    const key = source.keyAt(position);
-    const value = source.entryValues[position];
+  for (const [key, value] of mapEntries(runtime, other)) {
     if (check) {
       castTo(runtime, key, typeArgs[0] ?? DYNAMIC);
       castTo(runtime, value, typeArgs[1] ?? DYNAMIC);
@@ -1104,9 +1114,7 @@ define('Map.removeWhere', (runtime, receiver, [test]) => {
 });
 define('Map.addAll', (runtime, receiver, [other]) => {
   checkMapModifiable(runtime, receiver);
-  const source = store(other);
-  const positions = [...source.positions()];
-  for (const position of positions) store(receiver).set(source.keyAt(position), source.entryValues[position]);
+  for (const [key, value] of mapEntries(runtime, other)) store(receiver).set(key, value);
   return;
 });
 define('Map.remove', (runtime, receiver, [key]) => {
@@ -1208,3 +1216,43 @@ define(
 );
 
 export { checkIndex, store };
+
+// As internal/cast.dart, castFrom wraps any list, set, or map, the program's own included, in a casting view.
+define('List.castFrom', (runtime, _receiver, [source], _named, typeArgs) =>
+  runtime.links.construct(runtime, 'CastList', '', [source], undefined, [
+    typeArgs[0] ?? DYNAMIC,
+    typeArgs[1] ?? DYNAMIC,
+  ])
+);
+define('Set.castFrom', (runtime, _receiver, [source], _named, typeArgs) =>
+  runtime.links.construct(runtime, 'CastSet', '', [source], undefined, [typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC])
+);
+define('Map.castFrom', (runtime, _receiver, [source], _named, typeArgs) =>
+  runtime.links.construct(runtime, 'CastMap', '', [source], undefined, [
+    typeArgs[0] ?? DYNAMIC,
+    typeArgs[1] ?? DYNAMIC,
+    typeArgs[2] ?? DYNAMIC,
+    typeArgs[3] ?? DYNAMIC,
+  ])
+);
+
+/** A set's `contains`, which a set of the program answers itself. */
+function setContains(runtime: Runtime, set: Value, key: Value): boolean {
+  if (set instanceof DartObject && set.native instanceof HashStore) return set.native.has(key);
+  return runtime.invoke(set, 'contains', { positional: [key], named: undefined }, [], undefined) === true;
+}
+
+/** A map's entries in order: read directly from the interpreter's maps, and through `forEach` from the program's. */
+export function mapEntries(runtime: Runtime, map: Value): [Value, Value][] {
+  if (map instanceof DartObject && map.native instanceof HashStore) {
+    const source = map.native;
+    return [...source.positions()].map((position) => [source.keyAt(position), source.entryValues[position]]);
+  }
+  const entries: [Value, Value][] = [];
+  const collect = nativeFunction(2, (args) => {
+    entries.push([args[0], args[1]]);
+    return;
+  });
+  runtime.invoke(map, 'forEach', { positional: [collect], named: undefined }, [], undefined);
+  return entries;
+}

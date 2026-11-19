@@ -4,7 +4,7 @@ import { HashStore } from '../hashStore';
 import { DartThrow, type Runtime } from '../runtime';
 import { coreTypes, DYNAMIC, interfaceType } from '../types';
 import { DartList, DartObject, type Value } from '../values';
-import { newMap } from './nativeCollections';
+import { mapEntries, newMap } from './nativeCollections';
 import { define, intArg, newList, stringArg } from './nativeSupport';
 
 /** A string as Dart's JSON encoder writes it: quotes, backslashes, control characters, and lone surrogates escaped. */
@@ -85,29 +85,49 @@ class JsonStringifier {
     if (typeof current === 'number') return Number.isFinite(current) ? formatDouble(current) : undefined;
     if (typeof current === 'string') return quoteJson(current);
     if (this.visiting.includes(current)) this.runtime.throwError('JsonCyclicError', '', [current]);
-    if (current instanceof DartList) return this.writeList(current, depth);
-    if (isMap(current)) return this.writeMap(current, depth);
+    // As the SDK's writeJsonValue, any List or Map counts, the program's own included.
+    if (current instanceof DartList || this.isA(current, 'List')) return this.writeList(current, depth);
+    if (isMap(current) || this.isA(current, 'Map')) return this.writeMap(current, depth);
     return undefined;
   }
 
-  private writeList(list: DartList, depth: number): string {
-    if (list.elements.length === 0) return '[]';
+  private isA(value: Value, className: 'List' | 'Map'): boolean {
+    const cls = this.runtime.links.classNamed(className);
+    const type = interfaceType(
+      cls,
+      cls.typeParams.map(() => DYNAMIC)
+    );
+    return value instanceof DartObject && this.runtime.links.isValueOf(this.runtime, value, type);
+  }
+
+  private writeList(list: Value, depth: number): string {
+    const elements = list instanceof DartList ? list.elements : this.elementsOf(list);
+    if (elements.length === 0) return '[]';
     this.visiting.push(list);
-    const parts = list.elements.map((element) => this.write(element, depth + 1));
+    const parts = elements.map((element) => this.write(element, depth + 1));
     this.visiting.pop();
     return this.wrap('[', parts, ']', depth);
   }
 
-  private writeMap(map: DartObject, depth: number): string | undefined {
-    const store = map.native as unknown as HashStore;
-    if (store.size === 0) return '{}';
-    if ([...store.positions()].some((position) => typeof store.keyAt(position) !== 'string')) return undefined;
+  /** A program's list read as the SDK's writeList reads it: by index up to its length. */
+  private elementsOf(list: Value): Value[] {
+    const { runtime } = this;
+    const elements: Value[] = [];
+    for (let index = 0n; index < (runtime.getProperty(list, 'length', undefined) as bigint); index++) {
+      elements.push(runtime.invoke(list, '[]', { positional: [index], named: undefined }, [], undefined));
+    }
+    return elements;
+  }
+
+  private writeMap(map: Value, depth: number): string | undefined {
+    const entries = mapEntries(this.runtime, map);
+    if (entries.length === 0) return '{}';
+    if (entries.some(([key]) => typeof key !== 'string')) return undefined;
     this.visiting.push(map);
     const parts: string[] = [];
-    for (const position of store.positions()) {
-      const key = store.keyAt(position) as string;
+    for (const [key, value] of entries) {
       const separator = this.indent === undefined ? ':' : ': ';
-      parts.push(`${quoteJson(key)}${separator}${this.write(store.entryValues[position], depth + 1)}`);
+      parts.push(`${quoteJson(key as string)}${separator}${this.write(value, depth + 1)}`);
     }
     this.visiting.pop();
     return this.wrap('{', parts, '}', depth);

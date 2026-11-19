@@ -1,3 +1,4 @@
+import { CompileError } from '../interpreter/diagnostics';
 // code-gauge-allow-file fileNcss 901 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Arguments as ArgumentsSyntax,
@@ -789,6 +790,16 @@ export abstract class ExpressionCompiler extends CompilerBase {
     } else if (value.kind === 'setOrMap') {
       if (value.typeArguments) return value.typeArguments.length === 2 ? 'map' : 'set';
       return this.setOrMapFromElements(value.elements, undefined);
+    } else {
+      // The SDK decides by the spread value's static type; compiling it here for its type changes nothing else.
+      const savedFlow = this.flow;
+      try {
+        type = this.compileExpression(value).type;
+      } catch (error) {
+        if (!(error instanceof CompileError)) throw error;
+      } finally {
+        this.flow = savedFlow;
+      }
     }
     if (!type) return undefined;
     const base = resolveBound(nonNullable(type));
