@@ -323,3 +323,21 @@ Warning: Undefined variable $absent in /main.php on line 600
 
 Warning: Trying to access array offset on null in /main.php on line 600
 Undefined constant "absentName"
+
+Warning: Undefined array key 3 in /main.php on line 611
+
+Warning: Trying to access array offset on int in /main.php on line 615
+620:Cannot unset string offsets
+
+Warning: Array to string conversion in /main.php on line 624
+
+Warning: Array to string conversion in /main.php on line 625
+items
+Array
+Array
+Warning: Array to string conversion in /main.php on line 628
+
+Warning: Array to string conversion in /main.php on line 629
+items
+Array
+Array634:Object of class stdClass could not be converted to string

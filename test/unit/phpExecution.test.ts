@@ -271,6 +271,21 @@ test('stops at a runtime feature the grader rejects, keeping the output before i
   });
 });
 
+test.each([
+  ['_POST', 'echo $$name;', 'スーパーグローバル変数'],
+  ['_FILES', 'isset(${$name});', 'スーパーグローバル変数'],
+  ['_SERVER', '$$name = 1;', 'スーパーグローバル変数'],
+  ['_GET', 'unset($$name);', 'スーパーグローバル変数'],
+  ['argv', 'echo ${$name};', 'コマンドライン引数'],
+  ['argc', 'echo $GLOBALS[$name];', 'コマンドライン引数'],
+])('rejects indirect access to $%s through %s', (name, action, label) => {
+  expect(run(`<?php $name = '${name}'; echo 'before'; ${action} echo 'after';`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'before',
+    uncaughtException: `${label} $${name}は、この採点環境では使えません。`,
+  });
+});
+
 test('writes standard error without showing it in standard output', () => {
   expect(run('<?php\nfwrite(STDERR, "err");\nfwrite(STDOUT, "out");')).toMatchObject({ stdout: 'out', stderr: 'err' });
 });
@@ -346,6 +361,16 @@ $randomizer = new Random\Randomizer(new Random\Engine\Mt19937(7));
 $bytes = str_repeat('a', 900_000);
 $randomizer->shuffleBytes($bytes);
 $randomizer->shuffleBytes($bytes);
+echo 'completed';`);
+  expect(execution).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+});
+
+test('charges global string shuffles against the execution budget', () => {
+  const execution = run(`<?php
+mt_srand(7);
+$bytes = str_repeat('a', 900_000);
+str_shuffle($bytes);
+str_shuffle($bytes);
 echo 'completed';`);
   expect(execution).toEqual({ kind: 'limitExceeded', limit: 'operations' });
 });

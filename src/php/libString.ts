@@ -14,6 +14,7 @@ import { ctypeUpper, isCtypeAlpha, isCtypeSpace, isUtf8Ctype } from './libLocale
 import { defineAlias, defineConstant, defineFunction, defineOverloadedFunction, markInlined } from './native';
 import { toInt, toStr, withStringConversionErrors } from './operators';
 import { rt } from './runtime';
+import { shuffle } from './shuffle';
 import { formatPrintf } from './sprintf';
 import { incrementString } from './strings';
 import { allowedTags, stripTags } from './stripTags';
@@ -1164,10 +1165,7 @@ defineFunction('count_chars(string $string, int $mode = 0): array|string', ({ ar
 defineFunction('str_shuffle(string $string): string', ({ args }) => {
   const chars = [...s(args[0])];
   const mt = rt().mt;
-  for (let left = chars.length - 1; left > 0; left--) {
-    const index = Number(mt.range(0n, BigInt(left)));
-    if (index !== left) [chars[left], chars[index]] = [chars[index], chars[left]];
-  }
+  shuffle(chars, (end) => mt.range(0n, end));
   return chars.join('');
 });
 defineFunction('md5(string $string, bool $binary = false): string', ({ args }) =>

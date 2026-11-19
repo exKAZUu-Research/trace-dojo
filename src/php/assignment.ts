@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 949 -- Holds assignment and offset access modes with their shared helpers.
+// code-gauge-allow-file fileNcss 950 -- Holds assignment and offset access modes with their shared helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -52,6 +52,7 @@ import {
 import { FatalError, PhpThrow, rt } from './runtime';
 import { incrementString } from './strings';
 import { coerce, describePropertyType, matches, NO_MATCH, typeToString } from './types';
+import { checkedDynamicVariable } from './unsupported';
 import {
   type Key,
   PhpArray,
@@ -123,7 +124,7 @@ export function placeOf(e: Expr, mode: PlaceMode = 'write', through = false): Pl
 
 function namedPlace(name: Expr | string, mode: PlaceMode, locate: (name: string) => Place): Place {
   const readName = typeof name === 'string' ? () => name : prepareOperand(name);
-  const resolve = (): Place => locate(toStr(readName()));
+  const resolve = (): Place => locate(checkedDynamicVariable(toStr(readName())));
   return mode === 'deferred' || mode === 'coalesce' ? deferredPlace(resolve, () => readForIsset(resolve())) : resolve();
 }
 
@@ -328,7 +329,7 @@ function deferredPlace(
 
 function globalPlace(index?: Expr): VarPlace {
   if (index === undefined) throwError('Error', 'Cannot append to $GLOBALS');
-  return new VarPlace(rt().globalFrame, toStr(ev(index)), 'global');
+  return new VarPlace(rt().globalFrame, checkedDynamicVariable(toStr(ev(index))), 'global');
 }
 
 class StaticPlace implements Place {
@@ -1311,7 +1312,7 @@ function prepareUnset(e: Expr, nested?: UnsetBase): () => Place | undefined {
     }
     case 'varvar': {
       const name = prepareOperand(e.name);
-      return () => new VarPlace(rt().frame, toStr(name()), 'dynamic');
+      return () => new VarPlace(rt().frame, checkedDynamicVariable(toStr(name())), 'dynamic');
     }
     case 'sprop': {
       if (nested) {
@@ -1335,7 +1336,7 @@ function prepareUnsetOffset(e: Extract<Expr, { k: 'idx' }>, nested?: UnsetBase):
   if (e.index === undefined) throwError('Error', 'Cannot use [] for unsetting');
   if (e.base.k === 'var' && e.base.name === 'GLOBALS') {
     const readKey = prepareOperand(e.index);
-    return () => new VarPlace(rt().globalFrame, toStr(readKey()), 'global');
+    return () => new VarPlace(rt().globalFrame, checkedDynamicVariable(toStr(readKey())), 'global');
   }
   const readParent = prepareUnset(e.base, 'array');
   const readKey = prepareOperand(e.index);

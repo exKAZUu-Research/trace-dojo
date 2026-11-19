@@ -7,6 +7,7 @@ import { defineClass, defineUnitEnum, type NativeMethod } from './native';
 import { toStr } from './operators';
 import { MersenneTwister } from './random';
 import { rt } from './runtime';
+import { shuffle } from './shuffle';
 import { UnsupportedFeatureError } from './unsupported';
 import { enumCaseIdentifier, type Key, PhpArray, type PhpClass, PhpObject, type Value } from './values';
 
@@ -279,17 +280,6 @@ function ceilInt(a: number, b: number, gamma: number): bigint {
 
 const algoOf = (object: PhpObject): Algo => object.internal as Algo;
 
-/** Transcribes php_array_data_shuffle and php_binary_string_shuffle, a Fisher-Yates shuffle from the end. */
-function shuffle<T>(algo: Algo, items: T[]): T[] {
-  const runtime = rt();
-  for (let left = items.length - 1; left > 0; left--) {
-    runtime.spend();
-    const index = Number(range(algo, 0n, BigInt(left)));
-    if (index !== left) [items[left], items[index]] = [items[index], items[left]];
-  }
-  return items;
-}
-
 const randomizerMethods: NativeMethod[] = [
   {
     // The parameter's type is checked here: a native signature cannot spell the nullable class type as PHP does.
@@ -391,11 +381,13 @@ const randomizerMethods: NativeMethod[] = [
   },
   {
     signature: 'shuffleArray(array $array): array',
-    impl: ({ thisObj, args }) => PhpArray.copySlots(shuffle(algoOf(thisObj), [...(args[0] as PhpArray).map.values()])),
+    impl: ({ thisObj, args }) =>
+      PhpArray.copySlots(shuffle([...(args[0] as PhpArray).map.values()], (end) => range(algoOf(thisObj), 0n, end))),
   },
   {
     signature: 'shuffleBytes(string $bytes): string',
-    impl: ({ thisObj, args }) => shuffle(algoOf(thisObj), (args[0] as string).split('')).join(''),
+    impl: ({ thisObj, args }) =>
+      shuffle((args[0] as string).split(''), (end) => range(algoOf(thisObj), 0n, end)).join(''),
   },
   {
     signature: 'pickArrayKeys(array $array, int $num): array',

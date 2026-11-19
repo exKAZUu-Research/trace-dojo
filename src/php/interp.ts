@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 991 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 995 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import {
   applyOperator,
@@ -68,7 +68,7 @@ import {
 import { readElement, share } from './places';
 import { PhpThrow, rt, type Runtime } from './runtime';
 import { constantKey } from './statements';
-import { UnsupportedFeatureError } from './unsupported';
+import { checkedDynamicVariable, UnsupportedFeatureError } from './unsupported';
 import {
   type ClosureData,
   copyValueSlot,
@@ -202,7 +202,7 @@ export function evChain(e: Expr, discardResult = false): Chain {
     case 'interp': {
       let text = '';
       for (const part of e.parts) {
-        text += typeof part === 'string' ? part : toStr(ev(part));
+        text += typeof part === 'string' ? part : stringifyInterpolated(part);
         rt().ensureStringFits(text.length);
       }
       return text;
@@ -417,7 +417,7 @@ function prepareRead(e: Expr, mode: ReadMode): ReadPlan {
       return () => {
         const value = name(e.row);
         runtime.row = e.row;
-        const key = toStr(value);
+        const key = checkedDynamicVariable(toStr(value));
         const ref = runtime.frame.vars.get(key);
         if (mode === 'isset') return ref?.isSetBinding ?? false;
         return mode === 'read' ? readVar(key, e.row) : definedOrNull(ref?.v);
@@ -490,7 +490,7 @@ function prepareOffsetRead(e: Extract<Expr, { k: 'idx' }>, mode: ReadMode): Read
 }
 
 function globalOffsetRead(key: Value, row: number, mode: ReadMode): Value {
-  const name = toStr(key);
+  const name = checkedDynamicVariable(toStr(key));
   const runtime = rt();
   runtime.row = row;
   const ref = runtime.globalFrame.vars.get(name);
@@ -540,6 +540,12 @@ function readPropertyOperand(object: Value, name: Value, row: number, mode: Read
 
 function readMemberOperand(name: string | Expr): (row?: number) => Value {
   return typeof name === 'string' ? () => name : prepareOperand(name);
+}
+
+function stringifyInterpolated(part: Expr): string {
+  const value = ev(part);
+  rt().row = compiledOperandRow(part);
+  return toStr(value);
 }
 
 function readVar(name: string, row: number): Value {

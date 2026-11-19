@@ -6,7 +6,7 @@ import { ExecutionBudget } from '../interpreter/limits';
 import type { ClassRef, Expr, ResolvedName, Stmt } from './ast';
 import { nestedBodies } from './astAnalysis';
 import { enc, lower } from './bytes';
-import { unsupportedMessage } from './unsupported';
+import { unavailableVariable, unsupportedMessage } from './unsupported';
 import type { TypeDecl } from './values';
 
 export function semanticChildren(node: Node): Node[] {
@@ -20,7 +20,6 @@ export interface CompileNotice {
   row: number;
 }
 
-export const SUPERGLOBALS = new Set(['_GET', '_POST', '_SERVER', '_ENV', '_COOKIE', '_FILES', '_REQUEST', '_SESSION']);
 export const BUILTIN_TYPES = new Set([
   'int',
   'float',
@@ -222,8 +221,8 @@ export abstract class ConverterBase {
   }
 
   protected checkVariableAvailability(node: Node, name: string): void {
-    if (SUPERGLOBALS.has(name)) this.unsupported(node, `スーパーグローバル変数 $${name}`);
-    if (name === 'argv' || name === 'argc') this.unsupported(node, `コマンドライン引数 $${name}`);
+    const unavailable = unavailableVariable(name);
+    if (unavailable) this.unsupported(node, unavailable);
   }
 
   // code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.

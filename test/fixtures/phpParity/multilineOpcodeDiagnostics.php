@@ -603,3 +603,33 @@ try {
         absentName
     }";
 } catch (Error $error) { echo $error->getMessage(), "\n"; }
+
+$vector = [];
+$scalar = 2;
+echo $vector[
+    1 +
+    2
+];
+echo $scalar[
+    $prefix .
+    'x'
+];
+try {
+    unset($text[
+        $prefix .
+        'x'
+    ]);
+} catch (Throwable $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }
+echo "items
+$vector
+{$vector}";
+echo <<<LINES
+items
+$vector
+{$vector}
+LINES;
+try {
+    $plain = new stdClass;
+    echo "object
+$plain";
+} catch (Throwable $error) { echo $error->getLine(), ':', $error->getMessage(), "\n"; }

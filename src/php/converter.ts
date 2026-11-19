@@ -940,12 +940,9 @@ export class Converter extends DeclarationConverter {
             node,
             '文字列の添字に {} は使えません（Array and string offset access syntax with curly braces is no longer supported）。'
           );
-        return {
-          k: 'idx',
-          base: this.expr(baseNode),
-          index: indexNode ? this.expr(indexNode) : undefined,
-          row: indexNode?.startPosition.row ?? row,
-        };
+        const base = this.expr(baseNode);
+        const index = indexNode ? this.expr(indexNode) : undefined;
+        return { k: 'idx', base, index, row: index ? compiledOperandRow(index) : row };
       }
       case 'member_access_expression':
       case 'nullsafe_member_access_expression': {

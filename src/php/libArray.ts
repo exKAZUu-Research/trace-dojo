@@ -26,6 +26,7 @@ import {
 } from './operators';
 import { arrayIsShared, ElementPlace, share, VarPlace } from './places';
 import { ExitSignal, PhpThrow, rt } from './runtime';
+import { shuffle } from './shuffle';
 import {
   copyValueSlot,
   deref,
@@ -1320,10 +1321,7 @@ defineFunction('shuffle(array &$array): true', (ctx) => {
   const array = writableArray(ctx, 0);
   const values = [...array.map.values()];
   const mt = rt().mt;
-  for (let left = values.length - 1; left > 0; left--) {
-    const index = Number(mt.range(0n, BigInt(left)));
-    if (index !== left) [values[left], values[index]] = [values[index], values[left]];
-  }
+  shuffle(values, (end) => mt.range(0n, end));
   rebuild(
     values.map((value): [Key, Value | Ref] => [0n, value]),
     true,
