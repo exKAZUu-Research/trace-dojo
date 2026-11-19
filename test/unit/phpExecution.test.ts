@@ -491,6 +491,40 @@ echo 'after';`);
   expect(execution).toMatchObject({ kind: 'executed', stdout: 'exit;{"item":5}' });
 });
 
+test.each([
+  ['ArrayObject', "echo 'second;';", 'second;'],
+  ['ArrayIterator', "echo 'second;';", 'second;'],
+  ['ArrayObject', "exit('second-exit;');", 'second-exit;'],
+  ['ArrayIterator', "exit('second-exit;');", 'second-exit;'],
+])('defers a displaced %s value to shutdown when its destructor will %s', (name, action, output) => {
+  const execution = run(`<?php
+class DisplacedSetting {
+    function __destruct() { ${action} }
+}
+class RetiredSetting {
+    function __destruct() {
+        global $settings, $releasing;
+        echo 'first;';
+        if (!$releasing) {
+            $releasing = true;
+            $settings->item = new DisplacedSetting;
+        }
+        exit('exit;');
+    }
+}
+class SettingsObserver {
+    function __destruct() {
+        global $settings;
+        echo json_encode($settings->getArrayCopy());
+    }
+}
+$releasing = false;
+$settings = new ${name}(['item' => new RetiredSetting], ${name}::ARRAY_AS_PROPS);
+$observer = new SettingsObserver;
+$settings->item = 5;`);
+  expect(execution).toMatchObject({ kind: 'executed', stdout: `first;exit;{"item":5}${output}` });
+});
+
 test.each(['<?php echo "hello"; declare(strict_types=1);', '<?php function f() {} declare(strict_types=1);'])(
   'rejects a late strict_types declaration before execution: %s',
   (source) => {

@@ -19,9 +19,19 @@ import { setNativeArrayStorage } from './nativeArrayStorage';
 import { toKey } from './operators';
 import { arrayIsShared, share } from './places';
 import './splInterfaces';
-import { rt } from './runtime';
+import { ExitSignal, rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
-import { dropped, type Key, NativeValueIndex, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
+import {
+  deref,
+  dropped,
+  type Key,
+  NativeValueIndex,
+  PhpArray,
+  type PhpClass,
+  PhpObject,
+  Ref,
+  type Value,
+} from './values';
 
 const STD_PROP_LIST = 1;
 const ARRAY_AS_PROPS = 2;
@@ -177,13 +187,20 @@ export class ArrayStorage {
     runtime.held.push(replacement);
     try {
       withCleanupExceptions(runtime, (capture) => {
+        let exiting = false;
         try {
           dropped(array.releaseSlot(offset));
         } catch (error) {
           if (!isCleanupException(error)) throw error;
+          exiting = error instanceof ExitSignal;
           capture(error);
         }
-        if (arrayHasHolders(runtime, array, 1)) array.setSlot(offset, replacement);
+        if (!arrayHasHolders(runtime, array, 1)) return;
+        if (exiting) {
+          const value = deref(array.releaseSlot(offset) ?? null);
+          if (value instanceof PhpArray || value instanceof PhpObject) runtime.nativeShutdownHolders.add(value);
+        }
+        array.setSlot(offset, replacement);
       });
     } finally {
       runtime.held.pop();
