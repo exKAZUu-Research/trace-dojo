@@ -1,5 +1,6 @@
 // code-gauge-allow-file fileNcss 999 -- Holds assignment and offset access modes with their shared helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+import { arrayObjectProperty } from './arrayObjectProperties';
 import { withArrayReadView } from './arrayTable';
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -32,6 +33,8 @@ import {
   stringOffsetIndex,
   withPropertyName,
 } from './interp';
+import type { ArrayStorage } from './libArrayObject';
+import { nativeArrayStorage } from './nativeArrayStorage';
 import { compiledOperandRow, dimensionWriteRow, operandAstRow } from './opcodeRows';
 import { arithmetic, bitwise, concat, toKey, toStr } from './operators';
 import {
@@ -49,13 +52,13 @@ import {
   ValuePlace,
   VarPlace,
   watchStringSlot,
+  withIncrementCleanup,
   writableContainer,
 } from './places';
 import { FatalError, PhpThrow, rt } from './runtime';
 import { incrementString } from './strings';
 import { coerce, describePropertyType, matches, NO_MATCH, typeToString } from './types';
 import {
-  type Key,
   PhpArray,
   type PhpClass,
   PhpObject,
@@ -447,9 +450,12 @@ class StaticPlace implements Place {
   }
 }
 
-// code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionNcss 38 -- Keeps the property lookup shared across all place operations.
+// code-gauge-allow functionCognitiveComplexity 16 -- Shares the receiver and property lookup across ordinary access modes.
 function propPlace(object: PhpObject, name: string, unbound = false): Place {
   const scope = rt().frame.scope;
+  const storage = arrayObjectProperty(object, name, scope, undefined, unbound);
+  if (storage) return storage;
   let reportedStaticAccess = false;
   const lookup = (report: boolean): PropDecl | undefined => {
     const property = classesModule.lookupProp(object.cls, name, scope);
@@ -592,20 +598,6 @@ function issetPropExists(object: PhpObject, name: string, scope: PhpClass | unde
   const decl = classesModule.lookupProp(object.cls, name, scope);
   if (decl && !decl.isStatic) return object.props.has(decl.key) && !object.unsetProperties?.has(decl.key);
   return object.props.has(name);
-}
-
-interface NativeArrayStorage {
-  writable(): PhpArray;
-  readonly array: PhpArray;
-  offsetValue(key: Value, className: string, warning?: UpdateWarning, hasPendingWarning?: boolean): Value;
-  setOffset(key: Value, value: Value, className: string, warning?: UpdateWarning): void;
-  cursor(): { readonly key: Key | undefined };
-}
-let nativeArrayStorage: (value: unknown) => value is NativeArrayStorage = (_value): _value is NativeArrayStorage =>
-  false;
-
-export function setNativeArrayStorage(check: typeof nativeArrayStorage): void {
-  nativeArrayStorage = check;
 }
 
 export function nativeIteratorSlot(object: PhpObject): Value | Ref | undefined {
@@ -765,7 +757,7 @@ function arrayAccessNestedPlace(
 // code-gauge-allow functionCognitiveComplexity 20 -- Shares mode, key conversion and storage lifetime across nested offset access.
 function nativeArrayNestedPlace(
   object: PhpObject,
-  storage: NativeArrayStorage,
+  storage: ArrayStorage,
   key: Value,
   mode: NestMode,
   unbound: boolean
@@ -1292,7 +1284,7 @@ function incrementPlace(e: Extract<Expr, { k: 'incdec' }>, warning: UpdateWarnin
     else place.warnUndefined?.();
     old = null;
   }
-  const updated = incrementedValue(old, e.inc, warning);
+  const updated = withIncrementCleanup(place, old, () => incrementedValue(old, e.inc, warning));
   if (updated === undefined) return old;
   if (typeof old === 'bigint' && typeof updated === 'number') checkIntOverflow(place, e.inc);
   const stored = place.set(updated);

@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 590 -- Keeps core built-ins with their shared interpreter helpers.
+// code-gauge-allow-file fileNcss 594 -- Keeps core built-ins with their shared interpreter helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+import { arrayObjectProperty } from './arrayObjectProperties';
 import { byteAt, lower, untilNul } from './bytes';
 import { callableClosureName, callValue, checkCallable, consumeInvokedResult, explainCallable } from './callables';
 import { type ArgValue, backtraceLimit, callStack, frameArguments, setCallableExplainer } from './calls';
@@ -477,6 +478,8 @@ defineFunction('property_exists(mixed $object_or_class, string $property): bool'
   if (declaration && (declaration.visibility !== 'private' || declaration.cls === cls)) return true;
   if (!(target instanceof PhpObject)) return false;
   const scoped = classesModule.lookupProp(cls, name, rt().frame.scope);
+  const storage = arrayObjectProperty(target, name, rt().frame.scope, scoped);
+  if (storage) return storage.has('exists');
   if (!scoped || scoped.isStatic) return target.props.has(name);
   const slot = target.props.get(scoped.key);
   return scoped.isVirtual === true || (slot !== undefined && slot !== UNINIT);

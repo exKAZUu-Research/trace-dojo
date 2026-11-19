@@ -1,7 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ArrayCursor } from './arrayOrder';
 import { withArrayReadView } from './arrayTable';
-import { setNativeArrayStorage } from './assignment';
 import { callMethod } from './callables';
 import { invoke } from './calls';
 import { createObject, findClass, objectToArray } from './classes';
@@ -16,6 +15,7 @@ import {
 } from './errors';
 import { arrayHasHolders } from './garbage';
 import { defineClass, type NativeMethod } from './native';
+import { setNativeArrayStorage } from './nativeArrayStorage';
 import { toKey } from './operators';
 import { arrayIsShared, share } from './places';
 import './splInterfaces';
@@ -62,6 +62,10 @@ export class ArrayStorage {
     if (this.cursorArray !== array) this.moveCursor(array, 'replace');
     this.watchChain();
     return this.iteratorCursor as ArrayCursor;
+  }
+
+  get arrayAsProperties(): boolean {
+    return (this.flags & ARRAY_AS_PROPS) !== 0;
   }
 
   get array(): PhpArray {
@@ -313,7 +317,7 @@ function setStorage(object: PhpObject, value: Value, method: string, flags: numb
       throw new UnsupportedFeatureError('通常のオブジェクトを配列ストレージにする操作');
     }
   }
-  storage.flags = checkFlags(old.flags | newFlags);
+  storage.flags = old.flags | newFlags;
   storage.iteratorClass = old.iteratorClass;
   rt()
     .nativeHeld.at(-1)
@@ -325,11 +329,6 @@ function holdStorage(object: PhpObject, storage: ArrayStorage): ArrayStorage {
   object.internal = storage;
   storage.holder = object;
   return storage;
-}
-
-function checkFlags(flags: number): number {
-  if (flags & ARRAY_AS_PROPS) throw new UnsupportedFeatureError('ArrayObject::ARRAY_AS_PROPS');
-  return flags;
 }
 
 function arrayMethods(name: string): NativeMethod[] {
@@ -380,9 +379,7 @@ function arrayMethods(name: string): NativeMethod[] {
       signature: 'setFlags(int $flags): void',
       impl: ({ thisObj, args }) => {
         const storage = storageOf(thisObj);
-        storage.flags = checkFlags(
-          (storage.flags & INTERNAL_FLAGS) | Number((args[0] as bigint) & BigInt(PUBLIC_FLAGS))
-        );
+        storage.flags = (storage.flags & INTERNAL_FLAGS) | Number((args[0] as bigint) & BigInt(PUBLIC_FLAGS));
         return null;
       },
     },

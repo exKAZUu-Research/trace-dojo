@@ -1,4 +1,5 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+import { arrayObjectProperty } from './arrayObjectProperties';
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst, TraitRule } from './ast';
 import { canBindClass, declaresStringConversion } from './astAnalysis';
 import builtinNames from './builtinNames.json';
@@ -1181,7 +1182,7 @@ function guarded<T>(object: PhpObject, key: string, run: () => T): T {
   }
 }
 
-// code-gauge-allow functionNcss 47 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 50 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function readProp(
   object: PhpObject,
   name: string,
@@ -1195,6 +1196,8 @@ export function readProp(
     return null;
   }
   const decl = lookupProp(object.cls, name, scope);
+  const storage = arrayObjectProperty(object, name, scope, decl);
+  if (storage) return storage.read(mode);
   checkStaticInstanceAccess(
     object,
     name,
@@ -1295,6 +1298,8 @@ export function writeProp(
   const pending = runtime.pendingAssignmentWarning;
   runtime.spend();
   const decl = lookupProp(object.cls, name, scope);
+  const storage = arrayObjectProperty(object, name, scope, decl);
+  if (storage) return storage.set(value);
   checkStaticInstanceAccess(object, name, scope, decl, 'set', !options.fetched);
   if (decl && !decl.isStatic) {
     if (!canAccessProp(decl, scope)) {
@@ -1468,7 +1473,7 @@ export function checkStaticInstanceAccess(
 }
 
 /** The reference a property holds, creating it, for `=&`, by-reference arguments, and nested writes. */
-// code-gauge-allow functionNcss 47 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss 49 -- Follows PHP's class linking and property access rules in their order of checks.
 export function propRef(
   object: PhpObject,
   name: string,
@@ -1478,6 +1483,8 @@ export function propRef(
 ): Ref {
   if (object.isResource) throwError('Error', `Attempt to modify property "${name}" on resource`);
   const property = lookupProp(object.cls, name, scope);
+  const storage = arrayObjectProperty(object, name, scope, property);
+  if (storage) return storage.ref();
   checkStaticInstanceAccess(object, name, scope, property, 'get', !reportedStatic);
   const decl = property?.isStatic ? undefined : property;
   const key = decl?.key ?? name;
@@ -1571,7 +1578,7 @@ function overloadedPropertyReference(object: PhpObject, name: string, decl?: Pro
 }
 
 // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 43 -- Shares property lookup and validation across reference binding and value fallback.
+// code-gauge-allow functionNcss 46 -- Shares property lookup and validation across reference binding and value fallback.
 export function bindPropertyReference(
   object: PhpObject,
   name: string,
@@ -1581,6 +1588,8 @@ export function bindPropertyReference(
 ): void {
   if (object.isResource) throwError('Error', `Attempt to modify property "${name}" on resource`);
   const property = lookupProp(object.cls, name, scope);
+  const storage = arrayObjectProperty(object, name, scope, property);
+  if (storage) return storage.bind(ref, valueFallback);
   checkStaticInstanceAccess(object, name, scope, property, 'get');
   const decl = property?.isStatic ? undefined : property;
   const accessible = decl && canAccessProp(decl, scope);
@@ -1676,11 +1685,13 @@ function checkReferenceValue(ref: Ref, value: Value): Value {
   return coerced;
 }
 
-// code-gauge-allow functionCognitiveComplexity 29 -- Follows PHP's class linking and property access rules in their order of checks.
-// code-gauge-allow functionNcss 38 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 30 -- Follows PHP's class linking and property access rules in their order of checks.
+// code-gauge-allow functionNcss 41 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function unsetProp(object: PhpObject, name: string, scope: PhpClass | undefined): void {
   if (object.isResource) return;
   const decl = lookupProp(object.cls, name, scope);
+  const storage = arrayObjectProperty(object, name, scope, decl);
+  if (storage) return storage.unset();
   checkStaticInstanceAccess(object, name, scope, decl, 'unset');
   if (decl && !decl.isStatic) {
     if (!canAccessProp(decl, scope)) {
@@ -1726,6 +1737,8 @@ export function unsetProp(object: PhpObject, name: string, scope: PhpClass | und
 export function issetProp(object: PhpObject, name: string, scope: PhpClass | undefined, internal = false): boolean {
   if (object.isResource) return false;
   const decl = lookupProp(object.cls, name, scope);
+  const storage = arrayObjectProperty(object, name, scope, decl);
+  if (storage) return storage.has('isset');
   if (decl && !decl.isStatic && canAccessProp(decl, scope)) {
     requireVirtualPropertyHook(object, decl, 'get');
     if (decl.hooks?.get) return readProp(object, name, scope, internal ? 'native' : 'quiet') !== null;

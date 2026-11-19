@@ -1,0 +1,69 @@
+NULL
+int(2)
+string(7) "backing"
+string(3) "own"
+string(5) "first"
+bool(false)
+bool(true)
+bool(true)
+bool(true)
+string(7) "default"
+array(6) {
+  ["theme"]=>
+  string(5) "light"
+  ["count"]=>
+  &int(7)
+  ["privateLabel"]=>
+  string(7) "backing"
+  ["options"]=>
+  array(2) {
+    [0]=>
+    string(7) "compact"
+    [1]=>
+    string(4) "wide"
+  }
+  [0]=>
+  string(5) "first"
+  ["other"]=>
+  &int(7)
+}
+string(5) "light"
+bool(false)
+string(5) "light"
+
+Warning: Undefined array key "missing" in /main.php on line 35
+string(4) "dark"
+string(4) "dark"
+NULL
+get:name;get:count;set:count;get:count;set:count;string(3) "Ada"
+int(3)
+int(7)
+has:empty;has:empty;get:empty;has:empty;get:empty;has:empty;get:empty;bool(true)
+bool(true)
+bool(false)
+string(4) "none"
+get:nested;unset:name;array(3) {
+  ["count"]=>
+  int(7)
+  ["empty"]=>
+  NULL
+  ["nested"]=>
+  array(1) {
+    ["id"]=>
+    int(1)
+  }
+}
+set:new;array(2) {
+  ["n"]=>
+  int(4)
+  ["new"]=>
+  int(5)
+}
+Cannot increment array
+array(1) {
+  ["record"]=>
+  array(1) {
+    ["field"]=>
+    int(1)
+  }
+}

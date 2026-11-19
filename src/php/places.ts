@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { deprecated, E_WARNING, emitError, throwError, type UpdateWarning, warn } from './errors';
-import { type Frame, type PhpThrow, rt } from './runtime';
+import { deprecated, E_WARNING, emitError, throwError, type UpdateWarning, warn, withPendingException } from './errors';
+import { type Frame, PhpThrow, rt } from './runtime';
 import { watchSlot } from './slotWatch';
 import { describePropertyType } from './types';
 import { checkedDynamicVariable } from './unsupported';
@@ -49,10 +49,21 @@ export interface Place {
    */
   nested?(mode?: NestMode): Place;
   incrementTarget?(): Place;
+  writeAfterFailedIncrement?(value: Value): void;
   /** Warns that the place does not exist, as a read-modify-write (`++`, `.=`) of it does, creating what PHP creates. */
   warnUndefined?(warning?: UpdateWarning): void;
   /** The value as `isset` and `??` read it, asking `__isset` or `offsetExists` first; undefined when unset. */
   getForIsset?(): Value | undefined;
+}
+
+export function withIncrementCleanup<T>(place: Place, old: Value, update: () => T): T {
+  try {
+    return update();
+  } catch (error) {
+    if (error instanceof PhpThrow && place.writeAfterFailedIncrement)
+      withPendingException(rt(), error, () => place.writeAfterFailedIncrement?.(old));
+    throw error;
+  }
 }
 
 export function watchStringSlot(
