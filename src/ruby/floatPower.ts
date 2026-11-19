@@ -1,5 +1,15 @@
+import { UnsupportedFeatureError } from './runtime';
+
 /** The largest exponent computed exactly; larger ones overflow or underflow for every base not close to 1. */
 const MAX_EXACT_EXPONENT = 1100;
+
+export function floatPower(base: number, exponent: number): number {
+  if (base === 1 || (base === -1 && !Number.isNaN(exponent) && !Number.isFinite(exponent))) return 1;
+  if (base < 0 && (Number.isNaN(exponent) || (!Number.isInteger(exponent) && Number.isFinite(exponent)))) {
+    throw new UnsupportedFeatureError('負の数の小数乗（結果が複素数になるもの）');
+  }
+  return exactFloatPower(base, exponent) ?? base ** exponent;
+}
 
 /**
  * `base ** exponent` for a whole-number exponent, rounded to the nearest Float as the C library's `pow` that Ruby calls

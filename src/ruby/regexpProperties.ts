@@ -1,0 +1,115 @@
+// Ruby 4.0.9 Unicode 17 property names from enc/unicode/17.0.0/name2ctype.h.
+export const regexpPropertyNames: ReadonlySet<string> = new Set(
+  `
+adlam adlm age=1.1 age=10.0 age=11.0 age=12.0 age=12.1 age=13.0 age=14.0 age=15.0 age=15.1 age=16.0 age=17.0
+age=2.0 age=2.1 age=3.0 age=3.1 age=3.2 age=4.0 age=4.1 age=5.0 age=5.1 age=5.2 age=6.0 age=6.1 age=6.2 age=6.3
+age=7.0 age=8.0 age=9.0 aghb ahex ahom alnum alpha alphabetic anatolianhieroglyphs any arab arabic armenian
+armi armn ascii asciihexdigit assigned avestan avst bali balinese bamu bamum bass bassavah batak batk beng
+bengali berf beriaerfe bhaiksuki bhks bidic bidicontrol blank bopo bopomofo brah brahmi brai braille bugi
+buginese buhd buhid c cakm canadianaboriginal cans cari carian cased casedletter caseignorable
+caucasianalbanian cc cf chakma cham changeswhencasefolded changeswhencasemapped changeswhenlowercased
+changeswhentitlecased changeswhenuppercased cher cherokee chorasmian chrs ci closepunctuation cn cntrl co
+combiningmark common connectorpunctuation control copt coptic cpmn cprt cs cuneiform currencysymbol cwcf cwcm
+cwl cwt cwu cypriot cyprominoan cyrillic cyrl dash dashpunctuation decimalnumber defaultignorablecodepoint dep
+deprecated deseret deva devanagari di dia diacritic diak digit divesakuru dogr dogra dsrt dupl duployan ebase
+ecomp egyp egyptianhieroglyphs elba elbasan elym elymaic emod emoji emojicomponent emojimodifier
+emojimodifierbase emojipresentation enclosingmark epres ethi ethiopic ext extendedpictographic extender extpict
+finalpunctuation format gara garay geor georgian glag glagolitic gong gonm goth gothic gran grantha graph
+graphemebase graphemeclusterbreak=control graphemeclusterbreak=cr graphemeclusterbreak=extend
+graphemeclusterbreak=l graphemeclusterbreak=lf graphemeclusterbreak=lv graphemeclusterbreak=lvt
+graphemeclusterbreak=prepend graphemeclusterbreak=regionalindicator graphemeclusterbreak=spacingmark
+graphemeclusterbreak=t graphemeclusterbreak=v graphemeclusterbreak=zwj graphemeextend graphemelink grbase greek
+grek grext grlink gujarati gujr gukh gunjalagondi gurmukhi guru gurungkhema han hang hangul hani hanifirohingya
+hano hanunoo hatr hatran hebr hebrew hex hexdigit hira hiragana hluw hmng hmnp hung hyphen idc
+idcompatmathcontinue idcompatmathstart idcontinue ideo ideographic ids idsb idsbinaryoperator idst idstart
+idstrinaryoperator idsu idsunaryoperator imperialaramaic inadlam inaegeannumbers inahom inalchemicalsymbols
+inalphabeticpresentationforms inanatolianhieroglyphs inancientgreekmusicalnotation inancientgreeknumbers
+inancientsymbols inarabic inarabicextendeda inarabicextendedb inarabicextendedc
+inarabicmathematicalalphabeticsymbols inarabicpresentationformsa inarabicpresentationformsb inarabicsupplement
+inarmenian inarrows inavestan inbalinese inbamum inbamumsupplement inbasiclatin inbassavah inbatak inbengali
+inberiaerfe inbhaiksuki inblockelements inbopomofo inbopomofoextended inboxdrawing inbrahmi inbraillepatterns
+inbuginese inbuhid inbyzantinemusicalsymbols incarian incaucasianalbanian incb=consonant incb=extend
+incb=linker inchakma incham incherokee incherokeesupplement inchesssymbols inchorasmian incjkcompatibility
+incjkcompatibilityforms incjkcompatibilityideographs incjkcompatibilityideographssupplement
+incjkradicalssupplement incjkstrokes incjksymbolsandpunctuation incjkunifiedideographs
+incjkunifiedideographsextensiona incjkunifiedideographsextensionb incjkunifiedideographsextensionc
+incjkunifiedideographsextensiond incjkunifiedideographsextensione incjkunifiedideographsextensionf
+incjkunifiedideographsextensiong incjkunifiedideographsextensionh incjkunifiedideographsextensioni
+incjkunifiedideographsextensionj incombiningdiacriticalmarks incombiningdiacriticalmarksextended
+incombiningdiacriticalmarksforsymbols incombiningdiacriticalmarkssupplement incombininghalfmarks
+incommonindicnumberforms incontrolpictures incoptic incopticepactnumbers incountingrodnumerals incuneiform
+incuneiformnumbersandpunctuation incurrencysymbols incypriotsyllabary incyprominoan incyrillic
+incyrillicextendeda incyrillicextendedb incyrillicextendedc incyrillicextendedd incyrillicsupplement indeseret
+indevanagari indevanagariextended indevanagariextendeda indingbats indivesakuru indogra indominotiles
+induployan inearlydynasticcuneiform inegyptianhieroglyphformatcontrols inegyptianhieroglyphs
+inegyptianhieroglyphsextendeda inelbasan inelymaic inemoticons inenclosedalphanumerics
+inenclosedalphanumericsupplement inenclosedcjklettersandmonths inenclosedideographicsupplement inethiopic
+inethiopicextended inethiopicextendeda inethiopicextendedb inethiopicsupplement ingaray ingeneralpunctuation
+ingeometricshapes ingeometricshapesextended ingeorgian ingeorgianextended ingeorgiansupplement inglagolitic
+inglagoliticsupplement ingothic ingrantha ingreekandcoptic ingreekextended ingujarati ingunjalagondi ingurmukhi
+ingurungkhema inhalfwidthandfullwidthforms inhangulcompatibilityjamo inhanguljamo inhanguljamoextendeda
+inhanguljamoextendedb inhangulsyllables inhanifirohingya inhanunoo inhatran inhebrew inherited
+inhighprivateusesurrogates inhighsurrogates inhiragana inideographicdescriptioncharacters
+inideographicsymbolsandpunctuation inimperialaramaic inindicsiyaqnumbers ininscriptionalpahlavi
+ininscriptionalparthian inipaextensions initialpunctuation injavanese inkaithi inkaktoviknumerals
+inkanaextendeda inkanaextendedb inkanasupplement inkanbun inkangxiradicals inkannada inkatakana
+inkatakanaphoneticextensions inkawi inkayahli inkharoshthi inkhitansmallscript inkhmer inkhmersymbols inkhojki
+inkhudawadi inkiratrai inlao inlatin1supplement inlatinextendeda inlatinextendedadditional inlatinextendedb
+inlatinextendedc inlatinextendedd inlatinextendede inlatinextendedf inlatinextendedg inlepcha
+inletterlikesymbols inlimbu inlineara inlinearbideograms inlinearbsyllabary inlisu inlisusupplement
+inlowsurrogates inlycian inlydian inmahajani inmahjongtiles inmakasar inmalayalam inmandaic inmanichaean
+inmarchen inmasaramgondi inmathematicalalphanumericsymbols inmathematicaloperators inmayannumerals
+inmedefaidrin inmeeteimayek inmeeteimayekextensions inmendekikakui inmeroiticcursive inmeroitichieroglyphs
+inmiao inmiscellaneousmathematicalsymbolsa inmiscellaneousmathematicalsymbolsb inmiscellaneoussymbols
+inmiscellaneoussymbolsandarrows inmiscellaneoussymbolsandpictographs inmiscellaneoussymbolssupplement
+inmiscellaneoustechnical inmodi inmodifiertoneletters inmongolian inmongoliansupplement inmro inmultani
+inmusicalsymbols inmyanmar inmyanmarextendeda inmyanmarextendedb inmyanmarextendedc innabataean innagmundari
+innandinagari innewa innewtailue innko innoblock innumberforms innushu innyiakengpuachuehmong inogham inolchiki
+inoldhungarian inolditalic inoldnortharabian inoldpermic inoldpersian inoldsogdian inoldsoutharabian
+inoldturkic inolduyghur inolonal inopticalcharacterrecognition inoriya inornamentaldingbats inosage inosmanya
+inottomansiyaqnumbers inpahawhhmong inpalmyrene inpaucinhau inphagspa inphaistosdisc inphoenician
+inphoneticextensions inphoneticextensionssupplement inplayingcards inprivateusearea inpsalterpahlavi inrejang
+inruminumeralsymbols inrunic insamaritan insaurashtra inscriptionalpahlavi inscriptionalparthian insharada
+insharadasupplement inshavian inshorthandformatcontrols insiddham insidetic insinhala insinhalaarchaicnumbers
+insmallformvariants insmallkanaextension insogdian insorasompeng insoyombo inspacingmodifierletters inspecials
+insundanese insundanesesupplement insunuwar insuperscriptsandsubscripts insupplementalarrowsa
+insupplementalarrowsb insupplementalarrowsc insupplementalmathematicaloperators insupplementalpunctuation
+insupplementalsymbolsandpictographs insupplementaryprivateuseareaa insupplementaryprivateuseareab
+insuttonsignwriting insylotinagri insymbolsandpictographsextendeda insymbolsforlegacycomputing
+insymbolsforlegacycomputingsupplement insyriac insyriacsupplement intagalog intagbanwa intags intaile intaitham
+intaiviet intaixuanjingsymbols intaiyo intakri intamil intamilsupplement intangsa intangut intangutcomponents
+intangutcomponentssupplement intangutsupplement intelugu inthaana inthai intibetan intifinagh intirhuta
+intodhri intolongsiki intoto intransportandmapsymbols intulutigalari inugaritic
+inunifiedcanadianaboriginalsyllabics inunifiedcanadianaboriginalsyllabicsextended
+inunifiedcanadianaboriginalsyllabicsextendeda invai invariationselectors invariationselectorssupplement
+invedicextensions inverticalforms invithkuqi inwancho inwarangciti inyezidi inyijinghexagramsymbols
+inyiradicals inyisyllables inzanabazarsquare inznamennymusicalnotation ital java javanese joinc joincontrol
+kaithi kali kana kannada katakana kawi kayahli khar kharoshthi khitansmallscript khmer khmr khoj khojki
+khudawadi kiratrai kits knda krai kthi l lana lao laoo latin latn lc lepc lepcha letter letternumber limb limbu
+lina linb lineara linearb lineseparator lisu ll lm lo loe logicalorderexception lower lowercase lowercaseletter
+lt lu lyci lycian lydi lydian m mahajani mahj maka makasar malayalam mand mandaic mani manichaean marc marchen
+mark masaramgondi math mathsymbol mc mcm me medefaidrin medf meeteimayek mend mendekikakui merc mero
+meroiticcursive meroitichieroglyphs miao mlym mn modi modifiercombiningmark modifierletter modifiersymbol mong
+mongolian mro mroo mtei mult multani myanmar mymr n nabataean nagm nagmundari nand nandinagari narb nbat nchar
+nd newa newtailue nko nkoo nl no noncharactercodepoint nonspacingmark nshu number nushu nyiakengpuachuehmong
+oalpha odi ogam ogham ogrext oidc oids olchiki olck oldhungarian olditalic oldnortharabian oldpermic oldpersian
+oldsogdian oldsoutharabian oldturkic olduyghur olonal olower omath onao openpunctuation oriya orkh orya osage
+osge osma osmanya other otheralphabetic otherdefaultignorablecodepoint othergraphemeextend otheridcontinue
+otheridstart otherletter otherlowercase othermath othernumber otherpunctuation othersymbol otheruppercase ougr
+oupper p pahawhhmong palm palmyrene paragraphseparator patsyn patternsyntax patternwhitespace patws pauc
+paucinhau pc pcm pd pe perm pf phag phagspa phli phlp phnx phoenician pi plrd po prependedconcatenationmark
+print privateuse prti ps psalterpahlavi punct punctuation qaac qaai qmark quotationmark radical
+regionalindicator rejang ri rjng rohg runic runr s samaritan samr sarb saur saurashtra sc sd sentenceterminal
+separator sgnw sharada shavian shaw shrd sidd siddham sidetic sidt signwriting sind sinh sinhala sk sm so
+softdotted sogd sogdian sogo sora sorasompeng soyo soyombo space spaceseparator spacingmark sterm sund
+sundanese sunu sunuwar surrogate sylo sylotinagri symbol syrc syriac tagalog tagb tagbanwa taile taitham
+taiviet taiyo takr takri tale talu tamil taml tang tangsa tangut tavt tayo telu telugu term terminalpunctuation
+tfng tglg thaa thaana thai tibetan tibt tifinagh tirh tirhuta titlecaseletter tnsa todhri todr tolongsiki tols
+toto tulutigalari tutg ugar ugaritic uideo unassigned unifiedideograph unknown upper uppercase uppercaseletter
+vai vaii variationselector vith vithkuqi vs wancho wara warangciti wcho whitespace word wspace xdigit xidc
+xidcontinue xids xidstart xpeo xposixpunct xsux yezi yezidi yi yiii z zanabazarsquare zanb zinh zl zp zs zyyy
+zzzz
+`
+    .trim()
+    .split(/\s+/)
+);
