@@ -232,6 +232,7 @@ export class MemberChecker {
     name: string,
     isWrite = false
   ): Type {
+    objectType = this.c.reducedTypes.of(objectType);
     if (isAnyLike(objectType)) return objectType;
     if (propertyNode.type === 'private_property_identifier')
       return this.c.classes.privateNameAccess(node, propertyNode, objectType);
@@ -512,6 +513,7 @@ export class MemberChecker {
     indexType: Type
   ): Type | undefined {
     const name = String(value);
+    objectType = this.c.reducedTypes.of(objectType);
     if (objectType.kind === 'union') return this.indexedTypeOfMembers(access, objectType, indexType);
     const property = this.c.propertyOf(objectType, name);
     // A unique symbol matches the symbol index signature only.

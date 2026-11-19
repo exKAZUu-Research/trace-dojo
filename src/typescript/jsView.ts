@@ -164,6 +164,7 @@ function isErased(node: TreeNode, type: string, child: TreeNode, fieldName: stri
   if ((type === 'program' || type === 'statement_block') && erasedStatementTypes.has(child.type)) return true;
   if (fieldName && typeFields.has(fieldName)) return true;
   if (typeOnlyNodes.has(child.type)) return true;
+  if (node.type === 'field_definition' && child.type === 'readonly') return false;
   if (!child.isNamed && modifiedTypes.has(node.type) && memberModifiers.has(child.type)) return true;
   if (type === 'formal_parameters' && isThisParameter(child)) return true;
   return child.type === 'class_heritage' && !child.namedChildren.some((part) => part?.type === 'extends_clause');

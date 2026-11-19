@@ -231,6 +231,23 @@ console.log(Object.hasOwn(Symbol, 'iterator'), Object.getOwnPropertyNames(Symbol
   });
 });
 
+test('independent converter and checker errors on one line are both reported', () => {
+  expect(diagnosticsOf('const a; let b: number = "x";')).toEqual([
+    '1: const で宣言する変数には初期値が必要です。',
+    "1: 型 'string' を型 'number' に代入することはできません。",
+  ]);
+  expect(diagnosticsOf(String.raw`const p\u0061rt: Missing; console.log(another);`)).toEqual([
+    '1: const で宣言する変数には初期値が必要です。',
+    '1: 型 Missing が見つかりません。',
+    '1: 名前 another が見つかりません。',
+  ]);
+});
+
+test('Turtle rejects unsupported constructor shapes', () => {
+  const diagnostics = diagnosticsOf('new Turtle(3);\nnew Turtle(1, 2, undefined);');
+  expect(diagnostics.map((message) => Number(message.split(':')[0]))).toEqual([1, 2]);
+});
+
 test('turning a function or a class into text is not supported, as Node.js shows the source tsx printed', () => {
   const source = `function add(a: number, b: number): number { return a + b; }
 class A {}

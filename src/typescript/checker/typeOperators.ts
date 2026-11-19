@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 427 -- Resolves related type operators sharing generic parameters and type construction.
+// code-gauge-allow-file fileNcss 429 -- Resolves related type operators sharing generic parameters and type construction.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
@@ -659,6 +659,7 @@ export class TypeOperators {
 
   /** `Uppercase<T>` and its kin, which TypeScript pushes into a template literal's texts and placeholders. */
   stringMapping(mapping: StringMapping, type: Type): Type {
+    if (isIntrinsic(type, 'never')) return type;
     if (type.kind === 'union') return unionOf(type.types.map((member) => this.stringMapping(mapping, member)));
     if (type.kind === 'literal' && typeof type.value === 'string')
       return literalType(mapText(this.c.budget, mapping, type.value));

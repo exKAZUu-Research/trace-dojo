@@ -21,3 +21,16 @@ test.each([
     uncaughtException: undefined,
   });
 });
+
+test('formats a wide shared object diagnostic within the execution budget', () => {
+  const properties = Array.from({ length: 100 }, (_, index) => `p${index}: previous`).join(', ');
+  const objects = Array.from(
+    { length: 4 },
+    (_, index) => `const layer${index} = { ${properties.replaceAll('previous', index ? `layer${index - 1}` : '0')} };`
+  );
+  const result = executeProgram('typescript', [...objects, 'const invalid: string = layer3;'].join('\n'));
+  expect(result).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 4, message: expect.stringMatching(/p0.*\.\.\./) }],
+  });
+});

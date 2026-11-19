@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 621 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 633 -- Follows the flow of control through each kind of statement.
 import assert from 'node:assert/strict';
 
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
@@ -815,6 +815,8 @@ export class StatementChecker {
     const body = node.childForFieldName('body') as TreeNode;
     const handler = node.childForFieldName('handler');
     const finalizer = node.childForFieldName('finalizer');
+    const returnStates = finalizer ? this.c.functions.contexts.at(-1)?.returnStates : undefined;
+    const returnStart = returnStates?.length ?? 0;
     const passed = this.c.flow.exceptions.collect(body, () => this.checkBlockStatements(named(body)));
     const tryEnd = this.c.flow.current;
     let catchEnd: State;
@@ -831,13 +833,39 @@ export class StatementChecker {
       this.c.flow.current = after;
       return;
     }
-    this.c.flow.current = this.c.flow.merge([passed, tryEnd, catchPassed!, handler ? catchEnd! : undefined]);
-    const finalBody = finalizer.childForFieldName('body') ?? named(finalizer)[0];
-    if (finalBody) this.checkBlockStatements(named(finalBody));
+    const returned = returnStates?.splice(returnStart) ?? [];
+    this.checkFinally(finalizer, [passed, tryEnd, catchPassed, catchEnd], after, returned, returnStates);
+  }
+
+  private checkFinally(
+    finalizer: TreeNode,
+    entries: State[],
+    normal: State,
+    returned: State[],
+    returnStates: State[] | undefined
+  ): void {
+    this.c.flow.current = this.c.flow.merge([...entries, ...returned]);
+    const body = finalizer.childForFieldName('body') ?? named(finalizer)[0];
+    if (body) this.checkBlockStatements(named(body));
     this.c.flow.exceptions.include(this.c.flow.current);
     if (!this.c.flow.isReachable) return;
-    this.c.flow.current = after;
-    if (finalBody && after) this.c.silently(() => this.checkBlockStatements(named(finalBody)));
+    const continuations = returned.map((state) => this.flowAfterFinally(body, state));
+    returnStates?.push(...continuations.filter((state) => state !== undefined));
+    this.c.flow.current = this.flowAfterFinally(body, normal);
+  }
+
+  private flowAfterFinally(body: TreeNode | undefined, entry: State): State {
+    if (!body || !entry) return entry;
+    const fn = this.c.functions.contexts.at(-1);
+    const exits: unknown[][] = this.jumpTargets.flatMap((target) => [target.breaks, target.continues]);
+    if (fn) exits.push(fn.returnStates, fn.returnTypes);
+    const lengths = exits.map((states) => states.length);
+    try {
+      return this.c.flow.from(entry, () => this.c.silently(() => this.checkBlockStatements(named(body))));
+    } finally {
+      // The joined diagnostic pass already collected exits from the finalizer's own statements.
+      for (const [index, states] of exits.entries()) states.length = lengths[index];
+    }
   }
 
   private bindCatchParameter(handler: TreeNode): void {

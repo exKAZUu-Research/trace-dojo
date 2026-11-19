@@ -1,0 +1,24 @@
+type Shape = { kind: "circle"; radius: number } | { kind: "square"; side: number };
+type Result = { ok: true; value: number } | { ok: false; error: string };
+
+function area(shape: Shape & { kind: "circle" }): number {
+  return shape.radius * shape.radius;
+}
+
+function unwrap(result: Result & { ok: true }): number {
+  return result.value;
+}
+
+function impossible(shape: { tag: "left" } & { tag: "right" }): never {
+  return shape;
+}
+
+function ordinary(shape: { payload: string } & { payload: number; count: number }): number {
+  return shape.count;
+}
+
+function optional(shape: { tag?: "left" } & { tag?: "right"; count: number }): number {
+  return shape.count;
+}
+
+console.log(area({ kind: "circle", radius: 3 }), unwrap({ ok: true, value: 7 }), optional({ count: 5 }));

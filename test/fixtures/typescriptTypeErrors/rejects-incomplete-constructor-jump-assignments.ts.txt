@@ -1,0 +1,18 @@
+class Break {
+  x: number;
+  constructor() {
+    while (true) {
+      try { break; }
+      finally { this.x = 3; }
+    }
+  }
+}
+class Continue {
+  x: number;
+  constructor() {
+    do {
+      try { continue; }
+      finally { this.x = 4; }
+    } while (false);
+  }
+}

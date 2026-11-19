@@ -101,6 +101,57 @@ const t = new Turtle(x, 0);`,
   expect(stepsOf('typescript', typescript)).toEqual(stepsOf('java', java));
 });
 
+test('static compile-time constants stay out of the trace as they do in Java', () => {
+  const java = `public class Main {
+  public static void main(String[] args) {
+    int result = Settings.count;
+    String text = Settings.title;
+  }
+}
+class Settings {
+  static final int count = 1 + 2;
+  static final String title = "ready";
+}`;
+  const typescript = `class Settings {
+  static readonly count = 1 + 2;
+  static readonly title = "ready";
+}
+const result = Settings.count;
+const text = Settings.title;`;
+  expect(stepsOf('typescript', typescript)).toEqual(stepsOf('java', java));
+});
+
+test('only declared class bindings supply static field traces', () => {
+  const source = `function build() { return 10; }
+class Counter {
+  static count = 1;
+  static readonly dynamic = build();
+  static readonly empty = null;
+}
+const alias = Counter;
+alias.count++;
+const value = alias.count;`;
+  const { traceItems } = traceProgram('typescript', source, source);
+  expect(traceItems.at(-1)?.vars).toEqual({
+    value: 2,
+    'Counter.count': 2,
+    'Counter.dynamic': 10,
+  });
+  // oxlint-disable-next-line unicorn/no-null -- The trace retains the source language null.
+  expect(traceItems.at(-1)?.referenceVars['Counter.empty']).toEqual({ kind: 'value', value: null });
+});
+
+test('displayed object entries retain own __proto__ keys', () => {
+  const source = `const parsed = JSON.parse('{"__proto__":7,"name":"item"}');
+const literal = {["__proto__"]: 8};
+console.log(parsed["__proto__"], literal["__proto__"]);`;
+  const result = traceProgram('typescript', source, source);
+  expect(result.stdout).toBe('7 8\n');
+  const entries = result.traceItems.at(-1)?.referenceVars;
+  expect(entries?.parsed).toMatchObject({ entries: { ['__proto__']: { kind: 'value', value: 7 } } });
+  expect(entries?.literal).toMatchObject({ entries: { ['__proto__']: { kind: 'value', value: 8 } } });
+});
+
 test('a private static field traces under its private name', () => {
   const typescript = `class Settings {
   static #value = 0;

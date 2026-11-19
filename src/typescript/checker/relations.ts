@@ -184,8 +184,8 @@ export class Relations {
   // code-gauge-allow functionCognitiveComplexity 24 -- Follows TypeScript's order of checks for each kind of type.
   // code-gauge-allow functionNcss 32 -- Follows TypeScript's order of checks for each kind of type.
   private structuredRelated(source: Type, target: Type, relation: Relation, state: number): boolean {
-    const s = regularOf(source);
-    const t = regularOf(target);
+    const s = this.c.reducedTypes.of(regularOf(source));
+    const t = this.c.reducedTypes.of(regularOf(target));
     const trivial = this.trivialRelation(s, t);
     if (trivial !== undefined) return trivial;
     if (s.kind === 'union') return this.unionSourceRelated(s, t, relation, state);

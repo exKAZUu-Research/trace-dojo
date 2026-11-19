@@ -1,7 +1,7 @@
-// code-gauge-allow-file fileNcss 558 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 561 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
-import type { SourceDiagnostic } from '../../interpreter/diagnostics';
+import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
 import { ExecutionBudget, ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import { AssignmentChecker } from './assignments';
 import { Binder } from './binder';
@@ -28,6 +28,7 @@ import { MemberChecker } from './members';
 import { OperatorChecker } from './operators';
 import { BindingPatterns } from './patterns';
 import { Printer } from './print';
+import { ReducedTypes } from './reducedTypes';
 import { Relations } from './relations';
 import type { Scope } from './scopes';
 import { Signatures } from './signatures';
@@ -91,6 +92,7 @@ export class Checker {
   readonly libraryBinder: Binder;
   readonly localeOptionsBinder: Binder;
   readonly nativeOverloadBinder: Binder;
+  readonly reducedTypes = new ReducedTypes(this);
   readonly relations = new Relations(this);
   readonly printer = new Printer(this);
   readonly expressions = new ExpressionChecker(this);
@@ -156,7 +158,7 @@ export class Checker {
         seen.add(key);
         return true;
       })
-      .map(({ row, message }) => ({ row, message }));
+      .map(({ row, index, message }) => sourceDiagnostic(row, index, message));
   }
 
   error(node: TreeNode, message: string): void {
@@ -699,7 +701,7 @@ export class Checker {
   }
 
   /** The type whose members a value of `type` has: its boxing interface for a primitive, its constraint for a type parameter. */
-  // code-gauge-allow functionNcss 35 -- One case per kind of type that boxes to an interface.
+  // code-gauge-allow functionNcss 38 -- One case per kind of type that boxes to an interface.
   apparentType(type: Type): Type {
     switch (type.kind) {
       case 'intrinsic': {
@@ -745,7 +747,11 @@ export class Checker {
       }
       case 'union': {
         if (type === booleanType) return this.globalType('Boolean');
-        return type;
+        const reduced = this.reducedTypes.of(type);
+        return reduced === type ? type : this.apparentType(reduced);
+      }
+      case 'intersection': {
+        return this.reducedTypes.of(type);
       }
       default: {
         return type;

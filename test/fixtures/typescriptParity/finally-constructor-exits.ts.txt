@@ -1,0 +1,27 @@
+class Direct {
+  x: number;
+  constructor() {
+    try { return; }
+    finally { this.x = 1; }
+  }
+}
+class Conditional {
+  x: number;
+  constructor(flag: boolean) {
+    try { if (flag) return; }
+    finally { this.x = 2; }
+  }
+}
+class Nested {
+  x: number;
+  constructor() {
+    try {
+      try { return; }
+      finally {}
+    } finally {
+      this.x = 5;
+    }
+  }
+}
+console.log(new Direct().x, new Conditional(true).x, new Conditional(false).x);
+console.log(new Nested().x);

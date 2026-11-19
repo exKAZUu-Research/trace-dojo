@@ -32,13 +32,14 @@ export class Printer {
   constructor(private readonly c: Checker) {}
 
   print(type: Type): string {
+    this.c.budget.spend();
     if (this.depth > 4) return '...';
     this.depth++;
     try {
       const printed = this.printType(type);
       // As TypeScript's `typeToString`, a whole printed type is cut short at twice its length limit.
-      return this.depth === 1 && printed.length >= MAX_PRINTED_LENGTH * 2
-        ? `${printed.slice(0, MAX_PRINTED_LENGTH * 2 - 3)}...`
+      return this.depth === 1 && printed.length >= MAX_TYPE_LENGTH
+        ? `${printed.slice(0, MAX_TYPE_LENGTH - 3)}...`
         : printed;
     } finally {
       this.depth--;
@@ -62,19 +63,17 @@ export class Printer {
           ...type.types.filter((member) => !isNullish(member)),
           ...[nullType, undefinedType].filter((member) => type.types.includes(member)),
         ];
-        const hasBoolean = members.includes(trueType) && members.includes(falseType);
-        const printed: string[] = [];
-        for (const member of members) {
-          if (hasBoolean && (member === trueType || member === falseType)) {
-            if (member === falseType) printed.push('boolean');
-            continue;
-          }
-          printed.push(this.wrap(member));
-        }
-        return truncatedUnion(printed);
+        this.c.budget.spend(members.length);
+        const printedMembers =
+          members.includes(trueType) && members.includes(falseType)
+            ? members
+                .filter((member) => member !== trueType)
+                .map((member) => (member === falseType ? booleanType : member))
+            : members;
+        return this.printUnion(printedMembers);
       }
       case 'intersection': {
-        return type.types.map((member) => this.wrap(member)).join(' & ');
+        return boundedJoin(type.types, ' & ', (member) => this.wrap(member));
       }
       case 'typeParameter': {
         // A class's polymorphic `this` prints as the class.
@@ -94,7 +93,9 @@ export class Printer {
       case 'templateLiteral': {
         let text = '`';
         for (const [index, part] of type.texts.entries()) {
+          this.c.budget.spend();
           text += part;
+          if (text.length >= MAX_TYPE_LENGTH) break;
           if (index < type.types.length) text += `\${${this.print(type.types[index])}}`;
         }
         return `${text}\``;
@@ -108,6 +109,22 @@ export class Printer {
     }
   }
 
+  private printUnion(members: Type[]): string {
+    if (members.length <= 2) return boundedJoin(members, ' | ', (member) => this.wrap(member));
+    const kept: string[] = [];
+    let length = 0;
+    for (let index = 0; index < members.length - 1; index++) {
+      const text = this.wrap(members[index]);
+      if (length + text.length > MAX_PRINTED_LENGTH) break;
+      kept.push(text);
+      length += text.length + 3;
+    }
+    const last = this.wrap(members.at(-1) as Type);
+    const omitted = members.length - 1 - kept.length;
+    if (omitted > 0 || length + last.length > MAX_PRINTED_LENGTH) kept.push(`... ${omitted} more ...`);
+    return [...kept, last].join(' | ');
+  }
+
   /** A type as a member of a union, an intersection, or an array, parenthesized when it is a function. */
   private wrap(type: Type): string {
     const text = this.print(type);
@@ -118,7 +135,7 @@ export class Printer {
   }
 
   private printAlias(name: string, args: Type[] = []): string {
-    return args.length > 0 ? `${name}<${args.map((argument) => this.print(argument)).join(', ')}>` : name;
+    return args.length > 0 ? `${name}<${boundedJoin(args, ', ', (argument) => this.print(argument))}>` : name;
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of object type.
@@ -129,20 +146,20 @@ export class Printer {
         const args = type.typeArguments ?? [];
         if (this.c.isArrayType(type)) return `${this.wrap(args[0])}[]`;
         if (this.c.isReadonlyArrayType(type)) return `readonly ${this.wrap(args[0])}[]`;
-        return `${type.name}<${args.map((argument) => this.print(argument)).join(', ')}>`;
+        return `${type.name}<${boundedJoin(args, ', ', (argument) => this.print(argument))}>`;
       }
       case 'interface': {
         if (type.typeParameters)
-          return `${type.name}<${type.typeParameters.map((parameter) => parameter.name).join(', ')}>`;
+          return `${type.name}<${boundedJoin(type.typeParameters, ', ', (parameter) => parameter.name)}>`;
         return type.name ?? '{}';
       }
       case 'tuple': {
-        const elements = (type.tuple?.elements ?? []).map((element) => {
+        const elements = boundedJoin(type.tuple?.elements ?? [], ', ', (element) => {
           const name = element.name ? `${element.name}${element.optional ? '?' : ''}: ` : '';
           if (element.rest) return `...${name}${this.print(element.type)}`;
           return `${name}${this.print(element.type)}${element.optional && !element.name ? '?' : ''}`;
         });
-        return `${type.tuple?.readonly ? 'readonly ' : ''}[${elements.join(', ')}]`;
+        return `${type.tuple?.readonly ? 'readonly ' : ''}[${elements}]`;
       }
       case 'mapped': {
         return type.mapped ? this.printMapped(type.mapped) : '{}';
@@ -167,14 +184,16 @@ export class Printer {
     const structure = type.resolve();
     const signatureOnly = this.printSignatureOnly(structure);
     if (signatureOnly) return signatureOnly;
-    const members: string[] = [];
+    const members = boundedJoin(this.anonymousMembers(structure), ' ', (member) => member);
+    return members ? `{ ${members} }` : '{}';
+  }
+
+  private *anonymousMembers(structure: Structure): Iterable<string> {
     for (const index of keyedIndexes(structure))
-      members.push(`${index.readonly ? 'readonly ' : ''}[x: ${this.print(index.keyType)}]: ${this.print(index.type)};`);
-    for (const signature of structure.callSignatures) members.push(`${this.printSignature(signature, ': ')};`);
-    for (const signature of structure.constructSignatures) members.push(`new ${this.printSignature(signature, ': ')};`);
-    for (const property of structure.properties.values()) members.push(...this.printProperty(property));
-    if (members.length === 0) return '{}';
-    return `{ ${members.join(' ')} }`;
+      yield `${index.readonly ? 'readonly ' : ''}[x: ${this.print(index.keyType)}]: ${this.print(index.type)};`;
+    for (const signature of structure.callSignatures) yield `${this.printSignature(signature, ': ')};`;
+    for (const signature of structure.constructSignatures) yield `new ${this.printSignature(signature, ': ')};`;
+    for (const property of structure.properties.values()) yield* this.printProperty(property);
   }
 
   /** A function or constructor type with a single signature and no other members, as an arrow. */
@@ -192,56 +211,56 @@ export class Printer {
   }
 
   /** The members a property prints as: one per signature of a method. */
-  private printProperty(property: Property): string[] {
+  private *printProperty(property: Property): Iterable<string> {
+    this.c.budget.spend();
     const name = printedPropertyName(property.name);
     const optional = property.optional ? '?' : '';
     const propertyType = property.type();
     if (property.isMethod && propertyType.kind === 'object') {
-      return propertyType
-        .resolve()
-        .callSignatures.map((signature) => `${name}${optional}${this.printSignature(signature, ': ')};`);
+      for (const signature of propertyType.resolve().callSignatures)
+        yield `${name}${optional}${this.printSignature(signature, ': ')};`;
+      return;
     }
-    return [
-      `${property.readonly ? 'readonly ' : ''}${name}${optional}: ${this.print(property.optional ? this.c.relations.removeUndefined(propertyType) : propertyType)};`,
-    ];
+    yield `${property.readonly ? 'readonly ' : ''}${name}${optional}: ${this.print(property.optional ? this.c.relations.removeUndefined(propertyType) : propertyType)};`;
   }
 
   printSignature(signature: Signature, arrow: string): string {
     const typeParameters =
       signature.typeParameters.length > 0
-        ? `<${signature.typeParameters.map((parameter) => parameter.name).join(', ')}>`
+        ? `<${boundedJoin(signature.typeParameters, ', ', (parameter) => parameter.name)}>`
         : '';
-    const parameters = signature.parameters.map((parameter) => {
-      if (parameter.rest) return `...${parameter.name}: ${this.print(parameter.type)}`;
-      return `${parameter.name}${parameter.optional ? '?' : ''}: ${this.print(parameter.optional ? this.c.relations.removeUndefined(parameter.type) : parameter.type)}`;
-    });
-    if (signature.thisType) parameters.unshift(`this: ${this.print(signature.thisType)}`);
+    const thisParameter = signature.thisType ? `this: ${this.print(signature.thisType)}` : '';
+    const parameters = boundedJoin(
+      signature.parameters,
+      ', ',
+      (parameter) => {
+        if (parameter.rest) return `...${parameter.name}: ${this.print(parameter.type)}`;
+        return `${parameter.name}${parameter.optional ? '?' : ''}: ${this.print(parameter.optional ? this.c.relations.removeUndefined(parameter.type) : parameter.type)}`;
+      },
+      thisParameter
+    );
     const predicate = signature.predicate
       ? `${signature.predicate.index === -1 ? 'this' : (signature.parameters[signature.predicate.index]?.name ?? 'x')} is ${this.print(signature.predicate.type)}`
       : undefined;
-    return `${typeParameters}(${parameters.join(', ')})${arrow}${predicate ?? this.print(signature.returnType())}`;
+    return `${typeParameters}(${parameters})${arrow}${predicate ?? this.print(signature.returnType())}`;
   }
 }
 
 /** TypeScript's limit on the length of a printed type, past which it leaves members out. */
 const MAX_PRINTED_LENGTH = 160;
 
-/**
- * The members of a union joined as TypeScript prints them, which leaves out the members past its length limit but the
- * last, as `"a" | "b" | ... 98 more ... | "z"`.
- */
-function truncatedUnion(printed: string[]): string {
-  const joined = printed.join(' | ');
-  if (joined.length <= MAX_PRINTED_LENGTH || printed.length <= 2) return joined;
-  const kept: string[] = [];
-  let length = 0;
-  for (const member of printed.slice(0, -1)) {
-    if (length + member.length > MAX_PRINTED_LENGTH) break;
-    kept.push(member);
-    length += member.length + 3;
+const MAX_TYPE_LENGTH = MAX_PRINTED_LENGTH * 2;
+
+function boundedJoin<T>(values: Iterable<T>, separator: string, print: (value: T) => string, prefix = ''): string {
+  if (prefix.length >= MAX_TYPE_LENGTH) return prefix;
+  let result = prefix;
+  let delimiter = prefix ? separator : '';
+  for (const value of values) {
+    result += delimiter + print(value);
+    if (result.length >= MAX_TYPE_LENGTH) break;
+    delimiter = separator;
   }
-  const omitted = printed.length - 1 - kept.length;
-  return [...kept, `... ${omitted} more ...`, printed.at(-1) as string].join(' | ');
+  return result;
 }
 
 function printLiteral(value: LiteralValue): string {

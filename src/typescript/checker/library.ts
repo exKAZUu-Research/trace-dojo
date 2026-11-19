@@ -67,7 +67,9 @@ interface Console {
 }
 declare var console: Console;
 declare class Turtle {
-  constructor(x?: number, y?: number, color?: string);
+  constructor();
+  constructor(x: number, y: number);
+  constructor(x: number, y: number, color: string);
 ${turtleMethods}
 }
 declare function setTimeout(handler: any, timeout?: number, ...arguments: any[]): number;

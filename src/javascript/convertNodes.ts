@@ -1,4 +1,4 @@
-import { CompileError } from '../interpreter/diagnostics';
+import { CompileError, sourceDiagnostic } from '../interpreter/diagnostics';
 import type { Expression, IterationSource, PropertyName } from './ast';
 import { printedOperation, stringLiteralValue } from './operatorPrinter';
 
@@ -209,7 +209,7 @@ export function optionalNameOf(node: Node | null | undefined): string {
 }
 
 export function fail(node: Node, message: string): never {
-  throw new CompileError([{ row: rowOf(node), message }]);
+  throw new CompileError([sourceDiagnostic(rowOf(node), node.startIndex, message)]);
 }
 
 export function unsupported(node: Node, feature: string): never {

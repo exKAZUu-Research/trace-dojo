@@ -1,6 +1,6 @@
 import type { Node } from '@willbooster/web-tree-sitter';
 
-import { CompileError, type SourceDiagnostic } from '../interpreter/diagnostics';
+import { CompileError, diagnosticIndex, type SourceDiagnostic, sourceDiagnostic } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import type { Program } from '../javascript/ast';
@@ -69,12 +69,12 @@ export function parseTypeScript(source: string, trace?: TraceOptions): Program {
         if (!(error instanceof CompileError)) throw error;
         converterErrors = error.diagnostics;
       }
-      // tsc reports its grammar errors and type errors together; the type checker words a row's error first.
       const diagnostics = checkWithDecodedNames(root, source);
-      const rows = new Set(diagnostics.map((diagnostic) => diagnostic.row));
-      const all = [...diagnostics, ...converterErrors.filter((diagnostic) => !rows.has(diagnostic.row))].toSorted(
-        (a, b) => a.row - b.row
-      );
+      const described = new Set(diagnostics.map(diagnosticIndex).filter((index) => index !== undefined));
+      const all = [
+        ...diagnostics,
+        ...converterErrors.filter((diagnostic) => !described.has(diagnosticIndex(diagnostic) ?? -1)),
+      ].toSorted((left, right) => left.row - right.row || (diagnosticIndex(left) ?? 0) - (diagnosticIndex(right) ?? 0));
       if (all.length > 0 || !program) throw new CompileError(all);
       return program;
     },
@@ -85,29 +85,47 @@ export function parseTypeScript(source: string, trace?: TraceOptions): Program {
 /** Type-checks a program with the `\u` escapes of its names decoded, as tsc reads them, which keeps every row. */
 function checkWithDecodedNames(root: Node, source: string): SourceDiagnostic[] {
   const decoded = decodeNameEscapes(root, source);
-  if (decoded === source) return checkTypeScript(root);
-  const tree = parser.parse(decoded);
+  if (decoded.text === source) return checkTypeScript(root);
+  const tree = parser.parse(decoded.text);
   try {
-    // A decoded name that reads as a keyword changes the tree, whose original names are then checked instead.
-    return checkTypeScript(tree && tree.rootNode.toString() === root.toString() ? tree.rootNode : root);
+    if (!tree || tree.rootNode.toString() !== root.toString()) return checkTypeScript(root);
+    return restoreDiagnosticIndices(checkTypeScript(tree.rootNode), decoded.offsets);
   } finally {
     tree?.delete();
   }
 }
 
-function decodeNameEscapes(root: Node, source: string): string {
+interface NameOffset {
+  end: number;
+  removed: number;
+}
+
+function decodeNameEscapes(root: Node, source: string): { text: string; offsets: NameOffset[] } {
   let decoded = '';
   let end = 0;
+  const offsets: NameOffset[] = [];
   const visit = (node: Node): void => {
     if (node.childCount > 0) {
       for (const child of node.children) if (child) visit(child);
     } else if (node.type.endsWith('identifier') && node.text.includes('\\')) {
       decoded += source.slice(end, node.startIndex) + decodedName(node);
       end = node.endIndex;
+      offsets.push({ end: decoded.length, removed: end - decoded.length });
     }
   };
   visit(root);
-  return decoded + source.slice(end);
+  return { text: decoded + source.slice(end), offsets };
+}
+
+function restoreDiagnosticIndices(diagnostics: SourceDiagnostic[], offsets: NameOffset[]): SourceDiagnostic[] {
+  let current = 0;
+  let removed = 0;
+  return diagnostics.map((diagnostic) => {
+    const index = diagnosticIndex(diagnostic);
+    if (index === undefined) return diagnostic;
+    while (current < offsets.length && offsets[current].end <= index) removed = offsets[current++].removed;
+    return sourceDiagnostic(diagnostic.row, index + removed, diagnostic.message);
+  });
 }
 
 /** The name a node spells, or its source text when an escape is invalid there, which the converter reports. */

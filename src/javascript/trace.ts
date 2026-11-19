@@ -17,6 +17,7 @@ import {
   JsArray,
   JsFunction,
   JsObject,
+  type Key,
   privateClassOf,
   privateNameOf,
   type Scope,
@@ -74,10 +75,11 @@ class Snapshotter {
     while (top?.parent && top.parent !== this.runtime.realm.globals) top = top.parent;
     if (!top) return;
     for (const [className, binding] of top.bindings) {
+      if (!binding.isClassDeclaration) continue;
       const cls = binding.initializingClass ?? binding.value;
       if (!(cls instanceof JsFunction) || cls.behavior.kind !== 'class') continue;
       // Its private static fields show as instance ones do.
-      for (const [key, value] of displayedEntries(cls, this.runtime))
+      for (const [key, value] of displayedEntries(cls, this.runtime, cls.behavior.traceConstants))
         addVariable(variables, `${className}.${key}`, value, this.runtime);
     }
   }
@@ -162,17 +164,17 @@ function displayNodeOf(value: Value, seen: Set<JsObject>, runtime: Runtime): Dis
   const builtin = builtinNodeOf(value, seen, runtime);
   if (builtin) return builtin;
   seen.add(value);
-  const entries: Record<string, DisplayNode> = {};
+  const entries: [string | number, DisplayNode][] = [];
   for (const [key, item] of value instanceof JsArray
     ? value.elements.map(valueOfElement).entries()
     : displayedEntries(value, runtime)) {
     const property = value instanceof JsArray ? value.definedElements?.get(Number(key)) : undefined;
     const node = property && isAccessor(property) ? accessorNode(property) : displayNodeOf(item, seen, runtime);
-    if (node) entries[key] = node;
-    else if (value instanceof JsArray) entries[key] = NULL_NODE;
+    if (node) entries.push([key, node]);
+    else if (value instanceof JsArray) entries.push([key, NULL_NODE]);
   }
   seen.delete(value);
-  return { kind: value instanceof JsArray ? 'array' : 'object', entries };
+  return { kind: value instanceof JsArray ? 'array' : 'object', entries: Object.fromEntries(entries) };
 }
 
 function accessorNode(property: AccessorProperty): DisplayNode {
@@ -247,7 +249,7 @@ function privateLabels(keys: string[]): string[] {
 }
 
 /** The fields learners see in an object: its own enumerable data properties and private fields. */
-function displayedEntries(object: JsObject, runtime: Runtime): [string, Value][] {
+function displayedEntries(object: JsObject, runtime: Runtime, excluded?: ReadonlySet<Key>): [string, Value][] {
   const entries: [string, Value][] = [];
   // Errors keep their message in a non-enumerable property.
   const message = object.isError ? object.properties.get('message') : undefined;
@@ -257,17 +259,21 @@ function displayedEntries(object: JsObject, runtime: Runtime): [string, Value][]
       typeof key === 'string' &&
       property.enumerable &&
       !isAccessor(property) &&
-      !(property.value instanceof JsFunction)
+      traceField(property.value, excluded?.has(key))
     )
       entries.push([key, runtime.readPropertyValue(property)]);
   }
   const fields = [...(object.privateMembers ?? [])].filter(
-    ([, property]) => !isAccessor(property) && !(property.value instanceof JsFunction)
+    ([key, property]) => !isAccessor(property) && traceField(property.value, excluded?.has(key))
   );
   const labels = privateLabels(fields.map(([key]) => key));
   for (const [index, [, property]] of fields.entries())
     entries.push([labels[index], runtime.readPropertyValue(property as DataProperty)]);
   return entries;
+}
+
+function traceField(value: Value, isConstant: boolean | undefined): boolean {
+  return !(value instanceof JsFunction) && (!isConstant || value === undefined || value === null);
 }
 
 function primitiveNode(value: bigint | symbol): DisplayNode {

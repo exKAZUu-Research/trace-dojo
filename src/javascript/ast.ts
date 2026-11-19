@@ -151,6 +151,7 @@ export type ClassMember =
   | {
       kind: 'field';
       isStatic: boolean;
+      isTraceConstant?: true;
       key: PropertyName;
       value?: Expression;
       stepRow?: number;

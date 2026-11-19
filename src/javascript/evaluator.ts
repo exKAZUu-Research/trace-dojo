@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 523 -- Evaluates every kind of function call, class, and statement of the language in one evaluator.
+// code-gauge-allow-file fileNcss 526 -- Evaluates every kind of function call, class, and statement of the language in one evaluator.
 import assert from 'node:assert/strict';
 
 import { createArgumentsObject, mapArguments } from './argumentsObject';
@@ -581,6 +581,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       homeObject: prototype,
       isDerived: cls.superClass !== undefined,
       fields: [],
+      traceConstants: new Set(),
     };
     const fn = new JsFunction(constructorParent, behavior);
     runtime.allocate(3);
@@ -598,7 +599,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       enumerable: false,
       configurable: true,
     });
-    const staticInitializers = this.inScope(classScope, () => this.defineMembers(cls, fn, prototype, behavior.fields));
+    const staticInitializers = this.inScope(classScope, () => this.defineMembers(cls, fn, prototype, behavior));
     if (cls.name) classScope.bindings.set(cls.name, { value: fn, isMutable: false });
     const binding = isDeclaration ? classScope.parent?.bindings.get(cls.name) : undefined;
     this.initializeStaticMembers(classScope, fn, staticInitializers, binding);
@@ -611,7 +612,10 @@ export class Evaluator extends SuspendableStatementEvaluator {
     initializers: (() => void)[],
     binding: Binding | undefined
   ): void {
-    if (binding) binding.initializingClass = fn;
+    if (binding) {
+      binding.isClassDeclaration = true;
+      binding.initializingClass = fn;
+    }
     try {
       this.runtime.hold(fn, () =>
         this.inScope(classScope, () => {
@@ -654,13 +658,8 @@ export class Evaluator extends SuspendableStatementEvaluator {
    * Defines the methods and accessors and collects the instance fields, returning what initializes the class itself:
    * its static fields and static blocks in source order.
    */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Keeps method definitions and deferred field/static-block initialization in class source order.
-  private defineMembers(
-    cls: ClassNode,
-    fn: JsFunction,
-    prototype: JsObject,
-    instanceFields: ClassField[]
-  ): (() => void)[] {
+  // code-gauge-allow functionCognitiveComplexity 23 -- Keeps method definitions and deferred field/static-block initialization in class source order.
+  private defineMembers(cls: ClassNode, fn: JsFunction, prototype: JsObject, behavior: ClassBehavior): (() => void)[] {
     const { runtime } = this;
     const staticInitializers: (() => void)[] = [];
     const classScope = runtime.frame.scope;
@@ -684,11 +683,13 @@ export class Evaluator extends SuspendableStatementEvaluator {
           stepRow: member.stepRow,
           onlyCalls: value !== undefined && isObjectCreation(value),
         };
-        if (member.isStatic) staticInitializers.push(() => this.initializeField(fn, field));
-        else instanceFields.push(field);
+        if (member.isStatic) {
+          if (member.isTraceConstant) behavior.traceConstants.add(key);
+          staticInitializers.push(() => this.initializeField(fn, field));
+        } else behavior.fields.push(field);
         continue;
       }
-      this.defineMethod(member, key, target, classScope, instanceFields);
+      this.defineMethod(member, key, target, classScope, behavior.fields);
     }
     return staticInitializers;
   }

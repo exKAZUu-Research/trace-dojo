@@ -1,0 +1,7 @@
+type MapText<T extends string> = Capitalize<T>;
+type EmptyText = Exclude<string, string>;
+const upper = (input: Uppercase<EmptyText>): never => input;
+const lower = (input: Lowercase<never>): never => input;
+const capitalized = (input: MapText<never>): never => input;
+const uncapitalized = (input: Uncapitalize<never>): never => input;
+console.log('ok');

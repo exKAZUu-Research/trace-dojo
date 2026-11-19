@@ -520,9 +520,16 @@ export class ProgramConverter extends ExpressionConverter {
       const valueNode = member.childForFieldName('value');
       // Field initializers run like method bodies, where `this` is the instance and `super.x` works.
       const value = valueNode ? this.withContext(initializerContext(), () => this.expression(valueNode)) : undefined;
-      const fieldMember: ClassMember = { kind: 'field', isStatic, key, value, row: rowOf(member) };
-      // As in Java, a static field's constant initializer records no step: it changes nothing learners see.
-      const recordsStep = value !== undefined && !(isStatic && isConstantExpression(value));
+      const constant = value !== undefined && isStatic && isConstantExpression(value);
+      const fieldMember: ClassMember = {
+        kind: 'field',
+        isStatic,
+        isTraceConstant: constant && hasChild(member, 'readonly') ? true : undefined,
+        key,
+        value,
+        row: rowOf(member),
+      };
+      const recordsStep = value !== undefined && !constant;
       return recordsStep ? this.steppable(member, fieldMember) : fieldMember;
     }
     if (member.type === 'class_static_block') return this.staticBlock(member);
