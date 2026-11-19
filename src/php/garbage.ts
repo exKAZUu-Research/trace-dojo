@@ -411,7 +411,7 @@ class Release {
       )
         return;
       this.visitedArrays.add(item);
-      this.enqueue(pending, [...item.map.values()]);
+      this.enqueue(pending, [...item.map.ownedSlots()]);
     } else if (item instanceof PhpObject) {
       const owner = activeReleaseObjects.get(item);
       if (owner && owner !== this) {
@@ -588,7 +588,7 @@ function objectsWithin(values: unknown[], include: (value: Ref | PhpArray | PhpO
     } else if (item instanceof PhpArray) {
       if (!item.composite || seenArrays.has(item) || !include(item)) continue;
       seenArrays.add(item);
-      appendValues(pending, [...item.map.values()]);
+      appendValues(pending, [...item.map.ownedSlots()]);
     } else if (item instanceof PhpObject) {
       if (activeReleaseObjects.has(item)) continue;
       if (found.has(item) || !include(item)) continue;
@@ -623,7 +623,7 @@ function collectibleGraph(
     else if (item instanceof PhpArray) {
       if (reachedArrays.has(item) || arrays.has(item)) continue;
       arrays.add(item);
-      for (const slot of item.map.values()) {
+      for (const slot of item.map.ownedSlots()) {
         if (slot instanceof Ref || slot instanceof PhpObject) eligible.add(item);
         if (slot instanceof PhpArray) {
           const holders = parents.get(slot) ?? new Set<PhpArray>();
@@ -739,7 +739,7 @@ class DetachedArrays {
     this.active.set(node, this.frames.length);
     let children: Iterator<unknown>;
     if (node instanceof Ref) children = [node.v].values();
-    else if (node instanceof PhpArray) children = node.map.values();
+    else if (node instanceof PhpArray) children = node.map.ownedSlots();
     else {
       const items: unknown[] = [];
       pushObject(node, items);
@@ -791,7 +791,7 @@ export function mark(runtime: Runtime, includeBuffered = true, visitedArrays = n
       if (visitedArrays.has(item)) continue;
       visitedArrays.add(item);
       if (!item.composite || (!runtime.collectingCycles && objectFree(item, runtime))) continue;
-      pushInOrder([...item.map.values()].filter((slot) => slot !== null && typeof slot === 'object'));
+      pushInOrder([...item.map.ownedSlots()].filter((slot) => slot !== null && typeof slot === 'object'));
     } else if (item instanceof PhpObject) {
       if (reached.has(item)) continue;
       reached.add(item);
@@ -860,7 +860,7 @@ class CollectionGraph {
     const existing = this.edges.get(node);
     if (existing) return existing;
     let values: Iterable<unknown>;
-    if (node instanceof PhpArray) values = node.map.values();
+    if (node instanceof PhpArray) values = node.map.ownedSlots();
     else if (node instanceof Ref) values = [node.v];
     else {
       const held: unknown[] = [];
@@ -1047,7 +1047,7 @@ export function holderCounts(runtime: Runtime): Map<PhpObject, number> {
     } else if (item instanceof PhpArray) {
       if (visitedArrays.has(item)) continue;
       visitedArrays.add(item);
-      for (const slot of item.map.values()) count(slot);
+      for (const slot of item.map.ownedSlots()) count(slot);
     } else if (item instanceof PhpObject) {
       if (visitedObjects.has(item)) continue;
       visitedObjects.add(item);
@@ -1090,7 +1090,7 @@ function objectHasOwnedValues(runtime: Runtime, object: PhpObject): boolean {
 }
 
 function runGlobalDestructor(runtime: Runtime, object: PhpObject): boolean {
-  const roots = callbackRoots(runtime);
+  const roots = persistentNativeRoots(runtime);
   const declarations = runtime.declarationRoots.size;
   const releases = runtime.durableReleaseVersion;
   let newOwners = false;
@@ -1106,7 +1106,7 @@ function runGlobalDestructor(runtime: Runtime, object: PhpObject): boolean {
     stop();
     runtime.collectingObjects.delete(object);
   }
-  const after = callbackRoots(runtime);
+  const after = persistentNativeRoots(runtime);
   return (
     newOwners ||
     runtime.durableReleaseVersion !== releases ||
@@ -1116,10 +1116,11 @@ function runGlobalDestructor(runtime: Runtime, object: PhpObject): boolean {
   );
 }
 
-function callbackRoots(runtime: Runtime): unknown[] {
+function persistentNativeRoots(runtime: Runtime): unknown[] {
   return [
     runtime.exceptionHandler === runtime.retiringExceptionHandler ? undefined : runtime.exceptionHandler,
     runtime.assertionCallback,
+    ...runtime.nativeShutdownHolders,
     ...runtime.replacedExceptionHandlers,
     ...runtime.errorHandlers.map(({ handler }) => handler),
   ];
@@ -1137,14 +1138,14 @@ function objectFree(array: PhpArray, runtime: Runtime): boolean {
     if (visited.has(current) || objectFreeArrays.get(current) === current.mutationVersion) continue;
     visited.add(current);
     runtime.spend(Math.ceil(current.size / 64));
-    for (const slot of current.map.values()) {
+    for (const slot of current.map.ownedSlots()) {
       if (slot instanceof Ref || slot instanceof PhpObject) return false;
       if (slot instanceof PhpArray && slot.composite) pending.push(slot);
     }
   }
   for (const item of visited) {
     objectFreeArrays.set(item, item.mutationVersion);
-    for (const slot of item.map.values()) if (slot instanceof PhpArray) slot.trackCachedParent(item);
+    for (const slot of item.map.ownedSlots()) if (slot instanceof PhpArray) slot.trackCachedParent(item);
   }
   return true;
 }
@@ -1185,7 +1186,7 @@ function ownershipRootSlots(runtime: Runtime, includeTemporaries = true): unknow
     for (const method of cls.methods.values())
       if (method.fn.kind === 'user') appendValues(roots, [...method.fn.statics.values()]);
   }
-  roots.push(...runtime.declarationRoots, ...runtime.held, ...callbackRoots(runtime), runtime.thrown);
+  roots.push(...runtime.declarationRoots, ...runtime.held, ...persistentNativeRoots(runtime), runtime.thrown);
   for (const held of runtime.nativeHeld) appendValues(roots, [...held]);
   return roots;
 }

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 986 -- Keeps class defaults with PHP value storage and ownership helpers.
+// code-gauge-allow-file fileNcss 993 -- Keeps class defaults with PHP value storage and ownership helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
@@ -235,7 +235,7 @@ export class PhpArray {
   }
 
   set(key: Key, value: Value): void {
-    const slot = this.map.get(key);
+    const slot = this.map.ownedSlot(key);
     if (slot instanceof Ref) {
       slot.assign(value);
     } else {
@@ -246,7 +246,7 @@ export class PhpArray {
   }
 
   setSlot(key: Key, slot: Value | Ref): void {
-    const old = this.map.get(key);
+    const old = this.map.ownedSlot(key);
     if (old instanceof Ref && old !== slot) old.rc--;
     this.insert(key, slot);
 
@@ -487,6 +487,13 @@ export class PhpArray {
     return slots;
   }
 
+  releaseSlot(key: Key): Value | Ref | undefined {
+    const slot = this.map.releaseSlot(key);
+    if (slot !== null && typeof slot === 'object') this.invalidate();
+    if (slot instanceof Ref) slot.rc--;
+    return slot;
+  }
+
   retire(): (Value | Ref)[] {
     const slots = this.detachSlots();
     this.mutationVersion++;
@@ -495,7 +502,7 @@ export class PhpArray {
   }
 
   private detachSlots(): (Value | Ref)[] {
-    const slots = [...this.map.values()];
+    const slots = [...this.map.ownedSlots()];
     this.map.clear();
     this.composite = false;
     for (const slot of slots) if (slot instanceof Ref) slot.rc--;
@@ -525,7 +532,7 @@ export class PhpArray {
     if (!this.has(key)) return;
     const order = this.ordered();
     const trim = this.map.mayHaveUndefinedSlots && order.isPacked && order.last?.key === key;
-    const old = this.map.get(key);
+    const old = this.map.ownedSlot(key);
     if (old instanceof Ref) old.rc--;
     // PHP moves a pointer at the deleted element on to the next one.
     if (this.pointer === key) this.pointer = this.keyAfter(key);
@@ -1135,7 +1142,7 @@ function directHolderCount(parent: Owner, value: object, keys: Set<Key | undefin
   if (packed !== undefined) return packed;
   let count = 0;
   for (const key of keys) {
-    const actual = parent instanceof PhpArray ? parent.map.get(key as Key) : parent.props.get(key as string);
+    const actual = parent instanceof PhpArray ? parent.map.ownedSlot(key as Key) : parent.props.get(key as string);
     if (actual === value) {
       if (++count > 1) return count;
     } else keys.delete(key);
@@ -1208,7 +1215,7 @@ function retainsChild(owner: Owner, replacedKey: Key | undefined, child: object)
   if (owner instanceof PhpObject && nativeOwners.get(child)?.has(owner)) return true;
   for (const key of owners.get(child)?.get(owner) ?? []) {
     if (key === replacedKey) continue;
-    const actual = owner instanceof PhpArray ? owner.map.get(key as Key) : owner.props.get(key as string);
+    const actual = owner instanceof PhpArray ? owner.map.ownedSlot(key as Key) : owner.props.get(key as string);
     if (actual === child) return true;
   }
   return false;

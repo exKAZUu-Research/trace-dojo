@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 431 -- Keeps the wrappers with their shared iterator state and retirement phases.
+// code-gauge-allow-file fileNcss 440 -- Keeps the wrappers with their shared iterator state and retirement phases.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callCallback, callMethod, consumeInvokedResult, discardInvokedResult } from './callables';
 import { createObject, findClass } from './classes';
@@ -9,7 +9,7 @@ import { arrayIteratorOver } from './libArrayObject';
 import { defineClass, type NativeMethod } from './native';
 import { toKey, toStr } from './operators';
 import { PhpThrow, rt } from './runtime';
-import { nativeOwnershipChanged, PhpArray, type PhpClass, PhpObject, type Value } from './values';
+import { deref, nativeOwnershipChanged, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
 
 /** The engine's iterator for a Traversable object, which asks an IteratorAggregate for its iterator. */
 export function innerIteratorOf(object: PhpObject): InnerIterator {
@@ -153,8 +153,22 @@ export class DualState {
   }
 
   clearCache(): void {
-    const slots = this.cache.clearSlots();
-    if (slots.length > 0) rt().release(slots, true, true);
+    const runtime = rt();
+    withIteratorTransition((transition) => {
+      try {
+        for (const key of this.cache.keys()) {
+          runtime.spend();
+          const slot = this.cache.releaseSlot(key);
+          if (slot instanceof PhpArray || slot instanceof PhpObject || slot instanceof Ref)
+            transition.run(() => runtime.release([slot], true, true));
+        }
+      } finally {
+        for (const slot of this.cache.clearSlots()) {
+          const value = deref(slot);
+          if (value instanceof PhpArray || value instanceof PhpObject) runtime.nativeShutdownHolders.add(value);
+        }
+      }
+    });
   }
 
   free(): void {

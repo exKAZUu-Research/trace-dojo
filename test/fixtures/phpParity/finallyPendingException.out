@@ -4,9 +4,11 @@ inner
 LogicException:from catch
 destructor:finally
 destructor:inner
+destructor:inner
+destructor:inner
 inner
 
-Fatal error: Uncaught Exception: uncaught in /main.php:34
+Fatal error: Uncaught Exception: uncaught in /main.php:43
 Stack trace:
 #0 {main}
-  thrown in /main.php on line 34
+  thrown in /main.php on line 43

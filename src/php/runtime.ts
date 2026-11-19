@@ -182,6 +182,7 @@ export class Runtime {
   errorHandlers: { handler: Value; mask: bigint }[] = [];
   exceptionHandler: Value = null;
   retiringExceptionHandler: Value | undefined;
+  readonly nativeShutdownHolders = new Set<PhpArray | PhpObject>();
   assertionCallback: Value | undefined;
   /** The handlers `set_exception_handler` replaced, latest last, which `restore_exception_handler` brings back. */
   replacedExceptionHandlers: Value[] = [];

@@ -17,6 +17,7 @@ foreach ([false, true] as $fromCatch) {
 }
 class InterruptedReturn {
     function __destruct() { throw new Exception('destructor'); }
+    function fail() { innerFailure(); }
 }
 function discardReturn($call) {
     try { return [new InterruptedReturn]; }
@@ -28,6 +29,14 @@ function discardReturn($call) {
 foreach ([false, true] as $call) {
     try { discardReturn($call); }
     catch (Throwable $error) {
+        echo $error->getMessage(), ':', $error->getPrevious()?->getMessage(), "\n";
+    }
+}
+foreach ([false, true] as $echo) {
+    try {
+        if ($echo) echo (new InterruptedReturn)->fail();
+        else (new InterruptedReturn)->fail();
+    } catch (Throwable $error) {
         echo $error->getMessage(), ':', $error->getPrevious()?->getMessage(), "\n";
     }
 }

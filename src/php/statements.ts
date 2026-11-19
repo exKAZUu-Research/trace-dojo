@@ -279,6 +279,8 @@ function execStmt(statement: Stmt, seek?: string): Completion {
         return undefined;
       }
     }
+  } catch (error) {
+    releaseTemporariesOnThrow(runtime, frame, held, error);
   } finally {
     runtime.dropTemporaries(frame, held);
   }
@@ -360,15 +362,10 @@ function runForClause(expressions: Expr[], row: number, frame: Frame, held: numb
 }
 
 function evaluateForExpression(e: Expr, frame: Frame, held: number, condition = false): boolean {
-  const runtime = rt();
-  try {
-    if (condition) return evBool(e);
-    if (e.k === 'var') evQuiet(e);
-    else ev(e, true);
-  } catch (error) {
-    releaseTemporariesOnThrow(runtime, frame, held, error);
-  }
-  runtime.dropTemporaries(frame, held);
+  if (condition) return evBool(e);
+  if (e.k === 'var') evQuiet(e);
+  else ev(e, true);
+  rt().dropTemporaries(frame, held);
   return true;
 }
 
@@ -505,19 +502,8 @@ function catches(object: PhpObject, name: string): boolean {
 function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completion {
   const runtime = rt();
   const frame = runtime.frame;
+  if (foreachReferences(statement.value, statement.byRef)) return foreachReferenceSubject(statement);
   const subjectMark = frame.temporaries.length;
-  try {
-    return foreachReferences(statement.value, statement.byRef)
-      ? foreachReferenceSubject(statement)
-      : foreachValueSubject(statement, subjectMark);
-  } catch (error) {
-    releaseTemporariesOnThrow(runtime, frame, subjectMark, error);
-  }
-}
-
-function foreachValueSubject(statement: Extract<Stmt, { k: 'foreach' }>, subjectMark: number): Completion {
-  const runtime = rt();
-  const frame = runtime.frame;
   const nativeMark = runtime.nativeHeld.at(-1)?.length ?? 0;
   const subject = ev(statement.subject);
   if (!(subject instanceof PhpArray || (subject instanceof PhpObject && !subject.isResource)))

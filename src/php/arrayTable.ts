@@ -4,6 +4,7 @@ type Slot = Value | Ref;
 
 export class ArrayTable extends Map<Key, Slot> {
   private packed?: Slot[];
+  private releasedKeys?: Set<Key>;
   private integerKeys = 0;
   mayHaveUndefinedSlots = false;
   removedUndefinedSlots = 0;
@@ -75,11 +76,33 @@ export class ArrayTable extends Map<Key, Slot> {
   }
 
   packedValueCount(value: object): number | undefined {
-    return this.packed ? (this.holders.get(value) ?? 0) : undefined;
+    return this.packed && !this.releasedKeys?.size ? (this.holders.get(value) ?? 0) : undefined;
   }
 
   hasValue(value: object, key: Key): boolean {
-    return this.packed ? this.holders.has(value) : super.get(key) === value;
+    const packed = this.packedValueCount(value);
+    return packed === undefined ? this.ownedSlot(key) === value : packed > 0;
+  }
+
+  ownedSlot(key: Key): Slot | undefined {
+    return this.releasedKeys?.has(key) ? undefined : this.get(key);
+  }
+
+  ownedSlots(): IterableIterator<Slot> {
+    return this.releasedKeys?.size ? this.unreleasedSlots() : this.values();
+  }
+
+  private *unreleasedSlots(): IterableIterator<Slot> {
+    for (const [key, slot] of this) if (!this.releasedKeys?.has(key)) yield slot;
+  }
+
+  releaseSlot(key: Key): Slot | undefined {
+    const slot = this.ownedSlot(key);
+    if (slot !== null && typeof slot === 'object') {
+      this.releasedKeys ??= new Set();
+      this.releasedKeys.add(key);
+    }
+    return slot;
   }
 
   override get size(): number {
@@ -95,6 +118,7 @@ export class ArrayTable extends Map<Key, Slot> {
   }
 
   override set(key: Key, value: Slot): this {
+    this.releasedKeys?.delete(key);
     if (value === UNDEFINED_RESULT) this.mayHaveUndefinedSlots = true;
     if (this.packed && typeof key === 'bigint' && key >= 0n && key <= BigInt(this.packed.length)) {
       const index = Number(key);
@@ -110,6 +134,7 @@ export class ArrayTable extends Map<Key, Slot> {
   }
 
   override delete(key: Key): boolean {
+    this.releasedKeys?.delete(key);
     if (this.packed && this.packed.length > 0 && key === BigInt(this.packed.length - 1)) {
       this.count(this.packed.pop() as Slot, -1);
       return true;
@@ -121,6 +146,7 @@ export class ArrayTable extends Map<Key, Slot> {
   }
 
   override clear(): void {
+    this.releasedKeys = undefined;
     this.packed = undefined;
     this.holders.clear();
     this.integerKeys = 0;

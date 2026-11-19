@@ -62,3 +62,19 @@ foreach ($cache as $key => $value) {
     }
 }
 echo json_encode($cache), "\n";
+class CacheInsertedValue {
+    function __destruct() { echo "inserted value released\n"; }
+}
+class CacheWriter {
+    function __destruct() {
+        global $it, $cache, $inserted;
+        echo json_encode(array_keys($cache)), ':', count($it), "\n";
+        $it['inserted'] = $inserted = new CacheInsertedValue;
+    }
+}
+$it = new CachingIterator(new ArrayIterator(['fresh' => 9]), CachingIterator::FULL_CACHE);
+$it['original'] = new CacheWriter;
+$cache = $it->getCache();
+$it->rewind();
+unset($inserted);
+echo json_encode($cache), "\n";
