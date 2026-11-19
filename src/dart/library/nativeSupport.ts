@@ -101,3 +101,11 @@ export function checkElement(runtime: Runtime, value: Value, type: DartType, nam
     );
   }
 }
+
+/** Casts a value to a type as `value as T` does, which the SDK's own code does where it reads a nullable slot. */
+export function castTo(runtime: Runtime, value: Value, type: DartType): void {
+  if (type.kind === 'dynamic' || runtime.links.isValueOf(runtime, value, type)) return;
+  runtime.throwTypeError(
+    `type '${typeToString(runtime.runtimeTypeOf(value))}' is not a subtype of type '${typeToString(type)}' in type cast`
+  );
+}

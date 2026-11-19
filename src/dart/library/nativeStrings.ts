@@ -12,7 +12,7 @@ function checkLength(runtime: Runtime, length: number): void {
   runtime.spend(Math.ceil(length / 1024));
 }
 
-function rangeError(runtime: Runtime, value: bigint, min: number, max: number, name: string): never {
+function rangeError(runtime: Runtime, value: bigint, min: number, max: number, name: string | undefined): never {
   runtime.throwError('RangeError', 'range', [value, BigInt(min), BigInt(max), name]);
 }
 
@@ -23,15 +23,13 @@ function self(value: Value): string {
 define('String.[]', (runtime, receiver, [position]) => {
   const text = self(receiver);
   const at = intArg(runtime, position, 'index');
-  if (at < 0n || at >= BigInt(text.length))
-    runtime.throwError('IndexError', 'withLength', [at, BigInt(text.length)], { indexable: text, name: 'index' });
+  if (at < 0n || at >= BigInt(text.length)) rangeError(runtime, at, 0, text.length - 1, 'index');
   return text[index(at)];
 });
 define('String.codeUnitAt', (runtime, receiver, [position]) => {
   const text = self(receiver);
   const at = intArg(runtime, position, 'index');
-  if (at < 0n || at >= BigInt(text.length))
-    runtime.throwError('IndexError', 'withLength', [at, BigInt(text.length)], { indexable: text, name: 'index' });
+  if (at < 0n || at >= BigInt(text.length)) rangeError(runtime, at, 0, text.length - 1, 'length');
   // oxlint-disable-next-line unicorn/prefer-code-point -- Dart's code units are UTF-16 code units.
   return BigInt(text.charCodeAt(index(at)));
 });
@@ -78,7 +76,7 @@ define('String.lastIndexOf', (runtime, receiver, [pattern, start]) => {
   let at = text.length;
   if (start !== undefined) {
     const value = intArg(runtime, start, 'start');
-    if (value < 0n || value > BigInt(text.length)) rangeError(runtime, value, 0, text.length, 'start');
+    if (value < 0n || value > BigInt(text.length)) rangeError(runtime, value, 0, text.length, undefined);
     at = index(value);
   }
   if (typeof pattern === 'string') {
@@ -290,8 +288,25 @@ define('String.codeUnits', (runtime, receiver) =>
   )
 );
 define('String.runes', (runtime, receiver) => runtime.links.construct(runtime, 'Runes', '', [receiver]));
-define('String.toLowerCase', (_runtime, receiver) => self(receiver).toLowerCase());
-define('String.toUpperCase', (_runtime, receiver) => self(receiver).toUpperCase());
+define('String.toLowerCase', (_runtime, receiver) => mapCase(self(receiver), false));
+define('String.toUpperCase', (_runtime, receiver) => mapCase(self(receiver), true));
+
+/**
+ * Case mapping as the VM does it: one UTF-16 code unit at a time with Unicode's simple mappings, so `ß` and ligatures
+ * stay as they are, a final sigma is not special, and `İ` lowercases to `i`.
+ */
+function mapCase(text: string, upper: boolean): string {
+  let result = '';
+  for (const unit of text.split('')) {
+    if (unit === '\u0130' && !upper) {
+      result += 'i';
+      continue;
+    }
+    const mapped = upper ? unit.toUpperCase() : unit.toLowerCase();
+    result += mapped.length === 1 ? mapped : unit;
+  }
+  return result;
+}
 define('String.toString', (_runtime, receiver) => receiver);
 define('String.allMatches', (runtime, receiver, [input, start = 0n]) => {
   const text = stringArg(runtime, input, 'string');
@@ -319,14 +334,14 @@ define('String.fromCharCodes', (runtime, _receiver, [codes, start = 0n, end]) =>
   return values
     .slice(from, to)
     .map((code) => {
-      if (code < 0 || code > 0x10_ff_ff) rangeError(runtime, BigInt(code), 0, 0x10_ff_ff, '');
+      if (code < 0 || code > 0x10_ff_ff) rangeError(runtime, BigInt(code), 0, 0x10_ff_ff, undefined);
       return String.fromCodePoint(code);
     })
     .join('');
 });
 define('String.fromCharCode', (runtime, _receiver, [code]) => {
   const value = Number(intArg(runtime, code, 'charCode'));
-  if (value < 0 || value > 0x10_ff_ff) rangeError(runtime, BigInt(value), 0, 0x10_ff_ff, '');
+  if (value < 0 || value > 0x10_ff_ff) rangeError(runtime, BigInt(value), 0, 0x10_ff_ff, undefined);
   return String.fromCodePoint(value);
 });
 define('String.fromEnvironment', (_runtime, _receiver, _args, namedArgs) => named(namedArgs, 'defaultValue', ''));

@@ -284,7 +284,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
     flow: ConditionFlow;
   } {
     const left = this.compileExpression(expression.left);
-    const right = this.compileExpression(expression.right);
+    // The right operand of == takes the left's type as its context, which `c == .red` needs.
+    const right = this.compileExpression(
+      expression.right,
+      expression.right.kind === 'dotShorthand' ? nonNullable(left.type) : undefined
+    );
     const negated = expression.operator === '!=';
     const nullVariable =
       right.type.kind === 'null' && left.variable
@@ -982,7 +986,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         const target = cell(frame);
         const value = target.v;
         if (value === UNINITIALIZED)
-          frame.runtime.throwError('LateInitializationError', '', [`Local '${name}' has not been initialized.`]);
+          frame.runtime.throwError('LateError', '', [`Local '${name}' has not been initialized.`]);
         if (value instanceof LateInitializer) {
           target.v = UNINITIALIZED;
           const computed = value.run();
@@ -1116,13 +1120,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
       };
     }
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
-    const resolved = this.lookupMember(lookupType, name, false);
+    const resolved = this.memberFor(receiver, lookupType, name, false);
     if (!resolved) {
       if (this.lookupMember(lookupType, name, true))
         this.error(span, `${name} には getter がないので、値を読めません。`);
       return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${name} というメンバーがありません。`);
     }
-    if (!nullAware && isNullable(receiverType) && !isObjectMember(resolved.member) && receiverType.kind !== 'null') {
+    if (!nullAware && isNullable(receiverType) && !this.acceptsNull(resolved) && receiverType.kind !== 'null') {
       this.error(
         span,
         `${typeName(receiverType)} 型の値は null かもしれないので、${name} を直接は使えません。?. を使うか、null でないことを確かめてください。`
@@ -1843,8 +1847,19 @@ export abstract class ExpressionCompiler extends CompilerBase {
   private compileInstantiation(expression: Extract<Expression, { kind: 'instantiation' }>): Compiled {
     const target = this.staticTarget(expression.target);
     if (target?.kind === 'class') {
-      const type = interfaceType(target.cls, target.typeArgs ?? []);
-      return { type: interfaceType(coreTypes.type), run: () => new DartTypeValue(coreTypes.type, type), isConst: true };
+      if (expression.typeArguments.length !== target.cls.typeParams.length) {
+        this.error(expression, `${target.cls.name} の型引数は ${target.cls.typeParams.length} 個です。`);
+      }
+      const type = interfaceType(
+        target.cls,
+        expression.typeArguments.map((argument) => this.resolveType(argument))
+      );
+      const resolve = this.runtimeType(type);
+      return {
+        type: interfaceType(coreTypes.type),
+        run: (frame) => new DartTypeValue(coreTypes.type, resolve(frame)),
+        isConst: true,
+      };
     }
     return this.unsupported(expression, '型引数を指定した関数の取り出し（f<int> の形）');
   }
@@ -1946,10 +1961,6 @@ export function promotionTarget(current: DartType, tested: DartType): DartType |
     return { ...current, nullable: isNullable(tested) && current.nullable, promoted: tested };
   }
   return undefined;
-}
-
-function isObjectMember(member: Member): boolean {
-  return member.owner === coreTypes.object;
 }
 
 function singleArgument(index: Expression): ArgumentsSyntax {

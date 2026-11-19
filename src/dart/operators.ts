@@ -37,17 +37,12 @@ export function doubleModulo(a: number, b: number): number {
 /** `num.~/` on doubles: the truncated quotient, which must fit in an `int`. */
 export function doubleTruncatingDivide(runtime: Runtime, a: number, b: number): bigint {
   const quotient = a / b;
-  return truncateToInt(runtime, quotient, 'Result of truncating division is');
+  return truncateToInt(runtime, quotient);
 }
 
 /** Converts a double to an int as `truncate()` does, throwing for infinities and NaN. */
-export function truncateToInt(runtime: Runtime, value: number, what = ''): bigint {
-  if (Number.isNaN(value)) runtime.throwError('UnsupportedError', '', [what ? `${what} NaN` : 'NaN']);
-  if (!Number.isFinite(value)) {
-    runtime.throwError('UnsupportedError', '', [
-      what ? `${what} ${value > 0 ? 'Infinity' : '-Infinity'}` : value > 0 ? 'Infinity' : '-Infinity',
-    ]);
-  }
+export function truncateToInt(runtime: Runtime, value: number): bigint {
+  if (!Number.isFinite(value)) runtime.throwError('UnsupportedError', '', ['Infinity or NaN toInt']);
   const truncated = BigInt(Math.trunc(value));
   // The VM saturates conversions of doubles beyond the 64-bit range.
   if (truncated > 9_223_372_036_854_775_807n) return 9_223_372_036_854_775_807n;

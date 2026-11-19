@@ -401,9 +401,12 @@ class AssertionError extends Error {
 }
 
 class TypeError extends Error {
+  TypeError();
+}
+
+class _TypeError extends TypeError {
   final String _message;
-  TypeError() : _message = '';
-  TypeError._withMessage(this._message);
+  _TypeError._withMessage(this._message);
   String toString() => _message;
 }
 
@@ -546,9 +549,11 @@ class NoSuchMethodError extends Error {
   String toString() => _message;
 }
 
-class LateInitializationError extends Error {
+abstract interface class LateInitializationError implements Error {}
+
+class LateError extends Error implements LateInitializationError {
   final String _message;
-  LateInitializationError(this._message);
+  LateError(this._message);
   String toString() => "LateInitializationError: $_message";
 }
 
@@ -694,12 +699,12 @@ abstract mixin class Iterable<E> {
   factory Iterable.empty() => _EmptyIterable<E>();
   static Iterable<T> castFrom<S, T>(Iterable<S> source) => source.cast<T>();
   Iterator<E> get iterator;
-  Iterable<R> cast<R>() => _CastIterable<E, R>(this);
-  Iterable<E> followedBy(Iterable<E> other) => _FollowedByIterable<E>(this, other);
-  Iterable<T> map<T>(T Function(E e) toElement) => _MappedIterable<E, T>(this, toElement);
-  Iterable<E> where(bool Function(E element) test) => _WhereIterable<E>(this, test);
-  Iterable<T> whereType<T>() => _WhereTypeIterable<T>(this);
-  Iterable<T> expand<T>(Iterable<T> Function(E element) toElements) => _ExpandIterable<E, T>(this, toElements);
+  Iterable<R> cast<R>() => CastIterable<E, R>(this);
+  Iterable<E> followedBy(Iterable<E> other) => FollowedByIterable<E>(this, other);
+  Iterable<T> map<T>(T Function(E e) toElement) => MappedIterable<E, T>(this, toElement);
+  Iterable<E> where(bool Function(E element) test) => WhereIterable<E>(this, test);
+  Iterable<T> whereType<T>() => WhereTypeIterable<T>(this);
+  Iterable<T> expand<T>(Iterable<T> Function(E element) toElements) => ExpandIterable<E, T>(this, toElements);
   bool contains(Object? element) {
     for (E e in this) {
       if (e == element) return true;
@@ -767,15 +772,15 @@ abstract mixin class Iterable<E> {
   bool get isEmpty => !iterator.moveNext();
   bool get isNotEmpty => !isEmpty;
   Iterable<E> take(int count) {
-    RangeError.checkNotNegative(count, "count");
-    return _TakeIterable<E>(this, count);
+    RangeError.checkNotNegative(count, "takeCount");
+    return TakeIterable<E>(this, count);
   }
-  Iterable<E> takeWhile(bool Function(E value) test) => _TakeWhileIterable<E>(this, test);
+  Iterable<E> takeWhile(bool Function(E value) test) => TakeWhileIterable<E>(this, test);
   Iterable<E> skip(int count) {
-    RangeError.checkNotNegative(count, "count");
-    return _SkipIterable<E>(this, count);
+    RangeError.checkNotNegative(count, "skipCount");
+    return SkipIterable<E>(this, count);
   }
-  Iterable<E> skipWhile(bool Function(E value) test) => _SkipWhileIterable<E>(this, test);
+  Iterable<E> skipWhile(bool Function(E value) test) => SkipWhileIterable<E>(this, test);
   E get first {
     Iterator<E> it = iterator;
     if (!it.moveNext()) throw StateError("No element");
@@ -967,7 +972,7 @@ class _EmptyIterator<E> implements Iterator<E> {
   E get current => throw StateError("No element");
 }
 
-class _GeneratorIterable<E> extends Iterable<E> {
+class _GeneratorIterable<E> extends ListIterable<E> {
   final int _count;
   final E Function(int)? _generator;
   _GeneratorIterable(this._count, this._generator) {
@@ -1003,11 +1008,11 @@ class _GeneratorIterator<E> implements Iterator<E> {
   E get current => _current as E;
 }
 
-class _MappedIterable<S, T> extends Iterable<T> {
+class MappedIterable<S, T> extends Iterable<T> {
   final Iterable<S> _iterable;
   final T Function(S) _f;
-  _MappedIterable(this._iterable, this._f);
-  Iterator<T> get iterator => _MappedIterator<S, T>(_iterable.iterator, _f);
+  MappedIterable(this._iterable, this._f);
+  Iterator<T> get iterator => MappedIterator<S, T>(_iterable.iterator, _f);
   int get length => _iterable.length;
   bool get isEmpty => _iterable.isEmpty;
   T get first => _f(_iterable.first);
@@ -1016,11 +1021,11 @@ class _MappedIterable<S, T> extends Iterable<T> {
   T elementAt(int index) => _f(_iterable.elementAt(index));
 }
 
-class _MappedIterator<S, T> implements Iterator<T> {
+class MappedIterator<S, T> implements Iterator<T> {
   T? _current;
   final Iterator<S> _iterator;
   final T Function(S) _f;
-  _MappedIterator(this._iterator, this._f);
+  MappedIterator(this._iterator, this._f);
   bool moveNext() {
     if (_iterator.moveNext()) {
       _current = _f(_iterator.current);
@@ -1032,18 +1037,18 @@ class _MappedIterator<S, T> implements Iterator<T> {
   T get current => _current as T;
 }
 
-class _WhereIterable<E> extends Iterable<E> {
+class WhereIterable<E> extends Iterable<E> {
   final Iterable<E> _iterable;
   final bool Function(E) _f;
-  _WhereIterable(this._iterable, this._f);
-  Iterator<E> get iterator => _WhereIterator<E>(_iterable.iterator, _f);
-  Iterable<T> map<T>(T Function(E element) toElement) => _MappedIterable<E, T>(this, toElement);
+  WhereIterable(this._iterable, this._f);
+  Iterator<E> get iterator => WhereIterator<E>(_iterable.iterator, _f);
+  Iterable<T> map<T>(T Function(E element) toElement) => MappedIterable<E, T>(this, toElement);
 }
 
-class _WhereIterator<E> implements Iterator<E> {
+class WhereIterator<E> implements Iterator<E> {
   final Iterator<E> _iterator;
   final bool Function(E) _f;
-  _WhereIterator(this._iterator, this._f);
+  WhereIterator(this._iterator, this._f);
   bool moveNext() {
     while (_iterator.moveNext()) {
       if (_f(_iterator.current)) return true;
@@ -1053,15 +1058,15 @@ class _WhereIterator<E> implements Iterator<E> {
   E get current => _iterator.current;
 }
 
-class _WhereTypeIterable<T> extends Iterable<T> {
+class WhereTypeIterable<T> extends Iterable<T> {
   final Iterable<Object?> _source;
-  _WhereTypeIterable(this._source);
-  Iterator<T> get iterator => _WhereTypeIterator<T>(_source.iterator);
+  WhereTypeIterable(this._source);
+  Iterator<T> get iterator => WhereTypeIterator<T>(_source.iterator);
 }
 
-class _WhereTypeIterator<T> implements Iterator<T> {
+class WhereTypeIterator<T> implements Iterator<T> {
   final Iterator<Object?> _source;
-  _WhereTypeIterator(this._source);
+  WhereTypeIterator(this._source);
   bool moveNext() {
     while (_source.moveNext()) {
       if (_source.current is T) return true;
@@ -1071,19 +1076,19 @@ class _WhereTypeIterator<T> implements Iterator<T> {
   T get current => _source.current as T;
 }
 
-class _ExpandIterable<S, T> extends Iterable<T> {
+class ExpandIterable<S, T> extends Iterable<T> {
   final Iterable<S> _iterable;
   final Iterable<T> Function(S) _f;
-  _ExpandIterable(this._iterable, this._f);
-  Iterator<T> get iterator => _ExpandIterator<S, T>(_iterable.iterator, _f);
+  ExpandIterable(this._iterable, this._f);
+  Iterator<T> get iterator => ExpandIterator<S, T>(_iterable.iterator, _f);
 }
 
-class _ExpandIterator<S, T> implements Iterator<T> {
+class ExpandIterator<S, T> implements Iterator<T> {
   final Iterator<S> _iterator;
   final Iterable<T> Function(S) _f;
   Iterator<T> _currentExpansion = _EmptyIterator<T>();
   T? _current;
-  _ExpandIterator(this._iterator, this._f);
+  ExpandIterator(this._iterator, this._f);
   T get current => _current as T;
   bool moveNext() {
     while (!_currentExpansion.moveNext()) {
@@ -1099,17 +1104,17 @@ class _ExpandIterator<S, T> implements Iterator<T> {
   }
 }
 
-class _TakeIterable<E> extends Iterable<E> {
+class TakeIterable<E> extends Iterable<E> {
   final Iterable<E> _iterable;
   final int _takeCount;
-  _TakeIterable(this._iterable, this._takeCount);
-  Iterator<E> get iterator => _TakeIterator<E>(_iterable.iterator, _takeCount);
+  TakeIterable(this._iterable, this._takeCount);
+  Iterator<E> get iterator => TakeIterator<E>(_iterable.iterator, _takeCount);
 }
 
-class _TakeIterator<E> implements Iterator<E> {
+class TakeIterator<E> implements Iterator<E> {
   final Iterator<E> _iterator;
   int _remaining;
-  _TakeIterator(this._iterator, this._remaining);
+  TakeIterator(this._iterator, this._remaining);
   bool moveNext() {
     _remaining--;
     if (_remaining >= 0) return _iterator.moveNext();
@@ -1122,18 +1127,18 @@ class _TakeIterator<E> implements Iterator<E> {
   }
 }
 
-class _TakeWhileIterable<E> extends Iterable<E> {
+class TakeWhileIterable<E> extends Iterable<E> {
   final Iterable<E> _iterable;
   final bool Function(E) _f;
-  _TakeWhileIterable(this._iterable, this._f);
-  Iterator<E> get iterator => _TakeWhileIterator<E>(_iterable.iterator, _f);
+  TakeWhileIterable(this._iterable, this._f);
+  Iterator<E> get iterator => TakeWhileIterator<E>(_iterable.iterator, _f);
 }
 
-class _TakeWhileIterator<E> implements Iterator<E> {
+class TakeWhileIterator<E> implements Iterator<E> {
   final Iterator<E> _iterator;
   final bool Function(E) _f;
   bool _isFinished = false;
-  _TakeWhileIterator(this._iterator, this._f);
+  TakeWhileIterator(this._iterator, this._f);
   bool moveNext() {
     if (_isFinished) return false;
     if (!_iterator.moveNext() || !_f(_iterator.current)) {
@@ -1148,17 +1153,17 @@ class _TakeWhileIterator<E> implements Iterator<E> {
   }
 }
 
-class _SkipIterable<E> extends Iterable<E> {
+class SkipIterable<E> extends Iterable<E> {
   final Iterable<E> _iterable;
   final int _skipCount;
-  _SkipIterable(this._iterable, this._skipCount);
-  Iterator<E> get iterator => _SkipIterator<E>(_iterable.iterator, _skipCount);
+  SkipIterable(this._iterable, this._skipCount);
+  Iterator<E> get iterator => SkipIterator<E>(_iterable.iterator, _skipCount);
 }
 
-class _SkipIterator<E> implements Iterator<E> {
+class SkipIterator<E> implements Iterator<E> {
   final Iterator<E> _iterator;
   int _skipCount;
-  _SkipIterator(this._iterator, this._skipCount);
+  SkipIterator(this._iterator, this._skipCount);
   bool moveNext() {
     for (int i = 0; i < _skipCount; i++) _iterator.moveNext();
     _skipCount = 0;
@@ -1167,18 +1172,18 @@ class _SkipIterator<E> implements Iterator<E> {
   E get current => _iterator.current;
 }
 
-class _SkipWhileIterable<E> extends Iterable<E> {
+class SkipWhileIterable<E> extends Iterable<E> {
   final Iterable<E> _iterable;
   final bool Function(E) _f;
-  _SkipWhileIterable(this._iterable, this._f);
-  Iterator<E> get iterator => _SkipWhileIterator<E>(_iterable.iterator, _f);
+  SkipWhileIterable(this._iterable, this._f);
+  Iterator<E> get iterator => SkipWhileIterator<E>(_iterable.iterator, _f);
 }
 
-class _SkipWhileIterator<E> implements Iterator<E> {
+class SkipWhileIterator<E> implements Iterator<E> {
   final Iterator<E> _iterator;
   final bool Function(E) _f;
   bool _hasSkipped = false;
-  _SkipWhileIterator(this._iterator, this._f);
+  SkipWhileIterator(this._iterator, this._f);
   bool moveNext() {
     if (!_hasSkipped) {
       _hasSkipped = true;
@@ -1191,17 +1196,17 @@ class _SkipWhileIterator<E> implements Iterator<E> {
   E get current => _iterator.current;
 }
 
-class _FollowedByIterable<E> extends Iterable<E> {
+class FollowedByIterable<E> extends Iterable<E> {
   final Iterable<E> _first;
   final Iterable<E> _second;
-  _FollowedByIterable(this._first, this._second);
-  Iterator<E> get iterator => _FollowedByIterator<E>(_first, _second);
+  FollowedByIterable(this._first, this._second);
+  Iterator<E> get iterator => FollowedByIterator<E>(_first, _second);
 }
 
-class _FollowedByIterator<E> implements Iterator<E> {
+class FollowedByIterator<E> implements Iterator<E> {
   Iterator<E> _currentIterator;
   Iterable<E>? _nextIterable;
-  _FollowedByIterator(Iterable<E> first, this._nextIterable) : _currentIterator = first.iterator;
+  FollowedByIterator(Iterable<E> first, this._nextIterable) : _currentIterator = first.iterator;
   bool moveNext() {
     if (_currentIterator.moveNext()) return true;
     if (_nextIterable != null) {
@@ -1214,15 +1219,15 @@ class _FollowedByIterator<E> implements Iterator<E> {
   E get current => _currentIterator.current;
 }
 
-class _CastIterable<S, T> extends Iterable<T> {
+class CastIterable<S, T> extends Iterable<T> {
   final Iterable<S> _source;
-  _CastIterable(this._source);
-  Iterator<T> get iterator => _CastIterator<S, T>(_source.iterator);
+  CastIterable(this._source);
+  Iterator<T> get iterator => CastIterator<S, T>(_source.iterator);
 }
 
-class _CastIterator<S, T> implements Iterator<T> {
+class CastIterator<S, T> implements Iterator<T> {
   final Iterator<S> _source;
-  _CastIterator(this._source);
+  CastIterator(this._source);
   bool moveNext() => _source.moveNext();
   T get current => _source.current as T;
 }
@@ -1236,6 +1241,173 @@ class _SyncStarIterator<E> implements Iterator<E> {
   _SyncStarIterator._();
   external bool moveNext();
   external E get current;
+}
+
+/** An iterable with an efficient length and indexed elements, as the VM's ListIterable. */
+abstract class ListIterable<E> extends Iterable<E> {
+  ListIterable();
+  int get length;
+  E elementAt(int index);
+  Iterator<E> get iterator => ListIterator<E>(this);
+  void forEach(void Function(E element) action) {
+    int length = this.length;
+    for (int i = 0; i < length; i++) {
+      action(elementAt(i));
+      if (length != this.length) throw ConcurrentModificationError(this);
+    }
+  }
+  bool get isEmpty => length == 0;
+  E get first {
+    if (length == 0) throw StateError("No element");
+    return elementAt(0);
+  }
+  E get last {
+    if (length == 0) throw StateError("No element");
+    return elementAt(length - 1);
+  }
+  E get single {
+    if (length == 0) throw StateError("No element");
+    if (length > 1) throw StateError("Too many elements");
+    return elementAt(0);
+  }
+  bool contains(Object? element) {
+    int length = this.length;
+    for (int i = 0; i < length; i++) {
+      if (elementAt(i) == element) return true;
+      if (length != this.length) throw ConcurrentModificationError(this);
+    }
+    return false;
+  }
+  Iterable<T> map<T>(T Function(E element) toElement) => MappedListIterable<E, T>(this, toElement);
+  Iterable<E> skip(int count) => SubListIterable<E>(this, count, null);
+  Iterable<E> take(int count) => SubListIterable<E>(this, 0, count);
+}
+
+class MappedListIterable<S, T> extends ListIterable<T> {
+  final Iterable<S> _source;
+  final T Function(S) _f;
+  MappedListIterable(this._source, this._f);
+  int get length => _source.length;
+  T elementAt(int index) => _f(_source.elementAt(index));
+}
+
+class ReversedListIterable<E> extends ListIterable<E> {
+  final Iterable<E> _source;
+  ReversedListIterable(this._source);
+  int get length => _source.length;
+  E elementAt(int index) => _source.elementAt(_source.length - 1 - index);
+}
+
+class SubListIterable<E> extends ListIterable<E> {
+  final Iterable<E> _source;
+  final int _start;
+  final int? _endOrLength;
+  SubListIterable(this._source, this._start, this._endOrLength) {
+    RangeError.checkNotNegative(_start, "start");
+    int? endOrLength = _endOrLength;
+    if (endOrLength != null) {
+      RangeError.checkNotNegative(endOrLength, "end");
+      if (_start > endOrLength) throw RangeError.range(_start, 0, endOrLength, "start");
+    }
+  }
+  int get _endIndex {
+    int length = _source.length;
+    int? endOrLength = _endOrLength;
+    if (endOrLength == null || endOrLength > length) return length;
+    return endOrLength;
+  }
+  int get _startIndex {
+    int length = _source.length;
+    if (_start > length) return length;
+    return _start;
+  }
+  int get length {
+    int length = _source.length;
+    if (_start >= length) return 0;
+    int? endOrLength = _endOrLength;
+    if (endOrLength == null || endOrLength >= length) return length - _start;
+    return endOrLength - _start;
+  }
+  E elementAt(int index) {
+    int realIndex = _startIndex + index;
+    if (index < 0 || realIndex >= _endIndex) throw IndexError.withLength(index, length, indexable: this, name: "index");
+    return _source.elementAt(realIndex);
+  }
+  Iterable<E> skip(int count) {
+    RangeError.checkNotNegative(count, "count");
+    int newStart = _start + count;
+    int? endOrLength = _endOrLength;
+    if (endOrLength != null && newStart >= endOrLength) return Iterable<E>.empty();
+    return SubListIterable<E>(_source, newStart, _endOrLength);
+  }
+  Iterable<E> take(int count) {
+    RangeError.checkNotNegative(count, "count");
+    int? endOrLength = _endOrLength;
+    if (endOrLength == null) return SubListIterable<E>(_source, _start, _start + count);
+    int newEnd = _start + count;
+    if (endOrLength < newEnd) return this;
+    return SubListIterable<E>(_source, _start, newEnd);
+  }
+}
+
+class ListIterator<E> implements Iterator<E> {
+  final Iterable<E> _iterable;
+  final int _length;
+  int _index = 0;
+  E? _current;
+  ListIterator(Iterable<E> iterable) : _iterable = iterable, _length = iterable.length;
+  E get current => _current as E;
+  bool moveNext() {
+    int length = _iterable.length;
+    if (_length != length) throw ConcurrentModificationError(_iterable);
+    if (_index >= length) {
+      _current = null;
+      return false;
+    }
+    _current = _iterable.elementAt(_index);
+    _index++;
+    return true;
+  }
+}
+
+extension IterableExtensions<T> on Iterable<T> {
+  T? get firstOrNull {
+    var iterator = this.iterator;
+    if (iterator.moveNext()) return iterator.current;
+    return null;
+  }
+  T? get lastOrNull {
+    if (isEmpty) return null;
+    return last;
+  }
+  T? get singleOrNull {
+    var iterator = this.iterator;
+    if (iterator.moveNext()) {
+      var result = iterator.current;
+      if (!iterator.moveNext()) return result;
+    }
+    return null;
+  }
+  T? elementAtOrNull(int index) {
+    RangeError.checkNotNegative(index, "index");
+    var iterator = this.iterator;
+    for (var i = 0; i <= index; i++) {
+      if (!iterator.moveNext()) return null;
+    }
+    return iterator.current;
+  }
+  Iterable<(int, T)> get indexed sync* {
+    var index = 0;
+    for (var element in this) yield (index++, element);
+  }
+}
+
+extension NullableIterableExtensions<T extends Object> on Iterable<T?> {
+  Iterable<T> get nonNulls sync* {
+    for (var element in this) {
+      if (element != null) yield element;
+    }
+  }
 }
 
 // Lists
@@ -1273,7 +1445,7 @@ abstract interface class List<E> extends Iterable<E> {
   external Iterator<E> get iterator;
   external void add(E value);
   external void addAll(Iterable<E> iterable);
-  external Iterable<E> get reversed;
+  Iterable<E> get reversed => ReversedListIterable<E>(this);
   external void sort([int Function(E a, E b)? compare]);
   external void shuffle([dynamic random]);
   external int indexOf(E element, [int start = 0]);
@@ -1291,7 +1463,10 @@ abstract interface class List<E> extends Iterable<E> {
   external void retainWhere(bool Function(E element) test);
   external List<E> operator +(List<E> other);
   external List<E> sublist(int start, [int? end]);
-  external Iterable<E> getRange(int start, int end);
+  Iterable<E> getRange(int start, int end) {
+    RangeError.checkValidRange(start, end, this.length);
+    return SubListIterable<E>(this, start, end);
+  }
   external void setRange(int start, int end, Iterable<E> iterable, [int skipCount = 0]);
   external void removeRange(int start, int end);
   external void fillRange(int start, int end, [E? fillValue]);
@@ -1305,11 +1480,11 @@ abstract interface class List<E> extends Iterable<E> {
   external bool operator ==(Object other);
   external int get hashCode;
   external String toString();
-  Iterable<R> map<R>(R Function(E e) toElement) => _MappedIterable<E, R>(this, toElement);
-  Iterable<E> where(bool Function(E element) test) => _WhereIterable<E>(this, test);
-  Iterable<T> whereType<T>() => _WhereTypeIterable<T>(this);
-  Iterable<T> expand<T>(Iterable<T> Function(E element) toElements) => _ExpandIterable<E, T>(this, toElements);
-  Iterable<E> followedBy(Iterable<E> other) => _FollowedByIterable<E>(this, other);
+  Iterable<R> map<R>(R Function(E e) toElement) => MappedListIterable<E, R>(this, toElement);
+  Iterable<E> where(bool Function(E element) test) => WhereIterable<E>(this, test);
+  Iterable<T> whereType<T>() => WhereTypeIterable<T>(this);
+  Iterable<T> expand<T>(Iterable<T> Function(E element) toElements) => ExpandIterable<E, T>(this, toElements);
+  Iterable<E> followedBy(Iterable<E> other) => FollowedByIterable<E>(this, other);
   E reduce(E Function(E value, E element) combine) {
     int length = this.length;
     if (length == 0) throw StateError("No element");
@@ -1382,15 +1557,15 @@ abstract interface class List<E> extends Iterable<E> {
     if (orElse != null) return orElse();
     throw StateError("No element");
   }
-  Iterable<E> skip(int count) => _SkipIterable<E>(this, RangeError.checkNotNegative(count, "count"));
-  Iterable<E> skipWhile(bool Function(E element) test) => _SkipWhileIterable<E>(this, test);
-  Iterable<E> take(int count) => _TakeIterable<E>(this, RangeError.checkNotNegative(count, "count"));
-  Iterable<E> takeWhile(bool Function(E element) test) => _TakeWhileIterable<E>(this, test);
+  Iterable<E> skip(int count) => SubListIterable<E>(this, count, null);
+  Iterable<E> skipWhile(bool Function(E element) test) => SkipWhileIterable<E>(this, test);
+  Iterable<E> take(int count) => SubListIterable<E>(this, 0, count);
+  Iterable<E> takeWhile(bool Function(E element) test) => TakeWhileIterable<E>(this, test);
   List<E> toList({bool growable = true}) => List<E>.of(this, growable: growable);
   Set<E> toSet() => Set<E>.of(this);
 }
 
-class _ListIterator<E> implements Iterator<E> {
+class _ListIterator<E> implements ListIterator<E> {
   _ListIterator._();
   external bool moveNext();
   external E get current;
@@ -1559,21 +1734,21 @@ String _mapToString(Map<Object?, Object?> m) {
   return result.toString();
 }
 
-class _MapKeysIterable<K> extends Iterable<K> {
-  _MapKeysIterable._();
+class _CompactKeysIterable<K> extends Iterable<K> {
+  _CompactKeysIterable._();
   external Iterator<K> get iterator;
   external int get length;
   external bool contains(Object? element);
 }
 
-class _MapValuesIterable<V> extends Iterable<V> {
-  _MapValuesIterable._();
+class _CompactValuesIterable<V> extends Iterable<V> {
+  _CompactValuesIterable._();
   external Iterator<V> get iterator;
   external int get length;
 }
 
-class _MapEntriesIterable<K, V> extends Iterable<MapEntry<K, V>> {
-  _MapEntriesIterable._();
+class _CompactEntriesIterable<K, V> extends Iterable<MapEntry<K, V>> {
+  _CompactEntriesIterable._();
   external Iterator<MapEntry<K, V>> get iterator;
   external int get length;
 }
@@ -1587,6 +1762,7 @@ class _MapIterator<E> implements Iterator<E> {
 // Big integers
 
 abstract final class BigInt implements Comparable<BigInt> {
+  BigInt._base();
   external static BigInt get zero;
   external static BigInt get one;
   external static BigInt get two;
@@ -1615,6 +1791,8 @@ abstract final class BigInt implements Comparable<BigInt> {
   external bool operator ==(Object other);
   external int get hashCode;
   external int compareTo(BigInt other);
+  external BigInt toUnsigned(int width);
+  external BigInt toSigned(int width);
   external int get bitLength;
   external int get sign;
   external bool get isEven;
@@ -1631,9 +1809,14 @@ abstract final class BigInt implements Comparable<BigInt> {
   external String toRadixString(int radix);
 }
 
+final class _BigIntImpl extends BigInt {
+  _BigIntImpl._() : super._base();
+}
+
 // Regular expressions
 
 abstract interface class RegExp implements Pattern {
+  RegExp._base();
   external factory RegExp(String source, {bool multiLine = false, bool caseSensitive = true, bool unicode = false, bool dotAll = false});
   external static String escape(String text);
   external RegExpMatch? firstMatch(String input);
@@ -1650,6 +1833,7 @@ abstract interface class RegExp implements Pattern {
 }
 
 abstract interface class RegExpMatch implements Match {
+  RegExpMatch._base();
   external int get start;
   external int get end;
   external String? group(int group);
@@ -1660,6 +1844,14 @@ abstract interface class RegExpMatch implements Match {
   external Pattern get pattern;
   external String? namedGroup(String name);
   external Iterable<String> get groupNames;
+}
+
+class _RegExp extends RegExp {
+  _RegExp._() : super._base();
+}
+
+class _RegExpMatch extends RegExpMatch {
+  _RegExpMatch._() : super._base();
 }
 
 class _StringMatch implements Match {

@@ -48,10 +48,10 @@ defineConstructor('RegExp.new', (runtime, _instance, args) => {
     );
   } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
-    const reason = error.message.replace(/^Invalid regular expression: \/.*\/[a-z]*: /, '');
-    return runtime.throwError('FormatException', '', [`${reason}`, source]);
+    const reason = error.message.replace(/^Invalid regular expression: (\/.*\/[a-z]*: )?/, '');
+    return runtime.throwError('FormatException', '', [IRREGEXP_MESSAGES[reason] ?? reason, source]);
   }
-  const object = new DartObject(runtime.links.classNamed('RegExp'), [], []);
+  const object = new DartObject(runtime.links.classNamed('_RegExp'), [], []);
   object.native = { source, multiLine, caseSensitive, unicode, dotAll, regex, values: () => [] };
   return object;
 });
@@ -133,7 +133,7 @@ export function matchAt(
 }
 
 export function newMatch(runtime: Runtime, state: MatchState): DartObject {
-  const object = new DartObject(runtime.links.classNamed('RegExpMatch'), [], []);
+  const object = new DartObject(runtime.links.classNamed('_RegExpMatch'), [], []);
   object.native = { ...state, values: () => [] } as unknown as DartObject['native'];
   return object;
 }
@@ -182,10 +182,22 @@ define('RegExp.isMultiLine', (_runtime, receiver) => stateOf(receiver).multiLine
 define('RegExp.isCaseSensitive', (_runtime, receiver) => stateOf(receiver).caseSensitive);
 define('RegExp.isUnicode', (_runtime, receiver) => stateOf(receiver).unicode);
 define('RegExp.isDotAll', (_runtime, receiver) => stateOf(receiver).dotAll);
+/** The VM's regular expression engine (Irregexp) words its syntax errors differently from the host's. */
+const IRREGEXP_MESSAGES: Record<string, string> = {
+  'missing )': 'Unterminated group',
+  'unmatched parentheses': "Unmatched ')'",
+  'nothing to repeat': 'Nothing to repeat',
+  'missing terminating ] for character class': 'Unterminated character class',
+  'duplicate group specifier name': 'Duplicate capture group name',
+  'invalid \\k<> named backreference': 'Invalid named capture referenced',
+  'range out of order in character class': 'Range out of order in character class',
+  'invalid group specifier name': 'Invalid capture group name',
+};
+
 define(
   'RegExp.toString',
   (_runtime, receiver) =>
-    `RegExp/${stateOf(receiver).source}/${stateOf(receiver).multiLine ? 'm' : ''}${stateOf(receiver).caseSensitive ? '' : 'i'}`
+    `RegExp: pattern=${stateOf(receiver).source} flags=${stateOf(receiver).multiLine ? 'm' : ''}${stateOf(receiver).caseSensitive ? '' : 'i'}${stateOf(receiver).unicode ? 'u' : ''}${stateOf(receiver).dotAll ? 's' : ''}`
 );
 
 function group(runtime: Runtime, receiver: Value, which: Value): Value {
@@ -215,8 +227,7 @@ define('RegExpMatch.namedGroup', (runtime, receiver, [name]) => {
   const state = matchState(receiver);
   const key = stringArg(runtime, name, 'name');
   const { names } = state;
-  if (!names || !(key in names))
-    return runtime.throwError('ArgumentError', 'value', [name, 'name', 'Not a capture group name']);
+  if (!names || !(key in names)) return runtime.throwError('ArgumentError', '', [`Not a capture group name: ${key}`]);
   return names[key];
 });
 define('RegExpMatch.groupNames', (runtime, receiver) =>

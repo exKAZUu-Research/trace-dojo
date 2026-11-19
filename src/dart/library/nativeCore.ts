@@ -1,5 +1,6 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../../interpreter/turtleWorld';
 import { formatDouble, safeToString, stringOf } from '../format';
+import { HashStore } from '../hashStore';
 import type { Runtime } from '../runtime';
 import { coreTypes, type DartType, isTop, substitute, TypeParam, typeParamType, typeToString } from '../types';
 import { DartClosure, DartList, DartObject, DartRecord, DartTypeValue, type Value } from '../values';
@@ -195,6 +196,10 @@ export function safeToStringOf(runtime: Runtime, value: Value): string {
   if (value instanceof DartList) {
     const cls = value.unmodifiable ? '_ImmutableList' : value.growable ? '_GrowableList' : '_List';
     return `Instance(length:${value.elements.length}) of '${cls}'`;
+  }
+  // The VM describes its maps and sets by class and length.
+  if (value instanceof DartObject && value.native instanceof HashStore) {
+    return `${value.native.isMap ? '_Map' : '_Set'} len:${value.native.size}`;
   }
   return safeToString(runtime, value);
 }

@@ -111,7 +111,8 @@ export interface LibraryLinks {
     className: string,
     constructorName: string,
     args: Value[],
-    named?: Record<string, Value>
+    named?: Record<string, Value>,
+    typeArgs?: readonly DartType[]
   ): DartObject;
   /** The value `toString` gives, or a fallback when the object's own `toString` fails. */
   stringify(runtime: Runtime, value: Value): string;
@@ -191,7 +192,7 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** Throws a `TypeError` with the VM's message, as failed casts and null checks do. */
   throwTypeError(message: string): never {
-    this.throwError('TypeError', '_withMessage', [message]);
+    this.throwError('_TypeError', '_withMessage', [message]);
   }
 
   // Classes and types of values

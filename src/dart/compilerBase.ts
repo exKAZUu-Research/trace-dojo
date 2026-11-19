@@ -48,6 +48,8 @@ export interface Compiled {
   completes?: boolean;
   /** Whether the expression creates an object, whose constructor's steps show what it did. */
   creates?: boolean;
+  /** An explicit extension application `E(x)`, whose members are the extension's. */
+  extensionOverride?: { ext: ExtensionInfo; typeArgs: DartType[] };
 }
 
 /** A member found through a static type, with its type in terms of the receiver's type arguments. */
@@ -55,7 +57,8 @@ export interface ResolvedMember {
   member: Member;
   /** The type of a field or getter, the parameter of a setter, or the signature of a method. */
   type: DartType;
-  extension?: { ext: ExtensionInfo; typeArgs: DartType[] };
+  /** An extension member, or a member of an extension type, which runs on the receiver without dispatch. */
+  extension?: { ext: ExtensionInfo | undefined; typeArgs: DartType[]; onType?: DartType };
 }
 
 /** Only the position of a span, without the fields of the node it belongs to. */
@@ -337,7 +340,30 @@ export abstract class CompilerBase {
     }
     const owner = asInstanceOf(type, member.owner);
     const map = new Map(member.owner.typeParams.map((param, index) => [param, owner?.args[index] ?? DYNAMIC]));
-    return { member, type: substitute(member.type, map) };
+    // An extension type's members run on its representation, which has no class to dispatch on.
+    const extension = member.owner.kind === 'extensionType' ? { ext: undefined, typeArgs: [] } : undefined;
+    return { member, type: substitute(member.type, map), extension };
+  }
+
+  /** Finds a member for a receiver, honoring an explicit extension application (`E(x).m`). */
+  memberFor(receiver: Compiled, lookupType: DartType, name: string, setter: boolean): ResolvedMember | undefined {
+    const override = receiver.extensionOverride;
+    if (!override) return this.lookupMember(lookupType, name, setter);
+    const member = (setter ? override.ext.setters : override.ext.members).get(name);
+    if (!member) return undefined;
+    const map = new Map(override.ext.typeParams.map((param, index) => [param, override.typeArgs[index]]));
+    return {
+      member,
+      type: substitute(member.type, map),
+      extension: { ext: override.ext, typeArgs: override.typeArgs, onType: substitute(override.ext.onType, map) },
+    };
+  }
+
+  /** Whether a member may be used on a receiver that may be null: Object's members and extensions on nullable types. */
+  acceptsNull(resolved: ResolvedMember): boolean {
+    if (resolved.member.owner === coreTypes.object) return true;
+    const onType = resolved.extension?.onType;
+    return onType !== undefined && isNullable(onType);
   }
 
   /** The extension member that applies to a receiver of a type, choosing the most specific extension. */
@@ -358,7 +384,7 @@ export abstract class CompilerBase {
     return {
       member: chosen.member,
       type: substitute(chosen.member.type, map),
-      extension: { ext: chosen.ext, typeArgs: chosen.typeArgs },
+      extension: { ext: chosen.ext, typeArgs: chosen.typeArgs, onType: chosen.onType },
     };
   }
 

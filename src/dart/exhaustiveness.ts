@@ -279,6 +279,9 @@ function covers(compiler: ExpressionCompiler, pattern: Pattern, space: Space): b
     case 'constant': {
       if (space.kind === 'null') return pattern.value.kind === 'null';
       if (space.kind !== 'constant') return false;
+      if (pattern.value.kind === 'dotShorthand' && space.type.kind === 'interface') {
+        return space.type.cls.staticMembers.get(pattern.value.name) === space.key;
+      }
       return constantKey(compiler, pattern.value) === space.key;
     }
     case 'object': {

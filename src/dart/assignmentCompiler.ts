@@ -364,16 +364,14 @@ export abstract class AssignmentCompiler extends StatementCompiler {
       read: (frame) => {
         const value = cell(frame).v;
         if (value === UNINITIALIZED)
-          frame.runtime.throwError('LateInitializationError', '', [`Local '${name}' has not been initialized.`]);
+          frame.runtime.throwError('LateError', '', [`Local '${name}' has not been initialized.`]);
         return value === UNASSIGNED ? undefined : value;
       },
       write: isLateFinal
         ? (frame, _prepared, value) => {
             const target = cell(frame);
             if (target.v !== UNINITIALIZED)
-              frame.runtime.throwError('LateInitializationError', '', [
-                `Local '${name}' has already been initialized.`,
-              ]);
+              frame.runtime.throwError('LateError', '', [`Local '${name}' has already been initialized.`]);
             target.v = value;
           }
         : (frame, _prepared, value) => {
@@ -427,9 +425,7 @@ export abstract class AssignmentCompiler extends StatementCompiler {
       write: (frame, _prepared, value) => {
         const cell = frame.runtime.globals[slot];
         if (isLateFinal && cell.v !== UNINITIALIZED) {
-          frame.runtime.throwError('LateInitializationError', '', [
-            `Field '${global.name}' has already been initialized.`,
-          ]);
+          frame.runtime.throwError('LateError', '', [`Field '${global.name}' has already been initialized.`]);
         }
         cell.v = value;
       },

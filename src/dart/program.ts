@@ -91,6 +91,36 @@ export function libraries(): Libraries {
       if (phase === 'resolve') {
         const core = envs.get('dart:core') as LibraryEnv;
         assignCoreTypes(core);
+        for (const name of [
+          'MappedIterable',
+          'MappedListIterable',
+          'WhereIterable',
+          'WhereTypeIterable',
+          'ExpandIterable',
+          'TakeIterable',
+          'TakeWhileIterable',
+          'SkipIterable',
+          'SkipWhileIterable',
+          'FollowedByIterable',
+          'CastIterable',
+          'ListIterable',
+          'ListIterator',
+          'ReversedListIterable',
+          'SubListIterable',
+          'MappedIterator',
+          'WhereIterator',
+          'WhereTypeIterator',
+          'ExpandIterator',
+          'TakeIterator',
+          'TakeWhileIterator',
+          'SkipIterator',
+          'SkipWhileIterator',
+          'FollowedByIterator',
+          'CastIterator',
+          'LateError',
+        ]) {
+          core.hiddenNames.add(name);
+        }
         for (const name of ['LinkedHashMap', 'LinkedHashSet']) {
           core.hiddenNames.add(name);
           (envs.get('dart:collection') as LibraryEnv).reexports.set(name, core.declarations.get(name) as never);
@@ -218,7 +248,7 @@ function classNamed(name: string): ClassInfo {
 
 export const LINKS: LibraryLinks = {
   classNamed,
-  construct(runtime, className, constructorName, args, named) {
+  construct(runtime, className, constructorName, args, named, typeArgs) {
     const cls = classNamed(className);
     const constructor = cls.constructors.get(constructorName);
     if (!constructor) throw new Error(`No constructor ${className}.${constructorName}`);
@@ -227,7 +257,7 @@ export const LINKS: LibraryLinks = {
       runtime,
       cls,
       constructor,
-      cls.typeParams.map(() => DYNAMIC),
+      typeArgs ? [...typeArgs] : cls.typeParams.map(() => DYNAMIC),
       { positional: args, named: namedArgs },
       undefined
     ) as DartObject;

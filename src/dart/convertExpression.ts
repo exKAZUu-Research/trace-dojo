@@ -954,6 +954,17 @@ export abstract class ExpressionConverter {
    */
   private constantPatternExpression(node: Node, children: Node[], isConst: boolean): Expression {
     const span = spanOf(node);
+    if (children[0]?.type === '.' && children.length === 2) {
+      return {
+        kind: 'dotShorthand',
+        name: children[1].type === 'new' ? 'new' : children[1].text,
+        arguments: undefined,
+        isConst,
+        ...span,
+      };
+    }
+    if (children.length === 1 && children[0].type === 'static_member_shorthand')
+      return this.convertExpression(children[0]);
     if (children[0]?.type === '-') {
       const operand = this.constantPatternExpression(node, children.slice(1), isConst);
       return { kind: 'prefix', operator: '-', operand, ...span };

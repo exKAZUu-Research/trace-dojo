@@ -917,13 +917,10 @@ export class Compiler extends AssignmentCompiler {
         const value = object.fields[slot];
         if (value !== UNINITIALIZED) return value;
         const initialize = lateInit;
-        if (!initialize)
-          return runtime.throwError('LateInitializationError', '', [`Field '${name}' has not been initialized.`]);
+        if (!initialize) return runtime.throwError('LateError', '', [`Field '${name}' has not been initialized.`]);
         const computed = initialize(runtime, object);
         if (field.isFinal && object.fields[slot] !== UNINITIALIZED) {
-          runtime.throwError('LateInitializationError', '', [
-            `Field '${name}' has been assigned during initialization.`,
-          ]);
+          runtime.throwError('LateError', '', [`Field '${name}' has been assigned during initialization.`]);
         }
         object.fields[slot] = computed;
         return computed;
@@ -981,7 +978,7 @@ export class Compiler extends AssignmentCompiler {
         impl: (runtime, receiver, args) => {
           const object = receiver as DartObject;
           if (field.isFinal && object.fields[slot] !== UNINITIALIZED) {
-            runtime.throwError('LateInitializationError', '', [`Field '${name}' has already been initialized.`]);
+            runtime.throwError('LateError', '', [`Field '${name}' has already been initialized.`]);
           }
           object.fields[slot] = args.positional[0];
           return;
@@ -2347,7 +2344,7 @@ export function readGlobalValue(runtime: Runtime, global: GlobalVariable): Value
     runtime.throwError('_MessageError', '', [`Reading static variable '${global.name}' during its initialization`]);
   }
   if (!global.initialize) {
-    runtime.throwError('LateInitializationError', '', [`Field '${global.name}' has not been initialized.`]);
+    runtime.throwError('LateError', '', [`Field '${global.name}' has not been initialized.`]);
   }
   cell.v = INITIALIZING;
   try {

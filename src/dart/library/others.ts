@@ -54,7 +54,43 @@ final class Point<T extends num> {
   }
 }
 
-class Rectangle<T extends num> {
+abstract mixin class _RectangleBase<T extends num> {
+  T get left;
+  T get top;
+  T get width;
+  T get height;
+  T get right => (left + width) as T;
+  T get bottom => (top + height) as T;
+  String toString() => "Rectangle (" + left.toString() + ", " + top.toString() + ") " + width.toString() + " x " + height.toString();
+  bool operator ==(Object other) => other is Rectangle && left == other.left && top == other.top && right == other.right && bottom == other.bottom;
+  int get hashCode => Object.hash(left.hashCode, top.hashCode, right.hashCode, bottom.hashCode);
+  Rectangle<T>? intersection(Rectangle<T> other) {
+    var x0 = max(left, other.left);
+    var x1 = min(left + width, other.left + other.width);
+    if (x0 <= x1) {
+      var y0 = max(top, other.top);
+      var y1 = min(top + height, other.top + other.height);
+      if (y0 <= y1) return Rectangle<T>(x0, y0, (x1 - x0) as T, (y1 - y0) as T);
+    }
+    return null;
+  }
+  bool intersects(Rectangle<num> other) => left <= other.left + other.width && other.left <= left + width && top <= other.top + other.height && other.top <= top + height;
+  Rectangle<T> boundingBox(Rectangle<T> other) {
+    var right = max(this.left + this.width, other.left + other.width);
+    var bottom = max(this.top + this.height, other.top + other.height);
+    var left = min(this.left, other.left);
+    var top = min(this.top, other.top);
+    return Rectangle<T>(left, top, (right - left) as T, (bottom - top) as T);
+  }
+  bool containsRectangle(Rectangle<num> another) => left <= another.left && left + width >= another.left + another.width && top <= another.top && top + height >= another.top + another.height;
+  bool containsPoint(Point<num> another) => another.x >= left && another.x <= left + width && another.y >= top && another.y <= top + height;
+  Point<T> get topLeft => Point<T>(this.left, this.top);
+  Point<T> get topRight => Point<T>((this.left + this.width) as T, this.top);
+  Point<T> get bottomRight => Point<T>((this.left + this.width) as T, (this.top + this.height) as T);
+  Point<T> get bottomLeft => Point<T>(this.left, (this.top + this.height) as T);
+}
+
+class Rectangle<T extends num> with _RectangleBase<T> {
   final T left;
   final T top;
   final T width;
@@ -62,15 +98,40 @@ class Rectangle<T extends num> {
   const Rectangle(this.left, this.top, T width, T height)
       : width = (width < 0) ? (-width * 0) as T : width,
         height = (height < 0) ? (-height * 0) as T : height;
-  T get right => (left + width) as T;
-  T get bottom => (top + height) as T;
-  String toString() => "Rectangle (" + left.toString() + ", " + top.toString() + ") " + width.toString() + " x " + height.toString();
-  bool operator ==(Object other) => other is Rectangle && left == other.left && top == other.top && right == other.right && bottom == other.bottom;
-  int get hashCode => Object.hash(left.hashCode, top.hashCode, right.hashCode, bottom.hashCode);
-  bool containsPoint(Point<num> another) => another.x >= left && another.x <= left + width && another.y >= top && another.y <= top + height;
-  bool intersects(Rectangle<num> other) => left <= other.left + other.width && other.left <= left + width && top <= other.top + other.height && other.top <= top + height;
-  Point<T> get topLeft => Point<T>(left, top);
-  Point<T> get bottomRight => Point<T>((left + width) as T, (top + height) as T);
+  factory Rectangle.fromPoints(Point<T> a, Point<T> b) {
+    T left = min(a.x, b.x);
+    T width = (max(a.x, b.x) - left) as T;
+    T top = min(a.y, b.y);
+    T height = (max(a.y, b.y) - top) as T;
+    return Rectangle<T>(left, top, width, height);
+  }
+}
+
+class MutableRectangle<T extends num> with _RectangleBase<T> implements Rectangle<T> {
+  T left;
+  T top;
+  T _width;
+  T _height;
+  MutableRectangle(this.left, this.top, T width, T height)
+      : _width = (width < 0) ? (-width * 0) as T : width,
+        _height = (height < 0) ? (-height * 0) as T : height;
+  factory MutableRectangle.fromPoints(Point<T> a, Point<T> b) {
+    T left = min(a.x, b.x);
+    T width = (max(a.x, b.x) - left) as T;
+    T top = min(a.y, b.y);
+    T height = (max(a.y, b.y) - top) as T;
+    return MutableRectangle<T>(left, top, width, height);
+  }
+  T get width => _width;
+  set width(T width) {
+    if (width < 0) width = (-width * 0) as T;
+    _width = width;
+  }
+  T get height => _height;
+  set height(T height) {
+    if (height < 0) height = (-height * 0) as T;
+    _height = height;
+  }
 }
 `;
 

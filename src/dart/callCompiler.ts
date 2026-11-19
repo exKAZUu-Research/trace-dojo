@@ -10,7 +10,7 @@ import {
   type ResolvedMember,
   typeName,
 } from './compilerBase';
-import type { TopLevelFunction } from './environment';
+import type { ExtensionInfo, TopLevelFunction } from './environment';
 import { ExpressionCompiler, INFERENCE_HOLE, isInferenceHole, SHORTED } from './expressionCompiler';
 import type { Frame, Runtime, TypeEnv } from './runtime';
 import type { FunctionContext } from './scope';
@@ -97,6 +97,9 @@ export abstract class CallCompiler extends ExpressionCompiler {
   // code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of callee.
   compileCall(expression: Extract<Expression, { kind: 'call' }>, context: DartType | undefined): Compiled {
     const { callee, arguments: args, typeArguments } = expression;
+    if (callee.kind === 'dotShorthand' && !callee.arguments) {
+      return this.compileDotShorthand({ ...callee, arguments: args }, context);
+    }
     if (callee.kind === 'identifier') {
       const resolution = this.resolveName(callee.name);
       if (!resolution) return this.undefinedName(callee, callee.name);
@@ -122,6 +125,8 @@ export abstract class CallCompiler extends ExpressionCompiler {
           const { declaration } = resolution;
           if (declaration.kind === 'function')
             return this.compileFunctionCall(declaration.fn, args, typeArguments, expression, context);
+          if (declaration.kind === 'extension')
+            return this.compileExtensionOverride(declaration.ext, args, typeArguments, expression);
           if (declaration.kind === 'class') {
             return this.compileConstructorCall(
               declaration.cls,
@@ -231,6 +236,23 @@ export abstract class CallCompiler extends ExpressionCompiler {
     return this.compileValueCall(target, args, typeArguments, expression, context);
   }
 
+  /** `E(x)`, which applies the extension E to x explicitly. */
+  private compileExtensionOverride(
+    ext: ExtensionInfo,
+    args: ArgumentsSyntax,
+    typeArguments: TypeSyntax[] | undefined,
+    span: Span
+  ): Compiled {
+    if (args.positional.length !== 1 || args.named.length > 0)
+      this.error(span, `拡張 ${ext.name ?? ''} を明示して使うときは、値を 1 つだけ書いてください。`);
+    const value = this.compileExpression(args.positional[0], ext.typeParams.length === 0 ? ext.onType : undefined);
+    const typeArgs = typeArguments
+      ? typeArguments.map((argument) => this.resolveType(argument))
+      : this.matchExtension(ext, value.type);
+    if (!typeArgs) return this.error(span, `${typeName(value.type)} 型の値には、拡張 ${ext.name ?? ''} は使えません。`);
+    return { ...value, extensionOverride: { ext, typeArgs }, variable: undefined };
+  }
+
   /** The type arguments written after a class's name in a constructor call (`Box<int>(1)`), if any. */
   private classTypeArguments(
     cls: ClassInfo,
@@ -312,17 +334,12 @@ export abstract class CallCompiler extends ExpressionCompiler {
       return this.dynamicCall(receiver, name, args, span, nullAware);
     }
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
-    const resolved = this.lookupMember(lookupType, name, false);
+    const resolved = this.memberFor(receiver, lookupType, name, false);
     if (!resolved) {
       const shown = name === '[]' ? '[]' : name;
       return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${shown} というメソッドがありません。`);
     }
-    if (
-      !nullAware &&
-      isNullable(receiverType) &&
-      resolved.member.owner !== coreTypes.object &&
-      receiverType.kind !== 'null'
-    ) {
+    if (!nullAware && isNullable(receiverType) && !this.acceptsNull(resolved) && receiverType.kind !== 'null') {
       const what = name === '[]' ? '添字 [ ]' : `${name}()`;
       this.error(
         span,

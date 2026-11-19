@@ -1,10 +1,11 @@
 import { stringOf } from '../format';
 import { HashStore } from '../hashStore';
 import { type Frame, Frame as FrameClass, type Runtime } from '../runtime';
-import { coreTypes, type DartType, DYNAMIC, interfaceType, isTop } from '../types';
+import { coreTypes, type DartType, DYNAMIC, type InterfaceType, interfaceType } from '../types';
 import { Cell, DartList, DartObject, type Value } from '../values';
 import {
   callFunction,
+  castTo,
   checkElement,
   define,
   defineConstructor,
@@ -26,7 +27,7 @@ function rangeError(
   runtime: Runtime,
   value: bigint | number,
   min: number,
-  max: number,
+  max: number | bigint,
   name: string | undefined
 ): never {
   runtime.throwError('RangeError', 'range', [BigInt(value), BigInt(min), BigInt(max), name]);
@@ -80,7 +81,7 @@ function checkRange(runtime: Runtime, start: Value, end: Value, length: number):
 
 defineConstructor('List.filled', (runtime, _instance, args, typeArgs) => {
   const length = intArg(runtime, args.positional[0], 'length');
-  if (length < 0n || length > MAX_LIST_LENGTH) rangeError(runtime, length, 0, Number(MAX_LIST_LENGTH), 'length');
+  if (length < 0n || length > MAX_LIST_LENGTH) rangeError(runtime, length, 0, MAX_LIST_LENGTH, 'length');
   const count = index(length);
   runtime.allocate(count + 1);
   const fill = args.positional[1];
@@ -110,7 +111,7 @@ defineConstructor('List.of', (runtime, _instance, args, typeArgs) => {
 });
 defineConstructor('List.generate', (runtime, _instance, args, typeArgs) => {
   const length = intArg(runtime, args.positional[0], 'length');
-  if (length < 0n || length > MAX_LIST_LENGTH) rangeError(runtime, length, 0, Number(MAX_LIST_LENGTH), 'length');
+  if (length < 0n || length > MAX_LIST_LENGTH) rangeError(runtime, length, 0, MAX_LIST_LENGTH, 'length');
   const generator = args.positional[1];
   const values: Value[] = [];
   const result = new DartList(
@@ -156,17 +157,11 @@ define('List.length=', (runtime, receiver, [length]) => {
   const target = list(receiver);
   checkGrowable(runtime, target, 'length');
   const count = intArg(runtime, length, 'newLength');
-  if (count < 0n || count > MAX_LIST_LENGTH) rangeError(runtime, count, 0, Number(MAX_LIST_LENGTH), 'newLength');
+  if (count < 0n || count > MAX_LIST_LENGTH) rangeError(runtime, count, 0, MAX_LIST_LENGTH, 'newLength');
   const elements = target.elements;
   if (count > BigInt(elements.length)) {
     const elementType = elementTypeOf(target);
-    if (
-      !isTop(elementType) &&
-      elementType.kind !== 'null' &&
-      !(elementType.kind !== 'interface' || elementType.nullable)
-    ) {
-      runtime.throwError('UnsupportedError', '', ['Cannot grow a list of non-nullable elements']);
-    }
+    castTo(runtime, undefined, elementType);
     runtime.allocate(index(count) - elements.length);
     while (elements.length < count) elements.push(undefined);
   } else {
@@ -248,10 +243,12 @@ define('_ListIterator.moveNext', (runtime, receiver) => {
   state.position++;
   return true;
 });
-define(
-  '_ListIterator.current',
-  (_runtime, receiver) => ((receiver as DartObject).native as unknown as ListIteratorState).current
-);
+define('_ListIterator.current', (runtime, receiver) => {
+  const state = (receiver as DartObject).native as unknown as ListIteratorState;
+  // Before the first moveNext and after the last, `current` is `null as E`, which fails for a non-nullable E.
+  if (state.current === undefined) castTo(runtime, undefined, elementTypeOf(receiver as DartObject));
+  return state.current;
+});
 
 define('List.forEach', (runtime, receiver, [action]) => {
   const target = list(receiver);
@@ -270,10 +267,6 @@ define('List.contains', (runtime, receiver, [value]) => {
 define('List.join', (runtime, receiver, [separator = '']) => {
   const target = list(receiver);
   return target.elements.map((element) => stringOf(runtime, element)).join(separator as string);
-});
-define('List.reversed', (runtime, receiver) => {
-  const target = list(receiver);
-  return newList(runtime, elementTypeOf(target), target.elements.toReversed(), false);
 });
 define('List.toString', (runtime, receiver) =>
   iterableToFullString(runtime, receiver, list(receiver).elements, '[', ']')
@@ -419,17 +412,12 @@ define('List.sublist', (runtime, receiver, [start, end]) => {
   const [from, to] = checkRange(runtime, start, end, target.elements.length);
   return newList(runtime, elementTypeOf(target), target.elements.slice(from, to));
 });
-define('List.getRange', (runtime, receiver, [start, end]) => {
-  const target = list(receiver);
-  const [from, to] = checkRange(runtime, start, end, target.elements.length);
-  return newList(runtime, elementTypeOf(target), target.elements.slice(from, to), false);
-});
 define('List.setRange', (runtime, receiver, [start, end, iterable, skip = 0n]) => {
   const target = list(receiver);
   checkModifiable(runtime, target);
   const [from, to] = checkRange(runtime, start, end, target.elements.length);
   const skipCount = intArg(runtime, skip, 'skipCount');
-  if (skipCount < 0n) rangeError(runtime, skipCount, 0, Number(MAX_LIST_LENGTH), 'skipCount');
+  if (skipCount < 0n) rangeError(runtime, skipCount, 0, MAX_LIST_LENGTH, 'skipCount');
   const values = iterableValues(runtime, iterable).slice(index(skipCount));
   if (values.length < to - from) runtime.throwError('StateError', '', ['Too few elements']);
   for (let position = from; position < to; position++) target.elements[position] = values[position - from];
@@ -806,6 +794,12 @@ function storeIterator(
   return iterator;
 }
 
+function storeCurrent(runtime: Runtime, receiver: Value): Value {
+  const state = (receiver as DartObject).native as unknown as StoreIteratorState;
+  if (state.current === undefined) castTo(runtime, undefined, elementTypeOf(receiver as DartObject));
+  return state.current;
+}
+
 function moveStoreIterator(runtime: Runtime, receiver: Value): boolean {
   const state = (receiver as DartObject).native as unknown as StoreIteratorState;
   if (state.modifications !== state.store.modifications)
@@ -816,7 +810,18 @@ function moveStoreIterator(runtime: Runtime, receiver: Value): boolean {
     const key = state.store.keyAt(position);
     if (state.kind === 'keys') state.current = key;
     else if (state.kind === 'values') state.current = state.store.entryValues[position];
-    else state.current = runtime.links.construct(runtime, 'MapEntry', '_', [key, state.store.entryValues[position]]);
+    else {
+      state.current = runtime.links.construct(
+        runtime,
+        'MapEntry',
+        '_',
+        [key, state.store.entryValues[position]],
+        undefined,
+        (receiver as DartObject).typeArgs[0].kind === 'interface'
+          ? ((receiver as DartObject).typeArgs[0] as InterfaceType).args
+          : undefined
+      );
+    }
     return true;
   }
   state.current = undefined;
@@ -827,10 +832,7 @@ define('Set.iterator', (runtime, receiver) =>
   storeIterator(runtime, receiver, '_SetIterator', 'keys', (receiver as DartObject).typeArgs)
 );
 define('_SetIterator.moveNext', (runtime, receiver) => moveStoreIterator(runtime, receiver));
-define(
-  '_SetIterator.current',
-  (_runtime, receiver) => ((receiver as DartObject).native as unknown as StoreIteratorState).current
-);
+define('_SetIterator.current', (runtime, receiver) => storeCurrent(runtime, receiver));
 define('Set.contains', (_runtime, receiver, [value]) => store(receiver).has(value));
 define('Set.add', (runtime, receiver, [value]) => {
   checkSetModifiable(runtime, receiver);
@@ -1013,13 +1015,13 @@ function mapView(runtime: Runtime, receiver: Value, className: string, typeArgs:
   return view;
 }
 define('Map.keys', (runtime, receiver) =>
-  mapView(runtime, receiver, '_MapKeysIterable', [elementTypeOf(receiver as DartObject, 0)])
+  mapView(runtime, receiver, '_CompactKeysIterable', [elementTypeOf(receiver as DartObject, 0)])
 );
 define('Map.values', (runtime, receiver) =>
-  mapView(runtime, receiver, '_MapValuesIterable', [elementTypeOf(receiver as DartObject, 1)])
+  mapView(runtime, receiver, '_CompactValuesIterable', [elementTypeOf(receiver as DartObject, 1)])
 );
 define('Map.entries', (runtime, receiver) =>
-  mapView(runtime, receiver, '_MapEntriesIterable', [
+  mapView(runtime, receiver, '_CompactEntriesIterable', [
     elementTypeOf(receiver as DartObject, 0),
     elementTypeOf(receiver as DartObject, 1),
   ])
@@ -1027,27 +1029,24 @@ define('Map.entries', (runtime, receiver) =>
 function viewedMap(receiver: Value): Value {
   return ((receiver as DartObject).native as unknown as { map: Value }).map;
 }
-define('_MapKeysIterable.iterator', (runtime, receiver) =>
+define('_CompactKeysIterable.iterator', (runtime, receiver) =>
   storeIterator(runtime, viewedMap(receiver), '_MapIterator', 'keys', (receiver as DartObject).typeArgs)
 );
-define('_MapValuesIterable.iterator', (runtime, receiver) =>
+define('_CompactValuesIterable.iterator', (runtime, receiver) =>
   storeIterator(runtime, viewedMap(receiver), '_MapIterator', 'values', (receiver as DartObject).typeArgs)
 );
-define('_MapEntriesIterable.iterator', (runtime, receiver) => {
+define('_CompactEntriesIterable.iterator', (runtime, receiver) => {
   const mapEntry = runtime.links.classNamed('MapEntry');
   return storeIterator(runtime, viewedMap(receiver), '_MapIterator', 'entries', [
     interfaceType(mapEntry, (receiver as DartObject).typeArgs),
   ]);
 });
-define('_MapKeysIterable.length', (_runtime, receiver) => BigInt(store(viewedMap(receiver)).size));
-define('_MapValuesIterable.length', (_runtime, receiver) => BigInt(store(viewedMap(receiver)).size));
-define('_MapEntriesIterable.length', (_runtime, receiver) => BigInt(store(viewedMap(receiver)).size));
-define('_MapKeysIterable.contains', (_runtime, receiver, [key]) => store(viewedMap(receiver)).has(key));
+define('_CompactKeysIterable.length', (_runtime, receiver) => BigInt(store(viewedMap(receiver)).size));
+define('_CompactValuesIterable.length', (_runtime, receiver) => BigInt(store(viewedMap(receiver)).size));
+define('_CompactEntriesIterable.length', (_runtime, receiver) => BigInt(store(viewedMap(receiver)).size));
+define('_CompactKeysIterable.contains', (_runtime, receiver, [key]) => store(viewedMap(receiver)).has(key));
 define('_MapIterator.moveNext', (runtime, receiver) => moveStoreIterator(runtime, receiver));
-define(
-  '_MapIterator.current',
-  (_runtime, receiver) => ((receiver as DartObject).native as unknown as StoreIteratorState).current
-);
+define('_MapIterator.current', (runtime, receiver) => storeCurrent(runtime, receiver));
 define('Map.addEntries', (runtime, receiver, [entries]) => {
   checkMapModifiable(runtime, receiver);
   for (const entry of iterableValues(runtime, entries)) {

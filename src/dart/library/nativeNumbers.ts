@@ -55,10 +55,6 @@ function roundHalfAway(value: number): number {
 }
 
 function toIntChecked(runtime: Runtime, value: number): bigint {
-  if (!Number.isFinite(value))
-    runtime.throwError('UnsupportedError', '', [
-      Number.isNaN(value) ? 'NaN.toInt()' : value > 0 ? 'Infinity.toInt()' : '-Infinity.toInt()',
-    ]);
   return truncateToInt(runtime, value);
 }
 
@@ -110,7 +106,7 @@ export function parseDouble(text: string): number | undefined {
 }
 
 /** `int.parse`: an optional sign, then digits of the radix, or `0x` and hexadecimal digits without a radix. */
-export function parseInt(text: string, radix: number | undefined): bigint | undefined {
+export function parseInt(text: string, radix: number | undefined, bounded = true): bigint | undefined {
   const trimmed = text.trim();
   let rest = trimmed;
   let negative = false;
@@ -133,6 +129,7 @@ export function parseInt(text: string, radix: number | undefined): bigint | unde
   }
   if (negative) result = -result;
   if (base === 16 && radix === undefined && !negative && result <= 0xff_ff_ff_ff_ff_ff_ff_ffn) return wrap(result);
+  if (!bounded) return result;
   if (result > MAX_INT || result < -MAX_INT - 1n) return undefined;
   return result;
 }
@@ -140,7 +137,7 @@ export function parseInt(text: string, radix: number | undefined): bigint | unde
 function checkRadix(runtime: Runtime, radix: Value): number | undefined {
   if (radix === undefined) return undefined;
   const value = Number(intArg(runtime, radix, 'radix'));
-  if (value < 2 || value > 36) runtime.throwError('RangeError', 'range', [radix, 2n, 36n, 'radix']);
+  if (value < 2 || value > 36) runtime.throwError('RangeError', '', [`Radix ${value} not in range 2..36`]);
   return value;
 }
 
@@ -285,7 +282,11 @@ defineAll(
 defineAll(['num.toString', 'int.toString', 'double.toString'], (_runtime, self) =>
   typeof self === 'bigint' ? self.toString() : formatDouble(self as number)
 );
-define('int.toRadixString', (runtime, self, [radix]) => (self as bigint).toString(checkRadix(runtime, radix) ?? 10));
+define('int.toRadixString', (runtime, self, [radix]) => {
+  const value = Number(intArg(runtime, radix, 'radix'));
+  if (value < 2 || value > 36) runtime.throwError('RangeError', 'range', [radix, 2n, 36n, 'radix']);
+  return (self as bigint).toString(value);
+});
 define('int.isEven', (_runtime, self) => ((self as bigint) & 1n) === 0n);
 define('int.isOdd', (_runtime, self) => ((self as bigint) & 1n) === 1n);
 define('int.bitLength', (_runtime, self) => BigInt(bitLength(self as bigint)));
@@ -318,6 +319,11 @@ define('int.parse', (runtime, _self, [source], namedArgs) => {
   const result = parseInt(text, radix);
   if (result === undefined) {
     if (text.trim().length === 0) throwFormat(runtime, 'Invalid number', text, 0n);
+    // The VM reports digits that are all valid but too many for 64 bits separately, without the position.
+    const unbounded = parseInt(text, radix, false);
+    if (unbounded !== undefined) {
+      throwFormat(runtime, `${unbounded < 0n ? 'Negative' : 'Positive'} input exceeds the limit of integer`, text);
+    }
     throwFormat(runtime, `Invalid radix-${radix ?? 10} number`, text, 0n);
   }
   return result;
@@ -335,7 +341,7 @@ define('double.tryParse', (runtime, _self, [source]) => parseDouble(stringArg(ru
 define('num.parse', (runtime, _self, [source]) => {
   const text = stringArg(runtime, source, 'input');
   const result = parseInt(text, undefined) ?? parseDouble(text);
-  if (result === undefined) throwFormat(runtime, 'Invalid number', text, 0n);
+  if (result === undefined) runtime.throwError('FormatException', '', [text]);
   return result;
 });
 define('num.tryParse', (runtime, _self, [source]) => {

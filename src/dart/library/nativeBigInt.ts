@@ -9,7 +9,7 @@ interface BigIntState {
 }
 
 function newBigInt(runtime: Runtime, value: bigint): DartObject {
-  const object = new DartObject(runtime.links.classNamed('BigInt'), [], []);
+  const object = new DartObject(runtime.links.classNamed('_BigIntImpl'), [], []);
   object.native = { value, values: () => [] } satisfies BigIntState as unknown as DartObject['native'];
   return object;
 }
@@ -51,9 +51,24 @@ function radixOf(runtime: Runtime, radix: Value): number | undefined {
   return value;
 }
 
-define('BigInt.zero', (runtime) => newBigInt(runtime, 0n));
-define('BigInt.one', (runtime) => newBigInt(runtime, 1n));
-define('BigInt.two', (runtime) => newBigInt(runtime, 2n));
+// The constants are single objects, so `identical(BigInt.one, BigInt.one)` holds.
+const constants = new WeakMap<Runtime, Map<bigint, DartObject>>();
+function constant(runtime: Runtime, value: bigint): DartObject {
+  let table = constants.get(runtime);
+  if (!table) {
+    table = new Map();
+    constants.set(runtime, table);
+  }
+  let object = table.get(value);
+  if (!object) {
+    object = newBigInt(runtime, value);
+    table.set(value, object);
+  }
+  return object;
+}
+define('BigInt.zero', (runtime) => constant(runtime, 0n));
+define('BigInt.one', (runtime) => constant(runtime, 1n));
+define('BigInt.two', (runtime) => constant(runtime, 2n));
 define('BigInt.parse', (runtime, _receiver, [source], namedArgs) => {
   const text = stringArg(runtime, source, 'source');
   const value = parseBigInt(text, radixOf(runtime, named(namedArgs, 'radix', undefined)));
@@ -146,8 +161,32 @@ define('BigInt.hashCode', (runtime, receiver) => numberHash(BigInt.asIntN(64, va
 define('BigInt.compareTo', (runtime, receiver, [other]) => {
   const a = valueOf(runtime, receiver);
   const b = valueOf(runtime, other);
-  return a < b ? -1n : a > b ? 1n : 0n;
+  if (a < 0n !== b < 0n) return a < 0n ? -1n : 1n;
+  const result = compareDigits(a < 0n ? -a : a, b < 0n ? -b : b);
+  return a < 0n ? -result : result;
 });
+
+/** The VM's comparison of magnitudes: the difference of their counts of 32-bit digits, else of the first unequal digit. */
+function compareDigits(a: bigint, b: bigint): bigint {
+  const x = digitsOf(a);
+  const y = digitsOf(b);
+  if (x.length !== y.length) return BigInt(x.length - y.length);
+  for (let position = x.length - 1; position >= 0; position--) {
+    if (x[position] !== y[position]) return x[position] - y[position];
+  }
+  return 0n;
+}
+function digitsOf(value: bigint): bigint[] {
+  const digits: bigint[] = [];
+  for (let rest = value; rest > 0n; rest >>= 32n) digits.push(rest & 0xff_ff_ff_ffn);
+  return digits;
+}
+define('BigInt.toUnsigned', (runtime, receiver, [width]) =>
+  newBigInt(runtime, BigInt.asUintN(Number(intArg(runtime, width, 'width')), valueOf(runtime, receiver)))
+);
+define('BigInt.toSigned', (runtime, receiver, [width]) =>
+  newBigInt(runtime, BigInt.asIntN(Number(intArg(runtime, width, 'width')), valueOf(runtime, receiver)))
+);
 define('BigInt.bitLength', (runtime, receiver) => BigInt(bitLength(valueOf(runtime, receiver))));
 define('BigInt.sign', (runtime, receiver) => {
   const value = valueOf(runtime, receiver);
@@ -181,7 +220,13 @@ define(
   'BigInt.isValidInt',
   (runtime, receiver) => BigInt.asIntN(64, valueOf(runtime, receiver)) === valueOf(runtime, receiver)
 );
-define('BigInt.toInt', (runtime, receiver) => BigInt.asIntN(64, valueOf(runtime, receiver)));
+define('BigInt.toInt', (runtime, receiver) => {
+  // The VM clamps values beyond the 64-bit range.
+  const value = valueOf(runtime, receiver);
+  if (value > 9_223_372_036_854_775_807n) return 9_223_372_036_854_775_807n;
+  if (value < -9_223_372_036_854_775_808n) return -9_223_372_036_854_775_808n;
+  return value;
+});
 define('BigInt.toDouble', (runtime, receiver) => Number(valueOf(runtime, receiver)));
 define('BigInt.toString', (runtime, receiver) => valueOf(runtime, receiver).toString());
 define('BigInt.toRadixString', (runtime, receiver, [radix]) =>

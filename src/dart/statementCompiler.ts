@@ -16,7 +16,7 @@ import type { CompiledFunction, FunctionSpec } from './callCompiler';
 import { type Compiled, type Eval, typeName } from './compilerBase';
 import { checkExhaustive } from './exhaustiveness';
 import { SHORTED } from './expressionCompiler';
-import { type CompiledPattern, PatternCompiler } from './patternCompiler';
+import { type CompiledPattern, isRefutableSyntax, PatternCompiler } from './patternCompiler';
 import { DartThrow, type Frame } from './runtime';
 import { type ConditionFlow, Flow, FunctionContext, type LocalVar } from './scope';
 import {
@@ -1579,46 +1579,6 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   static readonly SHORTED = SHORTED;
-}
-
-/**
- * Whether a pattern can fail to match in a way a declaration may not allow: constants, relational patterns, and null
- * checks. Other patterns that do not match the value throw at runtime, as Dart's declarations do.
- */
-function isRefutableSyntax(pattern: Pattern): boolean {
-  switch (pattern.kind) {
-    case 'constant':
-    case 'relational':
-    case 'nullCheck': {
-      return true;
-    }
-    case 'or':
-    case 'and': {
-      return isRefutableSyntax(pattern.left) || isRefutableSyntax(pattern.right);
-    }
-    case 'parenthesized':
-    case 'cast':
-    case 'nullAssert': {
-      return isRefutableSyntax(pattern.pattern);
-    }
-    case 'list': {
-      return pattern.elements.some((element) =>
-        element.kind === 'rest'
-          ? element.pattern !== undefined && isRefutableSyntax(element.pattern)
-          : isRefutableSyntax(element)
-      );
-    }
-    case 'map': {
-      return pattern.entries.some((entry) => isRefutableSyntax(entry.value));
-    }
-    case 'record':
-    case 'object': {
-      return pattern.fields.some((field) => isRefutableSyntax(field.pattern));
-    }
-    default: {
-      return false;
-    }
-  }
 }
 
 function loopCompletion(completion: Completion, labels: readonly string[]): Completion | undefined | 'continue' {

@@ -565,7 +565,7 @@ export abstract class PatternCompiler extends CallCompiler {
   compilePatternAssignment(pattern: Pattern, value: Expression, span: Span): Compiled {
     const compiled = this.compileExpression(value, this.patternContextType(pattern));
     const matcher = this.compilePattern(pattern, compiled.type, { mode: 'assign', isFinal: false });
-    if (!matcher.irrefutable) this.error(span, 'このパターンには合わない値があるので、代入には使えません。');
+    if (isRefutableSyntax(pattern)) this.error(span, 'このパターンには合わない値があるので、代入には使えません。');
     const { run } = compiled;
     return {
       type: compiled.type,
@@ -580,6 +580,46 @@ export abstract class PatternCompiler extends CallCompiler {
   }
 
   static readonly OBJECT = objectType();
+}
+
+/**
+ * Whether a pattern can fail to match in a way a declaration may not allow: constants, relational patterns, and null
+ * checks. Other patterns that do not match the value throw at runtime, as Dart's declarations do.
+ */
+export function isRefutableSyntax(pattern: Pattern): boolean {
+  switch (pattern.kind) {
+    case 'constant':
+    case 'relational':
+    case 'nullCheck': {
+      return true;
+    }
+    case 'or':
+    case 'and': {
+      return isRefutableSyntax(pattern.left) || isRefutableSyntax(pattern.right);
+    }
+    case 'parenthesized':
+    case 'cast':
+    case 'nullAssert': {
+      return isRefutableSyntax(pattern.pattern);
+    }
+    case 'list': {
+      return pattern.elements.some((element) =>
+        element.kind === 'rest'
+          ? element.pattern !== undefined && isRefutableSyntax(element.pattern)
+          : isRefutableSyntax(element)
+      );
+    }
+    case 'map': {
+      return pattern.entries.some((entry) => isRefutableSyntax(entry.value));
+    }
+    case 'record':
+    case 'object': {
+      return pattern.fields.some((field) => isRefutableSyntax(field.pattern));
+    }
+    default: {
+      return false;
+    }
+  }
 }
 
 function compareBigints(operator: string, a: bigint, b: bigint): boolean {
