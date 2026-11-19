@@ -209,3 +209,13 @@ fun move(t: Turtle) {
   expect(withoutLines(kotlinTrace.traceItems)).toEqual(withoutLines(javaTrace.traceItems));
   expect(kotlinTrace.finalBoard).toBe(javaTrace.finalBoard);
 });
+
+test("records the step of a top-level property's initializer, as Java records a static field's", () => {
+  const source = 'fun g() = 3\nval top = g()\nfun main() {\n    println(top)\n}';
+  const trace = traceProgram('kotlin', source, source);
+  expect(trace.traceItems.map(({ line, vars }) => ({ line, vars }))).toEqual([
+    { line: 0, vars: {} },
+    { line: 2, vars: { top: 3 } },
+    { line: 4, vars: { top: 3 } },
+  ]);
+});

@@ -138,7 +138,6 @@ export class Compiler extends DeclarationCompiler {
 
   /** Compiles files together: their classes first, then their signatures, then their bodies. */
   // code-gauge-allow functionNcss 49 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-  // code-gauge-allow functionCognitiveComplexity 20 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   compileFiles(
     files: { file: KotlinFile; isLibrary: boolean }[],
     afterClasses: () => void,
@@ -174,18 +173,14 @@ export class Compiler extends DeclarationCompiler {
       if (!entry.cls && delegateGlobal !== undefined && entry.initializer) {
         const evaluate = entry.initializer.eval;
         const { info } = this.initializerContext(entry);
-        const run = (frame: Frame): void => {
-          frame.runtime.call(info, frame, [], undefined, [], undefined, (inner) => {
-            inner.runtime.globals[delegateGlobal] = evaluate(inner);
-            return;
-          });
+        const isStepped = this.recordsSteps && !entry.file.isLibrary;
+        const store = (inner: Frame): void => {
+          inner.runtime.globals[delegateGlobal] = evaluate(inner);
         };
-        const onlyCalls = entry.initializer.isCreation === true;
         initializers.push({
           row: entry.decl.row,
           isConstant: false,
-          run:
-            this.recordsSteps && !entry.file.isLibrary ? this.steppedInitializer(entry.decl.row, run, onlyCalls) : run,
+          run: this.initializerRun(info, entry.decl.row, store, isStepped, entry.initializer.isCreation === true),
         });
         continue;
       }
@@ -202,27 +197,37 @@ export class Compiler extends DeclarationCompiler {
       );
       const { slot } = entry.symbol;
       if (compiled.constant !== undefined) entry.symbol.constantInitializer = compiled.constant;
-      const { info } = context;
-      const run = (frame: Frame): void => {
-        frame.runtime.call(info, frame, [], undefined, [], undefined, (inner) => {
-          inner.runtime.globals[slot] = evaluate(inner);
-          return;
-        });
+      const isStepped = this.recordsSteps && !entry.file.isLibrary && compiled.constant === undefined;
+      const store = (inner: Frame): void => {
+        inner.runtime.globals[slot] = evaluate(inner);
       };
       initializers.push({
         row: entry.decl.row,
         isConstant: compiled.constant !== undefined || entry.decl.initializer.kind === 'null',
-        run:
-          this.recordsSteps && !entry.file.isLibrary && compiled.constant === undefined
-            ? this.steppedInitializer(entry.decl.row, run, compiled.isCreation === true)
-            : run,
+        run: this.initializerRun(context.info, entry.decl.row, store, isStepped, compiled.isCreation === true),
       });
     }
     return { contexts: prepared.map(({ context }) => context), initializers };
   }
 
-  private steppedInitializer(row: number, run: (frame: Frame) => void, onlyCalls: boolean): (frame: Frame) => void {
-    return (frame) => frame.runtime.steps.runStatement(row, onlyCalls, () => run(frame));
+  /**
+   * Runs a top-level property's initializer in a frame of its own, recording its step there, as a Java static field's
+   * initializer records one in its class's initializer: the step shows the property's new value.
+   */
+  private initializerRun(
+    info: FunctionInfo,
+    row: number,
+    store: (frame: Frame) => void,
+    isStepped: boolean,
+    onlyCalls: boolean
+  ): (frame: Frame) => void {
+    return (frame) => {
+      frame.runtime.call(info, frame, [], undefined, [], undefined, (inner) => {
+        if (isStepped) inner.runtime.steps.runStatement(row, onlyCalls, () => store(inner));
+        else store(inner);
+        return;
+      });
+    };
   }
 
   get globals(): number {
