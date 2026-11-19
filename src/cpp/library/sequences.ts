@@ -343,18 +343,18 @@ export function iteratorRange(
     const [slot] = callbackOperands([{ type: from, category: proxy ? 'prvalue' : undefined }], first.row, (frame) =>
       frame.pending.at(-1)
     );
-    let run: ReturnType<typeof constructElement>;
+    let run: Expr['run'];
     try {
       run =
         output === 'assign'
-          ? compiler.withLibraryAccess(() => compiler.convert(slot, target, first.row).run as Eval<Value>)
-          : constructElement(compiler, target, [slot], first.row);
+          ? compiler.withLibraryAccess(() => compiler.convert(slot, target, first.row)).run
+          : elementConstruction(compiler, target, [slot], first.row).run;
     } catch (error) {
       if (error instanceof CompileError) return;
       throw error;
     }
     construct = (frame, value, destination) =>
-      holdValues(frame, [proxy ? value : locationOf(value)], () => run(frame, destination));
+      holdValues(frame, [proxy ? value : locationOf(value)], () => run(frame, undefined, destination) as Value);
   }
   return {
     params,

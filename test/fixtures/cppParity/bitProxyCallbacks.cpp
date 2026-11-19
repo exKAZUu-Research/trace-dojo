@@ -27,6 +27,16 @@ struct ClearingFlag {
   ClearingFlag(std::vector<bool>::reference bit) : value(bit) { bit = false; }
 };
 
+struct LocatedFlag;
+LocatedFlag* firstFlag = nullptr;
+struct LocatedFlag {
+  LocatedFlag(std::vector<bool>::reference bit) {
+    if (firstFlag == nullptr) firstFlag = this;
+    std::cout << this - firstFlag;
+    bit = false;
+  }
+};
+
 int main() {
   std::vector<bool> bits{false, true, true};
   std::for_each(bits.begin(), bits.end(), toggle);
@@ -74,4 +84,17 @@ int main() {
   source[0] = true;
   vector.assign(source.begin(), source.end());
   std::cout << vector.front().value << source[0] << '\n';
+
+  std::vector<bool> pair{true, true};
+  std::vector<LocatedFlag> inserted;
+  inserted.reserve(4);
+  inserted.insert(inserted.end(), pair.begin(), pair.end());
+  std::cout << ' ' << pair[0] << pair[1] << '\n';
+  pair[0] = true;
+  pair[1] = true;
+  firstFlag = nullptr;
+  std::vector<LocatedFlag> assigned;
+  assigned.reserve(4);
+  assigned.assign(pair.begin(), pair.end());
+  std::cout << ' ' << pair[0] << pair[1] << '\n';
 }
