@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 429 -- Resolves related type operators sharing generic parameters and type construction.
+// code-gauge-allow-file fileNcss 447 -- Resolves related type operators sharing generic parameters and type construction.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
@@ -30,6 +30,7 @@ import {
   nullType,
   numberType,
   type ObjectType,
+  permissiveAnyType,
   type Property,
   stringType,
   type Structure,
@@ -501,9 +502,30 @@ export class TypeOperators {
         return checker.typeNodes.typeFromNode(falseNode);
       },
       inferTypeParameters: [...this.inferParametersOf(node).values()],
+      outerTypeParameters: this.conditionalOuterParameters(node),
       distributive: checkType.kind === 'typeParameter',
     };
     return this.resolveConditional(conditional, new Map());
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 16 -- Each enclosing binding has its own scope rule.
+  private conditionalOuterParameters(node: TreeNode): TypeParameter[] {
+    const parameters = this.c.signatures.outerTypeParametersOf(node) ?? [];
+    let child = node;
+    for (let ancestor = node.parent; ancestor; ancestor = ancestor.parent) {
+      if (ancestor.type === 'conditional_type' && ancestor.childForFieldName('consequence')?.id === child.id)
+        for (const parameter of this.inferParametersOf(ancestor).values()) parameters.push(parameter);
+      if (ancestor.type === 'index_signature') {
+        const clause = named(ancestor).find((member) => member.type === 'mapped_type_clause');
+        const name = clause?.childForFieldName('name')?.text;
+        if (name) {
+          const parameter = this.localParameterAt(ancestor, child, name);
+          if (parameter) parameters.push(parameter);
+        }
+      }
+      child = ancestor;
+    }
+    return parameters;
   }
 
   /** The mapper that applies `first` and then `second`. */
@@ -535,6 +557,7 @@ export class TypeOperators {
     for (const [index, parameter] of type.inferTypeParameters.entries())
       mapper.set(parameter.id, inferTypeParameters[index]);
     const extendsType = this.c.instantiate(type.extendsType, mapper);
+    if (checkType === permissiveAnyType || extendsType === permissiveAnyType) return permissiveAnyType;
     const deferred = { type, outer, mapper, checkType, extendsType, inferTypeParameters };
     if (isGenericObjectOrIndexType(checkType) || isGenericObjectOrIndexType(extendsType, inferTypeParameters))
       return this.deferredConditional(deferred);
@@ -605,6 +628,7 @@ export class TypeOperators {
         return checker.instantiate(type.falseType, outer);
       },
       inferTypeParameters,
+      outerTypeParameters: type.outerTypeParameters,
       root: type,
       mapper: outer,
     };

@@ -1,3 +1,4 @@
+import type { ExecutionBudget } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { keyedIndexes } from './indexInfos';
 import {
@@ -57,7 +58,7 @@ export function conditionalBranch(
   // Every type extends `any` and `unknown`, `any` included; it extends any other type ambiguously.
   if (isAnyLike(extendsType) || isIntrinsic(extendsType, 'unknown')) return 'true';
   if (isAnyLike(checkType)) return 'both';
-  const parameters = [...typeParametersIn(checkType), ...typeParametersIn(extendsType)];
+  const parameters = [...typeParametersIn(checkType, [], c.budget), ...typeParametersIn(extendsType, [], c.budget)];
   if (parameters.length === 0) return c.relations.isAssignable(checkType, extendsType) ? 'true' : 'false';
   const isAssignableWith = (map: (parameter: TypeParameter) => Type): boolean => {
     const mapper: Mapper = new Map(parameters.map((parameter) => [parameter.id, map(parameter)]));
@@ -75,19 +76,35 @@ export function conditionalBranch(
  * arguments, and elements, including the members of object and function types and the parts of mapped types, but not
  * the type parameters a signature or mapped type declares itself.
  */
-export function typeParametersIn(type: Type, except: readonly TypeParameter[] = []): TypeParameter[] {
+export function typeParametersIn(
+  type: Type,
+  except: readonly TypeParameter[] = [],
+  budget?: ExecutionBudget
+): TypeParameter[] {
   const found = new Map<number, TypeParameter>();
   const declared = new Set<number>(except.map((parameter) => parameter.id));
   const seen = new Set<Type>();
-  const visit = (current: Type): void => {
-    if (seen.has(current)) return;
+  const pending = [type];
+  while (pending.length > 0) {
+    budget?.spend();
+    const current = pending.pop() as Type;
+    if (seen.has(current)) continue;
     seen.add(current);
-    for (const child of childTypes(current)) visit(child);
-    if (current.kind === 'object') for (const child of objectMemberTypes(current, declared)) visit(child);
+    for (const child of parameterChildren(current, declared)) pending.push(child);
     if (current.kind === 'typeParameter') found.set(current.id, current);
-  };
-  visit(type);
+  }
   return [...found.values()].filter((parameter) => !declared.has(parameter.id));
+}
+
+function parameterChildren(type: Type, declared: Set<number>): readonly Type[] {
+  if (type.kind === 'conditional') {
+    for (const parameter of type.inferTypeParameters) declared.add(parameter.id);
+    // Branches can refer to the conditional's own alias. Their lexical parameters are known without instantiating them.
+    const outer = type.outerTypeParameters.map((parameter) => type.mapper?.get(parameter.id) ?? parameter);
+    return [type.checkType, type.extendsType, ...outer];
+  }
+  const children = childTypes(type);
+  return type.kind === 'object' ? [...children, ...objectMemberTypes(type, declared)] : children;
 }
 
 /** The types an anonymous or mapped object type holds, adding the type parameters it declares to `declared`. */

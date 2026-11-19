@@ -20,3 +20,9 @@ function symbol(source: { [key]?: number }): number {
 }
 
 console.log(count({ count: 4 }), strings({ a: 'a', b: 'b' }), pattern({ x: 2, x2: 3 }), symbol({ [key]: 6 }));
+
+function unused(source: { item?: void }): Record<string, number> {
+  return source;
+}
+
+console.log(Object.keys(unused({})).length);

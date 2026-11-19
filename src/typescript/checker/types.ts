@@ -260,6 +260,7 @@ export interface ConditionalType {
   falseType: Type;
   /** The `infer` type parameters the extends type declares. */
   inferTypeParameters: TypeParameter[];
+  outerTypeParameters: TypeParameter[];
   /** Whether it distributes over a union its check type, a naked type parameter, receives. */
   distributive: boolean;
   /** For a conditional type instantiated while still generic, the declared one and the type arguments it got. */

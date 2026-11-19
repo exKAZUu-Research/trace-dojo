@@ -601,6 +601,7 @@ function defineConsoleDir(
         'stdout',
         inspectValue(runtime, value, undefined, limit('depth'), {
           breakLength: limit('breakLength'),
+          colors: toBoolean(option('colors')),
           compact: typeof compact === 'boolean' || typeof compact === 'number' ? compact : undefined,
           maxArrayLength: limit('maxArrayLength'),
           maxStringLength: limit('maxStringLength'),

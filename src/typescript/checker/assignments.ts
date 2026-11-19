@@ -462,7 +462,6 @@ export class AssignmentChecker {
     const indexNode = expression.childForFieldName('index') as TreeNode;
     const objectType = this.c.members.checkNonNullable(objectNode, this.c.expressions.check(objectNode));
     const indexType = this.c.members.indexTypeOf(indexNode);
-    if (this.isReadonlyArrayLike(objectType)) return this.reportReadonlyIndex(expression, objectType);
     const keys = literalKeys(indexType);
     const readonlyKey = keys
       ?.filter((key) => isPropertyKeyLiteral(key))
@@ -517,13 +516,6 @@ export class AssignmentChecker {
   private narrowedType(reference: TreeNode): Type | undefined {
     const key = this.c.flow.referenceKey(reference);
     return key ? this.c.flow.entry(key)?.type : undefined;
-  }
-
-  private isReadonlyArrayLike(type: Type): boolean {
-    return (
-      type.kind === 'object' &&
-      (this.c.isReadonlyArrayType(type) || (type.objectKind === 'tuple' && type.tuple?.readonly === true))
-    );
   }
 
   private namedWriteType(type: Type, name: string): Type {

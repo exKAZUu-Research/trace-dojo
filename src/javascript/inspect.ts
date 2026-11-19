@@ -1,4 +1,6 @@
-// code-gauge-allow-file fileNcss 576 -- One port of Node.js's util.inspect, whose formatters share its context.
+// code-gauge-allow-file fileNcss 593 -- One port of Node.js's util.inspect, whose formatters share its context.
+import { inspect as hostInspect, type InspectStyle, stripVTControlCharacters } from 'node:util';
+
 import { eastAsianWidthType } from 'get-east-asian-width';
 
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
@@ -77,6 +79,7 @@ interface Context {
   sorted: Value;
   getters: boolean | 'get' | 'set';
   numericSeparator: boolean;
+  colors: boolean;
   maxStringLength: number;
 }
 
@@ -90,6 +93,7 @@ export interface InspectOptions {
   sorted?: Value;
   getters?: boolean | 'get' | 'set';
   numericSeparator?: boolean;
+  colors?: boolean;
   maxStringLength?: number;
 }
 
@@ -129,6 +133,7 @@ export function inspectValue(
     sorted: options.sorted ?? false,
     getters: options.getters ?? false,
     numericSeparator: options.numericSeparator ?? false,
+    colors: options.colors ?? false,
     maxStringLength: Math.max(0, options.maxStringLength ?? MAX_STRING_LENGTH),
   };
   return formatCharged(ctx, value, 0);
@@ -143,20 +148,40 @@ function formatCharged(ctx: Context, value: Value, recurseTimes: number): string
 }
 
 function formatValue(ctx: Context, value: Value, recurseTimes: number): string {
-  if (typeof value === 'string') return formatString(ctx, value);
-  if (typeof value === 'number')
-    return ctx.numericSeparator ? separateDigits(formatNumber(value)) : formatNumber(value);
-  if (typeof value === 'bigint') return `${ctx.numericSeparator ? separateDigits(String(value)) : value}n`;
-  if (!(value instanceof JsObject)) return String(value);
+  if (!(value instanceof JsObject)) return formatPrimitive(ctx, value);
   if (ctx.seen.has(value)) {
     let index = ctx.circular.get(value);
     if (index === undefined) {
       index = ctx.circular.size + 1;
       ctx.circular.set(value, index);
     }
-    return `[Circular *${index}]`;
+    return stylize(ctx, `[Circular *${index}]`, 'special');
   }
   return formatRaw(ctx, value, recurseTimes);
+}
+
+function formatPrimitive(ctx: Context, value: Exclude<Value, JsObject>): string {
+  if (typeof value === 'string') return formatString(ctx, value);
+  if (typeof value === 'number' || typeof value === 'bigint') {
+    const digits = typeof value === 'number' ? formatNumber(value) : String(value);
+    return stylize(
+      ctx,
+      (ctx.numericSeparator ? separateDigits(digits) : digits) + (typeof value === 'bigint' ? 'n' : ''),
+      typeof value
+    );
+  }
+  return stylize(ctx, String(value), value === null ? 'null' : typeof value);
+}
+
+function stylize(ctx: Context, text: string, type: string): string {
+  const style = ctx.colors && hostInspect.styles[type as InspectStyle];
+  if (typeof style === 'function') return style(text);
+  const color = style ? hostInspect.colors[style] : undefined;
+  return color ? `\u001B[${color[0]}m${text}\u001B[${color[1]}m` : text;
+}
+
+function unstyled(ctx: Context, text: string): string {
+  return ctx.colors ? stripVTControlCharacters(text) : text;
 }
 
 /** Formats `-0` as `-0`, which `String` does not. */
@@ -192,11 +217,11 @@ function formatString(ctx: Context, text: string): string {
     return (
       value
         .split(/(?<=\n)/)
-        .map((line) => quote(line))
+        .map((line) => stylize(ctx, quote(line), 'string'))
         .join(` +\n${' '.repeat(ctx.indentationLvl + 2)}`) + trailer
     );
   }
-  return quote(value) + trailer;
+  return stylize(ctx, quote(value), 'string') + trailer;
 }
 
 /** Quotes a string with the first of `'`, `"`, and `` ` `` it does not contain, escaping what it must. */
@@ -244,7 +269,7 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   if (typeof frame === 'string') return frame;
   if (recurseTimes > ctx.depth) {
     const name = prefixOf(constructor, value instanceof JsArray ? 'Array' : 'Object').slice(0, -1);
-    return constructor === undefined ? name : `[${name}]`;
+    return constructor === undefined ? name : stylize(ctx, `[${name}]`, 'special');
   }
   recurseTimes++;
   ctx.seen.add(value);
@@ -252,7 +277,7 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   const output =
     value instanceof JsArray ? formatArray(ctx, value, recurseTimes) : formatCollection(ctx, value, recurseTimes);
   if (value.promise) output.push(promiseEntry(ctx, value.promise, recurseTimes));
-  if (showsLength) output.push(`[length]: ${formatNumber((value as JsArray).elements.length)}`);
+  if (showsLength) output.push(`[length]: ${formatPrimitive(ctx, (value as JsArray).elements.length)}`);
   appendProperties(
     ctx,
     value,
@@ -266,7 +291,7 @@ function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string 
   const braces = [...frame.braces];
   if (reference !== undefined) {
     // The compact layout puts its base after the opening brace, so the reference goes before the brace instead.
-    const label = `<ref *${reference}>`;
+    const label = stylize(ctx, `<ref *${reference}>`, 'special');
     if (ctx.compact === true) braces[0] = `${label} ${braces[0]}`;
     else base = base === '' ? label : `${label} ${base}`;
   }
@@ -362,8 +387,8 @@ function isBuiltinPrototype(object: JsObject): boolean {
 }
 
 /** What surrounds the entries of an object, or its whole text when it has no entries to list. */
-// code-gauge-allow functionCognitiveComplexity 24 -- Ports Node.js's util.inspect, so the two stay comparable.
-// code-gauge-allow functionNcss 39 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionCognitiveComplexity 28 -- Ports Node.js's util.inspect, so the two stay comparable.
+// code-gauge-allow functionNcss 43 -- Ports Node.js's util.inspect, so the two stay comparable.
 function frameOf(ctx: Context, value: JsObject, constructor: string | undefined, hasKeys: boolean): Frame | string {
   const { runtime } = ctx;
   if (value instanceof JsArray) {
@@ -377,12 +402,12 @@ function frameOf(ctx: Context, value: JsObject, constructor: string | undefined,
   let base = '';
   let open = '{';
   if (value instanceof JsFunction) base = functionBase(runtime, value, constructor);
-  else if (value.regexp) base = String(value.regexp);
+  else if (value.regexp) base = stylize(ctx, String(value.regexp), 'regexp');
   else if (dateValueOf(value) !== undefined) base = dateBase(value, constructor);
   else if (value.isError && constructor !== 'Object')
     base = errorText(runtime, value, constructor, ctx.errorStacks.get(value));
   else if (value.primitive !== undefined && !isPrimitivePrototype(runtime, value))
-    base = boxedBase(ctx, value.primitive, constructor, toStringTagOf(value));
+    base = boxedBase(ctx, value.primitive, constructor, toStringTagOf(value), hasKeys);
   else if (value.isArguments) open = '[Arguments] {';
   else {
     const tag = toStringTagOf(value);
@@ -390,7 +415,11 @@ function frameOf(ctx: Context, value: JsObject, constructor: string | undefined,
     if (tag && tag !== constructor) open = `${prefixOf(constructor, fallback)}[${tag}] {`;
     else if (constructor !== 'Object') open = `${prefixOf(constructor, fallback)}{`;
   }
-  if (!hasKeys) return base || `${open}}`;
+  if (!hasKeys) {
+    if (value instanceof JsFunction) return stylize(ctx, base, 'special');
+    if (dateValueOf(value) !== undefined) return stylize(ctx, base, 'date');
+    return base || `${open}}`;
+  }
   return { base, braces: [open, '}'] };
 }
 
@@ -415,14 +444,15 @@ function boxedBase(
   ctx: Context,
   primitive: string | number | boolean | bigint | symbol,
   constructor: string | undefined,
-  tag: string | undefined
+  tag: string | undefined,
+  hasKeys: boolean
 ): string {
   const type = BOXED_TYPES[typeof primitive as keyof typeof BOXED_TYPES];
   let base = `[${type}`;
   if (type !== constructor) base += constructor === undefined ? ' (null prototype)' : ` (${constructor})`;
-  base += `: ${typeof primitive === 'string' ? formatString(ctx, primitive) : formatValue(ctx, primitive, 0)}]`;
+  base += `: ${formatPrimitive({ ...ctx, colors: false }, primitive)}]`;
   if (tag && tag !== constructor) base += ` [${tag}]`;
-  return base;
+  return hasKeys ? base : stylize(ctx, base, typeof primitive);
 }
 
 const BOXED_TYPES = {
@@ -658,17 +688,21 @@ function gotText(ctx: Context, object: JsObject, property: AccessorProperty, rec
   const label = property.set ? 'Getter/Setter' : 'Getter';
   try {
     const value = ctx.runtime.call(property.get, object, []);
-    if (isObject(value)) return `[${label}] ${formatIndented(ctx, value, recurseTimes)}`;
-    return `[${label}: ${formatIndented(ctx, value, recurseTimes)}]`;
+    if (isObject(value)) return `${stylize(ctx, `[${label}]`, 'special')} ${formatIndented(ctx, value, recurseTimes)}`;
+    return getterResult(ctx, label, formatIndented(ctx, value, recurseTimes));
   } catch (error) {
     if (!(error instanceof JsThrow)) throw error;
-    return `[${label}: <Inspection threw (${formatIndented(ctx, error.value, recurseTimes)})>]`;
+    return getterResult(ctx, label, `<Inspection threw (${formatIndented(ctx, error.value, recurseTimes)})>`);
   }
 }
 
-function accessorText(property: AccessorProperty): string {
-  if (property.get) return property.set ? '[Getter/Setter]' : '[Getter]';
-  return property.set ? '[Setter]' : 'undefined';
+function getterResult(ctx: Context, label: string, text: string): string {
+  return `${stylize(ctx, `[${label}:`, 'special')} ${text}${stylize(ctx, ']', 'special')}`;
+}
+
+function accessorText(ctx: Context, property: AccessorProperty): string {
+  if (property.get) return stylize(ctx, property.set ? '[Getter/Setter]' : '[Getter]', 'special');
+  return property.set ? stylize(ctx, '[Setter]', 'special') : stylize(ctx, 'undefined', 'undefined');
 }
 
 // code-gauge-allow functionCognitiveComplexity 21 -- Ports Node.js's util.inspect, so the two stay comparable.
@@ -681,7 +715,7 @@ function formatArray(ctx: Context, array: JsArray, recurseTimes: number): string
       const start = index;
       while (index < elements.length && elements[index] === HOLE) index++;
       const count = index - start;
-      output.push(`<${count} empty item${count > 1 ? 's' : ''}>`);
+      output.push(stylize(ctx, `<${count} empty item${count > 1 ? 's' : ''}>`, 'undefined'));
     } else {
       const defined = array.definedElements?.get(index);
       output.push(
@@ -752,33 +786,33 @@ function formatCollection(ctx: Context, value: JsObject, recurseTimes: number): 
 
 /** What a promise shows before its properties: `<pending>`, its value, or `<rejected>` and its reason. */
 function promiseEntry(ctx: Context, state: PromiseState, recurseTimes: number): string {
-  if (state.status === 'pending') return '<pending>';
+  if (state.status === 'pending') return stylize(ctx, '<pending>', 'special');
   const result = formatIndented(ctx, state.result, recurseTimes);
-  return state.status === 'rejected' ? `<rejected> ${result}` : result;
+  return state.status === 'rejected' ? `${stylize(ctx, '<rejected>', 'special')} ${result}` : result;
 }
 
 // code-gauge-allow functionCognitiveComplexity 20 -- Ports Node.js's util.inspect, so the two stay comparable.
 function formatProperty(ctx: Context, object: JsObject, recurseTimes: number, key: Key, receiver = object): string {
   const property = ctx.runtime.getOwnProperty(object, key);
-  let text = 'undefined';
+  let text = stylize(ctx, 'undefined', 'undefined');
   let separator = ' ';
   if (property && !isAccessor(property)) {
     // The compact layout indents an object's values one more and moves a value too wide for a line to the next.
     const diff = ctx.compact === true && !(object instanceof JsArray) ? 3 : 2;
     text = formatIndented(ctx, ctx.runtime.readPropertyValue(property), recurseTimes, diff);
-    if (diff === 3 && ctx.breakLength < text.length) separator = `\n${' '.repeat(ctx.indentationLvl + diff)}`;
+    if (diff === 3 && ctx.breakLength < (ctx.colors ? stringWidth(unstyled(ctx, text)) : text.length))
+      separator = `\n${' '.repeat(ctx.indentationLvl + diff)}`;
   } else if (property && isAccessor(property)) {
     text = formatAccessor(ctx, receiver, property, recurseTimes);
   }
-  // A symbol key shows its description with control characters escaped, unlike a symbol value.
-  const symbolKey = typeof key === 'symbol' ? escapeControls(key.toString()) : undefined;
-  if (property && !property.enumerable) {
-    const name = symbolKey ?? (typeof key === 'string' && !KEY_PATTERN.test(key) ? quote(key) : String(key));
-    return `[${name}]:${separator}${text}`;
-  }
-  if (typeof key === 'symbol') return `${symbolKey}:${separator}${text}`;
-  if (KEY_PATTERN.test(key)) return `${key === '__proto__' ? "['__proto__']" : key}:${separator}${text}`;
-  return `${quote(key)}:${separator}${text}`;
+  const name = inspectionPropertyName(ctx, key);
+  return `${property && !property.enumerable ? `[${name}]` : name}:${separator}${text}`;
+}
+
+function inspectionPropertyName(ctx: Context, key: Key): string {
+  if (typeof key === 'symbol') return stylize(ctx, escapeControls(key.toString()), 'symbol');
+  if (!KEY_PATTERN.test(key)) return stylize(ctx, quote(key), 'string');
+  return key === '__proto__' ? "['__proto__']" : key;
 }
 
 function formatIndented(ctx: Context, value: Value, recurseTimes: number, diff = 2): string {
@@ -826,7 +860,7 @@ function isBelowBreakLength(ctx: Context, output: string[], start: number, base:
   let totalLength = output.length + start;
   if (totalLength + output.length > ctx.breakLength) return false;
   for (const entry of output) {
-    totalLength += entry.length;
+    totalLength += unstyled(ctx, entry).length;
     if (totalLength > ctx.breakLength) return false;
   }
   return !base.includes('\n');
@@ -842,7 +876,7 @@ function groupArrayElements(ctx: Context, output: string[], array: JsArray): str
   const separatorSpace = 2;
   const dataLength: number[] = [];
   for (let i = 0; i < outputLength; i++) {
-    const length = stringWidth(output[i]);
+    const length = stringWidth(unstyled(ctx, output[i]));
     dataLength.push(length);
     totalLength += length + separatorSpace;
     if (maxLength < length) maxLength = length;
@@ -911,5 +945,5 @@ function columnWidth(code: number, character: string): number {
 }
 
 function formatAccessor(ctx: Context, object: JsObject, property: AccessorProperty, recurseTimes: number): string {
-  return showsGetter(ctx, property) ? gotText(ctx, object, property, recurseTimes) : accessorText(property);
+  return showsGetter(ctx, property) ? gotText(ctx, object, property, recurseTimes) : accessorText(ctx, property);
 }

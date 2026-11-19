@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 563 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 574 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -41,6 +41,7 @@ import {
   anonymousObject,
   anyType,
   booleanType,
+  type ConditionalType,
   emptyStructure,
   type IndexInfo,
   intersectionOf,
@@ -762,6 +763,7 @@ export class Checker {
   }
 
   private readonly circularConstraints = new CircularConstraints(this);
+  private readonly conditionalConstraintsInProgress = new Set<number>();
 
   /** As TypeScript's `getConstraintOfTypeParameter`, none for a circular constraint. */
   constraintOf(parameter: TypeParameter): Type | undefined {
@@ -770,6 +772,7 @@ export class Checker {
 
   /** The type a generic type stands for at most, which its members come from. */
   baseConstraint(type: Type): Type {
+    this.budget.spend();
     switch (type.kind) {
       case 'typeParameter': {
         return this.constraintOf(type) ?? unknownType;
@@ -784,16 +787,28 @@ export class Checker {
         return unionOf([stringType, numberType, symbolType]);
       }
       case 'conditional': {
-        // The true branch sees its check type narrowed to the extends type, as TypeScript's substitution types do.
-        const trueConstraint =
-          type.trueType === type.checkType
-            ? intersectionOf([this.baseConstraint(type.checkType), type.extendsType], this.budget)
-            : this.baseConstraint(type.trueType);
-        return unionOf([trueConstraint, this.baseConstraint(type.falseType)]);
+        return this.conditionalConstraint(type);
       }
       default: {
         return type;
       }
+    }
+  }
+
+  private conditionalConstraint(type: ConditionalType): Type {
+    const { id } = type.root ?? type;
+    if (this.conditionalConstraintsInProgress.has(id)) return unknownType;
+    this.conditionalConstraintsInProgress.add(id);
+    try {
+      // The true branch sees its check type narrowed to the extends type.
+      const trueType = type.trueType;
+      const trueConstraint =
+        trueType === type.checkType
+          ? intersectionOf([this.baseConstraint(type.checkType), type.extendsType], this.budget)
+          : this.baseConstraint(trueType);
+      return unionOf([trueConstraint, this.baseConstraint(type.falseType)]);
+    } finally {
+      this.conditionalConstraintsInProgress.delete(id);
     }
   }
 

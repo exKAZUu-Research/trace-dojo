@@ -9,3 +9,7 @@ function absent(source: { count?: undefined }): void {
 function required(source: { count: number | undefined }): void {
   const indexed: Record<string, number> = source;
 }
+
+function optionalNever(source: { item?: never }): void {
+  const indexed: Record<string, number> = source;
+}
