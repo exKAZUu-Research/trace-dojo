@@ -6,3 +6,4 @@
 (19,10): error TS2339: Property 'toUpperCase' does not exist on type '{ m(): void; }'.
 (22,6): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
 (24,28): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+(28,22): error TS2551: Property 'toFixed' does not exist on type 'string'. Did you mean 'fixed'?

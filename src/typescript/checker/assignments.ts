@@ -40,7 +40,7 @@ export class AssignmentChecker {
       leftExpression.type === 'object' ||
       leftExpression.type === 'array'
     ) {
-      const implied = this.c.silently(() => this.patternContext(leftExpression));
+      const implied = this.c.flow.probe(() => this.c.silently(() => this.patternContext(leftExpression)));
       const valueType = this.c.expressions.check(right, implied);
       this.c.patterns.checkInitializer(leftExpression, right, valueType, implied);
       this.destructuringAssignment(leftExpression, valueType);
@@ -119,20 +119,26 @@ export class AssignmentChecker {
     this.c.flow.set(key, { type, assigned: true, evolving: entry?.evolving }, target);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Probes the accessor and getter types within isolated flow.
   private assignedAccessorType(target: TreeNode): Type | undefined {
     if (target.type !== 'member_expression' && target.type !== 'subscript_expression') return undefined;
-    const object = target.childForFieldName('object') as TreeNode;
-    const index = target.childForFieldName('index');
-    const indexed = index ? this.c.silently(() => this.c.expressions.check(index)) : undefined;
-    const name =
-      target.childForFieldName('property')?.text ?? (indexed?.kind === 'literal' ? String(indexed.value) : undefined);
-    if (name === undefined) return undefined;
-    const objectType = this.c.silently(() => this.c.expressions.check(object));
-    const properties = (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>
-      this.c.propertyOf(member, name)
+    return this.c.flow.probe(() =>
+      this.c.silently(() => {
+        const object = target.childForFieldName('object') as TreeNode;
+        const index = target.childForFieldName('index');
+        const indexed = index ? this.c.expressions.check(index) : undefined;
+        const name =
+          target.childForFieldName('property')?.text ??
+          (indexed?.kind === 'literal' ? String(indexed.value) : undefined);
+        if (name === undefined) return;
+        const objectType = this.c.expressions.check(object);
+        const properties = (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>
+          this.c.propertyOf(member, name)
+        );
+        if (!properties.some((property) => property?.writeType)) return;
+        return unionOf(properties.map((property) => property?.type() ?? anyType));
+      })
     );
-    if (!properties.some((property) => property?.writeType)) return undefined;
-    return unionOf(properties.map((property) => property?.type() ?? anyType));
   }
 
   isAutoTyped(symbol: Sym, declaration = symbol.valueDeclaration): boolean {
@@ -277,6 +283,7 @@ export class AssignmentChecker {
     const left = node.childForFieldName('left') as TreeNode;
     const right = node.childForFieldName('right') as TreeNode;
     const operator = node.childForFieldName('operator')?.text ?? '+=';
+    const declared = this.declaredTargetType(left);
     const targetType = this.targetType(left, true);
     if (operator === '&&=' || operator === '||=' || operator === '??=') {
       // The right operand runs only on some paths, so its effects join the path that skips it.
@@ -286,11 +293,10 @@ export class AssignmentChecker {
         valueType = this.c.expressions.check(right, targetType);
       });
       this.c.flow.current = this.c.flow.merge([skipped, evaluated]);
-      if (targetType !== errorType)
-        this.c.expressions.checkAssignable(skipParentheses(left), valueType, this.declaredTargetType(left));
+      if (targetType !== errorType) this.c.expressions.checkAssignable(skipParentheses(left), valueType, declared);
       const result = this.logicalAssignmentType(operator, targetType, valueType);
       // The target holds what it kept or what was assigned, as `s ||= "x"` leaves a truthy `s` or `"x"`.
-      if (targetType !== errorType) this.assignReference(skipParentheses(left), this.declaredTargetType(left), result);
+      if (targetType !== errorType) this.assignReference(skipParentheses(left), declared, result);
       return result;
     }
     const valueType = this.c.expressions.check(right);
@@ -302,7 +308,6 @@ export class AssignmentChecker {
       targetType,
       valueType
     );
-    const declared = this.declaredTargetType(left);
     if (
       targetType !== errorType &&
       resultType !== errorType &&
@@ -332,11 +337,12 @@ export class AssignmentChecker {
   }
 
   private declaredTargetType(left: TreeNode): Type {
-    return this.c.silently(() => this.targetType(left, false));
+    return this.c.flow.probe(() => this.c.silently(() => this.targetType(left, false)));
   }
 
   update(node: TreeNode): Type {
     const argument = node.childForFieldName('argument') as TreeNode;
+    const declared = this.declaredTargetType(argument);
     const type = this.targetType(argument, true);
     if (type === errorType) return numberType;
     // As TypeScript's `checkNonNullType`, then its arithmetic operand check, which rejects `void`.
@@ -347,7 +353,7 @@ export class AssignmentChecker {
       return numberType;
     }
     const result = this.c.operators.isBigintLike(operand) ? bigintType : numberType;
-    this.assignReference(skipParentheses(argument), this.declaredTargetType(argument), result);
+    this.assignReference(skipParentheses(argument), declared, result);
     return result;
   }
 

@@ -22,3 +22,7 @@ let body: string | number = "text";
 body.toUpperCase();
 let spreadState: string | number = "before";
 ((first, second) => second.toUpperCase())(...([spreadState = 3] as [number]), spreadState);
+let compound: string | number = 0;
+const valuesToWrite = [0];
+valuesToWrite[compound = 0] += (compound = "numeric").length;
+console.log(compound.toFixed());

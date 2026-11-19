@@ -29,3 +29,17 @@ let spreadState: string | number = "before";
 console.log(((first, second) => second.toFixed(1))(...([spreadState = 3] as [number]), spreadState));
 spreadState = 4;
 console.log(((first, second) => second.toUpperCase())(...([spreadState = "after"] as [string]), spreadState));
+let compound: string | number = 0;
+const valuesToWrite = [0];
+valuesToWrite[compound = 0] += (compound = "numeric").length;
+console.log(compound.toUpperCase(), valuesToWrite[0]);
+
+let logical: string | number = 0;
+const logicalTargets = [0];
+logicalTargets[logical = 0] ||= (logical = "logical").length;
+if (typeof logical === "string") console.log(logical.toUpperCase(), logicalTargets[0]);
+
+let update: string | number = "before";
+const updateTargets = [1];
+updateTargets[update = 0]++;
+console.log(update.toFixed(1), updateTargets[0]);
