@@ -177,7 +177,7 @@ export class BinderBase {
 
   tupleType(elements: Type[], names?: (string | undefined)[]): NamedType {
     const symbol = this.library.valueTuples.get(elements.length);
-    if (!symbol) this.unsupported(0, '要素が8個以上のタプル');
+    if (!symbol) this.unsupported(0, '要素が17個以上のタプル');
     const type = namedType(symbol, elements);
     if (names?.some((name) => name !== undefined)) type.tupleNames = names;
     return type;

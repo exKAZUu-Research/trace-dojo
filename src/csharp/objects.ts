@@ -26,6 +26,8 @@ import { CsArray, CsBox, CsDelegate, CsObject, CsStruct, type Value, type Variab
 export function runtimeTypeName(type: Type): string {
   switch (type.kind) {
     case 'named': {
+      // A tuple of more than 7 elements is .NET's `ValueTuple<T1, …, T7, TRest>` with the rest nested.
+      if (type.symbol.special === 'valueTuple' && type.args.length > 7) return tupleTypeName(type.args);
       const base = type.symbol.fullName;
       if (type.args.length === 0) return base;
       return `${base}[${type.args.map(runtimeTypeName).join(',')}]`;
@@ -40,6 +42,11 @@ export function runtimeTypeName(type: Type): string {
       return 'System.Object';
     }
   }
+}
+
+function tupleTypeName(args: Type[]): string {
+  if (args.length <= 7) return `System.ValueTuple\`${args.length}[${args.map(runtimeTypeName).join(',')}]`;
+  return `System.ValueTuple\`8[${[...args.slice(0, 7).map(runtimeTypeName), tupleTypeName(args.slice(7))].join(',')}]`;
 }
 
 /** The simple name that `Type.Name` gives, such as `List\`1` or `Int32[]`. */

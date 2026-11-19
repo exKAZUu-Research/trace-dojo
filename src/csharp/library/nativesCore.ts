@@ -1123,7 +1123,7 @@ defineNatives({
 // ---- Tuples ----
 
 const tupleNatives: Record<string, NativeMethod> = {};
-for (let arity = 1; arity <= 7; arity++) {
+for (let arity = 1; arity <= 16; arity++) {
   const name = `System.ValueTuple\`${arity}`;
   tupleNatives[`${name}..ctor`] = (_call, receiver, args) => {
     const tuple = receiver as CsStruct;

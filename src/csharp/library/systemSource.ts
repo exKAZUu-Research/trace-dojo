@@ -812,6 +812,9 @@ namespace System {
   public struct ValueTuple<T1, T2, T3, T4, T5> : IComparable<ValueTuple<T1, T2, T3, T4, T5>> { public T1 Item1; public T2 Item2; public T3 Item3; public T4 Item4; public T5 Item5; public ValueTuple(T1 item1, T2 item2, T3 item3, T4 item4, T5 item5); public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); public int CompareTo(ValueTuple<T1, T2, T3, T4, T5> other); }
   public struct ValueTuple<T1, T2, T3, T4, T5, T6> : IComparable<ValueTuple<T1, T2, T3, T4, T5, T6>> { public T1 Item1; public T2 Item2; public T3 Item3; public T4 Item4; public T5 Item5; public T6 Item6; public ValueTuple(T1 item1, T2 item2, T3 item3, T4 item4, T5 item5, T6 item6); public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); public int CompareTo(ValueTuple<T1, T2, T3, T4, T5, T6> other); }
   public struct ValueTuple<T1, T2, T3, T4, T5, T6, T7> : IComparable<ValueTuple<T1, T2, T3, T4, T5, T6, T7>> { public T1 Item1; public T2 Item2; public T3 Item3; public T4 Item4; public T5 Item5; public T6 Item6; public T7 Item7; public ValueTuple(T1 item1, T2 item2, T3 item3, T4 item4, T5 item5, T6 item6, T7 item7); public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); public int CompareTo(ValueTuple<T1, T2, T3, T4, T5, T6, T7> other); }
+` +
+  longTupleDeclarations() +
+  String.raw`
   public struct ValueTuple {
     public static ValueTuple<T1> Create<T1>(T1 item1);
     public static ValueTuple<T1, T2> Create<T1, T2>(T1 item1, T2 item2);
@@ -1054,3 +1057,22 @@ namespace System.Text {
 }
 
 `;
+
+/**
+ * Tuples of 8 to 16 elements, which .NET nests as `ValueTuple<T1, …, T7, TRest>`. They are flat here, with their
+ * `ItemN` fields; `runtimeTypeName` gives them .NET's nested names.
+ */
+function longTupleDeclarations(): string {
+  const declarations: string[] = [];
+  for (let arity = 8; arity <= 16; arity++) {
+    const numbers = Array.from({ length: arity }, (_, index) => index + 1);
+    const parameters = numbers.map((number) => `T${number}`).join(', ');
+    const self = `ValueTuple<${parameters}>`;
+    const fields = numbers.map((number) => `public T${number} Item${number};`).join(' ');
+    const constructorParameters = numbers.map((number) => `T${number} item${number}`).join(', ');
+    declarations.push(
+      `  public struct ${self} : IComparable<${self}> { ${fields} public ValueTuple(${constructorParameters}); public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); public int CompareTo(${self} other); }`
+    );
+  }
+  return `${declarations.join('\n')}\n`;
+}
