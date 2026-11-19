@@ -50,7 +50,13 @@ export class TypeScriptProgramConverter extends ProgramConverter {
   override convert(root: Node): Program {
     const program = super.convert(root);
     if (this.statementErrors.length > 0) throw new CompileError(this.statementErrors);
-    return { ...program, rejectsFunctionText: true, allowsOnlyStringRawTag: true, rejectsUnavailableMembers: true };
+    return {
+      ...program,
+      hasCommonJsReceiver: true,
+      rejectsFunctionText: true,
+      allowsOnlyStringRawTag: true,
+      rejectsUnavailableMembers: true,
+    };
   }
 
   private recoverFromStatementErrors(): void {

@@ -1,0 +1,25 @@
+const data: Record<number, number> = {};
+const numericText: Record<'1', number> = data;
+const textualData: Record<string, number> = {};
+const numericKey: Record<2, number> = textualData;
+
+class NeverReturns {
+  get value() {
+    while (false) return 1;
+  }
+}
+const getter = {
+  get value() {
+    if (false) return 1;
+  },
+};
+
+function shadowObject() {
+  interface Object { label: string }
+  const object: Object = 3;
+  console.log(object.label);
+}
+
+abstract class Contract {
+  abstract value: number = 1;
+}

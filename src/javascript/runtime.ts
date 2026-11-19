@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 786 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 788 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -890,8 +890,12 @@ export class Runtime {
     return typeof primitive === 'bigint' ? primitive : this.toNumber(primitive);
   }
 
-  toString(value: Value): string {
-    const primitive = this.toPrimitive(value, 'string');
+  toNumericText(value: Value): string {
+    return this.toString(value, true);
+  }
+
+  toString(value: Value, numericOnly = false): string {
+    const primitive = this.toPrimitive(value, 'string', numericOnly);
     if (typeof primitive === 'symbol') this.throwError('TypeError', 'Cannot convert a Symbol value to a string');
     return String(primitive);
   }

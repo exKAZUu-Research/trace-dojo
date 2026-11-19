@@ -443,11 +443,7 @@ export class StatementChecker {
 
   private ifStatement(node: TreeNode): void {
     const condition = node.childForFieldName('condition') as TreeNode;
-    const checked = this.c.conditions.checkCondition(condition);
-    // `if (true)` never takes its else branch, and `if (false)` never takes its then branch.
-    const literal = skipParentheses(condition).type;
-    const whenTrue = literal === 'false' ? undefined : checked.whenTrue;
-    const whenFalse = literal === 'true' ? undefined : checked.whenFalse;
+    const { whenTrue, whenFalse } = this.c.conditions.checkCondition(condition);
     const consequence = node.childForFieldName('consequence') as TreeNode;
     this.c.conditions.checkUncalledFunction(condition, consequence);
     const alternative = node.childForFieldName('alternative');
@@ -467,7 +463,7 @@ export class StatementChecker {
   }
 
   private checkUnreachable(node: TreeNode): void {
-    this.c.flow.current = new FlowState(undefined, undefined, true);
+    this.c.flow.current = new FlowState(undefined, undefined, true, 'after');
     this.check(node);
     this.c.flow.current = undefined;
   }
@@ -548,7 +544,7 @@ export class StatementChecker {
       this.checkSubstatement(body);
       const end = this.c.flow.merge([this.c.flow.current, ...target.continues]);
       this.c.flow.current = end;
-      return this.isAlwaysTrue(condition) ? undefined : whenFalse;
+      return whenFalse;
     });
   }
 
@@ -561,7 +557,7 @@ export class StatementChecker {
       if (!this.c.flow.isReachable) return;
       const { whenTrue, whenFalse } = this.c.conditions.checkCondition(condition);
       this.c.flow.current = whenTrue;
-      return this.isAlwaysTrue(condition) ? undefined : whenFalse;
+      return whenFalse;
     });
   }
 
@@ -580,7 +576,7 @@ export class StatementChecker {
       if (conditionNode) {
         const result = this.c.conditions.checkCondition(conditionNode);
         this.c.flow.current = result.whenTrue;
-        whenFalse = this.isAlwaysTrue(conditionNode) ? undefined : result.whenFalse;
+        whenFalse = result.whenFalse;
       }
       this.checkSubstatement(body);
       this.c.flow.current = this.c.flow.merge([this.c.flow.current, ...target.continues]);
@@ -594,10 +590,6 @@ export class StatementChecker {
       this.declaration(initializer);
     else if (initializer.type === 'expression_statement') this.c.expressions.check(named(initializer)[0]);
     else this.c.expressions.check(initializer);
-  }
-
-  private isAlwaysTrue(condition: TreeNode): boolean {
-    return skipParentheses(condition).type === 'true';
   }
 
   private forInStatement(node: TreeNode): void {

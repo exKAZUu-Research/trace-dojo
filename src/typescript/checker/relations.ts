@@ -548,7 +548,7 @@ export class Relations {
   /** Whether an object type has no members, as `{}` does, which every non-nullish value is assignable to. */
   isEmptyObjectType(type: Type): boolean {
     if (type.kind !== 'object') return false;
-    return (type.objectKind === 'interface' && type.name === 'Object') || this.hasNoMembers(type);
+    return this.c.isLibraryType(type, 'Object') || this.hasNoMembers(type);
   }
 
   /**
@@ -719,7 +719,8 @@ export class Relations {
       source.aliasId !== undefined &&
       source.aliasId === target.aliasId &&
       source.mappedKeys !== undefined &&
-      target.mappedKeys !== undefined
+      target.mappedKeys !== undefined &&
+      this.isAssignable(target.mappedKeys, source.mappedKeys)
     );
   }
 

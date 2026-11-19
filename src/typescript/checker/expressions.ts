@@ -680,7 +680,7 @@ export class ExpressionChecker {
     const types = this.c.typesForMessage(source, target);
     this.c.error(
       node,
-      `型 '${this.c.print(types.source)}' を型 '${this.c.print(types.target)}' に代入することはできません。${this.elaborate(source, target)}`
+      `型 '${this.c.print(types.source)}' を型 '${this.c.print(types.target)}' に代入することはできません。${this.elaborate(source, types.target)}`
     );
   }
 

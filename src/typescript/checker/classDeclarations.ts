@@ -195,6 +195,11 @@ export class ClassDeclarationChecker {
     const value = member.childForFieldName('value');
     const annotation = this.c.typeNodes.annotationType(member.childForFieldName('type'));
     if (value) {
+      if (hasToken(member, 'abstract'))
+        this.c.error(
+          member.childForFieldName('name') ?? member,
+          'abstract プロパティに初期値を指定することはできません。'
+        );
       const valueType = this.c.classes.withThis(isStatic ? info.staticType : info.instanceType, () =>
         this.c.flow.from(new FlowState(), () => {
           this.c.functions.contexts.push({

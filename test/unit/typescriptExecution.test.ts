@@ -513,3 +513,15 @@ test('nullable assignment diagnostics retain the source and target types reporte
     expect(reported?.slice(1)).toEqual([expected[index].source, expected[index].target]);
   }
 });
+
+test('an optional object type reports the missing property of its non-nullish member', () => {
+  const source = `interface Point { x: number; y: number }
+const nullable: Point | null = { x: 1 };
+const optional: Point | undefined = { x: 2 };`;
+  const diagnostics = diagnosticsOf(source);
+  expect(diagnostics).toHaveLength(2);
+  for (const diagnostic of diagnostics) {
+    expect(diagnostic).toContain("型 'Point' に代入");
+    expect(diagnostic).toContain("プロパティ 'y' がありません");
+  }
+});

@@ -200,8 +200,9 @@ function bindFunction({ runtime, thisValue, args }: NativeCall): JsFunction {
   const targetLength = runtime.getOwnProperty(target, 'length') ? runtime.get(target, 'length') : undefined;
   const length =
     typeof targetLength === 'number' ? Math.max(0, toInteger(runtime, targetLength) - boundArgs.length) : 0;
+  const targetName = runtime.get(target, 'name');
   const bound = runtime.newNativeFunction(
-    `bound ${runtime.functionName(target)}`,
+    `bound ${typeof targetName === 'string' ? targetName : ''}`,
     length,
     (call) =>
       call.newTarget
@@ -350,12 +351,12 @@ function defineNumber(builder: RealmBuilder): void {
     builder.method(numberConstructor, name, 1, ({ args }) => test(args[0]));
   }
   const parseIntFunction = builder.method(numberConstructor, 'parseInt', 2, ({ runtime, args }) => {
-    const text = runtime.toString(args[0]);
+    const text = runtime.toNumericText(args[0]);
     runtime.scan(text.length);
     return Number.parseInt(text, args[1] === undefined ? undefined : runtime.toNumber(args[1]));
   });
   const parseFloatFunction = builder.method(numberConstructor, 'parseFloat', 1, ({ runtime, args }) => {
-    const text = runtime.toString(args[0]);
+    const text = runtime.toNumericText(args[0]);
     runtime.scan(text.length);
     return Number.parseFloat(text);
   });

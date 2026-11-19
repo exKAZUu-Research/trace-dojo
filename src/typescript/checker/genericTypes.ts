@@ -90,16 +90,18 @@ export function typeParametersIn(type: Type, except: readonly TypeParameter[] = 
 }
 
 /** The types an anonymous or mapped object type holds, adding the type parameters it declares to `declared`. */
-function objectMemberTypes(type: ObjectType, declared: Set<number>): Type[] {
+export function objectMemberTypes(type: ObjectType, declared?: Set<number>): Type[] {
   if (type.objectKind === 'mapped') {
     const mapped = type.mapped as MappedInfo;
-    declared.add(mapped.typeParameter.id);
+    declared?.add(mapped.typeParameter.id);
     return [mapped.constraint, mapped.template, mapped.nameType, mapped.source].filter((child) => child !== undefined);
   }
   if (type.objectKind !== 'anonymous' || type.nonGeneric) return [];
   const structure = type.resolve();
   const signatures = [...structure.callSignatures, ...structure.constructSignatures];
-  for (const signature of signatures) for (const parameter of signature.typeParameters) declared.add(parameter.id);
+  if (declared) {
+    for (const signature of signatures) for (const parameter of signature.typeParameters) declared.add(parameter.id);
+  }
   return [
     ...[...structure.properties.values()].map((property) => property.type()),
     ...signatures.flatMap((signature) => [

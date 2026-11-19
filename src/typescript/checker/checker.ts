@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 554 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 558 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { SourceDiagnostic } from '../../interpreter/diagnostics';
@@ -81,7 +81,7 @@ interface Diagnostic extends SourceDiagnostic {
   index: number;
 }
 
-const diagnosticPrimitives = new Set(['string', 'number', 'bigint', 'symbol']);
+const nonNullishDiagnosticIntrinsics = new Set(['string', 'number', 'bigint', 'symbol', 'object']);
 
 export class Checker {
   readonly diagnostics: Diagnostic[] = [];
@@ -919,12 +919,8 @@ export class Checker {
 
   typesForMessage(source: Type, target: Type): { source: Type; target: Type } {
     const regular = regularOf(source);
-    const primitive =
-      regular === booleanType ||
-      regular.kind === 'literal' ||
-      (regular.kind === 'intrinsic' && diagnosticPrimitives.has(regular.name));
     let shownTarget = target;
-    if (primitive && target.kind === 'union') {
+    if (target.kind === 'union' && this.usesSingleDiagnosticTarget(regular)) {
       this.budget.spend(target.types.length);
       const nonNullish = target.types.filter(
         (member) => !isIntrinsic(member, 'null') && !isIntrinsic(member, 'undefined')
@@ -932,6 +928,19 @@ export class Checker {
       if (nonNullish.length === 1) shownTarget = nonNullish[0];
     }
     return { source: this.widenLiteralForMessage(regular, shownTarget), target: shownTarget };
+  }
+
+  private usesSingleDiagnosticTarget(type: Type): boolean {
+    this.budget.spend();
+    if (type.kind === 'intersection') return type.types.some((member) => this.usesSingleDiagnosticTarget(member));
+    return (
+      type === booleanType ||
+      type.kind === 'object' ||
+      type.kind === 'literal' ||
+      type.kind === 'templateLiteral' ||
+      type.kind === 'stringMapping' ||
+      (type.kind === 'intrinsic' && nonNullishDiagnosticIntrinsics.has(type.name))
+    );
   }
 
   widenLiteralForMessage(source: Type, target: Type): Type {

@@ -8,6 +8,7 @@ export interface Program {
   scope: ScopeDeclarations;
   /** Whether the program's own code is strict mode code, outside which failed assignments do nothing. */
   isStrict: boolean;
+  hasCommonJsReceiver?: boolean;
   /**
    * Whether turning a function into text is unavailable, as for TypeScript, whose functions Node.js shows as the
    * source a compiler printed rather than as written.

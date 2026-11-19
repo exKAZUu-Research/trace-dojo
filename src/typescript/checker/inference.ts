@@ -1,5 +1,6 @@
 // code-gauge-allow-file fileNcss 433 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import type { Checker, Mapper } from './checker';
+import { childTypes, objectMemberTypes } from './genericTypes';
 import { applicableIndex, isIndexKeyOf, isPropertyKeyOf, keyedIndexes } from './indexInfos';
 import {
   anyType,
@@ -531,43 +532,20 @@ export class TypeInference {
     );
   }
 
-  /** Whether a type mentions a type parameter, looking into the members of object types a few levels deep. */
-  mentions(type: Type, parameter: TypeParameter, depth = 0): boolean {
-    if (depth > 3 || type.noInfer) return false;
-    const next = (member: Type): boolean => this.mentions(member, parameter, depth + 1);
-    switch (type.kind) {
-      case 'typeParameter': {
-        return type.id === parameter.id;
-      }
-      case 'union':
-      case 'intersection': {
-        return type.types.some(next);
-      }
-      case 'object': {
-        if (type.objectKind === 'reference') return (type.typeArguments ?? []).some(next);
-        if (type.objectKind === 'tuple') return (type.tuple?.elements ?? []).some((element) => next(element.type));
-        if (type.objectKind !== 'anonymous') return false;
-        const structure = type.resolve();
-        return (
-          [...structure.properties.values()].some((property) => next(property.type())) ||
-          [structure.stringIndex, structure.numberIndex, ...(structure.patternIndexes ?? [])].some(
-            (index) => index !== undefined && next(index.type)
-          ) ||
-          [...structure.callSignatures, ...structure.constructSignatures].some(
-            (signature) => signature.parameters.some((member) => next(member.type)) || next(signature.returnType())
-          )
-        );
-      }
-      case 'indexedAccess': {
-        return next(type.objectType) || next(type.indexType);
-      }
-      case 'keyof': {
-        return next(type.type);
-      }
-      default: {
-        return false;
+  mentions(type: Type, parameter: TypeParameter): boolean {
+    const pending = [type];
+    const seen = new Set<Type>();
+    for (let current = pending.pop(); current; current = pending.pop()) {
+      this.c.budget.spend();
+      if (current.noInfer || seen.has(current)) continue;
+      if (current.kind === 'typeParameter' && current.id === parameter.id) return true;
+      seen.add(current);
+      for (const child of childTypes(current)) pending.push(child);
+      if (current.kind === 'object' && !current.aliasMapper) {
+        for (const member of objectMemberTypes(current)) pending.push(member);
       }
     }
+    return false;
   }
 
   /** Infers the type parameters of `types` from `source` matched against `target`, as `infer U` does. */

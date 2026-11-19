@@ -73,6 +73,7 @@ function formatPlaceholder(runtime: Runtime, kind: string, value: Value, budget:
 }
 
 /** Formats `%s`, `%j`, `%d`, `%i`, and `%f` as Node.js's `formatWithOptions` does, which never rejects a BigInt or a symbol. */
+// code-gauge-allow functionCognitiveComplexity 17 -- Each placeholder has its own coercion and formatting rules for numbers, bigints, and symbols.
 function formatPrimitivePlaceholder(runtime: Runtime, kind: string, value: Value): string | undefined {
   switch (kind) {
     case 's': {
@@ -89,10 +90,10 @@ function formatPrimitivePlaceholder(runtime: Runtime, kind: string, value: Value
     }
     case 'i': {
       if (typeof value === 'bigint') return `${value}n`;
-      return typeof value === 'symbol' ? 'NaN' : formatNumber(Number.parseInt(runtime.toString(value)));
+      return typeof value === 'symbol' ? 'NaN' : formatNumber(Number.parseInt(runtime.toNumericText(value)));
     }
     case 'f': {
-      return typeof value === 'symbol' ? 'NaN' : formatNumber(Number.parseFloat(runtime.toString(value)));
+      return typeof value === 'symbol' ? 'NaN' : formatNumber(Number.parseFloat(runtime.toNumericText(value)));
     }
     case 'c': {
       return '';

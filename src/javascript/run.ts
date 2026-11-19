@@ -45,14 +45,14 @@ export function runProgram(runtime: Runtime, program: Program, onEnd?: (scope: S
   runtime.rejectsFunctionText = program.rejectsFunctionText ?? false;
   runtime.allowsOnlyStringRawTag = program.allowsOnlyStringRawTag ?? false;
   if (program.rejectsUnavailableMembers) runtime.unavailableMember = unavailableMemberCheck(runtime.realm);
+  const hasReceiver = program.hasCommonJsReceiver || !program.isStrict;
   const scope = new Scope(runtime.realm.globals, {
-    // A CommonJS script's `this` is its empty `module.exports`.
-    thisValue: program.isStrict ? undefined : runtime.newObject(),
+    thisValue: hasReceiver ? runtime.newObject() : undefined,
     homeObject: undefined,
     constructing: undefined,
     newTarget: undefined,
     isStrict: program.isStrict,
-    hasImplicitThis: !program.isStrict,
+    hasImplicitThis: hasReceiver,
   });
   runtime.pushFrame(scope, undefined, false);
   try {

@@ -19,3 +19,17 @@ const tuple: [string | undefined] = [3];
 const array: (string | undefined)[] = [3];
 function compound(value: number | null) {const target: string | undefined = value;}
 function booleanSource(value: boolean) {const target: number | undefined = value;}
+const objectTarget: string | undefined = { x: 1 };
+const arrayTarget: string | null = [1];
+const functionTarget: string | undefined = (x: number) => x;
+class Instance {}
+const classTarget: string | undefined = new Instance();
+interface Shape { x: number }
+function useShape(shape: Shape) { const target: string | undefined = shape; }
+argument({ x: 1 });
+function objectResult(): string | undefined { return { x: 1 }; }
+class ObjectField { value: string | undefined = { x: 1 }; }
+function objectDefault<T extends string | undefined = { x: 1 }>() {}
+function opaque(value: unknown) { const target: string | undefined = value; }
+function anyObject(value: object) { const target: string | undefined = value; }
+function unionSource(value: string | number) { const target: symbol | undefined = value; }

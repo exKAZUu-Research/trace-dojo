@@ -56,6 +56,9 @@ export class ConditionChecker {
 
   condition(node: TreeNode, testsTruthiness = true): Condition {
     const result = this.conditionOf(node);
+    const literal = skipParentheses(node).type;
+    if (literal === 'true') result.whenFalse = undefined;
+    if (literal === 'false') result.whenTrue = undefined;
     if (testsTruthiness) this.checkTruthiness(node, result.type);
     return result;
   }
