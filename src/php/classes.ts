@@ -14,7 +14,7 @@ import { lower } from './bytes';
 import { type ArgValue, asInternal, invoke } from './calls';
 import { foldedConstant, selectConstantBranch } from './constantDefaults';
 import { formatFloat, normalizeKeyString, toBool, valueName } from './conversions';
-import { deprecated, notice, throwError, warn } from './errors';
+import { deprecated, E_COMPILE_WARNING, emitError, notice, throwError, warn } from './errors';
 import { strictEquals } from './operators';
 import { share } from './places';
 import { FatalError, rt, SCRIPT_PATH } from './runtime';
@@ -106,7 +106,11 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
   }
   const declared = [...decl.interfaces];
   // A class that declares __toString implements Stringable, as if it had named it last.
-  if (declaresStringConversion(decl) && !declared.some((name) => lower(name) === 'stringable')) {
+  if (
+    cls.kind !== 'trait' &&
+    declaresStringConversion(decl) &&
+    !declared.some((name) => lower(name) === 'stringable')
+  ) {
     declared.push('Stringable');
   }
   for (const name of declared) {
@@ -135,11 +139,21 @@ export function declareClass(decl: ClassDecl, row: number): PhpClass {
   addDeclaredProperties(cls, decl.props);
   for (const method of decl.methods) addMethod(cls, method);
   applyTraits(cls, decl);
+  linkTraitStringable(cls);
   linkInterfaceConstants(cls, row);
   checkInheritance(cls, row);
   if (!decl.isAnonymous) runtime.classes.set(key, cls);
   runtime.userClasses.push(cls);
   return cls;
+}
+
+function linkTraitStringable(cls: PhpClass): void {
+  if (cls.kind === 'trait' || !cls.methods.has('__tostring')) return;
+  const stringable = findClass('Stringable')!;
+  if (!cls.interfaces.includes(stringable)) {
+    cls.ownInterfaces.push(stringable);
+    cls.interfaces.push(stringable);
+  }
 }
 
 function checkBuiltinInterfaces(cls: PhpClass, row: number): void {
@@ -425,80 +439,95 @@ function addMethod(cls: PhpClass, ast: MethodDeclAst, scope = cls): void {
   cls.methods.set(method.lname, method);
 }
 
-// code-gauge-allow functionNcss 56 -- Follows PHP's class linking and property access rules in their order of checks.
-// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function applyTraits(cls: PhpClass, decl: ClassDecl): void {
   if (cls.traits.length === 0) return;
   const rules = decl.traits.flatMap((use) => use.rules);
   const excluded = traitPrecedence(cls, rules, decl.row);
-  const aliases = rules
-    .filter((rule) => rule.k === 'as')
-    .map((rule) => ({ rule, source: traitAliasSource(cls, rule, decl.row) }));
-  const ownMethods = new Set(decl.methods.map((method) => lower(method.fn.name)));
-  const added = new Map<string, PhpClass>();
-  const contracts: Method[] = [];
+  const aliases = new Map<Method, Extract<TraitRule, { k: 'as' }>[]>();
+  for (const rule of rules) {
+    if (rule.k !== 'as') continue;
+    const source = traitAliasSource(cls, rule, decl.row);
+    const method = source.methods.get(lower(rule.method))!;
+    const adaptations = aliases.get(method);
+    if (adaptations) adaptations.push(rule);
+    else aliases.set(method, [rule]);
+  }
+  const methods = cls.traits.flatMap((trait) => [...trait.methods.values()]);
+  const imported = new Map<string, Method>();
+  for (const isAbstract of [false, true])
+    for (const method of methods)
+      if (method.isAbstract === isAbstract)
+        importTraitMethod(cls, method, aliases.get(method) ?? [], excluded, imported);
   const propertyOrigins = new Map<string, string>();
   const constantOrigins = new Map<string, string>();
   for (const trait of cls.traits) {
-    for (const [lname, method] of trait.methods) {
-      if (method.isAbstract) {
-        contracts.push({ ...method, cls, scope: trait });
-        if (!cls.findMethod(lname)) cls.methods.set(lname, { ...method, cls, scope: cls, fn: copyFunction(method.fn) });
-        continue;
-      }
-      if (excluded.has(`${lower(trait.name)}::${lname}`)) continue;
-      if (ownMethods.has(lname)) continue;
-      const previous = added.get(lname);
-      if (previous && previous !== trait) {
-        throw new FatalError(
-          `Trait method ${trait.name}::${method.name} has not been applied as ${cls.name}::${method.name}, because of collision with ${previous.name}::${method.name}`,
-          decl.row
-        );
-      }
-      added.set(lname, trait);
-      cls.methods.set(lname, { ...method, cls, scope: cls, fn: copyFunction(method.fn) });
-    }
     applyTraitProperties(cls, trait, propertyOrigins, decl.row);
     applyTraitConstants(cls, trait, constantOrigins, decl.row);
   }
-  for (const { rule, source } of aliases) applyTraitAlias(cls, rule, source, ownMethods, added);
-  for (const contract of contracts) {
-    const implementation = cls.findMethod(contract.lname);
-    if (implementation) checkOverride(cls, implementation, contract);
-  }
 }
 
-function applyTraitAlias(
+function importTraitMethod(
   cls: PhpClass,
-  rule: Extract<TraitRule, { k: 'as' }>,
-  source: PhpClass,
-  ownMethods: Set<string>,
-  added: Map<string, PhpClass>
+  original: Method,
+  aliases: Extract<TraitRule, { k: 'as' }>[],
+  excluded: Set<string>,
+  imported: Map<string, Method>
 ): void {
-  const name = lower(rule.method);
-  const method = source.methods.get(name) as Method;
-  if (rule.alias) {
-    const lname = lower(rule.alias);
-    if (ownMethods.has(lname)) return;
-    cls.methods.set(lname, {
-      ...method,
-      name: rule.alias,
-      lname,
-      cls,
-      scope: cls,
-      visibility: rule.visibility ?? method.visibility,
-      isFinal: method.isFinal || rule.isFinal === true,
-      fn: copyFunction(method.fn),
-    });
-  } else if ((rule.visibility || rule.isFinal) && added.get(name) === source) {
-    const own = cls.methods.get(name);
-    if (own)
-      cls.methods.set(name, {
-        ...own,
-        visibility: rule.visibility ?? own.visibility,
-        isFinal: own.isFinal || rule.isFinal === true,
-      });
+  let method = original;
+  for (const rule of aliases) {
+    const adapted = {
+      ...original,
+      name: rule.alias ?? method.name,
+      lname: rule.alias ? lower(rule.alias) : method.lname,
+      visibility: rule.visibility ?? (rule.alias ? original : method).visibility,
+      isFinal: (rule.alias ? original : method).isFinal || rule.isFinal === true,
+    };
+    if (rule.alias) addTraitMethod(cls, adapted, original, imported);
+    else method = adapted;
   }
+  if (original.isAbstract || !excluded.has(`${lower(original.cls.name)}::${original.lname}`))
+    addTraitMethod(cls, method, original, imported);
+}
+
+function addTraitMethod(cls: PhpClass, method: Method, original: Method, imported: Map<string, Method>): void {
+  if (!original.isFinal && method.isFinal && method.visibility === 'private' && method.lname !== '__construct')
+    emitError(
+      E_COMPILE_WARNING,
+      'Private methods cannot be final as they are never overridden by other classes',
+      cls.declaredRow
+    );
+  const existing = cls.methods.get(method.lname);
+  const previous = imported.get(method.lname);
+  if (previous && existing?.visibility === method.visibility && sameTraitBody(previous.fn, original.fn)) return;
+  if (method.isAbstract) {
+    const implementation = existing ?? cls.parent?.findMethod(method.lname);
+    if (implementation) {
+      checkTraitContract(cls, implementation, method);
+      return;
+    }
+  }
+  if (existing && !previous) return;
+  if (existing && previous && !existing.isAbstract)
+    throw new FatalError(
+      `Trait method ${original.cls.name}::${original.name} has not been applied as ${cls.name}::${method.name}, because of collision with ${previous.cls.name}::${existing.name}`,
+      cls.declaredRow
+    );
+  imported.set(method.lname, original);
+  cls.methods.set(method.lname, { ...method, cls, scope: cls, fn: copyFunction(method.fn) });
+}
+
+function sameTraitBody(left: Callable, right: Callable): boolean {
+  return left === right || (left.kind === 'user' && right.kind === 'user' && left.decl === right.decl);
+}
+
+function checkTraitContract(cls: PhpClass, method: Method, contract: Method): void {
+  const row = method.fn.kind === 'user' ? method.fn.decl.row : 0;
+  checkMethodStaticness(method, contract, row);
+  if (!signatureCompatible(method, { ...contract, cls }))
+    throw new FatalError(
+      `Declaration of ${signatureText(method)} must be compatible with ${signatureText(contract, cls)}`,
+      row
+    );
 }
 
 function traitPrecedence(cls: PhpClass, rules: TraitRule[], row: number): Set<string> {
@@ -792,14 +821,7 @@ function checkOverride(cls: PhpClass, method: Method, parent: Method, reportTent
     );
   }
   const row = method.fn.kind === 'user' ? method.fn.decl.row : 0;
-  if (parent.isStatic !== method.isStatic) {
-    throw new FatalError(
-      parent.isStatic
-        ? `Cannot make static method ${parent.cls.name}::${parent.name}() non static in class ${method.cls.name}`
-        : `Cannot make non static method ${parent.cls.name}::${parent.name}() static in class ${method.cls.name}`,
-      row
-    );
-  }
+  checkMethodStaticness(method, parent, row);
   if (visibilityRank(method.visibility) < visibilityRank(parent.visibility)) {
     throw new FatalError(
       `Access level to ${method.cls.name}::${method.name}() must be ${parent.visibility}${parent.visibility === 'protected' ? ' (as in class ' + parent.cls.name + ') or weaker' : ` (as in class ${parent.cls.name})`}`,
@@ -829,6 +851,17 @@ function checkOverride(cls: PhpClass, method: Method, parent: Method, reportTent
         rt().row = saved;
       }
     }
+  }
+}
+
+function checkMethodStaticness(method: Method, parent: Method, row: number): void {
+  if (parent.isStatic !== method.isStatic) {
+    throw new FatalError(
+      parent.isStatic
+        ? `Cannot make static method ${parent.cls.name}::${parent.name}() non static in class ${method.cls.name}`
+        : `Cannot make non static method ${parent.cls.name}::${parent.name}() static in class ${method.cls.name}`,
+      row
+    );
   }
 }
 
@@ -881,13 +914,13 @@ function returnTypeOf(fn: Callable): TypeDecl | undefined {
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- Follows PHP's class linking and property access rules in their order of checks.
-function signatureText(method: Method): string {
+function signatureText(method: Method, typeScope = method.scope): string {
   const fn = method.fn;
   const params = fn.params
     .map((param) => {
       let text = '';
       const type = parameterType(param);
-      if (type) text += `${describeType(type, method.scope)} `;
+      if (type) text += `${describeType(type, typeScope)} `;
       if (param.byRef) text += '&';
       if (param.variadic) text += '...';
       text += `$${param.name}`;
@@ -900,7 +933,7 @@ function signatureText(method: Method): string {
     })
     .join(', ');
   const returnType = fn.kind === 'user' ? fn.decl.returnType : fn.returnType;
-  return `${fn.kind === 'user' && fn.decl.byRefReturn ? '& ' : ''}${method.scope.name}::${method.name}(${params})${returnType ? `: ${describeType(returnType, method.scope)}` : ''}`;
+  return `${fn.kind === 'user' && fn.decl.byRefReturn ? '& ' : ''}${method.scope.name}::${method.name}(${params})${returnType ? `: ${describeType(returnType, typeScope)}` : ''}`;
 }
 
 // code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.

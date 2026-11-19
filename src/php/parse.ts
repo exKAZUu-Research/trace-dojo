@@ -11,7 +11,7 @@ import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitte
 import type { Program } from './ast';
 import { dec, enc } from './bytes';
 import { castType, type CompileNotice, Converter } from './converter';
-import { reservedIdentifierToken } from './converterBase';
+import { reservedIdentifierToken, traitAdaptationModifierError } from './converterBase';
 
 const parser = await loadParser('@willbooster/tree-sitter-php/tree-sitter-php.wasm');
 
@@ -103,7 +103,7 @@ function locatePhpErrors(root: Node, diagnostics: SourceDiagnostic[]): SourceDia
   if (diagnostics.length === 0) return diagnostics;
   for (const error of root.descendantsOfType('ERROR')) {
     if (diagnostics[0].row !== error.startPosition.row) continue;
-    const classDiagnostic = reservedClassSyntax(error);
+    const classDiagnostic = reservedClassSyntax(error) ?? recoveredTraitModifier(root, error);
     if (classDiagnostic) return [classDiagnostic];
     const next = error.nextNamedSibling;
     if (
@@ -127,6 +127,31 @@ function locatePhpErrors(root: Node, diagnostics: SourceDiagnostic[]): SourceDia
       return [{ row: token.startPosition.row, message: 'syntax error, unexpected token ",", expecting "}"' }];
   }
   return diagnostics;
+}
+
+function recoveredTraitModifier(root: Node, error: Node): SourceDiagnostic | undefined {
+  const children = error.children.filter((node) => node.type !== 'comment');
+  for (const [index, child] of children.entries()) {
+    if (child.type !== 'as') continue;
+    const use = traitUseBeforeAlias(error, children, index);
+    if (!use) continue;
+    const rest = root.text.slice(child.endIndex).replace(PHP_TRIVIA, '');
+    const modifier = /^[a-zA-Z_][a-zA-Z_0-9]*/.exec(rest)?.[0];
+    const message = modifier && traitAdaptationModifierError(modifier);
+    if (message) return { row: use.startPosition.row, message };
+  }
+}
+
+function traitUseBeforeAlias(error: Node, children: Node[], index: number): Node | undefined {
+  if (error.parent?.type === 'use_list') return error.parent.parent ?? undefined;
+  const use = children.findLastIndex((node, position) => position < index && node.type === 'use');
+  if (use === -1) return;
+  const open = children.findIndex((node, position) => position > use && position < index && node.type === '{');
+  if (open <= use + 1) return;
+  if (
+    children.slice(use + 1, open).every((node) => ['name', 'qualified_name', 'relative_name', ','].includes(node.type))
+  )
+    return children[use];
 }
 
 function newKeywordError(root: Node, recovering: boolean): SourceDiagnostic | undefined {

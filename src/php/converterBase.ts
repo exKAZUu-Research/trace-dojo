@@ -305,6 +305,12 @@ const BARE_KEYWORDS = new Set(
   )
 );
 
+export function traitAdaptationModifierError(modifier: string): string | undefined {
+  const word = lower(modifier);
+  if (word === 'readonly') return 'Cannot use the readonly modifier on a method';
+  if (word === 'abstract' || word === 'static') return `Cannot use "${word}" as method modifier in trait alias`;
+}
+
 export function reservedIdentifierToken(name: string): string | undefined {
   const word = lower(name);
   if (word === 'die') return 'exit';

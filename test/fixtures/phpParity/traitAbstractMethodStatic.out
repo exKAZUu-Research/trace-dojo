@@ -1,0 +1,4 @@
+
+Fatal error: Cannot make non static method TraitContract::run() static in class Implementation in /main.php on line 5
+Stack trace:
+#0 {main}

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 905 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 907 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -32,6 +32,7 @@ import {
   isReservedClassName,
   relativeClassName,
   semanticChildren,
+  traitAdaptationModifierError,
 } from './converterBase';
 import { decodeLiteral, decodeSingleQuoted } from './literals';
 import { compiledOperandRow } from './opcodeRows';
@@ -1443,7 +1444,10 @@ export abstract class DeclarationConverter extends ConverterBase {
     const modifier = clause.childForFieldName('modifier') ?? rest.find((child) => child.type === 'visibility_modifier');
     const aliasField = clause.childForFieldName('alias');
     const alias = aliasField ?? rest.find((child) => child.type === 'name');
-    const legacyFinal = !modifier && !aliasField && lower(alias?.text ?? '') === 'final';
+    const legacyModifier = !modifier && !aliasField ? lower(alias?.text ?? '') : '';
+    const error = traitAdaptationModifierError(modifier?.text ?? legacyModifier);
+    if (error) this.error(clause.parent?.parent ?? clause, error);
+    const legacyFinal = legacyModifier === 'final';
     return {
       k: 'as',
       trait: trait ? this.namedClass(trait, '', 'trait') : undefined,

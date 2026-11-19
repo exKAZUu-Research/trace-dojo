@@ -1,0 +1,13 @@
+text
+ran text
+array (
+)array (
+  'Stringable' => 'Stringable',
+)array (
+  0 => '__toString',
+  1 => 'renamed',
+  2 => 'call',
+)array (
+  0 => 'later',
+  1 => 'earlier',
+)

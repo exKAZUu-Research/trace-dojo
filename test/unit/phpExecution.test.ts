@@ -1429,6 +1429,24 @@ test.each([
   expect(result.kind === 'executed' && result.stdout).not.toContain('never');
 });
 
+test.each([
+  ['static', 'Cannot use "static" as method modifier in trait alias'],
+  ['abstract', 'Cannot use "abstract" as method modifier in trait alias'],
+  ['readonly', 'Cannot use the readonly modifier on a method'],
+])('rejects the %s modifier on a trait adaptation', (modifier, message) => {
+  expect(
+    run(`<?php
+trait Role { function run() {} }
+class C {
+    use Role { run as ${modifier}; }
+}
+echo 'never';`)
+  ).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 3, message }],
+  });
+});
+
 test.each(['T,U', 'U,T'])('retains abstract trait contracts despite precedence: %s', (order) => {
   const result = run(
     `<?php trait T{abstract function f(int $x):int;}trait U{function f(string $x):int{return 1;}}class A{use ${order}{U::f insteadof T;}}echo 'never';`
