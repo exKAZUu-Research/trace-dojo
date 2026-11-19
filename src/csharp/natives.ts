@@ -31,9 +31,19 @@ export function defineNatives(natives: Record<string, NativeMethod>): void {
   }
 }
 
-/** The native implementation of a library method, if any. */
+/** The native implementation of a library method, if any, which a constructor may take from its base class's. */
 export function nativeOf(method: MethodSymbol): NativeMethod | undefined {
-  const base = `${method.owner.fullName}.${method.kind === 'constructor' ? '.ctor' : method.name}`;
+  const own = ownNativeOf(method, method.owner.fullName);
+  if (own || method.kind !== 'constructor') return own;
+  for (let base = method.owner.baseType; base; base = base.symbol.baseType) {
+    const inherited = ownNativeOf(method, base.symbol.fullName);
+    if (inherited) return inherited;
+  }
+  return undefined;
+}
+
+function ownNativeOf(method: MethodSymbol, ownerName: string): NativeMethod | undefined {
+  const base = `${ownerName}.${method.kind === 'constructor' ? '.ctor' : method.name}`;
   const signature = method.parameters.map((parameter) => displayType(parameter.type)).join(', ');
   return (
     registry.get(`${base}(${signature})`) ??

@@ -149,7 +149,7 @@ export abstract class ConversionBinder extends LookupBinder {
       ['int', 'long'].includes(specialOf(expression.type) as string) &&
       specialOf(target) !== 'char'
     ) {
-      this.error(row, 'CS0031', `定数値 '${constantText(expression.value)}' は '${to}' に変換できません`);
+      this.error(row, 'CS0031', `定数値 '${constantText(expression.value)}' を '${to}' に変換できません`);
       return;
     }
     if (this.conversions.explicit(expression.type, target)) {
@@ -237,7 +237,7 @@ export abstract class ConversionBinder extends LookupBinder {
         return { kind: 'constant', value: convertNumeric(value, from, targetUnderlying), type: target, row };
       } catch (error) {
         if (!(error instanceof PendingException)) throw error;
-        this.error(row, 'CS0031', `定数値 '${constantText(value)}' は '${displayType(target)}' に変換できません`);
+        this.error(row, 'CS0031', `定数値 '${constantText(value)}' を '${displayType(target)}' に変換できません`);
         return { kind: 'constant', value: 0, type: target, row };
       }
     }

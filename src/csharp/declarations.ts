@@ -931,6 +931,8 @@ export class DeclarationBinder extends BinderBase {
       field.isReadonly = symbol.kind === 'class';
       field.row = symbol.row;
       field.isPrimaryParameter = true;
+      // A positional record's property starts with its parameter's value, as a field initializer gives it.
+      field.initializer = { kind: 'name', name: parameter.name, typeArgs: undefined, row: symbol.row, column: 0 };
       property.backingField = field;
       symbol.fields.push(field);
       for (const kind of ['get', symbol.kind === 'class' ? 'init' : 'set'] as const) {

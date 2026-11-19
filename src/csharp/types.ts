@@ -539,6 +539,8 @@ export function displayTypeSymbol(
   symbol: TypeSymbol,
   args: Type[] = symbol.allTypeParameters.map((parameter) => parameter.type)
 ): string {
+  const keyword = symbol.special ? KEYWORD_NAMES[symbol.special] : undefined;
+  if (keyword) return keyword;
   const ownCount = symbol.typeParameters.length;
   const ownArgs = args.slice(args.length - ownCount);
   const outerArgs = args.slice(0, args.length - ownCount);

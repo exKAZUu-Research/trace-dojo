@@ -124,6 +124,16 @@ export class Evaluator {
       return method.native(call, self, args);
     }
     const body = method.body;
+    const backingField = method.property?.backingField;
+    if (!body && backingField) {
+      // An auto-property's accessors read and write its backing field.
+      const fields = backingField.isStatic
+        ? this.runtime.staticsOf(this.ownerFromEnvironment(method, typeEnvironment) as NamedType)
+        : this.fieldsOf(self);
+      if (method.kind === 'getter') return fields[backingField.slot];
+      fields[backingField.slot] = args.at(-1) as Value;
+      return undefined;
+    }
     if (!body) {
       if (method.isAbstract)
         throw new PendingException('System.EntryPointNotFoundException', `Entry point was not found.`);
@@ -163,8 +173,19 @@ export class Evaluator {
     const initializer = constructor.constructorInitializer;
     const isThisChain = (initializer as { isThisInitializer?: boolean } | undefined)?.isThisInitializer === true;
     const owner = constructor.owner;
-    if (!isThisChain && owner.instanceInitializer)
-      this.runInitializer(owner.instanceInitializer, owner.initializerLocals, frame, frame.thisValue, false);
+    if (!isThisChain && owner.instanceInitializer) {
+      const primaryArguments =
+        constructor.parameters === owner.primaryParameters ? frame.slots.slice(0, constructor.parameters.length) : [];
+      this.runInitializer(
+        owner.instanceInitializer,
+        owner.initializerLocals,
+        frame,
+        frame.thisValue,
+        false,
+        frame.typeEnvironment,
+        primaryArguments
+      );
+    }
     if (initializer) this.evaluate(initializer, frame);
   }
 
@@ -191,10 +212,13 @@ export class Evaluator {
     caller: Frame,
     thisValue: Value,
     isStatic: boolean,
-    environment = caller.typeEnvironment
+    environment = caller.typeEnvironment,
+    /** The arguments of a primary constructor, which the initializers read as its parameters. */
+    primaryArguments: Slot[] = []
   ): void {
     const owner = locals[0]?.owner;
     const frame = new Frame(this.runtime, owner, thisValue, environment, undefined, locals.length);
+    for (const [index, value] of primaryArguments.entries()) frame.slots[index] = value;
     // Initializers run as part of the constructor or type initialization that started them, in its frame for traces.
     if (isStatic) {
       this.runtime.pushFrame(frame);
@@ -944,7 +968,8 @@ export class Evaluator {
     let receiver: Value = undefined;
     if (expression.receiver) {
       receiver = this.evaluate(expression.receiver, frame);
-      if (receiver === undefined && !method.isStatic) throw NULL_REFERENCE();
+      // A nullable value's members run on its missing value too, as `HasValue` does.
+      if (receiver === undefined && !method.isStatic && method.owner.special !== 'nullable') throw NULL_REFERENCE();
       // A method of a struct runs on a copy of a value that is not a variable, so it cannot change the original.
       if (receiver instanceof CsStruct && !this.isVariableExpression(expression.receiver)) receiver = receiver.clone();
     } else if (!method.isStatic && method.kind !== 'localFunction') {
@@ -954,11 +979,16 @@ export class Evaluator {
     frame.temporaries.push(receiver);
     try {
       const args = this.evaluateArguments(expression.args, frame);
+      if (method.kind === 'delegateInvoke') return this.invokeDelegate(frame, receiver, args, expression.row);
       const owner = expression.owner ? (frame.resolve(expression.owner) as NamedType) : undefined;
       if (method.isStatic && owner && method.owner.staticConstructor) this.runtime.ensureInitialized(owner);
       const typeArgs = expression.typeArgs.map((type) => frame.resolve(type));
       if (expression.isVirtual && receiver !== undefined) {
-        const implementation = this.runtime.dispatch(method, receiver);
+        const implementation = this.runtime.dispatch(
+          method,
+          receiver,
+          expression.receiver ? frame.resolve(expression.receiver.type) : undefined
+        );
         const implementationOwner = this.ownerOfImplementation(implementation, receiver) ?? owner;
         return this.invoke(
           frame,
@@ -1120,7 +1150,7 @@ export class Evaluator {
     let receiver: Value = undefined;
     if (target.receiver) {
       receiver = this.evaluate(target.receiver, frame);
-      if (receiver === undefined) throw NULL_REFERENCE();
+      if (receiver === undefined && property.owner.special !== 'nullable') throw NULL_REFERENCE();
     } else if (!property.isStatic) {
       receiver = frame.thisValue;
     }
@@ -1911,7 +1941,18 @@ export function removeDelegate(a: Value, b: Value): Value {
 }
 
 function entriesEqual(a: DelegateEntry, b: DelegateEntry): boolean {
-  if (a.lambda || b.lambda) return a.lambda?.info === b.lambda?.info && a.lambda?.cells === b.lambda?.cells && a === b;
+  if (a.lambda || b.lambda) {
+    // A delegate of a local function or a lambda equals another of the same function over the same captured variables.
+    if (
+      !a.lambda ||
+      !b.lambda ||
+      a.lambda.info.method !== b.lambda.info.method ||
+      a.lambda.thisValue !== b.lambda.thisValue
+    )
+      return false;
+    const other = b.lambda.cells;
+    return [...a.lambda.cells].every(([local, cell]) => other.get(local) === cell);
+  }
   return a.method === b.method && a.target === b.target;
 }
 

@@ -508,6 +508,18 @@ export abstract class MemberBinder extends CallBinder {
     }
   }
 
+  /** An access that failed to bind, which keeps its receiver so that flow analysis still sees the receiver read. */
+  protected failedAccess(receiver: BoundExpression, position: Position): BoundExpression {
+    return {
+      kind: 'sequence',
+      locals: [],
+      sideEffects: [receiver],
+      value: { kind: 'default', type: ERROR_TYPE, row: position.row },
+      type: ERROR_TYPE,
+      row: position.row,
+    };
+  }
+
   /** Binds an instance member of a value, or an extension method that takes it. */
   bindInstanceMember(
     receiver: BoundExpression,
@@ -555,7 +567,7 @@ export abstract class MemberBinder extends CallBinder {
         'CS1061',
         `'${displayType(type)}' に '${name}' の定義が含まれておらず、型 '${displayType(type)}' の最初の引数を受け付けるアクセス可能な拡張メソッド '${name}' が見つかりませんでした。using ディレクティブまたはアセンブリ参照が不足していないことを確認してください`
       );
-      return { kind: 'default', type: ERROR_TYPE, row: position.row };
+      return this.failedAccess(receiver, position);
     }
     if (found.kind === 'type') {
       this.error(
@@ -695,7 +707,7 @@ export abstract class MemberBinder extends CallBinder {
       this.toValue(target, node.target);
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
-    if (target.type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
+    if (target.type.kind === 'error') return this.failedAccess(target, node);
     const invoke = this.delegateInvokeOf(target.type);
     if (!invoke) {
       if (
@@ -783,7 +795,10 @@ export abstract class MemberBinder extends CallBinder {
     resolved: ResolvedCall,
     node: Position
   ): BoundExpression {
-    const { method } = resolved.candidate;
+    const declared = resolved.candidate.method;
+    // `base.M()` calls the implementation that the base class has, which may override the method found by name.
+    const method =
+      group.isBaseAccess && group.receiver ? this.implementationIn(group.receiver.type, declared) : declared;
     const substitution = this.callSubstitution(resolved.candidate, resolved.typeArgs);
     const returnType = substitute(method.returnType, substitution);
     let receiver = method.isStatic ? undefined : group.receiver;
@@ -839,6 +854,19 @@ export abstract class MemberBinder extends CallBinder {
       type: returnType,
       row: node.row,
     };
+  }
+
+  /** The override of a virtual method that a type or its nearest base declares, for a non-virtual `base` call. */
+  protected implementationIn(type: Type, method: MethodSymbol): MethodSymbol {
+    if (!(method.isVirtual || method.isAbstract || method.isOverride)) return method;
+    for (const owner of this.searchChain(type)) {
+      for (const candidate of owner.symbol.methods) {
+        for (let current: MethodSymbol | undefined = candidate; current; current = current.overridden) {
+          if (current === method && candidate.name === method.name) return candidate;
+        }
+      }
+    }
+    return method;
   }
 
   /** Binds a user-defined operator call among candidates, if one applies. */

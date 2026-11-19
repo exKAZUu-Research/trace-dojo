@@ -128,7 +128,7 @@ export class BinderBase {
   error(position: Position | number, code: string, message: string): void {
     const row = typeof position === 'number' ? position : position.row;
     this.diagnostics.push({ row, message: `${code}: ${message}` });
-    if (this.diagnostics.length >= 30) throw new TooManyErrors();
+    if (this.diagnostics.length >= 200) throw new TooManyErrors();
   }
 
   /** Rejects a feature this grader does not run, which stops compiling at once. */

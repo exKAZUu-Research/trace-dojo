@@ -842,11 +842,16 @@ export abstract class ExpressionBinder extends MemberBinder {
         } else {
           const converted = value.kind === 'throw' ? value : this.convert(value, returnType, node.body);
           if (
-            this.diagnostics.length > savedDiagnostics &&
+            report &&
             value.kind !== 'throw' &&
+            value.type.kind !== 'error' &&
             !this.implicitConversionOf(value, returnType)
           ) {
-            // Roslyn adds that the lambda's body does not convert to the delegate's return type.
+            this.error(
+              node.body,
+              'CS1662',
+              'デリゲート戻り値の型に暗黙的に変換できない戻り値の型がブロック内にあるため、ラムダ式 を目的のデリゲート型に変換できません'
+            );
           }
           body = this.expressionBody(converted, returnType, node.row);
           inferred = returnType;

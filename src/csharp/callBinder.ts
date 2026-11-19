@@ -101,6 +101,8 @@ export abstract class CallBinder extends OperatorBinder {
     }
     const best = this.bestOf(applicable, args);
     if (!best) {
+      // An argument whose binding already failed fits every overload, which Roslyn does not report again.
+      if (args.some((arg) => arg.expression.type.kind === 'error')) return undefined;
       const [first, second] = this.tiedCandidates(applicable, args);
       this.error(
         row,

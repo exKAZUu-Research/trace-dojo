@@ -70,9 +70,18 @@ function buildLibrary(): Library {
     specials: new Map(),
     valueTuples: new Map(),
     typeNamed(fullName: string, arity = 0): TypeSymbol {
-      const parts = fullName.split('.');
+      // A nested type's name follows its containing type's after `+`, with the arities after backticks.
+      const [outerName, ...nestedNames] = fullName.split('+');
+      const parts = outerName.split('.');
       const namespace = root.resolve(parts.slice(0, -1), false);
-      const found = namespace?.findType(parts.at(-1) as string, arity);
+      const [simpleName, outerArity] = parts.at(-1)?.split('`') ?? [];
+      let found = namespace?.findType(simpleName, nestedNames.length > 0 ? Number(outerArity ?? 0) : arity);
+      for (const nestedName of nestedNames) {
+        const [name, nestedArity] = nestedName.split('`');
+        found = found?.nestedTypes.find(
+          (nested) => nested.name === name && nested.typeParameters.length === Number(nestedArity ?? 0)
+        );
+      }
       if (!found) throw new Error(`The library lacks ${fullName}\`${arity}`);
       return found;
     },
@@ -343,9 +352,48 @@ export class Compiler extends StatementBinder {
       constructor.constructorInitializer = this.bindConstructorInitializer(constructor, declaration, type, bindContext);
     constructor.body = declaration?.body
       ? this.bindMethodBody(declaration.body, bindContext, VOID_TYPE)
-      : { kind: 'block', statements: [], capturedLocals: [], locals: [], row: symbol.row, step: 'none' };
+      : {
+          kind: 'block',
+          statements: this.primaryCaptures(constructor, symbol, bindContext),
+          capturedLocals: [],
+          locals: [],
+          row: symbol.row,
+          step: 'none',
+        };
     this.claimAtomic(constructor, declaration?.startRow ?? declaration?.row, declaration?.bodyRow);
     this.finishFunction(constructor, fn);
+  }
+
+  /** A primary constructor stores the parameters that members read in the fields that capture them. */
+  private primaryCaptures(constructor: MethodSymbol, symbol: TypeSymbol, context: BindContext): BoundStatement[] {
+    if (constructor.parameters !== symbol.primaryParameters) return [];
+    const statements: BoundStatement[] = [];
+    for (const field of symbol.fields) {
+      if (!field.isPrimaryParameter || field.property) continue;
+      const name = field.name.slice(1, -2);
+      const local = context.scope.variables.get(name);
+      if (!local) continue;
+      const target: BoundExpression = {
+        kind: 'field',
+        receiver: { kind: 'this', type: symbol.declaredType, row: symbol.row },
+        field,
+        type: field.type,
+        row: symbol.row,
+      };
+      statements.push({
+        kind: 'expression',
+        expression: {
+          kind: 'assign',
+          target: target as never,
+          value: { kind: 'local', local, type: local.type, row: symbol.row },
+          type: field.type,
+          row: symbol.row,
+        },
+        row: symbol.row,
+        step: 'none',
+      });
+    }
+    return statements;
   }
 
   /** Binds `: base(...)` or `: this(...)`, or the implicit call of the base class's parameterless constructor. */
