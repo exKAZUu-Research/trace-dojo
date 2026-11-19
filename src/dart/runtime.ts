@@ -584,7 +584,7 @@ function covariantErased(member: Member & { kind: 'method' }, type: FunctionType
   if (params.size === 0) return type;
   const objectQ = interfaceType(coreTypes.object, [], true);
   const erase = (declared: DartType | undefined, actual: DartType): DartType =>
-    declared && mentionsTypeParams(declared, params) ? objectQ : actual;
+    declared && mentionsCovariantly(declared, params, true) ? objectQ : actual;
   return {
     ...type,
     positional: type.positional.map((actual, index) => erase(member.type.positional[index], actual)),
@@ -593,4 +593,32 @@ function covariantErased(member: Member & { kind: 'method' }, type: FunctionType
       type: erase(member.type.named.find((other) => other.name === named.name)?.type, named.type),
     })),
   };
+}
+
+/** Whether a type uses one of the parameters where a value of it flows in, outside the parameters of function types. */
+function mentionsCovariantly(type: DartType, params: ReadonlySet<TypeParam>, positive: boolean): boolean {
+  switch (type.kind) {
+    case 'typeParam': {
+      return positive && params.has(type.param);
+    }
+    case 'interface': {
+      return type.args.some((arg) => mentionsCovariantly(arg, params, positive));
+    }
+    case 'function': {
+      return (
+        mentionsCovariantly(type.returnType, params, positive) ||
+        [...type.positional, ...type.named.map((named) => named.type)].some((parameter) =>
+          mentionsCovariantly(parameter, params, !positive)
+        )
+      );
+    }
+    case 'record': {
+      return [...type.positional, ...type.named.map((field) => field.type)].some((field) =>
+        mentionsCovariantly(field, params, positive)
+      );
+    }
+    default: {
+      return false;
+    }
+  }
 }

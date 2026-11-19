@@ -1713,7 +1713,7 @@ abstract interface class List<E> extends Iterable<E> {
   external void replaceRange(int start, int end, Iterable<E> replacements);
   external Map<int, E> asMap();
   external bool contains(Object? element);
-  external void forEach(void Function(E element) action);
+  external void forEach(dynamic Function(E element) action);
   external String join([String separator = ""]);
   external E elementAt(int index);
   external List<R> cast<R>();
