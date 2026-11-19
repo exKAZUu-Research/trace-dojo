@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 884 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 888 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/text-encoding-identifier-case -- mbstring names its encodings in this case.
 // oxlint-disable typescript/no-misused-spread -- PHP splits strings into bytes or code points, never into grapheme clusters.
@@ -10,7 +10,7 @@ import { eastAsianWidth } from 'get-east-asian-width';
 import { codePointBytes, dec, enc, lower } from './bytes';
 import { encodingValidator, extraEncodingReader } from './detectionReaders';
 import { deprecated, throwError, warn } from './errors';
-import { padUnits } from './libString';
+import { type PaddingCharacters, padString } from './libString';
 import { encodingNames } from './multibyteEncodingNames';
 import { defineConstant, defineFunction } from './native';
 import { toStr } from './operators';
@@ -51,9 +51,9 @@ function checkEncoding(name: string, args: Value[], position: number, parameter 
   }
 }
 
-defineUtf8Function('mb_strlen(string $string, ?string $encoding = null): int', ({ args }) => {
-  checkEncoding('mb_strlen', args, 2);
-  return BigInt(chars(args[0]).length);
+defineFunction('mb_strlen(string $string, ?string $encoding = null): int', ({ args }) => {
+  const codec = encodingArgument(args, 2, 'mb_strlen');
+  return BigInt(paddingCharacters(s(args[0]), codec).length);
 });
 defineUtf8Function(
   'mb_substr(string $string, int $start, ?int $length = null, ?string $encoding = null): string',
@@ -190,11 +190,11 @@ defineFunction('mb_substr_count(string $haystack, string $needle, ?string $encod
   }
   return count;
 });
-defineUtf8Function(
+defineFunction(
   'mb_str_pad(string $string, int $length, string $pad_string = " ", int $pad_type = STR_PAD_RIGHT, ?string $encoding = null): string',
   ({ args }) => {
-    checkEncoding('mb_str_pad', args, 5);
-    return padUnits('mb_str_pad', chars(args[0]), args, args[2] === undefined ? [' '] : chars(args[2]));
+    const codec = encodingArgument(args, 5, 'mb_str_pad');
+    return padString('mb_str_pad', args, (bytes) => paddingCharacters(bytes, codec));
   }
 );
 defineUtf8Function('mb_strwidth(string $string, ?string $encoding = null): int', ({ args }) => {
@@ -372,9 +372,24 @@ for (const [name, mode] of [
 
 interface Codec {
   name: string;
+  unitWidth?: number;
   decode: (bytes: string) => number[];
   /** The bytes of a code point, or undefined when the encoding cannot represent it. */
   encode: (code: number) => string | undefined;
+}
+
+function paddingCharacters(bytes: string, codec: Codec): PaddingCharacters {
+  const width = codec.unitWidth;
+  if (width)
+    return {
+      length: Math.floor(bytes.length / width),
+      prefix: (count) => bytes.slice(0, count * width),
+    };
+  const codes = codec.decode(bytes);
+  return {
+    length: codes.length,
+    prefix: (count) => encodeCodes(codes.slice(0, count), codec),
+  };
 }
 
 /** Trims the characters of `set` from the left (mode bit 1) and the right (mode bit 2) as trim_each_wchar does. */
@@ -564,6 +579,7 @@ function truncatedTail(bytes: string, start: number, lead: number, length: numbe
 
 const byteCodec = (name: string, max: number): Codec => ({
   name,
+  unitWidth: 1,
   decode: (bytes) => {
     const codes: number[] = [];
     for (let index = 0; index < bytes.length; index++) {
@@ -588,6 +604,7 @@ const utf16Codec = (name: string, littleEndian?: boolean): Codec => ({
 });
 const utf32Codec = (name: string, littleEndian?: boolean): Codec => ({
   name,
+  unitWidth: 4,
   decode: (bytes) => decodeUtf32(bytes, littleEndian),
   encode: (code) => (code < 0 || code > 0x10_ff_ff ? undefined : wordBytes(code, 4, littleEndian === true)),
 });

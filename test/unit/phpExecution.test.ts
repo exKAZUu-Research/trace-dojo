@@ -340,6 +340,16 @@ test('walking arrays that share their elements stops at the execution limit', ()
   expect(execution).toEqual({ kind: 'limitExceeded', limit: 'operations' });
 });
 
+test('charges each seeded shuffle against the execution budget', () => {
+  const execution = run(String.raw`<?php
+$randomizer = new Random\Randomizer(new Random\Engine\Mt19937(7));
+$bytes = str_repeat('a', 900_000);
+$randomizer->shuffleBytes($bytes);
+$randomizer->shuffleBytes($bytes);
+echo 'completed';`);
+  expect(execution).toEqual({ kind: 'limitExceeded', limit: 'operations' });
+});
+
 test('an uncaught exception prints its fatal error and reports it', () => {
   const execution = run('<?php\nfunction f() { throw new RuntimeException("boom"); }\nf();');
   expect(execution).toMatchObject({

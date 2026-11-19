@@ -116,23 +116,44 @@ defineAlias('chop', 'rtrim');
 
 defineFunction(
   'str_pad(string $string, int $length, string $pad_string = " ", int $pad_type = STR_PAD_RIGHT): string',
-  ({ args }) => padUnits('str_pad', [...s(args[0])], args, [...(args[2] === undefined ? ' ' : s(args[2]))])
+  ({ args }) => padString('str_pad', args)
 );
-/** Pads a sequence of bytes or characters to the length that `args` holds, as `str_pad` does with its arguments. */
-export function padUnits(name: string, text: string[], args: Value[], pad: string[]): string {
+export interface PaddingCharacters {
+  length: number;
+  prefix(count: number): string;
+}
+
+export function padString(
+  name: string,
+  args: Value[],
+  characters: (bytes: string) => PaddingCharacters = (bytes) => ({
+    length: bytes.length,
+    prefix: (count) => bytes.slice(0, count),
+  })
+): string {
+  const text = s(args[0]);
   const length = n(args[1]);
+  const total = length - characters(text).length;
+  if (total <= 0) return text;
+  const pad = args[2] === undefined ? ' ' : s(args[2]);
   const type = args[3] === undefined ? 1 : n(args[3]);
-  if (length <= text.length) return text.join('');
-  if (pad.length === 0) throwError('ValueError', `${name}(): Argument #3 ($pad_string) must not be empty`);
+  const emptyPad = (): never => throwError('ValueError', `${name}(): Argument #3 ($pad_string) must not be empty`);
+  if (pad === '') emptyPad();
   if (type < 0 || type > 2) {
     throwError('ValueError', `${name}(): Argument #4 ($pad_type) must be STR_PAD_LEFT, STR_PAD_RIGHT, or STR_PAD_BOTH`);
   }
-  rt().ensureStringFits(length);
-  rt().spend(Math.ceil(length / 64));
-  const total = length - text.length;
-  const fill = (count: number): string => Array.from({ length: count }, (_, index) => pad[index % pad.length]).join('');
+  const pattern = characters(pad);
+  if (pattern.length === 0) emptyPad();
   const left = type === 0 ? total : type === 1 ? 0 : Math.floor(total / 2);
-  return fill(left) + text.join('') + fill(total - left);
+  const [before, after] = [left, total - left].map((count) => ({
+    copies: Math.floor(count / pattern.length),
+    tail: pattern.prefix(count % pattern.length),
+  }));
+  const bytes = text.length + pad.length * (before.copies + after.copies) + before.tail.length + after.tail.length;
+  const runtime = rt();
+  runtime.ensureStringFits(bytes);
+  runtime.spend(Math.ceil(length / 64));
+  return pad.repeat(before.copies) + before.tail + text + pad.repeat(after.copies) + after.tail;
 }
 
 defineFunction('str_split(string $string, int $length = 1): array', ({ args }) => {

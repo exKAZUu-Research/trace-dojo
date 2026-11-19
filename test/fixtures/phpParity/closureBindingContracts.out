@@ -39,3 +39,22 @@ bool(true)
 bool(false)
 bool(false)
 int(3)
+
+Warning: Cannot unbind $this of closure using $this, this will be an error in PHP 9 in /main.php on line 21
+
+Warning: Cannot unbind $this of closure using $this, this will be an error in PHP 9 in /main.php on line 21
+bool(true)
+bool(true)
+int(7)
+
+Warning: Cannot unbind $this of closure using $this, this will be an error in PHP 9 in /main.php on line 21
+
+Warning: Cannot unbind $this of closure using $this, this will be an error in PHP 9 in /main.php on line 21
+bool(true)
+bool(true)
+bool(true)
+bool(false)
+bool(false)
+int(1)
+bool(false)
+bool(false)

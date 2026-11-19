@@ -208,7 +208,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         row: node.startPosition.row,
         endRow: node.endPosition.row,
         isAtomic,
-        usesThis: false,
+        usesThis: this.fn.usesThis === true,
         hasGoto: this.fn.gotos.length > 0,
         namespace: this.namespace,
         className: lexicalClass,

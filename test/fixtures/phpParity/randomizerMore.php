@@ -27,3 +27,12 @@ echo (new Randomizer(new Mt19937(-1)))->getInt(1, 1000), ' ', (new Randomizer(ne
 echo (new Randomizer(new Xoshiro256StarStar(-5)))->nextInt(), ' ', (new Randomizer(new PcgOneseq128XslRr64(PHP_INT_MIN)))->nextInt(), "\n";
 mt_srand(42); $a = mt_rand(1, 100);
 echo $a, ' ', (new Randomizer(new Mt19937(42)))->getInt(1, 100), "\n";
+
+$engine = new Mt19937(14);
+$randomizer = new Randomizer($engine);
+$control = new Randomizer(new Mt19937(14));
+foreach ([$engine, new Mt19937(15), null] as $replacement) {
+    try { $randomizer->__construct($replacement); }
+    catch (Error $error) { echo $error->getMessage(), "\n"; }
+    var_dump($randomizer->engine === $engine, $randomizer->nextInt() === $control->nextInt());
+}

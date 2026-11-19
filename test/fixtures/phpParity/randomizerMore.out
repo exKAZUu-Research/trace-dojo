@@ -28,3 +28,12 @@ Random\Randomizer::__construct(): Argument #1 ($engine) must be of type ?Random\
 372 372
 4395772514377964482 3185520985158611437
 43 43
+Cannot modify readonly property Random\Randomizer::$engine
+bool(true)
+bool(true)
+Cannot modify readonly property Random\Randomizer::$engine
+bool(true)
+bool(true)
+Cannot modify readonly property Random\Randomizer::$engine
+bool(true)
+bool(true)

@@ -908,7 +908,7 @@ export class Converter extends DeclarationConverter {
         return { k: 'lit', v: this.nowdoc(node), row };
       }
       case 'variable_name': {
-        return { k: 'var', name: this.variableName(node), row };
+        return this.variable(this.variableName(node), row);
       }
       case 'dynamic_variable_name': {
         const inner = node.namedChildren.find((child) => child.type !== 'comment') as Node;
@@ -933,11 +933,11 @@ export class Converter extends DeclarationConverter {
             row,
           });
         }
-        if (interpolating && inner.type === 'name') return { k: 'var', name: enc(inner.text), row };
+        if (interpolating && inner.type === 'name') return this.variable(enc(inner.text), row);
         if (interpolating && indexedName) {
           return {
             k: 'idx',
-            base: { k: 'var', name: enc(parts[0].text), row },
+            base: this.variable(enc(parts[0].text), row),
             index: parts[1] ? this.expr(parts[1]) : undefined,
             row,
           };
@@ -950,7 +950,7 @@ export class Converter extends DeclarationConverter {
         if (typeof constant !== 'string') return { k: 'varvar', name, row: nameRow };
         if (this.preserveSyntax) return { k: 'varvar', name: { k: 'lit', v: constant, row }, row };
         this.checkVariableAvailability(node, constant);
-        return { k: 'var', name: constant, row: nameRow };
+        return this.variable(constant, nameRow);
       }
       case 'name':
       case 'qualified_name':
@@ -1232,6 +1232,11 @@ export class Converter extends DeclarationConverter {
     while (preceding?.type === 'comment') preceding = preceding.previousSibling;
     if (node.type === 'name' && preceding?.type !== '{') return this.nameText(node);
     return this.expr(node);
+  }
+
+  private variable(name: string, row: number): Expr {
+    if (name === 'this') this.fn.usesThis = true;
+    return { k: 'var', name, row };
   }
 
   private propertyName(node: Node): string | Expr {

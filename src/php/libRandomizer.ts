@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callMethod } from './callables';
-import { findClass } from './classes';
+import { findClass, writeProp } from './classes';
 import { valueName } from './conversions';
 import { deprecated, throwError } from './errors';
 import { defineClass, defineUnitEnum, type NativeMethod } from './native';
@@ -281,7 +281,9 @@ const algoOf = (object: PhpObject): Algo => object.internal as Algo;
 
 /** Transcribes php_array_data_shuffle and php_binary_string_shuffle, a Fisher-Yates shuffle from the end. */
 function shuffle<T>(algo: Algo, items: T[]): T[] {
+  const runtime = rt();
   for (let left = items.length - 1; left > 0; left--) {
+    runtime.spend();
     const index = Number(range(algo, 0n, BigInt(left)));
     if (index !== left) [items[left], items[index]] = [items[index], items[left]];
   }
@@ -302,9 +304,12 @@ const randomizerMethods: NativeMethod[] = [
           'TypeError',
           `Random\\Randomizer::__construct(): Argument #1 ($engine) must be of type ?Random\\Engine, ${valueName(engine)} given`
         );
-      if (!(engine instanceof PhpObject))
+      if (!(engine instanceof PhpObject)) {
+        const previous = thisObj.props.get('engine');
+        if (previous instanceof PhpObject) writeProp(thisObj, 'engine', previous, thisObj.cls);
         throw new UnsupportedFeatureError(String.raw`乱数の種を指定できない Random\Engine\Secure`);
-      thisObj.props.set('engine', engine);
+      }
+      writeProp(thisObj, 'engine', engine, thisObj.cls);
       thisObj.internal = engine.internal instanceof EngineState ? engine.internal : new UserAlgo(engine);
       return null;
     },

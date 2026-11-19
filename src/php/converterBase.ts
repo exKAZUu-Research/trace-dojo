@@ -75,6 +75,7 @@ export interface FunctionContext {
   /** Whether the code is a function's body (not the file's), and whether that function is a closure. */
   isFunction?: boolean;
   isClosure?: boolean;
+  usesThis?: boolean;
   /** The function's name in the names of the closures it defines, such as `A::m()`; undefined at the top level. */
   displayName?: string;
   name?: string;

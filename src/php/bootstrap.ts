@@ -99,8 +99,9 @@ function closureBinding(
   }
   const anonymous = data.fn.kind === 'user' && data.fn.decl.isClosure;
   const methodScope = !anonymous ? data.scope : undefined;
-  if (methodScope && !data.isStatic && newThis === null) {
-    warn('Cannot unbind $this of method, this will be an error in PHP 9');
+  const unbind = newThis === null ? closureUnbindWarning(data, Boolean(methodScope)) : undefined;
+  if (unbind) {
+    warn(unbind);
     return undefined;
   }
   if (methodScope && newThis instanceof PhpObject && !newThis.cls.isSubclassOf(methodScope)) {
@@ -125,6 +126,12 @@ function closureBinding(
     scope,
     calledClass: newThis instanceof PhpObject ? newThis.cls : scope,
   };
+}
+
+function closureUnbindWarning(data: ClosureData, method: boolean): string | undefined {
+  if (method && !data.isStatic) return 'Cannot unbind $this of method, this will be an error in PHP 9';
+  if (data.thisObj && data.fn.kind === 'user' && data.fn.decl.isClosure && data.fn.decl.usesThis)
+    return 'Cannot unbind $this of closure using $this, this will be an error in PHP 9';
 }
 
 function requestedClosureScope(value: Value | undefined, current: PhpClass | undefined): PhpClass | undefined | false {
