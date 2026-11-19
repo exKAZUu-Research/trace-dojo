@@ -1,60 +1,36 @@
-import type { Annotations, Coercion, FnContext, LocalVar, MethodRes, PathRes, ReceiverAdjust } from './annotations';
-import type { Block, Condition, Expr, FormatArgs, MacroCall, Pattern, Span, Stmt } from './ast';
+// code-gauge-allow-file fileNcss 563 -- Keeps the compilation that shares a function's context and step state together.
+import type { Annotations, Coercion, FnContext, LocalVar, PathRes } from './annotations';
+import type { Block, Expr, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindings } from './astWalk';
-import {
-  changeString,
-  claimString,
-  claimStrings,
-  concatStrings,
-  moveString,
-  settleStrings,
-  sizeTable,
-  TableMap,
-} from './capacity';
+import { claimString, claimStrings, moveString, settleStrings } from './capacity';
 import type { Checker } from './checker';
-import type { Formatter, Spec } from './fmt';
+import { compileCall, compileMethodCall } from './compilerCalls';
+import { construct, isPlaceExpr, isRefType, isStringType, LocalPlace } from './compilerCommon';
+import { compileFor, compileIf, compileLoop, compileMatch, compileWhile } from './compilerControl';
+import { compileMacro } from './compilerMacros';
+import { compileBinary, compileCompoundAssign, compileUnary } from './compilerOperators';
+import { compileMatcher, type Matcher, takesWhole } from './compilerPatterns';
+import { compileField, compileIndex, compilePlace } from './compilerPlaces';
+import type { Formatter } from './fmt';
 import { normalize } from './infer';
 import type { Program } from './items';
-import {
-  castValue,
-  cloneValue,
-  compareValues,
-  copiedSlots,
-  copyValue,
-  floatArith,
-  hashKey,
-  intArith,
-  needsCopy,
-  overflow,
-  valuesEqual,
-  wrap,
-} from './ops';
-import { ControlSignal, FmtFailure, type Frame, type FunctionInfo, MOVED, RustPanic, UNASSIGNED } from './runtime';
+import { castValue, copiedSlots, copyValue, needsCopy } from './ops';
+import { ControlSignal, type Frame, type FunctionInfo, MOVED, UNASSIGNED } from './runtime';
 import { runtimeType } from './runtimeTypes';
-import { type AdtDef, type FnDef, type IntName, isUnit, resolve, shallow, substitute, type Type } from './types';
+import { type FnDef, isUnit, resolve, shallow, substitute, type Type } from './types';
 import {
-  AccessorPlace,
   CellPlace,
-  DONE,
   DynValue,
-  ElementPlace,
   EnumValue,
   FnValue,
-  type FormatterValue,
-  isPlace,
-  type IterValue,
-  type MapValue,
   type Place,
   RangeValue,
-  SetValue,
-  sliceBase,
-  sliceGet,
-  sliceLength,
-  SliceView,
   StructValue,
   UNIT_VALUE,
   type Value,
 } from './values';
+
+export { sliceRange } from './compilerPlaces';
 
 export type Eval = (frame: Frame) => Value;
 export type PlaceEval = (frame: Frame) => Place;
@@ -80,30 +56,48 @@ export interface CallSupport {
   strSlice(text: string, start: number | undefined, end: number | undefined, span: Span): string;
 }
 
-class LocalPlace implements Place {
-  readonly isPlace = true;
-  constructor(
-    private readonly frame: Frame,
-    private readonly slot: number
-  ) {}
+type ExprOf<K extends Expr['kind']> = Extract<Expr, { kind: K }>;
+type Reader<K extends Expr['kind']> = (c: Compiler, expr: ExprOf<K>) => Eval;
 
-  get(): Value {
-    const value = this.frame.locals[this.slot];
-    return value === UNASSIGNED ? undefined : value;
-  }
-
-  set(value: Value): void {
-    this.frame.locals[this.slot] = value;
-  }
-
-  storage(): [object, number] {
-    return [this.frame.locals, this.slot];
-  }
-}
+const READERS: { [K in Expr['kind']]: Reader<K> } = {
+  int: readInt,
+  float: readFloat,
+  bool: readLiteral,
+  char: readLiteral,
+  str: readLiteral,
+  path: (c, expr) => c.path(expr),
+  unary: compileUnary,
+  binary: compileBinary,
+  assign: (c, expr) => c.assign(expr),
+  compoundAssign: compileCompoundAssign,
+  ref: readRef,
+  cast: readCast,
+  call: compileCall,
+  methodCall: compileMethodCall,
+  field: compileField,
+  index: compileIndex,
+  range: readRange,
+  tuple: readTuple,
+  array: readArray,
+  arrayRepeat: readArrayRepeat,
+  struct: (c, expr) => c.struct(expr),
+  block: (c, expr) => c.compileBlock(expr),
+  if: compileIf,
+  match: compileMatch,
+  loop: compileLoop,
+  while: compileWhile,
+  for: compileFor,
+  break: readJump,
+  continue: readJump,
+  return: readReturn,
+  closure: (c, expr) => c.closure(expr),
+  try: (c, expr) => c.tryExpr(expr),
+  macro: (c, expr) => compileMacro(c, expr, expr.macro),
+};
 
 /** Compiles the checked bodies of a program into closures over frames. */
 export class Compiler {
-  private readonly annotations: Annotations;
+  readonly annotations: Annotations;
   private readonly compiled = new Map<FnContext, CompiledFn>();
   private fn!: FnContext;
   /** Whether the body being compiled records steps (tracing, and not an atomic function's body). */
@@ -190,7 +184,7 @@ export class Compiler {
   // -------------------------------------------------------------------------------------------------------------------
   // Steps
 
-  private stepRow(span: Span): number | undefined {
+  stepRow(span: Span): number | undefined {
     return this.recordsSteps ? span.row : undefined;
   }
 
@@ -340,7 +334,7 @@ export class Compiler {
     const init = this.read(stmt.init!);
     const place = this.place(stmt.init!);
     const matcher = this.compileMatcher(stmt.pattern);
-    const takeAll = this.takesWhole(stmt.init!, stmt.pattern);
+    const takeAll = takesWhole(this, stmt.init!, stmt.pattern);
     const elseBlock = stmt.else && this.compileBlock(stmt.else);
     const run: Eval = (frame) => {
       frame.runtime.spend();
@@ -349,41 +343,6 @@ export class Compiler {
       return UNIT_VALUE;
     };
     return this.withStep(stmt.span, run, false);
-  }
-
-  /**
-   * When a pattern moves every part of the variable it matches (`let (a, b) = pair;`, `Some(t) =>`), the variable is
-   * moved as a whole and leaves the trace; otherwise it keeps the parts the pattern leaves.
-   */
-  private takesWhole(scrutinee: Expr, pattern: Pattern): ((frame: Frame) => void) | undefined {
-    if (scrutinee.kind !== 'path' || !this.movesAll(pattern)) return undefined;
-    const res = this.annotations.paths.get(scrutinee);
-    if (res?.kind !== 'local' || res.local.mode !== 'move' || isRefType(res.local.type)) return undefined;
-    const slot = res.local.slot;
-    return (frame) => {
-      frame.locals[slot] = UNASSIGNED;
-    };
-  }
-
-  private movesAll(pattern: Pattern): boolean {
-    switch (pattern.kind) {
-      case 'binding': {
-        const local = this.annotations.bindings.get(pattern);
-        return local !== undefined && local.mode === 'move' && !isRefType(local.type) && !this.isCopy(local.type);
-      }
-      case 'tuple':
-      case 'tupleStruct': {
-        return pattern.elems.length > 0 && pattern.elems.every((elem) => this.movesAll(elem));
-      }
-      case 'struct': {
-        const res = this.annotations.paths.get(pattern);
-        const count = res?.kind === 'ctor' ? res.def.variants[res.variant].fields.length : -1;
-        return pattern.fields.length === count && pattern.fields.every((field) => this.movesAll(field.pattern));
-      }
-      default: {
-        return false;
-      }
-    }
   }
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -397,117 +356,16 @@ export class Compiler {
     };
   }
 
-  /**
-   * Matches a value against a pattern, binding its variables when it matches. `place` gives where the value lives, for
-   * bindings that bind by mutable reference.
-   */
-  compileMatcher(pattern: Pattern): (frame: Frame, value: Value, place: (() => Place) | undefined) => boolean {
-    const type = resolve(pattern.ty ?? { kind: 'tuple', elems: [] }, true);
-    switch (pattern.kind) {
-      case 'wild': {
-        return () => true;
-      }
-      case 'binding': {
-        const res = this.annotations.paths.get(pattern);
-        if (res) return this.constMatcher(res, type);
-        const local = this.annotations.bindings.get(pattern);
-        if (!local) return () => true;
-        const sub = pattern.sub ? this.compileMatcher(pattern.sub) : undefined;
-        const copies = local.mode === 'move' && needsCopy(resolve(local.type, true)) && this.isCopy(local.type);
-        const localType = normalize(shallow(local.type));
-        // Match ergonomics on a `&mut` value gives the parts of the value with `&mut` types, which are their places.
-        const bindsPlace = local.mode === 'refMut' || (localType.kind === 'ref' && localType.mutable);
-        // Binding a part of a variable by value moves it out, leaving the variable without it, as Rust does.
-        const movesOut = local.mode === 'move' && localType.kind !== 'ref' && !this.isCopy(local.type);
-        return (frame, value, place) => {
-          if (sub && !sub(frame, value, place)) return false;
-          let bound = value;
-          if (bindsPlace && !(local.mode === 'move' && isPlace(value))) {
-            bound = place ? place() : new CellPlace(value);
-          } else if (local.mode === 'ref' && isPlace(value)) bound = value.get();
-          else if (copies) bound = copyValue(value);
-          frame.locals[local.slot] = bound;
-          if (movesOut && place) place().set(MOVED);
-          return true;
-        };
-      }
-      case 'lit': {
-        const literal = this.value(pattern.expr);
-        const litType = runtimeType(pattern.expr.ty ?? type);
-        return (frame, value) => valuesEqual(litType(frame), derefDeep(value), literal(frame));
-      }
-      case 'tuple': {
-        const elems = pattern.elems.map((elem) => this.compileMatcher(elem));
-        return (frame, value, place) => {
-          const tuple = derefDeep(value) as Value[];
-          const tuplePlace = place;
-          return elems.every((elem, index) =>
-            elem(
-              frame,
-              tuple[index],
-              tuplePlace || isPlace(value) ? () => new ElementPlace(derefDeep(value) as Value[], index) : undefined
-            )
-          );
-        };
-      }
-      case 'tupleStruct':
-      case 'struct':
-      case 'path': {
-        const res = this.annotations.paths.get(pattern);
-        if (!res) return () => true;
-        if (res.kind !== 'ctor') return this.constMatcher(res, type);
-        const variant = res.variant;
-        const isEnum = res.def.kind === 'enum';
-        const subs: [number, ReturnType<Compiler['compileMatcher']>][] = [];
-        if (pattern.kind === 'tupleStruct') {
-          for (const [index, elem] of pattern.elems.entries()) subs.push([index, this.compileMatcher(elem)]);
-        } else if (pattern.kind === 'struct') {
-          const fields = res.def.variants[variant].fields;
-          for (const field of pattern.fields) {
-            subs.push([fields.findIndex((f) => f.name === field.name), this.compileMatcher(field.pattern)]);
-          }
-        }
-        return (frame, value, place) => {
-          const target = derefDeep(value);
-          if (isEnum && (target as EnumValue).variant !== variant) return false;
-          const fields = (target as StructValue | EnumValue).fields;
-          for (const [index, sub] of subs) {
-            const fieldPlace = place || isPlace(value) ? () => new ElementPlace(fields, index) : undefined;
-            if (!sub(frame, fields[index], fieldPlace)) return false;
-          }
-          return true;
-        };
-      }
-      case 'ref': {
-        const inner = this.compileMatcher(pattern.pattern);
-        return (frame, value) =>
-          inner(frame, isPlace(value) ? value.get() : value, isPlace(value) ? () => value : undefined);
-      }
-      case 'or': {
-        const alternatives = pattern.alternatives.map((alt) => this.compileMatcher(alt));
-        return (frame, value, place) => alternatives.some((alt) => alt(frame, value, place));
-      }
-    }
+  compileMatcher(pattern: Pattern): Matcher {
+    return compileMatcher(this, pattern);
   }
 
   /** The slots of the variables a pattern binds, which go out of scope with the pattern. */
-  private patternSlots(pattern: Pattern): number[] {
+  patternSlots(pattern: Pattern): number[] {
     return patternBindings(pattern, this.annotations).map((local) => local.slot);
   }
 
-  private constMatcher(res: PathRes, type: Type): (frame: Frame, value: Value) => boolean {
-    if (res.kind === 'ctor') {
-      const variant = res.variant;
-      if (res.def.kind === 'struct') return () => true;
-      return (_frame, value) => (derefDeep(value) as EnumValue).variant === variant;
-    }
-    if (res.kind === 'const') {
-      return (frame, value) => valuesEqual(type, derefDeep(value), this.support.constValue(res.def, frame));
-    }
-    return () => true;
-  }
-
-  private isCopy(type: Type): boolean {
+  isCopy(type: Type): boolean {
     return this.checker.solver.isCopy(resolve(type, true));
   }
 
@@ -599,147 +457,11 @@ export class Compiler {
 
   /** An expression's value as it is: a place's value without copying it, as borrows and reads see it. */
   read(expr: Expr): Eval {
-    switch (expr.kind) {
-      case 'int': {
-        const value = expr.value;
-        const type = resolve(expr.ty!, true);
-        if (type.kind === 'float') {
-          const number = Number(value);
-          return () => number;
-        }
-        return () => value;
-      }
-      case 'float': {
-        const type = resolve(expr.ty!, true);
-        const value = type.kind === 'float' && type.name === 'f32' ? expr.f32 : expr.value;
-        return () => value;
-      }
-      case 'bool':
-      case 'char':
-      case 'str': {
-        const value = expr.value;
-        return () => value;
-      }
-      case 'path': {
-        return this.path(expr);
-      }
-      case 'unary': {
-        return this.unary(expr);
-      }
-      case 'binary': {
-        return this.binary(expr);
-      }
-      case 'assign': {
-        return this.assign(expr);
-      }
-      case 'compoundAssign': {
-        return this.compoundAssign(expr);
-      }
-      case 'ref': {
-        if (expr.mutable) {
-          const place = this.place(expr.operand);
-          return (frame) => place(frame);
-        }
-        return this.read(expr.operand);
-      }
-      case 'cast': {
-        const operand = this.value(expr.operand);
-        const from = resolve(expr.operand.ty!, true);
-        const to = resolve(expr.ty!, true);
-        return (frame) => castValue(operand(frame), from, to);
-      }
-      case 'call': {
-        return this.call(expr);
-      }
-      case 'methodCall': {
-        return this.methodCall(expr);
-      }
-      case 'field': {
-        return this.field(expr);
-      }
-      case 'index': {
-        return this.index(expr);
-      }
-      case 'range': {
-        const start = expr.start ? this.value(expr.start) : undefined;
-        const end = expr.end ? this.value(expr.end) : undefined;
-        const inclusive = expr.inclusive;
-        return (frame) => new RangeValue(start?.(frame), end?.(frame), inclusive);
-      }
-      case 'tuple': {
-        if (expr.elems.length === 0) return () => UNIT_VALUE;
-        const elems = expr.elems.map((elem) => this.value(elem));
-        return (frame) => claimStrings(elems.map((elem) => elem(frame)));
-      }
-      case 'array': {
-        const elems = expr.elems.map((elem) => this.value(elem));
-        return (frame) => {
-          frame.runtime.allocate(elems.length);
-          return claimStrings(elems.map((elem) => elem(frame)));
-        };
-      }
-      case 'arrayRepeat': {
-        const value = this.value(expr.value);
-        const count = this.value(expr.count);
-        return (frame) => {
-          const length = Number(count(frame) as bigint);
-          frame.runtime.allocate(length);
-          frame.runtime.spend(Math.ceil(length / 16));
-          const item = value(frame);
-          frame.runtime.allocate(length * copiedSlots(item));
-          return Array.from({ length }, () => copyValue(item));
-        };
-      }
-      case 'struct': {
-        return this.struct(expr);
-      }
-      case 'block': {
-        return this.compileBlock(expr);
-      }
-      case 'if': {
-        return this.ifExpr(expr);
-      }
-      case 'match': {
-        return this.matchExpr(expr);
-      }
-      case 'loop': {
-        return this.loop(expr);
-      }
-      case 'while': {
-        return this.whileExpr(expr);
-      }
-      case 'for': {
-        return this.forExpr(expr);
-      }
-      case 'break':
-      case 'continue': {
-        const value = expr.kind === 'break' && expr.value ? this.value(expr.value) : undefined;
-        const kind = expr.kind;
-        const label = expr.label;
-        return (frame) => {
-          throw new ControlSignal(kind, label, value?.(frame));
-        };
-      }
-      case 'return': {
-        const value = expr.value ? this.value(expr.value) : undefined;
-        return (frame) => {
-          throw new ControlSignal('return', undefined, value ? value(frame) : UNIT_VALUE);
-        };
-      }
-      case 'closure': {
-        return this.closure(expr);
-      }
-      case 'try': {
-        return this.tryExpr(expr);
-      }
-      case 'macro': {
-        return this.macro(expr, expr.macro);
-      }
-    }
+    return (READERS[expr.kind] as Reader<Expr['kind']>)(this, expr);
   }
 
   // code-gauge-allow functionNcss 39 -- One case per kind of expression, statement, or pattern.
-  private path(expr: Extract<Expr, { kind: 'path' }>): Eval {
+  path(expr: Extract<Expr, { kind: 'path' }>): Eval {
     const res = this.annotations.paths.get(expr);
     if (!res) throw new Error('Unresolved path');
     switch (res.kind) {
@@ -788,184 +510,11 @@ export class Compiler {
     }
   }
 
-  /** The place a place expression denotes, which assignments and `&mut` borrows write through. */
   place(expr: Expr): PlaceEval {
-    switch (expr.kind) {
-      case 'path': {
-        const res = this.annotations.paths.get(expr);
-        if (res?.kind === 'local') {
-          const slot = res.local.slot;
-          if (res.local.mode === 'refMut') return (frame) => frame.locals[slot] as Place;
-          return (frame) => new LocalPlace(frame, slot);
-        }
-        if (res?.kind === 'capture') {
-          const index = res.index;
-          const local = res.local;
-          if (local.mode === 'refMut') return (frame) => frame.captures[index].get() as Place;
-          return (frame) => frame.captures[index];
-        }
-        break;
-      }
-      case 'field': {
-        const field = this.annotations.fields.get(expr);
-        if (!field) break;
-        const base = this.placeThrough(expr.operand, field.derefs);
-        const { index } = field;
-        if (field.range) {
-          return (frame) => {
-            const range = base(frame).get() as RangeValue;
-            return new AccessorPlace(
-              () => (index === 0 ? range.start : range.end),
-              (value) => {
-                if (index === 0) range.start = value;
-                else range.end = value;
-              }
-            );
-          };
-        }
-        return (frame) => {
-          const owner = base(frame).get();
-          const fields = Array.isArray(owner) ? owner : (owner as StructValue).fields;
-          return new ElementPlace(fields, index);
-        };
-      }
-      case 'index': {
-        return this.indexPlace(expr);
-      }
-      case 'unary': {
-        if (expr.op === '*') {
-          const operandType = normalize(shallow(expr.operand.ty!));
-          if (operandType.kind === 'ref' && operandType.mutable) {
-            const operand = this.read(expr.operand);
-            return (frame) => operand(frame) as Place;
-          }
-          if (operandType.kind === 'ref') {
-            const operand = this.read(expr.operand);
-            return (frame) => new CellPlace(operand(frame));
-          }
-          // A Box is its value.
-          return this.place(expr.operand);
-        }
-        break;
-      }
-      default: {
-        break;
-      }
-    }
-    // A temporary: the place holds the expression's value.
-    const value = this.value(expr);
-    return (frame) => new CellPlace(value(frame));
+    return compilePlace(this, expr);
   }
 
-  /** The place an operand reaches through derefs: through `&mut` references and owners (`Box`, `Vec`, `String`). */
-  private placeThrough(operand: Expr, derefs: ('ref' | 'mutRef' | 'own')[]): PlaceEval {
-    if (derefs.some((step) => step === 'ref')) {
-      // Through a shared reference only reads happen, so a place over the value serves.
-      const read = this.valueThrough(operand, derefs);
-      return (frame) => new CellPlace(read(frame));
-    }
-    const base = this.place(operand);
-    if (!derefs.includes('mutRef')) return base;
-    return (frame) => {
-      let place = base(frame);
-      for (const step of derefs) if (step === 'mutRef') place = place.get() as Place;
-      return place;
-    };
-  }
-
-  /** An operand's value after derefs, reading through `&mut` references. */
-  private valueThrough(operand: Expr, derefs: ('ref' | 'mutRef' | 'own')[]): Eval {
-    const read = this.read(operand);
-    if (!derefs.includes('mutRef')) return read;
-    return (frame) => {
-      let value = read(frame);
-      for (const step of derefs) if (step === 'mutRef') value = (value as Place).get();
-      return value;
-    };
-  }
-
-  private field(expr: Extract<Expr, { kind: 'field' }>): Eval {
-    const field = this.annotations.fields.get(expr);
-    if (!field) throw new Error('Unresolved field');
-    const base = this.valueThrough(expr.operand, field.derefs);
-    const { index } = field;
-    if (field.range) {
-      return (frame) => {
-        const range = base(frame) as RangeValue;
-        return index === 0 ? range.start : range.end;
-      };
-    }
-    return (frame) => {
-      const owner = base(frame);
-      if (Array.isArray(owner)) return owner[index];
-      return (owner as StructValue).fields[index];
-    };
-  }
-
-  // code-gauge-allow functionNcss 33 -- One case per kind of expression, statement, or pattern.
-  private index(expr: Extract<Expr, { kind: 'index' }>): Eval {
-    const res = this.annotations.indexes.get(expr);
-    if (!res) throw new Error('Unresolved index');
-    const base = this.valueThrough(expr.operand, res.derefs);
-    const index = this.value(expr.index);
-    // A range goes through the `Index` impls, which report their panics at the `[`, as `Vec`'s indexes do.
-    const span = res.overloaded || res.range ? expr.bracketSpan : expr.span;
-    if (res.container === 'map') {
-      const keyType = runtimeType(expr.index.ty!);
-      return (frame) => {
-        const map = base(frame) as MapValue;
-        const key = index(frame);
-        const entry = map.entries.get(hashKey(keyType(frame), key));
-        if (!entry) throw new RustPanic('no entry found for key', span);
-        return entry[1];
-      };
-    }
-    if (res.range) {
-      if (res.container === 'str') {
-        return (frame) => {
-          const range = index(frame) as RangeValue | undefined;
-          const text = base(frame) as string;
-          return this.support.strSlice(text, rangeStart(range), rangeEnd(range), span);
-        };
-      }
-      return (frame) => {
-        const range = index(frame) as RangeValue | undefined;
-        const container = base(frame);
-        return sliceRange(container, range, span);
-      };
-    }
-    return (frame) => {
-      const container = base(frame);
-      const position = index(frame) as bigint;
-      const length = sliceLength(container);
-      if (position >= length) throw new RustPanic(indexPanic(res.container, length, position), span);
-      return sliceGet(container, Number(position));
-    };
-  }
-
-  private indexPlace(expr: Extract<Expr, { kind: 'index' }>): PlaceEval {
-    const res = this.annotations.indexes.get(expr);
-    if (!res) throw new Error('Unresolved index');
-    const base = this.placeThrough(expr.operand, res.derefs);
-    const index = this.value(expr.index);
-    const span = res.overloaded ? expr.bracketSpan : expr.span;
-    if (res.range) {
-      const read = this.index(expr);
-      return (frame) => new CellPlace(read(frame));
-    }
-    return (frame) => {
-      const container = base(frame).get();
-      const position = Number(index(frame) as bigint);
-      const length = sliceLength(container);
-      if (position >= length) {
-        throw new RustPanic(indexPanic(undefined, length, BigInt(position)), span);
-      }
-      const { base: array, start } = sliceBase(container);
-      return new ElementPlace(array, start + position);
-    };
-  }
-
-  private struct(expr: Extract<Expr, { kind: 'struct' }>): Eval {
+  struct(expr: Extract<Expr, { kind: 'struct' }>): Eval {
     const res = this.annotations.paths.get(expr);
     if (res?.kind !== 'ctor') throw new Error('Unresolved struct');
     const { def, variant } = res;
@@ -989,110 +538,7 @@ export class Compiler {
     };
   }
 
-  // -------------------------------------------------------------------------------------------------------------------
-  // Operators
-
-  private unary(expr: Extract<Expr, { kind: 'unary' }>): Eval {
-    const operand = expr.op === '*' ? this.read(expr.operand) : this.value(expr.operand);
-    if (expr.op === '*') {
-      const operandType = normalize(shallow(expr.operand.ty!));
-      if (operandType.kind === 'ref' && operandType.mutable) return (frame) => (operand(frame) as Place).get();
-      return operand;
-    }
-    const type = numericType(expr.ty!);
-    const span = expr.span;
-    if (expr.op === '!') {
-      if (type.kind === 'bool') return (frame) => !derefAll(operand(frame));
-      const name = (type as { name: IntName }).name;
-      return (frame) => {
-        const value = derefAll(operand(frame)) as bigint;
-        return name.startsWith('u') ? BigInt.asUintN(intBitsOf(name), ~value) : ~value;
-      };
-    }
-    if (type.kind === 'float') return (frame) => -(derefAll(operand(frame)) as number);
-    const name = (type as { name: IntName }).name;
-    return (frame) => {
-      const negated = -(derefAll(operand(frame)) as bigint);
-      if (negated !== wrap(name, negated)) overflow('neg', span);
-      return negated;
-    };
-  }
-
-  // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of expression, statement, or pattern.
-  // code-gauge-allow functionNcss 45 -- One case per kind of expression, statement, or pattern.
-  private binary(expr: Extract<Expr, { kind: 'binary' }>): Eval {
-    const { op } = expr;
-    if (op === '&&' || op === '||') {
-      const left = this.value(expr.left);
-      const right = this.value(expr.right);
-      return op === '&&'
-        ? (frame) => (left(frame) as boolean) && (right(frame) as boolean)
-        : (frame) => (left(frame) as boolean) || (right(frame) as boolean);
-    }
-    const left = this.read(expr.left);
-    const right = this.read(expr.right);
-    const leftCoerced = this.annotations.coercions.get(expr.left) ? this.value(expr.left) : left;
-    const rightCoerced = this.annotations.coercions.get(expr.right) ? this.value(expr.right) : right;
-    if (['==', '!=', '<', '<=', '>', '>='].includes(op)) {
-      const staticType = resolve(expr.left.ty!, true);
-      const compareType = runtimeType(stringish(staticType) ?? staticType);
-      if (op === '==' || op === '!=') {
-        const equal = op === '==';
-        const rhsType = runtimeType(resolve(expr.right.ty!, true));
-        return (frame) =>
-          valuesEqual(compareType(frame), leftCoerced(frame), rightCoerced(frame), rhsType(frame)) === equal;
-      }
-      const tests: Record<string, (order: number) => boolean> = {
-        '<': (o) => o < 0,
-        '<=': (o) => o <= 0,
-        '>': (o) => o > 0,
-        '>=': (o) => o >= 0,
-      };
-      const test = tests[op];
-      return (frame) => {
-        const order = compareValues(compareType(frame), leftCoerced(frame), rightCoerced(frame));
-        return order !== undefined && test(order);
-      };
-    }
-    const type = numericType(expr.ty!);
-    const span = expr.span;
-    if (type.kind === 'adt' && (type.def.builtin === 'HashSet' || type.def.builtin === 'BTreeSet')) {
-      const elem = runtimeType(type.args[0]);
-      return (frame) =>
-        setOperation(op, derefAll(left(frame)) as SetValue, derefAll(right(frame)) as SetValue, elem(frame));
-    }
-    if (type.kind === 'adt') {
-      // String + &str
-      return (frame) => {
-        const text = left(frame) as string;
-        const addition = derefAll(rightCoerced(frame)) as string;
-        frame.runtime.allocateString(text.length + addition.length, addition.length);
-        return concatStrings(text, addition);
-      };
-    }
-    if (type.kind === 'bool') {
-      const fn = {
-        '&': (a: boolean, b: boolean) => a && b,
-        '|': (a: boolean, b: boolean) => a || b,
-        '^': (a: boolean, b: boolean) => a !== b,
-      }[op as '&'];
-      return (frame) => fn(derefAll(left(frame)) as boolean, derefAll(right(frame)) as boolean);
-    }
-    if (type.kind === 'float') {
-      const f32 = type.name === 'f32';
-      return (frame) => floatArith(op, derefAll(left(frame)) as number, derefAll(right(frame)) as number, f32);
-    }
-    const name = (type as { name: IntName }).name;
-    if (op === '<<' || op === '>>') {
-      return (frame) => intArith(op, name, derefAll(left(frame)) as bigint, derefAll(right(frame)) as bigint, span);
-    }
-    return (frame) => {
-      frame.runtime.spend();
-      return intArith(op, name, derefAll(left(frame)) as bigint, derefAll(right(frame)) as bigint, span);
-    };
-  }
-
-  private assign(expr: Extract<Expr, { kind: 'assign' }>): Eval {
+  assign(expr: Extract<Expr, { kind: 'assign' }>): Eval {
     const value = this.value(expr.value);
     const res = expr.target.kind === 'path' ? this.annotations.paths.get(expr.target) : undefined;
     if (res?.kind === 'discard') return (frame) => (value(frame), UNIT_VALUE);
@@ -1118,151 +564,7 @@ export class Compiler {
     };
   }
 
-  // code-gauge-allow functionNcss 33 -- One case per kind of expression, statement, or pattern.
-  private compoundAssign(expr: Extract<Expr, { kind: 'compoundAssign' }>): Eval {
-    const place = this.place(expr.target);
-    const value = this.value(expr.value);
-    const type = numericType(expr.target.ty!);
-    const span = expr.span;
-    const { op } = expr;
-    if (type.kind === 'adt') {
-      return (frame) => {
-        const target = place(frame);
-        const addition = derefAll(value(frame)) as string;
-        frame.runtime.allocateString((target.get() as string).length + addition.length, addition.length);
-        changeString(target, () => target.set((target.get() as string) + addition));
-        return UNIT_VALUE;
-      };
-    }
-    // On primitive types, `a[i()] += f()` evaluates its right side first; `String`'s `+=` is a call, left side first.
-    if (type.kind === 'bool') {
-      return (frame) => {
-        const b = derefAll(value(frame)) as boolean;
-        const target = place(frame);
-        const a = target.get() as boolean;
-        target.set(op === '&' ? a && b : op === '|' ? a || b : a !== b);
-        return UNIT_VALUE;
-      };
-    }
-    if (type.kind === 'float') {
-      const f32 = type.name === 'f32';
-      return (frame) => {
-        const operand = derefAll(value(frame)) as number;
-        const target = place(frame);
-        target.set(floatArith(op, target.get() as number, operand, f32));
-        return UNIT_VALUE;
-      };
-    }
-    const name = (type as { name: IntName }).name;
-    return (frame) => {
-      const operand = derefAll(value(frame)) as bigint;
-      const target = place(frame);
-      target.set(intArith(op, name, target.get() as bigint, operand, span));
-      return UNIT_VALUE;
-    };
-  }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Calls
-
-  private call(expr: Extract<Expr, { kind: 'call' }>): Eval {
-    const { callee } = expr;
-    const args = expr.args.map((arg) => this.value(arg));
-    const span = expr.span;
-    const callRow = expr.span.row;
-    const res = callee.kind === 'path' ? this.annotations.paths.get(callee) : undefined;
-    if (res?.kind === 'fn') {
-      const { fn } = res;
-      if ((fn as { nativeKey?: string }).nativeKey === 'Turtle::new') {
-        return (frame) =>
-          this.support.turtleNew(
-            args.map((arg) => arg(frame)),
-            span,
-            frame
-          );
-      }
-      const typeArgs = res.typeArgs.map((arg) => runtimeType(arg));
-      return (frame) => {
-        const values = args.map((arg) => arg(frame));
-        return this.support.callFn(
-          fn,
-          typeArgs.map((arg) => arg(frame)),
-          values,
-          callRow,
-          span,
-          frame
-        );
-      };
-    }
-    if (res?.kind === 'ctor') {
-      const { def, variant } = res;
-      return (frame) => {
-        frame.runtime.allocate(args.length);
-        return construct(
-          def,
-          variant,
-          args.map((arg) => arg(frame))
-        );
-      };
-    }
-    const calleeValue = this.read(callee);
-    return (frame) => {
-      const fn = derefAll(calleeValue(frame));
-      const values = args.map((arg) => arg(frame));
-      return this.support.callValue(fn instanceof DynValue ? fn.value : fn, values, callRow);
-    };
-  }
-
-  private methodCall(expr: Extract<Expr, { kind: 'methodCall' }>): Eval {
-    const method = this.annotations.methods.get(expr);
-    if (!method) throw new Error(`Unresolved method ${expr.method}`);
-    const receiver = this.receiver(expr, method);
-    const args = expr.args.map((arg) => this.value(arg));
-    const typeArgs = method.typeArgs.map((arg) => runtimeType(arg));
-    const { fn } = method;
-    const span = expr.methodSpan;
-    const callRow = expr.span.row;
-    return (frame) => {
-      const self = receiver(frame);
-      const values = [self];
-      for (const arg of args) values.push(arg(frame));
-      return this.support.callFn(
-        fn,
-        typeArgs.map((arg) => arg(frame)),
-        values,
-        callRow,
-        span,
-        frame
-      );
-    };
-  }
-
-  /** The receiver a method takes, after the derefs and the reference its call adds. */
-  private receiver(expr: Extract<Expr, { kind: 'methodCall' }>, method: MethodRes): Eval {
-    const adjust: ReceiverAdjust = method.receiver;
-    const iterFrom = adjust.asIter ? runtimeType(stripRefs(expr.receiver.ty!)) : undefined;
-    // `String::capacity` reads where the string is stored, which keeps its capacity (a JS string cannot).
-    if (adjust.autoref === 'mut' || (adjust.autoref === 'ref' && isStringCapacity(method.fn))) {
-      const place = this.placeThrough(expr.receiver, adjust.derefs);
-      if (iterFrom) return (frame) => new CellPlace(this.support.toIter(place(frame).get(), iterFrom(frame)));
-      return place;
-    }
-    const byValue = adjust.autoref === 'none' && method.fn.selfMode === 'value' && adjust.derefs.length === 0;
-    const read = byValue ? this.value(expr.receiver) : this.valueThrough(expr.receiver, adjust.derefs);
-    if (iterFrom) return (frame) => this.support.toIter(read(frame), iterFrom(frame));
-    const selfType = resolve(expr.receiver.ty!, true);
-    if (
-      method.fn.selfMode === 'value' &&
-      adjust.autoref === 'none' &&
-      adjust.derefs.length > 0 &&
-      needsCopy(selfType)
-    ) {
-      return (frame) => copyValue(read(frame));
-    }
-    return read;
-  }
-
-  private closure(expr: Extract<Expr, { kind: 'closure' }>): Eval {
+  closure(expr: Extract<Expr, { kind: 'closure' }>): Eval {
     const info = this.annotations.closures.get(expr);
     if (!info) throw new Error('Unchecked closure');
     const { context } = info;
@@ -1356,7 +658,7 @@ export class Compiler {
     return shell;
   }
 
-  private tryExpr(expr: Extract<Expr, { kind: 'try' }>): Eval {
+  tryExpr(expr: Extract<Expr, { kind: 'try' }>): Eval {
     const res = this.annotations.tries.get(expr);
     if (!res) throw new Error('Unchecked ?');
     const operand = this.value(expr.operand);
@@ -1377,470 +679,96 @@ export class Compiler {
       throw new ControlSignal('return', undefined, new EnumValue(value.def, 1, [error]));
     };
   }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Control flow
-
-  private conditionEval(cond: Condition): Eval {
-    if (cond.kind === 'expr') return this.value(cond.expr);
-    const value = this.read(cond.value);
-    const matcher = this.compileMatcher(cond.pattern);
-    const placeEval = isPlaceExpr(cond.value, this.annotations) ? this.place(cond.value) : undefined;
-    const takeAll = this.takesWhole(cond.value, cond.pattern);
-    return (frame) => {
-      const v = value(frame);
-      const matched = matcher(frame, v, placeEval ? () => placeEval(frame) : undefined);
-      if (matched) takeAll?.(frame);
-      return matched;
-    };
-  }
-
-  private ifExpr(expr: Extract<Expr, { kind: 'if' }>): Eval {
-    const cond = this.conditionEval(expr.cond);
-    const condLocals = expr.cond.kind === 'let' ? this.patternSlots(expr.cond.pattern) : [];
-    const then = this.compileBlock(expr.consequent);
-    const otherwise = expr.else ? this.value(expr.else) : undefined;
-    return (frame) => {
-      frame.runtime.spend();
-      if (cond(frame)) {
-        try {
-          return then(frame);
-        } finally {
-          for (const slot of condLocals) frame.locals[slot] = UNASSIGNED;
-        }
-      }
-      return otherwise ? otherwise(frame) : UNIT_VALUE;
-    };
-  }
-
-  private matchExpr(expr: Extract<Expr, { kind: 'match' }>): Eval {
-    const scrutinee = this.read(expr.scrutinee);
-    const placeEval = isPlaceExpr(expr.scrutinee, this.annotations) ? this.place(expr.scrutinee) : undefined;
-    const arms = expr.arms.map((arm) => {
-      const matcher = this.compileMatcher(arm.pattern);
-      const body = this.value(arm.body);
-      const slots = this.patternSlots(arm.pattern);
-      const takeAll = this.takesWhole(expr.scrutinee, arm.pattern);
-      return { matcher, body, slots, takeAll };
-    });
-    return (frame) => {
-      frame.runtime.spend();
-      const value = scrutinee(frame);
-      frame.temporaries.push(value);
-      try {
-        for (const { matcher, body, slots, takeAll } of arms) {
-          if (matcher(frame, value, placeEval ? () => placeEval(frame) : undefined)) {
-            takeAll?.(frame);
-            frame.temporaries.pop();
-            try {
-              return body(frame);
-            } finally {
-              for (const slot of slots) frame.locals[slot] = UNASSIGNED;
-              frame.temporaries.push(undefined);
-            }
-          }
-        }
-      } finally {
-        frame.temporaries.pop();
-      }
-      throw new Error('No arm matched');
-    };
-  }
-
-  // code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of expression, statement, or pattern.
-  private loop(expr: Extract<Expr, { kind: 'loop' }>): Eval {
-    const body = this.compileBlock(expr.body);
-    const label = expr.label;
-    return (frame) => {
-      for (;;) {
-        frame.runtime.spend();
-        try {
-          body(frame);
-        } catch (error) {
-          if (!(error instanceof ControlSignal) || error.kind === 'return') throw error;
-          if (error.label !== undefined && error.label !== label) throw error;
-          if (error.kind === 'break') return error.value ?? UNIT_VALUE;
-        }
-      }
-    };
-  }
-
-  private whileExpr(expr: Extract<Expr, { kind: 'while' }>): Eval {
-    const cond = this.conditionEval(expr.cond);
-    const condLocals = expr.cond.kind === 'let' ? this.patternSlots(expr.cond.pattern) : [];
-    const body = this.compileBlock(expr.body);
-    const label = expr.label;
-    const isLet = expr.cond.kind === 'let';
-    const row = isLet ? this.stepRow(expr.span) : undefined;
-    const answered = isLet && this.bindsAnswer(expr.cond.kind === 'let' ? expr.cond.pattern : undefined);
-    return (frame) => {
-      try {
-        for (;;) {
-          frame.runtime.spend();
-          if (!cond(frame)) return UNIT_VALUE;
-          if (row !== undefined) frame.runtime.steps.stepBinding(row, answered);
-          try {
-            body(frame);
-          } catch (error) {
-            if (!(error instanceof ControlSignal) || error.kind === 'return') throw error;
-            if (error.label !== undefined && error.label !== label) throw error;
-            if (error.kind === 'break') return UNIT_VALUE;
-          }
-        }
-      } finally {
-        for (const slot of condLocals) frame.locals[slot] = UNASSIGNED;
-      }
-    };
-  }
-
-  // code-gauge-allow functionCognitiveComplexity 28 -- One case per kind of expression, statement, or pattern.
-  // code-gauge-allow functionNcss 36 -- One case per kind of expression, statement, or pattern.
-  private forExpr(expr: Extract<Expr, { kind: 'for' }>): Eval {
-    const loopInfo = this.annotations.loops.get(expr);
-    if (!loopInfo) throw new Error('Unchecked for');
-    const iterable = this.value(expr.iterable);
-    const fromType = runtimeType(loopInfo.from);
-    const bind = this.compileBinder(expr.pattern);
-    const patternSlots = this.patternSlots(expr.pattern);
-    const body = this.compileBlock(expr.body);
-    const label = expr.label;
-    const row = this.stepRow(expr.span);
-    const answered = this.bindsAnswer(expr.pattern);
-    return (frame) => {
-      const source = iterable(frame);
-      // The iterator keeps what the loop still uses: all of a borrowed collection, or what an owned one has left.
-      const iterator = this.support.toIter(source, fromType(frame)) as IterValue;
-      frame.temporaries.push(iterator);
-      try {
-        for (;;) {
-          frame.runtime.spend();
-          const next = iterator.next();
-          if (next === DONE) return UNIT_VALUE;
-          bind(frame, next as Value);
-          if (row !== undefined) frame.runtime.steps.stepBinding(row, answered);
-          try {
-            body(frame);
-          } catch (error) {
-            if (!(error instanceof ControlSignal) || error.kind === 'return') throw error;
-            if (error.label !== undefined && error.label !== label) throw error;
-            if (error.kind === 'break') return UNIT_VALUE;
-          }
-        }
-      } finally {
-        frame.temporaries.pop();
-        for (const slot of patternSlots) frame.locals[slot] = UNASSIGNED;
-      }
-    };
-  }
-
-  /** Whether a loop's pattern binds a value learners write down: a number, a `bool`, a `char`, or a string. */
-  private bindsAnswer(pattern: Pattern | undefined): boolean {
-    if (!pattern) return false;
-    if (pattern.kind === 'tuple' || pattern.kind === 'tupleStruct' || pattern.kind === 'struct') return true;
-    const type = normalize(shallow(resolve(pattern.ty ?? { kind: 'tuple', elems: [] }, true)));
-    return isAnswerType(type);
-  }
-
-  // -------------------------------------------------------------------------------------------------------------------
-  // Macros
-
-  private macro(expr: Expr, macro: MacroCall): Eval {
-    const span = expr.span;
-    switch (macro.kind) {
-      case 'print': {
-        const format = macro.format ? this.format(macro.format) : () => '';
-        const newline = macro.newline ? '\n' : '';
-        const stream = macro.stream;
-        return (frame) => {
-          const text = formatOrPanic(format, frame, IO_WRITE_FAILURE) + newline;
-          frame.runtime.write(stream, text);
-          return UNIT_VALUE;
-        };
-      }
-      case 'format': {
-        const format = this.format(macro.format);
-        return (frame) => formatOrPanic(format, frame, FORMAT_FAILURE);
-      }
-      case 'write': {
-        const target = this.read(macro.target);
-        const format = macro.format ? this.format(macro.format) : () => '';
-        const newline = macro.newline ? '\n' : '';
-        const targetType = normalize(shallow(macro.target.ty!));
-        const inner = targetType.kind === 'ref' ? normalize(shallow(targetType.target)) : targetType;
-        const isString = inner.kind === 'adt' && inner.def.builtin === 'String';
-        const okValue = (): Value => new EnumValue(this.program.adtDef('Result'), 0, [UNIT_VALUE]);
-        const errValue = (): Value =>
-          new EnumValue(this.program.adtDef('Result'), 1, [new StructValue(this.program.adtDef('FmtError'), [])]);
-        if (isString) {
-          const place = this.place(macro.target.kind === 'ref' ? macro.target.operand : macro.target);
-          const throughRef = targetType.kind === 'ref' && macro.target.kind !== 'ref';
-          return (frame) => {
-            const p = throughRef ? (target(frame) as Place) : place(frame);
-            const { text, failed } = formatPartly(format, frame);
-            const written = text + (failed ? '' : newline);
-            frame.runtime.allocateString((p.get() as string).length + written.length, written.length);
-            p.set((p.get() as string) + written);
-            return failed ? errValue() : okValue();
-          };
-        }
-        return (frame) => {
-          let formatter = target(frame);
-          while (isPlace(formatter)) formatter = formatter.get();
-          const { text, failed } = formatPartly(format, frame);
-          const written = text + (failed ? '' : newline);
-          frame.runtime.allocateString((formatter as FormatterValue).text.length + written.length, written.length);
-          (formatter as FormatterValue).text += written;
-          return failed ? errValue() : okValue();
-        };
-      }
-      case 'panic': {
-        const format = macro.format ? this.format(macro.format) : undefined;
-        const name = macro.name;
-        return (frame) => {
-          const text = format?.(frame);
-          const message =
-            name === 'panic'
-              ? (text ?? 'explicit panic')
-              : name === 'unreachable'
-                ? text === undefined
-                  ? 'internal error: entered unreachable code'
-                  : `internal error: entered unreachable code: ${text}`
-                : name === 'todo'
-                  ? text === undefined
-                    ? 'not yet implemented'
-                    : `not yet implemented: ${text}`
-                  : text === undefined
-                    ? 'not implemented'
-                    : `not implemented: ${text}`;
-          throw new RustPanic(message, span);
-        };
-      }
-      case 'assert': {
-        const cond = this.value(macro.cond);
-        const format = macro.format ? this.format(macro.format) : undefined;
-        const source = macro.text;
-        return (frame) => {
-          if (!(cond(frame) as boolean)) {
-            throw new RustPanic(format ? format(frame) : `assertion failed: ${source}`, span);
-          }
-          return UNIT_VALUE;
-        };
-      }
-      case 'assertEq': {
-        const left = this.read(macro.left);
-        const right = this.read(macro.right);
-        const leftStatic = resolve(macro.left.ty!, true);
-        const leftType = runtimeType(leftStatic);
-        const rightType = runtimeType(macro.right.ty!);
-        const eqType = runtimeType(stringish(leftStatic) ?? leftStatic);
-        const format = macro.format ? this.format(macro.format) : undefined;
-        const { equal } = macro;
-        return (frame) => {
-          const a = left(frame);
-          const b = right(frame);
-          if (valuesEqual(eqType(frame), a, b) !== equal) {
-            const spec: Spec = {
-              fill: ' ',
-              align: undefined,
-              sign: undefined,
-              alternate: false,
-              zero: false,
-              width: undefined,
-              precision: undefined,
-            };
-            const l = this.support.formatter.debug(a, leftType(frame), spec, undefined);
-            const r = this.support.formatter.debug(b, rightType(frame), spec, undefined);
-            const message = format ? `: ${format(frame)}` : '';
-            throw new RustPanic(
-              `assertion \`left ${equal ? '==' : '!='} right\` failed${message}\n  left: ${l}\n right: ${r}`,
-              span
-            );
-          }
-          return UNIT_VALUE;
-        };
-      }
-      case 'vec': {
-        const elems = macro.elems.map((elem) => this.value(elem));
-        return (frame) => {
-          frame.runtime.allocate(elems.length);
-          return claimStrings(elems.map((elem) => elem(frame)));
-        };
-      }
-      case 'vecRepeat': {
-        const value = this.value(macro.value);
-        const count = this.value(macro.count);
-        const elemType = runtimeType(macro.value.ty!);
-        return (frame) => {
-          const item = value(frame);
-          const length = Number(count(frame) as bigint);
-          frame.runtime.allocate(length);
-          frame.runtime.spend(Math.ceil(length / 16));
-          const type = elemType(frame);
-          return Array.from({ length }, (_, index) => (index === length - 1 ? item : cloneValue(type, item)));
-        };
-      }
-      case 'matches': {
-        const value = this.read(macro.value);
-        const matcher = this.compileMatcher(macro.pattern);
-        return (frame) => matcher(frame, value(frame), undefined);
-      }
-      case 'dbg': {
-        const args = macro.args.map((arg, index) => ({
-          value: this.value(arg),
-          type: runtimeType(arg.ty!),
-          text: macro.texts[index],
-        }));
-        return (frame) => {
-          const values = args.map(({ value, type, text }) => {
-            const v = value(frame);
-            const spec: Spec = {
-              fill: ' ',
-              align: undefined,
-              sign: undefined,
-              alternate: true,
-              zero: false,
-              width: undefined,
-              precision: undefined,
-            };
-            const shown = this.support.formatter.debug(v, type(frame), spec, 0);
-            frame.runtime.write('stderr', `[src/main.rs:${span.row + 1}:${span.col}] ${text} = ${shown}\n`);
-            return v;
-          });
-          if (args.length === 0) {
-            frame.runtime.write('stderr', `[src/main.rs:${span.row + 1}:${span.col}]\n`);
-            return UNIT_VALUE;
-          }
-          return values.length === 1 ? values[0] : values;
-        };
-      }
-    }
-  }
-
-  private format(format: FormatArgs): (frame: Frame) => string {
-    const args = format.args.map((arg) => this.read(arg));
-    const types = format.args.map((arg) => runtimeType(arg.ty!));
-    const { pieces } = format;
-    return (frame) => {
-      const values = args.map((arg) => arg(frame));
-      frame.runtime.spend();
-      return this.support.formatter.format(
-        pieces,
-        values,
-        types.map((type) => type(frame))
-      );
-    };
-  }
 }
 
-function construct(def: AdtDef, variant: number, args: Value[]): Value {
-  claimStrings(args);
-  return def.kind === 'enum' ? new EnumValue(def, variant, args) : new StructValue(def, args);
+function readInt(_c: Compiler, expr: ExprOf<'int'>): Eval {
+  const value = expr.value;
+  const type = resolve(expr.ty!, true);
+  if (type.kind === 'float') {
+    const number = Number(value);
+    return () => number;
+  }
+  return () => value;
+}
+
+function readFloat(_c: Compiler, expr: ExprOf<'float'>): Eval {
+  const type = resolve(expr.ty!, true);
+  const value = type.kind === 'float' && type.name === 'f32' ? expr.f32 : expr.value;
+  return () => value;
+}
+
+function readLiteral(_c: Compiler, expr: ExprOf<'bool' | 'char' | 'str'>): Eval {
+  const value = expr.value;
+  return () => value;
+}
+
+function readRef(c: Compiler, expr: ExprOf<'ref'>): Eval {
+  if (expr.mutable) {
+    const place = c.place(expr.operand);
+    return (frame) => place(frame);
+  }
+  return c.read(expr.operand);
+}
+
+function readCast(c: Compiler, expr: ExprOf<'cast'>): Eval {
+  const operand = c.value(expr.operand);
+  const from = resolve(expr.operand.ty!, true);
+  const to = resolve(expr.ty!, true);
+  return (frame) => castValue(operand(frame), from, to);
+}
+
+function readRange(c: Compiler, expr: ExprOf<'range'>): Eval {
+  const start = expr.start ? c.value(expr.start) : undefined;
+  const end = expr.end ? c.value(expr.end) : undefined;
+  const inclusive = expr.inclusive;
+  return (frame) => new RangeValue(start?.(frame), end?.(frame), inclusive);
+}
+
+function readTuple(c: Compiler, expr: ExprOf<'tuple'>): Eval {
+  if (expr.elems.length === 0) return () => UNIT_VALUE;
+  const elems = expr.elems.map((elem) => c.value(elem));
+  return (frame) => claimStrings(elems.map((elem) => elem(frame)));
+}
+
+function readArray(c: Compiler, expr: ExprOf<'array'>): Eval {
+  const elems = expr.elems.map((elem) => c.value(elem));
+  return (frame) => {
+    frame.runtime.allocate(elems.length);
+    return claimStrings(elems.map((elem) => elem(frame)));
+  };
+}
+
+function readArrayRepeat(c: Compiler, expr: ExprOf<'arrayRepeat'>): Eval {
+  const value = c.value(expr.value);
+  const count = c.value(expr.count);
+  return (frame) => {
+    const length = Number(count(frame) as bigint);
+    frame.runtime.allocate(length);
+    frame.runtime.spend(Math.ceil(length / 16));
+    const item = value(frame);
+    frame.runtime.allocate(length * copiedSlots(item));
+    return Array.from({ length }, () => copyValue(item));
+  };
+}
+
+function readJump(c: Compiler, expr: ExprOf<'break' | 'continue'>): Eval {
+  const value = expr.kind === 'break' && expr.value ? c.value(expr.value) : undefined;
+  const kind = expr.kind;
+  const label = expr.label;
+  return (frame) => {
+    throw new ControlSignal(kind, label, value?.(frame));
+  };
+}
+
+function readReturn(c: Compiler, expr: ExprOf<'return'>): Eval {
+  const value = expr.value ? c.value(expr.value) : undefined;
+  return (frame) => {
+    throw new ControlSignal('return', undefined, value ? value(frame) : UNIT_VALUE);
+  };
 }
 
 function runtimeTypeStatic(type: Type): Type {
   return resolve(type, true);
-}
-
-function derefAll(value: Value): Value {
-  let current = value;
-  while (isPlace(current)) current = current.get();
-  return current;
-}
-
-function derefDeep(value: Value): Value {
-  let current = value;
-  while (isPlace(current)) current = current.get();
-  return current;
-}
-
-function intBitsOf(name: IntName): number {
-  return name === 'usize' || name === 'isize' ? 64 : Number(name.slice(1));
-}
-
-/** The type an operator works on: numbers through references. */
-function numericType(type: Type): Type {
-  let t = normalize(shallow(resolve(type, true)));
-  while (t.kind === 'ref') t = normalize(shallow(t.target));
-  return t;
-}
-
-/** For comparisons of string-like types (`String == &str`), the type `str` that compares them alike. */
-function stringish(type: Type): Type | undefined {
-  let t = normalize(shallow(type));
-  while (t.kind === 'ref') t = normalize(shallow(t.target));
-  if (t.kind === 'str' || (t.kind === 'adt' && t.def.builtin === 'String')) return { kind: 'str' };
-  return undefined;
-}
-
-function isStringType(type: Type): boolean {
-  const t = normalize(shallow(type));
-  return t.kind === 'adt' && t.def.builtin === 'String';
-}
-
-function isStringCapacity(fn: FnDef): boolean {
-  return fn.name === 'capacity' && fn.impl !== undefined && isStringType(fn.impl.selfType);
-}
-
-function stripRefs(type: Type): Type {
-  let t = normalize(shallow(type));
-  while (t.kind === 'ref') t = normalize(shallow(t.target));
-  return t;
-}
-
-function isRefType(type: Type): boolean {
-  return normalize(shallow(type)).kind === 'ref';
-}
-
-export function isAnswerType(type: Type): boolean {
-  const t = normalize(shallow(type));
-  if (t.kind === 'int' || t.kind === 'float' || t.kind === 'bool' || t.kind === 'char' || t.kind === 'str') return true;
-  if (t.kind === 'ref') return isAnswerType(t.target);
-  return t.kind === 'adt' && t.def.builtin === 'String';
-}
-
-function rangeStart(range: RangeValue | undefined): number | undefined {
-  return range?.start === undefined ? undefined : Number(range.start as bigint);
-}
-
-function rangeEnd(range: RangeValue | undefined): number | undefined {
-  if (range?.end === undefined) return undefined;
-  return Number(range.end as bigint) + (range.inclusive ? 1 : 0);
-}
-
-/** The message of an index past the end; `VecDeque`'s says less. */
-function indexPanic(container: string | undefined, length: number, index: bigint): string {
-  if (container === 'vecDeque') return 'out of bounds access';
-  return `index out of bounds: the len is ${length} but the index is ${index}`;
-}
-
-/** `&v[a..b]`: a window on a slice, panicking as Rust does when the range is out of order or bounds. */
-export function sliceRange(container: Value, range: RangeValue | undefined, span: Span): Value {
-  const length = sliceLength(container);
-  const start = rangeStart(range) ?? 0;
-  const end = rangeEnd(range) ?? length;
-  if (range?.inclusive && range.end !== undefined && (range.end as bigint) === 0xff_ff_ff_ff_ff_ff_ff_ffn) {
-    throw new RustPanic('attempted to index slice up to maximum usize', span);
-  }
-  if (range?.end === undefined && start > length) {
-    throw new RustPanic(`range start index ${range!.start as bigint} out of range for slice of length ${length}`, span);
-  }
-  if (start > end) throw new RustPanic(`slice index starts at ${start} but ends at ${end}`, span);
-  if (end > length) {
-    // An inclusive range reports its last index, and others their end, as the numbers the program wrote.
-    throw new RustPanic(`range end index ${range!.end as bigint} out of range for slice of length ${length}`, span);
-  }
-  const { base, start: offset } = sliceBase(container);
-  return new SliceView(base, offset + start, offset + end);
-}
-
-function isPlaceExpr(expr: Expr, annotations: Annotations): boolean {
-  if (expr.kind === 'path') {
-    const res = annotations.paths.get(expr);
-    return res?.kind === 'local' || res?.kind === 'capture';
-  }
-  if (expr.kind === 'field') return true;
-  if (expr.kind === 'index') return !annotations.indexes.get(expr)?.range;
-  return expr.kind === 'unary' && expr.op === '*';
 }
 
 function isBlockLike(expr: Expr): boolean {
@@ -1883,35 +811,6 @@ export function isObjectCreation(expr: Expr, annotations: Annotations): boolean 
   return false;
 }
 
-/** Where std panics when an impl's error reaches `println!` (its `io::Write`) and `format!`. */
-const IO_WRITE_FAILURE = {
-  message: 'a formatting trait implementation returned an error when the underlying stream did not',
-  location: 'core/src/io/write.rs:411:17',
-};
-const FORMAT_FAILURE = {
-  message: 'a formatting trait implementation returned an error when the underlying stream did not: Error',
-  location: 'alloc/src/fmt.rs:657:14',
-};
-
-function formatOrPanic(format: Eval, frame: Frame, failure: { message: string; location: string }): string {
-  try {
-    return format(frame) as string;
-  } catch (error) {
-    if (error instanceof FmtFailure) throw new RustPanic(failure.message, { row: 0, col: 0 }, failure.location);
-    throw error;
-  }
-}
-
-/** Formats for `write!`, which writes what the formatting wrote before an impl's error and returns the error. */
-function formatPartly(format: Eval, frame: Frame): { text: string; failed: boolean } {
-  try {
-    return { text: format(frame) as string, failed: false };
-  } catch (error) {
-    if (error instanceof FmtFailure) return { text: error.written, failed: true };
-    throw error;
-  }
-}
-
 /** Fills the fields a struct expression does not give from its base: moving the moved ones, copying the others. */
 function takeFromBase(source: StructValue, result: Value[], given: ReadonlySet<number>, moved: boolean[]): void {
   for (let index = 0; index < result.length; index++) {
@@ -1919,17 +818,4 @@ function takeFromBase(source: StructValue, result: Value[], given: ReadonlySet<n
     result[index] = moved[index] ? source.fields[index] : copyValue(source.fields[index]);
     if (moved[index]) source.fields[index] = MOVED;
   }
-}
-
-/** The set that `|`, `&`, `-`, or `^` makes of two sets, of clones of their elements, in the order they iterate. */
-function setOperation(op: string, a: SetValue, b: SetValue, elem: Type): SetValue {
-  const result = new SetValue(a.sorted);
-  if (a.entries instanceof TableMap) sizeTable(result.entries, a.entries.entrySize);
-  const add = (hash: string, value: Value): void => void result.entries.set(hash, cloneValue(elem, value));
-  for (const [hash, value] of a.entries) {
-    const inB = b.entries.has(hash);
-    if (op === '|' || (op === '&' && inB) || ((op === '-' || op === '^') && !inB)) add(hash, value);
-  }
-  if (op === '|' || op === '^') for (const [hash, value] of b.entries) if (!a.entries.has(hash)) add(hash, value);
-  return result;
 }
