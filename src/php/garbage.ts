@@ -721,12 +721,16 @@ class DetachedArrays {
       }
     }
   }
-  // code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionNcss 39 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+  // code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private enter(node: unknown): void {
     if (!(node instanceof Ref || node instanceof PhpArray || node instanceof PhpObject)) return;
     if (node instanceof PhpObject && activeReleaseObjects.has(node)) return;
-    if (node instanceof PhpArray && (!node.composite || objectFreeArrays.get(node) === node.mutationVersion)) return;
+    if (node instanceof PhpArray && !node.composite) return;
+    if (node instanceof PhpArray && objectFreeArrays.get(node) === node.mutationVersion) {
+      if (!ownedReachable(node, this.roots, this.runtime, this.unreachable, releaseSequence)) this.arrays.add(node);
+      return;
+    }
     const position = this.active.get(node);
     if (position !== undefined) {
       const cycle = this.frames.slice(position).map((frame) => frame.node);

@@ -3662,9 +3662,13 @@ f(null); echo '|'; f(new D('x'));
 $a = [4]; next($a); $b = [[$a]]; unset($b); $a['b'] = 8;
 echo key($a), ':', current($a), ';';
 $c = [4]; next($c); count([$c]); $c['b'] = 8;
-echo key($c), ':', current($c);
+echo key($c), ':', current($c), ';';
+$d = [4]; next($d); array_merge([$d], [new stdClass]); $d['b'] = 8;
+echo key($d), ':', current($d), ';';
+$e = [4]; next($e); $w = [[$e]]; $o = new stdClass; $o->w = $w; unset($w); unset($o); $e['b'] = 8;
+echo key($e), ':', current($e);
 `);
-  expect(retiredObjectFreeWrapper).toMatchObject({ kind: 'executed', stdout: 'b:8;b:8' });
+  expect(retiredObjectFreeWrapper).toMatchObject({ kind: 'executed', stdout: 'b:8;b:8;b:8;b:8' });
 
   const nestedCycleArrayCount = run(String.raw`<?php
 $x = [1]; $y = [$x]; $a = [$y]; $a[] =& $a; unset($x, $y, $a);
