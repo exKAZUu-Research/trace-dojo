@@ -17,6 +17,34 @@ function steps(language: 'cpp' | 'java', program: string): { vars: Record<string
   }));
 }
 
+test('unordered map assignment retains earlier copied entries while later entries allocate turtles', () => {
+  const program = `#include <unordered_map>
+int copies;
+struct Item {
+  Turtle* turtle = nullptr;
+  Item() {}
+  Item(const Item&) : turtle(new Turtle(++copies, 0)) {}
+};
+int main() {
+  std::unordered_map<int, Item> source, target;
+  source.try_emplace(1);
+  source.try_emplace(2);
+  source.try_emplace(3);
+  target = source;
+}`;
+  const execution = executeProgram('cpp', program);
+  const trace = traceProgram('cpp', program, program);
+  expect(execution).toMatchObject({
+    kind: 'executed',
+    finalTurtles: [
+      expect.objectContaining({ x: 1 }),
+      expect.objectContaining({ x: 2 }),
+      expect.objectContaining({ x: 3 }),
+    ],
+  });
+  expect(trace).toMatchObject({ finalTurtles: execution.kind === 'executed' ? execution.finalTurtles : undefined });
+});
+
 test('a C++ program records the steps that the Java version of it records', () => {
   const cpp = `#include <string>
 #include <vector>

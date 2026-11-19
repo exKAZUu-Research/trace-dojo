@@ -342,6 +342,23 @@ export function isLibraryClass(type: Type, name?: string): type is ClassType {
   return type.kind === 'class' && type.cls.library !== undefined && (!name || type.cls.library.kind === name);
 }
 
+export function hasVacuousInitialization(type: Type): boolean {
+  if (type.kind === 'array') return hasVacuousInitialization(type.of);
+  if (type.kind !== 'class') return true;
+  const { cls } = type;
+  if (cls.library) {
+    const array = cls.library.aggregateArray?.type;
+    return array ? array.length === 0 || hasVacuousInitialization(array.of) : cls.library.kind === 'functor';
+  }
+  return (
+    cls.constructors.length === 0 &&
+    !cls.isPolymorphic &&
+    !cls.hasUserDestructor &&
+    (!cls.base || hasVacuousInitialization(classType(cls.base))) &&
+    cls.ownFields.every((field) => !field.initializer && hasVacuousInitialization(field.type))
+  );
+}
+
 export function isCharType(type: Type): boolean {
   return type.kind === 'int' && (type.name === 'char' || type.name === 'schar' || type.name === 'uchar');
 }

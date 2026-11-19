@@ -80,9 +80,9 @@ export interface Expr extends ConstantValue {
   /** The member an expression names, for messages such as "assigning to a const member". */
   description?: string;
   /**
-   * Locates a temporary subobject and optionally transfers its owner to a reference's lifetime.
+   * Locates a temporary or its subobject and optionally retains its owner for a reference's lifetime.
    */
-  temporaryMember?: TemporaryBinding;
+  temporaryBinding?: TemporaryBinding;
 }
 
 /** A name that denotes functions: free functions, or the member functions of an object. */
@@ -97,10 +97,6 @@ export interface FunctionCandidates {
   isQualified?: boolean;
   /** Explicit template arguments, such as `std::max<int>`. */
   templateArgs?: Type[];
-}
-
-export function isXvalue(expr: Expr): boolean {
-  return expr.isXvalue === true || expr.temporaryMember !== undefined;
 }
 
 export function constantExpr(type: Type, value: number | bigint, row: number): Expr {

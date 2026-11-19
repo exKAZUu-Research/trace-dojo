@@ -421,31 +421,46 @@ export class HashValue extends MapValue {
     return node.value;
   }
 
-  /**
-   * Becomes a copy of another table holding `values` in place of its nodes' values: the same bucket count and the same
-   * order, as libc++'s copy constructor and copy assignment make.
-   */
-  copyStructure(frame: Frame, other: HashValue, values: Value[]): void {
-    const count = other.size === 0 ? 0 : other.bucketCount;
-    frame.runtime.reserve(count + 3 * other.size);
-    for (let node = this.head.next; node; node = node.next) node.owner = undefined;
+  copyStructure(
+    frame: Frame,
+    other: HashValue,
+    entry: (source: Value, existing: HashNode | undefined, index: number) => Value,
+    destroy?: ElementOperations['destroy']
+  ): void {
     this.maxLoadFactor = other.maxLoadFactor;
+    if (other.size === 0) {
+      destroyElements(frame, this.clear(frame), destroy);
+      return;
+    }
+    const count = other.bucketCount;
+    frame.runtime.reserve(count + 3 * Math.max(0, other.nodes().length - this.nodes().length));
     this.buckets = Array.from({ length: count });
-    this.head.next = undefined;
     let own = this.head;
     let current = -1;
-    for (const [index, node] of other.nodes().entries()) {
-      const copy: HashNode = { next: undefined, hash: node.hash, value: values[index], owner: this };
-      const bucket = constrain(node.hash, count);
+    for (const [index, source] of other.nodes().entries()) {
+      const existing = own.next;
+      const value = entry(source.value, existing, index);
+      const copy: HashNode = existing ?? { next: undefined, hash: source.hash, value, owner: this };
+      copy.hash = source.hash;
+      copy.value = value;
+      const bucket = constrain(source.hash, count);
       if (bucket !== current) {
         this.buckets[bucket] = own;
         current = bucket;
       }
       own.next = copy;
       own = copy;
+      this.ordered = undefined;
     }
-    this.size = other.size;
+    const discarded: Value[] = [];
+    for (let node = own.next; node; node = node.next) {
+      node.owner = undefined;
+      discarded.push(node.value);
+    }
+    own.next = undefined;
     this.ordered = undefined;
+    destroyElements(frame, discarded, destroy);
+    this.size = other.size;
   }
 
   swap(other: HashValue): void {
@@ -686,35 +701,26 @@ export function unorderedClass(
       const from = source as HashValue;
       const target = make();
       // Apple libc++ skips entry destructors when hash-table copy construction throws.
-      target.copyStructure(
+      const values = copyEntries(
         frame,
-        from,
-        copyEntries(
-          frame,
-          from.nodes().map((node) => node.value),
-          ops(),
-          'release'
-        )
+        from.nodes().map((node) => node.value),
+        ops(),
+        'release'
       );
+      target.copyStructure(frame, from, (_source, _existing, index) => values[index]);
       return target;
     },
     assign: (frame, target, source) => {
       const to = target as HashValue;
       const from = source as HashValue;
       if (to === from) return;
-      to.maxLoadFactor = from.maxLoadFactor;
-      if (from.size === 0) {
-        destroyAll(frame, to.clear(frame));
-        return;
-      }
-      // Copy assignment assigns to the nodes it has, in order, and destroys or adds the rest.
-      const own = to.nodes().map((node) => node.value);
-      const others = from.nodes().map((node) => node.value);
-      const reused = Math.min(own.length, others.length);
-      const values = others.slice(0, reused).map((value, index) => ops().assign(frame, own[index], value));
-      destroyAll(frame, own.slice(reused));
-      for (const value of others.slice(reused)) values.push(ops().copy(frame, value));
-      to.copyStructure(frame, from, values);
+      const { assign, copy, destroy } = ops();
+      to.copyStructure(
+        frame,
+        from,
+        (value, existing) => (existing ? assign(frame, existing.value, value) : copy(frame, value)),
+        destroy
+      );
     },
     destroy: (frame, value) =>
       destroyAll(

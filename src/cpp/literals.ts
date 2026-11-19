@@ -113,8 +113,8 @@ function escapeBytes(part: Syntax): string {
   if (body in SIMPLE_ESCAPES) return SIMPLE_ESCAPES[body];
   // A backslash at the end of a line splices the lines (C++20 [lex.phases]), which the grammar reads as an escape.
   if (/^\r?\n$/.test(body)) return '';
-  if (/^[0-7]{1,3}$/.test(body)) return String.fromCodePoint(Number.parseInt(body, 8) & 0xff);
-  if (/^x[\da-fA-F]+$/.test(body)) return String.fromCodePoint(Number.parseInt(body.slice(1), 16) & 0xff);
+  if (/^[0-7]{1,3}$/.test(body)) return numericEscape(part, body, 8);
+  if (/^x[\da-fA-F]+$/.test(body)) return numericEscape(part, body.slice(1), 16);
   if (/^[uU]/.test(body)) {
     const point = /^u[\da-fA-F]{4}$|^U[\da-fA-F]{8}$/.test(body) ? Number.parseInt(body.slice(1), 16) : Number.NaN;
     if (!Number.isInteger(point) || point > 0x10_ff_ff || (point >= 0xd8_00 && point <= 0xdf_ff))
@@ -123,6 +123,14 @@ function escapeBytes(part: Syntax): string {
   }
   // clang++ warns of an unknown escape and keeps the character.
   return utf8(body);
+}
+
+function numericEscape(part: Syntax, digits: string, base: 8 | 16): string {
+  const value = Number.parseInt(digits, base);
+  if (value > Number(intMax('uchar'))) {
+    return compileError(part.row, `${part.text} は、文字の値の範囲を超えています。`);
+  }
+  return String.fromCodePoint(value);
 }
 
 /** Rejects the prefixes of wide and Unicode literals, which the interpreter leaves out. */

@@ -21,6 +21,7 @@ import { isObjectCreation, onlyCalls } from './stepRules';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
   type GlobalInfo,
+  hasVacuousInitialization,
   intMax,
   intMin,
   isArithmetic,
@@ -70,6 +71,7 @@ interface LocalDeclaration {
   hasInitializer: boolean;
   createsObject: boolean;
   deduced?: AutoDeduction;
+  type?: Type;
 }
 
 /** Compiles statements to closures that run them and tell how they completed. */
@@ -135,7 +137,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   compileStatement(node: Syntax): Exec {
-    const exec = this.compileStatementBody(node);
+    return this.budgeted(this.compileStatementBody(node));
+  }
+
+  private budgeted(exec: Exec): Exec {
     return (frame) => {
       frame.runtime.spend();
       return exec(frame);
@@ -149,7 +154,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return this.compileBlock(node);
       }
       case 'declaration': {
-        return this.localDeclaration(node);
+        return this.localDeclaration(node).exec;
       }
       case 'expression_statement': {
         return this.expressionStatement(node);
@@ -218,7 +223,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   // Declarations -----------------------------------------------------------------------------------------------------
 
-  private localDeclaration(node: Syntax): Exec {
+  private localDeclaration(node: Syntax): { exec: Exec; enter?: Exec | false } {
     const isStatic = this.hasSpecifier(node, 'static');
     const base = this.specifiedType(node, true);
     const declarators = fieldsOf(node, 'declarator');
@@ -226,13 +231,15 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     let recordsStep = false;
     let allCreate = true;
     const parts: Exec[] = [];
+    let canEnter = true;
     let firstDeduced: AutoDeduction | undefined;
     for (const declarator of declarators) {
-      const { exec, hasInitializer, createsObject, deduced } = isStatic
+      const { exec, hasInitializer, createsObject, deduced, type } = isStatic
         ? this.staticDeclarator(base, declarator, node)
         : this.localDeclarator(base, declarator, node);
       firstDeduced = this.checkAutoDeduction(firstDeduced, deduced, declarator.row);
       parts.push(exec);
+      if (hasInitializer || (type && !hasVacuousInitialization(type))) canEnter = false;
       if (hasInitializer || createsObject) recordsStep = true;
       if (!createsObject) allCreate = false;
     }
@@ -240,7 +247,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       for (const part of parts) part(frame);
       return;
     };
-    return recordsStep ? this.withStep(node.row, run, allCreate) : run;
+    return {
+      exec: recordsStep ? this.withStep(node.row, run, allCreate) : run,
+      enter: isStatic ? undefined : canEnter && run,
+    };
   }
 
   private localDeclarator(base: Type, declarator: Syntax, declaration: Syntax): LocalDeclaration {
@@ -307,6 +317,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       hasInitializer: value !== undefined,
       createsObject: createsObject || (type.kind === 'class' && !value),
       deduced,
+      type,
     };
   }
 
@@ -555,7 +566,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         lifetime: this.temporaryLocation(bound),
       };
     }
-    const member = isDirect ? target.temporaryMember : undefined;
+    const member = isDirect ? target.temporaryBinding : undefined;
     if (member) {
       this.convert(target, type, row);
       return { type, lifetime: member };
@@ -790,7 +801,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const saved = this.recordsStepsOverride;
     this.recordsStepsOverride = false;
     try {
-      return this.localDeclaration(node);
+      return this.localDeclaration(node).exec;
     } finally {
       this.recordsStepsOverride = saved;
     }
@@ -1003,12 +1014,14 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const compile = (nodes: readonly Syntax[]): void => {
       for (const node of nodes) {
         if (node.type !== 'case_statement') {
-          const execute = this.compileStatement(node);
-          if (node.type === 'declaration' && !this.hasSpecifier(node, 'static')) {
-            if (this.initializes(node)) initializedBefore = node;
-            else uninitializedDeclarations.push({ index: statements.length, execute });
+          if (node.type === 'declaration') {
+            const { exec, enter } = this.localDeclaration(node);
+            if (enter === false) initializedBefore = node;
+            else if (enter) uninitializedDeclarations.push({ index: statements.length, execute: enter });
+            statements.push(this.budgeted(exec));
+          } else {
+            statements.push(this.compileStatement(node));
           }
-          statements.push(execute);
           continue;
         }
         if (initializedBefore) {
@@ -1053,13 +1066,6 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     };
   }
 
-  /** Whether a declaration initializes a variable, which a jump to a later `case` must not skip. */
-  private initializes(declaration: Syntax): boolean {
-    const type = fieldOf(declaration, 'type');
-    const isClass = type !== undefined && !['primitive_type', 'sized_type_specifier'].includes(type.type);
-    return fieldsOf(declaration, 'declarator').some((declarator) => declarator.type === 'init_declarator' || isClass);
-  }
-
   private returnStatement(node: Syntax): Exec {
     const valueNode = node.children[0];
     const returnType = this.context.returnType;
@@ -1097,30 +1103,30 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (returnType.kind === 'reference') {
       return this.convert(expr, returnType, row).run;
     }
-    const local = this.returnedLocal(node, expr, returnType);
-    this.context.noteReturn(local);
-    if (!local) {
-      const initialize = this.copyInitializer(returnType, expr, row, false);
-      return (frame) => initialize(frame, undefined, false, 'full-expression');
-    }
+    const local = this.returnedAutomaticObject(node, expr);
+    const canElide = local && !local.isParameter && sameType(expr.type, returnType, false);
+    this.context.noteReturn(canElide ? local : undefined);
+    const source = local ? this.implicitReturnSource(expr, returnType) : expr;
+    const initialize = this.copyInitializer(returnType, source, row, false);
+    const copy: Eval<Value> = (frame) => initialize(frame, undefined, false, 'full-expression');
+    if (!local || !canElide) return copy;
     const { slot } = local;
     const share: Eval<Value> = (frame) => {
       frame.nrvoSlot = slot;
       return (frame.slots[slot] as Box).value;
     };
-    const copy = this.copyInitializer(returnType, expr, row, false);
     const { namedReturns } = this.context;
     return (frame) => (namedReturns.has(local) ? share(frame) : copy(frame));
   }
 
-  /** The local variable of the returned class type that a `return` names, which it may return without copying. */
-  private returnedLocal(node: Syntax, expr: Expr, returnType: Type): LocalInfo | undefined {
+  private returnedAutomaticObject(node: Syntax, expr: Expr): LocalInfo | undefined {
     let name = node;
     while (name.type === 'parenthesized_expression' && name.children.length === 1) name = name.children[0];
-    if (name.type !== 'identifier' || returnType.kind !== 'class') return undefined;
-    if (expr.type.kind !== 'class' || expr.type.cls !== returnType.cls) return undefined;
+    if (name.type !== 'identifier' || expr.type.kind !== 'class') return undefined;
     const entity = this.context.lookupLocal(name.text);
-    return entity?.kind === 'local' && !entity.isReference ? entity.local : undefined;
+    if (entity?.kind !== 'local' || entity.isReference) return undefined;
+    const { local } = entity;
+    return this.context.scopes.some((scope) => scope.statics.includes(local.slot)) ? undefined : local;
   }
 
   private tryStatement(node: Syntax): Exec {

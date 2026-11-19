@@ -2,7 +2,7 @@ import { binaryOperation, convertScalar, type Scalar } from '../../c/arith';
 import { commonType, promote } from '../../c/types';
 import { CompileError } from '../../interpreter/diagnostics';
 import { CppRuntimeError, overflowError } from '../errors';
-import { type Expr, isXvalue } from '../expr';
+import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { invoke, makeEach, withTemporaries } from '../objectCompiler';
 import { type Frame, holdAll } from '../runtime';
@@ -1367,7 +1367,7 @@ function makeOperation(
   }));
   const result = resolve(args);
   const { type } = result;
-  const category = result.isLvalue ? (isXvalue(result) ? 'xvalue' : undefined) : 'prvalue';
+  const category = result.isLvalue ? (result.isXvalue ? 'xvalue' : undefined) : 'prvalue';
   const run: ElementOperation['run'] = (frame, ...values) => {
     calls.push(values);
     try {

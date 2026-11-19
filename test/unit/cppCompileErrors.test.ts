@@ -3,6 +3,46 @@ import { expect, test } from 'vitest';
 import { executeProgram } from '../../src/interpreter/program';
 
 test.each([
+  'static int main() {}',
+  'inline int main() {}',
+  'constexpr int main() {}',
+  'const int main() {}',
+  'inline int main(); int main() {}',
+  'static int main(); int main() {}',
+])('rejects an invalid entry point declaration: %s', (program) => {
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 0 }] });
+});
+
+test.each([String.raw`"\x100"`, String.raw`"\400"`, String.raw`'\x100'`, String.raw`'\400'`])(
+  'rejects a numeric escape outside the character range in %s',
+  (literal) => {
+    const program = `int main() { auto value = ${literal}; }`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 0, message: expect.stringContaining('文字の値の範囲') }],
+    });
+  }
+);
+
+test.each(['int n = 2;', 'WithDefault n;', 'WithDestructor n;', 'WithDefault n[2];'])(
+  'rejects a switch label that bypasses initialization of %s',
+  (declaration) => {
+    const program = `struct WithDefault { int n = 1; };
+struct WithDestructor { ~WithDestructor() {} };
+int main() {
+  switch (1) {
+    case 0: ${declaration}
+    case 1: break;
+  }
+}`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 5, message: expect.stringContaining('飛び越えて') }],
+    });
+  }
+);
+
+test.each([
   ['std::accumulate(input, input + 2, 0, add)', 'int add(int& sum, int item) { return sum + item; }'],
   [
     'std::inner_product(input, input + 2, input, 0, add, multiply)',

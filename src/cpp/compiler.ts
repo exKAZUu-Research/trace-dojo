@@ -947,6 +947,16 @@ export class Compiler extends StatementCompiler {
   private baseInitialization(cls: ClassInfo, base: ClassInfo, initializer: Syntax | undefined): Exec {
     const row = initializer?.row ?? cls.row;
     this.requireVirtualDefinitions(base, row);
+    const braces = initializer?.children[1];
+    if (braces?.type === 'initializer_list' && this.isAggregate(base)) {
+      const initialize = this.listInitializer(classType(base), braces, row);
+      return this.fullExpression<undefined>((frame) => {
+        const target = frame.self?.read() as CObject;
+        target.cls = base;
+        installBaseValue(base, target, initialize(frame, target) as CObject);
+        return;
+      });
+    }
     const args = initializer ? this.initializerArguments(initializer) : [];
     if (base.constructors.length === 0) {
       if (args.length > 0) this.error(row, `${base.name} には引数をとるコンストラクタがありません。`);
@@ -1043,7 +1053,7 @@ export class Compiler extends StatementCompiler {
 
   private constructorReference(type: Extract<Type, { kind: 'reference' }>, expr: Expr, row: number): Eval<Value | Ptr> {
     const target = this.referenceMemberTarget(type, expr, row);
-    if (!target.isLvalue || target.temporaryMember || !isReferenceRelated(target.type, type.to))
+    if (!target.isLvalue || target.isXvalue || target.temporaryBinding || !isReferenceRelated(target.type, type.to))
       throw new TemporaryConstructorReferenceError([
         { row, message: 'コンストラクタで参照メンバを一時的な値に束縛できません。' },
       ]);
@@ -1194,10 +1204,13 @@ export class Compiler extends StatementCompiler {
       this.error(node.row, 'virtual はメンバ関数にしか付けられません。');
     const declared = this.applyDeclarator(this.specifiedType(node, true), fieldOf(node, 'declarator') as Syntax);
     const name = declared.name as string;
+    if (name === 'main') this.checkMainSpecifiers(node);
+    else if (!isDefinition && this.hasSpecifier(node, 'static'))
+      this.unsupported(node.row, 'static の関数（内部結合）');
     const fn = this.functionInfo(name, declared.type, declarator, node, undefined);
     this.bindDefaultArguments(fn);
     if (name === 'main') {
-      if (!sameType(unqualified(fn.ret), INT)) this.error(node.row, 'main 関数の戻り値の型は int にしてください。');
+      if (!sameType(fn.ret, INT)) this.error(node.row, 'main 関数の戻り値の型は int にしてください。');
       this.checkMainParameters(fn);
     }
     const existing = this.globalScope.names.get(name);
@@ -1234,6 +1247,11 @@ export class Compiler extends StatementCompiler {
     overloads.push(fn);
     if (!existing) this.globalScope.names.set(name, { kind: 'functions', functions: overloads });
     return fn;
+  }
+
+  private checkMainSpecifiers(node: Syntax): void {
+    const specifier = ['static', 'inline', 'constexpr'].find((word) => this.hasSpecifier(node, word));
+    if (specifier) this.error(node.row, `main 関数に ${specifier} は付けられません。`);
   }
 
   private checkMainParameters(fn: FunctionInfo): void {
@@ -1468,7 +1486,6 @@ export class Compiler extends StatementCompiler {
       this.error(node.row, `${declared.nameNode.text} の宣言はクラスの中に書いてください。`);
     }
     const functionDeclarator = innermostFunctionDeclarator(declarator);
-    if (this.hasSpecifier(node, 'static')) this.unsupported(node.row, 'static の関数（内部結合）');
     this.declareFunction(
       {
         ...node,

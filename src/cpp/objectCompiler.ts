@@ -10,7 +10,7 @@ import {
   Rank,
 } from './conversions';
 import { CppException, CppRuntimeError } from './errors';
-import { type Expr, hasConstantObject, isXvalue, mapMemberConstants, type TemporaryBinding } from './expr';
+import { type Expr, hasConstantObject, mapMemberConstants, type TemporaryBinding } from './expr';
 import { constructElementFromRvalue } from './library/elements';
 import { type Eval, type Frame, holdAll, type Temporary } from './runtime';
 import type { Syntax } from './syntax';
@@ -137,7 +137,7 @@ export function bindRetainedTemporary(
     const location = bind(f, (temporary) => {
       index = f.temporaries.push(temporary) - 1;
     });
-    if (index === undefined) throw new Error('Reference binding did not create its temporary');
+    if (index === undefined) return location;
     const [temporary] = f.temporaries.splice(index, 1);
     keep(temporary);
     return location;
@@ -321,11 +321,13 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     return {
       type: expr.type,
       isLvalue: true,
+      isXvalue: true,
       constantInitialization: this.isConstantInitializer(expr),
       constantStringLength: expr.constantStringLength,
       row: expr.row,
       onlyCalls: expr.onlyCalls,
       run: (frame) => locate(frame),
+      temporaryBinding: locate,
     };
   }
 
@@ -357,7 +359,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       const selected = this.resolve(`コピーコンストラクタ ${cls.name}`, candidates, [expr], undefined, expr.row);
       return this.constructWith(cls, selected, [expr], expr.row);
     }
-    if (!cls.implicitCopyFromConst && (!expr.isLvalue || isXvalue(expr) || isConstType(expr.type)))
+    if (!cls.implicitCopyFromConst && (!expr.isLvalue || expr.isXvalue || isConstType(expr.type)))
       this.error(expr.row, `${cls.name} のコピーコンストラクタには const でない左辺値が必要です。`);
     this.requireObjectUse(classType(cls), 'copy', expr.row);
     const source = this.rvalue(expr);
@@ -379,6 +381,16 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
           : copyAs(frame, cls, value, destination);
       },
     };
+  }
+
+  protected implicitReturnSource(expr: Expr, destination: Type): Expr {
+    const moved: Expr = { ...expr, isXvalue: true };
+    if (destination.kind === 'class' && expr.type.kind === 'class' && expr.type.cls.isDerivedFrom(destination.cls)) {
+      const written = this.writtenCopyConstructors(destination.cls);
+      if (written.length === 0) return destination.cls.implicitCopyFromConst ? moved : expr;
+      return bestOf(this.matchingOverloads(written, [moved]), (a, b) => this.compareCandidates(a, b)) ? moved : expr;
+    }
+    return implicitConversion(this, moved, unqualified(destination)) ? moved : expr;
   }
 
   protected writtenCopyConstructors(cls: ClassInfo): FunctionInfo[] {

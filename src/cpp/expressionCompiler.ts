@@ -548,10 +548,11 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const cls = object.type.kind === 'class' ? object.type.cls : field.owner;
     const locate = (location: Ptr): Ptr => new Ptr(location.read() as CObject, index, { location, cls });
     if (object.isLvalue) {
-      const { run, temporaryMember } = object;
+      const { run, temporaryBinding } = object;
       return {
         type,
         isLvalue: true,
+        isXvalue: object.isXvalue,
         staticAddress: object.staticAddress,
         constantInitialization: object.constantInitialization,
         constantDesignation: object.constantDesignation,
@@ -559,17 +560,17 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         row,
         run: (frame) => locate(run(frame) as Ptr),
         description: field.name,
-        temporaryMember: temporaryMember && ((frame, retain) => locate(temporaryMember(frame, retain))),
+        temporaryBinding: temporaryBinding && ((frame, retain) => locate(temporaryBinding(frame, retain))),
       };
     }
-    // A member of a prvalue is an xvalue, which the interpreter treats as a temporary's member.
     const materialized = this.temporaryLocation(object);
     return {
       type,
       isLvalue: true,
+      isXvalue: true,
       row,
       run: (frame) => locate(materialized(frame)),
-      temporaryMember: (frame, retain) => locate(materialized(frame, retain)),
+      temporaryBinding: (frame, retain) => locate(materialized(frame, retain)),
     };
   }
 
@@ -1012,7 +1013,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   addressOf(operand: Expr, row: number): Expr {
     if (operand.functions) return this.unsupported(row, '関数ポインタ');
-    if (!operand.isLvalue || operand.temporaryMember)
+    if (!operand.isLvalue || operand.isXvalue)
       return this.error(row, '& は、変数などの場所を持つ値（左辺値）にしか使えません。');
     if (operand.type.kind === 'class' && operand.type.cls.library?.operator) {
       const result = operand.type.cls.library.operator(this, '&', [operand], row);
@@ -1137,7 +1138,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** Stops at an assignment to something that cannot be assigned: a const object, or a value without storage. */
   checkAssignable(target: Expr, row: number, operator: string): void {
-    if (!target.isLvalue || (target.temporaryMember && target.type.kind !== 'class'))
+    if (!target.isLvalue || (target.isXvalue && target.type.kind !== 'class'))
       return this.error(row, `${operator} の左には、変数などの代入できるもの（左辺値）を書いてください。`);
     if (isConstType(target.type)) {
       const what = target.description ? `const のメンバ ${target.description}` : 'const の変数（または const の値）';
@@ -1159,11 +1160,11 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const memberCondition = scalar.memberConstant;
     const leftConstant = memberConstantOf(left);
     const rightConstant = memberConstantOf(right);
-    const leftTemporary = left.temporaryMember;
-    const rightTemporary = right.temporaryMember;
+    const choose = (frame: Frame): Expr => (condition(frame) ? left : right);
     return {
       type,
       isLvalue,
+      isXvalue: isLvalue && left.isXvalue,
       row: node.row,
       constant: chosen?.constant,
       memberConstant: memberCondition
@@ -1180,10 +1181,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       staticAddress: chosen?.staticAddress,
       constantDesignation: chosen?.constantDesignation,
       constantPointerValue: chosen?.constantPointerValue,
-      run: (...args) => (condition(args[0]) ? left : right).run(...args),
-      temporaryMember:
-        isLvalue && leftTemporary && rightTemporary
-          ? (frame, retain) => (condition(frame) ? leftTemporary : rightTemporary)(frame, retain)
+      run: (...args) => choose(args[0]).run(...args),
+      temporaryBinding:
+        isLvalue && (left.temporaryBinding || right.temporaryBinding)
+          ? (frame, retain) => {
+              const branch = choose(frame);
+              return branch.temporaryBinding ? branch.temporaryBinding(frame, retain) : (branch.run(frame) as Ptr);
+            }
           : undefined,
       isTemporaryObject: !isLvalue && type.kind === 'class',
     };
@@ -1194,14 +1198,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     b: Expr,
     row: number
   ): { left: Expr; right: Expr; type: Type; isLvalue: boolean } {
-    if (
-      a.isLvalue &&
-      b.isLvalue &&
-      Boolean(a.temporaryMember) === Boolean(b.temporaryMember) &&
-      sameType(a.type, b.type, false)
-    ) {
-      return { left: a, right: b, type: isConstType(b.type) ? withConst(a.type) : a.type, isLvalue: true };
-    }
+    const glvalue = this.conditionalGlvalueType(a, b, row);
+    if (glvalue) return { left: a, right: b, type: glvalue, isLvalue: true };
     if (a.type.kind === 'void' && b.type.kind === 'void') return { left: a, right: b, type: a.type, isLvalue: false };
     const av = this.rvalue(a);
     const bv = this.rvalue(b);
@@ -1243,11 +1241,23 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return this.error(row, `条件演算子の2つの値の型（${typeName(a.type)} と ${typeName(b.type)}）が合いません。`);
   }
 
+  private conditionalGlvalueType(a: Expr, b: Expr, row: number): Type | undefined {
+    if (!a.isLvalue || !b.isLvalue || Boolean(a.isXvalue) !== Boolean(b.isXvalue)) return undefined;
+    if (sameType(a.type, b.type, false)) return isConstType(b.type) ? withConst(a.type) : a.type;
+    if (a.type.kind !== 'class' || b.type.kind !== 'class') return undefined;
+    const [derived, base] = a.type.cls.isDerivedFrom(b.type.cls) ? [a.type, b.type] : [b.type, a.type];
+    if (!derived.cls.isDerivedFrom(base.cls)) return undefined;
+    if (isConstType(derived) && !isConstType(base))
+      return this.error(row, `条件演算子の2つの値の型（${typeName(a.type)} と ${typeName(b.type)}）が合いません。`);
+    this.checkBaseConversion(derived.cls, base.cls, row);
+    return base;
+  }
+
   private commaExpression(node: Syntax): Expr {
     const left = this.compileExpression(fieldOf(node, 'left') as Syntax);
     const right = this.compileExpression(fieldOf(node, 'right') as Syntax);
     const first = this.discardedValue(left);
-    const { run: second, temporaryMember } = right;
+    const { run: second, temporaryBinding } = right;
     const value = this.rvalue(left);
     const hasConstantLeft = value.constant !== undefined;
     return {
@@ -1266,11 +1276,11 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       staticAddress: hasConstantLeft ? right.staticAddress : undefined,
       constantDesignation: hasConstantLeft ? right.constantDesignation : undefined,
       constantPointerValue: hasConstantLeft ? right.constantPointerValue : undefined,
-      temporaryMember:
-        temporaryMember &&
+      temporaryBinding:
+        temporaryBinding &&
         ((frame, retain) => {
           first(frame);
-          return temporaryMember(frame, retain);
+          return temporaryBinding(frame, retain);
         }),
       run: (...args) => {
         first(args[0]);
@@ -1310,7 +1320,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const type = (pointer.type as Extract<Type, { kind: 'pointer' }>).to;
     const constantLocation = offsetConstantLocation(pointer.constantPointee, n.constant);
     const original = reversed ? index : array;
-    const temporaryArray = original.type.kind === 'array' ? original.temporaryMember : undefined;
+    const temporaryArray = original.type.kind === 'array' ? original.temporaryBinding : undefined;
     const locate = (frame: Frame, pointerAt: Eval<Ptr>): Ptr => {
       if (!reversed) return pointerAt(frame).offset(Number(n.run(frame)));
       const position = Number(n.run(frame));
@@ -1319,13 +1329,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return {
       type,
       isLvalue: true,
+      isXvalue: original.type.kind === 'array' && original.isXvalue,
       staticAddress: pointer.staticAddress && offset.constant !== undefined,
       constantDesignation: original.type.kind === 'array' && original.constantDesignation && n.constant !== undefined,
       constantInitialization: hasConstantObject(constantLocation),
       constantLocation,
       row,
       run: (frame) => locate(frame, p as Eval<Ptr>),
-      temporaryMember:
+      temporaryBinding:
         temporaryArray &&
         ((frame, retain) => locate(frame, (f) => new Ptr(temporaryArray(f, retain).read() as ArrayStore, 0))),
     };
@@ -1424,7 +1435,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const { to } = type;
     if (
       expr.isLvalue &&
-      !expr.temporaryMember &&
+      !expr.isXvalue &&
       from.kind === 'class' &&
       to.kind === 'class' &&
       (to.cls.isDerivedFrom(from.cls) || from.cls.isDerivedFrom(to.cls)) &&
@@ -1433,7 +1444,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return this.castClassLocation(expr, to, from.cls, to.cls, row, kind);
     }
     const converted = this.convert(expr, type, row);
-    return { ...converted, type: to, isLvalue: true };
+    return { ...converted, type: to, isLvalue: true, isXvalue: false };
   }
 
   private castPointer(
@@ -1479,18 +1490,19 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const downcast = to.isDerivedFrom(from);
     if (kind === 'static') this.checkBaseConversion(downcast ? to : from, downcast ? from : to, row);
     if (!downcast) return { ...expr, type };
-    const run = expr.run;
+    const { run, temporaryBinding } = expr;
+    const checked = (location: Ptr): Ptr => {
+      if (location.isNull) return location;
+      const object = location.read();
+      if (!(object instanceof CObject) || !object.cls.isDerivedFrom(to))
+        throw new CppRuntimeError('custom', `${to.name} 型ではないオブジェクトをキャストしました。`);
+      return location;
+    };
     return {
       ...expr,
       type,
-      run: (frame) => {
-        const location = run(frame) as Ptr;
-        if (location.isNull) return location;
-        const object = location.read();
-        if (!(object instanceof CObject) || !object.cls.isDerivedFrom(to))
-          throw new CppRuntimeError('custom', `${to.name} 型ではないオブジェクトをキャストしました。`);
-        return location;
-      },
+      run: (frame) => checked(run(frame) as Ptr),
+      temporaryBinding: temporaryBinding && ((frame, retain) => checked(temporaryBinding(frame, retain))),
     };
   }
 
