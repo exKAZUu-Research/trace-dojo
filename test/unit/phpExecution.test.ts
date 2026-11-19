@@ -3941,4 +3941,22 @@ $x = new Plain; $y = new Plain; $z = new Plain;
 echo spl_object_id($x), spl_object_id($y), spl_object_id($z);
 `);
   expect(destructibleBeforePlainHandles).toMatchObject({ kind: 'executed', stdout: 'D4|123' });
+
+  const arrayMergeStorageLayout = run(String.raw`<?php
+foreach ([
+  array_merge([5 => 1, 3 => 2, 9 => 3], [4]),
+  array_merge([5 => 1, 3 => 2], []),
+  array_merge([1, 2, 3], [4]),
+  array_merge([1, 2, 3], [5 => 1, 3 => 2]),
+  array_merge([], [], [1, 2, 3]),
+] as $m) {
+  end($m);
+  $v = array_values($m);
+  echo json_encode([key($v), current($v)]), '|';
+}
+`);
+  expect(arrayMergeStorageLayout).toMatchObject({
+    kind: 'executed',
+    stdout: '[0,1]|[0,1]|[3,4]|[4,2]|[0,1]|',
+  });
 });

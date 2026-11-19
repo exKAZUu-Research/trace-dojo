@@ -292,7 +292,7 @@ defineFunction('array_search(mixed $needle, array $haystack, bool $strict = fals
 defineFunction('array_merge(array ...$arrays): array', ({ args }) => {
   const reused = mergeReuse(args);
   if (reused) return share(reused);
-  const result = new PhpArray();
+  const result = new PhpArray(undefined, undefined, args[0] instanceof PhpArray && !args[0].ordered().isPacked);
   for (const [index, value] of args.entries()) {
     if (!(value instanceof PhpArray))
       throwError('TypeError', `array_merge(): Argument #${index + 1} must be of type array, ${valueName(value)} given`);
