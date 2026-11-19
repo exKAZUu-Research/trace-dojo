@@ -532,6 +532,26 @@ test.each([
     'class Base { Base(const Base&) {} public: Base() {} };\nstruct Derived : Base {};\nDerived make() { Derived value; return value; }',
     2,
   ],
+  [
+    'default arguments on a function passed to for_each',
+    '#include <algorithm>\nvoid emit(int, int = 9) {}\nint main() { int values[] = {1}; std::for_each(values, values + 1, emit); }',
+    2,
+  ],
+  [
+    'default arguments on a function passed to transform',
+    '#include <algorithm>\nint twice(int x, int scale = 2) { return x * scale; }\nint main() { int a[] = {1}, b[1]; std::transform(a, a + 1, b, twice); }',
+    2,
+  ],
+  [
+    'a void-returning function used as a predicate',
+    '#include <algorithm>\nvoid pred(int) {}\nint main() { int values[] = {1}; return std::count_if(values, values + 1, pred); }',
+    2,
+  ],
+  [
+    'a hidden class in the leading return type of an out-of-class member',
+    '#include <ctime>\nstruct time { time next() const; };\ntime time::next() const { return time{}; }',
+    2,
+  ],
 ])('the interpreter rejects %s', (_, program, row) => {
   const execution = executeProgram('cpp', program.includes('int main') ? program : `${program}\nint main() {}`);
   expect(execution).toMatchObject({ kind: 'compileError', diagnostics: [{ row }] });

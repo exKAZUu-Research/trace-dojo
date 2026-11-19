@@ -10,8 +10,8 @@ import { compileCpp, runProgram } from './execute';
 import { MapValue, SequenceValue } from './library/containerValues';
 import { StringValue } from './library/string';
 import { type Frame, Runtime } from './runtime';
-import { isCharType, type Type } from './types';
-import { ArrayStore, Box, CObject, Liveness, Ptr, type Store, UNINIT, type Value } from './values';
+import { type ClassInfo, isCharType, type Type } from './types';
+import { ArrayStore, type Box, CObject, Ptr, type Store, UNINIT, type Value } from './values';
 
 // code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceCppProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
@@ -56,12 +56,13 @@ class Snapshotter {
     }
     if (!withContext) return variables;
     const self = frame.thisObject;
-    if (self && frame.fn?.owner) {
-      for (const field of self.cls.fields) {
+    const owner = frame.fn?.owner;
+    if (self && owner) {
+      for (const field of owner.fields) {
         const scalar = scalarOf(self.values[field.index], field.type);
         if (scalar !== NOT_SCALAR && scalar !== undefined) variables.vars[`this->${field.name}`] = scalar;
       }
-      const node = nodeOf(self, { kind: 'class', cls: self.cls }, new Set());
+      const node = nodeOf(self, { kind: 'class', cls: owner }, new Set(), owner);
       if (node) variables.referenceVars.this = node;
     }
     const runtime = frame.runtime;
@@ -81,12 +82,10 @@ class Snapshotter {
 }
 
 function readLocation(pointer: Ptr): Value {
-  const store = pointer.store;
-  if (!store || store.liveness !== Liveness.Alive) return UNINIT;
-  if (store instanceof Box) return pointer.index === 0 ? store.value : UNINIT;
-  if (store instanceof ArrayStore || store instanceof CObject) return store.values[pointer.index];
   try {
-    return store.get(pointer.index);
+    const store = pointer.target();
+    if (pointer.index < 0 || pointer.index >= store.length) return UNINIT;
+    return pointer.readRaw();
   } catch {
     return UNINIT;
   }
@@ -117,6 +116,9 @@ function scalarOf(value: Value, type: Type): Scalar | typeof NOT_SCALAR | undefi
     }
     case 'float': {
       return type.name === 'float' ? shortestFloat(value as number) : (value as number);
+    }
+    case 'reference': {
+      return value instanceof Ptr ? scalarOf(readLocation(value), type.to) : undefined;
     }
     case 'pointer': {
       const pointer = value as Ptr;
@@ -184,10 +186,9 @@ function shortestFloat(value: number): number {
 /** The text of a null-terminated string, or undefined when the pointer reaches none. */
 function cStringOf(pointer: Ptr): string | undefined {
   try {
-    const { store, index: first } = pointer;
-    if (!store || store.liveness !== Liveness.Alive) return undefined;
+    const store = pointer.target();
     let bytes = '';
-    for (let index = first; index < store.length; index++) {
+    for (let index = pointer.index; index < store.length; index++) {
       const value = store.get(index);
       if (value === 0) return new TextDecoder().decode(byteArray(bytes));
       bytes += String.fromCodePoint(Number(value) & 0xff);
@@ -200,8 +201,9 @@ function cStringOf(pointer: Ptr): string | undefined {
 
 /** The node that shows a value in the trace's reference view, or undefined for one that shows nothing. */
 // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of value, each with its own shape.
-function nodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNode | undefined {
+function nodeOf(value: Value, type: Type, seen: Set<unknown>, receiverClass?: ClassInfo): DisplayNode | undefined {
   if (value === UNINIT || value === undefined) return undefined;
+  if (type.kind === 'reference') return value instanceof Ptr ? nodeOf(readLocation(value), type.to, seen) : undefined;
   if (type.kind === 'pointer') {
     const pointer = value as Ptr;
     if (pointer.isNull) return NULL_NODE;
@@ -231,7 +233,7 @@ function nodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNode | und
           kind: 'value',
           value: new TextDecoder().decode(byteArray(value.message)),
         };
-      for (const field of value.cls.fields) {
+      for (const field of (receiverClass ?? value.cls).fields) {
         const node = nodeOf(value.values[field.index], field.type, seen);
         if (node) entries[field.name] = node;
       }

@@ -1033,12 +1033,7 @@ export class Compiler extends StatementCompiler {
       let isBaseComplete = false;
       try {
         if (base) {
-          const baseCopy = base.operations?.copy(
-            frame,
-            source,
-            target.zeroInitialized ? target : undefined,
-            cls.implicitCopyFromConst
-          ) as CObject;
+          const baseCopy = base.operations?.copy(frame, source, target, cls.implicitCopyFromConst) as CObject;
           if (baseCopy !== target) {
             target.message = baseCopy.message;
             for (let index = 0; index < base.fields.length; index++) target.values[index] = baseCopy.values[index];
@@ -1215,14 +1210,14 @@ export class Compiler extends StatementCompiler {
     if (scope.kind !== 'class') return this.unsupported(node.row, '名前空間のメンバの定義');
     const cls = scope.cls;
     if (cls.library) return this.error(node.row, `標準ライブラリのクラス ${cls.name} のメンバは定義できません。`);
+    const typeNode = fieldOf(node, 'type');
+    const ret = typeNode ? this.specifiedType(node, true) : VOID;
     const savedClass = this.memberClass;
     this.memberClass = cls;
     try {
       const declarator = fieldOf(node, 'declarator') as Syntax;
       const nameNode = fieldOf(qualified, 'name') as Syntax;
-      const typeNode = fieldOf(node, 'type');
       this.checkSpecialMemberReturnType(cls, nameNode.text, node);
-      const ret = typeNode ? this.specifiedType(node, true) : VOID;
       const declared = this.applyDeclarator(ret, declarator);
       const probe = this.functionInfo(declared.name ?? '', declared.type, declared.function as Syntax, node, cls);
       let candidates: FunctionInfo[];

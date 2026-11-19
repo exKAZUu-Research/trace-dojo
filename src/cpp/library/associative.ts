@@ -815,7 +815,6 @@ export function orderedClass(
 
 const keyArg = (arg: unknown): Value => (arg as Ptr).read();
 
-/** Stops at `m[key]` of a map whose mapped type has no default constructor, which `[]` needs to insert an entry. */
 function treeMaxSize(entry: Type): bigint {
   const alignment = alignOf(entry);
   // libc++ uses the tail padding after the three pointers and color flag in its arm64 tree node base.

@@ -23,6 +23,7 @@ import {
 import { throwLibrary } from './library/support';
 import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
 import { makeEach, ObjectCompiler, zeroOf } from './objectCompiler';
+import { erasePointee, recoverPointee } from './pointerCasts';
 import { type Eval, type Frame, holdAll } from './runtime';
 import type { Entity } from './scopes';
 import { fieldOf, type Syntax, tokenOf } from './syntax';
@@ -1344,9 +1345,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const to = type.to;
       if (
         expr.isLvalue &&
+        !expr.temporaryMember &&
         from.kind === 'class' &&
         to.kind === 'class' &&
-        to.cls.isDerivedFrom(from.cls) &&
+        (to.cls.isDerivedFrom(from.cls) || from.cls.isDerivedFrom(to.cls)) &&
         (!isConstType(from) || isConstType(to))
       ) {
         return this.castClassLocation(expr, to, from.cls, to.cls, row, kind);
@@ -1375,6 +1377,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
           kind === 'C' ? '関係のない型のポインタへのキャスト（reinterpret_cast にあたる）' : 'reinterpret_cast'
         );
       if (isConstType(from) && !isConstType(to)) return this.unsupported(row, 'const を外すキャスト（const_cast）');
+      if (from.kind === 'void' || to.kind === 'void') {
+        const run = value.run;
+        if (from.kind === 'void' && to.kind !== 'void')
+          return { ...value, type, run: (frame) => recoverPointee(run(frame) as Ptr, to) };
+        if (from.kind !== 'void') return { ...value, type, run: (frame) => erasePointee(run(frame) as Ptr, from) };
+      }
       if (from.kind === 'class' && to.kind === 'class')
         return this.castClassLocation(value, type, from.cls, to.cls, row, kind);
       return { ...value, type };
@@ -1595,6 +1603,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     // A virtual call never reaches a pure virtual function, but a qualified call needs its definition.
     if (!resolved.fn.isPure || candidates.isQualified) this.checkDefined(resolved.fn, row);
     return this.callExpr(resolved, args, object, row, candidates.isQualified === true);
+  }
+
+  callCallback(candidates: FunctionInfo[], args: Expr[], row: number): Expr {
+    const resolved = this.resolve('関数', candidates, args, undefined, row, undefined, true);
+    const { fn } = resolved;
+    if (fn.owner && !fn.isStatic) return this.error(row, `メンバ関数 ${fn.displayName} は、関数として渡せません。`);
+    this.checkDefined(fn, row);
+    return this.callExpr(resolved, args, undefined, row);
   }
 
   /** Adds the library's functions an unqualified call finds through its arguments' types (C++20 [basic.lookup.argdep]). */

@@ -1,5 +1,6 @@
 import { convertScalar } from '../c/arith';
 import { type Expr, mapMemberConstants } from './expr';
+import { erasePointee } from './pointerCasts';
 import type { Syntax } from './syntax';
 import {
   type ClassInfo,
@@ -274,8 +275,17 @@ function pointerConversion(
   if (permitsQualificationConversion(fromTarget, to.to)) {
     return sequence(Rank.Exact, apply, { addsQualification: !sameType(fromTarget, to.to) });
   }
-  if (to.to.kind === 'void')
-    return sequence(Rank.Conversion, apply, { addsQualification, convertsToVoidPointer: true });
+  if (to.to.kind === 'void') {
+    return sequence(
+      Rank.Conversion,
+      (e) => {
+        const value = apply(e);
+        const run = value.run;
+        return { ...value, run: (frame) => erasePointee(run(frame) as Ptr, fromTarget) };
+      },
+      { addsQualification, convertsToVoidPointer: true }
+    );
+  }
   const distance = baseDistance(fromTarget, to.to);
   if (distance > 0) {
     return sequence(Rank.Conversion, (e) => apply(toBase(host, e, to.to)), {

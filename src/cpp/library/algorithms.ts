@@ -245,7 +245,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     }
     const call = comparatorOf(compiler(), unqualified(arg.type), arg.functions?.candidates, types, arg.row);
     if (!call) return undefined;
-    return (frame) => (a, b) => truthy(call(frame, undefined, a, b));
+    return (frame) => (a, b) => truthy(call(frame, a, b));
   };
   /** A predicate or an operation argument, for `arity` elements or for arguments of the types `element` lists. */
   const predicateOf = (
@@ -254,17 +254,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     arity = 1
   ): ((frame: Frame, ...values: Value[]) => Value) | undefined => {
     if (!arg) return undefined;
-    const types = Array.isArray(element) ? element : Array.from({ length: arity }, () => element);
-    if (arg.functions) {
-      const call = comparatorOf(compiler(), VOID, arg.functions.candidates, types, arg.row);
-      return call ? (frame, ...values) => call(frame, undefined, ...values) : undefined;
-    }
-    const type = unqualified(arg.type);
-    if (type.kind === 'class' && type.cls.library?.kind === 'functor') {
-      const operation = types.length === 2 ? type.cls.library.apply?.(types[0], types[1]) : undefined;
-      return operation ? (_frame, a, b) => operation(a, b) : undefined;
-    }
-    return undefined;
+    return comparatorOf(compiler(), unqualified(arg.type), arg.functions?.candidates, element, arg.row, arity);
   };
 
   /** Stops when an algorithm gets iterators of a weaker category than it needs, as libc++ rejects them. */
@@ -1311,8 +1301,9 @@ function compileOperation(compiler: ExpressionCompiler, operation: Expr, types: 
     row,
     run: () => calls.at(-1)?.[index],
   }));
-  const callee: Expr = operation.functions ? operation : { ...operation, run: () => {} };
-  const result = compiler.callWith(callee, args, row);
+  const result = operation.functions
+    ? compiler.callCallback(operation.functions.candidates, args, row)
+    : compiler.callWith({ ...operation, run: () => {} }, args, row);
   const evaluate = compiler.rvalue(result).run;
   return describeOperation(compiler, result, (frame, ...values) => {
     calls.push(values.map(locationOf));

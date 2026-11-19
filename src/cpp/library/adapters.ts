@@ -1,6 +1,8 @@
-import { CppRuntimeError } from '../errors';
-import type { Frame } from '../runtime';
+import { CppException, CppRuntimeError } from '../errors';
+import { withTemporaries } from '../objectCompiler';
+import { type Frame, holdAll } from '../runtime';
 import {
+  alignOf,
   BOOL,
   ClassInfo,
   classType,
@@ -8,6 +10,7 @@ import {
   nonReference,
   referenceTo,
   SIZE_T,
+  sizeOf,
   type Type,
   typeName,
   VOID,
@@ -16,7 +19,13 @@ import {
 import { type Ptr, type Value } from '../values';
 import { comparatorOrder } from './associative';
 import { SequenceValue } from './containerValues';
-import { type ElementOperations, elementOperations } from './elements';
+import {
+  type ElementOperations,
+  elementOperations,
+  moveConstructElement,
+  moveValue,
+  requireElementUse,
+} from './elements';
 import type { Library } from './registry';
 import { SequenceEditor } from './sequenceEdits';
 import { constructElement, iteratorRange, sequenceClass } from './sequences';
@@ -68,13 +77,20 @@ export function adapterClass(
   const push = (frame: Frame, self: SequenceValue, create: () => Value): void => {
     frame.runtime.reserve(1);
     editor.append(frame, self, 1, create);
-    if (kind === 'priority_queue') siftUp(self.items, self.items.length, less);
+    if (kind === 'priority_queue') new Heap(frame, self, ops(), less).push();
   };
   cls.memberTypes.set('value_type', element);
   cls.memberTypes.set('size_type', SIZE_T);
   cls.memberTypes.set('container_type', storage);
   const reference = storage.cls.memberTypes.get('reference') ?? referenceTo(element);
   const constReference = storage.cls.memberTypes.get('const_reference') ?? referenceTo(withConst(element));
+  const comparatorAlignment = compareType ? alignOf(compareType) : 1;
+  const align = Math.max(alignOf(storage), comparatorAlignment);
+  const storageSize = sizeOf(storage);
+  const size = compareType
+    ? Math.ceil((Math.ceil(storageSize / comparatorAlignment) * comparatorAlignment + sizeOf(compareType)) / align) *
+      align
+    : storageSize;
   cls.memberTypes.set('reference', reference);
   cls.memberTypes.set('const_reference', constReference);
   if (compareType) cls.memberTypes.set('value_compare', compareType);
@@ -83,8 +99,8 @@ export function adapterClass(
     args: [element],
     ownedTypes: [element],
     elementUseOnAssignment: storage.cls.library?.elementUseOnAssignment,
-    size: kind === 'priority_queue' ? 32 : 48,
-    align: 8,
+    size,
+    align,
     operator: (compiler_, operator, operands, row) => {
       if (kind === 'priority_queue' || !['==', '!=', '<', '<=', '>', '>='].includes(operator)) return;
       if (operands.length !== 2 || operands.some(({ type }) => type.kind !== 'class' || type.cls !== cls)) return;
@@ -96,7 +112,9 @@ export function adapterClass(
       );
     },
     memberCall: (compiler_, object, member, args, row) => {
-      if (member === 'push') compiler_.requireLibraryObjectUse(element, 'copy', row);
+      if (kind === 'priority_queue' && ['push', 'pop', 'emplace'].includes(member))
+        requireElementUse(compiler_, element, row, 'relocate');
+      else if (member === 'push') requireElementUse(compiler_, element, row, 'copy');
       if (member !== 'emplace') return;
       if (isConstType(object.type)) return compiler_.error(row, `const の ${cls.name} には emplace を使えません。`);
       const value = constructElement(compiler_, element, args, row);
@@ -133,14 +151,26 @@ export function adapterClass(
   }
   cls.constructors = [nativeConstructor(cls, [], () => make([]))];
   if (compareType) {
-    const fromItems = (items: Value[]): SequenceValue => {
-      makeHeap(items, less);
-      return make(items);
+    const fromItems = (frame: Frame, items: Value[]): SequenceValue => {
+      const sequence = make(items);
+      return holdAll(frame, [() => sequence], () => {
+        try {
+          new Heap(frame, sequence, ops(), less).build();
+          return sequence;
+        } catch (error) {
+          if (error instanceof CppException) editor.destroy(frame, items);
+          throw error;
+        }
+      });
     };
+    const uses = (row: number): void => requireElementUse(compiler, element, row, 'relocate');
     cls.constructors.push(
       nativeConstructor(cls, [constRef(compareType)], () => make([]), { isExplicit: true }),
-      nativeConstructor(cls, [constRef(compareType), constRef(storage)], ([, from], { frame }) =>
-        fromItems(copyItems(frame, (from as Ptr).read() as SequenceValue))
+      nativeConstructor(
+        cls,
+        [constRef(compareType), constRef(storage)],
+        ([, from], { frame }) => fromItems(frame, copyItems(frame, (from as Ptr).read() as SequenceValue)),
+        { uses }
       ),
       {
         ...nativeConstructor(cls, [], () => make([])),
@@ -149,13 +179,19 @@ export function adapterClass(
           const range = iteratorRange(compiler, args.slice(0, 2), element, ops);
           if (!range) return;
           const params = args.length === 3 ? [...range.params, constRef(compareType)] : range.params;
-          return nativeConstructor(cls, params, ([first, last], { frame }) => {
-            const source = range.read(first, last);
-            frame.runtime.reserve(source.values.length);
-            return fromItems(
-              editor.build(frame, source.values.length, (index) => source.construct(frame, source.values[index]))
-            );
-          });
+          return nativeConstructor(
+            cls,
+            params,
+            ([first, last], { frame }) => {
+              const source = range.read(first, last);
+              frame.runtime.reserve(source.values.length);
+              return fromItems(
+                frame,
+                editor.build(frame, source.values.length, (index) => source.construct(frame, source.values[index]))
+              );
+            },
+            { uses }
+          );
         },
       }
     );
@@ -193,7 +229,7 @@ export function adapterClass(
     nonEmpty(self);
     if (kind === 'queue') editor.removeFront(frame, self);
     else {
-      if (kind === 'priority_queue') popHeap(self.items, less);
+      if (kind === 'priority_queue') new Heap(frame, self, ops(), less).pop();
       editor.truncate(frame, self, self.items.length - 1);
     }
   });
@@ -224,65 +260,102 @@ export function adapterClass(
   return cls;
 }
 
-function makeHeap(items: Value[], less: (a: Value, b: Value) => boolean): void {
-  for (let parent = Math.floor((items.length - 2) / 2); parent >= 0; parent--) {
-    const value = items[parent];
-    let hole = parent;
-    for (let child = 2 * hole + 1; child < items.length; child = 2 * hole + 1) {
-      if (child + 1 < items.length && less(items[child], items[child + 1])) child++;
-      if (less(items[child], value)) break;
-      items[hole] = items[child];
-      hole = child;
-    }
-    items[hole] = value;
-  }
-}
-
 const nonEmpty = (self: SequenceValue): void => {
   if (self.items.length === 0) throw new CppRuntimeError('emptyContainer');
 };
 
-/** libc++'s `__sift_up`, which moves the last of `length` elements up the heap. */
-function siftUp(items: Value[], length: number, less: (a: Value, b: Value) => boolean): void {
-  if (length <= 1) return;
-  let parent = Math.floor((length - 2) / 2);
-  let last = length - 1;
-  if (!less(items[parent], items[last])) return;
-  const value = items[last];
-  for (;;) {
-    items[last] = items[parent];
-    last = parent;
-    if (parent === 0) break;
-    parent = Math.floor((parent - 1) / 2);
-    if (!less(items[parent], value)) break;
-  }
-  items[last] = value;
-}
+class Heap {
+  private readonly items: Value[];
 
-/** libc++'s `__pop_heap`: Floyd's sift down of a hole from the top, then a sift up of the moved last element. */
-function popHeap(items: Value[], less: (a: Value, b: Value) => boolean): void {
-  const length = items.length;
-  if (length <= 1) return;
-  const top = items[0];
-  let hole = 0;
-  let child = 0;
-  for (;;) {
-    child = 2 * child + 1;
-    let childIndex = child;
-    if (child + 1 < length && less(items[childIndex], items[childIndex + 1])) {
-      childIndex++;
-      child++;
+  constructor(
+    private readonly frame: Frame,
+    private readonly sequence: SequenceValue,
+    private readonly operations: ElementOperations,
+    private readonly less: (a: Value, b: Value) => boolean
+  ) {
+    this.items = sequence.items;
+  }
+
+  build(): void {
+    const lastParent = Math.floor((this.items.length - 2) / 2);
+    for (let parent = lastParent; parent >= 0; parent--) {
+      const firstChild = this.largerChild(parent);
+      if (this.less(this.items[firstChild], this.items[parent])) continue;
+      this.withMoved(parent, (value) => {
+        let hole = parent;
+        let child = firstChild;
+        for (;;) {
+          this.assign(hole, this.items[child]);
+          hole = child;
+          if (hole > lastParent) break;
+          child = this.largerChild(hole);
+          if (this.less(this.items[child], value)) break;
+        }
+        this.assign(hole, value);
+      });
     }
-    items[hole] = items[childIndex];
-    hole = childIndex;
-    if (child > Math.floor((length - 2) / 2)) break;
   }
-  const last = length - 1;
-  if (hole === last) {
-    items[hole] = top;
-    return;
+
+  push(): void {
+    this.siftUp(this.items.length);
   }
-  items[hole] = items[last];
-  items[last] = top;
-  siftUp(items, hole + 1, less);
+
+  pop(): void {
+    const length = this.items.length;
+    if (length <= 1) return;
+    this.withMoved(0, (top) => {
+      const last = length - 1;
+      const lastParent = Math.floor((length - 2) / 2);
+      let hole = 0;
+      do {
+        const child = this.largerChild(hole);
+        this.assign(hole, this.items[child]);
+        hole = child;
+      } while (hole <= lastParent);
+      if (hole === last) {
+        this.assign(last, top);
+        return;
+      }
+      this.assign(hole, this.items[last]);
+      this.assign(last, top);
+      this.siftUp(hole + 1);
+    });
+  }
+
+  private siftUp(length: number): void {
+    if (length <= 1) return;
+    let parent = Math.floor((length - 2) / 2);
+    let hole = length - 1;
+    if (!this.less(this.items[parent], this.items[hole])) return;
+    this.withMoved(hole, (value) => {
+      for (;;) {
+        this.assign(hole, this.items[parent]);
+        hole = parent;
+        if (parent === 0) break;
+        parent = Math.floor((parent - 1) / 2);
+        if (!this.less(this.items[parent], value)) break;
+      }
+      this.assign(hole, value);
+    });
+  }
+
+  private largerChild(parent: number): number {
+    const left = 2 * parent + 1;
+    const right = left + 1;
+    return right < this.items.length && this.less(this.items[left], this.items[right]) ? right : left;
+  }
+
+  private assign(index: number, value: Value): void {
+    const target = this.sequence.location(index);
+    target.write(moveValue(this.frame, this.operations.type, target.readRaw(), value));
+  }
+
+  private withMoved(index: number, run: (value: Value) => void): void {
+    withTemporaries(this.frame, () => {
+      const object = moveConstructElement(this.frame, this.operations, this.items[index]);
+      const { destroy } = this.operations;
+      if (destroy) this.frame.temporaries.push({ object, destroy });
+      run(object);
+    });
+  }
 }

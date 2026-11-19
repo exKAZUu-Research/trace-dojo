@@ -21,6 +21,14 @@ protected:
   Parent(const Parent&) { std::cout << 'p'; }
 };
 struct Child : Parent {};
+struct Addresses {
+  int value = 4;
+  const Addresses* self = this;
+  const int* member = &value;
+  Addresses() {}
+  Addresses(const Addresses& other) : value(other.value) {}
+};
+struct DerivedAddresses : Addresses {};
 
 int main() {
   Choice source;
@@ -37,4 +45,8 @@ int main() {
   choices.push_back(source);
   std::vector<Choice> braceCopies{Choice()};
   std::cout << '\n';
+  DerivedAddresses original;
+  DerivedAddresses aliased = original;
+  aliased.value = 9;
+  std::cout << (aliased.self == &aliased) << ' ' << *aliased.member << '\n';
 }

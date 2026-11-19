@@ -1,8 +1,9 @@
 import { CppRuntimeError } from '../errors';
+import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { destroyTemporaries, invoke, withTemporaries, zeroOf } from '../objectCompiler';
 import type { Frame } from '../runtime';
-import { type ClassInfo, type FunctionInfo, isArithmetic, isCopyConstructor, type Type, typeName } from '../types';
+import { type ClassInfo, type FunctionInfo, isArithmetic, isCopyConstructor, type Type } from '../types';
 import { type ArrayStore, Box, CObject, endLifetime, FunctionRef, Ptr, Store, UNINIT, type Value } from '../values';
 import { SequenceValue } from './containerValues';
 import { StringValue } from './string';
@@ -292,18 +293,16 @@ export function comparatorOf(
   elementType: Type | Type[],
   row: number,
   arity = 2
-): ((frame: Frame, callee: Value, ...args: Value[]) => Value) | undefined {
+): ((frame: Frame, ...args: Value[]) => Value) | undefined {
   const types = Array.isArray(elementType) ? elementType : Array.from({ length: arity }, () => elementType);
   if (functions) {
-    const call = functionCallback(compiler, functions, types, row);
-    return (frame, _callee, ...values) => call(frame, ...values.map(locationOf));
+    const call = functionCallback(compiler, functions, types, row, true);
+    return (frame, ...values) => call(frame, ...values.map(locationOf));
   }
-  if (argumentType.kind === 'class' && argumentType.cls.library?.kind === 'functor') {
-    const operation = types.length === 2 ? argumentType.cls.library.apply?.(types[0], types[1]) : undefined;
-    if (!operation) {
-      return compiler.error(row, `${argumentType.cls.name} では ${typeName(types[0])} を比べられません。`);
-    }
-    return (_frame, _callee, a, b) => operation(a, b);
+  if (argumentType.kind === 'class' && argumentType.cls.library?.kind === 'functor' && types.length === 2) {
+    const callee: Expr = { type: argumentType, row, isLvalue: false, run: () => {} };
+    const call = callbackRunner(compiler, types, row, (args) => compiler.callWith(callee, args, row), true);
+    return (frame, ...values) => call(frame, ...values.map(locationOf));
   }
   return undefined;
 }
@@ -312,7 +311,18 @@ export function functionCallback(
   compiler: ExpressionCompiler,
   candidates: FunctionInfo[],
   types: Type[],
-  row: number
+  row: number,
+  predicate = false
+): (frame: Frame, ...locations: Ptr[]) => Value {
+  return callbackRunner(compiler, types, row, (args) => compiler.callCallback(candidates, args, row), predicate);
+}
+
+function callbackRunner(
+  compiler: ExpressionCompiler,
+  types: Type[],
+  row: number,
+  compile: (args: Expr[]) => Expr,
+  predicate: boolean
 ): (frame: Frame, ...locations: Ptr[]) => Value {
   const argumentsByCall: Ptr[][] = [];
   const args = types.map((type, index) => ({
@@ -321,15 +331,13 @@ export function functionCallback(
     row,
     run: () => argumentsByCall.at(-1)?.[index],
   }));
-  const resolved = compiler.resolve('関数', candidates, args, undefined, row);
-  const { fn } = resolved;
-  if (fn.owner && !fn.isStatic) return compiler.error(row, `メンバ関数 ${fn.displayName} は、関数として渡せません。`);
-  const call = compiler.callExpr(resolved, args, undefined, row);
+  const call = compile(args);
+  const condition = predicate ? compiler.condition(call, row) : undefined;
   return (frame, ...locations) => {
     const mark = frame.temporaries.length;
     argumentsByCall.push(locations);
     try {
-      return call.run(frame) as Value;
+      return condition ? Number(condition(frame)) : (call.run(frame) as Value);
     } finally {
       argumentsByCall.pop();
       destroyTemporaries(frame, mark);

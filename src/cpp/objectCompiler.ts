@@ -366,9 +366,10 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     args: Expr[],
     object: Expr | undefined,
     row: number,
-    templateArgs?: Type[]
+    templateArgs?: Type[],
+    isFunctionPointer = false
   ): Resolved {
-    const viable = this.matchingOverloads(candidates, args, object, templateArgs);
+    const viable = this.matchingOverloads(candidates, args, object, templateArgs, isFunctionPointer);
     const best = this.chooseOverload(description, viable, row);
     if (best) return best;
     const argTypes = args.map((arg) => (arg.type.kind === 'void' ? 'void' : typeName(arg.type))).join(', ');
@@ -390,13 +391,15 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     candidates: FunctionInfo[],
     args: Expr[],
     object?: Expr,
-    templateArgs?: Type[]
+    templateArgs?: Type[],
+    isFunctionPointer = false
   ): MatchingOverload[] {
     const viable: MatchingOverload[] = [];
     for (const candidate of candidates) {
       const instantiated = candidate.instantiate?.(args, templateArgs);
       const fn = candidate.instantiate ? instantiated && { ...instantiated, isTemplate: true } : candidate;
       if (!fn || (templateArgs && !candidate.instantiate)) continue;
+      if (isFunctionPointer && args.length < fn.params.length) continue;
       const conversions = this.argumentConversions(fn, args);
       if (!conversions) continue;
       const objectConversion =

@@ -3,7 +3,9 @@
 #include <functional>
 #include <iostream>
 #include <queue>
+#include <random>
 #include <stack>
+#include <list>
 #include <unordered_map>
 #include <vector>
 
@@ -18,6 +20,8 @@ struct Item {
   ~Item() { std::cout << n; }
 };
 bool isLess(const Item& a, const Item& b) { return a.n < b.n; }
+
+struct RandomMember { char prefix; std::random_device generator; };
 
 int main() {
   try { std::minmax({Item(2), Item(1)}, isLess); }
@@ -39,6 +43,16 @@ int main() {
   bit = true;
   largest.emplace(9);
   std::cout << stack.top() << queue.back() << static_cast<bool>(bits.top()) << largest.top();
+  std::cout << ' ' << sizeof(std::stack<int, std::vector<int>>)
+            << ' ' << sizeof(std::stack<int, std::list<int>>)
+            << ' ' << sizeof(std::priority_queue<int, std::deque<int>>) << ' ' << sizeof(RandomMember);
+  std::vector<std::pair<int, int>> storage{{1, 10}, {2, 20}, {3, 30}};
+  std::priority_queue<std::pair<int, int>> heap(std::less<std::pair<int, int>>(), storage);
+  const int* top = &heap.top().second;
+  heap.pop();
+  std::cout << ' ' << *top;
+  heap.push({4, 40});
+  std::cout << ' ' << *top;
   b[1] = 9;
   std::cout << (a != b);
 }

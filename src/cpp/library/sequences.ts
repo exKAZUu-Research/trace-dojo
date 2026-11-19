@@ -753,7 +753,7 @@ function listMethods(
       unqualified(element),
       arg.row
     );
-    return call ? (frame, a, b) => truthy(call(frame, undefined, a, b)) : undefined;
+    return call ? (frame, a, b) => truthy(call(frame, a, b)) : undefined;
   };
   addTemplateMethod(cls, 'sort', (args) => {
     const compare = callable(args);

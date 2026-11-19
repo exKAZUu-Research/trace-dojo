@@ -338,6 +338,55 @@ test('clamp rejects bounds reversed under its comparator', () => {
   });
 });
 
+test('void pointer recovery checks the original type when reading a value', () => {
+  const program = `int main() {
+  double value = 2.5;
+  void* location = &value;
+  int* converted = static_cast<int*>(location);
+  if (static_cast<void*>(converted) != location) return 1;
+  return *converted;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('ポインタで扱えません'),
+  });
+});
+
+test('a base-class member traces its own field when a derived field hides it', () => {
+  const program = `struct Base {
+  int value = 1;
+  void set() { value = 3; }
+};
+struct Derived : Base { int value = 2; };
+int main() { Derived object; object.set(); }`;
+  const { traceItems } = traceProgram('cpp', program, program);
+  expect(traceItems).toContainEqual(
+    expect.objectContaining({
+      vars: expect.objectContaining({ 'this->value': 3 }),
+      referenceVars: expect.objectContaining({
+        this: { kind: 'object', entries: { value: { kind: 'value', value: 3 } } },
+      }),
+    })
+  );
+});
+
+test('a reference member shows the referenced value while tracing a setter', () => {
+  const program = `struct Ref {
+  int& value;
+  void set() { value = 7; }
+};
+int main() { int n = 1; Ref holder{n}; holder.set(); int done = 0; }`;
+  const { traceItems } = traceProgram('cpp', program, program);
+  expect(traceItems).toContainEqual(
+    expect.objectContaining({
+      vars: expect.objectContaining({ 'this->value': 7 }),
+      referenceVars: expect.objectContaining({
+        this: { kind: 'object', entries: { value: { kind: 'value', value: 7 } } },
+      }),
+    })
+  );
+});
+
 test.each([
   ['std::set<int> a{1, 2}, b{3, 4}; a.erase(a.begin(), b.end());', 'イテレータ'],
   ['std::map<int, int> a{{1, 2}}, b{{3, 4}}; a.erase(b.begin(), b.end());', 'イテレータ'],

@@ -231,7 +231,7 @@ export function randomEngines(): Map<string, ClassInfo> {
       kind: 'engine',
       args: [],
       size: parameters ? parameters.n * (parameters.w / 8) + 8 : 4,
-      align: 8,
+      align: parameters ? 8 : 4,
       call: (compiler, object, args, row) => {
         if (args.length > 0) return;
         if (isConstType(object.type)) return compiler.error(row, `const の ${cls.name} には () を使えません。`);
