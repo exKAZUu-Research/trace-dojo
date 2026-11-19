@@ -597,7 +597,9 @@ export abstract class MemberBinder extends CallBinder {
     }
     if (found.kind === 'methods') {
       const instance = found.candidates.filter((candidate) => !candidate.method.isStatic);
-      if (instance.length === 0) {
+      // Static methods do not apply to an instance, which then calls an extension method of the name, as
+      // `array.Reverse()` calls Enumerable.Reverse rather than Array.Reverse.
+      if (instance.length === 0 && extensions.length === 0) {
         const [first] = found.candidates;
         this.error(
           position,

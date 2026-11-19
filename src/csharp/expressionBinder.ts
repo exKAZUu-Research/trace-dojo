@@ -639,14 +639,30 @@ export abstract class ExpressionBinder extends MemberBinder {
   }
 
   /** Binds `c ? a : b`, with the natural type of its branches, or with a target type when they have none. */
+  private readonly conditionalParts = new WeakMap<
+    Expression,
+    { scope: LocalScope; condition: BoundExpression; whenTrue: BoundExpression; whenFalse: BoundExpression }
+  >();
+
   private bindConditional(
     node: Extract<Expression, { kind: 'conditional' }>,
     context: BindContext,
     target: Type | undefined
   ): BoundExpression | undefined {
-    const condition = this.bindAs(node.condition, this.boolType, context);
-    const whenTrue = this.bindAllowingThrow(node.whenTrue, context);
-    const whenFalse = this.bindAllowingThrow(node.whenFalse, context);
+    // A conditional without a natural type binds again once its target is known, reusing its parts so that the
+    // variables its condition declares (`out int n`) are declared once.
+    let parts = this.conditionalParts.get(node);
+    // A lambda's body binds once per candidate delegate type, each time in a new scope, which binds anew.
+    if (parts?.scope !== context.scope) {
+      parts = {
+        scope: context.scope,
+        condition: this.bindAs(node.condition, this.boolType, context),
+        whenTrue: this.bindAllowingThrow(node.whenTrue, context),
+        whenFalse: this.bindAllowingThrow(node.whenFalse, context),
+      };
+      this.conditionalParts.set(node, parts);
+    }
+    const { condition, whenTrue, whenFalse } = parts;
     const type = target ?? this.bestCommonType([whenTrue, whenFalse]);
     if (!type) {
       if (
