@@ -177,15 +177,14 @@ export function formatFloat(value: number, isFloat: boolean): string {
   if (value === Number.POSITIVE_INFINITY) return CULTURE.positiveInfinity;
   if (value === Number.NEGATIVE_INFINITY) return CULTURE.negativeInfinity;
   const number = shortestDigits(value, isFloat);
-  return generalText(number, isFloat ? 9 : 17, 'E', true);
+  return generalText(number, isFloat ? 9 : 17, 'E');
 }
 
-/** The general format: fixed notation unless the exponent reaches the precision or falls below -5. */
-function generalText(number: Digits, precision: number, letter: 'E' | 'e', isRoundTrip: boolean): string {
+/** The general format: fixed notation unless the exponent reaches the precision or falls to -5. */
+function generalText(number: Digits, precision: number, letter: 'E' | 'e'): string {
   if (number.digits === '') return number.isNegative ? `${CULTURE.negativeSign}0` : '0';
   const exponent = number.exponent - 1;
-  if (exponent >= precision || exponent < -5) {
-    void isRoundTrip;
+  if (exponent >= precision || exponent < -4) {
     return withSign(scientific(number, undefined, letter, 2, true), number);
   }
   const { integer, fraction } = fixedParts(number, Math.max(0, number.digits.length - number.exponent));
@@ -257,7 +256,7 @@ function formatStandard(
     case 'P': {
       const decimals = precision ?? CULTURE.percentDecimalDigits;
       const base = digitsOf(value, kind);
-      const scaled = { ...base, exponent: base.exponent + 2 };
+      const scaled = base.digits === '' ? base : { ...base, exponent: base.exponent + 2 };
       const number = roundToDecimals(scaled, decimals, mode);
       const { integer, fraction } = fixedParts(number, decimals);
       const text = `${group(integer)}${decimals > 0 ? `${CULTURE.decimalSeparator}${fraction}` : ''}%`;
@@ -273,7 +272,7 @@ function formatStandard(
     case 'E': {
       const decimals = precision ?? 6;
       const number = roundDigits(digitsOf(value, kind), decimals + 1, mode);
-      return withSign(scientific(number, decimals, specifier === 'e' ? 'e' : 'E', 3, false), number);
+      return withSignKeepingZero(scientific(number, decimals, specifier === 'e' ? 'e' : 'E', 3, false), number, kind);
     }
     case 'G': {
       if (precision === undefined || precision === 0) {
@@ -281,7 +280,7 @@ function formatStandard(
         return defaultText(value, kind);
       }
       const number = roundDigits(digitsOf(value, kind), precision, mode);
-      return generalText(number, precision, specifier === 'g' ? 'e' : 'E', false);
+      return generalText(number, precision, specifier === 'g' ? 'e' : 'E');
     }
     case 'R': {
       if (kind === 'double' || kind === 'float') return formatFloat(value as number, kind === 'float');

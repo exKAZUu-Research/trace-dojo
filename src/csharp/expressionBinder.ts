@@ -798,7 +798,7 @@ export abstract class ExpressionBinder extends MemberBinder {
     const context: BindContext = { scope, fn };
     for (const [index, parameter] of node.parameters.entries()) {
       if (parameter.name === '_' && node.parameters.filter((other) => other.name === '_').length > 1) continue;
-      this.declareParameterLocal(parameter, parameterTypes[index] ?? ERROR_TYPE, context, outer);
+      this.declareParameterLocal(parameter, parameterTypes[index] ?? ERROR_TYPE, context);
     }
     let body: BoundBlock;
     let inferred: Type | undefined;
@@ -878,19 +878,8 @@ export abstract class ExpressionBinder extends MemberBinder {
     };
   }
 
-  private declareParameterLocal(
-    parameter: LambdaParameter,
-    type: Type,
-    context: BindContext,
-    outer: BindContext
-  ): void {
-    if (outer.scope.lookup(parameter.name)?.local || outer.scope.lookup(parameter.name)?.localFunction) {
-      this.error(
-        parameter,
-        'CS0136',
-        `ローカルまたはパラメーター '${parameter.name}' は、その名前が外側のローカルのスコープでローカルやパラメーターの定義に使用されているため、このスコープでは宣言できません`
-      );
-    }
+  /** Declares a lambda's parameter, which may hide an enclosing function's local of the same name (since C# 8). */
+  private declareParameterLocal(parameter: LambdaParameter, type: Type, context: BindContext): void {
     const local = new LocalSymbol(parameter.name, type, parameter.row, parameter.column);
     local.isParameter = true;
     local.refKind = parameter.modifier;

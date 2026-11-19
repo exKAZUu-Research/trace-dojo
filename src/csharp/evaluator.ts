@@ -893,10 +893,7 @@ export class Evaluator {
       }
       case 'tuple': {
         const type = frame.resolve(expression.type) as NamedType;
-        return new CsStruct(
-          type,
-          expression.elements.map((element) => copyValue(this.evaluate(element, frame)))
-        );
+        return new CsStruct(type, this.evaluateHeld(expression.elements, frame));
       }
       case 'conditionalAccess': {
         const receiver = this.evaluate(expression.receiver, frame);
@@ -1045,6 +1042,22 @@ export class Evaluator {
   }
 
   /** Evaluates arguments in order: values copied as their parameters receive them, and references to variables. */
+  /** Evaluates elements in order, keeping the evaluated ones alive (with their turtles) while the rest run. */
+  private evaluateHeld(elements: BoundExpression[], frame: Frame): Value[] {
+    const values: Value[] = [];
+    const start = frame.temporaries.length;
+    try {
+      for (const element of elements) {
+        const value = copyValue(this.evaluate(element, frame));
+        values.push(value);
+        frame.temporaries.push(value);
+      }
+      return values;
+    } finally {
+      frame.temporaries.length = start;
+    }
+  }
+
   evaluateArguments(args: BoundArgument[], frame: Frame): (Value | VariableReference)[] {
     const values: (Value | VariableReference)[] = [];
     const start = frame.temporaries.length;
@@ -1330,8 +1343,7 @@ export class Evaluator {
     const total = lengths.reduce((product, length) => product * length, 1);
     this.runtime.allocateSlots(total);
     if (expression.elements) {
-      const values = expression.elements.map((element) => copyValue(this.evaluate(element, frame)));
-      return new CsArray(type, lengths, values);
+      return new CsArray(type, lengths, this.evaluateHeld(expression.elements, frame));
     }
     const element = type.element;
     const values: Value[] = Array.from({ length: total }, () => this.defaultOf(element));

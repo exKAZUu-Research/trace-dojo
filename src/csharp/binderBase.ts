@@ -212,6 +212,22 @@ export class BinderBase {
   }
 
   /** The program's and the library's namespaces at a path, of which either may lack it. */
+  /**
+   * The namespaces a declaration's names resolve in, innermost first: each namespace around it, both the program's
+   * and the library's of the same name, so that a program's class finds the library's global `Turtle`.
+   */
+  *enclosingNamespaces(context: TypeContext): Generator<NamespaceSymbol[]> {
+    const [first] = context.namespace;
+    if (!first) return;
+    yield context.namespace;
+    const path = namespacePathOf(first);
+    yield this.namespacesAt(path).filter((namespace) => !context.namespace.includes(namespace));
+    while (path.length > 0) {
+      path.pop();
+      yield this.namespacesAt(path);
+    }
+  }
+
   namespacesAt(path: readonly string[]): NamespaceSymbol[] {
     return [this.userRoot.resolve(path, false), this.library.root.resolve(path, false)].filter(
       (namespace): namespace is NamespaceSymbol => namespace !== undefined
@@ -358,7 +374,7 @@ export class BinderBase {
   findTypeInScope(name: string, arity: number, context: TypeContext): TypeSymbol | undefined {
     const matches = (namespace: NamespaceSymbol): TypeSymbol | undefined =>
       arity < 0 ? namespace.types.get(name)?.[0] : namespace.findType(name, arity);
-    for (let namespaces = context.namespace; namespaces.length > 0; namespaces = parentsOf(namespaces)) {
+    for (const namespaces of this.enclosingNamespaces(context)) {
       for (const namespace of namespaces) {
         const found = matches(namespace);
         if (found) return found;
@@ -416,10 +432,12 @@ export class BinderBase {
   }
 }
 
-function parentsOf(namespaces: NamespaceSymbol[]): NamespaceSymbol[] {
-  return namespaces
-    .map((namespace) => namespace.parent)
-    .filter((parent): parent is NamespaceSymbol => parent !== undefined);
+export function namespacePathOf(namespace: NamespaceSymbol): string[] {
+  const path: string[] = [];
+  for (let current: NamespaceSymbol | undefined = namespace; current?.parent; current = current.parent) {
+    path.unshift(current.name);
+  }
+  return path;
 }
 
 /** The dotted path of a type name that may name a namespace, such as `System.Collections`. */

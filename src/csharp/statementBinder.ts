@@ -73,7 +73,7 @@ export abstract class StatementBinder extends PatternBinder {
         'CS0128',
         `'${name}' という名前のローカル変数または関数はこのスコープで既に定義されています`
       );
-    } else if (scope.isDeclaredOutside(name) || this.isOuterFunctionLocal(name, context)) {
+    } else if (scope.isDeclaredOutside(name)) {
       this.error(
         position,
         'CS0136',
@@ -86,13 +86,6 @@ export abstract class StatementBinder extends PatternBinder {
     scope.locals.push(local);
     scope.declaredLater.delete(name);
     return local;
-  }
-
-  /** Whether a name belongs to a local of an enclosing function, which a lambda's or local function's locals may not reuse. */
-  private isOuterFunctionLocal(name: string, context: BindContext): boolean {
-    void name;
-    void context;
-    return false;
   }
 
   // code-gauge-allow functionNcss 60 -- Each kind of storage has its own rule for assignment.

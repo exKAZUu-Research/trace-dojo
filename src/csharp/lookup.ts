@@ -149,11 +149,7 @@ export class LookupBinder extends DeclarationBinder {
         }
       }
     };
-    for (
-      let namespaces = context.namespace;
-      namespaces.length > 0;
-      namespaces = namespaces.map((namespace) => namespace.parent).filter((parent) => parent !== undefined)
-    ) {
+    for (const namespaces of this.enclosingNamespaces(context)) {
       for (const namespace of namespaces) visit(namespace.types);
     }
     for (const group of context.usings) for (const namespace of group) visit(namespace.types);

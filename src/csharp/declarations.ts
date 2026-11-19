@@ -10,7 +10,7 @@ import type {
   TypeParameterDeclaration,
   UsingDirective,
 } from './ast';
-import { BinderBase, SPECIAL_TYPE_NAMES, type TypeContext } from './binderBase';
+import { BinderBase, namespacePathOf, SPECIAL_TYPE_NAMES, type TypeContext } from './binderBase';
 import type { NamespaceSymbol } from './namespaces';
 import { nativeOf, OPERATOR_NAMES, UNARY_OPERATOR_NAMES } from './natives';
 import {
@@ -96,7 +96,7 @@ export class DeclarationBinder extends BinderBase {
         const inner = namespace.resolve(member.name, true) as NamespaceSymbol;
         const namespaces = [
           inner,
-          ...this.namespacesAt(namespacePath(inner)).filter((candidate) => candidate !== inner),
+          ...this.namespacesAt(namespacePathOf(inner)).filter((candidate) => candidate !== inner),
         ];
         this.collectMembers(member.members, inner, { ...context, namespace: namespaces }, [
           ...usingChain,
@@ -1305,13 +1305,6 @@ export class DeclarationBinder extends BinderBase {
 /** Synthesized record members run natively, comparing and printing the record's fields. */
 function recordNative(name: string): MethodSymbol['native'] {
   return (call, receiver, args) => call.frame.runtime.recordMember(call, name, receiver, args);
-}
-
-function namespacePath(namespace: NamespaceSymbol): string[] {
-  const path: string[] = [];
-  for (let current: NamespaceSymbol | undefined = namespace; current?.parent; current = current.parent)
-    path.unshift(current.name);
-  return path;
 }
 
 export function accessibilityOf(modifiers: Modifiers, fallback: Accessibility): Accessibility {
