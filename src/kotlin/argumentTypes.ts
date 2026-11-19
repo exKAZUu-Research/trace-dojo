@@ -1,7 +1,10 @@
 import type { Expression } from './ast';
-import { type Compiled, isBareCallExpression } from './compilerBase';
+import { type Compiled, type Eval, isBareCallExpression } from './compilerBase';
+import { type Frame, MISSING } from './runtime';
+import type { FunctionSymbol } from './symbols';
 import { branchHint, isSameType, withDeterminedVariables } from './typeRelations';
 import { hasOpenVariables, type KType, substitute, type Substitution } from './types';
+import type { KObject, Value } from './values';
 
 /** What the expected type of an argument needs of an attempt to call a candidate. */
 interface ArgumentAttempt {
@@ -63,4 +66,45 @@ function agreedParameterType(
     agreed = type;
   }
   return agreed;
+}
+
+/** An argument's evaluation, by its index among the written arguments and the index of the parameter that takes it. */
+export interface ArgumentEvaluation {
+  index: number;
+  paramIndex: number;
+  eval: Eval;
+  isSpread: boolean;
+}
+
+/**
+ * Evaluates the arguments in the order they are written into the values the parameters receive, collecting a vararg's
+ * values into its array, while the values are held as temporaries for the garbage collector.
+ */
+export function argumentEvaluator(
+  symbol: FunctionSymbol,
+  evaluations: ArgumentEvaluation[],
+  varargArrayFactory: (type: KType) => (frame: Frame, values: Value[]) => KObject
+): (frame: Frame) => Value[] {
+  const paramCount = symbol.params.length;
+  const varargIndex = symbol.params.findIndex((param) => param.isVararg);
+  const varargArray = varargIndex === -1 ? undefined : varargArrayFactory(symbol.params[varargIndex].type);
+  return (frame) => {
+    const values: Value[] = Array.from({ length: paramCount }, () => MISSING);
+    const varargs: Value[] = [];
+    const { temporaries } = frame;
+    const mark = temporaries.length;
+    try {
+      for (const { paramIndex, eval: evaluate, isSpread } of evaluations) {
+        const value = evaluate(frame);
+        temporaries.push(value);
+        if (isSpread) varargs.push(...((value as KObject).items as Value[]));
+        else if (paramIndex === varargIndex) varargs.push(value);
+        else values[paramIndex] = value;
+      }
+      if (varargArray) values[varargIndex] = varargArray(frame, varargs);
+      return values;
+    } finally {
+      temporaries.length = mark;
+    }
+  };
 }

@@ -1,11 +1,11 @@
 // code-gauge-allow-file fileNcss 469 -- the compiler of one area of Kotlin, whose parts call each other closely.
-import { expectedArgumentType, firstAttempts } from './argumentTypes';
+import { type ArgumentEvaluation, argumentEvaluator, expectedArgumentType, firstAttempts } from './argumentTypes';
 import type { Expression, LambdaExpression } from './ast';
 import { type Compiled, type Eval, FunctionContext, reprOf, type Scope, typeMismatchMessage } from './compilerBase';
 import { CompilerCore } from './compilerCore';
 import { callFunction, parameterReprs, receiverRepr, returnRepr } from './dispatch';
 import { literalFits } from './literals';
-import { type Frame, MISSING } from './runtime';
+import type { Frame } from './runtime';
 import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
 import { checkVariableBounds, determinedType, fixVariable, isSubtype } from './typeRelations';
 import {
@@ -152,6 +152,7 @@ export abstract class CallCompiler extends CompilerCore {
    * Resolves a call among candidate levels, the nearest first: the first level with an applicable candidate decides,
    * as Kotlin's resolution goes from inner scopes to outer ones.
    */
+  // code-gauge-allow functionParameterCount 10 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   protected resolveCall(
     scope: Scope,
     context: FunctionContext,
@@ -168,50 +169,18 @@ export abstract class CallCompiler extends CompilerCore {
       typeof receiver === 'function' ? receiver(candidate) : receiver;
     const all = levels.flat();
     if (all.length === 0) this.error(row, `${name} が見つかりません。`);
+    const call: CallSyntax = { args, hasTrailingLambda, explicitTypeArgs, row, name };
     // A lone candidate gives its parameter types to the arguments, which literals and nested generic calls need.
     const lone = all.length === 1 ? all[0] : undefined;
-    let loneAttempt: Attempt | undefined;
-    if (lone) {
-      loneAttempt = this.startAttempt(lone, args, hasTrailingLambda, explicitTypeArgs);
-      if (!loneAttempt) this.reportUnmappable(lone, args, hasTrailingLambda, explicitTypeArgs, row, name);
-      // The receiver and the expected type constrain the variables first, so that the arguments see the types they
-      // give them, as `List<Long>` does to the literals of `listOf(1, 2)`.
-      const loneReceiver = receiverOf(lone);
-      if (lone.symbol.extensionReceiver && loneReceiver) {
-        isSubtype(loneReceiver.type, substitute(lone.symbol.extensionReceiver, loneAttempt.substitution));
-      }
-      this.constrainByKnownExpected(loneAttempt, expected, row);
-    }
+    const loneAttempt = lone ? this.startLoneAttempt(lone, call, receiverOf(lone), expected) : undefined;
     // The candidates of the first level that take the arguments, or the lone one, give an argument the type they agree
     // on, as members come before extensions.
     const attempts = loneAttempt
       ? [loneAttempt]
       : firstAttempts(levels, (candidate) => this.startAttempt(candidate, args, hasTrailingLambda, explicitTypeArgs));
     if (!loneAttempt) for (const attempt of attempts) this.constrainByKnownExpected(attempt, expected, row);
-    const compiledArgs: (Compiled | undefined)[] = [];
-    for (const [index, argument] of args.entries()) {
-      if (isLambdaArgument(argument.value)) {
-        compiledArgs.push(undefined);
-        continue;
-      }
-      const expectedType = expectedArgumentType(attempts, compiledArgs, index, argument.value, !lone);
-      compiledArgs.push(this.compileExpression(scope, context, argument.value, expectedType));
-    }
-    let chosen: Attempt | undefined;
-    for (const level of levels) {
-      const applicable = level.flatMap((candidate) => {
-        const attempt =
-          candidate === lone ? loneAttempt : this.startAttempt(candidate, args, hasTrailingLambda, explicitTypeArgs);
-        if (!attempt) return [];
-        return this.isApplicable(attempt, args, compiledArgs, receiverOf(candidate)) ? [attempt] : [];
-      });
-      if (applicable.length === 0) continue;
-      chosen =
-        applicable.length === 1
-          ? applicable[0]
-          : this.mostSpecific(applicable, compiledArgs, args, scope, context, row, name);
-      break;
-    }
+    const compiledArgs = this.compileArguments(scope, context, args, attempts, !lone);
+    const chosen = this.chooseAttempt(scope, context, levels, call, compiledArgs, loneAttempt, receiverOf);
     if (!chosen)
       return this.reportInapplicable(
         all,
@@ -225,6 +194,73 @@ export abstract class CallCompiler extends CompilerCore {
       );
     this.checkAccessible(scope, chosen.candidate.symbol, row, chosen.candidate.receiverType);
     return this.completeCall(scope, context, chosen, args, compiledArgs, expected, row);
+  }
+
+  /**
+   * The attempt of a lone candidate, whose receiver and expected type constrain its variables before the arguments
+   * compile, so that the arguments see the types they give them, as `List<Long>` does to the literals of `listOf(1, 2)`.
+   */
+  private startLoneAttempt(
+    lone: Candidate,
+    { args, hasTrailingLambda, explicitTypeArgs, row, name }: CallSyntax,
+    receiver: Compiled | undefined,
+    expected: KType | undefined
+  ): Attempt {
+    const attempt = this.startAttempt(lone, args, hasTrailingLambda, explicitTypeArgs);
+    if (!attempt) return this.reportUnmappable(lone, args, hasTrailingLambda, explicitTypeArgs, row, name);
+    if (lone.symbol.extensionReceiver && receiver) {
+      isSubtype(receiver.type, substitute(lone.symbol.extensionReceiver, attempt.substitution));
+    }
+    this.constrainByKnownExpected(attempt, expected, row);
+    return attempt;
+  }
+
+  /** The arguments other than lambdas, which compile against the parameter types the attempts agree on. */
+  private compileArguments(
+    scope: Scope,
+    context: FunctionContext,
+    args: ArgumentSyntax[],
+    attempts: Attempt[],
+    isOverloaded: boolean
+  ): (Compiled | undefined)[] {
+    const compiledArgs: (Compiled | undefined)[] = [];
+    for (const [index, argument] of args.entries()) {
+      if (isLambdaArgument(argument.value)) {
+        compiledArgs.push(undefined);
+        continue;
+      }
+      const expectedType = expectedArgumentType(attempts, compiledArgs, index, argument.value, isOverloaded);
+      compiledArgs.push(this.compileExpression(scope, context, argument.value, expectedType));
+    }
+    return compiledArgs;
+  }
+
+  /** The most specific applicable candidate of the nearest level that has one. */
+  // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  private chooseAttempt(
+    scope: Scope,
+    context: FunctionContext,
+    levels: Candidate[][],
+    { args, hasTrailingLambda, explicitTypeArgs, row, name }: CallSyntax,
+    compiledArgs: (Compiled | undefined)[],
+    loneAttempt: Attempt | undefined,
+    receiverOf: (candidate: Candidate) => Compiled | undefined
+  ): Attempt | undefined {
+    for (const level of levels) {
+      const applicable = level.flatMap((candidate) => {
+        const attempt =
+          loneAttempt?.candidate === candidate
+            ? loneAttempt
+            : this.startAttempt(candidate, args, hasTrailingLambda, explicitTypeArgs);
+        if (!attempt) return [];
+        return this.isApplicable(attempt, args, compiledArgs, receiverOf(candidate)) ? [attempt] : [];
+      });
+      if (applicable.length === 0) continue;
+      return applicable.length === 1
+        ? applicable[0]
+        : this.mostSpecific(applicable, compiledArgs, args, scope, context, row, name);
+    }
+    return undefined;
   }
 
   // code-gauge-allow functionCognitiveComplexity 18 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
@@ -363,6 +399,7 @@ export abstract class CallCompiler extends CompilerCore {
     return lambda.params.length === actual.params.length;
   }
 
+  // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   private mostSpecific(
     attempts: Attempt[],
     compiledArgs: (Compiled | undefined)[],
@@ -372,68 +409,60 @@ export abstract class CallCompiler extends CompilerCore {
     row: number,
     name: string
   ): Attempt {
-    const paramTypeOf = (attempt: Attempt, argIndex: number): KType | undefined => {
-      const paramIndex = attempt.mapping.findIndex((indexes) => indexes.includes(argIndex));
-      const param = attempt.candidate.symbol.params[paramIndex];
-      return param ? param.type : undefined;
-    };
-    // As Kotlin compares overloads, `a`'s type parameters stay as they are and `b`'s become fresh variables, which
-    // keeps the comparison from constraining the variables the call infers.
-    const rigid = (attempt: Attempt): Substitution => attempt.candidate.substitution;
-    const fresh = (attempt: Attempt): Substitution => {
-      const substitution = new Map(attempt.candidate.substitution);
-      for (const param of this.inferredTypeParameters(attempt.candidate)) {
-        const variable: InferenceVariable = { param, lower: [], upper: [], fixed: undefined };
-        substitution.set(param, { kind: 'variable', variable, nullable: false });
-      }
-      return substitution;
-    };
-    const isAsSpecific = (a: Attempt, b: Attempt): boolean => {
-      const aSubstitution = rigid(a);
-      const bSubstitution = fresh(b);
-      for (const [index] of args.entries()) {
-        const aType = paramTypeOf(a, index);
-        const bType = paramTypeOf(b, index);
-        const compiled = compiledArgs[index];
-        if (!aType || !bType || !compiled) continue;
-        // An integer literal is an Int unless only another integer type fits, as `1..4` calls `rangeTo(Int)`; a type
-        // parameter fits any, so `maxOf(Long, Long)` is as specific as `maxOf(T, T)` for `maxOf(1, 2L)`.
-        if (compiled.integerLiteral && aType.kind !== 'param' && bType.kind !== 'param') {
-          const literalType = compiled.type;
-          const aIsLiteral = isSubtype(literalType, substitute(aType, a.substitution));
-          const bIsLiteral = isSubtype(literalType, substitute(bType, b.substitution));
-          if (aIsLiteral !== bIsLiteral) {
-            if (!aIsLiteral) return false;
-            continue;
-          }
-        }
-        if (!isSubtype(substitute(aType, aSubstitution), substitute(bType, bSubstitution))) return false;
-      }
-      const aReceiver = a.candidate.symbol.extensionReceiver;
-      const bReceiver = b.candidate.symbol.extensionReceiver;
-      return (
-        !aReceiver ||
-        !bReceiver ||
-        isSubtype(substitute(aReceiver, aSubstitution), substitute(bReceiver, bSubstitution))
-      );
-    };
     let best = attempts.filter((attempt) =>
-      attempts.every((other) => other === attempt || isAsSpecific(attempt, other))
+      attempts.every((other) => other === attempt || this.isAsSpecific(attempt, other, compiledArgs))
     );
     if (best.length > 1) {
       // Without a vararg or default parameter left unused, a candidate is more specific.
-      const unused = (attempt: Attempt): number =>
-        attempt.mapping.filter(
-          (indexes, index) => indexes.length === 0 && attempt.candidate.symbol.params[index].hasDefault
-        ).length + (attempt.candidate.symbol.params.some((param) => param.isVararg) ? 1 : 0);
-      const fewest = Math.min(...best.map(unused));
-      best = best.filter((attempt) => unused(attempt) === fewest);
+      const fewest = Math.min(...best.map(unusedParameters));
+      best = best.filter((attempt) => unusedParameters(attempt) === fewest);
     }
     if (best.length === 1) return best[0];
     const byLambda = this.chooseByLambdaResult(best.length > 0 ? best : attempts, args, scope, context);
     if (byLambda) return byLambda;
     if (best.length > 1 && best.every((attempt) => attempt.candidate.symbol.isLibrary)) return best[0];
     return this.error(row, `${name} の呼び出しが、どの関数のことか決められません。`);
+  }
+
+  /**
+   * Whether `a` is as specific as `b` for the arguments. As Kotlin compares overloads, `a`'s type parameters stay as
+   * they are and `b`'s become fresh variables, which keeps the comparison from constraining the variables the call
+   * infers.
+   */
+  // code-gauge-allow functionCognitiveComplexity 17 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  private isAsSpecific(a: Attempt, b: Attempt, compiledArgs: (Compiled | undefined)[]): boolean {
+    const aSubstitution = a.candidate.substitution;
+    const bSubstitution = this.freshSubstitution(b);
+    for (const [index, compiled] of compiledArgs.entries()) {
+      const aType = parameterTypeOf(a, index);
+      const bType = parameterTypeOf(b, index);
+      if (!aType || !bType || !compiled) continue;
+      // An integer literal is an Int unless only another integer type fits, as `1..4` calls `rangeTo(Int)`; a type
+      // parameter fits any, so `maxOf(Long, Long)` is as specific as `maxOf(T, T)` for `maxOf(1, 2L)`.
+      if (compiled.integerLiteral && aType.kind !== 'param' && bType.kind !== 'param') {
+        const aIsLiteral = isSubtype(compiled.type, substitute(aType, a.substitution));
+        const bIsLiteral = isSubtype(compiled.type, substitute(bType, b.substitution));
+        if (aIsLiteral !== bIsLiteral) {
+          if (!aIsLiteral) return false;
+          continue;
+        }
+      }
+      if (!isSubtype(substitute(aType, aSubstitution), substitute(bType, bSubstitution))) return false;
+    }
+    const aReceiver = a.candidate.symbol.extensionReceiver;
+    const bReceiver = b.candidate.symbol.extensionReceiver;
+    return (
+      !aReceiver || !bReceiver || isSubtype(substitute(aReceiver, aSubstitution), substitute(bReceiver, bSubstitution))
+    );
+  }
+
+  private freshSubstitution(attempt: Attempt): Substitution {
+    const substitution = new Map(attempt.candidate.substitution);
+    for (const param of this.inferredTypeParameters(attempt.candidate)) {
+      const variable: InferenceVariable = { param, lower: [], upper: [], fixed: undefined };
+      substitution.set(param, { kind: 'variable', variable, nullable: false });
+    }
+    return substitution;
   }
 
   /** Overloads that differ only in a lambda's result, such as `sumOf`, are chosen by the type the lambda returns. */
@@ -536,6 +565,7 @@ export abstract class CallCompiler extends CompilerCore {
     }
   }
 
+  // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   private completeCall(
     scope: Scope,
     context: FunctionContext,
@@ -545,46 +575,96 @@ export abstract class CallCompiler extends CompilerCore {
     expected: KType | undefined,
     row: number
   ): ResolvedCall {
-    const { candidate, substitution, variables, mapping } = attempt;
+    const { candidate, substitution } = attempt;
     const { symbol } = candidate;
     this.constrainByExpected(attempt, expected, row);
-    const argumentEvals: { index: number; paramIndex: number; eval: Eval }[] = [];
-    for (const [paramIndex, indexes] of mapping.entries()) {
-      const param = symbol.params[paramIndex];
+    for (const [paramIndex, indexes] of attempt.mapping.entries()) {
       for (const index of indexes) {
-        const paramType = substitute(param.type, substitution);
-        const elementType = param.isVararg ? this.varargElementType(paramType) : paramType;
-        let compiled = compiledArgs[index];
-        if (!compiled) {
-          const sam = this.samOf(elementType);
-          const lambdaType = this.lambdaTypeFor(sam ? sam.functionType : elementType, variables);
-          compiled = this.compileLambda(
-            scope,
-            context,
-            args[index].value as LambdaExpression,
-            lambdaType,
-            symbol.isInline && !sam
-          );
-          if (lambdaType) {
-            const bodyType = (resolved(compiled.type) as FunctionType).returnType;
-            const expectedReturn = resolved(lambdaType.returnType);
-            if (
-              !(expectedReturn.kind === 'class' && expectedReturn.cls === this.core.unit) &&
-              !isSubtype(bodyType, lambdaType.returnType)
-            ) {
-              this.error(args[index].row, typeMismatchMessage(lambdaType.returnType, bodyType));
-            }
-          }
-          if (sam) compiled = this.samWrap(compiled, sam, resolved(elementType));
-          // A lambda for a type variable, as each of `listOf({ 1 }, { 2 })`, gives the variable its type.
-          else if (!lambdaType) isSubtype(compiled.type, elementType);
-          compiledArgs[index] = compiled;
-        }
-        argumentEvals.push({ index, paramIndex, eval: (frame) => compiled.eval(frame) });
+        compiledArgs[index] ??= this.compileLambdaArgument(scope, context, attempt, paramIndex, args[index]);
       }
     }
-    // Checking a fixed variable's bounds constrains the variables they mention, as `C : Iterable<T>` in
-    // `onEach` gives `T` its type from `C`, so a variable nothing constrains yet waits for the others.
+    this.fixVariables(attempt, row);
+    const evaluateArgs = argumentEvaluator(
+      symbol,
+      this.argumentEvaluations(attempt, args, compiledArgs as Compiled[]),
+      (type) => this.varargArrayFactory(type)
+    );
+    const callRow = this.recordsSteps && !this.file.isLibrary ? row : undefined;
+    const call = (frame: Frame, receiver: Value): Value => {
+      const { temporaries } = frame;
+      const mark = temporaries.length;
+      temporaries.push(receiver);
+      try {
+        const values = evaluateArgs(frame);
+        temporaries.push(...values);
+        return callFunction(symbol, frame, receiver, values, callRow);
+      } finally {
+        temporaries.length = mark;
+      }
+    };
+    const typeArguments = new Map<TypeParameterSymbol, KType>();
+    for (const param of this.inferredTypeParameters(candidate))
+      typeArguments.set(param, resolved(substitution.get(param) as KType));
+    return {
+      symbol,
+      candidate,
+      type: this.callResultType(attempt, typeArguments, row),
+      repr: candidate.kind === 'constructor' ? 'ref' : returnRepr(symbol),
+      call,
+      evaluateArgs,
+      callRow,
+      argumentsCreateObjects: args.length > 0 && compiledArgs.every((compiled) => compiled?.isCreation === true),
+      compiledArgs,
+      receiverRepr: receiverRepr(symbol),
+      typeArguments,
+    };
+  }
+
+  /** A lambda argument, compiled now that the other arguments constrain the types of its parameters. */
+  private compileLambdaArgument(
+    scope: Scope,
+    context: FunctionContext,
+    { candidate, substitution, variables }: Attempt,
+    paramIndex: number,
+    argument: ArgumentSyntax
+  ): Compiled {
+    const { symbol } = candidate;
+    const param = symbol.params[paramIndex];
+    const paramType = substitute(param.type, substitution);
+    const elementType = param.isVararg ? this.varargElementType(paramType) : paramType;
+    const sam = this.samOf(elementType);
+    const lambdaType = this.lambdaTypeFor(sam ? sam.functionType : elementType, variables);
+    const compiled = this.compileLambda(
+      scope,
+      context,
+      argument.value as LambdaExpression,
+      lambdaType,
+      symbol.isInline && !sam
+    );
+    if (lambdaType) {
+      const bodyType = (resolved(compiled.type) as FunctionType).returnType;
+      const expectedReturn = resolved(lambdaType.returnType);
+      if (
+        !(expectedReturn.kind === 'class' && expectedReturn.cls === this.core.unit) &&
+        !isSubtype(bodyType, lambdaType.returnType)
+      ) {
+        this.error(argument.row, typeMismatchMessage(lambdaType.returnType, bodyType));
+      }
+    }
+    if (sam) return this.samWrap(compiled, sam, resolved(elementType));
+    // A lambda for a type variable, as each of `listOf({ 1 }, { 2 })`, gives the variable its type.
+    if (!lambdaType) isSubtype(compiled.type, elementType);
+    return compiled;
+  }
+
+  /**
+   * Fixes the call's type variables and checks their bounds. Checking a fixed variable's bounds constrains the variables
+   * they mention, as `C : Iterable<T>` in `onEach` gives `T` its type from `C`, so a variable nothing constrains yet
+   * waits for the others.
+   */
+  // code-gauge-allow functionCognitiveComplexity 24 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  private fixVariables({ candidate, substitution, variables }: Attempt, row: number): void {
+    const { symbol } = candidate;
     let pending = variables;
     while (pending.length > 0) {
       const waiting = pending.filter((variable) => !fixVariable(variable));
@@ -611,86 +691,54 @@ export abstract class CallCompiler extends CompilerCore {
         }
       }
     }
-    // Arguments convert to the parameters' declared representations, now that the types are known.
+  }
+
+  /** The arguments, in the order they are written, converted to the parameters' declared representations. */
+  private argumentEvaluations(
+    { candidate, substitution, mapping }: Attempt,
+    args: ArgumentSyntax[],
+    compiledArgs: Compiled[]
+  ): ArgumentEvaluation[] {
+    const { symbol } = candidate;
     const reprs = parameterReprs(symbol);
-    const finalEvals = argumentEvals.map(({ index, paramIndex, eval: _eval }) => {
-      const param = symbol.params[paramIndex];
-      const compiled = compiledArgs[index] as Compiled;
-      const paramType = substitute(param.type, substitution);
-      const elementType = param.isVararg ? this.varargElementType(paramType) : paramType;
-      const isSpread = args[index].isSpread === true;
-      if (isSpread) return { index, paramIndex, eval: compiled.eval, isSpread };
-      if (!this.acceptsArgument(compiled, elementType)) {
-        this.error(args[index].row, typeMismatchMessage(elementType, compiled.type));
-      }
-      const converted = this.convertTo(compiled, elementType, args[index].row);
-      const declaredRepr = param.isVararg ? reprOf(this.core, param.type) : reprs[paramIndex];
-      const fromRepr = reprOf(this.core, elementType);
-      return { index, paramIndex, eval: this.reprConvert(converted, fromRepr, declaredRepr), isSpread };
-    });
-    finalEvals.sort((a, b) => a.index - b.index);
-    const paramCount = symbol.params.length;
-    const varargIndex = symbol.params.findIndex((param) => param.isVararg);
-    const varargArray = varargIndex === -1 ? undefined : this.varargArrayFactory(symbol.params[varargIndex].type);
-    const callRow = this.recordsSteps && !this.file.isLibrary ? row : undefined;
-    const evaluateArgs = (frame: Frame): Value[] => {
-      const values: Value[] = Array.from({ length: paramCount }, () => MISSING);
-      const varargs: Value[] = [];
-      const { temporaries } = frame;
-      const mark = temporaries.length;
-      try {
-        for (const { paramIndex, eval: evaluate, isSpread } of finalEvals) {
-          const value = evaluate(frame);
-          temporaries.push(value);
-          if (isSpread) varargs.push(...((value as KObject).items as Value[]));
-          else if (paramIndex === varargIndex) varargs.push(value);
-          else values[paramIndex] = value;
+    const evaluations = mapping.flatMap((indexes, paramIndex) =>
+      indexes.map((index): ArgumentEvaluation => {
+        const param = symbol.params[paramIndex];
+        const compiled = compiledArgs[index];
+        const paramType = substitute(param.type, substitution);
+        const elementType = param.isVararg ? this.varargElementType(paramType) : paramType;
+        const isSpread = args[index].isSpread === true;
+        if (isSpread) return { index, paramIndex, eval: compiled.eval, isSpread };
+        if (!this.acceptsArgument(compiled, elementType)) {
+          this.error(args[index].row, typeMismatchMessage(elementType, compiled.type));
         }
-        if (varargArray) values[varargIndex] = varargArray(frame, varargs);
-        return values;
-      } finally {
-        temporaries.length = mark;
-      }
-    };
-    const call = (frame: Frame, receiver: Value): Value => {
-      const { temporaries } = frame;
-      const mark = temporaries.length;
-      temporaries.push(receiver);
-      try {
-        const values = evaluateArgs(frame);
-        temporaries.push(...values);
-        return callFunction(symbol, frame, receiver, values, callRow);
-      } finally {
-        temporaries.length = mark;
-      }
-    };
-    const type = resolved(substitute(this.declaredReturnOf(candidate, row), substitution));
-    const typeArguments = new Map<TypeParameterSymbol, KType>();
-    for (const param of this.inferredTypeParameters(candidate))
-      typeArguments.set(param, resolved(substitution.get(param) as KType));
+        const converted = this.convertTo(compiled, elementType, args[index].row);
+        const declaredRepr = param.isVararg ? reprOf(this.core, param.type) : reprs[paramIndex];
+        const fromRepr = reprOf(this.core, elementType);
+        return { index, paramIndex, eval: this.reprConvert(converted, fromRepr, declaredRepr), isSpread };
+      })
+    );
+    return evaluations.toSorted((a, b) => a.index - b.index);
+  }
+
+  /** The type of a call's result, which for a constructor is its class with the inferred type arguments. */
+  private callResultType(
+    { candidate, substitution }: Attempt,
+    typeArguments: Map<TypeParameterSymbol, KType>,
+    row: number
+  ): KType {
+    const { symbol } = candidate;
+    if (candidate.kind !== 'constructor' || !symbol.owner) {
+      return resolved(substitute(this.declaredReturnOf(candidate, row), substitution));
+    }
     return {
-      symbol,
-      candidate,
-      type:
-        candidate.kind === 'constructor' && symbol.owner
-          ? {
-              kind: 'class',
-              cls: symbol.owner,
-              args: symbol.owner.typeParameters.map((param) => ({
-                variance: 'inv' as const,
-                type: typeArguments.get(param) as KType,
-              })),
-              nullable: false,
-            }
-          : type,
-      repr: candidate.kind === 'constructor' ? 'ref' : returnRepr(symbol),
-      call,
-      evaluateArgs,
-      callRow,
-      argumentsCreateObjects: args.length > 0 && compiledArgs.every((compiled) => compiled?.isCreation === true),
-      compiledArgs,
-      receiverRepr: receiverRepr(symbol),
-      typeArguments,
+      kind: 'class',
+      cls: symbol.owner,
+      args: symbol.owner.typeParameters.map((param) => ({
+        variance: 'inv' as const,
+        type: typeArguments.get(param) as KType,
+      })),
+      nullable: false,
     };
   }
 
@@ -804,3 +852,25 @@ function isExactlyType(a: KType, b: KType): boolean {
 }
 
 export { KObject };
+
+/** The parts of a call that resolving it reads. */
+interface CallSyntax {
+  args: ArgumentSyntax[];
+  hasTrailingLambda: boolean;
+  explicitTypeArgs: KType[];
+  row: number;
+  name: string;
+}
+
+/** The declared type of the parameter that takes an argument, or `undefined` for none. */
+function parameterTypeOf(attempt: Attempt, argIndex: number): KType | undefined {
+  const paramIndex = attempt.mapping.findIndex((indexes) => indexes.includes(argIndex));
+  return attempt.candidate.symbol.params[paramIndex]?.type;
+}
+
+/** The default and vararg parameters an attempt leaves unused, which make a candidate less specific. */
+function unusedParameters(attempt: Attempt): number {
+  const { params } = attempt.candidate.symbol;
+  const defaults = attempt.mapping.filter((indexes, index) => indexes.length === 0 && params[index].hasDefault).length;
+  return defaults + (params.some((param) => param.isVararg) ? 1 : 0);
+}
