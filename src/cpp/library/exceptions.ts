@@ -16,7 +16,7 @@ export function exceptionClasses(stringType: () => Type): Map<string, ClassInfo>
     cls.base = base;
     cls.baseAccess = 'public';
     cls.isComplete = true;
-    cls.library = { kind: name, args: [], size: base ? 16 : 8, align: 8, isInheritable: true };
+    cls.library = { kind: name, args: [], size: hasMessage ? 16 : 8, align: 8, isInheritable: true };
     if (base) for (const [key, fn] of base.virtuals) cls.virtuals.set(key, fn);
     cls.destructor = {
       ...native(`~${name}`, [], VOID, () => {}, { owner: cls, isVirtual: true }),
