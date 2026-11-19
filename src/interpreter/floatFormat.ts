@@ -166,3 +166,69 @@ export function formatHex(value: number, precision: number | undefined, alternat
   const point = hex.length > 0 || alternate ? '.' : '';
   return `0x${lead.toString(16)}${point}${hex}p${exponent < 0 ? '-' : '+'}${Math.abs(exponent)}`;
 }
+
+/** A `printf` conversion of a floating-point value: its flags, width, precision, and letter (`f`, `E`, `g`, `a`...). */
+export interface FloatSpecification {
+  flags: string;
+  width?: number;
+  precision?: number;
+  conversion: string;
+}
+
+/**
+ * Formats a floating-point conversion as macOS's `printf` does, with its sign and zero padding but not the spaces
+ * that pad it to its width, which callers add.
+ */
+// code-gauge-allow functionCognitiveComplexity 18 -- Format variants share sign, alternate-form, case, and padding rules; retain that coordination together.
+// code-gauge-allow functionNcss 36 -- Format variants share sign, alternate-form, case, and padding rules; retain that coordination together.
+export function formatFloatField(spec: FloatSpecification, value: number): string {
+  const { conversion } = spec;
+  const upper = conversion === conversion.toUpperCase();
+  const negative = value < 0 || Object.is(value, -0);
+  const sign = negative ? '-' : signOf(spec.flags);
+  const magnitude = Math.abs(value);
+  const alternate = spec.flags.includes('#');
+  if (!Number.isFinite(magnitude)) {
+    const text = Number.isNaN(magnitude) ? 'nan' : 'inf';
+    // macOS prints no sign for a NaN.
+    const shownSign = Number.isNaN(magnitude) ? '' : sign;
+    return shownSign + (upper ? text.toUpperCase() : text);
+  }
+  let body: string;
+  switch (conversion.toLowerCase()) {
+    case 'f': {
+      body = formatFixed(magnitude, spec.precision ?? 6);
+      if (alternate && !body.includes('.')) body += '.';
+      break;
+    }
+    case 'e': {
+      body = formatScientific(magnitude, spec.precision ?? 6, alternate);
+      break;
+    }
+    case 'g': {
+      body = formatGeneral(magnitude, spec.precision ?? 6, alternate);
+      break;
+    }
+    default: {
+      body = formatHex(magnitude, spec.precision, alternate);
+      break;
+    }
+  }
+  if (upper) body = body.toUpperCase();
+  const width = spec.width ?? 0;
+  if (spec.flags.includes('0') && !spec.flags.includes('-')) {
+    if (conversion.toLowerCase() === 'a') {
+      const prefix = body.slice(0, 2);
+      return sign + prefix + body.slice(2).padStart(width - sign.length - 2, '0');
+    }
+    return sign + body.padStart(width - sign.length, '0');
+  }
+  return sign + body;
+}
+
+/** The sign a non-negative value shows with the `+` or space flag. */
+function signOf(flags: string): string {
+  if (flags.includes('+')) return '+';
+  if (flags.includes(' ')) return ' ';
+  return '';
+}

@@ -1,4 +1,4 @@
-import { formatFixed, formatGeneral, formatHex, formatScientific } from '../../interpreter/floatFormat';
+import { formatFloatField } from '../../interpreter/floatFormat';
 import type { Scalar, Value } from '../arith';
 import { CRuntimeError } from '../errors';
 import type { Runtime } from '../runtime';
@@ -173,7 +173,7 @@ function convert(runtime: Runtime, spec: Spec, args: Arguments, written: number)
     case 'G':
     case 'a':
     case 'A': {
-      return floatField(spec, args.double());
+      return formatFloatField(spec, args.double());
     }
     case 'n': {
       storeWritten(runtime, length, args.pointer(), written);
@@ -249,53 +249,6 @@ function integerField(
     return lead + body.padStart(width - lead.length, '0');
   }
   return lead + body;
-}
-
-// code-gauge-allow functionCognitiveComplexity 18 -- Format variants share sign, alternate-form, case, and padding rules; retain that coordination together.
-// code-gauge-allow functionNcss 36 -- Format variants share sign, alternate-form, case, and padding rules; retain that coordination together.
-function floatField(spec: Spec, value: number): string {
-  const { conversion } = spec;
-  const upper = conversion === conversion.toUpperCase();
-  const negative = value < 0 || Object.is(value, -0);
-  const sign = negative ? '-' : signOf(spec);
-  const magnitude = Math.abs(value);
-  const alternate = spec.flags.includes('#');
-  if (!Number.isFinite(magnitude)) {
-    const text = Number.isNaN(magnitude) ? 'nan' : 'inf';
-    // macOS prints no sign for a NaN.
-    const shownSign = Number.isNaN(magnitude) ? '' : sign;
-    return shownSign + (upper ? text.toUpperCase() : text);
-  }
-  let body: string;
-  switch (conversion.toLowerCase()) {
-    case 'f': {
-      body = formatFixed(magnitude, spec.precision ?? 6);
-      if (alternate && !body.includes('.')) body += '.';
-      break;
-    }
-    case 'e': {
-      body = formatScientific(magnitude, spec.precision ?? 6, alternate);
-      break;
-    }
-    case 'g': {
-      body = formatGeneral(magnitude, spec.precision ?? 6, alternate);
-      break;
-    }
-    default: {
-      body = formatHex(magnitude, spec.precision, alternate);
-      break;
-    }
-  }
-  if (upper) body = body.toUpperCase();
-  const width = spec.width ?? 0;
-  if (spec.flags.includes('0') && !spec.flags.includes('-')) {
-    if (conversion.toLowerCase() === 'a') {
-      const prefix = body.slice(0, 2);
-      return sign + prefix + body.slice(2).padStart(width - sign.length - 2, '0');
-    }
-    return sign + body.padStart(width - sign.length, '0');
-  }
-  return sign + body;
 }
 
 function pad(spec: Spec, text: string): string {
