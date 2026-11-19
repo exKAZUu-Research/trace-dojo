@@ -280,8 +280,7 @@ export type Statement =
   | ({ kind: 'rethrow' } & Span)
   | ({ kind: 'labeled'; labels: string[]; body: Statement } & Span)
   | ({ kind: 'assert'; condition: Expression; message: Expression | undefined } & Span)
-  | ({ kind: 'yield'; value: Expression; isEach: boolean } & Span)
-  | ({ kind: 'empty' } & Span);
+  | ({ kind: 'yield'; value: Expression; isEach: boolean } & Span);
 
 export type ForInBinding =
   /** `for (var x in …)`, `for (final int x in …)`, or `for (x in …)` with an existing variable. */

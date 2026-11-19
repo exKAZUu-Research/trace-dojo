@@ -61,7 +61,10 @@ export class Converter extends ExpressionConverter {
           break;
         }
         case 'library_name': {
-          // `library;` or `library name;` only names the library.
+          // `library;` or `library name;` only names the library; dotted names are a legacy form.
+          if (namedOf(node).some((child) => child.type === 'dotted_identifier_list' && child.text.includes('.'))) {
+            return unsupported(node, '. で区切った名前のライブラリ（library a.b;）');
+          }
           break;
         }
         case 'part_directive':
@@ -73,6 +76,11 @@ export class Converter extends ExpressionConverter {
         }
         case 'annotation': {
           pendingAnnotations.push(this.convertAnnotation(node));
+          break;
+        }
+        case 'external_variable_declaration': {
+          declarations.push(...this.convertExternalVariables(node));
+          pendingAnnotations = [];
           break;
         }
         default: {
@@ -160,9 +168,7 @@ export class Converter extends ExpressionConverter {
       }
       case 'external_function_declaration':
       case 'external_getter_declaration':
-      case 'external_setter_declaration':
-      case 'external_variable_declaration': {
-        if (!this.isLibrary) return unsupported(node, 'external（処理系の外で定義する宣言）');
+      case 'external_setter_declaration': {
         return this.convertExternalTopLevel(node);
       }
       default: {
@@ -432,7 +438,6 @@ export class Converter extends ExpressionConverter {
     const children = childrenOf(inner);
     const tokens = new Set(children.filter((child) => !child.isNamed).map((child) => child.type));
     const isExternal = children.some((child) => child.type === 'external');
-    if (isExternal && !this.isLibrary) return unsupported(inner, 'external（処理系の外で定義する宣言）');
     const signature = children.find((child) =>
       [
         'constructor_signature',
@@ -492,7 +497,6 @@ export class Converter extends ExpressionConverter {
   ): MemberDeclaration {
     const tokens = new Set(parts.filter((child) => !child.isNamed).map((child) => child.type));
     const isExternal = parts.some((child) => child.type === 'external');
-    if (isExternal && !this.isLibrary) return unsupported(declaration, 'external（処理系の外で定義する宣言）');
     const signature = requireNode(
       parts.find((child) => child.isNamed && child.type.endsWith('signature')),
       declaration
@@ -698,6 +702,57 @@ export class Converter extends ExpressionConverter {
           ? 'setter'
           : 'function';
     return this.functionFromSignature(signature, undefined, kind, this.annotationsOf(node), spanOf(node), true);
+  }
+
+  /** `external int v;`, which declares a getter and, unless final, a setter. */
+  private convertExternalVariables(node: Node): FunctionDeclaration[] {
+    const span = spanOf(node);
+    const typeNode = namedOf(node).find((child) => child.type === 'type');
+    const type = typeNode ? this.convertType(typeNode) : undefined;
+    const isFinal = childrenOf(node).some((child) => child.type === 'final');
+    const names = namedOf(
+      requireNode(
+        namedOf(node).find((child) => child.type === 'identifier_list'),
+        node
+      )
+    );
+    return names.flatMap((identifier) => {
+      const base = {
+        kind: 'function' as const,
+        name: identifier.text,
+        isExternal: true,
+        typeParameters: [],
+        body: undefined,
+        annotations: [],
+        headerEndRow: span.row,
+        ...span,
+      };
+      const getter: FunctionDeclaration = {
+        ...base,
+        functionKind: 'getter',
+        returnType: type,
+        parameters: emptyParameters(span),
+      };
+      if (isFinal) return [getter];
+      const parameter: FormalParameter = {
+        name: 'value',
+        type,
+        binding: 'plain',
+        isFinal: false,
+        isCovariant: false,
+        isRequired: true,
+        defaultValue: undefined,
+        functionType: undefined,
+        ...span,
+      };
+      const setter: FunctionDeclaration = {
+        ...base,
+        functionKind: 'setter',
+        returnType: undefined,
+        parameters: { positional: [parameter], requiredCount: 1, named: [], ...span },
+      };
+      return [getter, setter];
+    });
   }
 
   private convertTopLevelVariables(node: Node): VariableDeclaration {
@@ -960,7 +1015,7 @@ export class Converter extends ExpressionConverter {
         };
       }
       case 'empty_statement': {
-        return { kind: 'empty', ...span };
+        return unsupported(node, '空の文（; だけの文）');
       }
       default: {
         return syntaxError(node, '書き方に誤りがあります。');

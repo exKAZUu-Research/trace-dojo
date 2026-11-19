@@ -53,20 +53,26 @@ class JsonStringifier {
     private readonly indent: string | undefined
   ) {}
 
+  /** A value JSON cannot hold (NaN, a map with keys other than strings, an object) goes through toEncodable once. */
   write(current: Value, depth: number): string {
     this.runtime.spend();
+    const direct = this.writeJsonValue(current, depth);
+    if (direct !== undefined) return direct;
+    const converted = this.writeJsonValue(this.convert(current), depth);
+    if (converted === undefined) this.runtime.throwError('JsonUnsupportedObjectError', '', [current]);
+    return converted;
+  }
+
+  private writeJsonValue(current: Value, depth: number): string | undefined {
     if (current === undefined) return 'null';
     if (typeof current === 'boolean') return current ? 'true' : 'false';
     if (typeof current === 'bigint') return current.toString();
-    if (typeof current === 'number') {
-      if (!Number.isFinite(current)) this.runtime.throwError('JsonUnsupportedObjectError', '', [current]);
-      return formatDouble(current);
-    }
+    if (typeof current === 'number') return Number.isFinite(current) ? formatDouble(current) : undefined;
     if (typeof current === 'string') return quoteJson(current);
     if (this.visiting.includes(current)) this.runtime.throwError('JsonCyclicError', '', [current]);
     if (current instanceof DartList) return this.writeList(current, depth);
     if (isMap(current)) return this.writeMap(current, depth);
-    return this.write(this.convert(current), depth);
+    return undefined;
   }
 
   private writeList(list: DartList, depth: number): string {
@@ -77,17 +83,14 @@ class JsonStringifier {
     return this.wrap('[', parts, ']', depth);
   }
 
-  private writeMap(map: DartObject, depth: number): string {
+  private writeMap(map: DartObject, depth: number): string | undefined {
     const store = map.native as unknown as HashStore;
     if (store.size === 0) return '{}';
+    if ([...store.positions()].some((position) => typeof store.keyAt(position) !== 'string')) return undefined;
     this.visiting.push(map);
     const parts: string[] = [];
     for (const position of store.positions()) {
-      const key = store.keyAt(position);
-      if (typeof key !== 'string') {
-        this.visiting.pop();
-        this.runtime.throwError('JsonUnsupportedObjectError', '', [map]);
-      }
+      const key = store.keyAt(position) as string;
       const separator = this.indent === undefined ? ':' : ': ';
       parts.push(`${quoteJson(key)}${separator}${this.write(store.entryValues[position], depth + 1)}`);
     }
@@ -119,9 +122,6 @@ class JsonStringifier {
       throw error;
     }
     this.visiting.pop();
-    if (converted instanceof DartObject && !(converted instanceof DartList) && !isMap(converted)) {
-      runtime.throwError('JsonUnsupportedObjectError', '', [current]);
-    }
     return converted;
   }
 }

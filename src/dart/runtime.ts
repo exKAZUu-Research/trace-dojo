@@ -11,8 +11,10 @@ import {
   type FunctionType,
   type InterfaceType,
   interfaceType,
+  mentionsTypeParams,
   substitute,
   type TypeParam,
+  typeToString,
 } from './types';
 import {
   type Arguments,
@@ -158,9 +160,19 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   enter(frame: Frame): void {
-    if (this.frames.length >= LIMITS.maxCallDepth) this.throwError('StackOverflowError', '', []);
+    // Constructing the error enters its constructor's frame, which the check must let through.
+    if (this.frames.length >= LIMITS.maxCallDepth && !this.overflowing) {
+      this.overflowing = true;
+      try {
+        this.throwError('StackOverflowError', '', []);
+      } finally {
+        this.overflowing = false;
+      }
+    }
     this.frames.push(frame);
   }
+
+  private overflowing = false;
 
   exit(frame: Frame): void {
     if (this.frames.length === 1 && this.onMainExit) {
@@ -270,6 +282,22 @@ export class Runtime implements TracedRuntime<Frame> {
     }
   }
 
+  /**
+   * A field typed by a type parameter of its class takes only values of the object's type argument, which a
+   * reference of a supertype (`Box<num> b = Box<int>(1)`) cannot check statically.
+   */
+  private checkCovariantField(receiver: DartObject, field: Member & { kind: 'field' }, value: Value): void {
+    const owner = asInstanceOf(interfaceType(receiver.cls, receiver.typeArgs), field.owner);
+    const env = new Map(
+      field.owner.typeParams.map((param, index) => [param, owner?.args[index] ?? ({ kind: 'dynamic' } as const)])
+    );
+    const expected = substitute(field.type, env);
+    if (this.links.isValueOf(this, value, expected)) return;
+    this.throwTypeError(
+      `type '${typeToString(this.runtimeTypeOf(value))}' is not a subtype of type '${typeToString(expected)}' of '${field.name}'`
+    );
+  }
+
   setProperty(receiver: Value, name: string, value: Value, callRow: number | undefined): void {
     const cls = this.classOf(receiver);
     const member = cls.setterImplementation(name);
@@ -278,6 +306,7 @@ export class Runtime implements TracedRuntime<Frame> {
       return;
     }
     if (member.kind === 'field') {
+      if (mentionsTypeParams(member.type)) this.checkCovariantField(receiver as DartObject, member, value);
       (receiver as DartObject).fields[member.slot] = value;
       return;
     }

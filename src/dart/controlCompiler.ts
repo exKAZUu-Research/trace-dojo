@@ -292,10 +292,13 @@ export abstract class ControlCompiler extends StatementCompiler {
         if (!containsYield(statement)) break;
         return this.compileGenForIn(statement);
       }
+      case 'labeled': {
+        if (!containsYield(statement)) break;
+        return this.compileGenLabeled(statement);
+      }
       case 'try':
       case 'switch':
-      case 'do':
-      case 'labeled': {
+      case 'do': {
         if (containsYield(statement)) return this.unsupported(statement, 'sync* の中の、yield を含むこの文');
         break;
       }
@@ -307,6 +310,28 @@ export abstract class ControlCompiler extends StatementCompiler {
     // oxlint-disable-next-line require-yield -- A statement without yield runs as one step of the generator.
     return function* (frame) {
       return exec(frame);
+    };
+  }
+
+  private compileGenLabeled(statement: Extract<Statement, { kind: 'labeled' }>): GenExec {
+    const { labels, body } = statement;
+    const isLoop = ['for', 'forIn', 'while', 'do', 'switch'].includes(body.kind);
+    if (isLoop) this.pendingLabels = labels;
+    for (const label of labels) if (!isLoop) this.fn.labels.push({ name: label, isLoop: false, isSwitchCase: false });
+    this.breakFlows.push(undefined);
+    let exec: GenExec;
+    try {
+      exec = this.compileGenStatement(body);
+    } finally {
+      if (!isLoop) this.fn.labels.splice(this.fn.labels.length - labels.length, labels.length);
+      this.pendingLabels = [];
+    }
+    const breakFlow = this.breakFlows.pop();
+    if (breakFlow) this.flow = Flow.join(this.flow, breakFlow);
+    return function* (frame) {
+      const completion = yield* exec(frame);
+      if (completion?.kind === 'break' && completion.label !== undefined && labels.includes(completion.label)) return;
+      return completion;
     };
   }
 
@@ -333,11 +358,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     this.enterLoop(statement);
     const { compiled: condition, flow } = this.compileCondition(statement.condition);
     this.flow = flow.whenTrue;
-    this.fn.loopDepth++;
-    this.breakFlows.push(undefined);
-    const body = this.compileGenScoped(statement.body);
-    this.fn.loopDepth--;
-    this.breakFlows.pop();
+    const body = this.compileGenLoopBody(statement.body, labels);
     this.flow = flow.whenFalse;
     const test = condition.run;
     return function* (frame) {
@@ -366,11 +387,7 @@ export abstract class ControlCompiler extends StatementCompiler {
       this.enterLoop(statement);
       const condition = statement.condition ? this.compileCondition(statement.condition) : undefined;
       if (condition) this.flow = condition.flow.whenTrue;
-      this.fn.loopDepth++;
-      this.breakFlows.push(undefined);
-      const body = this.compileGenScoped(statement.body);
-      this.fn.loopDepth--;
-      this.breakFlows.pop();
+      const body = this.compileGenLoopBody(statement.body, labels);
       const updates = statement.updates.map((update) => this.compileExpression(update).run);
       if (condition) this.flow = condition.flow.whenFalse;
       return genForLoop(initExec, condition?.compiled.run, body, updates, labels);
@@ -399,11 +416,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     const { result, slots } = this.withScope(() => {
       this.enterLoop(statement);
       const bind = this.compileForInBinding(statement.binding, elementType, statement);
-      this.fn.loopDepth++;
-      this.breakFlows.push(undefined);
-      const body = this.compileGenScoped(statement.body);
-      this.fn.loopDepth--;
-      this.breakFlows.pop();
+      const body = this.compileGenLoopBody(statement.body, labels);
       const source = iterable.run;
       return function* (frame: Frame): Generator<Value, Completion | undefined, undefined> {
         const { runtime } = frame;
@@ -432,6 +445,19 @@ export abstract class ControlCompiler extends StatementCompiler {
 
   // code-gauge-allow functionCognitiveComplexity 18 -- Each branch is one of the cases Dart distinguishes for this construct.
   // code-gauge-allow functionNcss 33 -- One case per form of the construct, which reads best together.
+  private compileGenLoopBody(body: Statement, labels: string[]): GenExec {
+    this.fn.loopDepth++;
+    for (const label of labels) this.fn.labels.push({ name: label, isLoop: true, isSwitchCase: false });
+    this.breakFlows.push(undefined);
+    try {
+      return this.compileGenScoped(body);
+    } finally {
+      this.fn.loopDepth--;
+      this.fn.labels.splice(this.fn.labels.length - labels.length, labels.length);
+      this.breakFlows.pop();
+    }
+  }
+
   private compileYield(statement: Extract<Statement, { kind: 'yield' }>): GenExec {
     if (!this.fn.kind.isGenerator) return this.error(statement, 'yield は sync* の関数の中にしか書けません。');
     const elementType = this.fn.yieldElement;

@@ -673,16 +673,27 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     isRedirecting: boolean
   ): void {
     if (isRedirecting || this.isLibraryCode) return;
-    // Dart reports a field the implicit default constructor leaves unset at the field, and others at the constructor.
-    const isDefault = declaration.start === cls.declaration?.start;
     for (const field of cls.fields) {
       if (initialized.has(field.name) || field.isLate || field.hasInitializer) continue;
-      const at = isDefault ? { row: field.row ?? declaration.row } : declaration;
+      // Dart reports a field no constructor initializes at the field, and one another constructor initializes here.
+      const at = this.someConstructorInitializes(cls, field.name) ? declaration : { row: field.row ?? declaration.row };
       if (field.isFinal) this.error(at, `final のフィールド ${field.name} が、コンストラクタで初期化されていません。`);
       if (!isNullable(field.type) && field.type.kind !== 'dynamic') {
         this.error(at, `null にならないフィールド ${field.name} が、コンストラクタで初期化されていません。`);
       }
     }
+  }
+
+  private someConstructorInitializes(cls: ClassInfo, name: string): boolean {
+    return (cls.declaration?.members ?? []).some(
+      (member) =>
+        member.kind === 'constructor' &&
+        member.constructorKind === 'generative' &&
+        ([...member.parameters.positional, ...member.parameters.named].some(
+          (parameter) => parameter.binding === 'this' && parameter.name === name
+        ) ||
+          member.initializers.some((initializer) => initializer.kind === 'field' && initializer.name === name))
+    );
   }
 }
 

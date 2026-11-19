@@ -12,6 +12,7 @@ import {
   interfaceType,
   isNullable,
   isSubtype,
+  NEVER,
   nonNullable,
   objectType,
   resolveBound,
@@ -77,7 +78,22 @@ export abstract class PatternCompiler extends CallCompiler {
       case 'list': {
         if (pattern.typeArguments?.length === 1)
           return interfaceType(coreTypes.list, [this.resolveType(pattern.typeArguments[0])]);
-        return undefined;
+        const element = this.sharedContext(
+          pattern.elements
+            .filter((element) => element.kind !== 'rest')
+            .map((element) => this.patternContextType(element))
+        );
+        return element ? interfaceType(coreTypes.list, [element]) : undefined;
+      }
+      case 'map': {
+        if (pattern.typeArguments?.length === 2) {
+          return interfaceType(
+            coreTypes.map,
+            pattern.typeArguments.map((argument) => this.resolveType(argument))
+          );
+        }
+        const value = this.sharedContext(pattern.entries.map((entry) => this.patternContextType(entry.value)));
+        return value ? interfaceType(coreTypes.map, [DYNAMIC, value]) : undefined;
       }
       case 'object': {
         return this.resolveType(pattern.type, { allowRaw: true });
@@ -86,6 +102,20 @@ export abstract class PatternCompiler extends CallCompiler {
         return undefined;
       }
     }
+  }
+
+  /**
+   * The context the subpatterns of a collection pattern give its elements together: the type they all accept, or
+   * Never when no type does, as Dart computes their greatest lower bound.
+   */
+  private sharedContext(contexts: (DartType | undefined)[]): DartType | undefined {
+    let shared: DartType | undefined;
+    for (const context of contexts) {
+      if (!context || context.kind === 'dynamic') continue;
+      if (!shared || isSubtype(context, shared)) shared = context;
+      else if (!isSubtype(shared, context)) return NEVER;
+    }
+    return shared;
   }
 
   // code-gauge-allow functionNcss 42 -- One case per part of the pattern, matched in Dart's order.
@@ -102,6 +132,7 @@ export abstract class PatternCompiler extends CallCompiler {
       case 'wildcard': {
         if (!pattern.type) return { match: () => true, irrefutable: true };
         const type = this.resolveType(pattern.type);
+        this.requireAssignable(type, matchedType, options, pattern);
         return this.typeTest(type, matchedType, () => true, true);
       }
       case 'variable': {
@@ -121,7 +152,13 @@ export abstract class PatternCompiler extends CallCompiler {
       }
       case 'and': {
         const left = this.compilePatternInner(pattern.left, matchedType, options, variables);
-        const right = this.compilePatternInner(pattern.right, matchedType, options, variables);
+        // The right operand matches the value as the left one narrowed it, as in `double v && > 3`.
+        const right = this.compilePatternInner(
+          pattern.right,
+          this.narrowedType(pattern.left, matchedType),
+          options,
+          variables
+        );
         return {
           match: (frame, value) => left.match(frame, value) && right.match(frame, value),
           irrefutable: left.irrefutable && right.irrefutable,
@@ -177,6 +214,7 @@ export abstract class PatternCompiler extends CallCompiler {
       return true;
     };
     if (!declared) return { match: bind, irrefutable: true };
+    this.requireAssignable(declared, matchedType, options, pattern);
     return this.typeTest(declared, matchedType, bind, true);
   }
 
@@ -250,6 +288,39 @@ export abstract class PatternCompiler extends CallCompiler {
     });
     variables.set(name, variable);
     return variable;
+  }
+
+  /** The type a value of the matched type has once it matches a pattern. */
+  private narrowedType(pattern: Pattern, matchedType: DartType): DartType {
+    switch (pattern.kind) {
+      case 'variable':
+      case 'wildcard':
+      case 'object':
+      case 'cast': {
+        if (!pattern.type) return matchedType;
+        const type = this.resolveType(pattern.type, { allowRaw: true });
+        return isSubtype(matchedType, type) ? matchedType : type;
+      }
+      case 'nullCheck':
+      case 'nullAssert': {
+        return this.narrowedType(pattern.pattern, nonNullable(matchedType));
+      }
+      case 'parenthesized': {
+        return this.narrowedType(pattern.pattern, matchedType);
+      }
+      case 'and': {
+        return this.narrowedType(pattern.right, this.narrowedType(pattern.left, matchedType));
+      }
+      default: {
+        return matchedType;
+      }
+    }
+  }
+
+  /** In a declaration or an assignment, a pattern's type must accept the matched value, which nothing tests there. */
+  private requireAssignable(type: DartType, matchedType: DartType, options: PatternOptions, span: Span): void {
+    if (options.mode === 'match' || matchedType.kind === 'dynamic' || isSubtype(matchedType, type)) return;
+    this.error(span, `${typeName(matchedType)} 型の値は、パターンが求める ${typeName(type)} 型に代入できません。`);
   }
 
   /** Tests the value's type, then runs `then` on it; the test is irrefutable when the matched type is a subtype. */
@@ -370,6 +441,7 @@ export abstract class PatternCompiler extends CallCompiler {
     const tail = compileElements(after);
     const hasRest = restIndex !== -1;
     const parts: ListPatternParts = { head, rest, tail, hasRest, resolveElement: this.runtimeType(elementType) };
+    this.requireAssignable(listType, matchedType, options, pattern);
     const typeCheck = this.typeTest(listType, matchedType, () => true, true);
     return {
       match: (frame, value) => typeCheck.match(frame, value) && matchListParts(frame, value, parts),
@@ -413,6 +485,7 @@ export abstract class PatternCompiler extends CallCompiler {
       if (!key.isConst) this.error(entry.key, 'マップのパターンのキーには、定数を書いてください。');
       return { key: key.run, value: this.compilePatternInner(entry.value, valueType, options, variables) };
     });
+    this.requireAssignable(mapType, matchedType, options, pattern);
     const typeCheck = this.typeTest(mapType, matchedType, () => true, true);
     return {
       match: (frame, value) => {

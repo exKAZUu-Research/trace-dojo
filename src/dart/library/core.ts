@@ -12,6 +12,33 @@ class Object {
   external Type get runtimeType;
   static int hash(Object? object1, Object? object2, [Object? object3, Object? object4, Object? object5, Object? object6, Object? object7, Object? object8]) => _hashValues([object1, object2, object3, object4, object5, object6, object7, object8]);
   static int hashAll(Iterable<Object?> objects) => _hashValues(objects.toList());
+  static int hashAllUnordered(Iterable<Object?> objects) {
+    int sum = 0;
+    int count = 0;
+    for (var object in objects) {
+      sum = (sum + _smear(object.hashCode)) & 0x3FFFFFFF;
+      count += 1;
+    }
+    return _finish(_combine(_combine(0, sum), count));
+  }
+  static int _smear(int x) {
+    x ^= x >>> 16;
+    x = (x * 0x21f0aaad) & 0xFFFFFFFF;
+    x ^= x >>> 15;
+    x = (x * 0xd35a2d97) & 0xFFFFFFFF;
+    x ^= x >>> 15;
+    return x;
+  }
+  static int _combine(int hash, int value) {
+    hash = 0x1fffffff & (hash + value);
+    hash = 0x1fffffff & (hash + ((0x0007ffff & hash) << 10));
+    return hash ^ (hash >> 6);
+  }
+  static int _finish(int hash) {
+    hash = 0x1fffffff & (hash + ((0x03ffffff & hash) << 3));
+    hash = hash ^ (hash >> 11);
+    return 0x1fffffff & (hash + ((0x00003fff & hash) << 15));
+  }
   external static int _hashValues(List<Object?> values);
 }
 
@@ -301,10 +328,9 @@ class _EmptyStackTrace implements StackTrace {
   String toString() => '';
 }
 
-class _StackTraceText implements StackTrace {
-  final String _text;
-  _StackTraceText(this._text);
-  String toString() => _text;
+class _StackTrace implements StackTrace {
+  _StackTrace();
+  external String toString();
 }
 
 abstract class Enum {
@@ -559,6 +585,7 @@ class StackOverflowError implements Error {
 class NoSuchMethodError extends Error {
   final String _message;
   NoSuchMethodError._withInvocation(Object? receiver, Invocation invocation) : _message = _describe(receiver, invocation);
+  NoSuchMethodError._withMessage(this._message);
   external static String _describe(Object? receiver, Invocation invocation);
   String toString() => _message;
 }

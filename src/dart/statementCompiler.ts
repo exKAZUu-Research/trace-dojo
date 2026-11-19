@@ -409,9 +409,6 @@ export abstract class StatementCompiler extends PatternCompiler {
       case 'yield': {
         return this.error(statement, 'yield は sync* の関数の中にしか書けません。');
       }
-      case 'empty': {
-        return () => {};
-      }
     }
   }
 

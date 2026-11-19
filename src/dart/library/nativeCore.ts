@@ -199,7 +199,13 @@ define('Error._safeToString', (runtime, _receiver, [value]) => safeToStringOf(ru
 define('Error.throwWithStackTrace', (runtime, _receiver, [error]) => {
   throw runtime.links.newThrow(runtime, error);
 });
-define('StackTrace.current', (runtime) => runtime.links.construct(runtime, '_StackTraceText', '', ['']));
+// The VM's stack traces show file paths and the VM's own frames, which the interpreter cannot reproduce.
+define('StackTrace.current', (runtime) =>
+  runtime.throwError('UnsupportedError', '', ['StackTrace.current は、この採点環境では使えません。'])
+);
+define('_StackTrace.toString', (runtime) =>
+  runtime.throwError('UnsupportedError', '', ['スタックトレースの中身は、この採点環境では使えません。'])
+);
 
 /** `Error.safeToString`, which describes a list by its length and the VM's class, as messages of errors show. */
 export function safeToStringOf(runtime: Runtime, value: Value): string {

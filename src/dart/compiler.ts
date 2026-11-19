@@ -343,8 +343,23 @@ export class Compiler extends ConstructorCompiler {
 
   /** Rejects extending or implementing classes whose modifiers forbid it outside their library. */
   private checkSubtypeAllowed(cls: ClassInfo, supercls: ClassInfo, role: string, span: Span): void {
-    if (supercls.library === cls.library) return;
     const name = supercls.name;
+    // In its own library too, a subtype of a base or final class must keep others from implementing it.
+    const { modifiers } = cls;
+    if (
+      (supercls.modifiers.isBase || supercls.modifiers.isFinal) &&
+      !modifiers.isBase &&
+      !modifiers.isFinal &&
+      !modifiers.isSealed &&
+      cls.kind !== 'enum' &&
+      !this.isLibraryCode
+    ) {
+      this.error(
+        span,
+        `${name} は ${supercls.modifiers.isFinal ? 'final' : 'base'} なので、それを継承する ${cls.name} にも base・final・sealed のどれかを付けてください。`
+      );
+    }
+    if (supercls.library === cls.library) return;
     const isExtends = role === 'スーパークラス';
     const isImplements = role === '実装するインターフェース';
     if (
@@ -360,18 +375,6 @@ export class Compiler extends ConstructorCompiler {
       this.error(span, `${name} は interface なので、このライブラリの外では extends できません。`);
     if (supercls.modifiers.isBase && isImplements)
       this.error(span, `${name} は base なので、このライブラリの外では implements できません。`);
-    if (
-      (supercls.modifiers.isBase || supercls.modifiers.isFinal) &&
-      !cls.modifiers.isBase &&
-      !cls.modifiers.isFinal &&
-      !cls.modifiers.isSealed &&
-      isExtends
-    ) {
-      this.error(
-        span,
-        `${name} は base なので、それを継承する ${cls.name} にも base・final・sealed のどれかを付けてください。`
-      );
-    }
   }
 
   /** The class `superclass with mixin`, whose members are the mixin's. */
@@ -908,7 +911,7 @@ export class Compiler extends ConstructorCompiler {
     row: number,
     isExternal: boolean
   ): void {
-    const getterImpl = isExternal ? this.native(`${cls.name}.${name}`) : undefined;
+    const getterImpl = isExternal ? this.native(`${cls.name}.${name}`, 'getter') : undefined;
     cls.members.set(name, {
       kind: 'getter',
       name,
@@ -920,7 +923,7 @@ export class Compiler extends ConstructorCompiler {
       impl: getterImpl as Callable | undefined,
     });
     if (!isFinal) {
-      const setterImpl = isExternal ? this.native(`${cls.name}.${name}=`) : undefined;
+      const setterImpl = isExternal ? this.native(`${cls.name}.${name}=`, 'setter') : undefined;
       cls.setters.set(name, {
         kind: 'setter',
         name,
@@ -1044,7 +1047,9 @@ export class Compiler extends ConstructorCompiler {
     if (methodKind === 'operator' && declaration.isStatic) this.error(declaration, '演算子は static にできません。');
     this.checkOperatorArity(declaration);
     const nativeKey = `${isExtension ? (owner as ExtensionInfo).name : cls.name}.${methodKind === 'setter' ? `${name}=` : name}`;
-    const impl = declaration.isExternal ? (this.native(nativeKey) as Callable) : undefined;
+    const impl = declaration.isExternal
+      ? (this.native(nativeKey, methodKind === 'getter' || methodKind === 'setter' ? methodKind : 'method') as Callable)
+      : undefined;
     let member: Member;
     if (methodKind === 'getter') {
       member = {
@@ -1546,7 +1551,13 @@ export class Compiler extends ConstructorCompiler {
       this.signatureOf(declaration.parameters, declaration.returnType, typeParams)
     );
     fn.type = declaration.functionKind === 'setter' && !declaration.returnType ? { ...type, returnType: VOID } : type;
-    if (declaration.isExternal) fn.impl = this.native(declaration.name) as Callable;
+    if (declaration.isExternal) {
+      const kind = declaration.functionKind === 'function' ? 'method' : declaration.functionKind;
+      fn.impl = this.native(
+        declaration.functionKind === 'setter' ? `${declaration.name}=` : declaration.name,
+        kind
+      ) as Callable;
+    }
     (fn as TopLevelFunction & { typeParams?: TypeParam[] }).typeParams = typeParams;
   }
 
@@ -1716,9 +1727,10 @@ export class Compiler extends ConstructorCompiler {
     return frame.runtime.links.syncStarIterable(frame, elementType, body);
   }
 
-  protected native(key: string): Callable | ConstructorImpl {
+  protected native(key: string, kind: 'method' | 'getter' | 'setter' = 'method'): Callable | ConstructorImpl {
     const found = this.natives.get(key);
     if (found) return found;
+    if (!this.isLibraryCode) return missingExternal(key, kind);
     // A library member without a native fails only when a program calls it.
     return () => {
       throw new Error(`The interpreter has no native for ${key}`);
@@ -1726,6 +1738,24 @@ export class Compiler extends ConstructorCompiler {
   }
 
   static readonly unused = [NEVER, nonNullable, isTop, NO_ARGUMENTS, SHORTED] as const;
+}
+
+/**
+ * An `external` member of the program, which the SDK compiles but which has no body, so calling it throws the
+ * NoSuchMethodError the VM throws.
+ */
+function missingExternal(key: string, kind: 'method' | 'getter' | 'setter'): Callable {
+  const dot = key.indexOf('.');
+  const owner = dot === -1 ? undefined : key.slice(0, dot);
+  const name = key.slice(dot + 1);
+  return (runtime, _receiver, args) => {
+    const shown = args.positional.map((value) => runtime.links.stringify(runtime, value)).join(', ');
+    const call = kind === 'method' ? `${name}(${shown})` : name;
+    const message = owner
+      ? `NoSuchMethodError: No static ${kind} '${name}' declared in class '${owner}'.\nReceiver: ${owner}\nTried calling: ${call}`
+      : `NoSuchMethodError: No top-level ${kind} '${name}' declared.\nReceiver: top-level\nTried calling: ${call}`;
+    return runtime.throwError('NoSuchMethodError', '_withMessage', [message]);
+  };
 }
 
 /**

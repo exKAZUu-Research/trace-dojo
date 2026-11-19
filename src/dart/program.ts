@@ -284,7 +284,7 @@ export const LINKS: LibraryLinks = {
     return new DartThrow(value, undefined);
   },
   stackTraceOf(runtime) {
-    return LINKS.construct(runtime, '_StackTraceText', '', ['']);
+    return LINKS.construct(runtime, '_StackTrace', '', []);
   },
   syncStarIterable,
   listIterator,

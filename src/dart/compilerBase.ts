@@ -91,6 +91,7 @@ const UNAVAILABLE_NAMES: Record<string, string> = {
   HttpServer: 'HttpServer（ネットワーク）',
   Socket: 'Socket（ネットワーク）',
   Uri: 'Uri',
+  sleep: 'sleep（実行を止める）',
   Expando: 'Expando',
   WeakReference: 'WeakReference',
   Finalizer: 'Finalizer',

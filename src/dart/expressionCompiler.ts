@@ -1028,10 +1028,23 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return { type, run, isConst: false, variable };
   }
 
+  /** Rejects reading a late local without an initializer that no path, closures included, can have assigned yet. */
+  private checkLateAssignable(variable: LocalVar, span: Span): void {
+    if (variable.options.hasInitializer || !this.flow.reachable || this.flow.maybeAssigned.has(variable)) return;
+    const { owner, name } = variable;
+    if (variable.isWriteCaptured || owner.closureAssignedNames.has(name)) return;
+    if (owner !== this.fn && owner.assignedNames.has(name)) return;
+    this.error(span, `late の変数 ${name} には、まだどこでも値を代入していないので、使えません。`);
+  }
+
   /** Rejects reading a local that flow analysis cannot prove assigned, as Dart does for non-nullable and final ones. */
   protected checkDefinitelyAssigned(variable: LocalVar, span: Span): void {
     const { options } = variable;
-    if (options.hasInitializer || options.isParameter || options.isLate || this.flow.assigned.has(variable)) return;
+    if (options.isLate) {
+      this.checkLateAssignable(variable, span);
+      return;
+    }
+    if (options.hasInitializer || options.isParameter || this.flow.assigned.has(variable)) return;
     if (!this.flow.reachable) return;
     // A closure may run after the variable is assigned; Dart still rejects definitely unassigned ones.
     if (
