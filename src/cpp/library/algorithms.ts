@@ -870,7 +870,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       }
       if (args.length === 2 && type.kind === 'class' && type.cls.library?.kind === 'pair') {
         const args = type.cls.library.args;
-        fn.allowsConstantInitialization = () => args.every(isArithmetic);
+        fn.libraryConstant = () => (args.every(isArithmetic) ? true : undefined);
       }
       return fn;
     });

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -14,10 +15,19 @@ std::string text = "abc";
 std::string repeated(5, 'x');
 std::string counted("a\0bc", 4);
 std::string listed{'y', 'z'};
+const std::array<int, 2> originalArray{3, 4};
+std::array<int, 2> copiedArray = originalArray;
+std::pair<std::string, int> textPair{"ab", 2};
+auto madeTextPair = std::make_pair(std::string("cd"), 3);
+const std::string prefix = std::string("ab") + "c";
+const std::string copiedPrefix = prefix;
+std::string expanded = 'x' + (std::string("ab") + "c") + std::string("yz");
 
 void read() {
   std::cout << copied.first << made.first << converted.first << selected.first
-            << text.size() << repeated.size() << counted.size() << listed.size() << '\n';
+            << text.size() << repeated.size() << counted.size() << listed.size()
+            << copiedArray[1] << textPair.second << madeTextPair.second
+            << copiedPrefix.size() << expanded.size() << '\n';
 }
 
 int calls = 0;

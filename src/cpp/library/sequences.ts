@@ -8,6 +8,7 @@ import { type Eval, type Frame, holdAll } from '../runtime';
 import type { Syntax } from '../syntax';
 import {
   alignOf,
+  allowsConstantCopy,
   BOOL,
   ClassInfo,
   classType,
@@ -120,6 +121,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
     args: [element],
     ownedTypes: fixedLength === 0 ? [] : [element],
     assignmentCopies: kind !== 'array',
+    allowsConstantCopy: kind === 'array' && (fixedLength === 0 || allowsConstantCopy(element)),
     size: kind === 'array' ? Math.max(1, fixedLength ?? 0) * sizeOf(element) : kind === 'deque' ? 48 : 24,
     align: kind === 'array' ? alignOf(element) : 8,
     operator: (compiler, operator, operands, row) =>

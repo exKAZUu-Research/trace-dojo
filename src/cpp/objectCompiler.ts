@@ -10,7 +10,7 @@ import {
   Rank,
 } from './conversions';
 import { CppException, CppRuntimeError } from './errors';
-import { type Expr, mapMemberConstants } from './expr';
+import { type Expr, type LibraryConstant, mapMemberConstants } from './expr';
 import { type Eval, type Frame, holdAll } from './runtime';
 import type { Syntax } from './syntax';
 import {
@@ -199,6 +199,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       isLvalue: false,
       staticAddress: expr.constantPointerValue,
       constantInitialization: expr.constantInitialization,
+      constantStringLength: expr.constantStringLength,
       memberConstant: expr.memberConstant,
       row: expr.row,
       run: (frame) => (run(frame) as Ptr).read(),
@@ -225,6 +226,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     return {
       type: expr.type,
       isLvalue: true,
+      constantInitialization: this.isConstantInitializer(expr),
+      constantStringLength: expr.constantStringLength,
       row: expr.row,
       onlyCalls: expr.onlyCalls,
       run: (frame) => {
@@ -258,6 +261,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       row: expr.row,
       isTemporaryObject: true,
       constantInitialization: cls.library?.allowsConstantCopy && source.constantInitialization,
+      constantStringLength: !expr.isLvalue && cls.library?.allowsConstantCopy ? source.constantStringLength : undefined,
       onlyCalls: expr.onlyCalls,
       run: (frame, _zeroInitialize, destination) => copyAs(frame, cls, source.run(frame), destination),
     };
@@ -465,9 +469,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
    * is an object becomes a temporary of the caller's full-expression, so the call must be invoked with
    * `isCallerDestroying`.
    */
-  callArguments(resolved: Resolved, args: Expr[], row: number): Eval<unknown>[] {
-    const { fn, conversions } = resolved;
-    const runs: Eval<unknown>[] = args.map((arg, index) => conversions[index].apply(arg).run);
+  callArguments(fn: FunctionInfo, args: Expr[], row: number): Eval<unknown>[] {
+    const runs: Eval<unknown>[] = args.map((arg) => arg.run);
     // The library's functions take the arguments a call leaves out as missing.
     if (fn.native) return runs;
     for (const param of fn.params.slice(args.length)) {
@@ -487,13 +490,18 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     });
   }
 
+  protected convertArguments(resolved: Resolved, args: Expr[]): Expr[] {
+    return args.map((arg, index) => resolved.conversions[index].apply(arg));
+  }
+
   /**
    * A call of a resolved function. A member function needs the object, as an lvalue or a prvalue; `isQualified`
    * calls the function itself rather than the final overrider of a virtual one.
    */
   callExpr(resolved: Resolved, args: Expr[], object: Expr | undefined, row: number, isQualified = false): Expr {
     const { fn } = resolved;
-    const argRuns = this.callArguments(resolved, args, row);
+    const converted = this.convertArguments(resolved, args);
+    const argRuns = this.callArguments(fn, converted, row);
     const evaluateObject = object && (fn.isStatic ? this.materialize(object).run : this.objectOf(object));
     const runs = evaluateObject ? [evaluateObject, ...argRuns] : argRuns;
     const virtualKeyText = fn.isVirtual && !isQualified ? virtualKey(fn) : undefined;
@@ -514,6 +522,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     const isReference = fn.ret.kind === 'reference';
     const type = nonReference(fn.ret);
     const arithmeticArgs = object ? undefined : this.constantCallArguments(fn, args);
+    const libraryConstant = object ? undefined : this.libraryConstant(fn, args, converted);
     const evaluate = fn.evaluateConstant;
     const allConstant = arithmeticArgs && arithmeticArgs.every((arg) => arg.constant !== undefined);
     return {
@@ -523,7 +532,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       run,
       constant: allConstant ? evaluate?.(arithmeticArgs.map((arg) => arg.constant as number | bigint)) : undefined,
       memberConstant: arithmeticArgs && evaluate ? mapMemberConstants(arithmeticArgs, evaluate) : undefined,
-      constantInitialization: !object && this.isConstantLibraryCall(fn, args),
+      constantInitialization: libraryConstant !== undefined,
+      constantStringLength: libraryConstant && libraryConstant !== true ? libraryConstant.stringLength : undefined,
       onlyCalls: true,
       isTemporaryObject: !isReference && type.kind === 'class',
     };
@@ -541,8 +551,9 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     return converted;
   }
 
-  private isConstantLibraryCall(fn: FunctionInfo, args: Expr[]): boolean {
-    return fn.allowsConstantInitialization?.(args) === true && args.every((arg) => this.isConstantInitializer(arg));
+  private libraryConstant(fn: FunctionInfo, source: Expr[], converted: Expr[]): LibraryConstant | undefined {
+    const result = fn.libraryConstant?.(source);
+    if (result && converted.every((arg) => this.isConstantInitializer(arg))) return result;
   }
 
   /** Evaluates the location of the object of a member function call, materializing a prvalue as a temporary. */
@@ -566,7 +577,9 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     if (!fn.native) this.checkAccess(fn.access, cls, cls, row, `${cls.name} のコンストラクタ`);
     this.checkDefined(fn, row);
     this.requireVirtualDefinitions(cls, row);
-    const argRuns = this.callArguments(resolved, args, row);
+    const converted = this.convertArguments(resolved, args);
+    const argRuns = this.callArguments(fn, converted, row);
+    const libraryConstant = this.libraryConstant(fn, args, converted);
     const run: Expr['run'] = fn.native
       ? (frame) => holdAll(frame, argRuns, (values) => invoke(frame, fn, values, undefined, row, true) as Value)
       : (frame, zeroInitialize, destination) =>
@@ -583,7 +596,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       run,
       onlyCalls: true,
       isTemporaryObject: true,
-      constantInitialization: this.isConstantLibraryCall(fn, args),
+      constantInitialization: libraryConstant !== undefined,
+      constantStringLength: libraryConstant && libraryConstant !== true ? libraryConstant.stringLength : undefined,
     };
   }
 

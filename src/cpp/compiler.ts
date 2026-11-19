@@ -811,7 +811,7 @@ export class Compiler extends StatementCompiler {
       initializer.children[1]?.type === 'initializer_list'
     );
     this.checkDefined(resolved.fn, initializer.row);
-    const runs = this.callArguments(resolved, args, initializer.row);
+    const runs = this.callArguments(resolved.fn, this.convertArguments(resolved, args), initializer.row);
     const { row } = initializer;
     return this.fullExpression<undefined>((frame) => {
       const values = runs.map((run) => run(frame));
@@ -843,7 +843,7 @@ export class Compiler extends StatementCompiler {
     this.checkDefined(resolved.fn, row);
     if (!resolved.fn.native && resolved.fn.access === 'private')
       this.error(row, `${base.name} のコンストラクタは private です。`);
-    const runs = this.callArguments(resolved, args, row);
+    const runs = this.callArguments(resolved.fn, this.convertArguments(resolved, args), row);
     return this.fullExpression<undefined>((frame) => {
       const values = runs.map((run) => run(frame));
       (frame.self?.read() as CObject).cls = base;
@@ -1577,18 +1577,17 @@ export class Compiler extends StatementCompiler {
     const converted = this.convert(expr, unqualified(type), row);
     return type.kind === 'class'
       ? this.objectInitializer(converted)
-      : initializerWithConstancy(
-          converted.run as Eval<Value>,
-          this.isConstantInitializer(converted),
-          memberConstantOf(converted)
-        );
+      : initializerWithConstancy(converted.run as Eval<Value>, this.isConstantInitializer(converted), {
+          memberConstant: memberConstantOf(converted),
+        });
   }
 
   private objectInitializer(expr: Expr): Initializer {
     return initializerWithConstancy(
       (frame, target, zeroInitialize, referenceLifetime) =>
         expr.run(frame, zeroInitialize, asObject(target), referenceLifetime),
-      expr.constantInitialization === true
+      expr.constantInitialization === true,
+      expr
     );
   }
 
@@ -1740,11 +1739,9 @@ export class Compiler extends StatementCompiler {
     }
     if (elements.length === 0) {
       const zero = zeroOf(type);
-      return initializerWithConstancy(
-        () => zero,
-        true,
-        typeof zero === 'number' || typeof zero === 'bigint' ? () => zero : undefined
-      );
+      return initializerWithConstancy(() => zero, true, {
+        memberConstant: typeof zero === 'number' || typeof zero === 'bigint' ? () => zero : undefined,
+      });
     }
     if (elements.length > 1)
       return this.error(row, `${typeName(type)} 型の値を初期化する {...} には、値を1つだけ書いてください。`);
@@ -1865,7 +1862,7 @@ export class Compiler extends StatementCompiler {
       return initializerWithConstancy(
         hasDefault ? this.fullExpression(binding.loc) : binding.loc,
         binding.isConstant === true,
-        binding.memberConstant
+        binding
       );
     const { type: heldType, make, locate } = binding.lifetime;
     const create = hasDefault ? this.fullExpression(make) : make;
@@ -1885,7 +1882,7 @@ export class Compiler extends StatementCompiler {
         return locate(box);
       },
       binding.isConstant === true,
-      binding.memberConstant
+      binding
     );
   }
 
@@ -2072,7 +2069,7 @@ export class Compiler extends StatementCompiler {
         (frame, target, zeroInitialize, referenceLifetime) =>
           withTemporaries(frame, (f) => initialize(f, target, zeroInitialize, referenceLifetime)),
         initialize.isConstant === true,
-        initialize.memberConstant
+        initialize
       );
     } finally {
       this.context = previous;
@@ -2213,9 +2210,11 @@ const target = (type: Type): Type | undefined =>
 
 /** Whether default-initializing a const object of a type gives every scalar in it a value. */
 function isConstDefaultConstructible(type: Type): boolean {
-  if (type.kind === 'array') return isConstDefaultConstructible(type.of);
+  if (type.kind === 'array') return type.length === 0 || isConstDefaultConstructible(type.of);
   if (type.kind !== 'class') return false;
   const { cls } = type;
+  const fixed = cls.library?.aggregateArray;
+  if (fixed) return isConstDefaultConstructible(fixed.type);
   return (
     cls.library !== undefined ||
     cls.constructors.length > 0 ||
@@ -2237,10 +2236,12 @@ function isUnassignable(type: Type): boolean {
 /** Whether a member of a type without an initializer leaves its class's implicit default constructor defined. */
 function isDefaultInitializable(type: Type): boolean {
   if (type.kind === 'reference') return false;
-  if (type.kind === 'array') return isDefaultInitializable(type.of);
+  if (type.kind === 'array') return type.length === 0 || isDefaultInitializable(type.of);
   if (type.kind !== 'class') return !isConstType(type);
   const { cls } = type;
   if (cls.isDefaultConstructorDeleted || (isConstType(type) && !isConstDefaultConstructible(type))) return false;
+  const fixed = cls.library?.aggregateArray;
+  if (fixed) return isDefaultInitializable(fixed.type);
   return (
     cls.library !== undefined ||
     cls.constructors.length === 0 ||

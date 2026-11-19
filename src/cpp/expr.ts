@@ -8,21 +8,23 @@ export type InitializerTarget = ArrayStore | CObject;
 export type ConstantMembers = ReadonlyMap<FieldInfo, number | bigint>;
 export type MemberConstant = (members: ConstantMembers) => number | bigint | undefined;
 export const NO_CONSTANT_MEMBERS: ConstantMembers = new Map();
+export type LibraryConstant = true | { stringLength: number };
+interface ConstantValue {
+  memberConstant?: MemberConstant;
+  constantStringLength?: number;
+}
 
 export type Initializer = ((
   frame: Frame,
   target?: InitializerTarget,
   zeroInitialize?: boolean,
   referenceLifetime?: ReferenceLifetime
-) => Value) & { isConstant?: boolean; memberConstant?: MemberConstant };
+) => Value) & { isConstant?: boolean } & ConstantValue;
 
-export function initializerWithConstancy(
-  run: Initializer,
-  isConstant: boolean,
-  memberConstant?: MemberConstant
-): Initializer {
+export function initializerWithConstancy(run: Initializer, isConstant: boolean, value?: ConstantValue): Initializer {
   if (isConstant) run.isConstant = true;
-  if (memberConstant) run.memberConstant = memberConstant;
+  if (value?.memberConstant) run.memberConstant = value.memberConstant;
+  if (value?.constantStringLength !== undefined) run.constantStringLength = value.constantStringLength;
   return run;
 }
 
@@ -30,7 +32,7 @@ export function initializerWithConstancy(
  * A compiled expression. An lvalue evaluates to the location it designates (a `Ptr`); a prvalue evaluates to its
  * value. The type is never a reference type: a reference denotes the object it refers to, as an lvalue.
  */
-export interface Expr {
+export interface Expr extends ConstantValue {
   isAssignmentList?: boolean;
   type: Type;
   isLvalue: boolean;
@@ -43,7 +45,6 @@ export interface Expr {
   row: number;
   /** The value of a constant expression of arithmetic type, which array lengths and `case` labels need. */
   constant?: number | bigint;
-  memberConstant?: MemberConstant;
   isThis?: boolean;
   /** Reads a static member's integral constant without requiring its addressable definition. */
   readConstant?: Eval<Value>;

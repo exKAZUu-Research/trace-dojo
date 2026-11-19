@@ -12,6 +12,15 @@ struct Derived : Base {
   ~Derived() { std::cout << 'D'; }
 };
 struct Ref { const Base& value; };
+struct WrappedArray { std::array<Ref, 2> elements; };
+struct Item {
+  Item(int number) : number(number) {}
+  int number;
+};
+struct ExplicitArrays {
+  std::array<Item, 1> nonempty;
+  std::array<Item, 0> empty;
+};
 struct DefaultBase { const Base& value{Derived{}}; };
 struct DefaultDerived { const Derived& value{Derived{}}; };
 
@@ -26,6 +35,10 @@ Ref bracedReturn() { return {Derived{}}; }
 Ref conditionalReturn(bool flag) { return flag ? Ref{Derived{}} : Ref{Derived{}}; }
 std::array<Ref, 1> arrayReturn() {
   std::array<Ref, 1> result{Ref{Derived{}}};
+  return result;
+}
+WrappedArray wrappedReturn() {
+  WrappedArray result{{Ref{Derived{}}, Ref{Derived{}}}};
   return result;
 }
 
@@ -67,4 +80,8 @@ int main() {
   std::cout << 'C';
   auto array = arrayReturn();
   std::cout << 'A';
+  auto wrapped = wrappedReturn();
+  std::cout << 'W';
+  ExplicitArrays withItems{{Item(7)}, {}};
+  std::cout << withItems.nonempty[0].number << withItems.empty.size();
 }

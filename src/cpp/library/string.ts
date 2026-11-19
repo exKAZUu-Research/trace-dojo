@@ -2,7 +2,7 @@ import { isFloatUnderflow, isSpaceByte, parseFloatPrefix, parseIntegerPrefix } f
 import { LIMITS } from '../../interpreter/limits';
 import { byteArray, byteAt } from '../bytes';
 import { CppRuntimeError } from '../errors';
-import { type Expr, type Initializer, initializerWithConstancy } from '../expr';
+import { type Expr, type Initializer, initializerWithConstancy, type LibraryConstant } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import type { Eval, Frame } from '../runtime';
 import type { Syntax } from '../syntax';
@@ -253,17 +253,12 @@ export function stringClass(library: Library): ClassInfo {
   const repeated = (frame: Frame, count: unknown, char: unknown, kept = 0): string =>
     checkLength(frame, charOf(char).repeat(requestedLength(frame, count, kept)));
   cls.constructors = [
-    nativeConstructor(cls, [], () => make(''), { allowsConstantInitialization: () => true }),
+    nativeConstructor(cls, [], () => make(''), { libraryConstant: () => ({ stringLength: 0 }) }),
     nativeConstructor(cls, [CONST_CHAR_PTR], ([pointer]) => make(readCString(pointer as Ptr)), {
-      allowsConstantInitialization: ([source]) => {
-        const bytes = source?.literalBytes;
-        if (bytes === undefined) return false;
-        const terminator = bytes.indexOf('\0');
-        return (terminator === -1 ? bytes.length : terminator) <= SHORT_CAPACITY;
-      },
+      libraryConstant: ([source]) => shortString(literalStringLength(source?.literalBytes)),
     }),
     nativeConstructor(cls, [SIZE_T, CHAR], ([count, char], { frame }) => make(repeated(frame, count, char)), {
-      allowsConstantInitialization: ([count]) => fitsShortString(count?.constant),
+      libraryConstant: ([count]) => shortString(count?.constant),
     }),
     nativeConstructor(
       cls,
@@ -272,10 +267,10 @@ export function stringClass(library: Library): ClassInfo {
       { optional: 1 }
     ),
     nativeConstructor(cls, [CONST_CHAR_PTR, SIZE_T], ([pointer, count]) => make(pointerBytes(pointer as Ptr, count)), {
-      allowsConstantInitialization: ([source, count]) =>
-        source?.literalBytes !== undefined &&
-        fitsShortString(count?.constant) &&
-        Number(count?.constant) <= source.literalBytes.length + 1,
+      libraryConstant: ([source, count]) => {
+        if (source?.literalBytes !== undefined && Number(count?.constant) <= source.literalBytes.length + 1)
+          return shortString(count?.constant);
+      },
     }),
     {
       ...nativeConstructor(cls, [], () => {}),
@@ -787,14 +782,25 @@ function charList(compiler: ExpressionCompiler, elements: Syntax[], row: number)
     }
   }
   const runs = values.map((value) => compiler.convert(value, CHAR, row).run);
+  const constantStringLength =
+    elements.length <= SHORT_CAPACITY && values.every((value) => value.constant !== undefined)
+      ? elements.length
+      : undefined;
   return initializerWithConstancy(
     (frame) => new StringValue(runs.map((run) => charOf(run(frame))).join('')),
-    elements.length <= SHORT_CAPACITY && values.every((value) => value.constant !== undefined)
+    constantStringLength !== undefined,
+    { constantStringLength }
   );
 }
 
-function fitsShortString(count: number | bigint | undefined): boolean {
-  return count !== undefined && count >= 0 && count <= SHORT_CAPACITY;
+function shortString(count: number | bigint | undefined): Exclude<LibraryConstant, true> | undefined {
+  if (count !== undefined && count >= 0 && count <= SHORT_CAPACITY) return { stringLength: Number(count) };
+}
+
+function literalStringLength(bytes: string | undefined): number | undefined {
+  if (bytes === undefined) return;
+  const terminator = bytes.indexOf('\0');
+  return terminator === -1 ? bytes.length : terminator;
 }
 
 /** Whether converting a value to `char` narrows it (C++20 [dcl.init.list]). */
@@ -889,7 +895,16 @@ function stringOperator(
       if (!a || !b) return undefined;
       // A temporary string operand gives its buffer to the result, as libc++ appends to it or inserts into it.
       const reused = operands.findIndex((operand) => isString(operand) && !operand.isLvalue);
-      return { type, isLvalue: false, row, isTemporaryObject: true, run: concatenation(a, b, reused) };
+      const constantStringLength = shortConcatenationLength(left, right);
+      return {
+        type,
+        isLvalue: false,
+        row,
+        isTemporaryObject: true,
+        constantInitialization: constantStringLength !== undefined,
+        constantStringLength,
+        run: concatenation(a, b, reused),
+      };
     }
     case '+=':
     case '=': {
@@ -947,6 +962,17 @@ function stringOperator(
       return undefined;
     }
   }
+}
+
+function shortConcatenationLength(left: Expr, right: Expr): number | undefined {
+  const a = stringOperandLength(left);
+  const b = stringOperandLength(right);
+  if (a !== undefined && b !== undefined) return shortString(a + b)?.stringLength;
+}
+
+function stringOperandLength(expr: Expr): number | undefined {
+  if (isPlainChar(expr.type)) return expr.constant === undefined ? undefined : 1;
+  return expr.constantStringLength ?? literalStringLength(expr.literalBytes);
 }
 
 const COMPARE: Record<string, (a: string, b: string) => boolean> = {

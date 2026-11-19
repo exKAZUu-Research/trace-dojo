@@ -1143,6 +1143,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
           }
         : chosen?.memberConstant,
       constantInitialization: chosen?.constantInitialization,
+      constantStringLength: chosen?.constantStringLength,
       staticAddress: chosen?.staticAddress,
       constantPointerValue: chosen?.constantPointerValue,
       run: (...args) => (condition(args[0]) ? left : right).run(...args),
@@ -1221,6 +1222,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       isNullConstant: undefined,
       literalBytes: undefined,
       constantInitialization: hasConstantLeft ? right.constantInitialization : undefined,
+      constantStringLength: hasConstantLeft ? right.constantStringLength : undefined,
       staticAddress: hasConstantLeft ? right.staticAddress : undefined,
       constantPointerValue: hasConstantLeft ? right.constantPointerValue : undefined,
       run: (...args) => {
@@ -1428,6 +1430,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       run: (frame, zeroInitialize, destination, referenceLifetime) =>
         run(frame, destination, zeroInitialize, referenceLifetime),
       constantInitialization: run.isConstant,
+      constantStringLength: run.constantStringLength,
       onlyCalls: type.kind === 'class',
       isTemporaryObject: type.kind === 'class',
     };
@@ -1576,6 +1579,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       run: (frame, zeroInitialize, destination, referenceLifetime) =>
         run(frame, destination, zeroInitialize, referenceLifetime),
       constantInitialization: run.isConstant,
+      constantStringLength: run.constantStringLength,
       isTemporaryObject: type.kind === 'class',
     };
   }
@@ -1606,6 +1610,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
           run: (frame, zeroInitialize, destination, referenceLifetime) =>
             run(frame, destination, zeroInitialize, referenceLifetime),
           constantInitialization: run.isConstant,
+          constantStringLength: run.constantStringLength,
         };
     }
     if (args.length === 1 && args[0].type.kind === 'class' && args[0].type.cls.isDerivedFrom(cls) && !isBraced) {

@@ -1,5 +1,5 @@
 import { type FloatName, INT_PROPERTIES, type IntName } from '../c/types';
-import type { Expr } from './expr';
+import type { Expr, LibraryConstant } from './expr';
 import type { ClassOperations, LibraryClass } from './library/libraryClass';
 import type { CompiledFunction, Eval, Frame } from './runtime';
 import type { Syntax } from './syntax';
@@ -136,7 +136,7 @@ export interface FunctionInfo {
   native?: NativeFunction;
   nativeUses?: (row: number) => void;
   evaluateConstant?: (args: readonly (number | bigint)[]) => number | bigint;
-  allowsConstantInitialization?: (args: readonly Expr[]) => boolean;
+  libraryConstant?: (args: readonly Expr[]) => LibraryConstant | undefined;
   /** The syntax of the definition, which the compiler compiles once the declarations it may use are known. */
   definition?: Syntax;
   /** Whether the function takes any number of further arguments, as `printf` does. */
@@ -252,6 +252,12 @@ export function referenceTo(type: Type): ReferenceType {
 
 export function classType(cls: ClassInfo, isConst = false): ClassType {
   return isConst ? { kind: 'class', cls, isConst } : { kind: 'class', cls };
+}
+
+export function allowsConstantCopy(type: Type): boolean {
+  if (type.kind === 'class') return type.cls.library?.allowsConstantCopy === true;
+  if (type.kind === 'array') return allowsConstantCopy(type.of);
+  return isArithmetic(type) || type.kind === 'pointer' || type.kind === 'nullptr';
 }
 
 export function isConstType(type: Type): boolean {
