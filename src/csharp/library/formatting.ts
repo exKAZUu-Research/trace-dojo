@@ -22,6 +22,9 @@ const NUMERIC_KINDS: Record<string, NumericKind> = {
   decimal: 'decimal',
 };
 
+/** The widths of the integral types other than `int`'s 32 bits, which `X` shows negative numbers in. */
+const INTEGER_BITS: Partial<Record<string, number>> = { sbyte: 8, byte: 8, short: 16, ushort: 16, long: 64, ulong: 64 };
+
 /**
  * Formats a value with a format string, as an interpolation hole or a composite format item does: numbers, enums,
  * dates, and times by the format, and anything else by its `ToString()`.
@@ -46,7 +49,7 @@ export function formatValue(
     if (special === 'char' || special === 'bool' || special === 'string')
       return stringOf(evaluator, inner, actualType, frame);
     const kind = special ? NUMERIC_KINDS[special] : undefined;
-    if (kind) return formatNumber(inner as number, kind, format);
+    if (kind) return formatNumber(inner as number, kind, format, special ? (INTEGER_BITS[special] ?? 32) : 32);
     if (actualType.symbol.kind === 'enum') return formatEnum(actualType, inner, format);
     if (inner instanceof CsStruct) {
       const name = actualType.symbol.fullName;
@@ -95,9 +98,10 @@ function formatEnum(type: NamedType, value: Value, format: string): string {
 export function parseNumber(text: string): number | undefined {
   const trimmed = text.trim();
   if (trimmed === CULTURE.nan || trimmed === 'NaN') return Number.NaN;
-  if (trimmed === CULTURE.positiveInfinity || trimmed === 'Infinity' || trimmed === '+∞' || trimmed === '+Infinity')
+  // ja-JP spells infinity `∞`, so `Infinity` does not parse.
+  if (trimmed === CULTURE.positiveInfinity || trimmed === `+${CULTURE.positiveInfinity}`)
     return Number.POSITIVE_INFINITY;
-  if (trimmed === CULTURE.negativeInfinity || trimmed === '-Infinity') return Number.NEGATIVE_INFINITY;
+  if (trimmed === CULTURE.negativeInfinity) return Number.NEGATIVE_INFINITY;
   if (!/^[+-]?(\d{1,3}(,\d{3})+|\d*)(\.\d*)?([eE][+-]?\d+)?$/.test(trimmed) || !/\d/.test(trimmed)) return undefined;
   return Number(trimmed.replaceAll(',', ''));
 }

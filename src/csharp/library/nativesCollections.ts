@@ -19,6 +19,7 @@ import {
   evaluatorOf,
   fail,
   failIndex,
+  failNegative,
   failNull,
   failOutOfRange,
   libraryType,
@@ -128,11 +129,19 @@ export function equalityOf(call: NativeCall, comparer: Value): Equality {
 
 export class ListState implements EnumerableState {
   version = 0;
+  /** The capacity of .NET's backing array, which `Capacity` shows: it starts at 4 and doubles as items are added. */
+  capacity = 0;
 
   constructor(
     public items: Value[],
     readonly elementType: Type
   ) {}
+
+  /** Grows the capacity as .NET's List<T> does: to 4, then by doubling, or to the size needed if more. */
+  ensureCapacity(size: number): void {
+    if (size <= this.capacity) return;
+    this.capacity = Math.max(this.capacity === 0 ? 4 : this.capacity * 2, size);
+  }
 
   *enumerate(): Generator<Value> {
     const version = this.version;
@@ -162,7 +171,9 @@ export function listOf(value: Value): ListState {
 export function newList(call: NativeCall, elementType: Type, items: Value[]): CsObject {
   call.frame.runtime.allocateSlots(items.length);
   const list = new CsObject(libraryType(call, 'System.Collections.Generic.List', [elementType]), []);
-  list.native = new ListState(items, elementType);
+  const state = new ListState(items, elementType);
+  state.capacity = items.length;
+  list.native = state;
   return list;
 }
 
@@ -224,15 +235,21 @@ const listNatives: Record<string, NativeMethod> = {
   [`${LIST}..ctor()`]: (call, receiver) => setNative(receiver, new ListState([], typeArgument(call))),
   [`${LIST}..ctor(int)`]: (call, receiver, [capacity]) => {
     if ((capacity as number) < 0) failOutOfRange(call, 'capacity', 'Non-negative number required.');
-    return setNative(receiver, new ListState([], typeArgument(call)));
+    const list = new ListState([], typeArgument(call));
+    list.capacity = capacity as number;
+    return setNative(receiver, list);
   },
-  [`${LIST}..ctor(IEnumerable<T>)`]: (call, receiver, [source]) =>
-    setNative(receiver, new ListState([...iterate(call, source as Value, 'collection')], typeArgument(call))),
+  [`${LIST}..ctor(IEnumerable<T>)`]: (call, receiver, [source]) => {
+    const list = new ListState([...iterate(call, source as Value, 'collection')], typeArgument(call));
+    list.capacity = list.items.length;
+    return setNative(receiver, list);
+  },
   [`${LIST}.get_Count`]: (_call, receiver) => listOf(receiver).items.length,
-  [`${LIST}.get_Capacity`]: (_call, receiver) => capacityOf(listOf(receiver).items.length),
+  [`${LIST}.get_Capacity`]: (_call, receiver) => listOf(receiver).capacity,
   [`${LIST}.set_Capacity`]: (call, receiver, [capacity]) => {
     if ((capacity as number) < listOf(receiver).items.length)
       failOutOfRange(call, 'value', 'capacity was less than the current size.');
+    listOf(receiver).capacity = capacity as number;
     return;
   },
   [`${LIST}.get_IsReadOnly`]: () => false,
@@ -251,6 +268,7 @@ const listNatives: Record<string, NativeMethod> = {
   [`${LIST}.Add`]: (call, receiver, [value]) => {
     const list = listOf(receiver);
     call.frame.runtime.allocateSlots(1);
+    list.ensureCapacity(list.items.length + 1);
     list.items.push(value as Value);
     list.version++;
     return;
@@ -259,6 +277,7 @@ const listNatives: Record<string, NativeMethod> = {
     const list = listOf(receiver);
     const added = [...iterate(call, source as Value, 'collection')];
     call.frame.runtime.allocateSlots(added.length);
+    list.ensureCapacity(list.items.length + added.length);
     list.items.push(...added);
     list.version++;
     return;
@@ -388,6 +407,7 @@ const listNatives: Record<string, NativeMethod> = {
     if ((index as number) < 0 || (index as number) > list.items.length)
       failOutOfRange(call, 'index', 'Index must be within the bounds of the List.');
     call.frame.runtime.allocateSlots(1);
+    list.ensureCapacity(list.items.length + 1);
     list.items.splice(index as number, 0, value as Value);
     list.version++;
     return;
@@ -395,8 +415,13 @@ const listNatives: Record<string, NativeMethod> = {
   [`${LIST}.InsertRange`]: (call, receiver, [index, source]) => {
     const list = listOf(receiver);
     if ((index as number) < 0 || (index as number) > list.items.length)
-      failOutOfRange(call, 'index', 'Index must be within the bounds of the List.');
+      failOutOfRange(
+        call,
+        'index',
+        'Index was out of range. Must be non-negative and less than or equal to the size of the collection.'
+      );
     const added = [...iterate(call, source as Value, 'collection')];
+    list.ensureCapacity(list.items.length + added.length);
     list.items.splice(index as number, 0, ...added);
     list.version++;
     return;
@@ -475,20 +500,18 @@ const listNatives: Record<string, NativeMethod> = {
     return;
   },
   [`${LIST}.ToArray`]: (call, receiver) => newArray(call, typeArgument(call), [...listOf(receiver).items]),
-  [`${LIST}.TrimExcess`]: () => {},
+  [`${LIST}.TrimExcess`]: (_call, receiver) => {
+    const list = listOf(receiver);
+    // .NET trims only when the list fills less than 90% of its capacity.
+    if (list.items.length < Math.trunc(list.capacity * 0.9)) list.capacity = list.items.length;
+    return;
+  },
   [`${LIST}.TrueForAll`]: (call, receiver, [match]) => listOf(receiver).items.every(predicateOf(call, match as Value)),
   ...enumeratorNatives('System.Collections.Generic.List`1+Enumerator'),
 };
 defineNatives(listNatives);
 
 /** `List<T>`'s capacity, which starts at 4 and doubles. */
-function capacityOf(count: number): number {
-  if (count === 0) return 0;
-  let capacity = 4;
-  while (capacity < count) capacity *= 2;
-  return capacity;
-}
-
 function binarySearch(items: Value[], value: Value, compare: Comparison): number {
   let low = 0;
   let high = items.length - 1;
@@ -957,11 +980,18 @@ defineNatives({
   [`${HASH_SET}.SymmetricExceptWith`]: (call, receiver, [other]) => {
     const state = hashOfState(receiver);
     const seen = newHashState(call, state.comparer, state.keyType, undefined);
+    if (other instanceof CsObject && other.native instanceof HashState && !other.native.valueType) {
+      // Another set has unique elements, which .NET removes or adds one by one.
+      for (const item of otherElements(call, other)) if (!state.remove(item)) state.insert(item, undefined, false);
+      return;
+    }
+    // .NET adds another sequence's new elements first and removes the shared ones after, which decides the order.
+    const shared: Value[] = [];
     for (const item of otherElements(call, other as Value)) {
       if (!seen.insert(item, undefined, false)) continue;
-      if (state.find(item) >= 0) state.remove(item);
-      else state.insert(item, undefined, false);
+      if (!state.insert(item, undefined, false)) shared.push(item);
     }
+    for (const item of shared) state.remove(item);
     return;
   },
   [`${HASH_SET}.TryGetValue`]: (call, receiver, [value, actual]) => {
@@ -1184,6 +1214,26 @@ defineNatives({
 
 const ARRAY = 'System.Array';
 
+function failStartIndex(call: NativeCall): never {
+  return failOutOfRange(
+    call,
+    'startIndex',
+    'Index was out of range. Must be non-negative and less than or equal to the size of the collection.'
+  );
+}
+
+/** The range check of Array.Reverse and Array.Sort with an index and a length. */
+function checkArrayRange(call: NativeCall, size: number, index: number, length: number): void {
+  if (index < 0) failOutOfRange(call, 'index', 'Non-negative number required.');
+  if (length < 0) failOutOfRange(call, 'length', 'Non-negative number required.');
+  if (index + length > size) {
+    fail(
+      'System.ArgumentException',
+      'Offset and length were out of bounds for the array or count is greater than the number of elements from index to the end of the source collection.'
+    );
+  }
+}
+
 function arrayOf(value: Value, name = 'array'): CsArray {
   if (value === undefined) failNull(name);
   return value as CsArray;
@@ -1197,11 +1247,10 @@ defineNatives({
   [`${ARRAY}.get_Length`]: (_call, receiver) => arrayOf(receiver).values.length,
   [`${ARRAY}.get_LongLength`]: (_call, receiver) => BigInt(arrayOf(receiver).values.length),
   [`${ARRAY}.get_Rank`]: (_call, receiver) => arrayOf(receiver).type.rank,
-  [`${ARRAY}.GetLength`]: (call, receiver, [dimension]) => {
+  [`${ARRAY}.GetLength`]: (_call, receiver, [dimension]) => {
     const array = arrayOf(receiver);
     if ((dimension as number) < 0 || (dimension as number) >= array.lengths.length)
-      fail('System.IndexOutOfRangeException', 'Index was outside the bounds of the array.');
-    void call;
+      fail('System.IndexOutOfRangeException', 'Array does not have that many dimensions.');
     return array.lengths[dimension as number];
   },
   [`${ARRAY}.GetUpperBound`]: (_call, receiver, [dimension]) => arrayOf(receiver).lengths[dimension as number] - 1,
@@ -1302,7 +1351,16 @@ defineNatives({
     arrayOf(array as Value).values.fill(value as Value);
     return;
   },
-  [`${ARRAY}.Fill(T[], T, int, int)`]: (_call, _receiver, [array, value, start, count]) => {
+  [`${ARRAY}.Fill(T[], T, int, int)`]: (call, _receiver, [array, value, start, count]) => {
+    const length = arrayOf(array as Value).values.length;
+    if ((start as number) < 0 || (start as number) > length) failStartIndex(call);
+    if ((count as number) < 0 || (start as number) > length - (count as number)) {
+      failOutOfRange(
+        call,
+        'count',
+        'Count must be positive and count must refer to a location within the string/array/collection.'
+      );
+    }
     arrayOf(array as Value).values.fill(value as Value, start as number, (start as number) + (count as number));
     return;
   },
@@ -1339,8 +1397,11 @@ defineNatives({
   },
   [`${ARRAY}.IndexOf(T[], T)`]: (call, _receiver, [array, value]) =>
     indexOfValue(call, arrayOf(array as Value).values, value as Value),
-  [`${ARRAY}.IndexOf(T[], T, int)`]: (call, _receiver, [array, value, start]) =>
-    indexOfValue(call, arrayOf(array as Value).values, value as Value, start as number),
+  [`${ARRAY}.IndexOf(T[], T, int)`]: (call, _receiver, [array, value, start]) => {
+    const { values } = arrayOf(array as Value);
+    if ((start as number) < 0 || (start as number) > values.length) failStartIndex(call);
+    return indexOfValue(call, values, value as Value, start as number);
+  },
   [`${ARRAY}.IndexOf(Array, object?)`]: (call, _receiver, [array, value]) =>
     indexOfValue(call, arrayOf(array as Value).values, value as Value),
   [`${ARRAY}.LastIndexOf`]: (call, _receiver, [array, value]) =>
@@ -1364,8 +1425,9 @@ defineNatives({
     arrayOf(array as Value).values.reverse();
     return;
   },
-  [`${ARRAY}.Reverse(Array, int, int)`]: (_call, _receiver, [array, index, length]) => {
+  [`${ARRAY}.Reverse(Array, int, int)`]: (call, _receiver, [array, index, length]) => {
     const values = arrayOf(array as Value).values;
+    checkArrayRange(call, values.length, index as number, length as number);
     const part = values.slice(index as number, (index as number) + (length as number)).toReversed();
     values.splice(index as number, length as number, ...part);
     return;
@@ -1380,8 +1442,10 @@ defineNatives({
   },
   [`${ARRAY}.Sort(T[], IComparer<T>?)`]: (call, _receiver, [array, comparer]) =>
     sortArray(call, arrayOf(array as Value), 0, undefined, comparer as Value),
-  [`${ARRAY}.Sort(T[], int, int)`]: (call, _receiver, [array, index, length]) =>
-    sortArray(call, arrayOf(array as Value), index as number, length as number, undefined),
+  [`${ARRAY}.Sort(T[], int, int)`]: (call, _receiver, [array, index, length]) => {
+    checkArrayRange(call, arrayOf(array as Value).values.length, index as number, length as number);
+    return sortArray(call, arrayOf(array as Value), index as number, length as number, undefined);
+  },
   [`${ARRAY}.Sort(TKey[], TValue[])`]: (call, _receiver, [keys, items]) => {
     const keyArray = arrayOf(keys as Value, 'keys');
     const itemArray = arrayOf(items as Value, 'items');
@@ -1419,7 +1483,7 @@ function copyArray(
   targetIndex: number,
   length: number
 ): Value {
-  if (length < 0) failOutOfRange(call, 'length', 'Non-negative number required.');
+  if (length < 0) failNegative(call, 'length', length);
   if (sourceIndex < 0 || targetIndex < 0)
     failOutOfRange(call, sourceIndex < 0 ? 'sourceIndex' : 'destinationIndex', 'Non-negative number required.');
   if (sourceIndex + length > source.values.length)

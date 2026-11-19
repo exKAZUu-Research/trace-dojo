@@ -697,12 +697,7 @@ function listOf(value: Value): CsObject[] {
 
 function itemAt(call: NativeCall, items: CsObject[], index: number): CsObject {
   if (index < 0 || index >= items.length) {
-    failOutOfRange(
-      call,
-      'i',
-      'Index was out of range. Must be non-negative and less than the size of the collection.',
-      String(index)
-    );
+    failOutOfRange(call, 'i', 'Specified argument was out of the range of valid values.');
   }
   return items[index];
 }

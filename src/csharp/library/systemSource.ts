@@ -721,7 +721,6 @@ namespace System {
     public Exception? InnerException { get; }
     public virtual string? StackTrace { get; }
     public virtual string? Source { get; set; }
-    public virtual System.Collections.IDictionary Data { get; }
     public string? HelpLink { get; set; }
     public int HResult { get; set; }
     public virtual Exception GetBaseException();

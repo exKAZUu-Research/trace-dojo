@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
-import { compareCulture, compareOrdinal, primitiveHash, unboxed } from '../objects';
+import { compareCulture, primitiveHash, unboxed } from '../objects';
 import type { NativeState } from '../runtime';
 import { specialOf, type Type } from '../types';
 import { type CsArray, CsObject, type Value, type VariableReference } from '../values';
@@ -10,6 +10,8 @@ import {
   arrayValues,
   evaluatorOf,
   fail,
+  failGreater,
+  failNegative,
   failNull,
   failOutOfRange,
   libraryType,
@@ -23,7 +25,9 @@ const STRING = 'System.String';
 /** `StringComparison`'s values, of which the odd ones ignore case and those from 4 compare ordinally. */
 function compareWith(a: string, b: string, comparison: number): number {
   const ignoreCase = comparison % 2 === 1;
-  if (comparison >= 4) return compareOrdinal(ignoreCase ? a.toUpperCase() : a, ignoreCase ? b.toUpperCase() : b);
+  // An ordinal comparison gives the difference of the first differing characters, as .NET's does.
+  if (comparison >= 4)
+    return ordinalDifference(ignoreCase ? caseMappedText(a, true) : a, ignoreCase ? caseMappedText(b, true) : b);
   return compareCulture(a, b, ignoreCase);
 }
 
@@ -37,15 +41,6 @@ function receiverText(receiver: Value): string {
   if (receiver === undefined)
     fail('System.NullReferenceException', 'Object reference not set to an instance of an object.');
   return receiver as string;
-}
-
-function checkStart(call: NativeCall, text: string, startIndex: number, name = 'startIndex'): void {
-  if (startIndex < 0 || startIndex > text.length)
-    failOutOfRange(
-      call,
-      name,
-      'Index was out of range. Must be non-negative and less than or equal to the size of the collection.'
-    );
 }
 
 /** The characters `Trim` removes by default: Unicode whitespace. */
@@ -69,7 +64,7 @@ function charsOf(value: Value): string[] {
 
 function split(call: NativeCall, text: string, args: Value[]): CsArray {
   const { separators, count, options } = splitArguments(call, args);
-  if (count < 0) failOutOfRange(call, 'count', 'Count cannot be less than zero.');
+  if (count < 0) failNegative(call, 'count', count);
   const isWhitespaceSplit =
     separators.length === 0 &&
     !(call.method.parameters.some((parameter) => specialOf(parameter.type) === 'string') && args[0] === '');
@@ -168,7 +163,7 @@ function joinValues(call: NativeCall, separator: string, args: Value[], startInd
 
 const stringNatives: Record<string, NativeMethod> = {
   [`${STRING}..ctor(char, int)`]: (call, _receiver, [char, count]) => {
-    if ((count as number) < 0) failOutOfRange(call, 'count', 'Count cannot be less than zero.');
+    if ((count as number) < 0) failNegative(call, 'count', count as number);
     call.frame.runtime.allocateString(count as number);
     return String.fromCodePoint(char as number).repeat(count as number);
   },
@@ -260,37 +255,41 @@ const stringNatives: Record<string, NativeMethod> = {
   [`${STRING}.Insert`]: (call, receiver, [index, value]) => {
     const text = receiverText(receiver);
     if (value === undefined) failNull('value');
-    checkStart(call, text, index as number);
+    // .NET compares the index as an unsigned number, so a negative one shows as a large one.
+    if ((index as number) < 0 || (index as number) > text.length)
+      failGreater(call, 'startIndex', (index as number) >>> 0, text.length);
     return text.slice(0, index as number) + (value as string) + text.slice(index as number);
   },
   [`${STRING}.PadLeft`]: (call, receiver, [width, char = 32]) => {
-    if ((width as number) < 0) failOutOfRange(call, 'totalWidth', 'Non-negative number required.');
+    if ((width as number) < 0) failNegative(call, 'totalWidth', width as number);
     return receiverText(receiver).padStart(width as number, String.fromCodePoint(char as number));
   },
   [`${STRING}.PadRight`]: (call, receiver, [width, char = 32]) => {
-    if ((width as number) < 0) failOutOfRange(call, 'totalWidth', 'Non-negative number required.');
+    if ((width as number) < 0) failNegative(call, 'totalWidth', width as number);
     return receiverText(receiver).padEnd(width as number, String.fromCodePoint(char as number));
   },
   [`${STRING}.Remove(int)`]: (call, receiver, [start]) => {
     const text = receiverText(receiver);
     if ((start as number) < 0) failOutOfRange(call, 'startIndex', 'StartIndex cannot be less than zero.');
-    if ((start as number) >= text.length)
+    if ((start as number) > text.length)
+      failOutOfRange(call, 'startIndex', 'startIndex cannot be larger than length of string.');
+    if ((start as number) === text.length)
       failOutOfRange(call, 'startIndex', 'startIndex must be less than length of string.');
     return text.slice(0, start as number);
   },
   [`${STRING}.Remove(int, int)`]: (call, receiver, [start, count]) => {
     const text = receiverText(receiver);
-    if ((start as number) < 0) failOutOfRange(call, 'startIndex', 'StartIndex cannot be less than zero.');
-    if ((count as number) < 0) failOutOfRange(call, 'count', 'Count cannot be less than zero.');
+    if ((start as number) < 0) failNegative(call, 'startIndex', start as number);
+    if ((count as number) < 0) failNegative(call, 'count', count as number);
     if ((start as number) + (count as number) > text.length)
-      failOutOfRange(call, 'count', 'Index and count must refer to a location within the string.');
+      failGreater(call, 'count', count as number, text.length - (start as number));
     return text.slice(0, start as number) + text.slice((start as number) + (count as number));
   },
   [`${STRING}.Replace(char, char)`]: (_call, receiver, [from, to]) =>
     receiverText(receiver).replaceAll(String.fromCodePoint(from as number), String.fromCodePoint(to as number)),
   [`${STRING}.Replace(string, string?)`]: (call, receiver, [from, to]) => {
     if (from === undefined) failNull('oldValue');
-    if (from === '') fail('System.ArgumentException', 'String cannot be of zero length.', 'oldValue');
+    if (from === '') fail('System.ArgumentException', 'The value cannot be an empty string.', 'oldValue');
     const text = receiverText(receiver).replaceAll(from as string, (to as string | undefined) ?? '');
     call.frame.runtime.allocateString(text.length);
     return text;
@@ -306,17 +305,17 @@ const stringNatives: Record<string, NativeMethod> = {
   [`${STRING}.Split`]: (call, receiver, args) => split(call, receiverText(receiver), args as Value[]),
   [`${STRING}.Substring(int)`]: (call, receiver, [start]) => {
     const text = receiverText(receiver);
-    if ((start as number) < 0) failOutOfRange(call, 'startIndex', 'StartIndex cannot be less than zero.');
+    if ((start as number) < 0) failNegative(call, 'startIndex', start as number);
     if ((start as number) > text.length)
       failOutOfRange(call, 'startIndex', 'startIndex cannot be larger than length of string.');
     return text.slice(start as number);
   },
   [`${STRING}.Substring(int, int)`]: (call, receiver, [start, length]) => {
     const text = receiverText(receiver);
-    if ((start as number) < 0) failOutOfRange(call, 'startIndex', 'StartIndex cannot be less than zero.');
+    if ((start as number) < 0) failNegative(call, 'startIndex', start as number);
     if ((start as number) > text.length)
       failOutOfRange(call, 'startIndex', 'startIndex cannot be larger than length of string.');
-    if ((length as number) < 0) failOutOfRange(call, 'length', 'Length cannot be less than zero.');
+    if ((length as number) < 0) failNegative(call, 'length', length as number);
     if ((start as number) + (length as number) > text.length)
       failOutOfRange(call, 'length', 'Index and length must refer to a location within the string.');
     return text.slice(start as number, (start as number) + (length as number));
@@ -327,19 +326,25 @@ const stringNatives: Record<string, NativeMethod> = {
       libraryType(call, 'System.Char'),
       [...receiverText(receiver)].flatMap((char) => [...char].map((unit) => unit.charCodeAt(0)))
     ),
-  [`${STRING}.ToCharArray(int, int)`]: (call, receiver, [start, length]) =>
-    newArray(
+  [`${STRING}.ToCharArray(int, int)`]: (call, receiver, [start, length]) => {
+    const text = receiverText(receiver);
+    if ((start as number) < 0) failNegative(call, 'startIndex', start as number);
+    if ((length as number) < 0) failNegative(call, 'length', length as number);
+    if ((start as number) > text.length - (length as number))
+      failGreater(call, 'startIndex', start as number, text.length - (length as number));
+    return newArray(
       call,
       libraryType(call, 'System.Char'),
-      receiverText(receiver)
+      text
         .slice(start as number, (start as number) + (length as number))
         .split('')
         .map((unit) => unit.charCodeAt(0))
-    ),
-  [`${STRING}.ToLower`]: (_call, receiver) => receiverText(receiver).toLowerCase(),
-  [`${STRING}.ToLowerInvariant`]: (_call, receiver) => receiverText(receiver).toLowerCase(),
-  [`${STRING}.ToUpper`]: (_call, receiver) => receiverText(receiver).toUpperCase(),
-  [`${STRING}.ToUpperInvariant`]: (_call, receiver) => receiverText(receiver).toUpperCase(),
+    );
+  },
+  [`${STRING}.ToLower`]: (_call, receiver) => caseMappedText(receiverText(receiver), false),
+  [`${STRING}.ToLowerInvariant`]: (_call, receiver) => caseMappedText(receiverText(receiver), false),
+  [`${STRING}.ToUpper`]: (_call, receiver) => caseMappedText(receiverText(receiver), true),
+  [`${STRING}.ToUpperInvariant`]: (_call, receiver) => caseMappedText(receiverText(receiver), true),
   [`${STRING}.ToString`]: (_call, receiver) => receiverText(receiver),
   [`${STRING}.Trim()`]: (_call, receiver) => trimWith(receiverText(receiver), undefined, true, true),
   [`${STRING}.Trim(char)`]: (_call, receiver, [char]) =>
@@ -403,6 +408,7 @@ const stringNatives: Record<string, NativeMethod> = {
   [`${STRING}.IsNullOrWhiteSpace`]: (_call, _receiver, [value]) =>
     value === undefined || trimWith(value as string, undefined, true, true) === '',
   [`${STRING}.Join`]: (call, _receiver, args) => {
+    if (args.length === 2 && args[1] === undefined) failNull('value');
     const separator =
       args[0] === undefined ? '' : typeof args[0] === 'number' ? String.fromCodePoint(args[0]) : (args[0] as string);
     return joinValues(call, separator, args as Value[]);
@@ -576,10 +582,8 @@ defineNatives({
   [`${CHAR}.ToLowerInvariant`]: (_call, _receiver, [value]) => caseMapped(value as number, false),
   [`${CHAR}.GetNumericValue`]: (_call, _receiver, args) => {
     const [value, index] = args as Value[];
-    const char = typeof value === 'string' ? value.charAt(index as number) : String.fromCodePoint(value as number);
-    if (/[0-9]/.test(char)) return Number(char);
-    if (/[０-９]/.test(char)) return (char.codePointAt(0) as number) - 0xff_10;
-    return -1;
+    const char = typeof value === 'string' ? value.charAt(index as number) : String.fromCharCode(value as number);
+    return numericValueOf(char.charCodeAt(0));
   },
   [`${CHAR}.Parse`]: (_call, _receiver, [text]) => {
     if (text === undefined) failNull('s');
@@ -597,11 +601,87 @@ defineNatives({
 });
 
 /** A character's case mapping, which keeps characters whose mapping is longer than one character. */
+/**
+ * .NET's simple case mapping of a character, which keeps one character: `ß` stays as JavaScript's `SS` would expand
+ * it, and `İ` lowers to `i` without JavaScript's combining dot.
+ */
 function caseMapped(code: number, upper: boolean): number {
-  const char = String.fromCodePoint(code);
+  const char = String.fromCharCode(code);
   const mapped = upper ? char.toUpperCase() : char.toLowerCase();
-  return mapped.length === 1 ? mapped.charCodeAt(0) : code;
+  if (mapped.length === 1) return mapped.charCodeAt(0);
+  return !upper && /^.\p{M}+$/u.test(mapped) ? mapped.charCodeAt(0) : code;
 }
+
+/** Maps each character of a text as `ToUpper` and `ToLower` do, without JavaScript's context-sensitive rules. */
+function caseMappedText(text: string, upper: boolean): string {
+  let result = '';
+  for (let index = 0; index < text.length; index++)
+    result += String.fromCharCode(caseMapped(text.charCodeAt(index), upper));
+  return result;
+}
+
+/**
+ * The Unicode numeric value of a character that `char.GetNumericValue` gives: a decimal digit of any script, and the
+ * common fractions, Roman numerals, circled numbers, superscripts, and subscripts; -1 for others.
+ */
+function numericValueOf(code: number): number {
+  const char = String.fromCharCode(code);
+  if (/\p{Nd}/u.test(char)) {
+    // Each script's digits run from 0 to 9 in consecutive code units.
+    let zero = code;
+    while (zero > code - 9 && /\p{Nd}/u.test(String.fromCharCode(zero - 1))) zero--;
+    return (code - zero) % 10;
+  }
+  const special = NUMERIC_VALUES.get(code);
+  if (special !== undefined) return special;
+  for (const [start, end, first] of NUMERIC_RANGES) if (code >= start && code <= end) return first + code - start;
+  return -1;
+}
+
+const NUMERIC_VALUES = new Map<number, number>([
+  [0xbc, 0.25],
+  [0xbd, 0.5],
+  [0xbe, 0.75],
+  [0xb9, 1],
+  [0xb2, 2],
+  [0xb3, 3],
+  [0x20_70, 0],
+  [0x21_50, 1 / 7],
+  [0x21_51, 1 / 9],
+  [0x21_52, 0.1],
+  [0x21_53, 1 / 3],
+  [0x21_54, 2 / 3],
+  [0x21_55, 0.2],
+  [0x21_56, 0.4],
+  [0x21_57, 0.6],
+  [0x21_58, 0.8],
+  [0x21_59, 1 / 6],
+  [0x21_5a, 5 / 6],
+  [0x21_5b, 0.125],
+  [0x21_5c, 0.375],
+  [0x21_5d, 0.625],
+  [0x21_5e, 0.875],
+  [0x21_6c, 50],
+  [0x21_6d, 100],
+  [0x21_6e, 500],
+  [0x21_6f, 1000],
+  [0x21_7c, 50],
+  [0x21_7d, 100],
+  [0x21_7e, 500],
+  [0x21_7f, 1000],
+]);
+
+/** Runs of characters whose values count up from a first value: [first code, last code, first value]. */
+const NUMERIC_RANGES: [number, number, number][] = [
+  [0x20_74, 0x20_79, 4],
+  [0x20_80, 0x20_89, 0],
+  [0x21_60, 0x21_6b, 1],
+  [0x21_70, 0x21_7b, 1],
+  [0x24_60, 0x24_73, 1],
+  [0x24_74, 0x24_87, 1],
+  [0x24_88, 0x24_9b, 1],
+  [0x27_76, 0x27_7f, 1],
+];
 
 // ---- StringBuilder ----
 
@@ -633,21 +713,17 @@ defineNatives({
   [`${BUILDER}..ctor(string?)`]: (_call, receiver, [text]) => setBuilder(receiver, (text as string | undefined) ?? ''),
   [`${BUILDER}.get_Length`]: (_call, receiver) => builder(receiver).text.length,
   [`${BUILDER}.set_Length`]: (call, receiver, [length]) => {
-    if ((length as number) < 0) failOutOfRange(call, 'value', 'Length cannot be less than zero.');
+    if ((length as number) < 0) failNegative(call, 'value', length as number);
     const state = builder(receiver);
     state.text = state.text.slice(0, length as number).padEnd(length as number, '\0');
     return;
   },
   [`${BUILDER}.get_Capacity`]: (_call, receiver) => Math.max(16, builder(receiver).text.length),
   [`${BUILDER}.set_Capacity`]: () => {},
-  [`${BUILDER}.get_Item`]: (call, receiver, [index]) => {
+  [`${BUILDER}.get_Item`]: (_call, receiver, [index]) => {
     const { text } = builder(receiver);
     if ((index as number) < 0 || (index as number) >= text.length)
-      failOutOfRange(
-        call,
-        'index',
-        'Index was out of range. Must be non-negative and less than the size of the collection.'
-      );
+      fail('System.IndexOutOfRangeException', 'Index was outside the bounds of the array.');
     return text.charCodeAt(index as number);
   },
   [`${BUILDER}.set_Item`]: (call, receiver, [index, char]) => {
@@ -666,8 +742,11 @@ defineNatives({
   },
   [`${BUILDER}.Append`]: (call, receiver, args) => {
     const parameters = call.method.parameters;
-    if (parameters.length === 2 && specialOf(parameters[0].type) === 'char')
-      return append(call, receiver, String.fromCodePoint(args[0] as number).repeat(args[1] as number));
+    if (parameters.length === 2 && specialOf(parameters[0].type) === 'char') {
+      const count = args[1] as number;
+      if (count < 0) failNegative(call, 'repeatCount', count);
+      return append(call, receiver, String.fromCodePoint(args[0] as number).repeat(count));
+    }
     if (parameters.length === 3)
       return append(
         call,
@@ -714,13 +793,13 @@ defineNatives({
   },
   [`${BUILDER}.Remove`]: (call, receiver, [start, length]) => {
     const state = builder(receiver);
-    if ((start as number) < 0) failOutOfRange(call, 'startIndex', 'StartIndex cannot be less than zero.');
-    if ((length as number) < 0) failOutOfRange(call, 'length', 'Length cannot be less than zero.');
+    if ((start as number) < 0) failNegative(call, 'startIndex', start as number);
+    if ((length as number) < 0) failNegative(call, 'length', length as number);
     if ((start as number) + (length as number) > state.text.length)
       failOutOfRange(
         call,
         'length',
-        'Index was out of range. Must be non-negative and less than the size of the collection.'
+        'Index was out of range. Must be non-negative and less than or equal to the size of the collection.'
       );
     state.text = state.text.slice(0, start as number) + state.text.slice((start as number) + (length as number));
     return receiver;
@@ -740,8 +819,10 @@ defineNatives({
   [`${BUILDER}.ToString()`]: (_call, receiver) => builder(receiver).text,
   [`${BUILDER}.ToString(int, int)`]: (call, receiver, [start, length]) => {
     const { text } = builder(receiver);
-    if ((start as number) < 0 || (start as number) + (length as number) > text.length)
-      failOutOfRange(call, 'startIndex', 'StartIndex cannot be less than zero.');
+    if ((start as number) < 0) failOutOfRange(call, 'startIndex', 'StartIndex cannot be less than zero.');
+    if ((length as number) < 0) failOutOfRange(call, 'length', 'Length cannot be less than zero.');
+    if ((start as number) + (length as number) > text.length)
+      failOutOfRange(call, 'length', 'Index and length must refer to a location within the string.');
     return text.slice(start as number, (start as number) + (length as number));
   },
 });

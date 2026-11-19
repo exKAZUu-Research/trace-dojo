@@ -926,21 +926,27 @@ export class ExpressionConverter {
       } else if (part.type === 'escape_sequence') {
         parts.push({ text: unescape(part, part.text) });
       } else if (part.type === 'interpolation') {
-        parts.push({ hole: this.convertInterpolation(part) });
+        parts.push({ hole: this.convertInterpolation(part, !isVerbatim && !isRaw) });
       }
     }
     if (isRaw) return dedentRawParts(node, parts);
     return parts;
   }
 
-  private convertInterpolation(node: Node): NonNullable<InterpolationPart['hole']> {
+  /** @param hasEscapes Whether the string reads escape sequences, which then apply to a hole's format too. */
+  private convertInterpolation(node: Node, hasEscapes: boolean): NonNullable<InterpolationPart['hole']> {
     let expression: Expression | undefined;
     let alignment: Expression | undefined;
     let format: string | undefined;
     for (const part of namedChildren(node)) {
       if (part.type === 'interpolation_alignment_clause') alignment = this.convertExpression(namedChildren(part)[0]);
-      else if (part.type === 'interpolation_format_clause') format = part.text.slice(1);
-      else if (part.type !== 'interpolation_brace') expression = this.convertExpression(part);
+      else if (part.type === 'interpolation_format_clause') {
+        format = part.text.slice(1);
+        if (hasEscapes)
+          format = format.replaceAll(/\\(u[\dA-Fa-f]{4}|U[\dA-Fa-f]{8}|x[\dA-Fa-f]{1,4}|.)/g, (escape) =>
+            unescape(part, escape)
+          );
+      } else if (part.type !== 'interpolation_brace') expression = this.convertExpression(part);
     }
     if (!expression) throw new CompileError([{ row: node.startPosition.row, message: 'CS1733: 式が必要です' }]);
     return { expression, alignment, format };

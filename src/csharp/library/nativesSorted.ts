@@ -165,12 +165,25 @@ function sortedDictionaryNatives(prefix: string): Record<string, NativeMethod> {
     },
     [`${prefix}.Add`]: (call, receiver, [key, value]) => {
       if (key === undefined) failNull('key');
-      if (!sortedOf(receiver).insert(key as Value, value as Value, false))
+      const state = sortedOf(receiver);
+      if (state.insert(key as Value, value as Value, false)) return;
+      // SortedDictionary's tree reports the pair it failed to add, and SortedList the key as the parameter.
+      if (prefix.includes('SortedDictionary')) {
+        const pairType = libraryType(call, 'System.Collections.Generic.KeyValuePair', [
+          state.keyType,
+          state.valueType as Type,
+        ]);
+        const pair = (state.pairOf as (key: Value, value: Value) => Value)(key as Value, value as Value);
         fail(
           'System.ArgumentException',
-          `An item with the same key has already been added. Key: ${textOf(call, key as Value, typeArgument(call, 0))}`
+          `An item with the same key has already been added. Key: ${textOf(call, pair, pairType)}`
         );
-      return;
+      }
+      fail(
+        'System.ArgumentException',
+        `An item with the same key has already been added. Key: ${textOf(call, key as Value, typeArgument(call, 0))}`,
+        'key'
+      );
     },
     [`${prefix}.Clear`]: (_call, receiver) => {
       const state = sortedOf(receiver);

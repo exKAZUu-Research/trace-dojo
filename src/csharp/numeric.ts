@@ -23,8 +23,8 @@ export const ARITHMETIC_OVERFLOW = (): PendingException =>
 const DECIMAL_OVERFLOW = 'Value was either too large or too small for a Decimal.';
 
 /** The .NET name in "Value was either too large or too small for an Int32." of each integral type. */
-const OVERFLOW_NAMES: Partial<Record<SpecialType, string>> = {
-  sbyte: 'an SByte',
+export const OVERFLOW_NAMES: Partial<Record<SpecialType, string>> = {
+  sbyte: 'a signed byte',
   byte: 'an unsigned byte',
   short: 'an Int16',
   ushort: 'a UInt16',

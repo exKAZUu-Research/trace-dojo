@@ -511,7 +511,7 @@ defineNatives({
   'System.DateTime.IsLeapYear': (_call, _receiver, [year]) => isLeapYear(year as number),
   'System.DateTime.Parse': (call, _receiver, [text]) => {
     const ticks = parseDate(text as string);
-    if (ticks === undefined) fail('System.FormatException', `String '${text}' was not recognized as a valid DateTime.`);
+    if (ticks === undefined) fail('System.FormatException', dateTimeParseError(text as string));
     return dateTime(call, ticks);
   },
   'System.DateTime.TryParse': (call, _receiver, [text, result]) => {
@@ -553,4 +553,11 @@ function parseDate(text: string): bigint | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** .NET's message for a string that DateTime.Parse rejects, which points at the first word it does not know. */
+function dateTimeParseError(text: string): string {
+  const word = /\p{L}/u.exec(text);
+  if (!word) return `String '${text}' was not recognized as a valid DateTime.`;
+  return `The string '${text}' was not recognized as a valid DateTime. There is an unknown word starting at index '${word.index}'.`;
 }

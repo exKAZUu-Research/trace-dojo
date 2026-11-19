@@ -72,6 +72,21 @@ export function failOutOfRange(call: NativeCall, paramName: string, message: str
   throw new CsThrow(exception);
 }
 
+/** .NET's `ArgumentOutOfRangeException.ThrowIfNegative`. */
+export function failNegative(call: NativeCall, paramName: string, value: number | bigint): never {
+  return failOutOfRange(call, paramName, `${paramName} ('${value}') must be a non-negative value.`, String(value));
+}
+
+/** .NET's `ArgumentOutOfRangeException.ThrowIfGreaterThan`. */
+export function failGreater(call: NativeCall, paramName: string, value: number, limit: number): never {
+  return failOutOfRange(
+    call,
+    paramName,
+    `${paramName} ('${value}') must be less than or equal to '${limit}'.`,
+    String(value)
+  );
+}
+
 export function failIndex(call: NativeCall, paramName = 'index'): never {
   return failOutOfRange(
     call,

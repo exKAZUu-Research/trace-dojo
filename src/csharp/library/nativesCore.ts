@@ -2,7 +2,15 @@
 import { TURTLE_METHOD_NAMES } from '../../interpreter/turtleWorld';
 import { CsDecimal } from '../decimal';
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
-import { convertNumeric, integerRange, isBigIntKind, type NumericValue, PendingException } from '../numeric';
+import {
+  arithmetic,
+  convertNumeric,
+  integerRange,
+  isBigIntKind,
+  type NumericValue,
+  OVERFLOW_NAMES,
+  PendingException,
+} from '../numeric';
 import {
   compareCulture,
   defaultCompare,
@@ -268,10 +276,10 @@ for (const [name, special] of INTEGRAL) {
     },
     [`${prefix}.Parse`]: (_call: NativeCall, _receiver: Value, [text]: Value[]) => {
       if (text === undefined) failNull('s');
-      return fromBig(parseInteger(text as string, min, max, name, true) as bigint);
+      return fromBig(parseInteger(text as string, min, max, special, true) as bigint);
     },
     [`${prefix}.TryParse`]: (_call: NativeCall, _receiver: Value, [text, result]: (Value | VariableReference)[]) => {
-      const parsed = text === undefined ? undefined : parseInteger(text as string, min, max, name, false);
+      const parsed = text === undefined ? undefined : parseInteger(text as string, min, max, special, false);
       refOf(result).set(fromBig(parsed ?? 0n));
       return parsed !== undefined;
     },
@@ -307,7 +315,13 @@ function clampInteger(value: Value, low: Value, high: Value, toBig: (value: Valu
 }
 
 /** Parses an integer as `int.Parse` does: optional whitespace and sign, decimal digits, and a thousands-free number. */
-function parseInteger(text: string, min: bigint, max: bigint, typeName: string, throws: boolean): bigint | undefined {
+function parseInteger(
+  text: string,
+  min: bigint,
+  max: bigint,
+  special: SpecialType,
+  throws: boolean
+): bigint | undefined {
   const match = /^[\s]*([+-]?)(\d+)[\s\0]*$/.exec(text);
   if (!match) {
     if (throws) fail('System.FormatException', `The input string '${text}' was not in a correct format.`);
@@ -316,10 +330,7 @@ function parseInteger(text: string, min: bigint, max: bigint, typeName: string, 
   const value = BigInt(`${match[1]}${match[2]}`);
   if (value < min || value > max) {
     if (throws)
-      fail(
-        'System.OverflowException',
-        `Value was either too large or too small for ${typeName === 'Int32' || typeName === 'Int16' || typeName === 'Int64' ? 'an' : typeName === 'Byte' ? 'an unsigned' : 'a'} ${typeName === 'Byte' ? 'byte' : typeName}.`
-      );
+      fail('System.OverflowException', `Value was either too large or too small for ${OVERFLOW_NAMES[special]}.`);
     return undefined;
   }
   return value;
@@ -464,12 +475,12 @@ defineNatives({
     other === undefined ? 1 : (unboxed(receiver) as CsDecimal).compare(unboxed(other as Value) as CsDecimal),
   'System.Decimal.Parse': (_call, _receiver, [text]) => {
     if (text === undefined) failNull('s');
-    const parsed = CsDecimal.parse((text as string).trim().replaceAll(',', ''));
+    const parsed = parseDecimal(text as string);
     if (!parsed) fail('System.FormatException', `The input string '${text}' was not in a correct format.`);
     return parsed;
   },
   'System.Decimal.TryParse': (_call, _receiver, [text, result]) => {
-    const parsed = text === undefined ? undefined : CsDecimal.parse((text as string).trim().replaceAll(',', ''));
+    const parsed = text === undefined ? undefined : parseDecimal(text as string);
     refOf(result).set(parsed ?? CsDecimal.ZERO);
     return parsed !== undefined;
   },
@@ -543,16 +554,49 @@ defineNatives({
       : textOf(call, unboxed(receiver), call.frame.resolve(call.owner?.args[0] ?? libraryType(call, 'System.Object'))),
 });
 
+/** Parses a decimal as `decimal.Parse` does, whose number style allows group separators but no exponent. */
+function parseDecimal(text: string): CsDecimal | undefined {
+  if (/[eE]/.test(text)) return undefined;
+  return CsDecimal.parse(text.trim().replaceAll(',', ''));
+}
+
 // ---- Math ----
+
+function checkDecimals(digits: number): number {
+  if (digits < 0 || digits > 28) {
+    fail(
+      'System.ArgumentOutOfRangeException',
+      'Decimal can only round to between 0 and 28 digits of precision.',
+      'decimals'
+    );
+  }
+  return digits;
+}
+
+/** `Math.DivRem` with an `out` remainder, which divides as `/` and `%` do, failing alike on zero. */
+function divRem(kind: 'int' | 'long', a: NumericValue, b: NumericValue, result: Value | VariableReference): Value {
+  const quotient = arithmetic('/', kind, a, b, false);
+  refOf(result).set(arithmetic('%', kind, a, b, false));
+  return quotient;
+}
+
+function divRemTuple(call: NativeCall, kind: 'int' | 'long', a: NumericValue, b: NumericValue): Value {
+  const quotient = arithmetic('/', kind, a, b, false);
+  return new CsStruct(call.method.returnType as NamedType, [quotient, arithmetic('%', kind, a, b, false)]);
+}
 
 /** `Math.Round(double)`, which rounds half to even. */
 function roundEven(value: number): number {
   if (!Number.isFinite(value)) return value;
   const floor = Math.floor(value);
   const difference = value - floor;
-  if (difference > 0.5) return floor + 1;
-  if (difference < 0.5) return floor === 0 && value < 0 ? -0 : floor;
-  return floor % 2 === 0 ? floor : floor + 1;
+  const rounded = difference > 0.5 ? floor + 1 : difference < 0.5 ? floor : floor % 2 === 0 ? floor : floor + 1;
+  return withSignOf(value, rounded);
+}
+
+/** A rounded zero keeps the sign of the number rounded, as `Math.Round(-0.4)` gives -0. */
+function withSignOf(value: number, rounded: number): number {
+  return rounded === 0 && (value < 0 || Object.is(value, -0)) ? -0 : rounded;
 }
 
 function mathMax(a: number, b: number): number {
@@ -599,18 +643,16 @@ function roundDouble(value: number, digits: number, mode: number): number {
       scaled = roundEven(scaled);
     }
   }
-  return scaled / power;
+  return withSignOf(value, scaled / power);
 }
 
 const numericMath =
-  (name: string, operation: (call: NativeCall, args: Value[]) => Value): NativeMethod =>
-  (call, _receiver, args) => {
-    void name;
-    return operation(call, args as Value[]);
-  };
+  (operation: (call: NativeCall, args: Value[]) => Value): NativeMethod =>
+  (call, _receiver, args) =>
+    operation(call, args as Value[]);
 
 defineNatives({
-  'System.Math.Abs': numericMath('Abs', (call, [value]) => {
+  'System.Math.Abs': numericMath((call, [value]) => {
     const type = parameterType(call, 0);
     const special = specialOf(type) as SpecialType;
     if (special === 'decimal') return (value as CsDecimal).isNegative ? (value as CsDecimal).negate() : value;
@@ -620,9 +662,9 @@ defineNatives({
       fail('System.OverflowException', 'Negating the minimum value of a twos complement number is invalid.');
     return isBigIntKind(special) ? (integer < 0n ? -integer : integer) : Math.abs(value as number);
   }),
-  'System.Math.Max': numericMath('Max', (call, [a, b]) => extremum(call, a, b, true)),
-  'System.Math.Min': numericMath('Min', (call, [a, b]) => extremum(call, a, b, false)),
-  'System.Math.Clamp': numericMath('Clamp', (call, [value, low, high]) => {
+  'System.Math.Max': numericMath((call, [a, b]) => extremum(call, a, b, true)),
+  'System.Math.Min': numericMath((call, [a, b]) => extremum(call, a, b, false)),
+  'System.Math.Clamp': numericMath((call, [value, low, high]) => {
     const order = (x: Value, y: Value): number => compareNumbers(call, x, y);
     if (order(low, high) > 0)
       fail(
@@ -633,7 +675,7 @@ defineNatives({
     if (order(value, high) > 0) return high;
     return value;
   }),
-  'System.Math.Sign': numericMath('Sign', (call, [value]) => {
+  'System.Math.Sign': numericMath((call, [value]) => {
     const special = specialOf(parameterType(call, 0));
     if (special === 'decimal') return (value as CsDecimal).isZero() ? 0 : (value as CsDecimal).isNegative ? -1 : 1;
     if (typeof value === 'number' && Number.isNaN(value))
@@ -668,6 +710,12 @@ defineNatives({
   'System.Math.IEEERemainder': (_call, _receiver, [x, y]) =>
     (x as number) - (y as number) * roundEven((x as number) / (y as number)),
   'System.Math.BigMul': (_call, _receiver, [a, b]) => BigInt(a as number) * BigInt(b as number),
+  'System.Math.DivRem(int, int, int)': (_call, _receiver, [a, b, result]) =>
+    divRem('int', a as number, b as number, result),
+  'System.Math.DivRem(long, long, long)': (_call, _receiver, [a, b, result]) =>
+    divRem('long', a as bigint, b as bigint, result),
+  'System.Math.DivRem(int, int)': (call, _receiver, [a, b]) => divRemTuple(call, 'int', a as number, b as number),
+  'System.Math.DivRem(long, long)': (call, _receiver, [a, b]) => divRemTuple(call, 'long', a as bigint, b as bigint),
   'System.Math.Floor(double)': (_call, _receiver, [value]) => Math.floor(value as number),
   'System.Math.Floor(decimal)': (_call, _receiver, [value]) => (value as CsDecimal).round(0, 'floor'),
   'System.Math.Ceiling(double)': (_call, _receiver, [value]) => Math.ceil(value as number),
@@ -683,33 +731,19 @@ defineNatives({
     roundDouble(value as number, 0, mode as number),
   'System.Math.Round(decimal)': (_call, _receiver, [value]) => (value as CsDecimal).round(0, 'even'),
   'System.Math.Round(decimal, int)': (_call, _receiver, [value, digits]) =>
-    (value as CsDecimal).round(digits as number, 'even'),
+    (value as CsDecimal).round(checkDecimals(digits as number), 'even'),
   'System.Math.Round(decimal, int, MidpointRounding)': (_call, _receiver, [value, digits, mode]) =>
-    (value as CsDecimal).round(digits as number, MIDPOINT_MODES[mode as number]),
+    (value as CsDecimal).round(checkDecimals(digits as number), MIDPOINT_MODES[mode as number]),
   'System.Math.Round(decimal, MidpointRounding)': (_call, _receiver, [value, mode]) =>
     (value as CsDecimal).round(0, MIDPOINT_MODES[mode as number]),
   'System.Decimal.Round(decimal)': (_call, _receiver, [value]) => (value as CsDecimal).round(0, 'even'),
   'System.Decimal.Round(decimal, int)': (_call, _receiver, [value, digits]) =>
-    (value as CsDecimal).round(digits as number, 'even'),
+    (value as CsDecimal).round(checkDecimals(digits as number), 'even'),
   'System.Decimal.Round(decimal, int, MidpointRounding)': (_call, _receiver, [value, digits, mode]) =>
-    (value as CsDecimal).round(digits as number, MIDPOINT_MODES[mode as number]),
+    (value as CsDecimal).round(checkDecimals(digits as number), MIDPOINT_MODES[mode as number]),
   'System.Decimal.Round(decimal, MidpointRounding)': (_call, _receiver, [value, mode]) =>
     (value as CsDecimal).round(0, MIDPOINT_MODES[mode as number]),
-  'System.Math.DivRem(int, int, out int)': (_call, _receiver, [a, b, result]) =>
-    divRem(a as number, b as number, result as VariableReference),
-  'System.Math.DivRem(long, long, out long)': (_call, _receiver, [a, b, result]) =>
-    divRem(a as bigint, b as bigint, result as VariableReference),
 });
-
-function divRem(a: number | bigint, b: number | bigint, result: VariableReference): Value {
-  if (b === 0 || b === 0n) fail('System.DivideByZeroException', 'Attempted to divide by zero.');
-  if (typeof a === 'bigint') {
-    result.set(a % (b as bigint));
-    return a / (b as bigint);
-  }
-  result.set(a % (b as number));
-  return Math.trunc(a / (b as number));
-}
 
 function compareNumbers(call: NativeCall, a: Value, b: Value): number {
   if (a instanceof CsDecimal) return a.compare(b as CsDecimal);
@@ -822,12 +856,12 @@ function convertString(text: string | undefined, fromBase: Value, target: Specia
     return text.charCodeAt(0);
   }
   const [min, max] = integerRange(target);
-  const parsed = parseInteger(text, min, max, NET_NAMES[target] ?? 'Int32', true) as bigint;
+  const parsed = parseInteger(text, min, max, target, true) as bigint;
   return isBigIntKind(target) ? parsed : Number(parsed);
 }
 
 function parseNonIntegral(text: string, target: SpecialType): Value {
-  const parsed = target === 'decimal' ? CsDecimal.parse(text.trim()) : parseNumber(text);
+  const parsed = target === 'decimal' ? parseDecimal(text) : parseNumber(text);
   if (parsed === undefined) fail('System.FormatException', `The input string '${text}' was not in a correct format.`);
   return target === 'float' ? Math.fround(parsed as number) : parsed;
 }
@@ -851,33 +885,15 @@ function checkIntegerRange(integer: bigint, target: SpecialType): void {
 }
 
 function overflowFor(target: SpecialType): never {
-  return fail('System.OverflowException', `Value was either too large or too small for ${OVERFLOW_ARTICLES[target]}.`);
+  return fail('System.OverflowException', `Value was either too large or too small for ${OVERFLOW_NAMES[target]}.`);
 }
-
-const NET_NAMES: Partial<Record<SpecialType, string>> = {
-  int: 'Int32',
-  long: 'Int64',
-  short: 'Int16',
-  byte: 'Byte',
-  sbyte: 'SByte',
-  ushort: 'UInt16',
-  uint: 'UInt32',
-  ulong: 'UInt64',
-};
-const OVERFLOW_ARTICLES: Partial<Record<SpecialType, string>> = {
-  int: 'an Int32',
-  long: 'an Int64',
-  short: 'an Int16',
-  byte: 'an unsigned byte',
-  sbyte: 'a signed byte',
-  char: 'a character',
-  ushort: 'a UInt16',
-  uint: 'a UInt32',
-  ulong: 'a UInt64',
-};
 
 function parseRadix(text: string, base: number, target: SpecialType): Value {
   if (![2, 8, 10, 16].includes(base)) fail('System.ArgumentException', 'Invalid Base.');
+  if (base !== 10 && text.startsWith('-'))
+    fail('System.ArgumentException', 'String cannot contain a minus sign if the base is not 10.');
+  if (base !== 10 && text.startsWith('-'))
+    fail('System.ArgumentException', 'String cannot contain a minus sign if the base is not 10.');
   const pattern = { 2: /^[01]+$/, 8: /^[0-7]+$/, 10: /^-?\d+$/, 16: /^(0[xX])?[\dA-Fa-f]+$/ }[base as 2 | 8 | 10 | 16];
   if (!pattern.test(text)) fail('System.FormatException', 'Could not find any recognizable digits.');
   const digits = base === 16 ? text.replace(/^0[xX]/, '') : text;

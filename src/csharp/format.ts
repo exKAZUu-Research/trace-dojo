@@ -198,14 +198,17 @@ export type NumericKind = 'integer' | 'double' | 'float' | 'decimal';
 export function formatNumber(
   value: number | bigint | CsDecimal,
   kind: NumericKind,
-  format: string | undefined
+  format: string | undefined,
+  /** The width of an integral type, which `X` shows a negative number in. */
+  bits = 32
 ): string {
   if ((kind === 'double' || kind === 'float') && typeof value === 'number' && !Number.isFinite(value)) {
     return Number.isNaN(value) ? CULTURE.nan : value > 0 ? CULTURE.positiveInfinity : CULTURE.negativeInfinity;
   }
   if (format === undefined || format === '') return defaultText(value, kind);
   const standard = /^([A-Za-z])(\d{0,9})$/.exec(format);
-  if (standard) return formatStandard(value, kind, standard[1], standard[2] === '' ? undefined : Number(standard[2]));
+  if (standard)
+    return formatStandard(value, kind, standard[1], standard[2] === '' ? undefined : Number(standard[2]), bits);
   return formatCustom(value, kind, format);
 }
 
@@ -228,7 +231,8 @@ function formatStandard(
   value: number | bigint | CsDecimal,
   kind: NumericKind,
   specifier: string,
-  precision: number | undefined
+  precision: number | undefined,
+  bits: number
 ): string {
   const upper = specifier.toUpperCase();
   const mode = kind === 'decimal' || kind === 'integer' ? 'away' : 'even';
@@ -241,7 +245,7 @@ function formatStandard(
     }
     case 'X': {
       if (kind !== 'integer') throw invalidFormat();
-      return hexText(value as number | bigint, specifier === 'x', precision ?? 0);
+      return hexText(value as number | bigint, specifier === 'x', precision ?? 0, bits);
     }
     case 'F':
     case 'N': {
@@ -254,7 +258,11 @@ function formatStandard(
       const decimals = precision ?? CULTURE.currencyDecimalDigits;
       const number = roundToDecimals(digitsOf(value, kind), decimals, mode);
       const { integer, fraction } = fixedParts(number, decimals);
-      return withSign(`${CULTURE.currencySymbol}${group(integer)}${fractionSuffix(decimals, fraction)}`, number);
+      return withSignKeepingZero(
+        `${CULTURE.currencySymbol}${group(integer)}${fractionSuffix(decimals, fraction)}`,
+        number,
+        kind
+      );
     }
     case 'E': {
       const decimals = precision ?? 6;
@@ -265,7 +273,8 @@ function formatStandard(
       return generalStandardText(value, kind, precision, specifier === 'g' ? 'e' : 'E', mode);
     }
     case 'R': {
-      if (kind === 'decimal') throw invalidFormat();
+      // A decimal is always exact, so its round-trip text is its general one.
+      if (kind === 'decimal') return defaultText(value, kind);
       return roundTripText(value, kind);
     }
     default: {
@@ -327,9 +336,9 @@ function withSignKeepingZero(text: string, number: Digits, kind: NumericKind): s
   return text;
 }
 
-function hexText(value: number | bigint, lower: boolean, minimum: number): string {
+function hexText(value: number | bigint, lower: boolean, minimum: number, bits: number): string {
   let integer = BigInt(value);
-  if (integer < 0n) integer = BigInt.asUintN(typeof value === 'bigint' ? 64 : 32, integer);
+  if (integer < 0n) integer = BigInt.asUintN(bits, integer);
   const text = integer.toString(16).padStart(minimum, '0');
   return lower ? text : text.toUpperCase();
 }
@@ -343,10 +352,16 @@ interface Section {
 function formatCustom(value: number | bigint | CsDecimal, kind: NumericKind, format: string): string {
   const sections = splitSections(format);
   const initial = customDigits(value, kind);
-  const section = sectionFor(sections, initial);
+  let section = sectionFor(sections, initial);
+  let scan = scanPattern(section.pattern);
+  let { number, exponent } = roundCustom(initial, scan);
+  // A value that rounds to zero in its section takes the zero section, when the format has one.
+  if (number.digits === '' && initial.digits !== '' && sections.length > 2) {
+    section = sections[2];
+    scan = scanPattern(section.pattern);
+    ({ number, exponent } = roundCustom({ ...initial, digits: '' }, scan));
+  }
   const pattern = section.pattern;
-  const scan = scanPattern(pattern);
-  const { number, exponent } = roundCustom(initial, scan);
   const { integer: integerPart, fraction: fractionPart } = fixedParts(number, scan.fractionDigits);
   const integerDigitsText = integerPart === '0' && number.exponent <= 0 ? '' : integerPart;
   const isZero = number.digits === '';
@@ -355,7 +370,9 @@ function formatCustom(value: number | bigint | CsDecimal, kind: NumericKind, for
     (number.isNegative && sections.length === 1) ||
     (number.isNegative && section === sections[0] && sections.length > 1 && !isZero);
   const result = renderCustom(pattern, scan, integerDigitsText, fractionPart, exponent);
-  if (needsSign && (!isZero || kind === 'double' || kind === 'float')) return `${CULTURE.negativeSign}${result}`;
+  // A pattern that prints no digit, such as `#` for a value that rounds to zero, prints no sign either.
+  if (needsSign && (!isZero || kind === 'double' || kind === 'float') && /\d/.test(result))
+    return `${CULTURE.negativeSign}${result}`;
   return result;
 }
 
@@ -492,8 +509,9 @@ function scanDigit(char: string, index: number, scan: PatternScan, state: ScanSt
 }
 
 function scanComma(pattern: string, index: number, scan: PatternScan, state: ScanState): void {
-  const next = pattern[index + 1];
-  if (next === undefined || next === '.' || next === ';') scan.scaleDown++;
+  // A comma after the integer part's last digit placeholder scales the number by a thousand; others group digits.
+  const integerRest = /^[^.;]*/.exec(pattern.slice(index + 1))?.[0] ?? '';
+  if (!/[0#]/.test(integerRest)) scan.scaleDown++;
   else if (state.lastDigitBeforePoint >= 0) scan.hasGrouping = true;
 }
 
@@ -618,8 +636,11 @@ export function parseCompositeFormat(format: string): (string | FormatItem)[] {
   while (index < format.length) {
     const char = format[index];
     const isDoubled = format[index + 1] === char;
-    if (char === '}' && !isDoubled)
-      throw fail(index, 'Unexpected closing brace without a corresponding opening brace.');
+    // .NET reads past a lone `}` before it reports it, so it points after it, or at the end.
+    if (char === '}' && !isDoubled) {
+      if (index + 1 >= format.length) throw fail(index + 1, 'Format item ends prematurely.');
+      throw fail(index + 1, 'Unexpected closing brace without a corresponding opening brace.');
+    }
     if (char !== '{' || isDoubled) {
       text += char;
       index += char === '{' || char === '}' ? 2 : 1;
@@ -654,7 +675,7 @@ function parseFormatItem(format: string, start: number): { item: FormatItem; end
   if (format[index] === ':') {
     const formatStart = index + 1;
     for (index = formatStart; index < format.length && format[index] !== '}'; index++) {
-      if (format[index] === '{') throw fail(index, 'Unexpected opening brace inside a format item.');
+      if (format[index] === '{') throw fail(index, 'Format item ends prematurely.');
     }
     itemFormat = format.slice(formatStart, index);
   }

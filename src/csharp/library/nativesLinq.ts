@@ -10,6 +10,8 @@ import { comparisonOf, type Equality, equalityOf, HashState, ListState, newList 
 import { stableSort } from './sort';
 import { evaluatorOf, fail, failNull, failOutOfRange, libraryType, newArray } from './support';
 
+/** The message of LINQ's argument errors, which name no value. */
+const OUT_OF_RANGE = 'Specified argument was out of the range of valid values.';
 const ENUMERABLE = 'System.Linq.Enumerable';
 const noElements = (): PendingException =>
   new PendingException('System.InvalidOperationException', 'Sequence contains no elements');
@@ -369,7 +371,9 @@ function ordered(call: NativeCall, args: Value[], descending: boolean, isThen: b
   return query(
     call,
     elementType,
-    iteratorName('OrderedIterator', [elementType, keyType]),
+    keyless && !isThen
+      ? iteratorName('ImplicitlyStableOrderedIterator', [elementType])
+      : iteratorName('OrderedIterator', [elementType, keyType]),
     [root],
     () => {
       const items = [...source(call, root)];
@@ -481,14 +485,13 @@ const linq: Record<string, NativeMethod> = {
     });
   },
   [`${ENUMERABLE}.Chunk`]: (call, _receiver, [items, size]) => {
-    if ((size as number) < 1)
-      failOutOfRange(call, 'size', `size ('${String(size)}') must be greater than or equal to '1'.`, String(size));
+    if ((size as number) < 1) failOutOfRange(call, 'size', OUT_OF_RANGE);
     const elementType = call.typeArgs[0];
     const all = source(call, items as Value);
     return query(
       call,
       { kind: 'array', element: elementType, rank: 1 },
-      `System.Linq.Enumerable+<ChunkIterator>d__69\`1[${runtimeTypeName(elementType)}]`,
+      `System.Linq.Enumerable+${items instanceof CsArray ? '<ArrayChunkIterator>d__39' : '<EnumerableChunkIterator>d__40'}\`1[${runtimeTypeName(elementType)}]`,
       [items as Value],
       function* () {
         let chunk: Value[] = [];
@@ -776,7 +779,7 @@ const linq: Record<string, NativeMethod> = {
   [`${ENUMERABLE}.ThenByDescending`]: (call, _receiver, args) => ordered(call, args as Value[], true, true, false),
   [`${ENUMERABLE}.Range`]: (call, _receiver, [start, count]) => {
     if ((count as number) < 0 || (start as number) + (count as number) - 1 > 2_147_483_647)
-      failOutOfRange(call, 'count', `count ('${String(count)}') must be a non-negative value.`, String(count));
+      failOutOfRange(call, 'count', OUT_OF_RANGE);
     return query(
       call,
       libraryType(call, 'System.Int32'),
@@ -788,8 +791,7 @@ const linq: Record<string, NativeMethod> = {
     );
   },
   [`${ENUMERABLE}.Repeat`]: (call, _receiver, [element, count]) => {
-    if ((count as number) < 0)
-      failOutOfRange(call, 'count', `count ('${String(count)}') must be a non-negative value.`, String(count));
+    if ((count as number) < 0) failOutOfRange(call, 'count', OUT_OF_RANGE);
     return query(
       call,
       call.typeArgs[0],
@@ -811,7 +813,7 @@ const linq: Record<string, NativeMethod> = {
     const withIndex = (call.method.parameters[1].type as NamedType).args.length === 3;
     const all = source(call, items as Value);
     const name = withIndex
-      ? `<SelectIterator>d__0`
+      ? `<SelectIterator>d__251`
       : isList(items as Value)
         ? 'SizeOptIListSelectIterator'
         : 'IEnumerableSelectIterator';
@@ -832,19 +834,22 @@ const linq: Record<string, NativeMethod> = {
     const [items, collectionSelector, resultSelector] = args as Value[];
     const collect = delegateCall(call, collectionSelector, 'selector');
     const resultOf = resultSelector === undefined ? undefined : delegateCall(call, resultSelector, 'resultSelector');
+    const withIndex = (call.method.parameters[1].type as NamedType).args.length === 3;
     const all = source(call, items);
     const resultType = resultSelector === undefined ? call.typeArgs[1] : call.typeArgs[2];
-    return query(
-      call,
-      resultType,
-      `System.Linq.Enumerable+<SelectManyIterator>d__0\`2[${call.typeArgs.map(runtimeTypeName).join(',')}]`,
-      [items],
-      function* () {
-        for (const item of all) {
-          for (const inner of iterate(call, collect(item))) yield resultOf ? resultOf(item, inner) : inner;
-        }
+    const typeArgs = call.typeArgs.map(runtimeTypeName).join(',');
+    const name = resultOf
+      ? `<SelectManyIterator>d__266\`3[${typeArgs}]`
+      : withIndex
+        ? `<SelectManyIterator>d__262\`2[${typeArgs}]`
+        : `SelectManySingleSelectorIterator\`2[${typeArgs}]`;
+    return query(call, resultType, `System.Linq.Enumerable+${name}`, [items], function* () {
+      let index = 0;
+      for (const item of all) {
+        const inners = withIndex ? collect(item, index++) : collect(item);
+        for (const inner of iterate(call, inners)) yield resultOf ? resultOf(item, inner) : inner;
       }
-    );
+    });
   },
   [`${ENUMERABLE}.SequenceEqual`]: (call, _receiver, [first, second]) => {
     const equality = equalityOf(call, undefined);
