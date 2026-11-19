@@ -70,6 +70,7 @@ import {
   CObject,
   endLifetime,
   FunctionRef,
+  holdValues,
   Liveness,
   NULL_PTR,
   Ptr,
@@ -1941,18 +1942,20 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const store = pointer.target();
       if (store.allocation !== (isArray ? 'newArray' : 'new') || pointer.index !== 0)
         throw new CppRuntimeError('invalidDelete');
-      if (isArray) {
-        destroyAllocatedArray(frame, store as ArrayStore, pointee, destroyStatic);
-      } else {
-        const object = (store as Box).value;
-        if (cls && object instanceof CObject && object.cls !== cls && !hasVirtualDestructor)
-          throw new CppRuntimeError('invalidDelete');
-        const destroy =
-          hasVirtualDestructor && object instanceof CObject ? object.cls.operations?.destroy : destroyStatic;
-        destroy?.(frame, object);
-      }
-      endLifetime(store, Liveness.Deleted);
-      return undefined;
+      holdValues(frame, [store], () => {
+        if (isArray) {
+          destroyAllocatedArray(frame, store as ArrayStore, pointee, destroyStatic);
+        } else {
+          const object = (store as Box).value;
+          if (cls && object instanceof CObject && object.cls !== cls && !hasVirtualDestructor)
+            throw new CppRuntimeError('invalidDelete');
+          const destroy =
+            hasVirtualDestructor && object instanceof CObject ? object.cls.operations?.destroy : destroyStatic;
+          destroy?.(frame, object);
+        }
+        endLifetime(store, Liveness.Deleted);
+      });
+      return;
     };
     return { type: { kind: 'void' }, isLvalue: false, row: node.row, run: exec, onlyCalls: true };
   }

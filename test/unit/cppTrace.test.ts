@@ -300,9 +300,12 @@ int main() {
 });
 
 test.each([
-  ['a struct', 'Group{Item(1), Item(2)}'],
-  ['an array', 'std::array<Item, 2>{Item(1), Item(2)}'],
-])('keeps the full temporary owner alive while destroying %s', (_, expression) => {
+  ['a temporary struct', 'static_cast<void>(Group{Item(1), Item(2)});'],
+  ['a temporary array', 'static_cast<void>(std::array<Item, 2>{Item(1), Item(2)});'],
+  ['a factory allocation', 'delete make();'],
+  ['a new struct', 'delete new Group{Item(1), Item(2)};'],
+  ['a new array', 'delete[] new Item[2]{Item(1), Item(2)};'],
+])('keeps the full owner alive while destroying %s', (_, statement) => {
   const program = `#include <array>
 #include <iostream>
 Turtle observer(0, 0);
@@ -312,7 +315,8 @@ struct Item {
   ~Item() { std::cout << observer.canMoveForward(); }
 };
 struct Group { Item first; Item second; };
-int main() { static_cast<void>(${expression}); }`;
+Group* make() { return new Group{Item(1), Item(2)}; }
+int main() { ${statement} }`;
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'executed',
     stdout: '00',
