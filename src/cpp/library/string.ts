@@ -1,4 +1,5 @@
 import { isFloatUnderflow, isSpaceByte, parseFloatPrefix, parseIntegerPrefix } from '../../c/library/numberParsing';
+import { LIMITS } from '../../interpreter/limits';
 import { byteArray, byteAt } from '../bytes';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
@@ -29,7 +30,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { type ArrayStore, NULL_PTR, Ptr, Store, type Value } from '../values';
+import { endLifetime, NULL_PTR, Ptr, Store, type Value } from '../values';
 import { formatFloat } from './formatting';
 import { randomAccessIterator } from './iterators';
 import type { Library } from './registry';
@@ -38,7 +39,6 @@ import {
   asNumber,
   CONST_CHAR_PTR,
   constRef,
-  cStringStore,
   native,
   nativeConstructor,
   readCString,
@@ -52,15 +52,25 @@ const SHORT_CAPACITY = 22;
 
 /** The value of a `std::string`: its bytes, as a string of character codes below 256. */
 export class StringValue extends Store {
-  /** The capacity libc++ gives the string, which a new string fits exactly and an edit grows as libc++ grows it. */
-  capacity: number;
+  private room: number;
   private stored: string;
-  private cStringCache?: { bytes: string; store: ArrayStore };
+  private buffer?: StringBuffer;
 
   constructor(bytes: string) {
     super();
+    checkStringLength(bytes.length);
     this.stored = bytes;
-    this.capacity = fittingCapacity(bytes.length);
+    this.room = fittingCapacity(bytes.length);
+  }
+
+  get capacity(): number {
+    return this.room;
+  }
+
+  set capacity(capacity: number) {
+    if (capacity === this.room) return;
+    this.invalidateBuffer();
+    this.room = capacity;
   }
 
   get bytes(): string {
@@ -69,27 +79,39 @@ export class StringValue extends Store {
 
   /** Replaces the bytes, growing the capacity to at least twice the old one when they do not fit, as libc++ does. */
   set bytes(bytes: string) {
+    checkStringLength(bytes.length);
     if (bytes.length > this.capacity) this.capacity = fittingCapacity(Math.max(bytes.length, 2 * this.capacity));
     this.stored = bytes;
   }
 
   /** Takes the bytes and the buffer of another string, as the move constructor and assignment do. */
   moveFrom(source: StringValue): void {
+    if (source === this) return;
+    this.invalidateBuffer();
     this.stored = source.stored;
-    this.capacity = source.capacity;
+    this.room = source.room;
+    if (source.room > SHORT_CAPACITY) {
+      this.buffer = source.buffer;
+      if (this.buffer) this.buffer.owner = this;
+      source.buffer = undefined;
+    } else {
+      source.invalidateBuffer();
+    }
     source.stored = '';
-    source.capacity = SHORT_CAPACITY;
+    source.room = SHORT_CAPACITY;
   }
 
-  /** The null-terminated copy that `c_str()` and `data()` return, one array while the bytes stay the same. */
-  cString(): ArrayStore {
-    if (this.cStringCache?.bytes !== this.bytes)
-      this.cStringCache = { bytes: this.bytes, store: cStringStore(this.bytes) };
-    return this.cStringCache.store;
+  characterBuffer(): Store {
+    return (this.buffer ??= new StringBuffer(this));
+  }
+
+  private invalidateBuffer(): void {
+    endLifetime(this.buffer);
+    this.buffer = undefined;
   }
 
   children(): Iterable<Value> {
-    return this.cStringCache ? [this.cStringCache.store] : [];
+    return this.buffer ? [this.buffer] : [];
   }
 
   get length(): number {
@@ -114,6 +136,28 @@ export class StringValue extends Store {
   }
 }
 
+class StringBuffer extends Store {
+  constructor(public owner: StringValue) {
+    super();
+  }
+
+  get length(): number {
+    return this.owner.length + 1;
+  }
+
+  get(index: number): Value {
+    this.checkAlive();
+    if (index === this.owner.length) return 0;
+    return this.owner.get(index);
+  }
+
+  set(index: number, value: Value): void {
+    this.checkAlive();
+    if (index === this.owner.length && value === 0) return;
+    this.owner.set(index, value);
+  }
+}
+
 export function decodeUtf8(bytes: string): string {
   // oxlint-disable-next-line no-control-regex -- ASCII text decodes to itself.
   if (/^[\u0000-\u007F]*$/.test(bytes)) return bytes;
@@ -123,7 +167,7 @@ export function decodeUtf8(bytes: string): string {
 const NPOS = 0xff_ff_ff_ff_ff_ff_ff_ffn;
 const MAX_SIZE = 0x7f_ff_ff_ff_ff_ff_ff_f6n;
 /** The longest string that the interpreter makes, which is far shorter than `max_size()`. */
-const MAX_LENGTH = 1_000_000;
+const MAX_LENGTH = LIMITS.maxStringLength;
 
 /** Reads the bytes of an argument that is a `std::string` (by reference) or a `const char*`. */
 function textOf(value: unknown): string {
@@ -296,10 +340,10 @@ export function stringClass(library: Library): ClassInfo {
     const at = BigInt(index as bigint);
     if (at >= BigInt(s.bytes.length)) {
       if (checked) return outOfRange(frame);
-      if (at === BigInt(s.bytes.length)) return new Ptr(cStringStore(''), 0);
+      if (at === BigInt(s.bytes.length)) return new Ptr(s.characterBuffer(), Number(at));
       throw new CppRuntimeError('outOfBounds');
     }
-    return new Ptr(s, Number(at));
+    return new Ptr(s.characterBuffer(), Number(at));
   };
   for (const isConst of [false, true]) {
     const charRef = { kind: 'reference', to: isConst ? withConst(CHAR) : CHAR } as Type;
@@ -310,7 +354,7 @@ export function stringClass(library: Library): ClassInfo {
       charRef,
       (s) => {
         if (s.bytes.length === 0) throw new CppRuntimeError('emptyContainer');
-        return new Ptr(s, 0);
+        return new Ptr(s.characterBuffer(), 0);
       },
       { isConst }
     );
@@ -320,7 +364,7 @@ export function stringClass(library: Library): ClassInfo {
       charRef,
       (s) => {
         if (s.bytes.length === 0) throw new CppRuntimeError('emptyContainer');
-        return new Ptr(s, s.bytes.length - 1);
+        return new Ptr(s.characterBuffer(), s.bytes.length - 1);
       },
       { isConst }
     );
@@ -542,8 +586,9 @@ export function stringClass(library: Library): ClassInfo {
     target.moveFrom(moved);
   });
   for (const name of ['c_str', 'data']) {
-    method(name, [], CONST_CHAR_PTR, (s) => new Ptr(s.cString(), 0), { isConst: true });
+    method(name, [], CONST_CHAR_PTR, (s) => new Ptr(s.characterBuffer(), 0), { isConst: true });
   }
+  method('data', [], pointerTo(CHAR), (s) => new Ptr(s.characterBuffer(), 0));
   method(
     'copy',
     [pointerTo(CHAR), SIZE_T, SIZE_T],
@@ -564,10 +609,20 @@ export function stringClass(library: Library): ClassInfo {
 const make = (bytes: string): StringValue => new StringValue(bytes);
 
 const checkLength = (frame: Frame, bytes: string): string => {
+  checkStringLength(bytes.length);
   frame.runtime.reserve(Math.ceil(bytes.length / 8));
-  if (bytes.length > MAX_LENGTH) throw new CppRuntimeError('custom', '文字列が長すぎます。');
   return bytes;
 };
+
+function checkStringLength(length: number): void {
+  if (length > MAX_LENGTH) throw new CppRuntimeError('custom', '文字列が長すぎます。');
+}
+
+function appendBytes(frame: Frame, left: string, right: string): string {
+  checkStringLength(left.length + right.length);
+  frame.runtime.reserve(Math.ceil((left.length + right.length) / 8));
+  return left + right;
+}
 
 const self = (value: StringValue): Ptr => new Ptr(new SelfBox(value), 0);
 
@@ -713,8 +768,7 @@ function concatenation(
   const bytesOf = (value: string | StringValue): string => (value instanceof StringValue ? value.bytes : value);
   return (frame) => {
     const operands = [a(frame), b(frame)];
-    const bytes = bytesOf(operands[0]) + bytesOf(operands[1]);
-    frame.runtime.reserve(Math.ceil(bytes.length / 8));
+    const bytes = appendBytes(frame, bytesOf(operands[0]), bytesOf(operands[1]));
     const source = operands.at(reused);
     if (reused < 0 || !(source instanceof StringValue)) return new StringValue(bytes);
     const result = new StringValue('');
@@ -808,7 +862,7 @@ function stringOperator(
           const bytes = source(frame);
           const place = location(frame) as Ptr;
           const target = place.read() as StringValue;
-          target.bytes = append ? target.bytes + bytes : bytes;
+          target.bytes = append ? appendBytes(frame, target.bytes, bytes) : checkLength(frame, bytes);
           return place;
         },
       };
@@ -838,9 +892,8 @@ function stringOperator(
         run: (frame) => {
           const target = (object(frame) as Ptr).read() as StringValue;
           const at = Number(index(frame) as bigint);
-          if (at === target.bytes.length) return new Ptr(cStringStore(''), 0);
           if (at < 0 || at > target.bytes.length) throw new CppRuntimeError('outOfBounds');
-          return new Ptr(target, at);
+          return new Ptr(target.characterBuffer(), at);
         },
       };
     }

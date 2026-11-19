@@ -24,6 +24,7 @@ export type Entity =
 
 export class Scope {
   readonly names = new Map<string, Entity>();
+  usesStd = false;
   /** The variables declared in this block whose destruction has an effect, by slot. */
   readonly destructibles = new Map<number, (frame: Frame, value: Value) => void>();
   /** The slots of the variables declared in this block, which go out of scope with it. */

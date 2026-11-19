@@ -62,7 +62,7 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
     finalTurtles = runtime.world.turtleTraces();
   };
   try {
-    runtime.globals = program.createGlobals();
+    runtime.globals = program.createGlobals(runtime);
     const startup = runtime.pushFrame(undefined, undefined, undefined, undefined);
     try {
       program.initializeGlobals(startup);

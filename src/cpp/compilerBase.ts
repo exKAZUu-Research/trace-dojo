@@ -69,7 +69,7 @@ export abstract class CompilerBase {
   findGlobalName(name: string): Entity | undefined {
     const own = this.globalScope.names.get(name);
     const library = this.library.global(name);
-    const std = this.usesStd ? this.library.std(name) : undefined;
+    const std = this.usesStd || this.context.scopes.some((scope) => scope.usesStd) ? this.library.std(name) : undefined;
     const found = own ?? library;
     if (found && std && found !== std) {
       if (found.kind === 'functions' && std.kind === 'functions') {

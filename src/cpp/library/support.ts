@@ -105,16 +105,19 @@ export function throwLibrary(frame: Frame, cls: ClassInfo, message: string): nev
   return frame.runtime.throwException(frame, new CppException(object, classType(cls)));
 }
 
-/** The bytes of a null-terminated string a `const char*` points to. */
-export function readCString(pointer: Ptr): string {
+/** Reads up to `limit` bytes from a character buffer, stopping at a null byte. */
+export function readCString(pointer: Ptr, limit = Number.POSITIVE_INFINITY): string {
+  if (limit === 0) return '';
   const store = pointer.target();
   let bytes = '';
-  for (let index = pointer.index; ; index++) {
+  const end = pointer.index + limit;
+  for (let index = pointer.index; index < end; index++) {
     if (index >= store.length) throw new CppRuntimeError('unterminatedString');
     const value = store.get(index) as number;
     if (value === 0) return bytes;
     bytes += String.fromCodePoint(value & 0xff);
   }
+  return bytes;
 }
 
 /** A new null-terminated array of `char` holding bytes, as `c_str()` and `what()` return. */

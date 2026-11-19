@@ -2,7 +2,6 @@ import { fma } from '../../c/library/binaryFloat';
 import { BINARY, UNARY } from '../../c/library/mathFunctions';
 import { CppRuntimeError, ProgramExit } from '../errors';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { invoke } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import type { Entity } from '../scopes';
 import {
@@ -29,7 +28,7 @@ import {
   USHORT,
   VOID,
 } from '../types';
-import { Box, Ptr, type Value } from '../values';
+import { Box, Ptr } from '../values';
 import { algorithmFunctions } from './algorithms';
 import { makePair } from './associative';
 import { cFunctions } from './cFunctions';
@@ -179,11 +178,6 @@ export class Library {
 
   get stringType(): Type {
     return classType(this.stringClass);
-  }
-
-  /** Calls a function the program wrote, for an algorithm that calls back. */
-  invokeWith(frame: Frame, fn: FunctionInfo, args: unknown[], row: number): Value | Ptr {
-    return invoke(frame, fn, args, undefined, row);
   }
 
   fileStore(name: 'stdout' | 'stderr'): Box {

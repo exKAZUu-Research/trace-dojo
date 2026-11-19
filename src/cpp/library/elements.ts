@@ -1,6 +1,6 @@
 import { CppRuntimeError } from '../errors';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { invoke, zeroOf } from '../objectCompiler';
+import { destroyTemporaries, zeroOf } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import { type ClassInfo, type FunctionInfo, isArithmetic, type Type, typeName } from '../types';
 import { type ArrayStore, Box, CObject, FunctionRef, Ptr, Store, UNINIT, type Value } from '../values';
@@ -130,7 +130,7 @@ export function lessThan(type: Type): ((a: Value, b: Value) => number) | undefin
     return (a, b) => {
       const x = a as number | bigint;
       const y = b as number | bigint;
-      return x < y ? -1 : x > y ? 1 : 0;
+      return x === y ? 0 : x < y ? -1 : x > y ? 1 : Number.NaN;
     };
   }
   if (type.kind === 'pointer') {
@@ -158,7 +158,8 @@ export function lessThan(type: Type): ((a: Value, b: Value) => number) | undefin
     return (a, b) => {
       const x = a as CObject;
       const y = b as CObject;
-      return compareFirst(x.values[0], y.values[0]) || compareSecond(x.values[1], y.values[1]);
+      const order = compareFirst(x.values[0], y.values[0]);
+      return order === 0 ? compareSecond(x.values[1], y.values[1]) : order;
     };
   }
   if (library && ['vector', 'deque', 'array', 'list'].includes(library.kind)) {
@@ -213,18 +214,8 @@ export function comparatorOf(
 ): ((frame: Frame, callee: Value, ...args: Value[]) => Value) | undefined {
   const types = Array.isArray(elementType) ? elementType : Array.from({ length: arity }, () => elementType);
   if (functions) {
-    const args = types.map((type) => ({ type, isLvalue: true, row, run: () => UNINIT }));
-    const resolved = compiler.resolve('比較の関数', functions, args, undefined, row);
-    const fn = resolved.fn;
-    if (fn.owner && !fn.isStatic) return compiler.error(row, `メンバ関数 ${fn.displayName} は、関数として渡せません。`);
-    return (frame, _callee, ...values) =>
-      invoke(
-        frame,
-        fn,
-        values.map((value, index) => (fn.params[index].type.kind === 'reference' ? locationOf(value) : value)),
-        undefined,
-        row
-      ) as Value;
+    const call = functionCallback(compiler, functions, types, row);
+    return (frame, _callee, ...values) => call(frame, ...values.map(locationOf));
   }
   if (argumentType.kind === 'class' && argumentType.cls.library?.kind === 'functor') {
     const operation = argumentType.cls.library.apply?.(types[0]);
@@ -234,6 +225,35 @@ export function comparatorOf(
     return (_frame, _callee, a, b) => operation(a, b);
   }
   return undefined;
+}
+
+export function functionCallback(
+  compiler: ExpressionCompiler,
+  candidates: FunctionInfo[],
+  types: Type[],
+  row: number
+): (frame: Frame, ...locations: Ptr[]) => Value {
+  const argumentsByCall: Ptr[][] = [];
+  const args = types.map((type, index) => ({
+    type,
+    isLvalue: true,
+    row,
+    run: () => argumentsByCall.at(-1)?.[index],
+  }));
+  const resolved = compiler.resolve('関数', candidates, args, undefined, row);
+  const { fn } = resolved;
+  if (fn.owner && !fn.isStatic) return compiler.error(row, `メンバ関数 ${fn.displayName} は、関数として渡せません。`);
+  const call = compiler.callExpr(resolved, args, undefined, row);
+  return (frame, ...locations) => {
+    const mark = frame.temporaries.length;
+    argumentsByCall.push(locations);
+    try {
+      return call.run(frame) as Value;
+    } finally {
+      argumentsByCall.pop();
+      destroyTemporaries(frame, mark);
+    }
+  };
 }
 
 /** Calls a predicate the program passed, which takes elements and gives a value that converts to `bool`. */

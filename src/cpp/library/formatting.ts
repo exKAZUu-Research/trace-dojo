@@ -1,6 +1,6 @@
 import { formatFixed, formatGeneral, formatHex, formatScientific } from '../../c/library/floatFormat';
 import { CppRuntimeError } from '../errors';
-import type { Type } from '../types';
+import { type IntName, isWide, type Type } from '../types';
 import { Ptr, type Value } from '../values';
 import { readCString } from './support';
 
@@ -112,7 +112,7 @@ export function formatPrintf(format: string, args: PrintfArgument[], spend: (cos
     if (index >= format.length) break;
     spec.conversion = format[index++];
     spend(Math.max(spec.width ?? 0, spec.precision ?? 0));
-    const field = convert(spec, take);
+    const field = convert(spec, take, out.length);
     if (field !== undefined) out += pad(spec, field);
   }
   return out;
@@ -126,7 +126,7 @@ function integerOf(arg: PrintfArgument, wide: boolean): bigint {
 }
 
 // code-gauge-allow functionNcss 40 -- One case per printf conversion.
-function convert(spec: Spec, take: () => PrintfArgument): string | undefined {
+function convert(spec: Spec, take: () => PrintfArgument, count: number): string | undefined {
   const { conversion, length } = spec;
   const wide = ['l', 'll', 'j', 'z', 't', 'q'].includes(length);
   switch (conversion) {
@@ -153,8 +153,7 @@ function convert(spec: Spec, take: () => PrintfArgument): string | undefined {
       const arg = take();
       if (!(arg.value instanceof Ptr) || arg.type.kind !== 'pointer') throw new CppRuntimeError('formatArgumentType');
       if (arg.value.isNull) return spec.precision === undefined ? '(null)' : '(null)'.slice(0, spec.precision);
-      const bytes = readCString(arg.value);
-      return spec.precision === undefined ? bytes : bytes.slice(0, spec.precision);
+      return readCString(arg.value, spec.precision);
     }
     case 'p': {
       const arg = take();
@@ -177,7 +176,7 @@ function convert(spec: Spec, take: () => PrintfArgument): string | undefined {
       return '%';
     }
     case 'n': {
-      take();
+      writeCount(take(), length, count);
       return undefined;
     }
     default: {
@@ -185,6 +184,27 @@ function convert(spec: Spec, take: () => PrintfArgument): string | undefined {
       return conversion;
     }
   }
+}
+
+const COUNT_TYPES: Record<string, IntName> = {
+  '': 'int',
+  hh: 'schar',
+  h: 'short',
+  l: 'long',
+  ll: 'llong',
+  j: 'long',
+  z: 'long',
+  t: 'long',
+  q: 'llong',
+};
+
+function writeCount(arg: PrintfArgument, length: string, count: number): void {
+  const type = arg.type.kind === 'pointer' ? arg.type.to : undefined;
+  if (type?.kind !== 'int' || type.name !== COUNT_TYPES[length] || type.isConst || !(arg.value instanceof Ptr))
+    throw new CppRuntimeError('formatArgumentType');
+  const wide = isWide(type);
+  const value = narrow(BigInt(count), length, true, wide);
+  arg.value.write(wide ? value : Number(value));
 }
 
 /**

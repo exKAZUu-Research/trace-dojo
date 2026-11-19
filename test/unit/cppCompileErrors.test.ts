@@ -24,6 +24,7 @@ test.each([
   ['a private static member function', 'class A { static void f() {} };\nint main() {\n  A::f(); }', 2],
   ['a private copy constructor', 'class A { A(const A&) {} public: A() {} };\nint main() { A a;\n  A b = a; }', 2],
   ['a private destructor', 'class A { ~A() {} public: A() {} };\nint main() {\n  A a; }', 2],
+  ['braced construction through a private constructor', 'class A { A(int) {} };\nint main() {\n  A a{1}; }', 2],
   [
     'an assignment to a class with a const member',
     'struct D { const int c; };\nint main() { D x{1}, y{2};\n  x = y; }',
@@ -44,6 +45,29 @@ test.each([
   ['a case jump over an initializer', 'int main() { switch (0) { int n = 1;\n  case 0: return n; } }', 1],
   ['a redeclaration in the outermost for body', 'int main() { for (int i = 0; i < 1; i++) {\n  int i = 5; } }', 1],
   ['a redeclaration in the outermost range-for body', 'int main() { for (int i : {1, 2}) {\n  int i = 5; } }', 1],
+  [
+    'a using directive after leaving its block',
+    '#include <iostream>\nint main() { { using namespace std; cout << 1; }\n  cout << 2; }',
+    2,
+  ],
+  ['a duplicate base initializer', 'struct Base {};\nstruct Derived : Base {\n  Derived() : Base(), Base() {} };', 2],
+  ['a catch-all before another handler', 'int main() { try { throw 1; }\n  catch (...) {} catch (int) {} }', 1],
+  ['a void catch parameter', 'int main() { try { throw 1; }\n  catch (void) {} }', 1],
+  [
+    'sorting a const range',
+    '#include <algorithm>\n#include <vector>\nint main() { const std::vector<int> v{2,1};\n  std::sort(v.begin(), v.end()); }',
+    3,
+  ],
+  [
+    'copying to a const iterator',
+    '#include <algorithm>\n#include <vector>\nint main() { std::vector<int> v{1}; int data[1] = {2};\n  std::copy(data, data + 1, v.cbegin()); }',
+    3,
+  ],
+  [
+    'assigning through a search of a const C string',
+    "#include <cstring>\nint main() { const char word[] = \"abc\";\n  *std::strchr(word, 'b') = 'd'; }",
+    2,
+  ],
   ['an abstract class as a parameter type', 'struct A { virtual void h() = 0; };\nvoid g(A a) {}', 1],
   ['an int argument between double and bool', 'void f(double) {}\nvoid f(bool) {}\nint main() {\n  f(1); }', 3],
   ['a chained comparison', 'int main() { int a = 1;\n  bool b = 0 < a < 2; }', 1],

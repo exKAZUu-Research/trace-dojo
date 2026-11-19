@@ -28,7 +28,6 @@ function writeBytes(target: Ptr, bytes: string): void {
 
 /** The functions of the C library that C++ programs use, in `std` and in the global namespace alike. */
 export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
-  void library;
   const functions = new Map<string, FunctionInfo[]>();
   const add = (fn: FunctionInfo): void => {
     functions.set(fn.name, [...(functions.get(fn.name) ?? []), fn]);
@@ -202,20 +201,22 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
       return target;
     })
   );
-  add(
-    native('strchr', [CONST_CHAR_PTR, INT], CHAR_POINTER, ([text, char]) => {
-      const bytes = readCString(text as Ptr);
-      const code = asNumber(char) & 0xff;
-      const index = code === 0 ? bytes.length : bytes.indexOf(String.fromCodePoint(code));
-      return index < 0 ? NULL_PTR : (text as Ptr).offset(index);
-    })
-  );
-  add(
-    native('strstr', [CONST_CHAR_PTR, CONST_CHAR_PTR], CHAR_POINTER, ([text, needle]) => {
-      const index = readCString(text as Ptr).indexOf(readCString(needle as Ptr));
-      return index === -1 ? NULL_PTR : (text as Ptr).offset(index);
-    })
-  );
+  for (const pointer of [CHAR_POINTER, CONST_CHAR_PTR]) {
+    add(
+      native('strchr', [pointer, INT], pointer, ([text, char]) => {
+        const bytes = readCString(text as Ptr);
+        const code = asNumber(char) & 0xff;
+        const index = code === 0 ? bytes.length : bytes.indexOf(String.fromCodePoint(code));
+        return index < 0 ? NULL_PTR : (text as Ptr).offset(index);
+      })
+    );
+    add(
+      native('strstr', [pointer, CONST_CHAR_PTR], pointer, ([text, needle]) => {
+        const index = readCString(text as Ptr).indexOf(readCString(needle as Ptr));
+        return index === -1 ? NULL_PTR : (text as Ptr).offset(index);
+      })
+    );
+  }
   add(native('atoi', [CONST_CHAR_PTR], INT, ([text]) => atoi(text)));
   add(
     native('atol', [CONST_CHAR_PTR], LONG, ([text]) => {

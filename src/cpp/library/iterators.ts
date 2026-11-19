@@ -35,7 +35,7 @@ export function randomAccessIterator(
   const elementType = isConst ? withConst(element) : element;
   cls.library = {
     kind: 'iterator',
-    args: [element],
+    args: [elementType],
     isReverse,
     iteratorCategory: category,
     size: 8,

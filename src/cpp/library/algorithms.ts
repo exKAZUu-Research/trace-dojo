@@ -1,4 +1,5 @@
-import { toInt32 } from '../../c/arith';
+import { binaryOperation, convertScalar, type Scalar } from '../../c/arith';
+import { commonType, promote } from '../../c/types';
 import { CompileError } from '../../interpreter/diagnostics';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
@@ -25,7 +26,17 @@ import {
 import { CObject, Ptr, type Store, type Value } from '../values';
 import { pairClass } from './associative';
 import type { SequenceValue } from './containerValues';
-import { comparatorOf, elementOperations, equalTo, lessThan, moveValue, truthy } from './elements';
+import {
+  comparatorOf,
+  type ElementOperations,
+  elementOperations,
+  equalTo,
+  functionCallback,
+  lessThan,
+  moveValue,
+  truthy,
+} from './elements';
+import { elementLocation } from './iterators';
 import type { IteratorCategory } from './libraryClass';
 import type { EngineValue } from './random';
 import { uniformInteger } from './random';
@@ -83,6 +94,10 @@ class Range {
     return this.store.get(this.index(position));
   }
 
+  location(position: number): Ptr {
+    return new Ptr(this.store, this.index(position));
+  }
+
   set(position: number, value: Value): void {
     this.store.set(this.index(position), value);
   }
@@ -107,7 +122,7 @@ class Output {
     private readonly start: Ptr,
     private readonly info: IteratorInfo,
     private readonly frame: Frame,
-    private readonly copy: (frame: Frame, value: Value) => Value
+    private readonly operations: ElementOperations
   ) {}
 
   write(value: Value): void {
@@ -115,11 +130,11 @@ class Output {
       const target = this.start.read();
       this.frame.runtime.reserve(1);
       if (target instanceof StringValue) target.bytes += String.fromCodePoint(Number(value) & 0xff);
-      else (target as SequenceValue).items.push(this.copy(this.frame, value));
+      else (target as SequenceValue).items.push(this.operations.copy(this.frame, value));
       return;
     }
     const index = this.info.isReverse ? this.start.index - 1 - this.position : this.start.index + this.position;
-    this.start.target().set(index, this.copy(this.frame, value));
+    assignElement(this.frame, new Ptr(this.start.target(), index), this.operations, value);
     this.position++;
   }
 
@@ -134,6 +149,18 @@ class Output {
 
 type Less = (a: Value, b: Value) => boolean;
 
+const ARRAY_REFERENCE_FUNCTIONS = new Set([
+  'begin',
+  'end',
+  'cbegin',
+  'cend',
+  'rbegin',
+  'rend',
+  'size',
+  'advance',
+  'swap',
+]);
+
 /** The function templates of `<algorithm>`, `<numeric>`, `<iterator>`, and `<utility>`. */
 // code-gauge-allow functionNcss 400 -- One definition per algorithm, each a few lines.
 export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]> {
@@ -143,11 +170,19 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     name: string,
     instantiate: (args: Expr[], templateArgs: Type[] | undefined) => FunctionInfo | undefined
   ): void => {
-    functions.set(name, [...(functions.get(name) ?? []), generic(name, instantiate)]);
+    const overload = generic(name, (args, templateArgs) =>
+      instantiate(
+        ARRAY_REFERENCE_FUNCTIONS.has(name)
+          ? args
+          : args.map((arg) => (arg.type.kind === 'array' ? compiler().rvalue(arg) : arg)),
+        templateArgs
+      )
+    );
+    functions.set(name, [...(functions.get(name) ?? []), overload]);
   };
   /** The comparison an algorithm uses: the argument at `index`, or `<`. */
   const lessOf = (args: Expr[], index: number, element: Type): ((frame: Frame) => Less) | undefined =>
-    orderOf(args[index], [unqualified(element), unqualified(element)]);
+    orderOf(args[index], [element, element]);
   /** The comparison `arg` makes between values of the two types, or `<` without it. */
   const orderOf = (arg: Expr | undefined, types: Type[]): ((frame: Frame) => Less) | undefined => {
     if (!arg) {
@@ -166,9 +201,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     arity = 1
   ): ((frame: Frame, ...values: Value[]) => Value) | undefined => {
     if (!arg) return undefined;
-    const types = Array.isArray(element)
-      ? element.map((type) => unqualified(type))
-      : Array.from({ length: arity }, () => unqualified(element));
+    const types = Array.isArray(element) ? element : Array.from({ length: arity }, () => element);
     if (arg.functions) {
       const call = comparatorOf(compiler(), VOID, arg.functions.candidates, types, arg.row);
       return call ? (frame, ...values) => call(frame, undefined, ...values) : undefined;
@@ -195,8 +228,8 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   // Sorting -------------------------------------------------------------------------------------------------------
   for (const name of ['sort', 'stable_sort']) {
     define(name, (args) => {
-      const info = rangeAt(args, 0);
-      if (!info || args.length > 3 || isConstType(info.element)) return;
+      const info = writableRangeAt(args, 0);
+      if (!info || args.length > 3) return;
       checkCategory(name, info, 'randomAccess', args[0].row);
       const less = lessOf(args, 2, info.element);
       if (!less)
@@ -214,7 +247,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     });
   }
   define('reverse', (args) => {
-    const info = rangeAt(args, 0);
+    const info = writableRangeAt(args, 0);
     if (!info || args.length !== 2) return;
     checkCategory('reverse', info, 'bidirectional', args[0].row);
     return native('reverse', params(args), VOID, ([first, last]) => {
@@ -225,7 +258,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   });
   for (const name of ['next_permutation', 'prev_permutation']) {
     define(name, (args) => {
-      const info = rangeAt(args, 0);
+      const info = writableRangeAt(args, 0);
       if (!info || args.length > 3) return;
       checkCategory(name, info, 'bidirectional', args[0].row);
       const less = lessOf(args, 2, info.element);
@@ -239,7 +272,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     });
   }
   define('shuffle', (args) => {
-    const info = rangeAt(args, 0);
+    const info = writableRangeAt(args, 0);
     if (!info || args.length !== 3 || args[2].type.kind !== 'class' || args[2].type.cls.library?.kind !== 'engine')
       return;
     checkCategory('shuffle', info, 'randomAccess', args[0].row);
@@ -421,44 +454,41 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
 
   // Modifying -------------------------------------------------------------------------------------------------------
   define('fill', (args) => {
-    const info = rangeAt(args, 0);
-    if (!info || args.length !== 3 || isConstType(info.element)) return;
-    const value = tryCompile(() => compiler().convert(args[2], unqualified(info.element), args[2].row));
+    const info = writableRangeAt(args, 0);
+    if (!info || args.length !== 3) return;
+    const itemType = constRef(unqualified(info.element));
+    const value = tryCompile(() => compiler().convert(args[2], itemType, args[2].row));
     if (!value) return;
     const ops = elementOperations(compiler(), unqualified(info.element), args[0].row);
-    return native(
-      'fill',
-      [...params(args).slice(0, 2), unqualified(info.element)],
-      VOID,
-      ([first, last, item], { frame }) => {
-        const values = range(first, last, info);
-        for (let index = 0; index < values.length; index++) values.set(index, ops.copy(frame, item as Value));
-        return;
-      }
-    );
+    return native('fill', [...params(args).slice(0, 2), itemType], VOID, ([first, last, item], { frame }) => {
+      const values = range(first, last, info);
+      const source = (item as Ptr).read();
+      for (let index = 0; index < values.length; index++) assignElement(frame, values.location(index), ops, source);
+      return;
+    });
   });
   define('iota', (args) => {
-    const info = rangeAt(args, 0);
-    if (!info || args.length !== 3 || !isArithmetic(unqualified(info.element))) return;
+    const info = writableRangeAt(args, 0);
+    if (!info || args.length !== 3) return;
     const element = unqualified(info.element);
-    return native('iota', [...params(args).slice(0, 2), element], VOID, ([first, last, start]) => {
+    const source = unqualified(args[2].type);
+    if (!isArithmetic(element) || !isArithmetic(source) || source.name === 'bool') return;
+    const incrementType = source.kind === 'int' ? promote(source) : source;
+    const add = binaryOperation('+', incrementType);
+    const one = convertScalar(1, { kind: 'int', name: 'int' }, incrementType);
+    return native('iota', params(args), VOID, ([first, last, start]) => {
       const values = range(first, last, info);
-      let current = start as number | bigint;
+      let current = start as Scalar;
       for (let index = 0; index < values.length; index++) {
-        values.set(index, current);
-        current =
-          typeof current === 'bigint'
-            ? current + 1n
-            : element.kind === 'int'
-              ? toIntValue(current + 1, element)
-              : current + 1;
+        values.set(index, convertScalar(current, source, element));
+        current = convertScalar(add(convertScalar(current, source, incrementType), one), incrementType, source);
       }
       return;
     });
   });
   for (const name of ['replace', 'replace_if']) {
     define(name, (args) => {
-      const info = rangeAt(args, 0);
+      const info = writableRangeAt(args, 0);
       if (!info || args.length !== 4) return;
       const predicate = name === 'replace_if' ? predicateOf(args[2], info.element) : undefined;
       const equal = name === 'replace' ? valueEquality(compiler(), info.element, args[2]) : undefined;
@@ -472,7 +502,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         for (let index = 0; index < values.length; index++) {
           const item = values.get(index);
           if (predicate ? truthy(predicate(frame, item)) : (equal as (a: Value, b: Value) => boolean)(item, target))
-            values.set(index, ops.copy(frame, value));
+            assignElement(frame, values.location(index), ops, value);
         }
         return;
       });
@@ -480,7 +510,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   }
   for (const name of ['remove', 'remove_if', 'unique']) {
     define(name, (args) => {
-      const info = rangeAt(args, 0);
+      const info = writableRangeAt(args, 0);
       if (!info) return;
       if (name === 'unique' ? args.length > 3 : args.length !== 3) return;
       let keep: (frame: Frame, item: Value, previous: Value | undefined) => boolean;
@@ -525,7 +555,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     });
   }
   define('rotate', (args) => {
-    const info = rangeAt(args, 0);
+    const info = writableRangeAt(args, 0);
     if (!info || args.length !== 3) return;
     return native('rotate', params(args), unqualified(args[0].type), ([first, middle, last]) => {
       const values = range(first, last, info);
@@ -566,11 +596,12 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     });
   });
   define('iter_swap', (args) => {
-    const a = iteratorInfo(unqualified(args[0]?.type ?? VOID));
-    if (!a || args.length !== 2) return;
+    const a = outputOf(args[0]);
+    const b = outputOf(args[1]);
+    if (!a || !b || a.isOutput || b.isOutput || args.length !== 2) return;
     return native('iter_swap', params(args), VOID, ([x, y]) => {
-      const p = x as Ptr;
-      const q = y as Ptr;
+      const p = elementLocation(x as Ptr, a.isReverse);
+      const q = elementLocation(y as Ptr, b.isReverse);
       const value = p.read();
       p.write(q.read());
       q.write(value);
@@ -589,7 +620,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const ops = elementOperations(compiler(), unqualified(output.element), args[2].row);
       return native(name, params(args), unqualified(args[2].type), ([first, last, start], { frame }) => {
         const values = range(first, last, info);
-        const out = new Output(start as Ptr, output, frame, ops.copy);
+        const out = new Output(start as Ptr, output, frame, ops);
         for (let index = 0; index < values.length; index++) {
           const item = values.get(index);
           if (!predicate || truthy(predicate(frame, item))) out.write(item);
@@ -618,7 +649,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
             second as IteratorInfo
           )
         : undefined;
-      const out = new Output(values[isBinary ? 3 : 2] as Ptr, output, frame, ops.copy);
+      const out = new Output(values[isBinary ? 3 : 2] as Ptr, output, frame, ops);
       for (let index = 0; index < source.length; index++) {
         const result = others
           ? operation(frame, source.get(index), others.get(index))
@@ -630,25 +661,12 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   });
   define('for_each', (args) => {
     const info = rangeAt(args, 0);
-    if (!info || args.length !== 3) return;
-    const action = predicateOf(args[2], info.element);
-    if (!action || !args[2].functions) return;
-    const fn = compiler().resolve(
-      '関数',
-      args[2].functions.candidates,
-      [{ type: info.element, isLvalue: true, row: args[2].row, run: () => {} }],
-      undefined,
-      args[2].row
-    ).fn;
-    const byReference = fn.params[0]?.type.kind === 'reference';
+    const callback = args[2];
+    if (!info || args.length !== 3 || !callback.functions) return;
+    const action = functionCallback(compiler(), callback.functions.candidates, [info.element], callback.row);
     return native('for_each', params(args), VOID, ([first, last], { frame }) => {
       const values = range(first, last, info);
-      for (let index = 0; index < values.length; index++) {
-        if (byReference) {
-          // A function taking a reference may change the element in place.
-          library.invokeWith(frame, fn, [values.iterator(index)], args[2].row);
-        } else action(frame, values.get(index));
-      }
+      for (let index = 0; index < values.length; index++) action(frame, values.location(index));
       return;
     });
   });
@@ -662,7 +680,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       initial.type.kind === 'array' ? { kind: 'pointer', to: initial.type.of } : initial.type
     );
     const combine = args[3]
-      ? predicateOf(args[3], info.element, 2)
+      ? predicateOf(args[3], [sumType, info.element])
       : accumulateStep(compiler(), sumType, info.element, initial.row);
     if (!combine) return;
     return native(
@@ -717,7 +735,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const ops = elementOperations(compiler(), unqualified(output.element), args[2].row);
     return native('partial_sum', params(args), unqualified(args[2].type), ([first, last, start], { frame }) => {
       const values = range(first, last, info);
-      const out = new Output(start as Ptr, output, frame, ops.copy);
+      const out = new Output(start as Ptr, output, frame, ops);
       let sum: Value | undefined;
       for (let index = 0; index < values.length; index++) {
         sum = sum === undefined ? values.get(index) : (add(frame, sum, values.get(index)) as Value);
@@ -815,7 +833,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         return native(
           name,
           [referenceTo(type)],
-          { kind: 'pointer', to: type.of },
+          { kind: 'pointer', to: name.startsWith('c') ? withConst(type.of) : type.of },
           ([array]) => new Ptr((array as Ptr).read() as Store, name.endsWith('end') ? length : 0)
         );
       }
@@ -881,7 +899,8 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   });
   define('back_inserter', (args) => {
     const container = args[0];
-    if (args.length !== 1 || !container.isLvalue || container.type.kind !== 'class') return;
+    if (args.length !== 1 || !container.isLvalue || container.type.kind !== 'class' || isConstType(container.type))
+      return;
     const kind = container.type.cls.library?.kind;
     if (kind !== 'vector' && kind !== 'deque' && kind !== 'list' && kind !== 'string') return;
     const cls = backInserter(library, container.type);
@@ -900,6 +919,11 @@ const rangeAt = (args: Expr[], index: number): IteratorInfo | undefined => {
   if (typeName(decayed(a.type)).replace('const_', '') !== typeName(decayed(b.type)).replace('const_', ''))
     return undefined;
   return info;
+};
+
+const writableRangeAt = (args: Expr[], index: number): IteratorInfo | undefined => {
+  const info = rangeAt(args, index);
+  return info && !isConstType(info.element) ? info : undefined;
 };
 
 const params = (args: Expr[]): Type[] =>
@@ -926,8 +950,10 @@ const tryCompile = <T>(make: () => T): T | undefined => {
   }
 };
 
-const outputOf = (arg: Expr | undefined): IteratorInfo | undefined =>
-  arg ? iteratorInfo(unqualified(arg.type)) : undefined;
+const outputOf = (arg: Expr | undefined): IteratorInfo | undefined => {
+  const info = arg ? iteratorInfo(decayed(arg.type)) : undefined;
+  return info && !isConstType(info.element) ? info : undefined;
+};
 
 /** `std::back_insert_iterator<Container>`, an output iterator that appends what an algorithm writes. */
 function backInserter(library: Library, container: Type): ClassInfo {
@@ -943,10 +969,8 @@ function backInserter(library: Library, container: Type): ClassInfo {
   return cls;
 }
 
-function toIntValue(value: number, type: Extract<Type, { kind: 'int' }>): number {
-  if (type.name === 'uint') return value >>> 0;
-  if (type.name === 'int') return toInt32(value);
-  return value;
+function assignElement(frame: Frame, location: Ptr, operations: ElementOperations, value: Value): void {
+  location.write(operations.assign(frame, location.readRaw(), value));
 }
 
 /** The common type `T` of two arguments of `const T&` parameters, or undefined when deduction fails. */
@@ -966,7 +990,10 @@ function valueEquality(
 ): ((a: Value, b: Value) => boolean) | undefined {
   const type = unqualified(element);
   const argType = unqualified(arg.type);
-  if (isArithmetic(type) && isArithmetic(argType)) return (a, b) => Number(a) === Number(b) || a === b;
+  if (isArithmetic(type) && isArithmetic(argType)) {
+    const promoted = commonType(type, argType);
+    return (a, b) => convertScalar(a as Scalar, type, promoted) === convertScalar(b as Scalar, argType, promoted);
+  }
   if (type.kind === 'class' && type.cls.library?.kind === 'string' && argType.kind === 'pointer') {
     return (a, b) => (a as unknown as { bytes: string }).bytes === readBytes(b as Ptr);
   }

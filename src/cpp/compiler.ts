@@ -5,8 +5,8 @@ import { CppException, CppRuntimeError } from './errors';
 import type { Expr } from './expr';
 import type { Library } from './library/registry';
 import { invoke, makeEach, newObject, virtualKey, zeroOf } from './objectCompiler';
-import { type CompiledFunction, type Eval, type Exec, type Frame, RETURN } from './runtime';
-import { type Entity, FunctionContext, type Scope } from './scopes';
+import { type CompiledFunction, type Eval, type Exec, type Frame, RETURN, type Runtime } from './runtime';
+import { type Entity, FunctionContext } from './scopes';
 import { type AutoDeduction, bindsDirectly, endScope, StatementCompiler } from './statementCompiler';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
@@ -41,7 +41,7 @@ export interface CompiledProgram {
   main: FunctionInfo;
   globals: GlobalInfo[];
   /** Creates each variable with static storage duration, zero-initialized, by its index. */
-  createGlobals: () => Box[];
+  createGlobals: (runtime: Runtime) => Box[];
   /** Initializes the variables with static storage duration before `main` runs, in declaration order. */
   initializeGlobals: (frame: Frame) => void;
   /** The static members and global variables learners see, by global index. */
@@ -87,7 +87,11 @@ export class Compiler extends StatementCompiler {
     return {
       main: mainFunction,
       globals: this.globals,
-      createGlobals: () => types.map((type) => new Box(staticZero(type))),
+      createGlobals: (runtime) =>
+        types.map((type) => {
+          if (type.kind === 'array') runtime.reserve(staticArraySlots(type));
+          return new Box(staticZero(type));
+        }),
       initializeGlobals: (frame) => {
         for (const { init } of this.globalInitializers) init(frame);
       },
@@ -140,11 +144,8 @@ export class Compiler extends StatementCompiler {
     if (!target) return;
     if (isNamespace) {
       if (target.text !== 'std') return this.unsupported(node.row, `名前空間 ${target.text}`);
-      if (this.context.fn) {
-        this.context.scope.names.set('\0std', { kind: 'namespace', name: 'std' });
-        this.usesStdLocally.add(this.context.scope);
-      }
-      this.usesStd = true;
+      if (this.context.fn) this.context.scope.usesStd = true;
+      else this.usesStd = true;
       return;
     }
     if (target.type !== 'qualified_identifier') return this.unsupported(node.row, `using ${target.text}`);
@@ -154,8 +155,6 @@ export class Compiler extends StatementCompiler {
     const name = (fieldOf(target, 'name') as Syntax).text;
     (this.context.fn ? this.context.scope : this.globalScope).names.set(name, entity);
   }
-
-  private readonly usesStdLocally = new Set<Scope>();
 
   // Classes ----------------------------------------------------------------------------------------------------------
 
@@ -259,6 +258,13 @@ export class Compiler extends StatementCompiler {
 
   private memberDeclaration(cls: ClassInfo, node: Syntax, access: Access): void {
     const declarators = fieldsOf(node, 'declarator');
+    const type = fieldOf(node, 'type');
+    if (
+      type &&
+      (type.type === 'class_specifier' || type.type === 'struct_specifier') &&
+      (fieldOf(type, 'body') || declarators.length === 0)
+    )
+      return this.unsupported(type.row, 'クラスの中のクラスの宣言');
     if (declarators.length === 0) return this.error(node.row, 'メンバの名前を書いてください。');
     const firstDeclared = declarators[0];
     if (this.isFunctionDeclarator(firstDeclared)) {
@@ -644,12 +650,13 @@ export class Compiler extends StatementCompiler {
     for (const initializer of list?.children ?? []) {
       if (initializer.type !== 'field_initializer') continue;
       const nameNode = initializer.children[0];
-      const name = nameNode.type === 'qualified_identifier' ? nameNode.text : nameNode.text;
+      const { text: name } = nameNode;
       if (name === cls.name) {
         delegate = initializer;
         continue;
       }
       if (cls.base && this.namesClass(nameNode, cls.base)) {
+        if (baseInitializer) this.error(initializer.row, `親クラス ${name} の初期化が重複しています。`);
         baseInitializer = initializer;
         continue;
       }
@@ -1320,13 +1327,14 @@ export class Compiler extends StatementCompiler {
       });
       return () => {};
     }
-    let isDone = false;
+    const initialized = new WeakSet<Box>();
     const run = this.fullExpression(init.run);
     const store = this.staticStore(type, declarator.row);
     return (frame) => {
-      if (isDone) return;
-      isDone = true;
-      store(frame, frame.runtime.globals[index] as Box, run(frame));
+      const box = frame.runtime.globals[index] as Box;
+      if (initialized.has(box)) return;
+      store(frame, box, run(frame));
+      initialized.add(box);
     };
   }
 
@@ -1425,7 +1433,6 @@ export class Compiler extends StatementCompiler {
       return this.error(row, `${cls.name} は抽象クラス（純粋仮想関数があるクラス）なので、オブジェクトを作れません。`);
     if (cls.constructors.length > 0) {
       const resolved = this.resolve(`${cls.name} のコンストラクタ`, cls.constructors, [], undefined, row);
-      if (!resolved.fn.native) this.checkAccess(resolved.fn.access, cls, cls, row, `${cls.name} のコンストラクタ`);
       return this.constructWith(cls, resolved, [], row);
     }
     if (cls.isDefaultConstructorDeleted) return this.error(row, deletedDefaultMessage(cls));
@@ -1665,15 +1672,6 @@ export class Compiler extends StatementCompiler {
     if (length < 0) return this.error(size.row, '配列の大きさは負にできません。');
     return length;
   }
-
-  findName(name: string): Entity | undefined {
-    const found = super.findName(name);
-    if (found) return found;
-    if (this.usesStdLocally.size > 0 && this.context.scopes.some((scope) => this.usesStdLocally.has(scope))) {
-      return this.library.std(name);
-    }
-    return undefined;
-  }
 }
 
 /** The initializer-clauses of a braced list, which the elements of an aggregate take in order. */
@@ -1784,6 +1782,12 @@ function staticZero(type: Type): Value {
   if (type.kind === 'array') return new ArrayStore(Array.from({ length: type.length ?? 0 }, () => staticZero(type.of)));
   if (type.kind === 'class') return UNINIT;
   return zeroOf(type);
+}
+
+function staticArraySlots(type: Type): number {
+  if (type.kind !== 'array') return 0;
+  const length = type.length ?? 0;
+  return length === 0 ? 0 : length * (1 + staticArraySlots(type.of));
 }
 
 /** Copies a member's value as the implicit copy constructor does. */

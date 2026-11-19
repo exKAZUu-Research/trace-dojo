@@ -1027,9 +1027,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   private tryStatement(node: Syntax): Exec {
     if (fieldOf(node, 'body') === undefined) return this.error(node.row, 'try の後に {} を書いてください。');
     const body = this.compileBlock(fieldOf(node, 'body') as Syntax);
-    const handlers = node.children
-      .filter((child) => child.type === 'catch_clause')
-      .map((clause) => this.catchClause(clause));
+    const clauses = node.children.filter((child) => child.type === 'catch_clause');
+    const handlers = clauses.map((clause, index) => {
+      if (index < clauses.length - 1 && catchesAll(clause))
+        this.error(clause.row, 'catch (...) は最後の catch にしてください。');
+      return this.catchClause(clause);
+    });
     if (handlers.length === 0) return this.error(node.row, 'try の後に catch を書いてください。');
     const matches = (exception: CppException): boolean => handlers.some((handler) => handler.matches(exception));
     return (frame) => {
@@ -1057,16 +1060,19 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   } {
     const parameters = fieldOf(clause, 'parameters') as Syntax;
     const bodyNode = fieldOf(clause, 'body') as Syntax;
-    const param = parameters.children[0];
-    if (!param || parameters.text.replaceAll(/\s/g, '') === '(...)') {
+    const declarations = parameters.children.filter((child) => child.type !== 'comment');
+    if (catchesAll(clause)) {
       const body = this.compileBlock(bodyNode);
       return { matches: () => true, run: (frame) => body(frame) };
     }
+    if (declarations.length !== 1) return this.error(clause.row, 'catch の引数に型を1つ書いてください。');
+    const [param] = declarations;
     const base = this.specifiedType(param);
     const declaratorNode = fieldOf(param, 'declarator');
     const declared = declaratorNode ? this.applyDeclarator(base, declaratorNode) : { name: undefined, type: base };
     const handlerType = declared.type;
     const caught = unqualified(nonReference(handlerType));
+    if (caught.kind === 'void') this.error(clause.row, 'catch の型に void は使えません。');
     if (caught.kind === 'class' && caught.cls.isAbstract && handlerType.kind !== 'reference') {
       this.error(clause.row, `${caught.cls.name} は抽象クラスなので、値として catch できません。`);
     }
@@ -1132,6 +1138,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   needsDestruction(type: Type): boolean {
     return this.destroyerOf(type) !== undefined;
   }
+}
+
+function catchesAll(clause: Syntax): boolean {
+  const parameters = fieldOf(clause, 'parameters');
+  const tokens = parameters?.all.filter((parameter) => !['(', ')', 'comment'].includes(parameter.type));
+  return tokens?.length === 1 && ['...', 'variadic_parameter'].includes(tokens[0].type);
 }
 
 /** Whether a handler of type `handler` catches an exception of type `thrown` (C++20 [except.handle]). */

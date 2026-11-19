@@ -86,7 +86,7 @@ export function functorClass(library: Library, name: string, argument: Type | un
     },
   };
   cls.constructors = [nativeConstructor(cls, [], () => new CObject(cls, []))];
-  cls.operations = { copy: (_frame, value) => value, assign: (_frame, _target, source) => source };
+  cls.operations = { copy: () => new CObject(cls, []), assign: () => {} };
   return cls;
 }
 

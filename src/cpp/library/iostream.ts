@@ -12,6 +12,7 @@ import {
   isCharType,
   isConstType,
   LONG,
+  referenceTo,
   type Type,
   typeName,
   UINT,
@@ -26,6 +27,7 @@ import {
   asNumber,
   CONST_CHAR_PTR,
   constRef,
+  generic,
   native,
   nativeConstructor,
   readCString,
@@ -54,6 +56,8 @@ export const FLAGS = {
   floatfield: 0x1_00 | 0x4,
 } as const;
 
+const OPEN_MODE = { app: 0x01, ate: 0x02, binary: 0x04, in: 0x08, out: 0x10, trunc: 0x20 } as const;
+
 /** A stream: standard output or error, or a string stream, with its formatting state. */
 export class StreamValue extends Store {
   width = 0;
@@ -69,7 +73,10 @@ export class StreamValue extends Store {
   failed = false;
   atEnd = false;
 
-  constructor(readonly target: 'stdout' | 'stderr' | 'buffer') {
+  constructor(
+    readonly target: 'stdout' | 'stderr' | 'buffer',
+    readonly mode = OPEN_MODE.in | OPEN_MODE.out
+  ) {
     super();
   }
 
@@ -93,6 +100,10 @@ export class StreamValue extends Store {
   write(frame: Frame, bytes: string): void {
     if (!this.isGood) return;
     if (this.target === 'buffer') {
+      if (!(this.mode & OPEN_MODE.out)) {
+        this.failed = true;
+        return;
+      }
       const at = this.writePosition;
       this.buffer = this.buffer.slice(0, at) + bytes + this.buffer.slice(at + bytes.length);
       this.writePosition += bytes.length;
@@ -148,10 +159,11 @@ export class Streams {
     const cls = new ClassInfo('std::ios_base', 'class');
     cls.isComplete = true;
     cls.library = { kind: 'ios', args: [], size: 136, align: 8 };
-    for (const [name, value] of Object.entries(FLAGS)) {
+    for (const [name, value] of Object.entries({ ...FLAGS, ...OPEN_MODE })) {
       cls.constants.set(name, (row) => ({ type: UINT, isLvalue: false, row, run: () => value, constant: value }));
     }
     cls.memberTypes.set('fmtflags', UINT);
+    cls.memberTypes.set('openmode', UINT);
     return cls;
   }
 
@@ -175,18 +187,22 @@ export class Streams {
       assign: () => {},
     };
     if (name.includes('stringstream')) {
-      const make = (bytes: string): StreamValue => {
-        const stream = new StreamValue('buffer');
-        stream.buffer = bytes;
+      const defaultMode = (isInput ? OPEN_MODE.in : 0) | (isOutput ? OPEN_MODE.out : 0);
+      const requiredMode = isInput && isOutput ? 0 : defaultMode;
+      const make = (bytes: string, mode = defaultMode): StreamValue => {
+        const stream = new StreamValue('buffer', mode | requiredMode);
+        setStreamBuffer(stream, bytes);
         return stream;
       };
       cls.constructors = [
         nativeConstructor(cls, [], () => make('')),
+        nativeConstructor(cls, [UINT], ([mode]) => make('', asNumber(mode)), { isExplicit: true }),
         nativeConstructor(
           cls,
-          [constRef(this.library.stringType)],
-          ([text]) => make(((text as Ptr).read() as StringValue).bytes),
-          { isExplicit: true }
+          [constRef(this.library.stringType), UINT],
+          ([text, mode]) =>
+            make(((text as Ptr).read() as StringValue).bytes, mode === undefined ? defaultMode : asNumber(mode)),
+          { isExplicit: true, optional: 1 }
         ),
       ];
       addMethod(
@@ -198,10 +214,7 @@ export class Streams {
       addMethod(
         cls,
         native('str', [constRef(this.library.stringType)], VOID, ([text], { self }) => {
-          const stream = self as StreamValue;
-          stream.buffer = ((text as Ptr).read() as StringValue).bytes;
-          stream.position = 0;
-          stream.writePosition = 0;
+          setStreamBuffer(self as StreamValue, ((text as Ptr).read() as StringValue).bytes);
           return;
         })
       );
@@ -360,7 +373,7 @@ export class Streams {
       return compiler.error(row, `関数 ${right.functions.name} の後に (...) を書いて呼び出してください。`);
     const type = right.type;
     if (type.kind === 'class' && [this.manipulator, this.outputManipulator].includes(type.cls)) {
-      const run = right.run;
+      const run = compiler.rvalue(right).run;
       return (frame, stream) => (run(frame) as ManipulatorValue).apply(stream, frame);
     }
     if (type.kind === 'class' && type.cls === this.library.stringClass) {
@@ -432,7 +445,7 @@ export class Streams {
   /** `stream >> manipulator`, which applies the manipulator without the input `sentry`. */
   private applyTo(compiler: ExpressionCompiler, left: Expr, manipulator: Expr, row: number): Expr {
     const location = left.isLvalue ? left.run : compiler.materialize(left).run;
-    const run = manipulator.run;
+    const run = compiler.rvalue(manipulator).run;
     return {
       type: left.type,
       isLvalue: true,
@@ -469,22 +482,29 @@ export class Streams {
   /** `std::getline(stream, s)` and `std::getline(stream, s, delimiter)`. */
   getline(): ReturnType<typeof native>[] {
     const stringRef: Type = { kind: 'reference', to: this.library.stringType };
-    return [this.istream, this.istringstream, this.stringstream].map((cls) =>
-      native(
-        'getline',
-        [{ kind: 'reference', to: classType(cls) }, stringRef, CHAR],
-        { kind: 'reference', to: classType(cls) },
-        readLine,
-        { optional: 1 }
-      )
-    );
+    const input = new Set([this.istream, this.istringstream, this.stringstream]);
+    return [
+      generic('getline', (args) => {
+        const stream = args[0];
+        const type = stream?.type;
+        if (type?.kind !== 'class' || isConstType(type) || !input.has(type.cls)) return;
+        const parameter = stream.isLvalue ? referenceTo(type) : constRef(type);
+        return native('getline', [parameter, stringRef, CHAR], referenceTo(type), readLine, { optional: 1 });
+      }),
+    ];
   }
+}
+
+function setStreamBuffer(stream: StreamValue, bytes: string): void {
+  stream.buffer = bytes;
+  stream.position = 0;
+  stream.writePosition = stream.mode & (OPEN_MODE.app | OPEN_MODE.ate) ? bytes.length : 0;
 }
 
 const readLine = ([stream, text, delimiter]: unknown[]): Ptr => {
   const place = stream as Ptr;
   const source = place.read() as StreamValue;
-  if (!source.isGood) {
+  if (!source.isGood || !(source.mode & OPEN_MODE.in)) {
     source.failed = true;
     return place;
   }
@@ -533,8 +553,16 @@ function manipulatorClass(name: string): ClassInfo {
   const cls = new ClassInfo(name, 'class');
   cls.isComplete = true;
   cls.library = { kind: 'manipulator', args: [], size: 16, align: 8 };
-  cls.operations = { copy: (_frame, value) => value, assign: (_frame, _target, source) => source };
+  cls.operations = {
+    copy: (_frame, value) => copyManipulator(value),
+    assign: (_frame, _target, source) => copyManipulator(source),
+  };
   return cls;
+}
+
+function copyManipulator(value: Value): ManipulatorValue {
+  const { apply, name } = value as ManipulatorValue;
+  return new ManipulatorValue(apply, name);
 }
 
 /** The width of an integer type `<<` writes in hex or oct: libc++ passes a `short` as `unsigned short`. */
@@ -599,7 +627,7 @@ function paddingPoint(text: string): number {
 
 /** The input `sentry`: fails unless the stream is good, then skips whitespace, failing at the end of the text. */
 function inputSentry(stream: StreamValue): boolean {
-  if (!stream.isGood) {
+  if (!stream.isGood || !(stream.mode & OPEN_MODE.in)) {
     stream.failed = true;
     return false;
   }

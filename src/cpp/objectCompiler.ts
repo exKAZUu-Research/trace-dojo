@@ -391,7 +391,6 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     return 0;
   }
 
-  /** Converts the arguments of a resolved call and adds the defaults of the parameters it leaves out. */
   /**
    * Converts the arguments of a resolved call and adds the defaults of the parameters it leaves out. A parameter that
    * is an object becomes a temporary of the caller's full-expression, so the call must be invoked with
@@ -436,11 +435,12 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     const { fn } = resolved;
     const argRuns = this.callArguments(resolved, args, row);
     const evaluateObject = object && (fn.isStatic ? this.materialize(object).run : this.objectOf(object));
+    const runs = evaluateObject ? [evaluateObject, ...argRuns] : argRuns;
     const virtualKeyText = fn.isVirtual && !isQualified ? virtualKey(fn) : undefined;
     const run: Eval<Value | Ptr> = (frame) => {
-      const receiver = evaluateObject?.(frame);
-      const location = fn.isStatic ? undefined : (receiver as Ptr | undefined);
-      return holdAll(frame, argRuns, (values) => {
+      return holdAll(frame, runs, (values) => {
+        const receiver = evaluateObject ? (values.shift() as Ptr) : undefined;
+        const location = fn.isStatic ? undefined : receiver;
         let callee = fn;
         if (virtualKeyText !== undefined && location) {
           const target = location.read();
@@ -481,6 +481,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     if (cls.isAbstract)
       this.error(row, `${cls.name} は抽象クラス（純粋仮想関数があるクラス）なので、オブジェクトを作れません。`);
     const { fn } = resolved;
+    if (!fn.native) this.checkAccess(fn.access, cls, cls, row, `${cls.name} のコンストラクタ`);
     const argRuns = this.callArguments(resolved, args, row);
     const run: Eval<Value> = fn.native
       ? (frame) => holdAll(frame, argRuns, (values) => invoke(frame, fn, values, undefined, row, true) as Value)

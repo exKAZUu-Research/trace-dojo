@@ -15,7 +15,7 @@ int main() {
   char c = 'A'; c += 2; cout << c << " " << (int)c << " " << c + 1 << endl;
   bool f = 3 > 2; cout << f << " " << !f << " " << (f && false) << endl;
   int x = 10; x += 5; x -= 3; x *= 2; x /= 4; x %= 4; cout << x << endl;
-  int y = 5; int z = y++ + ++y; cout << y << " " << z << endl;
+  int y = 5; int previous = y++; int z = previous + ++y; cout << y << " " << z << endl;
   cout << (5 & 3) << " " << (5 | 3) << " " << (5 ^ 3) << " " << (~5) << " " << (1 << 4) << " " << (-16 >> 2) << endl;
   int i = 0;
   while (i < 3) { cout << i; i++; }

@@ -125,6 +125,19 @@ int main() {
   expect(trace.finalTurtles.map(({ x }) => x)).toEqual([1, 2]);
 });
 
+test('a heap receiver stays on the board while its method arguments are evaluated', () => {
+  const program = `#include <iostream>
+Turtle observer(0, 0);
+int probe() { return observer.canMoveForward(); }
+struct Walker {
+  Turtle t;
+  Walker() : t(0, 1) {}
+  void go(int clear) { std::cout << clear; }
+};
+int main() { (new Walker)->go(probe()); }`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '0' });
+});
+
 test('the interpreter rejects the syntax it leaves out with a message naming it', () => {
   const execution = executeProgram('cpp', 'int main() {\n  auto f = [](int x) { return x; };\n}');
   expect(execution).toEqual({

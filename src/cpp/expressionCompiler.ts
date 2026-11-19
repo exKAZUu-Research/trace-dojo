@@ -10,7 +10,7 @@ import { CppRuntimeError } from './errors';
 import { constantExpr, type Expr, type FunctionCandidates } from './expr';
 import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
 import { makeEach, ObjectCompiler, zeroOf } from './objectCompiler';
-import type { Eval, Frame } from './runtime';
+import { type Eval, type Frame, holdAll } from './runtime';
 import type { Entity } from './scopes';
 import { fieldOf, type Syntax, tokenOf } from './syntax';
 import {
@@ -1007,14 +1007,15 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type: target.type,
       isLvalue: true,
       row,
-      run: (frame) => {
-        const place = location(frame) as Ptr;
-        const object = place.read();
-        const from = (value(frame) as Ptr).read();
-        const replacement = cls.operations?.assign(frame, object, from);
-        if (replacement !== undefined) place.write(replacement);
-        return place;
-      },
+      run: (frame) =>
+        holdAll(frame, [value, location], ([right, left]) => {
+          const place = left as Ptr;
+          const object = place.read();
+          const from = (right as Ptr).read();
+          const replacement = cls.operations?.assign(frame, object, from);
+          if (replacement !== undefined) place.write(replacement);
+          return place;
+        }),
     };
   }
 
@@ -1418,7 +1419,6 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       );
     }
     const resolved = this.resolve(`${cls.name} のコンストラクタ`, cls.constructors, args, undefined, row);
-    if (!resolved.fn.native) this.checkAccess(resolved.fn.access, cls, cls, row, `${cls.name} のコンストラクタ`);
     return this.constructWith(cls, resolved, args, row);
   }
 
@@ -1428,6 +1428,27 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   /** A value-initialized prvalue of a type, as `T()` makes. */
   valueInitialized(type: Type, row: number): Expr {
     if (type.kind === 'class') return this.defaultConstructed(type.cls, row, true);
+    if (type.kind === 'array') {
+      const initialize = this.valueInitialized(type.of, row).run as Eval<Value>;
+      const destroy = this.destroyerOf(type.of);
+      const count = type.length ?? 0;
+      return {
+        type,
+        isLvalue: false,
+        row,
+        run: (frame) => {
+          frame.runtime.reserve(count);
+          return new ArrayStore(
+            makeEach(
+              frame,
+              count,
+              () => initialize(frame),
+              () => destroy
+            )
+          );
+        },
+      };
+    }
     if (type.kind === 'void') return { type, isLvalue: false, row, run: () => {} };
     const zero = zeroOf(type);
     return {
@@ -1562,6 +1583,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         if (destroyStatic) for (let index = values.length - 1; index >= 0; index--) destroyStatic(frame, values[index]);
       } else {
         const object = (store as Box).value;
+        if (cls && object instanceof CObject && object.cls !== cls && !hasVirtualDestructor)
+          throw new CppRuntimeError('invalidDelete');
         const destroy =
           hasVirtualDestructor && object instanceof CObject ? object.cls.operations?.destroy : destroyStatic;
         destroy?.(frame, object);
