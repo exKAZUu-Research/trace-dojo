@@ -315,7 +315,7 @@ export function escapeHtml(text: string, flags: bigint, all: boolean, doubleEnco
       }
       const name = entityFor(code, flags, all);
       if (name) result += `&${name};`;
-      else if (flags & DISALLOWED && !isAllowed(code, doctype)) result += latin1 ? '?' : REPLACEMENT;
+      else if (flags & DISALLOWED && !isAllowed(code, doctype)) result += latin1 ? '&#xFFFD;' : REPLACEMENT;
       else result += char;
     }
   }

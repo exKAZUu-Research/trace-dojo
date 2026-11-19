@@ -3449,3 +3449,11 @@ try { $missing / 0; echo 'after;'; } catch (Throwable $e) { echo 'caught:' . $e-
 `);
   expect(operandExitPrecedence).toMatchObject({ kind: 'executed', stdout: 'handler;exit;' });
 });
+
+test('emits &#xFFFD; for disallowed ISO-8859-1 characters under ENT_DISALLOWED', () => {
+  const result = run(String.raw`<?php
+echo htmlspecialchars("A\x01B", ENT_QUOTES | ENT_DISALLOWED, 'ISO-8859-1'), "\n";
+echo htmlentities("A\x80B", ENT_QUOTES | ENT_DISALLOWED, 'ISO-8859-1'), "\n";
+`);
+  expect(result).toMatchObject({ kind: 'executed', stdout: 'A&#xFFFD;B\nA&#xFFFD;B\n' });
+});
