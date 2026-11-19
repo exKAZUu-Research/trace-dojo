@@ -117,7 +117,7 @@ export function translate(pattern: string): Compiled {
     names: options.utf8 ? converter.names.map((name) => (name === undefined ? undefined : enc(name))) : converter.names,
     groupCount: converter.names.length - 1,
     keeps: converter.keeps,
-    boundedPattern: needsNative || matchLimit ? pcrePattern(body, modifiers) : undefined,
+    boundedPattern: converter.needsNative || needsNative || matchLimit ? pcrePattern(body, modifiers) : undefined,
   };
 }
 
@@ -322,6 +322,7 @@ class PatternConverter {
   readonly keeps: string[] = [];
   /** Whether the pattern starts with `\G`, so that it matches only where the search starts. */
   sticky = false;
+  needsNative = false;
   unavailable?: string;
   private index = 0;
   private result = '';
@@ -521,15 +522,13 @@ class PatternConverter {
     else this.emit(greedy ? text : `${text}?`, false);
   }
 
-  /** Notes the groups in the item that a quantifier repeats, whose captures JavaScript forgets at each repetition. */
   private repeatItem(): void {
+    // JavaScript forgets captures inside an item at each repetition.
     const first = startIndex(this.groupStarts, this.itemStart);
-    if (
+    this.needsNative ||=
       this.groupStarts.length - first > 1 ||
-      (first < this.groupStarts.length && this.groupStarts[first] > this.itemStart)
-    )
-      unsupported('入れ子のキャプチャを含む繰り返し');
-    if ((this.keepStarts.at(-1) ?? -1) >= this.itemStart) unsupported(String.raw`繰り返される \K`);
+      (first < this.groupStarts.length && this.groupStarts[first] > this.itemStart) ||
+      (this.keepStarts.at(-1) ?? -1) >= this.itemStart;
   }
 
   /** Repeats the last item atomically, as a lookahead does, which JavaScript does not backtrack into. */

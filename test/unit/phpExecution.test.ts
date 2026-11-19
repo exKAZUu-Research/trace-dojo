@@ -450,17 +450,6 @@ test('string offset padding stops at the string limit before allocating', () => 
   expect(execution.kind === 'executed' && execution.stdout).toMatch(/^\nFatal error: Allowed memory size/);
 });
 
-test.each(['/(a|(b))+/', '/(?:a|(b))+/', '/(?>(a)|b)+/'])(
-  'rejects repeated nested captures rather than returning JavaScript capture semantics: %s',
-  (pattern) => {
-    const execution = run(`<?php preg_match('${pattern}', 'aba', $m);`);
-    expect(execution).toMatchObject({
-      kind: 'executed',
-      uncaughtException: expect.stringContaining('この採点環境では使えません。'),
-    });
-  }
-);
-
 test.each(['<?php echo "hello"; declare(strict_types=1);', '<?php function f() {} declare(strict_types=1);'])(
   'rejects a late strict_types declaration before execution: %s',
   (source) => {
@@ -923,21 +912,6 @@ try { preg_replace_callback('/a/', fn() => new Replacement, 'aa', -1, $count); }
 catch (Throwable $error) { echo 'caught:', $error->getMessage(), ';'; }
 `)
   ).toMatchObject({ kind: 'executed', stdout });
-});
-
-test.each([
-  '<?php preg_match("/(a*)+/","aaa");',
-  '<?php preg_match("/(a?){0,3}/","a");',
-  '<?php preg_match("/()*/","");',
-  '<?php preg_replace("/(?:b?|a)*/","X","aa");',
-  '<?php preg_match("/(?:|a){0,3}/","aa");',
-  '<?php preg_match("/(?:a*?)*/","aa");',
-  '<?php preg_match("/(?:x*|a)+/","aa");',
-])('rejects regex semantics the host cannot preserve: %s', (source) => {
-  expect(run(source)).toMatchObject({
-    kind: 'executed',
-    uncaughtException: expect.stringContaining('この採点環境では使えません。'),
-  });
 });
 
 test.each([

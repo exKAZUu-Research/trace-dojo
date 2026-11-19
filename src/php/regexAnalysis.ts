@@ -31,7 +31,7 @@ export function analyzeRegex(
   const lookbehinds: AST.LookaroundAssertion[] = [];
   const lengths = new Map<AST.Element, Length>();
   let backwardCaptureReference = false;
-  let byteCaseFolding = false;
+  let needsNative = false;
   visitRegExpAST(tree, {
     onGroupEnter(node) {
       contexts.push(ignoreCase);
@@ -43,15 +43,15 @@ export function analyzeRegex(
     },
     onCharacterEnter(node) {
       rt().spend();
-      if (!utf8 && ignoreCase) byteCaseFolding ||= mayFoldNonAsciiBytes(node);
+      if (!utf8 && ignoreCase) needsNative ||= mayFoldNonAsciiBytes(node);
     },
     onCharacterSetEnter(node) {
-      if (!utf8 && ignoreCase) byteCaseFolding ||= node.kind === 'property';
+      if (!utf8 && ignoreCase) needsNative ||= node.kind === 'property';
     },
     onBackreferenceEnter(node) {
       const groups = node.ambiguous ? node.resolved : [node.resolved];
       backwardCaptureReference ||= referencesLocalLookbehindGroup(groups, lookbehinds);
-      byteCaseFolding ||= !utf8 && ignoreCase;
+      needsNative ||= !utf8 && ignoreCase;
     },
     onAssertionEnter(node) {
       if (node.kind !== 'lookbehind') return;
@@ -65,7 +65,7 @@ export function analyzeRegex(
         throw new UnsupportedFeatureError('可変長後読みのキャプチャ');
     },
     onQuantifierLeave(node) {
-      validateNullableRepeat(node, lengths);
+      needsNative ||= nullableRepeatNeedsNative(node, lengths);
     },
     onCapturingGroupEnter() {
       captureCount++;
@@ -74,7 +74,7 @@ export function analyzeRegex(
   if (backwardCaptureReference) throw new UnsupportedFeatureError('後読みの内部キャプチャへの後方参照');
   return {
     emptySource: emptyMarkers.size === 0 ? undefined : specializeForEmptySubject(tree, emptyMarkers),
-    needsNative: byteCaseFolding || hasAmbiguousRepetition(tree, unicode, ignoreCase),
+    needsNative: needsNative || hasAmbiguousRepetition(tree, unicode, ignoreCase),
   };
 }
 
@@ -118,15 +118,13 @@ function specializeForEmptySubject(tree: AST.Pattern, markers: ReadonlyMap<strin
   return output + tree.raw.slice(cursor);
 }
 
-function validateNullableRepeat(node: AST.Quantifier, lengths: Map<AST.Element, Length>): void {
+function nullableRepeatNeedsNative(node: AST.Quantifier, lengths: Map<AST.Element, Length>): boolean {
   const group = node.element;
-  if (node.max === node.min || (group.type !== 'CapturingGroup' && group.type !== 'Group')) return;
+  if (node.max === node.min || (group.type !== 'CapturingGroup' && group.type !== 'Group')) return false;
   const [min, max] = elementLength(group, lengths, new Set());
-  if (min !== 0) return;
-  if (group.type === 'CapturingGroup' && /^\$\d+$/.test(group.name ?? '') && (node.min === 0 || max > 0))
-    throw new UnsupportedFeatureError('空に一致できるキャプチャの繰り返し');
-  if (max > 0 && prefersEmpty(group, lengths))
-    throw new UnsupportedFeatureError('空の一致を優先する正規表現の繰り返し');
+  if (min !== 0) return false;
+  const phpCapture = group.type === 'CapturingGroup' && /^\$\d+$/.test(group.name ?? '');
+  return (phpCapture && (node.min === 0 || max > 0)) || (max > 0 && prefersEmpty(group, lengths));
 }
 
 function prefersEmpty(node: AST.Element, lengths: Map<AST.Element, Length>): boolean {
