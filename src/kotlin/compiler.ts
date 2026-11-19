@@ -14,12 +14,61 @@ import { type FileContext, TURTLE_PACKAGE } from './compilerCore';
 import { unavailableMessage } from './convertSupport';
 import { DeclarationCompiler } from './declarationCompiler';
 import { callFunction, parameterReprs, receiverRepr } from './dispatch';
+import { libraryClass } from './natives/registry';
 import type { NativeFunction, NativeProperty } from './nativeTypes';
-import { type Frame, MISSING } from './runtime';
-import type { ClassSymbol, FunctionSymbol, MemberSymbol } from './symbols';
+import { Frame, type FunctionInfo, MISSING } from './runtime';
+import { ClassSymbol, FunctionSymbol, type MemberSymbol, VariableSymbol } from './symbols';
 import { isSubtype } from './typeRelations';
 import { type ClassType, type KType, resolved } from './types';
 import { KObject, type Value } from './values';
+
+/** Adds a symbol to the imports of a name, once, since a file's imports are resolved before and after its headers. */
+function addOnce<T>(imports: Map<string, T[]>, name: string, symbol: T): void {
+  const existing = imports.get(name) ?? [];
+  if (!existing.includes(symbol)) imports.set(name, [...existing, symbol]);
+}
+
+const ROOT_DEFAULTS_INFO: FunctionInfo = {
+  name: '<defaults>',
+  locals: [],
+  captures: [],
+  slotCount: 8,
+  isAtomic: false,
+  isLibrary: true,
+  isLambda: false,
+  showsThis: false,
+};
+
+const samImplementations = new WeakMap<FunctionSymbol, ClassSymbol>();
+
+/** The class of the objects a lambda converts to for a `fun interface`, whose abstract method calls the lambda. */
+function samImplementation(core: Core, cls: ClassSymbol, method: FunctionSymbol): ClassSymbol {
+  const existing = samImplementations.get(method);
+  if (existing) return existing;
+  const implementation = new ClassSymbol('class', `${cls.name}$Lambda`, `${cls.qualifiedName}$$Lambda`, undefined);
+  implementation.interfaces = [cls.type];
+  implementation.isLibrary = true;
+  for (const [root, member] of cls.vtable) implementation.vtable.set(root, member);
+  const reprs = method.params.map((param) => reprOf(core, param.type));
+  const resultRepr = reprOf(core, method.returnType ?? core.unit.type);
+  const call = new FunctionSymbol(method.name);
+  Object.assign(call, {
+    owner: implementation,
+    params: method.params,
+    returnType: method.returnType,
+    root: method.root,
+    isOverride: true,
+    isLibrary: true,
+  });
+  call.invoke = (caller, receiver, args) => {
+    const boxedArgs = args.map((arg, index) => convertRepr(() => arg, reprs[index], 'ref')(caller));
+    const result = ((receiver as KObject).function as NonNullable<KObject['function']>).call(caller, boxedArgs);
+    return convertRepr(() => result, 'ref', resultRepr)(caller);
+  };
+  implementation.vtable.set(method.root, call);
+  samImplementations.set(method, implementation);
+  return implementation;
+}
 
 /** What the standard library's prelude provides to every program. */
 export interface LibraryPackages {
@@ -114,6 +163,25 @@ export class Compiler extends DeclarationCompiler {
     this.compileBodies();
     const initializers: CompiledProgram['initializers'] = [];
     for (const entry of this.propertyEntries) {
+      const { delegateGlobal } = entry;
+      if (!entry.cls && delegateGlobal !== undefined && entry.initializer) {
+        const evaluate = entry.initializer.eval;
+        const { info } = this.initializerContext(entry);
+        const run = (frame: Frame): void => {
+          frame.runtime.call(info, frame, [], undefined, [], undefined, (inner) => {
+            inner.runtime.globals[delegateGlobal] = evaluate(inner);
+            return;
+          });
+        };
+        const onlyCalls = entry.initializer.isCreation === true;
+        initializers.push({
+          row: entry.decl.row,
+          isConstant: false,
+          run:
+            this.recordsSteps && !entry.file.isLibrary ? this.steppedInitializer(entry.decl.row, run, onlyCalls) : run,
+        });
+        continue;
+      }
       if (entry.cls || !entry.decl.initializer || entry.symbol.slot === undefined) continue;
       this.file = entry.file;
       const context = this.initializerContext(entry);
@@ -191,9 +259,8 @@ export class Compiler extends DeclarationCompiler {
   protected importObjectMembers(context: FileContext, owner: ClassSymbol, name: string, members: MemberSymbol[]): void {
     void owner;
     for (const member of members) {
-      if (member.kind === 'function')
-        context.importedFunctions.set(name, [...(context.importedFunctions.get(name) ?? []), member]);
-      else context.importedProperties.set(name, [...(context.importedProperties.get(name) ?? []), member]);
+      if (member.kind === 'function') addOnce(context.importedFunctions, name, member);
+      else addOnce(context.importedProperties, name, member);
     }
     this.importedObjectOwners.set(name, owner);
   }
@@ -203,10 +270,31 @@ export class Compiler extends DeclarationCompiler {
 
   protected nativeInvoker(symbol: FunctionSymbol, native: NativeFunction): NonNullable<FunctionSymbol['invoke']> {
     return (caller, receiver, args) => {
-      const filled = args.some((arg) => arg === MISSING)
-        ? args.map((arg, index) => (arg === MISSING ? symbol.params[index].defaultValue?.(caller) : arg))
-        : args;
-      return native(caller, receiver, filled);
+      if (!args.includes(MISSING)) return native(caller, receiver, args);
+      // Default values may read the receiver and the earlier parameters, as `missingDelimiterValue: String = this` does.
+      const info = symbol.defaultsInfo ?? ROOT_DEFAULTS_INFO;
+      const frame = new Frame(caller.runtime, info, [], receiver, undefined);
+      for (const [index, arg] of args.entries()) frame.locals[index] = arg;
+      for (const [index, arg] of args.entries()) {
+        if (arg === MISSING) frame.locals[index] = symbol.params[index].defaultValue?.(frame);
+      }
+      return native(caller, receiver, frame.locals as Value[]);
+    };
+  }
+
+  protected samWrap(lambda: Compiled, sam: NonNullable<ReturnType<Compiler['samOf']>>, type: KType): Compiled {
+    const implementation = samImplementation(this.core, sam.cls, sam.method);
+    const evaluate = lambda.eval;
+    return {
+      type,
+      repr: 'ref',
+      eval: (frame) => {
+        const fn = evaluate(frame) as KObject;
+        const object = new KObject(implementation, 0);
+        object.function = fn.function;
+        object.env = fn.env;
+        return object;
+      },
     };
   }
 
@@ -310,7 +398,7 @@ export class Compiler extends DeclarationCompiler {
 
   protected enumEntriesValue(cls: ClassSymbol): (frame: Frame, entries: KObject[]) => Value {
     void cls;
-    const listClass = this.packages.get('kotlin.enums')?.classes.get('EnumEntriesList') ?? this.core.list;
+    const listClass = this.packages.get('kotlin.collections')?.classes.get('EnumEntriesList') ?? this.core.list;
     return (_frame, entries) => {
       const list = new KObject(listClass, 0);
       list.items = [...entries];
@@ -324,8 +412,21 @@ export class Compiler extends DeclarationCompiler {
     return this.error(row, `${name} が見つかりません。`);
   }
 
-  protected propertyReference(name: string): ArgumentSyntax {
-    return { row: 0, name: undefined, value: { kind: 'string', row: 0, parts: [name] } };
+  /** The `KProperty` a delegate's `getValue` and `setValue` receive, which tells the property's name. */
+  protected propertyReference(scope: Scope, name: string, row: number): ArgumentSyntax {
+    const variableName = `\0property:${name}`;
+    const type: KType = { kind: 'class', cls: this.core.kProperty, args: [{ variance: 'star' }], nullable: false };
+    const variable = new VariableSymbol(variableName, type, false, 0, -1, row);
+    let reference: KObject | undefined;
+    variable.delegateRead = () => {
+      reference ??= Object.assign(new KObject(libraryClass('kotlin.reflect.PropertyReference'), 0), {
+        native: { name },
+      });
+      return reference;
+    };
+    scope.variables.set(variableName, variable);
+    this.flow.assigned.add(variable);
+    return { row, name: undefined, value: { kind: 'name', row, name: variableName } };
   }
 
   protected progressionOf(type: KType): 'Int' | 'Long' | 'Char' | undefined {

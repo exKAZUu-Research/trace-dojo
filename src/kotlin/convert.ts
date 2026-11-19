@@ -116,7 +116,19 @@ export class Converter extends ExpressionConverter {
     }
   }
 
-  private convertTypeParameters(node: Node | undefined): TypeParameterDecl[] {
+  private convertTypeParameters(node: Node | undefined, constraints?: Node): TypeParameterDecl[] {
+    const declared = this.convertTypeParameterList(node);
+    // `where T : A` adds bounds to the type parameters it names.
+    for (const constraint of constraints ? namedOfType(constraints, 'type_constraint') : []) {
+      const [nameNode, typeNode] = named(constraint);
+      const param = declared.find((candidate) => candidate.name === identifierName(nameNode));
+      if (!param) throw syntaxError(constraint, `型引数 ${nameNode.text} がありません。`);
+      param.bounds.push(this.convertType(required(typeNode)));
+    }
+    return declared;
+  }
+
+  private convertTypeParameterList(node: Node | undefined): TypeParameterDecl[] {
     if (!node) return [];
     this.requireLibrary(node, '型引数を持つ関数・クラスの宣言');
     return namedOfType(node, 'type_parameter').map((parameter) => {
@@ -185,7 +197,10 @@ export class Converter extends ExpressionConverter {
       headerEndRow: rowOf(bodyNode ?? node),
       name,
       modifiers,
-      typeParameters: this.convertTypeParameters(firstOfType(node, 'type_parameters')),
+      typeParameters: this.convertTypeParameters(
+        firstOfType(node, 'type_parameters'),
+        firstOfType(node, 'type_constraints')
+      ),
       receiver: receiverNode ? this.convertType(receiverNode) : undefined,
       params: this.convertParameters(parametersNode),
       returnType: returnNode ? this.convertType(returnNode) : undefined,
@@ -243,7 +258,10 @@ export class Converter extends ExpressionConverter {
       name: declared.name,
       type: declared.type,
       receiver: receiverNode ? this.convertType(receiverNode) : undefined,
-      typeParameters: this.convertTypeParameters(firstOfType(node, 'type_parameters')),
+      typeParameters: this.convertTypeParameters(
+        firstOfType(node, 'type_parameters'),
+        firstOfType(node, 'type_constraints')
+      ),
       initializer: initializerNode ? this.convertExpression(initializerNode) : undefined,
       delegate: delegateNode ? this.convertExpression(named(delegateNode)[0]) : undefined,
       getter: getterNode ? this.convertAccessor(getterNode) : undefined,
@@ -300,8 +318,12 @@ export class Converter extends ExpressionConverter {
       endRow: node.endPosition.row,
       classKind,
       name: identifierName(required(node.childForFieldName('name'))),
+      isFunInterface: hasToken(node, 'interface') && hasToken(node, 'fun'),
       modifiers,
-      typeParameters: this.convertTypeParameters(firstOfType(node, 'type_parameters')),
+      typeParameters: this.convertTypeParameters(
+        firstOfType(node, 'type_parameters'),
+        firstOfType(node, 'type_constraints')
+      ),
       primaryConstructor: primaryNode ? this.convertPrimaryConstructor(primaryNode) : undefined,
       supers: this.convertSupers(firstOfType(node, 'delegation_specifiers')),
       ...this.withLocal(false, () => this.convertClassBody(bodyNode)),
@@ -444,6 +466,7 @@ export class Converter extends ExpressionConverter {
       endRow: node.endPosition.row,
       classKind: 'companion',
       name: nameNode ? identifierName(nameNode) : 'Companion',
+      isFunInterface: false,
       modifiers: this.convertModifiers(firstOfType(node, 'modifiers'), CLASS_MODIFIERS),
       typeParameters: [],
       primaryConstructor: undefined,

@@ -81,8 +81,9 @@ export function isSubtype(subType: KType, superType: KType): boolean {
   const sub = resolved(subType);
   const sup = resolved(superType);
   if (sup.kind === 'variable') {
+    // A variable may stand for a nullable type, so any type can be its lower bound.
     addBound(sup.variable, 'lower', sup.nullable ? nonNull(sub) : sub);
-    return sup.nullable || !isNullable(sub) || sub.kind === 'variable';
+    return true;
   }
   if (sub.kind === 'variable') {
     addBound(sub.variable, 'upper', sub.nullable ? sup : sup);
@@ -229,7 +230,11 @@ function supertypesInOrder(type: KType): KType[] {
  */
 export function fixVariable(variable: InferenceVariable): KType | undefined {
   if (variable.fixed) return variable.fixed;
-  const lower = variable.lower.map(resolved).filter((type) => type.kind !== 'variable');
+  // A lower bound that is another open variable stands for what that variable's own lower bounds give it.
+  const lower = variable.lower
+    .map(resolved)
+    .flatMap((type) => (type.kind === 'variable' && !type.variable.fixed ? type.variable.lower.map(resolved) : [type]))
+    .filter((type) => type.kind !== 'variable');
   const upper = variable.upper.map(resolved).filter((type) => type.kind !== 'variable');
   let fixed: KType | undefined;
   if (lower.length > 0) fixed = commonSupertype(lower);

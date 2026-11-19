@@ -18,6 +18,7 @@ import {
   type Eval,
   Flow,
   type FunctionContext,
+  Handoff,
   type LoopContext,
   type Repr,
   reprOf,
@@ -212,15 +213,6 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const variable = this.newVariable(scope, context, name, type, statement.isVar, row);
     this.flow.assigned.add(variable);
     this.flow.maybeAssigned.add(variable);
-    // A variable declared with a smarter type than its declared one starts narrowed, as `val x: Any = ""` is a String.
-    if (
-      declared &&
-      initializer.type !== declared &&
-      isSubtype(initializer.type, declared) &&
-      !isSubtype(declared, initializer.type)
-    ) {
-      this.flow.narrowed.set(keyOf(variable), initializer.type);
-    }
     const write = this.variableAccess(context, variable).write;
     return this.withStep(
       row,
@@ -256,7 +248,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       repr: delegate.repr,
       eval: this.variableAccess(context, holder).read,
     };
-    const property = this.propertyReference(name);
+    const property = this.propertyReference(scope, name, row);
     const getter = this.compileDelegateCall(
       scope,
       context,
@@ -283,7 +275,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   /** The `KProperty` argument of a delegate's `getValue` and `setValue`, as a name the compiler understands. */
-  protected abstract propertyReference(name: string): ArgumentSyntax;
+  protected abstract propertyReference(scope: Scope, name: string, row: number): ArgumentSyntax;
 
   protected compileDelegateCall(
     scope: Scope,
@@ -395,23 +387,14 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       }
     }
     const place = this.compilePlace(scope, context, target, row, true);
-    const currentHolder: Compiled = {
-      type: place.type,
-      repr: place.repr,
-      eval: (frame) => (frame.temporaries.at(-1) as unknown as BoundPlace).get(),
-    };
+    const current = new Handoff<BoundPlace>();
+    const currentHolder: Compiled = { type: place.type, repr: place.repr, eval: () => current.get().get() };
     const combined = this.compileArithmeticWith(scope, context, operation, currentHolder, statement.value, row);
     const converted = this.expectType(combined, place.type, row);
     const toPlace = convertRepr(converted, reprOf(this.core, place.type), place.repr);
     return (frame) => {
       const bound = place.bind(frame);
-      frame.temporaries.push(bound as unknown as Value);
-      let value: Value;
-      try {
-        value = toPlace(frame);
-      } finally {
-        frame.temporaries.pop();
-      }
+      const value = current.run(frame, bound, () => toPlace(frame));
       bound.set(value);
     };
   }
@@ -428,7 +411,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       const variable = this.findVariable(scope, target.name);
       if (variable) return variable.isVar;
       for (const receiver of this.receiversOf(scope)) {
-        const property = this.findProperty(scope, receiver.type, target.name);
+        const property = this.findProperty(scope, this.receiverTypeOf(receiver), target.name);
         if (property) return property.symbol.isVar;
       }
       return this.topLevelProperties(target.name)[0]?.[0]?.isVar ?? false;
@@ -471,7 +454,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       const variable = this.findVariable(scope, target.name);
       if (variable) return this.variablePlace(context, variable, row, isCompound);
       for (const receiver of this.receiversOf(scope)) {
-        const property = this.findProperty(scope, receiver.type, target.name);
+        const property = this.findProperty(scope, this.receiverTypeOf(receiver), target.name);
         if (property)
           return this.propertyPlace(
             property,
@@ -483,6 +466,15 @@ export abstract class StatementCompiler extends ExpressionCompiler {
             row,
             scope
           );
+      }
+      const companion = this.findCompanionProperty(scope, target.name);
+      if (companion) {
+        const holder: Compiled = {
+          type: companion.holder.type,
+          repr: 'ref',
+          eval: this.objectInstance(companion.holder),
+        };
+        return this.propertyPlace(companion.property, holder, row, scope);
       }
       const property = this.topLevelProperties(target.name)[0]?.find((candidate) => !candidate.extensionReceiver);
       if (property) return this.propertyPlace({ symbol: property, substitution: new Map() }, undefined, row, scope);
@@ -509,7 +501,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return this.error(row, `${typeToString(resolved(receiver.type))} には ${target.name} がありません。`);
       return this.propertyPlace(property, receiver, row, scope);
     }
-    if (target.kind === 'index') return this.indexPlace(scope, context, target, row);
+    if (target.kind === 'index') return this.indexPlace(scope, context, target, row, isCompound);
     return this.error(row, 'ここには代入できません。');
   }
 
@@ -586,6 +578,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   protected abstract propertyReprOf(symbol: PropertySymbol): Repr;
 
+  protected abstract nothing(): KType;
+
   /** Whether a `val` property may be assigned here: in its class's `init` block, once, before it is read. */
   protected abstract mayInitializeVal(scope: Scope, symbol: PropertySymbol): boolean;
 
@@ -593,90 +587,75 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return this.receiversOf(scope).some((receiver) => receiver.cls !== undefined && receiver.cls === cls);
   }
 
+  /**
+   * `a[i]` as a place: `set` stores into it, and for a compound assignment `get` reads it. The receiver and indexes
+   * are evaluated once and held, where the compiled `get` and `set` calls read them.
+   */
   private indexPlace(
     scope: Scope,
     context: FunctionContext,
     target: Extract<Expression, { kind: 'index' }>,
-    row: number
+    row: number,
+    isCompound: boolean
   ): Place {
     const receiver = this.compileExpression(scope, context, target.receiver);
     const indexValues = target.indices.map((index) => this.compileExpression(scope, context, index));
-    const holders = indexValues.map((compiled, index) => ({ compiled, index }));
-    // The receiver and indexes are evaluated once and held, so that get and set read them from the temporaries.
-    const receiverHolder: Compiled = {
-      type: receiver.type,
-      repr: receiver.repr,
-      eval: (frame) => (frame.temporaries.at(-1) as unknown as HeldIndex).receiver,
-    };
-    const indexArgs: ArgumentSyntax[] = holders.map(({ index }) => ({
-      row,
-      name: undefined,
-      value: { kind: 'name', row, name: `\0index${index}` },
-    }));
+    const handoff = new Handoff<HeldIndex>();
+    const held = (): HeldIndex => handoff.get();
+    const receiverHolder: Compiled = { type: receiver.type, repr: receiver.repr, eval: () => held().receiver };
     const indexScope = new Scope(scope, context);
-    const indexVariables = holders.map(({ compiled, index }) => {
-      const variable = new VariableSymbol(`\0index${index}`, compiled.type, false, 0, -1, row);
+    const heldName = (name: string, type: KType, read: (frame: Frame) => Value): ArgumentSyntax => {
+      const variable = new VariableSymbol(name, type, false, 0, -1, row);
       variable.owner = context;
-      variable.delegateRead = (frame) => (frame.temporaries.at(-1) as unknown as HeldIndex).indexes[index];
-      indexScope.variables.set(variable.name, variable);
+      variable.delegateRead = read;
+      indexScope.variables.set(name, variable);
       this.flow.assigned.add(variable);
-      return variable;
-    });
-    void indexVariables;
-    const getter = this.compileOperatorCall(indexScope, context, receiverHolder, 'get', indexArgs, row, '[]');
-    const valueName = '\0assigned';
-    const valueVariable = new VariableSymbol(valueName, getter.type, false, 0, -1, row);
-    valueVariable.owner = context;
-    valueVariable.delegateRead = (frame) => (frame.temporaries.at(-1) as unknown as HeldIndex).value;
-    indexScope.variables.set(valueName, valueVariable);
-    this.flow.assigned.add(valueVariable);
-    const setter = this.compileOperatorCall(
+      return { row, name: undefined, value: { kind: 'name', row, name } };
+    };
+    const indexArgs = indexValues.map((compiled, index) =>
+      heldName(`\0index${index}`, compiled.type, () => held().indexes[index])
+    );
+    // A value of type Nothing fits any `set`, whose parameter then gives the type the place stores.
+    const valueArg = heldName('\0assigned', this.nothing(), () => held().value);
+    const setter = this.resolveOperator(
       indexScope,
       context,
       receiverHolder,
       'set',
-      [...indexArgs, { row, name: undefined, value: { kind: 'name', row, name: valueName } }],
+      [...indexArgs, valueArg],
       row,
       '[]='
     );
-    const elementType = this.setterValueType(receiver, getter.type);
+    const valueParam = setter.call.symbol.params.at(-1);
+    if (!valueParam) return this.error(row, 'ここには代入できません。');
+    const substitution = new Map([...setter.call.candidate.substitution, ...setter.call.typeArguments]);
+    const type = resolved(substitute(valueParam.type, substitution));
+    const repr = reprOf(this.core, type);
+    const setEval = setter.compiled.eval;
+    let getEval: Eval | undefined;
+    if (isCompound) {
+      const getter = this.compileOperatorCall(indexScope, context, receiverHolder, 'get', indexArgs, row, '[]');
+      if (!isSubtype(getter.type, type)) this.error(row, typeMismatchMessage(type, getter.type));
+      getEval = convertRepr(getter.eval, getter.repr, repr);
+    }
     const receiverEval = receiver.eval;
-    const indexEvals = indexValues.map((compiled) => compiled.eval);
-    const getEval = getter.eval;
-    const setEval = setter.eval;
+    const indexEvals = indexValues.map((compiled) => this.convertTo(compiled, compiled.type, row));
     return {
-      type: elementType,
-      repr: getter.repr,
+      type,
+      repr,
       bind: (frame) => {
-        const held: HeldIndex = { receiver: receiverEval(frame), indexes: [], value: undefined };
-        for (const evaluate of indexEvals) held.indexes.push(evaluate(frame));
+        const state: HeldIndex = { receiver: receiverEval(frame), indexes: [], value: undefined };
+        for (const evaluate of indexEvals) state.indexes.push(evaluate(frame));
+        const run = (evaluate: Eval): Value => handoff.run(frame, state, () => evaluate(frame));
         return {
-          get: () => {
-            frame.temporaries.push(held as unknown as Value);
-            try {
-              return getEval(frame);
-            } finally {
-              frame.temporaries.pop();
-            }
-          },
+          get: () => run(getEval as Eval),
           set: (value) => {
-            held.value = value;
-            frame.temporaries.push(held as unknown as Value);
-            try {
-              setEval(frame);
-            } finally {
-              frame.temporaries.pop();
-            }
+            state.value = value;
+            run(setEval);
           },
         };
       },
     };
-  }
-
-  /** The type an indexed assignment stores, which is the type `get` returns. */
-  private setterValueType(receiver: Compiled, getterType: KType): KType {
-    void receiver;
-    return getterType;
   }
 
   // Loops.
@@ -686,7 +665,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     for (let current: Scope | undefined = scope; current; current = current.parent) {
       for (const variable of current.variables.values()) if (!variable.isVar) outerVals.add(variable);
     }
-    return { identity: {}, outerVals };
+    return { identity: {}, outerVals, hasBreak: false };
   }
 
   /** Forgets the smart casts of the variables a loop assigns, since another iteration may have changed them. */
@@ -743,9 +722,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const loop = this.newLoop(context, scope);
     const body = this.compileLoopBody(scope, context, loop, statement.body);
     const isInfinite = condition.compiled.constant === true;
-    this.flow = isInfinite
-      ? this.loopExitFlow(before, true)
-      : this.withNarrowing(Flow.merge([afterCondition]), condition.whenFalse);
+    this.flow = this.withNarrowing(afterCondition, condition.whenFalse);
+    this.flow.isDead = isInfinite && !loop.hasBreak;
     this.flow.assigned.clear();
     for (const variable of before.assigned) this.flow.assigned.add(variable);
     const test = condition.compiled.eval;
@@ -755,13 +733,6 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         if (this.runLoopBody(loop, body, frame) === 'break') return;
       }
     };
-  }
-
-  /** The state after an infinite loop, which only `break` leaves. */
-  private loopExitFlow(before: Flow, isInfinite: boolean): Flow {
-    const flow = before.copy();
-    flow.isDead = isInfinite && false;
-    return flow;
   }
 
   private compileDoWhile(scope: Scope, context: FunctionContext, statement: DoWhileStatement): Exec {
@@ -849,10 +820,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return true;
       };
     } else {
+      const iterableHandoff = new Handoff<Value>();
+      const stateHandoff = new Handoff<LoopState>();
       const iteratorCall = this.compileOperatorCall(
         loopScope,
         context,
-        { ...iterable, eval: (frame) => frame.temporaries.at(-1) as Value },
+        { ...iterable, eval: () => iterableHandoff.get() },
         'iterator',
         [],
         statement.row,
@@ -862,7 +835,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       const holderScope = new Scope(loopScope, context);
       const iteratorVariable = new VariableSymbol('\0iterator', iteratorType, false, 0, -1, statement.row);
       iteratorVariable.owner = context;
-      iteratorVariable.delegateRead = (frame) => (frame.temporaries.at(-1) as unknown as LoopState).iterator;
+      iteratorVariable.delegateRead = () => stateHandoff.get().iterator;
       holderScope.variables.set(iteratorVariable.name, iteratorVariable);
       this.flow.assigned.add(iteratorVariable);
       const iteratorName: Expression = { kind: 'name', row: statement.row, name: '\0iterator' };
@@ -888,24 +861,20 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       const nextEval = nextCall.eval;
       const elementRepr = nextCall.repr;
       void elementRepr;
-      start = (frame, value) => {
-        frame.temporaries.push(value);
-        try {
-          return { current: 0, last: 0, step: 0, isDone: false, iterator: iteratorEval(frame) };
-        } finally {
-          frame.temporaries.pop();
-        }
-      };
-      next = (frame, state) => {
-        frame.temporaries.push(state as unknown as Value);
-        try {
+      start = (frame, value) =>
+        iterableHandoff.run(frame, value, () => ({
+          current: 0,
+          last: 0,
+          step: 0,
+          isDone: false,
+          iterator: iteratorEval(frame),
+        }));
+      next = (frame, state) =>
+        stateHandoff.run(frame, state, () => {
           if (!(hasNextEval(frame) as boolean)) return false;
           state.value = nextEval(frame);
           return true;
-        } finally {
-          frame.temporaries.pop();
-        }
-      };
+        });
       this.loopElementRepr = nextCall.repr;
     }
     const elementRepr = progression ?? this.loopElementRepr;
@@ -954,15 +923,11 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       if (variable.name === '_') scope.variables.delete('_');
       this.flow.assigned.add(symbol);
       const { write } = this.variableAccess(context, symbol);
-      const convert = convertRepr((frame) => frame.temporaries.at(-1) as Value, elementRepr, reprOf(this.core, type));
+      const element = new Handoff<Value>();
+      const convert = convertRepr(() => element.get(), elementRepr, reprOf(this.core, type));
       const isAnswered = this.isAnswered(type);
       return (frame, value) => {
-        frame.temporaries.push(value);
-        try {
-          write(frame, convert(frame));
-        } finally {
-          frame.temporaries.pop();
-        }
+        element.run(frame, value, () => write(frame, convert(frame)));
         frame.runtime.steps.stepBinding(stepRow, isAnswered);
       };
     }
@@ -1166,8 +1131,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       };
     }
     if (condition.kind === 'is') {
-      const type = this.checkableType(scope, condition.type, condition.row);
-      this.checkCastPossible(subject.type, type, condition.row);
+      const type = this.checkableType(scope, condition.type, condition.row, subject.type);
       const test = instanceTest(this.core, type);
       const evaluate = convertRepr(subject.eval, subject.repr, 'ref');
       const narrowing = new Map<string, KType>();

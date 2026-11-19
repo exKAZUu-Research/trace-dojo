@@ -102,7 +102,8 @@ export abstract class CompilerCore {
 
   // Types.
 
-  resolveType(scope: Scope, ref: TypeRef): KType {
+  /** @param allowsBareClass Whether a generic class may be written without arguments, as `is List` may. */
+  resolveType(scope: Scope, ref: TypeRef, allowsBareClass = false): KType {
     if (ref.kind === 'function') {
       return {
         kind: 'function',
@@ -123,21 +124,29 @@ export abstract class CompilerCore {
         return ref.nullable ? nullable(NOTHING) : NOTHING;
       }
     }
-    let cls = this.findClass(scope, first.name) ?? this.findQualifiedClass(ref.parts.map((part) => part.name));
-    let consumed = 1;
+    const local = this.findClass(scope, first.name);
+    const qualified = local ? undefined : this.findQualifiedClass(ref.parts.map((part) => part.name));
+    let cls = local ?? qualified;
     if (!cls) this.error(ref.row, `型 ${ref.parts.map((part) => part.name).join('.')} が見つかりません。`);
-    if (this.findQualifiedClass(ref.parts.map((part) => part.name)) && !this.findClass(scope, first.name)) {
-      consumed = ref.parts.length;
-    }
+    // A fully qualified name such as `kotlin.reflect.KProperty<*>` carries its arguments on its last part.
+    const consumed = qualified ? ref.parts.length : 1;
+    const argumentsPart = qualified ? (ref.parts.at(-1) as typeof first) : first;
     // A qualifier such as `Map` in `Map.Entry<K, V>` names a scope, whose own type arguments it may leave out.
     const isQualifier = consumed < ref.parts.length;
     let args: TypeArgument[] =
-      isQualifier && first.args.length === 0 ? [] : this.resolveArguments(scope, cls, first.args, ref.row);
+      isQualifier && argumentsPart.args.length === 0
+        ? []
+        : allowsBareClass && argumentsPart.args.length === 0 && !isQualifier
+          ? cls.typeParameters.map((): TypeArgument => ({ variance: 'star' }))
+          : this.resolveArguments(scope, cls, argumentsPart.args, ref.row);
     for (const part of ref.parts.slice(consumed)) {
       const nested: ClassSymbol | undefined = cls.nested.get(part.name);
       if (!nested) this.error(ref.row, `型 ${cls.name}.${part.name} が見つかりません。`);
       cls = nested;
-      args = this.resolveArguments(scope, cls, part.args, ref.row);
+      args =
+        allowsBareClass && part.args.length === 0
+          ? cls.typeParameters.map((): TypeArgument => ({ variance: 'star' }))
+          : this.resolveArguments(scope, cls, part.args, ref.row);
     }
     return { kind: 'class', cls, args, nullable: ref.nullable };
   }

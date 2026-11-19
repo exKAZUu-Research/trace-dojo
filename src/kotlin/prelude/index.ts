@@ -1,14 +1,30 @@
+import { arraysSource } from './arrays';
+import { COLLECTION_CLASSES_SOURCE } from './collectionClasses';
+import { COLLECTION_FUNCTIONS_SOURCE } from './collectionFunctions';
 import { COLLECTION_TYPES_SOURCE } from './collectionTypes';
+import { COMPARISONS_SOURCE, MATH_SOURCE, RANDOM_SOURCE } from './comparisonsRandomMath';
 import { CORE_SOURCE } from './core';
+import { PROPERTIES_SOURCE } from './properties';
 import { RANGES_SOURCE } from './ranges';
 import { exceptionsSource, IO_SOURCE, REFLECT_SOURCE, TURTLE_SOURCE } from './runtimeTypes';
+import { STANDARD_SOURCE } from './standard';
+import { TEXT_SOURCE } from './text';
 
 /** The prelude of the standard library, in the order its files are compiled together. */
 export const PRELUDE_SOURCES = [
   CORE_SOURCE,
   exceptionsSource(),
+  STANDARD_SOURCE,
   RANGES_SOURCE,
   COLLECTION_TYPES_SOURCE,
+  COLLECTION_CLASSES_SOURCE,
+  COLLECTION_FUNCTIONS_SOURCE,
+  arraysSource(),
+  COMPARISONS_SOURCE,
+  RANDOM_SOURCE,
+  MATH_SOURCE,
+  TEXT_SOURCE,
+  PROPERTIES_SOURCE,
   IO_SOURCE,
   REFLECT_SOURCE,
   TURTLE_SOURCE,

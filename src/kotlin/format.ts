@@ -23,6 +23,12 @@ function members(): AnyMembers {
   return anyMembers;
 }
 
+/** A Kotlin `Char`, which is one UTF-16 code unit, as a string. */
+export function charToString(code: number): string {
+  // oxlint-disable-next-line unicorn/prefer-code-point -- Kotlin chars are UTF-16 code units, which may be half a surrogate pair.
+  return String.fromCharCode(code);
+}
+
 /** Formats a primitive value as `toString` does. */
 export function formatPrimitive(kind: PrimitiveKind, value: number | bigint): string {
   switch (kind) {
@@ -33,8 +39,7 @@ export function formatPrimitive(kind: PrimitiveKind, value: number | bigint): st
       return formatFloat(value as number);
     }
     case 'Char': {
-      // oxlint-disable-next-line unicorn/prefer-code-point -- Kotlin chars are UTF-16 code units.
-      return String.fromCharCode(value as number);
+      return charToString(value as number);
     }
     case 'UInt': {
       return String((value as number) >>> 0);

@@ -94,8 +94,9 @@ export abstract class ExpressionConverter {
         return this.convertIdentifier(node);
       }
       case 'this_expression': {
-        if (named(node).length > 0) throw unavailable(node, 'ラベル付きの this（this@名前）');
-        return { kind: 'this', row };
+        const labelNode = named(node)[0];
+        if (labelNode) this.requireLibrary(node, 'ラベル付きの this（this@名前）');
+        return { kind: 'this', row, label: labelNode ? identifierName(labelNode) : undefined };
       }
       case 'super_expression': {
         if (named(node).length > 0) throw unavailable(node, 'super<型> や super@名前');
@@ -337,12 +338,14 @@ export abstract class ExpressionConverter {
     const parts = named(node);
     const isNamed = hasToken(node, '=');
     const valueNode = parts.at(-1) as Node;
-    if (hasToken(node, '*')) throw unavailable(node, '配列の展開（*配列）');
+    const isSpread = hasToken(node, '*') || valueNode.type === 'spread_expression';
+    if (isSpread) this.requireLibrary(node, '配列の展開（*配列）');
+    const value = valueNode.type === 'spread_expression' ? named(valueNode)[0] : valueNode;
     return {
       row: rowOf(node),
       name: isNamed ? identifierName(parts[0]) : undefined,
-      value: this.convertExpression(valueNode),
-      isSpread: false,
+      value: this.convertExpression(value),
+      isSpread,
     };
   }
 

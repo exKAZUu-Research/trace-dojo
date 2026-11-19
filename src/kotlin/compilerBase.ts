@@ -101,12 +101,16 @@ export class ReceiverSymbol {
     readonly type: KType,
     readonly context: FunctionContext,
     /** The class whose `this` the receiver is, for a class's members. */
-    readonly cls: ClassSymbol | undefined
+    readonly cls: ClassSymbol | undefined,
+    /** The name `this@name` refers to it by: its class's, or its extension function's. */
+    readonly label?: string
   ) {}
 }
 
 export interface LoopContext {
   identity: object;
+  /** Whether a `break` leaves the loop, without which `while (true)` never completes. */
+  hasBreak: boolean;
   /** The variables declared before the loop, which an assignment in it may assign more than once. */
   outerVals: Set<VariableSymbol>;
 }
@@ -228,6 +232,31 @@ export class Flow {
     );
     const maybeAssigned = new Set(flows.flatMap((flow) => [...flow.maybeAssigned]));
     return new Flow(narrowed, assigned, maybeAssigned, false);
+  }
+}
+
+/**
+ * A value that compiled code hands to code compiled inside it, such as the receiver of `a[i] += 1` to its `get` and
+ * `set`. Handoffs nest as calls do, and the value also stays in the frame's temporaries, which garbage collection
+ * follows.
+ */
+export class Handoff<T> {
+  private current: T | undefined;
+
+  get(): T {
+    return this.current as T;
+  }
+
+  run<R>(frame: Frame, value: T, body: () => R): R {
+    const previous = this.current;
+    this.current = value;
+    frame.temporaries.push(value as unknown as Value);
+    try {
+      return body();
+    } finally {
+      frame.temporaries.pop();
+      this.current = previous;
+    }
   }
 }
 

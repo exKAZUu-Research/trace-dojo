@@ -106,6 +106,8 @@ export interface ClassDecl {
   endRow: number;
   classKind: ClassKind;
   name: string;
+  /** Whether the declaration is a `fun interface`, which lambdas convert to. */
+  isFunInterface: boolean;
   modifiers: Modifiers;
   typeParameters: TypeParameterDecl[];
   primaryConstructor: { row: number; params: ClassParameterDecl[]; modifiers: Modifiers } | undefined;
@@ -280,7 +282,7 @@ export type Expression =
   | { kind: 'boolean'; row: number; value: boolean }
   | { kind: 'null'; row: number }
   | { kind: 'name'; row: number; name: string }
-  | { kind: 'this'; row: number }
+  | { kind: 'this'; row: number; label: string | undefined }
   | { kind: 'super'; row: number }
   | { kind: 'member'; row: number; receiver: Expression; name: string; isSafe: boolean }
   | CallExpression

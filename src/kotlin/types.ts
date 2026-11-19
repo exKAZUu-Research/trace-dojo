@@ -72,7 +72,7 @@ export function nonNull(type: KType): KType {
 /** Whether a value of the type may be `null`, which a type parameter without a non-null bound may hold. */
 export function isNullable(type: KType): boolean {
   if (type.nullable) return true;
-  if (type.kind === 'param') return type.param.bounds.length === 0 || type.param.bounds.some(isNullable);
+  if (type.kind === 'param') return type.param.bounds.length === 0 || type.param.bounds.every(isNullable);
   if (type.kind === 'variable' && type.variable.fixed) return isNullable(type.variable.fixed);
   return false;
 }

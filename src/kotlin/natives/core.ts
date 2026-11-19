@@ -1,7 +1,7 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../../interpreter/turtleWorld';
 import { runtimeClassOf } from '../dispatch';
 import { defaultToString, formatPrimitive, hashOf, identityHash, stringHash, stringOf } from '../format';
-import { compareDoubles, compareNumbers, toInt32 } from '../operators';
+import { arithmeticOperation, compareDoubles, compareNumbers, negate, step, toInt32 } from '../operators';
 import { EXCEPTIONS } from '../prelude/runtimeTypes';
 import type { Frame } from '../runtime';
 import type { PropertySymbol } from '../symbols';
@@ -129,6 +129,28 @@ function range(name: string, first: Value, last: Value): Value {
   object.fields[1] = last;
   object.fields[2] = name === 'LongRange' ? 1n : 1;
   return object;
+}
+
+function defineOperatorMembers(): void {
+  const operators: [string, '+' | '-' | '*' | '/' | '%'][] = [
+    ['plus', '+'],
+    ['minus', '-'],
+    ['times', '*'],
+    ['div', '/'],
+    ['rem', '%'],
+  ];
+  for (const kind of ['Int', 'Long', 'Double', 'Float', 'Short', 'Byte'] as const) {
+    const result = kind === 'Short' || kind === 'Byte' ? 'Int' : kind;
+    for (const [name, operator] of operators) {
+      const operation = arithmeticOperation(result, operator);
+      defineNative(`kotlin.${kind}.${name}(${kind})`, (frame, receiver, [other]) =>
+        operation(frame, receiver as number | bigint, other as number | bigint)
+      );
+    }
+    defineNative(`kotlin.${kind}.unaryMinus()`, (_frame, receiver) => negate(result, receiver as number | bigint));
+    defineNative(`kotlin.${kind}.inc()`, (_frame, receiver) => step(kind, receiver as number | bigint, 1));
+    defineNative(`kotlin.${kind}.dec()`, (_frame, receiver) => step(kind, receiver as number | bigint, -1));
+  }
 }
 
 function definePrimitives(): void {
@@ -439,6 +461,7 @@ function defineTurtle(): void {
 }
 
 definePrimitives();
+defineOperatorMembers();
 defineAnyAndString();
 defineThrowables();
 defineOutput();

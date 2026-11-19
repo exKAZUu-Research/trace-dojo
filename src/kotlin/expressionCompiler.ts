@@ -224,7 +224,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
         return this.compileName(scope, context, expression.name, expression.row);
       }
       case 'this': {
-        return this.compileThis(scope, context, expression.row);
+        return this.compileThis(scope, context, expression.row, expression.label);
       }
       case 'super': {
         return this.error(expression.row, 'super は、super.メンバー の形で使ってください。');
@@ -344,9 +344,16 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   // Names.
 
-  protected compileThis(scope: Scope, context: FunctionContext, row: number): Compiled {
-    const [receiver] = this.receiversOf(scope);
-    if (!receiver) this.error(row, 'ここでは this を使えません。');
+  /** An implicit receiver's type where the code is, which a smart cast such as `if (this is List)` narrows. */
+  protected receiverTypeOf(receiver: ReceiverSymbol): KType {
+    return this.flow.narrowed.get(keyOf(receiver)) ?? receiver.type;
+  }
+
+  protected compileThis(scope: Scope, context: FunctionContext, row: number, label?: string): Compiled {
+    const receivers = this.receiversOf(scope);
+    const receiver = label === undefined ? receivers[0] : receivers.find((candidate) => candidate.label === label);
+    if (!receiver)
+      this.error(row, label === undefined ? 'ここでは this を使えません。' : `this@${label} が見つかりません。`);
     const key = keyOf(receiver);
     const narrowed = this.flow.narrowed.get(key);
     return {
@@ -362,10 +369,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const variable = this.findVariable(scope, name);
     if (variable) return this.readVariable(context, variable, row);
     for (const receiver of this.receiversOf(scope)) {
-      const property = this.findProperty(scope, receiver.type, name);
+      const property = this.findProperty(scope, this.receiverTypeOf(receiver), name);
       if (property) {
         const receiverCompiled: Compiled = {
-          type: this.flow.narrowed.get(keyOf(receiver)) ?? receiver.type,
+          type: this.receiverTypeOf(receiver),
           repr: reprOf(this.core, receiver.type),
           eval: this.receiverAccess(context, receiver),
           stableKey: keyOf(receiver),
@@ -390,6 +397,21 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   /** The members of the companion objects and enum entries that a class's body reaches by their simple names. */
+  /** The companion object whose property a simple name in a class's body means, with the property. */
+  protected findCompanionProperty(
+    scope: Scope,
+    name: string
+  ): { holder: ClassSymbol; property: MemberRef<PropertySymbol> } | undefined {
+    for (let current: Scope | undefined = scope; current; current = current.parent) {
+      for (let cls = current.staticClass; cls; cls = cls.outer) {
+        const { companion } = cls;
+        const property = companion ? this.findProperty(scope, companion.type, name) : undefined;
+        if (companion && property) return { holder: companion, property };
+      }
+    }
+    return undefined;
+  }
+
   private findStaticMember(scope: Scope, name: string): Compiled | undefined {
     for (let current: Scope | undefined = scope; current; current = current.parent) {
       for (let cls = current.staticClass; cls; cls = cls.outer) {
@@ -615,7 +637,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (expression.kind === 'name') {
       if (this.findVariable(scope, expression.name)) return undefined;
       for (const receiver of this.receiversOf(scope)) {
-        if (this.findProperty(scope, receiver.type, expression.name)) return undefined;
+        if (this.findProperty(scope, this.receiverTypeOf(receiver), expression.name)) return undefined;
       }
       if (this.findStaticMember(scope, expression.name)) return undefined;
       if (this.topLevelProperties(expression.name).length > 0) return undefined;
@@ -760,6 +782,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       row: argument.row,
       name: argument.name,
       value: argument.value,
+      isSpread: argument.isSpread,
     }));
     if (expression.trailingLambda)
       args.push({ row: expression.trailingLambda.row, name: undefined, value: expression.trailingLambda });
@@ -819,7 +842,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const levels: { candidates: Candidate[]; receiver: Compiled | undefined }[] = [];
     for (const receiver of this.receiversOf(scope)) {
       const receiverCompiled: Compiled = {
-        type: this.flow.narrowed.get(keyOf(receiver)) ?? receiver.type,
+        type: this.receiverTypeOf(receiver),
         repr: reprOf(this.core, receiver.type),
         eval: this.receiverAccess(context, receiver),
         stableKey: keyOf(receiver),
@@ -873,7 +896,16 @@ export abstract class ExpressionCompiler extends CallCompiler {
       }
     }
     const cls = this.findClass(scope, name);
-    if (cls) {
+    if (
+      cls?.isFunInterface &&
+      args.length === 1 &&
+      args[0].value.kind === 'lambda' &&
+      typeArgs.length <= cls.typeParameters.length
+    ) {
+      return this.compileSamConstructor(scope, context, cls, args[0].value, typeArgs, expected);
+    }
+    const instantiable = cls !== undefined && !cls.isInterface && !cls.isAbstract && cls.kind !== 'enum';
+    if (cls && (instantiable || levels.length === 0)) {
       const constructors = this.constructorCandidates(cls, row);
       if (constructors.length > 0) levels.push({ candidates: constructors, receiver: undefined });
     }
@@ -895,6 +927,49 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return this.resolveInLevels(scope, context, levels, args, hasTrailingLambda, typeArgs, expected, row, name);
   }
 
+  /** `Comparator { a, b -> ... }`: a lambda converted to a `fun interface`, whose type arguments it may infer. */
+  private compileSamConstructor(
+    scope: Scope,
+    context: FunctionContext,
+    cls: ClassSymbol,
+    lambda: LambdaExpression,
+    typeArgs: KType[],
+    expected: KType | undefined
+  ): Compiled {
+    let type: KType;
+    const expectedType = expected ? resolved(expected) : undefined;
+    if (typeArgs.length === cls.typeParameters.length) type = classType(cls, typeArgs);
+    else if (expectedType?.kind === 'class' && expectedType.cls === cls) type = withNullabilityOf(expectedType, false);
+    else
+      type = classType(
+        cls,
+        cls.typeParameters.map(
+          (param) =>
+            ({
+              kind: 'variable',
+              variable: { param, lower: [], upper: [], fixed: undefined },
+              nullable: false,
+            }) as KType
+        )
+      );
+    const sam = this.samOf(type) as NonNullable<ReturnType<ExpressionCompiler['samOf']>>;
+    const compiled = this.compileLambda(scope, context, lambda, resolved(sam.functionType) as FunctionType, false);
+    const bodyType = (resolved(compiled.type) as FunctionType).returnType;
+    if (
+      !isSubtype(bodyType, sam.functionType.returnType) &&
+      !this.isClass(sam.functionType.returnType, this.core.unit)
+    ) {
+      this.error(lambda.row, typeMismatchMessage(sam.functionType.returnType, bodyType));
+    }
+    for (const argument of (resolved(type) as ClassType).args) {
+      if (argument.variance !== 'star' && argument.type.kind === 'variable' && !argument.type.variable.fixed) {
+        argument.type.variable.fixed =
+          argument.type.variable.lower[0] ?? argument.type.variable.upper[0] ?? anyType(true);
+      }
+    }
+    return { ...this.samWrap(compiled, sam, resolved(type)), isCreation: true };
+  }
+
   /** Reports a call of a function that the program cannot use, naming the features that this environment lacks. */
   protected abstract reportUnknownFunction(name: string, row: number): never;
 
@@ -912,7 +987,17 @@ export abstract class ExpressionCompiler extends CallCompiler {
   ): Compiled {
     // Each level resolves with its own receiver; the first level with an applicable candidate decides.
     const receiverOf = new Map<Candidate, Compiled | undefined>();
-    for (const level of levels) for (const candidate of level.candidates) receiverOf.set(candidate, level.receiver);
+    for (const level of levels) {
+      for (const candidate of level.candidates) {
+        // A member of an object imported by name, as `observable` from `Delegates`, is called on the object.
+        const owner = candidate.symbol.owner;
+        const objectReceiver: Compiled | undefined =
+          !level.receiver && owner?.isObject && candidate.kind !== 'constructor'
+            ? { type: owner.type, repr: 'ref', eval: this.objectInstance(owner) }
+            : undefined;
+        receiverOf.set(candidate, level.receiver ?? objectReceiver);
+      }
+    }
     const resolvedCall = this.resolveCall(
       scope,
       context,
@@ -921,7 +1006,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       hasTrailingLambda,
       typeArgs,
       expected,
-      undefined,
+      (candidate) => receiverOf.get(candidate),
       row,
       name
     );
@@ -1001,9 +1086,25 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const members = this.memberCandidates(nonNull(receiver.type), name);
     const extensions = this.extensionCandidates(receiver.type, name);
     const levels: { candidates: Candidate[]; receiver: Compiled }[] = [];
+    // On a receiver that may be null, an extension that accepts null, such as `Any?.toString()`, comes before members.
+    const receiverMayBeNull = isNullable(resolved(receiver.type));
+    if (receiverMayBeNull && extensions.length > 0) levels.push({ candidates: extensions, receiver });
     if (members.length > 0) levels.push({ candidates: members, receiver });
-    if (extensions.length > 0) levels.push({ candidates: extensions, receiver });
+    if (!receiverMayBeNull && extensions.length > 0) levels.push({ candidates: extensions, receiver });
     if (levels.length === 0) {
+      const variable = this.findVariable(scope, name);
+      const variableType = variable ? resolved(variable.type) : undefined;
+      if (variable && variableType?.kind === 'function' && variableType.receiver) {
+        return this.compileInvoke(
+          scope,
+          context,
+          this.readVariable(context, variable, row),
+          args,
+          hasTrailingLambda,
+          row,
+          receiver
+        );
+      }
       const property = this.findProperty(scope, receiver.type, name);
       if (property && resolved(this.ensurePropertyType(property.symbol, row)).kind === 'function') {
         return this.compileInvoke(
@@ -1151,7 +1252,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     functionValue: Compiled,
     args: ArgumentSyntax[],
     hasTrailingLambda: boolean,
-    row: number
+    row: number,
+    explicitReceiver?: Compiled
   ): Compiled {
     void hasTrailingLambda;
     const type = resolved(functionValue.type);
@@ -1163,9 +1265,31 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (type.nullable) this.error(row, 'null かもしれない関数は、?.invoke() か !! を使って呼び出してください。');
     if (args.some((argument) => argument.name !== undefined))
       this.error(row, '関数型の値の呼び出しには、引数の名前を書けません。');
-    const params = type.receiver ? [type.receiver, ...type.params] : type.params;
+    // A function type with a receiver takes it before its arguments: written as `r.f(x)`, or implicit as `f(x)`.
+    let receiverEval: Eval | undefined;
+    if (type.receiver) {
+      const receiverType = type.receiver;
+      const receiver =
+        explicitReceiver ??
+        (args.length === type.params.length
+          ? this.receiversOf(scope)
+              .map((candidate): Compiled => ({
+                type: this.flow.narrowed.get(keyOf(candidate)) ?? candidate.type,
+                repr: reprOf(this.core, candidate.type),
+                eval: this.receiverAccess(context, candidate),
+              }))
+              .find((candidate) => isSubtype(candidate.type, receiverType))
+          : undefined);
+      if (receiver)
+        receiverEval = convertRepr(
+          this.expectType(receiver, receiverType, row),
+          reprOf(this.core, receiverType),
+          'ref'
+        );
+    }
+    const params = type.receiver && !receiverEval ? [type.receiver, ...type.params] : type.params;
     if (args.length !== params.length) this.error(row, `引数の数が違います。${params.length} 個必要です。`);
-    const evals = args.map((argument, index) => {
+    const argumentEvals = args.map((argument, index) => {
       const paramType = params[index];
       const compiled =
         argument.value.kind === 'lambda'
@@ -1180,6 +1304,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       const converted = this.expectType(compiled, paramType, argument.row);
       return convertRepr(converted, reprOf(this.core, paramType), 'ref');
     });
+    const evals = receiverEval ? [receiverEval, ...argumentEvals] : argumentEvals;
     const target = functionValue.eval;
     const callRow = this.recordsSteps && !this.file.isLibrary ? row : undefined;
     return {
@@ -1242,6 +1367,27 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (extensions.length === 0 || members.length > 0) this.requireNonNullReceiver(receiver, row, false);
     const call = this.resolveCall(scope, context, levels, args, false, [], undefined, receiver, row, shown);
     return { ...this.finishCall(call, receiver, row), isCall: false };
+  }
+
+  /** Resolves an operator call, giving both the resolved function and its compiled call. */
+  protected resolveOperator(
+    scope: Scope,
+    context: FunctionContext,
+    receiver: Compiled,
+    name: string,
+    args: ArgumentSyntax[],
+    row: number,
+    shown: string
+  ): { call: ResolvedCall; compiled: Compiled } {
+    const members = this.memberCandidates(nonNull(receiver.type), name).filter(
+      (candidate) => candidate.symbol.isOperator
+    );
+    const extensions = this.extensionCandidates(receiver.type, name).filter((candidate) => candidate.symbol.isOperator);
+    const levels = [members, extensions].filter((level) => level.length > 0);
+    if (levels.length === 0) this.error(row, `${typeToString(resolved(receiver.type))} には ${shown} を使えません。`);
+    if (extensions.length === 0 || members.length > 0) this.requireNonNullReceiver(receiver, row, false);
+    const call = this.resolveCall(scope, context, levels, args, false, [], undefined, receiver, row, shown);
+    return { call, compiled: { ...this.finishCall(call, receiver, row), isCall: false } };
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- One case per unary operator.
@@ -1590,12 +1736,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   ): Compiled {
     const { operator, row } = expression;
     const left = this.compileExpression(scope, context, expression.left);
-    const right = this.compileExpression(
-      scope,
-      context,
-      expression.right,
-      left.integerLiteral ? undefined : nonNull(left.type)
-    );
+    const right = this.compileExpression(scope, context, expression.right);
     const negated = operator === '!=' || operator === '!==';
     const isIdentity = operator === '===' || operator === '!==';
     this.checkEqualityApplicable(left, right, row, operator);
@@ -1651,17 +1792,14 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const b = nonNull(resolved(right.type));
     if (a.kind === 'nothing' || b.kind === 'nothing') return;
     if (isSubtype(a, b) || isSubtype(b, a)) return;
-    if (left.integerLiteral && this.acceptsArgument(left, b)) return;
-    if (right.integerLiteral && this.acceptsArgument(right, a)) return;
-    const aKind = this.primitiveOf(a);
-    const bKind = this.primitiveOf(b);
-    if (
-      aKind ||
-      bKind ||
-      this.isClass(a, this.core.string) ||
-      this.isClass(b, this.core.string) ||
-      (isFinalType(a) && isFinalType(b))
-    ) {
+    // Values of the standard library's final value types never equal values of unrelated types, which Kotlin rejects;
+    // two unrelated classes of the program only draw a warning.
+    const isValueType = (type: KType): boolean =>
+      this.primitiveOf(type) !== undefined ||
+      this.isClass(type, this.core.boolean) ||
+      this.isClass(type, this.core.string) ||
+      (type.kind === 'class' && type.cls.kind === 'enum');
+    if (isValueType(a) || isValueType(b)) {
       this.error(row, `演算子 ${operator} は ${typeToString(a)} と ${typeToString(b)} には使えません。`);
     }
   }
@@ -1749,10 +1887,21 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   // Types.
 
-  protected checkableType(scope: Scope, ref: TypeRef, row: number): KType {
-    const type = this.resolveType(scope, ref);
+  /**
+   * The type of an `is` check, which may name type arguments only where the subject's type implies them, as
+   * `iterable is Collection<T>` does for an `Iterable<T>`, since type arguments are erased at run time.
+   */
+  protected checkableType(scope: Scope, ref: TypeRef, row: number, subjectType: KType): KType {
+    const type = this.resolveType(scope, ref, true);
     const actual = resolved(type);
-    if (actual.kind === 'class' && actual.args.some((argument) => argument.variance !== 'star')) {
+    const implied =
+      actual.kind === 'class'
+        ? resolved(
+            this.narrowedType(subjectType, { ...actual, args: actual.args.map(() => ({ variance: 'star' as const })) })
+          )
+        : undefined;
+    const isImplied = implied !== undefined && isSubtype(implied, actual) && isSubtype(actual, implied);
+    if (actual.kind === 'class' && !isImplied && actual.args.some((argument) => argument.variance !== 'star')) {
       this.error(
         row,
         `型引数は実行時には消えるので、${typeToString(actual)} かどうかは調べられません。* を使ってください。`
@@ -1761,6 +1910,14 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (actual.kind === 'param' && !actual.param.isReified)
       this.error(row, `型引数 ${actual.param.name} かどうかは調べられません。`);
     return type;
+  }
+
+  /** Whether a type is a generic class written without arguments, as in `x is List`. */
+  protected isBare(type: KType): boolean {
+    const actual = resolved(type);
+    return (
+      actual.kind === 'class' && actual.args.length > 0 && actual.args.every((argument) => argument.variance === 'star')
+    );
   }
 
   /** The type `is` narrows to: the class type with the arguments the value's static type gives it. */
@@ -1787,8 +1944,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   private compileIs(scope: Scope, context: FunctionContext, expression: Extract<Expression, { kind: 'is' }>): Compiled {
     const operand = this.compileExpression(scope, context, expression.operand);
-    const type = this.checkableType(scope, expression.type, expression.row);
-    this.checkCastPossible(operand.type, type, expression.row);
+    const type = this.checkableType(scope, expression.type, expression.row, operand.type);
     const test = instanceTest(this.core, type);
     const evaluate = convertRepr(operand.eval, operand.repr, 'ref');
     const narrowing = new Map<string, KType>();
@@ -1803,20 +1959,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
     };
   }
 
-  /** Rejects a check or cast between types no value can have both of, as Kotlin's compiler does. */
-  protected checkCastPossible(from: KType, to: KType, row: number): void {
-    const source = nonNull(resolved(from));
-    const target = nonNull(resolved(to));
-    if (source.kind !== 'class' || target.kind !== 'class') return;
-    if (isSubtype(source, target) || isSubtype(target, source)) return;
-    if (isFinalClass(source.cls) && isFinalClass(target.cls)) {
-      this.error(row, `${typeToString(source)} の値が ${typeToString(target)} であることはありません。`);
-    }
-  }
-
   private compileAs(scope: Scope, context: FunctionContext, expression: Extract<Expression, { kind: 'as' }>): Compiled {
     const operand = this.compileExpression(scope, context, expression.operand);
-    const type = this.resolveType(scope, expression.type);
+    const written = this.resolveType(scope, expression.type, true);
+    const type = this.isBare(written) ? this.narrowedType(operand.type, written) : written;
     const actual = resolved(type);
     const isErased =
       (actual.kind === 'class' && actual.args.some((argument) => argument.variance !== 'star')) ||
@@ -1909,6 +2055,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   private compileJump(context: FunctionContext, isBreak: boolean, row: number): Compiled {
     const loop = context.loops.at(-1);
     if (!loop) this.error(row, `${isBreak ? 'break' : 'continue'} は、ループの中に書いてください。`);
+    if (isBreak) loop.hasBreak = true;
     const signal = new LoopSignal(loop.identity, isBreak);
     this.flow.isDead = true;
     return {
@@ -2095,16 +2242,12 @@ export abstract class ExpressionCompiler extends CallCompiler {
   ): Compiled;
 }
 
+function withNullabilityOf<T extends KType>(type: T, isNullable: boolean): T {
+  return type.nullable === isNullable ? type : { ...type, nullable: isNullable };
+}
+
 function unboxNumber(value: Value): number | bigint {
   return value instanceof Boxed ? value.value : (value as number | bigint);
-}
-
-function isFinalClass(cls: ClassSymbol): boolean {
-  return !cls.isInheritable && !cls.isInterface;
-}
-
-function isFinalType(type: KType): boolean {
-  return type.kind === 'class' && isFinalClass(type.cls);
 }
 
 function returnUnit(): Value {

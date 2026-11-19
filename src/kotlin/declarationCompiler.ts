@@ -20,6 +20,7 @@ import {
   type Eval,
   Flow,
   FunctionContext,
+  Handoff,
   PackageScope,
   ReceiverSymbol,
   type Repr,
@@ -86,6 +87,8 @@ interface PropertyEntry {
   initializer: Compiled | undefined;
   /** The slot of a delegate the property is delegated to. */
   delegateSlot: number | undefined;
+  /** For a top-level property, the global that holds its delegate. */
+  delegateGlobal?: number;
 }
 
 /** What a batch of files compiled into, for the runtime to start from. */
@@ -120,7 +123,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     const packageScope = this.packageScope(context.packageName);
     for (const declaration of file.declarations) {
       if (declaration.kind !== 'class') continue;
-      if (packageScope.classes.has(declaration.name) && !context.isLibrary) {
+      if (packageScope.classes.has(declaration.name)) {
         this.error(declaration.row, `クラス ${declaration.name} が2回宣言されています。`);
       }
       const entry = this.declareClass(declaration, context, undefined);
@@ -142,6 +145,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (symbol.isSealed) symbol.isAbstract = true;
     symbol.isData = keywords.has('data');
     symbol.isValue = keywords.has('value');
+    symbol.isFunInterface = decl.isFunInterface;
+    symbol.isNative = file.isLibrary && keywords.has('external');
     symbol.visibility = visibilityOf(decl.modifiers);
     symbol.row = decl.row;
     symbol.isLibrary = file.isLibrary;
@@ -206,9 +211,13 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         if (!cls && !functions && !properties) this.rejectImport(row, path.join('.'));
         if (cls) context.importedClasses.set(name, cls);
         if (functions)
-          context.importedFunctions.set(name, [...(context.importedFunctions.get(name) ?? []), ...functions]);
+          context.importedFunctions.set(name, [
+            ...new Set([...(context.importedFunctions.get(name) ?? []), ...functions]),
+          ]);
         if (properties)
-          context.importedProperties.set(name, [...(context.importedProperties.get(name) ?? []), ...properties]);
+          context.importedProperties.set(name, [
+            ...new Set([...(context.importedProperties.get(name) ?? []), ...properties]),
+          ]);
         continue;
       }
       const owner = this.findQualifiedClass(path.slice(0, -1));
@@ -465,7 +474,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     ctor.visibility = visibilityOf(member.modifiers);
     const scope = new Scope(entry.scope, undefined);
     ctor.params = member.params.map((param) => this.declareParameter(scope, param));
-    const key = `${cls.kotlinName}.<init>(${member.params.map((param) => (param.type ? typeRefText(param.type) : '')).join(', ')})`;
+    const key = `${cls.kotlinName}.<init>(${member.params.map(nativeParameterText).join(', ')})`;
     const native = this.natives.get(key);
     if (!native) {
       this.missingNatives.push(key);
@@ -599,7 +608,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   ): void {
     const receiverText = decl.receiver ? typeRefText(decl.receiver) : undefined;
     const base = this.nativeKey(owner, file, receiverText, decl.name);
-    const key = `${base}(${decl.params.map((param) => (param.type ? typeRefText(param.type) : '')).join(', ')})`;
+    const key = `${base}(${decl.params.map(nativeParameterText).join(', ')})`;
     const native = this.natives.get(key);
     if (!native) {
       this.missingNatives.push(key);
@@ -793,8 +802,9 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       hasDefault: true,
       isVararg: false,
     }));
-    const copiedSlots = ctor.params.map(
-      (_, index) => entry.parameterProperties.find((item) => item.index === index)?.symbol.slot
+    // The fields' slots are laid out after the members are declared, so copy reads them when it runs.
+    const copiedProperties = ctor.params.map(
+      (_, index) => entry.parameterProperties.find((item) => item.index === index)?.symbol
     );
     add(
       'copy',
@@ -803,7 +813,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       (frame, receiver, args) => {
         const values = args.map((arg, index) => {
           if (arg !== MISSING) return arg;
-          const slot = copiedSlots[index];
+          const slot = copiedProperties[index]?.slot;
           return slot === undefined ? undefined : (receiver as KObject).fields[slot];
         });
         return (ctor.invoke as NonNullable<FunctionSymbol['invoke']>)(frame, undefined, values, undefined);
@@ -858,7 +868,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       if (this.hasBackingField(member, property)) {
         property.slot = count++;
         symbol.ownFields.push(property);
-        if (!member.getter?.body && !member.setter?.body) this.bindFieldAccessors(property);
+        // Custom accessors, compiled later, replace the default ones they declare.
+        this.bindFieldAccessors(property);
       }
     }
     symbol.fieldCount = count;
@@ -935,6 +946,14 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         }
         member.overridden = overridden;
         member.root = overridden[0].root;
+        // An override of an operator or infix function is one as well, as Kotlin inherits these modifiers.
+        if (member.kind === 'function') {
+          for (const base of overridden) {
+            if (base.kind !== 'function') continue;
+            member.isOperator ||= base.isOperator;
+            member.isInfix ||= base.isInfix;
+          }
+        }
         if (member.kind === 'function' && !member.isOverride && this.isGenerated(member)) member.isOverride = true;
         for (const base of overridden) symbol.vtable.set(base.root, member);
         symbol.vtable.set(member.root, member);
@@ -1085,7 +1104,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       Object.defineProperty(context, 'returnTarget', { value: context });
       context.info.isAtomic = symbol.isAtomic;
       const scope = new Scope(entry.scope, context);
-      const thisType = this.addReceivers(scope, context, entry.cls, symbol.extensionReceiver);
+      const thisType = this.addReceivers(scope, context, entry.cls, symbol.extensionReceiver, symbol.name);
       context.info.showsThis = thisType !== undefined && entry.cls !== undefined && !entry.file.isLibrary;
       const variables = symbol.params.map((param, index) => {
         const declared = decl.params[index];
@@ -1114,6 +1133,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         if (evaluate) symbol.params[index].defaultValue = evaluate;
       }
       if (!decl.body) {
+        symbol.defaultsInfo = context.info;
         entry.state = 'done';
         return;
       }
@@ -1173,16 +1193,17 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     scope: Scope,
     context: FunctionContext,
     cls: ClassEntry | undefined,
-    extension: KType | undefined
+    extension: KType | undefined,
+    label?: string
   ): KType | undefined {
     let thisType: KType | undefined;
     if (cls) {
       thisType = this.thisTypeOf(cls.symbol);
-      if (!extension) scope.receiver = new ReceiverSymbol(thisType, context, cls.symbol);
+      if (!extension) scope.receiver = new ReceiverSymbol(thisType, context, cls.symbol, cls.symbol.name);
       else this.unavailable(cls.symbol.row, 'クラスの中での拡張関数・拡張プロパティの宣言');
     }
     if (extension) {
-      scope.receiver = new ReceiverSymbol(extension, context, undefined);
+      scope.receiver = new ReceiverSymbol(extension, context, undefined, label);
       thisType = extension;
     }
     return thisType;
@@ -1264,7 +1285,12 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (scope) return scope;
     scope = new Scope(entry.cls ? entry.cls.scope : entry.scope, context);
     if (entry.cls) {
-      scope.receiver = new ReceiverSymbol(this.thisTypeOf(entry.cls.symbol), context, entry.cls.symbol);
+      scope.receiver = new ReceiverSymbol(
+        this.thisTypeOf(entry.cls.symbol),
+        context,
+        entry.cls.symbol,
+        entry.cls.symbol.name
+      );
       const ctor = entry.cls.constructorSymbol;
       for (const [index, param] of (ctor?.params ?? []).entries()) {
         const row = entry.cls.decl.primaryConstructor?.params[index]?.row ?? entry.cls.decl.row;
@@ -1401,38 +1427,41 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     const holderScope = new Scope(scope, context);
     const holder = new VariableSymbol('\0delegate', delegate.type, false, 0, -1, decl.row);
     holder.owner = context;
-    holder.delegateRead = (frame) => (frame.temporaries.at(-1) as unknown as { delegate: Value }).delegate;
+    const held = new Handoff<{ delegate: Value; value: Value }>();
+    holder.delegateRead = () => held.get().delegate;
     holderScope.variables.set(holder.name, holder);
     this.flow.assigned.add(holder);
     const holderCompiled = this.compileName(holderScope, context, holder.name, decl.row);
     const thisArgument: ArgumentSyntax = entry.cls
-      ? { row: decl.row, name: undefined, value: { kind: 'this', row: decl.row } }
+      ? { row: decl.row, name: undefined, value: { kind: 'this', row: decl.row, label: undefined } }
       : { row: decl.row, name: undefined, value: { kind: 'null', row: decl.row } };
     const getter = this.compileDelegateCall(
       holderScope,
       context,
       holderCompiled,
       'getValue',
-      [thisArgument, this.propertyReference(decl.name)],
+      [thisArgument, this.propertyReference(holderScope, decl.name, decl.row)],
       decl.row
     );
     if (!symbol.type) symbol.type = getter.type;
     else if (!isSubtype(getter.type, symbol.type)) this.error(decl.row, typeMismatchMessage(symbol.type, getter.type));
     const getEval = convertRepr(getter.eval, getter.repr, propertyRepr(symbol));
-    if (slot === undefined) this.unavailable(decl.row, 'トップレベルのプロパティの委譲');
-    const readDelegate = (_frame: Frame, receiver: Value): Value => (receiver as KObject).fields[slot];
+    // A top-level property's delegate lives in the globals, which the file's initializers fill when the run starts.
+    const globalSlot = slot === undefined ? this.globalCount++ : undefined;
+    if (globalSlot !== undefined) entry.delegateGlobal = globalSlot;
+    const readDelegate = (frame: Frame, receiver: Value): Value =>
+      globalSlot === undefined ? (receiver as KObject).fields[slot as number] : frame.runtime.globals[globalSlot];
     const { info } = context;
     const none: unknown[] = [];
     const runHeld = (frame: Frame, receiver: Value, run: Eval, value?: Value): Value =>
-      frame.runtime.call(info, frame, none, receiver, [], undefined, (inner) => {
-        inner.temporaries.push({ delegate: readDelegate(frame, receiver), value } as unknown as Value);
-        return run(inner);
-      });
+      frame.runtime.call(info, frame, none, receiver, [], undefined, (inner) =>
+        held.run(inner, { delegate: readDelegate(frame, receiver), value }, () => run(inner))
+      );
     symbol.get = (frame, receiver) => runHeld(frame, receiver, getEval);
     if (decl.isVar) {
       const valueVariable = new VariableSymbol('\0value', symbol.type, false, 0, -1, decl.row);
       valueVariable.owner = context;
-      valueVariable.delegateRead = (frame) => (frame.temporaries.at(-1) as unknown as { value: Value }).value;
+      valueVariable.delegateRead = () => held.get().value;
       holderScope.variables.set(valueVariable.name, valueVariable);
       this.flow.assigned.add(valueVariable);
       const setter = this.compileDelegateCall(
@@ -1442,7 +1471,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         'setValue',
         [
           thisArgument,
-          this.propertyReference(decl.name),
+          this.propertyReference(holderScope, decl.name, decl.row),
           { row: decl.row, name: undefined, value: { kind: 'name', row: decl.row, name: '\0value' } },
         ],
         decl.row
@@ -1460,7 +1489,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   // code-gauge-allow functionCognitiveComplexity 35 -- The steps of a constructor: superclass, parameters, initializers, init blocks.
   private compileClassInitializer(entry: ClassEntry): void {
     const { symbol, decl } = entry;
-    if (symbol.isInterface) return;
+    if (symbol.isInterface || symbol.isNative) return;
     const owner = { cls: entry, scope: entry.scope, file: entry.file };
     const context = this.initializerContext(owner);
     const scope = this.initializerScope(owner, context);
@@ -1539,6 +1568,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       }
     }
     this.checkValsInitialized(entry);
+    if (symbol.kind === 'enum') this.compileEnumArguments(entry);
     const { info } = context;
     const run = (frame: Frame): Value => {
       for (const [index, evaluate] of defaults.entries()) {
@@ -1636,6 +1666,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
     const superclass = symbol.superclass;
     if (!superclass || superclass.cls === this.core.any) return undefined;
+    if (superclass.cls.isNative && superclass.cls.constructors.length === 0) return undefined;
     const spec = decl.supers.find(
       (candidate) =>
         candidate.kind === 'constructorCall' &&
@@ -1735,6 +1766,48 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         args ? args(frame) : [],
         undefined
       );
+    }
+  }
+
+  /** Compiles the arguments each enum constant passes to its class's constructor, as `RED(0xFF0000)` does. */
+  private compileEnumArguments(entry: ClassEntry): void {
+    const ctor = entry.constructorSymbol as FunctionSymbol;
+    const context = new FunctionContext(
+      undefined,
+      false,
+      `${entry.symbol.name}-entries`,
+      entry.file.isLibrary,
+      undefined
+    );
+    const scope = new Scope(entry.scope, context);
+    const candidates: Candidate[] = [
+      { symbol: ctor, kind: 'constructor', substitution: new Map(), receiverType: undefined },
+    ];
+    const savedRecords = this.recordsSteps;
+    this.recordsSteps = false;
+    try {
+      const evaluators = entry.decl.enumEntries.map((enumEntry) => {
+        const args: ArgumentSyntax[] = enumEntry.args.map((argument) => ({
+          row: argument.row,
+          name: argument.name,
+          value: argument.value,
+        }));
+        return this.resolveCall(
+          scope,
+          context,
+          [candidates],
+          args,
+          false,
+          [],
+          undefined,
+          undefined,
+          enumEntry.row,
+          enumEntry.name
+        ).evaluateArgs;
+      });
+      this.enumArguments.set(entry.symbol, evaluators);
+    } finally {
+      this.recordsSteps = savedRecords;
     }
   }
 
@@ -1840,6 +1913,12 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   protected declarationKinds(declaration: Declaration): string {
     return declaration.kind;
   }
+}
+
+/** A parameter as the key of a native names it, such as `vararg T`. */
+function nativeParameterText(param: ParameterDecl): string {
+  const type = param.type ? typeRefText(param.type) : '';
+  return param.modifiers.keywords.has('vararg') ? `vararg ${type}` : type;
 }
 
 /** Whether an accessor's body names `field`, which gives its property a backing field. */

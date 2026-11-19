@@ -3,7 +3,7 @@ import { type Compiled, type Eval, FunctionContext, reprOf, type Scope, typeMism
 import { CompilerCore } from './compilerCore';
 import { callFunction, parameterReprs, receiverRepr, returnRepr } from './dispatch';
 import { type Frame, MISSING } from './runtime';
-import type { FunctionSymbol, ParameterSymbol, TypeParameterSymbol } from './symbols';
+import type { ClassSymbol, FunctionSymbol, ParameterSymbol, TypeParameterSymbol } from './symbols';
 import { checkVariableBounds, fixVariable, isSubtype } from './typeRelations';
 import {
   type FunctionType,
@@ -24,6 +24,8 @@ export interface ArgumentSyntax {
   row: number;
   name: string | undefined;
   value: Expression;
+  /** Whether the argument is `*array`, which passes the array's elements to a `vararg` parameter. */
+  isSpread?: boolean;
 }
 
 /** A function a call may mean, with the receiver it would be called on. */
@@ -164,10 +166,12 @@ export abstract class CallCompiler extends CompilerCore {
     hasTrailingLambda: boolean,
     explicitTypeArgs: KType[],
     expected: KType | undefined,
-    receiver: Compiled | undefined,
+    receiver: Compiled | ((candidate: Candidate) => Compiled | undefined) | undefined,
     row: number,
     name: string
   ): ResolvedCall {
+    const receiverOf = (candidate: Candidate): Compiled | undefined =>
+      typeof receiver === 'function' ? receiver(candidate) : receiver;
     const all = levels.flat();
     if (all.length === 0) this.error(row, `${name} が見つかりません。`);
     // A lone candidate gives its parameter types to the arguments, which literals and nested generic calls need.
@@ -176,6 +180,11 @@ export abstract class CallCompiler extends CompilerCore {
     if (lone) {
       loneAttempt = this.startAttempt(lone, args, hasTrailingLambda, explicitTypeArgs, row);
       if (!loneAttempt) this.reportUnmappable(lone, args, hasTrailingLambda, row, name);
+      // The receiver constrains the variables first, so that the arguments see the types it gives them.
+      const loneReceiver = receiverOf(lone);
+      if (lone.symbol.extensionReceiver && loneReceiver) {
+        isSubtype(loneReceiver.type, substitute(lone.symbol.extensionReceiver, loneAttempt.substitution));
+      }
     }
     const compiledArgs = args.map((argument, index): Compiled | undefined => {
       if (isLambdaArgument(argument.value)) return undefined;
@@ -195,7 +204,7 @@ export abstract class CallCompiler extends CompilerCore {
             ? loneAttempt
             : this.startAttempt(candidate, args, hasTrailingLambda, explicitTypeArgs, row);
         if (!attempt) return [];
-        return this.isApplicable(attempt, args, compiledArgs, receiver) ? [attempt] : [];
+        return this.isApplicable(attempt, args, compiledArgs, receiverOf(candidate)) ? [attempt] : [];
       });
       if (applicable.length === 0) continue;
       chosen =
@@ -205,7 +214,16 @@ export abstract class CallCompiler extends CompilerCore {
       break;
     }
     if (!chosen)
-      return this.reportInapplicable(all, args, compiledArgs, hasTrailingLambda, explicitTypeArgs, receiver, row, name);
+      return this.reportInapplicable(
+        all,
+        args,
+        compiledArgs,
+        hasTrailingLambda,
+        explicitTypeArgs,
+        all.length === 1 ? receiverOf(all[0]) : undefined,
+        row,
+        name
+      );
     return this.completeCall(scope, context, chosen, args, compiledArgs, expected, row);
   }
 
@@ -232,6 +250,14 @@ export abstract class CallCompiler extends CompilerCore {
         const variable: InferenceVariable = { param, lower: [], upper: [], fixed: undefined };
         variables.push(variable);
         substitution.set(param, { kind: 'variable', variable, nullable: false });
+      }
+      // A bound that names another type parameter, as `T : S` in `reduce`, relates the two variables.
+      for (const variable of variables) {
+        for (const bound of variable.param.bounds) {
+          const substituted = substitute(bound, substitution);
+          if (resolved(substituted).kind === 'variable')
+            isSubtype({ kind: 'variable', variable, nullable: false }, substituted);
+        }
       }
     }
     return { candidate, variables, substitution, mapping };
@@ -265,6 +291,7 @@ export abstract class CallCompiler extends CompilerCore {
           if (!this.lambdaFits(args[index].value as LambdaExpression, paramType)) return false;
           continue;
         }
+        if (args[index].isSpread) continue;
         if (!this.acceptsArgument(compiled, param.isVararg ? this.varargElementType(paramType) : paramType))
           return false;
       }
@@ -287,8 +314,47 @@ export abstract class CallCompiler extends CompilerCore {
     return type;
   }
 
+  /**
+   * The function type of a `fun interface`, which a lambda converts to, with its single abstract method: for
+   * `Comparator<T>`, `(T, T) -> Int`.
+   */
+  protected samOf(type: KType): { functionType: FunctionType; method: FunctionSymbol; cls: ClassSymbol } | undefined {
+    const actual = resolved(type);
+    if (actual.kind !== 'class' || !actual.cls.isFunInterface) return undefined;
+    for (const members of actual.cls.members.values()) {
+      for (const member of members) {
+        if (member.kind !== 'function' || !member.isAbstract) continue;
+        const found = this.membersOf<FunctionSymbol>(actual, member.name, 'function').find(
+          (candidate) => candidate.symbol === member
+        );
+        const substitution = found?.substitution ?? new Map();
+        return {
+          functionType: {
+            kind: 'function',
+            receiver: undefined,
+            params: member.params.map((param) => substitute(param.type, substitution)),
+            returnType: substitute(member.returnType ?? this.core.unit.type, substitution),
+            nullable: false,
+          },
+          method: member,
+          cls: actual.cls,
+        };
+      }
+    }
+    return undefined;
+  }
+
+  /** Wraps a lambda in an object of a `fun interface`, whose abstract method calls it. */
+  protected abstract samWrap(
+    lambda: Compiled,
+    sam: NonNullable<ReturnType<CallCompiler['samOf']>>,
+    type: KType
+  ): Compiled;
+
   /** Whether a lambda's parameters fit a function type, which only its number of parameters can tell before inference. */
   private lambdaFits(lambda: LambdaExpression, type: KType): boolean {
+    const sam = this.samOf(type);
+    if (sam) return this.lambdaFits(lambda, sam.functionType);
     const actual = resolved(type);
     if (actual.kind === 'variable' || actual.kind === 'param') return true;
     if (actual.kind === 'class') return actual.cls === this.core.function || actual.cls === this.core.any;
@@ -316,7 +382,18 @@ export abstract class CallCompiler extends CompilerCore {
       for (const [index] of args.entries()) {
         const aType = paramTypeOf(a, index);
         const bType = paramTypeOf(b, index);
-        if (!aType || !bType || !compiledArgs[index]) continue;
+        const compiled = compiledArgs[index];
+        if (!aType || !bType || !compiled) continue;
+        // An integer literal is an Int unless only another integer type fits, as `1..4` calls `rangeTo(Int)`.
+        if (compiled.integerLiteral) {
+          const literalType = compiled.type;
+          const aIsLiteral = isSubtype(literalType, substitute(aType, a.substitution));
+          const bIsLiteral = isSubtype(literalType, substitute(bType, b.substitution));
+          if (aIsLiteral !== bIsLiteral) {
+            if (!aIsLiteral) return false;
+            continue;
+          }
+        }
         if (!isSubtype(substitute(aType, a.substitution), substitute(bType, b.substitution))) return false;
       }
       const aReceiver = a.candidate.symbol.extensionReceiver;
@@ -355,9 +432,11 @@ export abstract class CallCompiler extends CompilerCore {
   ): Attempt | undefined {
     const lambdaIndex = args.findIndex((argument) => isLambdaArgument(argument.value));
     if (lambdaIndex === -1) return undefined;
+    // The lambda's parameter types are fixed before it is compiled to probe its result, which would otherwise add bounds.
     const lambdaTypes = attempts.map((attempt) => {
       const paramIndex = attempt.mapping.findIndex((indexes) => indexes.includes(lambdaIndex));
-      return resolved(substitute(attempt.candidate.symbol.params[paramIndex].type, attempt.substitution));
+      const type = substitute(attempt.candidate.symbol.params[paramIndex].type, attempt.substitution);
+      return this.lambdaTypeFor(type, attempt.variables) ?? resolved(type);
     });
     const first = lambdaTypes[0];
     if (first.kind !== 'function') return undefined;
@@ -391,7 +470,11 @@ export abstract class CallCompiler extends CompilerCore {
   ): ResolvedCall {
     const { candidate, substitution, variables, mapping } = attempt;
     const { symbol } = candidate;
-    const declaredReturn = symbol.returnType ?? this.core.unit.type;
+    // A constructor's result is its class with the class's type parameters, which the expected type may infer.
+    const declaredReturn =
+      candidate.kind === 'constructor' && symbol.owner
+        ? symbol.owner.selfType
+        : (symbol.returnType ?? this.core.unit.type);
     // The expected type constrains the variables only where the result's type mentions them.
     if (expected && hasOpenVariables(substitute(declaredReturn, substitution))) {
       const saved = variables.map((variable) => ({ lower: [...variable.lower], upper: [...variable.upper] }));
@@ -410,13 +493,14 @@ export abstract class CallCompiler extends CompilerCore {
         const elementType = param.isVararg ? this.varargElementType(paramType) : paramType;
         let compiled = compiledArgs[index];
         if (!compiled) {
-          const lambdaType = this.lambdaTypeFor(elementType, variables);
+          const sam = this.samOf(elementType);
+          const lambdaType = this.lambdaTypeFor(sam ? sam.functionType : elementType, variables);
           compiled = this.compileLambda(
             scope,
             context,
             args[index].value as LambdaExpression,
             lambdaType,
-            symbol.isInline
+            symbol.isInline && !sam
           );
           if (lambdaType) {
             const bodyType = (resolved(compiled.type) as FunctionType).returnType;
@@ -428,6 +512,7 @@ export abstract class CallCompiler extends CompilerCore {
               this.error(args[index].row, typeMismatchMessage(lambdaType.returnType, bodyType));
             }
           }
+          if (sam) compiled = this.samWrap(compiled, sam, resolved(elementType));
           compiledArgs[index] = compiled;
         }
         argumentEvals.push({ index, paramIndex, eval: (frame) => compiled.eval(frame) });
@@ -457,13 +542,15 @@ export abstract class CallCompiler extends CompilerCore {
       const compiled = compiledArgs[index] as Compiled;
       const paramType = substitute(param.type, substitution);
       const elementType = param.isVararg ? this.varargElementType(paramType) : paramType;
+      const isSpread = args[index].isSpread === true;
+      if (isSpread) return { index, paramIndex, eval: compiled.eval, isSpread };
       if (!this.acceptsArgument(compiled, elementType)) {
         this.error(args[index].row, typeMismatchMessage(elementType, compiled.type));
       }
       const converted = this.convertTo(compiled, elementType, args[index].row);
       const declaredRepr = param.isVararg ? reprOf(this.core, param.type) : reprs[paramIndex];
       const fromRepr = reprOf(this.core, elementType);
-      return { index, paramIndex, eval: this.reprConvert(converted, fromRepr, declaredRepr) };
+      return { index, paramIndex, eval: this.reprConvert(converted, fromRepr, declaredRepr), isSpread };
     });
     finalEvals.sort((a, b) => a.index - b.index);
     const paramCount = symbol.params.length;
@@ -476,10 +563,11 @@ export abstract class CallCompiler extends CompilerCore {
       const { temporaries } = frame;
       const mark = temporaries.length;
       try {
-        for (const { paramIndex, eval: evaluate } of finalEvals) {
+        for (const { paramIndex, eval: evaluate, isSpread } of finalEvals) {
           const value = evaluate(frame);
           temporaries.push(value);
-          if (paramIndex === varargIndex) varargs.push(value);
+          if (isSpread) varargs.push(...((value as KObject).items as Value[]));
+          else if (paramIndex === varargIndex) varargs.push(value);
           else values[paramIndex] = value;
         }
         if (varargArray) values[varargIndex] = varargArray(frame, varargs);

@@ -1,5 +1,5 @@
 import type { FunctionContext } from './compilerBase';
-import type { Frame, Invoker } from './runtime';
+import type { Frame, FunctionInfo, Invoker } from './runtime';
 import type { ClassType, KType } from './types';
 import type { Value } from './values';
 
@@ -38,6 +38,10 @@ export class ClassSymbol {
   isSealed = false;
   isData = false;
   isValue = false;
+  /** Whether natives create and initialize the instances, as for the library's `external` classes. */
+  isNative = false;
+  /** Whether the class is a `fun interface`, which a lambda converts to. */
+  isFunInterface = false;
   /** Whether the program cannot inherit from the class, which the standard library's own classes mostly are. */
   visibility: Visibility = 'public';
   /** The number of fields each instance holds, its superclasses' first. */
@@ -165,6 +169,8 @@ export class FunctionSymbol implements MemberBase {
   packageName = '';
   /** Runs the function; set when its body is compiled or its native implementation is bound. */
   invoke: Invoker | undefined;
+  /** The frame layout in which a native's default values are computed, which may read the earlier parameters. */
+  defaultsInfo: FunctionInfo | undefined;
   /** For a constructor, runs it on an instance that a subclass's constructor or `invoke` allocated. */
   initialize: ((caller: Frame, instance: Value, args: Value[], callRow: number | undefined) => void) | undefined;
 

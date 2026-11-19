@@ -75,7 +75,13 @@ function loadLibrary(): Library {
     return compileLibrary(packages, compiler, files);
   } catch (error) {
     // A mistake in the prelude is the interpreter's, which must not look like an error in the learner's program.
-    if (error instanceof CompileError) throw new TypeError(`The prelude does not compile: ${error.message}`);
+    if (error instanceof CompileError) {
+      const [diagnostic] = error.diagnostics;
+      const lines = PRELUDE_SOURCES.map(
+        (source, index) => `#${index}: ${source.split('\n')[diagnostic.row]?.trim() ?? ''}`
+      );
+      throw new TypeError(`The prelude does not compile: ${error.message}\n${lines.join('\n')}`);
+    }
     throw error;
   }
 }

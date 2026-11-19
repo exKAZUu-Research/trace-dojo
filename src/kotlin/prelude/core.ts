@@ -64,6 +64,14 @@ class Char private constructor() : Comparable<Char> {
 }
 
 class Byte private constructor() : Number(), Comparable<Byte> {
+    external operator fun plus(other: Byte): Int
+    external operator fun minus(other: Byte): Int
+    external operator fun times(other: Byte): Int
+    external operator fun div(other: Byte): Int
+    external operator fun rem(other: Byte): Int
+    external operator fun unaryMinus(): Int
+    external operator fun inc(): Byte
+    external operator fun dec(): Byte
     external override fun compareTo(other: Byte): Int
     external override fun toDouble(): Double
     external override fun toFloat(): Float
@@ -84,6 +92,14 @@ class Byte private constructor() : Number(), Comparable<Byte> {
 }
 
 class Short private constructor() : Number(), Comparable<Short> {
+    external operator fun plus(other: Short): Int
+    external operator fun minus(other: Short): Int
+    external operator fun times(other: Short): Int
+    external operator fun div(other: Short): Int
+    external operator fun rem(other: Short): Int
+    external operator fun unaryMinus(): Int
+    external operator fun inc(): Short
+    external operator fun dec(): Short
     external override fun compareTo(other: Short): Int
     external override fun toDouble(): Double
     external override fun toFloat(): Float
@@ -104,6 +120,14 @@ class Short private constructor() : Number(), Comparable<Short> {
 }
 
 class Int private constructor() : Number(), Comparable<Int> {
+    external operator fun plus(other: Int): Int
+    external operator fun minus(other: Int): Int
+    external operator fun times(other: Int): Int
+    external operator fun div(other: Int): Int
+    external operator fun rem(other: Int): Int
+    external operator fun unaryMinus(): Int
+    external operator fun inc(): Int
+    external operator fun dec(): Int
     external override fun compareTo(other: Int): Int
     external override fun toDouble(): Double
     external override fun toFloat(): Float
@@ -136,6 +160,14 @@ class Int private constructor() : Number(), Comparable<Int> {
 }
 
 class Long private constructor() : Number(), Comparable<Long> {
+    external operator fun plus(other: Long): Long
+    external operator fun minus(other: Long): Long
+    external operator fun times(other: Long): Long
+    external operator fun div(other: Long): Long
+    external operator fun rem(other: Long): Long
+    external operator fun unaryMinus(): Long
+    external operator fun inc(): Long
+    external operator fun dec(): Long
     external override fun compareTo(other: Long): Int
     external override fun toDouble(): Double
     external override fun toFloat(): Float
@@ -166,6 +198,14 @@ class Long private constructor() : Number(), Comparable<Long> {
 }
 
 class Float private constructor() : Number(), Comparable<Float> {
+    external operator fun plus(other: Float): Float
+    external operator fun minus(other: Float): Float
+    external operator fun times(other: Float): Float
+    external operator fun div(other: Float): Float
+    external operator fun rem(other: Float): Float
+    external operator fun unaryMinus(): Float
+    external operator fun inc(): Float
+    external operator fun dec(): Float
     external override fun compareTo(other: Float): Int
     external override fun toDouble(): Double
     external override fun toFloat(): Float
@@ -186,6 +226,14 @@ class Float private constructor() : Number(), Comparable<Float> {
 }
 
 class Double private constructor() : Number(), Comparable<Double> {
+    external operator fun plus(other: Double): Double
+    external operator fun minus(other: Double): Double
+    external operator fun times(other: Double): Double
+    external operator fun div(other: Double): Double
+    external operator fun rem(other: Double): Double
+    external operator fun unaryMinus(): Double
+    external operator fun inc(): Double
+    external operator fun dec(): Double
     external override fun compareTo(other: Double): Int
     external override fun toDouble(): Double
     external override fun toFloat(): Float
