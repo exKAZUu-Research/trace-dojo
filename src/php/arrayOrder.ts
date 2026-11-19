@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 445 -- Keeps array bucket layout, mutations and their cursor positions together.
+// code-gauge-allow-file fileNcss 450 -- Keeps array bucket layout, mutations and their cursor positions together.
 import type { Key } from './values';
 
 class ArrayEntry {
@@ -213,12 +213,13 @@ export class ArrayOrder {
       this.packed = false;
       this.listLayout = false;
       this.storageVersion++;
-    } else this.replace(this.keys(), false);
+    } else this.toMixed();
   }
 
   private toMixed(): void {
     if (this.nextIndex >= this.capacity) this.capacity *= 2;
     this.packed = false;
+    this.listLayout = false;
     this.storageVersion++;
     this.compact();
   }
@@ -251,9 +252,13 @@ export class ArrayOrder {
   shiftList(): void {
     this.normalizeList();
     if (this.first) this.delete(this.first.key);
+    const ended = [...this.liveCursors()]
+      .filter((cursor) => !cursor.entry && cursor.index !== undefined)
+      .map((cursor) => [cursor, cursor.index as number] as const);
     this.keyOffset++;
     this.indexOffset++;
     this.nextIndex = this.entries.size;
+    for (const [cursor, index] of ended) cursor.setPosition(undefined, index);
     this.listLayout = true;
   }
 
@@ -366,6 +371,7 @@ export class ArrayOrder {
   private remapRebuild(rebuild: ArrayReindex, cursors: CursorPosition[]): void {
     if (rebuild === 'shift') {
       const positions = new Map([...this.orderedEntries()].map((entry, ordinal) => [entry.index, ordinal]));
+      positions.set(this.nextIndex, positions.size);
       for (const state of cursors) {
         const index = state.index;
         if (index !== undefined) state.index = positions.get(index) ?? index;

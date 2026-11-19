@@ -309,7 +309,7 @@ function releaseDroppedNow(
     for (const object of garbage) if (!freed.has(object)) runtime.objectCycles.add(object);
   }
   if (freed.size === 0 && activeReleaseObjects.size === 0) {
-    retireArrays(runtime, arrayStorage);
+    retireArrays(runtime, arrayStorage, dropped);
     return;
   }
   const release = new Release(runtime, freed, roots, fromNative, mode);
@@ -332,7 +332,7 @@ function releaseDroppedNow(
     if (activeReleaseObjects.size === 0) releaseSequence = 0;
     if (!failed || recoverableReleaseFailure(mode, failure))
       withPendingException(runtime, failure instanceof PhpThrow ? failure : undefined, () =>
-        retireArrays(runtime, arrayStorage)
+        retireArrays(runtime, arrayStorage, dropped)
       );
   }
   if (active.length === 0 || runtime.turtleObjects.size === 0) return;
@@ -657,18 +657,42 @@ function finishArrayCollection(runtime: Runtime, arrays: Iterable<PhpArray>): vo
   retireArrays(runtime, arrays);
 }
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function retireArrays(runtime: Runtime, arrays: Iterable<PhpArray>): void {
-  const pending = [...arrays];
-  if (pending.length === 0) return;
+function retireArrays(runtime: Runtime, arrays: Iterable<PhpArray>, dropped: unknown[] = []): void {
+  const remaining = new Set(arrays);
+  if (remaining.size === 0) return;
   const roots = ownershipRoots(runtime);
   const seen = new Set<PhpArray>();
   const released: unknown[] = [];
-  while (pending.length > 0) {
+  for (const item of [...dropped, ...remaining]) {
+    const value = item instanceof Ref ? item.v : item;
+    if (value instanceof PhpArray && remaining.has(value))
+      retireArrayGraph(runtime, value, roots, seen, remaining, released);
+    else if (
+      value instanceof PhpObject &&
+      !value.isResource &&
+      !runtime.collectingObjects.has(value) &&
+      runtime.objects.get(value.id) === value
+    )
+      runtime.gcRoots.add(value);
+  }
+  if (released.length > 0) runtime.release(released);
+}
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Retires an unreachable array tree and collects its released children.
+function retireArrayGraph(
+  runtime: Runtime,
+  root: PhpArray,
+  roots: Set<unknown>,
+  seen: Set<PhpArray>,
+  remaining: Set<PhpArray>,
+  released: unknown[]
+): void {
+  for (const pending = [root]; pending.length > 0;) {
     const array = pending.pop() as PhpArray;
-    if (seen.has(array) || !array.composite) continue;
+    remaining.delete(array);
+    if (seen.has(array) || !array.composite || ownedReachable(array, roots, runtime, undefined, undefined, true))
+      continue;
     seen.add(array);
-    if (ownedReachable(array, roots, runtime, undefined, undefined, true)) continue;
     runtime.gcRoots.delete(array);
     for (const slot of array.retire()) {
       const value = slot instanceof Ref ? slot.v : slot;
@@ -677,7 +701,6 @@ function retireArrays(runtime: Runtime, arrays: Iterable<PhpArray>): void {
       if (slot instanceof Ref || value instanceof PhpObject) released.push(slot);
     }
   }
-  if (released.length > 0) runtime.release(released);
 }
 
 function bufferArrayCycles(

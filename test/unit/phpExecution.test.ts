@@ -3507,3 +3507,39 @@ var_dump(key($a), current($a));
     stdout: 'NULL\nbool(false)\nint(9)\nint(8)\n',
   });
 });
+
+test('preserves cycle root order across by-reference foreach and cursor positions across unpack and shift', () => {
+  const byRefForeachGc = run(String.raw`<?php
+class N { public $p; function __construct(public $id) {} function __destruct() { echo $this->id; } }
+(function () {
+  $a = new N('a'); $b = new N('b'); $c = new N('c');
+  $x = [$a, $b];
+  $a->p = $c;
+  foreach ($x as &$v) { gc_collect_cycles(); break; }
+  $b->p = $a; $c->p = $b;
+})();
+echo '|', gc_collect_cycles();
+`);
+  expect(byRefForeachGc).toMatchObject({ kind: 'executed', stdout: '|cab3' });
+
+  const sparseSortCursor = run(String.raw`<?php
+$a = [0 => 1, 3 => 2, 5 => 3, 7 => 4];
+foreach ($a as $k => &$v) { echo "$v;"; if ($v === 2) ksort($a); }
+unset($v);
+`);
+  expect(sparseSortCursor).toMatchObject({ kind: 'executed', stdout: '1;2;3;4;' });
+
+  const packedShiftCursor = run(String.raw`<?php
+$a = [1, 2, 3];
+foreach ($a as &$v) { echo "$v;"; if ($v === 3) { array_shift($a); $a[] = 8; } }
+unset($v);
+`);
+  expect(packedShiftCursor).toMatchObject({ kind: 'executed', stdout: '1;2;3;' });
+
+  const mixedShiftCursor = run(String.raw`<?php
+$a = ['a' => 1, 2 => 2, 'c' => 3];
+foreach ($a as &$v) { echo "$v;"; if ($v === 3) { array_shift($a); $a[] = 9; } }
+unset($v);
+`);
+  expect(mixedShiftCursor).toMatchObject({ kind: 'executed', stdout: '1;2;3;9;' });
+});
