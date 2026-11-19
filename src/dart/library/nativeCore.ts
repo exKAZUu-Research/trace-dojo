@@ -253,7 +253,12 @@ define('print', (runtime, _receiver, [value]) => {
   return;
 });
 define('identical', (_runtime, _receiver, [a, b]) => identical(a, b));
-define('identityHashCode', (_runtime, _receiver, [value]) => BigInt(identityOf(value)));
+// The VM gives numbers, strings, booleans, and null their own hash codes as identity hash codes.
+define('identityHashCode', (runtime, _receiver, [value]) =>
+  value === undefined || typeof value !== 'object'
+    ? runtime.getProperty(value, 'hashCode', undefined)
+    : BigInt(identityOf(value))
+);
 define('_isToStringVisiting', (runtime, _receiver, [value]) => runtime.toStringVisiting.includes(value));
 define('_toStringVisitingAdd', (runtime, _receiver, [value]) => {
   runtime.toStringVisiting.push(value);

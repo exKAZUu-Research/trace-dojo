@@ -109,6 +109,13 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     return this.compileBinaryWithLeft(left, operator, expression.right, expression, context);
   }
 
+  protected compileSuperEquality(expression: Extract<Expression, { kind: 'binary' }>): Compiled {
+    const call = this.compileOperatorCall(this.superReceiver(expression.left), '==', [expression.right], expression);
+    const { run } = call;
+    const negated = expression.operator === '!=';
+    return { ...call, run: (frame) => (run(frame) === true) !== negated };
+  }
+
   /** Compiles `left op right` once the left operand is compiled, as compound assignments need. */
   // code-gauge-allow functionCognitiveComplexity 22 -- The typing rules of numbers, strings, dynamic, and operator methods.
   // code-gauge-allow functionNcss 33 -- The typing rules of numbers, strings, dynamic, and operator methods.

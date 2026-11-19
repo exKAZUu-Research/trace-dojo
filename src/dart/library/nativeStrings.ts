@@ -3,7 +3,7 @@ import { stringOf } from '../format';
 import { concatenate } from '../operators';
 import type { Runtime } from '../runtime';
 import { coreTypes, interfaceType } from '../types';
-import { type DartObject, type Value } from '../values';
+import { DartList, type DartObject, type Value } from '../values';
 import { allMatchesOf, isRegExp, matchAt, type MatchState, newMatch } from './nativeRegExp';
 import { define, defineConstructor, index, intArg, iterableValues, named, newList, stringArg } from './nativeSupport';
 
@@ -59,7 +59,7 @@ define('String.endsWith', (runtime, receiver, [other]) => self(receiver).endsWit
 define('String.startsWith', (runtime, receiver, [pattern, start = 0n]) => {
   const text = self(receiver);
   const at = intArg(runtime, start, 'index');
-  if (at < 0n || at > BigInt(text.length)) rangeError(runtime, at, 0, text.length, 'index');
+  if (at < 0n || at > BigInt(text.length)) rangeError(runtime, at, 0, text.length, undefined);
   if (typeof pattern === 'string') return text.startsWith(pattern, index(at));
   return matchAt(runtime, pattern, text, index(at), true) !== undefined;
 });
@@ -278,15 +278,20 @@ define('String.splitMapJoin', (runtime, receiver, [pattern], namedArgs) => {
   }
   return result + nonMatch(text.slice(last));
 });
-define('String.codeUnits', (runtime, receiver) =>
-  newList(
-    runtime,
+define('String.codeUnits', (runtime, receiver) => {
+  const text = self(receiver);
+  runtime.allocate(text.length + 1);
+  const units = new DartList(
+    coreTypes.list,
     interfaceType(coreTypes.int),
     // oxlint-disable-next-line unicorn/prefer-code-point -- Dart's code units are UTF-16 code units.
-    Array.from({ length: self(receiver).length }, (_, position) => BigInt(self(receiver).charCodeAt(position))),
-    false
-  )
-);
+    Array.from({ length: text.length }, (_, position) => BigInt(text.charCodeAt(position))),
+    false,
+    true
+  );
+  units.vmType = interfaceType(runtime.links.classNamed('CodeUnits'));
+  return units;
+});
 define('String.runes', (runtime, receiver) => runtime.links.construct(runtime, 'Runes', '', [receiver]));
 define('String.toLowerCase', (_runtime, receiver) => mapCase(self(receiver), false));
 define('String.toUpperCase', (_runtime, receiver) => mapCase(self(receiver), true));

@@ -1,7 +1,7 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import type { ClassInfo } from './classes';
 import type { Runtime } from './runtime';
-import type { DartType, FunctionType } from './types';
+import type { DartType, FunctionType, InterfaceType } from './types';
 
 /**
  * A Dart value: `undefined` is `null`, a bigint is an `int` (always within 64 bits), a number is a `double`, a
@@ -62,6 +62,8 @@ export interface NativeState {
 export class DartList extends DartObject {
   /** Bumped by every change of length, which iterators check to detect concurrent modification. */
   modifications = 0;
+  /** The type the VM's own list class for this list shows, as `CodeUnits` for `'ab'.codeUnits`. */
+  vmType: InterfaceType | undefined;
 
   constructor(
     cls: ClassInfo,

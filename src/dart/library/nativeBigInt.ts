@@ -1,3 +1,4 @@
+import { formatDouble } from '../format';
 import type { Runtime } from '../runtime';
 import { DartObject, type Value } from '../values';
 import { bitLength, modInverse, numberHash } from './nativeNumbers';
@@ -87,7 +88,7 @@ defineConstructor('BigInt.from', (runtime, _instance, args) => {
   const value = numArg(runtime, args.positional[0], 'value');
   if (typeof value === 'bigint') return newBigInt(runtime, value);
   if (!Number.isFinite(value))
-    return runtime.throwError('UnsupportedError', '', ['Value ' + String(value) + ' is not finite']);
+    return runtime.throwError('ArgumentError', '', [`Value must be finite: ${formatDouble(value)}`]);
   return newBigInt(runtime, BigInt(Math.trunc(value)));
 });
 

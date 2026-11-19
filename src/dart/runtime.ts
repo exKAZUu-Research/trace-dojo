@@ -450,6 +450,7 @@ export class Runtime implements TracedRuntime<Frame> {
       };
     }
     if (value === undefined) return { kind: 'null' };
+    if (value instanceof DartList && value.vmType) return value.vmType;
     if (value instanceof DartObject) return interfaceType(value.cls, value.typeArgs);
     return interfaceType(this.classOf(value));
   }

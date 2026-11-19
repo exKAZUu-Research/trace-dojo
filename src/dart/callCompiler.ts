@@ -28,7 +28,6 @@ import {
   interfaceType,
   isNullable,
   isSubtype,
-  isTop,
   mentionsTypeParams,
   NEVER,
   nonNullable,
@@ -698,7 +697,8 @@ export abstract class CallCompiler extends OperatorCompiler {
   ): DartType[] {
     const params = new Set(type.typeParams);
     const fromContext = new Map<TypeParam, DartType>();
-    if (context && !isInferenceHole(context) && !isTop(context)) {
+    // Any context but dynamic constrains the result, Object? included: `print(id(1))` makes T Object?.
+    if (context && !isInferenceHole(context) && context.kind !== 'dynamic') {
       inferFromContext(context, type.returnType, params, fromContext);
     }
     const solution = new Map<TypeParam, DartType>();
@@ -706,7 +706,11 @@ export abstract class CallCompiler extends OperatorCompiler {
       const infer = (argument: Expression, parameterType: DartType): Compiled => {
         const map = new Map<TypeParam, DartType>();
         for (const param of type.typeParams) {
-          map.set(param, (closurePass ? solution.get(param) : undefined) ?? fromContext.get(param) ?? INFERENCE_HOLE);
+          // A closure's parameters take the context's type over what the other arguments gave, as Dart solves the
+          // context first: `num n = ap(1, (a) => a + 1)` types `a` as num.
+          const contextual = fromContext.get(param);
+          const usable = contextual && !mentionsTypeParams(contextual, params) ? contextual : undefined;
+          map.set(param, usable ?? (closurePass ? solution.get(param) : undefined) ?? INFERENCE_HOLE);
         }
         const result = this.compileExpression(argument, substitute(parameterType, map));
         inferFromSubtype(result.type, parameterType, params, solution, upperBound);

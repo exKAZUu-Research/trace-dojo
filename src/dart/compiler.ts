@@ -227,14 +227,17 @@ export class Compiler extends ConstructorCompiler {
     for (const work of this.classWork) this.layoutClass(work.cls);
     for (const work of this.orderedClassWork()) this.declareMembers(work);
     for (const { ext, declaration } of this.extensionWork) this.declareExtension(ext, declaration);
-    for (const infer of this.fieldInferences) infer();
-    this.fieldInferences.length = 0;
     for (const declaration of syntax.declarations) {
       if (declaration.kind === 'function') this.resolveTopLevelSignature(declaration);
     }
+    // Every top-level variable is declared before any initializer compiles, as initializers may use later ones.
+    const initializers: (() => void)[] = [];
     for (const declaration of syntax.declarations) {
-      if (declaration.kind === 'variables') this.declareTopLevelVariables(declaration);
+      if (declaration.kind === 'variables') initializers.push(...this.declareTopLevelVariables(declaration));
     }
+    for (const infer of this.fieldInferences) infer();
+    this.fieldInferences.length = 0;
+    for (const compile of initializers) compile();
     for (const work of this.classWork) this.checkClass(work);
   }
 
@@ -1618,14 +1621,14 @@ export class Compiler extends ConstructorCompiler {
     };
   }
 
-  private declareTopLevelVariables(declaration: VariableDeclaration): void {
+  /** Declares a declaration's variables and returns the compilation of their initializers, to run once all are. */
+  private declareTopLevelVariables(declaration: VariableDeclaration): (() => void)[] {
     const declaredType = declaration.type ? this.resolveType(declaration.type) : undefined;
+    const initializers: (() => void)[] = [];
     for (const variable of declaration.variables) {
       if (declaration.isConst && !variable.initializer)
         this.error(variable, `const の ${variable.name} には初期値が必要です。`);
-      const type =
-        declaredType ??
-        (variable.initializer ? this.inferInitializerType(variable.initializer, true, undefined) : DYNAMIC);
+      const type = declaredType ?? DYNAMIC;
       if (!variable.initializer && !declaration.isLate && !isNullable(type) && type.kind !== 'dynamic') {
         this.error(variable, `null にならない変数 ${variable.name} には、初期値が必要です。`);
       }
@@ -1640,8 +1643,45 @@ export class Compiler extends ConstructorCompiler {
       );
       this.declareName(variable.name, { kind: 'variable', global }, variable);
       const { initializer } = variable;
-      if (initializer) this.compileGlobalInitializer(global, initializer, declaration.isConst, undefined);
+      if (!initializer) continue;
+      if (!declaredType) this.inferTypeOnFirstUse(global, initializer);
+      initializers.push(() => {
+        void global.type;
+        this.compileGlobalInitializer(global, initializer, declaration.isConst, undefined);
+      });
     }
+    return initializers;
+  }
+
+  /**
+   * Infers a top-level variable's type from its initializer when something first needs it, so that initializers may
+   * use variables declared after them, as Dart infers top-level variables in the order they depend on each other.
+   */
+  private inferTypeOnFirstUse(global: GlobalVariable, initializer: Expression): void {
+    let state: 'pending' | 'inferring' | 'done' = 'pending';
+    let inferred: DartType = DYNAMIC;
+    Object.defineProperty(global, 'type', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        if (state === 'inferring') {
+          this.error(
+            initializer,
+            `${global.name} の型は、自分の初期値に依存しているので推論できません。型を書いてください。`
+          );
+        }
+        if (state === 'pending') {
+          state = 'inferring';
+          inferred = this.inferInitializerType(initializer, true, undefined);
+          state = 'done';
+        }
+        return inferred;
+      },
+      set: (value: DartType) => {
+        inferred = value;
+        state = 'done';
+      },
+    });
   }
 
   // Runtime glue the expression compilers call
@@ -1805,10 +1845,9 @@ function isPrimitiveConstant(compiled: Compiled): boolean {
 export function readGlobalValue(runtime: Runtime, global: GlobalVariable): Value {
   const cell = runtime.globals[global.slot];
   const value = cell.v;
+  // A read during the global's own initialization runs the initializer again, as the VM does, which recursion of
+  // the initializers turns into a StackOverflowError.
   if (value !== UNINITIALIZED && value !== INITIALIZING) return value;
-  if (value === INITIALIZING) {
-    runtime.throwError('_MessageError', '', [`Reading static variable '${global.name}' during its initialization`]);
-  }
   if (!global.initialize) {
     runtime.throwError('LateError', '', [`Field '${global.name}' has not been initialized.`]);
   }

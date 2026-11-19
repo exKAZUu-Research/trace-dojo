@@ -53,14 +53,28 @@ class JsonStringifier {
     private readonly indent: string | undefined
   ) {}
 
-  /** A value JSON cannot hold (NaN, a map with keys other than strings, an object) goes through toEncodable once. */
+  /**
+   * A value JSON cannot hold (NaN, a map with keys other than strings, an object) goes through toEncodable once, and
+   * any failure in writing what it returns is reported for this value, as the SDK's writeObject does.
+   */
   write(current: Value, depth: number): string {
     this.runtime.spend();
     const direct = this.writeJsonValue(current, depth);
     if (direct !== undefined) return direct;
-    const converted = this.writeJsonValue(this.convert(current), depth);
-    if (converted === undefined) this.runtime.throwError('JsonUnsupportedObjectError', '', [current]);
-    return converted;
+    const { runtime } = this;
+    if (this.visiting.includes(current)) runtime.throwError('JsonCyclicError', '', [current]);
+    this.visiting.push(current);
+    try {
+      const text = this.writeJsonValue(this.convert(current), depth);
+      if (text === undefined) return runtime.throwError('JsonUnsupportedObjectError', '', [current]);
+      return text;
+    } catch (error) {
+      if (error instanceof DartThrow)
+        runtime.throwError('JsonUnsupportedObjectError', '', [current], { cause: error.value });
+      throw error;
+    } finally {
+      this.visiting.pop();
+    }
   }
 
   private writeJsonValue(current: Value, depth: number): string | undefined {
@@ -108,21 +122,9 @@ class JsonStringifier {
   /** The encodable value of another object, from toEncodable or the object's toJson. */
   private convert(current: Value): Value {
     const { runtime } = this;
-    this.visiting.push(current);
-    let converted: Value;
-    try {
-      converted =
-        this.toEncodable === undefined
-          ? runtime.invoke(current, 'toJson', { positional: [], named: undefined, isDynamic: true }, [], undefined)
-          : runtime.callValue(this.toEncodable, { positional: [current], named: undefined }, [], runtime.userCallRow);
-    } catch (error) {
-      this.visiting.pop();
-      if (error instanceof DartThrow)
-        runtime.throwError('JsonUnsupportedObjectError', '', [current], { cause: error.value });
-      throw error;
-    }
-    this.visiting.pop();
-    return converted;
+    return this.toEncodable === undefined
+      ? runtime.invoke(current, 'toJson', { positional: [], named: undefined, isDynamic: true }, [], undefined)
+      : runtime.callValue(this.toEncodable, { positional: [current], named: undefined }, [], runtime.userCallRow);
   }
 }
 
@@ -169,12 +171,21 @@ class JsonParser {
       ['false', false],
       ['null', undefined],
     ] as const) {
-      if (this.text.startsWith(word, this.position)) {
-        this.position += word.length;
-        return result;
-      }
+      if (char === word[0]) return this.keyword(word, result);
     }
     return this.fail('Unexpected character');
+  }
+
+  /** A keyword cut short by the end of the text is reported at the end, and a misspelled one at its start. */
+  keyword(word: string, result: Value): Value {
+    const start = this.position;
+    const rest = this.text.slice(start, start + word.length);
+    if (rest === word) {
+      this.position += word.length;
+      return result;
+    }
+    if (rest.length < word.length && word.startsWith(rest)) this.fail('Unexpected end of input', this.text.length);
+    return this.fail('Unexpected character', start);
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- A transcription of the SDK's algorithm, case by case.
@@ -229,11 +240,10 @@ class JsonParser {
   // code-gauge-allow duplicateLines 30 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   // code-gauge-allow functionCognitiveComplexity 16 -- A transcription of the SDK's algorithm, case by case.
   string(): string {
-    const start = this.position;
     this.position++;
     let result = '';
     for (;;) {
-      if (this.position >= this.text.length) this.fail('Unterminated string', start);
+      if (this.position >= this.text.length) this.fail('Unterminated string', this.text.length);
       const char = this.text[this.position++];
       if (char === '"') return result;
       // oxlint-disable-next-line unicorn/prefer-code-point -- JSON control characters are UTF-16 code units.
@@ -257,24 +267,60 @@ class JsonParser {
         result += simple[escape];
       } else if (escape === 'u') {
         const hex = this.text.slice(this.position, this.position + 4);
-        if (!/^[\da-fA-F]{4}$/.test(hex)) this.fail('Invalid unicode escape', this.position);
+        if (!/^[\da-fA-F]{4}$/.test(hex)) this.fail('Invalid unicode escape', this.position - 1);
         result += String.fromCodePoint(Number.parseInt(hex, 16));
         this.position += 4;
       } else {
-        this.fail('Unrecognized string escape', this.position - 1);
+        this.fail('Unrecognized string escape', this.position);
       }
     }
   }
 
+  /** Numbers as the SDK's parser reads them, which reports a number cut short by the end of the text separately. */
   number(): Value {
-    const match = /^-?(?:0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?/.exec(this.text.slice(this.position));
-    if (!match) this.fail('Unexpected character');
-    this.position += match[0].length;
-    if (match[1] === undefined && match[2] === undefined) {
-      const value = BigInt(match[0]);
+    const { text } = this;
+    const start = this.position;
+    let position = start;
+    const atEnd = (): boolean => position >= text.length;
+    const isDigit = (): boolean => !atEnd() && text[position] >= '0' && text[position] <= '9';
+    const unterminated = (): never => this.fail('Unterminated number literal', text.length);
+    if (text[position] === '-') {
+      position++;
+      if (atEnd()) unterminated();
+      if (!isDigit()) this.fail('Missing expected digit', position);
+    }
+    if (text[position] === '0') {
+      position++;
+      if (isDigit()) this.fail('Unexpected character', position);
+    } else {
+      while (isDigit()) position++;
+    }
+    let isDouble = false;
+    if (text[position] === '.') {
+      isDouble = true;
+      position++;
+      if (atEnd()) unterminated();
+      if (!isDigit()) this.fail('Unexpected character', position);
+      while (isDigit()) position++;
+    }
+    if (text[position] === 'e' || text[position] === 'E') {
+      isDouble = true;
+      position++;
+      if (atEnd()) unterminated();
+      if (text[position] === '+' || text[position] === '-') {
+        position++;
+        if (atEnd()) unterminated();
+      }
+      if (!isDigit()) this.fail('Missing expected digit', position);
+      while (isDigit()) position++;
+    }
+    this.position = position;
+    const literal = text.slice(start, position);
+    if (!isDouble) {
+      const value = BigInt(literal);
       if (value <= 9_223_372_036_854_775_807n && value >= -9_223_372_036_854_775_808n) return value;
     }
-    return Number(match[0]);
+    return Number(literal);
   }
 }
 
@@ -303,16 +349,202 @@ define('_utf8Encode', (runtime, _receiver, [input]) => {
   return newList(runtime, interfaceType(coreTypes.int), [...bytes].map(BigInt), false);
 });
 define('_utf8Decode', (runtime, _receiver, [codeUnits, allowMalformed]) => {
+  // The VM replaces values that are not bytes with 0xFF, which is invalid.
   const bytes = Uint8Array.from(
-    (codeUnits as DartList).elements.map((unit) => Number(intArg(runtime, unit, 'codeUnits')) & 0xff)
+    (codeUnits as DartList).elements.map((unit) => {
+      const value = Number(intArg(runtime, unit, 'codeUnits'));
+      return value >= 0 && value <= 0xff ? value : 0xff;
+    })
   );
-  try {
-    return new TextDecoder('utf-8', { fatal: allowMalformed !== true }).decode(bytes);
-  } catch (error) {
-    if (!(error instanceof TypeError)) throw error;
-    return runtime.throwError('FormatException', '', ['Unexpected extension byte']);
-  }
+  if (allowMalformed === true) return new TextDecoder('utf-8').decode(bytes);
+  const error = utf8Error(bytes);
+  if (error) return runtime.throwError('FormatException', '', [error.message, codeUnits, BigInt(error.offset)]);
+  return new TextDecoder('utf-8').decode(bytes);
 });
+
+/* oxlint-disable unicorn/prefer-code-point -- The SDK's tables are strings of byte-sized code units. */
+const UTF8_TYPES =
+  'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'.repeat(4) +
+  'FFFFFFFFFFFFFFFFGGGGGGGGGGGGGGGG' +
+  'HHHHHHHHHHHHHHHHHHHHHHHHHHHIHHHJ' +
+  'EEBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB' +
+  'KCCCCCCCCCCCCDCLONNNMEEEEEEEEEEE';
+const [IA, X1, X2, X3, TO, TS, QO, QR, B1, B2, E1, E2, E3, E4, E5, E6, E7] = [
+  0x00, 0x30, 0x3a, 0x44, 0x4e, 0x58, 0x62, 0x6c, 0x76, 0x80, 0x41, 0x43, 0x45, 0x47, 0x49, 0x4b, 0x4d,
+];
+const AB = 0x20;
+const UTF8_TRANSITIONS: number[] = [
+  0x20,
+  // IA, BB, AB: the states before and between characters.
+  IA,
+  X1,
+  X2,
+  TS,
+  E3,
+  E2,
+  E2,
+  E2,
+  E2,
+  E2,
+  TO,
+  X2,
+  QR,
+  X3,
+  QO,
+  0x20,
+  IA,
+  X1,
+  X2,
+  TS,
+  E3,
+  E2,
+  E2,
+  E2,
+  E2,
+  E2,
+  TO,
+  B1,
+  QR,
+  X3,
+  QO,
+  0x20,
+  IA,
+  X1,
+  X2,
+  TS,
+  E3,
+  E2,
+  E2,
+  E2,
+  E2,
+  E2,
+  TO,
+  X2,
+  QR,
+  X3,
+  QO,
+  0x20,
+  // X1, X2, X3, TO, TS, QO, QR, B1, B2: inside a character, each overlapping the next by five E1s.
+  E1,
+  E1,
+  E1,
+  E1,
+  E1,
+  IA,
+  IA,
+  IA,
+  IA,
+  IA,
+  E1,
+  E1,
+  E1,
+  E1,
+  E1,
+  X1,
+  X1,
+  X1,
+  X1,
+  X1,
+  E1,
+  E1,
+  E1,
+  E1,
+  E1,
+  X2,
+  X2,
+  X2,
+  X2,
+  X2,
+  E1,
+  E1,
+  E1,
+  E1,
+  E1,
+  E4,
+  E4,
+  X1,
+  X1,
+  X1,
+  E1,
+  E1,
+  E1,
+  E1,
+  E1,
+  X1,
+  X1,
+  E6,
+  E6,
+  E6,
+  E1,
+  E1,
+  E1,
+  E1,
+  E1,
+  E4,
+  X2,
+  X2,
+  X2,
+  X2,
+  E1,
+  E1,
+  E1,
+  E1,
+  E1,
+  X2,
+  E5,
+  E5,
+  E5,
+  E5,
+  E1,
+  E1,
+  E1,
+  E1,
+  E1,
+  X1,
+  X1,
+  X1,
+  B2,
+  X1,
+  E1,
+  E1,
+  E1,
+  E1,
+  E1,
+  IA,
+  IA,
+  IA,
+  IA,
+  AB,
+  E1,
+  E1,
+  E1,
+  E1,
+  E1,
+];
+const UTF8_ERRORS: Record<number, string> = {
+  [E1]: 'Missing extension byte',
+  [E2]: 'Unexpected extension byte',
+  [E3]: 'Invalid UTF-8 byte',
+  [E4]: 'Overlong encoding',
+  [E5]: 'Out of unicode range',
+  [E6]: 'Encoded surrogate',
+  [E7]: 'Unfinished UTF-8 octet sequence',
+};
+
+/** The first error in UTF-8 bytes and its offset, found with the SDK's state machine (utf.dart _Utf8Decoder). */
+function utf8Error(bytes: Uint8Array): { message: string; offset: number } | undefined {
+  let state = IA;
+  const start = bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : 0;
+  for (let position = start; position < bytes.length; position++) {
+    const type = UTF8_TYPES.charCodeAt(bytes[position]) & 0x1f;
+    state = UTF8_TRANSITIONS[state + type] as number;
+    if ((state & 1) !== 0) return { message: UTF8_ERRORS[state] as string, offset: position };
+  }
+  if (state > AB) return { message: UTF8_ERRORS[E7] as string, offset: bytes.length };
+  return undefined;
+}
+/* oxlint-enable unicorn/prefer-code-point */
+
 define('_base64Encode', (runtime, _receiver, [bytes, urlSafe]) => {
   const data = Uint8Array.from(
     (bytes as DartList).elements.map((unit) => Number(intArg(runtime, unit, 'bytes')) & 0xff)
@@ -321,9 +553,99 @@ define('_base64Encode', (runtime, _receiver, [bytes, urlSafe]) => {
   return urlSafe === true ? text.replaceAll('+', '-').replaceAll('/', '_') : text;
 });
 define('_base64Decode', (runtime, _receiver, [source]) => {
-  const text = stringArg(runtime, source, 'source').replaceAll('-', '+').replaceAll('_', '/');
-  if (!/^[A-Za-z\d+/]*={0,2}$/.test(text) || text.replace(/=+$/, '').length % 4 === 1) {
-    runtime.throwError('FormatException', '', ['Invalid character', source, 0n]);
-  }
-  return newList(runtime, interfaceType(coreTypes.int), [...Buffer.from(text, 'base64')].map(BigInt), false);
+  const input = stringArg(runtime, source, 'source');
+  const fail = (message: string, offset: number): never =>
+    runtime.throwError('FormatException', '', [message, input, BigInt(offset)]);
+  const bytes = decodeBase64(input, fail);
+  return newList(runtime, interfaceType(coreTypes.int), bytes.map(BigInt), false);
 });
+
+/** The inverse of the Base64 alphabets, both the standard and the URL-safe one: -1 for padding, -2 for others. */
+const BASE64_VALUES: readonly number[] = Array.from({ length: 128 }, (_, code) => {
+  const char = String.fromCodePoint(code);
+  if (char === '=' || char === '%') return -1;
+  if (char === '-' || char === '+') return 62;
+  if (char === '_' || char === '/') return 63;
+  const index = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'.indexOf(char);
+  return index === -1 ? -2 : index;
+});
+
+/** Base64 decoding as the SDK's _Base64Decoder does it, with its errors and their offsets. */
+function decodeBase64(input: string, fail: (message: string, offset: number) => never): number[] {
+  const output: number[] = [];
+  let bits = 0;
+  let count = 0;
+  for (let position = 0; position < input.length; position++) {
+    // oxlint-disable-next-line unicorn/prefer-code-point -- Base64 reads UTF-16 code units.
+    const code = input.charCodeAt(position);
+    const value = code > 127 ? -2 : (BASE64_VALUES[code] as number);
+    if (value >= 0) {
+      bits = ((bits << 6) | value) & 0xff_ff_ff;
+      count = (count + 1) & 3;
+      if (count === 0) {
+        output.push((bits >> 16) & 0xff, (bits >> 8) & 0xff, bits & 0xff);
+        bits = 0;
+      }
+      continue;
+    }
+    if (value === -1 && count > 1) {
+      if (count === 3) {
+        if ((bits & 0x03) !== 0) fail('Invalid encoding before padding', position);
+        output.push((bits >> 10) & 0xff, (bits >> 2) & 0xff);
+      } else {
+        if ((bits & 0x0f) !== 0) fail('Invalid encoding before padding', position);
+        output.push((bits >> 4) & 0xff);
+      }
+      let expected = (3 - count) * 3;
+      if (input[position] === '%') expected += 2;
+      const remaining = checkBase64Padding(input, position + 1, expected, fail);
+      if (remaining > 0) fail('Missing padding character', input.length);
+      return output;
+    }
+    fail('Invalid character', position);
+  }
+  if (count > 0) fail('Invalid length, must be multiple of four', input.length);
+  return output;
+}
+
+/** Checks the padding after the first `=` or `%3D`, returning how many padding characters are still missing. */
+function checkBase64Padding(
+  input: string,
+  start: number,
+  expectedPadding: number,
+  fail: (message: string, offset: number) => never
+): number {
+  let position = start;
+  let expected = expectedPadding;
+  const end = input.length;
+  if (position === end) return expected;
+  while (expected > 0) {
+    let char = input[position];
+    if (expected === 3) {
+      if (char === '=') {
+        expected -= 3;
+        position++;
+        break;
+      }
+      if (char !== '%') break;
+      expected--;
+      position++;
+      if (position === end) break;
+      char = input[position];
+    }
+    const partial = expected > 3 ? expected - 3 : expected;
+    if (partial === 2) {
+      if (char !== '3') break;
+      position++;
+      expected--;
+      if (position === end) break;
+      char = input[position];
+    }
+    if (char.toLowerCase() !== 'd') break;
+    position++;
+    expected--;
+    if (position === end) break;
+  }
+  if (position !== end) fail('Invalid padding character', position);
+  return expected;
+}

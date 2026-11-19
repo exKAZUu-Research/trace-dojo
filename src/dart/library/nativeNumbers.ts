@@ -322,7 +322,7 @@ define('int.parse', (runtime, _self, [source], namedArgs) => {
   const radix = checkRadix(runtime, named(namedArgs, 'radix', undefined));
   const result = parseInt(text, radix);
   if (result === undefined) {
-    if (text.trim().length === 0) throwFormat(runtime, 'Invalid number', text, 0n);
+    if (text.trim().length === 0 && radix === undefined) throwFormat(runtime, 'Invalid number', text, 0n);
     // The VM reports digits that are all valid but too many for 64 bits separately, without the position.
     const unbounded = parseInt(text, radix, false);
     if (unbounded !== undefined) {

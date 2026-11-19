@@ -158,7 +158,7 @@ define('List.length=', (runtime, receiver, [length]) => {
   const target = list(receiver);
   checkGrowable(runtime, target, 'length');
   const count = intArg(runtime, length, 'newLength');
-  if (count < 0n || count > MAX_LIST_LENGTH) rangeError(runtime, count, 0, MAX_LIST_LENGTH, 'newLength');
+  if (count < 0n || count > MAX_LIST_LENGTH) rangeError(runtime, count, 0, MAX_LIST_LENGTH, 'length');
   const elements = target.elements;
   if (count > BigInt(elements.length)) {
     const elementType = elementTypeOf(target);
@@ -333,7 +333,7 @@ define('List.insertAll', (runtime, receiver, [at, iterable]) => {
   checkGrowable(runtime, target, 'add');
   const position = intArg(runtime, at, 'index');
   if (position < 0n || position > BigInt(target.elements.length))
-    rangeError(runtime, position, 0, target.elements.length, 'index');
+    rangeError(runtime, position, 0, target.elements.length, undefined);
   const values = iterableValues(runtime, iterable);
   runtime.allocate(values.length);
   target.elements.splice(index(position), 0, ...values);
@@ -348,7 +348,7 @@ define('List.setAll', (runtime, receiver, [at, iterable]) => {
   if (position < 0n || position > BigInt(target.elements.length))
     rangeError(runtime, position, 0, target.elements.length, 'index');
   if (index(position) + values.length > target.elements.length)
-    rangeError(runtime, index(position) + values.length, 0, target.elements.length, 'end');
+    rangeError(runtime, index(position) + values.length, Number(position), target.elements.length, 'end');
   for (const [offset, value] of values.entries()) target.elements[index(position) + offset] = value;
   return;
 });
@@ -519,7 +519,10 @@ define('List.asMap', (runtime, receiver) =>
 );
 define('List.cast', (runtime, receiver, _args, _named, typeArgs) => {
   const target = list(receiver);
-  return new DartList(coreTypes.list, typeArgs[0] ?? DYNAMIC, target.elements, target.growable, target.unmodifiable);
+  const element = typeArgs[0] ?? DYNAMIC;
+  const cast = new DartList(coreTypes.list, element, target.elements, target.growable, target.unmodifiable);
+  cast.vmType = interfaceType(runtime.links.classNamed('CastList'), [elementTypeOf(target), element]);
+  return cast;
 });
 
 /**

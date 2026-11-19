@@ -198,14 +198,13 @@ const IRREGEXP_MESSAGES: Record<string, string> = {
 define(
   'RegExp.toString',
   (_runtime, receiver) =>
-    `RegExp: pattern=${stateOf(receiver).source} flags=${stateOf(receiver).multiLine ? 'm' : ''}${stateOf(receiver).caseSensitive ? '' : 'i'}${stateOf(receiver).unicode ? 'u' : ''}${stateOf(receiver).dotAll ? 's' : ''}`
+    `RegExp: pattern=${stateOf(receiver).source} flags=${stateOf(receiver).caseSensitive ? '' : 'i'}${stateOf(receiver).multiLine ? 'm' : ''}${stateOf(receiver).dotAll ? 's' : ''}${stateOf(receiver).unicode ? 'u' : ''}`
 );
 
 function group(runtime: Runtime, receiver: Value, which: Value): Value {
   const state = matchState(receiver);
   const at = intArg(runtime, which, 'group');
-  if (at < 0n || at >= BigInt(state.groups.length))
-    runtime.throwError('RangeError', 'range', [at, 0n, BigInt(state.groups.length - 1), 'groupIndex']);
+  if (at < 0n || at >= BigInt(state.groups.length)) runtime.throwError('RangeError', 'value', [at]);
   return state.groups[index(at)];
 }
 

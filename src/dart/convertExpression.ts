@@ -352,7 +352,7 @@ export abstract class ExpressionConverter {
         };
       }
       case 'type_test_expression': {
-        const [value, test] = namedOf(node);
+        const [value, test] = operandsOf(node);
         const isOperator = namedOf(test).find((child) => child.type === 'is_operator');
         return {
           kind: 'is',
@@ -368,7 +368,7 @@ export abstract class ExpressionConverter {
         };
       }
       case 'type_cast_expression': {
-        const [value, cast] = namedOf(node);
+        const [value, cast] = operandsOf(node);
         return {
           kind: 'as',
           value: this.convertExpression(value),
@@ -1490,3 +1490,8 @@ function stripFirstNewline(text: string): string {
 }
 
 export type { Span };
+
+/** The operands of an operator, where `this` and `super` are anonymous tokens of the grammar. */
+function operandsOf(node: Node): Node[] {
+  return childrenOf(node).filter((child) => child.isNamed || child.type === 'this' || child.type === 'super');
+}

@@ -113,7 +113,11 @@ final class Base64Codec extends Codec<List<int>, String> {
   const Base64Codec.urlSafe() : _urlSafe = true;
   String encode(List<int> input) => _base64Encode(input, _urlSafe);
   List<int> decode(String encoded) => _base64Decode(encoded);
-  String normalize(String source, [int start = 0, int? end]) => _base64Encode(_base64Decode(source.substring(start, end)), _urlSafe);
+  String normalize(String source, [int start = 0, int? end]) {
+    var text = source.substring(start, end);
+    if (!text.contains('=') && !text.contains('%') && text.length % 4 > 1) text = text + '=' * (4 - text.length % 4);
+    return _base64Encode(_base64Decode(text), _urlSafe);
+  }
 }
 
 external String _base64Encode(List<int> bytes, bool urlSafe);

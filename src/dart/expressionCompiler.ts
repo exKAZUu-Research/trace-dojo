@@ -284,10 +284,16 @@ export abstract class ExpressionCompiler extends CompilerBase {
     };
   }
 
+  /** `super == other`, which calls the superclass's `==`. */
+  protected abstract compileSuperEquality(expression: Extract<Expression, { kind: 'binary' }>): Compiled;
+
   protected compileEquality(expression: Extract<Expression, { kind: 'binary' }>): {
     compiled: Compiled;
     flow: ConditionFlow;
   } {
+    if (expression.left.kind === 'super') {
+      return { compiled: this.compileSuperEquality(expression), flow: { whenTrue: this.flow, whenFalse: this.flow } };
+    }
     const left = this.compileExpression(expression.left);
     // The right operand of == takes the left's type as its context, which `c == .red` needs.
     const right = this.compileExpression(

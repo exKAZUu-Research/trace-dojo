@@ -53,6 +53,12 @@ abstract final class Invocation {
   bool get isAccessor;
 }
 
+/** The VM's class of String.codeUnits, which the list of code units shows as its runtimeType. */
+abstract final class CodeUnits implements List<int> {}
+
+/** The VM's class of List.cast, which the cast list shows as its runtimeType. */
+abstract final class CastList<S, T> implements List<T> {}
+
 final class _InvocationMirror implements Invocation {
   final String _name;
   final int _kind;
@@ -482,8 +488,9 @@ class RangeError extends ArgumentError {
   RangeError.range(num invalidValue, int? minValue, int? maxValue, [String? name, String? message])
       : start = minValue, end = maxValue, super.value(invalidValue, name, message ?? "Invalid value");
   factory RangeError.index(int index, dynamic indexable, [String? name, String? message, int? length]) = IndexError;
-  static void checkValueInInterval(int value, int minValue, int maxValue, [String? name, String? message]) {
+  static int checkValueInInterval(int value, int minValue, int maxValue, [String? name, String? message]) {
     if (value < minValue || value > maxValue) throw RangeError.range(value, minValue, maxValue, name, message);
+    return value;
   }
   static int checkValidIndex(int index, dynamic indexable, [String? name, int? length, String? message]) {
     length ??= indexable.length as int;
