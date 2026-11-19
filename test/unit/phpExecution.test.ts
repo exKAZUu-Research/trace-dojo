@@ -3130,6 +3130,18 @@ set_error_handler(function () use ($ao4, &$ext) { $ao4['y'] = &$ext; return true
 $ao4->y += 2;
 restore_error_handler();
 echo 'aoRef:' . json_encode([$ext, $ao3['x'], $ao4['y']]) . "\n";
+
+$p2 = new stdClass();
+set_error_handler(function () use ($p2) { unset($p2->x); throw new Exception('stop'); });
+try { $p2->x--; } catch (Exception $e) {}
+restore_error_handler();
+class UnsetPropDecl { public $x; }
+$p3 = new UnsetPropDecl();
+unset($p3->x);
+set_error_handler(function () use ($p3) { unset($p3->x); throw new Exception('stop'); });
+try { --$p3->x; } catch (Exception $e) {}
+restore_error_handler();
+echo 'propUnsetThrow:' . json_encode([$p2, $p3]) . "\n";
 `);
   expect(result).toMatchObject({
     kind: 'executed',
@@ -3149,7 +3161,53 @@ echo 'aoRef:' . json_encode([$ext, $ao3['x'], $ao4['y']]) . "\n";
       'propThrow:{"x":5}',
       'aoThrow:{"x":null,"y":1}',
       'aoRef:[5,1,2]',
+      'propUnsetThrow:[{"x":null},{"x":null}]',
       '',
     ].join('\n'),
   });
+});
+
+test('leaves deferred closure static initializers null in debug output before first call', () => {
+  const result = run(String.raw`<?php
+class P { const PK = 7; }
+trait T {
+  function tf() {
+    return function () { static $x = __CLASS__; };
+  }
+}
+class C extends P {
+  use T;
+  const K = 3;
+  function cf() {
+    return function () {
+      static $s = self::K;
+      static $p = parent::PK;
+      static $n = C::K;
+    };
+  }
+}
+$c = new C();
+$f1 = $c->cf();
+$f2 = $c->tf();
+var_dump($f1, $f2);
+$f1();
+$f2();
+var_dump($f1, $f2);
+`);
+  expect(result.kind).toBe('executed');
+  if (result.kind === 'executed') {
+    const statics = [...result.stdout.matchAll(/\["(s|p|n|x)"\]=>\n\s+(NULL|int\(\d+\)|string\(1\) "C")/g)].map(
+      (match) => `${match[1]}=${match[2]}`
+    );
+    expect(statics).toEqual([
+      's=NULL',
+      'p=NULL',
+      'n=int(3)',
+      'x=NULL',
+      's=int(3)',
+      'p=int(7)',
+      'n=int(3)',
+      'x=string(1) "C"',
+    ]);
+  }
 });

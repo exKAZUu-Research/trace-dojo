@@ -4,7 +4,7 @@ import { type Frame, PhpThrow, rt } from './runtime';
 import { watchSlot } from './slotWatch';
 import { describePropertyType } from './types';
 import { checkedDynamicVariable } from './unsupported';
-import { dropped, type Key, PhpArray, PhpObject, type PropDecl, Ref, type Slot, type Value } from './values';
+import { dropped, type Key, PhpArray, PhpObject, type PropDecl, Ref, type Slot, UNINIT, type Value } from './values';
 import { isSubtype } from './variance';
 
 export type PlaceOperation = 'assignOp' | 'incdec' | 'nested' | 'nestedUpdate' | 'receiver' | 'receiverUpdate';
@@ -69,8 +69,8 @@ export function withIncrementCleanup<T>(place: Place, old: Value, update: () => 
 }
 
 export function warnPropertySlot(
-  props: { has(key: Key): boolean },
-  name: string,
+  object: PhpObject,
+  key: string,
   declared: boolean,
   warning: UpdateWarning,
   message: string
@@ -80,13 +80,23 @@ export function warnPropertySlot(
       () => warn(message),
       () => warn(message, true)
     );
+  const missing = (): boolean =>
+    !object.props.has(key) || object.props.get(key) === UNINIT || Boolean(object.unsetProperties?.has(key));
+  const restore = (): void => {
+    object.unsetProperties?.delete(key);
+    object.props.set(key, null);
+  };
   if (declared) {
     emit();
+    if (missing()) restore();
     return true;
   }
-  const watch = watchSlot(props, name);
+  const watch = watchSlot(object.props, key);
   try {
-    return emit() || watch.current() || !props.has(name);
+    const ok = emit();
+    const removed = missing();
+    if (removed) restore();
+    return ok || watch.current() || removed;
   } finally {
     watch.close();
   }

@@ -505,8 +505,8 @@ function propPlace(object: PhpObject, name: string, unbound = false): Place {
       if (decl) object.props.set(decl.key, null);
       else classesModule.createDynamicProp(object, name, null, (message) => warning(() => deprecated(message)));
       return warnPropertySlot(
-        object.props,
-        name,
+        object,
+        decl?.key ?? name,
         decl !== undefined,
         warning,
         `Undefined property: ${object.cls.name}::$${name}`

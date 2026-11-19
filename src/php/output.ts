@@ -264,7 +264,7 @@ function declaredStatics(decl: FunctionDecl): [string, Expr | undefined][] {
 function previewStatic(init: Expr | undefined, data: ClosureData): Value {
   if (!init) return null;
   if (init.k === 'magic') {
-    if (init.name === '__CLASS__') return data.scope?.fullName ?? '';
+    if (init.name === '__CLASS__') return null;
     if (init.name === '__TRAIT__') return data.scope?.kind === 'trait' ? data.scope.name : '';
     return data.fn.kind === 'user' ? data.fn.decl.name : data.fn.name;
   }
@@ -272,15 +272,8 @@ function previewStatic(init: Expr | undefined, data: ClosureData): Value {
 }
 
 function previewConstant(ref: ClassRef, name: string, data: ClosureData): Constant | undefined {
-  const cls =
-    ref.k === 'named'
-      ? findClass(ref.name)
-      : ref.k === 'self'
-        ? data.scope
-        : ref.k === 'parent'
-          ? data.scope?.parent
-          : undefined;
-  const entry = cls?.findConst(name);
+  if (ref.k !== 'named') return undefined;
+  const entry = findClass(ref.name)?.findConst(name);
   if (!entry || !canAccessConstant(entry, data.scope)) return undefined;
   const value = entry.value;
   if (value !== undefined && value !== UNDEFINED_RESULT && !(value instanceof PhpObject || value instanceof PhpArray))
