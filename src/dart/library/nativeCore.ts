@@ -214,6 +214,7 @@ export function safeToStringOf(runtime: Runtime, value: Value): string {
   return safeToString(runtime, value);
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- A transcription of the SDK's algorithm, case by case.
 define('NoSuchMethodError._describe', (runtime, _receiver, [receiver, invocation]) => {
   const field = (name: string): Value => runtime.getProperty(invocation, name, undefined);
   const member = runtime.getProperty(field('memberName'), '_name', undefined) as string;

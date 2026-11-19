@@ -35,6 +35,7 @@ import { Cell, type Value } from './values';
 
 /** Operators, conditionals, casts, throws, and cascades. */
 export abstract class OperatorCompiler extends ExpressionCompiler {
+  // code-gauge-allow functionCognitiveComplexity 24 -- Each branch is one of the cases Dart distinguishes for this construct.
   protected compilePrefix(
     expression: Extract<Expression, { kind: 'prefix' }>,
     context: DartType | undefined
@@ -88,7 +89,6 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- The operators share their typing rules case by case.
   protected compileBinary(
     expression: Extract<Expression, { kind: 'binary' }>,
     context: DartType | undefined
@@ -110,7 +110,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
   }
 
   /** Compiles `left op right` once the left operand is compiled, as compound assignments need. */
-  // code-gauge-allow functionCognitiveComplexity 30 -- The typing rules of numbers, strings, dynamic, and operator methods.
+  // code-gauge-allow functionCognitiveComplexity 22 -- The typing rules of numbers, strings, dynamic, and operator methods.
+  // code-gauge-allow functionNcss 33 -- The typing rules of numbers, strings, dynamic, and operator methods.
   protected compileBinaryWithLeft(
     left: Compiled,
     operator: string,
@@ -214,7 +215,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- The typing rules of num's operators.
+  // code-gauge-allow functionCognitiveComplexity 28 -- The typing rules of num's operators.
+  // code-gauge-allow functionNcss 53 -- The typing rules of num's operators.
   private numericOperator(
     operator: string,
     left: Compiled,
@@ -434,6 +436,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionNcss 34 -- One case per form of the construct, which reads best together.
   private compileCascadeSection(receiver: Compiled, section: CascadeSection): Eval {
     const span = section;
     let current: Compiled = receiver;
@@ -501,6 +505,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
 
 const ARITHMETIC = new Set(['+', '-', '*', '%', 'remainder']);
 
+// code-gauge-allow duplicateLines 32 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
 function doubleOperation(operator: string): (frame: Frame, a: number, b: number) => Value {
   switch (operator) {
     case '+': {
@@ -536,6 +541,8 @@ function doubleOperation(operator: string): (frame: Frame, a: number, b: number)
   }
 }
 
+// code-gauge-allow duplicateLines 31 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+// code-gauge-allow functionNcss 34 -- One case per form of the construct, which reads best together.
 function intOperation(operator: string): (frame: Frame, a: bigint, b: bigint) => Value {
   switch (operator) {
     case '+': {

@@ -12,7 +12,6 @@ import {
   interfaceType,
   isNullable,
   isSubtype,
-  isTop,
   nonNullable,
   objectType,
   resolveBound,
@@ -48,6 +47,7 @@ export abstract class PatternCompiler extends CallCompiler {
   }
 
   /** The type a pattern expects of the value, which declarations use as the context of their initializer. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- One case per part of the pattern, matched in Dart's order.
   patternContextType(pattern: Pattern): DartType | undefined {
     switch (pattern.kind) {
       case 'variable':
@@ -88,7 +88,7 @@ export abstract class PatternCompiler extends CallCompiler {
     }
   }
 
-  // code-gauge-allow functionNcss 150 -- One case per kind of pattern.
+  // code-gauge-allow functionNcss 42 -- One case per part of the pattern, matched in Dart's order.
   private compilePatternInner(
     pattern: Pattern,
     matchedType: DartType,
@@ -105,16 +105,7 @@ export abstract class PatternCompiler extends CallCompiler {
         return this.typeTest(type, matchedType, () => true, true);
       }
       case 'variable': {
-        const declared = pattern.type ? this.resolveType(pattern.type) : undefined;
-        const type = declared ?? matchedType;
-        const variable = this.patternVariable(pattern, pattern.name, type, options, variables);
-        const { slot } = variable;
-        const bind = (frame: Frame, value: Value): boolean => {
-          frame.locals[slot] = new Cell(value);
-          return true;
-        };
-        if (!declared) return { match: bind, irrefutable: true };
-        return this.typeTest(declared, matchedType, bind, true);
+        return this.variablePattern(pattern, matchedType, options, variables);
       }
       case 'assignedVariable': {
         return this.assignedVariablePattern(pattern, matchedType);
@@ -126,21 +117,7 @@ export abstract class PatternCompiler extends CallCompiler {
         return this.relationalPattern(pattern, matchedType);
       }
       case 'or': {
-        const left = this.compilePatternInner(pattern.left, matchedType, { ...options, shared: undefined }, variables);
-        const leftVariables = new Map(variables);
-        const right = this.compilePatternInner(
-          pattern.right,
-          matchedType,
-          { ...options, shared: leftVariables },
-          variables
-        );
-        for (const name of leftVariables.keys()) {
-          if (!variables.has(name)) this.error(pattern, `|| の両側で、同じ変数を宣言してください（${name}）。`);
-        }
-        return {
-          match: (frame, value) => left.match(frame, value) || right.match(frame, value),
-          irrefutable: left.irrefutable || right.irrefutable,
-        };
+        return this.orPattern(pattern, matchedType, options, variables);
       }
       case 'and': {
         const left = this.compilePatternInner(pattern.left, matchedType, options, variables);
@@ -151,21 +128,7 @@ export abstract class PatternCompiler extends CallCompiler {
         };
       }
       case 'cast': {
-        const type = this.resolveType(pattern.type);
-        const inner = this.compilePatternInner(pattern.pattern, type, options, variables);
-        const resolve = this.runtimeType(type);
-        return {
-          match: (frame, value) => {
-            const target = resolve(frame);
-            if (!this.valueIsAt(frame, value, target)) {
-              frame.runtime.throwTypeError(
-                `type '${typeToString(frame.runtime.runtimeTypeOf(value))}' is not a subtype of type '${typeToString(target)}' in type cast`
-              );
-            }
-            return inner.match(frame, value);
-          },
-          irrefutable: inner.irrefutable,
-        };
+        return this.castPattern(pattern, options, variables);
       }
       case 'nullCheck': {
         const inner = this.compilePatternInner(pattern.pattern, nonNullable(matchedType), options, variables);
@@ -197,6 +160,70 @@ export abstract class PatternCompiler extends CallCompiler {
         return this.objectPattern(pattern, matchedType, options, variables);
       }
     }
+  }
+
+  private variablePattern(
+    pattern: Extract<Pattern, { kind: 'variable' }>,
+    matchedType: DartType,
+    options: PatternOptions,
+    variables: Map<string, LocalVar>
+  ): Omit<CompiledPattern, 'variables'> {
+    const declared = pattern.type ? this.resolveType(pattern.type) : undefined;
+    const type = declared ?? matchedType;
+    const variable = this.patternVariable(pattern, pattern.name, type, options, variables);
+    const { slot } = variable;
+    const bind = (frame: Frame, value: Value): boolean => {
+      frame.locals[slot] = new Cell(value);
+      return true;
+    };
+    if (!declared) return { match: bind, irrefutable: true };
+    return this.typeTest(declared, matchedType, bind, true);
+  }
+
+  /** `a || b`, whose two sides must declare the same variables. */
+  private orPattern(
+    pattern: Extract<Pattern, { kind: 'or' }>,
+    matchedType: DartType,
+    options: PatternOptions,
+    variables: Map<string, LocalVar>
+  ): Omit<CompiledPattern, 'variables'> {
+    const left = this.compilePatternInner(pattern.left, matchedType, { ...options, shared: undefined }, variables);
+    const leftVariables = new Map(variables);
+    const right = this.compilePatternInner(
+      pattern.right,
+      matchedType,
+      { ...options, shared: leftVariables },
+      variables
+    );
+    for (const name of leftVariables.keys()) {
+      if (!variables.has(name)) this.error(pattern, `|| の両側で、同じ変数を宣言してください（${name}）。`);
+    }
+    return {
+      match: (frame, value) => left.match(frame, value) || right.match(frame, value),
+      irrefutable: left.irrefutable || right.irrefutable,
+    };
+  }
+
+  private castPattern(
+    pattern: Extract<Pattern, { kind: 'cast' }>,
+    options: PatternOptions,
+    variables: Map<string, LocalVar>
+  ): Omit<CompiledPattern, 'variables'> {
+    const type = this.resolveType(pattern.type);
+    const inner = this.compilePatternInner(pattern.pattern, type, options, variables);
+    const resolve = this.runtimeType(type);
+    return {
+      match: (frame, value) => {
+        const target = resolve(frame);
+        if (!this.valueIsAt(frame, value, target)) {
+          frame.runtime.throwTypeError(
+            `type '${typeToString(frame.runtime.runtimeTypeOf(value))}' is not a subtype of type '${typeToString(target)}' in type cast`
+          );
+        }
+        return inner.match(frame, value);
+      },
+      irrefutable: inner.irrefutable,
+    };
   }
 
   private patternVariable(
@@ -279,6 +306,7 @@ export abstract class PatternCompiler extends CallCompiler {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- One case per part of the pattern, matched in Dart's order.
   private relationalPattern(
     pattern: Extract<Pattern, { kind: 'relational' }>,
     matchedType: DartType
@@ -317,27 +345,13 @@ export abstract class PatternCompiler extends CallCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- A list pattern matches the length, the elements, and the rest.
   private listPattern(
     pattern: Extract<Pattern, { kind: 'list' }>,
     matchedType: DartType,
     options: PatternOptions,
     variables: Map<string, LocalVar>
   ): Omit<CompiledPattern, 'variables'> {
-    let elementType: DartType;
-    if (pattern.typeArguments) {
-      if (pattern.typeArguments.length !== 1) this.error(pattern, 'リストのパターンの型引数は 1 つです。');
-      elementType = this.resolveType(pattern.typeArguments[0]);
-    } else {
-      const base = resolveBound(matchedType);
-      const instance =
-        base.kind === 'interface' ? asInstanceOf({ ...base, nullable: false }, coreTypes.list) : undefined;
-      elementType =
-        instance?.args[0] ??
-        (base.kind === 'dynamic' || isTop(base) || (base.kind === 'interface' && base.cls === coreTypes.object)
-          ? DYNAMIC
-          : DYNAMIC);
-    }
+    const elementType = this.listPatternElementType(pattern, matchedType);
     const listType = interfaceType(coreTypes.list, [elementType]);
     const restIndex = pattern.elements.findIndex((element) => element.kind === 'rest');
     if (pattern.elements.filter((element) => element.kind === 'rest').length > 1) {
@@ -354,36 +368,27 @@ export abstract class PatternCompiler extends CallCompiler {
       ? this.compilePatternInner(restElement.pattern, listType, options, variables)
       : undefined;
     const tail = compileElements(after);
-    const minimum = head.length + tail.length;
     const hasRest = restIndex !== -1;
-    const resolveElement = this.runtimeType(elementType);
+    const parts: ListPatternParts = { head, rest, tail, hasRest, resolveElement: this.runtimeType(elementType) };
     const typeCheck = this.typeTest(listType, matchedType, () => true, true);
     return {
-      match: (frame, value) => {
-        if (!typeCheck.match(frame, value)) return false;
-        const list = value as DartList;
-        const elements = list instanceof DartList ? list.elements : [];
-        const count = elements.length;
-        if (hasRest ? count < minimum : count !== minimum) return false;
-        for (const [index, element] of head.entries()) if (!element.match(frame, elements[index])) return false;
-        if (rest) {
-          const sublist = new DartList(
-            coreTypes.list,
-            resolveElement(frame),
-            elements.slice(head.length, count - tail.length),
-            true
-          );
-          if (!rest.match(frame, sublist)) return false;
-        }
-        for (const [index, element] of tail.entries()) {
-          if (!element.match(frame, elements[count - tail.length + index])) return false;
-        }
-        return true;
-      },
-      irrefutable: typeCheck.irrefutable && hasRest && minimum === 0 && (!rest || rest.irrefutable),
+      match: (frame, value) => typeCheck.match(frame, value) && matchListParts(frame, value, parts),
+      irrefutable: typeCheck.irrefutable && hasRest && head.length + tail.length === 0 && (!rest || rest.irrefutable),
     };
   }
 
+  private listPatternElementType(pattern: Extract<Pattern, { kind: 'list' }>, matchedType: DartType): DartType {
+    if (pattern.typeArguments) {
+      if (pattern.typeArguments.length !== 1) this.error(pattern, 'リストのパターンの型引数は 1 つです。');
+      return this.resolveType(pattern.typeArguments[0]);
+    }
+    const base = resolveBound(matchedType);
+    const instance = base.kind === 'interface' ? asInstanceOf({ ...base, nullable: false }, coreTypes.list) : undefined;
+    return instance?.args[0] ?? DYNAMIC;
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 20 -- One case per part of the pattern, matched in Dart's order.
+  // code-gauge-allow functionNcss 32 -- One case per part of the pattern, matched in Dart's order.
   private mapPattern(
     pattern: Extract<Pattern, { kind: 'map' }>,
     matchedType: DartType,
@@ -426,6 +431,8 @@ export abstract class PatternCompiler extends CallCompiler {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 28 -- One case per part of the pattern, matched in Dart's order.
+  // code-gauge-allow functionNcss 31 -- One case per part of the pattern, matched in Dart's order.
   private recordPattern(
     pattern: Extract<Pattern, { kind: 'record' }>,
     matchedType: DartType,
@@ -489,6 +496,7 @@ export abstract class PatternCompiler extends CallCompiler {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- One case per part of the pattern, matched in Dart's order.
   private objectPattern(
     pattern: Extract<Pattern, { kind: 'object' }>,
     matchedType: DartType,
@@ -622,6 +630,38 @@ export function isRefutableSyntax(pattern: Pattern): boolean {
   }
 }
 
+interface ListPatternParts {
+  head: Omit<CompiledPattern, 'variables'>[];
+  rest: Omit<CompiledPattern, 'variables'> | undefined;
+  tail: Omit<CompiledPattern, 'variables'>[];
+  hasRest: boolean;
+  resolveElement: (frame: Frame) => DartType;
+}
+
+/** Matches a list's length, the elements before and after the rest, and the rest as a new list. */
+function matchListParts(frame: Frame, value: Value, parts: ListPatternParts): boolean {
+  const { head, rest, tail, hasRest } = parts;
+  const elements = value instanceof DartList ? value.elements : [];
+  const count = elements.length;
+  const minimum = head.length + tail.length;
+  if (hasRest ? count < minimum : count !== minimum) return false;
+  for (const [index, element] of head.entries()) if (!element.match(frame, elements[index])) return false;
+  if (rest) {
+    const sublist = new DartList(
+      coreTypes.list,
+      parts.resolveElement(frame),
+      elements.slice(head.length, count - tail.length),
+      true
+    );
+    if (!rest.match(frame, sublist)) return false;
+  }
+  for (const [index, element] of tail.entries()) {
+    if (!element.match(frame, elements[count - tail.length + index])) return false;
+  }
+  return true;
+}
+
+// code-gauge-allow duplicateLines 16 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
 function compareBigints(operator: string, a: bigint, b: bigint): boolean {
   switch (operator) {
     case '<': {
@@ -639,6 +679,7 @@ function compareBigints(operator: string, a: bigint, b: bigint): boolean {
   }
 }
 
+// code-gauge-allow duplicateLines 16 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
 function compareNumbers(operator: string, a: number, b: number): boolean {
   switch (operator) {
     case '<': {

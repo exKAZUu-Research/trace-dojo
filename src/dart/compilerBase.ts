@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 439 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import { CompileError } from '../interpreter/diagnostics';
 import type { Span, TypeParameter, TypeSyntax } from './ast';
 import type { ClassInfo, Member } from './classes';
@@ -178,7 +179,7 @@ export abstract class CompilerBase {
     return undefined;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of type syntax.
+  // code-gauge-allow functionCognitiveComplexity 18 -- One case per kind of type syntax.
   resolveType(syntax: TypeSyntax, options: { allowRaw?: boolean } = {}): DartType {
     switch (syntax.kind) {
       case 'void': {
@@ -226,6 +227,8 @@ export abstract class CompilerBase {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionNcss 33 -- One case per form of the construct, which reads best together.
   private resolveNamedType(syntax: Extract<TypeSyntax, { kind: 'named' }>, options: { allowRaw?: boolean }): DartType {
     const { name, prefix } = syntax;
     if (prefix === undefined) {
@@ -673,7 +676,7 @@ export function inferFromContext(
  * Collects the constraints that make `actual` a subtype of `formal` on the type parameters in `params`, keeping in
  * `solution` the least upper bound of what each must be a supertype of.
  */
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of type.
+// code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of type.
 export function inferFromSubtype(
   actual: DartType,
   formal: DartType,

@@ -65,6 +65,8 @@ interface Libraries {
 let loaded: Libraries | undefined;
 
 /** Compiles the interpreter's own libraries once per process; programs share them. */
+// code-gauge-allow functionCognitiveComplexity 26 -- The libraries load in their dependency order, each with its own exports.
+// code-gauge-allow functionNcss 42 -- The libraries load in their dependency order, each with its own exports.
 export function libraries(): Libraries {
   if (loaded) return loaded;
   const globals: GlobalVariable[] = [];
@@ -174,7 +176,6 @@ function assignCoreTypes(core: LibraryEnv): void {
 }
 
 /** Compiles a program against the interpreter's libraries. */
-// code-gauge-allow functionCognitiveComplexity 20 -- Imports, the phases of compiling, and checks of main.
 export function compileProgram(syntax: Library, options: { atomicRows?: ReadonlySet<number> } = {}): CompiledProgram {
   const { libraries: envs, globals: libraryGlobals } = libraries();
   const globals = [...libraryGlobals];

@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 508 -- One converter per file; splitting it further would scatter the cases of one kind of node.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -127,7 +128,6 @@ export class Converter extends ExpressionConverter {
     return (literal.parts as string[]).join('');
   }
 
-  // code-gauge-allow functionNcss 40 -- One case per kind of top-level declaration.
   private convertTopLevel(node: Node): TopLevelDeclaration | undefined {
     switch (node.type) {
       case 'class_declaration': {
@@ -189,6 +189,7 @@ export class Converter extends ExpressionConverter {
 
   // Classes
 
+  // code-gauge-allow duplicateLines 19 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private convertClass(node: Node): ClassDeclaration {
     const tokens = new Set(
       childrenOf(node)
@@ -229,6 +230,7 @@ export class Converter extends ExpressionConverter {
     };
   }
 
+  // code-gauge-allow duplicateLines 22 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private convertMixin(node: Node): ClassDeclaration {
     const children = childrenOf(node);
     const onIndex = children.findIndex((child) => child.type === 'on');
@@ -265,6 +267,7 @@ export class Converter extends ExpressionConverter {
     };
   }
 
+  // code-gauge-allow duplicateLines 17 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private convertEnum(node: Node): ClassDeclaration {
     const named = namedOf(node);
     const typeParameters = named.find((child) => child.type === 'type_parameters');
@@ -325,6 +328,7 @@ export class Converter extends ExpressionConverter {
     };
   }
 
+  // code-gauge-allow duplicateLines 20 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private convertExtensionType(node: Node): ClassDeclaration {
     const primary = requireNode(
       namedOf(node).find((child) => child.type === 'primary_constructor'),
@@ -414,7 +418,6 @@ export class Converter extends ExpressionConverter {
       .map((member) => asUntypedMethod(member, owner) ?? member);
   }
 
-  // code-gauge-allow functionNcss 60 -- A member's declaration node holds one of many signatures.
   private convertMember(node: Node): MemberDeclaration[] {
     const annotations = this.annotationsOf(node);
     const inner = requireNode(
@@ -480,7 +483,7 @@ export class Converter extends ExpressionConverter {
    * A method, accessor, operator, or constructor, from the nodes of its signature: modifier tokens, the signature,
    * and a constructor's initializers or redirection.
    */
-  // code-gauge-allow functionNcss 80 -- One case per kind of signature.
+  // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of signature.
   private convertSignature(
     declaration: Node,
     parts: Node[],
@@ -556,6 +559,8 @@ export class Converter extends ExpressionConverter {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of node in the grammar.
+  // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
   private convertMethodSignature(
     signature: Node,
     tokens: Set<string>,
@@ -848,7 +853,7 @@ export class Converter extends ExpressionConverter {
     return nodes.filter((child) => child.type !== 'comment').map((child) => this.convertStatement(child));
   }
 
-  // code-gauge-allow functionNcss 100 -- One case per kind of statement node in the grammar.
+  // code-gauge-allow functionNcss 55 -- One case per kind of statement node in the grammar.
   convertStatement(node: Node): Statement {
     const span = spanOf(node);
     switch (node.type) {

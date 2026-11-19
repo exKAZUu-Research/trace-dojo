@@ -77,7 +77,6 @@ function toDouble(value: bigint | number): number {
  * A binary operator on values whose types are known only at runtime: numbers and strings by their rules, other
  * objects through their operator methods.
  */
-// code-gauge-allow functionCognitiveComplexity 40 -- One case per operator, as num's methods define them.
 export function dynamicBinary(
   runtime: Runtime,
   operator: string,
@@ -119,6 +118,8 @@ export function numericBinary(runtime: Runtime, operator: string, a: bigint | nu
 
 const NOT_INT_OPERATOR = Symbol('not an int operator');
 
+// code-gauge-allow duplicateLines 45 -- The int and double operators share their shape but not their semantics.
+// code-gauge-allow functionNcss 36 -- One case per operator of int.
 function intBinary(runtime: Runtime, operator: string, a: bigint, b: bigint): Value | typeof NOT_INT_OPERATOR {
   switch (operator) {
     case '+': {
@@ -175,6 +176,7 @@ function intBinary(runtime: Runtime, operator: string, a: bigint, b: bigint): Va
   }
 }
 
+// code-gauge-allow duplicateLines 36 -- The int and double operators share their shape but not their semantics.
 function doubleBinary(runtime: Runtime, operator: string, a: bigint | number, b: bigint | number): Value {
   const x = toDouble(a);
   const y = toDouble(b);

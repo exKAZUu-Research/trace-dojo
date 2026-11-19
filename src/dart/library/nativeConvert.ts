@@ -7,6 +7,7 @@ import { newMap } from './nativeCollections';
 import { define, intArg, newList, stringArg } from './nativeSupport';
 
 /** A string as Dart's JSON encoder writes it: quotes, backslashes, control characters, and lone surrogates escaped. */
+// code-gauge-allow functionCognitiveComplexity 16 -- A transcription of the SDK's algorithm, case by case.
 function quoteJson(text: string): string {
   let result = '"';
   for (let position = 0; position < text.length; position++) {
@@ -154,7 +155,7 @@ class JsonParser {
     return value;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of JSON value.
+  // code-gauge-allow duplicateLines 15 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   value(): Value {
     this.runtime.spend();
     if (this.position >= this.text.length) this.fail('Unexpected end of input');
@@ -176,6 +177,8 @@ class JsonParser {
     return this.fail('Unexpected character');
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- A transcription of the SDK's algorithm, case by case.
+  // code-gauge-allow functionNcss 31 -- A transcription of the SDK's algorithm, case by case.
   object(): Value {
     this.position++;
     const map = newMap(this.runtime, interfaceType(coreTypes.string), DYNAMIC);
@@ -223,6 +226,8 @@ class JsonParser {
     }
   }
 
+  // code-gauge-allow duplicateLines 30 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow functionCognitiveComplexity 16 -- A transcription of the SDK's algorithm, case by case.
   string(): string {
     const start = this.position;
     this.position++;

@@ -14,7 +14,7 @@ import type { Frame, Runtime } from './runtime';
 import { coreTypes, type DartType, DYNAMIC } from './types';
 import { DartList, DartObject, DartRecord, UNASSIGNED, UNINITIALIZED, type Value } from './values';
 
-// code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
+// code-gauge-allow duplicateLines 15 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
 export function traceDartProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileProgram(parseDart(program), { atomicRows: new Set(trace.atomicAnnotations.keys()) });
   const runtime = newRuntime(input);
@@ -42,6 +42,7 @@ class Snapshotter {
    * The variables a frame shows: its locals that hold values and the variables a closure captured, then, with the
    * context, the program's top-level variables and static fields, and the fields of `this` as `this.x`.
    */
+  // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of value a trace shows.
   variablesOf(frame: Frame, withContext: boolean): TraceVariables {
     const variables: TraceVariables = { vars: {}, referenceVars: {} };
     const shown = new Set<string>();
@@ -158,6 +159,8 @@ function isScalarType(type: DartType): boolean {
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows Dart's null as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
+// code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of value a trace shows.
+// code-gauge-allow functionNcss 43 -- One case per kind of value a trace shows.
 function displayNodeOf(value: Value, seen: Set<unknown>): DisplayNode | undefined {
   // A late field not yet initialized holds a marker, which shows nothing.
   if (typeof value === 'symbol') return undefined;

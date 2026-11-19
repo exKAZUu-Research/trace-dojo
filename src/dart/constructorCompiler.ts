@@ -10,7 +10,7 @@ import type {
   Span,
 } from './ast';
 import type { CompiledFunction, FunctionSpec } from './callCompiler';
-import { type ClassInfo,type ConstructorImpl,type ConstructorInfo,type FieldMember } from './classes';
+import { type ClassInfo, type ConstructorImpl, type ConstructorInfo, type FieldMember } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
 import { Frame, type Runtime, type TypeEnv } from './runtime';
 import type { Exec } from './statementCompiler';
@@ -25,7 +25,7 @@ import {
   substitute,
   VOID,
 } from './types';
-import { type Cell, type DartObject,type Arguments,type Callable,type Value } from './values';
+import { type Arguments, type Callable, type Cell, type DartObject, type Value } from './values';
 
 export const EMPTY_ENV: TypeEnv = new Map();
 
@@ -48,7 +48,6 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
   /** Runs once, before the first statements of the next function body compile, to compile a constructor's initializers. */
   protected compileStatementsHook: (() => void) | undefined;
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- The kinds of constructors and their parameters.
   protected declareConstructor(cls: ClassInfo, declaration: ConstructorDeclaration): void {
     if (declaration.name === '\0primaryBody') return;
     if (declaration.className !== undefined && declaration.className !== cls.name) {
@@ -216,7 +215,6 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     this.declareConstructor(cls, constructorDeclaration);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 60 -- The parts of a generative constructor run in Dart's order.
   private compileConstructor(
     cls: ClassInfo,
     constructor: ConstructorInfo,
@@ -243,6 +241,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     }
   }
 
+  // code-gauge-allow duplicateLines 24 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private compileFactory(
     cls: ClassInfo,
     constructor: ConstructorInfo,
@@ -317,7 +316,6 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 60 -- Field initializers, initializing formals, the initializer list, the superclass's constructor, and the body.
   private compileGenerative(
     cls: ClassInfo,
     constructor: ConstructorInfo,
@@ -427,7 +425,9 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     return super.compileBlock(block, clear);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 60 -- The initializer list's entries and the implicit super().
+  // code-gauge-allow duplicateLines 15 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow functionCognitiveComplexity 17 -- The initializer list's entries and the implicit super().
+  // code-gauge-allow functionNcss 43 -- The initializer list's entries and the implicit super().
   private compileConstructorPrologue(
     cls: ClassInfo,
     declaration: ConstructorDeclaration,
@@ -436,34 +436,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     const steps: ((frame: Frame) => void)[] = [];
     const redirect = declaration.initializers.find((initializer) => initializer.kind === 'this');
     if (!redirect) steps.push(...this.compileFieldInitializers(cls, initializedFields));
-    // Initializing formals.
-    for (const parameter of [...declaration.parameters.positional, ...declaration.parameters.named]) {
-      if (parameter.binding !== 'this') continue;
-      const field = cls.fields.find((candidate) => candidate.name === parameter.name);
-      if (!field)
-        return this.error(
-          parameter,
-          `this.${parameter.name} の ${parameter.name} は、このクラスのフィールドではありません。`
-        );
-      if (initializedFields.has(field.name) && field.isFinal)
-        this.error(parameter, `final のフィールド ${field.name} は、もう初期化されています。`);
-      const variable = this.findLocal(parameter.name);
-      if (!variable) continue;
-      const parameterType = variable.type;
-      if (!isSubtype(parameterType, field.type)) {
-        this.error(
-          parameter,
-          `${typeName(parameterType)} 型の引数は、${typeName(field.type)} 型のフィールド ${field.name} に代入できません。`
-        );
-      }
-      initializedFields.add(field.name);
-      const { slot } = variable;
-      const fieldSlot = field.slot;
-      steps.push((frame) => {
-        (frame.receiver as DartObject).fields[fieldSlot] = (frame.locals[slot] as Cell).v;
-      });
-      // Inside the initializer list and the body, the name refers to the parameter, which is final.
-    }
+    steps.push(...this.compileInitializingFormals(cls, declaration, initializedFields));
     let superCall = false;
     for (const initializer of declaration.initializers) {
       switch (initializer.kind) {
@@ -544,6 +517,40 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     };
   }
 
+  /** The `this.x` parameters, which store their arguments in the fields before the initializer list runs. */
+  private compileInitializingFormals(
+    cls: ClassInfo,
+    declaration: ConstructorDeclaration,
+    initializedFields: Set<string>
+  ): ((frame: Frame) => void)[] {
+    const steps: ((frame: Frame) => void)[] = [];
+    for (const parameter of [...declaration.parameters.positional, ...declaration.parameters.named]) {
+      if (parameter.binding !== 'this') continue;
+      const field = cls.fields.find((candidate) => candidate.name === parameter.name);
+      if (!field)
+        this.error(parameter, `this.${parameter.name} の ${parameter.name} は、このクラスのフィールドではありません。`);
+      if (initializedFields.has(field.name) && field.isFinal)
+        this.error(parameter, `final のフィールド ${field.name} は、もう初期化されています。`);
+      const variable = this.findLocal(parameter.name);
+      if (!variable) continue;
+      const parameterType = variable.type;
+      if (!isSubtype(parameterType, field.type)) {
+        this.error(
+          parameter,
+          `${typeName(parameterType)} 型の引数は、${typeName(field.type)} 型のフィールド ${field.name} に代入できません。`
+        );
+      }
+      initializedFields.add(field.name);
+      const { slot } = variable;
+      const fieldSlot = field.slot;
+      steps.push((frame) => {
+        (frame.receiver as DartObject).fields[fieldSlot] = (frame.locals[slot] as Cell).v;
+      });
+      // Inside the initializer list and the body, the name refers to the parameter, which is final.
+    }
+    return steps;
+  }
+
   /** The initializers of the fields a class declares, one step per declaration as Java's are. */
   private compileFieldInitializers(cls: ClassInfo, initializedFields: Set<string>): ((frame: Frame) => void)[] {
     const declaration = cls.declaration;
@@ -585,6 +592,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
   }
 
   /** The call of the superclass's constructor or of another constructor of the class, in an initializer list. */
+  // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
   private compileDelegation(
     cls: ClassInfo,
     declaration: ConstructorDeclaration,

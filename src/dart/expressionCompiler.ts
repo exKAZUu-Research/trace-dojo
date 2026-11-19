@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 846 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Arguments as ArgumentsSyntax,
   CascadeSelector,
@@ -51,6 +52,30 @@ import {
 
 /** The value a null-aware member access gives when its receiver is null, which the rest of its chain passes on. */
 export const SHORTED = Symbol('shorted') as unknown as Value;
+
+type PrimaryExpression = Extract<
+  Expression,
+  {
+    kind:
+      | 'int'
+      | 'double'
+      | 'bool'
+      | 'null'
+      | 'string'
+      | 'symbol'
+      | 'list'
+      | 'setOrMap'
+      | 'record'
+      | 'identifier'
+      | 'this'
+      | 'super'
+      | 'parenthesized'
+      | 'member'
+      | 'index'
+      | 'call'
+      | 'new';
+  }
+>;
 
 /** What a name means where it is read. */
 export type NameResolution =
@@ -174,7 +199,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of condition that flow analysis understands.
   protected compileConditionInner(expression: Expression): { compiled: Compiled; flow: ConditionFlow } {
     switch (expression.kind) {
       case 'parenthesized': {
@@ -362,8 +386,69 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return valueIs(frame.runtime, value, type);
   }
 
-  // code-gauge-allow functionNcss 150 -- One case per kind of expression.
+  // code-gauge-allow functionNcss 38 -- One case per form of the construct, which reads best together.
   protected compileChainPart(expression: Expression, context: DartType | undefined): Compiled {
+    switch (expression.kind) {
+      case 'assign': {
+        return this.compileAssignment(expression, context);
+      }
+      case 'patternAssign': {
+        return this.compilePatternAssignment(expression.pattern, expression.value, expression);
+      }
+      case 'prefix': {
+        return this.compilePrefix(expression, context);
+      }
+      case 'postfix': {
+        return this.compileIncrement(expression.operand, expression.operator === '++' ? '+' : '-', false, expression);
+      }
+      case 'nullAssert': {
+        return this.compileNullAssert(expression);
+      }
+      case 'binary': {
+        return this.compileBinary(expression, context);
+      }
+      case 'conditional': {
+        return this.compileConditional(expression, context);
+      }
+      case 'is': {
+        return this.compileIs(expression).compiled;
+      }
+      case 'as': {
+        return this.compileAs(expression);
+      }
+      case 'throw': {
+        return this.compileThrow(expression);
+      }
+      case 'function': {
+        return this.compileFunctionExpression(expression, context);
+      }
+      case 'cascade': {
+        return this.compileCascade(expression, context);
+      }
+      case 'switch': {
+        return this.compileSwitchExpression(expression.subject, expression.cases, expression, context);
+      }
+      case 'dotShorthand': {
+        return this.compileDotShorthand(expression, context);
+      }
+      case 'instantiation': {
+        return this.compileInstantiation(expression);
+      }
+      case 'constructorTearoff': {
+        return this.compileConstructorTearoff(expression.type, expression.name, expression);
+      }
+      case 'await': {
+        return this.unsupported(expression, 'await（非同期処理）');
+      }
+      default: {
+        return this.compilePrimary(expression, context);
+      }
+    }
+  }
+
+  /** Literals, names, and the selectors of member access, indexing, calls, and creation. */
+  // code-gauge-allow functionNcss 40 -- One case per form of the construct, which reads best together.
+  private compilePrimary(expression: PrimaryExpression, context: DartType | undefined): Compiled {
     switch (expression.kind) {
       case 'int': {
         return this.compileInt(expression, context, false);
@@ -424,62 +509,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
       case 'new': {
         return this.compileNew(expression, context);
       }
-      case 'assign': {
-        return this.compileAssignment(expression, context);
-      }
-      case 'patternAssign': {
-        return this.compilePatternAssignment(expression.pattern, expression.value, expression);
-      }
-      case 'prefix': {
-        return this.compilePrefix(expression, context);
-      }
-      case 'postfix': {
-        return this.compileIncrement(expression.operand, expression.operator === '++' ? '+' : '-', false, expression);
-      }
-      case 'nullAssert': {
-        return this.compileNullAssert(expression);
-      }
-      case 'binary': {
-        return this.compileBinary(expression, context);
-      }
-      case 'conditional': {
-        return this.compileConditional(expression, context);
-      }
-      case 'is': {
-        return this.compileIs(expression).compiled;
-      }
-      case 'as': {
-        return this.compileAs(expression);
-      }
-      case 'throw': {
-        return this.compileThrow(expression);
-      }
-      case 'function': {
-        return this.compileFunctionExpression(expression, context);
-      }
-      case 'cascade': {
-        return this.compileCascade(expression, context);
-      }
-      case 'switch': {
-        return this.compileSwitchExpression(expression.subject, expression.cases, expression, context);
-      }
-      case 'dotShorthand': {
-        return this.compileDotShorthand(expression, context);
-      }
-      case 'instantiation': {
-        return this.compileInstantiation(expression);
-      }
-      case 'constructorTearoff': {
-        return this.compileConstructorTearoff(expression.type, expression.name, expression);
-      }
-      case 'await': {
-        return this.unsupported(expression, 'await（非同期処理）');
-      }
     }
   }
 
   // Literals
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch is one of the cases Dart distinguishes for this construct.
   protected compileInt(
     expression: Extract<Expression, { kind: 'int' }>,
     context: DartType | undefined,
@@ -502,6 +537,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return { type: interfaceType(coreTypes.int), run: () => value, isConst: true, constValue: { value } };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionNcss 39 -- One case per form of the construct, which reads best together.
   private compileString(parts: StringPart[]): Compiled {
     const pieces: (string | Eval)[] = [];
     let isConst = true;
@@ -593,6 +630,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return { type, run: isConst ? this.canonicalized(build) : build, isConst, creates: elements.creates };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch is one of the cases Dart distinguishes for this construct.
   private compileSetOrMapLiteral(
     expression: Extract<Expression, { kind: 'setOrMap' }>,
     context: DartType | undefined
@@ -723,6 +761,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     isConst: boolean
   ): Compiled;
 
+  // code-gauge-allow functionCognitiveComplexity 25 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionNcss 37 -- One case per form of the construct, which reads best together.
   private compileRecordLiteral(
     expression: Extract<Expression, { kind: 'record' }>,
     context: DartType | undefined
@@ -826,6 +866,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
   // Names
 
   /** What a name means: a local, a member of the enclosing class or extension, or a top-level declaration. */
+  // code-gauge-allow functionCognitiveComplexity 28 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionNcss 38 -- One case per form of the construct, which reads best together.
   resolveName(name: string): NameResolution | undefined {
     const local = this.findLocal(name);
     if (local) return { kind: 'local', variable: local };
@@ -863,7 +905,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return undefined;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of name.
   protected compileIdentifier(expression: Extract<Expression, { kind: 'identifier' }>): Compiled {
     const { name } = expression;
     if (name === '_') return this.error(expression, '_ は値として使えません。');
@@ -949,6 +990,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
   }
 
+  // code-gauge-allow functionNcss 31 -- One case per form of the construct, which reads best together.
   protected readLocal(variable: LocalVar, span: Span): Compiled {
     this.checkDefinitelyAssigned(variable, span);
     if (variable.hasConstant) {
@@ -1066,7 +1108,6 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   // Members
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of receiver.
   private compileMember(expression: Extract<Expression, { kind: 'member' }>, context: DartType | undefined): Compiled {
     const { object, name } = expression;
     const target = this.staticTarget(object);
@@ -1111,6 +1152,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** What a member access on a value of the receiver's static type reads, checking nullability. */
+  // code-gauge-allow functionCognitiveComplexity 19 -- Each branch is one of the cases Dart distinguishes for this construct.
   protected readMemberOf(receiver: Compiled, name: string, span: Span, nullAware: boolean): Compiled {
     const receiverType = receiver.type;
     if (receiverType.kind === 'void') this.error(span, 'void の値のメンバーは使えません。');
@@ -1145,6 +1187,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** Reads a member found statically: a field or getter through dynamic dispatch, a method as a tear-off. */
+  // code-gauge-allow functionCognitiveComplexity 27 -- Each branch is one of the cases Dart distinguishes for this construct.
   protected readMember(
     receiver: Compiled,
     resolved: ResolvedMember,
@@ -1231,6 +1274,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** A class, import prefix, or extension that a member access names instead of a value. */
+  // code-gauge-allow functionCognitiveComplexity 28 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionNcss 31 -- One case per form of the construct, which reads best together.
   protected staticTarget(
     object: Expression
   ):

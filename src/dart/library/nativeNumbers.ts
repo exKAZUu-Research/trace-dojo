@@ -11,6 +11,7 @@ function toDouble(value: bigint | number): number {
 }
 
 /** `num.compareTo`, which orders -0.0 before 0.0 and NaN after every number. */
+// code-gauge-allow functionCognitiveComplexity 21 -- A transcription of the SDK's algorithm, case by case.
 export function compareNumbers(a: bigint | number, b: bigint | number): number {
   if (typeof a === 'bigint' && typeof b === 'bigint') return a < b ? -1 : a > b ? 1 : 0;
   const x = toDouble(a);
@@ -108,6 +109,7 @@ export function parseDouble(text: string): number | undefined {
 }
 
 /** `int.parse`: an optional sign, then digits of the radix, or `0x` and hexadecimal digits without a radix. */
+// code-gauge-allow duplicateLines 22 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
 export function parseInt(text: string, radix: number | undefined, bounded = true): bigint | undefined {
   const trimmed = text.trim();
   let rest = trimmed;

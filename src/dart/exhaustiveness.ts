@@ -82,6 +82,8 @@ function isAlwaysExhaustive(type: DartType): boolean {
 }
 
 /** Splits a type into the spaces a switch must cover one by one. */
+// code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
+// code-gauge-allow functionNcss 39 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 function expand(type: DartType): Space[] {
   const spaces: Space[] = [];
   const add = (space: Space): void => {
@@ -151,6 +153,8 @@ function subclassType(supertype: DartType & { kind: 'interface' }, subclass: Cla
 }
 
 /** Whether a pattern matches every value of a type. */
+// code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
+// code-gauge-allow functionNcss 43 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 function coversAll(compiler: ExpressionCompiler, pattern: Pattern, type: DartType): boolean {
   switch (pattern.kind) {
     case 'wildcard':
@@ -245,6 +249,7 @@ function recordFieldsCover(
   );
 }
 
+// code-gauge-allow functionNcss 33 -- One case per kind of pattern and space, as Dart decides exhaustiveness.
 function covers(compiler: ExpressionCompiler, pattern: Pattern, space: Space): boolean {
   switch (pattern.kind) {
     case 'parenthesized': {

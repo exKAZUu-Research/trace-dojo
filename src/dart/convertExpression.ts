@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 810 -- One converter per file; splitting it further would scatter the cases of one kind of node.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -210,7 +211,7 @@ export abstract class ExpressionConverter {
     }
   }
 
-  // code-gauge-allow functionNcss 120 -- One case per kind of expression node in the grammar.
+  // code-gauge-allow functionNcss 52 -- One case per kind of node in the grammar.
   convertExpression(node: Node): Expression {
     const span = spanOf(node);
     if (BINARY_NODES.has(node.type)) return this.convertBinary(node);
@@ -303,6 +304,16 @@ export abstract class ExpressionConverter {
       case 'constructor_tearoff': {
         return this.convertConstructorTearoff(node);
       }
+      default: {
+        return this.convertOperatorExpression(node, span);
+      }
+    }
+  }
+
+  /** Assignments, operators, conditionals, casts, and the other expressions that combine expressions. */
+  // code-gauge-allow functionNcss 35 -- One case per kind of node in the grammar.
+  private convertOperatorExpression(node: Node, span: Span): Expression {
+    switch (node.type) {
       case 'assignment_expression': {
         return {
           kind: 'assign',
@@ -555,6 +566,7 @@ export abstract class ExpressionConverter {
     };
   }
 
+  // code-gauge-allow duplicateLines 18 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private convertConstructorInvocation(node: Node): Expression {
     const identifiers = fieldsOf(node, 'type').filter((child) => child.type === 'type_identifier');
     const typeArguments = namedOf(node).find((child) => child.type === 'type_arguments');
@@ -577,6 +589,7 @@ export abstract class ExpressionConverter {
     };
   }
 
+  // code-gauge-allow duplicateLines 18 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private convertConstructorTearoff(node: Node): Expression {
     const identifiers = namedOf(node).filter((child) => child.type === 'type_identifier');
     const typeArguments = namedOf(node).find((child) => child.type === 'type_arguments');
@@ -663,7 +676,6 @@ export abstract class ExpressionConverter {
     return elements;
   }
 
-  // code-gauge-allow functionNcss 60 -- One case per kind of collection element.
   protected convertElement(node: Node): CollectionElement {
     const span = spanOf(node);
     switch (node.type) {
@@ -808,6 +820,8 @@ export abstract class ExpressionConverter {
    * @param context In a declaration, a bare name declares a variable; in an assignment, it assigns one; in a
    * matching context (a case), it is a constant.
    */
+  // code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of node in the grammar.
+  // code-gauge-allow functionNcss 46 -- One case per kind of node in the grammar.
   protected convertPatternSequence(parent: Node, nodes: Node[], context: PatternContext): Pattern {
     const tokens = nodes.filter((child) => child.type !== 'comment' && child.type !== ',');
     let position = 0;
@@ -859,7 +873,8 @@ export abstract class ExpressionConverter {
     return pattern;
   }
 
-  // code-gauge-allow functionNcss 80 -- One case per kind of pattern node in the grammar.
+  // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of pattern node in the grammar.
+  // code-gauge-allow functionNcss 42 -- One case per kind of pattern node in the grammar.
   protected convertPattern(node: Node, context: PatternContext): Pattern {
     const span = spanOf(node);
     switch (node.type) {
@@ -952,6 +967,7 @@ export abstract class ExpressionConverter {
    * The expression of a constant pattern, which the grammar flattens: `-1`, `Color.red`, `m.pi`, `const [1]`, or
    * `const Point(1, 2)`.
    */
+  // code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of node in the grammar.
   private constantPatternExpression(node: Node, children: Node[], isConst: boolean): Expression {
     const span = spanOf(node);
     if (children[0]?.type === '.' && children.length === 2) {
@@ -1053,6 +1069,7 @@ export abstract class ExpressionConverter {
       .map((child) => this.convertElement(child));
   }
 
+  // code-gauge-allow duplicateLines 19 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private convertListPattern(node: Node, context: PatternContext): Pattern {
     const children = childrenOf(node);
     const typeArguments = children.find((child) => child.type === 'type_arguments');
@@ -1079,6 +1096,7 @@ export abstract class ExpressionConverter {
     };
   }
 
+  // code-gauge-allow duplicateLines 19 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   private convertMapPattern(node: Node, context: PatternContext): Pattern {
     const children = childrenOf(node);
     const typeArguments = children.find((child) => child.type === 'type_arguments');
@@ -1132,6 +1150,7 @@ export abstract class ExpressionConverter {
 
   // Strings
 
+  // code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of node in the grammar.
   private convertStringParts(node: Node): StringPart[] {
     const parts: StringPart[] = [];
     const pushText = (text: string): void => {
@@ -1250,6 +1269,7 @@ export abstract class ExpressionConverter {
     return type;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of node in the grammar.
   private convertParameterTypes(node: Node): ParameterTypes {
     const result: ParameterTypes = { positional: [], requiredCount: 0, named: [] };
     for (const child of namedOf(node)) {

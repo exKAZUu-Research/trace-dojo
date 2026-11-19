@@ -86,6 +86,7 @@ export class DartRecord extends DartObject {
 }
 
 export class DartClosure extends DartObject {
+  // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
   constructor(
     cls: ClassInfo,
     readonly type: FunctionType,

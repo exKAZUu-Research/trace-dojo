@@ -88,6 +88,7 @@ export function allMatchesOf(runtime: Runtime, pattern: Value, input: string, st
 }
 
 /** A match of a pattern at a position (`anchored`) or anywhere after it. */
+// code-gauge-allow functionCognitiveComplexity 17 -- A transcription of the SDK's algorithm, case by case.
 export function matchAt(
   runtime: Runtime,
   pattern: Value,

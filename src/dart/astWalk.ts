@@ -4,6 +4,7 @@ import type { Expression, Pattern, Statement } from './ast';
  * The names a function body assigns, other than in declarations, and those it assigns inside nested closures, which
  * flow analysis needs to decide what it may promote.
  */
+// code-gauge-allow functionCognitiveComplexity 29 -- Each branch is one of the cases Dart distinguishes for this construct.
 export function assignedNames(root: unknown): { all: Set<string>; inClosures: Set<string> } {
   const all = new Set<string>();
   const inClosures = new Set<string>();

@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 828 -- The natives of List, Set, Map, and their iterators share the helpers of this file.
 import { stringOf } from '../format';
 import { HashStore } from '../hashStore';
 import { type Frame, Frame as FrameClass, type Runtime } from '../runtime';
@@ -626,6 +627,8 @@ function choosePivots(
 }
 
 /** Moves the elements less than the pivot to the left and the greater ones to the right, keeping equal ones between. */
+// code-gauge-allow duplicateLines 28 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+// code-gauge-allow functionCognitiveComplexity 17 -- A transcription of dart:_internal's dual-pivot quicksort, whose comparisons programs see.
 function partitionAroundPivot(
   a: Value[],
   start: number,
@@ -667,6 +670,9 @@ function partitionAroundPivot(
 }
 
 /** Moves the elements that belong left to the left and those that belong right to the right. */
+// code-gauge-allow duplicateLines 28 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+// code-gauge-allow functionCognitiveComplexity 21 -- A transcription of dart:_internal's dual-pivot quicksort, whose comparisons programs see.
+// code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
 function partitionThree(
   a: Value[],
   start: number,

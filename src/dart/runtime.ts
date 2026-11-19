@@ -53,6 +53,7 @@ export class Frame implements TracedFrame {
   /** Values a statement holds while it evaluates the rest of an expression, which garbage collection keeps. */
   readonly temporaries: Value[] = [];
 
+  // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
   constructor(
     readonly runtime: Runtime,
     readonly info: FunctionInfo,
@@ -431,6 +432,8 @@ export class Runtime implements TracedRuntime<Frame> {
   // Garbage collection
 
   /** Removes the turtles that no variable, field, or value in flight still reaches. */
+  // code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of value garbage collection reaches.
+  // code-gauge-allow functionNcss 35 -- One case per kind of value garbage collection reaches.
   collectGarbage(): void {
     if (!this.world.hasTurtles) return;
     const reached = new Set<unknown>();

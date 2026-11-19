@@ -21,6 +21,7 @@ function valueOf(runtime: Runtime, value: Value, name = 'other'): bigint {
   return (state as BigIntState).value;
 }
 
+// code-gauge-allow duplicateLines 22 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
 function parseBigInt(text: string, radix: number | undefined): bigint | undefined {
   let rest = text.trim();
   let negative = false;
