@@ -9,7 +9,7 @@ import type {
   BoundPattern,
   BoundStatement,
 } from './bound';
-import type { LocalSymbol, MethodSymbol, Type } from './types';
+import { type FieldSymbol, LocalSymbol, type MethodSymbol, type Type } from './types';
 
 /** The locals definitely assigned at a point, or every local when the point is unreachable. */
 type State = Set<LocalSymbol> | 'unreachable';
@@ -21,6 +21,7 @@ interface ConditionalState {
 
 export interface FlowDiagnostics {
   unassigned(local: LocalSymbol, row: number): void;
+  unassignedField(field: FieldSymbol, row: number): void;
   notAllPathsReturn(row: number): void;
   lambdaNotAllPathsReturn(delegateType: Type, row: number): void;
   fallsThrough(label: string, isLast: boolean, row: number): void;
@@ -51,6 +52,16 @@ function copy(state: State): State {
 
 function isAssigned(state: State, local: LocalSymbol): boolean {
   return state === 'unreachable' || state.has(local);
+}
+
+function isStructLocal(local: LocalSymbol): boolean {
+  return local.type.kind === 'named' && local.type.symbol.isValueType && local.type.symbol.special === undefined;
+}
+
+function instanceFieldsOf(local: LocalSymbol): FieldSymbol[] {
+  return local.type.kind === 'named'
+    ? local.type.symbol.fields.filter((field) => !field.isStatic && !field.isConst)
+    : [];
 }
 
 function assign(state: State, local: LocalSymbol): State {
@@ -466,7 +477,7 @@ export class FlowAnalyzer {
   private accessExpression(expression: AccessExpression, state: State): State {
     switch (expression.kind) {
       case 'field': {
-        return this.receiver(expression.receiver, state);
+        return this.readField(expression, state);
       }
       case 'element': {
         return this.expressions(expression.indices, this.expression(expression.array, state));
@@ -587,8 +598,48 @@ export class FlowAnalyzer {
     return this.expression(receiver, state);
   }
 
+  /** Reads a field of a struct local, which its own assignment makes readable before the whole local is assigned. */
+  private readField(expression: Extract<BoundExpression, { kind: 'field' }>, state: State): State {
+    const { receiver } = expression;
+    if (receiver.kind !== 'local' || !isStructLocal(receiver.local)) return this.receiver(receiver, state);
+    const local = receiver.local;
+    const variable = this.fieldOf(local, expression.field);
+    if (local.isHidden || isAssigned(state, local) || isAssigned(state, variable) || this.reported.has(variable))
+      return state;
+    this.reported.add(variable);
+    this.diagnostics.unassignedField(expression.field, expression.row);
+    return state;
+  }
+
+  /**
+   * A struct local's field as a variable of its own (C# spec §9.4.1): assigning every instance field assigns the
+   * local, as `Point p; p.X = 1; p.Y = 2;` does.
+   */
+  private fieldOf(local: LocalSymbol, field: FieldSymbol): LocalSymbol {
+    let fields = this.structFields.get(local);
+    if (!fields) {
+      fields = new Map();
+      this.structFields.set(local, fields);
+    }
+    let variable = fields.get(field);
+    if (!variable) {
+      variable = new LocalSymbol(`${local.name}.${field.name}`, field.type, local.row, local.column);
+      fields.set(field, variable);
+    }
+    return variable;
+  }
+
+  private readonly structFields = new Map<LocalSymbol, Map<FieldSymbol, LocalSymbol>>();
+
+  /** Whether every instance field of a struct local is assigned, which assigns the local. */
+  private fieldsAssigned(local: LocalSymbol, state: State): boolean {
+    const fields = instanceFieldsOf(local);
+    return fields.length > 0 && fields.every((field) => isAssigned(state, this.fieldOf(local, field)));
+  }
+
   private read(local: LocalSymbol, state: State, row: number): void {
     if (local.isHidden || isAssigned(state, local) || this.reported.has(local)) return;
+    if (isStructLocal(local) && this.fieldsAssigned(local, state)) return;
     this.reported.add(local);
     this.diagnostics.unassigned(local, row);
   }
@@ -623,13 +674,10 @@ export class FlowAnalyzer {
 
   private assignTarget(target: BoundLValue, state: State): State {
     if (target.kind === 'local') return assign(state, target.local);
-    if (
-      target.kind === 'field' &&
-      target.receiver.kind === 'local' &&
-      target.receiver.type.kind === 'named' &&
-      target.receiver.type.symbol.isValueType
-    ) {
-      return assign(state, target.receiver.local);
+    if (target.kind === 'field' && target.receiver.kind === 'local' && isStructLocal(target.receiver.local)) {
+      const local = target.receiver.local;
+      const assigned = assign(state, this.fieldOf(local, target.field));
+      return this.fieldsAssigned(local, assigned) ? assign(assigned, local) : assigned;
     }
     return state;
   }

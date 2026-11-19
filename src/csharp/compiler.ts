@@ -565,6 +565,12 @@ export class Compiler extends StatementBinder {
           this.error(row, 'CS0269', `未割り当ての out パラメーター '${local.name}' が使用されました`);
         else this.error(row, 'CS0165', `未割り当てのローカル変数 '${local.name}' が使用されました`);
       },
+      unassignedField: (field, row) =>
+        this.error(
+          row,
+          'CS0170',
+          `フィールド '${field.property?.name ?? field.name}' は、割り当てられていない可能性があります`
+        ),
       notAllPathsReturn: (row) =>
         this.error(row, 'CS0161', `'${this.methodDisplay(method)}': 値を返さないコード パスがあります`),
       lambdaNotAllPathsReturn: (delegateType, row) =>

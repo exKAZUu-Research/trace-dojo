@@ -66,6 +66,9 @@ export abstract class StatementExecutor extends PatternMatcher {
         this.withStep(statement.row, statement.step, () => {
           if (statement.value)
             this.storeLocal(frame, statement.local, copyValue(this.evaluate(statement.value, frame)));
+          // A struct local without a value has its fields, which the program may assign one by one.
+          else if (isStructType(statement.local.type))
+            this.storeLocal(frame, statement.local, this.defaultOf(frame.resolve(statement.local.type)));
         });
         return undefined;
       }
@@ -378,4 +381,8 @@ function headerStep(initializers: BoundStatement[]): BoundStatement['step'] {
 
 function withoutStep(statement: BoundStatement): BoundStatement {
   return statement.step === 'none' ? statement : ({ ...statement, step: 'none' } as BoundStatement);
+}
+
+function isStructType(type: Type): boolean {
+  return type.kind === 'named' && type.symbol.kind === 'struct' && type.symbol.special === undefined;
 }
