@@ -548,107 +548,25 @@ function insertionSort(a: Value[], left: number, right: number, compare: (a: Val
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 80 -- A transcription of dart:_internal's _dualPivotQuicksort, whose order of ties programs see.
-function dualPivotQuicksort(a: Value[], left: number, right: number, compare: (a: Value, b: Value) => number): void {
-  const sixth = Math.trunc((right - left + 1) / 6);
-  const index1 = left + sixth;
-  const index5 = right - sixth;
-  const index3 = Math.trunc((left + right) / 2);
-  const index2 = index3 - sixth;
-  const index4 = index3 + sixth;
-  let el1 = a[index1];
-  let el2 = a[index2];
-  let el3 = a[index3];
-  let el4 = a[index4];
-  let el5 = a[index5];
-  let t: Value;
-  if (compare(el1, el2) > 0) [t, el1, el2] = [el1, el2, el1];
-  if (compare(el4, el5) > 0) [t, el4, el5] = [el4, el5, el4];
-  if (compare(el1, el3) > 0) [t, el1, el3] = [el1, el3, el1];
-  if (compare(el2, el3) > 0) [t, el2, el3] = [el2, el3, el2];
-  if (compare(el1, el4) > 0) [t, el1, el4] = [el1, el4, el1];
-  if (compare(el3, el4) > 0) [t, el3, el4] = [el3, el4, el3];
-  if (compare(el2, el5) > 0) [t, el2, el5] = [el2, el5, el2];
-  if (compare(el2, el3) > 0) [t, el2, el3] = [el2, el3, el2];
-  if (compare(el4, el5) > 0) [t, el4, el5] = [el4, el5, el4];
-  void t;
-  const pivot1 = el2;
-  const pivot2 = el4;
-  a[index1] = el1;
-  a[index3] = el3;
-  a[index5] = el5;
-  a[index2] = a[left];
-  a[index4] = a[right];
+type Compare = (a: Value, b: Value) => number;
+
+/** A transcription of dart:_internal's _dualPivotQuicksort, whose order of ties and of comparisons programs see. */
+function dualPivotQuicksort(a: Value[], left: number, right: number, compare: Compare): void {
+  const { pivot1, pivot2, index1, index5 } = choosePivots(a, left, right, compare);
   let less = left + 1;
   let great = right - 1;
   const pivotsAreEqual = compare(pivot1, pivot2) === 0;
-  if (pivotsAreEqual) {
-    const pivot = pivot1;
-    for (let k = less; k <= great; k++) {
-      const ak = a[k];
-      const comp = compare(ak, pivot);
-      if (comp === 0) continue;
-      if (comp < 0) {
-        if (k !== less) {
-          a[k] = a[less];
-          a[less] = ak;
-        }
-        less++;
-      } else {
-        for (;;) {
-          const greatComp = compare(a[great], pivot);
-          if (greatComp > 0) {
-            great--;
-            continue;
-          } else if (greatComp < 0) {
-            a[k] = a[less];
-            a[less++] = a[great];
-            a[great--] = ak;
-            break;
-          } else {
-            a[k] = a[great];
-            a[great--] = ak;
-            break;
-          }
-        }
-      }
-    }
-  } else {
-    for (let k = less; k <= great; k++) {
-      const ak = a[k];
-      const compPivot1 = compare(ak, pivot1);
-      if (compPivot1 < 0) {
-        if (k !== less) {
-          a[k] = a[less];
-          a[less] = ak;
-        }
-        less++;
-      } else {
-        const compPivot2 = compare(ak, pivot2);
-        if (compPivot2 > 0) {
-          for (;;) {
-            const comp = compare(a[great], pivot2);
-            if (comp > 0) {
-              great--;
-              if (great < k) break;
-              continue;
-            } else {
-              const comp2 = compare(a[great], pivot1);
-              if (comp2 < 0) {
-                a[k] = a[less];
-                a[less++] = a[great];
-                a[great--] = ak;
-              } else {
-                a[k] = a[great];
-                a[great--] = ak;
-              }
-              break;
-            }
-          }
-        }
-      }
-    }
-  }
+  ({ less, great } = pivotsAreEqual
+    ? partitionAroundPivot(a, less, great, pivot1, compare)
+    : partitionThree(
+        a,
+        less,
+        great,
+        pivot1,
+        (value) => compare(value, pivot1) < 0,
+        (value) => compare(value, pivot2) > 0,
+        compare
+      ));
   a[left] = a[less - 1];
   a[less - 1] = pivot1;
   a[right] = a[great + 1];
@@ -659,44 +577,135 @@ function dualPivotQuicksort(a: Value[], left: number, right: number, compare: (a
   if (less < index1 && great > index5) {
     while (compare(a[less], pivot1) === 0) less++;
     while (compare(a[great], pivot2) === 0) great--;
-    for (let k = less; k <= great; k++) {
-      const ak = a[k];
-      const compPivot1 = compare(ak, pivot1);
-      if (compPivot1 === 0) {
-        if (k !== less) {
-          a[k] = a[less];
-          a[less] = ak;
-        }
-        less++;
-      } else {
-        const compPivot2 = compare(ak, pivot2);
-        if (compPivot2 === 0) {
-          for (;;) {
-            const comp = compare(a[great], pivot2);
-            if (comp === 0) {
-              great--;
-              if (great < k) break;
-              continue;
-            } else {
-              const comp2 = compare(a[great], pivot1);
-              if (comp2 < 0) {
-                a[k] = a[less];
-                a[less++] = a[great];
-                a[great--] = ak;
-              } else {
-                a[k] = a[great];
-                a[great--] = ak;
-              }
-              break;
-            }
-          }
-        }
-      }
-    }
-    doSort(a, less, great, compare);
-  } else {
-    doSort(a, less, great, compare);
+    ({ less, great } = partitionThree(
+      a,
+      less,
+      great,
+      pivot1,
+      (value) => compare(value, pivot1) === 0,
+      (value) => compare(value, pivot2) === 0,
+      compare
+    ));
   }
+  doSort(a, less, great, compare);
+}
+
+/** Sorts five sample elements with a sorting network and takes the second and fourth as the pivots. */
+function choosePivots(
+  a: Value[],
+  left: number,
+  right: number,
+  compare: Compare
+): { pivot1: Value; pivot2: Value; index1: number; index5: number } {
+  const sixth = Math.trunc((right - left + 1) / 6);
+  const index1 = left + sixth;
+  const index5 = right - sixth;
+  const index3 = Math.trunc((left + right) / 2);
+  const index2 = index3 - sixth;
+  const index4 = index3 + sixth;
+  const el = [a[index1], a[index2], a[index3], a[index4], a[index5]];
+  for (const [x, y] of [
+    [0, 1],
+    [3, 4],
+    [0, 2],
+    [1, 2],
+    [0, 3],
+    [2, 3],
+    [1, 4],
+    [1, 2],
+    [3, 4],
+  ] as const) {
+    if (compare(el[x], el[y]) > 0) [el[x], el[y]] = [el[y], el[x]];
+  }
+  a[index1] = el[0];
+  a[index3] = el[2];
+  a[index5] = el[4];
+  a[index2] = a[left];
+  a[index4] = a[right];
+  return { pivot1: el[1], pivot2: el[3], index1, index5 };
+}
+
+/** Moves the elements less than the pivot to the left and the greater ones to the right, keeping equal ones between. */
+function partitionAroundPivot(
+  a: Value[],
+  start: number,
+  end: number,
+  pivot: Value,
+  compare: Compare
+): { less: number; great: number } {
+  let less = start;
+  let great = end;
+  for (let k = less; k <= great; k++) {
+    const ak = a[k];
+    const comp = compare(ak, pivot);
+    if (comp === 0) continue;
+    if (comp < 0) {
+      if (k !== less) {
+        a[k] = a[less];
+        a[less] = ak;
+      }
+      less++;
+      continue;
+    }
+    for (;;) {
+      const greatComp = compare(a[great], pivot);
+      if (greatComp > 0) {
+        great--;
+        continue;
+      }
+      if (greatComp < 0) {
+        a[k] = a[less];
+        a[less++] = a[great];
+      } else {
+        a[k] = a[great];
+      }
+      a[great--] = ak;
+      break;
+    }
+  }
+  return { less, great };
+}
+
+/** Moves the elements that belong left to the left and those that belong right to the right. */
+function partitionThree(
+  a: Value[],
+  start: number,
+  end: number,
+  pivot1: Value,
+  belongsLeft: (value: Value) => boolean,
+  belongsRight: (value: Value) => boolean,
+  compare: Compare
+): { less: number; great: number } {
+  let less = start;
+  let great = end;
+  for (let k = less; k <= great; k++) {
+    const ak = a[k];
+    if (belongsLeft(ak)) {
+      if (k !== less) {
+        a[k] = a[less];
+        a[less] = ak;
+      }
+      less++;
+      continue;
+    }
+    if (!belongsRight(ak)) continue;
+    for (;;) {
+      if (belongsRight(a[great])) {
+        great--;
+        if (great < k) break;
+        continue;
+      }
+      if (compare(a[great], pivot1) < 0) {
+        a[k] = a[less];
+        a[less++] = a[great];
+      } else {
+        a[k] = a[great];
+      }
+      a[great--] = ak;
+      break;
+    }
+  }
+  return { less, great };
 }
 
 // Sets

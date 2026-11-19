@@ -38,67 +38,91 @@ function isMap(value: Value): value is DartObject {
   return value instanceof DartObject && value.native instanceof HashStore && value.native.isMap;
 }
 
-// code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of JSON value, as Dart's _JsonStringifier.
 function encodeJson(runtime: Runtime, value: Value, toEncodable: Value, indent: string | undefined): string {
-  const visiting: Value[] = [];
-  const write = (current: Value, depth: number): string => {
-    runtime.spend();
+  return new JsonStringifier(runtime, toEncodable, indent).write(value, 0);
+}
+
+/** Writes JSON as Dart's _JsonStringifier does: one case per kind of value, and toEncodable or toJson for the rest. */
+class JsonStringifier {
+  private readonly visiting: Value[] = [];
+
+  constructor(
+    private readonly runtime: Runtime,
+    private readonly toEncodable: Value,
+    private readonly indent: string | undefined
+  ) {}
+
+  write(current: Value, depth: number): string {
+    this.runtime.spend();
     if (current === undefined) return 'null';
     if (typeof current === 'boolean') return current ? 'true' : 'false';
     if (typeof current === 'bigint') return current.toString();
     if (typeof current === 'number') {
-      if (!Number.isFinite(current)) runtime.throwError('JsonUnsupportedObjectError', '', [current]);
+      if (!Number.isFinite(current)) this.runtime.throwError('JsonUnsupportedObjectError', '', [current]);
       return formatDouble(current);
     }
     if (typeof current === 'string') return quoteJson(current);
-    if (visiting.includes(current)) runtime.throwError('JsonCyclicError', '', [current]);
-    const newline = indent === undefined ? '' : `\n${indent.repeat(depth + 1)}`;
-    const close = indent === undefined ? '' : `\n${indent.repeat(depth)}`;
-    if (current instanceof DartList) {
-      if (current.elements.length === 0) return '[]';
-      visiting.push(current);
-      const parts = current.elements.map((element) => write(element, depth + 1));
-      visiting.pop();
-      return `[${newline}${parts.join(`,${newline}`)}${close}]`;
-    }
-    if (isMap(current)) {
-      const store = current.native as unknown as HashStore;
-      if (store.size === 0) return '{}';
-      visiting.push(current);
-      const parts: string[] = [];
-      for (const position of store.positions()) {
-        const key = store.keyAt(position);
-        if (typeof key !== 'string') {
-          visiting.pop();
-          runtime.throwError('JsonUnsupportedObjectError', '', [current]);
-        }
-        parts.push(
-          `${quoteJson(key)}${indent === undefined ? ':' : ': '}${write(store.entryValues[position], depth + 1)}`
-        );
+    if (this.visiting.includes(current)) this.runtime.throwError('JsonCyclicError', '', [current]);
+    if (current instanceof DartList) return this.writeList(current, depth);
+    if (isMap(current)) return this.writeMap(current, depth);
+    return this.write(this.convert(current), depth);
+  }
+
+  private writeList(list: DartList, depth: number): string {
+    if (list.elements.length === 0) return '[]';
+    this.visiting.push(list);
+    const parts = list.elements.map((element) => this.write(element, depth + 1));
+    this.visiting.pop();
+    return this.wrap('[', parts, ']', depth);
+  }
+
+  private writeMap(map: DartObject, depth: number): string {
+    const store = map.native as unknown as HashStore;
+    if (store.size === 0) return '{}';
+    this.visiting.push(map);
+    const parts: string[] = [];
+    for (const position of store.positions()) {
+      const key = store.keyAt(position);
+      if (typeof key !== 'string') {
+        this.visiting.pop();
+        this.runtime.throwError('JsonUnsupportedObjectError', '', [map]);
       }
-      visiting.pop();
-      return `{${newline}${parts.join(`,${newline}`)}${close}}`;
+      const separator = this.indent === undefined ? ':' : ': ';
+      parts.push(`${quoteJson(key)}${separator}${this.write(store.entryValues[position], depth + 1)}`);
     }
-    visiting.push(current);
+    this.visiting.pop();
+    return this.wrap('{', parts, '}', depth);
+  }
+
+  private wrap(open: string, parts: string[], close: string, depth: number): string {
+    const { indent } = this;
+    const newline = indent === undefined ? '' : `\n${indent.repeat(depth + 1)}`;
+    const end = indent === undefined ? '' : `\n${indent.repeat(depth)}`;
+    return `${open}${newline}${parts.join(`,${newline}`)}${end}${close}`;
+  }
+
+  /** The encodable value of another object, from toEncodable or the object's toJson. */
+  private convert(current: Value): Value {
+    const { runtime } = this;
+    this.visiting.push(current);
     let converted: Value;
     try {
       converted =
-        toEncodable === undefined
+        this.toEncodable === undefined
           ? runtime.invoke(current, 'toJson', { positional: [], named: undefined, isDynamic: true }, [], undefined)
-          : runtime.callValue(toEncodable, { positional: [current], named: undefined }, [], runtime.userCallRow);
+          : runtime.callValue(this.toEncodable, { positional: [current], named: undefined }, [], runtime.userCallRow);
     } catch (error) {
-      visiting.pop();
+      this.visiting.pop();
       if (error instanceof DartThrow)
         runtime.throwError('JsonUnsupportedObjectError', '', [current], { cause: error.value });
       throw error;
     }
-    visiting.pop();
+    this.visiting.pop();
     if (converted instanceof DartObject && !(converted instanceof DartList) && !isMap(converted)) {
       runtime.throwError('JsonUnsupportedObjectError', '', [current]);
     }
-    return write(converted, depth);
-  };
-  return write(value, 0);
+    return converted;
+  }
 }
 
 define('_jsonEncode', (runtime, _receiver, [value, toEncodable, indent]) =>

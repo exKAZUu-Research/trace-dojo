@@ -969,7 +969,28 @@ export abstract class ExpressionConverter {
       const operand = this.constantPatternExpression(node, children.slice(1), isConst);
       return { kind: 'prefix', operator: '-', operand, ...span };
     }
-    if (isConst && children[0]?.type === '[') {
+    if (isConst) {
+      const collection = this.constCollectionPattern(node, children, span);
+      if (collection) return collection;
+    }
+    const creation = this.constCreationPattern(node, children, isConst, span);
+    if (creation) return creation;
+    const parts = children.filter((child) => child.type === 'identifier' || child.type === 'type_identifier');
+    if (children.length > 1 && children.every((child) => child.type === 'identifier' || child.type === '.')) {
+      let expression: Expression = { kind: 'identifier', name: parts[0].text, ...spanOf(parts[0]) };
+      for (const part of parts.slice(1)) {
+        expression = { kind: 'member', object: expression, name: part.text, nullAware: false, ...span };
+      }
+      return expression;
+    }
+    const expression = this.soleExpression(node, children);
+    if (isConst && expression.kind === 'record') return { ...expression, isConst: true };
+    return expression;
+  }
+
+  /** `const [...]`, `const <T>[...]`, and `const {...}` in a constant pattern. */
+  private constCollectionPattern(node: Node, children: Node[], span: Span): Expression | undefined {
+    if (children[0]?.type === '[') {
       return {
         kind: 'list',
         typeArguments: undefined,
@@ -978,7 +999,7 @@ export abstract class ExpressionConverter {
         ...span,
       };
     }
-    if (isConst && children[0]?.type === 'type_arguments' && children[1]?.type === '[') {
+    if (children[0]?.type === 'type_arguments' && children[1]?.type === '[') {
       return {
         kind: 'list',
         typeArguments: this.convertTypeArguments(children[0]),
@@ -987,10 +1008,7 @@ export abstract class ExpressionConverter {
         ...span,
       };
     }
-    if (
-      isConst &&
-      (children[0]?.type === '{' || (children[0]?.type === 'type_arguments' && children[1]?.type === '{'))
-    ) {
+    if (children[0]?.type === '{' || (children[0]?.type === 'type_arguments' && children[1]?.type === '{')) {
       const typeArguments = children[0].type === 'type_arguments' ? this.convertTypeArguments(children[0]) : undefined;
       return {
         kind: 'setOrMap',
@@ -1000,6 +1018,11 @@ export abstract class ExpressionConverter {
         ...span,
       };
     }
+    return undefined;
+  }
+
+  /** A creation `const C(...)` in a constant pattern. */
+  private constCreationPattern(node: Node, children: Node[], isConst: boolean, span: Span): Expression | undefined {
     const argumentsNode = children.find((child) => child.type === 'arguments');
     const parts = children.filter((child) => child.type === 'identifier' || child.type === 'type_identifier');
     if (argumentsNode || (isConst && children.some((child) => child.type === 'type_arguments'))) {
@@ -1021,16 +1044,7 @@ export abstract class ExpressionConverter {
         ...span,
       };
     }
-    if (children.length > 1 && children.every((child) => child.type === 'identifier' || child.type === '.')) {
-      let expression: Expression = { kind: 'identifier', name: parts[0].text, ...spanOf(parts[0]) };
-      for (const part of parts.slice(1)) {
-        expression = { kind: 'member', object: expression, name: part.text, nullAware: false, ...span };
-      }
-      return expression;
-    }
-    const expression = this.soleExpression(node, children);
-    if (isConst && expression.kind === 'record') return { ...expression, isConst: true };
-    return expression;
+    return undefined;
   }
 
   private elementsOf(node: Node, children: Node[]): CollectionElement[] {
@@ -1247,22 +1261,28 @@ export abstract class ExpressionConverter {
           if (group.type === 'optional_positional_parameter_types') {
             for (const parameter of namedOf(group)) result.positional.push(this.convertNormalParameterType(parameter));
           } else {
-            let isRequired = false;
-            for (const part of childrenOf(group)) {
-              if (part.type === 'required') isRequired = true;
-              if (part.type !== 'typed_identifier') continue;
-              result.named.push({
-                name: requireNode(fieldOf(part, 'name'), part).text,
-                type: this.convertType(requireNode(fieldOf(part, 'type'), part)),
-                isRequired,
-              });
-              isRequired = false;
-            }
+            result.named.push(...this.convertNamedParameterTypes(group));
           }
         }
       }
     }
     return result;
+  }
+
+  private convertNamedParameterTypes(group: Node): ParameterTypes['named'] {
+    const named: ParameterTypes['named'] = [];
+    let isRequired = false;
+    for (const part of childrenOf(group)) {
+      if (part.type === 'required') isRequired = true;
+      if (part.type !== 'typed_identifier') continue;
+      named.push({
+        name: requireNode(fieldOf(part, 'name'), part).text,
+        type: this.convertType(requireNode(fieldOf(part, 'type'), part)),
+        isRequired,
+      });
+      isRequired = false;
+    }
+    return named;
   }
 
   private convertNormalParameterType(node: Node): { name: string | undefined; type: TypeSyntax } {

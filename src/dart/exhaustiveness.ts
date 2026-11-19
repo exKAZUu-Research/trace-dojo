@@ -245,7 +245,6 @@ function recordFieldsCover(
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of pattern against each kind of space.
 function covers(compiler: ExpressionCompiler, pattern: Pattern, space: Space): boolean {
   switch (pattern.kind) {
     case 'parenthesized': {
@@ -277,46 +276,13 @@ function covers(compiler: ExpressionCompiler, pattern: Pattern, space: Space): b
       return isSubtype(space.type, tested);
     }
     case 'constant': {
-      if (space.kind === 'null') return pattern.value.kind === 'null';
-      if (space.kind !== 'constant') return false;
-      if (pattern.value.kind === 'dotShorthand' && space.type.kind === 'interface') {
-        return space.type.cls.staticMembers.get(pattern.value.name) === space.key;
-      }
-      return constantKey(compiler, pattern.value) === space.key;
+      return constantCovers(compiler, pattern.value, space);
     }
     case 'object': {
-      if (space.kind === 'null') return false;
-      const target = withDynamicArgs(compiler.resolveType(pattern.type, { allowRaw: true }));
-      if (!isSubtype(space.type, target)) return false;
-      if (space.kind === 'constant' && pattern.fields.length > 0) return false;
-      return pattern.fields.every((field) => {
-        const member = field.name ? compiler.lookupMember(space.type, field.name, false) : undefined;
-        return member ? coversAll(compiler, field.pattern, member.type) : false;
-      });
+      return objectCovers(compiler, pattern, space);
     }
     case 'record': {
-      if (space.kind === 'record') {
-        const positional = pattern.fields.filter((field) => field.name === undefined);
-        const named = pattern.fields.filter((field) => field.name !== undefined);
-        const positionalCount = space.names.filter((name) => name === undefined).length;
-        if (positional.length !== positionalCount || named.length !== space.names.length - positionalCount)
-          return false;
-        return space.fields.every((fieldSpace, index) => {
-          const name = space.names[index];
-          const field = name === undefined ? positional[index] : named.find((other) => other.name === name);
-          return field !== undefined && covers(compiler, field.pattern, fieldSpace);
-        });
-      }
-      if (space.kind === 'type') {
-        const base = resolveBound(space.type);
-        return (
-          base.kind === 'record' &&
-          recordFieldsCover(compiler, pattern, base, (fieldPattern, fieldType) =>
-            coversAll(compiler, fieldPattern, fieldType)
-          )
-        );
-      }
-      return false;
+      return recordCovers(compiler, pattern, space);
     }
     case 'list':
     case 'map': {
@@ -326,6 +292,56 @@ function covers(compiler: ExpressionCompiler, pattern: Pattern, space: Space): b
       return false;
     }
   }
+}
+
+function constantCovers(compiler: ExpressionCompiler, value: Expression, space: Space): boolean {
+  if (space.kind === 'null') return value.kind === 'null';
+  if (space.kind !== 'constant') return false;
+  if (value.kind === 'dotShorthand' && space.type.kind === 'interface') {
+    return space.type.cls.staticMembers.get(value.name) === space.key;
+  }
+  return constantKey(compiler, value) === space.key;
+}
+
+function objectCovers(
+  compiler: ExpressionCompiler,
+  pattern: Extract<Pattern, { kind: 'object' }>,
+  space: Space
+): boolean {
+  if (space.kind === 'null') return false;
+  const target = withDynamicArgs(compiler.resolveType(pattern.type, { allowRaw: true }));
+  if (!isSubtype(space.type, target)) return false;
+  if (space.kind === 'constant' && pattern.fields.length > 0) return false;
+  return pattern.fields.every((field) => {
+    const member = field.name ? compiler.lookupMember(space.type, field.name, false) : undefined;
+    return member ? coversAll(compiler, field.pattern, member.type) : false;
+  });
+}
+
+function recordCovers(
+  compiler: ExpressionCompiler,
+  pattern: Extract<Pattern, { kind: 'record' }>,
+  space: Space
+): boolean {
+  if (space.kind === 'record') {
+    const positional = pattern.fields.filter((field) => field.name === undefined);
+    const named = pattern.fields.filter((field) => field.name !== undefined);
+    const positionalCount = space.names.filter((name) => name === undefined).length;
+    if (positional.length !== positionalCount || named.length !== space.names.length - positionalCount) return false;
+    return space.fields.every((fieldSpace, index) => {
+      const name = space.names[index];
+      const field = name === undefined ? positional[index] : named.find((other) => other.name === name);
+      return field !== undefined && covers(compiler, field.pattern, fieldSpace);
+    });
+  }
+  if (space.kind !== 'type') return false;
+  const base = resolveBound(space.type);
+  return (
+    base.kind === 'record' &&
+    recordFieldsCover(compiler, pattern, base, (fieldPattern, fieldType) =>
+      coversAll(compiler, fieldPattern, fieldType)
+    )
+  );
 }
 
 /** The identity of a constant that a space of a bool or an enum names, for comparing it with a constant pattern. */

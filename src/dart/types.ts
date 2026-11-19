@@ -338,9 +338,13 @@ export function asInstanceOf(type: InterfaceType, cls: ClassInfo): InterfaceType
   return type.nullable ? { ...result, nullable: true } : result;
 }
 
-/** Whether `s` is a subtype of `t` (Dart's subtyping rules). */
-// code-gauge-allow functionCognitiveComplexity 60 -- The rules of the specification, in its order.
+/** Whether `s` is a subtype of `t` (Dart's subtyping rules, in the specification's order). */
 export function isSubtype(s: DartType, t: DartType): boolean {
+  return topBottomSubtype(s, t) ?? typeParamSubtype(s, t) ?? structuralSubtype(s, t);
+}
+
+/** The rules for top and bottom types, Object, Null, and a nullable left side; undefined when none applies. */
+function topBottomSubtype(s: DartType, t: DartType): boolean | undefined {
   if (s === t) return true;
   if (isTop(t)) return true;
   if (s.kind === 'never' && !s.nullable) return true;
@@ -361,6 +365,11 @@ export function isSubtype(s: DartType, t: DartType): boolean {
     if (!isNullable(t) && !(t.kind === 'typeParam' && t.nullable)) return false;
     return isSubtype({ ...s, nullable: false, promoted: undefined }, t);
   }
+  return undefined;
+}
+
+/** The rules for type parameters and a nullable right side; undefined when none applies. */
+function typeParamSubtype(s: DartType, t: DartType): boolean | undefined {
   if (s.kind === 'typeParam' && t.kind === 'typeParam' && s.param === t.param && !t.promoted) return true;
   if (t.kind === 'typeParam' && t.nullable) {
     return isSubtype(s, { ...t, nullable: false }) || isSubtype(s, NULL);
@@ -379,6 +388,11 @@ export function isSubtype(s: DartType, t: DartType): boolean {
     if (t.promoted) return isSubtype(s, typeParamType(t.param)) && isSubtype(s, t.promoted);
     return false;
   }
+  return undefined;
+}
+
+/** The rules for non-nullable functions, records, and interfaces. */
+function structuralSubtype(s: DartType, t: DartType): boolean {
   if (t.kind === 'never') return false;
   if (s.kind === 'function') {
     if (t.kind === 'interface') return t.cls === coreTypes.function || t.cls === coreTypes.object;
@@ -445,6 +459,11 @@ function mutualSubtypes(a: DartType, b: DartType): boolean {
 /** The least upper bound of two types (Dart's UP), used for conditional expressions and collection literals. */
 // code-gauge-allow functionCognitiveComplexity 40 -- The cases of the specification, in its order.
 export function upperBound(a: DartType, b: DartType): DartType {
+  return specialUpperBound(a, b) ?? structuralUpperBound(a, b);
+}
+
+/** The bound when either type is a top, bottom, null, nullable, Object, or type parameter type. */
+function specialUpperBound(a: DartType, b: DartType): DartType | undefined {
   if (sameType(a, b)) return a;
   if (isTop(a) || isTop(b)) {
     if (a.kind === 'dynamic' || b.kind === 'dynamic') return DYNAMIC;
@@ -464,28 +483,34 @@ export function upperBound(a: DartType, b: DartType): DartType {
     const right = b.kind === 'typeParam' ? (b.promoted ?? boundOf(b.param)) : b;
     return upperBound(left, right);
   }
+  return undefined;
+}
+
+function structuralUpperBound(a: DartType, b: DartType): DartType {
   if (a.kind === 'function' && b.kind === 'function') return functionUpperBound(a, b);
-  if (a.kind === 'record' && b.kind === 'record') {
-    if (
-      a.positional.length === b.positional.length &&
-      a.named.length === b.named.length &&
-      a.named.every((field, index) => field.name === b.named[index].name)
-    ) {
-      return {
-        kind: 'record',
-        positional: a.positional.map((field, index) => upperBound(field, b.positional[index])),
-        named: a.named.map((field, index) => ({ name: field.name, type: upperBound(field.type, b.named[index].type) })),
-        nullable: false,
-      };
-    }
-    return interfaceType(coreTypes.record);
-  }
+  if (a.kind === 'record' && b.kind === 'record') return recordUpperBound(a, b);
   const left = asInterface(a);
   const right = asInterface(b);
   if (!left || !right) return objectType();
   if (isSubtype(left, right)) return right;
   if (isSubtype(right, left)) return left;
   return interfaceUpperBound(left, right);
+}
+
+function recordUpperBound(a: RecordType, b: RecordType): DartType {
+  if (
+    a.positional.length !== b.positional.length ||
+    a.named.length !== b.named.length ||
+    a.named.some((field, index) => field.name !== b.named[index].name)
+  ) {
+    return interfaceType(coreTypes.record);
+  }
+  return {
+    kind: 'record',
+    positional: a.positional.map((field, index) => upperBound(field, b.positional[index])),
+    named: a.named.map((field, index) => ({ name: field.name, type: upperBound(field.type, b.named[index].type) })),
+    nullable: false,
+  };
 }
 
 /** Function types and records are interfaces of `Function` and `Record` when compared with classes. */
@@ -597,25 +622,7 @@ export function typeToString(type: DartType): string {
       return type.promoted ? `${base} & ${typeToString(type.promoted)}` : base;
     }
     case 'function': {
-      const typeParams =
-        type.typeParams.length > 0
-          ? `<${type.typeParams
-              .map((param) =>
-                param.bound && !isTop(param.bound) ? `${param.name} extends ${typeToString(param.bound)}` : param.name
-              )
-              .join(', ')}>`
-          : '';
-      const required = type.positional.slice(0, type.requiredCount).map(typeToString);
-      const optional = type.positional.slice(type.requiredCount).map(typeToString);
-      const parts = [...required];
-      if (optional.length > 0) parts.push(`[${optional.join(', ')}]`);
-      if (type.named.length > 0) {
-        parts.push(
-          `{${type.named.map((named) => `${named.isRequired ? 'required ' : ''}${typeToString(named.type)} ${named.name}`).join(', ')}}`
-        );
-      }
-      const text = `${typeToString(type.returnType)} Function${typeParams}(${parts.join(', ')})`;
-      return type.nullable ? `(${text})?` : text;
+      return functionTypeToString(type);
     }
     case 'record': {
       const parts = type.positional.map(typeToString);
@@ -637,6 +644,28 @@ export function typeToString(type: DartType): string {
       return 'Null';
     }
   }
+}
+
+function functionTypeToString(type: FunctionType): string {
+  const typeParams =
+    type.typeParams.length > 0
+      ? `<${type.typeParams
+          .map((param) =>
+            param.bound && !isTop(param.bound) ? `${param.name} extends ${typeToString(param.bound)}` : param.name
+          )
+          .join(', ')}>`
+      : '';
+  const required = type.positional.slice(0, type.requiredCount).map(typeToString);
+  const optional = type.positional.slice(type.requiredCount).map(typeToString);
+  const parts = [...required];
+  if (optional.length > 0) parts.push(`[${optional.join(', ')}]`);
+  if (type.named.length > 0) {
+    parts.push(
+      `{${type.named.map((named) => `${named.isRequired ? 'required ' : ''}${typeToString(named.type)} ${named.name}`).join(', ')}}`
+    );
+  }
+  const text = `${typeToString(type.returnType)} Function${typeParams}(${parts.join(', ')})`;
+  return type.nullable ? `(${text})?` : text;
 }
 
 export function functionType(

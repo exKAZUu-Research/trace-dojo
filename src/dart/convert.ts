@@ -759,25 +759,31 @@ export class Converter extends ExpressionConverter {
         requiredCount++;
       } else if (child.type === 'optional_formal_parameters') {
         const isNamed = !hasToken(child, '[');
-        let isRequired = false;
-        const parts = childrenOf(child);
-        for (const [index, part] of parts.entries()) {
-          if (part.type === 'required') isRequired = true;
-          if (part.type !== 'formal_parameter') continue;
-          const next = parts[index + 1];
-          let defaultValue: Expression | undefined;
-          if (next && (next.type === '=' || next.type === ':')) {
-            let end = index + 2;
-            while (end < parts.length && ![',', ']', '}', 'formal_parameter'].includes(parts[end].type)) end++;
-            defaultValue = this.soleExpression(child, parts.slice(index + 2, end));
-          }
-          const parameter = this.convertFormalParameter(part, isNamed && isRequired, defaultValue);
-          (isNamed ? named : positional).push(parameter);
-          isRequired = false;
-        }
+        (isNamed ? named : positional).push(...this.convertOptionalParameters(child, isNamed));
       }
     }
     return { positional, requiredCount, named, ...spanOf(node) };
+  }
+
+  /** The parameters inside `[...]` or `{...}`, with their default values and `required`. */
+  private convertOptionalParameters(node: Node, isNamed: boolean): FormalParameter[] {
+    const parameters: FormalParameter[] = [];
+    let isRequired = false;
+    const parts = childrenOf(node);
+    for (const [index, part] of parts.entries()) {
+      if (part.type === 'required') isRequired = true;
+      if (part.type !== 'formal_parameter') continue;
+      const next = parts[index + 1];
+      let defaultValue: Expression | undefined;
+      if (next && (next.type === '=' || next.type === ':')) {
+        let end = index + 2;
+        while (end < parts.length && ![',', ']', '}', 'formal_parameter'].includes(parts[end].type)) end++;
+        defaultValue = this.soleExpression(node, parts.slice(index + 2, end));
+      }
+      parameters.push(this.convertFormalParameter(part, isNamed && isRequired, defaultValue));
+      isRequired = false;
+    }
+    return parameters;
   }
 
   private convertFormalParameter(

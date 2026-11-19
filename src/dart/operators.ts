@@ -106,66 +106,76 @@ export function dynamicBinary(
   return runtime.invoke(a, operator, { positional: [b], named: undefined }, [], callRow);
 }
 
-// code-gauge-allow functionCognitiveComplexity 40 -- One case per operator of num.
 export function numericBinary(runtime: Runtime, operator: string, a: bigint | number, b: bigint | number): Value {
   if (typeof a === 'bigint' && typeof b === 'bigint') {
-    switch (operator) {
-      case '+': {
-        return wrap(a + b);
-      }
-      case '-': {
-        return wrap(a - b);
-      }
-      case '*': {
-        return wrap(a * b);
-      }
-      case '/': {
-        return Number(a) / Number(b);
-      }
-      case '~/': {
-        return intTruncatingDivide(runtime, a, b);
-      }
-      case '%': {
-        return intModulo(runtime, a, b);
-      }
-      case '<': {
-        return a < b;
-      }
-      case '<=': {
-        return a <= b;
-      }
-      case '>': {
-        return a > b;
-      }
-      case '>=': {
-        return a >= b;
-      }
-      case '&': {
-        return a & b;
-      }
-      case '|': {
-        return a | b;
-      }
-      case '^': {
-        return a ^ b;
-      }
-      case '<<': {
-        return shiftLeft(runtime, a, b);
-      }
-      case '>>': {
-        return shiftRight(runtime, a, b);
-      }
-      case '>>>': {
-        return shiftRightUnsigned(runtime, a, b);
-      }
-      default: {
-        break;
-      }
-    }
+    const result = intBinary(runtime, operator, a, b);
+    if (result !== NOT_INT_OPERATOR) return result;
   }
   if (['&', '|', '^', '<<', '>>', '>>>'].includes(operator)) {
     runtime.throwTypeError(`type 'double' is not a subtype of type 'int' of 'other'`);
   }
+  return doubleBinary(runtime, operator, a, b);
+}
+
+const NOT_INT_OPERATOR = Symbol('not an int operator');
+
+function intBinary(runtime: Runtime, operator: string, a: bigint, b: bigint): Value | typeof NOT_INT_OPERATOR {
+  switch (operator) {
+    case '+': {
+      return wrap(a + b);
+    }
+    case '-': {
+      return wrap(a - b);
+    }
+    case '*': {
+      return wrap(a * b);
+    }
+    case '/': {
+      return Number(a) / Number(b);
+    }
+    case '~/': {
+      return intTruncatingDivide(runtime, a, b);
+    }
+    case '%': {
+      return intModulo(runtime, a, b);
+    }
+    case '<': {
+      return a < b;
+    }
+    case '<=': {
+      return a <= b;
+    }
+    case '>': {
+      return a > b;
+    }
+    case '>=': {
+      return a >= b;
+    }
+    case '&': {
+      return a & b;
+    }
+    case '|': {
+      return a | b;
+    }
+    case '^': {
+      return a ^ b;
+    }
+    case '<<': {
+      return shiftLeft(runtime, a, b);
+    }
+    case '>>': {
+      return shiftRight(runtime, a, b);
+    }
+    case '>>>': {
+      return shiftRightUnsigned(runtime, a, b);
+    }
+    default: {
+      return NOT_INT_OPERATOR;
+    }
+  }
+}
+
+function doubleBinary(runtime: Runtime, operator: string, a: bigint | number, b: bigint | number): Value {
   const x = toDouble(a);
   const y = toDouble(b);
   switch (operator) {

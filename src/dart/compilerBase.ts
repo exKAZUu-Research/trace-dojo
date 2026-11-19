@@ -23,6 +23,7 @@ import {
   NEVER,
   NULL,
   objectType,
+  type RecordType,
   resolveBound,
   substitute,
   TypeParam,
@@ -689,34 +690,51 @@ export function inferFromSubtype(
   }
   if (actual.kind === 'dynamic' && !mentionsTypeParams(formal, params)) return;
   if (formal.kind === 'interface') {
-    const base = actual.kind === 'typeParam' ? resolveBound(actual) : actual;
-    if (base.kind === 'dynamic') {
-      for (const arg of formal.args) inferFromSubtype(DYNAMIC, arg, params, solution, join);
-      return;
-    }
-    if (base.kind === 'function' && formal.cls === coreTypes.function) return;
-    if (base.kind !== 'interface') return;
-    const instance = asInstanceOf({ ...base, nullable: false }, formal.cls);
-    if (!instance) return;
-    for (const [index, arg] of formal.args.entries()) {
-      const actualArg = instance.args[index];
-      if (actualArg) inferFromSubtype(actualArg, arg, params, solution, join);
-    }
+    inferFromInterface(actual, formal, params, solution, join);
     return;
   }
   if (formal.kind === 'function' && actual.kind === 'function') {
     inferFromSubtype(actual.returnType, formal.returnType, params, solution, join);
     return;
   }
-  if (formal.kind === 'record' && actual.kind === 'record') {
-    for (const [index, field] of formal.positional.entries()) {
-      const actualField = actual.positional[index];
-      if (actualField) inferFromSubtype(actualField, field, params, solution, join);
-    }
-    for (const field of formal.named) {
-      const actualField = actual.named.find((other) => other.name === field.name);
-      if (actualField) inferFromSubtype(actualField.type, field.type, params, solution, join);
-    }
+  if (formal.kind === 'record' && actual.kind === 'record') inferFromRecord(actual, formal, params, solution, join);
+}
+
+function inferFromInterface(
+  actual: DartType,
+  formal: InterfaceType,
+  params: ReadonlySet<TypeParam>,
+  solution: Map<TypeParam, DartType>,
+  join: (a: DartType, b: DartType) => DartType
+): void {
+  const base = actual.kind === 'typeParam' ? resolveBound(actual) : actual;
+  if (base.kind === 'dynamic') {
+    for (const arg of formal.args) inferFromSubtype(DYNAMIC, arg, params, solution, join);
+    return;
+  }
+  if (base.kind !== 'interface') return;
+  const instance = asInstanceOf({ ...base, nullable: false }, formal.cls);
+  if (!instance) return;
+  for (const [index, arg] of formal.args.entries()) {
+    const actualArg = instance.args[index];
+    if (actualArg) inferFromSubtype(actualArg, arg, params, solution, join);
+  }
+}
+
+function inferFromRecord(
+  actual: RecordType,
+  formal: RecordType,
+  params: ReadonlySet<TypeParam>,
+  solution: Map<TypeParam, DartType>,
+  join: (a: DartType, b: DartType) => DartType
+): void {
+  for (const [index, field] of formal.positional.entries()) {
+    const actualField = actual.positional[index];
+    if (actualField) inferFromSubtype(actualField, field, params, solution, join);
+  }
+  for (const field of formal.named) {
+    const actualField = actual.named.find((other) => other.name === field.name);
+    if (actualField) inferFromSubtype(actualField.type, field.type, params, solution, join);
   }
 }
 
