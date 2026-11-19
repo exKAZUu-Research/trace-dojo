@@ -38,6 +38,7 @@ import {
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
   type Access,
+  allowsMemberAssignment,
   ClassInfo,
   classType,
   type FieldInfo,
@@ -616,7 +617,7 @@ export class Compiler extends StatementCompiler {
       !userCopy &&
       (cls.base?.isNoncopyable === true || cls.ownFields.some((field) => this.isNoncopyableType(field.type)));
     cls.isAssignmentDeleted =
-      cls.base?.isAssignmentDeleted === true || cls.ownFields.some((field) => isUnassignable(field.type));
+      cls.base?.isAssignmentDeleted === true || cls.ownFields.some((field) => !allowsMemberAssignment(field.type));
     cls.isComplete = true;
     if (cls.constructors.length === 0) {
       cls.isDefaultConstructorDeleted =
@@ -2258,13 +2259,6 @@ function isConstDefaultConstructible(type: Type): boolean {
 
 function deletedDefaultMessage(cls: ClassInfo): string {
   return `${cls.name} のオブジェクトは初期値なしでは作れません（デフォルトコンストラクタが削除されています）。`;
-}
-
-/** Whether a member of a type deletes its class's implicit copy assignment (C++20 [class.copy.assign]p7). */
-function isUnassignable(type: Type): boolean {
-  if (type.kind === 'reference') return true;
-  if (type.kind === 'array') return isUnassignable(type.of);
-  return isConstType(type) || (type.kind === 'class' && type.cls.isAssignmentDeleted);
 }
 
 /** Completes zero initialization for implicit value construction. */

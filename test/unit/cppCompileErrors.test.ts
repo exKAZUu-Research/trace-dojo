@@ -12,9 +12,20 @@ int main() { Derived object; }`;
   }
 );
 
-test.each(['Turtle', 'WithTurtle'])('assignment through a pair requires an assignable %s', (type) => {
+test.each(['Base value;', 'Base values[1];'])(
+  'a protected constructor cannot construct a separate base-typed member: %s',
+  (member) => {
+    const program = `struct Base { protected: Base() {} };
+struct Derived : Base { ${member} Derived() {} };
+int main() { Derived object; }`;
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 1 }] });
+  }
+);
+
+test.each(['Turtle', 'WithTurtle', 'WithCopy'])('assignment through a pair requires an assignable %s', (type) => {
   const program = `#include <utility>
 struct WithTurtle { Turtle turtle; };
+struct WithCopy { Turtle turtle; WithCopy() {} WithCopy(const WithCopy&) {} };
 int main() {
   ${type} first, second;
   std::pair<${type}&, int> target(first, 1), source(second, 2);
@@ -22,7 +33,7 @@ int main() {
 }`;
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'compileError',
-    diagnostics: [{ row: 5, message: expect.stringContaining('代入演算子が削除') }],
+    diagnostics: [{ row: 6, message: expect.stringContaining('代入演算子が削除') }],
   });
 });
 

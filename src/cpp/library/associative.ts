@@ -7,6 +7,7 @@ import type { Eval, Frame } from '../runtime';
 import {
   alignOf,
   allowsConstantCopy,
+  allowsMemberAssignment,
   BOOL,
   ClassInfo,
   classType,
@@ -58,11 +59,7 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
   cls.memberTypes.set('second_type', second);
   cls.isAssignmentDeleted = [first, second].some((member) => {
     const type = nonReference(member);
-    return (
-      isConstType(type) ||
-      type.kind === 'array' ||
-      (type.kind === 'class' && (type.cls.isAssignmentDeleted || type.cls.isNoncopyable))
-    );
+    return type.kind === 'array' || !allowsMemberAssignment(type);
   });
   let operations: [ElementOperations, ElementOperations] | undefined;
   const ops = (): [ElementOperations, ElementOperations] => {

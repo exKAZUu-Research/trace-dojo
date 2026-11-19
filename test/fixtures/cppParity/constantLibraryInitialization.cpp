@@ -49,6 +49,16 @@ const WithValue wrappedValue{{9}, 0};
 Value fromMember = wrappedValue.member;
 const std::array<Value, 1> valueSequence{{{6}}};
 Value fromSequence = valueSequence[0];
+const Value& byIndex = valueSequence[0];
+const Value& byFront = valueSequence.front();
+const Value& byBack = valueSequence.back();
+const Value& byAt = valueSequence.at(0);
+constexpr const Value* sequenceData = valueSequence.data();
+Value indexCopy = byIndex;
+Value frontCopy = byFront;
+Value backCopy = byBack;
+Value atCopy = byAt;
+Value dataCopy = *sequenceData;
 int referenceValue = 4;
 struct WithReference { const int& member; };
 const WithReference originalReference{referenceValue};
@@ -62,7 +72,8 @@ void read() {
             << valueCopy.number << pairCopy.number << textCopy.number << textCopy.text.size() << '\n'
             << fromArray.number << fromMember.number << fromSequence.number << copiedReference.member
             << maxFromGlobal.size() << minFromList.size() << '\n'
-            << fromPointer.number << fromOffset.number << fromEnd.number << fromReference.number << '\n';
+            << fromPointer.number << fromOffset.number << fromEnd.number << fromReference.number << '\n'
+            << indexCopy.number << frontCopy.number << backCopy.number << atCopy.number << dataCopy.number << '\n';
 }
 
 int calls = 0;

@@ -288,6 +288,7 @@ export function randomEngines(): Map<string, ClassInfo> {
       }
     } else {
       cls.isNoncopyable = true;
+      cls.isAssignmentDeleted = true;
       cls.constructors = [nativeConstructor(cls, [], () => new EngineValue(undefined))];
       addMethod(cls, { ...native('min', [], UINT, () => 0), isStatic: true });
       addMethod(cls, { ...native('max', [], UINT, () => 0xff_ff_ff_ff), isStatic: true });

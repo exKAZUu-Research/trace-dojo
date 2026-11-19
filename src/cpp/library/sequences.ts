@@ -1,7 +1,7 @@
 import { CompileError } from '../../interpreter/diagnostics';
 import { implicitConversion } from '../conversions';
 import { CppRuntimeError, NarrowingConversionError } from '../errors';
-import type { Expr } from '../expr';
+import { type ConstantLocation, type Expr, hasConstantObject, offsetConstantLocation } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { makeEach } from '../objectCompiler';
 import { type Eval, type Frame, holdAll } from '../runtime';
@@ -9,6 +9,7 @@ import type { Syntax } from '../syntax';
 import {
   alignOf,
   allowsConstantCopy,
+  allowsMemberAssignment,
   BOOL,
   ClassInfo,
   classType,
@@ -42,7 +43,7 @@ import {
 import { elementLocation, positionOf, randomAccessIterator, rangePositions } from './iterators';
 import type { Library } from './registry';
 import { listSort, SequenceEditor, type Source } from './sequenceEdits';
-import { addMethod, asNumber, constRef, native, nativeConstructor, throwLibrary } from './support';
+import { addMethod, asNumber, constRef, native, nativeConstructor, type NativeOptions, throwLibrary } from './support';
 import { typeKey } from './templates';
 
 export type SequenceKind = 'vector' | 'deque' | 'array' | 'list';
@@ -70,6 +71,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   if (element.kind === 'void') library.compiler.error(0, `${name} の要素を void にはできません。`);
   const cls = new ClassInfo(name, 'class');
   cls.isComplete = true;
+  cls.isAssignmentDeleted = kind === 'array' && fixedLength !== 0 && !allowsMemberAssignment(element);
   library.instances.set(key, cls);
   let elementOps: ElementOperations | undefined;
   const ops = (): ElementOperations => {
@@ -380,7 +382,7 @@ function sequenceMethods(
     params: Type[],
     ret: Type,
     run: (self: SequenceValue, args: unknown[], frame: Frame) => unknown,
-    options: { isConst?: boolean; optional?: number; uses?: FunctionInfo['nativeUses'] } = {}
+    options: NativeOptions = {}
   ): void => {
     addMethod(
       cls,
@@ -420,7 +422,7 @@ function sequenceMethods(
           if (at >= BigInt(self.items.length)) return outOfRange(frame);
           return self.location(Number(at));
         },
-        { isConst }
+        { isConst, constantAccess: (object, [index]) => constantArrayLocation(object, index?.constant) }
       );
     }
     method(
@@ -431,7 +433,7 @@ function sequenceMethods(
         nonEmpty(self);
         return self.location(0);
       },
-      { isConst }
+      { isConst, constantAccess: (object) => constantArrayLocation(object, 0) }
     );
     method(
       'back',
@@ -441,7 +443,7 @@ function sequenceMethods(
         nonEmpty(self);
         return self.location(self.items.length - 1);
       },
-      { isConst }
+      { isConst, constantAccess: (object) => constantArrayLocation(object, (fixedLength ?? 0) - 1) }
     );
     method('begin', [], isConst ? types.constIterator : types.iterator, (self) => self.iteratorLocation(0), {
       isConst,
@@ -472,7 +474,10 @@ function sequenceMethods(
       }
     );
     if ((kind === 'vector' || kind === 'array') && !bitProxy) {
-      method('data', [], pointerTo(isConst ? withConst(element) : element), (self) => self.location(0), { isConst });
+      method('data', [], pointerTo(isConst ? withConst(element) : element), (self) => self.location(0), {
+        isConst,
+        constantAccess: (object) => constantArrayLocation(object, 0),
+      });
     }
   }
   method('cbegin', [], types.constIterator, (self) => self.iteratorLocation(0), { isConst: true });
@@ -829,14 +834,13 @@ function sequenceOperator(
     const isConst = isConstType(left.type);
     const proxy = cls.memberTypes.get(isConst ? 'const_reference' : 'reference');
     const type = proxy ?? (isConst ? withConst(element) : element);
+    const constantLocation = constantArrayLocation(left, index.constant);
     return {
       type,
       isLvalue: !proxy,
-      constantInitialization:
-        kind === 'array' &&
-        left.constantInitialization === true &&
-        index.constant !== undefined &&
-        index.constant < (cls.library?.aggregateArray?.type.length ?? 0),
+      staticAddress: hasConstantObject(constantLocation),
+      constantInitialization: hasConstantObject(constantLocation),
+      constantLocation,
       row,
       run: (frame) => {
         const target = (object(frame) as Ptr).read() as SequenceValue;
@@ -869,6 +873,12 @@ function sequenceOperator(
     };
   }
   return undefined;
+}
+
+function constantArrayLocation(object: Expr, index: number | bigint | undefined): ConstantLocation | undefined {
+  if (!object.staticAddress || !object.constantInitialization || object.type.kind !== 'class') return;
+  const length = object.type.cls.library?.aggregateArray?.type.length;
+  if (length !== undefined) return offsetConstantLocation({ index: 0, length }, index);
 }
 
 /**

@@ -207,6 +207,7 @@ export class Library {
     this.fileClass = new ClassInfo('FILE', 'struct');
     this.fileClass.isComplete = true;
     this.fileClass.isNoncopyable = true;
+    this.fileClass.isAssignmentDeleted = true;
     this.fileClass.library = { kind: 'FILE', args: [], size: 152, align: 8 };
     for (const name of ['stdout', 'stderr'] as const) this.files.set(name, new Box(undefined));
     this.stringClass = stringClass(this);

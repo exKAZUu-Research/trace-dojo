@@ -139,6 +139,7 @@ export interface FunctionInfo {
   nativeUses?: (row: number) => void;
   evaluateConstant?: (args: readonly (number | bigint)[]) => number | bigint;
   libraryConstant?: (args: readonly Expr[]) => LibraryConstant | undefined;
+  constantAccess?: (object: Expr, args: readonly Expr[]) => ConstantLocation | undefined;
   streamManipulator?: 'both' | 'output';
   mathIntrinsic?: boolean;
   /** The syntax of the definition, which the compiler compiles once the declarations it may use are known. */
@@ -279,6 +280,12 @@ export function allowsConstantCopy(type: Type): boolean {
   }
   if (type.kind === 'array') return allowsConstantCopy(type.of);
   return isArithmetic(type) || type.kind === 'pointer' || type.kind === 'nullptr' || type.kind === 'reference';
+}
+
+export function allowsMemberAssignment(type: Type): boolean {
+  if (type.kind === 'reference' || isConstType(type)) return false;
+  if (type.kind === 'array') return allowsMemberAssignment(type.of);
+  return type.kind !== 'class' || !type.cls.isAssignmentDeleted;
 }
 
 export function isConstType(type: Type): boolean {

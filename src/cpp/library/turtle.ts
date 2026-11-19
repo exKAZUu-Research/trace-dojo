@@ -15,6 +15,7 @@ export function turtleClass(runtimeError: () => ClassInfo, stringType: () => Typ
   const cls = new ClassInfo('Turtle', 'class');
   cls.isTurtle = true;
   cls.isNoncopyable = true;
+  cls.isAssignmentDeleted = true;
   cls.isComplete = true;
   cls.library = { kind: 'Turtle', args: [], size: 8, align: 8 };
   const create = (frame: Frame, x: unknown, y: unknown, color: string | undefined): CObject => {

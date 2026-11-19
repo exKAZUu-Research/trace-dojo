@@ -26,6 +26,7 @@ export interface NativeOptions {
   displayName?: string;
   uses?: FunctionInfo['nativeUses'];
   libraryConstant?: FunctionInfo['libraryConstant'];
+  constantAccess?: FunctionInfo['constantAccess'];
 }
 
 /** A library function with fixed parameter types. */
@@ -64,6 +65,7 @@ export function native(
     native: run,
     nativeUses: options.uses,
     libraryConstant: options.libraryConstant,
+    constantAccess: options.constantAccess,
     isVariadic: options.isVariadic,
     isExplicit: options.isExplicit,
   };

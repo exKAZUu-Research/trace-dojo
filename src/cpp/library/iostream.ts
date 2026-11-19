@@ -205,6 +205,7 @@ export class Streams {
     const cls = new ClassInfo(name, 'class');
     cls.isComplete = true;
     cls.isNoncopyable = true;
+    cls.isAssignmentDeleted = true;
     cls.base = base;
     cls.library = {
       kind: name.replace('std::', ''),

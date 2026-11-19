@@ -10,7 +10,7 @@ import {
   Rank,
 } from './conversions';
 import { CppException, CppRuntimeError } from './errors';
-import { type Expr, mapMemberConstants } from './expr';
+import { type Expr, hasConstantObject, mapMemberConstants } from './expr';
 import { type Eval, type Frame, holdAll } from './runtime';
 import type { Syntax } from './syntax';
 import {
@@ -255,7 +255,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     if (expr.type.kind === 'class') this.checkBaseConversion(expr.type.cls, cls, expr.row);
     const copyConstructor = cls.constructors.find((ctor) => !ctor.native && isCopyConstructor(ctor, cls));
     if (copyConstructor) {
-      this.checkAccess(copyConstructor.access, cls, cls, expr.row, `${cls.name} のコンストラクタ`);
+      this.checkAccess(copyConstructor.access, cls, cls, expr.row, `${cls.name} のコンストラクタ`, cls);
     }
     this.requireObjectUse(classType(cls), 'copy', expr.row);
     const source = this.rvalue(expr);
@@ -526,12 +526,20 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     };
     const isReference = fn.ret.kind === 'reference';
     const type = nonReference(fn.ret);
+    const knownLocation = object && fn.constantAccess?.(object, converted);
     return {
       type,
       isLvalue: isReference,
       row,
       run,
-      ...(object ? undefined : this.callConstancy(fn, args, converted)),
+      ...(object
+        ? {
+            staticAddress: isReference ? hasConstantObject(knownLocation) : knownLocation !== undefined,
+            constantLocation: isReference ? knownLocation : undefined,
+            constantInitialization: isReference && hasConstantObject(knownLocation),
+            constantPointee: type.kind === 'pointer' ? knownLocation : undefined,
+          }
+        : this.callConstancy(fn, args, converted)),
       onlyCalls: true,
       isTemporaryObject: !isReference && type.kind === 'class',
     };
@@ -592,7 +600,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     if (cls.isAbstract)
       this.error(row, `${cls.name} は抽象クラス（純粋仮想関数があるクラス）なので、オブジェクトを作れません。`);
     const { fn } = resolved;
-    if (!fn.native) this.checkAccess(fn.access, cls, cls, row, `${cls.name} のコンストラクタ`);
+    if (!fn.native) this.checkAccess(fn.access, cls, cls, row, `${cls.name} のコンストラクタ`, cls);
     this.checkDefined(fn, row);
     this.requireVirtualDefinitions(cls, row);
     const converted = this.convertArguments(resolved, args);
