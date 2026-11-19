@@ -62,6 +62,7 @@ class Snapshotter {
   ) {}
 
   /** The variables a frame shows: its locals in scope, then static fields and the fields of `this` when `withContext`. */
+  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
   variablesOf(frame: Frame, withContext: boolean): TraceVariables {
     const variables: TraceVariables = { vars: {}, referenceVars: {} };
     const method = frame.method;
@@ -160,6 +161,7 @@ const SHOWN_LIBRARY_TYPES = new Set(['valueTuple', 'KeyValuePair`2']);
 const NOT_SCALAR = Symbol('notScalar');
 
 // code-gauge-allow functionNcss 41 -- One case per kind of type.
+// code-gauge-allow functionCognitiveComplexity 18 -- Each branch handles one case of the C# rule that the function applies.
 function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[string] | typeof NOT_SCALAR {
   const underlying = nullableUnderlying(type) ?? type;
   if (value instanceof CsBox) return scalarOf(value.value, value.type);
@@ -241,6 +243,8 @@ function hasScalarElements(type: ArrayType): boolean {
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows C# null as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
+// code-gauge-allow functionNcss 33 -- One case per kind of syntax or value that the function handles.
+// code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
 function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNode | undefined {
   if (value === undefined) return NULL_NODE;
   const scalar = scalarOf(value, type);

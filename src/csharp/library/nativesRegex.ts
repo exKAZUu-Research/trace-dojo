@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 474 -- The nativesRegex module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { defineNatives, type NativeCall } from '../natives';
 import type { NativeState } from '../runtime';
@@ -339,58 +340,75 @@ class MatchListState implements EnumerableState {
 const compiledPatterns = new Map<string, CompiledPattern>();
 
 /** The first error that .NET's parser reports for the common mistakes in a pattern, with its offset. */
-function patternError(pattern: string): { offset: number; reason: string } | undefined {
-  let depth = 0;
-  let canQuantify = false;
-  let quantified = false;
-  for (let index = 0; index < pattern.length; index++) {
-    const char = pattern[index];
-    if (char === '\\') {
-      if (index + 1 >= pattern.length) return { offset: index + 1, reason: String.raw`Illegal \ at end of pattern.` };
-      const escaped = pattern[index + 1];
-      if (/[A-Za-z]/.test(escaped) && !/[dDwWsSbBAzZGntrfvaeuxcpPk]/.test(escaped))
-        return { offset: index + 2, reason: `Unrecognized escape sequence \\${escaped}.` };
-      index++;
-      canQuantify = true;
-      quantified = false;
-      continue;
-    }
-    if (char === '[') {
-      const close = pattern.indexOf(']', index + (pattern[index + 1] === ']' ? 2 : 1));
-      if (close === -1) return { offset: pattern.length, reason: 'Unterminated [] set.' };
-      index = close;
-      canQuantify = true;
-      quantified = false;
-      continue;
-    }
-    const quantifier = /^(?:[*+?]|\{(\d+)(?:,(\d*))?\})/.exec(pattern.slice(index));
-    if (quantifier && !(char === '?' && quantified)) {
-      const text = quantifier[0];
-      if (!canQuantify)
-        return { offset: index + 1, reason: `Quantifier '${text[0] === '{' ? text : char}' following nothing.` };
-      if (quantified) return { offset: index + 1, reason: `Nested quantifier '${text[0]}'.` };
-      const [, low, high] = quantifier;
-      if (high !== undefined && high !== '' && Number(low) > Number(high))
-        return { offset: index + text.length, reason: 'Illegal {x,y} with x > y.' };
-      index += text.length - 1;
-      quantified = true;
-      continue;
-    }
-    quantified = false;
-    if (char === '(') {
-      depth++;
-      canQuantify = false;
-      // `(?` starts a group construct, such as `(?:`, `(?<name>`, or `(?=`, whose `?` is no quantifier.
-      if (pattern[index + 1] === '?') index++;
-      continue;
-    }
-    if (char === ')') {
-      if (depth === 0) return { offset: index + 1, reason: "Too many )'s." };
-      depth--;
-    }
-    canQuantify = char !== '|';
+function patternError(pattern: string): PatternError | undefined {
+  const scan: PatternScan = { depth: 0, canQuantify: false, quantified: false };
+  for (let index = 0; index < pattern.length;) {
+    const step = scanPatternAt(pattern, index, scan);
+    if (typeof step !== 'number') return step;
+    index = step;
   }
-  return depth > 0 ? { offset: pattern.length, reason: "Not enough )'s." } : undefined;
+  return scan.depth > 0 ? { offset: pattern.length, reason: "Not enough )'s." } : undefined;
+}
+
+interface PatternError {
+  offset: number;
+  reason: string;
+}
+
+interface PatternScan {
+  depth: number;
+  /** Whether the last element can take a quantifier, which an opening parenthesis or `|` cannot. */
+  canQuantify: boolean;
+  quantified: boolean;
+}
+
+/** Scans the element of a pattern at an index, returning the index after it or the error it makes. */
+function scanPatternAt(pattern: string, index: number, scan: PatternScan): number | PatternError {
+  const char = pattern[index];
+  if (char === '\\') return scanEscape(pattern, index, scan);
+  if (char === '[') {
+    const close = pattern.indexOf(']', index + (pattern[index + 1] === ']' ? 2 : 1));
+    if (close === -1) return { offset: pattern.length, reason: 'Unterminated [] set.' };
+    scan.canQuantify = true;
+    scan.quantified = false;
+    return close + 1;
+  }
+  const quantifier = /^(?:[*+?]|\{(\d+)(?:,(\d*))?\})/.exec(pattern.slice(index));
+  if (quantifier && !(char === '?' && scan.quantified)) return scanQuantifier(quantifier, index, scan);
+  scan.quantified = false;
+  if (char === '(') {
+    scan.depth++;
+    scan.canQuantify = false;
+    // `(?` starts a group construct, such as `(?:`, `(?<name>`, or `(?=`, whose `?` is no quantifier.
+    return pattern[index + 1] === '?' ? index + 2 : index + 1;
+  }
+  if (char === ')') {
+    if (scan.depth === 0) return { offset: index + 1, reason: "Too many )'s." };
+    scan.depth--;
+  }
+  scan.canQuantify = char !== '|';
+  return index + 1;
+}
+
+function scanEscape(pattern: string, index: number, scan: PatternScan): number | PatternError {
+  if (index + 1 >= pattern.length) return { offset: index + 1, reason: String.raw`Illegal \ at end of pattern.` };
+  const escaped = pattern[index + 1];
+  if (/[A-Za-z]/.test(escaped) && !/[dDwWsSbBAzZGntrfvaeuxcpPk]/.test(escaped))
+    return { offset: index + 2, reason: `Unrecognized escape sequence \\${escaped}.` };
+  scan.canQuantify = true;
+  scan.quantified = false;
+  return index + 2;
+}
+
+function scanQuantifier(quantifier: RegExpExecArray, index: number, scan: PatternScan): number | PatternError {
+  const [text, low, high] = quantifier;
+  if (!scan.canQuantify)
+    return { offset: index + 1, reason: `Quantifier '${text[0] === '{' ? text : text[0]}' following nothing.` };
+  if (scan.quantified) return { offset: index + 1, reason: `Nested quantifier '${text[0]}'.` };
+  if (high !== undefined && high !== '' && Number(low) > Number(high))
+    return { offset: index + text.length, reason: 'Illegal {x,y} with x > y.' };
+  scan.quantified = true;
+  return index + text.length;
 }
 
 function patternOf(call: NativeCall, pattern: Value, options: Value = 0): CompiledPattern {
@@ -495,6 +513,8 @@ function missingGroup(call: NativeCall): CsObject {
 }
 
 /** Expands a replacement pattern's substitutions (`$1`, `${name}`, `$&`, ...) for a match, as .NET does. */
+// code-gauge-allow functionNcss 40 -- One case per kind of syntax or value that the function handles.
+// code-gauge-allow functionCognitiveComplexity 25 -- Each branch handles one case of the C# rule that the function applies.
 function substitute(replacement: string, state: MatchState): string {
   const groupValue = (number: number): string => state.groups[number]?.value ?? '';
   const whole = state.group;

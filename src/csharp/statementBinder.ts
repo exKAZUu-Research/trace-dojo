@@ -1,9 +1,11 @@
+// code-gauge-allow-file fileNcss 659 -- The statementBinder module keeps one stage of the C# interpreter together.
 import type {
   Block,
   Expression,
   MethodDeclaration,
   Position,
   Statement,
+  SwitchLabel,
   SwitchSection,
   VariableDeclarator,
 } from './ast';
@@ -48,6 +50,13 @@ import {
   VOID_TYPE,
 } from './types';
 import { unavailableTypeOf } from './unavailable';
+
+/** What the earlier labels of a switch have covered. */
+interface SwitchLabelsSeen {
+  constants: unknown[];
+  hasDefault: boolean;
+  isExhausted: boolean;
+}
 
 /** Binds statements and the storage that assignments write. */
 export abstract class StatementBinder extends PatternBinder {
@@ -393,7 +402,7 @@ export abstract class StatementBinder extends PatternBinder {
     return statements.map((statement) => this.bindStatement(statement, context));
   }
 
-  // code-gauge-allow functionNcss 50 -- One case per kind of statement.
+  // code-gauge-allow functionNcss 51 -- One case per kind of statement.
   bindStatement(statement: Statement, context: BindContext): BoundStatement {
     const row = statement.row;
     switch (statement.kind) {
@@ -555,6 +564,7 @@ export abstract class StatementBinder extends PatternBinder {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
   private bindLocalDeclaration(
     statement: Extract<Statement, { kind: 'localDeclaration' }>,
     context: BindContext
@@ -769,6 +779,7 @@ export abstract class StatementBinder extends PatternBinder {
   }
 
   // code-gauge-allow functionNcss 56 -- How foreach finds its elements: arrays, strings, and the GetEnumerator pattern.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Each branch handles one case of the C# rule that the function applies.
   private bindForeach(statement: Extract<Statement, { kind: 'foreach' }>, context: BindContext): BoundStatement {
     const collection = this.bindValue(statement.collection, context);
     const scope = new LocalScope(context.scope, context.fn);
@@ -888,6 +899,8 @@ export abstract class StatementBinder extends PatternBinder {
   }
 
   /** Finds `GetEnumerator()` and the `MoveNext()` and `Current` of what it returns, as `foreach` does. */
+  // code-gauge-allow functionNcss 34 -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity 16 -- Each branch handles one case of the C# rule that the function applies.
   private enumeratorPattern(
     type: Type,
     position: Position,
@@ -959,52 +972,20 @@ export abstract class StatementBinder extends PatternBinder {
     return undefined;
   }
 
-  // code-gauge-allow functionNcss 40 -- Switch sections, their labels, and duplicate cases.
   private bindSwitch(statement: Extract<Statement, { kind: 'switch' }>, context: BindContext): BoundStatement {
     const value = this.bindValue(statement.value, context);
     const scope = new LocalScope(context.scope, context.fn);
     const temporary = new LocalSymbol('\0switch', value.type, statement.row, statement.column);
     temporary.isHidden = true;
     context.fn.addLocal(temporary);
-    const seenConstants: unknown[] = [];
-    let hasDefault = false;
-    let isExhausted = false;
+    const seen: SwitchLabelsSeen = { constants: [], hasDefault: false, isExhausted: false };
     context.fn.breakDepth++;
     let sections: BoundSwitchSection[];
     try {
       sections = statement.sections.map((section) => {
         const sectionScope = new LocalScope(scope, context.fn);
         const sectionContext: BindContext = { scope: sectionScope, fn: context.fn };
-        const labels = section.labels.map((label) => {
-          if (label.kind === 'default') {
-            if (hasDefault)
-              this.error(label, 'CS0152', "switch ステートメントに、ラベル値が 'default' の case が複数含まれています");
-            hasDefault = true;
-            return 'default' as const;
-          }
-          const pattern = this.bindPattern(label.pattern, value.type, sectionContext);
-          const guard = label.guard ? this.bindAs(label.guard, this.boolType, sectionContext) : undefined;
-          if (isExhausted && value.type.kind !== 'error')
-            this.error(
-              label,
-              'CS8120',
-              'switch ケースに到達できません。以前のケースで既に処理されたか、一致させることができません。'
-            );
-          const constant = this.constantOfPattern(pattern);
-          if (constant && !guard) {
-            const value = (constant as Extract<BoundExpression, { kind: 'constant' }>).value;
-            const key = constantKey(value);
-            if (seenConstants.includes(key))
-              this.error(
-                label,
-                'CS0152',
-                `switch ステートメントに、ラベル値が '${constantText(value)}' の case が複数含まれています`
-              );
-            seenConstants.push(key);
-          }
-          if (!guard && this.isIrrefutable(pattern, value.type)) isExhausted = true;
-          return { pattern, guard };
-        });
+        const labels = section.labels.map((label) => this.bindSwitchLabel(label, value, sectionContext, seen));
         const patternLocals = new Set(sectionScope.locals);
         this.predeclare(section.statements, sectionContext);
         const statements = this.bindStatements(section.statements, sectionContext);
@@ -1023,6 +1004,43 @@ export abstract class StatementBinder extends PatternBinder {
       context.fn.breakDepth--;
     }
     return { kind: 'switch', value, sections, temporary, row: statement.row, step: 'none' };
+  }
+
+  /** Binds a case label, reporting a duplicate constant or default and a case that an earlier one covers. */
+  private bindSwitchLabel(
+    label: SwitchLabel,
+    value: BoundExpression,
+    context: BindContext,
+    seen: SwitchLabelsSeen
+  ): BoundSwitchSection['labels'][number] {
+    if (label.kind === 'default') {
+      if (seen.hasDefault)
+        this.error(label, 'CS0152', "switch ステートメントに、ラベル値が 'default' の case が複数含まれています");
+      seen.hasDefault = true;
+      return 'default';
+    }
+    const pattern = this.bindPattern(label.pattern, value.type, context);
+    const guard = label.guard ? this.bindAs(label.guard, this.boolType, context) : undefined;
+    if (seen.isExhausted && value.type.kind !== 'error')
+      this.error(
+        label,
+        'CS8120',
+        'switch ケースに到達できません。以前のケースで既に処理されたか、一致させることができません。'
+      );
+    const constant = this.constantOfPattern(pattern);
+    if (constant && !guard) {
+      const constantValue = (constant as Extract<BoundExpression, { kind: 'constant' }>).value;
+      const key = constantKey(constantValue);
+      if (seen.constants.includes(key))
+        this.error(
+          label,
+          'CS0152',
+          `switch ステートメントに、ラベル値が '${constantText(constantValue)}' の case が複数含まれています`
+        );
+      seen.constants.push(key);
+    }
+    if (!guard && this.isIrrefutable(pattern, value.type)) seen.isExhausted = true;
+    return { pattern, guard };
   }
 
   private bindReturn(statement: Extract<Statement, { kind: 'return' }>, context: BindContext): BoundStatement {
@@ -1064,6 +1082,7 @@ export abstract class StatementBinder extends PatternBinder {
 
   protected abstract methodDisplay(method: MethodSymbol): string;
 
+  // code-gauge-allow functionNcss 36 -- One case per kind of syntax or value that the function handles.
   private bindTry(statement: Extract<Statement, { kind: 'try' }>, context: BindContext): BoundStatement {
     const body = this.bindBlock(statement.body, context);
     const exceptionType = namedType(this.library.specials.get('exception') as TypeSymbol);

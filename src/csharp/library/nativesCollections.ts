@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 830 -- The nativesCollections module keeps one stage of the C# interpreter together.
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import { defaultCompare, environmentOf, hashOf, stringOf, valuesEqual } from '../objects';

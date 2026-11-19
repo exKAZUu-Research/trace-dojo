@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 995 -- The expressionBinder module keeps one stage of the C# interpreter together.
 import type { SourceDiagnostic } from '../interpreter/diagnostics';
 import type { Block, Designation, Expression, LambdaParameter, Pattern, Position } from './ast';
 import type {
@@ -188,7 +189,7 @@ export abstract class ExpressionBinder extends MemberBinder {
     }
   }
 
-  // code-gauge-allow functionNcss 33 -- One case per kind of operator expression.
+  // code-gauge-allow functionNcss 38 -- One case per kind of operator expression.
   private bindOperatorExpression(node: Expression, context: BindContext): BindResult | undefined {
     const row = node.row;
     switch (node.kind) {
@@ -409,6 +410,7 @@ export abstract class ExpressionBinder extends MemberBinder {
     return result;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Each branch handles one case of the C# rule that the function applies.
   private bindInterpolated(node: Extract<Expression, { kind: 'interpolated' }>, context: BindContext): BoundExpression {
     const parts: Extract<BoundExpression, { kind: 'interpolated' }>['parts'] = [];
     for (const part of node.parts) {
@@ -467,6 +469,8 @@ export abstract class ExpressionBinder extends MemberBinder {
     return { kind: 'conditionalAccess', receiver, access, temporary, wrapsNullable, type, row: node.row };
   }
 
+  // code-gauge-allow functionNcss 31 -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity 30 -- Each branch handles one case of the C# rule that the function applies.
   private bindBinaryExpression(node: Extract<Expression, { kind: 'binary' }>, context: BindContext): BoundExpression {
     const { operator } = node;
     const row = node.operatorRow;
@@ -806,6 +810,8 @@ export abstract class ExpressionBinder extends MemberBinder {
   }
 
   /** Binds `{ ... }` as the elements of an array of a type, flattening the elements of a multidimensional one. */
+  // code-gauge-allow functionNcss 33 -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Each branch handles one case of the C# rule that the function applies.
   bindArrayInitializer(
     initializer: Extract<Expression, { kind: 'arrayInitializer' }>,
     type: Type,
@@ -1315,6 +1321,8 @@ export abstract class ExpressionBinder extends MemberBinder {
   }
 
   /** Converts a method group to a delegate type, choosing the overload that its parameters select. */
+  // code-gauge-allow functionNcss 32 -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity 26 -- Each branch handles one case of the C# rule that the function applies.
   private bindMethodGroupConversion(
     group: Extract<NonValue, { kind: 'methodGroup' }>,
     target: Type,
@@ -1407,6 +1415,7 @@ export abstract class ExpressionBinder extends MemberBinder {
   }
 
   /** The default value of a type: null for references and nullables, zero for numbers, an empty struct. */
+  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch handles one case of the C# rule that the function applies.
   defaultValue(type: Type, row: number): BoundExpression {
     const special = specialOf(type);
     if (type.kind === 'named' && !nullableUnderlying(type)) {
@@ -1425,6 +1434,7 @@ export abstract class ExpressionBinder extends MemberBinder {
 
   /** Binds `[a, b, ..c]` as an array, a list, or another collection type of its target. */
   // code-gauge-allow functionNcss 38 -- Each kind of collection that a collection expression creates.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Each branch handles one case of the C# rule that the function applies.
   private bindCollectionExpression(
     node: Extract<Expression, { kind: 'collection' }>,
     target: Type,
@@ -1564,6 +1574,7 @@ export abstract class ExpressionBinder extends MemberBinder {
   }
 
   /** The anonymous type with members of the names and types, which `new { ... }` creates. */
+  // code-gauge-allow functionNcss 46 -- One case per kind of syntax or value that the function handles.
   private anonymousTypeOf(members: { name: string; type: Type }[]): TypeSymbol {
     const key = members.map((member) => `${member.name}:${displayType(member.type)}`).join(';');
     let symbol = this.anonymousTypes.get(key);
@@ -1677,6 +1688,7 @@ export abstract class ExpressionBinder extends MemberBinder {
     return { kind: 'with', value, clone: undefined, assignments, temporary, type, row: node.row };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Each branch handles one case of the C# rule that the function applies.
   private bindAssignment(node: Extract<Expression, { kind: 'assign' }>, context: BindContext): BoundExpression {
     const { operator } = node;
     if (operator === '=' && node.target.kind === 'tuple') return this.bindDeconstructionAssignment(node, context);

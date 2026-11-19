@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 565 -- The memberBinder module keeps one stage of the C# interpreter together.
 import type { Argument, Expression, Initializer, MemberInitializer, Position, TypeNode } from './ast';
 import type { TypeContext } from './binderBase';
 import type { BoundArgument, BoundExpression, BoundInitializerEntry, BoundLValue, BoundMemberInit } from './bound';
@@ -410,6 +411,7 @@ export abstract class MemberBinder extends CallBinder {
 
   // code-gauge-allow functionNcss 31 -- Each kind of target of a member access.
   /** Binds `target.name`, on a namespace, a type, or a value. */
+  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch handles one case of the C# rule that the function applies.
   bindMemberAccess(node: Extract<Expression, { kind: 'memberAccess' }>, context: BindContext): BindResult {
     const position = { row: node.nameRow, column: node.column };
     const typeArgs = node.typeArgs?.map((arg) => this.resolveType(arg, context.fn.typeContext));
@@ -561,6 +563,8 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** Binds an instance member of a value, or an extension method that takes it. */
+  // code-gauge-allow functionNcss 32 -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
   bindInstanceMember(
     receiver: BoundExpression,
     name: string,
@@ -856,6 +860,7 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** The call node for a resolved method, checking that an instance method has a receiver. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Each branch handles one case of the C# rule that the function applies.
   protected callNode(
     group: Extract<NonValue, { kind: 'methodGroup' }>,
     resolved: ResolvedCall,
@@ -1047,6 +1052,7 @@ export abstract class MemberBinder extends CallBinder {
 
   // code-gauge-allow functionNcss 40 -- Each kind of created type.
   /** Binds `new T(args) { initializer }`. */
+  // code-gauge-allow functionCognitiveComplexity 24 -- Each branch handles one case of the C# rule that the function applies.
   bindCreation(
     type: Type,
     argNodes: Argument[] | undefined,

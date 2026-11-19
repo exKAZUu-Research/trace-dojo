@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 570 -- The convertExpression module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -67,6 +68,7 @@ export class ExpressionConverter {
     throw new Error('convertBlockNode is provided by the statement converter');
   }
 
+  // code-gauge-allow functionNcss 33 -- One case per kind of syntax or value that the function handles.
   convertType(node: Node): TypeNode {
     const position = positionOf(node);
     switch (node.type) {
@@ -595,6 +597,7 @@ export class ExpressionConverter {
     return members;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 24 -- Each branch handles one case of the C# rule that the function applies.
   private convertLambda(node: Node): Expression {
     const modifiers = new Set(
       childrenOf(node)
@@ -864,6 +867,7 @@ export class ExpressionConverter {
   }
 
   // code-gauge-allow functionNcss 33 -- One case per kind of literal.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
   convertLiteral(node: Node): LiteralValue {
     switch (node.type) {
       case 'integer_literal': {

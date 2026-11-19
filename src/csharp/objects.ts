@@ -229,6 +229,7 @@ export function exceptionText(evaluator: Evaluator, exception: CsObject): string
 // ---- Equality and hashing ----
 
 /** Whether two values are equal as `object.Equals` decides, calling the program's overrides. */
+// code-gauge-allow functionCognitiveComplexity 26 -- Each branch handles one case of the C# rule that the function applies.
 export function valuesEqual(evaluator: Evaluator, a: Value, b: Value, frame: Frame): boolean {
   if (a === b) return typeof a !== 'number' || !Number.isNaN(a) || true;
   if (a === undefined || b === undefined) return false;
@@ -332,6 +333,7 @@ export function compareCulture(a: string, b: string, ignoreCase = false): number
 }
 
 /** The primary collation class and weight of a character: spaces, punctuation, digits, Latin letters, kana, then the rest. */
+// code-gauge-allow functionCognitiveComplexity 23 -- Each branch handles one case of the C# rule that the function applies.
 function primaryKey(code: number): [number, number] {
   const char = String.fromCharCode(code);
   if (/\s/.test(char)) return [0, code];

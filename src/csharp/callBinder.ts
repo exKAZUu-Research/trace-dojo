@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 567 -- The callBinder module keeps one stage of the C# interpreter together.
 import type { BoundArgument, BoundExpression, BoundLValue } from './bound';
 import { displayMethodIn } from './declarations';
 import type { MethodCandidate } from './lookup';
@@ -141,6 +142,7 @@ export abstract class CallBinder extends OperatorBinder {
   }
 
   /** Maps arguments to a candidate's parameters, infers its type arguments, and checks the arguments convert. */
+  // code-gauge-allow functionCognitiveComplexity 27 -- Each branch handles one case of the C# rule that the function applies.
   private applicability(
     candidate: MethodCandidate,
     args: ArgumentInfo[],
@@ -462,6 +464,8 @@ export abstract class CallBinder extends OperatorBinder {
     }
   }
 
+  // code-gauge-allow functionNcss 32 -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Each branch handles one case of the C# rule that the function applies.
   private lowerBoundInference(from: Type, to: Type, bounds: Map<TypeParameterSymbol, Bounds>): void {
     if (to.kind === 'typeParameter' && bounds.has(to.symbol)) {
       const list = (bounds.get(to.symbol) as Bounds).lower;
@@ -544,6 +548,7 @@ export abstract class CallBinder extends OperatorBinder {
   }
 
   /** Whether a candidate is a better function member than another for the arguments. */
+  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
   private isBetter(a: Applicable, b: Applicable, args: ArgumentInfo[]): boolean {
     let isBetterSomewhere = false;
     for (const [index, arg] of args.entries()) {
@@ -581,6 +586,7 @@ export abstract class CallBinder extends OperatorBinder {
     return result;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Each branch handles one case of the C# rule that the function applies.
   private specificity(a: Type, b: Type): number {
     if (a.kind === 'typeParameter' && b.kind !== 'typeParameter') return -1;
     if (a.kind !== 'typeParameter' && b.kind === 'typeParameter') return 1;
@@ -675,6 +681,7 @@ export abstract class CallBinder extends OperatorBinder {
   }
 
   /** Checks a type argument against its parameter's constraints, reporting the first it breaks. */
+  // code-gauge-allow functionCognitiveComplexity 26 -- Each branch handles one case of the C# rule that the function applies.
   satisfiesConstraints(
     arg: Type,
     parameter: TypeParameterSymbol,
@@ -751,6 +758,7 @@ export abstract class CallBinder extends OperatorBinder {
   }
 
   /** Converts the arguments to their parameters' types and orders them as the parameters, filling defaults and packing `params`. */
+  // code-gauge-allow functionCognitiveComplexity 22 -- Each branch handles one case of the C# rule that the function applies.
   private finishArguments(applicable: Applicable, args: ArgumentInfo[], row: number): BoundArgument[] {
     const { method } = applicable.candidate;
     const substitution = this.callSubstitution(applicable.candidate, applicable.typeArgs);

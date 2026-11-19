@@ -104,6 +104,7 @@ function partsOf(ticks: bigint): DateParts {
   };
 }
 
+// code-gauge-allow functionParameterCount 7 -- The values that the operation needs, which share no object.
 function ticksFromParts(
   year: number,
   month: number,

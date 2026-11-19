@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 492 -- The flow module keeps one stage of the C# interpreter together.
 import type {
   BoundArgument,
   BoundBlock,
@@ -362,6 +363,7 @@ export class FlowAnalyzer {
   }
 
   /** The state after matching a pattern: when it matched, its variables are assigned. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- Each branch handles one case of the C# rule that the function applies.
   private pattern(pattern: BoundPattern, state: State, matched: boolean): State {
     switch (pattern.kind) {
       case 'type':

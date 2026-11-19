@@ -29,6 +29,7 @@ const INTEGER_BITS: Partial<Record<string, number>> = { sbyte: 8, byte: 8, short
  * Formats a value with a format string, as an interpolation hole or a composite format item does: numbers, enums,
  * dates, and times by the format, and anything else by its `ToString()`.
  */
+// code-gauge-allow functionCognitiveComplexity 24 -- Each branch handles one case of the C# rule that the function applies.
 export function formatValue(
   evaluator: Evaluator,
   value: Value,

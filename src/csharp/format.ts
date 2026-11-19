@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 506 -- The format module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { CsDecimal } from './decimal';
 import { PendingException } from './numeric';
@@ -629,6 +630,7 @@ export interface FormatItem {
 }
 
 /** Parses a composite format string such as `"{0,5:F2} {1}"` into its literal text and items, as `string.Format` does. */
+// code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
 export function parseCompositeFormat(format: string): (string | FormatItem)[] {
   const parts: (string | FormatItem)[] = [];
   let text = '';

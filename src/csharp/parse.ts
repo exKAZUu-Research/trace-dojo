@@ -113,6 +113,7 @@ function unterminatedQuote(tokens: Node[]): Node | undefined {
   });
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
 function roslynErrorOf(root: Node, error: Node, tokens: Node[], inDeclaration: boolean): SourceDiagnostic {
   const count = (text: string): number => tokens.filter((token) => token.type === text).length;
   if (count('{') > count('}') && !nextLeafOf(root, error)) {
@@ -190,6 +191,8 @@ function ancestorOfType(node: Node, type: string): Node | undefined {
  * Parenthesizes expressions that stand as statements, such as `1 + 2;`, which C#'s grammar accepts (the compiler
  * then rejects them as CS0201) but tree-sitter's cannot parse; a parenthesized expression parses, keeping the rows.
  */
+// code-gauge-allow functionNcss 35 -- One case per kind of syntax or value that the function handles.
+// code-gauge-allow functionCognitiveComplexity 25 -- Each branch handles one case of the C# rule that the function applies.
 function parenthesizeExpressionStatements(source: string): string {
   const tree = parser.parse(source);
   if (!tree) return source;

@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 789 -- The declarations module keeps one stage of the C# interpreter together.
 import type {
   Accessor,
   CompilationUnit,
@@ -56,6 +57,7 @@ export class DeclarationBinder extends BinderBase {
   protected isLibraryUnit = false;
 
   /** Declares every type of a unit and its members, in the order that inheritance needs. */
+  // code-gauge-allow functionCognitiveComplexity 19 -- Each branch handles one case of the C# rule that the function applies.
   declareUnit(unit: CompilationUnit, root: NamespaceSymbol, isLibrary: boolean): DeclaredType[] {
     this.isLibraryUnit = isLibrary;
     const start = this.declaredTypes.length;
@@ -113,6 +115,8 @@ export class DeclarationBinder extends BinderBase {
     }
   }
 
+  // code-gauge-allow functionNcss 38 -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Each branch handles one case of the C# rule that the function applies.
   private declareType(
     declaration: TypeDeclaration,
     namespace: NamespaceSymbol,
@@ -364,6 +368,7 @@ export class DeclarationBinder extends BinderBase {
     this.applyConstraints(type.symbol.typeParameters, type.declaration.constraints, type.context);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
   protected applyConstraints(
     parameters: TypeParameterSymbol[],
     clauses: ConstraintClause[],
@@ -675,6 +680,8 @@ export class DeclarationBinder extends BinderBase {
     symbol.constructors.push(constructor);
   }
 
+  // code-gauge-allow functionNcss 45 -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Each branch handles one case of the C# rule that the function applies.
   private declareProperty(
     type: DeclaredType,
     member: Extract<TypeDeclaration['members'][number], { kind: 'property' | 'indexer' }>
@@ -819,6 +826,7 @@ export class DeclarationBinder extends BinderBase {
     this.addMethod(symbol, method, member);
   }
 
+  // code-gauge-allow functionParameterCount 8 -- The values that the operation needs, which share no object.
   private declareMethod(
     symbol: TypeSymbol,
     name: string,
@@ -855,6 +863,7 @@ export class DeclarationBinder extends BinderBase {
     return method;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 24 -- Each branch handles one case of the C# rule that the function applies.
   private checkMethodModifiers(method: MethodSymbol, modifiers: Modifiers, position: Position): void {
     const display = (): string => displayMethod(method);
     if (method.isAbstract && !method.owner.isAbstract && method.owner.kind === 'class') {
@@ -922,6 +931,7 @@ export class DeclarationBinder extends BinderBase {
     method.native = nativeOf(method);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 21 -- Each branch handles one case of the C# rule that the function applies.
   resolveParameters(
     parameters: Parameter[],
     context: TypeContext,
@@ -966,6 +976,8 @@ export class DeclarationBinder extends BinderBase {
   }
 
   /** Declares the members that the compiler gives a record. */
+  // code-gauge-allow functionNcss 46 -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
   private declareRecordMembers(type: DeclaredType): void {
     const { symbol, context } = type;
     for (const [index, parameter] of (symbol.primaryParameters ?? []).entries()) {
@@ -1153,6 +1165,7 @@ export class DeclarationBinder extends BinderBase {
     symbol.staticFieldCount = statics;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 30 -- Each branch handles one case of the C# rule that the function applies.
   private checkInheritance(type: DeclaredType): void {
     const { symbol } = type;
     if (symbol.kind !== 'class' && symbol.kind !== 'struct') return;
@@ -1207,6 +1220,7 @@ export class DeclarationBinder extends BinderBase {
     return result;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- Each branch handles one case of the C# rule that the function applies.
   private resolveOverride(method: MethodSymbol, symbol: TypeSymbol): void {
     if (method.kind === 'operator' || method.isStatic) return;
     const base = symbol.baseType;

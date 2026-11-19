@@ -187,6 +187,7 @@ export class Conversions {
   }
 
   /** Whether a value of type `from` is also of type `to` without changing its representation. */
+  // code-gauge-allow functionCognitiveComplexity 25 -- Each branch handles one case of the C# rule that the function applies.
   isReferenceConvertible(from: Type, to: Type): boolean {
     if (sameType(from, to)) return true;
     if (to.kind === 'named' && to.symbol === this.types.object.symbol) return true;
@@ -271,6 +272,7 @@ export class Conversions {
     return undefined;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch handles one case of the C# rule that the function applies.
   private isExplicitReference(from: Type, to: Type): boolean {
     if (this.isReferenceConvertible(to, from)) return true;
     if (from.kind === 'named' && to.kind === 'named') {

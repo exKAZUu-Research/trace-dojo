@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 641 -- The nativesCore module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { TURTLE_METHOD_NAMES } from '../../interpreter/turtleWorld';
 import { CsDecimal } from '../decimal';
@@ -898,6 +899,7 @@ function overflowFor(target: SpecialType): never {
   return fail('System.OverflowException', `Value was either too large or too small for ${OVERFLOW_NAMES[target]}.`);
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Each branch handles one case of the C# rule that the function applies.
 function parseRadix(text: string, base: number, target: SpecialType): Value {
   if (![2, 8, 10, 16].includes(base)) fail('System.ArgumentException', 'Invalid Base.');
   if (base !== 10 && text.startsWith('-'))
@@ -1017,6 +1019,7 @@ function textWriter(call: NativeCall, stream: 'stdout' | 'stderr'): CsObject {
 
 // ---- Exceptions ----
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Each branch handles one case of the C# rule that the function applies.
 const exceptionConstructor: NativeMethod = (call, receiver, args) => {
   const exception = receiver as CsObject;
   const parameters = call.method.parameters.map((parameter) => parameter.name);

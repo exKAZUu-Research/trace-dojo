@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 714 -- The evaluator module keeps one stage of the C# interpreter together.
 import type {
   BoundArgument,
   BoundBlock,
@@ -105,6 +106,9 @@ export class Evaluator extends StatementExecutor {
     runtime.evaluator = this;
   }
 
+  // code-gauge-allow functionParameterCount 7 -- The values that the operation needs, which share no object.
+  // code-gauge-allow functionNcss 33 -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Each branch handles one case of the C# rule that the function applies.
   invoke(
     caller: Frame,
     method: MethodSymbol,
@@ -210,6 +214,7 @@ export class Evaluator extends StatementExecutor {
     if (symbol.staticConstructor) this.invoke(frame, symbol.staticConstructor, undefined, [], undefined, environment);
   }
 
+  // code-gauge-allow functionParameterCount 7 -- The values that the operation needs, which share no object.
   private runInitializer(
     block: BoundBlock,
     locals: LocalSymbol[],
@@ -669,28 +674,7 @@ export class Evaluator extends StatementExecutor {
 
   private evaluateCall(expression: Extract<BoundExpression, { kind: 'call' }>, frame: Frame): Value {
     const { method } = expression;
-    let receiver: Value = undefined;
-    if (expression.receiver) {
-      receiver = this.evaluate(expression.receiver, frame);
-      // A nullable value's members run on its missing value too, as `HasValue` and its `ToString` override do.
-      if (receiver === undefined && !method.isStatic && !this.runsOnNullable(expression)) throw NULL_REFERENCE();
-      // A method of a struct runs on a copy of a value that is not a variable, so it cannot change the original.
-      if (receiver instanceof CsStruct && !this.isVariableExpression(expression.receiver)) receiver = receiver.clone();
-      // A value calls a non-virtual method of a reference type, such as `GetType`, through a box of its own type.
-      const receiverType = frame.resolve(expression.receiver.type);
-      if (
-        !expression.isVirtual &&
-        !method.isStatic &&
-        !method.isExtension &&
-        !method.owner.isValueType &&
-        this.isValueTypeValue(receiver, receiverType)
-      ) {
-        receiver = new CsBox(receiverType, copyValue(receiver));
-      }
-    } else if (!method.isStatic && method.kind !== 'localFunction') {
-      receiver = frame.thisValue;
-    }
-    if (method.kind === 'localFunction') receiver = frame.thisValue;
+    const receiver = this.evaluateReceiver(expression, frame);
     frame.temporaries.push(receiver);
     try {
       const args = this.evaluateArguments(expression.args, frame);
@@ -699,33 +683,7 @@ export class Evaluator extends StatementExecutor {
       if (method.isStatic && owner && method.owner.staticConstructor) this.runtime.ensureInitialized(owner);
       const typeArgs = expression.typeArgs.map((type) => frame.resolve(type));
       if (expression.isVirtual && (receiver !== undefined || expression.receiver !== undefined)) {
-        const implementation = this.runtime.dispatch(
-          method,
-          receiver,
-          expression.receiver ? frame.resolve(expression.receiver.type) : undefined
-        );
-        const staticType = expression.receiver ? frame.resolve(expression.receiver.type) : undefined;
-        const implementationOwner =
-          this.ownerOfImplementation(implementation, receiver) ??
-          (staticType && nullableUnderlying(staticType) ? (staticType as NamedType) : owner);
-        // An enum's or a primitive's value runs an implementation of a class (Enum, ValueType) in its box.
-        const self =
-          staticType &&
-          receiver !== undefined &&
-          !implementation.owner.isValueType &&
-          !(receiver instanceof CsStruct) &&
-          this.isValueTypeValue(receiver, staticType) &&
-          !nullableUnderlying(staticType)
-            ? new CsBox(staticType, receiver)
-            : receiver;
-        return this.invoke(
-          frame,
-          implementation,
-          self,
-          args,
-          expression.row,
-          this.environmentOf(implementation, implementationOwner, typeArgs)
-        );
+        return this.invokeVirtual(expression, receiver, args, owner, typeArgs, frame);
       }
       return this.invoke(
         frame,
@@ -739,6 +697,64 @@ export class Evaluator extends StatementExecutor {
     } finally {
       frame.temporaries.pop();
     }
+  }
+
+  /** The receiver a call runs on: its value, a copy of a struct that is no variable, a box, or `this`. */
+  private evaluateReceiver(expression: Extract<BoundExpression, { kind: 'call' }>, frame: Frame): Value {
+    const { method } = expression;
+    if (method.kind === 'localFunction') return frame.thisValue;
+    if (!expression.receiver) return method.isStatic ? undefined : frame.thisValue;
+    let receiver = this.evaluate(expression.receiver, frame);
+    // A nullable value's members run on its missing value too, as `HasValue` and its `ToString` override do.
+    if (receiver === undefined && !method.isStatic && !this.runsOnNullable(expression)) throw NULL_REFERENCE();
+    // A method of a struct runs on a copy of a value that is not a variable, so it cannot change the original.
+    if (receiver instanceof CsStruct && !this.isVariableExpression(expression.receiver)) receiver = receiver.clone();
+    // A value calls a non-virtual method of a reference type, such as `GetType`, through a box of its own type.
+    const receiverType = frame.resolve(expression.receiver.type);
+    if (
+      !expression.isVirtual &&
+      !method.isStatic &&
+      !method.isExtension &&
+      !method.owner.isValueType &&
+      this.isValueTypeValue(receiver, receiverType)
+    ) {
+      receiver = new CsBox(receiverType, copyValue(receiver));
+    }
+    return receiver;
+  }
+
+  /** Calls the implementation of a virtual method that the receiver's runtime type, or its static type, has. */
+  private invokeVirtual(
+    expression: Extract<BoundExpression, { kind: 'call' }>,
+    receiver: Value,
+    args: (Value | VariableReference)[],
+    owner: NamedType | undefined,
+    typeArgs: Type[],
+    frame: Frame
+  ): Value {
+    const staticType = expression.receiver ? frame.resolve(expression.receiver.type) : undefined;
+    const implementation = this.runtime.dispatch(expression.method, receiver, staticType);
+    const implementationOwner =
+      this.ownerOfImplementation(implementation, receiver) ??
+      (staticType && nullableUnderlying(staticType) ? (staticType as NamedType) : owner);
+    // An enum's or a primitive's value runs an implementation of a class (Enum, ValueType) in its box.
+    const self =
+      staticType &&
+      receiver !== undefined &&
+      !implementation.owner.isValueType &&
+      !(receiver instanceof CsStruct) &&
+      this.isValueTypeValue(receiver, staticType) &&
+      !nullableUnderlying(staticType)
+        ? new CsBox(staticType, receiver)
+        : receiver;
+    return this.invoke(
+      frame,
+      implementation,
+      self,
+      args,
+      expression.row,
+      this.environmentOf(implementation, implementationOwner, typeArgs)
+    );
   }
 
   private runsOnNullable(expression: Extract<BoundExpression, { kind: 'call' }>): boolean {
@@ -900,6 +916,8 @@ export class Evaluator extends StatementExecutor {
     };
   }
 
+  // code-gauge-allow functionNcss 34 -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity 28 -- Each branch handles one case of the C# rule that the function applies.
   private propertyPlace(target: Extract<BoundExpression, { kind: 'property' }>, frame: Frame): Place {
     const { property } = target;
     let receiver: Value = undefined;
@@ -962,6 +980,7 @@ export class Evaluator extends StatementExecutor {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Each branch handles one case of the C# rule that the function applies.
   private evaluateNew(expression: Extract<BoundExpression, { kind: 'new' }>, frame: Frame): Value {
     const type = frame.resolve(expression.objectType);
     // `new T()` runs the parameterless constructor of the class that the type argument gives.

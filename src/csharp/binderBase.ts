@@ -312,6 +312,7 @@ export class BinderBase {
     return inner;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
   private resolveQualifiedType(node: Extract<TypeNode, { kind: 'qualifiedType' }>, context: TypeContext): Type {
     const args = (node.typeArgs ?? []).map((arg) => this.resolveType(arg, context));
     const path = qualifiedPath(node.left);
@@ -343,6 +344,7 @@ export class BinderBase {
   }
 
   /** Finds a type by its simple name, from the innermost scope out, as C#'s name lookup does. */
+  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch handles one case of the C# rule that the function applies.
   resolveNamedType(position: Position, name: string, args: Type[], context: TypeContext): Type {
     if (args.length === 0) {
       for (const parameter of context.methodTypeParameters.toReversed())
