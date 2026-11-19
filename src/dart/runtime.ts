@@ -14,7 +14,7 @@ import {
   mentionsTypeParams,
   substitute,
   type TypeParam,
-  typeToString,
+  vmTypeString,
 } from './types';
 import {
   type Arguments,
@@ -294,7 +294,7 @@ export class Runtime implements TracedRuntime<Frame> {
     const expected = substitute(field.type, env);
     if (this.links.isValueOf(this, value, expected)) return;
     this.throwTypeError(
-      `type '${typeToString(this.runtimeTypeOf(value))}' is not a subtype of type '${typeToString(expected)}' of '${field.name}'`
+      `type '${vmTypeString(this.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(expected)}' of '${field.name}'`
     );
   }
 

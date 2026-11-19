@@ -25,7 +25,7 @@ import {
   functionType,
   interfaceType,
   isSubtype as import_isSubtype,
-  typeToString,
+  vmTypeString,
 } from './types';
 import { DartList, DartObject, DartRecord, type Value } from './values';
 
@@ -306,7 +306,7 @@ function keyOf(item: Value): string {
 /** A key that equal constants share, or undefined for values that are canonical already. */
 function constantKey(value: Value): string | undefined {
   if (!(value instanceof DartObject)) return undefined;
-  const parts: string[] = [typeToString(interfaceType(value.cls, value.typeArgs))];
+  const parts: string[] = [vmTypeString(interfaceType(value.cls, value.typeArgs))];
   if (value instanceof DartList) parts.push(...value.elements.map(keyOf));
   else if (value instanceof DartRecord) {
     parts.push(...value.positional.map(keyOf));

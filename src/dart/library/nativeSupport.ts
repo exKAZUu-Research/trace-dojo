@@ -1,6 +1,6 @@
 import type { ConstructorImpl } from '../classes';
 import type { Runtime } from '../runtime';
-import { coreTypes, type DartType, DYNAMIC, typeToString } from '../types';
+import { coreTypes, type DartType, DYNAMIC, vmTypeString } from '../types';
 import { type Arguments, type Callable, DartList, type DartObject, type Value } from '../values';
 
 /** The natives of the interpreter's libraries, by `Class.member`, `Class.member=`, `Class.new`, or a function's name. */
@@ -38,7 +38,7 @@ export function named(args: ReadonlyMap<string, Value> | undefined, name: string
 export function intArg(runtime: Runtime, value: Value, name: string): bigint {
   if (typeof value !== 'bigint') {
     runtime.throwTypeError(
-      `type '${typeToString(runtime.runtimeTypeOf(value))}' is not a subtype of type 'int' of '${name}'`
+      `type '${vmTypeString(runtime.runtimeTypeOf(value))}' is not a subtype of type 'int' of '${name}'`
     );
   }
   return value;
@@ -47,7 +47,7 @@ export function intArg(runtime: Runtime, value: Value, name: string): bigint {
 export function numArg(runtime: Runtime, value: Value, name: string): bigint | number {
   if (typeof value !== 'bigint' && typeof value !== 'number') {
     runtime.throwTypeError(
-      `type '${typeToString(runtime.runtimeTypeOf(value))}' is not a subtype of type 'num' of '${name}'`
+      `type '${vmTypeString(runtime.runtimeTypeOf(value))}' is not a subtype of type 'num' of '${name}'`
     );
   }
   return value;
@@ -56,7 +56,7 @@ export function numArg(runtime: Runtime, value: Value, name: string): bigint | n
 export function stringArg(runtime: Runtime, value: Value, name: string): string {
   if (typeof value !== 'string') {
     runtime.throwTypeError(
-      `type '${typeToString(runtime.runtimeTypeOf(value))}' is not a subtype of type 'String' of '${name}'`
+      `type '${vmTypeString(runtime.runtimeTypeOf(value))}' is not a subtype of type 'String' of '${name}'`
     );
   }
   return value;
@@ -97,7 +97,7 @@ export function checkElement(runtime: Runtime, value: Value, type: DartType, nam
   if (type.kind === 'dynamic') return;
   if (!runtime.links.isValueOf(runtime, value, type)) {
     runtime.throwTypeError(
-      `type '${typeToString(runtime.runtimeTypeOf(value))}' is not a subtype of type '${typeToString(type)}' of '${name}'`
+      `type '${vmTypeString(runtime.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(type)}' of '${name}'`
     );
   }
 }
@@ -106,6 +106,6 @@ export function checkElement(runtime: Runtime, value: Value, type: DartType, nam
 export function castTo(runtime: Runtime, value: Value, type: DartType): void {
   if (type.kind === 'dynamic' || runtime.links.isValueOf(runtime, value, type)) return;
   runtime.throwTypeError(
-    `type '${typeToString(runtime.runtimeTypeOf(value))}' is not a subtype of type '${typeToString(type)}' in type cast`
+    `type '${vmTypeString(runtime.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(type)}' in type cast`
   );
 }

@@ -1,6 +1,6 @@
 import { LIMITS } from '../interpreter/limits';
 import type { Runtime } from './runtime';
-import { typeToString } from './types';
+import { vmTypeString } from './types';
 import type { Value } from './values';
 
 /** Wraps an exact integer to the 64 bits of a Dart `int`. */
@@ -89,7 +89,7 @@ export function dynamicBinary(
       if (operator === '==' || operator === '!=')
         return runtime.invoke(a, operator, { positional: [b], named: undefined }, [], callRow);
       runtime.throwTypeError(
-        `type '${typeToString(runtime.runtimeTypeOf(b))}' is not a subtype of type 'num' of 'other'`
+        `type '${vmTypeString(runtime.runtimeTypeOf(b))}' is not a subtype of type 'num' of 'other'`
       );
     }
     return numericBinary(runtime, operator, a, b);
@@ -97,7 +97,7 @@ export function dynamicBinary(
   if (typeof a === 'string' && operator === '+') {
     if (typeof b !== 'string') {
       runtime.throwTypeError(
-        `type '${typeToString(runtime.runtimeTypeOf(b))}' is not a subtype of type 'String' of 'other'`
+        `type '${vmTypeString(runtime.runtimeTypeOf(b))}' is not a subtype of type 'String' of 'other'`
       );
     }
     return concatenate(runtime, a, b);

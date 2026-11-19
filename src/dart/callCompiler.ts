@@ -28,6 +28,7 @@ import {
   interfaceType,
   isNullable,
   isSubtype,
+  isTop,
   mentionsTypeParams,
   NEVER,
   nonNullable,
@@ -709,8 +710,16 @@ export abstract class CallCompiler extends OperatorCompiler {
         for (const param of type.typeParams) {
           // A closure's parameters take the context's type over what the other arguments gave, as Dart solves the
           // context first: `num n = ap(1, (a) => a + 1)` types `a` as num.
+          // Other arguments see only a context that says more than Object?, as `[3, 9]` in `print(maxOf([3, 9]))`
+          // stays a List<int>.
           const contextual = fromContext.get(param);
-          const usable = contextual && !mentionsTypeParams(contextual, params) ? contextual : undefined;
+          const usable =
+            contextual &&
+            !mentionsTypeParams(contextual, params) &&
+            withinBound(param, contextual, type.typeParams) &&
+            (closurePass || !isTop(contextual))
+              ? contextual
+              : undefined;
           map.set(param, usable ?? (closurePass ? solution.get(param) : undefined) ?? INFERENCE_HOLE);
         }
         const result = this.compileExpression(argument, substitute(parameterType, map));
@@ -1169,6 +1178,14 @@ interface CompiledArguments {
 }
 
 /** The context wins over the arguments when they fit it, as `List<num> l = List.filled(3, 0)` makes a List<num>. */
+/** Whether a type argument satisfies its parameter's bound, with the parameter itself in place of F-bounded uses. */
+function withinBound(param: TypeParam, argument: DartType, typeParams: readonly TypeParam[]): boolean {
+  const { bound } = param;
+  if (!bound) return true;
+  const map = new Map(typeParams.map((other) => [other, other === param ? argument : DYNAMIC] as const));
+  return isSubtype(argument, substitute(bound, map));
+}
+
 function chooseTypeArguments(
   type: FunctionType,
   params: ReadonlySet<TypeParam>,
@@ -1183,7 +1200,8 @@ function chooseTypeArguments(
       contextual &&
       !isInferenceHole(contextual) &&
       (!fromArguments || isSubtype(fromArguments, contextual)) &&
-      !mentionsTypeParams(contextual, params)
+      !mentionsTypeParams(contextual, params) &&
+      withinBound(param, contextual, type.typeParams)
     ) {
       return contextual;
     }

@@ -1,5 +1,5 @@
 import type { Runtime } from './runtime';
-import { typeToString } from './types';
+import { vmTypeString } from './types';
 import type { DartObject, Value } from './values';
 
 /** `double.toString()`: the shortest digits that read back as the value, as the Dart VM prints them. */
@@ -53,7 +53,7 @@ export function safeToString(runtime: Runtime, value: Value): string {
 
 /** The name `Instance of '…'` shows: the runtime type, with its type arguments. */
 export function instanceName(runtime: Runtime, value: Value): string {
-  return typeToString(runtime.runtimeTypeOf(value));
+  return vmTypeString(runtime.runtimeTypeOf(value));
 }
 
 /** A string as `Error.safeToString` quotes it, escaping as JSON does. */

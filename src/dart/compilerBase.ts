@@ -30,6 +30,7 @@ import {
   TypeParam,
   typeParamType,
   typeToString,
+  vmTypeString,
   VOID,
 } from './types';
 import { type Cell, DartClosure as DartClosureValue, type DartRecord, type Value } from './values';
@@ -557,9 +558,9 @@ export abstract class CompilerBase {
       const value = run(frame);
       const type = resolve(frame);
       if (!valueIs(frame.runtime, value, type)) {
-        const actual = typeToString(frame.runtime.runtimeTypeOf(value));
+        const actual = vmTypeString(frame.runtime.runtimeTypeOf(value));
         frame.runtime.throwTypeError(
-          `type '${actual}' is not a subtype of type '${typeToString(type)}'${explicit ? ' in type cast' : ''}`
+          `type '${actual}' is not a subtype of type '${vmTypeString(type)}'${explicit ? ' in type cast' : ''}`
         );
       }
       return value;

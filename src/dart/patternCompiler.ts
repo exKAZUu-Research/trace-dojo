@@ -18,7 +18,7 @@ import {
   objectType,
   resolveBound,
   sameType,
-  typeToString,
+  vmTypeString,
 } from './types';
 import { type Arguments, type Callable, Cell, DartList, DartRecord, type Value } from './values';
 
@@ -269,7 +269,7 @@ export abstract class PatternCompiler extends CallCompiler {
         const target = resolve(frame);
         if (!this.valueIsAt(frame, value, target)) {
           frame.runtime.throwTypeError(
-            `type '${typeToString(frame.runtime.runtimeTypeOf(value))}' is not a subtype of type '${typeToString(target)}' in type cast`
+            `type '${vmTypeString(frame.runtime.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(target)}' in type cast`
           );
         }
         return inner.match(frame, value);
@@ -355,7 +355,7 @@ export abstract class PatternCompiler extends CallCompiler {
           const required = resolve(frame);
           if (!this.valueIsAt(frame, value, required)) {
             frame.runtime.throwTypeError(
-              `type '${typeToString(frame.runtime.runtimeTypeOf(value))}' is not a subtype of type '${typeToString(required)}'`
+              `type '${vmTypeString(frame.runtime.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(required)}'`
             );
           }
           return then(frame, value);
@@ -591,7 +591,7 @@ export abstract class PatternCompiler extends CallCompiler {
       match: (frame, value) => {
         if (castsDynamic && !this.valueIsAt(frame, value, shape)) {
           frame.runtime.throwTypeError(
-            `type '${typeToString(frame.runtime.runtimeTypeOf(value))}' is not a subtype of type '${typeToString(shape)}'`
+            `type '${vmTypeString(frame.runtime.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(shape)}'`
           );
         }
         if (!(value instanceof DartRecord)) return false;

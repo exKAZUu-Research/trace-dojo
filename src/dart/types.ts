@@ -736,3 +736,51 @@ export function isFunctionLike(type: DartType): boolean {
   const base = resolveBound(type);
   return base.kind === 'function' || (base.kind === 'interface' && base.cls === coreTypes.function);
 }
+
+/** A type as the VM's `Type.toString` and closures' `toString` write it: function types as `(int) => int`. */
+export function vmTypeString(type: DartType): string {
+  switch (type.kind) {
+    case 'interface': {
+      const args = type.args.length > 0 ? `<${type.args.map(vmTypeString).join(', ')}>` : '';
+      return `${type.cls.name}${args}${type.nullable ? '?' : ''}`;
+    }
+    case 'function': {
+      return type.typeParams.length > 0 ? vmGenericFunctionString(type) : vmFunctionString(type);
+    }
+    case 'record': {
+      const parts = type.positional.map(vmTypeString);
+      if (type.named.length > 0)
+        parts.push(`{${type.named.map((field) => `${vmTypeString(field.type)} ${field.name}`).join(', ')}}`);
+      const inner = parts.length === 1 && type.named.length === 0 ? `${parts[0]},` : parts.join(', ');
+      return `(${inner})${type.nullable ? '?' : ''}`;
+    }
+    default: {
+      return typeToString(type);
+    }
+  }
+}
+
+/** The VM names a generic function's type parameters Y0, Y1, and so on. */
+function vmGenericFunctionString(type: FunctionType): string {
+  const renamed = type.typeParams.map((_, position) => new TypeParam(`Y${position}`));
+  const map = new Map(type.typeParams.map((param, position) => [param, typeParamType(renamed[position]) as DartType]));
+  for (const [position, param] of type.typeParams.entries())
+    renamed[position].bound = param.bound ? substitute(param.bound, map) : undefined;
+  const body = substitute({ ...type, typeParams: [] }, map) as FunctionType;
+  const typeParams = `<${renamed.map((param) => (param.bound && !isTop(param.bound) ? `${param.name} extends ${vmTypeString(param.bound)}` : param.name)).join(', ')}>`;
+  return typeParams + vmFunctionString(body);
+}
+
+function vmFunctionString(type: FunctionType): string {
+  const parts = type.positional.slice(0, type.requiredCount).map(vmTypeString);
+  const optional = type.positional.slice(type.requiredCount).map(vmTypeString);
+  if (optional.length > 0) parts.push(`[${optional.join(', ')}]`);
+  const order = type.namedOrder;
+  const named = order ? type.named.toSorted((a, b) => order.indexOf(a.name) - order.indexOf(b.name)) : type.named;
+  if (named.length > 0)
+    parts.push(
+      `{${named.map((field) => `${field.isRequired ? 'required ' : ''}${vmTypeString(field.type)} ${field.name}`).join(', ')}}`
+    );
+  const text = `(${parts.join(', ')}) => ${vmTypeString(type.returnType)}`;
+  return type.nullable ? `(${text})?` : text;
+}

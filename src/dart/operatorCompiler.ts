@@ -28,8 +28,8 @@ import {
   nonNullable,
   numericClassOf,
   sameType,
-  typeToString,
   upperBound,
+  vmTypeString,
 } from './types';
 import { Cell, type Value } from './values';
 
@@ -178,7 +178,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
           const b = rightRun(frame);
           if (typeof b !== 'string')
             return frame.runtime.throwTypeError(
-              `type '${typeToString(frame.runtime.runtimeTypeOf(b))}' is not a subtype of type 'String' of 'other'`
+              `type '${vmTypeString(frame.runtime.runtimeTypeOf(b))}' is not a subtype of type 'String' of 'other'`
             );
           return concatenate(frame.runtime, a, b);
         },

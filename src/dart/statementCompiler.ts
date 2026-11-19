@@ -36,8 +36,8 @@ import {
   NULL,
   resolveBound,
   type TypeParam,
-  typeToString as typeToStringImpl,
   upperBound,
+  vmTypeString,
   VOID,
 } from './types';
 import { type Arguments, Cell, LateInitializer, UNASSIGNED, UNINITIALIZED, type Value } from './values';
@@ -300,7 +300,7 @@ export abstract class StatementCompiler extends PatternCompiler {
       const expected = resolve(frame);
       if (!this.valueIsAt(frame, value, expected)) {
         frame.runtime.throwTypeError(
-          `type '${typeToStringOf(frame.runtime.runtimeTypeOf(value))}' is not a subtype of type '${typeToStringOf(expected)}' of '${name}'`
+          `type '${vmTypeString(frame.runtime.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(expected)}' of '${name}'`
         );
       }
     };
@@ -1190,10 +1190,6 @@ function isCreation(compiled: Compiled): boolean {
 
 function displayName(name: string): string {
   return name === '<anonymous closure>' ? '' : name;
-}
-
-function typeToStringOf(type: DartType): string {
-  return typeToStringImpl(type);
 }
 
 export { makeNullable, resolveBound };
