@@ -83,8 +83,6 @@ function scalbn(value: number, exponent: number): number {
   return result * 2 ** remaining;
 }
 
-// code-gauge-allow functionNcss 160 -- A transcription of fdlibm's e_pow.c, whose steps reviews compare with the original.
-// code-gauge-allow functionCognitiveComplexity 80 -- A transcription of fdlibm's e_pow.c, whose steps reviews compare with the original.
 export function fdlibmPow(x: number, y: number): number {
   const hx = high(x);
   const lx = low(x);

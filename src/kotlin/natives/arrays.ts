@@ -1,3 +1,17 @@
+import {
+  fdlibmAcos,
+  fdlibmAsin,
+  fdlibmAtan,
+  fdlibmAtan2,
+  fdlibmCbrt,
+  fdlibmCos,
+  fdlibmExp,
+  fdlibmHypot,
+  fdlibmLog,
+  fdlibmLog10,
+  fdlibmSin,
+  fdlibmTan,
+} from '../../interpreter/fdlibm';
 import { fdlibmPow } from '../../interpreter/fdlibmPow';
 import { callFunction } from '../dispatch';
 import { stringOf, valueEquals } from '../format';
@@ -215,23 +229,25 @@ function binaryInsertionSort(
   }
 }
 
-// code-gauge-allow functionNcss 42 -- registers the natives of one class together, in the order the prelude declares them.
-// code-gauge-allow functionCognitiveComplexity 30 -- registers the natives of one class together, in the order the prelude declares them.
+const LN2 = fdlibmLog(2);
+
+// code-gauge-allow functionNcss 42 -- registers the natives of `kotlin.math` together, in the order the prelude declares them.
+// code-gauge-allow functionCognitiveComplexity 30 -- registers the natives of `kotlin.math` together, in the order the prelude declares them.
 function defineMath(): void {
   const unary: [string, (x: number) => number][] = [
     ['sqrt', Math.sqrt],
-    ['cbrt', Math.cbrt],
-    ['sin', Math.sin],
-    ['cos', Math.cos],
-    ['tan', Math.tan],
-    ['asin', Math.asin],
-    ['acos', Math.acos],
-    ['atan', Math.atan],
-    ['exp', Math.exp],
-    ['ln', Math.log],
-    ['log10', Math.log10],
-    // oxlint-disable-next-line unicorn/prefer-modern-math-apis -- Kotlin computes `log2` as `ln(x) / ln(2)`, whose last digit differs from `Math.log2`'s for some arguments.
-    ['log2', (x) => Math.log(x) / Math.LN2],
+    ['cbrt', fdlibmCbrt],
+    ['sin', fdlibmSin],
+    ['cos', fdlibmCos],
+    ['tan', fdlibmTan],
+    ['asin', fdlibmAsin],
+    ['acos', fdlibmAcos],
+    ['atan', fdlibmAtan],
+    ['exp', fdlibmExp],
+    ['ln', fdlibmLog],
+    ['log10', fdlibmLog10],
+    // Kotlin computes `log2` as `ln(x) / ln(2)`, whose last digit differs from a direct `log2` for some arguments.
+    ['log2', (x) => fdlibmLog(x) / LN2],
     ['floor', Math.floor],
     ['ceil', Math.ceil],
     ['round', roundHalfEven],
@@ -245,14 +261,14 @@ function defineMath(): void {
   defineNative('kotlin.math.abs(Float)', (_frame, _receiver, [x]) => Math.abs(x as number));
   defineNative('kotlin.math.pow(Double, Double)', (_frame, _receiver, [x, y]) => fdlibmPow(x as number, y as number));
   defineNative('kotlin.math.atan2(Double, Double)', (_frame, _receiver, [y, x]) =>
-    Math.atan2(y as number, x as number)
+    fdlibmAtan2(y as number, x as number)
   );
   defineNative('kotlin.math.hypot(Double, Double)', (_frame, _receiver, [x, y]) =>
-    Math.hypot(x as number, y as number)
+    fdlibmHypot(x as number, y as number)
   );
   defineNative('kotlin.math.log(Double, Double)', (_frame, _receiver, [x, base]) => {
     if ((base as number) <= 0 || base === 1) return Number.NaN;
-    return Math.log(x as number) / Math.log(base as number);
+    return fdlibmLog(x as number) / fdlibmLog(base as number);
   });
   for (const type of ['Double', 'Float']) {
     defineNative(`kotlin.math.max(${type}, ${type})`, (_frame, _receiver, [a, b]) => javaMax(a as number, b as number));

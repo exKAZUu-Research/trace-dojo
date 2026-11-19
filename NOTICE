@@ -210,8 +210,8 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-This product includes code transcribed from fdlibm 5.3 (src/interpreter/fdlibmPow.ts and
-src/interpreter/fdlibm.ts), which is distributed under the following notice:
+This product includes code transcribed from fdlibm 5.3 (src/interpreter/fdlibm.ts, src/interpreter/fdlibmPow.ts,
+src/interpreter/fdlibmRemPio2.ts, and src/interpreter/fdlibmWords.ts), which is distributed under the following notice:
 
 Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
 
