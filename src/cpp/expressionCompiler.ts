@@ -1098,6 +1098,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       isLvalue,
       row: node.row,
       constant: chosen?.constant,
+      constantInitialization: chosen?.constantInitialization,
       staticAddress: chosen?.staticAddress,
       constantPointerValue: chosen?.constantPointerValue,
       run: (frame, zeroInitialize, destination) =>
@@ -1165,7 +1166,18 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const right = this.compileExpression(fieldOf(node, 'right') as Syntax);
     const first = this.discardedValue(left);
     const second = right.run;
-    return { ...right, constant: undefined, run: (frame) => (first(frame), second(frame)) };
+    const hasConstantLeft = this.rvalue(left).constant !== undefined;
+    return {
+      ...right,
+      constant: hasConstantLeft ? right.constant : undefined,
+      constantInitialization: hasConstantLeft ? right.constantInitialization : undefined,
+      staticAddress: hasConstantLeft ? right.staticAddress : undefined,
+      constantPointerValue: hasConstantLeft ? right.constantPointerValue : undefined,
+      run: (frame, zeroInitialize, destination, referenceLifetime) => {
+        first(frame);
+        return second(frame, zeroInitialize, destination, referenceLifetime);
+      },
+    };
   }
 
   discardedValue(expr: Expr): Expr['run'] {
@@ -1363,7 +1375,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type,
       isLvalue: false,
       row: node.row,
-      run: (frame, zeroInitialize, destination) => run(frame, destination, zeroInitialize),
+      run: (frame, zeroInitialize, destination, referenceLifetime) =>
+        run(frame, destination, zeroInitialize, referenceLifetime),
+      constantInitialization: run.isConstant,
       onlyCalls: type.kind === 'class',
       isTemporaryObject: type.kind === 'class',
     };
@@ -1509,7 +1523,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type,
       isLvalue: false,
       row: list.row,
-      run: (frame, zeroInitialize, destination) => run(frame, destination, zeroInitialize),
+      run: (frame, zeroInitialize, destination, referenceLifetime) =>
+        run(frame, destination, zeroInitialize, referenceLifetime),
+      constantInitialization: run.isConstant,
       isTemporaryObject: type.kind === 'class',
     };
   }
@@ -1531,7 +1547,16 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         list.children.filter((child) => child.type !== 'comment'),
         row
       );
-      if (run) return { type: classType(cls), isLvalue: false, isTemporaryObject: true, row, run };
+      if (run)
+        return {
+          type: classType(cls),
+          isLvalue: false,
+          isTemporaryObject: true,
+          row,
+          run: (frame, zeroInitialize, destination, referenceLifetime) =>
+            run(frame, destination, zeroInitialize, referenceLifetime),
+          constantInitialization: run.isConstant,
+        };
     }
     if (args.length === 1 && args[0].type.kind === 'class' && args[0].type.cls.isDerivedFrom(cls) && !isBraced) {
       const source = args[0];

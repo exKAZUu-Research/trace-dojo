@@ -419,7 +419,7 @@ export function stringClass(library: Library): ClassInfo {
   );
   const search = (
     name: string,
-    find: (bytes: string, needle: string, start: bigint) => number,
+    find: (bytes: string, needle: string, start: bigint, frame: Frame) => number,
     defaultStart: bigint
   ): void => {
     for (const needleType of [ref, CONST_CHAR_PTR]) {
@@ -427,7 +427,7 @@ export function stringClass(library: Library): ClassInfo {
         name,
         [needleType, SIZE_T],
         SIZE_T,
-        (s, [needle, start]) => found(find(s.bytes, textOf(needle), position(start, defaultStart))),
+        (s, [needle, start], frame) => found(find(s.bytes, textOf(needle), position(start, defaultStart), frame)),
         { isConst: true, optional: 1 }
       );
     }
@@ -435,16 +435,16 @@ export function stringClass(library: Library): ClassInfo {
       name,
       [CHAR, SIZE_T],
       SIZE_T,
-      (s, [char, start]) => found(find(s.bytes, charOf(char), position(start, defaultStart))),
+      (s, [char, start], frame) => found(find(s.bytes, charOf(char), position(start, defaultStart), frame)),
       { isConst: true, optional: 1 }
     );
     method(
       name,
       [CONST_CHAR_PTR, SIZE_T, SIZE_T],
       SIZE_T,
-      (s, [needle, start, count]) => {
+      (s, [needle, start, count], frame) => {
         const bytes = pointerBytes(needle as Ptr, count);
-        return found(find(s.bytes, bytes, position(start, defaultStart)));
+        return found(find(s.bytes, bytes, position(start, defaultStart), frame));
       },
       { isConst: true }
     );
@@ -462,10 +462,10 @@ export function stringClass(library: Library): ClassInfo {
     },
     NPOS
   );
-  search('find_first_of', firstOf(true), 0n);
-  search('find_first_not_of', firstOf(false), 0n);
-  search('find_last_of', lastOf(true), NPOS);
-  search('find_last_not_of', lastOf(false), NPOS);
+  search('find_first_of', searchCharacterSet(false, true), 0n);
+  search('find_first_not_of', searchCharacterSet(false, false), 0n);
+  search('find_last_of', searchCharacterSet(true, true), NPOS);
+  search('find_last_not_of', searchCharacterSet(true, false), NPOS);
   const compareMethod = (params: Type[], run: (s: StringValue, args: unknown[], frame: Frame) => number): void =>
     method('compare', params, INT, run, { isConst: true });
   for (const otherType of [ref, CONST_CHAR_PTR]) {
@@ -654,20 +654,26 @@ const insertAt = (s: StringValue, at: unknown, bytes: string, frame: Frame): Ptr
   return s.characterBuffer().location(index);
 };
 
-const firstOf =
-  (inSet: boolean) =>
-  (bytes: string, set: string, start: bigint): number => {
-    for (let index = start > BigInt(bytes.length) ? bytes.length : Number(start); index < bytes.length; index++) {
-      if (set.includes(bytes[index]) === inSet) return index;
+const searchCharacterSet =
+  (reverse: boolean, inSet: boolean) =>
+  (bytes: string, set: string, start: bigint, frame: Frame): number => {
+    const first = reverse
+      ? start >= BigInt(bytes.length)
+        ? bytes.length - 1
+        : Number(start)
+      : start >= BigInt(bytes.length)
+        ? bytes.length
+        : Number(start);
+    if (first < 0 || first >= bytes.length) return -1;
+    const contains = new Uint8Array(256);
+    for (let index = 0; index < set.length; index++) {
+      if (index % 64 === 0) frame.runtime.spend();
+      contains[byteAt(set, index)] = 1;
     }
-    return -1;
-  };
-
-const lastOf =
-  (inSet: boolean) =>
-  (bytes: string, set: string, start: bigint): number => {
-    for (let index = start >= BigInt(bytes.length) ? bytes.length - 1 : Number(start); index >= 0; index--) {
-      if (set.includes(bytes[index]) === inSet) return index;
+    const step = reverse ? -1 : 1;
+    for (let index = first; index >= 0 && index < bytes.length; index += step) {
+      if ((index - first) % 64 === 0) frame.runtime.spend();
+      if ((contains[byteAt(bytes, index)] === 1) === inSet) return index;
     }
     return -1;
   };

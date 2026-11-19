@@ -211,12 +211,13 @@ export class Runtime implements TracedRuntime<Frame> {
     this.writers.stderr.flush();
   }
 
-  withReceiver<T>(self: Ptr, evaluate: (frame: Frame) => T): T {
+  withReceiver<T>(parent: Frame, self: Ptr, evaluate: (frame: Frame) => T): T {
     const frame = this.pushFrame(undefined, undefined, undefined, self);
     try {
       return evaluate(frame);
     } finally {
       this.popFrame();
+      for (const temporary of frame.temporaries) parent.temporaries.push(temporary);
     }
   }
 

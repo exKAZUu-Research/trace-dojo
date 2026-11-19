@@ -225,7 +225,13 @@ function pointerConversion(
 ): ConversionSequence | undefined {
   const from = expr.type;
   if (from.kind === 'nullptr' || (expr.isNullConstant && isInteger(from))) {
-    return sequence(Rank.Conversion, (e) => ({ type: to, isLvalue: false, row: e.row, run: () => NULL_PTR }));
+    return sequence(Rank.Conversion, (e) => ({
+      type: to,
+      isLvalue: false,
+      row: e.row,
+      staticAddress: true,
+      run: () => NULL_PTR,
+    }));
   }
   const fromTarget = from.kind === 'pointer' ? from.to : from.kind === 'array' ? from.of : undefined;
   if (!fromTarget) return undefined;

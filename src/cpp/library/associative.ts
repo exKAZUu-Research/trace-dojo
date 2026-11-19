@@ -1,6 +1,6 @@
 import type { DisplayNode } from '../../problems/trace';
 import { CppRuntimeError } from '../errors';
-import type { Expr } from '../expr';
+import { type Expr, initializerWithConstancy } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { makeEach } from '../objectCompiler';
 import type { Eval, Frame } from '../runtime';
@@ -10,6 +10,7 @@ import {
   ClassInfo,
   classType,
   type FunctionInfo,
+  isArithmetic,
   isConstType,
   nonReference,
   pointerTo,
@@ -69,18 +70,20 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
   const secondOffset = Math.ceil(sizeOf(firstStorage) / secondAlign) * secondAlign;
   cls.library = {
     kind: 'pair',
+    hasConstantConstructors: [first, second].every((type) => isArithmetic(type) || type.kind === 'pointer'),
     args: [first, second],
     size: Math.ceil((secondOffset + sizeOf(secondStorage)) / align) * align,
     align,
     listInitializer: (compiler, elements, row) => {
       if (elements.length !== 2) return;
       // The forwarding constructor deduces its parameters before initializing the pair's member types.
-      return compiler.constructObject(
+      const expr = compiler.constructObject(
         cls,
         elements.map((element) => compiler.argument(element)),
         row,
         false
-      ).run as Eval;
+      );
+      return initializerWithConstancy((frame) => expr.run(frame), expr.constantInitialization === true);
     },
     operator: (compiler, operator, operands, row) => {
       const [left, right] = operands;

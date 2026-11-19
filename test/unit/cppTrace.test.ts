@@ -215,6 +215,20 @@ int main() {
   expect(traceProgram('cpp', program, program)).toMatchObject({ stdout: 'ok' });
 });
 
+test('an exception message cannot hide an output limit', () => {
+  const program = `#include <iostream>
+#include <stdexcept>
+#include <string>
+struct Error : std::exception {
+  const char* what() const noexcept override {
+    std::cout << std::string(110000, 'a');
+    return "message";
+  }
+};
+int main() { throw Error{}; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'output' });
+});
+
 test('an exception message ends its lifetime with the exception object', () => {
   const program = `#include <stdexcept>
 int main() {

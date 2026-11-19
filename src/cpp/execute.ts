@@ -119,7 +119,8 @@ function describeException(frame: Frame, exception: CppException): string {
   try {
     const result = invoke(frame, what, [], new Ptr(new Box(value), 0), undefined as unknown as number);
     return `${prefix}: ${decode(readCString(result as Ptr))}`;
-  } catch {
+  } catch (error) {
+    if (error instanceof ExecutionLimitError) throw error;
     return prefix;
   }
 }

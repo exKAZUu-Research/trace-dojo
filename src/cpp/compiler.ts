@@ -4,7 +4,7 @@ import { misplacedAtomicMessage, type TraceOptions } from '../interpreter/traceA
 import { byteAt } from './bytes';
 import { hasAuto } from './compilerBase';
 import { CppException, CppRuntimeError } from './errors';
-import type { Expr, Initializer, InitializerTarget } from './expr';
+import { type Expr, type Initializer, type InitializerTarget, initializerWithConstancy } from './expr';
 import { SequenceValue } from './library/containerValues';
 import type { Library } from './library/registry';
 import {
@@ -932,6 +932,7 @@ export class Compiler extends StatementCompiler {
     const ownFields = cls.ownFields;
     const undo = this.undoConstruction(cls);
     const copyInto = (frame: Frame, target: CObject, source: CObject): void => {
+      target.cls = cls;
       if (userCopy) {
         invoke(frame, userCopy, [new Ptr(new Box(source), 0)], new Ptr(new Box(target), 0), cls.row);
         return;
@@ -941,13 +942,19 @@ export class Compiler extends StatementCompiler {
       let isBaseComplete = false;
       try {
         if (base) {
-          const baseCopy = base.operations?.copy(frame, source) as CObject;
-          target.message = baseCopy.message;
-          for (let index = 0; index < base.fields.length; index++) target.values[index] = baseCopy.values[index];
+          const baseCopy = base.operations?.copy(frame, source, target.zeroInitialized ? target : undefined) as CObject;
+          if (baseCopy !== target) {
+            target.message = baseCopy.message;
+            for (let index = 0; index < base.fields.length; index++) target.values[index] = baseCopy.values[index];
+          }
           isBaseComplete = true;
         }
-        for (const field of ownFields)
-          target.values[field.index] = this.copyMember(frame, field.type, source.values[field.index]);
+        target.cls = cls;
+        for (const field of ownFields) {
+          const member = source.values[field.index];
+          const destination = initializerTarget(target.values[field.index]);
+          target.values[field.index] = this.copyMember(frame, field.type, member, destination);
+        }
       } catch (error) {
         if (error instanceof CppException) undo(frame, isBaseComplete, target);
         throw error;
@@ -981,17 +988,19 @@ export class Compiler extends StatementCompiler {
     };
   }
 
-  private copyMember(frame: Frame, type: Type, value: Value): Value {
-    if (type.kind !== 'array' || value === UNINIT) return copyValue(frame, type, value);
+  private copyMember(frame: Frame, type: Type, value: Value, destination?: InitializerTarget): Value {
+    if (value === UNINIT) return value;
+    if (type.kind === 'class' && type.cls.operations)
+      return type.cls.operations.copy(frame, value, asObject(destination));
+    if (type.kind !== 'array') return value;
     const fields = (value as ArrayStore).values;
     const destroy = this.destroyerOf(type.of);
-    return new ArrayStore(
-      makeEach(
-        frame,
-        fields.length,
-        (index) => this.copyMember(frame, type.of, fields[index]),
-        () => destroy
-      )
+    return this.fillArray(
+      frame,
+      fields.length,
+      (f, target, index) => this.copyMember(f, type.of, fields[index], target),
+      destroy,
+      arrayStorage(destination)
     );
   }
 
@@ -1457,60 +1466,33 @@ export class Compiler extends StatementCompiler {
     value: Syntax | undefined,
     row: number
   ): { run: Initializer; isConstant: boolean; isCreation: boolean } | undefined {
+    let run: Initializer;
+    const createsClass = type.kind === 'class' && !type.cls.library;
+    let isCreation = false;
     if (!value) {
       if (!this.isClassType(type)) {
         this.checkConstDefault(type, row);
         return undefined;
       }
-      return { run: this.defaultInitializer(type, row), isConstant: false, isCreation: true };
-    }
-    if (value.type === 'initializer_list') {
-      const run = this.listInitializer(type, value, row);
-      return {
-        run,
-        isConstant: this.hasConstantListElements(type) && this.isConstantList(value),
-        isCreation: type.kind === 'class' && !type.cls.library,
-      };
-    }
-    if (value.type === 'argument_list') {
+      run = this.defaultInitializer(type, row);
+      isCreation = true;
+    } else if (value.type === 'initializer_list') {
+      run = this.listInitializer(type, value, row);
+      isCreation = createsClass;
+    } else if (value.type === 'argument_list') {
       const args = value.children.map((arg) => this.argument(arg));
       if (type.kind === 'class') {
-        const construct = this.constructObject(type.cls, args, row, false).run;
-        return {
-          run: (frame, target, zeroInitialize) => construct(frame, zeroInitialize, asObject(target)),
-          isConstant: false,
-          isCreation: !type.cls.library,
-        };
+        run = this.objectInitializer(this.constructObject(type.cls, args, row, false));
+        isCreation = createsClass;
+      } else {
+        if (args.length !== 1) return this.error(row, '初期値には値を1つだけ書いてください。');
+        run = this.copyInitializer(type, args[0], row, false);
       }
-      if (args.length !== 1) return this.error(row, '初期値には値を1つだけ書いてください。');
-      const run = this.copyInitializer(type, args[0], row, false);
-      return { run, isConstant: this.isConstantInitializer(args[0]), isCreation: false };
+    } else {
+      run = this.copyInitializer(type, this.compileExpression(value), row, false);
+      isCreation = value.type === 'new_expression';
     }
-    const expr = this.compileExpression(value);
-    const run = this.copyInitializer(type, expr, row, false);
-    const isConstant = !this.isClassType(type) && this.isConstantInitializer(expr);
-    return { run, isConstant, isCreation: value.type === 'new_expression' };
-  }
-
-  private hasConstantListElements(type: Type): boolean {
-    if (type.kind === 'array') return this.hasConstantListElements(type.of);
-    if (type.kind !== 'class') return type.kind !== 'reference';
-    const { cls } = type;
-    return (
-      !cls.base &&
-      this.isAggregate(cls) &&
-      cls.ownFields.every((field) => !field.initializer && this.hasConstantListElements(field.type))
-    );
-  }
-
-  private isConstantList(list: Syntax): boolean {
-    return list.children.every(
-      (node) =>
-        node.type === 'comment' ||
-        (node.type === 'initializer_list'
-          ? this.isConstantList(node)
-          : this.isConstantInitializer(this.compileExpression(node)))
-    );
+    return { run, isConstant: run.isConstant === true, isCreation };
   }
 
   staticInitializer(global: GlobalInfo, type: Type, value: Syntax | undefined, row: number): (frame: Frame) => void {
@@ -1552,7 +1534,7 @@ export class Compiler extends StatementCompiler {
   copyInitializer(type: Type, expr: Expr, row: number, isList: boolean): Initializer {
     if (type.kind === 'array') {
       if (expr.literalBytes !== undefined && isCharacterArray(type))
-        return this.charArrayFromLiteral(type, expr.literalBytes, row);
+        return initializerWithConstancy(this.charArrayFromLiteral(type, expr.literalBytes, row), true);
       return this.error(row, `配列は ${typeName(expr.type)} 型の値では初期化できません。{...} を使ってください。`);
     }
     if (isList) this.checkNarrowing(expr, type, row);
@@ -1562,13 +1544,20 @@ export class Compiler extends StatementCompiler {
       expr.type.cls === type.cls &&
       expr.isTemporaryObject &&
       !expr.isLvalue
-    ) {
-      return (frame, target, zeroInitialize) => expr.run(frame, zeroInitialize, asObject(target));
-    }
-    const converted = this.convert(expr, unqualified(type), row).run;
+    )
+      return this.objectInitializer(expr);
+    const converted = this.convert(expr, unqualified(type), row);
     return type.kind === 'class'
-      ? (frame, target, zeroInitialize) => converted(frame, zeroInitialize, asObject(target))
-      : (converted as Eval<Value>);
+      ? this.objectInitializer(converted)
+      : initializerWithConstancy(converted.run as Eval<Value>, this.isConstantInitializer(converted));
+  }
+
+  private objectInitializer(expr: Expr): Initializer {
+    return initializerWithConstancy(
+      (frame, target, zeroInitialize, referenceLifetime) =>
+        expr.run(frame, zeroInitialize, asObject(target), referenceLifetime),
+      expr.constantInitialization === true
+    );
   }
 
   private charArrayFromLiteral(type: Extract<Type, { kind: 'array' }>, bytes: string, row: number): Initializer {
@@ -1604,10 +1593,7 @@ export class Compiler extends StatementCompiler {
 
   defaultInitializer(type: Type, row: number): Initializer {
     this.checkConstDefault(type, row);
-    if (type.kind === 'class') {
-      const run = this.defaultConstructed(type.cls, row, false).run;
-      return (frame, target, zeroInitialize) => run(frame, zeroInitialize, asObject(target));
-    }
+    if (type.kind === 'class') return this.objectInitializer(this.defaultConstructed(type.cls, row, false));
     if (type.kind === 'array') {
       const length = type.length ?? 0;
       const element = this.defaultInitializer(type.of, row);
@@ -1713,18 +1699,14 @@ export class Compiler extends StatementCompiler {
         if (run) return run;
       }
       if (isAggregate) return this.aggregateInitializer(type.cls, elements, row);
-      if (elements.length === 0) {
-        const run = this.defaultConstructed(type.cls, row, true).run;
-        return (frame, target, zeroInitialize) => run(frame, zeroInitialize, asObject(target));
-      }
+      if (elements.length === 0) return this.objectInitializer(this.defaultConstructed(type.cls, row, true));
       const args = elements.map((element) => this.argument(element));
       const resolved = this.resolveConstructor(type.cls, args, row, true);
-      const run = this.constructWith(type.cls, resolved, args, row).run;
-      return (frame, target, zeroInitialize) => run(frame, zeroInitialize, asObject(target));
+      return this.objectInitializer(this.constructWith(type.cls, resolved, args, row));
     }
     if (elements.length === 0) {
       const zero = zeroOf(type);
-      return () => zero;
+      return initializerWithConstancy(() => zero, true);
     }
     if (elements.length > 1)
       return this.error(row, `${typeName(type)} 型の値を初期化する {...} には、値を1つだけ書いてください。`);
@@ -1884,8 +1866,11 @@ export class Compiler extends StatementCompiler {
     const take = this.takeClausesForArrayMember(array.type, clauses, row);
     return () => {
       const initialize = take();
-      return (frame, _target, zeroInitialize, referenceLifetime) =>
-        array.make((initialize(frame, undefined, zeroInitialize, referenceLifetime) as ArrayStore).values);
+      return initializerWithConstancy(
+        (frame, _target, zeroInitialize, referenceLifetime) =>
+          array.make((initialize(frame, undefined, zeroInitialize, referenceLifetime) as ArrayStore).values),
+        initialize.isConstant === true
+      );
     };
   }
 
@@ -1910,14 +1895,24 @@ export class Compiler extends StatementCompiler {
       const elementType = type.of;
       const rest = inits.length === length ? undefined : this.initializeList(elementType, [], row);
       const destroy = this.destroyerOf(elementType);
-      return (frame, target, zeroInitialize, referenceLifetime) =>
-        this.fillArray(
-          frame,
-          length,
-          (f, storage, index) => (inits[index] ?? (rest as Initializer))(f, storage, zeroInitialize, referenceLifetime),
-          destroy,
-          arrayStorage(target)
-        );
+      return initializerWithConstancy(
+        (frame, target, zeroInitialize, referenceLifetime) =>
+          this.fillArray(
+            frame,
+            length,
+            (f, storage, index) => {
+              const init = inits[index];
+              return init
+                ? init(f, storage, zeroInitialize, referenceLifetime)
+                : withTemporaries(f, (elementFrame) =>
+                    (rest as Initializer)(elementFrame, storage, zeroInitialize, 'full-expression')
+                  );
+            },
+            destroy,
+            arrayStorage(target)
+          ),
+        inits.every((init) => init.isConstant) && (!rest || rest.isConstant === true)
+      );
     };
   }
 
@@ -1957,7 +1952,9 @@ export class Compiler extends StatementCompiler {
       supplied[index] ? undefined : (this.aggregateDefaults.get(field)?.() ?? this.bindAggregateDefault(field, row))
     );
     const destroyers = fields.map((field) => this.destroyerOf(field.type));
-    return (frame, target, zeroInitialize, referenceLifetime) => {
+    const isConstant =
+      !cls.destructor && fields.every((_field, index) => (supplied[index] ?? defaults[index])?.isConstant);
+    return initializerWithConstancy((frame, target, zeroInitialize, referenceLifetime) => {
       const object = newObject(frame, cls, zeroInitialize, asObject(target));
       const owner = referenceLifetime === 'full-expression' ? referenceLifetime : object;
       const receiver = new Ptr(new Box(object, false), 0);
@@ -1972,7 +1969,7 @@ export class Compiler extends StatementCompiler {
             const target = initializerTarget(object.values[fields[index].index]);
             const value = init
               ? init(frame, target, zeroInitialize, owner)
-              : frame.runtime.withReceiver(receiver, (f) =>
+              : frame.runtime.withReceiver(frame, receiver, (f) =>
                   (defaults[index] as Initializer)(f, target, zeroInitialize, owner)
                 );
             object.values[fields[index].index] = value;
@@ -1989,7 +1986,7 @@ export class Compiler extends StatementCompiler {
       } finally {
         frame.pending.length = mark;
       }
-    };
+    }, isConstant);
   }
 
   private bindAggregateDefault(field: FieldInfo, row: number): Initializer {
@@ -2006,8 +2003,11 @@ export class Compiler extends StatementCompiler {
         node.type === 'initializer_list'
           ? this.listInitializer(field.type, node, node.row)
           : this.copyInitializer(field.type, this.compileExpression(node), node.row, false);
-      return (frame, target, zeroInitialize, referenceLifetime) =>
-        withTemporaries(frame, (f) => initialize(f, target, zeroInitialize, referenceLifetime));
+      return initializerWithConstancy(
+        (frame, target, zeroInitialize, referenceLifetime) =>
+          withTemporaries(frame, (f) => initialize(f, target, zeroInitialize, referenceLifetime)),
+        initialize.isConstant === true
+      );
     } finally {
       this.context = previous;
     }

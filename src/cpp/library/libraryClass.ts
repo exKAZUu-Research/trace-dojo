@@ -1,6 +1,6 @@
-import type { Expr } from '../expr';
+import type { Expr, Initializer } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import type { Eval, Frame } from '../runtime';
+import type { Frame } from '../runtime';
 import type { Syntax } from '../syntax';
 import type { ArrayType, ClassInfo, FunctionInfo, Type } from '../types';
 import type { CObject, Value } from '../values';
@@ -14,6 +14,7 @@ export interface LibraryClass {
   readonly args: readonly Type[];
   readonly ownedTypes?: readonly Type[];
   readonly assignmentCopies?: boolean;
+  readonly hasConstantConstructors?: boolean;
   readonly aggregateArray?: { type: ArrayType; make: (items: Value[]) => Value };
   readonly additionalPublicBases?: readonly ClassInfo[];
   /** `sizeof` of the class in libc++ on arm64. */
@@ -31,7 +32,7 @@ export interface LibraryClass {
    * Compiles list-initialization (`std::vector<int> v = {1, 2};`) when the class has an `std::initializer_list`
    * constructor that takes the elements, or gives undefined to initialize through the other constructors.
    */
-  listInitializer?: (compiler: ExpressionCompiler, elements: Syntax[], row: number) => Eval<Value> | undefined;
+  listInitializer?: (compiler: ExpressionCompiler, elements: Syntax[], row: number) => Initializer | undefined;
   defaultInitializer?: (compiler: ExpressionCompiler, row: number, valueInitialize: boolean) => Expr['run'];
   /**
    * Compiles a call of a member function that constructs an element from its arguments, such as `emplace_back`,

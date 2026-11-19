@@ -6,12 +6,17 @@ import type { ArrayStore, CObject, Ptr, Value } from './values';
 export type ReferenceLifetime = CObject | 'full-expression';
 export type InitializerTarget = ArrayStore | CObject;
 
-export type Initializer = (
+export type Initializer = ((
   frame: Frame,
   target?: InitializerTarget,
   zeroInitialize?: boolean,
   referenceLifetime?: ReferenceLifetime
-) => Value;
+) => Value) & { isConstant?: boolean };
+
+export function initializerWithConstancy(run: Initializer, isConstant: boolean): Initializer {
+  if (isConstant) run.isConstant = true;
+  return run;
+}
 
 /**
  * A compiled expression. An lvalue evaluates to the location it designates (a `Ptr`); a prvalue evaluates to its
@@ -21,7 +26,12 @@ export interface Expr {
   isAssignmentList?: boolean;
   type: Type;
   isLvalue: boolean;
-  run: (frame: Frame, zeroInitialize?: boolean, destination?: CObject) => Value | Ptr;
+  run: (
+    frame: Frame,
+    zeroInitialize?: boolean,
+    destination?: CObject,
+    referenceLifetime?: ReferenceLifetime
+  ) => Value | Ptr;
   row: number;
   /** The value of a constant expression of arithmetic type, which array lengths and `case` labels need. */
   constant?: number | bigint;
@@ -34,6 +44,7 @@ export interface Expr {
   /** An lvalue location or pointer value that can be formed before dynamic initialization. */
   staticAddress?: boolean;
   constantPointerValue?: boolean;
+  constantInitialization?: boolean;
   /** The bytes of a string literal, which may initialize a `char` array. */
   literalBytes?: string;
   /** The functions a name denotes, which a call resolves among. */

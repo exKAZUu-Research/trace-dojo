@@ -204,6 +204,17 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     };
   }
 
+  protected isConstantInitializer(expr: Expr): boolean {
+    const value = this.rvalue(expr);
+    return (
+      value.constantInitialization === true ||
+      value.constant !== undefined ||
+      value.staticAddress === true ||
+      value.literalBytes !== undefined ||
+      value.isNullConstant === true
+    );
+  }
+
   /** An lvalue designating a temporary holding a prvalue, which lives until the end of the full-expression. */
   materialize(expr: Expr): Expr {
     if (expr.isLvalue) return expr;
@@ -555,7 +566,16 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
             object.needsConstruction = false;
             return object;
           });
-    return { type: classType(cls), isLvalue: false, row, run, onlyCalls: true, isTemporaryObject: true };
+    return {
+      type: classType(cls),
+      isLvalue: false,
+      row,
+      run,
+      onlyCalls: true,
+      isTemporaryObject: true,
+      constantInitialization:
+        cls.library?.hasConstantConstructors && args.every((arg) => this.isConstantInitializer(arg)),
+    };
   }
 
   /**

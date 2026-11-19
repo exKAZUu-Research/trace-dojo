@@ -1,4 +1,6 @@
+#include <array>
 #include <iostream>
+#include <utility>
 
 int observe();
 int first = observe();
@@ -14,7 +16,14 @@ int& memberAlias = plain.value;
 int* chosen = true ? &scalar : &plain.value;
 constexpr const int* source = &scalar;
 const int* copied = source;
-int observe() { return *addresses[0] + *addresses[1] + *addresses[2] + alias + temporary + *member + memberAlias + *chosen + *copied; }
+constexpr const int* empty = nullptr;
+struct WithDefault { int value = 3; };
+WithDefault defaulted{};
+WithDefault overridden{4};
+std::pair<int, int> pair{1, 2};
+std::array<std::pair<int, int>, 2> nested{{{2, 3}, {4, 5}}};
+int observe() { return *addresses[0] + *addresses[1] + *addresses[2] + alias + temporary + *member + memberAlias + *chosen + *copied
+        + defaulted.value + overridden.value + pair.second + nested[1].second + (empty == nullptr); }
 
 struct Part {
   int field;
@@ -35,6 +44,14 @@ struct Writes {
   Writes() : assigned(entries[1][0] = 7) { std::cout << assigned << entries[1][0]; }
 };
 Writes writes;
+struct Copy {
+  Plain nested;
+  int array[2];
+};
+Copy original{{7}, {8, 9}};
+Copy duplicate = original;
+int* duplicateMember = &duplicate.nested.value;
+int* duplicateElement = &duplicate.array[1];
 
 int save(int n) {
   if (n < 0) throw n;
@@ -49,7 +66,7 @@ void capture(int n) {
 }
 
 int main() {
-  std::cout << ':' << first << ':';
+  std::cout << ':' << first << ':' << *duplicateMember << *duplicateElement << ':';
   try {
     capture(-1);
   } catch (int) {

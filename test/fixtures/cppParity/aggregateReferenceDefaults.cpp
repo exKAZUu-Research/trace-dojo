@@ -17,6 +17,13 @@ struct DefaultDerived { const Derived& value{Derived{}}; };
 
 void take(Ref value) { std::cout << 'T'; }
 
+Ref namedReturn() {
+  Ref result{Derived{}};
+  return result;
+}
+Ref directReturn() { return Ref{Derived{}}; }
+Ref bracedReturn() { return {Derived{}}; }
+
 int main() {
   DefaultRef first{};
   DefaultRef second{9};
@@ -33,8 +40,8 @@ int main() {
     std::cout << 'Z';
   }
   {
-    DefaultRef builtIn[2]{};
-    std::array<DefaultRef, 2> library{};
+    DefaultBase builtIn[2]{};
+    std::array<DefaultDerived, 2> library{};
     DefaultBase explicitBuiltIn[2]{{}, {}};
     std::array<DefaultDerived, 2> explicitLibrary{{{}, {}}};
     std::cout << 'A';
@@ -45,4 +52,10 @@ int main() {
   Ref* heap = new Ref{Derived{}};
   std::cout << 'H';
   delete heap;
+  Ref named = namedReturn();
+  std::cout << 'N';
+  Ref direct = directReturn();
+  std::cout << 'R';
+  Ref braced = bracedReturn();
+  std::cout << 'L';
 }

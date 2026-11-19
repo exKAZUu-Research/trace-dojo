@@ -24,7 +24,7 @@ import {
   unqualified,
   withConst,
 } from './types';
-import { Box, type CObject, endLifetime, Liveness, Ptr, type Store, UNINIT, type Value } from './values';
+import { ArrayStore, Box, CObject, endLifetime, Liveness, Ptr, type Store, UNINIT, type Value } from './values';
 
 /** The type an `auto` declarator deduced, which the declaration's other declarators must agree with. */
 export type ReferenceBinding = { type: Extract<Type, { kind: 'reference' }>; isConstant?: boolean } & (
@@ -516,16 +516,6 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       isConstant: isDirect && target.staticAddress,
       loc: this.convert(target, type, row).run as Eval<Ptr>,
     };
-  }
-
-  protected isConstantInitializer(expr: Expr): boolean {
-    const value = this.rvalue(expr);
-    return (
-      value.constant !== undefined ||
-      value.staticAddress === true ||
-      value.literalBytes !== undefined ||
-      value.isNullConstant === true
-    );
   }
 
   /**
@@ -1065,7 +1055,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (node.type === 'initializer_list') {
       if (returnType.kind === 'reference') return this.error(row, '参照を返す関数は {...} を返せません。');
       this.context.noteReturn(undefined);
-      return this.listInitializer(returnType, node, row);
+      const initialize = this.listInitializer(returnType, node, row);
+      return (frame) => initialize(frame, undefined, false, 'full-expression');
     }
     const expr = this.compileExpression(node);
     if (returnType.kind === 'reference') {
@@ -1073,7 +1064,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
     const local = this.returnedLocal(node, expr, returnType);
     this.context.noteReturn(local);
-    if (!local) return this.copyInitializer(returnType, expr, row, false);
+    if (!local) {
+      const initialize = this.copyInitializer(returnType, expr, row, false);
+      return (frame) => initialize(frame, undefined, false, 'full-expression');
+    }
     const { slot } = local;
     const share: Eval<Value> = (frame) => {
       frame.nrvoSlot = slot;
@@ -1300,12 +1294,23 @@ export function endScope(
   for (let index = slots.length - 1; index >= 0; index--) {
     const slot = slots[index];
     const store = frame.slots[slot];
-    if (store instanceof Box && store.liveness === Liveness.Alive && frame.nrvoSlot !== slot) {
-      if (store.value !== UNINIT) destructibles.get(slot)?.(frame, store.value);
-      endLifetime(store);
+    if (store instanceof Box && store.liveness === Liveness.Alive) {
+      if (frame.nrvoSlot === slot) {
+        endReturnedReferenceLifetimes(frame, store.value);
+      } else {
+        if (store.value !== UNINIT) destructibles.get(slot)?.(frame, store.value);
+        endLifetime(store);
+      }
     }
     frame.slots[slot] = undefined;
   }
+}
+
+function endReturnedReferenceLifetimes(frame: Frame, value: Value): void {
+  if (!(value instanceof CObject || value instanceof ArrayStore)) return;
+  for (let index = value.values.length - 1; index >= 0; index--)
+    endReturnedReferenceLifetimes(frame, value.values[index]);
+  if (value instanceof CObject) value.destroyReferenceTemporaries(frame);
 }
 
 function doNothing(): undefined {}
