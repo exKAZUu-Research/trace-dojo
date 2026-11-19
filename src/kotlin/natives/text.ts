@@ -236,7 +236,9 @@ function defineStrings(): void {
           'java.lang.IllegalArgumentException',
           `Desired length ${length as number} is less than zero.`
         );
-      return result(frame, text(receiver).padStart(length as number, charToString(char as number)));
+      // The padded text is charged before it is built, as its length may be far beyond the limit.
+      frame.runtime.allocateString(frame, length as number);
+      return text(receiver).padStart(length as number, charToString(char as number));
     },
     'String.padEnd(Int, Char)': (frame, receiver, [length, char]) => {
       if ((length as number) < 0)
@@ -245,7 +247,9 @@ function defineStrings(): void {
           'java.lang.IllegalArgumentException',
           `Desired length ${length as number} is less than zero.`
         );
-      return result(frame, text(receiver).padEnd(length as number, charToString(char as number)));
+      // The padded text is charged before it is built, as its length may be far beyond the limit.
+      frame.runtime.allocateString(frame, length as number);
+      return text(receiver).padEnd(length as number, charToString(char as number));
     },
     'String.equals(String?, Boolean)': (_frame, receiver, [other, ignoreCase]) => {
       if (other === undefined) return false;
@@ -636,6 +640,7 @@ function defineBuilder(): void {
     const current = builder(receiver).builder as string;
     const size = length as number;
     if (size < 0) throwError(frame, 'java.lang.StringIndexOutOfBoundsException', `String index out of range: ${size}`);
+    frame.runtime.allocateString(frame, size);
     setBuilder(frame, receiver, size <= current.length ? current.slice(0, size) : current.padEnd(size, '\0'));
     return UNIT;
   });

@@ -7,6 +7,7 @@ export const CORE_SOURCE = kotlin`
 package kotlin
 
 open external class Any {
+    external constructor()
     open external operator fun equals(other: Any?): Boolean
     open external fun hashCode(): Int
     open external fun toString(): String

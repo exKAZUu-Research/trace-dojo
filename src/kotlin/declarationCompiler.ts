@@ -430,10 +430,10 @@ export abstract class DeclarationCompiler extends StatementCompiler {
             : visibilityOf(primary?.modifiers ?? { keywords: new Set(), annotations: [] });
       const ctorScope = new Scope(scope, undefined);
       constructorSymbol.params = (primary?.params ?? []).map((param) => this.declareParameter(ctorScope, param));
-      if (
-        !(entry.file.isLibrary && primary === undefined && this.hasSecondaryConstructors(decl)) &&
-        !(entry.file.isLibrary && decl.modifiers.keywords.has('external') && primary === undefined && symbol.isAbstract)
-      ) {
+      // An external class of the library has only the constructors it declares: the natives make the others' instances,
+      // as `EmptyList`'s, which a program cannot create.
+      const isExternal = entry.file.isLibrary && decl.modifiers.keywords.has('external');
+      if (!(entry.file.isLibrary && primary === undefined && (this.hasSecondaryConstructors(decl) || isExternal))) {
         symbol.constructors.push(constructorSymbol);
       }
       entry.constructorSymbol = constructorSymbol;

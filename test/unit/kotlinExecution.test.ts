@@ -177,6 +177,12 @@ fun square(x: Int) = x * x`,
     stdout:
       '{1000=3, 17=4, 10=2, 20=1}\n1\n[a, b,c]\na\n6\n1\ntrue\n[a, bb]\nab\njava.util.FormatFlagsConversionMismatchException: Conversion = x, Flags = ,\njava.lang.StringIndexOutOfBoundsException: Range [2, 1) out of bounds for length 3\njava.util.NoSuchElementException: Progression 1..0 is empty.\n',
   },
+  {
+    name: 'an instance of Any',
+    source:
+      'fun main() {\n    val a = Any()\n    println(a == a)\n    println(a.toString().startsWith("java.lang.Object@"))\n}',
+    stdout: 'true\ntrue\n',
+  },
 ])('runs $name as Kotlin does', ({ source, stdout }) => {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
@@ -300,6 +306,7 @@ test.each([
   ],
   ['an unknown escape', false, 'fun main() {\n    println("\\q")\n}'],
   ['a variable of the type Nothing?', true, 'fun main() {\n    val n = null\n    println(n)\n}'],
+  ['a class of the library that Kotlin does not have', false, 'fun main() {\n    println(EmptyList<Int>())\n}'],
 ])('decides whether %s compiles as kotlinc does', (_name, compiles, source) => {
   expect(executeProgram('kotlin', source).kind === 'compileError').toBe(!compiles);
 });
@@ -317,4 +324,11 @@ test.each([
   ],
 ])('rejects %s as unavailable', (_name, source, message) => {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'compileError', diagnostics: [{ message }] });
+});
+
+test("prints the same identity hashes whatever ran before in the server's process", () => {
+  const program = 'class A\nfun main() {\n    println(hashSetOf(A(), A(), A()).map { it.hashCode() })\n}';
+  const first = executeProgram('kotlin', program);
+  executeProgram('kotlin', 'class B\nfun main() {\n    repeat(100) { println(B()) }\n}');
+  expect(executeProgram('kotlin', program)).toEqual(first);
 });

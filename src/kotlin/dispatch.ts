@@ -63,6 +63,10 @@ function convertValue(value: Value, fromRepr: Repr, toRepr: Repr): Value {
 
 type Bridge = (frame: Frame, receiver: Value, args: Value[], callRow: number | undefined) => Value;
 
+/**
+ * The bridges by the overriding function, which belongs to one run, and then by the overridden one. Keyed the other
+ * way, a library function such as `Any.toString` would keep every run's overrides alive for the life of the process.
+ */
 const bridges = new WeakMap<FunctionSymbol, Map<FunctionSymbol, Bridge>>();
 
 /**
@@ -70,12 +74,12 @@ const bridges = new WeakMap<FunctionSymbol, Map<FunctionSymbol, Bridge>>();
  * result between their representations where the two declare them differently, as the JVM's bridge methods do.
  */
 function bridge(symbol: FunctionSymbol, target: FunctionSymbol): Bridge {
-  let byTarget = bridges.get(symbol);
-  if (!byTarget) {
-    byTarget = new Map();
-    bridges.set(symbol, byTarget);
+  let bySymbol = bridges.get(target);
+  if (!bySymbol) {
+    bySymbol = new Map();
+    bridges.set(target, bySymbol);
   }
-  const existing = byTarget.get(target);
+  const existing = bySymbol.get(symbol);
   if (existing) return existing;
   const from = parameterReprs(symbol);
   const to = parameterReprs(target);
@@ -98,7 +102,7 @@ function bridge(symbol: FunctionSymbol, target: FunctionSymbol): Bridge {
         );
         return convertValue(result, fromResult, toResult);
       };
-  byTarget.set(target, created);
+  bySymbol.set(symbol, created);
   return created;
 }
 

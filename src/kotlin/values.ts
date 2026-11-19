@@ -67,6 +67,17 @@ export class KStore extends HashStore<Value, Frame> {
 }
 
 let nextIdentity = 1;
+let firstRunIdentity: number | undefined;
+
+/**
+ * Numbers a run's objects from where the first run started, after the library's own objects, so that the identity
+ * hashes of a program, and the order of hash sets and the map keys of traces that follow them, do not depend on the
+ * runs before it in the server's process.
+ */
+export function startRunIdentities(): void {
+  firstRunIdentity ??= nextIdentity;
+  nextIdentity = firstRunIdentity;
+}
 
 /** An instance of a class, including the standard library's: its fields, and what a native class holds besides. */
 export class KObject {

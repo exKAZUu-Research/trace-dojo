@@ -262,8 +262,9 @@ function definePrimitives(): void {
   void INT_KINDS;
 }
 
-// code-gauge-allow functionNcss 31 -- registers the natives of one class together, in the order the prelude declares them.
+// code-gauge-allow functionNcss 32 -- registers the natives of one class together, in the order the prelude declares them.
 function defineAnyAndString(): void {
+  defineNative('kotlin.Any.<init>()', () => UNIT);
   defineNative('kotlin.Any.equals(Any?)', (_frame, receiver, [other]) => receiver === other);
   defineNative('kotlin.Any.hashCode()', (_frame, receiver) => identityHash(receiver));
   defineNative('kotlin.Any.toString()', (frame, receiver) => {

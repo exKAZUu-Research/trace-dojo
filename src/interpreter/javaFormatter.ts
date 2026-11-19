@@ -73,6 +73,8 @@ function checkSpecifier<V>(
 ): void {
   const lower = conversion.toLowerCase();
   if (lower === 'n') return;
+  // A width or precision makes text of its length, which is charged before anything is built.
+  values.scan(Number(width ?? 0) + Number(precision?.slice(1) ?? 0));
   if (precision && 'dxoc'.includes(lower)) {
     values.fail('IllegalFormatPrecisionException', precision.slice(1));
   }

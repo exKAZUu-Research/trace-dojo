@@ -8,7 +8,7 @@ import { compileKotlin, libraryExceptions } from './library';
 import { libraryClass } from './natives/registry';
 import { parseKotlin } from './parse';
 import { Frame, type FunctionInfo, KotlinThrow, ProgramExit, Runtime } from './runtime';
-import { KObject, type Value } from './values';
+import { KObject, startRunIdentities, type Value } from './values';
 
 export function executeKotlinProgram(source: string, input?: ProgramInput): ProgramExecution {
   let compiled: CompiledProgram;
@@ -47,6 +47,7 @@ export function runProgram(
   program: CompiledProgram,
   onMainExit?: (frame: Frame) => void
 ): ProgramRun {
+  startRunIdentities();
   let finalTurtles: ProgramRun['finalTurtles'] = [];
   const root = new Frame(runtime, ROOT_INFO, [], undefined, undefined);
   runtime.globals = Array.from({ length: program.globalCount });
