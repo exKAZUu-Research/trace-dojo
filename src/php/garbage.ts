@@ -187,7 +187,8 @@ function countAfterDestruction(
     runtime,
     (value) => !(value instanceof PhpArray && afterArrays.has(value))
   );
-  const cyclic = cyclicObjects(graph, remaining);
+  const cyclicArrays = new Set<PhpArray>(arrayCandidates);
+  const cyclic = cyclicObjects(graph, remaining, cyclicArrays);
   const referenced = referencedGarbage(graph, [...remaining, ...arrayCandidates]);
   // Zend drops the last temporary reference to the current destructor's receiver without freeing it.
   for (const object of destructedInBuffer) if (allowed.has(object) && !referenced.has(object)) cyclic.add(object);
@@ -198,7 +199,7 @@ function countAfterDestruction(
     allowed
   ).objects;
   const excluded = new Set(destructible.filter((object) => !protectedObjects.has(object)));
-  const counted = collectibleGraph([...cyclic, ...arrayCandidates], afterArrays, excluded, allowed);
+  const counted = collectibleGraph([...cyclic, ...cyclicArrays], afterArrays, excluded, allowed);
   return counted.objects.size + counted.arrays.size;
 }
 
@@ -917,7 +918,7 @@ function freeable(garbage: PhpObject[], runtime: Runtime, include?: (value: Ref 
 
 // code-gauge-allow functionNcss 45 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function cyclicObjects(graph: CollectionGraph, garbage: PhpObject[]): Set<PhpObject> {
+function cyclicObjects(graph: CollectionGraph, garbage: PhpObject[], cyclicArrays?: Set<PhpArray>): Set<PhpObject> {
   // Tarjan's strongly connected components finds the objects on cycles.
   let index = 0;
   const indices = new Map<CollectionNode, number>();
@@ -957,13 +958,18 @@ function cyclicObjects(graph: CollectionGraph, garbage: PhpObject[]): Set<PhpObj
         do {
           member = stack.pop() as CollectionNode;
           onStack.delete(member);
-          if (isCycle && member instanceof PhpObject) cyclic.add(member);
+          if (isCycle) recordCyclicNode(member, cyclic, cyclicArrays);
         } while (member !== node);
       }
     }
   };
   for (const object of garbage) if (!indices.has(object)) strongConnect(object);
   return cyclic;
+}
+
+function recordCyclicNode(node: CollectionNode, objects: Set<PhpObject>, arrays?: Set<PhpArray>): void {
+  if (node instanceof PhpObject) objects.add(node);
+  else if (node instanceof PhpArray) arrays?.add(node);
 }
 
 /** Owner order follows retained slots; a handle is freed after its owner's children. */

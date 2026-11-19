@@ -3679,4 +3679,18 @@ $v = 1; $a = [[$v]]; $a[] =& $a; unset($a);
 echo gc_collect_cycles();
 `);
   expect(nestedCycleArrayCount).toMatchObject({ kind: 'executed', stdout: '2,3,2' });
+
+  const cycleBehindDestructor = run(String.raw`<?php
+class N { public $p; function __destruct() { echo 'D'; } }
+$a = []; $b = []; $n = new N; $b[0] =& $b; $b[1] = $n; $a[0] =& $a; $n->p =& $a;
+unset($a, $n, $b);
+echo '|', gc_collect_cycles(), ';';
+$a = []; $b = []; $d1 = new N; $d2 = new N; $b[0] =& $b; $b[1] = $d1; $d1->p = $d2; $a[0] =& $a; $d2->p =& $a;
+unset($a, $d1, $d2, $b);
+echo '|', gc_collect_cycles(), ';';
+$v = 1; $b = []; $d = new N; $b[0] =& $b; $b[1] = $d; $d->p = [$v];
+unset($d, $b);
+echo '|', gc_collect_cycles();
+`);
+  expect(cycleBehindDestructor).toMatchObject({ kind: 'executed', stdout: '|D2;|DD2;|D1' });
 });
