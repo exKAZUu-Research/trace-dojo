@@ -2,13 +2,18 @@ import type {
   Accessor,
   CompilationUnit,
   ConstraintClause,
+  EventFieldDeclaration,
+  FieldDeclaration,
+  MethodDeclaration,
   Modifiers,
   NamespaceDeclaration,
   Parameter,
   Position,
   TypeDeclaration,
+  TypeNode,
   TypeParameterDeclaration,
   UsingDirective,
+  VariableDeclarator,
 } from './ast';
 import { BinderBase, namespacePathOf, SPECIAL_TYPE_NAMES, type TypeContext } from './binderBase';
 import type { NamespaceSymbol } from './namespaces';
@@ -206,23 +211,8 @@ export class DeclarationBinder extends BinderBase {
 
   private resolveBases(type: DeclaredType): void {
     const { symbol, declaration, context } = type;
-    const library = this.library;
     if (symbol.kind === 'enum') {
-      symbol.baseType = this.wellKnown.enum;
-      const underlying = declaration.enumUnderlyingType
-        ? this.resolveType(declaration.enumUnderlyingType, context)
-        : this.intType;
-      const allowed = ['byte', 'sbyte', 'short', 'ushort', 'int', 'uint', 'long', 'ulong'];
-      if (underlying.kind !== 'named' || !allowed.includes(underlying.symbol.special ?? '')) {
-        this.error(
-          declaration,
-          'CS1008',
-          'byte、sbyte、short、ushort、int、uint、long または ulong のいずれかの型を使用してください'
-        );
-        symbol.enumUnderlying = this.intType;
-      } else {
-        symbol.enumUnderlying = underlying;
-      }
+      this.resolveEnumUnderlying(type);
       return;
     }
     if (symbol.kind === 'delegate') {
@@ -230,73 +220,9 @@ export class DeclarationBinder extends BinderBase {
       return;
     }
     const bases = declaration.bases.map((node) => ({ node, type: this.resolveType(node, context) }));
-    for (const [index, { node, type: baseType }] of bases.entries()) {
-      if (baseType.kind === 'error') continue;
-      if (baseType.kind !== 'named') {
-        this.error(
-          node,
-          'CS0527',
-          `インターフェイス リストの型 '${displayType(baseType)}' はインターフェイスではありません`
-        );
-        continue;
-      }
-      if (baseType.symbol.kind === 'interface') {
-        if (symbol.interfaces.some((existing) => sameType(existing, baseType))) {
-          this.error(node, 'CS0528', `'${displayType(baseType)}' は既にインターフェイス リストに存在します`);
-        }
-        symbol.interfaces.push(baseType);
-        continue;
-      }
-      if (symbol.kind !== 'class' || index > 0) {
-        if (symbol.kind === 'class' && index > 0) {
-          this.error(
-            node,
-            'CS1721',
-            `クラス '${displayTypeSymbol(symbol)}' は複数の基底クラス ('${displayType(symbol.baseType ?? this.objectType)}' と '${displayType(baseType)}') を持つことができません`
-          );
-        } else {
-          this.error(
-            node,
-            'CS0527',
-            `インターフェイス リストの型 '${displayType(baseType)}' はインターフェイスではありません`
-          );
-        }
-        continue;
-      }
-      if (baseType.symbol.isSealed || baseType.symbol.isStatic) {
-        if (baseType.symbol.isStatic)
-          this.error(
-            node,
-            'CS0709',
-            `'${displayTypeSymbol(symbol)}': 静的クラス '${displayType(baseType)}' から派生することはできません`
-          );
-        else
-          this.error(
-            node,
-            'CS0509',
-            `'${displayTypeSymbol(symbol)}': シール型 '${displayType(baseType)}' から派生することはできません`
-          );
-        continue;
-      }
-      if (
-        !symbol.isLibrary &&
-        ['valueType', 'enum', 'array', 'delegate', 'multicastDelegate'].includes(baseType.symbol.special ?? '')
-      ) {
-        this.error(
-          node,
-          'CS0644',
-          `'${displayTypeSymbol(symbol)}' は特殊クラス '${displayType(baseType)}' から派生することはできません`
-        );
-        continue;
-      }
-      if (symbol.isRecord && !baseType.symbol.isRecord && baseType.symbol !== this.objectType.symbol) {
-        this.error(node, 'CS8864', "レコードは、レコードまたは 'object' からのみ継承できます。");
-        continue;
-      }
-      symbol.baseType = baseType;
-    }
+    for (const [index, { node, type: baseType }] of bases.entries()) this.addBase(symbol, node, baseType, index);
     if (symbol.kind === 'struct') symbol.baseType = this.wellKnown.valueType;
-    else if (symbol.kind === 'class' && !symbol.baseType && symbol !== library.specials.get('object'))
+    else if (symbol.kind === 'class' && !symbol.baseType && symbol !== this.library.specials.get('object'))
       symbol.baseType = this.objectType;
     if (
       symbol.kind === 'class' &&
@@ -307,6 +233,97 @@ export class DeclarationBinder extends BinderBase {
     ) {
       symbol.baseType = this.objectType;
     }
+  }
+
+  private resolveEnumUnderlying({ symbol, declaration, context }: DeclaredType): void {
+    symbol.baseType = this.wellKnown.enum;
+    const underlying = declaration.enumUnderlyingType
+      ? this.resolveType(declaration.enumUnderlyingType, context)
+      : this.intType;
+    const allowed = ['byte', 'sbyte', 'short', 'ushort', 'int', 'uint', 'long', 'ulong'];
+    if (underlying.kind !== 'named' || !allowed.includes(underlying.symbol.special ?? '')) {
+      this.error(
+        declaration,
+        'CS1008',
+        'byte、sbyte、short、ushort、int、uint、long または ulong のいずれかの型を使用してください'
+      );
+      symbol.enumUnderlying = this.intType;
+    } else {
+      symbol.enumUnderlying = underlying;
+    }
+  }
+
+  /** Adds one type of a declaration's base list as an interface or the base class, reporting an invalid one. */
+  private addBase(symbol: TypeSymbol, node: TypeNode, baseType: Type, index: number): void {
+    if (baseType.kind === 'error') return;
+    if (baseType.kind !== 'named') {
+      this.error(
+        node,
+        'CS0527',
+        `インターフェイス リストの型 '${displayType(baseType)}' はインターフェイスではありません`
+      );
+      return;
+    }
+    if (baseType.symbol.kind === 'interface') {
+      if (symbol.interfaces.some((existing) => sameType(existing, baseType))) {
+        this.error(node, 'CS0528', `'${displayType(baseType)}' は既にインターフェイス リストに存在します`);
+      }
+      symbol.interfaces.push(baseType);
+      return;
+    }
+    if (this.reportsInvalidBaseClass(symbol, node, baseType, index)) return;
+    symbol.baseType = baseType;
+  }
+
+  private reportsInvalidBaseClass(symbol: TypeSymbol, node: TypeNode, baseType: NamedType, index: number): boolean {
+    if (symbol.kind === 'class' && index > 0) {
+      this.error(
+        node,
+        'CS1721',
+        `クラス '${displayTypeSymbol(symbol)}' は複数の基底クラス ('${displayType(symbol.baseType ?? this.objectType)}' と '${displayType(baseType)}') を持つことができません`
+      );
+      return true;
+    }
+    if (symbol.kind !== 'class') {
+      this.error(
+        node,
+        'CS0527',
+        `インターフェイス リストの型 '${displayType(baseType)}' はインターフェイスではありません`
+      );
+      return true;
+    }
+    if (baseType.symbol.isStatic) {
+      this.error(
+        node,
+        'CS0709',
+        `'${displayTypeSymbol(symbol)}': 静的クラス '${displayType(baseType)}' から派生することはできません`
+      );
+      return true;
+    }
+    if (baseType.symbol.isSealed) {
+      this.error(
+        node,
+        'CS0509',
+        `'${displayTypeSymbol(symbol)}': シール型 '${displayType(baseType)}' から派生することはできません`
+      );
+      return true;
+    }
+    if (
+      !symbol.isLibrary &&
+      ['valueType', 'enum', 'array', 'delegate', 'multicastDelegate'].includes(baseType.symbol.special ?? '')
+    ) {
+      this.error(
+        node,
+        'CS0644',
+        `'${displayTypeSymbol(symbol)}' は特殊クラス '${displayType(baseType)}' から派生することはできません`
+      );
+      return true;
+    }
+    if (symbol.isRecord && !baseType.symbol.isRecord && baseType.symbol !== this.objectType.symbol) {
+      this.error(node, 'CS8864', "レコードは、レコードまたは 'object' からのみ継承できます。");
+      return true;
+    }
+    return false;
   }
 
   /** Orders types so that every type follows its base class and its containing type, reporting cycles. */
@@ -403,124 +420,31 @@ export class DeclarationBinder extends BinderBase {
     }
   }
 
-  // code-gauge-allow functionNcss 80 -- One case per kind of member declaration.
+  // code-gauge-allow functionNcss 42 -- One case per kind of member declaration.
+  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of member declaration.
   private declareMembers(type: DeclaredType): void {
-    const { symbol, declaration, context } = type;
+    const { symbol, declaration } = type;
     if (symbol.kind === 'enum') {
       this.declareEnumMembers(type);
       return;
     }
     if (symbol.kind === 'delegate') {
-      const invoke = new MethodSymbol('Invoke', symbol, 'delegateInvoke');
-      invoke.access = 'public';
-      invoke.parameters = this.resolveParameters(declaration.delegateParameters, context, invoke);
-      invoke.returnType = declaration.delegateReturnType
-        ? this.resolveType(declaration.delegateReturnType, context)
-        : VOID_TYPE;
-      symbol.invoke = invoke;
-      symbol.methods.push(invoke);
+      this.declareDelegateInvoke(type);
       return;
     }
     if (declaration.primaryParameters) this.declarePrimaryParameters(type);
     for (const member of declaration.members) {
       switch (member.kind) {
         case 'field': {
-          for (const declarator of member.declarators) {
-            const field = new FieldSymbol(declarator.name, ERROR_TYPE, symbol);
-            field.type = this.resolveType(member.type, context);
-            field.isStatic = member.modifiers.set.has('static') || member.modifiers.set.has('const');
-            field.isConst = member.modifiers.set.has('const');
-            field.isReadonly = member.modifiers.set.has('readonly');
-            field.access = accessibilityOf(member.modifiers, symbol.kind === 'interface' ? 'public' : 'private');
-            field.initializer = declarator.initializer;
-            field.row = declarator.row;
-            if (member.type.kind === 'varType' && field.type.kind === 'error') this.diagnostics.pop();
-            if (member.type.kind === 'varType')
-              this.error(
-                member.type,
-                'CS0825',
-                "コンテキスト キーワード 'var' は、ローカル変数宣言またはスクリプト コード内でのみ使用できます"
-              );
-            if (symbol.kind === 'interface' && !field.isStatic)
-              this.error(declarator, 'CS0525', 'インターフェイスにインスタンス フィールドを含めることはできません');
-            if (symbol.isStatic && !field.isStatic)
-              this.error(
-                declarator,
-                'CS0708',
-                `'${declarator.name}': 静的クラスでインスタンスのメンバーを宣言することはできません`
-              );
-            if (field.isConst && member.modifiers.set.has('static'))
-              this.error(
-                declarator,
-                'CS0504',
-                `定数 '${displayTypeSymbol(symbol)}.${declarator.name}' を static に設定することはできません`
-              );
-            if (
-              symbol.kind === 'struct' &&
-              !field.isStatic &&
-              declarator.initializer &&
-              !declaration.primaryParameters &&
-              !declaration.members.some((other) => other.kind === 'constructor')
-            ) {
-              this.error(
-                declarator,
-                'CS8983',
-                "'struct' でフィールド初期化子を使用するには、明示的に宣言されたコンストラクターが必要です。"
-              );
-            }
-            this.addMember(symbol, field, declarator);
-            symbol.fields.push(field);
-          }
+          for (const declarator of member.declarators) this.declareField(type, member, declarator);
           break;
         }
         case 'event': {
-          for (const declarator of member.declarators) {
-            const field = new FieldSymbol(declarator.name, this.resolveType(member.type, context), symbol);
-            field.isEvent = true;
-            field.isStatic = member.modifiers.set.has('static');
-            field.access = accessibilityOf(member.modifiers, 'private');
-            field.initializer = declarator.initializer;
-            field.row = declarator.row;
-            if (
-              field.type.kind !== 'error' &&
-              !(field.type.kind === 'named' && field.type.symbol.kind === 'delegate')
-            ) {
-              this.error(
-                declarator,
-                'CS0066',
-                `'${displayTypeSymbol(symbol)}.${declarator.name}': イベントはデリゲート型である必要があります`
-              );
-            }
-            this.addMember(symbol, field, declarator);
-            symbol.fields.push(field);
-          }
+          for (const declarator of member.declarators) this.declareEvent(type, member, declarator);
           break;
         }
         case 'method': {
-          const method = this.declareMethod(
-            symbol,
-            member.name,
-            'method',
-            member.modifiers,
-            member,
-            context,
-            member.typeParameters,
-            member.constraints
-          );
-          method.declaration = member;
-          const methodContext = this.methodContexts.get(method) as TypeContext;
-          method.returnType = this.resolveType(member.returnType, methodContext);
-          method.parameters = this.resolveParameters(member.parameters, methodContext, method);
-          method.isExtension = member.parameters[0]?.modifier === 'this';
-          this.attachNative(method, member.body === undefined);
-          this.checkMethodBody(method, member.body !== undefined, member);
-          if (method.name === symbol.name)
-            this.error(
-              member,
-              'CS0542',
-              `'${member.name}': メンバー名をそれを囲む型の名前と同じにすることはできません`
-            );
-          this.addMethod(symbol, method, member);
+          this.declareMethodMember(type, member);
           break;
         }
         case 'constructor': {
@@ -547,6 +471,119 @@ export class DeclarationBinder extends BinderBase {
     }
     if (symbol.isRecord) this.declareRecordMembers(type);
     this.declareImplicitConstructors(type);
+  }
+
+  private declareDelegateInvoke({ symbol, declaration, context }: DeclaredType): void {
+    const invoke = new MethodSymbol('Invoke', symbol, 'delegateInvoke');
+    invoke.access = 'public';
+    invoke.parameters = this.resolveParameters(declaration.delegateParameters, context, invoke);
+    invoke.returnType = declaration.delegateReturnType
+      ? this.resolveType(declaration.delegateReturnType, context)
+      : VOID_TYPE;
+    symbol.invoke = invoke;
+    symbol.methods.push(invoke);
+  }
+
+  private declareField(type: DeclaredType, member: FieldDeclaration, declarator: VariableDeclarator): void {
+    const { symbol, context } = type;
+    const field = new FieldSymbol(declarator.name, ERROR_TYPE, symbol);
+    field.type = this.resolveType(member.type, context);
+    field.isStatic = member.modifiers.set.has('static') || member.modifiers.set.has('const');
+    field.isConst = member.modifiers.set.has('const');
+    field.isReadonly = member.modifiers.set.has('readonly');
+    field.access = accessibilityOf(member.modifiers, symbol.kind === 'interface' ? 'public' : 'private');
+    field.initializer = declarator.initializer;
+    field.row = declarator.row;
+    if (member.type.kind === 'varType' && field.type.kind === 'error') this.diagnostics.pop();
+    this.checkField(type, member, declarator, field);
+    this.addMember(symbol, field, declarator);
+    symbol.fields.push(field);
+  }
+
+  private checkField(
+    { symbol, declaration }: DeclaredType,
+    member: FieldDeclaration,
+    declarator: VariableDeclarator,
+    field: FieldSymbol
+  ): void {
+    if (member.type.kind === 'varType')
+      this.error(
+        member.type,
+        'CS0825',
+        "コンテキスト キーワード 'var' は、ローカル変数宣言またはスクリプト コード内でのみ使用できます"
+      );
+    if (symbol.kind === 'interface' && !field.isStatic)
+      this.error(declarator, 'CS0525', 'インターフェイスにインスタンス フィールドを含めることはできません');
+    if (symbol.isStatic && !field.isStatic)
+      this.error(
+        declarator,
+        'CS0708',
+        `'${declarator.name}': 静的クラスでインスタンスのメンバーを宣言することはできません`
+      );
+    if (field.isConst && member.modifiers.set.has('static'))
+      this.error(
+        declarator,
+        'CS0504',
+        `定数 '${displayTypeSymbol(symbol)}.${declarator.name}' を static に設定することはできません`
+      );
+    if (
+      symbol.kind === 'struct' &&
+      !field.isStatic &&
+      declarator.initializer &&
+      !declaration.primaryParameters &&
+      !declaration.members.some((other) => other.kind === 'constructor')
+    ) {
+      this.error(
+        declarator,
+        'CS8983',
+        "'struct' でフィールド初期化子を使用するには、明示的に宣言されたコンストラクターが必要です。"
+      );
+    }
+  }
+
+  private declareEvent(
+    { symbol, context }: DeclaredType,
+    member: EventFieldDeclaration,
+    declarator: VariableDeclarator
+  ): void {
+    const field = new FieldSymbol(declarator.name, this.resolveType(member.type, context), symbol);
+    field.isEvent = true;
+    field.isStatic = member.modifiers.set.has('static');
+    field.access = accessibilityOf(member.modifiers, 'private');
+    field.initializer = declarator.initializer;
+    field.row = declarator.row;
+    if (field.type.kind !== 'error' && !(field.type.kind === 'named' && field.type.symbol.kind === 'delegate')) {
+      this.error(
+        declarator,
+        'CS0066',
+        `'${displayTypeSymbol(symbol)}.${declarator.name}': イベントはデリゲート型である必要があります`
+      );
+    }
+    this.addMember(symbol, field, declarator);
+    symbol.fields.push(field);
+  }
+
+  private declareMethodMember({ symbol, context }: DeclaredType, member: MethodDeclaration): void {
+    const method = this.declareMethod(
+      symbol,
+      member.name,
+      'method',
+      member.modifiers,
+      member,
+      context,
+      member.typeParameters,
+      member.constraints
+    );
+    method.declaration = member;
+    const methodContext = this.methodContexts.get(method) as TypeContext;
+    method.returnType = this.resolveType(member.returnType, methodContext);
+    method.parameters = this.resolveParameters(member.parameters, methodContext, method);
+    method.isExtension = member.parameters[0]?.modifier === 'this';
+    this.attachNative(method, member.body === undefined);
+    this.checkMethodBody(method, member.body !== undefined, member);
+    if (method.name === symbol.name)
+      this.error(member, 'CS0542', `'${member.name}': メンバー名をそれを囲む型の名前と同じにすることはできません`);
+    this.addMethod(symbol, method, member);
   }
 
   private declareEnumMembers(type: DeclaredType): void {
@@ -1095,7 +1132,6 @@ export class DeclarationBinder extends BinderBase {
     symbol.staticFieldCount = statics;
   }
 
-  // code-gauge-allow functionNcss 60 -- Each inheritance rule has its own diagnostic.
   private checkInheritance(type: DeclaredType): void {
     const { symbol } = type;
     if (symbol.kind !== 'class' && symbol.kind !== 'struct') return;
@@ -1245,20 +1281,11 @@ export class DeclarationBinder extends BinderBase {
     for (let current: NamedType | undefined = symbol.declaredType; current; current = baseTypeOf(current)) {
       for (const method of current.symbol.methods) {
         if (method.isAbstract && !implemented.has(method)) missing.push(displayMethodIn(method, current));
-        for (let overridden = method.overridden; overridden; overridden = overridden.overridden)
-          implemented.add(overridden);
+        addOverriddenChain(method, implemented);
       }
       for (const property of current.symbol.properties) {
-        if (property.isAbstract && !implemented.has(property)) {
-          for (const accessor of [property.getter, property.setter]) {
-            if (accessor)
-              missing.push(
-                `${displayTypeSymbol(current.symbol, current.args)}.${property.name}.${accessor === property.getter ? 'get' : 'set'}`
-              );
-          }
-        }
-        for (let overridden = property.overridden; overridden; overridden = overridden.overridden)
-          implemented.add(overridden);
+        if (property.isAbstract && !implemented.has(property)) missing.push(...displayAccessorsIn(property, current));
+        addOverriddenChain(property, implemented);
       }
     }
     return missing;
@@ -1349,4 +1376,25 @@ export { isReferenceType };
 
 function parameter(name: string, parameterType: Type, refKind?: 'out'): ParameterSymbol {
   return { name, type: parameterType, refKind, isParams: false };
+}
+
+function addOverriddenChain(
+  member: MethodSymbol | PropertySymbol,
+  implemented: Set<MethodSymbol | PropertySymbol>
+): void {
+  for (
+    let overridden: MethodSymbol | PropertySymbol | undefined = member.overridden;
+    overridden;
+    overridden = overridden.overridden
+  )
+    implemented.add(overridden);
+}
+
+function displayAccessorsIn(property: PropertySymbol, owner: NamedType): string[] {
+  return [property.getter, property.setter]
+    .filter((accessor) => accessor !== undefined)
+    .map(
+      (accessor) =>
+        `${displayTypeSymbol(owner.symbol, owner.args)}.${property.name}.${accessor === property.getter ? 'get' : 'set'}`
+    );
 }

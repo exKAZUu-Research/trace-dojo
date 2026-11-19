@@ -126,8 +126,18 @@ export class ExpressionConverter {
     return [nameNode.text, namedChildren(argsNode).map((arg) => this.convertType(arg))];
   }
 
-  // code-gauge-allow functionNcss 160 -- One case per kind of expression node in the grammar.
   convertExpression(node: Node): Expression {
+    return (
+      this.convertPrimaryExpression(node) ??
+      this.convertAccessExpression(node) ??
+      this.convertCreationExpression(node) ??
+      this.convertOperatorExpression(node) ??
+      this.convertOtherExpression(node)
+    );
+  }
+
+  // code-gauge-allow functionNcss 39 -- One case per kind of primary expression node in the grammar.
+  private convertPrimaryExpression(node: Node): Expression | undefined {
     const position = positionOf(node);
     switch (node.type) {
       case 'parenthesized_expression': {
@@ -157,16 +167,47 @@ export class ExpressionConverter {
       case 'predefined_type': {
         return { kind: 'predefinedTypeName', name: node.text, ...position };
       }
-      case 'qualified_name': {
-        // A qualified name in an expression is a member access on a namespace or type.
-        const target = this.convertExpression(requiredField(node, 'qualifier'));
-        return this.memberAccess(target, requiredField(node, 'name'), position);
-      }
       case 'this': {
         return { kind: 'this', ...position };
       }
       case 'base': {
         return { kind: 'base', ...position };
+      }
+      case 'default_expression': {
+        const typeNode = field(node, 'type');
+        return { kind: 'default', type: typeNode ? this.convertType(typeNode) : undefined, ...position };
+      }
+      case 'declaration_expression': {
+        return {
+          kind: 'declaration',
+          type: this.convertType(requiredField(node, 'type')),
+          designation: {
+            kind: 'single',
+            name: requiredField(node, 'name').text,
+            ...positionOf(requiredField(node, 'name')),
+          },
+          ...position,
+        };
+      }
+      case 'tuple_expression': {
+        return { kind: 'tuple', elements: namedChildren(node).map((arg) => this.convertArgument(arg)), ...position };
+      }
+      case 'discard': {
+        return { kind: 'name', name: '_', typeArgs: undefined, ...position };
+      }
+      default: {
+        return undefined;
+      }
+    }
+  }
+
+  private convertAccessExpression(node: Node): Expression | undefined {
+    const position = positionOf(node);
+    switch (node.type) {
+      case 'qualified_name': {
+        // A qualified name in an expression is a member access on a namespace or type.
+        const target = this.convertExpression(requiredField(node, 'qualifier'));
+        return this.memberAccess(target, requiredField(node, 'name'), position);
       }
       case 'member_access_expression': {
         const targetNode = requiredField(node, 'expression');
@@ -205,6 +246,16 @@ export class ExpressionConverter {
           ...position,
         };
       }
+      default: {
+        return undefined;
+      }
+    }
+  }
+
+  // code-gauge-allow functionNcss 32 -- One case per kind of creation expression node in the grammar.
+  private convertCreationExpression(node: Node): Expression | undefined {
+    const position = positionOf(node);
+    switch (node.type) {
       case 'object_creation_expression': {
         const argsNode = field(node, 'arguments');
         const initializerNode = field(node, 'initializer');
@@ -245,6 +296,24 @@ export class ExpressionConverter {
       case 'anonymous_object_creation_expression': {
         return { kind: 'anonymousObject', members: this.convertAnonymousMembers(node), ...position };
       }
+      case 'with_expression': {
+        const [value, initializer] = namedChildren(node);
+        return {
+          kind: 'with',
+          value: this.convertExpression(value),
+          members: initializer ? this.convertWithMembers(initializer) : [],
+          ...position,
+        };
+      }
+      default: {
+        return undefined;
+      }
+    }
+  }
+
+  private convertOperatorExpression(node: Node): Expression | undefined {
+    const position = positionOf(node);
+    switch (node.type) {
       case 'prefix_unary_expression': {
         return this.convertPrefixUnary(node);
       }
@@ -313,27 +382,17 @@ export class ExpressionConverter {
           ...position,
         };
       }
+      default: {
+        return undefined;
+      }
+    }
+  }
+
+  private convertOtherExpression(node: Node): Expression {
+    const position = positionOf(node);
+    switch (node.type) {
       case 'lambda_expression': {
         return this.convertLambda(node);
-      }
-      case 'default_expression': {
-        const typeNode = field(node, 'type');
-        return { kind: 'default', type: typeNode ? this.convertType(typeNode) : undefined, ...position };
-      }
-      case 'declaration_expression': {
-        return {
-          kind: 'declaration',
-          type: this.convertType(requiredField(node, 'type')),
-          designation: {
-            kind: 'single',
-            name: requiredField(node, 'name').text,
-            ...positionOf(requiredField(node, 'name')),
-          },
-          ...position,
-        };
-      }
-      case 'tuple_expression': {
-        return { kind: 'tuple', elements: namedChildren(node).map((arg) => this.convertArgument(arg)), ...position };
       }
       case 'switch_expression': {
         return this.convertSwitchExpression(node);
@@ -342,20 +401,8 @@ export class ExpressionConverter {
         const [value] = namedChildren(node);
         return { kind: 'throw', value: this.convertExpression(value), ...position };
       }
-      case 'with_expression': {
-        const [value, initializer] = namedChildren(node);
-        return {
-          kind: 'with',
-          value: this.convertExpression(value),
-          members: initializer ? this.convertWithMembers(initializer) : [],
-          ...position,
-        };
-      }
       case 'query_expression': {
         return { kind: 'query', clauses: this.convertQuery(node), ...position };
-      }
-      case 'discard': {
-        return { kind: 'name', name: '_', typeArgs: undefined, ...position };
       }
       default: {
         const what = UNSUPPORTED_EXPRESSIONS[node.type];
@@ -597,7 +644,7 @@ export class ExpressionConverter {
     return { kind: 'switch', value: this.convertExpression(valueNode), arms, ...positionOf(node) };
   }
 
-  // code-gauge-allow functionNcss 70 -- One case per query clause.
+  // code-gauge-allow functionNcss 42 -- One case per query clause.
   private convertQuery(node: Node): QueryClause[] {
     const clauses: QueryClause[] = [];
     const children = childrenOf(node);
@@ -691,7 +738,7 @@ export class ExpressionConverter {
     return orderings;
   }
 
-  // code-gauge-allow functionNcss 80 -- One case per kind of pattern node in the grammar.
+  // code-gauge-allow functionNcss 36 -- One case per kind of pattern node in the grammar.
   convertPattern(node: Node): Pattern {
     const position = positionOf(node);
     const parts = namedChildren(node);
@@ -803,7 +850,7 @@ export class ExpressionConverter {
     throw new CompileError([{ row: node.startPosition.row, message: 'CS1001: 識別子がありません' }]);
   }
 
-  // code-gauge-allow functionNcss 50 -- One case per kind of literal.
+  // code-gauge-allow functionNcss 33 -- One case per kind of literal.
   convertLiteral(node: Node): LiteralValue {
     switch (node.type) {
       case 'integer_literal': {

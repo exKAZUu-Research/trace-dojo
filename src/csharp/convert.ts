@@ -209,7 +209,7 @@ export class Converter extends ExpressionConverter {
     }
   }
 
-  // code-gauge-allow functionNcss 70 -- Each kind of type declaration keeps its parts in different children.
+  // code-gauge-allow functionNcss 32 -- Each kind of type declaration keeps its parts in different children.
   private convertTypeDeclaration(node: Node): TypeDeclaration {
     this.rejectAttributes(node);
     const typeKind =
@@ -328,7 +328,7 @@ export class Converter extends ExpressionConverter {
     return { name: nameNode.text, constraints, ...positionOf(node) };
   }
 
-  // code-gauge-allow functionNcss 90 -- One case per kind of member declaration.
+  // code-gauge-allow functionNcss 56 -- One case per kind of member declaration.
   private convertMember(node: Node, owner: TypeDeclaration): MemberDeclaration[] {
     const what = UNSUPPORTED_DECLARATIONS[node.type];
     if (what) unsupported(node, what);
@@ -629,7 +629,7 @@ export class Converter extends ExpressionConverter {
     };
   }
 
-  // code-gauge-allow functionNcss 140 -- One case per kind of statement node in the grammar.
+  // code-gauge-allow functionNcss 48 -- One case per kind of statement node in the grammar.
   convertStatement(node: Node): Statement {
     const position = positionOf(node);
     const parts = namedChildren(node);

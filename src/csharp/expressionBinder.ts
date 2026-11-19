@@ -43,6 +43,7 @@ import {
 import type { CsObject } from './values';
 
 type Unbound = Extract<BoundExpression, { kind: 'unbound' }>;
+type LambdaExpression = Extract<Expression, { kind: 'lambda' }>;
 
 /** Binds every kind of expression, and the target-typed ones once their targets are known. */
 export abstract class ExpressionBinder extends MemberBinder {
@@ -66,8 +67,17 @@ export abstract class ExpressionBinder extends MemberBinder {
     >
   >();
 
-  // code-gauge-allow functionNcss 160 -- One case per kind of expression.
   bindExpression(node: Expression, context: BindContext): BindResult {
+    return (
+      this.bindPrimaryExpression(node, context) ??
+      this.bindCreationExpression(node, context) ??
+      this.bindOperatorExpression(node, context) ??
+      this.bindOtherExpression(node, context)
+    );
+  }
+
+  // code-gauge-allow functionNcss 37 -- One case per kind of primary expression.
+  private bindPrimaryExpression(node: Expression, context: BindContext): BindResult | undefined {
     const row = node.row;
     switch (node.kind) {
       case 'literal': {
@@ -114,6 +124,22 @@ export abstract class ExpressionBinder extends MemberBinder {
         const target = this.bindValue(node.target, context);
         return this.bindElementAccess(target, node.args, node, context);
       }
+      case 'tuple': {
+        return this.bindTuple(node, context);
+      }
+      case 'declaration': {
+        this.error(node, 'CS8185', '宣言はこのコンテキストでは許可されていません。');
+        return { kind: 'default', type: ERROR_TYPE, row };
+      }
+      default: {
+        return undefined;
+      }
+    }
+  }
+
+  private bindCreationExpression(node: Expression, context: BindContext): BindResult | undefined {
+    const row = node.row;
+    switch (node.kind) {
       case 'new': {
         const type = this.resolveType(node.type, context.fn.typeContext);
         if (
@@ -153,6 +179,19 @@ export abstract class ExpressionBinder extends MemberBinder {
       case 'anonymousObject': {
         return this.bindAnonymousObject(node, context);
       }
+      case 'with': {
+        return this.bindWith(node, context);
+      }
+      default: {
+        return undefined;
+      }
+    }
+  }
+
+  // code-gauge-allow functionNcss 33 -- One case per kind of operator expression.
+  private bindOperatorExpression(node: Expression, context: BindContext): BindResult | undefined {
+    const row = node.row;
+    switch (node.kind) {
       case 'unary': {
         const operand = this.bindValue(node.operand, context);
         if (node.operator === '-' && operand.kind === 'constant' && node.operand.kind === 'literal')
@@ -197,13 +236,15 @@ export abstract class ExpressionBinder extends MemberBinder {
         const pattern = this.bindPattern(node.pattern, operand.type, context);
         return { kind: 'is', operand, pattern, type: this.boolType, row };
       }
-      case 'declaration': {
-        this.error(node, 'CS8185', '宣言はこのコンテキストでは許可されていません。');
-        return { kind: 'default', type: ERROR_TYPE, row };
+      default: {
+        return undefined;
       }
-      case 'tuple': {
-        return this.bindTuple(node, context);
-      }
+    }
+  }
+
+  private bindOtherExpression(node: Expression, context: BindContext): BindResult {
+    const row = node.row;
+    switch (node.kind) {
       case 'switch': {
         return (
           this.bindSwitchExpression(node, context, undefined) ?? {
@@ -222,11 +263,11 @@ export abstract class ExpressionBinder extends MemberBinder {
         const value = this.bindThrowValue(node.value, context, node);
         return { kind: 'throw', value, type: NULL_TYPE, row };
       }
-      case 'with': {
-        return this.bindWith(node, context);
-      }
       case 'query': {
         return this.bindExpression(desugarQuery(node), context);
+      }
+      default: {
+        throw new Error(`Unexpected expression ${node.kind}`);
       }
     }
   }
@@ -418,7 +459,6 @@ export abstract class ExpressionBinder extends MemberBinder {
     return { kind: 'conditionalAccess', receiver, access, temporary, wrapsNullable, type, row: node.row };
   }
 
-  // code-gauge-allow functionNcss 40 -- Each kind of binary operator binds its operands differently.
   private bindBinaryExpression(node: Extract<Expression, { kind: 'binary' }>, context: BindContext): BoundExpression {
     const { operator } = node;
     const row = node.operatorRow;
@@ -726,7 +766,6 @@ export abstract class ExpressionBinder extends MemberBinder {
     };
   }
 
-  // code-gauge-allow functionNcss 40 -- Each kind of tuple element binds alike.
   private bindTuple(node: Extract<Expression, { kind: 'tuple' }>, context: BindContext): BoundExpression {
     if (node.elements.length < 2) {
       this.error(node, 'CS8124', 'タプルには 2 つ以上の要素が必要です。');
@@ -751,10 +790,9 @@ export abstract class ExpressionBinder extends MemberBinder {
     return { kind: 'tuple', elements, type, row: node.row };
   }
 
-  // code-gauge-allow functionNcss 60 -- Binding a lambda's parameters and body.
   /** Binds a lambda to a delegate type, or returns undefined when it does not convert, reporting why if `report`. */
   protected bindLambda(
-    node: Extract<Expression, { kind: 'lambda' }>,
+    node: LambdaExpression,
     outer: BindContext,
     delegateType: NamedType | undefined,
     parameterTypes: Type[],
@@ -770,6 +808,39 @@ export abstract class ExpressionBinder extends MemberBinder {
     const cached = cache.get(key);
     if (cached && !report) return { result: cached.result, returnType: cached.returnType };
     const savedDiagnostics = this.diagnostics.length;
+    const context = this.lambdaContext(node, outer, parameterTypes, returnType);
+    const method = context.fn.method;
+    const savedThrow = this.allowsThrowExpression;
+    let bound: { body: BoundBlock; inferred: Type | undefined };
+    try {
+      bound = this.bindLambdaBody(node, context, returnType, report);
+    } finally {
+      this.allowsThrowExpression = savedThrow;
+    }
+    const { body, inferred } = bound;
+    method.body = body;
+    const failed = this.diagnostics.length > savedDiagnostics;
+    const lambda: LambdaInfo = { method, captures: [...context.fn.captures], isStatic: node.isStatic };
+    const result: BoundExpression | undefined =
+      failed || !delegateType ? undefined : { kind: 'lambda', lambda, type: delegateType, row: node.row };
+    if (!report) {
+      const diagnostics = this.diagnostics.splice(savedDiagnostics);
+      cache.set(key, { result, diagnostics, returnType: inferred });
+      return { result, returnType: inferred };
+    }
+    return {
+      result: delegateType ? { kind: 'lambda', lambda, type: delegateType, row: node.row } : undefined,
+      returnType: inferred,
+    };
+  }
+
+  /** The scope of a lambda's body, with a method for the lambda and its parameters declared. */
+  private lambdaContext(
+    node: LambdaExpression,
+    outer: BindContext,
+    parameterTypes: Type[],
+    returnType: Type | undefined
+  ): BindContext {
     const method = new MethodSymbol('<lambda>', outer.fn.method.owner, 'localFunction');
     method.isStatic = outer.fn.isStatic;
     (method as { isStaticLambda?: boolean }).isStaticLambda = node.isStatic;
@@ -796,81 +867,86 @@ export abstract class ExpressionBinder extends MemberBinder {
       if (parameter.name === '_' && node.parameters.filter((other) => other.name === '_').length > 1) continue;
       this.declareParameterLocal(parameter, parameterTypes[index] ?? ERROR_TYPE, context);
     }
-    let body: BoundBlock;
-    let inferred: Type | undefined;
+    return context;
+  }
+
+  private bindLambdaBody(
+    node: LambdaExpression,
+    context: BindContext,
+    returnType: Type | undefined,
+    report: boolean
+  ): { body: BoundBlock; inferred: Type | undefined } {
+    if (node.body.kind === 'block') {
+      const body = this.bindFunctionBlock(node.body, context);
+      const { fn } = context;
+      const inferred =
+        returnType ??
+        (fn.returnsValue
+          ? (this.bestCommonType(
+              fn.returnTypes.map((type) => ({ kind: 'default', type, row: node.row }) as BoundExpression)
+            ) ?? ERROR_TYPE)
+          : VOID_TYPE);
+      return { body, inferred };
+    }
     const savedThrow = this.allowsThrowExpression;
-    try {
-      if (node.body.kind === 'block') {
-        body = this.bindFunctionBlock(node.body, context);
-        inferred =
-          returnType ??
-          (fn.returnsValue
-            ? (this.bestCommonType(
-                fn.returnTypes.map((type) => ({ kind: 'default', type, row: node.row }) as BoundExpression)
-              ) ?? ERROR_TYPE)
-            : VOID_TYPE);
-      } else {
-        this.allowsThrowExpression = true;
-        const value = this.bindValue(node.body, context);
-        this.allowsThrowExpression = savedThrow;
-        if (returnType === undefined) {
-          inferred = value.kind === 'throw' ? undefined : value.kind === 'unbound' ? undefined : value.type;
-          body = this.expressionBody(value, inferred, node.row);
-        } else if (returnType.kind === 'void') {
-          if (!this.isStatementExpression(value)) {
-            if (report)
-              this.error(
-                node.body,
-                'CS0201',
-                '代入、呼び出し、インクリメント、デクリメント、新しいオブジェクトの式のみがステートメントとして使用できます'
-              );
-            else this.diagnostics.push({ row: node.row, message: 'not a statement' });
-          }
-          body = {
-            kind: 'block',
-            statements: [{ kind: 'expression', expression: value, row: node.body.row, step: 'none' }],
-            capturedLocals: [],
-            locals: [],
-            row: node.row,
-            step: 'none',
-          };
-          inferred = VOID_TYPE;
-        } else {
-          const converted = value.kind === 'throw' ? value : this.convert(value, returnType, node.body);
-          if (
-            report &&
-            value.kind !== 'throw' &&
-            value.type.kind !== 'error' &&
-            !this.implicitConversionOf(value, returnType)
-          ) {
-            this.error(
-              node.body,
-              'CS1662',
-              'デリゲート戻り値の型に暗黙的に変換できない戻り値の型がブロック内にあるため、ラムダ式 を目的のデリゲート型に変換できません'
-            );
-          }
-          body = this.expressionBody(converted, returnType, node.row);
-          inferred = returnType;
-        }
-      }
-    } finally {
-      this.allowsThrowExpression = savedThrow;
+    this.allowsThrowExpression = true;
+    const value = this.bindValue(node.body, context);
+    this.allowsThrowExpression = savedThrow;
+    return this.expressionLambdaBody(node, node.body, value, returnType, report);
+  }
+
+  /** The body of a lambda with an expression body, converted to the delegate's return type. */
+  private expressionLambdaBody(
+    node: LambdaExpression,
+    bodyNode: Expression,
+    value: BoundExpression,
+    returnType: Type | undefined,
+    report: boolean
+  ): { body: BoundBlock; inferred: Type | undefined } {
+    if (returnType === undefined) {
+      const inferred = value.kind === 'throw' ? undefined : value.kind === 'unbound' ? undefined : value.type;
+      return { body: this.expressionBody(value, inferred, node.row), inferred };
     }
-    method.body = body;
-    const failed = this.diagnostics.length > savedDiagnostics;
-    const lambda: LambdaInfo = { method, captures: [...fn.captures], isStatic: node.isStatic };
-    const result: BoundExpression | undefined =
-      failed || !delegateType ? undefined : { kind: 'lambda', lambda, type: delegateType, row: node.row };
-    if (!report) {
-      const diagnostics = this.diagnostics.splice(savedDiagnostics);
-      cache.set(key, { result, diagnostics, returnType: inferred });
-      return { result, returnType: inferred };
+    if (returnType.kind === 'void')
+      return { body: this.voidLambdaBody(node, bodyNode, value, report), inferred: VOID_TYPE };
+    const converted = value.kind === 'throw' ? value : this.convert(value, returnType, bodyNode);
+    if (
+      report &&
+      value.kind !== 'throw' &&
+      value.type.kind !== 'error' &&
+      !this.implicitConversionOf(value, returnType)
+    ) {
+      this.error(
+        bodyNode,
+        'CS1662',
+        'デリゲート戻り値の型に暗黙的に変換できない戻り値の型がブロック内にあるため、ラムダ式 を目的のデリゲート型に変換できません'
+      );
     }
-    if (failed && delegateType)
-      return { result: { kind: 'lambda', lambda, type: delegateType, row: node.row }, returnType: inferred };
+    return { body: this.expressionBody(converted, returnType, node.row), inferred: returnType };
+  }
+  /** The body of a lambda with an expression body whose delegate returns void, which must be a statement expression. */
+  private voidLambdaBody(
+    node: LambdaExpression,
+    bodyNode: Expression,
+    value: BoundExpression,
+    report: boolean
+  ): BoundBlock {
+    if (!this.isStatementExpression(value)) {
+      if (report)
+        this.error(
+          bodyNode,
+          'CS0201',
+          '代入、呼び出し、インクリメント、デクリメント、新しいオブジェクトの式のみがステートメントとして使用できます'
+        );
+      else this.diagnostics.push({ row: node.row, message: 'not a statement' });
+    }
     return {
-      result: delegateType ? { kind: 'lambda', lambda, type: delegateType, row: node.row } : undefined,
-      returnType: inferred,
+      kind: 'block',
+      statements: [{ kind: 'expression', expression: value, row: bodyNode.row, step: 'none' }],
+      capturedLocals: [],
+      locals: [],
+      row: node.row,
+      step: 'none',
     };
   }
 
@@ -922,7 +998,6 @@ export abstract class ExpressionBinder extends MemberBinder {
     }
   }
 
-  // code-gauge-allow functionNcss 80 -- Each kind of target-typed expression.
   protected bindUnbound(
     expression: Unbound,
     target: Type,
@@ -938,93 +1013,105 @@ export abstract class ExpressionBinder extends MemberBinder {
         report,
         expression.row
       );
-    const attempt = (bind: () => BoundExpression | undefined): BoundExpression | undefined => {
-      if (report) return bind();
-      const saved = this.diagnostics.length;
-      const result = bind();
-      const failed = this.diagnostics.length > saved;
-      this.diagnostics.length = saved;
-      return failed ? undefined : result;
-    };
     switch (node.kind) {
       case 'lambda': {
-        const invoke = this.delegateInvokeOf(target);
-        if (!invoke) {
-          if (report && target.kind !== 'error')
-            this.error(
-              node,
-              'CS1660',
-              `ラムダ式 はデリゲート型ではないため、'${displayType(target)}' 型に変換できません`
-            );
-          return undefined;
-        }
-        if (invoke.parameterTypes.length !== node.parameters.length) {
-          if (report)
-            this.error(
-              node,
-              'CS1593',
-              `デリゲート '${displayType(target)}' には引数 ${node.parameters.length} を指定できません`
-            );
-          return undefined;
-        }
-        for (const [index, parameter] of node.parameters.entries()) {
-          if (!parameter.type) continue;
-          const declared = this.resolveType(parameter.type, context.fn.typeContext);
-          if (!sameType(declared, invoke.parameterTypes[index])) {
-            if (report)
-              this.error(
-                parameter,
-                'CS1678',
-                `パラメーター ${index + 1} は '${displayType(declared)}' 型として宣言しますが、'${displayType(invoke.parameterTypes[index])}' である必要があります`
-              );
-            return undefined;
-          }
-        }
-        return this.bindLambda(node, context, target as NamedType, invoke.parameterTypes, invoke.returnType, report)
-          .result;
+        return this.bindLambdaTo(node, context, target, report);
       }
       case 'implicitNew': {
-        return attempt(() => this.bindCreation(target, node.args, node.initializer, node, context));
+        return this.attempt(report, () => this.bindCreation(target, node.args, node.initializer, node, context));
       }
       case 'default': {
         return this.defaultValue(target, node.row);
       }
       case 'collection': {
-        return attempt(() => this.bindCollectionExpression(node, target, context));
+        return this.attempt(report, () => this.bindCollectionExpression(node, target, context));
       }
       case 'conditional': {
-        return attempt(() => this.bindConditional(node, context, target));
+        return this.attempt(report, () => this.bindConditional(node, context, target));
       }
       case 'switch': {
-        return attempt(() => this.bindSwitchExpression(node, context, target));
+        return this.attempt(report, () => this.bindSwitchExpression(node, context, target));
       }
       case 'tuple': {
-        if (
-          target.kind !== 'named' ||
-          specialOf(target) !== 'valueTuple' ||
-          target.args.length !== node.elements.length
-        ) {
-          if (report)
-            this.error(
-              node,
-              'CS0029',
-              `型 '${this.tupleDisplay(node, context)}' を '${displayType(target)}' に暗黙的に変換できません`
-            );
-          return undefined;
-        }
-        return attempt(() => ({
-          kind: 'tuple',
-          elements: node.elements.map((element, index) =>
-            this.convert(this.bindValue(element.value, context), target.args[index], element, mode)
-          ),
-          type: target,
-          row: node.row,
-        }));
+        return this.bindTupleTo(node, context, target, mode, report);
       }
       default: {
         return undefined;
       }
     }
+  }
+
+  /** Binds, discarding the result and its diagnostics when it fails unless `report`. */
+  private attempt(report: boolean, bind: () => BoundExpression | undefined): BoundExpression | undefined {
+    if (report) return bind();
+    const saved = this.diagnostics.length;
+    const result = bind();
+    const failed = this.diagnostics.length > saved;
+    this.diagnostics.length = saved;
+    return failed ? undefined : result;
+  }
+
+  private bindLambdaTo(
+    node: LambdaExpression,
+    context: BindContext,
+    target: Type,
+    report: boolean
+  ): BoundExpression | undefined {
+    const invoke = this.delegateInvokeOf(target);
+    if (!invoke) {
+      if (report && target.kind !== 'error')
+        this.error(node, 'CS1660', `ラムダ式 はデリゲート型ではないため、'${displayType(target)}' 型に変換できません`);
+      return undefined;
+    }
+    if (invoke.parameterTypes.length !== node.parameters.length) {
+      if (report)
+        this.error(
+          node,
+          'CS1593',
+          `デリゲート '${displayType(target)}' には引数 ${node.parameters.length} を指定できません`
+        );
+      return undefined;
+    }
+    for (const [index, parameter] of node.parameters.entries()) {
+      if (!parameter.type) continue;
+      const declared = this.resolveType(parameter.type, context.fn.typeContext);
+      if (!sameType(declared, invoke.parameterTypes[index])) {
+        if (report)
+          this.error(
+            parameter,
+            'CS1678',
+            `パラメーター ${index + 1} は '${displayType(declared)}' 型として宣言しますが、'${displayType(invoke.parameterTypes[index])}' である必要があります`
+          );
+        return undefined;
+      }
+    }
+    return this.bindLambda(node, context, target as NamedType, invoke.parameterTypes, invoke.returnType, report).result;
+  }
+
+  private bindTupleTo(
+    node: Extract<Expression, { kind: 'tuple' }>,
+    context: BindContext,
+    target: Type,
+    mode: ConversionMode,
+    report: boolean
+  ): BoundExpression | undefined {
+    if (target.kind !== 'named' || specialOf(target) !== 'valueTuple' || target.args.length !== node.elements.length) {
+      if (report)
+        this.error(
+          node,
+          'CS0029',
+          `型 '${this.tupleDisplay(node, context)}' を '${displayType(target)}' に暗黙的に変換できません`
+        );
+      return undefined;
+    }
+    return this.attempt(report, () => ({
+      kind: 'tuple',
+      elements: node.elements.map((element, index) =>
+        this.convert(this.bindValue(element.value, context), target.args[index], element, mode)
+      ),
+      type: target,
+      row: node.row,
+    }));
   }
 
   private tupleDisplay(node: Extract<Expression, { kind: 'tuple' }>, context: BindContext): string {
@@ -1220,8 +1307,8 @@ export abstract class ExpressionBinder extends MemberBinder {
     return { kind: 'default', type, row };
   }
 
-  // code-gauge-allow functionNcss 50 -- Each kind of collection that a collection expression creates.
   /** Binds `[a, b, ..c]` as an array, a list, or another collection type of its target. */
+  // code-gauge-allow functionNcss 38 -- Each kind of collection that a collection expression creates.
   private bindCollectionExpression(
     node: Extract<Expression, { kind: 'collection' }>,
     target: Type,
@@ -1462,7 +1549,6 @@ export abstract class ExpressionBinder extends MemberBinder {
     return { kind: 'with', value, clone: undefined, assignments, temporary, type, row: node.row };
   }
 
-  // code-gauge-allow functionNcss 40 -- Simple, compound, and event assignments differ.
   private bindAssignment(node: Extract<Expression, { kind: 'assign' }>, context: BindContext): BoundExpression {
     const { operator } = node;
     if (operator === '=' && node.target.kind === 'tuple') return this.bindDeconstructionAssignment(node, context);
@@ -1574,7 +1660,6 @@ export abstract class ExpressionBinder extends MemberBinder {
     return { kind: 'increment', target, isPrefix: node.prefix, operation, type: target.type, row: node.row };
   }
 
-  // code-gauge-allow functionNcss 40 -- Each kind of deconstructed value.
   /** Binds `(a, b) = value`, deconstructing a tuple or a value with a `Deconstruct` method. */
   private bindDeconstructionAssignment(
     node: Extract<Expression, { kind: 'assign' }>,
@@ -1720,7 +1805,6 @@ export abstract class ExpressionBinder extends MemberBinder {
     };
   }
 
-  // code-gauge-allow functionNcss 50 -- Binding the arms of a switch expression and their common type.
   /** Binds `value switch { ... }`, with the natural type of its arms or the target type. */
   protected bindSwitchExpression(
     node: Extract<Expression, { kind: 'switch' }>,
