@@ -1,5 +1,6 @@
 import { BINARY, UNARY } from '../../c/library/mathFunctions';
 import { MATH_CONSTANTS } from './constants';
+import { isLibcGlobalDeclared, isLibcHeaderMacro, isSdkStdDeclared } from './libcGlobals';
 
 /**
  * The groups of library names each header makes visible in libc++ (Apple clang 21), directly or through the headers it
@@ -965,11 +966,14 @@ function typedefVisible(name: string, headers: ReadonlySet<string>, scope: 'std'
   );
 }
 
-/** Whether a library name is visible to a program that includes `headers`. Names of no group stay visible. */
+/** Whether a library name is visible to a program that includes `headers`. */
 export function isVisible(name: string, headers: ReadonlySet<string>, scope: 'std' | 'global'): boolean {
   if (typedefHeader(name)) return typedefVisible(name, headers, scope);
   const nameGroups = NAME_GROUPS[name];
-  if (!nameGroups) return true;
+  if (!nameGroups)
+    return scope === 'std'
+      ? isSdkStdDeclared(name, headers)
+      : isLibcGlobalDeclared(name, headers) || isLibcHeaderMacro(name, headers);
   for (const header of headers) {
     const groups = VISIBLE_GROUPS[header] ?? TRANSITIVE_GROUPS.get(header);
     if (nameGroups.some((group) => header === group || groups?.includes(group))) return true;
@@ -979,6 +983,8 @@ export function isVisible(name: string, headers: ReadonlySet<string>, scope: 'st
 
 /** The header that declares a library name, for the message that asks to include it. */
 export function headerOf(name: string): string | undefined {
+  if (['begin', 'end', 'cbegin', 'cend', 'rbegin', 'rend', 'size'].includes(name)) return 'iterator';
+  if (['istream', 'ostream', 'ios'].includes(name)) return name;
   return typedefHeader(name) ?? NAME_GROUPS[name]?.[0];
 }
 

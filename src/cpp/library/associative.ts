@@ -163,8 +163,8 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
       {
         libraryConstant: () => (constantMembers ? true : undefined),
         uses: (row) => {
-          library.compiler.requireObjectUse(classType(cls), 'copy', row);
-          library.compiler.requireObjectUse(classType(cls), 'destroy', row);
+          library.compiler.requireLibraryObjectUse(classType(cls), 'copy', row);
+          library.compiler.requireLibraryObjectUse(classType(cls), 'destroy', row);
         },
       }
     ),
@@ -281,7 +281,7 @@ export function makePair(library: Library): FunctionInfo {
         cls.operations?.copy(frame, new CObject(cls, [(a as Ptr).read(), (b as Ptr).read()])) as Value,
       {
         libraryConstant: () => (cls.library?.allowsConstantCopy ? true : undefined),
-        uses: (row) => library.compiler.requireObjectUse(classType(cls), 'copy', row),
+        uses: (row) => library.compiler.requireLibraryObjectUse(classType(cls), 'copy', row),
       }
     );
   });

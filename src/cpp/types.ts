@@ -3,6 +3,7 @@ import type { ConstantLocation, Expr, LibraryConstant } from './expr';
 import type { ClassOperations, LibraryClass } from './library/libraryClass';
 import type { CompiledFunction, Eval, Frame } from './runtime';
 import type { Syntax } from './syntax';
+import type { Ptr } from './values';
 
 export type { FloatName, IntName } from '../c/types';
 
@@ -164,6 +165,7 @@ export type NativeFunction = (args: unknown[], context: NativeContext) => unknow
 export interface NativeContext {
   /** The object of a member function. */
   self: unknown;
+  readonly selfLocation?: Ptr;
   readonly frame: Frame;
   readonly row: number;
 }
@@ -196,6 +198,7 @@ export class ClassInfo {
   isTurtle = false;
   /** Whether copying is deleted, as for `Turtle`. */
   isNoncopyable = false;
+  implicitCopyFromConst = true;
   /** Whether the implicit copy assignment is deleted, as for a class with a const or reference member. */
   isAssignmentDeleted = false;
   /** Whether the implicit default constructor is deleted, as for a class with an uninitialized reference member. */

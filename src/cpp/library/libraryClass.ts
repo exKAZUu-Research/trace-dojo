@@ -64,7 +64,7 @@ export interface LibraryClass {
 /** How objects of a class are copied, assigned, and destroyed, which the compiler or the library provides. */
 export interface ClassOperations {
   /** Copies an object, as the copy constructor does. */
-  copy: (frame: Frame, source: Value, destination?: CObject) => Value;
+  copy: (frame: Frame, source: Value, destination?: CObject, sourceIsConst?: boolean) => Value;
   /**
    * Assigns an object's value to another existing object, as the copy assignment operator does: in place, or, for an
    * object that is an immutable value (an iterator), by giving the value that replaces the target.

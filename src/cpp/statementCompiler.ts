@@ -1172,7 +1172,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
           const copy = caught.kind === 'class' ? caught.cls : undefined;
           this.requireObjectUse(handlerType, 'copy', param.row);
           bind = (frame, error) => {
-            const value = copy ? copy.operations?.copy(frame, error.value) : error.value;
+            const value = copy ? copy.operations?.copy(frame, error.value, undefined, false) : error.value;
             frame.slots[local.slot] = new Box(value as Value);
           };
           const destroy = this.destroyerOf(handlerType, param.row);

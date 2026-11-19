@@ -45,9 +45,9 @@ function requireSwapUse(compiler: ExpressionCompiler, type: Type, row: number): 
     swap.nativeUses?.(row);
     return;
   }
-  compiler.requireObjectUse(type, 'copy', row);
-  compiler.requireObjectUse(type, 'assign', row);
-  compiler.requireObjectUse(type, 'destroy', row);
+  compiler.requireLibraryObjectUse(type, 'copy', row);
+  compiler.requireLibraryObjectUse(type, 'assign', row);
+  compiler.requireLibraryObjectUse(type, 'destroy', row);
 }
 
 export function requireElementUse(compiler: ExpressionCompiler, type: Type, row: number, use: ElementUse): void {
@@ -56,10 +56,10 @@ export function requireElementUse(compiler: ExpressionCompiler, type: Type, row:
     return;
   }
   if (use === 'copy' || use === 'relocate') {
-    compiler.requireObjectUse(type, 'copy', row);
-    compiler.requireObjectUse(type, 'destroy', row);
+    compiler.requireLibraryObjectUse(type, 'copy', row);
+    compiler.requireLibraryObjectUse(type, 'destroy', row);
   }
-  if (use === 'assign' || use === 'relocate') compiler.requireObjectUse(type, 'assign', row);
+  if (use === 'assign' || use === 'relocate') compiler.requireLibraryObjectUse(type, 'assign', row);
 }
 
 function swapFunction(type: Type): FunctionInfo | undefined {

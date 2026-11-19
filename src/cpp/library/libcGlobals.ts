@@ -64,6 +64,13 @@ export function conflictsWithStdName(name: string, isFunction: boolean, headers:
   );
 }
 
+export function isSdkStdDeclared(name: string, headers: ReadonlySet<string>): boolean {
+  return (
+    Object.hasOwn(standard, name) &&
+    standard[name].some(([group]) => typeof group === 'number' && visibleIn(group, headers))
+  );
+}
+
 export function mathWrapperCall(name: string, kind: MathWrapper): string | undefined {
   return Object.hasOwn(mathCalls, name) ? mathCalls[name][kind] : undefined;
 }

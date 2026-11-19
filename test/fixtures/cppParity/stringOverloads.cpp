@@ -10,6 +10,8 @@ int main() {
   s.replace(0, 1, t, 0, 2); cout << s << '\n';
   s.replace(0, 2, "hello", 3); cout << s << '\n';
   s.append(t.begin(), t.end()); cout << s << '\n';
+  string copy = s;
+  cout << (&copy == &copy.append(t.begin(), t.end())) << (&copy == &copy.erase()) << '\n';
   s.append(t.rbegin(), t.rend()); cout << s << '\n';
   s.append("pq", 1); cout << s << '\n';
   s.assign(s, 1, 4); cout << s << '\n';

@@ -193,7 +193,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
         isExplicit: true,
         uses: (row) => {
           library.compiler.valueInitialized(element, row);
-          library.compiler.requireObjectUse(element, 'destroy', row);
+          library.compiler.requireLibraryObjectUse(element, 'destroy', row);
         },
       }
     );
@@ -240,7 +240,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
                 editor.build(frame, source.values.length, (index) => source.construct(frame, source.values[index]))
               );
             },
-            { uses: (row) => library.compiler.requireObjectUse(element, 'destroy', row) }
+            { uses: (row) => library.compiler.requireLibraryObjectUse(element, 'destroy', row) }
           );
         },
         isTemplate: true,

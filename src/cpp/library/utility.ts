@@ -159,6 +159,10 @@ export function numericLimitsClass(library: Library, type: Type): ClassInfo {
   const target = unqualified(type);
   if (!isArithmetic(target)) return cls;
   const limits = LIMITS[target.name];
+  const floating = target.kind === 'float';
+  const binary32 = target.name === 'float';
+  const signed = floating || limits.min < 0;
+  const zero = typeof limits.max === 'bigint' ? 0n : 0;
   const staticFunction = (name: string, value: number | bigint): void => {
     cls.methods.set(name, [
       {
@@ -184,29 +188,48 @@ export function numericLimitsClass(library: Library, type: Type): ClassInfo {
       },
     ]);
   };
-  staticFunction('max', limits.max);
-  staticFunction('min', limits.min);
-  staticFunction('lowest', limits.lowest ?? limits.min);
-  if (target.kind === 'float') {
-    staticFunction('epsilon', limits.epsilon as number);
-    staticFunction('infinity', Number.POSITIVE_INFINITY);
-    staticFunction('quiet_NaN', Number.NaN);
-  } else {
-    // The integer types have these members too, which give 0.
-    const zero = typeof limits.max === 'bigint' ? 0n : 0;
-    for (const name of ['epsilon', 'infinity', 'quiet_NaN']) staticFunction(name, zero);
-  }
+  for (const [name, value] of Object.entries({
+    max: limits.max,
+    min: limits.min,
+    lowest: limits.lowest ?? limits.min,
+    epsilon: limits.epsilon ?? zero,
+    round_error: floating ? 0.5 : zero,
+    infinity: floating ? Infinity : zero,
+    quiet_NaN: floating ? Number.NaN : zero,
+    signaling_NaN: floating ? Number.NaN : zero,
+    denorm_min: floating ? (binary32 ? 2 ** -149 : Number.MIN_VALUE) : zero,
+  }))
+    staticFunction(name, value);
   const int: Type = { kind: 'int', name: 'int' };
-  cls.constants.set('digits', constant(limits.digits, int));
-  cls.constants.set('digits10', constant(limits.digits10, int));
-  cls.constants.set(
-    'is_signed',
-    constant(
-      target.kind === 'float' || ['char', 'schar', 'short', 'int', 'long', 'llong'].includes(target.name) ? 1 : 0,
-      BOOL
-    )
-  );
-  cls.constants.set('is_integer', constant(target.kind === 'int' ? 1 : 0, BOOL));
+  for (const [name, value] of Object.entries({
+    digits: limits.digits,
+    digits10: limits.digits10,
+    max_digits10: floating ? (binary32 ? 9 : 17) : 0,
+    radix: 2,
+    min_exponent: floating ? (binary32 ? -125 : -1021) : 0,
+    max_exponent: floating ? (binary32 ? 128 : 1024) : 0,
+    min_exponent10: floating ? (binary32 ? -37 : -307) : 0,
+    max_exponent10: floating ? (binary32 ? 38 : 308) : 0,
+    has_denorm: Number(floating),
+    round_style: Number(floating),
+  }))
+    cls.constants.set(name, constant(value, int));
+  for (const [name, value] of Object.entries({
+    is_specialized: true,
+    is_signed: signed,
+    is_integer: !floating,
+    is_exact: !floating,
+    has_infinity: floating,
+    has_quiet_NaN: floating,
+    has_signaling_NaN: floating,
+    has_denorm_loss: false,
+    is_iec559: floating,
+    is_bounded: true,
+    is_modulo: !signed && target.name !== 'bool',
+    traps: false,
+    tinyness_before: false,
+  }))
+    cls.constants.set(name, constant(Number(value), BOOL));
   return cls;
 }
 

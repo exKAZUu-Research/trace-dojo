@@ -1,4 +1,5 @@
 import { byteAt } from '../bytes';
+import { CppRuntimeError } from '../errors';
 import { CHAR_POINTER, type FunctionInfo, INT, LONG, pointerTo, SIZE_T, type Type, UINT, VOID } from '../types';
 import type { Ptr } from '../values';
 import { NULL_PTR } from '../values';
@@ -137,23 +138,22 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
     })
   );
   for (const [name, test] of Object.entries(CHARACTER_CLASSES)) {
-    // macOS's tables classify only ASCII in the C locale; other values, such as negative chars, are no class.
     add(
       native(name, [INT], INT, ([c]) => {
-        const value = asNumber(c);
+        const value = characterArgument(c);
         return value >= 0 && value < 0x80 && test(value) ? 1 : 0;
       })
     );
   }
   add(
     native('tolower', [INT], INT, ([c]) => {
-      const value = asNumber(c);
+      const value = characterArgument(c);
       return value >= 0x41 && value <= 0x5a ? value + 32 : value;
     })
   );
   add(
     native('toupper', [INT], INT, ([c]) => {
-      const value = asNumber(c);
+      const value = characterArgument(c);
       return value >= 0x61 && value <= 0x7a ? value - 32 : value;
     })
   );
@@ -234,6 +234,13 @@ const atoi = (text: unknown): number => {
   const match = /^[\t\n\v\f\r ]*([+-]?\d+)/.exec(readCString(text as Ptr));
   return match ? Number(BigInt.asIntN(32, BigInt(match[1]))) : 0;
 };
+
+function characterArgument(input: unknown): number {
+  const value = asNumber(input);
+  if (value < -1 || value > 255)
+    throw new CppRuntimeError('custom', '文字を調べる関数の引数は、unsigned char の範囲か EOF にしてください。');
+  return value;
+}
 
 function compareBytes(a: string, b: string): number {
   const length = Math.min(a.length, b.length);

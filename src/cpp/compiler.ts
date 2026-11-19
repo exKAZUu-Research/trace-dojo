@@ -49,7 +49,6 @@ import {
   intMin,
   isArithmetic,
   isConstType,
-  isCopyConstructor,
   isInteger,
   isReferenceRelated,
   type ParamInfo,
@@ -614,10 +613,8 @@ export class Compiler extends StatementCompiler {
     const baseDestructor = cls.base?.destructor;
     if (!cls.destructor && baseDestructor?.isVirtual) cls.destructor = this.implicitDestructor(cls);
     if (cls.destructor) this.completeVirtual(cls, cls.destructor, '~');
-    const userCopy = cls.constructors.find((ctor) => isCopyConstructor(ctor, cls));
-    cls.isNoncopyable =
-      !userCopy &&
-      (cls.base?.isNoncopyable === true || cls.ownFields.some((field) => this.isNoncopyableType(field.type)));
+    const copies = this.writtenCopyConstructors(cls);
+    if (copies.length === 0) this.completeImplicitCopy(cls);
     cls.isAssignmentDeleted =
       cls.base?.isAssignmentDeleted === true || cls.ownFields.some((field) => !allowsMemberAssignment(field.type));
     cls.isComplete = true;
@@ -629,7 +626,50 @@ export class Compiler extends StatementCompiler {
         this.implicitDefaults.set(cls, this.bindImplicitDefault(cls));
       }
     }
-    cls.operations = this.classOperations(cls, userCopy);
+    cls.operations = this.classOperations(cls, copies.length > 0);
+  }
+
+  private completeImplicitCopy(cls: ClassInfo): void {
+    const base = cls.base && classType(cls.base);
+    cls.implicitCopyFromConst =
+      (!base || this.hasConstCopyParameter(base)) &&
+      cls.ownFields.every((field) => this.hasConstCopyParameter(field.type));
+    cls.isNoncopyable =
+      (base !== undefined && !this.isCopyInitializable(base, cls, true)) ||
+      cls.ownFields.some((field) => !this.isCopyInitializable(field.type, cls));
+  }
+
+  private hasConstCopyParameter(type: Type): boolean {
+    if (type.kind === 'array') return type.length === 0 || this.hasConstCopyParameter(type.of);
+    if (type.kind !== 'class') return true;
+    const candidates = this.writtenCopyConstructors(type.cls);
+    return candidates.length === 0
+      ? type.cls.implicitCopyFromConst
+      : candidates.some(
+          ({ params: [{ type: parameter }] }) => parameter.kind === 'reference' && isConstType(parameter.to)
+        );
+  }
+
+  private isCopyInitializable(type: Type, owner: ClassInfo, isBase = false): boolean {
+    if (type.kind === 'array') return type.length === 0 || this.isCopyInitializable(type.of, owner);
+    if (type.kind !== 'class') return true;
+    const { cls } = type;
+    if (cls.isNoncopyable) return false;
+    const object = isBase ? owner : cls;
+    if (cls.destructor && !isMemberAccessible(cls.destructor.access, cls, cls, owner, object)) return false;
+    const sourceIsConst = owner.implicitCopyFromConst || isConstType(type);
+    if (this.writtenCopyConstructors(cls).length === 0) return !sourceIsConst || cls.implicitCopyFromConst;
+    const copy = this.usableCopyConstructor(cls, sourceIsConst);
+    return copy !== undefined && isMemberAccessible(copy.access, cls, cls, owner, object);
+  }
+
+  private usableCopyConstructor(cls: ClassInfo, sourceIsConst: boolean): FunctionInfo | undefined {
+    try {
+      return this.selectCopyConstructor(cls, sourceIsConst, cls.row);
+    } catch (error) {
+      if (error instanceof CompileError) return;
+      throw error;
+    }
   }
 
   private isDefaultInitializable(type: Type, owner: ClassInfo, isBase = false): boolean {
@@ -690,12 +730,6 @@ export class Compiler extends StatementCompiler {
         `${overridden.displayName} は noexcept なので、上書きする ${fn.displayName} にも noexcept が要ります。`
       );
     }
-  }
-
-  private isNoncopyableType(type: Type): boolean {
-    if (type.kind === 'class') return type.cls.isNoncopyable;
-    if (type.kind === 'array') return this.isNoncopyableType(type.of);
-    return false;
   }
 
   private implicitDestructor(cls: ClassInfo): FunctionInfo {
@@ -980,14 +1014,18 @@ export class Compiler extends StatementCompiler {
   }
 
   /** How objects of a class are copied, assigned, and destroyed. */
-  private classOperations(cls: ClassInfo, userCopy: FunctionInfo | undefined): ClassInfo['operations'] {
+  private classOperations(cls: ClassInfo, hasUserCopy: boolean): ClassInfo['operations'] {
     const base = cls.base;
     const ownFields = cls.ownFields;
     const undo = this.undoConstruction(cls);
-    const copyInto = (frame: Frame, target: CObject, source: CObject): void => {
+    const constCopy = hasUserCopy ? this.usableCopyConstructor(cls, true) : undefined;
+    const mutableCopy = hasUserCopy ? this.usableCopyConstructor(cls, false) : undefined;
+    const copyInto = (frame: Frame, target: CObject, source: CObject, sourceIsConst: boolean): void => {
       target.cls = cls;
-      if (userCopy) {
-        invoke(frame, userCopy, [new Ptr(new Box(source), 0)], new Ptr(new Box(target), 0), cls.row);
+      if (hasUserCopy) {
+        const copy = sourceIsConst ? constCopy : mutableCopy;
+        if (!copy) throw new CppRuntimeError('custom', `${cls.name} のオブジェクトはコピーできません。`);
+        this.invokeStoredCopy(frame, copy, new Ptr(new Box(source), 0), new Ptr(new Box(target), 0));
         return;
       }
       const mark = frame.pending.length;
@@ -995,7 +1033,12 @@ export class Compiler extends StatementCompiler {
       let isBaseComplete = false;
       try {
         if (base) {
-          const baseCopy = base.operations?.copy(frame, source, target.zeroInitialized ? target : undefined) as CObject;
+          const baseCopy = base.operations?.copy(
+            frame,
+            source,
+            target.zeroInitialized ? target : undefined,
+            cls.implicitCopyFromConst
+          ) as CObject;
           if (baseCopy !== target) {
             target.message = baseCopy.message;
             for (let index = 0; index < base.fields.length; index++) target.values[index] = baseCopy.values[index];
@@ -1006,7 +1049,13 @@ export class Compiler extends StatementCompiler {
         for (const field of ownFields) {
           const member = source.values[field.index];
           const destination = initializerTarget(target.values[field.index]);
-          target.values[field.index] = this.copyMember(frame, field.type, member, destination);
+          target.values[field.index] = this.copyMember(
+            frame,
+            field.type,
+            member,
+            destination,
+            cls.implicitCopyFromConst
+          );
         }
       } catch (error) {
         if (error instanceof CppException) undo(frame, isBaseComplete, target);
@@ -1028,9 +1077,9 @@ export class Compiler extends StatementCompiler {
     };
     const destroy = this.destructionOf(cls);
     return {
-      copy: (frame, source, destination) => {
+      copy: (frame, source, destination, sourceIsConst = true) => {
         const target = newObject(frame, cls, false, destination);
-        copyInto(frame, target, source as CObject);
+        copyInto(frame, target, source as CObject, sourceIsConst);
         target.needsConstruction = false;
         return target;
       },
@@ -1041,17 +1090,23 @@ export class Compiler extends StatementCompiler {
     };
   }
 
-  private copyMember(frame: Frame, type: Type, value: Value, destination?: InitializerTarget): Value {
+  private copyMember(
+    frame: Frame,
+    type: Type,
+    value: Value,
+    destination: InitializerTarget | undefined,
+    sourceIsConst: boolean
+  ): Value {
     if (value === UNINIT) return value;
     if (type.kind === 'class' && type.cls.operations)
-      return type.cls.operations.copy(frame, value, asObject(destination));
+      return type.cls.operations.copy(frame, value, asObject(destination), sourceIsConst || isConstType(type));
     if (type.kind !== 'array') return value;
     const fields = (value as ArrayStore).values;
     const destroy = this.destroyerOf(type.of);
     return this.fillArray(
       frame,
       fields.length,
-      (f, target, index) => this.copyMember(f, type.of, fields[index], target),
+      (f, target, index) => this.copyMember(f, type.of, fields[index], target, sourceIsConst),
       destroy,
       arrayStorage(destination)
     );
@@ -2136,7 +2191,7 @@ export class Compiler extends StatementCompiler {
     return [...new Set([...functions, ...found.functions])];
   }
 
-  protected checkDefined(fn: FunctionInfo, row: number): void {
+  checkDefined(fn: FunctionInfo, row: number): void {
     if (this.isUnevaluated) return;
     if (fn.native) {
       fn.nativeUses?.(row);

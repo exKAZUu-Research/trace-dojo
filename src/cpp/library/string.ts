@@ -302,7 +302,16 @@ export function stringClass(library: Library): ClassInfo {
   ): void => {
     addMethod(
       cls,
-      native(name, params, ret, (args, { self, frame }) => run(self as StringValue, args, frame), options)
+      native(
+        name,
+        params,
+        ret,
+        (args, { self, selfLocation, frame }) => {
+          const result = run(self as StringValue, args, frame);
+          return ret.kind === 'reference' && result === self ? selfLocation : result;
+        },
+        options
+      )
     );
   };
   /** A member function template that takes an input iterator range after `params`, such as `append(first, last)`. */
@@ -322,9 +331,10 @@ export function stringClass(library: Library): ClassInfo {
           name,
           [...params, iteratorType, iteratorType],
           ret,
-          (callArgs, { self, frame }) => {
+          (callArgs, { self, selfLocation, frame }) => {
             const [first, last] = callArgs.slice(params.length) as Ptr[];
-            return run(self as StringValue, callArgs, rangeBytes(first, last, isReverse), frame);
+            const result = run(self as StringValue, callArgs, rangeBytes(first, last, isReverse), frame);
+            return ret.kind === 'reference' && result === self ? selfLocation : result;
           },
           { owner: cls }
         );
@@ -508,13 +518,13 @@ export function stringClass(library: Library): ClassInfo {
   const refType: Type = { kind: 'reference', to: type };
   const iteratorType = classType(iterator);
   const constIteratorType = classType(constIterator);
-  const edit = (s: StringValue, start: unknown, count: unknown, replacement: string, frame: Frame): Ptr => {
+  const edit = (s: StringValue, start: unknown, count: unknown, replacement: string, frame: Frame): StringValue => {
     const begin = position(start, 0n);
     if (begin > BigInt(s.bytes.length)) return outOfRange(frame);
     const from = Number(begin);
     const length = clampedLength(count, s.bytes.length - from);
     s.bytes = checkLength(frame, s.bytes.slice(0, from) + replacement + s.bytes.slice(from + length));
-    return self(s);
+    return s;
   };
   /** The forms of the characters `append`, `assign`, `insert`, and `replace` put in: `(str)`, `(s, n)`, `(n, c)`, ... */
   const sources: {
@@ -651,8 +661,6 @@ function appendBytes(frame: Frame, left: string, right: string): string {
   return left + right;
 }
 
-const self = (value: StringValue): Ptr => new Ptr(new SelfBox(value), 0);
-
 const isPlainChar = (type: Type): boolean => type.kind === 'int' && type.name === 'char';
 
 const insertAt = (s: StringValue, at: unknown, bytes: string, frame: Frame): Ptr => {
@@ -694,25 +702,6 @@ const compareBytes = (a: string, b: string): number => {
   }
   return a.length === b.length ? 0 : a.length < b.length ? -1 : 1;
 };
-
-/** A store that holds one object, for a member function that returns `*this` by reference. */
-class SelfBox extends Store {
-  constructor(readonly value: StringValue) {
-    super();
-  }
-
-  get length(): number {
-    return 1;
-  }
-
-  get(): Value {
-    return this.value;
-  }
-
-  set(_index: number, value: Value): void {
-    this.value.bytes = (value as StringValue).bytes;
-  }
-}
 
 /**
  * The capacity libc++'s string allocates for a length: the short form's, or room for the length and the terminating

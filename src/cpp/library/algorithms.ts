@@ -40,6 +40,7 @@ import {
   lessThan,
   locationOf,
   moveValue,
+  requireElementUse,
   swapElements,
   truthy,
 } from './elements';
@@ -600,6 +601,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
             : (equal as (a: Value, b: Value) => boolean)(previous, item));
       }
       const element = unqualified(info.element);
+      requireElementUse(compiler(), element, args[0].row, 'assign');
       return native(name, params(args), unqualified(args[0].type), ([first, last, value], { frame }) => {
         const values = range(first, last, info);
         frame.pending.push(value as Value);
@@ -915,27 +917,14 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
           ([array]) => new Ptr((array as Ptr).read() as Store, name.endsWith('end') ? length : 0)
         );
       }
-      if (type.kind !== 'class' || !type.cls.methods.has(name)) return;
-      const member =
-        (type.cls.methods.get(name) as FunctionInfo[]).find((fn) => fn.isConst === isConstType(type)) ??
-        (type.cls.methods.get(name) as FunctionInfo[])[0];
-      return native(
-        name,
-        [isConstType(type) ? constRef(unqualified(type)) : referenceTo(type)],
-        member.ret,
-        ([object], context) => member.native?.([], { ...context, self: (object as Ptr).read() })
-      );
+      return rangeMemberFunction(compiler(), name, args[0]);
     });
   }
   define('size', (args) => {
     if (args.length !== 1) return;
     const type = args[0].type;
     if (type.kind === 'array') return native('size', [referenceTo(type)], SIZE_T, () => BigInt(type.length ?? 0));
-    if (type.kind !== 'class' || !type.cls.methods.has('size')) return;
-    const member = (type.cls.methods.get('size') as FunctionInfo[])[0];
-    return native('size', [constRef(unqualified(type))], SIZE_T, ([object], context) =>
-      member.native?.([], { ...context, self: (object as Ptr).read() })
-    );
+    return rangeMemberFunction(compiler(), 'size', args[0]);
   });
   for (const name of ['next', 'prev']) {
     define(name, (args) => {
@@ -987,6 +976,31 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     return native('back_inserter', [referenceTo(container.type)], classType(cls), ([location]) => location);
   });
   return functions;
+}
+
+function rangeMemberFunction(compiler: ExpressionCompiler, name: string, arg: Expr): FunctionInfo | undefined {
+  if (arg.type.kind !== 'class') return;
+  const row = arg.row;
+  const useConst = name === 'size' || name.startsWith('c') || isConstType(arg.type) || !arg.isLvalue;
+  const type = useConst ? withConst(arg.type) : arg.type;
+  const object = { ...arg, type, isLvalue: true };
+  const member = name.startsWith('c') ? name.slice(1) : name;
+  let fn: FunctionInfo;
+  try {
+    const functions = compiler.member(object, member, row).functions?.candidates;
+    if (!functions) return;
+    fn = compiler.resolve(member, functions, [], object, row).fn;
+  } catch (error) {
+    if (error instanceof CompileError) return;
+    throw error;
+  }
+  if (fn.access !== 'public') return;
+  if (!fn.isPure) compiler.checkDefined(fn, row);
+  const args = compiler.callArguments(fn, [], row);
+  const call = compiler.prepareInvocation(fn, row);
+  return native(name, [referenceTo(type)], fn.ret, ([receiver], { frame }) =>
+    withTemporaries(frame, () => holdAll(frame, args, (values) => call(frame, values, receiver as Ptr)))
+  );
 }
 
 /** The iterator pair at `index` of the arguments, with a common element type, or undefined when it is none. */

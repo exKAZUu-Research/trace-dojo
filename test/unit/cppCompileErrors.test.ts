@@ -443,6 +443,38 @@ test.each([
   ],
   ['std::sqrt with only <cstdio>', '#include <cstdio>\nint main() {\n  double x = std::sqrt(2.0); }', 2],
   ['std::abs with only <cstdio>', '#include <cstdio>\nint main() {\n  int x = std::abs(-2); }', 2],
+  ['std::size without a header', 'int main() { int a[3] = {}; return std::size(a); }', 0],
+  ['std::ostream without a header', 'int main() { std::ostream* p = nullptr; }', 0],
+  [
+    'fill with an element type that has a deleted assignment operator',
+    '#include <algorithm>\nstruct X { const int n; };\nint main() { X a[] = {{1}}; std::fill(a, a + 1, X{2}); }',
+    2,
+  ],
+  [
+    'remove_if with an element type that has a deleted assignment operator',
+    '#include <algorithm>\nstruct X { const int n; };\nbool keep(const X&) { return true; }\nint main() { X a[] = {{1}}; std::remove_if(a, a + 1, keep); }',
+    3,
+  ],
+  [
+    'library copy of a private copy constructor from a member that could call it directly',
+    '#include <vector>\nclass X { X(const X&) {} public: X() {} void store() { std::vector<X> v; v.push_back(*this); } };',
+    1,
+  ],
+  [
+    'copy from a const object with only a mutable reference copy constructor',
+    'struct X { X() {} X(X&) {} };\nint main() { const X a; X b = a; }',
+    1,
+  ],
+  [
+    'implicit copy with an inaccessible base copy constructor',
+    'class Base { Base(const Base&) {} public: Base() {} };\nstruct Child : Base {};\nint main() { Child a; Child b = a; }',
+    2,
+  ],
+  [
+    'a prvalue argument with an inaccessible destructor',
+    'class X { ~X() {} public: X() {} };\nvoid f(X) {}\nint main() { f(X()); }',
+    2,
+  ],
 ])('the interpreter rejects %s', (_, program, row) => {
   const execution = executeProgram('cpp', program.includes('int main') ? program : `${program}\nint main() {}`);
   expect(execution).toMatchObject({ kind: 'compileError', diagnostics: [{ row }] });

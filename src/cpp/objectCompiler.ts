@@ -16,6 +16,7 @@ import type { Syntax } from './syntax';
 import {
   type Access,
   allowsConstantCopy,
+  allowsMemberAssignment,
   type ClassInfo,
   classType,
   type FunctionInfo,
@@ -50,7 +51,7 @@ export function invoke(
     const override = fn.libcGlobal ? runtime.libcOverrides.get(fn.name) : undefined;
     if (override && sameParameters(fn, override)) return invoke(frame, override, args, self, row, isCallerDestroying);
     runtime.spend();
-    return fn.native(args, { self: self?.read(), frame, row }) as Value | Ptr;
+    return fn.native(args, { self: self?.read(), selfLocation: self, frame, row }) as Value | Ptr;
   }
   const compiled = fn.compiled;
   if (!compiled) throw new Error(`${fn.displayName} has no body`);
@@ -256,10 +257,13 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       this.error(expr.row, `${cls.name} のオブジェクトはコピーできません（コピーコンストラクタが削除されています）。`);
     }
     if (expr.type.kind === 'class') this.checkBaseConversion(expr.type.cls, cls, expr.row);
-    const copyConstructor = cls.constructors.find((ctor) => !ctor.native && isCopyConstructor(ctor, cls));
-    if (copyConstructor) {
-      this.checkAccess(copyConstructor.access, cls, cls, expr.row, `${cls.name} のコンストラクタ`, cls);
+    const candidates = this.writtenCopyConstructors(cls);
+    if (candidates.length > 0) {
+      const selected = this.resolve(`コピーコンストラクタ ${cls.name}`, candidates, [expr], undefined, expr.row);
+      return this.constructWith(cls, selected, [expr], expr.row);
     }
+    if (!cls.implicitCopyFromConst && (!expr.isLvalue || isConstType(expr.type)))
+      this.error(expr.row, `${cls.name} のコピーコンストラクタには const でない左辺値が必要です。`);
     this.requireObjectUse(classType(cls), 'copy', expr.row);
     const source = this.rvalue(expr);
     const constantInitialization = source.constantInitialization === true && allowsConstantCopy(classType(cls));
@@ -273,6 +277,21 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       onlyCalls: expr.onlyCalls,
       run: (frame, _zeroInitialize, destination) => copyAs(frame, cls, source.run(frame), destination),
     };
+  }
+
+  protected writtenCopyConstructors(cls: ClassInfo): FunctionInfo[] {
+    return cls.constructors.filter((fn) => !fn.native && isCopyConstructor(fn, cls));
+  }
+
+  protected copySource(cls: ClassInfo, sourceIsConst: boolean, row: number): Expr {
+    return { type: classType(cls, sourceIsConst), isLvalue: true, row, run: () => {} };
+  }
+
+  protected selectCopyConstructor(cls: ClassInfo, sourceIsConst: boolean, row: number): FunctionInfo | undefined {
+    const viable = this.matchingOverloads(this.writtenCopyConstructors(cls), [
+      this.copySource(cls, sourceIsConst, row),
+    ]);
+    return this.chooseOverload(`コピーコンストラクタ ${cls.name}`, viable, row)?.fn;
   }
 
   /** Stops at a use of a member that the code compiled now cannot access (C++20 [class.access]). */
@@ -301,7 +320,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
 
   abstract bracedConversion(list: Syntax, to: Type): ConversionSequence | undefined;
 
-  protected abstract checkDefined(fn: FunctionInfo, row: number): void;
+  abstract checkDefined(fn: FunctionInfo, row: number): void;
 
   protected requireVirtualDefinitions(cls: ClassInfo, row: number): void {
     for (const fn of cls.virtuals.values()) {
@@ -489,6 +508,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     return runs.map((run, index) => {
       const type = fn.params[index]?.type;
       if (type?.kind !== 'class') return run;
+      this.requireObjectUse(type, 'destroy', row);
       return (frame) => {
         const value = run(frame) as Value;
         const destroy = parameterDestroyer(type);
@@ -512,19 +532,11 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     const argRuns = this.callArguments(fn, converted, row);
     const evaluateObject = object && (fn.isStatic ? this.materialize(object).run : this.objectOf(object));
     const runs = evaluateObject ? [evaluateObject, ...argRuns] : argRuns;
-    const virtualKeyText = fn.isVirtual && !isQualified ? virtualKey(fn) : undefined;
+    const call = this.prepareInvocation(fn, row, isQualified);
     const run: Eval<Value | Ptr> = (frame) => {
       return holdAll(frame, runs, (values) => {
         const receiver = evaluateObject ? (values.shift() as Ptr) : undefined;
-        const location = fn.isStatic ? undefined : receiver;
-        let callee = fn;
-        if (virtualKeyText !== undefined && location) {
-          const target = location.read();
-          if (target instanceof CObject) callee = target.cls.virtuals.get(virtualKeyText) ?? fn;
-          if (callee.isPure)
-            throw new CppRuntimeError('custom', `純粋仮想関数 ${callee.displayName} を呼び出しました。`);
-        }
-        return invoke(frame, callee, values, location, row, true);
+        return call(frame, values, receiver);
       });
     };
     const isReference = fn.ret.kind === 'reference';
@@ -545,6 +557,20 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
         : this.callConstancy(fn, args, converted)),
       onlyCalls: true,
       isTemporaryObject: !isReference && type.kind === 'class',
+    };
+  }
+
+  prepareInvocation(fn: FunctionInfo, row: number, isQualified = false) {
+    const key = fn.isVirtual && !isQualified ? virtualKey(fn) : undefined;
+    return (frame: Frame, args: unknown[], receiver?: Ptr): Value | Ptr => {
+      const location = fn.isStatic ? undefined : receiver;
+      let callee = fn;
+      if (key !== undefined && location) {
+        const target = location.read();
+        if (target instanceof CObject) callee = target.cls.virtuals.get(key) ?? fn;
+        if (callee.isPure) throw new CppRuntimeError('custom', `純粋仮想関数 ${callee.displayName} を呼び出しました。`);
+      }
+      return invoke(frame, callee, args, location, row, true);
     };
   }
 
@@ -650,29 +676,43 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   }
 
   requireObjectUse(type: Type, operation: 'copy' | 'assign' | 'destroy', row: number): void {
-    this.checkObjectUse(type, operation, row, this.enclosingClass, new Set());
+    this.checkObjectUse(type, operation, row, { access: this.enclosingClass, seen: new Set() });
+  }
+
+  requireLibraryObjectUse(type: Type, operation: 'copy' | 'assign' | 'destroy', row: number): void {
+    if (operation === 'assign' && !allowsMemberAssignment(type))
+      this.error(row, `${typeName(type)} 型の要素には代入できません。`);
+    this.checkObjectUse(type, operation, row, { seen: new Set(), sourceIsConst: true });
+  }
+
+  private readonly copyDefaults = new Map<FunctionInfo, Eval<unknown>[]>();
+
+  protected invokeStoredCopy(frame: Frame, fn: FunctionInfo, source: Ptr, target: Ptr): void {
+    const defaults = this.copyDefaults.get(fn) ?? [];
+    withTemporaries(frame, () =>
+      holdAll(frame, [() => source, ...defaults], (args) => invoke(frame, fn, args, target, fn.row, true))
+    );
   }
 
   private checkObjectUse(
     type: Type,
     operation: 'copy' | 'assign' | 'destroy',
     row: number,
-    accessContext: ClassInfo | undefined,
-    seen: Set<ClassInfo>,
-    derivedObject?: ClassInfo
+    context: { access?: ClassInfo; seen: Set<ClassInfo>; sourceIsConst?: boolean; baseObject?: ClassInfo }
   ): void {
     if (type.kind === 'array') {
-      if ((type.length ?? 1) > 0) this.checkObjectUse(type.of, operation, row, accessContext, seen);
+      if ((type.length ?? 1) > 0) this.checkObjectUse(type.of, operation, row, context);
       return;
     }
     if (type.kind !== 'class') return;
     const { cls } = type;
+    const { access, seen, baseObject } = context;
     const destructor = cls.destructor;
     if (
       operation === 'destroy' &&
       destructor &&
       !destructor.native &&
-      !isMemberAccessible(destructor.access, cls, cls, accessContext, derivedObject ?? cls)
+      !isMemberAccessible(destructor.access, cls, cls, access, baseObject ?? cls)
     ) {
       this.error(row, `${cls.name} のデストラクタは ${destructor.access} なので、ここでは使えません。`);
     }
@@ -681,19 +721,31 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
 
     if (operation === 'copy') {
       this.requireVirtualDefinitions(cls, row);
-      const constructor = cls.constructors.find((fn) => !fn.native && isCopyConstructor(fn, cls));
+      const sourceIsConst = context.sourceIsConst === true || isConstType(type);
+      const constructors = this.writtenCopyConstructors(cls);
+      const constructor = constructors.length > 0 ? this.selectCopyConstructor(cls, sourceIsConst, row) : undefined;
+      if (cls.isNoncopyable || (constructors.length > 0 ? !constructor : sourceIsConst && !cls.implicitCopyFromConst))
+        this.error(row, `${cls.name} のオブジェクトはコピーできません。`);
       if (constructor) {
+        if (!isMemberAccessible(constructor.access, cls, cls, access, baseObject ?? cls))
+          this.error(row, `${cls.name} のコピーコンストラクタは ${constructor.access} なので、ここでは使えません。`);
         this.checkDefined(constructor, row);
+        if (constructor.params.length > 1) {
+          const defaults = this.callArguments(constructor, [this.copySource(cls, sourceIsConst, row)], row).slice(1);
+          this.copyDefaults.set(constructor, defaults);
+        }
         return;
       }
     }
     if (operation === 'destroy' && destructor) this.checkDefined(destructor, row);
-    if (cls.base) this.checkObjectUse(classType(cls.base), operation, row, cls, seen, cls);
-    for (const field of cls.ownFields) this.checkObjectUse(field.type, operation, row, cls, seen);
+    const nested = { access: cls, seen, sourceIsConst: cls.implicitCopyFromConst };
+    if (cls.base) this.checkObjectUse(classType(cls.base), operation, row, { ...nested, baseObject: cls });
+    for (const field of cls.ownFields) this.checkObjectUse(field.type, operation, row, nested);
     for (const owned of cls.library?.ownedTypes ?? []) {
-      this.checkObjectUse(owned, operation, row, cls, seen);
+      const library = { seen, sourceIsConst: true };
+      this.checkObjectUse(owned, operation, row, library);
       if (operation === 'assign' && cls.library?.assignmentCopies)
-        this.checkObjectUse(owned, 'copy', row, cls, new Set());
+        this.checkObjectUse(owned, 'copy', row, { ...library, seen: new Set() });
     }
   }
 }
