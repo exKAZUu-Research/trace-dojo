@@ -730,7 +730,7 @@ export interface NativeFunction {
    * so that stack traces show no frame for it and what it calls shows the caller's line.
    */
   inlined?: boolean;
-  acceptsNamed?: boolean;
+  acceptsNamed?: boolean | 'positional-only';
 }
 
 export interface UserFunction {

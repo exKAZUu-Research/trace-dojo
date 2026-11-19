@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 741 -- Keeps call binding, completion and frame cleanup together.
+// code-gauge-allow-file fileNcss 745 -- Keeps call binding, completion and frame cleanup together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -227,7 +227,10 @@ export function invoke(
   callRow: number | undefined,
   discardResult = false
 ): Value {
-  if (target.fn.kind === 'native') return invokeNative(target, target.fn, args, callRow, discardResult);
+  if (target.fn.kind === 'native') {
+    if (target.fn.acceptsNamed === 'positional-only') checkNamedArgs([], args);
+    return invokeNative(target, target.fn, args, callRow, discardResult);
+  }
   return invokeUser(target, target.fn, args, callRow, discardResult);
 }
 
@@ -434,7 +437,7 @@ function bindNative(
   }
   // Only call_user_func passes on named arguments its variadic parameter collects; PHP's other functions refuse them,
   // after checking the arguments they did match.
-  const refusesNamed = named !== undefined && fn.name !== 'call_user_func' && !fn.acceptsNamed;
+  const refusesNamed = named !== undefined && fn.name !== 'call_user_func' && fn.acceptsNamed !== true;
   if (refusesNamed && given < required) {
     throwError(
       'ArgumentCountError',
@@ -1168,7 +1171,9 @@ const copyClosureRefs = (refs: Map<string, Ref>): Map<string, Ref> =>
         ref.rc++;
         return [name, ref];
       }
-      return [name, new Ref(share(ref.v))];
+      const copy = new Ref(share(ref.v));
+      copy.isRef = ref.isRef;
+      return [name, copy];
     })
   );
 

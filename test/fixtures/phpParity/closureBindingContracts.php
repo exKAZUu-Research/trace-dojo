@@ -24,3 +24,21 @@ foreach ($outer->instanceClosures() as $closure) {
 }
 $unbound = fn() => isset($this);
 var_dump($unbound->bindTo(null) === null, $unbound());
+
+function counter() {
+    $value = 0;
+    return function () use (&$value) { return ++$value; };
+}
+foreach (['bindTo', 'bind', 'clone'] as $copy) {
+    $original = counter();
+    $other = match ($copy) {
+        'bindTo' => $original->bindTo(null),
+        'bind' => Closure::bind($original, null),
+        'clone' => clone $original,
+    };
+    echo $original(), $other(), $original(), $other(), "\n";
+}
+$value = 0;
+$original = function () use (&$value) { return ++$value; };
+$other = clone $original;
+echo $original(), $other(), $value, "\n";

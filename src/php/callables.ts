@@ -64,7 +64,10 @@ export function evalArgs(
   const runtime = rt();
   const values: ArgValue[] = [];
   const named = args.some((arg) => arg.name !== undefined || arg.spread)
-    ? new NamedArgumentBindings(fn?.params ?? [], fn === undefined && allowUnresolvedNames)
+    ? new NamedArgumentBindings(
+        fn?.kind === 'native' && fn.acceptsNamed === 'positional-only' ? [] : (fn?.params ?? []),
+        fn === undefined && allowUnresolvedNames
+      )
     : undefined;
   let positional = 0;
   const add = (value: ArgValue): void => {
@@ -420,22 +423,26 @@ function magicClosure(receiver: PhpObject | undefined, calledClass: PhpClass, me
   return makeCallableClosure(magicClosureTarget({ method, name, receiver, calledClass }));
 }
 
-function magicClosureTarget({ method: magic, name, receiver, calledClass }: MagicCall): CallTarget {
-  const fn = magicForwarder({ method: magic, name, receiver, calledClass });
+function magicClosureTarget({ method: magic, name, receiver, calledClass }: MagicCall, allowNamed = true): CallTarget {
+  const fn = magicForwarder(magic, name, allowNamed);
   const method: Method = { ...magic, fn, name, lname: lower(name), isStatic: !receiver };
   return { fn, method, thisObj: receiver, scope: method.scope, staticClass: calledClass };
 }
 
-function magicForwarder(magic: MagicCall): Callable {
+function magicForwarder(method: Method, name: string, allowNamed: boolean): Callable {
   return {
     kind: 'native',
-    name: magic.name,
-    acceptsNamed: true,
+    name,
+    acceptsNamed: allowNamed ? true : 'positional-only',
     params: [{ name: 'arguments', byRef: false, variadic: true, optional: true }],
-    impl: ({ args, named }) => {
+    impl: ({ args, named, thisObj, calledClass }) => {
       const argumentsToPack: ArgValue[] = args.map((v) => ({ v }));
       for (const [key, v] of named ?? []) argumentsToPack.push({ v, name: key });
-      return invokeMagic(magic, argumentsToPack, undefined);
+      return invokeMagic(
+        { method, name, receiver: thisObj, calledClass: calledClass ?? method.scope },
+        argumentsToPack,
+        undefined
+      );
     },
   };
 }
@@ -1014,7 +1021,9 @@ function warnCallbackReferenceArguments(target: CallTarget, args: ArgValue[]): v
 }
 
 export function closureFromCallable(target: CallTarget): PhpObject {
-  return target.magic ? makeCallableClosure(magicClosureTarget(target.magic), true) : makeCallableClosure(target);
+  return target.magic
+    ? makeCallableClosure(magicClosureTarget(target.magic, false), true)
+    : makeCallableClosure(target);
 }
 
 export function closureFromValue(value: Value): PhpObject {

@@ -35,3 +35,13 @@ object(Closure)#3 (2) {
   object(ExtendingFallback)#2 (0) {
   }
 }
+receiver:MagicBinding:missing:[1]
+subclass:MagicBindingChild:missing:[2]
+receiver:MagicBinding:missing:{"value":3}
+receiver:MagicBinding:missing:[1]
+subclass:MagicBindingChild:missing:[2]
+Unknown named parameter $value
+#0 /main.php(32): Closure->call(Object(MagicBinding), value: 3)
+#1 {main}
+MagicBindingChild:missing
+MagicBinding:missing
