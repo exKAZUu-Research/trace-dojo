@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 487 -- Keeps PHP's encoder and parser with their shared flag and error definitions.
+// code-gauge-allow-file fileNcss 489 -- Keeps PHP's encoder and parser with their shared flag and error definitions.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { codePointBytes, enc, utf8Length } from './bytes';
@@ -18,7 +18,7 @@ import { formatFloatRepr } from './conversions';
 import { type CleanupException, isCleanupException, newThrowable, throwError, withCleanupExceptions } from './errors';
 import { nextChar } from './htmlEntities';
 import { defineConstant, defineFunction } from './native';
-import { PhpThrow, rt } from './runtime';
+import { ExitSignal, PhpThrow, rt } from './runtime';
 import { PhpArray, type PhpClass, PhpObject, type PropDecl, Ref, UNDEFINED_RESULT, type Value } from './values';
 
 const FLAGS: [string, bigint][] = [
@@ -86,14 +86,19 @@ function encodeJson(value: Value, flags: bigint, depth: number): string | false 
   const runtime = rt();
   const partial = has(flags, PARTIAL_OUTPUT_ON_ERROR);
   let result: string | false = false;
-  withCleanupExceptions(runtime, (capture) => {
-    const encoder = new JsonEncoder(flags, depth, capture);
-    const text = encoder.document(value);
-    const code = encoder.error;
-    if (!has(flags, THROW_ON_ERROR) || partial) runtime.lastJsonError = code;
-    else if (code !== 0) throw new PhpThrow(newThrowable('JsonException', MESSAGES[code], BigInt(code)));
-    if (code === 0 || partial) result = text as string;
-  });
+  withCleanupExceptions(
+    runtime,
+    (capture) => {
+      const encoder = new JsonEncoder(flags, depth, capture);
+      const text = encoder.document(value);
+      const code = encoder.error;
+      if (!has(flags, THROW_ON_ERROR) || partial) runtime.lastJsonError = code;
+      else if (code !== 0 && !encoder.exiting)
+        throw new PhpThrow(newThrowable('JsonException', MESSAGES[code], BigInt(code)));
+      if (code === 0 || partial) result = text as string;
+    },
+    'latest'
+  );
   return result;
 }
 
@@ -101,7 +106,7 @@ function encodeJson(value: Value, flags: bigint, depth: number): string | false 
 class JsonEncoder {
   error = 0;
   private readonly active = new Set<object>();
-  private interrupted = false;
+  private interruption: 'exit' | 'exception' | undefined;
 
   constructor(
     private readonly flags: bigint,
@@ -117,9 +122,13 @@ class JsonEncoder {
     }
   }
 
+  get exiting(): boolean {
+    return this.interruption === 'exit';
+  }
+
   private interrupt(error: unknown): void {
     if (!isCleanupException(error)) throw error;
-    this.interrupted = true;
+    this.interruption = error instanceof ExitSignal ? 'exit' : 'exception';
     this.capture(error);
   }
 
@@ -159,7 +168,7 @@ class JsonEncoder {
 
   private encodeSerializable(value: PhpObject, level: number): string {
     if (this.active.has(value)) return this.fail(6);
-    if (this.interrupted) return this.serializerFailure();
+    if (this.interruption) return this.serializerFailure();
     this.active.add(value);
     try {
       const encoded = this.encodeUserResult(
@@ -198,7 +207,7 @@ class JsonEncoder {
             encoded = error;
           }
         },
-        true
+        { releaseOnExit: true, releaseMode: 'complete' }
       );
     } catch (error) {
       this.interrupt(error);
@@ -290,7 +299,7 @@ class JsonEncoder {
   }
 
   private hookedMember(object: PhpObject, decl: PropDecl, level: number): string {
-    if (this.interrupted) throw new JsonError(this.error);
+    if (this.interruption) throw new JsonError(this.error);
     const member = this.encodeUserResult(
       () => readProp(object, decl.name, decl.cls, 'native'),
       (item) => this.member(decl.name, item, level)

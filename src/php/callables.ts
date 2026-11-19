@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 701 -- Keeps implicit dispatch and native result ownership together.
+// code-gauge-allow-file fileNcss 702 -- Keeps implicit dispatch and native result ownership together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr, ResolvedName } from './ast';
@@ -22,6 +22,7 @@ import {
 import { canCall, classScopeMessage, lookupMethod, requireClass } from './classes';
 import { debugType, toBool, valueName } from './conversions';
 import { deprecated, notice, probe, ProbeFailure, throwError, warn, withPendingException } from './errors';
+import type { ReleaseMode } from './garbage';
 import {
   type Chain,
   ev,
@@ -972,7 +973,7 @@ export function discardInvokedResult(call: () => Value | undefined): void {
 export function consumeInvokedResult<V extends Value | undefined, T>(
   call: () => V,
   consume: (value: V) => T,
-  releaseOnExit = false
+  options?: { releaseOnExit?: boolean; releaseMode?: ReleaseMode }
 ): T {
   const runtime = rt();
   const nativeMark = runtime.nativeHeld.at(-1)?.length ?? 0;
@@ -986,11 +987,15 @@ export function consumeInvokedResult<V extends Value | undefined, T>(
     return consume(value);
   } catch (error) {
     if (error instanceof PhpThrow) pending = error;
-    else canRelease = releaseOnExit && error instanceof ExitSignal;
+    else canRelease = options?.releaseOnExit === true && error instanceof ExitSignal;
     throw error;
   } finally {
     if (canRelease)
-      withPendingException(runtime, pending, () => runtime.discardNativeResult(value, nativeMark, temporaryMark));
+      withPendingException(runtime, pending, () =>
+        runtime.withNativeReleaseMode(options?.releaseMode ?? runtime.nativeReleaseMode, () =>
+          runtime.discardNativeResult(value, nativeMark, temporaryMark)
+        )
+      );
   }
 }
 

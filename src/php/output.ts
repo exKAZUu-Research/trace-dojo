@@ -75,7 +75,7 @@ function withDebugEntries<T>(object: PhpObject, state: Inspection, use: (table: 
         result = { value: use(debugInfoEntries(object, info)) };
         return result.value;
       },
-      true
+      { releaseOnExit: true }
     );
   } catch (error) {
     if (!result || !isCleanupException(error)) throw error;

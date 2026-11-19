@@ -404,7 +404,7 @@ export function constantTruth(value: Constant): boolean {
   return value instanceof Map ? value.size > 0 : boolValue(value);
 }
 
-function scalarString(value: Scalar): string {
+export function scalarString(value: Scalar): string {
   if (typeof value === 'string' || typeof value === 'bigint') return String(value);
   if (typeof value === 'number') return formatFloat(value);
   return value ? '1' : '';

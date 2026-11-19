@@ -1,4 +1,5 @@
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
+import { simpleSprintfParts } from './builtinCompiler';
 import { callStack } from './calls';
 import { floatFitsInt, formatFloatRepr, numericPrefix } from './conversions';
 import { fatal, notice, throwError, warn } from './errors';
@@ -19,7 +20,7 @@ export function renderSimpleSprintf(format: string, reads: ((row: number) => Val
   let index = 0;
   let cursor = 0;
   let length = 0;
-  for (const match of format.matchAll(/%([sd%])/g)) {
+  for (const match of simpleSprintfParts(format)) {
     parts.push(format.slice(cursor, match.index));
     length += match.index - cursor;
     cursor = match.index + 2;

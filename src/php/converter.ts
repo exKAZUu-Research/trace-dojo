@@ -3,7 +3,18 @@ import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
 import type { ExecutionBudget } from '../interpreter/limits';
-import type { Arg, ArrayItem, CatchClause, Expr, ListItem, MatchArm, Program, Stmt, SwitchCase } from './ast';
+import type {
+  Arg,
+  ArrayItem,
+  CatchClause,
+  Expr,
+  ListItem,
+  MatchArm,
+  Program,
+  ResolvedName,
+  Stmt,
+  SwitchCase,
+} from './ast';
 import {
   collectScopeVars,
   collectVariables,
@@ -13,9 +24,9 @@ import {
   isWritableFetchBase,
   onlyCalls,
 } from './astAnalysis';
-import { oneArgumentBuiltinOpcodes, simpleSprintfFormat } from './builtinCompiler';
+import { oneArgumentBuiltinOpcodes, simpleSprintfFormat, simpleSprintfParts } from './builtinCompiler';
 import { enc, lower } from './bytes';
-import { type Constant, constantTruth, constantTypeName, foldedConstant } from './constantDefaults';
+import { type Constant, constantTruth, constantTypeName, foldedConstant, scalarString } from './constantDefaults';
 import { formatFloat, isNumericString, NAN_BOOL_WARNING, NAN_STRING_WARNING, normalizeKeyString } from './conversions';
 import {
   type CompileNotice,
@@ -1379,9 +1390,7 @@ export class Converter extends DeclarationConverter {
       const raw = this.nameText(fnNode);
       if (this.preserveSyntax) return { k: 'call', fn: { name: raw }, args, fcc, row };
       const name = this.resolveFunctionName(raw);
-      if (!name.fallback && ['call_user_func', 'call_user_func_array'].includes(lower(name.name)) && args[0]) {
-        args[0].e = this.foldCallableOperand(args[0].e, true);
-      }
+      this.compileBuiltinArguments(name, args, fcc);
       if (lower(name.fallback ?? name.name) === 'assert') {
         this.addAssertionDescription(argumentsNode, args, row);
       }
@@ -1395,6 +1404,32 @@ export class Converter extends DeclarationConverter {
       initRow: row,
       row: argumentsNode.startPosition.row,
     };
+  }
+
+  private compileBuiltinArguments(name: ResolvedName, args: Arg[], fcc: boolean): void {
+    if (name.fallback) return;
+    const builtin = lower(name.name);
+    if (builtin === 'sprintf' && !fcc) this.compileSimpleSprintf(args);
+    if ((builtin === 'call_user_func' || builtin === 'call_user_func_array') && args[0])
+      args[0].e = this.foldCallableOperand(args[0].e, true);
+  }
+
+  private compileSimpleSprintf(args: Arg[]): void {
+    const first = args[0];
+    const format = first && this.compiledValue(first.e);
+    if (typeof format !== 'string' || simpleSprintfFormat(args, format) === undefined) return;
+    first.e = { k: 'lit', v: format, row: first.e.row };
+    const row = compiledOperandRow(args.at(-1)!.e);
+    let index = 1;
+    for (const [, specifier] of simpleSprintfParts(format)) {
+      if (specifier === '%') continue;
+      const arg = args[index++];
+      if (specifier !== 's') continue;
+      const value = this.compiledValue(arg.e);
+      if (value === undefined || value instanceof Map) continue;
+      if (Number.isNaN(value)) this.notices.push({ level: 'Warning', message: NAN_STRING_WARNING, row });
+      arg.e = { k: 'lit', v: scalarString(value), row: arg.e.row };
+    }
   }
 
   private foldCallableOperand(expression: Expr, forwarding = false): Expr {

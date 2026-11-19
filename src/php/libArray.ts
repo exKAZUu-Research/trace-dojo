@@ -837,7 +837,7 @@ function reduceArray(array: PhpArray, callback: Value, initial: Value): Value {
           holders[slot] = next;
           if (previous !== next) releaseReduceCarry(previous);
         },
-        true
+        { releaseOnExit: true }
       );
     } catch (error) {
       if (isCleanupException(error) && (!produced || remaining > 0)) {
@@ -1132,7 +1132,7 @@ function addColumnRow(result: PhpArray, row: Value, column: Value, index: Value 
         }
       );
     },
-    true
+    { releaseOnExit: true }
   );
 }
 

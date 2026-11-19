@@ -10,3 +10,9 @@ last error 8
 release
 JsonException 5 result cleanup
 last error 4
+release 1
+exit during first cleanup
+release 2
+JsonException 5 Malformed UTF-8 characters, possibly incorrectly encoded
+Exception 0 second cleanup
+continued

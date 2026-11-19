@@ -518,7 +518,7 @@ function callbackReplacement(
         converted = toStr(value);
         return converted;
       },
-      true
+      { releaseOnExit: true }
     );
   } catch (error) {
     if (!retain || !(error instanceof PhpThrow || error instanceof ExitSignal)) throw error;

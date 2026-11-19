@@ -28,3 +28,25 @@ foreach ([
     }
     echo "last error ", json_last_error(), "\n";
 }
+
+class JsonCleanupChain {
+    function __construct(private int $position) {}
+    function __destruct() {
+        echo "release $this->position\n";
+        if ($this->position === 1) exit("exit during first cleanup\n");
+        throw new Exception("second cleanup");
+    }
+}
+class JsonCleanupChainValue implements JsonSerializable {
+    function jsonSerialize(): mixed {
+        return [new JsonCleanupChain(1), new JsonCleanupChain(2), chr(255)];
+    }
+}
+try {
+    json_encode(new JsonCleanupChainValue, JSON_THROW_ON_ERROR);
+} catch (Throwable $error) {
+    for (; $error !== null; $error = $error->getPrevious()) {
+        echo get_class($error), ' ', $error->getCode(), ' ', $error->getMessage(), "\n";
+    }
+}
+echo "continued\n";
