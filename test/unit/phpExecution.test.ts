@@ -3916,4 +3916,29 @@ echo json_encode([key($d), current($d)]);
     kind: 'executed',
     stdout: '[0,1]|[0,1]|[0,1]|[1,2]',
   });
+
+  const mixedCycleHandleReuse = run(String.raw`<?php
+class Node { public $next; function __destruct() { echo "D"; } }
+class Plain { public $next; }
+$p1 = new Plain; $p1->next = $p1;
+$a = new Node; $a->next = $a;
+$p2 = new Plain; $p2->next = $p2;
+unset($p1, $a, $p2);
+echo gc_collect_cycles(), '|', spl_object_id(new Plain), '|';
+$x = new Plain; $y = new Plain; $z = new Plain;
+echo spl_object_id($x), spl_object_id($y), spl_object_id($z);
+`);
+  expect(mixedCycleHandleReuse).toMatchObject({ kind: 'executed', stdout: 'D3|2|231' });
+
+  const destructibleBeforePlainHandles = run(String.raw`<?php
+class Node { public $next; function __destruct() { echo "D"; } }
+class Plain { public $next; }
+$a = new Node; $p1 = new Plain; $p2 = new Plain;
+$a->next = [$a, $p1]; $p2->next = $p2;
+unset($a, $p1, $p2);
+echo gc_collect_cycles(), '|';
+$x = new Plain; $y = new Plain; $z = new Plain;
+echo spl_object_id($x), spl_object_id($y), spl_object_id($z);
+`);
+  expect(destructibleBeforePlainHandles).toMatchObject({ kind: 'executed', stdout: 'D4|123' });
 });

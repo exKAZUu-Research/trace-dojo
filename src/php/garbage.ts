@@ -146,8 +146,22 @@ function collectAfterDestruction(
     const afterArrays = new Set<PhpArray>();
     const after = mark(runtime, false, afterArrays);
     const remaining = handles.filter((object) => runtime.objects.get(object.id) === object && !after.has(object));
-    count = countAfterDestruction(runtime, remaining, destructible, destructedInBuffer, arrayCandidates, afterArrays);
-    finishCollectedObjects(runtime, remaining, arrayStorage);
+    const allowed = new Set(remaining);
+    count = countAfterDestruction(
+      runtime,
+      remaining,
+      allowed,
+      destructible,
+      destructedInBuffer,
+      arrayCandidates,
+      afterArrays
+    );
+    const deferred = collectibleGraph(destructible, afterArrays, new Set(), allowed).objects;
+    const ordered = [
+      ...remaining.filter((object) => !deferred.has(object)),
+      ...remaining.filter((object) => deferred.has(object)),
+    ];
+    finishCollectedObjects(runtime, ordered, arrayStorage);
   });
   return count;
 }
@@ -172,15 +186,16 @@ function retainCollectionReceiver(runtime: Runtime, object: PhpObject): void {
   }
 }
 
+// code-gauge-allow functionParameterCount 7 -- Shares the post-destructor snapshot with collectAfterDestruction.
 function countAfterDestruction(
   runtime: Runtime,
   remaining: PhpObject[],
+  allowed: Set<PhpObject>,
   destructible: PhpObject[],
   destructedInBuffer: Set<PhpObject>,
   arrayCandidates: PhpArray[],
   afterArrays: Set<PhpArray>
 ): number {
-  const allowed = new Set(remaining);
   const graph = new CollectionGraph(
     remaining,
     runtime,
