@@ -21,6 +21,7 @@ import {
   callValue,
   createArrow,
   createClosure,
+  discardInvokedResult,
   evalArgs,
   methodCallExpression,
   readOffset,
@@ -1106,10 +1107,12 @@ export function cloneObject(original: PhpObject, withValue?: Value): PhpObject {
   copy.cloning = true;
   try {
     if (cloneMethod) {
-      invoke(
-        { fn: cloneMethod.fn, thisObj: copy, scope: cloneMethod.scope, staticClass: copy.cls, method: cloneMethod },
-        [],
-        runtime.row
+      discardInvokedResult(() =>
+        invoke(
+          { fn: cloneMethod.fn, thisObj: copy, scope: cloneMethod.scope, staticClass: copy.cls, method: cloneMethod },
+          [],
+          runtime.row
+        )
       );
     }
     if (withValue !== undefined) {

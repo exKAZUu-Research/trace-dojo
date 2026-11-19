@@ -1305,6 +1305,29 @@ test.each([
   expect(run(source).kind).toBe('compileError');
 });
 
+test.each(['\n', '\r\n'])('keeps literal multiline whitespace with line ending %j', (lineEnding) => {
+  const source = [
+    '<?php',
+    '$value = 7;',
+    '$spaces = <<<TEXT',
+    '    ',
+    '  TEXT;',
+    "$blank = <<<'TEXT'",
+    '',
+    '',
+    'TEXT;',
+    '$interpolated = <<<TEXT',
+    '  ',
+    '  $value',
+    '  TEXT;',
+    'var_dump($spaces, $blank, $interpolated);',
+  ].join(lineEnding);
+  expect(run(source)).toMatchObject({
+    kind: 'executed',
+    stdout: `string(2) "  "\nstring(${lineEnding.length}) "${lineEnding}"\nstring(${lineEnding.length + 1}) "${lineEnding}7"\n`,
+  });
+});
+
 test.each(['SplMaxHeap', 'SplMinHeap', 'SplPriorityQueue'])(
   'charges cloned heap storage to the allocation budget: %s',
   (name) => {

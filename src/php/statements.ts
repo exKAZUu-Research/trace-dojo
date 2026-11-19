@@ -5,7 +5,7 @@ import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from
 import type { Expr, FunctionDecl, Program, Stmt } from './ast';
 import { foreachReferences, nestedBodies } from './astAnalysis';
 import { lower } from './bytes';
-import { consumeInvokedResult } from './callables';
+import { consumeInvokedResult, discardInvokedResult } from './callables';
 import { asInternal, invoke, setBodyRunner, setDefaultEvaluator } from './calls';
 import {
   bindPropertyReference,
@@ -730,11 +730,13 @@ setBodyRunner(runBody);
 setDestructor((object, row) => {
   const destructor = object.cls.findMethod('__destruct');
   if (!destructor) return;
-  const run = (): Value =>
-    invoke(
-      { fn: destructor.fn, thisObj: object, scope: destructor.scope, staticClass: object.cls, method: destructor },
-      [],
-      row
+  const run = (): void =>
+    discardInvokedResult(() =>
+      invoke(
+        { fn: destructor.fn, thisObj: object, scope: destructor.scope, staticClass: object.cls, method: destructor },
+        [],
+        row
+      )
     );
   const runtime = rt();
   const releasingGlobals = runtime.releasingGlobalsAtShutdown;

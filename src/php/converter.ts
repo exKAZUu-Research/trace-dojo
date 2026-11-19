@@ -1929,23 +1929,27 @@ export class Converter extends DeclarationConverter {
   }
 
   private nowdoc(node: Node): string {
-    const body = node.childForFieldName('value');
     const end = node.childForFieldName('end_tag') as Node;
-    const indent = end.startPosition.column;
-    this.checkMultilineIndent(node, end);
-    const raw = (body?.text ?? '').replace(/^\r?\n/, '').replace(/\r?\n$/, '');
-    return enc(this.dedent(raw, indent, true, () => node.startPosition.row + 1));
+    const [start, limit] = this.multilineBody(node, end);
+    return enc(
+      this.dedent(this.source.slice(start, limit), end.startPosition.column, true, () => node.startPosition.row + 1)
+    );
   }
 
-  private checkMultilineIndent(node: Node, end: Node): void {
+  private multilineBody(node: Node, end: Node): [start: number, limit: number] {
     const start = this.source.indexOf('\n', node.startIndex) + 1;
-    const limit = this.source.lastIndexOf('\n', end.startIndex - 1) + 1;
-    this.checkIndentKinds(this.source.slice(start, limit), end, node.startPosition.row + 1);
+    const closingLine = this.source.lastIndexOf('\n', end.startIndex - 1) + 1;
+    const lineBreakWidth = this.source[closingLine - 2] === '\r' ? 2 : 1;
+    const limit = Math.max(start, closingLine - lineBreakWidth);
+    this.checkIndentKinds(
+      this.source.slice(start, limit),
+      this.source.slice(closingLine, end.startIndex),
+      node.startPosition.row + 1
+    );
+    return [start, limit];
   }
 
-  private checkIndentKinds(raw: string, end: Node, firstRow: number): void {
-    const lineStart = this.source.lastIndexOf('\n', end.startIndex - 1) + 1;
-    const closing = this.source.slice(lineStart, end.startIndex);
+  private checkIndentKinds(raw: string, closing: string, firstRow: number): void {
     if (/ /.test(closing) && /\t/.test(closing))
       this.error(firstRow, 'Invalid indentation - tabs and spaces cannot be mixed');
     const kind = closing[0];
@@ -1968,16 +1972,11 @@ export class Converter extends DeclarationConverter {
     const end = isHeredoc ? (node.childForFieldName('end_tag') as Node) : undefined;
     const indent = end ? end.startPosition.column : 0;
     const parts: (string | Expr)[] = [];
-    if (end) this.checkMultilineIndent(node, end);
-    if (!container) return recordOperandRows({ k: 'lit', v: '', row }, end?.startPosition.row ?? row);
-    const children = container.children;
-    let cursor = isHeredoc ? container.startIndex : this.source.indexOf('"', node.startIndex) + 1;
-    let limit = isHeredoc ? container.endIndex : node.endIndex - 1;
-    if (isHeredoc) {
-      // The body runs from the line after the opening marker to the line break before the closing one.
-      cursor = Math.max(cursor, this.source.indexOf('\n', node.startIndex) + 1);
-      if (this.source[limit - 1] === '\n') limit -= this.source[limit - 2] === '\r' ? 2 : 1;
-    }
+    const children = container?.children ?? [];
+    const [start, limit] = end
+      ? this.multilineBody(node, end)
+      : [this.source.indexOf('"', node.startIndex) + 1, node.endIndex - 1];
+    let cursor = start;
     let raw = '';
     let rawStart = cursor;
     let rawAtLineStart = isHeredoc;
@@ -2068,7 +2067,7 @@ export class Converter extends DeclarationConverter {
       .map((line, index) => {
         if (index === 0 && !atLineStart) return line;
         const leading = /^[ \t]*/.exec(line)?.[0] ?? '';
-        if (leading.length < indent && line.trim() !== '') {
+        if (leading.length < indent && /[^ \t\r]/.test(line)) {
           this.error(
             firstRow() + index,
             `ヒアドキュメントの行の字下げが、終わりの印より浅くなっています（Invalid body indentation level (expecting an indentation level of at least ${indent})）。`

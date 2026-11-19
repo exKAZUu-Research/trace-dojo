@@ -96,6 +96,7 @@ export class DualState {
   inner: InnerIterator | undefined;
   /** The fetched element, or undefined when there is none. */
   data: { v: Value } | undefined;
+  private sourceData: { v: Value } | undefined;
   key: Value | undefined;
   pos = 0n;
   limitOffset = 0n;
@@ -117,6 +118,7 @@ export class DualState {
   /** What the iterator holds, in the order PHP releases it (spl_dual_it_free_storage). */
   held(): Value[] {
     const held: Value[] = [];
+    if (this.sourceData) held.push(this.sourceData.v);
     if (this.data) held.push(this.data.v);
     if (this.key !== undefined) held.push(this.key);
     if (this.inner) held.push(this.inner.handle);
@@ -133,13 +135,15 @@ export class DualState {
 
   free(): void {
     const data = this.data;
+    const sourceData = this.sourceData;
     const key = this.key;
     const current = this.inner?.takeCurrent();
     this.data = undefined;
+    this.sourceData = undefined;
     this.key = undefined;
     this.cachingString = undefined;
-    if (data || key !== undefined) nativeOwnershipChanged(this.owner);
-    releaseIteratorValues([current, data?.v, key]);
+    if (data || sourceData || key !== undefined) nativeOwnershipChanged(this.owner);
+    releaseIteratorValues([current, sourceData?.v, data?.v, key]);
   }
 
   rewind(): void {
@@ -168,6 +172,31 @@ export class DualState {
       }
     );
     return true;
+  }
+
+  replaceData(value: Value): void {
+    const previous = this.data;
+    this.sourceData ??= previous;
+    this.data = { v: value };
+    nativeOwnershipChanged(this.owner);
+    if (previous !== this.sourceData) releaseIteratorValues([previous?.v]);
+  }
+
+  replaceKey(value: Value): void {
+    const previous = this.key;
+    this.key = value;
+    nativeOwnershipChanged(this.owner);
+    releaseIteratorValues([previous]);
+  }
+
+  skipRejected(): void {
+    const sourceData = this.sourceData;
+    if (sourceData) {
+      this.sourceData = undefined;
+      nativeOwnershipChanged(this.owner);
+      releaseIteratorValues([sourceData.v]);
+    }
+    this.inner?.next();
   }
 
   next(free: boolean): void {
@@ -285,7 +314,7 @@ function aggregateIterator(object: PhpObject, className: Value): PhpObject {
 export function filterFetch(object: PhpObject, state: DualState): void {
   while (state.fetch(true)) {
     if (consumeInvokedResult(() => callMethod(object, 'accept', []), toBool)) return;
-    state.inner?.next();
+    state.skipRejected();
   }
   state.free();
 }

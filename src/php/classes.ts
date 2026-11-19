@@ -2,6 +2,7 @@
 import type { ClassDecl, Expr, FunctionDecl, MethodDeclAst, PropertyDeclAst, TraitRule } from './ast';
 import { canBindClass, declaresStringConversion } from './astAnalysis';
 import builtinNames from './builtinNames.json';
+import { consumeInvokedResult, discardInvokedResult } from './callables';
 import {
   addConst,
   applyTraitConstants,
@@ -1132,7 +1133,16 @@ function scopeText(scope: PhpClass | undefined): string {
   return scope ? `scope ${scope.name}` : 'global scope';
 }
 
-/** Calls a magic method, guarding against recursion into the same property. */
+function magicIsset(object: PhpObject, method: Method, name: string, internal = false): boolean {
+  return consumeInvokedResult(() => callMagic(object, method, [name], internal), toBool);
+}
+
+function discardMagicResult(object: PhpObject, method: Method, args: [name: string, ...values: Value[]]): void {
+  guarded(object, `${method.lname.slice(2)}:${args[0]}`, () =>
+    discardInvokedResult(() => callMagic(object, method, args))
+  );
+}
+
 function callMagic(object: PhpObject, method: Method, args: Value[], internal = false): Value {
   return invoke(
     { fn: method.fn, thisObj: object, scope: method.scope, staticClass: object.cls, method },
@@ -1221,7 +1231,7 @@ function readOverloadedProp(
 ): Value | undefined {
   const isset = mode === 'coalesce' || mode === 'empty' ? object.cls.findMethod('__isset') : undefined;
   if (isset && !object.guards?.has(`isset:${name}`)) {
-    const present = (): boolean => toBool(callMagic(object, isset, [name]));
+    const present = (): boolean => magicIsset(object, isset, name);
     if (mode === 'empty')
       return guarded(object, `isset:${name}`, () => (present() ? readOverloadedProp(object, name, 'quiet') : null));
     if (!guarded(object, `isset:${name}`, present)) return null;
@@ -1328,7 +1338,7 @@ function writeOverloadedProperty(object: PhpObject, name: string, value: Value):
   if (!magic || object.guards?.has(`set:${name}`)) return false;
   const pending = rt().pendingAssignmentWarning;
   if (pending) throw pending;
-  guarded(object, `set:${name}`, () => callMagic(object, magic, [name, value]));
+  discardMagicResult(object, magic, [name, value]);
   return true;
 }
 
@@ -1624,7 +1634,7 @@ export function unsetProp(object: PhpObject, name: string, scope: PhpClass | und
     if (!canAccessProp(decl, scope)) {
       const magic = object.cls.findMethod('__unset');
       if (magic && !object.guards?.has(`unset:${name}`)) {
-        guarded(object, `unset:${name}`, () => callMagic(object, magic, [name]));
+        discardMagicResult(object, magic, [name]);
         return;
       }
       throwError('Error', `Cannot access ${decl.visibility} property ${object.cls.name}::$${name}`);
@@ -1633,7 +1643,7 @@ export function unsetProp(object: PhpObject, name: string, scope: PhpClass | und
     if (object.unsetProperties?.has(decl.key)) {
       const magic = object.cls.findMethod('__unset');
       if (magic && !object.guards?.has(`unset:${name}`)) {
-        guarded(object, `unset:${name}`, () => callMagic(object, magic, [name]));
+        discardMagicResult(object, magic, [name]);
         return;
       }
     }
@@ -1657,8 +1667,7 @@ export function unsetProp(object: PhpObject, name: string, scope: PhpClass | und
     return;
   }
   const magic = object.cls.findMethod('__unset');
-  if (magic && !object.guards?.has(`unset:${name}`))
-    guarded(object, `unset:${name}`, () => callMagic(object, magic, [name]));
+  if (magic && !object.guards?.has(`unset:${name}`)) discardMagicResult(object, magic, [name]);
 }
 
 // code-gauge-allow functionCognitiveComplexity 27 -- Follows PHP's class linking and property access rules in their order of checks.
@@ -1677,7 +1686,7 @@ export function issetProp(object: PhpObject, name: string, scope: PhpClass | und
   }
   const magic = object.cls.findMethod('__isset');
   if (magic && !object.guards?.has(`isset:${name}`)) {
-    return toBool(guarded(object, `isset:${name}`, () => callMagic(object, magic, [name], internal)));
+    return guarded(object, `isset:${name}`, () => magicIsset(object, magic, name, internal));
   }
   return false;
 }

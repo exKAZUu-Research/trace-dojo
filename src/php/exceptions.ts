@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { untilNul } from './bytes';
-import { callMethod, callValue } from './callables';
+import { callMethod, callValue, consumeInvokedResult } from './callables';
 import { asInternal, callArguments, callNamedArguments, type CallRecord, callStack } from './calls';
 import { createObject, findClass } from './classes';
 import { formatFloat } from './conversions';
@@ -190,12 +190,10 @@ function callUserHandler(handler: Value, level: bigint, message: string, row: nu
   const runtime = rt();
   runtime.activeErrorHandlers.add(handler);
   try {
-    const result = callValue(
-      handler,
-      [{ v: level }, { v: message }, { v: SCRIPT_PATH }, { v: BigInt(row + 1) }],
-      undefined
+    return consumeInvokedResult(
+      () => callValue(handler, [{ v: level }, { v: message }, { v: SCRIPT_PATH }, { v: BigInt(row + 1) }], undefined),
+      (result) => result !== false
     );
-    return result !== false;
   } finally {
     runtime.activeErrorHandlers.delete(handler);
   }

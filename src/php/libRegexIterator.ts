@@ -111,12 +111,12 @@ function match(object: PhpObject, state: DualState, subject: string): boolean {
       const matches = new Ref(null);
       const name = mode === MODE_ALL_MATCHES ? 'preg_match_all' : 'preg_match';
       const count = preg(name, [pattern, subject, null, pregFlags], matches);
-      state.data = { v: matches.v };
+      state.replaceData(matches.v);
       return typeof count === 'bigint' && count > 0n;
     }
     case MODE_SPLIT: {
       const parts = preg('preg_split', [pattern, subject, -1n, pregFlags]);
-      state.data = { v: parts };
+      state.replaceData(parts);
       return parts instanceof PhpArray && parts.size > 1;
     }
     case MODE_REPLACE: {
@@ -124,8 +124,8 @@ function match(object: PhpObject, state: DualState, subject: string): boolean {
       const replacement = toStr(readProp(object, 'replacement', object.cls));
       const result = preg('preg_replace', [pattern, replacement, subject, -1n, null], count);
       if (result === null) return false;
-      if (flags & USE_KEY) state.key = result;
-      else state.data = { v: result };
+      if (flags & USE_KEY) state.replaceKey(result);
+      else state.replaceData(result);
       return (count.v as bigint) > 0n;
     }
     default: {

@@ -1,0 +1,23 @@
+released isset slot
+released isset slot
+get slot
+released isset slot
+get slot
+released set slot
+bool(true)
+int(3)
+bool(false)
+int(7)
+released unset first
+released unset second
+warning 0
+warning 1
+Array,Array
+released clone ordinary
+use ordinary
+released destruct ordinary
+released destruct ordinary
+released property ordinary
+end
+released destruct shutdown
+released property shutdown
