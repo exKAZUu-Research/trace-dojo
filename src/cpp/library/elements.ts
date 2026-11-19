@@ -491,14 +491,48 @@ export function comparatorOf(
   arity = 2
 ): ((frame: Frame, ...args: Value[]) => Value) | undefined {
   const types = Array.isArray(elementType) ? elementType : Array.from({ length: arity }, () => elementType);
+  const call = predicateCallback(
+    compiler,
+    argumentType,
+    functions,
+    types.map((type) => ({ type })),
+    row
+  );
+  if (call) return (frame, ...values) => call(frame, ...values.map(locationOf));
+}
+
+export interface CallbackOperand {
+  type: Type;
+  category?: 'xvalue' | 'prvalue';
+}
+
+export function callbackOperands(
+  operands: CallbackOperand[],
+  row: number,
+  read: (frame: Frame, index: number) => Value
+): Expr[] {
+  return operands.map(({ type, category }, index) => ({
+    type,
+    isLvalue: category !== 'prvalue',
+    isXvalue: category === 'xvalue',
+    row,
+    run: (frame) => read(frame, index),
+  }));
+}
+
+export function predicateCallback(
+  compiler: ExpressionCompiler,
+  argumentType: Type,
+  functions: FunctionCandidates | undefined,
+  operands: CallbackOperand[],
+  row: number
+): ((frame: Frame, ...locations: Ptr[]) => Value) | undefined {
   if (functions) {
-    const call = functionCallback(compiler, functions, types, row, true);
-    return (frame, ...values) => call(frame, ...values.map(locationOf));
+    return functionCallback(compiler, functions, operands, row, true);
   }
-  if (argumentType.kind === 'class' && argumentType.cls.library?.kind === 'functor' && types.length === 2) {
+  if (argumentType.kind === 'class' && argumentType.cls.library?.kind === 'functor' && operands.length === 2) {
     const callee: Expr = { type: argumentType, row, isLvalue: false, run: () => {} };
-    const call = callbackRunner(compiler, types, row, (args) => compiler.callWith(callee, args, row), true);
-    return (frame, ...values) => call(frame, ...values.map(locationOf));
+    return callbackRunner(compiler, operands, row, (args) => compiler.callWith(callee, args, row), true);
   }
   return undefined;
 }
@@ -506,27 +540,22 @@ export function comparatorOf(
 export function functionCallback(
   compiler: ExpressionCompiler,
   candidates: FunctionCandidates,
-  types: Type[],
+  operands: CallbackOperand[],
   row: number,
   predicate = false
 ): (frame: Frame, ...locations: Ptr[]) => Value {
-  return callbackRunner(compiler, types, row, (args) => compiler.callCallback(candidates, args, row), predicate);
+  return callbackRunner(compiler, operands, row, (args) => compiler.callCallback(candidates, args, row), predicate);
 }
 
 function callbackRunner(
   compiler: ExpressionCompiler,
-  types: Type[],
+  operands: CallbackOperand[],
   row: number,
   compile: (args: Expr[]) => Expr,
   predicate: boolean
 ): (frame: Frame, ...locations: Ptr[]) => Value {
   const argumentsByCall: Ptr[][] = [];
-  const args = types.map((type, index) => ({
-    type,
-    isLvalue: true,
-    row,
-    run: () => argumentsByCall.at(-1)?.[index],
-  }));
+  const args = callbackOperands(operands, row, (_frame, index) => argumentsByCall.at(-1)?.[index]);
   const call = compile(args);
   const condition = predicate ? compiler.condition(call, row) : undefined;
   return (frame, ...locations) =>

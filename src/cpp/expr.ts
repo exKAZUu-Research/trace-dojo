@@ -56,8 +56,6 @@ export interface Expr extends ConstantValue {
   isThis?: boolean;
   /** Reads a static member's integral constant without requiring its addressable definition. */
   readConstant?: Eval<Value>;
-  /** The factors of a floating-point product, which an addition or subtraction using it fuses (`a * b + c`). */
-  product?: { left: Eval<number>; right: Eval<number> };
   /** Whether the expression is a null pointer constant: `nullptr`, or an integer literal whose value is zero. */
   isNullConstant?: boolean;
   /** An lvalue location or pointer value that can be formed before dynamic initialization. */

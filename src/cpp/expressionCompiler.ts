@@ -82,11 +82,15 @@ const RELATIONAL_OPERATORS = ['<', '<=', '>', '>='];
 const COMPARISONS = new Set(['==', '!=', ...RELATIONAL_OPERATORS]);
 const ARITHMETIC_OPERATORS = new Set(['+', '-', '*', '/', '%', '&', '|', '^', '<<', '>>']);
 
+type FloatingFactors = [number, number];
+
 /** Compiles expressions to closures that evaluate them. */
 export abstract class ExpressionCompiler extends ObjectCompiler {
   protected isUnevaluated = false;
   /** The storage of the string literals by their bytes, which identical literals share as clang++ merges them. */
   private readonly literalStores = new Map<string, Box>();
+  // A replacement evaluator must explicitly preserve factor evaluation, including any new side effects.
+  private readonly floatingProducts = new WeakMap<Expr['run'], Eval<FloatingFactors>>();
 
   compileExpression(node: Syntax): Expr {
     switch (node.type) {
@@ -715,21 +719,25 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
    */
   private contract(operator: string, expr: Expr, a: Expr, b: Expr, isFloat: boolean): void {
     if (operator === '*') {
-      expr.product = { left: a.run as Eval<number>, right: b.run as Eval<number> };
+      this.floatingProducts.set(expr.run, (frame) => [a.run(frame) as number, b.run(frame) as number]);
       return;
     }
     if (operator !== '+' && operator !== '-') return;
     const sign = operator === '+' ? 1 : -1;
-    if (a.product) {
-      const { left, right } = a.product;
+    const first = this.floatingProducts.get(a.run);
+    const second = this.floatingProducts.get(b.run);
+    if (first) {
       const addend = b.run as Eval<number>;
-      expr.run = (frame) => fma(left(frame), right(frame), sign * addend(frame), isFloat);
-    } else if (b.product) {
-      const { left, right } = b.product;
+      expr.run = (frame) => {
+        const [left, right] = first(frame);
+        return fma(left, right, sign * addend(frame), isFloat);
+      };
+    } else if (second) {
       const addend = a.run as Eval<number>;
       expr.run = (frame) => {
         const value = addend(frame);
-        return fma(sign * left(frame), right(frame), value, isFloat);
+        const [left, right] = second(frame);
+        return fma(sign * left, right, value, isFloat);
       };
     }
   }
@@ -900,9 +908,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       memberConstant: mapMemberConstants([converted], ([scalar]) => operation(scalar)),
     };
     // A negated product still fuses into an addition (`-(a * b) + c`).
-    if (operator === '-' && converted.product && converted.constant === undefined) {
-      const { left, right } = converted.product;
-      expr.product = { left: (frame) => -left(frame), right };
+    const factors = this.floatingProducts.get(run);
+    if (operator === '-' && factors) {
+      this.floatingProducts.set(expr.run, (frame) => {
+        const [left, right] = factors(frame);
+        return [-left, right];
+      });
     }
     if (converted.constant !== undefined) {
       try {
@@ -1082,18 +1093,26 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     };
     const right = scalarValue(this, source);
     const operand: Expr = { ...right, run: (frame) => frame.pending.at(-2) as Value };
+    const factors = right.type.kind === 'float' ? this.floatingProducts.get(right.run) : undefined;
+    if (factors && right.type.kind === 'float') {
+      const multiply = binaryOperation('*', right.type);
+      operand.run = (frame) => multiply(...compoundAssignmentFactors(frame));
+      this.floatingProducts.set(operand.run, compoundAssignmentFactors);
+    }
     const combined = this.binary(binaryOperator, current, operand, row);
     const value = this.convert(combined, unqualified(target.type), row).run;
     return {
       type: target.type,
       isLvalue: true,
       row,
-      run: (frame) =>
-        holdAll(frame, [right.run, location], ([, destination]) => {
-          const place = destination as Ptr;
+      run: (frame) => {
+        const evaluated = factors?.(frame).map((factor) => () => factor) ?? [right.run];
+        return holdAll(frame, [...evaluated, location], (values) => {
+          const place = values.at(-1) as Ptr;
           place.write(value(frame) as Value);
           return place;
-        }),
+        });
+      },
     };
   }
 
@@ -1260,7 +1279,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const { run: second, temporaryBinding } = right;
     const value = this.rvalue(left);
     const hasConstantLeft = value.constant !== undefined;
-    return {
+    const expr: Expr = {
       ...right,
       constant: hasConstantLeft ? right.constant : undefined,
       memberConstant: hasConstantLeft
@@ -1287,6 +1306,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         return second(...args);
       },
     };
+    const factors = this.floatingProducts.get(second);
+    if (factors) {
+      this.floatingProducts.set(expr.run, (frame) => {
+        first(frame);
+        return factors(frame);
+      });
+    }
+    return expr;
   }
 
   discardedValue(expr: Expr): Expr['run'] {
@@ -1995,6 +2022,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return this.error(row, `auto* の初期値にポインタを書いてください（${typeName(actual)}）。`);
     return pointerTo(this.deduceAutoPattern(declared.to, actual.to, row), isConst);
   }
+}
+
+function compoundAssignmentFactors(frame: Frame): FloatingFactors {
+  return [frame.pending.at(-3) as number, frame.pending.at(-2) as number];
 }
 
 function commonConditionalPointer(left: Expr, right: Expr): Type | undefined {

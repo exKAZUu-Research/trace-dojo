@@ -32,6 +32,8 @@ import { Box, CObject, endLifetime, NULL_PTR, Ptr, type Store, type Value } from
 import { pairClass } from './associative';
 import {
   assignElement,
+  type CallbackOperand,
+  callbackOperands,
   comparatorOf,
   constructElementFromRvalue,
   type ElementOperations,
@@ -42,6 +44,7 @@ import {
   locationOf,
   moveAssignElement,
   moveValue,
+  predicateCallback,
   requireElementUse,
   requireMoves,
   swapElements,
@@ -58,6 +61,7 @@ import { constRef, generic, native, readCString } from './support';
 /** What an argument's type tells of an iterator: the element it designates, its category, and whether it goes backward. */
 interface IteratorInfo {
   element: Type;
+  reference?: Type;
   category: IteratorCategory;
   isReverse: boolean;
   isOutput?: boolean;
@@ -70,6 +74,7 @@ function iteratorInfo(type: Type): IteratorInfo | undefined {
   if (type.kind === 'class' && type.cls.library?.kind === 'iterator') {
     return {
       element: type.cls.library.args[0],
+      reference: type.cls.library.iteratorReference,
       category: type.cls.library.iteratorCategory ?? 'randomAccess',
       isReverse: type.cls.library.isReverse === true,
     };
@@ -86,6 +91,10 @@ function iteratorInfo(type: Type): IteratorInfo | undefined {
   return undefined;
 }
 
+function iteratorOperand(info: IteratorInfo): CallbackOperand {
+  return info.reference ? { type: info.reference, category: 'prvalue' } : { type: info.element };
+}
+
 /** The elements between two iterators, addressed by their positions from the first. */
 class Range {
   readonly length: number;
@@ -93,15 +102,15 @@ class Range {
   constructor(
     readonly first: Ptr,
     last: Ptr,
-    readonly isReverse: boolean,
+    private readonly info: IteratorInfo,
     private readonly write?: { frame: Frame; ops: ElementOperations; move: boolean }
   ) {
-    this.length = first.rangeLength(last, isReverse);
+    this.length = first.rangeLength(last, info.isReverse);
   }
 
   private index(position: number): number {
     if (position < 0 || position >= this.length) throw new CppRuntimeError('invalidComparator');
-    return this.isReverse ? this.first.index - 1 - position : this.first.index + position;
+    return this.info.isReverse ? this.first.index - 1 - position : this.first.index + position;
   }
 
   get(position: number): Value {
@@ -112,6 +121,10 @@ class Range {
   location(position: number): Ptr {
     const index = this.index(position);
     return this.first.target().location(index);
+  }
+
+  comparisonValue(position: number): Value {
+    return this.info.reference ? this.location(position) : this.get(position);
   }
 
   set(position: number, value: Value): void {
@@ -155,7 +168,7 @@ class Range {
   /** The iterator at a position, which may be one past the last element. */
   iterator(position: number): Ptr {
     if (position === 0) return this.first;
-    return this.first.offset(this.isReverse ? -position : position, true);
+    return this.first.offset(this.info.isReverse ? -position : position, true);
   }
 }
 
@@ -236,8 +249,24 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     functions.set(name, [...(functions.get(name) ?? []), overload]);
   };
   /** The comparison an algorithm uses: the argument at `index`, or `<`. */
-  const lessOf = (args: Expr[], index: number, element: Type): ((frame: Frame) => Less) | undefined =>
-    orderOf(args[index], [element, element], args[0].row);
+  const lessOf = (
+    args: Expr[],
+    index: number,
+    info: IteratorInfo,
+    usesStoredValues = false
+  ): ((frame: Frame) => Less) | undefined => {
+    const { element, reference } = info;
+    const compare = args[index];
+    if (!reference) return orderOf(compare, [element, element], args[0].row);
+    if (compare) return bitIteratorOrder(compiler(), compare, info, usesStoredValues);
+    const order = orderOf(undefined, [element, element], args[0].row);
+    if (order) {
+      return (frame) => {
+        const less = order(frame);
+        return (a, b) => less(a instanceof Ptr ? a.read() : a, b instanceof Ptr ? b.read() : b);
+      };
+    }
+  };
   /** The comparison `arg` makes between values of the two types, or `<` without it. */
   const orderOf = (arg: Expr | undefined, types: [Type, Type], row: number): ((frame: Frame) => Less) | undefined => {
     if (!arg) {
@@ -251,14 +280,13 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     if (!call) return undefined;
     return (frame) => (a, b) => truthy(call(frame, a, b));
   };
-  /** A predicate or an operation argument, for `arity` elements or for arguments of the types `element` lists. */
+  /** A predicate of the expressions an algorithm passes, including proxy dereferences. */
   const predicateOf = (
     arg: Expr | undefined,
-    element: Type | Type[],
-    arity = 1
-  ): ((frame: Frame, ...values: Value[]) => Value) | undefined => {
+    ...operands: CallbackOperand[]
+  ): ((frame: Frame, ...locations: Ptr[]) => Value) | undefined => {
     if (!arg) return undefined;
-    return comparatorOf(compiler(), unqualified(arg.type), arg.functions, element, arg.row, arity);
+    return predicateCallback(compiler(), unqualified(arg.type), arg.functions, operands, arg.row);
   };
 
   /** Stops when an algorithm gets iterators of a weaker category than it needs, as libc++ rejects them. */
@@ -278,7 +306,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const info = writableRangeAt(args, 0);
       if (!info || args.length > 3) return;
       checkCategory(name, info, 'randomAccess', args[0].row);
-      const less = lessOf(args, 2, info.element);
+      const less = lessOf(args, 2, info, true);
       if (!less)
         return compiler().error(
           args[0].row,
@@ -312,7 +340,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const info = writableRangeAt(args, 0);
       if (!info || args.length > 3) return;
       checkCategory(name, info, 'bidirectional', args[0].row);
-      const less = lessOf(args, 2, info.element);
+      const less = lessOf(args, 2, info);
       if (!less) return;
       const ops = elementOperations(compiler(), unqualified(info.element), args[0].row, 'swap');
       return native(name, params(args), BOOL, ([first, last], { frame }) => {
@@ -348,7 +376,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     define(name, [[0, 1], [2]], (args) => {
       const info = rangeAt(args, 0);
       if (!info || args.length > 3) return;
-      const less = lessOf(args, 2, info.element);
+      const less = lessOf(args, 2, info);
       if (!less) return;
       return native(name, params(args), unqualified(args[0].type), ([first, last], { frame }) => {
         const values = range(first, last, info);
@@ -357,8 +385,8 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         for (let index = 1; index < values.length; index++) {
           if (
             name === 'min_element'
-              ? compare(values.get(index), values.get(best))
-              : compare(values.get(best), values.get(index))
+              ? compare(values.comparisonValue(index), values.comparisonValue(best))
+              : compare(values.comparisonValue(best), values.comparisonValue(index))
           )
             best = index;
         }
@@ -383,12 +411,12 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     define(name, [[0, 1], [2]], (args) => {
       const info = rangeAt(args, 0);
       if (!info || args.length !== 3) return;
-      const predicate = predicateOf(args[2], info.element);
+      const predicate = predicateOf(args[2], iteratorOperand(info));
       if (!predicate) return;
       return native(name, params(args), unqualified(args[0].type), ([first, last], { frame }) => {
         const values = range(first, last, info);
         for (let index = 0; index < values.length; index++) {
-          if (truthy(predicate(frame, values.get(index))) === (name === 'find_if')) return values.iterator(index);
+          if (truthy(predicate(frame, values.location(index))) === (name === 'find_if')) return values.iterator(index);
         }
         return values.iterator(values.length);
       });
@@ -411,12 +439,12 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('count_if', [[0, 1], [2]], (args) => {
     const info = rangeAt(args, 0);
     if (!info || args.length !== 3) return;
-    const predicate = predicateOf(args[2], info.element);
+    const predicate = predicateOf(args[2], iteratorOperand(info));
     if (!predicate) return;
     return native('count_if', params(args), PTRDIFF_T, ([first, last], { frame }) => {
       const values = range(first, last, info);
       let count = 0;
-      for (let index = 0; index < values.length; index++) if (truthy(predicate(frame, values.get(index)))) count++;
+      for (let index = 0; index < values.length; index++) if (truthy(predicate(frame, values.location(index)))) count++;
       return BigInt(count);
     });
   });
@@ -424,12 +452,12 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     define(name, [[0, 1], [2]], (args) => {
       const info = rangeAt(args, 0);
       if (!info || args.length !== 3) return;
-      const predicate = predicateOf(args[2], info.element);
+      const predicate = predicateOf(args[2], iteratorOperand(info));
       if (!predicate) return;
       return native(name, params(args), BOOL, ([first, last], { frame }) => {
         const values = range(first, last, info);
         for (let index = 0; index < values.length; index++) {
-          const test = truthy(predicate(frame, values.get(index)));
+          const test = truthy(predicate(frame, values.location(index)));
           if (name === 'all_of' && !test) return 0;
           if (name === 'any_of' && test) return 1;
           if (name === 'none_of' && test) return 0;
@@ -448,8 +476,25 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       // (value, element) for upper_bound.
       const elementType = unqualified(info.element);
       const searched = unqualified(valueType.kind === 'reference' ? valueType.to : valueType);
-      const elementFirst = name !== 'upper_bound' ? orderOf(args[3], [elementType, searched], args[0].row) : undefined;
-      const valueFirst = name !== 'lower_bound' ? orderOf(args[3], [searched, elementType], args[0].row) : undefined;
+      const boundOrder = (elementFirst: boolean): ((frame: Frame) => Less) | undefined => {
+        const comparator = args[3];
+        if (!info.reference || !comparator) {
+          const types: [Type, Type] = elementFirst ? [elementType, searched] : [searched, elementType];
+          return orderOf(comparator, types, args[0].row);
+        }
+        const element = iteratorOperand(info);
+        const key = { type: withConst(searched) };
+        const operands = elementFirst ? [element, key] : [key, element];
+        const predicate = predicateOf(comparator, ...operands);
+        if (predicate) {
+          return (frame) => (a, b) =>
+            truthy(
+              predicate(frame, elementFirst ? (a as Ptr) : locationOf(a), elementFirst ? locationOf(b) : (b as Ptr))
+            );
+        }
+      };
+      const elementFirst = name !== 'upper_bound' ? boundOrder(true) : undefined;
+      const valueFirst = name !== 'lower_bound' ? boundOrder(false) : undefined;
       if ((name !== 'upper_bound' && !elementFirst) || (name !== 'lower_bound' && !valueFirst)) return;
       return native(
         name,
@@ -460,19 +505,21 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
           const elementLess = elementFirst?.(frame) as Less;
           const valueLess = valueFirst?.(frame) as Less;
           const target = readArg(value, valueType);
+          const element = (index: number): Value =>
+            info.reference && args[3] ? values.comparisonValue(index) : values.get(index);
           const upper = name === 'upper_bound';
           let low = 0;
           let count = values.length;
           while (count > 0) {
             const step = Math.floor(count / 2);
             const middle = low + step;
-            const goesRight = upper ? !valueLess(target, values.get(middle)) : elementLess(values.get(middle), target);
+            const goesRight = upper ? !valueLess(target, element(middle)) : elementLess(element(middle), target);
             if (goesRight) {
               low = middle + 1;
               count -= step + 1;
             } else count = step;
           }
-          if (name === 'binary_search') return low < values.length && !valueLess(target, values.get(low)) ? 1 : 0;
+          if (name === 'binary_search') return low < values.length && !valueLess(target, element(low)) ? 1 : 0;
           return values.iterator(low);
         }
       );
@@ -486,11 +533,11 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     // equal(first1, last1, first2[, last2][, pred]): a fourth argument is the end of the second range or a predicate.
     const hasEnd = !(args.length === 4 && templateArgs?.length === 3) && equalHasSecondEnd(args);
     const predicateArg = args[hasEnd ? 4 : 3];
-    const predicate = predicateArg ? predicateOf(predicateArg, [info.element, other.element]) : undefined;
+    const predicate = predicateArg
+      ? predicateOf(predicateArg, iteratorOperand(info), iteratorOperand(other))
+      : undefined;
     const equal = valueEquality(compiler(), info.element, other.element, args[0].row);
     if (predicateArg ? !predicate : !equal) return;
-    const same = (frame: Frame, a: Value, b: Value): boolean =>
-      predicate ? truthy(predicate(frame, a, b)) : (equal as ValueEquality).test(frame, a, b);
     // libc++ compares the lengths first only when both ranges are random access.
     const random = isRandomAccess(decayed(args[0].type)) && isRandomAccess(decayed(args[2].type));
     return native('equal', params(args), BOOL, ([first, last, start, end], { frame }) => {
@@ -499,7 +546,12 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       if (random && otherLength !== values.length) return 0;
       const length = Math.min(values.length, otherLength);
       const others = rangeWithLength(start, length, other);
-      for (let index = 0; index < length; index++) if (!same(frame, values.get(index), others.get(index))) return 0;
+      for (let index = 0; index < length; index++) {
+        const matches = predicate
+          ? truthy(predicate(frame, values.location(index), others.location(index)))
+          : (equal as ValueEquality).test(frame, values.get(index), others.get(index));
+        if (!matches) return 0;
+      }
       return values.length === otherLength ? 1 : 0;
     });
   });
@@ -556,7 +608,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     define(name, [[0, 1], ...(name === 'replace' ? [[2, 3]] : [[2], [3]])], (args) => {
       const info = writableRangeAt(args, 0);
       if (!info || args.length !== 4) return;
-      const predicate = name === 'replace_if' ? predicateOf(args[2], info.element) : undefined;
+      const predicate = name === 'replace_if' ? predicateOf(args[2], iteratorOperand(info)) : undefined;
       const equal =
         name === 'replace' ? valueEquality(compiler(), info.element, decayed(args[2].type), args[0].row) : undefined;
       if (!predicate && !equal) return;
@@ -568,8 +620,11 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         const target = name === 'replace' ? readArg(old, types[2]) : undefined;
         const value = readArg(replacement, types[3]);
         for (let index = 0; index < values.length; index++) {
-          const item = values.get(index);
-          if (predicate ? truthy(predicate(frame, item)) : (equal as ValueEquality).test(frame, item, target))
+          if (
+            predicate
+              ? truthy(predicate(frame, values.location(index)))
+              : (equal as ValueEquality).test(frame, values.get(index), target)
+          )
             convert(frame, value, (converted) => assignElement(frame, values.location(index), ops, converted));
         }
         return;
@@ -581,25 +636,27 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const info = writableRangeAt(args, 0);
       if (!info) return;
       if (name === 'unique' ? args.length > 3 : args.length !== 3) return;
-      let keep: (frame: Frame, item: Value, previous: Value | undefined) => boolean;
+      let keep: (frame: Frame, values: Range, index: number, out: number) => boolean;
       if (name === 'remove') {
         const equal = valueEquality(compiler(), info.element, decayed(args[2].type), args[0].row);
         if (!equal) return;
         const types = params(args);
-        keep = (frame, item) => !equal.test(frame, item, readArg(frame.pending.at(-1) as Ptr, types[2]));
+        keep = (frame, values, index) =>
+          !equal.test(frame, values.get(index), readArg(frame.pending.at(-1) as Ptr, types[2]));
       } else if (name === 'remove_if') {
-        const predicate = predicateOf(args[2], info.element);
+        const predicate = predicateOf(args[2], iteratorOperand(info));
         if (!predicate) return;
-        keep = (frame, item) => !truthy(predicate(frame, item));
+        keep = (frame, values, index) => !truthy(predicate(frame, values.location(index)));
       } else {
-        const predicate = args[2] ? predicateOf(args[2], info.element, 2) : undefined;
+        const operand = iteratorOperand(info);
+        const predicate = predicateOf(args[2], operand, operand);
         const equal = equalTo(unqualified(info.element));
         if (!predicate && !equal) return;
-        keep = (frame, item, previous) =>
-          previous === undefined ||
+        keep = (frame, values, index, out) =>
+          out === 0 ||
           !(predicate
-            ? truthy(predicate(frame, previous, item))
-            : (equal as (a: Value, b: Value) => boolean)(previous, item));
+            ? truthy(predicate(frame, values.location(out - 1), values.location(index)))
+            : (equal as (a: Value, b: Value) => boolean)(values.get(out - 1), values.get(index)));
       }
       const element = unqualified(info.element);
       requireElementUse(compiler(), element, args[0].row, 'assign');
@@ -610,9 +667,8 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
           // The kept elements move forward, leaving moved-from elements behind them.
           let out = 0;
           for (let index = 0; index < values.length; index++) {
-            const item = values.get(index);
-            if (keep(frame, item, out === 0 ? undefined : values.get(out - 1))) {
-              if (out !== index) values.set(out, moveValue(frame, element, values.get(out), item));
+            if (keep(frame, values, index, out)) {
+              if (out !== index) values.set(out, moveValue(frame, element, values.get(out), values.get(index)));
               out++;
             }
           }
@@ -670,7 +726,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const info = rangeAt(args, 0);
       const output = outputOf(args[2]);
       if (!info || !output || args.length !== (name === 'copy' ? 3 : 4)) return;
-      const predicate = name === 'copy_if' ? predicateOf(args[3], info.element) : undefined;
+      const predicate = name === 'copy_if' ? predicateOf(args[3], iteratorOperand(info)) : undefined;
       if (name === 'copy_if' && !predicate) return;
       const ops = elementOperations(
         compiler(),
@@ -683,8 +739,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         const values = range(first, last, info);
         const out = new Output(start as Ptr, output, frame, ops, convert);
         for (let index = 0; index < values.length; index++) {
-          const item = values.get(index);
-          if (!predicate || truthy(predicate(frame, item))) out.write(item);
+          if (!predicate || truthy(predicate(frame, values.location(index)))) out.write(values.get(index));
         }
         return out.end;
       });
@@ -700,7 +755,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const operation = compileOperation(
       compiler(),
       args[isBinary ? 4 : 3],
-      second ? [{ type: info.element }, { type: second.element }] : [{ type: info.element }]
+      second ? [iteratorOperand(info), iteratorOperand(second)] : [iteratorOperand(info)]
     );
     if (!operation) return;
     const destination = unqualified(output.element);
@@ -726,7 +781,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const info = rangeAt(args, 0);
     const callback = args[2];
     if (!info || args.length !== 3 || !callback.functions) return;
-    const action = functionCallback(compiler(), callback.functions, [info.element], callback.row);
+    const action = functionCallback(compiler(), callback.functions, [iteratorOperand(info)], callback.row);
     return native('for_each', params(args), VOID, ([first, last], { frame }) => {
       const values = range(first, last, info);
       for (let index = 0; index < values.length; index++) action(frame, values.location(index));
@@ -742,7 +797,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const sumType = unqualified(
       initial.type.kind === 'array' ? { kind: 'pointer', to: initial.type.of } : initial.type
     );
-    const operands = accumulatorOperands(sumType, { type: info.element });
+    const operands = accumulatorOperands(sumType, iteratorOperand(info));
     const combine = args[3]
       ? compileOperation(compiler(), args[3], operands)
       : binaryStep(compiler(), '+', operands, initial.row);
@@ -763,7 +818,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const other = args[2] ? iteratorInfo(unqualified(args[2].type)) : undefined;
     if (!info || !other || (args.length !== 4 && args.length !== 6)) return;
     const sumType = unqualified(args[3].type);
-    const factors = [{ type: info.element }, { type: other.element }];
+    const factors = [iteratorOperand(info), iteratorOperand(other)];
     const product = args[5]
       ? compileOperation(compiler(), args[5], factors)
       : binaryStep(compiler(), '*', factors, args[0].row);
@@ -796,7 +851,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const output = outputOf(args[2]);
     if (!info || !output || (args.length !== 3 && args.length !== 4)) return;
     const sumType = unqualified(info.element);
-    const operands = accumulatorOperands(sumType, { type: info.element });
+    const operands = accumulatorOperands(sumType, iteratorOperand(info));
     const add = args[3]
       ? compileOperation(compiler(), args[3], operands)
       : binaryStep(compiler(), '+', operands, args[0].row);
@@ -1018,6 +1073,33 @@ function explicitAlgorithmArguments(
   return typed;
 }
 
+function bitIteratorOrder(
+  compiler: ExpressionCompiler,
+  arg: Expr,
+  info: IteratorInfo,
+  usesStoredValues: boolean
+): ((frame: Frame) => Less) | undefined {
+  const proxy = iteratorOperand(info);
+  const bind = (left: CallbackOperand, right: CallbackOperand): ReturnType<typeof predicateCallback> =>
+    predicateCallback(compiler, unqualified(arg.type), arg.functions, [left, right], arg.row);
+  const twoProxies = bind(proxy, proxy);
+  if (!twoProxies) return;
+  if (!usesStoredValues) return (frame) => (a, b) => truthy(twoProxies(frame, a as Ptr, b as Ptr));
+  const local = { type: info.element };
+  const proxyLeft = bind(proxy, local);
+  const proxyRight = bind(local, proxy);
+  const twoLocals = bind(local, local);
+  if (!proxyLeft || !proxyRight || !twoLocals) return;
+  return (frame) => (a, b) => {
+    if (a instanceof Ptr) {
+      return truthy(b instanceof Ptr ? twoProxies(frame, a, b) : proxyLeft(frame, a, locationOf(b)));
+    }
+    return truthy(
+      b instanceof Ptr ? proxyRight(frame, locationOf(a), b) : twoLocals(frame, locationOf(a), locationOf(b))
+    );
+  };
+}
+
 function transformTemplateParameters(args: Expr[]): TemplateParameterPositions {
   return args.length === 5 ? [[0, 1], [2], [3], [4]] : [[0, 1], [2], [3]];
 }
@@ -1091,8 +1173,7 @@ const params = (args: Expr[]): Type[] =>
       : type;
   });
 
-const range = (first: unknown, last: unknown, info: IteratorInfo): Range =>
-  new Range(first as Ptr, last as Ptr, info.isReverse);
+const range = (first: unknown, last: unknown, info: IteratorInfo): Range => new Range(first as Ptr, last as Ptr, info);
 
 function rangeWithLength(begin: unknown, length: number, info: IteratorInfo): Range {
   const first = begin as Ptr;
@@ -1108,7 +1189,7 @@ function mutableRange(
   move = false
 ): Range {
   const write = info.element.kind === 'class' ? { frame, ops, move } : undefined;
-  return new Range(first as Ptr, last as Ptr, info.isReverse, write);
+  return new Range(first as Ptr, last as Ptr, info, write);
 }
 
 const readArg = (arg: unknown, type: Type): Value => (type.kind === 'reference' ? (arg as Ptr).read() : (arg as Value));
@@ -1301,14 +1382,9 @@ function assignmentSource(
   };
 }
 
-interface OperationOperand {
-  type: Type;
-  category?: 'xvalue' | 'prvalue';
-}
-
 type OperationArgument = Value | ((frame: Frame) => Value);
 
-interface ElementOperation extends OperationOperand {
+interface ElementOperation extends CallbackOperand {
   run: (frame: Frame, ...args: OperationArgument[]) => Value;
   destroy?: (frame: Frame, value: Value) => void;
 }
@@ -1359,7 +1435,7 @@ function holdAccumulator(frame: Frame, accumulator: NumericAccumulator, value: V
   return new Ptr(new Box(value), 0);
 }
 
-function accumulatorOperands(type: Type, item: OperationOperand): OperationOperand[] {
+function accumulatorOperands(type: Type, item: CallbackOperand): CallbackOperand[] {
   return [{ type, category: 'xvalue' }, item];
 }
 
@@ -1377,7 +1453,7 @@ function readOperationValue(operation: ElementOperation, result: Value): Value {
 function compileOperation(
   compiler: ExpressionCompiler,
   operation: Expr,
-  operands: OperationOperand[]
+  operands: CallbackOperand[]
 ): ElementOperation | undefined {
   const type = operation.type;
   if (!operation.functions && !(type.kind === 'class' && type.cls.library?.kind === 'functor')) return;
@@ -1393,7 +1469,7 @@ function compileOperation(
 function binaryStep(
   compiler: ExpressionCompiler,
   operator: string,
-  operands: OperationOperand[],
+  operands: CallbackOperand[],
   row: number
 ): ElementOperation | undefined {
   try {
@@ -1406,21 +1482,15 @@ function binaryStep(
 
 function makeOperation(
   compiler: ExpressionCompiler,
-  operands: OperationOperand[],
+  operands: CallbackOperand[],
   row: number,
   resolve: (args: Expr[]) => Expr
 ): ElementOperation {
   const calls: OperationArgument[][] = [];
-  const args: Expr[] = operands.map(({ type, category }, index) => ({
-    type,
-    isLvalue: category !== 'prvalue',
-    isXvalue: category === 'xvalue',
-    row,
-    run: (frame) => {
-      const arg = calls.at(-1)?.[index];
-      return typeof arg === 'function' ? arg(frame) : arg;
-    },
-  }));
+  const args = callbackOperands(operands, row, (frame, index) => {
+    const arg = calls.at(-1)?.[index];
+    return typeof arg === 'function' ? arg(frame) : arg;
+  });
   const result = resolve(args);
   const { type } = result;
   const category = result.isLvalue ? (result.isXvalue ? 'xvalue' : undefined) : 'prvalue';
@@ -1539,40 +1609,40 @@ function minmaxPositions(items: Value[], less: Less): [number, number] {
 // libc++'s std::sort ------------------------------------------------------------------------------------------------
 
 function sort3(values: Range, x: number, y: number, z: number, less: Less): void {
-  if (!less(values.get(y), values.get(x))) {
-    if (!less(values.get(z), values.get(y))) return;
+  if (!less(values.comparisonValue(y), values.comparisonValue(x))) {
+    if (!less(values.comparisonValue(z), values.comparisonValue(y))) return;
     values.swap(y, z);
-    if (less(values.get(y), values.get(x))) values.swap(x, y);
+    if (less(values.comparisonValue(y), values.comparisonValue(x))) values.swap(x, y);
     return;
   }
-  if (less(values.get(z), values.get(y))) {
+  if (less(values.comparisonValue(z), values.comparisonValue(y))) {
     values.swap(x, z);
     return;
   }
   values.swap(x, y);
-  if (less(values.get(z), values.get(y))) values.swap(y, z);
+  if (less(values.comparisonValue(z), values.comparisonValue(y))) values.swap(y, z);
 }
 
 function sort4(values: Range, a: number, b: number, c: number, d: number, less: Less): void {
   sort3(values, a, b, c, less);
-  if (less(values.get(d), values.get(c))) {
+  if (less(values.comparisonValue(d), values.comparisonValue(c))) {
     values.swap(c, d);
-    if (less(values.get(c), values.get(b))) {
+    if (less(values.comparisonValue(c), values.comparisonValue(b))) {
       values.swap(b, c);
-      if (less(values.get(b), values.get(a))) values.swap(a, b);
+      if (less(values.comparisonValue(b), values.comparisonValue(a))) values.swap(a, b);
     }
   }
 }
 
 function sort5(values: Range, a: number, b: number, c: number, d: number, e: number, less: Less): void {
   sort4(values, a, b, c, d, less);
-  if (less(values.get(e), values.get(d))) {
+  if (less(values.comparisonValue(e), values.comparisonValue(d))) {
     values.swap(d, e);
-    if (less(values.get(d), values.get(c))) {
+    if (less(values.comparisonValue(d), values.comparisonValue(c))) {
       values.swap(c, d);
-      if (less(values.get(c), values.get(b))) {
+      if (less(values.comparisonValue(c), values.comparisonValue(b))) {
         values.swap(b, c);
-        if (less(values.get(b), values.get(a))) values.swap(a, b);
+        if (less(values.comparisonValue(b), values.comparisonValue(a))) values.swap(a, b);
       }
     }
   }
@@ -1582,14 +1652,14 @@ function insertionSort(values: Range, first: number, last: number, less: Less, g
   if (first === last) return;
   for (let i = first + 1; i !== last; i++) {
     let j = i - 1;
-    if (less(values.get(i), values.get(j))) {
+    if (less(values.comparisonValue(i), values.comparisonValue(j))) {
       values.withTemporary(i, (value) => {
         let k = j;
         j = i;
         do {
           values.set(j, values.get(k));
           j = k;
-        } while ((!guarded || j !== first) && less(value, values.get(--k)));
+        } while ((!guarded || j !== first) && less(value, values.comparisonValue(--k)));
         values.set(j, value);
       });
     }
@@ -1603,7 +1673,7 @@ function insertionSortIncomplete(values: Range, first: number, last: number, les
       return true;
     }
     case 2: {
-      if (less(values.get(last - 1), values.get(first))) values.swap(first, last - 1);
+      if (less(values.comparisonValue(last - 1), values.comparisonValue(first))) values.swap(first, last - 1);
       return true;
     }
     case 3: {
@@ -1623,14 +1693,14 @@ function insertionSortIncomplete(values: Range, first: number, last: number, les
   sort3(values, first, first + 1, j, less);
   let count = 0;
   for (let i = j + 1; i !== last; i++) {
-    if (less(values.get(i), values.get(j))) {
+    if (less(values.comparisonValue(i), values.comparisonValue(j))) {
       values.withTemporary(i, (value) => {
         let k = j;
         j = i;
         do {
           values.set(j, values.get(k));
           j = k;
-        } while (j !== first && less(value, values.get(--k)));
+        } while (j !== first && less(value, values.comparisonValue(--k)));
         values.set(j, value);
       });
       if (++count === 8) return i + 1 === last;
@@ -1646,19 +1716,19 @@ function partitionWithEqualsOnRight(values: Range, start: number, end: number, l
   let last = end;
   return values.withTemporary(first, (pivot) => {
     do first++;
-    while (less(values.get(first), pivot));
+    while (less(values.comparisonValue(first), pivot));
     if (begin === first - 1) {
-      while (first < last && !less(values.get(--last), pivot));
+      while (first < last && !less(values.comparisonValue(--last), pivot));
     } else {
-      while (!less(values.get(--last), pivot));
+      while (!less(values.comparisonValue(--last), pivot));
     }
     const alreadyPartitioned = first >= last;
     while (first < last) {
       values.swap(first, last);
       do first++;
-      while (less(values.get(first), pivot));
+      while (less(values.comparisonValue(first), pivot));
       do last--;
-      while (!less(values.get(last), pivot));
+      while (!less(values.comparisonValue(last), pivot));
     }
     const pivotPosition = first - 1;
     if (begin !== pivotPosition) values.set(begin, values.get(pivotPosition));
@@ -1672,22 +1742,22 @@ function partitionWithEqualsOnLeft(values: Range, start: number, end: number, le
   let first = start;
   let last = end;
   return values.withTemporary(first, (pivot) => {
-    if (less(pivot, values.get(last - 1))) {
+    if (less(pivot, values.comparisonValue(last - 1))) {
       do first++;
-      while (!less(pivot, values.get(first)));
+      while (!less(pivot, values.comparisonValue(first)));
     } else {
-      while (++first < last && !less(pivot, values.get(first)));
+      while (++first < last && !less(pivot, values.comparisonValue(first)));
     }
     if (first < last) {
       do last--;
-      while (less(pivot, values.get(last)));
+      while (less(pivot, values.comparisonValue(last)));
     }
     while (first < last) {
       values.swap(first, last);
       do first++;
-      while (!less(pivot, values.get(first)));
+      while (!less(pivot, values.comparisonValue(first)));
       do last--;
-      while (less(pivot, values.get(last)));
+      while (less(pivot, values.comparisonValue(last)));
     }
     const pivotPosition = first - 1;
     if (begin !== pivotPosition) values.set(begin, values.get(pivotPosition));
@@ -1703,8 +1773,9 @@ function heapSort(values: Range, first: number, last: number, less: Less): void 
     let child = start;
     if (size < 2 || (size - 2) >> 1 < child) return;
     child = 2 * child + 1;
-    if (child + 1 < size && less(values.get(first + child), values.get(first + child + 1))) child++;
-    if (less(values.get(first + child), values.get(first + start))) return;
+    if (child + 1 < size && less(values.comparisonValue(first + child), values.comparisonValue(first + child + 1)))
+      child++;
+    if (less(values.comparisonValue(first + child), values.comparisonValue(first + start))) return;
     values.withTemporary(first + start, (top) => {
       let hole = start;
       do {
@@ -1712,8 +1783,9 @@ function heapSort(values: Range, first: number, last: number, less: Less): void 
         hole = child;
         if ((size - 2) >> 1 < child) break;
         child = 2 * child + 1;
-        if (child + 1 < size && less(values.get(first + child), values.get(first + child + 1))) child++;
-      } while (!less(values.get(first + child), top));
+        if (child + 1 < size && less(values.comparisonValue(first + child), values.comparisonValue(first + child + 1)))
+          child++;
+      } while (!less(values.comparisonValue(first + child), top));
       values.set(first + hole, top);
     });
   };
@@ -1754,7 +1826,7 @@ function sortPart(
         return;
       }
       case 2: {
-        if (less(values.get(last - 1), values.get(first))) values.swap(first, last - 1);
+        if (less(values.comparisonValue(last - 1), values.comparisonValue(first))) values.swap(first, last - 1);
         return;
       }
       case 3: {
@@ -1789,7 +1861,7 @@ function sortPart(
     } else {
       sort3(values, first + half, first, last - 1, less);
     }
-    if (!leftmost && !less(values.get(first - 1), values.get(first))) {
+    if (!leftmost && !less(values.comparisonValue(first - 1), values.comparisonValue(first))) {
       first = partitionWithEqualsOnLeft(values, first, last, less);
       continue;
     }
@@ -1837,9 +1909,9 @@ function permute(values: Range, less: Less): boolean {
   for (;;) {
     const ip1 = i;
     i--;
-    if (less(values.get(i), values.get(ip1))) {
+    if (less(values.comparisonValue(i), values.comparisonValue(ip1))) {
       let j = length - 1;
-      while (!less(values.get(i), values.get(j))) j--;
+      while (!less(values.comparisonValue(i), values.comparisonValue(j))) j--;
       values.swap(i, j);
       for (let a = ip1, b = length - 1; a < b; a++, b--) values.swap(a, b);
       return true;

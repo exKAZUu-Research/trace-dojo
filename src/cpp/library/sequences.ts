@@ -27,7 +27,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { type Ptr, type Value } from '../values';
+import { NULL_PTR, type Ptr, type Value } from '../values';
 import { bitReferences } from './bitReference';
 import { SequenceValue } from './containerValues';
 import {
@@ -88,8 +88,6 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   const container = name;
   const category = kind === 'list' ? 'bidirectional' : 'randomAccess';
   const bits = kind === 'vector' && element.kind === 'int' && element.name === 'bool' ? bitReferences() : undefined;
-  const iterator = randomAccessIterator(library.iterators, container, element, false, false, category, bits);
-  const constIterator = randomAccessIterator(library.iterators, container, element, true, false, category, bits);
   const reverseIterator = randomAccessIterator(library.iterators, container, element, false, true, category, bits);
   const constReverseIterator = randomAccessIterator(library.iterators, container, element, true, true, category, bits);
   if (bits) {
@@ -98,8 +96,18 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   }
   cls.memberTypes.set('value_type', element);
   cls.memberTypes.set('size_type', SIZE_T);
-  cls.memberTypes.set('iterator', classType(iterator));
-  cls.memberTypes.set('const_iterator', classType(constIterator));
+  cls.memberTypes.set(
+    'iterator',
+    kind === 'array'
+      ? pointerTo(element)
+      : classType(randomAccessIterator(library.iterators, container, element, false, false, category, bits))
+  );
+  cls.memberTypes.set(
+    'const_iterator',
+    kind === 'array'
+      ? pointerTo(withConst(element))
+      : classType(randomAccessIterator(library.iterators, container, element, true, false, category, bits))
+  );
   cls.memberTypes.set('reverse_iterator', classType(reverseIterator));
   cls.memberTypes.set('const_reverse_iterator', classType(constReverseIterator));
   const outOfRange = (frame: Frame): never =>
@@ -408,6 +416,11 @@ function sequenceMethods(
     run: (self: SequenceValue, args: unknown[], frame: Frame) => unknown
   ): FunctionInfo =>
     native(name, params, ret, (args, { self, frame }) => run(self as SequenceValue, args, frame), { owner: cls });
+  const iteratorAt = (self: SequenceValue, index: number): Ptr =>
+    fixedLength === 0 ? NULL_PTR : self.iteratorLocation(index);
+  const begin = (self: SequenceValue): Ptr => iteratorAt(self, 0);
+  const end = (self: SequenceValue): Ptr => iteratorAt(self, self.items.length);
+  const endConstant = (object: Expr): ConstantLocation | undefined => constantArrayLocation(object, fixedLength);
   method('size', [], SIZE_T, (self) => BigInt(self.items.length), { isConst: true });
   method('max_size', [], SIZE_T, () => (kind === 'array' ? BigInt(fixedLength ?? 0) : maxSizeOf(kind, element)), {
     isConst: true,
@@ -457,47 +470,37 @@ function sequenceMethods(
       },
       { isConst, constantAccess: (object) => constantArrayLocation(object, (fixedLength ?? 0) - 1) }
     );
-    method('begin', [], isConst ? types.constIterator : types.iterator, (self) => self.iteratorLocation(0), {
+    method('begin', [], isConst ? types.constIterator : types.iterator, begin, {
+      isConst,
+      constantAccess: constantArrayStart,
+    });
+    method('end', [], isConst ? types.constIterator : types.iterator, end, {
+      isConst,
+      constantAccess: endConstant,
+    });
+    method('rbegin', [], isConst ? types.constReverseIterator : types.reverseIterator, end, { isConst });
+    method('rend', [], isConst ? types.constReverseIterator : types.reverseIterator, begin, {
       isConst,
     });
-    method(
-      'end',
-      [],
-      isConst ? types.constIterator : types.iterator,
-      (self) => self.iteratorLocation(self.items.length),
-      {
-        isConst,
-      }
-    );
-    method(
-      'rbegin',
-      [],
-      isConst ? types.constReverseIterator : types.reverseIterator,
-      (self) => self.iteratorLocation(self.items.length),
-      { isConst }
-    );
-    method(
-      'rend',
-      [],
-      isConst ? types.constReverseIterator : types.reverseIterator,
-      (self) => self.iteratorLocation(0),
-      {
-        isConst,
-      }
-    );
     if ((kind === 'vector' || kind === 'array') && !bitProxy) {
-      method('data', [], pointerTo(isConst ? withConst(element) : element), (self) => self.location(0), {
-        isConst,
-        constantAccess: (object) => constantArrayLocation(object, 0),
-      });
+      method(
+        'data',
+        [],
+        pointerTo(isConst ? withConst(element) : element),
+        (self) => (self.capacity === 0 ? NULL_PTR : self.location(0)),
+        {
+          isConst,
+          constantAccess: constantArrayStart,
+        }
+      );
     }
   }
-  method('cbegin', [], types.constIterator, (self) => self.iteratorLocation(0), { isConst: true });
-  method('cend', [], types.constIterator, (self) => self.iteratorLocation(self.items.length), { isConst: true });
-  method('crbegin', [], types.constReverseIterator, (self) => self.iteratorLocation(self.items.length), {
+  method('cbegin', [], types.constIterator, begin, { isConst: true, constantAccess: constantArrayStart });
+  method('cend', [], types.constIterator, end, { isConst: true, constantAccess: endConstant });
+  method('crbegin', [], types.constReverseIterator, end, {
     isConst: true,
   });
-  method('crend', [], types.constReverseIterator, (self) => self.iteratorLocation(0), { isConst: true });
+  method('crend', [], types.constReverseIterator, begin, { isConst: true });
   method(
     'swap',
     [referenceTo(type)],
@@ -939,6 +942,10 @@ function sequenceOperator(
     };
   }
   return undefined;
+}
+
+function constantArrayStart(object: Expr): ConstantLocation | undefined {
+  return constantArrayLocation(object, 0);
 }
 
 function constantArrayLocation(object: Expr, index: number | bigint | undefined): ConstantLocation | undefined {

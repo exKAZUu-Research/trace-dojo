@@ -291,6 +291,20 @@ int main() { std::pair<std::vector<int>, int> pair = {1, 2}; }`;
 });
 
 test.each([
+  ['for_each', 'void callback(bool&) {}', 'callback'],
+  ['transform', 'int callback(bool&) { return 1; }', 'out, callback'],
+])('std::%s rejects bool lvalue references for bit proxy callbacks', (name, callback, argumentsAfterRange) => {
+  const program = `#include <algorithm>
+#include <vector>
+${callback}
+int main() { std::vector<bool> bits{true}; int out[1]; std::${name}(bits.begin(), bits.end(), ${argumentsAfterRange}); }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 3, message: expect.stringContaining('std::vector<bool>::reference') }],
+  });
+});
+
+test.each([
   ['reverse', 'v.begin(), v.end()'],
   ['rotate', 'v.begin(), v.begin() + 1, v.end()'],
   ['sort', 'v.begin(), v.end(), less'],
