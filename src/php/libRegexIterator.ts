@@ -6,7 +6,6 @@ import { defineClass } from './native';
 import { toStr } from './operators';
 import { PatternError, translate } from './pcrePattern';
 import { rt } from './runtime';
-import { UnsupportedFeatureError } from './unsupported';
 import { type NativeFunction, PhpArray, type PhpObject, Ref, type Value } from './values';
 
 const USE_KEY = 1n;
@@ -82,9 +81,9 @@ function checkPattern(pattern: string): void {
   try {
     translate(pattern);
   } catch (error) {
-    if (error instanceof UnsupportedFeatureError) throw error;
-    const message = error instanceof PatternError ? error.message : `Compilation failed: ${(error as Error).message}`;
-    throwError('InvalidArgumentException', `RegexIterator::__construct(): ${message}`);
+    if (!(error instanceof PatternError || error instanceof SyntaxError)) throw error;
+    const prefix = error instanceof PatternError ? '' : 'Compilation failed: ';
+    throwError('InvalidArgumentException', `RegexIterator::__construct(): ${prefix}${error.message}`);
   }
 }
 

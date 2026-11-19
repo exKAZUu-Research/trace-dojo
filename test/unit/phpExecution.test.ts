@@ -2263,6 +2263,13 @@ test('a timed-out pattern compilation does not affect the next run', () => {
   expect(run(program)).toMatchObject({ kind: 'executed', stdout: 'int(0)\n' });
 });
 
+test('a RegexIterator constructor propagates the execution deadline', () => {
+  vi.spyOn(performance, 'now').mockReturnValue(3000).mockReturnValueOnce(0);
+  const program =
+    '<?php try { new RegexIterator(new ArrayIterator([]), "/abcdef/"); } catch (Throwable $e) { echo "caught"; }';
+  expect(run(program)).toEqual({ kind: 'limitExceeded', limit: 'time' });
+});
+
 test.each(['PHP_EOL', 'PHP_EOL . "A"', 'PHP_INT_MAX', 'PHP_INT_MAX + 1'])(
   'rejects compile-time native constants as class receivers: %s',
   (value) => {
