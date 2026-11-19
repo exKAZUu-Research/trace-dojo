@@ -1,5 +1,5 @@
 // code-gauge-allow-file fileNcss 567 -- The callBinder module keeps one stage of the C# interpreter together.
-import type { BoundArgument, BoundExpression, BoundLValue } from './bound';
+import type { BoundArgument, BoundArguments, BoundExpression, BoundLValue } from './bound';
 import { displayMethodIn } from './declarations';
 import type { MethodCandidate } from './lookup';
 import { OperatorBinder } from './operatorBinder';
@@ -112,7 +112,7 @@ export abstract class CallBinder extends OperatorBinder {
       this.reportInapplicable(candidates, args, explicitTypeArgs, row, description);
       return undefined;
     }
-    const best = this.bestOf(applicable, args);
+    const best = this.bestOf(applicable, args) ?? this.libraryTieBreak(applicable, args);
     if (!best) {
       // An argument whose binding already failed fits every overload, which Roslyn does not report again.
       if (args.some((arg) => arg.expression.type.kind === 'error')) return undefined;
@@ -129,7 +129,7 @@ export abstract class CallBinder extends OperatorBinder {
   }
 
   private describe(applicable: Applicable): string {
-    return displayMethodIn(applicable.candidate.method, applicable.candidate.owner);
+    return displayMethodIn(applicable.candidate.method, applicable.candidate.owner, true);
   }
 
   /** The two candidates to name in an ambiguity error: the first two that no other candidate beats. */
@@ -759,7 +759,7 @@ export abstract class CallBinder extends OperatorBinder {
 
   /** Converts the arguments to their parameters' types and orders them as the parameters, filling defaults and packing `params`. */
   // code-gauge-allow functionCognitiveComplexity 22 -- Each branch handles one case of the C# rule that the function applies.
-  private finishArguments(applicable: Applicable, args: ArgumentInfo[], row: number): BoundArgument[] {
+  private finishArguments(applicable: Applicable, args: ArgumentInfo[], row: number): BoundArguments {
     const { method } = applicable.candidate;
     const substitution = this.callSubstitution(applicable.candidate, applicable.typeArgs);
     const result: (BoundArgument | undefined)[] = Array.from({ length: method.parameters.length });
@@ -800,7 +800,11 @@ export abstract class CallBinder extends OperatorBinder {
       const type = substitute(parameter.type, substitution);
       result[index] = this.defaultArgument(parameter, type, row);
     }
-    return result as BoundArgument[];
+    const sourceOrder = [...new Set(args.map((_arg, index) => applicable.parameterOf[index]))];
+    const isReordered = sourceOrder.some(
+      (parameterIndex, index) => index > 0 && parameterIndex < sourceOrder[index - 1]
+    );
+    return isReordered ? Object.assign(result as BoundArgument[], { sourceOrder }) : (result as BoundArgument[]);
   }
 
   /** The value of an omitted optional argument. */
@@ -811,6 +815,22 @@ export abstract class CallBinder extends OperatorBinder {
   ): BoundExpression;
 
   // code-gauge-allow functionCognitiveComplexity 16 -- Roslyn reports a different error for each way a call fails.
+  /** Reports a call whose type arguments no candidate takes as many of, as Roslyn does before matching arguments. */
+  private reportTypeArgumentCount(candidates: MethodCandidate[], count: number, row: number): boolean {
+    if (candidates.some((candidate) => candidate.method.typeParameters.length === count)) return false;
+    const [{ method, owner }] = candidates;
+    const name = displayMethodIn(method, owner);
+    if (method.typeParameters.length === 0)
+      this.error(row, 'CS0308', `非ジェネリック メソッド '${name}' は型引数と一緒には使用できません`);
+    else
+      this.error(
+        row,
+        'CS0305',
+        `ジェネリック メソッド '${name}' を使用するには、${method.typeParameters.length} 型引数が必要です`
+      );
+    return true;
+  }
+
   private reportInapplicable(
     candidates: MethodCandidate[],
     args: ArgumentInfo[],
@@ -818,6 +838,7 @@ export abstract class CallBinder extends OperatorBinder {
     row: number,
     description: CallDescription
   ): void {
+    if (explicitTypeArgs && this.reportTypeArgumentCount(candidates, explicitTypeArgs.length, row)) return;
     const byArity = candidates.filter(
       (candidate) =>
         this.mapArguments(candidate.method, args, false) !== undefined ||
@@ -863,6 +884,20 @@ export abstract class CallBinder extends OperatorBinder {
     expanded: boolean
   ): Type[] {
     return explicitTypeArgs ?? this.inferTypeArguments(candidate, args, parameterOf, expanded) ?? [];
+  }
+
+  /**
+   * A tie between library methods that .NET's further overloads settle, such as `string.Join(",", objects)`: .NET picks
+   * `Join(string, params object[])` over `Join<T>(string, IEnumerable<T>)` through its `ReadOnlySpan` overloads, which
+   * this library does not declare. The single non-generic method among the tied ones stands in for that choice.
+   */
+  private libraryTieBreak(applicable: Applicable[], args: ArgumentInfo[]): Applicable | undefined {
+    const tied = applicable.filter(
+      (candidate) => !applicable.some((other) => other !== candidate && this.isBetter(other, candidate, args))
+    );
+    if (!tied.every((candidate) => candidate.candidate.method.owner.isLibrary)) return undefined;
+    const nonGeneric = tied.filter((candidate) => candidate.candidate.method.typeParameters.length === 0);
+    return nonGeneric.length === 1 ? nonGeneric[0] : undefined;
   }
 
   /** Reports a call that no candidate takes the number or the names of its arguments for. */

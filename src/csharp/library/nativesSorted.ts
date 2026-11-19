@@ -48,6 +48,11 @@ class SortedState implements EnumerableState {
     readonly keyText: (key: Value) => string
   ) {}
 
+  /** The type of a set's elements, which it holds unboxed; a dictionary's pairs carry their own type. */
+  get elementType(): Type | undefined {
+    return this.valueType ? undefined : this.keyType;
+  }
+
   position(key: Value): { index: number; isFound: boolean } {
     let low = 0;
     let high = this.keys.length;
@@ -285,7 +290,7 @@ defineNatives({
     return;
   },
   [`${SORTED_SET}.GetEnumerator`]: (call, receiver) =>
-    enumeratorOf(call, typeArgument(call), sortedOf(receiver).enumerate(), [receiver]),
+    enumeratorOf(call, sortedOf(receiver).keyType, sortedOf(receiver).enumerate(), [receiver]),
   [`${SORTED_SET}.GetViewBetween`]: (call, receiver, [lower, upper]) => {
     const state = sortedOf(receiver);
     if (state.compare(lower as Value, upper as Value) > 0)

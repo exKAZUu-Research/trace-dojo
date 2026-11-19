@@ -926,6 +926,12 @@ export class Converter extends ExpressionConverter {
       if (child.type === 'catch_clause') catches.push(this.convertCatch(child));
       else if (child.type === 'finally_clause') finallyBlock = this.convertBlockNode(namedChildren(child)[0]);
     }
+    if (catches.length === 0 && !finallyBlock) {
+      // The grammar takes a `try` block alone, which Roslyn rejects as a syntax error.
+      throw new CompileError([
+        { row: requiredField(node, 'body').endPosition.row, message: 'CS1524: catch または finally が必要です' },
+      ]);
+    }
     return {
       kind: 'try',
       body: this.convertBlockNode(requiredField(node, 'body')),

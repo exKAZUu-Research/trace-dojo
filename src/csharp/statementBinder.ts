@@ -157,13 +157,14 @@ export abstract class StatementBinder extends PatternBinder {
         return this.checkPropertyAssignable(target, position, context, use);
       }
       case 'this': {
+        // A struct's `this` is a variable in its constructors, and in its other members unless the struct is readonly.
         if (
           target.type.kind === 'named' &&
           target.type.symbol.kind === 'struct' &&
-          context.fn.method.kind === 'constructor'
+          (context.fn.method.kind === 'constructor' || !target.type.symbol.isReadonly)
         )
           return target;
-        this.error(position, 'CS1604', "'this' は読み取り専用であるため、割り当てることはできません");
+        this.error(position, 'CS1604', "読み取り専用であるため 'this' に割り当てできません");
         return { kind: 'discard', type: ERROR_TYPE, row: position.row };
       }
       default: {
@@ -359,20 +360,8 @@ export abstract class StatementBinder extends PatternBinder {
       );
       return { kind: 'discard', type: ERROR_TYPE, row: node.row };
     }
-    if (use === 'compound' && value.kind === 'property' && !this.getterOf(value.property)) {
-      this.error(
-        node,
-        'CS0154',
-        `get アクセサーがないため、プロパティまたはインデクサー '${displayTypeSymbol(value.owner.symbol)}.${value.property.name}' をこのコンテキストで使用することはできません`
-      );
-    }
+    if (use === 'compound') this.checkReadable(value, node);
     return this.checkAssignable(value, node, context, use);
-  }
-
-  private getterOf(property: PropertySymbol): MethodSymbol | undefined {
-    for (let current: PropertySymbol | undefined = property; current; current = current.overridden)
-      if (current.getter) return current.getter;
-    return undefined;
   }
 
   /** Binds the body of a member, lambda, or local function in its own scope. */

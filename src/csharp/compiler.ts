@@ -697,7 +697,7 @@ export class Compiler extends StatementBinder {
     const fn = new FunctionScope(
       method,
       undefined,
-      {
+      parameter.defaultContext ?? {
         namespace: [this.userRoot, this.library.root],
         usings: this.resolveUsings([]),
         type: undefined,

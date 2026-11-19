@@ -76,7 +76,21 @@ export abstract class MemberBinder extends CallBinder {
 
   /** Binds an expression as a value. */
   bindValue(node: Expression, context: BindContext): BoundExpression {
-    return this.toValue(this.bindExpression(node, context), node);
+    const value = this.toValue(this.bindExpression(node, context), node);
+    this.checkReadable(value, node);
+    return value;
+  }
+
+  /** Reports a read of a property that has no getter. */
+  protected checkReadable(value: BoundExpression, position: Position): void {
+    if (value.kind !== 'property') return;
+    for (let current: PropertySymbol | undefined = value.property; current; current = current.overridden)
+      if (current.getter) return;
+    this.error(
+      position,
+      'CS0154',
+      `get アクセサーがないため、プロパティまたはインデクサー '${displayTypeSymbol(value.owner.symbol)}.${value.property.name}' をこのコンテキストで使用することはできません`
+    );
   }
 
   /** Binds an expression and converts it to a type. */
@@ -1216,6 +1230,9 @@ export abstract class MemberBinder extends CallBinder {
 
   private bindMemberInitializer(member: MemberInitializer, type: Type, context: BindContext): BoundMemberInit {
     const placeholder: BoundExpression = { kind: 'compoundOperand', type, row: member.row };
+    // `Xs = { 1, 2 }` reads the member and fills it, so it needs no setter.
+    const { value } = member;
+    const isNested = value.kind === 'collectionInitializer' || value.kind === 'objectInitializer';
     let target: BoundLValue;
     if (member.kind === 'memberAssign') {
       const { found, inaccessible } = this.lookupMember(type, member.name, context.fn.typeContext);
@@ -1225,20 +1242,20 @@ export abstract class MemberBinder extends CallBinder {
         target = { kind: 'discard', type: ERROR_TYPE, row: member.row };
       } else {
         const access = this.memberAccessOn(placeholder, found, member, context);
-        target = this.checkAssignable(access, member, context, 'initializer');
+        target = isNested ? (access as BoundLValue) : this.checkAssignable(access, member, context, 'initializer');
       }
     } else {
       target = this.bindElementAccess(placeholder, member.args, member, context) as BoundLValue;
     }
-    if (member.value.kind === 'collectionInitializer' || member.value.kind === 'objectInitializer') {
+    if (isNested) {
       return {
         kind: 'memberInit',
         target,
         value: undefined,
-        nested: this.bindInitializer(member.value, target.type, context),
+        nested: this.bindInitializer(value, target.type, context),
       };
     }
-    return { kind: 'memberInit', target, value: this.bindAs(member.value, target.type, context), nested: undefined };
+    return { kind: 'memberInit', target, value: this.bindAs(value, target.type, context), nested: undefined };
   }
 
   /** Binds collection initializer elements as `Add` calls, which `{ a, b }` makes for each element. */

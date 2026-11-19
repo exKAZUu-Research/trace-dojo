@@ -1010,6 +1010,8 @@ export class DeclarationBinder extends BinderBase {
       if (result.some((other) => other.name === parameter.name)) {
         this.error(parameter, 'CS0100', `パラメーター名 '${parameter.name}' が重複しています`);
       }
+      if (!parameter.defaultValue && parameter.modifier !== 'params' && result.some((other) => other.defaultSyntax))
+        this.error(parameter, 'CS1737', '省略可能なパラメーターはすべての必須パラメーターの後で指定する必要があります');
       if (parameter.modifier === 'params') {
         if (index !== parameters.length - 1)
           this.error(
@@ -1036,6 +1038,7 @@ export class DeclarationBinder extends BinderBase {
             : undefined,
         isParams: parameter.modifier === 'params',
         defaultSyntax: parameter.defaultValue,
+        defaultContext: parameter.defaultValue ? context : undefined,
         position: parameter,
       });
     }
@@ -1207,10 +1210,8 @@ export class DeclarationBinder extends BinderBase {
   sameParameters(a: MethodSymbol, b: MethodSymbol, aOwner?: NamedType, bOwner?: NamedType): boolean {
     if (a.parameters.length !== b.parameters.length || a.typeParameters.length !== b.typeParameters.length)
       return false;
-    const aSubstitution = new Map(aOwner ? substitutionOf(aOwner) : []);
+    const aSubstitution = this.methodSubstitution(a, b, aOwner);
     const bSubstitution = new Map(bOwner ? substitutionOf(bOwner) : []);
-    for (const [index, parameter] of a.typeParameters.entries())
-      aSubstitution.set(parameter, b.typeParameters[index].type);
     return a.parameters.every((parameter, index) => {
       const other = b.parameters[index];
       return (
@@ -1218,6 +1219,18 @@ export class DeclarationBinder extends BinderBase {
         sameType(substitute(parameter.type, aSubstitution), substitute(other.type, bSubstitution))
       );
     });
+  }
+
+  /** The substitution that maps a method's owner's and its own type parameters onto those of a method it matches. */
+  private methodSubstitution(
+    method: MethodSymbol,
+    matched: MethodSymbol,
+    owner?: NamedType
+  ): Map<TypeParameterSymbol, Type> {
+    const substitution = new Map(owner ? substitutionOf(owner) : []);
+    for (const [index, parameter] of method.typeParameters.entries())
+      substitution.set(parameter, matched.typeParameters[index].type);
+    return substitution;
   }
 
   /** Numbers the fields of each type after those of its bases, since an object keeps them in one array. */
@@ -1449,7 +1462,7 @@ export class DeclarationBinder extends BinderBase {
           method.kind === 'method' &&
           this.sameParameters(method, member, current, face) &&
           sameType(
-            substitute(method.returnType, substitutionOf(current as NamedType)),
+            substitute(method.returnType, this.methodSubstitution(method, member, current as NamedType)),
             substitute(member.returnType, substitutionOf(face))
           )
       );
@@ -1504,12 +1517,16 @@ function accessibilityText(access: Accessibility): string {
 }
 
 /** A method's display name as a member of a constructed type, as diagnostics show inherited members. */
-export function displayMethodIn(method: MethodSymbol, owner: NamedType): string {
+/**
+ * A method as Roslyn's diagnostics name it, such as `A.M(int)`. With `isFull`, as its ambiguity errors do, the
+ * parameters carry `params` and their types' namespaces.
+ */
+export function displayMethodIn(method: MethodSymbol, owner: NamedType, isFull = false): string {
   const substitution = substitutionOf(owner);
   const parameters = method.parameters
     .map(
       (parameter) =>
-        `${parameter.refKind ? `${parameter.refKind} ` : ''}${displayType(substitute(parameter.type, substitution))}`
+        `${parameter.refKind ? `${parameter.refKind} ` : ''}${isFull && parameter.isParams ? 'params ' : ''}${displayType(substitute(parameter.type, substitution), isFull)}`
     )
     .join(', ');
   if (method.kind === 'getter' || method.kind === 'setter') return displayMethod(method);

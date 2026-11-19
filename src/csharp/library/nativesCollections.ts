@@ -559,6 +559,11 @@ export class HashState implements EnumerableState {
     readonly comparer: Value
   ) {}
 
+  /** The type of a set's elements, which it holds unboxed; a dictionary's pairs carry their own type. */
+  get elementType(): Type | undefined {
+    return this.valueType ? undefined : this.keyType;
+  }
+
   get count(): number {
     return this.entries.length - this.freeList.length;
   }
@@ -896,14 +901,44 @@ defineNatives({
       value as Value,
     ]),
   'System.Collections.Generic.CollectionExtensions.GetValueOrDefault': (call, _receiver, args) => {
-    const state = hashOfState(args[0] as Value);
-    const index = state.find(args[1] as Value);
-    if (index >= 0) return state.entries[index].value;
-    return args.length > 2 ? (args[2] as Value) : evaluatorOf(call).defaultOf(call.typeArgs[1]);
+    const [dictionary, key, defaultValue] = args as Value[];
+    if (dictionary === undefined) failNull('dictionary');
+    const found = tryGetValue(call, dictionary, key);
+    if (found.isFound) return found.value;
+    return args.length > 2 ? defaultValue : evaluatorOf(call).defaultOf(call.typeArgs[1]);
   },
   'System.Collections.Generic.CollectionExtensions.TryAdd': (_call, _receiver, [dictionary, key, value]) =>
     hashOfState(dictionary as Value).insert(key as Value, value as Value, false),
 });
+
+/** `IReadOnlyDictionary.TryGetValue` of any dictionary, as SortedDictionary's or one the program implements. */
+function tryGetValue(call: NativeCall, dictionary: Value, key: Value): { isFound: boolean; value: Value } {
+  const native = (dictionary as CsObject).native;
+  if (native instanceof HashState) {
+    const index = native.find(key);
+    return index >= 0 ? { isFound: true, value: native.entries[index].value } : { isFound: false, value: undefined };
+  }
+  const evaluator = evaluatorOf(call);
+  const face = evaluator.runtime.library.typeNamed('System.Collections.Generic.IReadOnlyDictionary', 2);
+  const method = face.methods.find((candidate) => candidate.name === 'TryGetValue') as MethodSymbol;
+  const implementation = evaluator.runtime.dispatch(method, dictionary);
+  let value: Value;
+  const out: VariableReference = {
+    get: () => value,
+    set: (assigned) => {
+      value = assigned;
+    },
+  };
+  const isFound = evaluator.invoke(
+    call.frame,
+    implementation,
+    dictionary,
+    [key, out as unknown as Value],
+    call.row,
+    environmentOf(evaluator, implementation, dictionary)
+  ) as boolean;
+  return { isFound, value };
+}
 
 const HASH_SET = 'System.Collections.Generic.HashSet`1';
 
@@ -946,7 +981,8 @@ defineNatives({
     enumeratorStruct(
       call,
       'System.Collections.Generic.HashSet`1+Enumerator',
-      [typeArgument(call)],
+      // A call through the non-generic IEnumerable has no type arguments, which the set's own state keeps.
+      [hashOfState(receiver).keyType],
       hashOfState(receiver).enumerate(),
       [receiver]
     ),

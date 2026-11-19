@@ -43,7 +43,7 @@ import {
   type Value,
   type VariableReference,
 } from '../values';
-import { formatValue, parseNumber } from './formatting';
+import { formatValue, normalizeNumberText, parseNumber, trimNumberText } from './formatting';
 import { linqDisplayName } from './nativesLinq';
 import {
   arrayValues,
@@ -105,8 +105,12 @@ defineNatives({
     return copy;
   },
   // A call through `object` passes the struct in its box, since ValueType is a class.
-  'System.ValueType.Equals': (call, receiver, [other]) =>
-    structEquals(evaluatorOf(call), unboxed(receiver) as CsStruct, other as Value, call.frame),
+  // An enum reaches it in a box, which compares as Object.Equals does a boxed value.
+  'System.ValueType.Equals': (call, receiver, [other]) => {
+    const value = unboxed(receiver);
+    if (value instanceof CsStruct) return structEquals(evaluatorOf(call), value, other as Value, call.frame);
+    return valuesEqual(evaluatorOf(call), receiver, other as Value, call.frame);
+  },
   'System.ValueType.GetHashCode': (call, receiver) => {
     const value = unboxed(receiver);
     return value instanceof CsStruct ? structHash(evaluatorOf(call), value, call.frame) : (primitiveHash(value) ?? 0);
@@ -332,7 +336,7 @@ function parseInteger(
   special: SpecialType,
   throws: boolean
 ): bigint | undefined {
-  const match = /^[\s]*([+-]?)(\d+)[\s\0]*$/.exec(text);
+  const match = /^([+-]?)(\d+)$/.exec(trimNumberText(text));
   if (!match) {
     if (throws) fail('System.FormatException', `The input string '${text}' was not in a correct format.`);
     return undefined;
@@ -566,8 +570,8 @@ defineNatives({
 
 /** Parses a decimal as `decimal.Parse` does, whose number style allows group separators but no exponent. */
 function parseDecimal(text: string): CsDecimal | undefined {
-  if (/[eE]/.test(text)) return undefined;
-  return CsDecimal.parse(text.trim().replaceAll(',', ''));
+  const normalized = normalizeNumberText(text, false);
+  return normalized === undefined ? undefined : CsDecimal.parse(normalized);
 }
 
 // ---- Math ----

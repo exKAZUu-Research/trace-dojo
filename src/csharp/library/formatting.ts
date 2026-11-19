@@ -95,16 +95,45 @@ function formatEnum(type: NamedType, value: Value, format: string): string {
   }
 }
 
+/**
+ * A number's text without the white space that .NET's number parsing skips: only tab to carriage return and the
+ * space, not the other Unicode spaces such as U+3000, with trailing NUL characters too.
+ */
+export function trimNumberText(text: string): string {
+  return text.replace(/^[\t-\r ]+/, '').replace(/[\t-\r \0]+$/, '');
+}
+
 /** Parses a floating-point number as `double.Parse` does with the culture's symbols, or returns undefined. */
 export function parseNumber(text: string): number | undefined {
-  const trimmed = text.trim();
-  if (trimmed === CULTURE.nan || trimmed === 'NaN') return Number.NaN;
+  const trimmed = trimNumberText(text);
+  // .NET compares the culture's symbols ignoring case.
+  if (trimmed.toLowerCase() === CULTURE.nan.toLowerCase()) return Number.NaN;
   // ja-JP spells infinity `∞`, so `Infinity` does not parse.
   if (trimmed === CULTURE.positiveInfinity || trimmed === `+${CULTURE.positiveInfinity}`)
     return Number.POSITIVE_INFINITY;
   if (trimmed === CULTURE.negativeInfinity) return Number.NEGATIVE_INFINITY;
-  if (!/^[+-]?(\d{1,3}(,\d{3})+|\d*)(\.\d*)?([eE][+-]?\d+)?$/.test(trimmed) || !/\d/.test(trimmed)) return undefined;
-  return Number(trimmed.replaceAll(',', ''));
+  const normalized = normalizeNumberText(trimmed, true);
+  return normalized === undefined ? undefined : Number(normalized);
+}
+
+/**
+ * A number's text, without white space and group separators, if it follows .NET's grammar for `double.Parse`
+ * (`isFloat`, with an exponent) or `decimal.Parse` (with a trailing sign instead). A group separator may follow any
+ * digit before the decimal point, in groups of any size.
+ */
+export function normalizeNumberText(text: string, isFloat: boolean): string | undefined {
+  let body = trimNumberText(text);
+  let sign = '';
+  if (/^[+-]/.test(body)) {
+    sign = body[0];
+    body = body.slice(1);
+  } else if (!isFloat && /[+-]$/.test(body)) {
+    sign = body.at(-1) as string;
+    body = body.slice(0, -1);
+  }
+  const match = /^(\d[\d,]*|)(\.\d*)?([eE][+-]?\d+)?$/.exec(body);
+  if (!match || (match[3] && !isFloat) || !/\d/.test(match[1] + (match[2] ?? ''))) return undefined;
+  return `${sign === '-' ? '-' : ''}${match[1].replaceAll(',', '')}${match[2] ?? ''}${match[3] ?? ''}`;
 }
 
 export { unboxed };

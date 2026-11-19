@@ -683,15 +683,6 @@ namespace System {
   public static class Environment {
     public static string NewLine { get; }
     public static void Exit(int exitCode);
-    public static int ProcessorCount { get; }
-    public static int TickCount { get; }
-    public static long TickCount64 { get; }
-    public static string MachineName { get; }
-    public static string UserName { get; }
-    public static string CurrentDirectory { get; }
-    public static string? GetEnvironmentVariable(string variable);
-    public static string[] GetCommandLineArgs();
-    public static string StackTrace { get; }
   }
 
   public abstract class Delegate : ICloneable {

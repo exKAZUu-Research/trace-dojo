@@ -29,6 +29,12 @@ export type BoundArgument =
   /** A `ref` or `out` argument, which passes a variable rather than its value. */
   | ({ kind: 'refArgument'; target: BoundLValue; refKind: 'ref' | 'out' } & Base);
 
+/**
+ * Arguments in the order of the parameters. Named arguments written in another order carry, in `sourceOrder`, the
+ * parameter indices in the order the source writes them, in which C# evaluates them.
+ */
+export type BoundArguments = BoundArgument[] & { readonly sourceOrder?: readonly number[] };
+
 export interface BoundMemberInit {
   kind: 'memberInit';
   target: BoundLValue;

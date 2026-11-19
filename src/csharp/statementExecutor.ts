@@ -226,7 +226,12 @@ export abstract class StatementExecutor extends PatternMatcher {
       const getter = iteration.current.getter as MethodSymbol;
       const current = this.runtime.dispatch(getter, enumerator);
       while (this.invokeWithoutArguments(frame, moveNext, enumerator, statement.row, enumeratorType) as boolean) {
-        const element = this.invokeWithoutArguments(frame, current, enumerator, statement.row, enumeratorType);
+        const element = this.boxedAsCalled(
+          getter,
+          current,
+          enumeratorType,
+          this.invokeWithoutArguments(frame, current, enumerator, statement.row, enumeratorType)
+        );
         const outcome = loopOutcome(runIteration(element));
         if (outcome !== NEXT) return outcome;
       }

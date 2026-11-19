@@ -8,6 +8,7 @@ import type {
   PropertyDeclaration,
   TypeDeclaration,
 } from './ast';
+import type { TypeContext } from './binderBase';
 import type { BoundBlock, BoundExpression } from './bound';
 import type { NativeMethod } from './natives';
 
@@ -104,6 +105,8 @@ export interface ParameterSymbol {
   defaultValue?: { value: unknown };
   /** The default value before binding, which members bind once their types are known. */
   defaultSyntax?: Expression;
+  /** The names in scope where the default value is written, such as the declaring type's constants. */
+  defaultContext?: TypeContext;
   position?: Position;
 }
 

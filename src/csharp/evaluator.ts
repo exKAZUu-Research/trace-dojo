@@ -1,6 +1,6 @@
 // code-gauge-allow-file fileNcss 714 -- The evaluator module keeps one stage of the C# interpreter together.
 import type {
-  BoundArgument,
+  BoundArguments,
   BoundBlock,
   BoundExpression,
   BoundInitializerEntry,
@@ -747,7 +747,7 @@ export class Evaluator extends StatementExecutor {
       !nullableUnderlying(staticType)
         ? new CsBox(staticType, receiver)
         : receiver;
-    return this.invoke(
+    const result = this.invoke(
       frame,
       implementation,
       self,
@@ -755,6 +755,7 @@ export class Evaluator extends StatementExecutor {
       expression.row,
       this.environmentOf(implementation, implementationOwner, typeArgs)
     );
+    return this.boxedAsCalled(expression.method, implementation, this.runtime.runtimeTypeOf(receiver), result);
   }
 
   private runsOnNullable(expression: Extract<BoundExpression, { kind: 'call' }>): boolean {
@@ -804,24 +805,26 @@ export class Evaluator extends StatementExecutor {
   }
 
   /** Evaluates arguments in order: values copied as their parameters receive them, and references to variables. */
-  evaluateArguments(args: BoundArgument[], frame: Frame): (Value | VariableReference)[] {
-    const values: (Value | VariableReference)[] = [];
+  evaluateArguments(args: BoundArguments, frame: Frame): (Value | VariableReference)[] {
+    const values: (Value | VariableReference)[] = Array.from({ length: args.length });
     const start = frame.temporaries.length;
+    const sourceOrder = args.sourceOrder ?? [];
+    const order = [...sourceOrder, ...args.keys().filter((index) => !sourceOrder.includes(index))];
     try {
-      for (const arg of args) {
+      for (const index of order) {
+        const arg = args[index];
         if (arg.kind === 'refArgument') {
-          values.push(
+          values[index] =
             arg.target.kind === 'discard'
               ? new Reference(
                   () => {},
                   () => {}
                 )
-              : this.referenceTo(arg.target, frame)
-          );
+              : this.referenceTo(arg.target, frame);
           continue;
         }
         const value = copyValue(this.evaluate(arg, frame));
-        values.push(value);
+        values[index] = value;
         frame.temporaries.push(value);
       }
       return values;
@@ -938,7 +941,7 @@ export class Evaluator extends StatementExecutor {
         (accessor.isVirtual || accessor.isAbstract || accessor.isOverride || accessor.owner.kind === 'interface');
       const implementation = isVirtual && receiver !== undefined ? this.runtime.dispatch(accessor, receiver) : accessor;
       const implementationOwner = isVirtual ? (this.ownerOfImplementation(implementation, receiver) ?? owner) : owner;
-      return this.invoke(
+      const result = this.invoke(
         frame,
         implementation,
         receiver,
@@ -946,6 +949,7 @@ export class Evaluator extends StatementExecutor {
         target.row,
         this.environmentOf(implementation, implementationOwner, [])
       );
+      return this.boxedAsCalled(accessor, implementation, this.runtime.runtimeTypeOf(receiver), result);
     };
     if (property.backingField && !property.getter?.native && !property.isAbstract) {
       const field = property.backingField;

@@ -136,6 +136,30 @@ export abstract class EvaluatorBase {
     return substitutionOf(receiverType);
   }
 
+  /**
+   * A value that a library implementation returns unboxed, such as a `List<int>` enumerator's `Current`, boxed in its
+   * type when the member called, such as the non-generic `IEnumerator.Current`, returns `object`.
+   */
+  protected boxedAsCalled(
+    called: MethodSymbol,
+    implementation: MethodSymbol,
+    receiverType: Type | undefined,
+    value: Value
+  ): Value {
+    if (called === implementation || !implementation.native || specialOf(called.returnType) !== 'object') return value;
+    if (
+      typeof value !== 'number' &&
+      typeof value !== 'bigint' &&
+      typeof value !== 'boolean' &&
+      !(value instanceof CsDecimal)
+    )
+      return value;
+    const type = substitute(implementation.returnType, this.environmentFor(implementation, receiverType));
+    return type.kind === 'named' && type.symbol.isValueType && !nullableUnderlying(type)
+      ? new CsBox(type, value)
+      : value;
+  }
+
   protected getterOf(property: PropertySymbol): MethodSymbol | undefined {
     for (let current: PropertySymbol | undefined = property; current; current = current.overridden)
       if (current.getter) return current.getter;

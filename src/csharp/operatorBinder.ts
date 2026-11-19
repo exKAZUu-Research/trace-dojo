@@ -172,7 +172,12 @@ export abstract class OperatorBinder extends ConversionBinder {
     ) {
       return this.finishBinary(operator, left, right, 'bool', this.specialType('bool'), isLifted, row);
     }
-    const kind = SHIFTS.has(operator) ? this.shiftKind(leftType, rightType) : this.promotedKind(leftType, rightType);
+    // A non-negative int constant converts to uint or ulong, so `u - 1` takes the unsigned operator.
+    const leftOperandType = asUnsigned(left, leftType, rightType);
+    const rightOperandType = asUnsigned(right, rightType, leftType);
+    const kind = SHIFTS.has(operator)
+      ? this.shiftKind(leftOperandType, rightOperandType)
+      : this.promotedKind(leftOperandType, rightOperandType);
     if (kind === 'ambiguous') {
       this.error(
         row,
@@ -559,4 +564,15 @@ function isInterface(type: Type): boolean {
 
 function isSealedClass(type: Type): boolean {
   return type.kind === 'named' && type.symbol.isSealed;
+}
+
+function asUnsigned(operand: BoundExpression, type: Type, other: Type): Type {
+  return isNonNegativeIntConstant(operand) && ['uint', 'ulong'].includes(specialOf(other) ?? '') ? other : type;
+}
+
+function isNonNegativeIntConstant(operand: BoundExpression): boolean {
+  if (operand.kind !== 'constant' || !['int', 'long', 'short', 'sbyte'].includes(specialOf(operand.type) ?? ''))
+    return false;
+  const value = operand.value as number | bigint;
+  return value >= 0;
 }
