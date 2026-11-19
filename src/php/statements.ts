@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 638 -- Holds statement execution and its shared binding and cleanup helpers.
+// code-gauge-allow-file fileNcss 644 -- Keeps statement execution with its binding and unwind scopes.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
@@ -493,17 +493,31 @@ function catches(object: PhpObject, name: string): boolean {
 function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completion {
   const runtime = rt();
   const frame = runtime.frame;
-  if (foreachReferences(statement.value, statement.byRef)) return foreachReferenceSubject(statement);
   const subjectMark = frame.temporaries.length;
+  try {
+    return foreachReferences(statement.value, statement.byRef)
+      ? foreachReferenceSubject(statement)
+      : foreachValueSubject(statement, subjectMark);
+  } catch (error) {
+    if (error instanceof PhpThrow && frame.temporaries.length > subjectMark)
+      withPendingException(runtime, error, () => runtime.dropTemporaries(frame, subjectMark));
+    throw error;
+  }
+}
+
+function foreachValueSubject(statement: Extract<Stmt, { k: 'foreach' }>, subjectMark: number): Completion {
+  const runtime = rt();
+  const frame = runtime.frame;
   const nativeMark = runtime.nativeHeld.at(-1)?.length ?? 0;
   const subject = ev(statement.subject);
-  if (subject instanceof PhpObject && !subject.isResource)
+  if (!(subject instanceof PhpArray || (subject instanceof PhpObject && !subject.isResource)))
+    return warnForeachSubject(statement, subject);
+  frame.temporaries.push(subject);
+  if (subject instanceof PhpObject)
     return foreachObject(statement, subject, false, () =>
       runtime.discardNativeResult(subject, nativeMark, subjectMark)
     );
-  if (!(subject instanceof PhpArray)) return warnForeachSubject(statement, subject);
   subject.shared = true;
-  frame.temporaries.push(subject);
   for (const [key, slot] of subject.map) {
     runtime.spend();
     const value = slot instanceof Ref ? slot.v : slot;
