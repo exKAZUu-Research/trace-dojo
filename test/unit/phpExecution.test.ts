@@ -3856,4 +3856,14 @@ echo extract($input3, EXTR_PREFIX_INVALID, 'inv'), '|', $inv_, '|', $ok;
     kind: 'executed',
     stdout: '2|Ada|zero|absent;1|Ada|absent;2|empty|good',
   });
+
+  const parenthesizedBreakContinue = run(String.raw`<?php
+for ($i = 0; $i < 3; $i++) { echo $i; break (1); }
+echo '|';
+for ($i = 0; $i < 3; $i++) { if ($i === 1) continue ((1)); echo $i; }
+`);
+  expect(parenthesizedBreakContinue).toMatchObject({ kind: 'executed', stdout: '0|02' });
+  expect(run('<?php for ($i = 0; $i < 3; $i++) { break (+1); }').kind).toBe('compileError');
+  expect(run('<?php for ($i = 0; $i < 3; $i++) { break (1 + 1); }').kind).toBe('compileError');
+  expect(run('<?php for ($i = 0; $i < 3; $i++) { break (0); }').kind).toBe('compileError');
 });

@@ -501,12 +501,13 @@ export class Converter extends DeclarationConverter {
     const argument = node.namedChildren.find((child) => child.type !== 'comment');
     let depth = 1;
     if (argument) {
-      if (argument.type !== 'integer')
+      const level = unparenthesizedNode(argument);
+      if (level.type !== 'integer')
         this.error(
           node,
           `'${kind}' の後には正の整数しか書けません（'${kind}' operator with non-integer operand is no longer supported）。`
         );
-      depth = Number(parseIntegerLiteral(argument.text));
+      depth = Number(parseIntegerLiteral(level.text));
       if (depth < 1) this.error(node, `'${kind}' operator accepts only positive integers`);
     }
     if (this.loop.depth === 0) {
