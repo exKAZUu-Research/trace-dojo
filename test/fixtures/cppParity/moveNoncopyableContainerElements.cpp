@@ -24,4 +24,12 @@ int main() {
   auto l = listResult(std::list<Item>(4));
   auto w = wrappedResult(Wrapper{std::vector<Item>(5)});
   std::cout << v.size() << d.size() << l.size() << w.items.size() << '\n';
+
+  std::vector<std::vector<Item>> nested;
+  nested.emplace_back(2);
+  nested.emplace_back(3);
+  nested.reserve(8);
+  nested.resize(4);
+  nested.shrink_to_fit();
+  std::cout << nested[0].size() << nested[1].size() << nested[2].size() << nested.size() << '\n';
 }

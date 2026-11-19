@@ -107,6 +107,11 @@ export function requireElementUse(compiler: ExpressionCompiler, type: Type, row:
   if (use === 'assign' || use === 'relocate') compiler.requireLibraryObjectUse(type, 'assign', row);
 }
 
+export function requireRelocation(compiler: ExpressionCompiler, type: Type, row: number): void {
+  compiler.requireLibraryObjectUse(type, canTransferElementStorage(type) ? 'move' : 'copy', row);
+  compiler.requireLibraryObjectUse(type, 'destroy', row);
+}
+
 function swapFunction(type: Type): FunctionInfo | undefined {
   return type.kind === 'class' && type.cls.library ? type.cls.methods.get('swap')?.[0] : undefined;
 }

@@ -38,6 +38,7 @@ import {
   lessThan,
   locationOf,
   requireElementUse,
+  requireRelocation,
   swapElements,
   truthy,
 } from './elements';
@@ -799,9 +800,15 @@ function checkElementRequirement(
   }
   if (member === 'resize' && args.length === 1) compiler.valueInitialized(element, row);
   if (
+    kind === 'vector' &&
+    ['reserve', 'shrink_to_fit', 'resize', 'emplace', 'emplace_back', 'push_back', 'insert'].includes(member)
+  ) {
+    requireRelocation(compiler, element, row);
+  }
+  if (
     ['push_back', 'push_front', 'insert', 'assign'].includes(member) ||
-    (member === 'resize' && (kind === 'vector' || args.length > 1)) ||
-    (kind === 'vector' && ['reserve', 'shrink_to_fit', 'emplace', 'emplace_back'].includes(member))
+    (member === 'resize' && args.length > 1) ||
+    (kind === 'vector' && member === 'emplace')
   ) {
     requireElementUse(compiler, element, row, 'copy');
   }
