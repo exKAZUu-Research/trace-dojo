@@ -152,8 +152,9 @@ export abstract class OperatorBinder extends ConversionBinder {
       rightUnderlying !== undefined ||
       left.type.kind === 'null' ||
       right.type.kind === 'null';
-    const leftType = leftUnderlying ?? (left.type.kind === 'null' ? right.type : left.type);
-    const rightType = rightUnderlying ?? (right.type.kind === 'null' ? left.type : right.type);
+    // A `null` operand takes the other operand's type, as a lifted operator's null.
+    const leftType = leftUnderlying ?? (left.type.kind === 'null' ? (rightUnderlying ?? right.type) : left.type);
+    const rightType = rightUnderlying ?? (right.type.kind === 'null' ? (leftUnderlying ?? left.type) : right.type);
     if (
       (BITWISE.has(operator) || EQUALITY.has(operator)) &&
       specialOf(leftType) === 'bool' &&

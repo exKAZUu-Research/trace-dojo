@@ -471,13 +471,28 @@ export class ExpressionConverter {
 
   private convertArrayCreation(node: Node): Expression {
     const typeNode = requiredField(node, 'type');
-    const rank = requiredField(typeNode, 'rank');
+    // The grammar nests `int[2][]` as an array of `int[2]`, while C# makes it an array of 2 `int[]`: the first rank
+    // in the source is the created array's, and the later ranks make up its element type.
+    const ranks: Node[] = [];
+    let base = typeNode;
+    while (base.type === 'array_type') {
+      ranks.unshift(requiredField(base, 'rank'));
+      base = requiredField(base, 'type');
+    }
+    const [rank, ...elementRanks] = ranks;
     const sizeNodes = namedChildren(rank);
     const rankCount = rankOf(rank);
     const sizes: (Expression | undefined)[] =
       sizeNodes.length > 0 ? sizeNodes.map((size) => this.convertExpression(size)) : Array.from({ length: rankCount });
-    // `new int[2][]` keeps the inner ranks in the element type.
-    const elementType = this.convertType(requiredField(typeNode, 'type'));
+    let elementType = this.convertType(base);
+    for (const inner of elementRanks.toReversed()) {
+      if (namedChildren(inner).length > 0) {
+        throw new CompileError([
+          { row: inner.startPosition.row, message: "CS0178: 無効な次元指定子です: ',' または ']' を指定してください" },
+        ]);
+      }
+      elementType = { kind: 'arrayType', element: elementType, rank: rankOf(inner), ...positionOf(inner) };
+    }
     const initializerNode = namedChildren(node).find((child) => child.type === 'initializer_expression');
     return {
       kind: 'newArray',

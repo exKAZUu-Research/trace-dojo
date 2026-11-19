@@ -4,7 +4,7 @@ import { arithmetic, PendingException } from '../numeric';
 import { runtimeTypeName } from '../objects';
 import type { NativeState } from '../runtime';
 import { type NamedType, nullableUnderlying, specialOf, type SpecialType, type Type } from '../types';
-import { CsArray, CsObject, CsStruct, type Value } from '../values';
+import { CsArray, CsBox, CsObject, CsStruct, type Value } from '../values';
 import { iterate, LibraryEnumerator } from './iteration';
 import { comparisonOf, type Equality, equalityOf, HashState, ListState, newList } from './nativesCollections';
 import { stableSort } from './sort';
@@ -169,6 +169,13 @@ function average(call: NativeCall, args: Value[]): Value {
   if (special === 'decimal') return (total as CsDecimal).divide(CsDecimal.fromBigInt(BigInt(count)));
   if (special === 'float') return Math.fround((total as number) / count);
   return Number(total) / count;
+}
+
+/** The element type of an array or a library collection, whose value-type elements it holds unboxed. */
+function elementTypeOf(items: Value): Type | undefined {
+  if (items instanceof CsArray) return items.type.element;
+  const native = items instanceof CsObject ? (items.native as { elementType?: Type } | undefined) : undefined;
+  return native?.elementType;
 }
 
 /** `Min` and `Max`, where NaN is the least double, null elements are skipped, and an empty sequence of a non-nullable value type throws. */
@@ -448,14 +455,19 @@ const linq: Record<string, NativeMethod> = {
     const target = call.typeArgs[0];
     const evaluator = evaluatorOf(call);
     const all = source(call, items as Value);
+    // The elements of a collection of a value type come unboxed, which Cast sees in their boxes.
+    const elementType = elementTypeOf(items as Value);
     return query(call, target, iteratorName('CastICollectionIterator', [target]), [items as Value], function* () {
-      for (const item of all)
+      for (const item of all) {
+        const boxed =
+          elementType && typeof item !== 'object' && typeof item !== 'string' ? new CsBox(elementType, item) : item;
         yield evaluator.convertValue(
-          item,
+          boxed,
           target.kind === 'named' && target.symbol.isValueType ? 'unboxing' : 'referenceCheck',
           libraryType(call, 'System.Object'),
           target
         );
+      }
     });
   },
   [`${ENUMERABLE}.OfType`]: (call, _receiver, [items]) => {

@@ -264,8 +264,12 @@ export class Runtime {
   dispatch(method: MethodSymbol, receiver: Value, staticType?: Type): MethodSymbol {
     // A primitive carries no type, which its static type with the frame's type arguments gives instead.
     let type = this.runtimeTypeOf(receiver) ?? staticType;
-    if (type?.kind === 'array' && type.rank === 1 && method.owner.kind === 'interface') {
-      type = namedType(this.library.typeNamed('System.Linq.Internal.ArrayHelper', 1), [type.element]);
+    // The generic collection interfaces of an array map to the helper; its other members to System.Array.
+    if (type?.kind === 'array') {
+      type =
+        type.rank === 1 && method.owner.kind === 'interface' && method.owner.typeParameters.length > 0
+          ? namedType(this.library.typeNamed('System.Linq.Internal.ArrayHelper', 1), [type.element])
+          : namedType(this.library.typeNamed('System.Array'));
     }
     if (!type || type.kind !== 'named') return method;
     if (type.symbol === method.owner && !method.isAbstract) return method;

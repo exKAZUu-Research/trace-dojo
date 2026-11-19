@@ -3,7 +3,16 @@ import { PendingException } from '../numeric';
 import { defaultCompare, environmentOf, hashOf, stringOf, valuesEqual } from '../objects';
 import { CsThrow } from '../runtime';
 import type { MethodSymbol, Type } from '../types';
-import { CsArray, CsDelegate, CsObject, CsStruct, type Value, type VariableReference } from '../values';
+import {
+  copyValue,
+  CsArray,
+  CsBox,
+  CsDelegate,
+  CsObject,
+  CsStruct,
+  type Value,
+  type VariableReference,
+} from '../values';
 import { collectionModified, type EnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { introSort } from './sort';
 import {
@@ -1216,7 +1225,14 @@ defineNatives({
       libraryType(call, 'System.Linq.Internal.Enumerator', [libraryType(call, 'System.Object')]),
       []
     );
-    enumerator.native = new LibraryEnumerator(arrayOf(receiver).values[Symbol.iterator](), [receiver]);
+    const array = arrayOf(receiver);
+    // The non-generic enumerator returns `object`, so it boxes the elements of a value type.
+    const element = array.type.element;
+    const isValueType = element.kind === 'named' && element.symbol.isValueType;
+    const boxed = array.values.map((value) =>
+      isValueType && value !== undefined ? new CsBox(element, copyValue(value)) : value
+    );
+    enumerator.native = new LibraryEnumerator(boxed[Symbol.iterator](), [receiver]);
     return enumerator;
   },
   [`${ARRAY}.BinarySearch`]: (call, _receiver, [array, value]) =>

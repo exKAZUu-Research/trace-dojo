@@ -494,8 +494,82 @@ export abstract class ExpressionBinder extends MemberBinder {
         operand.kind === 'unbound' ? this.convert(operand, typed.type, row) : operand;
       return this.bindBinary(operator, converted(left), converted(right), row);
     }
+    if ((operator === '==' || operator === '!=') && this.isTuple(left.type) && this.isTuple(right.type)) {
+      return this.bindTupleEquality(operator, left, right, node.row, context);
+    }
     const result = this.bindBinary(operator, left, right, row);
     return { ...result, row: node.row } as BoundExpression;
+  }
+
+  private isTuple(type: Type): type is NamedType {
+    return type.kind === 'named' && type.symbol.special === 'valueTuple';
+  }
+
+  /**
+   * Binds `==` or `!=` of two tuples, which compares their elements in order after evaluating both tuples, stopping at
+   * the first element that decides the result (C# spec §12.12.11).
+   */
+  private bindTupleEquality(
+    operator: '==' | '!=',
+    left: BoundExpression,
+    right: BoundExpression,
+    row: number,
+    context: BindContext
+  ): BoundExpression {
+    const leftType = left.type as NamedType;
+    const rightType = right.type as NamedType;
+    if (leftType.args.length !== rightType.args.length) {
+      this.reportBinary(operator, left, right, row);
+      return { kind: 'default', type: ERROR_TYPE, row };
+    }
+    const temporaryOf = (type: Type): BoundExpression => {
+      const local = new LocalSymbol('\0tuple', type, row, 0);
+      local.isHidden = true;
+      context.fn.addLocal(local);
+      return { kind: 'local', local, type, row };
+    };
+    const leftTemporary = temporaryOf(leftType);
+    const rightTemporary = temporaryOf(rightType);
+    const element = (tuple: BoundExpression, type: NamedType, index: number): BoundExpression => ({
+      kind: 'field',
+      receiver: tuple,
+      field: type.symbol.fields.find((field) => field.name === `Item${index + 1}`) as FieldSymbol,
+      type: type.args[index],
+      row,
+    });
+    const comparisons = leftType.args.map((_, index) => {
+      const a = element(leftTemporary, leftType, index);
+      const b = element(rightTemporary, rightType, index);
+      return this.isTuple(a.type) && this.isTuple(b.type)
+        ? this.bindTupleEquality(operator, a, b, row, context)
+        : this.bindBinary(operator, a, b, row);
+    });
+    let value = comparisons[0];
+    for (const comparison of comparisons.slice(1)) {
+      value = {
+        kind: 'logical',
+        operator: operator === '==' ? '&&' : '||',
+        left: value,
+        right: comparison,
+        type: this.boolType,
+        row,
+      };
+    }
+    const assign = (target: BoundExpression, source: BoundExpression): BoundExpression => ({
+      kind: 'assign',
+      target: target as BoundLValue,
+      value: source,
+      type: target.type,
+      row,
+    });
+    return {
+      kind: 'sequence',
+      locals: [],
+      sideEffects: [assign(leftTemporary, left), assign(rightTemporary, right)],
+      value,
+      type: this.boolType,
+      row,
+    };
   }
 
   private bindCoalesce(node: Extract<Expression, { kind: 'binary' }>, context: BindContext): BoundExpression {
