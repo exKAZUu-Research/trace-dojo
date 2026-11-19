@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss 675 -- Keeps statement execution with its binding and unwind scopes.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
+import type { ArrayCursor } from './arrayOrder';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
 import type { Expr, FunctionDecl, Program, Stmt } from './ast';
 import { foreachReferences, nestedBodies } from './astAnalysis';
@@ -573,56 +574,37 @@ function foreachReferenceLoop(
 }
 
 interface NativeForeachStorage {
-  readonly array: PhpArray;
+  cursor(): ArrayCursor;
   writable(): PhpArray;
 }
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the live cursor, subject replacement and reference binding in order.
 function foreachArrayByRef(
   statement: Extract<Stmt, { k: 'foreach' }>,
   array: PhpArray,
-  subject: Ref | NativeForeachStorage
+  subject: Ref
 ): ForeachCompletion {
   const runtime = rt();
-  const isRefSubject = subject instanceof Ref;
-  let state = { array, cursor: array.foreachCursor() };
+  let current = array;
+  let cursor = current.foreachCursor();
   try {
     for (;;) {
-      const synced = syncForeachArray(state.array, state.cursor, subject);
-      if (!synced) return FOREACH_REPLACED;
-      state = synced;
-      const key = state.cursor.key;
+      const next = subject.v;
+      if (next !== current) {
+        if (!(next instanceof PhpArray)) return FOREACH_REPLACED;
+        current = writableContainer(new RefPlace(subject), next) as PhpArray;
+        cursor = current.foreachCursor(cursor);
+      }
+      const key = cursor.key;
       if (key === undefined) return undefined;
       runtime.spend();
-      const hole = state.array.map.get(key) === UNDEFINED_RESULT;
-      if (isRefSubject || hole) state.cursor.next();
-      if (hole) continue;
-      bindForeachRef(statement, new ElementPlace(state.array, key).ref());
-      if (statement.key) assignTo(statement.key, key);
-      runtime.steps.stepBinding(statement.row, true);
-      const result = loopBody(statement.body);
+      cursor.next();
+      if (current.map.get(key) === UNDEFINED_RESULT) continue;
+      const result = foreachRefIteration(statement, current, key);
       if (result !== 'next') return result;
-      if (!isRefSubject) {
-        state = syncForeachArray(state.array, state.cursor, subject) ?? state;
-        state.cursor.next();
-      }
     }
   } finally {
-    state.cursor.close();
+    cursor.close();
   }
-}
-
-function syncForeachArray(
-  array: PhpArray,
-  cursor: ReturnType<PhpArray['foreachCursor']>,
-  subject: Ref | NativeForeachStorage
-): { array: PhpArray; cursor: ReturnType<PhpArray['foreachCursor']> } | undefined {
-  const isRefSubject = subject instanceof Ref;
-  const next = isRefSubject ? subject.v : subject.array;
-  if (next === array) return { array, cursor };
-  if (!(next instanceof PhpArray)) return undefined;
-  const updated = isRefSubject ? (writableContainer(new RefPlace(subject), next) as PhpArray) : subject.writable();
-  return { array: updated, cursor: updated.foreachCursor(cursor, !isRefSubject) };
 }
 
 function foreachPropertyByRef(
@@ -696,11 +678,7 @@ function foreachObject(
     const { iterator, handle } = acquired;
     let failure: PhpThrow | undefined;
     try {
-      if (byRef) {
-        const storage = iterator.internal as NativeForeachStorage;
-        const result = foreachArrayByRef(statement, storage.writable(), storage);
-        return result === FOREACH_REPLACED ? undefined : result;
-      }
+      if (byRef) return foreachStorageByRef(statement, iterator.internal as NativeForeachStorage);
       return foreachIteratorByValue(statement, new InnerIterator(iterator, handle), releaseSubject);
     } catch (error) {
       if (error instanceof PhpThrow) failure = error;
@@ -716,6 +694,33 @@ function foreachObject(
     if (completion !== 'next') return completion;
   }
   return undefined;
+}
+
+function foreachStorageByRef(statement: Extract<Stmt, { k: 'foreach' }>, storage: NativeForeachStorage): Completion {
+  const runtime = rt();
+  storage.cursor().rewind();
+  for (;;) {
+    const key = storage.cursor().key;
+    if (key === undefined) return undefined;
+    runtime.spend();
+    const array = storage.writable();
+    if (array.map.get(key) !== UNDEFINED_RESULT) {
+      const result = foreachRefIteration(statement, array, key);
+      if (result !== 'next') return result;
+    }
+    storage.cursor().next();
+  }
+}
+
+function foreachRefIteration(
+  statement: Extract<Stmt, { k: 'foreach' }>,
+  array: PhpArray,
+  key: Key
+): 'next' | Completion {
+  bindForeachRef(statement, new ElementPlace(array, key).ref());
+  if (statement.key) assignTo(statement.key, key);
+  rt().steps.stepBinding(statement.row, true);
+  return loopBody(statement.body);
 }
 
 function foreachIteratorByValue(

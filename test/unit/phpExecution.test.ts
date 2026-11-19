@@ -3707,10 +3707,26 @@ $ao2 = new ArrayObject([1, 2, 3]);
 foreach ($ao2 as $k => &$v) { echo "$v;"; if ($k === 0) $ao2->exchangeArray([10, 20, 30]); }
 unset($v);
 echo '|';
+$ao3 = new ArrayObject([0 => 1, 2 => 2, 5 => 3]);
+$i = 0;
+foreach ($ao3 as $k => &$v) { echo "$k:$v;"; if (++$i === 2) $ao3->asort(); }
+unset($v);
+echo '|', json_encode($ao3->getArrayCopy()), '|';
+$ai2 = new ArrayIterator(['a' => 1, 'b' => 2, 'c' => 3]);
+foreach ($ai2 as $k => &$v) { if ($k === 'b') break; }
+unset($v);
+echo $ai2->key(), ':', $ai2->current(), '|';
+$ai3 = new ArrayIterator(['a' => 1, 'b' => 2, 'c' => 3, 'd' => 4]);
+foreach ($ai3 as $k => &$v) { echo "$k:$v;"; if ($k === 'a') $ai3->next(); }
+unset($v);
+echo '|';
 class SubValid extends ArrayIterator { function valid(): bool { return false; } }
 $s = new SubValid([1, 2]);
 try { foreach ($s as &$v) { $v = 9; } } catch (Error $e) { echo 'err:'; }
 echo json_encode($s->getArrayCopy());
 `);
-  expect(splByRefForeach).toMatchObject({ kind: 'executed', stdout: '1;3;|1;3;|1;20;30;|err:[1,2]' });
+  expect(splByRefForeach).toMatchObject({
+    kind: 'executed',
+    stdout: '1;3;|1;3;|1;20;30;|0:1;2:2;|{"0":1,"2":2,"5":3}|b:2|a:1;c:3;d:4;|err:[1,2]',
+  });
 });
