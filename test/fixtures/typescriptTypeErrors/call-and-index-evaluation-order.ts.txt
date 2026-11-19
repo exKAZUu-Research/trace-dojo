@@ -40,3 +40,7 @@ patternKey = "before";
 [[patternTargets[0]] = [(patternKey = 0)]] = [[patternKey.toUpperCase().length]];
 let pendingTarget: { value: number } | undefined;
 [pendingTarget, pendingTarget.value] = [{ value: 1 }, 2];
+
+function numericTriple(header: number, first: number, second: number) { return first + second; }
+let changingArity: [number] | [number, number] = [1, 2];
+numericTriple((changingArity = [1]).length, ...changingArity);

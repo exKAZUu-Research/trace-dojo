@@ -2,9 +2,10 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
-import { CallArity, minimumArguments, tupleArgumentContexts, tupleTypeAt } from './callArity';
+import { ArgumentFlow, CallArity, minimumArguments, tupleArgumentContexts, tupleTypeAt } from './callArity';
 import type { Checker, Mapper } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
+import type { State } from './flow';
 import { InferencePriority, type InferenceRun, newInferenceRun } from './inference';
 import { isContextSensitiveFunction, parameterNodes } from './signatures';
 import { argumentParameters, isThisParameter, named, skipParentheses, stringValue, withoutAssertions } from './syntax';
@@ -35,6 +36,7 @@ interface Resolution {
 
 interface ExpandedArgument {
   node: TreeNode;
+  before: State;
   spread?: TupleElement;
 }
 
@@ -154,7 +156,7 @@ export class Calls {
     });
   }
 
-  private checkArgumentsOnly(args: TreeNode[], result: Type): Type {
+  private checkArgumentsOnly(args: TreeNode[], result: Type = anyType): Type {
     for (const arg of args) this.c.expressions.check(arg);
     return result;
   }
@@ -456,20 +458,21 @@ export class Calls {
       this.c.error(node, `型引数は ${counts.join(' か ')} 個必要ですが、${typeArguments.length} 個渡されています。`);
       return undefined;
     }
+    const argumentFlow = new ArgumentFlow(this.c, args);
     const instantiate = (candidate: Signature): Signature =>
-      this.c.flow.probe(() => this.instantiateFor(candidate, args, typeArguments, contextual, receiver));
+      this.c.flow.probe(() => this.instantiateFor(candidate, argumentFlow, typeArguments, contextual, receiver));
     const callbacks = candidates.length > 1 ? this.c.overloadContexts.callbacksOf(args) : undefined;
     const choose = (): Resolution => {
       for (const candidate of candidates) {
-        if (!this.arity.arityMatches(candidate, args)) continue;
+        if (!this.arity.arityMatches(candidate, argumentFlow)) continue;
         const instantiated = this.c.silently(() => instantiate(candidate));
-        if (!this.arity.instanceArityMatches(instantiated, candidate, args)) continue;
+        if (!this.arity.instanceArityMatches(instantiated, candidate, argumentFlow)) continue;
         if (callbacks?.nodes.size)
-          this.c.overloadContexts.capture(callbacks, () => this.previewArguments(instantiated, args));
+          this.c.overloadContexts.capture(callbacks, () => this.previewArguments(instantiated, argumentFlow));
         if (this.c.flow.probe(() => this.c.silently(() => this.checkArguments(instantiated, args, false))))
-          return this.finishOverload(node, candidate, args, { typeArguments, contextual, receiver });
+          return this.finishOverload(node, candidate, argumentFlow, { typeArguments, contextual, receiver });
       }
-      return this.reportUnresolved(node, callee, candidates, args, instantiate);
+      return this.reportUnresolved(node, callee, candidates, argumentFlow, instantiate);
     };
     return callbacks?.nodes.size ? this.c.overloadContexts.withCall(choose) : choose();
   }
@@ -477,7 +480,7 @@ export class Calls {
   private finishOverload(
     node: TreeNode,
     candidate: Signature,
-    args: TreeNode[],
+    args: ArgumentFlow,
     { typeArguments, contextual, receiver }: { typeArguments?: Type[]; contextual?: Type; receiver?: Type }
   ): Resolution {
     const deferred =
@@ -487,7 +490,7 @@ export class Calls {
     const final = this.c.flow.probe(() =>
       this.instantiateFor(candidate, args, typeArguments, deferred ?? contextual, receiver)
     );
-    this.checkArguments(final, args, true, node);
+    this.checkArguments(final, args.nodes, true, node);
     this.checkImmediateBody(node, final);
     if (typeArguments)
       this.c.typeNodes.checkTypeArgumentConstraints(
@@ -504,17 +507,17 @@ export class Calls {
     if (callee && skipParentheses(callee).id === signature.declaration?.id) signature.checkImmediateBody();
   }
 
-  private previewArguments(signature: Signature, args: TreeNode[]): boolean {
+  private previewArguments(signature: Signature, args: ArgumentFlow): boolean {
     return this.c.flow.probe(() => this.c.silently(() => this.checkExpandedArguments(signature, args)));
   }
 
-  private checkExpandedArguments(signature: Signature, args: TreeNode[]): boolean {
+  private checkExpandedArguments(signature: Signature, args: ArgumentFlow): boolean {
     const expanded = this.expandedArguments(args);
     const parameterTypes = this.argumentParameterTypes(signature, expanded);
-    return expanded.every(({ node, spread }, index) => {
+    return expanded.every(({ node, before, spread }, index) => {
       const target = parameterTypes[index];
       if (spread) return !target || this.c.relations.isAssignable(this.spreadValueType(spread), target);
-      return this.checkArgument(node, target, false, false);
+      return this.c.flow.probe(() => this.checkArgument(node, target, false, false), before);
     });
   }
 
@@ -523,7 +526,7 @@ export class Calls {
     node: TreeNode,
     callee: TreeNode,
     candidates: Signature[],
-    args: TreeNode[],
+    args: ArgumentFlow,
     instantiate: (candidate: Signature) => Signature
   ): Resolution {
     const byArity = candidates.filter((candidate) => this.arity.arityMatches(candidate, args));
@@ -535,19 +538,22 @@ export class Calls {
         args,
         instantiate
       );
-    for (const arg of args) this.c.expressions.check(arg);
     if (byArity.length === 0) {
+      this.checkArgumentsOnly(args.nodes);
       const minimum = Math.min(...candidates.map((candidate) => minimumArguments(candidate)));
       const maximum = Math.max(...candidates.map((candidate) => this.arity.maximumArguments(candidate)));
       this.c.error(
-        args.length > maximum ? args[maximum] : node,
+        args.nodes.length > maximum ? args.nodes[maximum] : node,
         maximum === Number.POSITIVE_INFINITY || minimum === maximum
-          ? `引数は ${minimum} 個必要ですが、${args.length} 個渡されています。`
-          : `引数は ${minimum} 個から ${maximum} 個必要ですが、${args.length} 個渡されています。`
+          ? `引数は ${minimum} 個必要ですが、${args.nodes.length} 個渡されています。`
+          : `引数は ${minimum} 個から ${maximum} 個必要ですが、${args.nodes.length} 個渡されています。`
       );
       return { signature: candidates[0], returnType: candidates[0].returnType() };
     }
     const at = this.overloadErrorLocation(node, callee, byArity, args, instantiate);
+    const last = byArity.at(-1) as Signature;
+    const returnType = this.c.silently(() => instantiate(last)).returnType();
+    this.checkArgumentsOnly(args.nodes);
     const message = 'この呼び出しに合うオーバーロードがありません。';
     if (at) this.c.diagnostics.push({ ...at, message });
     else
@@ -555,8 +561,7 @@ export class Calls {
         callee.type === 'member_expression' ? (callee.childForFieldName('property') ?? node) : node,
         message
       );
-    const last = byArity.at(-1) as Signature;
-    return { signature: last, returnType: this.c.silently(() => instantiate(last)).returnType() };
+    return { signature: last, returnType };
   }
 
   /** Where TypeScript 7 reports that no overload fits: at the first error of the last overload that could fit. */
@@ -564,7 +569,7 @@ export class Calls {
     node: TreeNode,
     callee: TreeNode,
     candidates: Signature[],
-    args: TreeNode[],
+    args: ArgumentFlow,
     instantiate: (candidate: Signature) => Signature
   ): { row: number; index: number } | undefined {
     if (this.c.silent > 0) return undefined;
@@ -579,22 +584,20 @@ export class Calls {
     node: TreeNode,
     callee: TreeNode,
     candidate: Signature,
-    args: TreeNode[],
+    args: ArgumentFlow,
     instantiate: (candidate: Signature) => Signature
   ): Resolution {
     const instantiated = this.arity.arityMatches(candidate, args) ? instantiate(candidate) : undefined;
     if (instantiated && this.arity.instanceArityMatches(instantiated, candidate, args)) {
-      this.checkArguments(instantiated, args, true, node);
+      this.checkArguments(instantiated, args.nodes, true, node);
       this.checkImmediateBody(node, instantiated);
       return { signature: instantiated, returnType: instantiated.returnType() };
     }
     this.arity.reportArity(node, callee, instantiated ?? candidate, args);
-    for (const arg of args) this.c.expressions.check(arg);
+    const returnType = (instantiated ?? this.c.silently(() => instantiate(candidate))).returnType();
+    for (const arg of args.nodes) this.c.expressions.check(arg);
     this.checkImmediateBody(node, instantiated ?? candidate);
-    return {
-      signature: instantiated ?? candidate,
-      returnType: (instantiated ?? this.c.silently(() => instantiate(candidate))).returnType(),
-    };
+    return { signature: instantiated ?? candidate, returnType };
   }
 
   private fillTypeArguments(signature: Signature, typeArguments: Type[]): Type[] {
@@ -695,7 +698,8 @@ export class Calls {
     report: boolean,
     at: TreeNode | undefined
   ): boolean {
-    const contexts = restTupleContexts(this.c, restType, args, (arg) => this.arity.spreadLength(arg));
+    const argumentFlow = new ArgumentFlow(this.c, args);
+    const contexts = restTupleContexts(this.c, restType, argumentFlow);
     const tuple =
       args.length === 1 && args[0].type === 'spread_element'
         ? this.c.expressions.check(named(args[0])[0])
@@ -739,7 +743,7 @@ export class Calls {
   // code-gauge-allow functionCognitiveComplexity 20 -- Follows TypeScript's inference passes: the contextual return, context-insensitive arguments, then callbacks.
   private instantiateFor(
     signature: Signature,
-    args: TreeNode[],
+    args: ArgumentFlow,
     typeArguments: Type[] | undefined,
     contextual: Type | undefined,
     receiver: Type | undefined
@@ -766,7 +770,9 @@ export class Calls {
         true
       );
     // Context-insensitive arguments infer first; functions without parameter annotations then see what they inferred.
-    const sensitive = arguments_.map((arg) => !arg.spread && this.isContextSensitive(arg.node));
+    const sensitive = arguments_.map(
+      (arg) => !arg.spread && this.c.flow.probe(() => this.isContextSensitive(arg.node), arg.before)
+    );
     for (const [index, arg] of arguments_.entries()) {
       if (restIndex !== undefined && index >= restIndex) continue;
       if (!sensitive[index])
@@ -839,11 +845,12 @@ export class Calls {
     if (inference) inference.impliedArity = rest.length;
   }
 
-  private expandedArguments(args: TreeNode[]): ExpandedArgument[] {
-    return args.flatMap((node): ExpandedArgument[] => {
-      if (node.type !== 'spread_element') return [{ node }];
-      const type = this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(named(node)[0])));
-      return this.c.silently(() => this.spreadElements(node, type)).map((spread) => ({ node, spread }));
+  private expandedArguments(args: ArgumentFlow): ExpandedArgument[] {
+    return args.nodes.flatMap((node): ExpandedArgument[] => {
+      const before = args.before(node);
+      const type = args.spreadType(node);
+      if (!type) return [{ node, before }];
+      return this.c.silently(() => this.spreadElements(node, type)).map((spread) => ({ node, before, spread }));
     });
   }
 
@@ -880,8 +887,8 @@ export class Calls {
         const context = parameterType && mapper ? this.c.instantiate(parameterType, mapper) : parameterType;
         return {
           type: constContext
-            ? this.c.silently(() => this.c.expressions.check(arg.node, constContext))
-            : this.c.widenLiteral(this.c.silently(() => this.c.expressions.check(arg.node, context))),
+            ? this.probeArgumentType(arg, constContext)
+            : this.c.widenLiteral(this.probeArgumentType(arg, context)),
           optional: false,
           rest: false,
         };
@@ -928,10 +935,12 @@ export class Calls {
   ): void {
     if (!parameterType) return;
     const context = mapper ? this.c.instantiate(parameterType, mapper) : parameterType;
-    const argType = arg.spread
-      ? this.spreadValueType(arg.spread)
-      : this.c.silently(() => this.c.expressions.check(arg.node, context));
+    const argType = arg.spread ? this.spreadValueType(arg.spread) : this.probeArgumentType(arg, context);
     this.c.inference.inferTypes(run, argType, parameterType, true);
+  }
+
+  private probeArgumentType(arg: ExpandedArgument, contextual: Type | undefined): Type {
+    return this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(arg.node, contextual)), arg.before);
   }
 
   private spreadElements(arg: TreeNode, type: Type): TupleElement[] {
@@ -993,12 +1002,11 @@ function isTrailingRestTuple(signature: Signature): boolean {
  * position, its trailing ones from the last argument back, and the rest's elements between. A spread of known length,
  * as a tuple's, keeps the positions after it; one of unknown length keeps only those counted from the other end.
  */
-function restTupleContexts(
-  c: Checker,
-  restType: Type,
-  args: TreeNode[],
-  lengthOf: (arg: TreeNode) => number | undefined
-): (Type | undefined)[] {
-  const contexts = tupleArgumentContexts(c, restType, args.map(lengthOf));
-  return contexts.map((context, index) => (args[index].type === 'spread_element' ? undefined : context));
+function restTupleContexts(c: Checker, restType: Type, args: ArgumentFlow): (Type | undefined)[] {
+  const contexts = tupleArgumentContexts(
+    c,
+    restType,
+    args.nodes.map((node) => args.length(node))
+  );
+  return contexts.map((context, index) => (args.nodes[index].type === 'spread_element' ? undefined : context));
 }

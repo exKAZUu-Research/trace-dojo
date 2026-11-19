@@ -15,3 +15,8 @@ NUMERIC 7
 LOGICAL 7
 0.0 2
 4 0
+2.0
+STRING
+[ 'a', 'b' ]
+B
+3.0

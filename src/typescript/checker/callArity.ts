@@ -1,8 +1,53 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
+import type { State } from './flow';
 import { named } from './syntax';
 import { isAnyLike, isIntrinsic, type Signature, type TupleElement, type Type, undefinedType, unionOf } from './types';
+
+interface ArgumentPosition {
+  before: State;
+  spread?: Type;
+}
+
+/** Flow at each argument's source position, shared by arity and overload-inference passes. */
+export class ArgumentFlow {
+  private positions?: Map<number, ArgumentPosition>;
+
+  constructor(
+    private readonly c: Checker,
+    readonly nodes: TreeNode[]
+  ) {}
+
+  before(node: TreeNode): State {
+    return this.position(node)?.before;
+  }
+
+  spreadType(node: TreeNode): Type | undefined {
+    return node.type === 'spread_element' ? this.position(node)?.spread : undefined;
+  }
+
+  length(node: TreeNode): number | undefined {
+    return node.type === 'spread_element' ? fixedSpreadLength(this.spreadType(node)) : 1;
+  }
+
+  private position(node: TreeNode): ArgumentPosition | undefined {
+    this.positions ??= this.c.flow.probe(() => this.c.silently(() => this.collectPositions()));
+    return this.positions.get(node.id);
+  }
+
+  private collectPositions(): Map<number, ArgumentPosition> {
+    const positions = new Map<number, ArgumentPosition>();
+    for (const [index, node] of this.nodes.entries()) {
+      const before = this.c.flow.current?.clone();
+      const operand = node.type === 'spread_element' ? named(node)[0] : undefined;
+      const spread = operand ? this.c.expressions.check(operand) : undefined;
+      positions.set(node.id, { before, spread });
+      if (!operand && index + 1 < this.nodes.length) this.c.expressions.check(node);
+    }
+    return positions;
+  }
+}
 
 /** Counts the arguments of a call against the parameters of a signature, and reports when they do not fit. */
 export class CallArity {
@@ -13,7 +58,7 @@ export class CallArity {
    * instance again only for a rest parameter that is no array, as `...args: A`; otherwise the declared parameters
    * decide, where `x: T | void` stays omittable even when `T` is inferred as `unknown`.
    */
-  instanceArityMatches(instance: Signature, declaration: Signature, args: TreeNode[]): boolean {
+  instanceArityMatches(instance: Signature, declaration: Signature, args: ArgumentFlow): boolean {
     const hasNonArrayRest = declaration.parameters.some(
       ({ rest, type }) => rest && !isAnyLike(type) && !this.c.isArrayType(type) && !this.c.isReadonlyArrayType(type)
     );
@@ -26,31 +71,22 @@ export class CallArity {
       : signature.parameters.length;
   }
 
-  /**
-   * How many arguments an argument passes: a spread one passes its tuple's length, optional elements included as
-   * TypeScript counts them, or an unknown count.
-   */
-  spreadLength(arg: TreeNode): number | undefined {
-    return spreadLength(this.c, arg);
-  }
-
   /** How many elements a spread tuple with a rest element passes before its rest, as `[number, ...string[]]`. */
-  private leadingLength(arg: TreeNode): number {
-    const type = spreadOperandType(this.c, arg);
-    const elements = type.kind === 'object' && type.objectKind === 'tuple' ? (type.tuple?.elements ?? []) : [];
+  private leadingLength(type: Type | undefined): number {
+    const elements = type?.kind === 'object' && type.objectKind === 'tuple' ? (type.tuple?.elements ?? []) : [];
     const restIndex = elements.findIndex((element) => element.rest);
     return restIndex === -1 ? 0 : restIndex;
   }
 
-  arityMatches(signature: Signature, args: TreeNode[]): boolean {
+  arityMatches(signature: Signature, args: ArgumentFlow): boolean {
     let count = 0;
-    for (const arg of args) {
-      const length = this.spreadLength(arg);
+    for (const arg of args.nodes) {
+      const length = args.length(arg);
       if (length === undefined) {
         // A tuple with a rest element passes its leading elements, then as many more as the rest holds. As TypeScript
         // decides, a spread of unknown length fits where it starts past the required parameters and either a rest
         // parameter or an optional one takes it, whatever follows it.
-        count += this.leadingLength(arg);
+        count += this.leadingLength(args.spreadType(arg));
         const hasRest = signature.parameters.some((parameter) => parameter.rest);
         return count >= minimumArguments(signature) && (hasRest || count < signature.parameters.length);
       }
@@ -59,18 +95,18 @@ export class CallArity {
     return count >= minimumArguments(signature) && count <= this.maximumArguments(signature);
   }
 
-  reportArity(node: TreeNode, callee: TreeNode, signature: Signature, args: TreeNode[]): void {
+  reportArity(node: TreeNode, callee: TreeNode, signature: Signature, args: ArgumentFlow): void {
     const minimum = minimumArguments(signature);
     const maximum = this.maximumArguments(signature);
-    const spread = args.find((arg) => arg.type === 'spread_element' && this.spreadLength(arg) === undefined);
+    const spread = args.nodes.find((arg) => args.length(arg) === undefined);
     if (spread && !this.arityMatches(signature, args)) {
       this.c.error(spread, 'スプレッド構文の引数は、タプル型であるか、残余引数に渡されなければいけません。');
       return;
     }
     let count = 0;
     let excess: TreeNode | undefined;
-    for (const arg of args) {
-      count += this.spreadLength(arg) ?? 1;
+    for (const arg of args.nodes) {
+      count += args.length(arg) ?? 1;
       if (count > maximum) excess ??= arg;
     }
     const message =
@@ -144,16 +180,15 @@ function offsets(lengths: (number | undefined)[]): (number | undefined)[] {
 
 export function spreadLength(c: Checker, arg: TreeNode): number | undefined {
   if (arg.type !== 'spread_element') return 1;
-  const type = spreadOperandType(c, arg);
+  return fixedSpreadLength(c.flow.probe(() => c.silently(() => c.expressions.check(named(arg)[0]))));
+}
+
+function fixedSpreadLength(type: Type | undefined): number | undefined {
   if (
-    type.kind === 'object' &&
+    type?.kind === 'object' &&
     type.objectKind === 'tuple' &&
     !(type.tuple?.elements ?? []).some((element) => element.rest)
   )
     return type.tuple?.elements.length;
   return undefined;
-}
-
-function spreadOperandType(c: Checker, arg: TreeNode): Type {
-  return c.flow.probe(() => c.silently(() => c.expressions.check(named(arg)[0])));
 }

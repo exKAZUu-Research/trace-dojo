@@ -168,10 +168,10 @@ export class Flow {
     }
   }
 
-  probe<T>(run: () => T, state = this.current): T {
+  probe<T>(run: () => T, ...source: [] | [State]): T {
     const outer = this.current;
     const probing = this.probing;
-    this.current = state?.clone();
+    this.current = (source.length === 0 ? outer : source[0])?.clone();
     this.probing = true;
     try {
       return this.exceptions.isolate(run);
