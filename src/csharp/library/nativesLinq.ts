@@ -757,10 +757,13 @@ const linq: Record<string, NativeMethod> = {
   [`${ENUMERABLE}.ElementAt`]: (call, _receiver, [items, index]) => {
     let position = 0;
     if ((index as number) >= 0) for (const item of source(call, items as Value)) if (position++ === index) return item;
+    // An array or a list fails in its indexer; other sequences in ElementAt itself.
     return failOutOfRange(
       call,
       'index',
-      'Index was out of range. Must be non-negative and less than the size of the collection.'
+      isArrayOrList(items as Value)
+        ? 'Index was out of range. Must be non-negative and less than the size of the collection.'
+        : 'Specified argument was out of the range of valid values.'
     );
   },
   [`${ENUMERABLE}.ElementAtOrDefault`]: (call, _receiver, [items, index]) => {
