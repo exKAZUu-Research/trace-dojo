@@ -212,6 +212,10 @@ export function withPendingException<T>(runtime: Runtime, pending: PhpThrow | un
 
 export type CleanupException = PhpThrow | ExitSignal;
 
+export function isCleanupException(error: unknown): error is CleanupException {
+  return error instanceof PhpThrow || error instanceof ExitSignal;
+}
+
 // code-gauge-allow functionCognitiveComplexity 19 -- Captures cleanup failures and their ownership in propagation order.
 export function withCleanupExceptions(
   runtime: Runtime,

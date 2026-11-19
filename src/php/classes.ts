@@ -516,6 +516,7 @@ function sameTraitBody(left: Callable, right: Callable): boolean {
 
 function checkTraitContract(cls: PhpClass, method: Method, contract: Method): void {
   const row = method.fn.kind === 'user' ? method.fn.decl.row : 0;
+  checkFinalMethod(method, contract, row);
   checkMethodStaticness(method, contract, row);
   if (!signatureCompatible(method, { ...contract, cls }))
     throw new FatalError(
@@ -808,13 +809,8 @@ function implementsPropertyHook(property: PropDecl | undefined, kind: 'get' | 's
 
 // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function checkOverride(cls: PhpClass, method: Method, parent: Method, reportTentative = true): void {
-  if (parent.isFinal && method.cls === cls && !parent.cls.decl?.isAnonymous) {
-    throw new FatalError(
-      `Cannot override final method ${parent.cls.name}::${parent.name}()`,
-      method.fn.kind === 'user' ? method.fn.decl.row : 0
-    );
-  }
   const row = method.fn.kind === 'user' ? method.fn.decl.row : 0;
+  if (method.cls === cls && !parent.cls.decl?.isAnonymous) checkFinalMethod(method, parent, row);
   checkMethodStaticness(method, parent, row);
   if (visibilityRank(method.visibility) < visibilityRank(parent.visibility)) {
     throw new FatalError(
@@ -846,6 +842,10 @@ function checkOverride(cls: PhpClass, method: Method, parent: Method, reportTent
       }
     }
   }
+}
+
+function checkFinalMethod(method: Method, parent: Method, row: number): void {
+  if (parent.isFinal) throw new FatalError(`Cannot override final method ${parent.cls.name}::${method.name}()`, row);
 }
 
 function checkMethodStaticness(method: Method, parent: Method, row: number): void {

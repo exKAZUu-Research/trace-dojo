@@ -8,7 +8,7 @@ import type { ArgValue } from './calls';
 import { canAccessProp, declForKey, issetProp, lookupProp, readProp } from './classes';
 import * as conversionsModule from './conversions';
 import { compareBytes, compareNumbers, debugType, floatFitsInt, normalizeKeyString, valueName } from './conversions';
-import { deprecated, throwError, warn, withCleanupExceptions } from './errors';
+import { deprecated, isCleanupException, throwError, warn, withCleanupExceptions } from './errors';
 import { releaseDropped } from './garbage';
 import { cast } from './interp';
 import { naturalCompare } from './libString';
@@ -1459,7 +1459,7 @@ function sortUserArray(
           try {
             return compareEntries(a, b);
           } catch (error) {
-            if (!(error instanceof PhpThrow)) throw error;
+            if (!isCleanupException(error)) throw error;
             failed = true;
             capture(error);
             return 0;

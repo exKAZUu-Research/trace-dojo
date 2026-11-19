@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 950 -- Holds assignment and offset access modes with their shared helpers.
+// code-gauge-allow-file fileNcss 953 -- Holds assignment and offset access modes with their shared helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -619,7 +619,7 @@ function writeOffset(object: PhpObject, key: Value | undefined, value: Value): v
   const setter = object.cls.findMethod('offsetset');
   if (key === undefined && setter?.fn.kind === 'native' && setter.scope.lname === 'splfixedarray')
     throwError('Error', '[] operator not supported for SplFixedArray');
-  const inline = object.cls.lname === 'splobjectstorage';
+  const inline = object.cls.lname === 'splobjectstorage' && key instanceof PhpObject && !key.isResource;
   callMethod(object, 'offsetSet', [key ?? null, value], rt().row, { inline });
 }
 
@@ -1331,11 +1331,16 @@ function prepareUnset(e: Expr, nested?: UnsetBase): () => Place | undefined {
   }
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps ordinary, global and nested unset access on the same operand path.
 function prepareUnsetOffset(e: Extract<Expr, { k: 'idx' }>, nested?: UnsetBase): () => Place | undefined {
   if (e.index === undefined) throwError('Error', 'Cannot use [] for unsetting');
   if (e.base.k === 'var' && e.base.name === 'GLOBALS') {
     const readKey = prepareOperand(e.index);
-    return () => new VarPlace(rt().globalFrame, toStr(readKey()), 'global');
+    return () => {
+      const name = toStr(readKey());
+      if (nested && name === 'this') throwError('Error', 'Cannot unset $this');
+      return new VarPlace(rt().globalFrame, name, 'global');
+    };
   }
   const readParent = prepareUnset(e.base, 'array');
   const readKey = prepareOperand(e.index);

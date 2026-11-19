@@ -713,6 +713,22 @@ test.each([
 });
 
 test.each([
+  ["$GLOBALS['this'] = 1;", 'Cannot re-assign $this'],
+  ["$GLOBALS['this'] ??= 1;", 'Cannot re-assign $this'],
+  ["$GLOBALS['this']++;", 'Cannot re-assign $this'],
+  ["$ref =& $GLOBALS['this'];", 'Cannot re-assign $this'],
+  ["unset($GLOBALS['this']['child']);", 'Cannot unset $this'],
+  ["unset($GLOBALS['this']);", 'done'],
+])('protects the current object in global table operations: %s', (operation, stdout) => {
+  expect(
+    run(`<?php try { ${operation} echo 'done'; } catch (Error $error) { echo $error->getMessage(); }`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout,
+  });
+});
+
+test.each([
   ['new final class {};', 'final'],
   ['new abstract class {};', 'abstract'],
   ['new final readonly class {};', 'final'],
@@ -1301,6 +1317,60 @@ test.each(['SplMaxHeap', 'SplMinHeap', 'SplPriorityQueue'])(
   }
 );
 
+test('finishes a heap removal interrupted by the comparator', () => {
+  expect(
+    run(`<?php
+class Heap extends SplMaxHeap {
+  public bool $stop = false;
+  public function compare($a, $b): int { if ($this->stop) exit('exit;'); return $a <=> $b; }
+}
+class Reader {
+  public function __destruct() { global $heap; var_dump(count($heap), $heap->isCorrupted()); }
+}
+$heap = new Heap;
+foreach ([1, 2, 3, 4, 5, 6] as $value) $heap->insert($value);
+$reader = new Reader;
+$heap->stop = true;
+$heap->extract();
+`)
+  ).toMatchObject({ kind: 'executed', stdout: 'exit;int(5)\nbool(true)\n' });
+});
+
+test.each([false, true])('publishes partial user sort results on exit with ArrayObject=%s', (wrapped) => {
+  const sort = wrapped
+    ? '$values = new ArrayObject($values); $values->uasort($compare);'
+    : 'uasort($values, $compare);';
+  expect(
+    run(`<?php
+class Reader {
+  public function __destruct() { global $values; echo json_encode(is_array($values) ? $values : $values->getArrayCopy()); }
+}
+$values = [9, 5, 2, 8, 7, 1, 6, 4, 3, 0];
+$reader = new Reader;
+$compare = function ($a, $b) { static $calls = 0; if (++$calls === 2) exit('exit;'); return $a <=> $b; };
+${sort}
+`)
+  ).toMatchObject({ kind: 'executed', stdout: 'exit;{"1":5,"0":9,"2":2,"3":8,"4":7,"5":1,"6":6,"7":4,"8":3,"9":0}' });
+});
+
+test('releases temporary debug tables within each object inspection', () => {
+  const result = run(`<?php
+class TemporaryDebugValue { public function __destruct() { echo 'released;'; } }
+class Displayed { public function __debugInfo(): array { return ['value' => new TemporaryDebugValue]; } }
+$object = new Displayed;
+var_dump($object, 'next');
+print_r([$object, 'next']);
+`);
+  expect(result.kind === 'executed' && result.stdout).toContain('released;}\nstring(4) "next"\nreleased;Array\n');
+});
+
+test('keeps the native offsetSet frame in SplObjectStorage append errors', () => {
+  expect(run('<?php\n$storage = new SplObjectStorage;\n$storage[] = new stdClass;')).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('#0 /main.php(3): SplObjectStorage->offsetSet(NULL, Object(stdClass))'),
+  });
+});
+
 test.each([
   "json_encode(array_fill(0,100000,str_repeat('x',10000)));",
   "json_encode(array_fill(0,100,str_repeat('x',10000)),JSON_PRETTY_PRINT);",
@@ -1592,6 +1662,16 @@ test.each(['T,U', 'U,T'])('retains abstract trait contracts despite precedence: 
   expect(result.kind === 'executed' && result.stdout).toContain(
     'Declaration of A::f(string $x): int must be compatible with T::f(int $x): int'
   );
+  expect(result.kind === 'executed' && result.stdout).not.toContain('never');
+});
+
+test.each([
+  ['class A{use T{f as final g;}function f(){}function g(){}}', 'g'],
+  ['class B{function f(){}}class A extends B{use T{f as final;}}', 'f'],
+  ['trait U{function f(){}}class A{use T,U{T::f as final;}}', 'f'],
+])('enforces final abstract trait contracts against visible implementations: %s', (source, name) => {
+  const result = run(`<?php trait T{abstract function f();} ${source} echo 'never';`);
+  expect(result.kind === 'executed' && result.stdout).toContain(`Cannot override final method T::${name}()`);
   expect(result.kind === 'executed' && result.stdout).not.toContain('never');
 });
 

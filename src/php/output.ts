@@ -1,7 +1,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ClassRef, Expr, FunctionDecl, Stmt } from './ast';
 import { nestedBodies } from './astAnalysis';
-import { callMethod } from './callables';
+import { callMethod, consumeInvokedResult } from './callables';
 import { canAccessConstant } from './classConstants';
 import {
   declForKey,
@@ -13,7 +13,15 @@ import {
 } from './classes';
 import { type Constant, foldedConstant } from './constantDefaults';
 import { formatFloat, formatFloatRepr } from './conversions';
-import { deprecated, E_ERROR, reportUncaughtWarning, warn, withCleanupExceptions } from './errors';
+import {
+  type CleanupException,
+  deprecated,
+  E_ERROR,
+  isCleanupException,
+  reportUncaughtWarning,
+  warn,
+  withCleanupExceptions,
+} from './errors';
 import { toStr } from './operators';
 import { FatalError, PhpThrow, rt } from './runtime';
 import { describePropertyType } from './types';
@@ -31,11 +39,15 @@ import {
 } from './values';
 
 type DebugEntry = [string | bigint, Slot, string];
+interface DebugTable {
+  entries: Iterable<DebugEntry>;
+  initialized: number;
+}
 
 interface Inspection {
   active: Set<object>;
-  capture: (error: PhpThrow) => void;
-  pending?: PhpThrow;
+  capture: (error: CleanupException) => void;
+  pending?: CleanupException;
 }
 
 function inspect<T>(run: (state: Inspection) => T): T {
@@ -53,34 +65,54 @@ function inspect<T>(run: (state: Inspection) => T): T {
   return result;
 }
 
-// code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-function debugEntries(object: PhpObject, state: Inspection): { entries: Iterable<DebugEntry>; initialized: number } {
-  if (object.cls.findMethod('__debuginfo')) {
-    if (state.pending) {
-      reportUncaughtWarning(state.pending.object);
-      failDebugInfo(false);
-    }
-    let info: Value;
-    try {
-      info = callMethod(object, '__debugInfo', []);
-    } catch (error) {
-      if (!(error instanceof PhpThrow)) throw error;
-      reportUncaughtWarning(error.object);
-      failDebugInfo(false);
-    }
-    if (info === null) {
-      deprecated(`Returning null from ${object.cls.name}::__debugInfo() is deprecated, return an empty array instead`);
-      return { entries: [], initialized: 0 };
-    }
-    if (!(info instanceof PhpArray)) failDebugInfo();
-    const entries: DebugEntry[] = [...info.map].map(([key, slot]) => [
-      key,
-      slot,
-      typeof key === 'string' ? `"${key}"` : `${key}`,
-    ]);
-    return { entries, initialized: entries.length };
+function withDebugEntries<T>(object: PhpObject, state: Inspection, use: (table: DebugTable) => T): T {
+  if (!object.cls.findMethod('__debuginfo')) return use(debugEntries(object, state));
+  let result: { value: T } | undefined;
+  try {
+    return consumeInvokedResult(
+      () => debugInfo(object, state),
+      (info) => {
+        result = { value: use(debugInfoEntries(object, info)) };
+        return result.value;
+      },
+      true
+    );
+  } catch (error) {
+    if (!result || !isCleanupException(error)) throw error;
+    state.capture(error);
+    return result.value;
   }
+}
+
+function debugInfo(object: PhpObject, state: Inspection): Value {
+  if (state.pending) {
+    if (state.pending instanceof PhpThrow) reportUncaughtWarning(state.pending.object);
+    failDebugInfo(false);
+  }
+  try {
+    return callMethod(object, '__debugInfo', []);
+  } catch (error) {
+    if (!(error instanceof PhpThrow)) throw error;
+    reportUncaughtWarning(error.object);
+    failDebugInfo(false);
+  }
+}
+
+function debugInfoEntries(object: PhpObject, info: Value): DebugTable {
+  if (info === null) {
+    deprecated(`Returning null from ${object.cls.name}::__debugInfo() is deprecated, return an empty array instead`);
+    return { entries: [], initialized: 0 };
+  }
+  if (!(info instanceof PhpArray)) failDebugInfo();
+  const entries: DebugEntry[] = [...info.map].map(([key, slot]) => [
+    key,
+    slot,
+    typeof key === 'string' ? `"${key}"` : `${key}`,
+  ]);
+  return { entries, initialized: entries.length };
+}
+
+function debugEntries(object: PhpObject, state: Inspection): DebugTable {
   if (isClosure(object)) {
     const entries = closureDebug(object);
     return { entries, initialized: entries.length };
@@ -283,7 +315,10 @@ function printRValue(value: Value, indent: number, state: Inspection): string {
     if (state.active.has(value)) return `${header} *RECURSION*`;
     state.active.add(value);
     try {
-      return header + printHash(printableDebugEntries(debugEntries(value, state).entries), indent, state);
+      return (
+        header +
+        withDebugEntries(value, state, ({ entries }) => printHash(printableDebugEntries(entries), indent, state))
+      );
     } finally {
       state.active.delete(value);
     }
@@ -380,16 +415,17 @@ function dumpObject(
   write: (text: string) => void,
   reference: string
 ): void {
-  const { entries, initialized } = debugEntries(object, state);
-  write(`${reference}object(${object.cls.name})#${object.id} (${initialized}) {\n`);
-  const indent = ' '.repeat(level + 1);
-  for (const [key, slot, label] of entries) {
-    write(`${indent}[${typeof key === 'bigint' ? key : label}]=>\n`);
-    if (slot === UNINIT) {
-      const decl = declForKey(object.cls, typeof key === 'string' ? keyFor(key, label) : String(key));
-      write(`${indent}uninitialized(${decl?.type ? describePropertyType(decl) : 'mixed'})\n`);
-    } else dumpValue(slotValue(slot), level + 2, state, write, slot);
-  }
+  withDebugEntries(object, state, ({ entries, initialized }) => {
+    write(`${reference}object(${object.cls.name})#${object.id} (${initialized}) {\n`);
+    const indent = ' '.repeat(level + 1);
+    for (const [key, slot, label] of entries) {
+      write(`${indent}[${typeof key === 'bigint' ? key : label}]=>\n`);
+      if (slot === UNINIT) {
+        const decl = declForKey(object.cls, keyFor(String(key), label));
+        write(`${indent}uninitialized(${decl?.type ? describePropertyType(decl) : 'mixed'})\n`);
+      } else dumpValue(slotValue(slot), level + 2, state, write, slot);
+    }
+  });
 }
 
 function keyFor(name: string, label: string): string {

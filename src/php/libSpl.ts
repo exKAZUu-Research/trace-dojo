@@ -2,7 +2,7 @@
 import { callMethod } from './callables';
 import { createObject } from './classes';
 import { debugType, normalizeKeyString } from './conversions';
-import { throwError } from './errors';
+import { type CleanupException, isCleanupException, throwError, withCleanupExceptions } from './errors';
 import { magicSerializationMethods, serializationMethods } from './libArrayObject';
 import './libObjectStorage';
 import { liveArrayIterator } from './libIterators';
@@ -11,7 +11,7 @@ import './libRecursiveIterators';
 import { defineClass, type NativeMethod } from './native';
 import { compare, toInt, toKey } from './operators';
 import { share } from './places';
-import { PhpThrow, rt } from './runtime';
+import { rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import { dropped, NativeValueIndex, PhpArray, type PhpClass, PhpObject, type Value } from './values';
 
@@ -285,7 +285,7 @@ class HeapStorage {
   corrupted = false;
   writeLocked = false;
   /** The exception a comparison threw while sifting, which PHP rethrows after the sift ends. */
-  private pending: unknown;
+  private pending?: CleanupException;
 
   constructor(
     /** The class whose private properties var_dump shows. */
@@ -362,8 +362,7 @@ class HeapStorage {
     this.elements.length = count;
     const removed = heapValues(top);
     for (const value of removed) this.nativeValues.delete(value);
-    rt().release(removed, true);
-    this.finishSift();
+    this.finishSift(() => rt().release(removed, true));
     return top;
   }
 
@@ -372,19 +371,23 @@ class HeapStorage {
     try {
       return Math.sign(Number(toInt(this.compareMethod(a, b))));
     } catch (error) {
-      if (!(error instanceof PhpThrow)) throw error;
+      if (!isCleanupException(error)) throw error;
       this.pending = error;
       return 0;
     }
   }
 
-  private finishSift(): void {
+  private finishSift(release?: () => void): void {
     this.writeLocked = false;
-    if (this.pending === undefined) return;
     const error = this.pending;
     this.pending = undefined;
-    this.corrupted = true;
-    throw error;
+    this.corrupted ||= error !== undefined;
+    if (release) {
+      withCleanupExceptions(rt(), (capture) => {
+        if (error) capture(error);
+        release();
+      });
+    } else if (error) throw error;
   }
 }
 

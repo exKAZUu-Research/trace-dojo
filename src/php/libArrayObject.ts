@@ -4,12 +4,12 @@ import { setNativeArrayStorage } from './assignment';
 import { callMethod } from './callables';
 import { invoke } from './calls';
 import { createObject, findClass, objectToArray } from './classes';
-import { deprecated, throwError, type UpdateWarning, warn, withCleanupExceptions } from './errors';
+import { deprecated, isCleanupException, throwError, type UpdateWarning, warn, withCleanupExceptions } from './errors';
 import { defineClass, type NativeMethod } from './native';
 import { toKey } from './operators';
 import { arrayIsShared, share } from './places';
 import './splInterfaces';
-import { PhpThrow, rt } from './runtime';
+import { rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import { type Key, NativeValueIndex, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
 
@@ -385,7 +385,7 @@ function sortStorage(object: PhpObject, name: string, args: Value[]): Value {
           invoke({ fn }, [{ v: ref.v, ref }, ...args.map((v) => ({ v }) as const)], undefined)
         );
       } catch (error) {
-        if (!(error instanceof PhpThrow)) throw error;
+        if (!isCleanupException(error)) throw error;
         capture(error);
       }
       if (storage.array !== ref.v) storage.array = ref.v as PhpArray;

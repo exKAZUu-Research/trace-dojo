@@ -74,9 +74,15 @@ export class VarPlace implements Place {
     checkedDynamicVariable(name);
   }
 
-  get(): Value | undefined {
+  get(operation?: PlaceOperation): Value | undefined {
+    if (operation) this.checkWritableName();
     const ref = this.frame.vars.get(this.name);
     return ref?.isDefinedBinding ? ref.v : undefined;
+  }
+
+  getForIsset(): Value | undefined {
+    if (this.kind === 'global' && this.name === 'this') return rt().frame.thisObj;
+    return this.get();
   }
 
   warnUndefined(): void {
@@ -84,7 +90,7 @@ export class VarPlace implements Place {
   }
 
   fetchCompound(warning: UpdateWarning): CompoundRead {
-    const current = this.get();
+    const current = this.get('assignOp');
     if (current !== undefined) return { value: current, sources: this.typeSources() };
     if (this.kind !== 'compiled') this.warnUndefined();
     else warning(() => this.warnUndefined());
@@ -93,6 +99,7 @@ export class VarPlace implements Place {
   }
 
   set(value: Value): Value {
+    this.checkWritableName();
     const ref = this.frame.vars.get(this.name);
     if (ref) {
       ref.assign(value);
@@ -112,6 +119,7 @@ export class VarPlace implements Place {
   }
 
   ref(): Ref {
+    this.checkWritableName();
     let ref = this.frame.vars.get(this.name);
     if (!ref) {
       ref = new Ref(null);
@@ -130,7 +138,7 @@ export class VarPlace implements Place {
   }
 
   bind(ref: Ref): void {
-    if (this.name === 'this') throwError('Error', 'Cannot re-assign $this');
+    this.checkWritableName();
     const old = this.frame.vars.get(this.name);
     if (old === ref) return;
     if (old) old.rc--;
@@ -138,6 +146,10 @@ export class VarPlace implements Place {
     ref.rc++;
     this.frame.vars.set(this.name, ref);
     if (old) dropped(old.v);
+  }
+
+  private checkWritableName(): void {
+    if (this.name === 'this') throwError('Error', 'Cannot re-assign $this');
   }
 }
 
