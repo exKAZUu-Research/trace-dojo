@@ -101,7 +101,7 @@ export function translate(pattern: string): Compiled {
   const converted = converter.convert();
   if (converted.length > 65_536) throw new UnsupportedFeatureError('大きすぎる正規表現');
   const flags = `d${options.caseless ? 'i' : ''}${converter.unicode ? 'u' : ''}`;
-  const { byteCaselessReferences, emptySource, ambiguousRepetition } = analyzeRegex(
+  const { byteCaselessReferences, emptySource, needsNative } = analyzeRegex(
     converted,
     converter.unicode,
     options.utf8,
@@ -119,7 +119,7 @@ export function translate(pattern: string): Compiled {
     groupCount: converter.names.length - 1,
     keeps: converter.keeps,
     byteCaselessReferences,
-    boundedPattern: ambiguousRepetition || matchLimit ? pcrePattern(body, modifiers) : undefined,
+    boundedPattern: needsNative || matchLimit ? pcrePattern(body, modifiers) : undefined,
   };
 }
 

@@ -6,7 +6,7 @@ import { UnsupportedFeatureError } from './unsupported';
 
 type Length = readonly [number, number];
 
-// code-gauge-allow functionNcss 54 -- Keeps scoped matching flags and lookbehind validation in one traversal.
+// code-gauge-allow functionNcss 55 -- Keeps scoped matching flags, engine selection and lookbehind validation in one traversal.
 // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function analyzeRegex(
   source: string,
@@ -15,7 +15,7 @@ export function analyzeRegex(
   ignoreCase: boolean,
   invalidLookbehind: (start: number, reason: string) => never,
   emptyMarkers: ReadonlyMap<string, string>
-): { byteCaselessReferences: Set<string>; emptySource?: string; ambiguousRepetition: boolean } {
+): { byteCaselessReferences: Set<string>; emptySource?: string; needsNative: boolean } {
   const parser = new RegExpParser({ ecmaVersion: 2025 });
   let tree: AST.Pattern;
   try {
@@ -32,6 +32,7 @@ export function analyzeRegex(
   const lookbehinds: AST.LookaroundAssertion[] = [];
   const lengths = new Map<AST.Element, Length>();
   let backwardCaptureReference = false;
+  let byteCaseFolding = false;
   visitRegExpAST(tree, {
     onGroupEnter(node) {
       contexts.push(ignoreCase);
@@ -43,8 +44,7 @@ export function analyzeRegex(
     },
     onCharacterEnter(node) {
       rt().spend();
-      if (!utf8 && ignoreCase && node.value > 127)
-        throw new UnsupportedFeatureError('非 UTF-8 の非 ASCII 文字を大文字・小文字を区別せずに照合する正規表現');
+      if (!utf8 && ignoreCase) byteCaseFolding ||= mayFoldNonAsciiBytes(node);
     },
     onCharacterSetEnter(node) {
       if (!utf8 && ignoreCase && node.kind === 'property')
@@ -77,8 +77,16 @@ export function analyzeRegex(
   return {
     byteCaselessReferences: references,
     emptySource: emptyMarkers.size === 0 ? undefined : specializeForEmptySubject(tree, emptyMarkers),
-    ambiguousRepetition: hasAmbiguousRepetition(tree, unicode, ignoreCase),
+    needsNative: byteCaseFolding || hasAmbiguousRepetition(tree, unicode, ignoreCase),
   };
+}
+
+function mayFoldNonAsciiBytes(node: AST.Character): boolean {
+  const range = node.parent.type === 'CharacterClassRange' ? node.parent : undefined;
+  const first = range?.min.value ?? node.value;
+  const last = range?.max.value ?? node.value;
+  // JavaScript folds Latin-1 letter pairs, which PCRE leaves distinct in C-locale byte mode.
+  return first <= 0xfe && last >= 0xc0;
 }
 
 function recordReferenceNames(references: Set<string>, groups: readonly AST.CapturingGroup[]): void {

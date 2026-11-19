@@ -926,8 +926,6 @@ catch (Throwable $error) { echo 'caught:', $error->getMessage(), ';'; }
 });
 
 test.each([
-  String.raw`<?php preg_match('/\xe9/i',"\xc9");`,
-  String.raw`<?php preg_match('/[\xe0-\xef]/i',"\xc9");`,
   '<?php preg_match("/(a*)+/","aaa");',
   '<?php preg_match("/(a?){0,3}/","a");',
   '<?php preg_match("/()*/","");',
