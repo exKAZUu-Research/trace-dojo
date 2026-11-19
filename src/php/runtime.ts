@@ -427,6 +427,17 @@ export class Runtime {
     }
   }
 
+  retireObjectFreeArrays(dropped: unknown[]): void {
+    const pending: PhpArray[] = [];
+    for (const value of dropped) if (value instanceof PhpArray && value.composite) pending.push(value);
+    while (pending.length > 0) {
+      const array = pending.pop() as PhpArray;
+      if (arrayHasHolders(this, array, 1)) continue;
+      this.gcRoots.delete(array);
+      for (const slot of array.retire()) if (slot instanceof PhpArray && slot.composite) pending.push(slot);
+    }
+  }
+
   // code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   freeObject(object: PhpObject): void {
     if (this.objects.get(object.id) !== object) return;

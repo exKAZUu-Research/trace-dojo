@@ -291,7 +291,7 @@ function releaseDroppedNow(
         (runtime.collectingObjects.has(value) || activeReleaseObjects.get(value)?.hasVisited(value))
       )
   );
-  if (!dropped.some((value) => mayHoldObject(value, runtime))) return;
+  if (!dropped.some((value) => mayHoldObject(value, runtime))) return runtime.retireObjectFreeArrays(dropped);
   const roots = ownershipRoots(runtime);
   const unreachable = new Set<object>();
   dropped = dropped.filter(

@@ -3657,4 +3657,12 @@ function f($replacement) {
 f(null); echo '|'; f(new D('x'));
 `);
   expect(liveLocalCleanup).toMatchObject({ kind: 'executed', stdout: 'AbZc|AbZxc' });
+
+  const retiredObjectFreeWrapper = run(String.raw`<?php
+$a = [4]; next($a); $b = [[$a]]; unset($b); $a['b'] = 8;
+echo key($a), ':', current($a), ';';
+$c = [4]; next($c); count([$c]); $c['b'] = 8;
+echo key($c), ':', current($c);
+`);
+  expect(retiredObjectFreeWrapper).toMatchObject({ kind: 'executed', stdout: 'b:8;b:8' });
 });
