@@ -40,3 +40,28 @@ $ai = new ArrayIterator(['p'=>1]); var_dump(count($ai));
 $f = new SplFixedArray(2);
 $f[1.0] = 'f'; $f[true] = 't'; var_dump($f[1], $f['1']);
 try { $f['-1']; } catch (Throwable $e) { echo get_class($e), ': ', $e->getMessage(), "\n"; }
+
+class DebugList extends SplDoublyLinkedList {
+    public $flags = 'label';
+    private $dllist = 'distinct';
+}
+class DebugFixedArray extends SplFixedArray {
+    protected $label = 'fixed';
+    public int $uninitialized;
+    function __debugInfo(): array { return ['ignored' => true]; }
+}
+class DebugHeap extends SplMaxHeap {
+    public $label = 'heap';
+    private $heap = 'distinct';
+}
+$debugList = new DebugList;
+$debugList->push(7);
+$debugFixed = new DebugFixedArray(1);
+$debugFixed[0] = 8;
+$debugHeap = new DebugHeap;
+$debugHeap->insert(9);
+foreach ([$debugList, $debugFixed] as $object) {
+    var_dump($object);
+    print_r($object);
+}
+var_dump($debugHeap);

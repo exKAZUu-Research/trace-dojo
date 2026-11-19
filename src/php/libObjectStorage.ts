@@ -1,7 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { callMethod, consumeInvokedResult, discardInvokedResult } from './callables';
 import { implicitCallRow } from './calls';
-import { objectToArray } from './classes';
 import { valueName } from './conversions';
 import { type CleanupException, deprecated, throwError, withCleanupExceptions, withPendingException } from './errors';
 import { releaseDropped } from './garbage';
@@ -58,8 +57,7 @@ class ObjectStorage {
       entry.set('inf', data);
       storage.append(entry);
     }
-    const properties = [...objectToArray(this.holder).entries()];
-    return [...properties, ['\0SplObjectStorage\0storage', storage]];
+    return [['\0SplObjectStorage\0storage', storage]];
   }
 
   attach(object: PhpObject, info: Value): void {

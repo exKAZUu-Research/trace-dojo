@@ -606,12 +606,8 @@ class FixedStorage {
     return copy;
   }
 
-  debugEntries(): [bigint, Value][] {
+  indexedProperties(): [bigint, Value][] {
     return this.items.map((item, index) => [BigInt(index), item]);
-  }
-
-  exportEntries(): [bigint, Value][] {
-    return this.debugEntries();
   }
 }
 

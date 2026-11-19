@@ -1285,8 +1285,8 @@ function wouldProofCycle(owner: object, child: object): boolean {
   return false;
 }
 
-export function copyValueSlot(slot: Value | Ref): Value | Ref {
-  if (slot instanceof Ref && slot.isRef && slot.rc > 1) {
+export function copyValueSlot(slot: Value | Ref, preserveSingleReference = false): Value | Ref {
+  if (slot instanceof Ref && slot.isRef && (preserveSingleReference || slot.rc > 1)) {
     slot.rc++;
     return slot;
   }

@@ -172,3 +172,53 @@ int(1)
 string(1) "t"
 string(1) "t"
 OutOfBoundsException: Index invalid or out of range
+object(DebugList)#6 (4) {
+  ["flags"]=>
+  string(5) "label"
+  ["dllist":"DebugList":private]=>
+  string(8) "distinct"
+  ["flags":"SplDoublyLinkedList":private]=>
+  int(0)
+  ["dllist":"SplDoublyLinkedList":private]=>
+  array(1) {
+    [0]=>
+    int(7)
+  }
+}
+DebugList Object
+(
+    [flags] => label
+    [dllist:DebugList:private] => distinct
+    [flags:SplDoublyLinkedList:private] => 0
+    [dllist:SplDoublyLinkedList:private] => Array
+        (
+            [0] => 7
+        )
+
+)
+object(DebugFixedArray)#15 (2) {
+  [0]=>
+  int(8)
+  ["label":protected]=>
+  string(5) "fixed"
+}
+DebugFixedArray Object
+(
+    [0] => 8
+    [label:protected] => fixed
+)
+object(DebugHeap)#16 (5) {
+  ["label"]=>
+  string(4) "heap"
+  ["heap":"DebugHeap":private]=>
+  string(8) "distinct"
+  ["flags":"SplHeap":private]=>
+  int(0)
+  ["isCorrupted":"SplHeap":private]=>
+  bool(false)
+  ["heap":"SplHeap":private]=>
+  array(1) {
+    [0]=>
+    int(9)
+  }
+}

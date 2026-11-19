@@ -195,10 +195,8 @@ export class ArrayStorage {
     return chain;
   }
 
-  /** What var_dump shows: the object's own properties, then the storage as a private property. */
   debugEntries(): [Key, Value][] {
-    const properties = this.holder ? [...objectToArray(this.holder).entries()] : [];
-    return [...properties, [`\0${this.owner}\0storage`, this.backing ?? this.own]];
+    return [[`\0${this.owner}\0storage`, this.backing ?? this.own]];
   }
 
   /** The property table json_encode and array casts read: the storage, or the object's own properties. */

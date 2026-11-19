@@ -27,8 +27,10 @@ import { FatalError, PhpThrow, rt } from './runtime';
 import { describePropertyType } from './types';
 import {
   type ClosureData,
+  copyValueSlot,
   enumCaseName,
   isClosure,
+  type Key,
   PhpArray,
   PhpObject,
   Ref,
@@ -42,6 +44,11 @@ type DebugEntry = [string | bigint, Slot, string];
 interface DebugTable {
   entries: Iterable<DebugEntry>;
   initialized: number;
+}
+
+interface NativeDebugStorage {
+  indexedProperties?: () => [bigint, Value][];
+  debugEntries?: () => [Key, Value][];
 }
 
 interface Inspection {
@@ -66,7 +73,10 @@ function inspect<T>(run: (state: Inspection) => T): T {
 }
 
 function withDebugEntries<T>(object: PhpObject, state: Inspection, use: (table: DebugTable) => T): T {
-  if (!object.cls.findMethod('__debuginfo')) return use(debugEntries(object, state));
+  const storage = object.internal as NativeDebugStorage | undefined;
+  if (storage?.indexedProperties) return use(nativeDebugTable(object, storage, state));
+  if (!object.cls.findMethod('__debuginfo'))
+    return use(storage?.debugEntries ? nativeDebugTable(object, storage, state) : debugEntries(object, state));
   let result: { value: T } | undefined;
   try {
     return consumeInvokedResult(
@@ -112,16 +122,30 @@ function debugInfoEntries(object: PhpObject, info: Value): DebugTable {
   return { entries, initialized: entries.length };
 }
 
+function nativeDebugTable(object: PhpObject, storage: NativeDebugStorage, state: Inspection): DebugTable {
+  const snapshot = new PhpArray();
+  const indexed = storage.indexedProperties?.();
+  for (const [key, value] of indexed ?? []) snapshot.setSlot(key, copyValueSlot(value));
+  for (const [key, slot] of object.props) {
+    rt().spend();
+    if (slot === UNINIT || slot === UNDEFINED_RESULT) continue;
+    const decl = declForKey(object.cls, key);
+    const name = decl?.visibility === 'protected' ? `\0*\0${decl.name}` : key;
+    snapshot.setSlot(name, copyValueSlot(slot, indexed !== undefined));
+  }
+  for (const [key, value] of storage.debugEntries?.() ?? []) snapshot.setSlot(key, copyValueSlot(value));
+  return { entries: inspectionSnapshot(snapshot, state, entries()), initialized: snapshot.size };
+
+  function* entries(): Generator<DebugEntry> {
+    for (const [key, slot] of snapshot.map) {
+      yield [typeof key === 'string' ? propNameOf(key) : key, slot, debugLabel(key)];
+    }
+  }
+}
+
 function debugEntries(object: PhpObject, state: Inspection): DebugTable {
   if (isClosure(object)) {
     const entries = closureDebug(object);
-    return { entries, initialized: entries.length };
-  }
-  const internal = object.internal as { debugEntries?: () => [string | bigint, Value][] } | undefined;
-  if (internal?.debugEntries) {
-    const entries: DebugEntry[] = internal
-      .debugEntries()
-      .map(([key, value]) => [typeof key === 'string' ? propNameOf(key) : key, value, debugLabel(key)]);
     return { entries, initialized: entries.length };
   }
   const keys: string[] = [];
@@ -505,41 +529,49 @@ function* exportedProps(object: PhpObject, state: Inspection): Generator<[string
   const storage = object.internal as
     | {
         properties?: () => PhpArray;
-        exportEntries?: () => [bigint, Value][];
+        indexedProperties?: () => [bigint, Value][];
       }
     | undefined;
   if (storage?.properties) {
     yield* storage.properties().map;
     return;
   }
-  yield* storage?.exportEntries?.() ?? [];
+  yield* storage?.indexedProperties?.() ?? [];
   yield* propertyEntries(object, objectPropertyKeys(object), state, (key, decl) => {
     if (state.pending && decl.hooks?.get) throw state.pending;
     return nativePropertySlot(object, key, decl);
   });
 }
 
-function* propertyEntries(
+function propertyEntries(
   object: PhpObject,
   keys: string[],
   state: Inspection,
   readDeclared: (key: string, decl: NonNullable<ReturnType<typeof declForKey>>) => Slot | undefined
 ): Generator<[string, Slot]> {
   const dynamic = snapshotDynamicProperties(object);
-  const runtime = rt();
-  runtime.nativeHeld.push([dynamic]);
-  let completed = false;
-  try {
+  return inspectionSnapshot(dynamic, state, entries());
+
+  function* entries(): Generator<[string, Slot]> {
     for (const key of keys) {
       const decl = declForKey(object.cls, key);
       const slot = decl ? readDeclared(key, decl) : dynamic.map.get(key);
       if (slot !== undefined) yield [key, slot];
     }
+  }
+}
+
+function* inspectionSnapshot<T>(snapshot: PhpArray, state: Inspection, entries: Iterable<T>): Generator<T> {
+  const runtime = rt();
+  runtime.nativeHeld.push([snapshot]);
+  let completed = false;
+  try {
+    yield* entries;
     completed = true;
   } finally {
     runtime.nativeHeld.pop();
-    runtime.release([dynamic]);
-    if (completed && dynamic.composite) flushInspectionReleases(state);
+    runtime.release([snapshot]);
+    if (completed && snapshot.composite) flushInspectionReleases(state);
   }
 }
 
