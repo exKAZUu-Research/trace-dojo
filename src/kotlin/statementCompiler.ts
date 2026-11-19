@@ -28,6 +28,7 @@ import {
 import { getPropertyValue, setPropertyValue } from './dispatch';
 import { type BoundPlace, ExpressionCompiler, keyOf, type Place } from './expressionCompiler';
 import { valueEquals } from './format';
+import { NUMBER_OPERATOR_NAMES } from './operators';
 import { type Frame, KotlinThrow, LoopSignal, UNASSIGNED } from './runtime';
 import { type ClassSymbol, type PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
 import { instanceTest } from './typeChecks';
@@ -204,7 +205,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (statement.delegate) return this.compileLocalDelegate(scope, context, statement, declared);
     if (!statement.initializer) {
       if (!declared) this.error(row, `変数 ${name} の型を書くか、初期値を書いてください。`);
-      this.newVariable(scope, context, name, declared, statement.isVar, row);
+      const variable = this.newVariable(scope, context, name, declared, statement.isVar, row);
+      variable.awaitsValue = !statement.isVar;
       return () => {};
     }
     const initializer = this.compileExpression(scope, context, statement.initializer, declared);
@@ -372,10 +374,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         (candidate) => candidate.symbol.isOperator
       );
       if (members.length + extensions.length > 0) {
-        if (this.isAssignableVar(scope, target) && this.hasOperator(receiver.type, OPERATOR_FUNCTION[operation])) {
+        if (this.isAssignableVar(scope, target) && this.hasOperator(receiver.type, NUMBER_OPERATOR_NAMES[operation])) {
           this.error(
             row,
-            `${operator} が ${assignName} と ${OPERATOR_FUNCTION[operation]} のどちらのことか決められません。val にするか、x = x ${operation} y と書いてください。`
+            `${operator} が ${assignName} と ${NUMBER_OPERATOR_NAMES[operation]} のどちらのことか決められません。val にするか、x = x ${operation} y と書いてください。`
           );
         }
         const args: ArgumentSyntax[] = [{ row: statement.value.row, name: undefined, value: statement.value }];
@@ -518,7 +520,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const isAssigned = this.flow.assigned.has(variable);
     if (isCompound && !isAssigned) this.error(row, `変数 ${variable.name} に値が入っていません。`);
     if (!variable.isVar) {
-      if (this.flow.maybeAssigned.has(variable) || isCompound)
+      // Parameters, loop variables, and the other variables a declaration gives a value are read-only as well.
+      if (!variable.awaitsValue || this.flow.maybeAssigned.has(variable) || isCompound)
         this.error(row, `val で宣言した ${variable.name} には、再び代入できません。`);
       if (variable.owner !== context)
         this.error(row, `val で宣言した ${variable.name} には、ラムダ式の中で代入できません。`);
@@ -558,7 +561,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const type = resolved(substitute(this.ensurePropertyType(symbol, row), member.substitution));
     if (!symbol.isVar && !this.mayInitializeVal(scope, symbol))
       this.error(row, `val で宣言した ${symbol.name} には、再び代入できません。`);
-    this.checkAccessible(scope, symbol, row);
+    this.checkAccessible(scope, symbol, row, receiver?.type);
     if (symbol.isVar && symbol.setterVisibility === 'private' && !this.isInsideClass(scope, symbol.owner)) {
       this.error(row, `${symbol.name} の set は private なので、クラスの外からは代入できません。`);
     }
@@ -1329,7 +1332,6 @@ const ASSIGN_OPERATORS = {
   '/': 'divAssign',
   '%': 'remAssign',
 } as const;
-const OPERATOR_FUNCTION = { '+': 'plus', '-': 'minus', '*': 'times', '/': 'div', '%': 'rem' } as const;
 
 /** The names that statements assign, which loops forget smart casts of. */
 // code-gauge-allow functionCognitiveComplexity 20 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.

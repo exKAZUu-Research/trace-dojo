@@ -48,7 +48,16 @@ import {
   type Visibility,
 } from './symbols';
 import { anyType, asSuper, isSameType, isSubtype, substitutionOf } from './typeRelations';
-import { type ClassType, type KType, NOTHING, nullable, resolved, substitute, typeToString } from './types';
+import {
+  type ClassType,
+  type KType,
+  NOTHING,
+  nullable,
+  resolved,
+  substitute,
+  type Substitution,
+  typeToString,
+} from './types';
 import { Boxed, KObject, UNIT, type Value } from './values';
 
 interface ClassEntry {
@@ -99,6 +108,8 @@ export interface CompiledFiles {
 }
 
 const ACCESS_KEYWORDS: Visibility[] = ['private', 'protected', 'internal', 'public'];
+
+const VISIBILITY_RANK: Record<Visibility, number> = { private: 0, protected: 1, internal: 2, public: 2 };
 
 function visibilityOf(modifiers: Modifiers): Visibility {
   return ACCESS_KEYWORDS.find((keyword) => modifiers.keywords.has(keyword)) ?? 'public';
@@ -152,16 +163,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     symbol.row = decl.row;
     symbol.isLibrary = file.isLibrary;
     symbol.enumEntries = decl.enumEntries.map((entry, ordinal) => ({ name: entry.name, ordinal }));
-    if (
-      symbol.isData &&
-      kind === 'class' &&
-      (!decl.primaryConstructor || decl.primaryConstructor.params.length === 0)
-    ) {
-      this.error(decl.row, 'data class には、プロパティを1つ以上持つコンストラクタが要ります。');
-    }
-    if (symbol.isData && (symbol.isOpen || symbol.isAbstract || symbol.isSealed)) {
-      this.error(decl.row, 'data class は open・abstract・sealed にできません。');
-    }
+    this.checkClassHeader(decl, symbol);
     const scope = new Scope(outer?.scope, undefined);
     scope.staticClass = symbol;
     const entry: ClassEntry = {
@@ -189,6 +191,30 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       symbol.nested.set(member.name, nested.symbol);
     }
     return entry;
+  }
+
+  private checkClassHeader(decl: ClassDecl, symbol: ClassSymbol): void {
+    this.rejectDuplicateNames(decl.enumEntries);
+    const params = decl.primaryConstructor?.params ?? [];
+    this.rejectDuplicateNames(params);
+    if (symbol.isData && symbol.kind === 'class') {
+      if (params.length === 0)
+        this.error(decl.row, 'data class には、プロパティを1つ以上持つコンストラクタが要ります。');
+      const plain = params.find((param) => !param.binding);
+      if (plain)
+        this.error(plain.row, `data class のコンストラクタの引数 ${plain.name} には、val か var を付けてください。`);
+    }
+    if (symbol.isData && (symbol.isOpen || symbol.isAbstract || symbol.isSealed)) {
+      this.error(decl.row, 'data class は open・abstract・sealed にできません。');
+    }
+  }
+
+  /** Rejects a name declared twice among parameters or enum entries, which Kotlin reports as conflicting. */
+  private rejectDuplicateNames(declarations: { name: string; row: number }[]): void {
+    for (const [index, declaration] of declarations.entries()) {
+      if (declarations.slice(0, index).some((other) => other.name === declaration.name))
+        this.error(declaration.row, `${declaration.name} が2回宣言されています。`);
+    }
   }
 
   /** Resolves a file's imports, which name classes, top-level functions and properties, and members of objects. */
@@ -295,23 +321,30 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       this.file = context;
       const packageScope = this.packageScope(context.packageName);
       const fileScope = new Scope(undefined, undefined);
-      for (const declaration of file.declarations) {
-        if (declaration.kind === 'function') {
-          const entry = this.declareFunction(declaration, fileScope, undefined, context);
-          if (!context.isLibrary)
-            this.checkDuplicateFunction(
-              packageScope.functions.get(entry.symbol.name) ?? [],
-              entry.symbol,
-              declaration.row
-            );
-          packageScope.addFunction(entry.symbol);
-        } else if (declaration.kind === 'property') {
-          const entry = this.declareProperty(declaration, fileScope, undefined, context);
-          packageScope.addProperty(entry.symbol);
-        } else if (declaration.kind === 'destructuring') {
-          this.error(declaration.row, '分解宣言は、関数の中の変数にだけ使えます。');
-        }
-      }
+      for (const declaration of file.declarations) this.declareTopLevel(declaration, fileScope, context, packageScope);
+    }
+  }
+
+  private declareTopLevel(
+    declaration: Declaration,
+    fileScope: Scope,
+    context: FileContext,
+    packageScope: PackageScope
+  ): void {
+    const checks = !context.isLibrary;
+    if (declaration.kind === 'function') {
+      const { symbol } = this.declareFunction(declaration, fileScope, undefined, context);
+      if (checks) this.checkDuplicateFunction(packageScope.functions.get(symbol.name) ?? [], symbol, declaration.row);
+      packageScope.addFunction(symbol);
+    } else if (declaration.kind === 'property') {
+      const { symbol } = this.declareProperty(declaration, fileScope, undefined, context);
+      const isDuplicate =
+        !symbol.extensionReceiver &&
+        packageScope.properties.get(symbol.name)?.some((other) => !other.extensionReceiver) === true;
+      if (checks && isDuplicate) this.error(declaration.row, `プロパティ ${declaration.name} が2回宣言されています。`);
+      packageScope.addProperty(symbol);
+    } else if (declaration.kind === 'destructuring') {
+      this.error(declaration.row, '分解宣言は、関数の中の変数にだけ使えます。');
     }
   }
 
@@ -550,12 +583,16 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (symbol.isAbstract && owner && !owner.isAbstract) {
       this.error(symbol.row, `abstract なメンバー ${symbol.name} は、abstract なクラスにだけ書けます。`);
     }
-    if (keywords.has('open') && owner && !owner.isInheritable && !owner.isLibrary && owner.kind !== 'enum') {
-      // Kotlin only warns that an open member of a final class has no effect.
+    const memberOnly = ['open', 'abstract', 'override', 'protected'].find((keyword) => keywords.has(keyword));
+    if (!owner && memberOnly) {
+      this.error(symbol.row, `${memberOnly} 修飾子は、クラスのメンバーにだけ書けます。`);
+    }
+    const inheritable = ['open', 'abstract', 'override'].find((keyword) => keywords.has(keyword));
+    if (owner && keywords.has('private') && inheritable) {
+      this.error(symbol.row, `private と ${inheritable} は、いっしょには書けません。`);
     }
   }
 
-  // code-gauge-allow functionNcss 50 -- The parts of a function declaration and their checks.
   private declareFunction(
     decl: FunctionDecl,
     ownerScope: Scope,
@@ -577,24 +614,31 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     symbol.isAtomic = !file.isLibrary && this.isAtomicRange(decl.row, decl.headerEndRow);
     if (decl.receiver) symbol.extensionReceiver = this.resolveType(scope, decl.receiver);
     symbol.params = decl.params.map((param) => this.declareParameter(scope, param));
+    this.rejectDuplicateNames(decl.params);
     if (decl.returnType) symbol.returnType = this.resolveType(scope, decl.returnType);
     else if (decl.body?.kind !== 'expression') symbol.returnType = this.core.unit.type;
-    if (!decl.body && !symbol.isAbstract && !(cls?.symbol.isInterface ?? false) && !keywords.has('external')) {
-      this.error(decl.row, `関数 ${decl.name} に本体を書いてください。`);
-    }
-    if (decl.body && symbol.isAbstract) this.error(decl.row, `abstract な関数 ${decl.name} には本体を書けません。`);
-    if (!decl.body && cls?.symbol.isInterface) symbol.isAbstract = true;
+    this.checkFunctionBody(decl, symbol, cls?.symbol);
     if (keywords.has('external')) this.bindNativeFunction(symbol, decl, cls?.symbol, file);
-    if (decl.name === 'main' && !cls && !file.isLibrary) this.checkMainSignature(symbol, decl.row);
     const entry: FunctionEntry = { kind: 'function', decl, symbol, file, scope, cls, state: 'pending' };
     this.functionEntries.push(entry);
     this.entryOfFunction.set(symbol, entry);
     return entry;
   }
 
-  private checkMainSignature(symbol: FunctionSymbol, row: number): void {
-    void symbol;
-    void row;
+  private checkFunctionBody(decl: FunctionDecl, symbol: FunctionSymbol, owner: ClassSymbol | undefined): void {
+    const { keywords } = decl.modifiers;
+    const isInterface = owner?.isInterface ?? false;
+    if (!decl.body && !symbol.isAbstract && !isInterface && !keywords.has('external')) {
+      this.error(decl.row, `関数 ${decl.name} に本体を書いてください。`);
+    }
+    if (decl.body && symbol.isAbstract) this.error(decl.row, `abstract な関数 ${decl.name} には本体を書けません。`);
+    if (!decl.body && isInterface) {
+      symbol.isAbstract = true;
+      if (keywords.has('private')) this.error(decl.row, `本体のない関数 ${decl.name} は、private にできません。`);
+    }
+    if (symbol.isInfix && (symbol.params.length !== 1 || (!owner && !symbol.extensionReceiver))) {
+      this.error(decl.row, 'infix 修飾子は、引数が1つのメンバー関数か拡張関数にだけ書けます。');
+    }
   }
 
   protected isAtomicRange(firstRow: number, lastRow: number): boolean {
@@ -1014,10 +1058,38 @@ export abstract class DeclarationCompiler extends StatementCompiler {
           if (!matches) continue;
         }
         if ((member.extensionReceiver === undefined) !== (candidate.extensionReceiver === undefined)) continue;
+        this.checkOverrideType(cls, member, candidate, substitution);
         if (!found.includes(candidate)) found.push(candidate);
       }
     }
     return found;
+  }
+
+  private checkOverrideType(
+    cls: ClassSymbol,
+    member: MemberSymbol,
+    base: MemberSymbol,
+    substitution: Substitution
+  ): void {
+    if (cls.isLibrary) return;
+    if (VISIBILITY_RANK[member.visibility] < VISIBILITY_RANK[base.visibility]) {
+      this.error(
+        member.row,
+        `${member.name} は、上書きする ${base.owner?.name ?? ''}.${member.name} より公開範囲を狭くできません。`
+      );
+    }
+    const own = member.kind === 'function' ? member.returnType : member.type;
+    const inherited = base.kind === 'function' ? base.returnType : base.type;
+    // A type that the member's body has yet to infer is checked against the inherited one where it is inferred.
+    if (!own || !inherited) return;
+    const expected = substitute(inherited, substitution);
+    const fits = member.kind === 'property' && member.isVar ? isSameType(own, expected) : isSubtype(own, expected);
+    if (!fits) {
+      this.error(
+        member.row,
+        `${member.name} の型 ${typeToString(own)} は、上書きする ${base.owner?.name ?? ''}.${member.name} の型 ${typeToString(expected)} と合いません。`
+      );
+    }
   }
 
   /** Forwards the members of an interface delegated with `by` that the class does not override to the delegate. */
@@ -1120,6 +1192,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     const savedFlow = this.flow;
     this.file = file;
     this.flow = new Flow();
+    for (const variable of this.initializerVariables) this.flow.assigned.add(variable);
     try {
       return compile();
     } finally {
@@ -1143,18 +1216,16 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       // An object's members show its properties as `Name.x`, as Java's static members do, rather than as `this.x`.
       context.info.showsThis =
         thisType !== undefined && entry.cls !== undefined && !entry.cls.symbol.isObject && !entry.file.isLibrary;
-      const variables = symbol.params.map((param, index) => {
-        const declared = decl.params[index];
-        const variable = this.newVariable(
+      const variables = symbol.params.map((param, index) =>
+        this.newParameter(
           scope,
           context,
           param.name,
           param.isVararg ? this.varargType(param.type) : param.type,
-          false,
-          declared.row
-        );
-        return variable;
-      });
+          decl.params[index].row
+        )
+      );
+      // A default value sees only the parameters before its own.
       const defaults = symbol.params.map((param, index) => {
         this.flow.assigned.add(variables[index]);
         const value = decl.params[index].defaultValue;
@@ -1332,7 +1403,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       const ctor = entry.cls.constructorSymbol;
       for (const [index, param] of (ctor?.params ?? []).entries()) {
         const row = entry.cls.decl.primaryConstructor?.params[index]?.row ?? entry.cls.decl.row;
-        const variable = this.newVariable(scope, context, param.name, param.type, false, row);
+        const variable = this.newParameter(scope, context, param.name, param.type, row);
         this.flow.assigned.add(variable);
         this.initializerVariables.add(variable);
       }

@@ -225,6 +225,9 @@ export class VariableSymbol {
   delegateRead: ((frame: Frame) => Value) | undefined;
   /** For `field` in an accessor, how to store the backing field. */
   delegateWrite: ((frame: Frame, value: Value) => void) | undefined;
+  /** Whether the variable is a `val` declared without a value, which one assignment may give it later. */
+  awaitsValue = false;
+  isParameter = false;
 
   constructor(
     readonly name: string,

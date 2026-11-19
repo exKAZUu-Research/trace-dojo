@@ -447,7 +447,11 @@ export abstract class ExpressionConverter {
   }
 
   /** A `variable_declaration`: a name with an optional type, where `_` names nothing. */
-  convertVariableDeclaration(node: Node): { row: number; name: string | undefined; type: TypeRef | undefined } {
+  convertVariableDeclaration(node: Node): {
+    row: number;
+    name: string | undefined;
+    type: TypeRef | undefined;
+  } {
     const parts = named(node);
     if (parts.some((part) => part.type === 'annotation')) throw unavailable(node, '変数へのアノテーション');
     const nameNode = required(parts.find((part) => part.type === 'identifier'));
@@ -542,6 +546,7 @@ export abstract class ExpressionConverter {
       }
       const keyword = child.text;
       if (!this.isLibrary && !allowed.has(keyword)) throw unavailable(child, `${keyword} 修飾子`);
+      if (keywords.has(keyword)) throw syntaxError(child, `${keyword} 修飾子が2回書かれています。`);
       keywords.add(keyword);
     }
     return { keywords, annotations };

@@ -1,3 +1,5 @@
+import { arithmeticResult, NUMBER_OPERATOR_NAMES, SIGNED_NUMBER_KINDS } from '../operators';
+import type { ArithmeticOperator, NumericKind } from '../operators';
 import { kotlin } from './source';
 
 /** The classes of `kotlin` that the language itself relies on. */
@@ -64,15 +66,10 @@ class Char private constructor() : Comparable<Char> {
 }
 
 class Byte private constructor() : Number(), Comparable<Byte> {
-    external operator fun plus(other: Byte): Int
-    external operator fun minus(other: Byte): Int
-    external operator fun times(other: Byte): Int
-    external operator fun div(other: Byte): Int
-    external operator fun rem(other: Byte): Int
+${numberOperators('Byte')}
     external operator fun unaryMinus(): Int
     external operator fun inc(): Byte
     external operator fun dec(): Byte
-    external override fun compareTo(other: Byte): Int
     external override fun toDouble(): Double
     external override fun toFloat(): Float
     external override fun toLong(): Long
@@ -92,15 +89,10 @@ class Byte private constructor() : Number(), Comparable<Byte> {
 }
 
 class Short private constructor() : Number(), Comparable<Short> {
-    external operator fun plus(other: Short): Int
-    external operator fun minus(other: Short): Int
-    external operator fun times(other: Short): Int
-    external operator fun div(other: Short): Int
-    external operator fun rem(other: Short): Int
+${numberOperators('Short')}
     external operator fun unaryMinus(): Int
     external operator fun inc(): Short
     external operator fun dec(): Short
-    external override fun compareTo(other: Short): Int
     external override fun toDouble(): Double
     external override fun toFloat(): Float
     external override fun toLong(): Long
@@ -120,15 +112,10 @@ class Short private constructor() : Number(), Comparable<Short> {
 }
 
 class Int private constructor() : Number(), Comparable<Int> {
-    external operator fun plus(other: Int): Int
-    external operator fun minus(other: Int): Int
-    external operator fun times(other: Int): Int
-    external operator fun div(other: Int): Int
-    external operator fun rem(other: Int): Int
+${numberOperators('Int')}
     external operator fun unaryMinus(): Int
     external operator fun inc(): Int
     external operator fun dec(): Int
-    external override fun compareTo(other: Int): Int
     external override fun toDouble(): Double
     external override fun toFloat(): Float
     external override fun toLong(): Long
@@ -160,15 +147,10 @@ class Int private constructor() : Number(), Comparable<Int> {
 }
 
 class Long private constructor() : Number(), Comparable<Long> {
-    external operator fun plus(other: Long): Long
-    external operator fun minus(other: Long): Long
-    external operator fun times(other: Long): Long
-    external operator fun div(other: Long): Long
-    external operator fun rem(other: Long): Long
+${numberOperators('Long')}
     external operator fun unaryMinus(): Long
     external operator fun inc(): Long
     external operator fun dec(): Long
-    external override fun compareTo(other: Long): Int
     external override fun toDouble(): Double
     external override fun toFloat(): Float
     external override fun toLong(): Long
@@ -198,15 +180,10 @@ class Long private constructor() : Number(), Comparable<Long> {
 }
 
 class Float private constructor() : Number(), Comparable<Float> {
-    external operator fun plus(other: Float): Float
-    external operator fun minus(other: Float): Float
-    external operator fun times(other: Float): Float
-    external operator fun div(other: Float): Float
-    external operator fun rem(other: Float): Float
+${numberOperators('Float')}
     external operator fun unaryMinus(): Float
     external operator fun inc(): Float
     external operator fun dec(): Float
-    external override fun compareTo(other: Float): Int
     external override fun toDouble(): Double
     external override fun toFloat(): Float
     external override fun toLong(): Long
@@ -226,15 +203,10 @@ class Float private constructor() : Number(), Comparable<Float> {
 }
 
 class Double private constructor() : Number(), Comparable<Double> {
-    external operator fun plus(other: Double): Double
-    external operator fun minus(other: Double): Double
-    external operator fun times(other: Double): Double
-    external operator fun div(other: Double): Double
-    external operator fun rem(other: Double): Double
+${numberOperators('Double')}
     external operator fun unaryMinus(): Double
     external operator fun inc(): Double
     external operator fun dec(): Double
-    external override fun compareTo(other: Double): Int
     external override fun toDouble(): Double
     external override fun toFloat(): Float
     external override fun toLong(): Long
@@ -345,3 +317,14 @@ open external class Throwable {
     external override fun toString(): String
 }
 `;
+
+/** Kotlin declares the arithmetic and `compareTo` of each signed number type for every signed number type as the argument. */
+function numberOperators(kind: NumericKind): string {
+  return SIGNED_NUMBER_KINDS.flatMap((other) => [
+    ...Object.entries(NUMBER_OPERATOR_NAMES).map(
+      ([operator, name]) =>
+        `    external operator fun ${name}(other: ${other}): ${arithmeticResult(kind, other, operator as ArithmeticOperator)}`
+    ),
+    `    external ${other === kind ? 'override' : 'operator'} fun compareTo(other: ${other}): Int`,
+  ]).join('\n');
+}

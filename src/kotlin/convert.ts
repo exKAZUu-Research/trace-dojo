@@ -38,7 +38,16 @@ const CLASS_MODIFIERS = new Set([
   'public',
   'protected',
 ]);
-const MEMBER_MODIFIERS = new Set(['open', 'abstract', 'override', 'private', 'public', 'protected', 'operator']);
+const MEMBER_MODIFIERS = new Set([
+  'open',
+  'abstract',
+  'override',
+  'private',
+  'public',
+  'protected',
+  'operator',
+  'infix',
+]);
 const NO_MODIFIERS = new Set<string>();
 
 /** Converts tree-sitter's tree into the AST, rejecting syntax that this environment does not run. */

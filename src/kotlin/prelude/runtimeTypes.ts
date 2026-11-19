@@ -95,17 +95,31 @@ export const EXCEPTIONS: [kotlinPackage: string, name: string, parent: string, j
   ['kotlin', 'StackOverflowError', 'Error', 'java.lang.StackOverflowError'],
   ['kotlin', 'OutOfMemoryError', 'Error', 'java.lang.OutOfMemoryError'],
   ['kotlin', 'InstantiationError', 'Error', 'java.lang.InstantiationError'],
+  ['java.lang', 'NegativeArraySizeException', 'RuntimeException', 'java.lang.NegativeArraySizeException'],
+  ['java.util', 'IllegalFormatException', 'IllegalArgumentException', 'java.util.IllegalFormatException'],
+  ...[
+    'IllegalFormatConversionException',
+    'MissingFormatArgumentException',
+    'UnknownFormatConversionException',
+    'MissingFormatWidthException',
+    'IllegalFormatPrecisionException',
+    'IllegalFormatCodePointException',
+    'FormatFlagsConversionMismatchException',
+  ].map((name): [string, string, string, string] => ['java.util', name, 'IllegalFormatException', `java.util.${name}`]),
 ];
 
-/** The exception classes of the prelude, each with Throwable's four constructors. */
-export function exceptionsSource(): string {
-  const classes = EXCEPTIONS.map(
-    ([, name, parent]) => `open external class ${name} : ${parent} {
+/** The exception classes of the prelude, each with Throwable's four constructors, as one source per package. */
+export function exceptionSources(): string[] {
+  const packages = Map.groupBy(EXCEPTIONS, ([packageName]) => packageName);
+  return [...packages].map(([packageName, exceptions]) => {
+    const classes = exceptions.map(
+      ([, name, parent]) => `open external class ${name} : ${parent} {
     external constructor()
     external constructor(message: String?)
     external constructor(message: String?, cause: Throwable?)
     external constructor(cause: Throwable?)
 }`
-  );
-  return `package kotlin\n\n${classes.join('\n\n')}\n`;
+    );
+    return `package ${packageName}\n\n${classes.join('\n\n')}\n`;
+  });
 }

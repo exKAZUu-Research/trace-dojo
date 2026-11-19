@@ -322,9 +322,12 @@ function roundHalfEven(value: number): number {
   if (!Number.isFinite(value)) return value;
   const floor = Math.floor(value);
   const difference = value - floor;
-  if (difference < 0.5) return floor;
-  if (difference > 0.5) return floor + 1;
-  return floor % 2 === 0 ? floor : floor + 1;
+  let rounded: number;
+  if (difference < 0.5) rounded = floor;
+  else if (difference > 0.5) rounded = floor + 1;
+  else rounded = floor % 2 === 0 ? floor : floor + 1;
+  // Math.rint keeps the sign of a value that rounds to zero, so round(-0.5) is -0.0.
+  return rounded === 0 && value < 0 ? -0 : rounded;
 }
 
 /** `Math.max`, where NaN wins and 0.0 is greater than -0.0. */

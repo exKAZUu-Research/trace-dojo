@@ -13,6 +13,7 @@ import {
   isNullable,
   type KType,
   mentionsVariable,
+  nonNull,
   nullable,
   resolved,
   substitute,
@@ -229,7 +230,7 @@ export abstract class CallCompiler extends CompilerCore {
         row,
         name
       );
-    this.checkAccessible(scope, chosen.candidate.symbol, row);
+    this.checkAccessible(scope, chosen.candidate.symbol, row, chosen.candidate.receiverType);
     return this.completeCall(scope, context, chosen, args, compiledArgs, expected, row);
   }
 
@@ -477,8 +478,16 @@ export abstract class CallCompiler extends CompilerCore {
     type: FunctionType
   ): KType | undefined;
 
-  /** Rejects a use of a `private` or `protected` member outside the code that may see it, as kotlinc does. */
-  protected checkAccessible(scope: Scope, member: FunctionSymbol | PropertySymbol, row: number): void {
+  /**
+   * Rejects a use of a `private` or `protected` member outside the code that may see it, as kotlinc does. A subclass
+   * uses a protected member only through a receiver of the subclass, or through `super`, whose receiver is undefined.
+   */
+  protected checkAccessible(
+    scope: Scope,
+    member: FunctionSymbol | PropertySymbol,
+    row: number,
+    receiverType: KType | undefined
+  ): void {
     const { owner, visibility } = member;
     if (!owner || visibility === 'public' || visibility === 'internal') return;
     const classes = this.enclosingClasses(scope);
@@ -487,8 +496,12 @@ export abstract class CallCompiler extends CompilerCore {
       if (classes.includes(owner) || (owner.outer?.companion === owner && classes.includes(owner.outer))) return;
       this.error(row, `${member.name} は private なので、${owner.name} の外からは使えません。`);
     }
-    if (classes.some((cls) => cls.isSubclassOf(owner))) return;
-    this.error(row, `${member.name} は protected なので、${owner.name} とそのサブクラスの外からは使えません。`);
+    if (
+      !classes.some(
+        (cls) => cls.isSubclassOf(owner) && (!receiverType || isSubtype(nonNull(receiverType), cls.selfType))
+      )
+    )
+      this.error(row, `${member.name} は protected なので、${owner.name} とそのサブクラスの外からは使えません。`);
   }
 
   /** The classes whose declarations hold the code of a scope, nested classes' outer classes included. */
@@ -515,9 +528,7 @@ export abstract class CallCompiler extends CompilerCore {
     const { symbol } = candidate;
     // A constructor's result is its class with the class's type parameters, which the expected type may infer.
     const declaredReturn =
-      candidate.kind === 'constructor' && symbol.owner
-        ? symbol.owner.selfType
-        : (symbol.returnType ?? this.core.unit.type);
+      candidate.kind === 'constructor' && symbol.owner ? symbol.owner.selfType : this.ensureReturnType(symbol, row);
     // The expected type constrains the variables only where the result's type mentions them.
     if (expected && hasOpenVariables(substitute(declaredReturn, substitution))) {
       const saved = variables.map((variable) => ({ lower: [...variable.lower], upper: [...variable.upper] }));
@@ -670,6 +681,9 @@ export abstract class CallCompiler extends CompilerCore {
       typeArguments,
     };
   }
+
+  /** Makes sure a function without a declared result type has its result inferred from its body. */
+  protected abstract ensureReturnType(func: FunctionSymbol, row: number): KType;
 
   protected abstract reprConvert(eval_: Eval, from: ReturnType<typeof reprOf>, to: ReturnType<typeof reprOf>): Eval;
 

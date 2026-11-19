@@ -1,7 +1,20 @@
 import { TURTLE_METHOD_NAMES, type TurtleState } from '../../interpreter/turtleWorld';
 import { runtimeClassOf } from '../dispatch';
 import { defaultToString, formatPrimitive, hashOf, identityHash, stringHash, stringOf } from '../format';
-import { arithmeticOperation, compareDoubles, compareNumbers, negate, step, toInt32 } from '../operators';
+import {
+  arithmeticOperation,
+  type ArithmeticOperator,
+  arithmeticResult,
+  compareDoubles,
+  compareNumbers,
+  negate,
+  NUMBER_OPERATOR_NAMES,
+  type NumericKind,
+  SIGNED_NUMBER_KINDS,
+  step,
+  toInt32,
+  widen,
+} from '../operators';
 import { EXCEPTIONS } from '../prelude/runtimeTypes';
 import type { Frame } from '../runtime';
 import type { PropertySymbol } from '../symbols';
@@ -9,6 +22,8 @@ import { Boxed, KObject, type PrimitiveKind, UNIT, type Value } from '../values'
 import { defineNative, defineNativeProperty, libraryClass, newItems, throwError } from './registry';
 
 const INT_KINDS: PrimitiveKind[] = ['Byte', 'Short', 'Int'];
+
+const SIGNED_NUMBER_KIND_NAMES = new Set<PrimitiveKind>(SIGNED_NUMBER_KINDS);
 
 /** Converts a number of one kind to another, as `toInt()`, `toLong()`, and their kin do. */
 // code-gauge-allow functionNcss 43 -- registers the natives of one class together, in the order the prelude declares them.
@@ -134,21 +149,28 @@ function range(name: string, first: Value, last: Value): Value {
 }
 
 function defineOperatorMembers(): void {
-  const operators: [string, '+' | '-' | '*' | '/' | '%'][] = [
-    ['plus', '+'],
-    ['minus', '-'],
-    ['times', '*'],
-    ['div', '/'],
-    ['rem', '%'],
-  ];
-  for (const kind of ['Int', 'Long', 'Double', 'Float', 'Short', 'Byte'] as const) {
-    const result = kind === 'Short' || kind === 'Byte' ? 'Int' : kind;
-    for (const [name, operator] of operators) {
-      const operation = arithmeticOperation(result, operator);
-      defineNative(`kotlin.${kind}.${name}(${kind})`, (frame, receiver, [other]) =>
-        operation(frame, receiver as number | bigint, other as number | bigint)
-      );
+  for (const kind of SIGNED_NUMBER_KINDS) {
+    for (const other of SIGNED_NUMBER_KINDS) {
+      for (const [operator, name] of Object.entries(NUMBER_OPERATOR_NAMES) as [ArithmeticOperator, string][]) {
+        const result = arithmeticResult(kind, other, operator) as NumericKind;
+        const operation = arithmeticOperation(result, operator);
+        defineNative(`kotlin.${kind}.${name}(${other})`, (frame, receiver, [argument]) =>
+          operation(
+            frame,
+            widen(receiver as number | bigint, kind, result),
+            widen(argument as number | bigint, other, result)
+          )
+        );
+      }
+      const common = arithmeticResult(kind, other, '+') as NumericKind;
+      const isFloating = common === 'Double' || common === 'Float';
+      defineNative(`kotlin.${kind}.compareTo(${other})`, (_frame, receiver, [argument]) => {
+        const a = widen(receiver as number | bigint, kind, common);
+        const b = widen(argument as number | bigint, other, common);
+        return isFloating ? compareDoubles(a as number, b as number) : compareNumbers(a, b);
+      });
     }
+    const result = kind === 'Short' || kind === 'Byte' ? 'Int' : kind;
     defineNative(`kotlin.${kind}.unaryMinus()`, (_frame, receiver) => negate(result, receiver as number | bigint));
     defineNative(`kotlin.${kind}.inc()`, (_frame, receiver) => step(kind, receiver as number | bigint, 1));
     defineNative(`kotlin.${kind}.dec()`, (_frame, receiver) => step(kind, receiver as number | bigint, -1));
@@ -161,12 +183,12 @@ function definePrimitives(): void {
     for (const [name, to] of CONVERSIONS) {
       defineNative(`${prefix}.${name}()`, (_frame, receiver) => convertNumber(receiver as number | bigint, kind, to));
     }
-    const isFloating = kind === 'Double' || kind === 'Float';
-    defineNative(`${prefix}.compareTo(${kind})`, (_frame, receiver, [other]) =>
-      isFloating
-        ? compareDoubles(receiver as number, other as number)
-        : compareNumbers(receiver as number | bigint, other as number | bigint)
-    );
+    // The signed number types compare with every number type, which defineOperatorMembers covers.
+    if (!SIGNED_NUMBER_KIND_NAMES.has(kind)) {
+      defineNative(`${prefix}.compareTo(${kind})`, (_frame, receiver, [other]) =>
+        compareNumbers(receiver as number | bigint, other as number | bigint)
+      );
+    }
     defineNative(`${prefix}.equals(Any?)`, boxedEquals(kind));
     defineNative(`${prefix}.hashCode()`, (frame, receiver) =>
       hashOf(frame, new Boxed(kind, receiver as number | bigint))

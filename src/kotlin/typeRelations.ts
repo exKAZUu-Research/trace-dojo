@@ -215,6 +215,8 @@ function supertypesInOrder(type: KType): KType[] {
     const substitution = substitutionOf(current);
     for (const supertype of current.cls.supertypes) {
       const next = substitute(supertype, substitution) as ClassType;
+      // Any comes last, after the interfaces that a class without a superclass implements.
+      if (next.cls === coreClasses().any) continue;
       if (!result.some((existing) => existing.kind === 'class' && existing.cls === next.cls)) {
         result.push(next);
         queue.push(next);

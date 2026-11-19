@@ -1,7 +1,7 @@
 import { convertRepr, type Core, type Eval, type Repr, reprOf } from './compilerBase';
 import type { Frame } from './runtime';
 import type { ClassSymbol, FunctionSymbol, PropertySymbol } from './symbols';
-import { Boxed, KObject, UNIT, type Value } from './values';
+import { Boxed, KObject, NULL, UNIT, type Value } from './values';
 
 let core: Core | undefined;
 
@@ -122,6 +122,7 @@ export function callFunction(
   args: Value[],
   callRow: number | undefined
 ): Value {
+  requireMemberReceiver(symbol, frame, receiver);
   if (!isVirtual(symbol)) return invokeFunction(symbol, frame, receiver, args, callRow);
   const target = runtimeClassOf(receiver).dispatch(symbol);
   if (target === symbol) return invokeFunction(symbol, frame, receiver, args, callRow);
@@ -129,6 +130,7 @@ export function callFunction(
 }
 
 export function getPropertyValue(symbol: PropertySymbol, frame: Frame, receiver: Value): Value {
+  requireMemberReceiver(symbol, frame, receiver);
   const target = isVirtual(symbol) ? runtimeClassOf(receiver).dispatch(symbol) : symbol;
   const { get } = target;
   if (!get) throw new Error(`The property ${symbol.name} has no getter`);
@@ -138,6 +140,7 @@ export function getPropertyValue(symbol: PropertySymbol, frame: Frame, receiver:
 }
 
 export function setPropertyValue(symbol: PropertySymbol, frame: Frame, receiver: Value, value: Value): void {
+  requireMemberReceiver(symbol, frame, receiver);
   const target = isVirtual(symbol) ? runtimeClassOf(receiver).dispatch(symbol) : symbol;
   const { set } = target;
   if (!set) throw new Error(`The property ${symbol.name} has no setter`);
@@ -149,3 +152,14 @@ export function setPropertyValue(symbol: PropertySymbol, frame: Frame, receiver:
 }
 
 export type { Eval };
+
+/**
+ * A receiver of a non-null type is null only when a superclass's initializer reads a property that the subclass has yet
+ * to initialize, where the JVM throws a NullPointerException.
+ */
+function requireMemberReceiver(symbol: FunctionSymbol | PropertySymbol, frame: Frame, receiver: Value): void {
+  const isStatic = symbol.kind === 'function' && symbol.isConstructor;
+  if (receiver === NULL && symbol.owner && !symbol.extensionReceiver && !isStatic && !symbol.owner.isObject) {
+    frame.runtime.throwError(frame, 'java.lang.NullPointerException');
+  }
+}

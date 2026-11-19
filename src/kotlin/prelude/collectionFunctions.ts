@@ -435,6 +435,31 @@ fun <T : Comparable<T>> Iterable<T>.min(): T {
     return min
 }
 
+// The floating-point overloads propagate NaN, as kotlin.math.min does, where compareTo would order NaN last.
+@JvmName("minOfDouble")
+fun Iterable<Double>.min(): Double = minOrNull() ?: throw NoSuchElementException()
+
+@JvmName("minOrNullOfDouble")
+fun Iterable<Double>.minOrNull(): Double? {
+    val iterator = iterator()
+    if (!iterator.hasNext()) return null
+    var min = iterator.next()
+    while (iterator.hasNext()) min = kotlin.math.min(min, iterator.next())
+    return min
+}
+
+@JvmName("maxOfDouble")
+fun Iterable<Double>.max(): Double = maxOrNull() ?: throw NoSuchElementException()
+
+@JvmName("maxOrNullOfDouble")
+fun Iterable<Double>.maxOrNull(): Double? {
+    val iterator = iterator()
+    if (!iterator.hasNext()) return null
+    var max = iterator.next()
+    while (iterator.hasNext()) max = kotlin.math.max(max, iterator.next())
+    return max
+}
+
 fun <T : Comparable<T>> Iterable<T>.maxOrNull(): T? {
     val iterator = iterator()
     if (!iterator.hasNext()) return null

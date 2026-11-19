@@ -23,6 +23,7 @@ import {
   arithmeticResult,
   compareNumbers,
   negate,
+  NUMBER_OPERATOR_NAMES,
   step,
   unaryResult,
   widen,
@@ -93,9 +94,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   /** Makes sure a property without a declared type has its type inferred from its initializer. */
   protected abstract ensurePropertyType(property: PropertySymbol, row: number): KType;
-
-  /** Makes sure a function without a declared result type has its result inferred from its body. */
-  protected abstract ensureReturnType(func: FunctionSymbol, row: number): KType;
 
   /** The instance of an object or companion object, created on first use. */
   protected abstract objectInstance(cls: ClassSymbol): (frame: Frame) => Value;
@@ -299,8 +297,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     else if (suffix === 'L') kind = 'Long';
     else if (suffix === 'uL') kind = 'ULong';
     else if (isUnsigned) kind = value <= 0xff_ff_ff_ffn ? 'UInt' : 'ULong';
-    else kind = value <= 2_147_483_647n ? 'Int' : 'Long';
-    if (kind === 'Long' && value > 2n ** 63n - 1n) this.error(row, '数が大きすぎます。');
+    else kind = BigInt.asIntN(32, value) === value ? 'Int' : 'Long';
+    if (kind === 'Long' && BigInt.asIntN(64, value) !== value) this.error(row, '数が大きすぎます。');
     const runtimeValue = kind === 'Long' || kind === 'ULong' ? value : Number(value);
     return {
       type: this.primitiveType(kind),
@@ -629,7 +627,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
         row,
         extensionReceiver !== undefined && isNullable(resolved(extensionReceiver))
       );
-      this.checkAccessible(scope, property.symbol, row);
+      this.checkAccessible(scope, property.symbol, row, target.type);
       return this.readProperty(property, target, row);
     });
   }
@@ -1231,7 +1229,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const supertypes = cls.supertypes.length > 0 ? cls.supertypes : [anyType()];
     const candidates = supertypes
       .flatMap((type) => this.memberCandidates(type, name))
-      .filter((candidate) => !candidate.symbol.isAbstract);
+      .filter((candidate) => !candidate.symbol.isAbstract)
+      // Through super, a subclass may use the protected members of its parent.
+      .map((candidate) => ({ ...candidate, receiverType: undefined }));
     if (candidates.length === 0) this.error(row, `super には ${name} がありません。`);
     const resolvedCall = this.resolveCall(
       scope,
@@ -1660,7 +1660,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       }
     }
     const args: ArgumentSyntax[] = [{ row: rightExpression.row, name: undefined, value: rightExpression }];
-    return this.compileOperatorCall(scope, context, left, OPERATOR_NAMES[operator], args, row, operator);
+    return this.compileOperatorCall(scope, context, left, NUMBER_OPERATOR_NAMES[operator], args, row, operator);
   }
 
   private compileLogical(
@@ -2134,15 +2134,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const outerFlow = this.flow;
     this.flow = outerFlow.copy();
     const variables = params.map((param) => {
-      const variable = this.newVariable(
-        lambdaScope,
-        lambdaContext,
-        param.name ?? '_',
-        param.type,
-        false,
-        param.row,
-        param.name !== undefined
-      );
+      const variable = this.newParameter(lambdaScope, lambdaContext, param.name ?? '_', param.type, param.row);
       if (param.name === undefined) lambdaScope.variables.delete('_');
       this.flow.assigned.add(variable);
       return variable;
@@ -2170,6 +2162,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const captureBuilder = this.captureBuilder(context, lambdaContext);
     const { info } = lambdaContext;
     const hasReceiver = receiverType !== undefined;
+    const receiverIsUnboxed = hasReceiver && reprOf(this.core, receiverType) !== 'ref';
     const arity = params.length + (hasReceiver ? 1 : 0);
     const functionClass = this.core.function;
     const type: FunctionType = {
@@ -2189,11 +2182,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
         value.function = {
           arity,
           call: (caller, args, callRow?: number) => {
-            const receiver = hasReceiver ? args[0] : undefined;
+            const receiver = hasReceiver ? unboxedIf(receiverIsUnboxed, args[0]) : undefined;
             const values = hasReceiver ? args.slice(1) : args;
-            const converted = values.map((arg, index) =>
-              paramReprs[index] === 'ref' || !(arg instanceof Boxed) ? arg : arg.value
-            );
+            const converted = values.map((arg, index) => unboxedIf(paramReprs[index] !== 'ref', arg));
             return frame.runtime.call(info, caller, env, receiver, converted, callRow, resultEval);
           },
         };
@@ -2289,14 +2280,6 @@ const COLLECTION_FACTORIES = new Set(['arrayOf', 'listOf', 'mutableListOf', 'arr
 
 const PROBE_PARAM = new (class extends Object {})() as unknown as TypeParameterSymbol;
 
-const OPERATOR_NAMES: Record<ArithmeticOperator, string> = {
-  '+': 'plus',
-  '-': 'minus',
-  '*': 'times',
-  '/': 'div',
-  '%': 'rem',
-};
-
 const COMPARISON_TESTS: Record<'<' | '<=' | '>' | '>=', (order: number) => boolean> = {
   '<': (order) => order < 0,
   '<=': (order) => order <= 0,
@@ -2329,4 +2312,9 @@ export function invokeFunctionValue(frame: Frame, fn: KObject, args: Value[], ca
 
 function Flow_merge(flows: Flow[]): Flow {
   return Flow.merge(flows);
+}
+
+/** Function values receive their arguments boxed, while a parameter of a primitive type holds the bare value. */
+function unboxedIf(unboxed: boolean, value: Value): Value {
+  return unboxed && value instanceof Boxed ? value.value : value;
 }

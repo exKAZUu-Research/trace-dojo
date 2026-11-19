@@ -4,6 +4,16 @@ import type { PrimitiveKind } from './values';
 export type ArithmeticOperator = '+' | '-' | '*' | '/' | '%';
 export type NumericKind = Exclude<PrimitiveKind, 'Char'>;
 
+export const NUMBER_OPERATOR_NAMES = {
+  '+': 'plus',
+  '-': 'minus',
+  '*': 'times',
+  '/': 'div',
+  '%': 'rem',
+} as const;
+
+export const SIGNED_NUMBER_KINDS = ['Byte', 'Short', 'Int', 'Long', 'Float', 'Double'] as const;
+
 type Binary = (frame: Frame, a: number | bigint, b: number | bigint) => number | bigint;
 
 function isUnsignedKind(kind: PrimitiveKind): boolean {

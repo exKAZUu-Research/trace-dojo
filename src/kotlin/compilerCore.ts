@@ -370,10 +370,26 @@ export abstract class CompilerCore {
     row: number,
     isShown = true
   ): VariableSymbol {
+    // A local may hide a parameter, as the body of a function or lambda shares the parameters' scope here.
+    if (isShown && name !== '_' && scope.variables.get(name)?.isParameter === false)
+      this.error(row, `${name} は、すでに宣言されています。`);
     const slot = context.allocate(name, type, isShown && !context.info.isLibrary);
     const variable = new VariableSymbol(name, type, isVar, 0, slot, row);
     variable.owner = context;
     scope.variables.set(name, variable);
+    return variable;
+  }
+
+  /** Declares a parameter, which a local of the body may hide. */
+  protected newParameter(
+    scope: Scope,
+    context: FunctionContext,
+    name: string,
+    type: KType,
+    row: number
+  ): VariableSymbol {
+    const variable = this.newVariable(scope, context, name, type, false, row, name !== '_');
+    variable.isParameter = true;
     return variable;
   }
 
