@@ -3457,3 +3457,19 @@ echo htmlentities("A\x80B", ENT_QUOTES | ENT_DISALLOWED, 'ISO-8859-1'), "\n";
 `);
   expect(result).toMatchObject({ kind: 'executed', stdout: 'A&#xFFFD;B\nA&#xFFFD;B\n' });
 });
+
+test('preserves cycle destructor order across a live gc_collect_cycles() inside a closure', () => {
+  const twoCycle = run(String.raw`<?php
+class N { public $p; function __construct(public $id) {} function __destruct() { echo $this->id; } }
+(function () { $a = new N('a'); $b = new N('b'); $a->p = $b; gc_collect_cycles(); $b->p = $a; })();
+echo '|', gc_collect_cycles(), "\n";
+`);
+  expect(twoCycle).toMatchObject({ kind: 'executed', stdout: '|ab2\n' });
+
+  const threeCycle = run(String.raw`<?php
+class N { public $p; function __construct(public $id) {} function __destruct() { echo $this->id; } }
+(function () { $a = new N('a'); $b = new N('b'); $c = new N('c'); $a->p = $b; gc_collect_cycles(); $b->p = $c; $c->p = $a; })();
+echo '|', gc_collect_cycles(), "\n";
+`);
+  expect(threeCycle).toMatchObject({ kind: 'executed', stdout: '|abc3\n' });
+});

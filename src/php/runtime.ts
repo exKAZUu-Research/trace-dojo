@@ -87,6 +87,8 @@ export class Frame {
   vars = new Map<string, Ref>();
   /** Values that an expression being evaluated holds, which garbage collection must keep. */
   temporaries: (Value | Ref)[] = [];
+  /** Active `foreach` subjects in this frame, which PHP's cycle collector keeps in its root buffer. */
+  foreachSubjects: (PhpArray | PhpObject)[] = [];
   args: Value[] = [];
   argumentHolders: (Value | Ref)[] = [];
   argumentRefs: (Ref | undefined)[] = [];

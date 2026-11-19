@@ -511,18 +511,23 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
   if (!(subject instanceof PhpArray || (subject instanceof PhpObject && !subject.isResource)))
     return warnForeachSubject(statement, subject);
   frame.temporaries.push(subject);
-  if (subject instanceof PhpObject)
-    return foreachObject(statement, subject, false, () =>
-      runtime.discardNativeResult(subject, nativeMark, subjectMark)
-    );
-  subject.shared = true;
-  for (const [key, slot] of subject.foreachEntries()) {
-    runtime.spend();
-    const value = slot instanceof Ref ? slot.v : slot;
-    const completion = foreachIteration(statement, key, value);
-    if (completion !== 'next') return completion;
+  frame.foreachSubjects.push(subject);
+  try {
+    if (subject instanceof PhpObject)
+      return foreachObject(statement, subject, false, () =>
+        runtime.discardNativeResult(subject, nativeMark, subjectMark)
+      );
+    subject.shared = true;
+    for (const [key, slot] of subject.foreachEntries()) {
+      runtime.spend();
+      const value = slot instanceof Ref ? slot.v : slot;
+      const completion = foreachIteration(statement, key, value);
+      if (completion !== 'next') return completion;
+    }
+    return undefined;
+  } finally {
+    frame.foreachSubjects.pop();
   }
-  return undefined;
 }
 
 const FOREACH_REPLACED = Symbol();

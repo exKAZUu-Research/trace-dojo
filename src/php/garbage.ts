@@ -32,7 +32,7 @@ export function setDestructor(run: (object: PhpObject, row?: number) => void): v
 export function collectGarbage(runtime: Runtime, cycles = false, stopOnException = false): number {
   if (runtime.collectingCycles) return 0;
   runtime.collectingCycles = cycles;
-  if (cycles) for (const value of gcTemporaries(runtime)) runtime.gcRoots.delete(value);
+  if (cycles) for (const value of gcForeachSubjects(runtime)) runtime.gcRoots.delete(value);
   try {
     return collectGarbageNow(runtime, cycles, stopOnException);
   } finally {
@@ -40,17 +40,15 @@ export function collectGarbage(runtime: Runtime, cycles = false, stopOnException
     runtime.collectingArrays.clear();
     runtime.collectingObjects.clear();
     runtime.destructedCollectionRoots.clear();
-    if (cycles) for (const value of gcTemporaries(runtime)) runtime.gcRoots.add(value);
+    if (cycles) for (const value of gcForeachSubjects(runtime)) runtime.gcRoots.add(value);
   }
 }
 
-function gcTemporaries(runtime: Runtime): (PhpArray | PhpObject)[] {
+function gcForeachSubjects(runtime: Runtime): (PhpArray | PhpObject)[] {
   return runtime.frames
-    .flatMap((frame) => frame.temporaries)
-    .filter((value): value is PhpArray | PhpObject =>
-      value instanceof PhpArray
-        ? !value.uncollectable
-        : value instanceof PhpObject && !value.isResource && runtime.objects.get(value.id) === value
+    .flatMap((frame) => frame.foreachSubjects)
+    .filter((value) =>
+      value instanceof PhpArray ? !value.uncollectable : !value.isResource && runtime.objects.get(value.id) === value
     );
 }
 
