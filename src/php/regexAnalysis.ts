@@ -5,7 +5,7 @@ import { UnsupportedFeatureError } from './unsupported';
 
 type Length = readonly [number, number];
 
-// code-gauge-allow functionNcss 53 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionNcss 56 -- Keeps the regex AST validation and subject restrictions in the same traversal.
 // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function analyzeRegex(
   source: string,
@@ -14,7 +14,7 @@ export function analyzeRegex(
   ignoreCase: boolean,
   invalidLookbehind: (start: number, reason: string) => never,
   emptyMarkers: ReadonlyMap<string, string>
-): { byteCaselessReferences: Set<string>; emptySource?: string } {
+): { byteCaselessReferences: Set<string>; emptySource?: string; ambiguousRepetition: boolean } {
   let tree: AST.Pattern;
   try {
     tree = new RegExpParser({ ecmaVersion: 2025 }).parsePattern(source, 0, source.length, { unicode });
@@ -29,7 +29,9 @@ export function analyzeRegex(
   const contexts: boolean[] = [];
   const lookbehinds: AST.LookaroundAssertion[] = [];
   const lengths = new Map<AST.Element, Length>();
+  const ambiguousBodies = new WeakMap<AST.Element, boolean>();
   let backwardCaptureReference = false;
+  let ambiguousRepetition = false;
   visitRegExpAST(tree, {
     onGroupEnter(node) {
       contexts.push(ignoreCase);
@@ -66,6 +68,7 @@ export function analyzeRegex(
     },
     onQuantifierLeave(node) {
       validateNullableRepeat(node, lengths);
+      ambiguousRepetition ||= node.max > 1 && ambiguousRepeatBody(node.element, ambiguousBodies);
     },
     onCapturingGroupEnter() {
       captureCount++;
@@ -75,7 +78,41 @@ export function analyzeRegex(
   return {
     byteCaselessReferences: references,
     emptySource: emptyMarkers.size === 0 ? undefined : specializeForEmptySubject(tree, emptyMarkers),
+    ambiguousRepetition,
   };
+}
+
+function ambiguousRepeatBody(node: AST.Element, cache: WeakMap<AST.Element, boolean>): boolean {
+  const cached = cache.get(node);
+  if (cached !== undefined) return cached;
+  let ambiguous = false;
+  if (node.type === 'Quantifier') {
+    ambiguous = node.min !== node.max || ambiguousRepeatBody(node.element, cache);
+  } else if (node.type === 'Group' || node.type === 'CapturingGroup') {
+    ambiguous =
+      !disjointAlternatives(node.alternatives) ||
+      node.alternatives.some((alternative) =>
+        alternative.elements.some((element) => ambiguousRepeatBody(element, cache))
+      );
+  } else if (node.type === 'Backreference') {
+    ambiguous = true;
+  }
+  cache.set(node, ambiguous);
+  return ambiguous;
+}
+
+function disjointAlternatives(alternatives: AST.Alternative[]): boolean {
+  if (alternatives.length <= 1) return true;
+  const prefixes = alternatives.map(({ elements }) => {
+    let prefix = '';
+    for (const element of elements) {
+      if (element.type !== 'Character') break;
+      prefix += String.fromCodePoint(element.value).toUpperCase().toLowerCase();
+    }
+    return prefix;
+  });
+  prefixes.sort();
+  return prefixes.every((prefix, index) => index === 0 || !prefix.startsWith(prefixes[index - 1]));
 }
 
 function recordReferenceNames(references: Set<string>, groups: readonly AST.CapturingGroup[]): void {

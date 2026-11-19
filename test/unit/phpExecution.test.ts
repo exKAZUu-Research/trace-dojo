@@ -831,11 +831,19 @@ test.each([
   '<?php preg_match("/(?:|a){0,3}/","aa");',
   '<?php preg_match("/(?:a*?)*/","aa");',
   '<?php preg_match("/(?:x*|a)+/","aa");',
+  '<?php preg_match("/^(?:a+)+$/",str_repeat("a", 30)."b");',
+  '<?php preg_match("/^(?:a|aa)+$/",str_repeat("a", 30)."b");',
 ])('rejects regex semantics the host cannot preserve: %s', (source) => {
   expect(run(source)).toMatchObject({
     kind: 'executed',
     uncaughtException: expect.stringContaining('この採点環境では使えません。'),
   });
+});
+
+test('retains short ambiguous repetitions and long unambiguous repetitions', () => {
+  expect(
+    run('<?php var_dump(preg_match("/^(?:a|aa)+$/","aaaa"),preg_match("/^(?:ab|ac)+$/",str_repeat("ab", 30)));')
+  ).toMatchObject({ kind: 'executed', stdout: 'int(1)\nint(1)\n' });
 });
 
 test('retains bounded lookbehind and Unicode or ASCII case folding', () => {

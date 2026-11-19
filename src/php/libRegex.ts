@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 410 -- The regex functions share matching, offsets, capture handling, and error state.
+// code-gauge-allow-file fileNcss 412 -- The regex functions share matching, offsets, capture handling, and error state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { dec, enc } from './bytes';
 import { consumeCallbackResult } from './callables';
@@ -40,6 +40,7 @@ defineConstant('PCRE_JIT_SUPPORT', false);
  */
 const cache = new Map<string, Compiled | string>();
 const CACHE_LIMIT = 256;
+const MAX_AMBIGUOUS_SUBJECT_LENGTH = 16;
 
 /** Compiles a PCRE pattern with delimiters, warning and returning undefined as PHP does for a bad pattern. */
 function compile(name: string, pattern: string): Compiled | undefined {
@@ -154,6 +155,8 @@ function prepareSubject(
   const text = compiled.utf8 ? dec(subject) : subject;
   rt().lastPregError = subjectError(compiled, subject, text, start);
   if (rt().lastPregError !== 0) return undefined;
+  if (compiled.ambiguousRepetition && text.length > MAX_AMBIGUOUS_SUBJECT_LENGTH)
+    throw new UnsupportedFeatureError('長い入力に対する曖昧な繰り返しを含む正規表現');
   if (!compiled.utf8) return { text, position: start, byteOffset: (index) => index };
   return { text, position: charIndexOf(text, start), byteOffset: byteIndexer(text) };
 }

@@ -8,7 +8,8 @@ import type { ArgValue } from './calls';
 import { canAccessProp, declForKey, issetProp, lookupProp, readProp } from './classes';
 import * as conversionsModule from './conversions';
 import { compareBytes, compareNumbers, debugType, floatFitsInt, normalizeKeyString, valueName } from './conversions';
-import { deprecated, throwError, warn, withCleanupExceptions, withPendingException } from './errors';
+import { deprecated, throwError, warn, withCleanupExceptions } from './errors';
+import { releaseDropped } from './garbage';
 import { cast } from './interp';
 import { naturalCompare } from './libString';
 import { defineAlias, defineConstant, defineFunction, markDirectOnly, markInlined } from './native';
@@ -24,7 +25,7 @@ import {
   withStringConversionErrors,
 } from './operators';
 import { arrayIsShared, ElementPlace, share, VarPlace } from './places';
-import { PhpThrow, rt } from './runtime';
+import { ExitSignal, PhpThrow, rt } from './runtime';
 import {
   copyValueSlot,
   deref,
@@ -1079,7 +1080,8 @@ function arrayColumn(rows: PhpArray, column: Value, index: Value | undefined): P
     for (const row of rows.iterValues()) addColumnRow(result, row, column, index);
   } catch (error) {
     runtime.held.pop();
-    if (error instanceof PhpThrow) withPendingException(runtime, error, () => runtime.release([result], true));
+    if (error instanceof PhpThrow || error instanceof ExitSignal)
+      releaseDropped(runtime, [result], true, 'complete', error);
     throw error;
   }
   runtime.held.pop();
@@ -1098,7 +1100,8 @@ function addColumnRow(result: PhpArray, row: Value, column: Value, index: Value 
           else result.set(toKey(key), share(value));
         }
       );
-    }
+    },
+    true
   );
 }
 
