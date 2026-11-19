@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 780 -- Keeps call binding, completion and frame cleanup together.
+// code-gauge-allow-file fileNcss 795 -- Keeps call binding, completion and frame cleanup together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl } from './ast';
@@ -668,7 +668,6 @@ function invokeUser(
     runtime.depth--;
     callStack.pop();
     runtime.frames.pop();
-    for (const ref of frame.vars.values()) ref.rc--;
     for (const value of frame.argumentHolders) if (value instanceof Ref) value.rc--;
     for (const value of frame.temporaries) if (value instanceof Ref) value.rc--;
     runtime.row = savedRow;
@@ -682,6 +681,7 @@ function invokeUser(
         outerNative > 0,
         failure instanceof PhpThrow ? failure : undefined
       );
+    else for (const ref of frame.vars.values()) ref.rc--;
   }
   runtime.lastReturnRef = !discardResult && frame.returning instanceof Ref ? frame.returning : undefined;
   return returned;
@@ -783,29 +783,42 @@ function releaseFrame(
   if (frame.thisObj) runtime.pendingGcRoots.add(frame.thisObj);
   const holder = fromNative ? runtime.nativeHeld.at(-1) : undefined;
   if (returned instanceof PhpObject || returned instanceof PhpArray) (holder ?? caller.temporaries).push(returned);
-  const locals = Array.from(runtime.variableBindings(frame), ([, ref]) => ref.v).filter(isComposite);
+  for (const ref of frame.vars.values()) if (!ref.isDefinedBinding) ref.rc--;
+  const locals = Array.from(runtime.variableBindings(frame), ([, ref]) => ref);
   const tail = [...frame.argumentHolders, ...frame.temporaries, frame.returning, frame.thisObj, frame.closure];
   if (locals.length === 0) {
     releaseCallValues(runtime, tail, pending, fromNative);
     return;
   }
   const heldTail = tail.map((value) => (value instanceof Ref ? value.v : value)).filter(isComposite);
-  withPendingException(runtime, pending, () => {
-    const base = runtime.held.length;
-    runtime.held.push(...heldTail, ...locals);
-    try {
-      withCleanupExceptions(runtime, (capture) => {
-        for (const [index, value] of locals.entries()) {
-          runtime.held[base + heldTail.length + index] = null;
-          releaseFrameStep(runtime, [value], fromNative, capture);
-        }
-        for (let index = 0; index < heldTail.length; index++) runtime.held[base + index] = null;
-        releaseFrameStep(runtime, tail, fromNative, capture);
-      });
-    } finally {
-      runtime.held.length = base;
-    }
-  });
+  withPendingException(runtime, pending, () => releaseFrameLocals(runtime, locals, heldTail, tail, fromNative));
+}
+
+function releaseFrameLocals(
+  runtime: Runtime,
+  locals: readonly Ref[],
+  heldTail: readonly (PhpObject | PhpArray)[],
+  tail: unknown[],
+  fromNative: boolean
+): void {
+  const base = runtime.held.length;
+  runtime.held.push(...heldTail, ...locals);
+  let released = 0;
+  try {
+    withCleanupExceptions(runtime, (capture) => {
+      for (const [index, ref] of locals.entries()) {
+        runtime.held[base + heldTail.length + index] = null;
+        ref.rc--;
+        released = index + 1;
+        if (isComposite(ref.v)) releaseFrameStep(runtime, [ref.v], fromNative, capture);
+      }
+      for (let index = 0; index < heldTail.length; index++) runtime.held[base + index] = null;
+      releaseFrameStep(runtime, tail, fromNative, capture);
+    });
+  } finally {
+    for (let index = released; index < locals.length; index++) locals[index].rc--;
+    runtime.held.length = base;
+  }
 }
 
 function isComposite(value: unknown): value is PhpObject | PhpArray {

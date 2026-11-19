@@ -3642,4 +3642,19 @@ echo json_encode([$m1, $m2, $m3]);
     kind: 'executed',
     stdout: '[["d","a"],["b","aa"],["b","aa"]]',
   });
+
+  const liveLocalCleanup = run(String.raw`<?php
+class D { function __construct(public $n) {} function __destruct() { echo $this->n; } }
+class A {
+  public $r;
+  function __construct(&$r, public $replacement) { $this->r =& $r; }
+  function __destruct() { echo 'A'; $this->r = $this->replacement; echo 'Z'; }
+}
+function f($replacement) {
+  $a = null; $b = new D('b'); $c = new D('c');
+  $a = new A($b, $replacement);
+}
+f(null); echo '|'; f(new D('x'));
+`);
+  expect(liveLocalCleanup).toMatchObject({ kind: 'executed', stdout: 'AbZc|AbZxc' });
 });

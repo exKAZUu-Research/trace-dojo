@@ -189,7 +189,7 @@ export class Runtime {
   replacedExceptionHandlers: Value[] = [];
   readonly mt = new MersenneTwister();
   /** Values held by native code (such as the array a sort is sorting), which garbage collection must keep. */
-  readonly held: Value[] = [];
+  readonly held: (Value | Ref)[] = [];
   program?: Program;
   private mainVariableNames?: ReadonlySet<string>;
   notices: CompileNotice[] = [];
