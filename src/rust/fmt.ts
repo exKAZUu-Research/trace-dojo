@@ -428,14 +428,15 @@ function deref(value: Value): Value {
   return current;
 }
 
+/** The chars `ToUppercase` or `ToLowercase` has left, which it displays. */
 function caseIterText(value: Value): string {
-  return (value as { text?: string }).text ?? '';
+  return ((value as IterValue).rest?.() ?? []).join('');
 }
 
-/** Formats a list of items compactly (`[1, 2]`) or, at a depth of `{:#?}`, one per line with trailing commas. */
+/** `{:?}` of `ToUppercase` or `ToLowercase`: the chars it has left, as std's `CaseMappingIter` holds them. */
 function caseIterDebug(value: Value): string {
-  const { name, text } = value as unknown as { name: string; text: string };
-  const chars = [...text].map((c) => `'${escapeDebug(c, true)}'`).join(', ');
+  const { name } = value as unknown as { name: string };
+  const chars = [...caseIterText(value)].map((c) => `'${escapeDebug(c, true)}'`).join(', ');
   return `${name}(CaseMappingIter(IntoIter([${chars}])))`;
 }
 

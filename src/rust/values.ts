@@ -1,5 +1,6 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { TableMap } from './capacity';
+import type { DebugPart } from './debugText';
 import type { AdtDef, Type } from './types';
 
 /**
@@ -182,6 +183,14 @@ export class IterValue {
    * a `zip` of two `TrustedLen` iterators folds as many pairs as the shorter has, taking nothing more from the longer.
    */
   foldNext: (() => Next) | undefined;
+
+  /**
+   * `{:?}` of the iterator as std writes it, for iterators whose own state shows (`Windows { v: .., size: 2 }`):
+   * `show` writes a value of a type, and `item` is the type of the iterator's elements.
+   */
+  debug:
+    | ((show: (value: Value, type: Type, indent: number | undefined) => string, item: Type) => DebugPart)
+    | undefined;
 
   /** The elements left, for iterators over an array (`Chars::as_str` reads them without taking them). */
   rest: (() => Value[]) | undefined;

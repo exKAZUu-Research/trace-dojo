@@ -550,6 +550,36 @@ fn main() {
   });
 });
 
+test('iterators print the state rustc prints with {:?}, also when cloned', () => {
+  const program = `use std::collections::{BTreeSet, VecDeque};
+fn main() {
+    let mut s = "a,b".split(',');
+    s.next();
+    println!("{:?}", s);
+    println!("{:?}", "xxa".split("xx"));
+    let mut d: VecDeque<i32> = VecDeque::with_capacity(2);
+    d.push_back(1);
+    d.push_front(0);
+    println!("{:?}", d.iter());
+    let a: BTreeSet<i32> = [1, 2].into();
+    let b: BTreeSet<i32> = [2, 3].into();
+    println!("{:?}", a.union(&b));
+    let mut c = [1, 2].iter().cycle().skip_while(|&&x| x < 2);
+    c.next();
+    println!("{:?}", c.clone());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: `Split(SplitInternal { start: 2, end: 3, matcher: CharSearcher { haystack: "a,b", finger: 2, finger_back: 3, needle: ',', utf8_size: 1, utf8_encoded: [44, 0, 0, 0] }, allow_trailing_empty: true, finished: false })
+Split(SplitInternal { start: 0, end: 3, matcher: StrSearcher { haystack: "xxa", needle: "xx", searcher: TwoWay(TwoWaySearcher { crit_pos: 0, crit_pos_back: 2, period: 1, byteset: 72057594037927936, position: 0, end: 3, memory: 0, memory_back: 2 }) }, allow_trailing_empty: true, finished: false })
+Iter([0], [1])
+Union(MergeIterInner(Iter([1, 2]), Iter([2, 3]), None))
+SkipWhile { iter: Cycle { orig: Iter([1, 2]), iter: Iter([]) }, flag: true }
+`,
+    uncaughtException: undefined,
+  });
+});
+
 test.each([
   ['range patterns (stage C)', '    match 3 { 1..=5 => {}, _ => {} }'],
   ['threads (stage D)', '    std::thread::spawn(|| {});'],

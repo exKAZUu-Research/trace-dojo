@@ -1,4 +1,5 @@
 import { TableMap } from '../capacity';
+import { described, listPart } from '../iterDebug';
 import { cloneValue, compareValues, hashKey } from '../ops';
 import type { Type } from '../types';
 import {
@@ -15,6 +16,7 @@ import {
 import { defaultValue } from './core';
 import { arrayIter, mapIter, setIter } from './iterators';
 import { sizeOf } from './layout';
+import { btreeSetOp, orderOf, type SetOp } from './setOps';
 import { call, define, deref, type NativeContext, none, option, some } from './support';
 
 /** A new `HashMap` or `HashSet` with its entries' size, and with room for `capacity` elements. */
@@ -36,6 +38,11 @@ function resize(collection: MapValue | SetValue, change: (table: TableMap<string
   return UNIT_VALUE;
 }
 
+/** `HashSet`'s set operations, which `{:?}` writes as the list of the elements left. */
+function listed(iter: IterValue): IterValue {
+  return described(iter, (show, item) => listPart(iter.rest?.() ?? [], item, show));
+}
+
 function map(self: Value): MapValue {
   return deref(self) as MapValue;
 }
@@ -43,6 +50,34 @@ function map(self: Value): MapValue {
 function set(self: Value): SetValue {
   return deref(self) as SetValue;
 }
+
+const others = (
+  ctx: NativeContext,
+  a: SetValue,
+  b: SetValue,
+  keep: (inA: boolean, inB: boolean) => boolean,
+  order: 'a' | 'ab'
+): Value => {
+  const result: Value[] = [];
+  for (const value of setValues(ctx, a))
+    if (keep(true, b.entries.has(hashKey(keyType(ctx), value)))) result.push(value);
+  if (order === 'ab') {
+    for (const value of setValues(ctx, b))
+      if (keep(a.entries.has(hashKey(keyType(ctx), value)), true) && !a.entries.has(hashKey(keyType(ctx), value)))
+        result.push(value);
+  }
+  return listed(arrayIter(result));
+};
+/** `BTreeSet`'s set operations, which take std's steps. */
+const btree = (ctx: NativeContext, op: SetOp, self: Value, other: Value): Value => {
+  const sets: [SetValue, SetValue] = [set(self), set(other)];
+  const type = keyType(ctx);
+  return btreeSetOp(op, sets, [setValues(ctx, sets[0]), setValues(ctx, sets[1])], {
+    cmp: orderOf(type),
+    contains: (s, value) => s.entries.has(hashKey(type, value)),
+    setType: ctx.interp.program.builtinType('BTreeSet', [type]),
+  });
+};
 
 /** The type of the keys, which hashes them: `K` of `HashMap<K, V>`. */
 function collectIter(iter: IterValue): Value[] {
@@ -181,25 +216,9 @@ function mapNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
   };
 }
 
+// code-gauge-allow functionCognitiveComplexity 28 -- One native per method of std's sets.
+// code-gauge-allow functionNcss 57 -- One native per method of std's sets.
 function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: NativeContext) => Value> {
-  const others = (
-    ctx: NativeContext,
-    a: SetValue,
-    b: SetValue,
-    keep: (inA: boolean, inB: boolean) => boolean,
-    order: 'a' | 'ab'
-  ): Value => {
-    const result: Value[] = [];
-    for (const value of setValues(ctx, a))
-      if (keep(true, b.entries.has(hashKey(keyType(ctx), value)))) result.push(value);
-    if (order === 'ab') {
-      for (const value of setValues(ctx, b))
-        if (keep(a.entries.has(hashKey(keyType(ctx), value)), true) && !a.entries.has(hashKey(keyType(ctx), value)))
-          result.push(value);
-    }
-    if (sorted) result.sort((x, y) => compareValues(keyType(ctx), x, y) ?? 0);
-    return arrayIter(result);
-  };
   return {
     new: (_args, ctx) => withTable(new SetValue(sorted), sizeOf(ctx.typeArgs[0])),
     with_capacity: ([capacity], ctx) => withTable(new SetValue(sorted), sizeOf(ctx.typeArgs[0]), capacity),
@@ -235,18 +254,22 @@ function setNatives(sorted: boolean): Record<string, (args: Value[], ctx: Native
       return UNIT_VALUE;
     },
     iter: ([self], ctx) => setIter(set(self), keyType(ctx)),
-    union: ([self, other], ctx) => others(ctx, set(self), set(other), () => true, 'ab'),
-    intersection: ([self, other], ctx) => others(ctx, set(self), set(other), (_a, b) => b, 'a'),
-    difference: ([self, other], ctx) => others(ctx, set(self), set(other), (_a, b) => !b, 'a'),
+    union: ([self, other], ctx) =>
+      sorted ? btree(ctx, 'union', self, other) : others(ctx, set(self), set(other), () => true, 'ab'),
+    intersection: ([self, other], ctx) =>
+      sorted ? btree(ctx, 'intersection', self, other) : others(ctx, set(self), set(other), (_a, b) => b, 'a'),
+    difference: ([self, other], ctx) =>
+      sorted ? btree(ctx, 'difference', self, other) : others(ctx, set(self), set(other), (_a, b) => !b, 'a'),
     symmetric_difference: ([self, other], ctx) => {
+      if (sorted) return btree(ctx, 'symmetric_difference', self, other);
       const a = set(self);
       const b = set(other);
-      const result = [
-        ...setValues(ctx, a).filter((value) => !b.entries.has(hashKey(keyType(ctx), value))),
-        ...setValues(ctx, b).filter((value) => !a.entries.has(hashKey(keyType(ctx), value))),
-      ];
-      if (sorted) result.sort((x, y) => compareValues(keyType(ctx), x, y) ?? 0);
-      return arrayIter(result);
+      return listed(
+        arrayIter([
+          ...setValues(ctx, a).filter((value) => !b.entries.has(hashKey(keyType(ctx), value))),
+          ...setValues(ctx, b).filter((value) => !a.entries.has(hashKey(keyType(ctx), value))),
+        ])
+      );
     },
     is_subset: ([self, other]) => [...set(self).entries.keys()].every((hash) => set(other).entries.has(hash)),
     is_superset: ([self, other]) => [...set(other).entries.keys()].every((hash) => set(self).entries.has(hash)),

@@ -855,6 +855,7 @@ const LEAF_SHAPES: Record<string, Capability[]> = {
   VecIntoIterShape: ['back', 'exact'],
   ArrayIntoIterShape: ['back', 'exact'],
   VecDrainShape: ['back', 'exact'],
+  BinaryHeapDrainShape: ['back', 'exact'],
   StringDrainShape: ['back'],
   WindowsShape: ['back', 'exact'],
   ChunksShape: ['back', 'exact'],

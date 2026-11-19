@@ -749,6 +749,7 @@ pub mod option {
         pub fn as_ref(&self) -> Option<&T>;
         pub fn as_mut(&mut self) -> Option<&mut T>;
         pub fn iter(&self) -> IterImpl<&T, OptionIterShape>;
+        pub fn iter_mut(&mut self) -> IterImpl<&mut T, OptionIterShape>;
         pub fn zip<U>(self, other: Option<U>) -> Option<(T, U)>;
         pub fn into_iter(self) -> IterImpl<T, OptionIterShape>;
     }
@@ -796,6 +797,7 @@ pub mod result {
         pub fn as_ref(&self) -> Result<&T, &E>;
         pub fn as_mut(&mut self) -> Result<&mut T, &mut E>;
         pub fn iter(&self) -> IterImpl<&T, OptionIterShape>;
+        pub fn iter_mut(&mut self) -> IterImpl<&mut T, OptionIterShape>;
         pub fn into_iter(self) -> IterImpl<T, OptionIterShape>;
     }
     impl<T, E> Result<&T, E> {
@@ -894,6 +896,7 @@ pub mod iter {
         pub struct VecDequeDrainShape;
         pub struct BinaryHeapIterShape;
         pub struct BinaryHeapIntoIterShape;
+        pub struct BinaryHeapDrainShape;
         pub struct RangeShape<Idx>;
         pub struct RangeInclusiveShape<Idx>;
         pub struct RangeFromShape<Idx>;
@@ -1206,6 +1209,7 @@ pub mod collections {
         pub fn contains(&self, x: &T) -> bool where T: PartialEq;
         pub fn iter(&self) -> IterImpl<&T, VecDequeIterShape>;
         pub fn iter_mut(&mut self) -> IterImpl<&mut T, VecDequeIterMutShape>;
+        pub fn as_slices(&self) -> (&[T], &[T]);
         pub fn insert(&mut self, index: usize, value: T);
         pub fn remove(&mut self, index: usize) -> Option<T>;
         pub fn extend<A: ExtendInto<T>, S>(&mut self, iter: IterImpl<A, S>);
@@ -1241,6 +1245,7 @@ pub mod collections {
         pub fn into_sorted_vec(self) -> Vec<T> where T: Ord;
         pub fn extend<A: ExtendInto<T>, S>(&mut self, iter: IterImpl<A, S>) where T: Ord;
         pub fn into_iter(self) -> IterImpl<T, BinaryHeapIntoIterShape>;
+        pub fn drain(&mut self) -> IterImpl<T, BinaryHeapDrainShape>;
     }
     impl<T> &BinaryHeap<T> {
         pub fn into_iter(self) -> IterImpl<&T, BinaryHeapIterShape>;

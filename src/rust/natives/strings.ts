@@ -1,8 +1,10 @@
 import { madeString } from '../capacity';
 import { normalize } from '../infer';
 import { strSliceBytes } from '../interpreter';
+// code-gauge-allow-file fileNcss 488 -- One native per method of the standard library.
+import { described, fieldsPart, listPart, numberPart, tuplePart } from '../iterDebug';
 import { RustPanic } from '../runtime';
-import { shallow, type Type } from '../types';
+import { CHAR, REF_STR, shallow, type Type } from '../types';
 import {
   DONE,
   FnValue,
@@ -14,10 +16,18 @@ import {
   UNIT_VALUE,
   type Value,
 } from '../values';
-// code-gauge-allow-file fileNcss 488 -- One native per method of the standard library.
 import { withStringCapacity } from './capacityNatives';
 import { arrayIter } from './iterators';
 import { parseFloatText, parseInteger } from './numbers';
+import {
+  linesIter,
+  matchesIter,
+  type PatternKind,
+  splitAsciiWhitespaceIter,
+  splitIter,
+  splitNIter,
+  splitWhitespaceIter,
+} from './strSplit';
 import {
   call,
   define,
@@ -108,37 +118,25 @@ function patternMatcher(
   };
 }
 
+/** The searcher std picks for a pattern, by the pattern's type. */
+function patternOf(ctx: NativeContext, pattern: Value): PatternKind {
+  const p = deref(pattern);
+  if (p instanceof FnValue) return { kind: 'predicate', matches: (char) => call(ctx, p, [char]) as boolean };
+  if (typeof p === 'string') {
+    return normalize(shallow(ctx.typeArgs[0])).kind === 'char' ? { kind: 'char', char: p } : { kind: 'str', needle: p };
+  }
+  const type = normalize(shallow(ctx.typeArgs[0]));
+  const target = type.kind === 'ref' ? normalize(shallow(type.target)) : type;
+  const searcher =
+    type.kind !== 'ref' ? 'CharArraySearcher' : target.kind === 'array' ? 'CharArrayRefSearcher' : 'CharSliceSearcher';
+  return { kind: 'chars', chars: sliceItems(p) as string[], searcher };
+}
+
 /** The empty pattern matches at every char boundary up to the end, where `indexOf` would match forever. */
 function matchEmpty(text: string, from: number): { index: number; length: number } | undefined {
   if (from > text.length) return;
   const insidePair = from > 0 && from < text.length && /[\uDC00-\uDFFF]/.test(text[from]);
   return { index: insidePair ? from + 1 : from, length: 0 };
-}
-
-function splitBy(ctx: NativeContext, text: string, pattern: Value, limit = Number.POSITIVE_INFINITY): string[] {
-  const match = patternMatcher(ctx, pattern);
-  const parts: string[] = [];
-  let start = 0;
-  let from = 0;
-  while (parts.length < limit - 1) {
-    const found = match(text, from);
-    if (!found) break;
-    // An empty pattern matches at every character boundary.
-    if (found.length === 0) {
-      if (found.index >= text.length) break;
-      parts.push(text.slice(start, found.index));
-      start = found.index;
-      from = found.index + String.fromCodePoint(text.codePointAt(found.index)!).length;
-      continue;
-    }
-    parts.push(text.slice(start, found.index));
-    start = found.index + found.length;
-    from = start;
-  }
-  parts.push(text.slice(start));
-  const p = deref(pattern);
-  if (typeof p === 'string' && p === '') return ['', ...text, ''];
-  return parts;
 }
 
 /** The text before a byte offset, which `String`'s methods assert is at a character boundary. */
@@ -299,7 +297,22 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
       items.push([BigInt(offset), char]);
       offset += byteLength(char);
     }
-    return arrayIter(items);
+    const iter = arrayIter(items);
+    // `CharIndices` shows the byte offset of its next `char` and the `Chars` of the rest.
+    return described(iter, (show) => {
+      const rest = (iter.rest?.() ?? []) as [bigint, string][];
+      const chars = tuplePart('Chars', [
+        listPart(
+          rest.map(([, char]) => char),
+          CHAR,
+          show
+        ),
+      ]);
+      return fieldsPart('CharIndices', [
+        ['front_offset', numberPart(rest[0]?.[0] ?? offset)],
+        ['iter', chars],
+      ]);
+    });
   },
   as_bytes: ([s]) => Array.from(encoder.encode(str(s)), BigInt),
   trim: ([s]) => trimWith(str(s), true, true, isWhitespace),
@@ -318,61 +331,15 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     const length = endsWith(ctx, text, p);
     return option(ctx, length === undefined ? undefined : text.slice(0, text.length - length), length !== undefined);
   },
-  split_whitespace: ([s]) =>
-    strIter(
-      str(s)
-        .split(/[\s\u0085]+/u)
-        .filter((part) => part.length > 0)
-    ),
-  split_ascii_whitespace: ([s]) =>
-    strIter(
-      str(s)
-        .split(/[ \t\n\f\r]+/)
-        .filter((part) => part.length > 0)
-    ),
-  lines: ([s]) => {
-    const text = str(s);
-    // A line ends at `\n` or `\r\n`; a `\r` at the very end stays in the last line.
-    const lines = text
-      .split('\n')
-      .map((line, index, all) => (index < all.length - 1 && line.endsWith('\r') ? line.slice(0, -1) : line));
-    if (text.endsWith('\n')) lines.pop();
-    if (text.length === 0) return strIter([]);
-    return strIter(lines);
-  },
-  split: ([s, p], ctx) => strIter(splitBy(ctx, str(s), p)),
-  rsplit: ([s, p], ctx) => strIter(splitBy(ctx, str(s), p).toReversed()),
-  split_inclusive: ([s, p], ctx) => {
-    const text = str(s);
-    const match = patternMatcher(ctx, p);
-    const parts: string[] = [];
-    let start = 0;
-    for (let found = match(text, 0); found; found = match(text, found.index + Math.max(found.length, 1))) {
-      parts.push(text.slice(start, found.index + found.length));
-      start = found.index + found.length;
-    }
-    if (start < text.length) parts.push(text.slice(start));
-    return strIter(parts);
-  },
-  split_terminator: ([s, p], ctx) => {
-    const parts = splitBy(ctx, str(s), p);
-    if (parts.at(-1) === '') parts.pop();
-    return strIter(parts);
-  },
-  splitn: ([s, n, p], ctx) => {
-    const limit = Number(n as bigint);
-    if (limit === 0) return strIter([]);
-    return strIter(splitBy(ctx, str(s), p, limit));
-  },
-  rsplitn: ([s, n, p], ctx) => {
-    const limit = Number(n as bigint);
-    if (limit === 0) return strIter([]);
-    const parts = splitBy(ctx, str(s), p);
-    if (parts.length <= limit) return strIter(parts.toReversed());
-    const pattern = deref(p) as string;
-    const head = parts.slice(0, parts.length - limit + 1).join(typeof pattern === 'string' ? pattern : '');
-    return strIter([...parts.slice(parts.length - limit + 1).toReversed(), head]);
-  },
+  split_whitespace: ([s]) => splitWhitespaceIter(str(s), isWhitespace),
+  split_ascii_whitespace: ([s]) => splitAsciiWhitespaceIter(str(s)),
+  lines: ([s]) => linesIter(str(s)),
+  split: ([s, p], ctx) => splitIter(str(s), patternOf(ctx, p), 'Split'),
+  rsplit: ([s, p], ctx) => splitIter(str(s), patternOf(ctx, p), 'RSplit'),
+  split_inclusive: ([s, p], ctx) => splitIter(str(s), patternOf(ctx, p), 'SplitInclusive'),
+  split_terminator: ([s, p], ctx) => splitIter(str(s), patternOf(ctx, p), 'SplitTerminator'),
+  splitn: ([s, n, p], ctx) => splitNIter(str(s), patternOf(ctx, p), Number(n as bigint), false),
+  rsplitn: ([s, n, p], ctx) => splitNIter(str(s), patternOf(ctx, p), Number(n as bigint), true),
   split_once: ([s, p], ctx) => {
     const text = str(s);
     const found = patternMatcher(ctx, p)(text, 0);
@@ -415,24 +382,8 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
     for (let found = match(text, 0); found; found = match(text, found.index + 1)) last = found;
     return option(ctx, last && BigInt(byteOffset(text, last.index)), last !== undefined);
   },
-  matches: ([s, p], ctx) => {
-    const text = str(s);
-    const match = patternMatcher(ctx, p);
-    const items: string[] = [];
-    for (let found = match(text, 0); found; found = match(text, found.index + Math.max(found.length, 1))) {
-      items.push(text.slice(found.index, found.index + found.length));
-    }
-    return strIter(items);
-  },
-  match_indices: ([s, p], ctx) => {
-    const text = str(s);
-    const match = patternMatcher(ctx, p);
-    const items: Value[] = [];
-    for (let found = match(text, 0); found; found = match(text, found.index + Math.max(found.length, 1))) {
-      items.push([BigInt(byteOffset(text, found.index)), text.slice(found.index, found.index + found.length)]);
-    }
-    return arrayIter(items);
-  },
+  matches: ([s, p], ctx) => matchesIter(str(s), patternOf(ctx, p), false),
+  match_indices: ([s, p], ctx) => matchesIter(str(s), patternOf(ctx, p), true),
   replace: ([s, from, to], ctx) => replaceN(ctx, str(s), from, str(to), Number.POSITIVE_INFINITY),
   replacen: ([s, from, to, count], ctx) => replaceN(ctx, str(s), from, str(to), Number(count as bigint)),
   to_uppercase: ([s]) => upper(str(s)),
@@ -598,7 +549,10 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     const removed = strSliceBytes(text, start, end, ctx.span);
     const head = strSliceBytes(text, 0, start, ctx.span);
     place.set(head + text.slice(head.length + removed.length));
-    return strIter([...removed]);
+    const iter = strIter([...removed]);
+    return described(iter, (show) =>
+      tuplePart('Drain', [(indent) => show((iter.rest?.() ?? []).join(''), REF_STR, indent)])
+    );
   },
   split_off: ([self, at], ctx) => {
     const place = placeOf(self);
@@ -717,7 +671,7 @@ function fromDigit(ctx: NativeContext, num: Value, radix: Value): Value {
 /** `char::to_uppercase`'s iterator, named as std's type, which also displays as the text it yields. */
 function caseIter(name: 'ToUppercase' | 'ToLowercase', text: string): Value {
   const iter = arrayIter([...text]);
-  Object.assign(iter, { name, text });
+  Object.assign(iter, { name });
   return iter;
 }
 

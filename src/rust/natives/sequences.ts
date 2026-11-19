@@ -1,6 +1,9 @@
+// code-gauge-allow-file fileNcss 420 -- One native per method of the standard library.
 import { keepVecCapacity, setIntoIterBuffer, vecCapacity } from '../capacity';
 import { sliceRange } from '../compiler';
+import { type DebugPart } from '../debugText';
 import { normalize } from '../infer';
+import { described, fieldsPart, listPart, numberPart } from '../iterDebug';
 import { cloneValue, compareValues, copyValue, valuesEqual } from '../ops';
 import { RustPanic } from '../runtime';
 import { shallow, type Type } from '../types';
@@ -8,6 +11,7 @@ import {
   DONE,
   ElementPlace,
   type IterValue,
+  type Next,
   type RangeValue,
   sliceBase,
   sliceGet,
@@ -19,8 +23,9 @@ import {
   type Value,
 } from '../values';
 import { extendRoom, withCapacity } from './capacityNatives';
+import { dequeDrain, dequeIter, dequeSlices, withDequeHead } from './dequeHead';
 import { arrayIter, collectVec, heapPop, heapPush, ownedIter, sliceIter } from './iterators';
-import { layoutOf } from './layout';
+import { layoutOf, sizeOf } from './layout';
 import { dedupBy, intoSortedVec, lessByKey, lessByOrd, sortByCachedKey, sortSlice } from './sorting';
 import {
   call,
@@ -56,6 +61,24 @@ function cmpWith(ctx: NativeContext, f: Value): (a: Value, b: Value) => number {
     ctx.runtime.spend();
     return (deref(call(ctx, f, [a, b])) as { variant: number }).variant - 1;
   };
+}
+
+/** The bounds of a `drain`'s range, which panics as slicing does outside the elements. */
+function drainBounds(ctx: NativeContext, items: Value[], range: Value): [number, number] {
+  const r = deref(range) as RangeValue | undefined;
+  const start = r?.start === undefined ? 0 : Number(r.start as bigint);
+  const end = r?.end === undefined ? items.length : Number(r.end as bigint) + (r.inclusive ? 1 : 0);
+  if (start > end) {
+    libraryPanic(ctx, `slice index starts at ${start} but ends at ${end}`, 'core/src/slice/index.rs:1020:55');
+  }
+  if (end > items.length) {
+    libraryPanic(
+      ctx,
+      `range end index ${end} out of range for slice of length ${items.length}`,
+      'core/src/slice/index.rs:1009:51'
+    );
+  }
+  return [start, end];
 }
 
 /** `get` with a range: the part of the slice it covers, or `None` when it reaches outside. */
@@ -233,8 +256,16 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     const width = Number(size as bigint);
     if (width === 0) panic(ctx, 'window size must be non-zero');
     const { base, start } = sliceBase(slice);
-    const count = Math.max(0, sliceLength(slice) - width + 1);
-    return arrayIter(base, 0, count, (index) => new SliceView(base, start + index, start + index + width));
+    const length = sliceLength(slice);
+    const count = Math.max(0, length - width + 1);
+    const iter = arrayIter(base, 0, count, (index) => new SliceView(base, start + index, start + index + width));
+    // `Windows` drops an element from the end it takes a window from, so once done it keeps `size - 1` of them.
+    const taken = { front: 0, back: 0 };
+    const [next, nextBack] = [iter.next, iter.nextBack!];
+    iter.next = () => countTaken(next(), taken, 'front');
+    iter.nextBack = () => countTaken(nextBack(), taken, 'back');
+    const done = (): SliceView => new SliceView(base, start + taken.front, start + length - taken.back);
+    return chunkDebug(iter, 'Windows', done, () => [['size', numberPart(width)]]);
   },
   chunks: ([self, size], ctx) => chunks(ctx, deref(self), Number(size as bigint), false),
   rchunks: ([self, size], ctx) => {
@@ -243,10 +274,12 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     if (width === 0) panic(ctx, 'chunk size must be non-zero');
     const { base, start } = sliceBase(slice);
     const length = sliceLength(slice);
-    return arrayIter(base, 0, Math.ceil(length / width), (index) => {
+    const iter = arrayIter(base, 0, Math.ceil(length / width), (index) => {
       const end = length - index * width;
       return new SliceView(base, start + Math.max(0, end - width), start + end);
     });
+    const done = (): SliceView => new SliceView(base, start, start);
+    return chunkDebug(iter, 'RChunks', done, () => [['chunk_size', numberPart(width)]]);
   },
   chunks_exact: ([self, size], ctx) => chunks(ctx, deref(self), Number(size as bigint), true),
   fill: ([self, value], ctx) => {
@@ -300,12 +333,50 @@ function chunks(ctx: NativeContext, slice: Value, size: number, exact: boolean):
   const { base, start } = sliceBase(slice);
   const length = sliceLength(slice);
   const count = exact ? Math.floor(length / size) : Math.ceil(length / size);
-  return arrayIter(
+  const iter = arrayIter(
     base,
     0,
     count,
     (index) => new SliceView(base, start + index * size, start + Math.min(length, (index + 1) * size))
   );
+  const done = (): SliceView => new SliceView(base, start, start);
+  const chunkSize: [string, DebugPart] = ['chunk_size', numberPart(size)];
+  if (!exact) return chunkDebug(iter, 'Chunks', done, () => [chunkSize]);
+  const rem = sliceItems(new SliceView(base, start + count * size, start + length));
+  return chunkDebug(iter, 'ChunksExact', done, (part) => [['rem', part(rem)], chunkSize]);
+}
+
+/**
+ * `{:?}` of `Windows`, `Chunks`, `RChunks`, and `ChunksExact`: `v`, the part of the slice their elements left cover
+ * (`done` once none is left), then their other fields; `ChunksExact` also shows the remainder `rem`.
+ */
+function chunkDebug(
+  iter: IterValue,
+  name: string,
+  done: () => SliceView,
+  fields: (part: (values: Value[]) => DebugPart) => [string, DebugPart][]
+): IterValue {
+  return described(iter, (show, item) => {
+    const elem = sliceElem(item);
+    const views = (iter.rest?.() ?? []) as SliceView[];
+    const from = Math.min(...views.map((view) => view.start));
+    const to = Math.max(...views.map((view) => view.end));
+    const covered = views.length > 0 ? sliceItems(new SliceView(views[0].base, from, to)) : sliceItems(done());
+    const part = (values: Value[]): DebugPart => listPart(values, elem, show);
+    return fieldsPart(name, [['v', part(covered)], ...fields(part)]);
+  });
+}
+
+function countTaken(item: Next, taken: { front: number; back: number }, end: 'front' | 'back'): Next {
+  if (item !== DONE) taken[end]++;
+  return item;
+}
+
+/** The element type of the slices an iterator yields (`&[T]`). */
+function sliceElem(item: Type): Type {
+  let t = normalize(shallow(item));
+  if (t.kind === 'ref') t = normalize(shallow(t.target));
+  return t.kind === 'slice' || t.kind === 'array' ? t.elem : t;
 }
 
 function rotate(slice: Value, mid: number): Value {
@@ -420,19 +491,7 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   },
   drain: ([self, range], ctx) => {
     const items = vec(self);
-    const r = deref(range) as RangeValue | undefined;
-    const start = r?.start === undefined ? 0 : Number(r.start as bigint);
-    const end = r?.end === undefined ? items.length : Number(r.end as bigint) + (r.inclusive ? 1 : 0);
-    if (start > end) {
-      libraryPanic(ctx, `slice index starts at ${start} but ends at ${end}`, 'core/src/slice/index.rs:1020:55');
-    }
-    if (end > items.length) {
-      libraryPanic(
-        ctx,
-        `range end index ${end} out of range for slice of length ${items.length}`,
-        'core/src/slice/index.rs:1009:51'
-      );
-    }
+    const [start, end] = drainBounds(ctx, items, range);
     return ownedIter(items.splice(start, end - start));
   },
   retain: ([self, f], ctx) => {
@@ -526,8 +585,9 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     return UNIT_VALUE;
   },
   contains: ([self, x], ctx) => sliceNatives.contains([self, x], ctx),
-  iter: ([self]) => sliceIter(deref(self), false),
-  iter_mut: ([self]) => sliceIter(deref(self), true),
+  iter: ([self], ctx) => dequeIter(vec(self), dequeCapacity(vec(self), ctx), false),
+  iter_mut: ([self], ctx) => dequeIter(vec(self), dequeCapacity(vec(self), ctx), true),
+  as_slices: ([self], ctx) => dequeSlices(vec(self), dequeCapacity(vec(self), ctx)),
   insert: ([self, index, value], ctx) => {
     const items = vec(self);
     const position = Number(index as bigint);
@@ -550,12 +610,21 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   rotate_left: ([self, n]) => rotate(vec(self), Number(n as bigint)),
   rotate_right: ([self, n]) => rotate(vec(self), vec(self).length - Number(n as bigint)),
   make_contiguous: ([self]) => self,
-  drain: ([self, range], ctx) => vecNatives.drain([self, range], ctx),
+  drain: ([self, range], ctx) => {
+    const items = vec(self);
+    const [start, end] = drainBounds(ctx, items, range);
+    return dequeDrain(items, start, end, dequeCapacity(items, ctx));
+  },
   into_iter: ([self]) => ownedIter(vec(self)),
 };
 
+function dequeCapacity(items: Value[], ctx: NativeContext): number {
+  return vecCapacity(items, items.length, sizeOf(elemType(ctx)));
+}
+
 const heapNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {
   new: () => [],
+  drain: ([self]) => ownedIter(vec(self).splice(0)),
   with_capacity: () => [],
   push: ([self, item], ctx) => {
     ctx.runtime.allocate(1);
@@ -596,7 +665,8 @@ const heapNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> 
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
 for (const [name, native] of Object.entries(sliceNatives)) natives[`[_]::${name}`] = native;
 for (const [name, native] of Object.entries(withCapacity(vecNatives))) natives[`Vec<_>::${name}`] = native;
-for (const [name, native] of Object.entries(withCapacity(dequeNatives))) natives[`VecDeque<_>::${name}`] = native;
+const dequeTracked = withDequeHead(withCapacity(dequeNatives), dequeCapacity);
+for (const [name, native] of Object.entries(dequeTracked)) natives[`VecDeque<_>::${name}`] = native;
 for (const [name, native] of Object.entries(withCapacity(heapNatives))) natives[`BinaryHeap<_>::${name}`] = native;
 natives['[_]::into_iter'] = ([self]) => arrayIter(sliceItems(deref(self)));
 natives['[_]::map'] = ([self, f], ctx) => sliceItems(deref(self)).map((item) => call(ctx, f, [item]));

@@ -1,7 +1,8 @@
 import { DEFAULT_SPEC } from '../fmt';
+import { described, fieldsPart, optionPart } from '../iterDebug';
 import { cloneValue, copyValue } from '../ops';
 import type { Type } from '../types';
-import { ElementPlace, type EnumValue, type Value } from '../values';
+import { ElementPlace, type EnumValue, type IterValue, type Value } from '../values';
 import { defaultValue } from './core';
 import { arrayIter } from './iterators';
 import { call, define, deref, err, type NativeContext, none, ok, panic, placeOf, some } from './support';
@@ -89,8 +90,9 @@ const optionNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   },
   as_ref: ([self], ctx) => (isSome(self) ? some(ctx, opt(self).fields[0]) : none(ctx)),
   as_mut: ([self], ctx) => (isSome(self) ? some(ctx, new ElementPlace(opt(self).fields, 0)) : none(ctx)),
-  iter: ([self]) => arrayIter(isSome(self) ? [opt(self).fields[0]] : []),
-  into_iter: ([self]) => arrayIter(isSome(self) ? [opt(self).fields[0]] : []),
+  iter: ([self]) => outcomeIter(self, isSome(self), 'Iter', true),
+  iter_mut: ([self]) => outcomeIter(self, isSome(self), 'IterMut', true, true),
+  into_iter: ([self]) => outcomeIter(self, isSome(self), 'IntoIter', true),
   zip: ([self, other], ctx) =>
     isSome(self) && isSome(other) ? some(ctx, [opt(self).fields[0], opt(other).fields[0]]) : none(ctx),
 };
@@ -148,8 +150,9 @@ const resultNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     const place = new ElementPlace(opt(self).fields, 0);
     return isOk(self) ? ok(ctx, place) : err(ctx, place);
   },
-  iter: ([self]) => arrayIter(isOk(self) ? [opt(self).fields[0]] : []),
-  into_iter: ([self]) => arrayIter(isOk(self) ? [opt(self).fields[0]] : []),
+  iter: ([self]) => outcomeIter(self, isOk(self), 'Iter', false),
+  iter_mut: ([self]) => outcomeIter(self, isOk(self), 'IterMut', false, true),
+  into_iter: ([self]) => outcomeIter(self, isOk(self), 'IntoIter', false),
 };
 
 const natives: Record<string, (args: Value[], ctx: NativeContext) => Value> = {};
@@ -182,3 +185,17 @@ natives['Result<Option<_>, _>::transpose'] = ([self], ctx) => {
   return inner.variant === 1 ? some(ctx, ok(ctx, inner.fields[0])) : none(ctx);
 };
 define(natives);
+
+/**
+ * The iterator of the value in `Some` or `Ok`, if there is one, which `{:?}` writes as std's `option::Iter` (an
+ * `Item { opt }` inside) or `result::Iter` does.
+ */
+function outcomeIter(self: Value, present: boolean, name: string, isOption: boolean, mutable = false): IterValue {
+  const fields = opt(self).fields;
+  const iter = arrayIter(present ? [mutable ? new ElementPlace(fields, 0) : fields[0]] : []);
+  return described(iter, (show, item) => {
+    const [value] = iter.rest?.() ?? [];
+    const inner = optionPart(value === undefined ? undefined : (indent) => show(value, item, indent));
+    return fieldsPart(name, [['inner', isOption ? fieldsPart('Item', [['opt', inner]]) : inner]]);
+  });
+}
