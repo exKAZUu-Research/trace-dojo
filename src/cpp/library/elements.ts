@@ -1,7 +1,7 @@
 import { CppRuntimeError } from '../errors';
 import type { Expr, FunctionCandidates } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { invoke, makeEach, newObject, withTemporaries, zeroOf } from '../objectCompiler';
+import { installBaseValue, invoke, makeEach, newObject, withTemporaries, zeroOf } from '../objectCompiler';
 import { type Frame, holdAll } from '../runtime';
 import {
   type ClassInfo,
@@ -166,7 +166,10 @@ function transferSubobjects(frame: Frame, cls: ClassInfo, source: CObject, targe
   return frame.runtime.withoutOuterHandlers(() => {
     const destination = newObject(frame, cls, false, target);
     return holdAll(frame, [() => destination], () => {
-      if (cls.base) transferElement(frame, classType(cls.base), source, destination);
+      if (cls.base) {
+        const base = transferElement(frame, classType(cls.base), source, destination) as CObject;
+        installBaseValue(cls.base, destination, base);
+      }
       destination.cls = cls;
       for (const field of cls.ownFields)
         destination.values[field.index] = transferElement(frame, field.type, source.values[field.index]);
@@ -261,7 +264,7 @@ export function moveValue(frame: Frame, type: Type, target: Value, source: Value
     if (cls.base) moveValue(frame, classType(cls.base), to, from);
     for (const field of cls.ownFields)
       to.values[field.index] = moveField(frame, field.type, to.values[field.index], from.values[field.index]);
-  } else cls.operations?.assign(frame, target, source);
+  } else return cls.operations?.assign(frame, target, source) ?? target;
   return target;
 }
 

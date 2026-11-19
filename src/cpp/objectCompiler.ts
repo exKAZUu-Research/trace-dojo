@@ -850,6 +850,12 @@ export function newObject(frame: Frame, cls: ClassInfo, zeroInitialize = false, 
   return destination?.liveness === Liveness.Alive ? destination : allocateObject(frame.runtime, cls, zeroInitialize);
 }
 
+export function installBaseValue(base: ClassInfo, target: CObject, initialized: CObject): void {
+  if (initialized === target) return;
+  target.message = initialized.message;
+  for (const field of base.fields) target.values[field.index] = initialized.values[field.index];
+}
+
 function allocateObject(runtime: Frame['runtime'], cls: ClassInfo, zeroInitialize: boolean): CObject {
   runtime.reserve(cls.fields.length);
   return new CObject(

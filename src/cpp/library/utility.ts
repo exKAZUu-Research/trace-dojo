@@ -4,6 +4,7 @@ import type { Expr } from '../expr';
 import { BOOL, ClassInfo, isArithmetic, sameType, type Type, typeName, unqualified } from '../types';
 import { CObject, type Value } from '../values';
 import { equalTo, lessThan } from './elements';
+import type { ClassOperations } from './libraryClass';
 import type { Library } from './registry';
 import { StringValue } from './string';
 import { native, nativeConstructor } from './support';
@@ -101,7 +102,7 @@ export function functorClass(library: Library, name: string, argument: Type | un
     },
   };
   cls.constructors = [nativeConstructor(cls, [], () => new CObject(cls, []))];
-  cls.operations = { copy: () => new CObject(cls, []), assign: () => {} };
+  cls.operations = statelessOperations(cls);
   return cls;
 }
 
@@ -172,6 +173,7 @@ export function numericLimitsClass(library: Library, type: Type): ClassInfo {
   library.instances.set(key, cls);
   cls.isComplete = true;
   cls.library = { kind: 'numeric_limits', args: [type], size: 1, align: 1 };
+  cls.operations = statelessOperations(cls);
   const target = unqualified(type);
   if (!isArithmetic(target)) return cls;
   const limits = LIMITS[target.name];
@@ -239,3 +241,7 @@ const constant =
     run: () => value,
     constant: value,
   });
+
+function statelessOperations(cls: ClassInfo): ClassOperations {
+  return { copyIsNoexcept: true, copy: () => new CObject(cls, []), assign: () => {} };
+}

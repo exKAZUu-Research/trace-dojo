@@ -40,6 +40,7 @@ export function exceptionClasses(stringType: () => Type): Map<string, ClassInfo>
         ]
       : [nativeConstructor(cls, [], (args, context) => construct(undefined)(args, context))];
     cls.operations = {
+      copyIsNoexcept: true,
       copy: (_frame, source) => {
         const object = source as CObject;
         const copy = new CObject(cls, [...object.values]);

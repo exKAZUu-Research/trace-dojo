@@ -59,6 +59,7 @@ function makeReference(isConst: boolean): Type {
     },
   };
   cls.operations = {
+    copyIsNoexcept: true,
     copy: (_frame, value) => value,
     assign: (_frame, target, source) => {
       (target as Ptr).write(readBit(source));

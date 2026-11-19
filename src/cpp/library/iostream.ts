@@ -620,6 +620,7 @@ function manipulatorClass(name: string): ClassInfo {
   cls.isComplete = true;
   cls.library = { kind: 'manipulator', args: [], size: 16, align: 8 };
   cls.operations = {
+    copyIsNoexcept: true,
     copy: (_frame, value) => copyManipulator(value),
     assign: (_frame, _target, source) => copyManipulator(source),
   };

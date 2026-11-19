@@ -19,6 +19,7 @@ import { SequenceValue } from './library/containerValues';
 import type { Library } from './library/registry';
 import {
   bindRetainedTemporary,
+  installBaseValue,
   invoke,
   makeEach,
   newObject,
@@ -2343,12 +2344,6 @@ class TemporaryConstructorReferenceError extends CompileError {}
 
 function sameDeclaredSignature(a: FunctionInfo, b: FunctionInfo): boolean {
   return !a.instantiate && !b.instantiate && sameParameters(a, b);
-}
-
-function installBaseValue(base: ClassInfo, target: CObject, initialized: CObject): void {
-  if (initialized === target) return;
-  target.message = initialized.message;
-  for (const field of base.fields) target.values[field.index] = initialized.values[field.index];
 }
 
 function initializerTarget(value: Value): InitializerTarget | undefined {

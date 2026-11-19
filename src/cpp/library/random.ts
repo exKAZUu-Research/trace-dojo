@@ -245,6 +245,7 @@ export function randomEngines(): Map<string, ClassInfo> {
       },
     };
     cls.operations = {
+      copyIsNoexcept: parameters !== undefined,
       copy: (_frame, source) => {
         const engine = new EngineValue(parameters);
         engine.copyFrom(source as EngineValue);
@@ -389,6 +390,7 @@ export function randomClasses(library: Library): LibraryTemplate[] {
       },
     };
     cls.operations = {
+      copyIsNoexcept: true,
       copy: (_frame, source) => new DistributionValue((source as DistributionValue).a, (source as DistributionValue).b),
       assign: (_frame, target, source) => {
         (target as DistributionValue).a = (source as DistributionValue).a;

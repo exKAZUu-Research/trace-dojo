@@ -1073,7 +1073,11 @@ function backInserter(library: Library, container: Type, appendMethod: FunctionI
   cls.isComplete = true;
   const element = unqualified(nonReference(appendMethod.params[0].type));
   cls.library = { kind: 'back_insert_iterator', args: [element], size: 8, align: 8, appendMethod };
-  cls.operations = { copy: (_frame, value) => value, assign: (_frame, _target, source) => source };
+  cls.operations = {
+    copyIsNoexcept: true,
+    copy: (_frame, value) => value,
+    assign: (_frame, _target, source) => source,
+  };
   library.instances.set(key, cls);
   return cls;
 }
