@@ -811,7 +811,7 @@ export interface PropDecl {
     abstractGet?: boolean;
     abstractSet?: boolean;
   };
-  /** Whether a hooked property has storage of its own. */
+  /** Whether a hooked property lacks backing storage of its own. */
   isVirtual?: boolean;
 }
 
