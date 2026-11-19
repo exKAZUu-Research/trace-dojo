@@ -329,6 +329,11 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         if (symbol.interfaces.some((existing) => existing.cls === parent))
           this.error(spec.row, `${parent.name} が2回書かれています。`);
         symbol.interfaces.push(type);
+        if (parent.isSealed) {
+          if (parent.isLibrary !== symbol.isLibrary)
+            this.error(spec.row, `sealed interface ${parent.name} は継承できません。`);
+          parent.sealedSubclasses.push(symbol);
+        }
         if (spec.kind === 'delegated') {
           entry.delegateFields.push({ type, slot: -1, spec });
         }

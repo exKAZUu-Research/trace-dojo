@@ -1,6 +1,13 @@
 /**
- * `pow` of fdlibm (e_pow.c), which the JVM's `StrictMath.pow` and `Math.pow` compute, transcribed so that JVM languages
- * print the JVM's last digits. JavaScript's `**` rounds differently for many arguments, as `1.0125 ** 40` shows.
+ * `pow` of fdlibm 5.3 (e_pow.c), which the JVM's `StrictMath.pow` and `Math.pow` compute, transcribed so that JVM
+ * languages print the JVM's last digits. JavaScript's `**` rounds differently for many arguments, as `1.0125 ** 40` shows.
+ *
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunSoft, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
  */
 
 const BP = [1, 1.5];
