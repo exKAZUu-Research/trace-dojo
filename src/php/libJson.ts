@@ -1,8 +1,8 @@
-// code-gauge-allow-file fileNcss 431 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 440 -- Keeps one PHP runtime concern and its shared helpers in one module.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { codePointBytes, enc, utf8Length } from './bytes';
-import { callMethod } from './callables';
+import { callMethod, consumeInvokedResult } from './callables';
 import {
   canAccessProp,
   createObject,
@@ -105,7 +105,6 @@ class JsonEncoder {
     private readonly maxDepth: number
   ) {}
 
-  // code-gauge-allow functionNcss 39 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   encode(value: Value, level: number): string {
     rt().spend();
@@ -137,13 +136,29 @@ class JsonEncoder {
     }
     const serializable = rt().classes.get('jsonserializable') as PhpClass;
     if (value instanceof PhpArray || !value.cls.isSubclassOf(serializable)) return this.encodeContainer(value, level);
+    return this.encodeSerializable(value, level);
+  }
+
+  private encodeSerializable(value: PhpObject, level: number): string {
     if (this.active.has(value)) return this.fail(6);
     this.active.add(value);
     try {
-      const result = callMethod(value, 'jsonSerialize', []);
-      if (result !== value) return this.encode(result, level);
-      this.active.delete(value);
-      return this.encodeContainer(value, level);
+      const encoded = consumeInvokedResult(
+        () => callMethod(value, 'jsonSerialize', []),
+        (result) => {
+          try {
+            if (result !== value) return this.encode(result, level);
+            this.active.delete(value);
+            return this.encodeContainer(value, level);
+          } catch (error) {
+            if (!(error instanceof JsonError)) throw error;
+            return error;
+          }
+        },
+        true
+      );
+      if (encoded instanceof JsonError) throw encoded;
+      return encoded;
     } finally {
       this.active.delete(value);
     }

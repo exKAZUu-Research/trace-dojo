@@ -13,4 +13,15 @@ class J implements JsonSerializable { function jsonSerialize(): mixed { return [
 $it = new ArrayIterator([new D("i1"), new D("i2")]); foreach ($it as $k => $obj) { echo $obj->n, "\n"; } $it = null; $obj = null; echo id(), "\n";
 echo call_user_func(fn($x) => $x->n, new D("cuf")), "\n"; echo id(), "\n";
 $sorted = [new D("s2"), new D("s1")]; usort($sorted, fn($a, $b) => strcmp($a->n, $b->n)); $sorted = null; echo id(), "\n";
+
+$releaseCount = 0;
+class JsonResult { function __destruct() { $GLOBALS['releaseCount']++; } }
+class JsonView implements JsonSerializable {
+    function __construct(private bool $temporary) {}
+    function jsonSerialize(): mixed {
+        return $this->temporary ? [new JsonResult, chr(255)] : $GLOBALS['releaseCount'];
+    }
+}
+echo json_encode([new JsonView(true), new JsonView(false)], JSON_PARTIAL_OUTPUT_ON_ERROR), "\n";
+
 echo "end\n";
