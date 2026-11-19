@@ -21,151 +21,186 @@ export function desugarQuery(node: Extract<Expression, { kind: 'query' }>): Expr
   return translate(node.clauses, counter, node);
 }
 
+/** The method calls translated so far, with the range variables in scope after them. */
+interface Translation {
+  source: Expression;
+  state: RangeState;
+  readonly counter: { value: number };
+  /** The query's first source, on which even a select of the range variable itself calls `Select`. */
+  readonly firstSource: Expression;
+}
+
 function translate(clauses: QueryClause[], counter: { value: number }, position: Position): Expression {
   const [first, ...rest] = clauses;
-  if (first?.kind !== 'from')
-    throw new CompileError([
-      { row: position.row, message: 'CS0742: クエリ本体の後には select 句または group 句が必要です' },
-    ]);
-  let source = first.type ? call(first.source, 'Cast', [], first, [first.type]) : first.source;
-  let state: RangeState = { variables: [first.name], parameter: first.name };
+  if (first?.kind !== 'from') throw unexpected(position);
+  const translation: Translation = {
+    source: castSource(first),
+    state: { variables: [first.name], parameter: first.name },
+    counter,
+    firstSource: first.source,
+  };
   for (let index = 0; index < rest.length; index++) {
-    const clause = rest[index];
-    const isLast = index === rest.length - 1;
-    const next = rest[index + 1];
-    switch (clause.kind) {
-      case 'from': {
-        const collection = clause.type ? call(clause.source, 'Cast', [], clause, [clause.type]) : clause.source;
-        if (next?.kind === 'select') {
-          source = call(
-            source,
-            'SelectMany',
-            [lambda(state, collection, clause), lambda2(state, clause.name, next.value, clause)],
-            clause
-          );
-          index++;
-          state = { variables: [], parameter: '' };
-          continue;
-        }
-        const [selected, nextState] = combine(
-          state,
-          clause.name,
-          { kind: 'name', name: clause.name, typeArgs: undefined, row: clause.row, column: clause.column },
-          counter,
-          clause
-        );
-        source = call(
-          source,
-          'SelectMany',
-          [lambda(state, collection, clause), lambda2(state, clause.name, selected, clause)],
-          clause
-        );
-        state = nextState;
-        break;
+    if (translateClause(translation, rest[index], rest[index + 1])) index++;
+  }
+  if (translation.state.variables.length > 0) throw unexpected(position);
+  return translation.source;
+}
+
+/** Translates one clause, telling whether it also consumed the select clause that follows it. */
+function translateClause(translation: Translation, clause: QueryClause, next: QueryClause | undefined): boolean {
+  const { state } = translation;
+  switch (clause.kind) {
+    case 'from': {
+      return translateFrom(translation, clause, next);
+    }
+    case 'let': {
+      const [selected, nextState] = combine(state, clause.name, clause.value, translation.counter, clause);
+      translation.source = call(translation.source, 'Select', [lambda(state, selected, clause)], clause);
+      translation.state = nextState;
+      return false;
+    }
+    case 'where': {
+      translation.source = call(translation.source, 'Where', [lambda(state, clause.condition, clause)], clause);
+      return false;
+    }
+    case 'join': {
+      return translateJoin(translation, clause, next);
+    }
+    case 'orderby': {
+      for (const [index, ordering] of clause.orderings.entries()) {
+        const name = `${index === 0 ? 'OrderBy' : 'ThenBy'}${ordering.descending ? 'Descending' : ''}`;
+        translation.source = call(translation.source, name, [lambda(state, ordering.key, clause)], clause);
       }
-      case 'let': {
-        const [selected, nextState] = combine(state, clause.name, clause.value, counter, clause);
-        source = call(source, 'Select', [lambda(state, selected, clause)], clause);
-        state = nextState;
-        break;
-      }
-      case 'where': {
-        source = call(source, 'Where', [lambda(state, clause.condition, clause)], clause);
-        break;
-      }
-      case 'join': {
-        const inner = clause.type ? call(clause.source, 'Cast', [], clause, [clause.type]) : clause.source;
-        const innerKey: Expression = {
-          kind: 'lambda',
-          parameters: [parameter(clause.name, clause)],
-          body: clause.innerKey,
-          isStatic: false,
-          returnType: undefined,
-          ...at(clause),
-        };
-        const method = clause.into ? 'GroupJoin' : 'Join';
-        const resultName = clause.into ?? clause.name;
-        if (next?.kind === 'select') {
-          source = call(
-            source,
-            method,
-            [inner, lambda(state, clause.outerKey, clause), innerKey, lambda2(state, resultName, next.value, clause)],
-            clause
-          );
-          index++;
-          state = { variables: [], parameter: '' };
-          continue;
-        }
-        const [selected, nextState] = combine(
-          state,
-          resultName,
-          { kind: 'name', name: resultName, typeArgs: undefined, ...at(clause) },
-          counter,
-          clause
-        );
-        source = call(
-          source,
-          method,
-          [inner, lambda(state, clause.outerKey, clause), innerKey, lambda2(state, resultName, selected, clause)],
-          clause
-        );
-        state = nextState;
-        break;
-      }
-      case 'orderby': {
-        for (const [position2, ordering] of clause.orderings.entries()) {
-          const name =
-            position2 === 0
-              ? ordering.descending
-                ? 'OrderByDescending'
-                : 'OrderBy'
-              : ordering.descending
-                ? 'ThenByDescending'
-                : 'ThenBy';
-          source = call(source, name, [lambda(state, ordering.key, clause)], clause);
-        }
-        break;
-      }
-      case 'select': {
-        const isIdentity =
-          clause.value.kind === 'name' &&
-          state.variables.length === 1 &&
-          clause.value.name === state.variables[0] &&
-          state.parameter === state.variables[0];
-        // A select of the range variable itself adds no call, unless the query would otherwise be its source alone.
-        if (!(isIdentity && source !== first.source))
-          source = call(source, 'Select', [lambda(state, clause.value, clause)], clause);
-        if (!isLast) {
-          const continuation = rest[index + 1];
-          if (continuation?.kind !== 'into') throw unexpected(continuation ?? clause);
-        }
-        state = { variables: [], parameter: '' };
-        break;
-      }
-      case 'group': {
-        const isIdentity =
-          clause.value.kind === 'name' &&
-          state.variables.length === 1 &&
-          state.parameter === state.variables[0] &&
-          clause.value.name === state.variables[0];
-        const args = isIdentity
-          ? [lambda(state, clause.key, clause)]
-          : [lambda(state, clause.key, clause), lambda(state, clause.value, clause)];
-        source = call(source, 'GroupBy', args, clause);
-        state = { variables: [], parameter: '' };
-        break;
-      }
-      case 'into': {
-        state = { variables: [clause.name], parameter: clause.name };
-        break;
-      }
+      return false;
+    }
+    case 'select': {
+      translateSelect(translation, clause, next);
+      return false;
+    }
+    case 'group': {
+      translateGroup(translation, clause);
+      return false;
+    }
+    case 'into': {
+      translation.state = { variables: [clause.name], parameter: clause.name };
+      return false;
     }
   }
-  if (state.variables.length > 0)
-    throw new CompileError([
-      { row: position.row, message: 'CS0742: クエリ本体の後には select 句または group 句が必要です' },
-    ]);
-  return source;
+}
+
+function translateFrom(
+  translation: Translation,
+  clause: Extract<QueryClause, { kind: 'from' }>,
+  next: QueryClause | undefined
+): boolean {
+  const { state } = translation;
+  const collection = castSource(clause);
+  if (next?.kind === 'select') {
+    translation.source = call(
+      translation.source,
+      'SelectMany',
+      [lambda(state, collection, clause), lambda2(state, clause.name, next.value, clause)],
+      clause
+    );
+    translation.state = { variables: [], parameter: '' };
+    return true;
+  }
+  const [selected, nextState] = combine(
+    state,
+    clause.name,
+    { kind: 'name', name: clause.name, typeArgs: undefined, row: clause.row, column: clause.column },
+    translation.counter,
+    clause
+  );
+  translation.source = call(
+    translation.source,
+    'SelectMany',
+    [lambda(state, collection, clause), lambda2(state, clause.name, selected, clause)],
+    clause
+  );
+  translation.state = nextState;
+  return false;
+}
+
+function translateJoin(
+  translation: Translation,
+  clause: Extract<QueryClause, { kind: 'join' }>,
+  next: QueryClause | undefined
+): boolean {
+  const { state } = translation;
+  const inner = castSource(clause);
+  const innerKey: Expression = {
+    kind: 'lambda',
+    parameters: [parameter(clause.name, clause)],
+    body: clause.innerKey,
+    isStatic: false,
+    returnType: undefined,
+    ...at(clause),
+  };
+  const method = clause.into ? 'GroupJoin' : 'Join';
+  const resultName = clause.into ?? clause.name;
+  if (next?.kind === 'select') {
+    translation.source = call(
+      translation.source,
+      method,
+      [inner, lambda(state, clause.outerKey, clause), innerKey, lambda2(state, resultName, next.value, clause)],
+      clause
+    );
+    translation.state = { variables: [], parameter: '' };
+    return true;
+  }
+  const [selected, nextState] = combine(
+    state,
+    resultName,
+    { kind: 'name', name: resultName, typeArgs: undefined, ...at(clause) },
+    translation.counter,
+    clause
+  );
+  translation.source = call(
+    translation.source,
+    method,
+    [inner, lambda(state, clause.outerKey, clause), innerKey, lambda2(state, resultName, selected, clause)],
+    clause
+  );
+  translation.state = nextState;
+  return false;
+}
+
+function translateSelect(
+  translation: Translation,
+  clause: Extract<QueryClause, { kind: 'select' }>,
+  next: QueryClause | undefined
+): void {
+  const { state } = translation;
+  const isIdentity =
+    clause.value.kind === 'name' &&
+    state.variables.length === 1 &&
+    clause.value.name === state.variables[0] &&
+    state.parameter === state.variables[0];
+  // A select of the range variable itself adds no call, unless the query would otherwise be its source alone.
+  if (!(isIdentity && translation.source !== translation.firstSource))
+    translation.source = call(translation.source, 'Select', [lambda(state, clause.value, clause)], clause);
+  if (next && next.kind !== 'into') throw unexpected(next);
+  translation.state = { variables: [], parameter: '' };
+}
+
+function translateGroup(translation: Translation, clause: Extract<QueryClause, { kind: 'group' }>): void {
+  const { state } = translation;
+  const isIdentity =
+    clause.value.kind === 'name' &&
+    state.variables.length === 1 &&
+    state.parameter === state.variables[0] &&
+    clause.value.name === state.variables[0];
+  const args = isIdentity
+    ? [lambda(state, clause.key, clause)]
+    : [lambda(state, clause.key, clause), lambda(state, clause.value, clause)];
+  translation.source = call(translation.source, 'GroupBy', args, clause);
+  translation.state = { variables: [], parameter: '' };
+}
+
+/** The source of a `from` or `join` clause, cast to the element type the clause declares. */
+function castSource(clause: Extract<QueryClause, { kind: 'from' | 'join' }>): Expression {
+  return clause.type ? call(clause.source, 'Cast', [], clause, [clause.type]) : clause.source;
 }
 
 function unexpected(position: Position): CompileError {

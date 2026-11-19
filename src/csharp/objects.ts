@@ -381,18 +381,29 @@ export function compareOrdinal(a: string, b: string): number {
 export function defaultCompare(evaluator: Evaluator, a: Value, b: Value, frame: Frame): number {
   if (a === undefined) return b === undefined ? 0 : -1;
   if (b === undefined) return 1;
-  const x = unboxed(a);
-  const y = unboxed(b);
+  return comparePrimitives(unboxed(a), unboxed(b)) ?? evaluator.compareThroughInterface(a, b, frame);
+}
+
+/** The order of two primitive values of the same kind, or undefined for other values. */
+function comparePrimitives(x: Value, y: Value): number | undefined {
   if (typeof x === 'string' && typeof y === 'string') return compareCulture(x, y);
-  if (typeof x === 'number' && typeof y === 'number') {
-    if (Number.isNaN(x)) return Number.isNaN(y) ? 0 : -1;
-    if (Number.isNaN(y)) return 1;
-    return x < y ? -1 : x > y ? 1 : 0;
-  }
-  if (typeof x === 'bigint' && typeof y === 'bigint') return x < y ? -1 : x > y ? 1 : 0;
+  if (typeof x === 'number' && typeof y === 'number') return compareNumbers(x, y);
+  if (typeof x === 'bigint' && typeof y === 'bigint') return orderOf(x, y);
   if (x instanceof CsDecimal && y instanceof CsDecimal) return x.compare(y);
-  if (typeof x === 'boolean' && typeof y === 'boolean') return x === y ? 0 : x ? 1 : -1;
-  return evaluator.compareThroughInterface(a, b, frame);
+  if (typeof x === 'boolean' && typeof y === 'boolean') return orderOf(Number(x), Number(y));
+  return undefined;
+}
+
+/** The order of two numbers, where NaN comes before every other number, as `double.CompareTo` does. */
+function compareNumbers(x: number, y: number): number {
+  if (Number.isNaN(x)) return Number.isNaN(y) ? 0 : -1;
+  if (Number.isNaN(y)) return 1;
+  return orderOf(x, y);
+}
+
+function orderOf<T extends number | bigint>(x: T, y: T): number {
+  if (x < y) return -1;
+  return x > y ? 1 : 0;
 }
 
 export function fieldOf(type: NamedType, name: string): FieldSymbol | undefined {
@@ -468,7 +479,6 @@ function printedMembers(type: NamedType): PrintedMember[] {
 }
 
 /** Runs a member that the compiler synthesizes for records and anonymous types. */
-// code-gauge-allow functionNcss 50 -- One case per synthesized member.
 export function recordMember(
   evaluator: Evaluator,
   call: NativeCall,
@@ -477,38 +487,12 @@ export function recordMember(
   args: Value[]
 ): Value {
   const frame = call.frame;
-  const readAll = (value: CsObject | CsStruct): { name: string; value: Value; type: Type }[] =>
-    printedMembers(value.type).map((member) => {
-      const getter = member.getter;
-      const memberValue = getter
-        ? evaluator.invoke(
-            frame,
-            evaluator.runtime.dispatch(getter, value),
-            value,
-            [],
-            undefined,
-            environmentOf(evaluator, getter, value)
-          )
-        : member.read(value);
-      return { name: member.name, value: memberValue, type: member.type };
-    });
   switch (name) {
     case 'ToString': {
-      const value = receiver as CsObject | CsStruct;
-      const members = readAll(value).map(
-        (member) =>
-          `${member.name} = ${member.value === undefined ? '' : stringOf(evaluator, member.value, member.type, frame)}`
-      );
-      const isAnonymous = (value.type.symbol as { anonymousDisplay?: string }).anonymousDisplay !== undefined;
-      const body = members.length > 0 ? ` ${members.join(', ')} ` : ' ';
-      return isAnonymous ? `{${body}}` : `${value.type.symbol.name}${body === ' ' ? ' { }' : ` {${body}}`}`;
+      return recordText(evaluator, frame, receiver as CsObject | CsStruct);
     }
     case 'Equals': {
-      const other = unboxed(args[0]);
-      if (other === undefined || !(other instanceof CsObject || other instanceof CsStruct)) return false;
-      const value = receiver as CsObject | CsStruct;
-      if (!sameType(value.type, other.type)) return false;
-      return value.fields.every((field, index) => valuesEqual(evaluator, field, other.fields[index], frame));
+      return recordEquals(evaluator, frame, receiver as CsObject | CsStruct, unboxed(args[0]));
     }
     case 'GetHashCode': {
       const value = receiver as CsObject | CsStruct;
@@ -526,19 +510,48 @@ export function recordMember(
       return name === 'op_Equality' ? equal : !equal;
     }
     case 'Deconstruct': {
-      const value = receiver as CsObject | CsStruct;
-      const symbol = value.type.symbol;
-      for (const [index, parameter] of (symbol.primaryParameters ?? []).entries()) {
-        const property = symbol.properties.find((candidate) => candidate.name === parameter.name);
-        const field = property?.backingField;
-        const memberValue = field ? value.fields[field.slot] : undefined;
-        (args[index] as unknown as VariableReference).set(memberValue);
-      }
+      deconstructRecord(receiver as CsObject | CsStruct, args);
       return undefined;
     }
     default: {
       throw new Error(`Unknown record member ${name}`);
     }
+  }
+}
+
+function recordText(evaluator: Evaluator, frame: Frame, value: CsObject | CsStruct): string {
+  const members = printedMembers(value.type).map((member) => {
+    const getter = member.getter;
+    const memberValue = getter
+      ? evaluator.invoke(
+          frame,
+          evaluator.runtime.dispatch(getter, value),
+          value,
+          [],
+          undefined,
+          environmentOf(evaluator, getter, value)
+        )
+      : member.read(value);
+    return `${member.name} = ${memberValue === undefined ? '' : stringOf(evaluator, memberValue, member.type, frame)}`;
+  });
+  const isAnonymous = (value.type.symbol as { anonymousDisplay?: string }).anonymousDisplay !== undefined;
+  const body = members.length > 0 ? ` ${members.join(', ')} ` : ' ';
+  return isAnonymous ? `{${body}}` : `${value.type.symbol.name}${body === ' ' ? ' { }' : ` {${body}}`}`;
+}
+
+function recordEquals(evaluator: Evaluator, frame: Frame, value: CsObject | CsStruct, other: Value): boolean {
+  if (other === undefined || !(other instanceof CsObject || other instanceof CsStruct)) return false;
+  if (!sameType(value.type, other.type)) return false;
+  return value.fields.every((field, index) => valuesEqual(evaluator, field, other.fields[index], frame));
+}
+
+function deconstructRecord(value: CsObject | CsStruct, args: Value[]): void {
+  const symbol = value.type.symbol;
+  for (const [index, parameter] of (symbol.primaryParameters ?? []).entries()) {
+    const property = symbol.properties.find((candidate) => candidate.name === parameter.name);
+    const field = property?.backingField;
+    const memberValue = field ? value.fields[field.slot] : undefined;
+    (args[index] as unknown as VariableReference).set(memberValue);
   }
 }
 

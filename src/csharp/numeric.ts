@@ -81,35 +81,10 @@ function isFloatKind(kind: SpecialType): boolean {
  * Converts a numeric value between numeric types, as a cast does. `checked` makes integral overflow throw; a
  * conversion from decimal always does, as .NET's does.
  */
-// code-gauge-allow functionNcss 50 -- One case per family of source and target types.
 export function convertNumeric(value: NumericValue, from: SpecialType, to: SpecialType, checked = false): NumericValue {
-  if (to === 'decimal') {
-    if (value instanceof CsDecimal) return value;
-    if (typeof value === 'bigint') return CsDecimal.fromBigInt(value);
-    if (Number.isInteger(value) && !isFloatKind(from)) return CsDecimal.fromBigInt(BigInt(value));
-    try {
-      return CsDecimal.fromDouble(value, from === 'float' ? 7 : 15);
-    } catch (error) {
-      if (error instanceof DecimalOverflowError)
-        throw new PendingException('System.OverflowException', DECIMAL_OVERFLOW);
-      throw error;
-    }
-  }
-  if (to === 'double' || to === 'float') {
-    const number =
-      value instanceof CsDecimal ? value.toDouble() : typeof value === 'bigint' ? bigIntToFloat(value, to) : value;
-    return to === 'float' ? Math.fround(number) : number;
-  }
-  if (value instanceof CsDecimal) {
-    const integer = value.truncate();
-    const [min, max] = integerRange(to);
-    if (integer < min || integer > max)
-      throw new PendingException(
-        'System.OverflowException',
-        `Value was either too large or too small for ${OVERFLOW_NAMES[to]}.`
-      );
-    return isBigIntKind(to) ? integer : Number(integer);
-  }
+  if (to === 'decimal') return toDecimal(value, from);
+  if (to === 'double' || to === 'float') return toFloat(value, to);
+  if (value instanceof CsDecimal) return decimalToIntegral(value, to);
   if (typeof value === 'number' && isFloatKind(from)) return floatToIntegral(value, to, checked);
   const integer = typeof value === 'bigint' ? value : BigInt(value);
   if (checked) {
@@ -117,6 +92,35 @@ export function convertNumeric(value: NumericValue, from: SpecialType, to: Speci
     if (integer < min || integer > max) throw ARITHMETIC_OVERFLOW();
   }
   return wrapInteger(integer, to);
+}
+
+function toFloat(value: NumericValue, to: 'float' | 'double'): number {
+  const number =
+    value instanceof CsDecimal ? value.toDouble() : typeof value === 'bigint' ? bigIntToFloat(value, to) : value;
+  return to === 'float' ? Math.fround(number) : number;
+}
+
+function toDecimal(value: NumericValue, from: SpecialType): CsDecimal {
+  if (value instanceof CsDecimal) return value;
+  if (typeof value === 'bigint') return CsDecimal.fromBigInt(value);
+  if (Number.isInteger(value) && !isFloatKind(from)) return CsDecimal.fromBigInt(BigInt(value));
+  try {
+    return CsDecimal.fromDouble(value, from === 'float' ? 7 : 15);
+  } catch (error) {
+    if (error instanceof DecimalOverflowError) throw new PendingException('System.OverflowException', DECIMAL_OVERFLOW);
+    throw error;
+  }
+}
+
+function decimalToIntegral(value: CsDecimal, to: SpecialType): number | bigint {
+  const integer = value.truncate();
+  const [min, max] = integerRange(to);
+  if (integer < min || integer > max)
+    throw new PendingException(
+      'System.OverflowException',
+      `Value was either too large or too small for ${OVERFLOW_NAMES[to]}.`
+    );
+  return isBigIntKind(to) ? integer : Number(integer);
 }
 
 /** Converts a floating-point value to an integral type, which saturates as .NET 9 and later do. */
@@ -157,7 +161,7 @@ function bigIntToFloat(value: bigint, to: 'float' | 'double'): number {
 }
 
 /** Applies a binary arithmetic or bitwise operator to two operands of the same promoted kind. */
-// code-gauge-allow functionNcss 80 -- One case per operator and kind of operand.
+// code-gauge-allow functionNcss 60 -- One case per operator and kind of operand.
 export function arithmetic(
   operator: string,
   kind: OperandKind,
@@ -228,6 +232,27 @@ export function arithmetic(
     if (result < min || result > max) throw ARITHMETIC_OVERFLOW();
   }
   return wrapInteger(result, special);
+}
+
+/** Applies a binary operator to two bools: `&`, `|`, `^`, `==`, or `!=`. */
+export function booleanOperation(operator: string, a: boolean, b: boolean): boolean {
+  switch (operator) {
+    case '&': {
+      return a && b;
+    }
+    case '|': {
+      return a || b;
+    }
+    case '^': {
+      return a !== b;
+    }
+    case '==': {
+      return a === b;
+    }
+    default: {
+      return a !== b;
+    }
+  }
 }
 
 function floatArithmetic(operator: string, a: number, b: number): number {

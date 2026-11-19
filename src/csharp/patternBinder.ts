@@ -21,7 +21,7 @@ import {
 
 /** Binds patterns, checking that each can match its input's type. */
 export abstract class PatternBinder extends ExpressionBinder {
-  // code-gauge-allow functionNcss 80 -- One case per kind of pattern.
+  // code-gauge-allow functionNcss 40 -- One case per kind of pattern.
   bindPattern(pattern: Pattern, inputType: Type, context: BindContext): BoundPattern {
     switch (pattern.kind) {
       case 'constantPattern': {
@@ -236,7 +236,6 @@ export abstract class PatternBinder extends ExpressionBinder {
     };
   }
 
-  // code-gauge-allow functionNcss 50 -- Positional and property subpatterns of a recursive pattern.
   private bindRecursivePattern(
     pattern: Extract<Pattern, { kind: 'recursivePattern' }>,
     inputType: Type,

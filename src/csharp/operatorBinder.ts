@@ -4,7 +4,14 @@ import { ConversionBinder } from './convertBinder';
 import { CsDecimal } from './decimal';
 import type { MethodCandidate } from './lookup';
 import { OPERATOR_NAMES, UNARY_OPERATOR_NAMES } from './natives';
-import { arithmetic, compareNumeric, type NumericValue, PendingException, unaryNumeric } from './numeric';
+import {
+  arithmetic,
+  booleanOperation,
+  compareNumeric,
+  type NumericValue,
+  PendingException,
+  unaryNumeric,
+} from './numeric';
 import {
   displayType,
   ERROR_TYPE,
@@ -102,13 +109,30 @@ export abstract class OperatorBinder extends ConversionBinder {
         return this.constant(unaryNumeric(operator, kind as OperandKind, operand.value as NumericValue), type, row);
       }
     }
-    return { kind: 'unary', operator, operand, operandKind: kind as OperandKind, isLifted, type, row };
+    return {
+      kind: 'unary',
+      operator,
+      operand,
+      operandKind: kind as OperandKind,
+      isLifted,
+      type,
+      row,
+    };
   }
 
   /** Binds a binary operator other than `&&`, `||`, and `??`. */
   bindBinary(operator: string, left: BoundExpression, right: BoundExpression, row: number): BoundExpression {
     if (left.type.kind === 'error' || right.type.kind === 'error')
-      return { kind: 'binary', operator, left, right, operandKind: 'int', isLifted: false, type: ERROR_TYPE, row };
+      return {
+        kind: 'binary',
+        operator,
+        left,
+        right,
+        operandKind: 'int',
+        isLifted: false,
+        type: ERROR_TYPE,
+        row,
+      };
     const userDefined = this.userOperator(OPERATOR_NAMES[operator], [left, right], row);
     if (userDefined) return userDefined;
     if (operator === '+' && (this.isString(left.type) || this.isString(right.type)))
@@ -144,7 +168,16 @@ export abstract class OperatorBinder extends ConversionBinder {
         'CS0034',
         `型 '${displayType(left.type)}' および '${displayType(right.type)}' のオペランドの演算子 '${operator}' があいまいです`
       );
-      return { kind: 'binary', operator, left, right, operandKind: 'int', isLifted: false, type: ERROR_TYPE, row };
+      return {
+        kind: 'binary',
+        operator,
+        left,
+        right,
+        operandKind: 'int',
+        isLifted: false,
+        type: ERROR_TYPE,
+        row,
+      };
     }
     if (
       kind &&
@@ -159,7 +192,16 @@ export abstract class OperatorBinder extends ConversionBinder {
       return this.finishBinary(operator, left, right, kind, operandType, isLifted, row, rightTarget);
     }
     this.reportBinary(operator, left, right, row);
-    return { kind: 'binary', operator, left, right, operandKind: 'int', isLifted: false, type: ERROR_TYPE, row };
+    return {
+      kind: 'binary',
+      operator,
+      left,
+      right,
+      operandKind: 'int',
+      isLifted: false,
+      type: ERROR_TYPE,
+      row,
+    };
   }
 
   protected reportBinary(operator: string, left: BoundExpression, right: BoundExpression, row: number): void {
@@ -211,21 +253,8 @@ export abstract class OperatorBinder extends ConversionBinder {
     )
       return node;
     try {
-      if (operandKind === 'bool') {
-        const a = left.value as boolean;
-        const b = right.value as boolean;
-        const value =
-          operator === '&'
-            ? a && b
-            : operator === '|'
-              ? a || b
-              : operator === '^'
-                ? a !== b
-                : operator === '=='
-                  ? a === b
-                  : a !== b;
-        return this.constant(value, node.type, row);
-      }
+      if (operandKind === 'bool')
+        return this.constant(booleanOperation(operator, left.value as boolean, right.value as boolean), node.type, row);
       if (
         operandKind === 'string' ||
         operandKind === 'object' ||
@@ -236,32 +265,32 @@ export abstract class OperatorBinder extends ConversionBinder {
           return this.constant((left.value === right.value) === (operator === '=='), node.type, row);
         return node;
       }
-      if (EQUALITY.has(operator) || RELATIONAL.has(operator)) {
-        return this.constant(
-          compareNumeric(operator, operandKind, left.value as NumericValue, right.value as NumericValue),
-          node.type,
-          row
-        );
-      }
-      const isIntegralKind = !['float', 'double', 'decimal'].includes(operandKind);
-      if ((operator === '/' || operator === '%') && isIntegralKind && (right.value === 0 || right.value === 0n)) {
-        this.error(row, 'CS0020', '定数 0 による除算です');
-        return node;
-      }
-      if (operandKind === 'decimal' && (operator === '/' || operator === '%') && (right.value as CsDecimal).isZero()) {
-        this.error(row, 'CS0020', '定数 0 による除算です');
-        return node;
-      }
-      return this.constant(
-        arithmetic(operator, operandKind, left.value as NumericValue, right.value as NumericValue, true),
-        node.type,
-        row
-      );
+      return this.foldNumeric(node, left.value as NumericValue, right.value as NumericValue);
     } catch (error) {
       if (!(error instanceof PendingException)) throw error;
       this.error(row, 'CS0220', 'この操作はチェック モードでコンパイルしたときにオーバーフローします');
       return node;
     }
+  }
+
+  private foldNumeric(
+    node: Extract<BoundExpression, { kind: 'binary' }>,
+    left: NumericValue,
+    right: NumericValue
+  ): BoundExpression {
+    const { operator, operandKind, row } = node;
+    if (EQUALITY.has(operator) || RELATIONAL.has(operator))
+      return this.constant(compareNumeric(operator, operandKind, left, right), node.type, row);
+    const isIntegralKind = !['float', 'double', 'decimal'].includes(operandKind);
+    if ((operator === '/' || operator === '%') && isIntegralKind && (right === 0 || right === 0n)) {
+      this.error(row, 'CS0020', '定数 0 による除算です');
+      return node;
+    }
+    if (operandKind === 'decimal' && (operator === '/' || operator === '%') && (right as CsDecimal).isZero()) {
+      this.error(row, 'CS0020', '定数 0 による除算です');
+      return node;
+    }
+    return this.constant(arithmetic(operator, operandKind, left, right, true), node.type, row);
   }
 
   /** The operand kind that binary numeric promotion chooses for two numeric types, if any. */
@@ -343,7 +372,16 @@ export abstract class OperatorBinder extends ConversionBinder {
       }
       const kind: OperandKind =
         leftType.kind === 'named' && leftType.symbol.kind === 'delegate' ? 'delegate' : 'object';
-      return { kind: 'binary', operator, left, right, operandKind: kind, isLifted: false, type: this.boolType, row };
+      return {
+        kind: 'binary',
+        operator,
+        left,
+        right,
+        operandKind: kind,
+        isLifted: false,
+        type: this.boolType,
+        row,
+      };
     }
     return undefined;
   }
@@ -377,7 +415,7 @@ export abstract class OperatorBinder extends ConversionBinder {
     };
   }
 
-  // code-gauge-allow functionNcss 40 -- One case per operator that enums define.
+  // code-gauge-allow functionCognitiveComplexity 28 -- Each operator that enums define has its own operand types.
   private bindEnumOperator(
     operator: string,
     left: BoundExpression,
@@ -393,65 +431,31 @@ export abstract class OperatorBinder extends ConversionBinder {
     const enumType = (leftEnum ? leftType : rightType) as NamedType;
     const underlying = enumType.symbol.enumUnderlying as NamedType;
     const lift = (type: Type): Type => (isLifted ? this.nullableOf(type) : type);
-    const node = (operandType: Type, resultType: Type, l: BoundExpression, r: BoundExpression): BoundExpression => {
-      const binary: Extract<BoundExpression, { kind: 'binary' }> = {
-        kind: 'binary',
-        operator,
-        left: this.convert(l, lift(operandType), row),
-        right: this.convert(r, lift(operandType), row),
-        operandKind: 'enum',
-        isLifted,
-        type: resultType,
-        row,
-      };
-      return binary;
-    };
-    if (
-      (EQUALITY.has(operator) || RELATIONAL.has(operator)) &&
-      (sameType(leftType, rightType) ||
-        (leftEnum && this.implicitConversionOf(right, enumType)) ||
-        (rightEnum && this.implicitConversionOf(left, enumType)))
-    ) {
-      return node(enumType, this.boolType, left, right);
-    }
-    if (
-      BITWISE.has(operator) &&
-      (sameType(leftType, rightType) ||
-        (leftEnum && this.implicitConversionOf(right, enumType)) ||
-        (rightEnum && this.implicitConversionOf(left, enumType)))
-    ) {
-      return node(enumType, lift(enumType), left, right);
-    }
+    const node = (leftOperandType: Type, rightOperandType: Type, resultType: Type): BoundExpression => ({
+      kind: 'binary',
+      operator,
+      left: this.convert(left, lift(leftOperandType), row),
+      right: this.convert(right, lift(rightOperandType), row),
+      operandKind: 'enum',
+      isLifted,
+      type: resultType,
+      row,
+    });
+    const isCompatible = (): boolean =>
+      sameType(leftType, rightType) ||
+      (leftEnum && this.implicitConversionOf(right, enumType) !== undefined) ||
+      (rightEnum && this.implicitConversionOf(left, enumType) !== undefined);
+    if ((EQUALITY.has(operator) || RELATIONAL.has(operator)) && isCompatible())
+      return node(enumType, enumType, this.boolType);
+    if (BITWISE.has(operator) && isCompatible()) return node(enumType, enumType, lift(enumType));
     if (operator === '+' && leftEnum !== rightEnum) {
-      const other = leftEnum ? right : left;
-      if (!this.implicitConversionOf(other, underlying)) return undefined;
-      const binary: Extract<BoundExpression, { kind: 'binary' }> = {
-        kind: 'binary',
-        operator,
-        left: leftEnum ? this.convert(left, lift(enumType), row) : this.convert(left, lift(underlying), row),
-        right: leftEnum ? this.convert(right, lift(underlying), row) : this.convert(right, lift(enumType), row),
-        operandKind: 'enum',
-        isLifted,
-        type: lift(enumType),
-        row,
-      };
-      return binary;
+      if (!this.implicitConversionOf(leftEnum ? right : left, underlying)) return undefined;
+      return leftEnum ? node(enumType, underlying, lift(enumType)) : node(underlying, enumType, lift(enumType));
     }
-    if (operator === '-') {
-      if (leftEnum && rightEnum && sameType(leftType, rightType)) return node(enumType, lift(underlying), left, right);
-      if (leftEnum && !rightEnum && this.implicitConversionOf(right, underlying)) {
-        return {
-          kind: 'binary',
-          operator,
-          left: this.convert(left, lift(enumType), row),
-          right: this.convert(right, lift(underlying), row),
-          operandKind: 'enum',
-          isLifted,
-          type: lift(enumType),
-          row,
-        };
-      }
-    }
+    if (operator !== '-') return undefined;
+    if (leftEnum && rightEnum && sameType(leftType, rightType)) return node(enumType, enumType, lift(underlying));
+    if (leftEnum && !rightEnum && this.implicitConversionOf(right, underlying))
+      return node(enumType, underlying, lift(enumType));
     return undefined;
   }
 

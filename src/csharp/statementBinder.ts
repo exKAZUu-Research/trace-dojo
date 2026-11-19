@@ -64,7 +64,6 @@ export abstract class StatementBinder extends PatternBinder {
     if (unavailable) this.unsupported(position, unavailable);
   }
 
-  // code-gauge-allow functionNcss 40 -- Each conflict of a local's name has its own diagnostic.
   declareLocal(name: string, type: Type, position: Position, context: BindContext): LocalSymbol {
     const { scope } = context;
     if (scope.variables.has(name) || scope.localFunctions.has(name)) {
@@ -88,7 +87,7 @@ export abstract class StatementBinder extends PatternBinder {
     return local;
   }
 
-  // code-gauge-allow functionNcss 60 -- Each kind of storage has its own rule for assignment.
+  // code-gauge-allow functionNcss 35 -- Each kind of storage has its own rule for assignment.
   checkAssignable(
     target: BoundExpression,
     position: Position,
@@ -381,7 +380,7 @@ export abstract class StatementBinder extends PatternBinder {
     return statements.map((statement) => this.bindStatement(statement, context));
   }
 
-  // code-gauge-allow functionNcss 100 -- One case per kind of statement.
+  // code-gauge-allow functionNcss 50 -- One case per kind of statement.
   bindStatement(statement: Statement, context: BindContext): BoundStatement {
     const row = statement.row;
     switch (statement.kind) {
@@ -392,32 +391,13 @@ export abstract class StatementBinder extends PatternBinder {
         return { kind: 'empty', row, step: 'none' };
       }
       case 'expression': {
-        const expression = this.bindValue(statement.expression, context);
-        const resolved =
-          expression.kind === 'unbound'
-            ? this.convert(expression, this.naturalTypeOf(expression) ?? ERROR_TYPE, statement)
-            : expression;
-        if (!this.isStatementExpression(resolved)) {
-          this.error(
-            statement.expression,
-            'CS0201',
-            '代入、呼び出し、インクリメント、デクリメント、新しいオブジェクトの式のみがステートメントとして使用できます'
-          );
-        }
-        return { kind: 'expression', expression: resolved, row, step: this.expressionStepKind(resolved) };
+        return this.bindExpressionStatement(statement, context);
       }
       case 'localDeclaration': {
         return this.bindLocalDeclaration(statement, context);
       }
       case 'deconstruction': {
-        const value = this.bindValue(statement.value, context);
-        if (value.kind === 'unbound' && value.node.kind === 'tuple') {
-          const elements = value.node.elements.map((element) => this.bindValue(element.value, context));
-          void elements;
-        }
-        const target = this.declareDeconstructed(statement.designation, undefined, value.type, context);
-        const expression: BoundExpression = { kind: 'deconstructAssign', targets: target, value, type: VOID_TYPE, row };
-        return { kind: 'expression', expression, row, step: 'step' };
+        return this.bindDeconstruction(statement, context);
       }
       case 'localFunction': {
         this.bindLocalFunctionBody(statement.declaration, context);
@@ -462,22 +442,61 @@ export abstract class StatementBinder extends PatternBinder {
         return this.bindReturn(statement, context);
       }
       case 'throw': {
-        if (!statement.value) {
-          if (context.fn.catchDepth === 0)
-            this.error(statement, 'CS0156', '引数なしの throw ステートメントは catch 句以外では使えません');
-          return { kind: 'throw', value: undefined, row, step: 'none' };
-        }
-        return {
-          kind: 'throw',
-          value: this.bindThrowValue(statement.value, context, statement.value),
-          row,
-          step: 'none',
-        };
+        return this.bindThrowStatement(statement, context);
       }
       case 'try': {
         return this.bindTry(statement, context);
       }
     }
+  }
+
+  private bindExpressionStatement(
+    statement: Extract<Statement, { kind: 'expression' }>,
+    context: BindContext
+  ): BoundStatement {
+    const expression = this.bindValue(statement.expression, context);
+    const resolved =
+      expression.kind === 'unbound'
+        ? this.convert(expression, this.naturalTypeOf(expression) ?? ERROR_TYPE, statement)
+        : expression;
+    if (!this.isStatementExpression(resolved)) {
+      this.error(
+        statement.expression,
+        'CS0201',
+        '代入、呼び出し、インクリメント、デクリメント、新しいオブジェクトの式のみがステートメントとして使用できます'
+      );
+    }
+    return { kind: 'expression', expression: resolved, row: statement.row, step: this.expressionStepKind(resolved) };
+  }
+
+  private bindDeconstruction(
+    statement: Extract<Statement, { kind: 'deconstruction' }>,
+    context: BindContext
+  ): BoundStatement {
+    const { row } = statement;
+    const value = this.bindValue(statement.value, context);
+    if (value.kind === 'unbound' && value.node.kind === 'tuple') {
+      const elements = value.node.elements.map((element) => this.bindValue(element.value, context));
+      void elements;
+    }
+    const target = this.declareDeconstructed(statement.designation, undefined, value.type, context);
+    const expression: BoundExpression = { kind: 'deconstructAssign', targets: target, value, type: VOID_TYPE, row };
+    return { kind: 'expression', expression, row, step: 'step' };
+  }
+
+  private bindThrowStatement(statement: Extract<Statement, { kind: 'throw' }>, context: BindContext): BoundStatement {
+    const { row } = statement;
+    if (!statement.value) {
+      if (context.fn.catchDepth === 0)
+        this.error(statement, 'CS0156', '引数なしの throw ステートメントは catch 句以外では使えません');
+      return { kind: 'throw', value: undefined, row, step: 'none' };
+    }
+    return {
+      kind: 'throw',
+      value: this.bindThrowValue(statement.value, context, statement.value),
+      row,
+      step: 'none',
+    };
   }
 
   /** How an expression statement records its step: one that only calls or creates objects may leave it to its calls. */
@@ -521,7 +540,6 @@ export abstract class StatementBinder extends PatternBinder {
     }
   }
 
-  // code-gauge-allow functionNcss 60 -- The rules of local declarations, `var`, and `const`.
   private bindLocalDeclaration(
     statement: Extract<Statement, { kind: 'localDeclaration' }>,
     context: BindContext
@@ -574,45 +592,9 @@ export abstract class StatementBinder extends PatternBinder {
     context: BindContext
   ): BoundStatement {
     const { initializer } = declarator;
-    let type = declaredType;
-    let value: BoundExpression | undefined;
-    if (!type) {
-      if (!initializer) {
-        this.error(declarator, 'CS0818', '暗黙的に型指定された変数は初期化される必要があります');
-        type = ERROR_TYPE;
-      } else if (initializer.kind === 'arrayInitializer') {
-        this.error(declarator, 'CS0820', '配列初期化子で暗黙的に型指定された変数を初期化することはできません');
-        type = ERROR_TYPE;
-      } else {
-        const bound = this.bindValue(initializer, context);
-        if (bound.type.kind === 'null' && bound.kind !== 'unbound') {
-          this.error(declarator, 'CS0815', '<null> を暗黙的に型指定された変数に割り当てることはできません');
-          type = ERROR_TYPE;
-        } else if (bound.type.kind === 'void') {
-          this.error(declarator, 'CS0815', 'void を暗黙的に型指定された変数に割り当てることはできません');
-          type = ERROR_TYPE;
-        } else if (bound.kind === 'unbound') {
-          const natural = this.naturalTypeOf(bound);
-          if (!natural) {
-            const what = bound.node.kind === 'lambda' || bound.methodGroup ? undefined : bound.node.kind;
-            if (what === 'default') this.error(declarator, 'CS8716', "'default' リテラルにターゲット型がありません。");
-            else if (what === 'implicitNew') this.error(declarator, 'CS8754', "'new()' のターゲット型がありません");
-            else if (what === 'collection')
-              this.error(declarator, 'CS9176', 'コレクション式のターゲット型がありません。');
-            else if (what === 'tuple')
-              this.error(declarator, 'CS0815', `(${'?'}) を暗黙的に型指定された変数に割り当てることはできません`);
-            else this.error(declarator, 'CS8917', 'デリゲート型を推論できませんでした。');
-            type = ERROR_TYPE;
-          } else {
-            type = natural;
-            value = this.convert(bound, natural, declarator);
-          }
-        } else {
-          type = bound.type;
-          value = bound;
-        }
-      }
-    }
+    const inferred = declaredType ? { type: declaredType } : this.inferLocalType(declarator, context);
+    const { type } = inferred;
+    let { value } = inferred;
     // The variable is in scope in its own initializer, where using it is an error of definite assignment.
     const local = this.declareLocal(declarator.name, type, declarator, context);
     if (initializer && !value) {
@@ -621,19 +603,71 @@ export abstract class StatementBinder extends PatternBinder {
           ? this.bindArrayInitializer(initializer, type, context)
           : this.bindAs(initializer, type, context);
     }
-    if (isConst) {
-      local.isConst = true;
-      if (!initializer) this.error(declarator, 'CS0145', 'const フィールドに値を指定する必要があります');
-      else if (value?.kind !== 'constant') {
-        if (value?.type.kind !== 'error')
-          this.error(declarator, 'CS0133', `'${declarator.name}' に割り当てられた式は定数でなければなりません`);
-      } else {
-        local.constantValue = value.value;
-      }
-      if (type.kind !== 'error' && !this.isConstantType(type))
-        this.error(declarator, 'CS0283', `型 '${displayType(type)}' を const 宣言することはできません`);
-    }
+    if (isConst) this.checkLocalConstant(declarator, local, value, type);
     return { kind: 'localDeclaration', local, value, row: declarator.row, step: 'none' };
+  }
+
+  /** The type of an implicitly typed local, from its initializer, which it binds when that gives the type. */
+  private inferLocalType(
+    declarator: VariableDeclarator,
+    context: BindContext
+  ): { type: Type; value?: BoundExpression } {
+    const { initializer } = declarator;
+    if (!initializer) {
+      this.error(declarator, 'CS0818', '暗黙的に型指定された変数は初期化される必要があります');
+      return { type: ERROR_TYPE };
+    }
+    if (initializer.kind === 'arrayInitializer') {
+      this.error(declarator, 'CS0820', '配列初期化子で暗黙的に型指定された変数を初期化することはできません');
+      return { type: ERROR_TYPE };
+    }
+    const bound = this.bindValue(initializer, context);
+    if (bound.type.kind === 'null' && bound.kind !== 'unbound') {
+      this.error(declarator, 'CS0815', '<null> を暗黙的に型指定された変数に割り当てることはできません');
+      return { type: ERROR_TYPE };
+    }
+    if (bound.type.kind === 'void') {
+      this.error(declarator, 'CS0815', 'void を暗黙的に型指定された変数に割り当てることはできません');
+      return { type: ERROR_TYPE };
+    }
+    if (bound.kind !== 'unbound') return { type: bound.type, value: bound };
+    const natural = this.naturalTypeOf(bound);
+    if (!natural) {
+      this.reportNoNaturalType(declarator, bound);
+      return { type: ERROR_TYPE };
+    }
+    return { type: natural, value: this.convert(bound, natural, declarator) };
+  }
+
+  private reportNoNaturalType(
+    declarator: VariableDeclarator,
+    bound: Extract<BoundExpression, { kind: 'unbound' }>
+  ): void {
+    const what = bound.node.kind === 'lambda' || bound.methodGroup ? undefined : bound.node.kind;
+    if (what === 'default') this.error(declarator, 'CS8716', "'default' リテラルにターゲット型がありません。");
+    else if (what === 'implicitNew') this.error(declarator, 'CS8754', "'new()' のターゲット型がありません");
+    else if (what === 'collection') this.error(declarator, 'CS9176', 'コレクション式のターゲット型がありません。');
+    else if (what === 'tuple')
+      this.error(declarator, 'CS0815', `(${'?'}) を暗黙的に型指定された変数に割り当てることはできません`);
+    else this.error(declarator, 'CS8917', 'デリゲート型を推論できませんでした。');
+  }
+
+  private checkLocalConstant(
+    declarator: VariableDeclarator,
+    local: LocalSymbol,
+    value: BoundExpression | undefined,
+    type: Type
+  ): void {
+    local.isConst = true;
+    if (!declarator.initializer) this.error(declarator, 'CS0145', 'const フィールドに値を指定する必要があります');
+    else if (value?.kind !== 'constant') {
+      if (value?.type.kind !== 'error')
+        this.error(declarator, 'CS0133', `'${declarator.name}' に割り当てられた式は定数でなければなりません`);
+    } else {
+      local.constantValue = value.value;
+    }
+    if (type.kind !== 'error' && !this.isConstantType(type))
+      this.error(declarator, 'CS0283', `型 '${displayType(type)}' を const 宣言することはできません`);
   }
 
   /** Whether a type may be that of a constant. */
@@ -718,7 +752,7 @@ export abstract class StatementBinder extends PatternBinder {
     };
   }
 
-  // code-gauge-allow functionNcss 80 -- How foreach finds its elements: arrays, strings, and the GetEnumerator pattern.
+  // code-gauge-allow functionNcss 56 -- How foreach finds its elements: arrays, strings, and the GetEnumerator pattern.
   private bindForeach(statement: Extract<Statement, { kind: 'foreach' }>, context: BindContext): BoundStatement {
     const collection = this.bindValue(statement.collection, context);
     const scope = new LocalScope(context.scope, context.fn);
@@ -909,7 +943,7 @@ export abstract class StatementBinder extends PatternBinder {
     return undefined;
   }
 
-  // code-gauge-allow functionNcss 60 -- Switch sections, their labels, and duplicate cases.
+  // code-gauge-allow functionNcss 40 -- Switch sections, their labels, and duplicate cases.
   private bindSwitch(statement: Extract<Statement, { kind: 'switch' }>, context: BindContext): BoundStatement {
     const value = this.bindValue(statement.value, context);
     const scope = new LocalScope(context.scope, context.fn);

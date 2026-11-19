@@ -282,18 +282,16 @@ export class Runtime {
 
   private findImplementation(type: NamedType, method: MethodSymbol): MethodSymbol | undefined {
     const isInterface = method.owner.kind === 'interface';
+    const implementsMethod = (candidate: MethodSymbol): boolean =>
+      candidate.name === method.name &&
+      (isInterface ? this.implementsByName(candidate, method) : this.overrides(candidate, method));
     for (let current: NamedType | undefined = type; current; current = baseTypeOf(current)) {
-      for (const candidate of current.symbol.methods) {
-        if (candidate.name !== method.name || candidate.isStatic) continue;
-        if (isInterface ? this.implementsByName(candidate, method) : this.overrides(candidate, method))
-          return candidate;
-      }
-      for (const property of current.symbol.properties) {
-        for (const accessor of [property.getter, property.setter]) {
-          if (!accessor || accessor.name !== method.name) continue;
-          if (isInterface ? this.implementsByName(accessor, method) : this.overrides(accessor, method)) return accessor;
-        }
-      }
+      const found =
+        current.symbol.methods.find((candidate) => !candidate.isStatic && implementsMethod(candidate)) ??
+        current.symbol.properties
+          .flatMap((property) => [property.getter, property.setter])
+          .find((accessor): accessor is MethodSymbol => accessor !== undefined && implementsMethod(accessor));
+      if (found) return found;
     }
     return undefined;
   }
@@ -335,46 +333,27 @@ export class Runtime {
     if (!this.world.hasTurtles) return;
     const reached = new Set<TurtleState>();
     const seen = new Set<object>();
-    const pending: unknown[] = [];
-    for (const frame of this.frames) {
-      pending.push(
-        frame.thisValue,
-        ...frame.slots,
-        ...frame.temporaries,
-        ...frame.operands,
-        ...frame.captured.values()
-      );
-    }
-    for (const storage of this.statics.values()) pending.push(...storage.values);
+    const pending = this.garbageRoots();
     let scanned = 0;
     while (pending.length > 0) {
       const value = pending.pop();
       if (!(value instanceof Object) || seen.has(value)) continue;
       seen.add(value);
       scanned++;
-      if (value instanceof Cell) pending.push(value.value === UNASSIGNED ? undefined : value.value);
-      else if (value instanceof CsObject) {
-        if (value.turtle?.isAlive) reached.add(value.turtle);
-        for (const field of value.fields) pending.push(field);
-        if (value.native && typeof (value.native as NativeState).references === 'function')
-          for (const item of (value.native as NativeState).references()) pending.push(item);
-      } else if (value instanceof CsStruct) {
-        for (const field of value.fields) pending.push(field);
-        if (value.native && typeof (value.native as NativeState).references === 'function')
-          for (const item of (value.native as NativeState).references()) pending.push(item);
-      } else if (value instanceof CsBox) pending.push(value.value);
-      else if (value instanceof CsArray) for (const item of value.values) pending.push(item);
-      else if (value instanceof CsDelegate) {
-        for (const entry of value.entries) {
-          pending.push(entry.target);
-          if (entry.lambda) pending.push(entry.lambda.thisValue, ...entry.lambda.cells.values());
-        }
-      } else if ('get' in value && typeof (value as VariableReference).get === 'function') {
-        pending.push((value as VariableReference).get());
-      }
+      if (value instanceof CsObject && value.turtle?.isAlive) reached.add(value.turtle);
+      pending.push(...referencesOf(value));
     }
     this.spend(Math.ceil(scanned / 64));
     this.world.retain((turtle) => reached.has(turtle));
+  }
+
+  private garbageRoots(): unknown[] {
+    const roots: unknown[] = [];
+    for (const frame of this.frames) {
+      roots.push(frame.thisValue, ...frame.slots, ...frame.temporaries, ...frame.operands, ...frame.captured.values());
+    }
+    for (const storage of this.statics.values()) roots.push(...storage.values);
+    return roots;
   }
 
   /** Synthesized record and anonymous type members, which compare and print the object's fields. */
@@ -439,3 +418,24 @@ export function isSameRuntimeType(a: Type, b: Type): boolean {
 }
 
 export type { FieldSymbol };
+
+/** The values that a value holds, which the garbage collector reaches through it. */
+function referencesOf(value: object): unknown[] {
+  if (value instanceof Cell) return [value.value === UNASSIGNED ? undefined : value.value];
+  if (value instanceof CsObject || value instanceof CsStruct) return [...value.fields, ...nativeReferencesOf(value)];
+  if (value instanceof CsBox) return [value.value];
+  if (value instanceof CsArray) return value.values;
+  if (value instanceof CsDelegate) {
+    return value.entries.flatMap((entry) =>
+      entry.lambda ? [entry.target, entry.lambda.thisValue, ...entry.lambda.cells.values()] : [entry.target]
+    );
+  }
+  if ('get' in value && typeof (value as VariableReference).get === 'function')
+    return [(value as VariableReference).get()];
+  return [];
+}
+
+function nativeReferencesOf(value: CsObject | CsStruct): Iterable<unknown> {
+  const native = value.native as NativeState | undefined;
+  return native && typeof native.references === 'function' ? native.references() : [];
+}

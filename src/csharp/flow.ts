@@ -56,6 +56,28 @@ function assign(state: State, local: LocalSymbol): State {
   return new Set([...state, local]);
 }
 
+type SwitchSection = Extract<BoundStatement, { kind: 'switch' }>['sections'][number];
+type LoopStatement = Extract<BoundStatement, { kind: 'while' | 'do' | 'for' | 'foreach' }>;
+type AccessExpression = Extract<
+  BoundExpression,
+  {
+    kind: 'field' | 'element' | 'call' | 'property' | 'invokeDelegate' | 'conditionalAccess';
+  }
+>;
+type CreationExpression = Extract<BoundExpression, { kind: 'new' | 'newArray' | 'newDelegate' | 'lambda' | 'with' }>;
+type OperatorExpression = Extract<
+  BoundExpression,
+  {
+    kind: 'unary' | 'convert' | 'as' | 'throw' | 'binary' | 'logical' | 'is' | 'coalesce' | 'conditional' | 'switch';
+  }
+>;
+type AssignmentExpression = Extract<
+  BoundExpression,
+  {
+    kind: 'assign' | 'compoundAssign' | 'increment' | 'deconstructAssign' | 'eventAccessor';
+  }
+>;
+
 /** A jump out of statements, with the state it carries to where it goes. */
 interface Jumps {
   breaks: State[];
@@ -101,14 +123,12 @@ export class FlowAnalyzer {
     }
   }
 
-  // code-gauge-allow functionNcss 120 -- One case per kind of statement.
+  // code-gauge-allow functionNcss 40 -- One case per kind of statement.
   /** The state after a statement, given the state before it. */
   statement(statement: BoundStatement, state: State): State {
     switch (statement.kind) {
       case 'block': {
-        let current = state;
-        for (const inner of statement.statements) current = this.statement(inner, current);
-        return current;
+        return this.statements(statement.statements, state);
       }
       case 'empty': {
         return state;
@@ -121,55 +141,13 @@ export class FlowAnalyzer {
         return assign(this.expression(statement.value, state), statement.local);
       }
       case 'if': {
-        const condition = this.condition(statement.condition, state);
-        const constant = constantBool(statement.condition);
-        const thenEnd = this.statement(statement.consequence, constant === false ? 'unreachable' : condition.whenTrue);
-        const elseStart = constant === true ? 'unreachable' : condition.whenFalse;
-        const elseEnd = statement.alternative ? this.statement(statement.alternative, elseStart) : elseStart;
-        return intersect(thenEnd, elseEnd);
+        return this.ifStatement(statement, state);
       }
-      case 'while': {
-        return this.loop(state, (start) => {
-          const condition = this.condition(statement.condition, start);
-          const constant = constantBool(statement.condition);
-          const bodyEnd = this.statement(statement.body, constant === false ? 'unreachable' : condition.whenTrue);
-          return { exit: constant === true ? 'unreachable' : condition.whenFalse, bodyEnd };
-        });
-      }
-      case 'do': {
-        return this.loop(state, (start) => {
-          const bodyEnd = this.statement(statement.body, start);
-          const continueState = intersectAll(bodyEnd, this.jumps.continues);
-          this.jumps.continues = [];
-          const condition = this.condition(statement.condition, continueState);
-          const constant = constantBool(statement.condition);
-          return { exit: constant === true ? 'unreachable' : condition.whenFalse, bodyEnd: 'unreachable' };
-        });
-      }
-      case 'for': {
-        let current = state;
-        for (const initializer of statement.initializers) current = this.statement(initializer, current);
-        return this.loop(current, (start) => {
-          const condition = statement.condition
-            ? this.condition(statement.condition, start)
-            : { whenTrue: start, whenFalse: 'unreachable' as State };
-          const constant = statement.condition ? constantBool(statement.condition) : true;
-          const bodyEnd = this.statement(statement.body, constant === false ? 'unreachable' : condition.whenTrue);
-          const continueState = intersectAll(bodyEnd, this.jumps.continues);
-          this.jumps.continues = [];
-          let afterUpdates = continueState;
-          for (const update of statement.updates) afterUpdates = this.expression(update, afterUpdates);
-          return { exit: constant === true ? 'unreachable' : condition.whenFalse, bodyEnd: 'unreachable' };
-        });
-      }
+      case 'while':
+      case 'do':
+      case 'for':
       case 'foreach': {
-        const afterCollection = this.expression(statement.collection, state);
-        return this.loop(afterCollection, (start) => {
-          let bodyStart = assign(start, statement.variable);
-          if (statement.deconstruction) bodyStart = this.expression(statement.deconstruction, bodyStart);
-          this.statement(statement.body, bodyStart);
-          return { exit: start, bodyEnd: 'unreachable' };
-        });
+        return this.loopStatement(statement, state);
       }
       case 'switch': {
         return this.switchStatement(statement, state);
@@ -184,8 +162,7 @@ export class FlowAnalyzer {
       }
       case 'return': {
         const after = statement.value ? this.expression(statement.value, state) : state;
-        if (!statement.value) this.checkOutParameters(after, statement.row);
-        else this.checkOutParameters(after, statement.row);
+        this.checkOutParameters(after, statement.row);
         this.jumps.returns.push(after);
         return 'unreachable';
       }
@@ -197,6 +174,80 @@ export class FlowAnalyzer {
         return this.tryStatement(statement, state);
       }
     }
+  }
+
+  private statements(statements: BoundStatement[], state: State): State {
+    let current = state;
+    for (const inner of statements) current = this.statement(inner, current);
+    return current;
+  }
+
+  private ifStatement(statement: Extract<BoundStatement, { kind: 'if' }>, state: State): State {
+    const condition = this.condition(statement.condition, state);
+    const constant = constantBool(statement.condition);
+    const thenEnd = this.statement(statement.consequence, constant === false ? 'unreachable' : condition.whenTrue);
+    const elseStart = constant === true ? 'unreachable' : condition.whenFalse;
+    const elseEnd = statement.alternative ? this.statement(statement.alternative, elseStart) : elseStart;
+    return intersect(thenEnd, elseEnd);
+  }
+
+  private loopStatement(statement: LoopStatement, state: State): State {
+    switch (statement.kind) {
+      case 'while': {
+        return this.loop(state, (start) => {
+          const condition = this.condition(statement.condition, start);
+          const constant = constantBool(statement.condition);
+          const bodyEnd = this.statement(statement.body, constant === false ? 'unreachable' : condition.whenTrue);
+          return {
+            exit: constant === true ? 'unreachable' : condition.whenFalse,
+            bodyEnd,
+          };
+        });
+      }
+      case 'do': {
+        return this.loop(state, (start) => {
+          const bodyEnd = this.statement(statement.body, start);
+          const continueState = intersectAll(bodyEnd, this.jumps.continues);
+          this.jumps.continues = [];
+          const condition = this.condition(statement.condition, continueState);
+          const constant = constantBool(statement.condition);
+          return {
+            exit: constant === true ? 'unreachable' : condition.whenFalse,
+            bodyEnd: 'unreachable',
+          };
+        });
+      }
+      case 'for': {
+        return this.forStatement(statement, state);
+      }
+      case 'foreach': {
+        const afterCollection = this.expression(statement.collection, state);
+        return this.loop(afterCollection, (start) => {
+          let bodyStart = assign(start, statement.variable);
+          if (statement.deconstruction) bodyStart = this.expression(statement.deconstruction, bodyStart);
+          this.statement(statement.body, bodyStart);
+          return { exit: start, bodyEnd: 'unreachable' };
+        });
+      }
+    }
+  }
+
+  private forStatement(statement: Extract<BoundStatement, { kind: 'for' }>, state: State): State {
+    return this.loop(this.statements(statement.initializers, state), (start) => {
+      const condition = statement.condition
+        ? this.condition(statement.condition, start)
+        : { whenTrue: start, whenFalse: 'unreachable' as State };
+      const constant = statement.condition ? constantBool(statement.condition) : true;
+      const bodyEnd = this.statement(statement.body, constant === false ? 'unreachable' : condition.whenTrue);
+      const continueState = intersectAll(bodyEnd, this.jumps.continues);
+      this.jumps.continues = [];
+      let afterUpdates = continueState;
+      for (const update of statement.updates) afterUpdates = this.expression(update, afterUpdates);
+      return {
+        exit: constant === true ? 'unreachable' : condition.whenFalse,
+        bodyEnd: 'unreachable',
+      };
+    });
   }
 
   /** Analyzes a loop, whose exits are its condition's false state and its breaks. */
@@ -212,23 +263,16 @@ export class FlowAnalyzer {
   private switchStatement(statement: Extract<BoundStatement, { kind: 'switch' }>, state: State): State {
     const afterValue = this.expression(statement.value, state);
     const saved = this.jumps;
-    this.jumps = { breaks: [], continues: saved.continues, returns: saved.returns };
+    this.jumps = {
+      breaks: [],
+      continues: saved.continues,
+      returns: saved.returns,
+    };
     let hasDefault = false;
     for (const [index, section] of statement.sections.entries()) {
-      let entry: State = 'unreachable';
-      for (const label of section.labels) {
-        if (label === 'default') {
-          hasDefault = true;
-          entry = intersect(entry, afterValue);
-          continue;
-        }
-        const matched = this.pattern(label.pattern, afterValue, true);
-        entry = intersect(entry, label.guard ? this.condition(label.guard, matched).whenTrue : matched);
-        if (!label.guard && isIrrefutable(label.pattern)) hasDefault = true;
-      }
-      let current = entry;
-      for (const inner of section.statements) current = this.statement(inner, current);
-      if (current !== 'unreachable') {
+      const { entry, coversAll } = this.sectionEntry(section, afterValue);
+      if (coversAll) hasDefault = true;
+      if (this.statements(section.statements, entry) !== 'unreachable') {
         const label = section.labels.at(-1);
         const labelText = label === 'default' || label === undefined ? 'default:' : `case ${caseText(label.pattern)}:`;
         this.diagnostics.fallsThrough(labelText, index === statement.sections.length - 1, section.row);
@@ -238,6 +282,23 @@ export class FlowAnalyzer {
     this.jumps = saved;
     const exit: State = hasDefault ? 'unreachable' : afterValue;
     return intersectAll(exit, breaks);
+  }
+
+  /** The state on entry to a switch section, and whether one of its labels matches every value. */
+  private sectionEntry(section: SwitchSection, afterValue: State): { entry: State; coversAll: boolean } {
+    let entry: State = 'unreachable';
+    let coversAll = false;
+    for (const label of section.labels) {
+      if (label === 'default') {
+        coversAll = true;
+        entry = intersect(entry, afterValue);
+        continue;
+      }
+      const matched = this.pattern(label.pattern, afterValue, true);
+      entry = intersect(entry, label.guard ? this.condition(label.guard, matched).whenTrue : matched);
+      if (!label.guard && isIrrefutable(label.pattern)) coversAll = true;
+    }
+    return { entry, coversAll };
   }
 
   private tryStatement(statement: Extract<BoundStatement, { kind: 'try' }>, state: State): State {
@@ -262,10 +323,16 @@ export class FlowAnalyzer {
         const left = this.condition(expression.left, state);
         if (expression.operator === '&&') {
           const right = this.condition(expression.right, left.whenTrue);
-          return { whenTrue: right.whenTrue, whenFalse: intersect(left.whenFalse, right.whenFalse) };
+          return {
+            whenTrue: right.whenTrue,
+            whenFalse: intersect(left.whenFalse, right.whenFalse),
+          };
         }
         const right = this.condition(expression.right, left.whenFalse);
-        return { whenTrue: intersect(left.whenTrue, right.whenTrue), whenFalse: right.whenFalse };
+        return {
+          whenTrue: intersect(left.whenTrue, right.whenTrue),
+          whenFalse: right.whenFalse,
+        };
       }
       case 'unary': {
         if (expression.operator === '!' && !expression.isLifted) {
@@ -324,7 +391,7 @@ export class FlowAnalyzer {
     }
   }
 
-  // code-gauge-allow functionNcss 120 -- One case per kind of expression, in evaluation order.
+  // code-gauge-allow functionNcss 55 -- One case per group of expression kinds, in evaluation order.
   /** The state after evaluating an expression, reporting reads of locals not definitely assigned. */
   expression(expression: BoundExpression, state: State): State {
     switch (expression.kind) {
@@ -332,18 +399,76 @@ export class FlowAnalyzer {
         this.read(expression.local, state, expression.row);
         return state;
       }
+      case 'field':
+      case 'element':
+      case 'call':
+      case 'property':
+      case 'invokeDelegate':
+      case 'conditionalAccess': {
+        return this.accessExpression(expression, state);
+      }
+      case 'new':
+      case 'newArray':
+      case 'newDelegate':
+      case 'lambda':
+      case 'with': {
+        return this.creationExpression(expression, state);
+      }
+      case 'unary':
+      case 'convert':
+      case 'as':
+      case 'throw':
+      case 'binary':
+      case 'logical':
+      case 'is':
+      case 'coalesce':
+      case 'conditional':
+      case 'switch': {
+        return this.operatorExpression(expression, state);
+      }
+      case 'assign':
+      case 'compoundAssign':
+      case 'increment':
+      case 'deconstructAssign':
+      case 'eventAccessor': {
+        return this.assignmentExpression(expression, state);
+      }
+      case 'concat':
+      case 'tuple': {
+        return this.expressions(expression.kind === 'concat' ? expression.parts : expression.elements, state);
+      }
+      case 'interpolated': {
+        let current = state;
+        for (const part of expression.parts)
+          if (typeof part !== 'string') current = this.expression(part.value, current);
+        return current;
+      }
+      case 'sequence': {
+        let current = state;
+        for (const local of expression.locals) current = assign(current, local);
+        return this.expression(expression.value, this.expressions(expression.sideEffects, current));
+      }
+      default: {
+        return state;
+      }
+    }
+  }
+
+  private expressions(expressions: BoundExpression[], state: State): State {
+    let current = state;
+    for (const expression of expressions) current = this.expression(expression, current);
+    return current;
+  }
+
+  private accessExpression(expression: AccessExpression, state: State): State {
+    switch (expression.kind) {
       case 'field': {
         return this.receiver(expression.receiver, state);
       }
       case 'element': {
-        let current = this.expression(expression.array, state);
-        for (const index of expression.indices) current = this.expression(index, current);
-        return current;
+        return this.expressions(expression.indices, this.expression(expression.array, state));
       }
-      case 'call': {
-        const current = expression.receiver ? this.receiver(expression.receiver, state) : state;
-        return this.arguments(expression.args, current);
-      }
+      case 'call':
       case 'property': {
         const current = expression.receiver ? this.receiver(expression.receiver, state) : state;
         return this.arguments(expression.args, current);
@@ -351,15 +476,22 @@ export class FlowAnalyzer {
       case 'invokeDelegate': {
         return this.arguments(expression.args, this.expression(expression.target, state));
       }
+      case 'conditionalAccess': {
+        const after = this.expression(expression.receiver, state);
+        const accessed = this.expression(expression.access, assign(after, expression.temporary));
+        return intersect(after, accessed);
+      }
+    }
+  }
+
+  private creationExpression(expression: CreationExpression, state: State): State {
+    switch (expression.kind) {
       case 'new': {
         const current = this.arguments(expression.args, state);
         return expression.initializer ? this.initializer(expression.initializer, current) : current;
       }
       case 'newArray': {
-        let current = state;
-        for (const size of expression.sizes) current = this.expression(size, current);
-        for (const element of expression.elements ?? []) current = this.expression(element, current);
-        return current;
+        return this.expressions(expression.elements ?? [], this.expressions(expression.sizes, state));
       }
       case 'newDelegate': {
         return expression.receiver ? this.expression(expression.receiver, state) : state;
@@ -368,13 +500,25 @@ export class FlowAnalyzer {
         this.lambda(expression.lambda.method, state);
         return state;
       }
+      case 'with': {
+        let current = this.expression(expression.value, state);
+        for (const assignment of expression.assignments)
+          if (assignment.value) current = this.expression(assignment.value, current);
+        return current;
+      }
+    }
+  }
+
+  private operatorExpression(expression: OperatorExpression, state: State): State {
+    switch (expression.kind) {
       case 'unary':
       case 'convert':
-      case 'as':
+      case 'as': {
+        return this.expression(expression.operand, state);
+      }
       case 'throw': {
-        const operand = expression.kind === 'throw' ? expression.value : expression.operand;
-        const after = this.expression(operand, state);
-        return expression.kind === 'throw' ? 'unreachable' : after;
+        this.expression(expression.value, state);
+        return 'unreachable';
       }
       case 'binary': {
         return this.expression(expression.right, this.expression(expression.left, state));
@@ -395,6 +539,25 @@ export class FlowAnalyzer {
         const whenFalse = this.expression(expression.whenFalse, condition.whenFalse);
         return intersect(whenTrue, whenFalse);
       }
+      case 'switch': {
+        return this.switchExpression(expression, state);
+      }
+    }
+  }
+
+  private switchExpression(expression: Extract<BoundExpression, { kind: 'switch' }>, state: State): State {
+    const afterValue = this.expression(expression.value, state);
+    let end: State = 'unreachable';
+    for (const arm of expression.arms) {
+      let armState = this.pattern(arm.pattern, afterValue, true);
+      if (arm.guard) armState = this.condition(arm.guard, armState).whenTrue;
+      end = intersect(end, this.expression(arm.value, armState));
+    }
+    return end === 'unreachable' ? afterValue : end;
+  }
+
+  private assignmentExpression(expression: AssignmentExpression, state: State): State {
+    switch (expression.kind) {
       case 'assign': {
         return this.assignTarget(
           expression.target,
@@ -407,54 +570,11 @@ export class FlowAnalyzer {
         if (expression.target.kind === 'local') this.read(expression.target.local, before, expression.row);
         return this.expression(expression.operation, before);
       }
-      case 'switch': {
-        const afterValue = this.expression(expression.value, state);
-        let end: State = 'unreachable';
-        for (const arm of expression.arms) {
-          let armState = this.pattern(arm.pattern, afterValue, true);
-          if (arm.guard) armState = this.condition(arm.guard, armState).whenTrue;
-          end = intersect(end, this.expression(arm.value, armState));
-        }
-        return end === 'unreachable' ? afterValue : end;
-      }
-      case 'concat':
-      case 'tuple': {
-        let current = state;
-        for (const part of expression.kind === 'concat' ? expression.parts : expression.elements)
-          current = this.expression(part, current);
-        return current;
-      }
-      case 'interpolated': {
-        let current = state;
-        for (const part of expression.parts)
-          if (typeof part !== 'string') current = this.expression(part.value, current);
-        return current;
-      }
-      case 'conditionalAccess': {
-        const after = this.expression(expression.receiver, state);
-        const accessed = this.expression(expression.access, assign(after, expression.temporary));
-        return intersect(after, accessed);
-      }
-      case 'with': {
-        let current = this.expression(expression.value, state);
-        for (const assignment of expression.assignments)
-          if (assignment.value) current = this.expression(assignment.value, current);
-        return current;
-      }
       case 'deconstructAssign': {
         return this.deconstructTargets(expression.targets, this.expression(expression.value, state));
       }
       case 'eventAccessor': {
         return this.expression(expression.value, this.targetPrefix(expression.target, state));
-      }
-      case 'sequence': {
-        let current = state;
-        for (const local of expression.locals) current = assign(current, local);
-        for (const effect of expression.sideEffects) current = this.expression(effect, current);
-        return this.expression(expression.value, current);
-      }
-      default: {
-        return state;
       }
     }
   }
