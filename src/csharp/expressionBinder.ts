@@ -233,8 +233,16 @@ export abstract class ExpressionBinder extends MemberBinder {
           );
           return { kind: 'default', type: this.boolType, row };
         }
-        const pattern = this.bindPattern(node.pattern, operand.type, context);
-        return { kind: 'is', operand, pattern, type: this.boolType, row };
+        // `x is T` is the type-testing operator, which only warns (CS0184) when T can never match.
+        const isTypeTest = node.pattern.kind === 'constantPattern' || node.pattern.kind === 'typePattern';
+        const saved = this.isTypeTestOperator;
+        this.isTypeTestOperator = isTypeTest;
+        try {
+          const pattern = this.bindPattern(node.pattern, operand.type, context);
+          return { kind: 'is', operand, pattern, type: this.boolType, row };
+        } finally {
+          this.isTypeTestOperator = saved;
+        }
       }
       default: {
         return undefined;
@@ -509,6 +517,9 @@ export abstract class ExpressionBinder extends MemberBinder {
    * Binds `==` or `!=` of two tuples, which compares their elements in order after evaluating both tuples, stopping at
    * the first element that decides the result (C# spec §12.12.11).
    */
+  /** Whether the pattern being bound is the type of an `x is T` operator. */
+  protected isTypeTestOperator = false;
+
   private bindTupleEquality(
     operator: '==' | '!=',
     left: BoundExpression,

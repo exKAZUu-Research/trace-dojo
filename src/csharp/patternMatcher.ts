@@ -7,9 +7,11 @@ import type { Frame } from './runtime';
 import {
   type FieldSymbol,
   isReferenceType,
+  isValueType,
   type LocalSymbol,
   type MethodSymbol,
   type NamedType,
+  nullableUnderlying,
   type PropertySymbol,
   sameType,
   type Type,
@@ -79,8 +81,13 @@ export abstract class PatternMatcher extends EvaluatorBase {
   private matchesType(pattern: Extract<BoundPattern, { kind: 'type' }>, value: Value, frame: Frame): boolean {
     if (value === undefined) return false;
     const type = frame.resolve(pattern.testType);
-    const inputIsValue = !(value instanceof CsBox) && this.runtime.runtimeTypeOf(value) === undefined;
-    if (!inputIsValue && !(value instanceof CsStruct && sameType(value.type, type)) && !this.isInstanceOf(value, type))
+    // A primitive carries no type, so it tests as a box of the input's static type.
+    const inputType = frame.resolve(pattern.inputType);
+    const subject =
+      !(value instanceof CsBox) && this.runtime.runtimeTypeOf(value) === undefined && isValueType(inputType)
+        ? new CsBox(nullableUnderlying(inputType) ?? inputType, value)
+        : value;
+    if (!(subject instanceof CsStruct && sameType(subject.type, type)) && !this.isInstanceOf(subject, type))
       return false;
     if (pattern.local)
       this.storeLocal(

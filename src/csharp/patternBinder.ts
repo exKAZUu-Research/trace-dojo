@@ -117,6 +117,7 @@ export abstract class PatternBinder extends ExpressionBinder {
       return;
     }
     const input = nullableUnderlying(inputType) ?? inputType;
+    if (this.isTypeTestOperator) return;
     if (!this.conversions.explicit(input, type) && !this.conversions.explicit(inputType, type)) {
       this.error(
         position,
@@ -158,8 +159,8 @@ export abstract class PatternBinder extends ExpressionBinder {
       return { kind: 'constant', value, inputType, type: ERROR_TYPE };
     }
     const target = nullableUnderlying(inputType) ?? inputType;
-    if (this.implicitConversionOf(value, target))
-      return { kind: 'constant', value: this.convert(value, target, pattern), inputType, type: target };
+    // Against `object`, an interface, or a type parameter, a constant tests the input's type and keeps its own,
+    // so `(object)1 is 1` holds while `(object)1L is 1` does not.
     if (
       specialOf(target) === 'object' ||
       target.kind === 'typeParameter' ||
@@ -167,6 +168,8 @@ export abstract class PatternBinder extends ExpressionBinder {
     ) {
       return { kind: 'constant', value, inputType, type: value.type };
     }
+    if (this.implicitConversionOf(value, target))
+      return { kind: 'constant', value: this.convert(value, target, pattern), inputType, type: target };
     this.error(
       pattern,
       'CS0029',
