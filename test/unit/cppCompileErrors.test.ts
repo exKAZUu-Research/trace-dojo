@@ -291,6 +291,16 @@ int main() { std::pair<std::vector<int>, int> pair = {1, 2}; }`;
 });
 
 test.each([
+  ['struct Holder { static int& value; };\nint& Holder::value;', 1],
+  ['struct Holder { inline static int& value; };', 0],
+])('a static reference definition requires an initializer', (source, row) => {
+  expect(executeProgram('cpp', `${source}\nint main() {}`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row, message: expect.stringContaining('初期値') }],
+  });
+});
+
+test.each([
   ['for_each', 'void callback(bool&) {}', 'callback'],
   ['transform', 'int callback(bool&) { return 1; }', 'out, callback'],
 ])('std::%s rejects bool lvalue references for bit proxy callbacks', (name, callback, argumentsAfterRange) => {

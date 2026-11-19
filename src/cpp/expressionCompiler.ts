@@ -290,29 +290,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         };
       }
       case 'global': {
-        const { index, type } = entity.global;
-        if (entity.isReference) {
-          return {
-            type: nonReference(type),
-            isLvalue: true,
-            row,
-            staticAddress: entity.global.hasStaticReferenceBinding,
-            constantInitialization: hasConstantObject(entity.global.constantLocation),
-            constantLocation: entity.global.constantLocation,
-            run: (frame) => (frame.runtime.globals[index] as Box).get(0) as Ptr,
-          };
-        }
-        return {
-          type,
-          isLvalue: true,
-          row,
-          constant: entity.constant,
-          staticAddress: true,
-          constantInitialization: entity.global.hasConstantObjectValue,
-          constantPointerValue: entity.global.isConstexprPointer,
-          constantPointee: entity.global.constantPointee,
-          run: (frame) => new Ptr(frame.runtime.globals[index], 0),
-        };
+        return this.staticStorageExpr(entity.global, row, entity.constant);
       }
       case 'field': {
         if (isQualified && !this.context.cls)
@@ -503,22 +481,38 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   private staticMemberExpr(field: StaticFieldInfo, row: number, object?: Expr): Expr {
-    const { global, constant, type } = field;
+    const { global, constant } = field;
     if (!global)
       return this.error(row, `static のメンバ変数 ${field.owner.name}::${field.name} が定義されていません。`);
+    return this.staticStorageExpr(global, row, constant, object, () => this.requireStaticDefinition(global, row));
+  }
+
+  private staticStorageExpr(
+    global: GlobalInfo,
+    row: number,
+    constant: number | bigint | undefined,
+    object?: Expr,
+    requireDefinition?: () => void
+  ): Expr {
+    const { type, index, constantLocation } = global;
+    const isReference = type.kind === 'reference';
     const evaluateObject = object ? this.materialize(object).run : undefined;
-    const requireDefinition = (): void => this.requireStaticDefinition(global, row);
     const locate = (frame: Frame): Ptr => {
       evaluateObject?.(frame);
-      return new Ptr(frame.runtime.globals[global.index], 0);
+      const box = frame.runtime.globals[index] as Box;
+      return isReference ? (box.get(0) as Ptr) : new Ptr(box, 0);
     };
     return {
-      type,
+      type: nonReference(type),
       isLvalue: true,
       row,
       constant: evaluateObject ? undefined : constant,
-      staticAddress: !evaluateObject,
-      constantInitialization: !evaluateObject && global.hasConstantObjectValue,
+      staticAddress: !evaluateObject && (!isReference || global.hasStaticReferenceBinding),
+      constantInitialization:
+        !evaluateObject && (isReference ? hasConstantObject(constantLocation) : global.hasConstantObjectValue),
+      constantLocation: evaluateObject ? undefined : constantLocation,
+      constantPointerValue: !evaluateObject && global.isConstexprPointer,
+      constantPointee: evaluateObject ? undefined : global.constantPointee,
       readConstant:
         evaluateObject && constant !== undefined
           ? (frame) => {
@@ -527,7 +521,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
             }
           : undefined,
       get run() {
-        requireDefinition();
+        requireDefinition?.();
         return locate;
       },
     };

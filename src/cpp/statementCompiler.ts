@@ -535,13 +535,22 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     declared: Extract<Type, { kind: 'reference' }>,
     declarator: Syntax
   ): ReferenceBinding {
-    const { row } = declarator;
     const value = declarator.type === 'init_declarator' ? fieldOf(declarator, 'value') : undefined;
+    return this.bindReferenceValue(name, declared, value, declarator.row, !hasToken(declarator, '='));
+  }
+
+  protected bindReferenceValue(
+    name: string,
+    declared: Extract<Type, { kind: 'reference' }>,
+    value: Syntax | undefined,
+    row: number,
+    direct: boolean
+  ): ReferenceBinding {
     if (!value) return this.error(row, `参照 ${name} には初期値が要ります。`);
     const isDeduced = hasAuto(declared.to);
     let target: Expr;
     if (value.type === 'initializer_list' && !isDeduced) {
-      const bound = this.listReferenceValue(value, declared.to, !hasToken(declarator, '='));
+      const bound = this.listReferenceValue(value, declared.to, direct);
       if (!bound) return this.error(row, `参照 ${name} を {...} の値に束縛できません。`);
       target = bound;
     } else if (value.type === 'initializer_list' || value.type === 'argument_list') {

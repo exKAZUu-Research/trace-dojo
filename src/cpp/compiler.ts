@@ -394,6 +394,7 @@ export class Compiler extends StatementCompiler {
         if (isConstexpr) this.requireConstantInitializer(declared.type, initializer, declarator.row, directInitializer);
         this.staticMember(cls, name, declared.type, access, declarator.row, initializer, {
           isInline,
+          isConstexpr,
           directInitializer,
         });
         continue;
@@ -434,7 +435,11 @@ export class Compiler extends StatementCompiler {
     access: Access,
     row: number,
     initializer: Syntax | undefined,
-    { isInline, directInitializer }: { isInline: boolean; directInitializer: boolean }
+    {
+      isInline,
+      isConstexpr,
+      directInitializer,
+    }: { isInline: boolean; isConstexpr: boolean; directInitializer: boolean }
   ): void {
     const info = {
       name,
@@ -456,8 +461,8 @@ export class Compiler extends StatementCompiler {
     const global = this.declareStaticStorage(`${cls.name}::${name}`, type, row, !isConstType(type));
     info.global = global;
     global.isDefined = isInline;
-    if (initializer || (isInline && this.isClassType(type)))
-      info.constant = this.initializeGlobal(global, type, initializer, row, directInitializer);
+    if (initializer || (isInline && (type.kind === 'reference' || this.isClassType(type))))
+      info.constant = this.initializeGlobal(global, type, initializer, row, directInitializer, isConstexpr);
     if (!isInline && initializer && info.constant === undefined)
       this.error(row, 'クラスの中で初期化する static const の整数には定数を書いてください。');
   }
@@ -1530,7 +1535,9 @@ export class Compiler extends StatementCompiler {
         if (info.constant !== undefined)
           this.error(declarator.row, `${scope.cls.name}::${name} の初期値はクラスの中ですでに指定されています。`);
         info.constant = this.initializeGlobal(global, info.type, value, declarator.row, !hasToken(declarator, '='));
-      } else if (this.isClassType(info.type)) this.initializeGlobal(global, info.type, undefined, declarator.row);
+      } else if (info.type.kind === 'reference' || this.isClassType(info.type)) {
+        this.initializeGlobal(global, info.type, undefined, declarator.row);
+      }
     } finally {
       this.memberClass = savedClass;
     }
@@ -1540,7 +1547,7 @@ export class Compiler extends StatementCompiler {
     if (this.globalScope.names.has(name)) return this.error(declarator.row, `${name} はすでに宣言されています。`);
     const value = declarator.type === 'init_declarator' ? fieldOf(declarator, 'value') : undefined;
     let type = declaredType;
-    if (type.kind === 'reference') return this.globalReference(name, type, declarator);
+    if (type.kind === 'reference') return this.globalReference(name, type, declarator, isConstexpr);
     if (hasAuto(type))
       type = this.deduceAuto(
         type,
@@ -1564,17 +1571,32 @@ export class Compiler extends StatementCompiler {
     return type;
   }
 
-  private globalReference(name: string, declared: Extract<Type, { kind: 'reference' }>, declarator: Syntax): Type {
+  private globalReference(
+    name: string,
+    declared: Extract<Type, { kind: 'reference' }>,
+    declarator: Syntax,
+    isConstexpr: boolean
+  ): Type {
     const { row } = declarator;
     const binding = this.bindReference(name, declared, declarator);
     const global = this.declareStaticStorage(name, binding.type, row, true);
     global.isDefined = true;
     this.globalScope.names.set(name, { kind: 'global', global, isReference: true });
+    this.initializeFileReference(global, binding, row, isConstexpr);
+    return binding.type;
+  }
+
+  private initializeFileReference(
+    global: GlobalInfo,
+    binding: ReferenceBinding,
+    row: number,
+    isConstexpr: boolean
+  ): void {
+    if (isConstexpr && !binding.isConstant) this.error(row, 'constexpr の変数の初期値には定数式を書いてください。');
     global.hasStaticReferenceBinding = binding.isConstant;
     global.constantLocation = binding.isConstant ? binding.constantLocation : undefined;
     const initializers = binding.isConstant ? this.constantInitializers : this.dynamicInitializers;
     initializers.push(this.staticReferenceInitializer(global, binding, row, true));
-    return binding.type;
   }
 
   staticReferenceInitializer(
@@ -1632,11 +1654,17 @@ export class Compiler extends StatementCompiler {
     type: Type,
     value: Syntax | undefined,
     row: number,
-    direct = false
+    direct = false,
+    isConstexpr = false
   ): number | bigint | undefined {
     const saved = this.context;
     this.context = new FunctionContext(undefined, this.memberClass, VOID);
     try {
+      if (type.kind === 'reference') {
+        const binding = this.bindReferenceValue(global.name, type, value, row, direct);
+        this.initializeFileReference(global, binding, row, isConstexpr);
+        return;
+      }
       const init = this.staticInitialization(type, value, row, direct);
       if (!init) return;
       if ((type.kind === 'class' || type.kind === 'array') && isConstType(type))
