@@ -90,6 +90,7 @@ export interface GlobalInfo {
   isDefined: boolean;
   hasStaticReferenceBinding?: boolean;
   isConstexprPointer?: boolean;
+  hasConstantObjectValue?: boolean;
   /** Whether learners see the variable: constants never change, so they would only crowd the variable table. */
   isShown: boolean;
 }
@@ -135,6 +136,7 @@ export interface FunctionInfo {
   native?: NativeFunction;
   nativeUses?: (row: number) => void;
   evaluateConstant?: (args: readonly (number | bigint)[]) => number | bigint;
+  allowsConstantInitialization?: (args: readonly Expr[]) => boolean;
   /** The syntax of the definition, which the compiler compiles once the declarations it may use are known. */
   definition?: Syntax;
   /** Whether the function takes any number of further arguments, as `printf` does. */

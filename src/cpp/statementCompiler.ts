@@ -2,7 +2,7 @@ import { isBaseAccessible } from './access';
 import { AUTO, hasAuto } from './compilerBase';
 import { permitsQualificationConversion } from './conversions';
 import { CppException, ProgramAbort } from './errors';
-import type { Expr } from './expr';
+import { type Expr, type MemberConstant, memberConstantOf } from './expr';
 import { ExpressionCompiler } from './expressionCompiler';
 import { SequenceValue } from './library/containerValues';
 import { withTemporaries, zeroOf } from './objectCompiler';
@@ -28,10 +28,11 @@ import {
 import { ArrayStore, Box, CObject, endLifetime, Liveness, Ptr, type Store, UNINIT, type Value } from './values';
 
 /** The type an `auto` declarator deduced, which the declaration's other declarators must agree with. */
-export type ReferenceBinding = { type: Extract<Type, { kind: 'reference' }>; isConstant?: boolean } & (
-  | { loc: Eval<Ptr> }
-  | { lifetime: { type: Type; make: Eval<Value | Ptr>; locate: (box: Box) => Ptr } }
-);
+export type ReferenceBinding = {
+  type: Extract<Type, { kind: 'reference' }>;
+  isConstant?: boolean;
+  memberConstant?: MemberConstant;
+} & ({ loc: Eval<Ptr> } | { lifetime: { type: Type; make: Eval<Value | Ptr>; locate: (box: Box) => Ptr } });
 
 export interface AutoDeduction {
   name: string;
@@ -505,6 +506,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       return {
         type,
         isConstant: this.isConstantInitializer(bound),
+        memberConstant: memberConstantOf(bound),
         lifetime: { type: heldType, make: bound.run, locate: (box) => new Ptr(box, 0) },
       };
     }
@@ -515,6 +517,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return {
       type,
       isConstant: isDirect && target.staticAddress,
+      memberConstant: isDirect ? target.memberConstant : undefined,
       loc: this.convert(target, type, row).run as Eval<Ptr>,
     };
   }

@@ -7,7 +7,16 @@ import { byteAt } from './bytes';
 import { hasAuto, isAuto } from './compilerBase';
 import { type ConversionSequence, convertArithmetic, implicitConversion, Rank, sequence } from './conversions';
 import { CppRuntimeError } from './errors';
-import { constantExpr, type Expr, type FunctionCandidates, type Initializer } from './expr';
+import {
+  constantExpr,
+  type Expr,
+  type FunctionCandidates,
+  type Initializer,
+  mapMemberConstants,
+  type MemberConstant,
+  memberConstantOf,
+  NO_CONSTANT_MEMBERS,
+} from './expr';
 import { throwLibrary } from './library/support';
 import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
 import { makeEach, ObjectCompiler, zeroOf } from './objectCompiler';
@@ -277,6 +286,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
           row,
           constant: entity.constant,
           staticAddress: true,
+          constantInitialization: entity.global.hasConstantObjectValue,
           constantPointerValue: entity.global.isConstexprPointer,
           run: (frame) => new Ptr(frame.runtime.globals[index], 0),
         };
@@ -358,6 +368,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return {
       type: classType(cls, isConst),
       isLvalue: true,
+      isThis: true,
       row,
       run: (frame) => thisLocation(frame),
     };
@@ -368,7 +379,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return this.error(row, 'this は、static でないメンバ関数の中でしか使えません。');
     }
     const type = pointerTo(classType(this.context.cls, this.context.isConstMember));
-    return { type, isLvalue: false, row, run: (frame) => thisLocation(frame) };
+    return { type, isLvalue: false, isThis: true, row, run: (frame) => thisLocation(frame) };
   }
 
   // Members -------------------------------------------------------------------------------------------------------
@@ -483,6 +494,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       row,
       constant: evaluateObject ? undefined : constant,
       staticAddress: !evaluateObject,
+      constantInitialization: !evaluateObject && global.hasConstantObjectValue,
       readConstant:
         evaluateObject && constant !== undefined
           ? (frame) => {
@@ -508,6 +520,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return {
         type: field.type.to,
         isLvalue: true,
+        memberConstant: object.isThis && isArithmetic(field.type.to) ? (members) => members.get(field) : undefined,
         row,
         run: (frame) => (objectRun(frame).read() as CObject).get(index) as unknown as Ptr,
       };
@@ -518,6 +531,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         type,
         isLvalue: true,
         staticAddress: object.staticAddress,
+        memberConstant: object.isThis && isArithmetic(type) ? (members) => members.get(field) : undefined,
         row,
         run: (frame) => {
           const target = (run(frame) as Ptr).read();
@@ -622,17 +636,20 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   private logical(operator: '&&' | '||', left: Expr, right: Expr, row: number): Expr {
     const a = this.condition(left, row);
     const b = this.condition(right, row);
-    const run: Eval<Value> =
-      operator === '&&' ? (frame) => (a(frame) && b(frame) ? 1 : 0) : (frame) => (a(frame) || b(frame) ? 1 : 0);
-    const expr: Expr = { type: BOOL, isLvalue: false, row, run };
-    const lc = this.rvalue(left).constant;
-    const rc = this.rvalue(right).constant;
-    if (lc !== undefined && rc !== undefined) {
-      expr.constant = (operator === '&&' ? Number(lc) !== 0 && Number(rc) !== 0 : Number(lc) !== 0 || Number(rc) !== 0)
-        ? 1
-        : 0;
-    }
-    return expr;
+    const stop = operator === '||';
+    const run: Eval<Value> = (frame) => (a(frame) === stop ? Number(stop) : Number(b(frame)));
+    const av = this.rvalue(left);
+    const bv = this.rvalue(right);
+    const constant = logicalConstant(stop, av, bv);
+    const isMemberDependent = (av.memberConstant ?? bv.memberConstant) !== undefined;
+    return {
+      type: BOOL,
+      isLvalue: false,
+      row,
+      run,
+      constant: isMemberDependent ? undefined : constant?.(NO_CONSTANT_MEMBERS),
+      memberConstant: isMemberDependent ? constant : undefined,
+    };
   }
 
   /** An arithmetic operator on two arithmetic prvalues, after the usual arithmetic conversions. */
@@ -656,6 +673,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       isLvalue: false,
       row,
       run: (frame) => operation(aRun(frame) as number, bRun(frame) as number),
+      memberConstant: mapMemberConstants([a, b], ([first, second]) => operation(first, second)),
     };
     if (a.constant !== undefined && b.constant !== undefined) {
       try {
@@ -696,8 +714,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   private shift(operator: '<<' | '>>', left: Expr, right: Expr, row: number): Expr {
     const type = promote(unqualified(left.type) as never) as Extract<Type, { kind: 'int' }>;
-    const a = convertArithmetic(left, type).run;
-    const b = this.rvalue(right).run;
+    const a = convertArithmetic(left, type);
+    const b = this.rvalue(right);
     const wide = isWide(type);
     const signed = type.name === 'int' || type.name === 'long' || type.name === 'llong';
     const bits = wide ? 64 : 32;
@@ -713,9 +731,15 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       if (operator === '<<') return signed ? small << amount : (small << amount) >>> 0;
       return signed ? small >> amount : small >>> amount;
     };
-    const expr: Expr = { type, isLvalue: false, row, run: (frame) => shift(a(frame) as number, b(frame) as number) };
-    const lc = convertArithmetic(left, type).constant;
-    const rc = this.rvalue(right).constant;
+    const expr: Expr = {
+      type,
+      isLvalue: false,
+      row,
+      run: (frame) => shift(a.run(frame) as number, b.run(frame) as number),
+      memberConstant: mapMemberConstants([a, b], ([value, count]) => shift(value, count)),
+    };
+    const lc = a.constant;
+    const rc = b.constant;
     if (lc !== undefined && rc !== undefined) {
       try {
         expr.constant = shift(lc, rc);
@@ -812,7 +836,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (operator === '!') {
       const condition = this.condition(operand, row);
       const expr: Expr = { type: BOOL, isLvalue: false, row, run: (frame) => (condition(frame) ? 0 : 1) };
-      const constant = this.rvalue(operand).constant;
+      const value = this.rvalue(operand);
+      expr.memberConstant = mapMemberConstants([value], ([scalar]) => (Number(scalar) === 0 ? 1 : 0));
+      const constant = value.constant;
       if (constant !== undefined) expr.constant = Number(constant) === 0 ? 1 : 0;
       return expr;
     }
@@ -829,7 +855,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (operator === '+') return { ...converted, isLvalue: false };
     const operation = operator === '-' ? negate(promoted as never) : complement(promoted as never);
     const run = converted.run;
-    const expr: Expr = { type: promoted, isLvalue: false, row, run: (frame) => operation(run(frame) as number) };
+    const expr: Expr = {
+      type: promoted,
+      isLvalue: false,
+      row,
+      run: (frame) => operation(run(frame) as number),
+      memberConstant: mapMemberConstants([converted], ([scalar]) => operation(scalar)),
+    };
     // A negated product still fuses into an addition (`-(a * b) + c`).
     if (operator === '-' && converted.product && converted.constant === undefined) {
       const { left, right } = converted.product;
@@ -929,6 +961,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type,
       isLvalue: true,
       staticAddress: pointer.staticAddress,
+      isThis: pointer.isThis,
       row,
       run: (frame) => {
         const location = run(frame) as Ptr;
@@ -1091,13 +1124,24 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const a = this.compileExpression(consequenceNode);
     const b = this.compileExpression(fieldOf(node, 'alternative') as Syntax);
     const { left, right, type, isLvalue } = this.conditionalOperands(a, b, node.row);
-    const known = this.rvalue(test).constant;
+    const scalar = this.rvalue(test);
+    const known = scalar.constant;
     const chosen = known === undefined ? undefined : known === 0 || known === 0n ? right : left;
+    const memberCondition = scalar.memberConstant;
+    const leftConstant = memberConstantOf(left);
+    const rightConstant = memberConstantOf(right);
     return {
       type,
       isLvalue,
       row: node.row,
       constant: chosen?.constant,
+      memberConstant: memberCondition
+        ? (members) => {
+            const value = memberCondition(members);
+            if (value === undefined) return;
+            return (Number(value) !== 0 ? leftConstant : rightConstant)?.(members);
+          }
+        : chosen?.memberConstant,
       constantInitialization: chosen?.constantInitialization,
       staticAddress: chosen?.staticAddress,
       constantPointerValue: chosen?.constantPointerValue,
@@ -1165,10 +1209,17 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const right = this.compileExpression(fieldOf(node, 'right') as Syntax);
     const first = this.discardedValue(left);
     const second = right.run;
-    const hasConstantLeft = this.rvalue(left).constant !== undefined;
+    const value = this.rvalue(left);
+    const hasConstantLeft = value.constant !== undefined;
     return {
       ...right,
       constant: hasConstantLeft ? right.constant : undefined,
+      memberConstant: hasConstantLeft
+        ? right.memberConstant
+        : mapMemberConstants([value, right], ([, result]) => result),
+      isThis: hasConstantLeft && right.isThis,
+      isNullConstant: undefined,
+      literalBytes: undefined,
       constantInitialization: hasConstantLeft ? right.constantInitialization : undefined,
       staticAddress: hasConstantLeft ? right.staticAddress : undefined,
       constantPointerValue: hasConstantLeft ? right.constantPointerValue : undefined,
@@ -1840,6 +1891,19 @@ const ALTERNATIVE_TOKENS: Record<string, string> = {
   or_eq: '|=',
   xor_eq: '^=',
 };
+
+function logicalConstant(stop: boolean, left: Expr, right: Expr): MemberConstant | undefined {
+  const first = memberConstantOf(left);
+  if (!first) return;
+  const second = memberConstantOf(right);
+  return (members) => {
+    const value = first(members);
+    if (value === undefined) return;
+    if ((Number(value) !== 0) === stop) return Number(stop);
+    const next = second?.(members);
+    if (next !== undefined) return Number(Number(next) !== 0);
+  };
+}
 
 function signedByte(code: number): number {
   return code >= 128 ? code - 256 : code;

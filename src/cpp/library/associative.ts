@@ -68,9 +68,10 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
   const secondAlign = alignOf(secondStorage);
   const align = Math.max(alignOf(firstStorage), secondAlign);
   const secondOffset = Math.ceil(sizeOf(firstStorage) / secondAlign) * secondAlign;
+  const constantMembers = [first, second].every((type) => isArithmetic(type) || type.kind === 'pointer');
   cls.library = {
     kind: 'pair',
-    hasConstantConstructors: [first, second].every((type) => isArithmetic(type) || type.kind === 'pointer'),
+    allowsConstantCopy: constantMembers,
     args: [first, second],
     size: Math.ceil((secondOffset + sizeOf(secondStorage)) / align) * align,
     align,
@@ -131,6 +132,7 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
       [],
       (_args, { frame }) => construct(frame, [(f) => ops()[0].make(f), (f) => ops()[1].make(f)]),
       {
+        allowsConstantInitialization: () => constantMembers,
         uses: (row) => {
           library.compiler.valueInitialized(first, row);
           library.compiler.valueInitialized(second, row);
@@ -143,6 +145,7 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
       ([a, b], { frame }) =>
         construct(frame, [(f) => ops()[0].copy(f, (a as Ptr).read()), (f) => ops()[1].copy(f, (b as Ptr).read())]),
       {
+        allowsConstantInitialization: () => constantMembers,
         uses: (row) => {
           library.compiler.requireObjectUse(classType(cls), 'copy', row);
           library.compiler.requireObjectUse(classType(cls), 'destroy', row);
@@ -179,20 +182,25 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
         } catch {
           return;
         }
-        return nativeConstructor(cls, [constRef(source.type)], ([pair], { frame }) => {
-          const object = (pair as Ptr).read() as CObject;
-          const member =
-            (index: number, convert: Eval): Eval<Value> =>
-            (f) => {
-              f.pending.push(new Ptr(object, index));
-              try {
-                return convert(f) as Value;
-              } finally {
-                f.pending.pop();
-              }
-            };
-          return construct(frame, [member(0, convertFirst), member(1, convertSecond)]);
-        });
+        return nativeConstructor(
+          cls,
+          [constRef(source.type)],
+          ([pair], { frame }) => {
+            const object = (pair as Ptr).read() as CObject;
+            const member =
+              (index: number, convert: Eval): Eval<Value> =>
+              (f) => {
+                f.pending.push(new Ptr(object, index));
+                try {
+                  return convert(f) as Value;
+                } finally {
+                  f.pending.pop();
+                }
+              };
+            return construct(frame, [member(0, convertFirst), member(1, convertSecond)]);
+          },
+          { allowsConstantInitialization: () => constantMembers }
+        );
       },
       isTemplate: true,
     },
@@ -245,7 +253,10 @@ export function makePair(library: Library): FunctionInfo {
       classType(cls),
       ([a, b], { frame }) =>
         cls.operations?.copy(frame, new CObject(cls, [(a as Ptr).read(), (b as Ptr).read()])) as Value,
-      { uses: (row) => library.compiler.requireObjectUse(classType(cls), 'copy', row) }
+      {
+        allowsConstantInitialization: () => cls.library?.allowsConstantCopy === true,
+        uses: (row) => library.compiler.requireObjectUse(classType(cls), 'copy', row),
+      }
     );
   });
 }

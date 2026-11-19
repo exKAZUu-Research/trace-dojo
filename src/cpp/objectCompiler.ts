@@ -10,7 +10,7 @@ import {
   Rank,
 } from './conversions';
 import { CppException, CppRuntimeError } from './errors';
-import type { Expr } from './expr';
+import { type Expr, mapMemberConstants } from './expr';
 import { type Eval, type Frame, holdAll } from './runtime';
 import type { Syntax } from './syntax';
 import {
@@ -198,6 +198,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       type: type.kind === 'class' ? type : unqualified(type),
       isLvalue: false,
       staticAddress: expr.constantPointerValue,
+      constantInitialization: expr.constantInitialization,
+      memberConstant: expr.memberConstant,
       row: expr.row,
       run: (frame) => (run(frame) as Ptr).read(),
       onlyCalls: expr.onlyCalls,
@@ -255,6 +257,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       isLvalue: false,
       row: expr.row,
       isTemporaryObject: true,
+      constantInitialization: cls.library?.allowsConstantCopy && source.constantInitialization,
       onlyCalls: expr.onlyCalls,
       run: (frame, _zeroInitialize, destination) => copyAs(frame, cls, source.run(frame), destination),
     };
@@ -510,29 +513,36 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     };
     const isReference = fn.ret.kind === 'reference';
     const type = nonReference(fn.ret);
+    const arithmeticArgs = object ? undefined : this.constantCallArguments(fn, args);
+    const evaluate = fn.evaluateConstant;
+    const allConstant = arithmeticArgs && arithmeticArgs.every((arg) => arg.constant !== undefined);
     return {
       type,
       isLvalue: isReference,
       row,
       run,
-      constant: !object ? this.constantCall(fn, args) : undefined,
+      constant: allConstant ? evaluate?.(arithmeticArgs.map((arg) => arg.constant as number | bigint)) : undefined,
+      memberConstant: arithmeticArgs && evaluate ? mapMemberConstants(arithmeticArgs, evaluate) : undefined,
+      constantInitialization: !object && this.isConstantLibraryCall(fn, args),
       onlyCalls: true,
       isTemporaryObject: !isReference && type.kind === 'class',
     };
   }
 
-  private constantCall(fn: FunctionInfo, args: Expr[]): number | bigint | undefined {
+  private constantCallArguments(fn: FunctionInfo, args: Expr[]): Expr[] | undefined {
     if (!fn.evaluateConstant || args.length !== fn.params.length) return;
-    const values: (number | bigint)[] = [];
+    const converted: Expr[] = [];
     for (const [index, arg] of args.entries()) {
       const value = this.rvalue(arg);
       const target = nonReference(fn.params[index].type);
-      if (value.constant === undefined || !isArithmeticType(value.type) || !isArithmeticType(target)) return;
-      const constant = convertArithmetic(value, target).constant;
-      if (constant === undefined) return;
-      values.push(constant);
+      if (!isArithmeticType(value.type) || !isArithmeticType(target)) return;
+      converted.push(convertArithmetic(value, target));
     }
-    return fn.evaluateConstant(values);
+    return converted;
+  }
+
+  private isConstantLibraryCall(fn: FunctionInfo, args: Expr[]): boolean {
+    return fn.allowsConstantInitialization?.(args) === true && args.every((arg) => this.isConstantInitializer(arg));
   }
 
   /** Evaluates the location of the object of a member function call, materializing a prvalue as a temporary. */
@@ -573,8 +583,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       run,
       onlyCalls: true,
       isTemporaryObject: true,
-      constantInitialization:
-        cls.library?.hasConstantConstructors && args.every((arg) => this.isConstantInitializer(arg)),
+      constantInitialization: this.isConstantLibraryCall(fn, args),
     };
   }
 

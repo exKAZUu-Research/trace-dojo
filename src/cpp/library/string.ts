@@ -2,7 +2,7 @@ import { isFloatUnderflow, isSpaceByte, parseFloatPrefix, parseIntegerPrefix } f
 import { LIMITS } from '../../interpreter/limits';
 import { byteArray, byteAt } from '../bytes';
 import { CppRuntimeError } from '../errors';
-import type { Expr } from '../expr';
+import { type Expr, type Initializer, initializerWithConstancy } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import type { Eval, Frame } from '../runtime';
 import type { Syntax } from '../syntax';
@@ -229,6 +229,7 @@ export function stringClass(library: Library): ClassInfo {
   cls.library = {
     kind: 'string',
     args: [],
+    allowsConstantCopy: true,
     size: 24,
     align: 8,
     operator: (compiler, operator, operands, row) => stringOperator(compiler, library, cls, operator, operands, row),
@@ -252,19 +253,30 @@ export function stringClass(library: Library): ClassInfo {
   const repeated = (frame: Frame, count: unknown, char: unknown, kept = 0): string =>
     checkLength(frame, charOf(char).repeat(requestedLength(frame, count, kept)));
   cls.constructors = [
-    nativeConstructor(cls, [], () => make('')),
-    nativeConstructor(cls, [CONST_CHAR_PTR], ([pointer]) => {
-      if ((pointer as Ptr).isNull) throw new CppRuntimeError('nullAccess');
-      return make(readCString(pointer as Ptr));
+    nativeConstructor(cls, [], () => make(''), { allowsConstantInitialization: () => true }),
+    nativeConstructor(cls, [CONST_CHAR_PTR], ([pointer]) => make(readCString(pointer as Ptr)), {
+      allowsConstantInitialization: ([source]) => {
+        const bytes = source?.literalBytes;
+        if (bytes === undefined) return false;
+        const terminator = bytes.indexOf('\0');
+        return (terminator === -1 ? bytes.length : terminator) <= SHORT_CAPACITY;
+      },
     }),
-    nativeConstructor(cls, [SIZE_T, CHAR], ([count, char], { frame }) => make(repeated(frame, count, char))),
+    nativeConstructor(cls, [SIZE_T, CHAR], ([count, char], { frame }) => make(repeated(frame, count, char)), {
+      allowsConstantInitialization: ([count]) => fitsShortString(count?.constant),
+    }),
     nativeConstructor(
       cls,
       [ref, SIZE_T, SIZE_T],
       ([source, start, count], { frame }) => make(substring(frame, textOf(source), start, count)),
       { optional: 1 }
     ),
-    nativeConstructor(cls, [CONST_CHAR_PTR, SIZE_T], ([pointer, count]) => make(pointerBytes(pointer as Ptr, count))),
+    nativeConstructor(cls, [CONST_CHAR_PTR, SIZE_T], ([pointer, count]) => make(pointerBytes(pointer as Ptr, count)), {
+      allowsConstantInitialization: ([source, count]) =>
+        source?.literalBytes !== undefined &&
+        fitsShortString(count?.constant) &&
+        Number(count?.constant) <= source.literalBytes.length + 1,
+    }),
     {
       ...nativeConstructor(cls, [], () => {}),
       instantiate: (args) => {
@@ -762,7 +774,7 @@ function iteratorIndex(s: StringValue, iterator: unknown): number {
  * `std::string s = {'a', 'b'}`, whose `initializer_list<char>` constructor wins whenever every element is arithmetic, so
  * `std::string{66}` holds "B" and a narrowing element is an error; other lists use the other constructors.
  */
-function charList(compiler: ExpressionCompiler, elements: Syntax[], row: number): Eval<Value> | undefined {
+function charList(compiler: ExpressionCompiler, elements: Syntax[], row: number): Initializer | undefined {
   if (elements.length === 0 || elements.some((element) => element.type === 'initializer_list')) return undefined;
   const values = elements.map((element) => compiler.rvalue(compiler.compileExpression(element)));
   if (!values.every((value) => isArithmetic(value.type))) return undefined;
@@ -775,7 +787,14 @@ function charList(compiler: ExpressionCompiler, elements: Syntax[], row: number)
     }
   }
   const runs = values.map((value) => compiler.convert(value, CHAR, row).run);
-  return (frame) => new StringValue(runs.map((run) => charOf(run(frame))).join(''));
+  return initializerWithConstancy(
+    (frame) => new StringValue(runs.map((run) => charOf(run(frame))).join('')),
+    elements.length <= SHORT_CAPACITY && values.every((value) => value.constant !== undefined)
+  );
+}
+
+function fitsShortString(count: number | bigint | undefined): boolean {
+  return count !== undefined && count >= 0 && count <= SHORT_CAPACITY;
 }
 
 /** Whether converting a value to `char` narrows it (C++20 [dcl.init.list]). */

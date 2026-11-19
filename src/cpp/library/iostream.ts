@@ -656,8 +656,8 @@ function writeFloat(frame: Frame, stream: StreamValue, value: number): void {
     if (conversion === 'g' && !alternate) {
       // A binary64 value is an integer times 2^-1074 at worst; further digits only pad the rounded number.
       precision = Math.min(precision, 1074);
-    }
-    stream.checkFormattedSize(frame, precision);
+      frame.runtime.spend(Math.ceil(precision / 64));
+    } else stream.checkFormattedSize(frame, precision);
   }
   const text = formatFloat(value, {
     conversion,

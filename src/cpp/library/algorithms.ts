@@ -866,6 +866,10 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       if (args.length === 2 && isArithmetic(type)) {
         fn.evaluateConstant = ([a, b]) => ((name === 'min' ? b < a : a < b) ? b : a);
       }
+      if (args.length === 2 && type.kind === 'class' && type.cls.library?.kind === 'pair') {
+        const args = type.cls.library.args;
+        fn.allowsConstantInitialization = () => args.every(isArithmetic);
+      }
       return fn;
     });
   }

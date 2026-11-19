@@ -14,7 +14,7 @@ export interface LibraryClass {
   readonly args: readonly Type[];
   readonly ownedTypes?: readonly Type[];
   readonly assignmentCopies?: boolean;
-  readonly hasConstantConstructors?: boolean;
+  readonly allowsConstantCopy?: boolean;
   readonly aggregateArray?: { type: ArrayType; make: (items: Value[]) => Value };
   readonly additionalPublicBases?: readonly ClassInfo[];
   /** `sizeof` of the class in libc++ on arm64. */

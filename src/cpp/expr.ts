@@ -1,20 +1,28 @@
 import type { Eval, Frame } from './runtime';
 import type { Syntax } from './syntax';
-import type { ClassInfo, FunctionInfo, Type } from './types';
+import type { ClassInfo, FieldInfo, FunctionInfo, Type } from './types';
 import type { ArrayStore, CObject, Ptr, Value } from './values';
 
 export type ReferenceLifetime = CObject | 'full-expression';
 export type InitializerTarget = ArrayStore | CObject;
+export type ConstantMembers = ReadonlyMap<FieldInfo, number | bigint>;
+export type MemberConstant = (members: ConstantMembers) => number | bigint | undefined;
+export const NO_CONSTANT_MEMBERS: ConstantMembers = new Map();
 
 export type Initializer = ((
   frame: Frame,
   target?: InitializerTarget,
   zeroInitialize?: boolean,
   referenceLifetime?: ReferenceLifetime
-) => Value) & { isConstant?: boolean };
+) => Value) & { isConstant?: boolean; memberConstant?: MemberConstant };
 
-export function initializerWithConstancy(run: Initializer, isConstant: boolean): Initializer {
+export function initializerWithConstancy(
+  run: Initializer,
+  isConstant: boolean,
+  memberConstant?: MemberConstant
+): Initializer {
   if (isConstant) run.isConstant = true;
+  if (memberConstant) run.memberConstant = memberConstant;
   return run;
 }
 
@@ -35,6 +43,8 @@ export interface Expr {
   row: number;
   /** The value of a constant expression of arithmetic type, which array lengths and `case` labels need. */
   constant?: number | bigint;
+  memberConstant?: MemberConstant;
+  isThis?: boolean;
   /** Reads a static member's integral constant without requiring its addressable definition. */
   readConstant?: Eval<Value>;
   /** The factors of a floating-point product, which an addition or subtraction using it fuses (`a * b + c`). */
@@ -80,4 +90,27 @@ export interface FunctionCandidates {
 
 export function constantExpr(type: Type, value: number | bigint, row: number): Expr {
   return { type, isLvalue: false, run: () => value, row, constant: value };
+}
+
+export function memberConstantOf(expr: Expr): MemberConstant | undefined {
+  const value = expr.constant;
+  return value === undefined ? expr.memberConstant : () => value;
+}
+
+export function mapMemberConstants(
+  operands: Expr[],
+  operation: (values: (number | bigint)[]) => number | bigint
+): MemberConstant | undefined {
+  if (!operands.some((operand) => operand.memberConstant)) return;
+  const inputs = operands.map(memberConstantOf);
+  if (inputs.some((input) => !input)) return;
+  return (members) => {
+    const values: (number | bigint)[] = [];
+    for (const input of inputs) {
+      const value = input?.(members);
+      if (value === undefined) return;
+      values.push(value);
+    }
+    return operation(values);
+  };
 }

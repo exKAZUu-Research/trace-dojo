@@ -225,6 +225,18 @@ int main() { ${setup}; std::cout << 1.0; }`;
   }
 );
 
+test('general float formatting uses the actual stream buffer space', () => {
+  const program = `#include <iostream>
+#include <sstream>
+#include <string>
+int main() {
+  std::ostringstream stream;
+  stream << std::string(999999, 'x') << 1.0;
+  std::cout << stream.str().size();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '1000000' });
+});
+
 test('an exception message cannot hide an output limit', () => {
   const program = `#include <iostream>
 #include <stdexcept>
@@ -243,6 +255,7 @@ test.each([
   ['std::abs(INT_MIN)', 'オーバーフロー'],
   ['std::labs(LONG_MIN)', 'オーバーフロー'],
   ['std::printf("%s", text)', 'nullptr'],
+  ['std::printf("%.*s", 0, text)', 'nullptr'],
 ])('reports undefined library behavior for %s', (call, diagnostic) => {
   const program = `#include <climits>
 #include <cstdio>

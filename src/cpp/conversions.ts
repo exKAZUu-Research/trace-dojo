@@ -1,5 +1,5 @@
 import { convertScalar } from '../c/arith';
-import type { Expr } from './expr';
+import { type Expr, mapMemberConstants } from './expr';
 import type { Syntax } from './syntax';
 import {
   type ClassInfo,
@@ -199,6 +199,7 @@ export function convertArithmetic(expr: Expr, to: Extract<Type, { kind: 'int' | 
     isLvalue: false,
     row: expr.row,
     run: (frame) => convertScalar(run(frame) as number | bigint, from, to),
+    memberConstant: mapMemberConstants([expr], ([value]) => convertScalar(value, from, to)),
   };
   if (expr.constant !== undefined) {
     try {
@@ -225,13 +226,19 @@ function pointerConversion(
 ): ConversionSequence | undefined {
   const from = expr.type;
   if (from.kind === 'nullptr' || (expr.isNullConstant && isInteger(from))) {
-    return sequence(Rank.Conversion, (e) => ({
-      type: to,
-      isLvalue: false,
-      row: e.row,
-      staticAddress: true,
-      run: () => NULL_PTR,
-    }));
+    return sequence(Rank.Conversion, (e) => {
+      const value = host.rvalue(e);
+      return {
+        type: to,
+        isLvalue: false,
+        row: e.row,
+        staticAddress: value.isNullConstant === true || value.staticAddress === true,
+        run: (frame) => {
+          value.run(frame);
+          return NULL_PTR;
+        },
+      };
+    });
   }
   const fromTarget = from.kind === 'pointer' ? from.to : from.kind === 'array' ? from.of : undefined;
   if (!fromTarget) return undefined;

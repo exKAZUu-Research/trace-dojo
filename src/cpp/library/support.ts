@@ -25,6 +25,7 @@ export interface NativeOptions {
   owner?: ClassInfo;
   displayName?: string;
   uses?: FunctionInfo['nativeUses'];
+  allowsConstantInitialization?: FunctionInfo['allowsConstantInitialization'];
 }
 
 /** A library function with fixed parameter types. */
@@ -62,6 +63,7 @@ export function native(
     isDefined: true,
     native: run,
     nativeUses: options.uses,
+    allowsConstantInitialization: options.allowsConstantInitialization,
     isVariadic: options.isVariadic,
     isExplicit: options.isExplicit,
   };
@@ -109,8 +111,8 @@ export function throwLibrary(frame: Frame, cls: ClassInfo, message: string): nev
 
 /** Reads up to `limit` bytes from a character buffer, stopping at a null byte. */
 export function readCString(pointer: Ptr, limit = Number.POSITIVE_INFINITY): string {
-  if (limit === 0) return '';
   const store = pointer.target();
+  if (pointer.index < 0 || pointer.index >= store.length) throw new CppRuntimeError('unterminatedString');
   let bytes = '';
   const end = pointer.index + limit;
   for (let index = pointer.index; index < end; index++) {

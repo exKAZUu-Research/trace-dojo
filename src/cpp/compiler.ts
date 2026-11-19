@@ -1,10 +1,18 @@
+import { CRuntimeError } from '../c/errors';
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionLimitError } from '../interpreter/limits';
 import { misplacedAtomicMessage, type TraceOptions } from '../interpreter/traceAnnotations';
 import { byteAt } from './bytes';
 import { hasAuto } from './compilerBase';
 import { CppException, CppRuntimeError, NarrowingConversionError } from './errors';
-import { type Expr, type Initializer, type InitializerTarget, initializerWithConstancy } from './expr';
+import {
+  type Expr,
+  type Initializer,
+  type InitializerTarget,
+  initializerWithConstancy,
+  memberConstantOf,
+  NO_CONSTANT_MEMBERS,
+} from './expr';
 import { SequenceValue } from './library/containerValues';
 import type { Library } from './library/registry';
 import {
@@ -1457,6 +1465,7 @@ export class Compiler extends StatementCompiler {
     try {
       const init = this.staticInitialization(type, value, row);
       if (!init) return;
+      if (type.kind === 'class' && isConstType(type)) global.hasConstantObjectValue = init.isConstant;
       if (global.isConstexprPointer && !init.isConstant)
         this.error(row, 'constexpr の変数の初期値には定数式を書いてください。');
       const { index } = global;
@@ -1568,7 +1577,11 @@ export class Compiler extends StatementCompiler {
     const converted = this.convert(expr, unqualified(type), row);
     return type.kind === 'class'
       ? this.objectInitializer(converted)
-      : initializerWithConstancy(converted.run as Eval<Value>, this.isConstantInitializer(converted));
+      : initializerWithConstancy(
+          converted.run as Eval<Value>,
+          this.isConstantInitializer(converted),
+          memberConstantOf(converted)
+        );
   }
 
   private objectInitializer(expr: Expr): Initializer {
@@ -1727,7 +1740,11 @@ export class Compiler extends StatementCompiler {
     }
     if (elements.length === 0) {
       const zero = zeroOf(type);
-      return initializerWithConstancy(() => zero, true);
+      return initializerWithConstancy(
+        () => zero,
+        true,
+        typeof zero === 'number' || typeof zero === 'bigint' ? () => zero : undefined
+      );
     }
     if (elements.length > 1)
       return this.error(row, `${typeName(type)} 型の値を初期化する {...} には、値を1つだけ書いてください。`);
@@ -1844,23 +1861,32 @@ export class Compiler extends StatementCompiler {
     hasDefault = false
   ): Initializer {
     const binding = this.referenceBinding(type, this.referenceMemberTarget(type, expr, row), row);
-    if (!('lifetime' in binding)) return hasDefault ? this.fullExpression(binding.loc) : binding.loc;
+    if (!('lifetime' in binding))
+      return initializerWithConstancy(
+        hasDefault ? this.fullExpression(binding.loc) : binding.loc,
+        binding.isConstant === true,
+        binding.memberConstant
+      );
     const { type: heldType, make, locate } = binding.lifetime;
     const create = hasDefault ? this.fullExpression(make) : make;
     const destroy = this.destroyerOf(heldType);
-    return (frame, _target, _zeroInitialize, owner) => {
-      const box = new Box(create(frame));
-      const temporary = {
-        object: box,
-        destroy: (f: Frame) => {
-          destroy?.(f, box.value);
-          endLifetime(box);
-        },
-      };
-      if (owner instanceof CObject) (owner.referenceTemporaries ??= []).push(temporary);
-      else frame.temporaries.push(temporary);
-      return locate(box);
-    };
+    return initializerWithConstancy(
+      (frame, _target, _zeroInitialize, owner) => {
+        const box = new Box(create(frame));
+        const temporary = {
+          object: box,
+          destroy: (f: Frame) => {
+            destroy?.(f, box.value);
+            endLifetime(box);
+          },
+        };
+        if (owner instanceof CObject) (owner.referenceTemporaries ??= []).push(temporary);
+        else frame.temporaries.push(temporary);
+        return locate(box);
+      },
+      binding.isConstant === true,
+      binding.memberConstant
+    );
   }
 
   private referenceMemberTarget(type: Extract<Type, { kind: 'reference' }>, expr: Expr, row: number): Expr {
@@ -1973,7 +1999,7 @@ export class Compiler extends StatementCompiler {
       supplied[index] ? undefined : (this.aggregateDefaults.get(field)?.() ?? this.bindAggregateDefault(field, row))
     );
     const destroyers = fields.map((field) => this.destroyerOf(field.type));
-    const isConstant = fields.every((_field, index) => (supplied[index] ?? defaults[index])?.isConstant);
+    const isConstant = this.constantAggregate(fields, supplied, defaults);
     return initializerWithConstancy((frame, target, zeroInitialize, referenceLifetime) => {
       const object = newObject(frame, cls, zeroInitialize, asObject(target));
       const owner = referenceLifetime === 'full-expression' ? referenceLifetime : object;
@@ -2009,6 +2035,25 @@ export class Compiler extends StatementCompiler {
     }, isConstant);
   }
 
+  private constantAggregate(
+    fields: FieldInfo[],
+    supplied: (Initializer | undefined)[],
+    defaults: (Initializer | undefined)[]
+  ): boolean {
+    const known = new Map<FieldInfo, number | bigint>();
+    try {
+      return fields.every((field, index) => {
+        const init = (supplied[index] ?? defaults[index]) as Initializer;
+        const value = init.memberConstant?.(supplied[index] ? NO_CONSTANT_MEMBERS : known);
+        if (value !== undefined) known.set(field, value);
+        return init.isConstant === true || value !== undefined;
+      });
+    } catch (error) {
+      if (error instanceof CRuntimeError || error instanceof CppRuntimeError) return false;
+      throw error;
+    }
+  }
+
   private bindAggregateDefault(field: FieldInfo, row: number): Initializer {
     const node = field.initializer;
     if (!node) {
@@ -2026,7 +2071,8 @@ export class Compiler extends StatementCompiler {
       return initializerWithConstancy(
         (frame, target, zeroInitialize, referenceLifetime) =>
           withTemporaries(frame, (f) => initialize(f, target, zeroInitialize, referenceLifetime)),
-        initialize.isConstant === true
+        initialize.isConstant === true,
+        initialize.memberConstant
       );
     } finally {
       this.context = previous;
