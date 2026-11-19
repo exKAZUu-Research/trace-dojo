@@ -3222,3 +3222,15 @@ var_dump($f1, $f2);
     ]);
   }
 });
+
+test('finishes SPL property updates before propagating exit from a displaced destructor', () => {
+  const result = run(String.raw`<?php
+class ExitOnReset { function __destruct() { exit('exit;'); } }
+class Observer { function __destruct() { global $a; echo json_encode($a->getArrayCopy()); } }
+$a = new ArrayObject([], ArrayObject::ARRAY_AS_PROPS);
+$obs = new Observer();
+set_error_handler(function () use ($a) { $a['x'] = new ExitOnReset(); return true; });
+$a->x += 2;
+`);
+  expect(result).toMatchObject({ kind: 'executed', stdout: 'exit;{"x":2}' });
+});

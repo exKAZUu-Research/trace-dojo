@@ -265,24 +265,32 @@ export function withOperandWarnings(
   // oxlint-disable-next-line unicorn/no-null -- PHP operators can return a null zval.
   let result: Value = null;
   withCleanupExceptions(rt(), (capture) => {
-    let pending: PhpThrow | undefined;
-    const warning: UpdateWarning = (emit, whilePending) => {
-      const action = pending ? whilePending : emit;
-      if (!action) return false;
-      const hadPending = pending !== undefined;
-      try {
-        action();
-        return !hadPending;
-      } catch (error) {
-        if (!(error instanceof PhpThrow)) throw error;
-        capture(error);
-        pending = error;
-        return false;
-      }
-    };
-    result = update(warning, () => pending);
+    const state = createOperandWarningState(capture);
+    result = update(state.warning, state.pendingThrow);
   });
   return result;
+}
+
+function createOperandWarningState(capture: (error: CleanupException) => void): {
+  warning: UpdateWarning;
+  pendingThrow: () => PhpThrow | undefined;
+} {
+  let pending: CleanupException | undefined;
+  const warning: UpdateWarning = (emit, whilePending) => {
+    const action = pending ? whilePending : emit;
+    if (!action) return false;
+    const hadPending = pending !== undefined;
+    try {
+      action();
+      return !hadPending;
+    } catch (error) {
+      if (!isCleanupException(error)) throw error;
+      capture(error);
+      if (!(pending instanceof ExitSignal)) pending = error;
+      return false;
+    }
+  };
+  return { warning, pendingThrow: () => (pending instanceof PhpThrow ? pending : undefined) };
 }
 
 function previousOf(exception: PhpObject): PhpObject | undefined {
