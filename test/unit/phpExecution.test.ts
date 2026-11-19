@@ -965,10 +965,13 @@ test('allows case-sensitive disjoint repetitions and small bounded repetitions o
 var_dump(preg_match('/^[a-z]*[A-Z]*$/', 'abcdefghijklmnopQ'));
 var_dump(preg_match('/^(?-i:a*A*)$/i', 'aaaaaaaaaaaaaaaaA'));
 var_dump(preg_match('/^(?i:z)[a-z]*[A-Z]*$/', 'ZabcdefghijklmnopQ'));
+var_dump(preg_match('/^(?:yes|YES)+$/', str_repeat('yesYES', 8)));
+var_dump(preg_match('/^(?-i:a|A)+$/i', str_repeat('aA', 20)));
+var_dump(preg_match('/^(?:é|É)+$/u', str_repeat('éÉ', 10)));
 var_dump(preg_match('/^\d{1,2}\d{1,2}$/', '12345678901234567'));
 var_dump(preg_match('/^a{1,3}a{1,3}$/', str_repeat('a', 17)));
 `)
-  ).toMatchObject({ kind: 'executed', stdout: 'int(1)\nint(1)\nint(1)\nint(0)\nint(0)\n' });
+  ).toMatchObject({ kind: 'executed', stdout: 'int(1)\nint(1)\nint(1)\nint(1)\nint(1)\nint(1)\nint(0)\nint(0)\n' });
 });
 
 test('retains short ambiguous repetitions and long unambiguous repetitions', () => {

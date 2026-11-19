@@ -48,7 +48,7 @@ export function hasAmbiguousRepetition(tree: AST.Pattern, unicode: boolean, igno
       if (node.max === Infinity) unbounded++;
       ambiguous ||=
         node.max > 1 &&
-        ambiguousRepeatBody(node.element, ambiguousBodies) &&
+        ambiguousRepeatBody(node.element, alphabets, ambiguousBodies) &&
         branchChoices(node, choiceCounts) > MAX_REPEAT_CHOICES;
     },
   });
@@ -209,17 +209,17 @@ function possibleCharacters(atom: AST.Element, alphabets: Alphabets): CharSet {
   return result;
 }
 
-function ambiguousRepeatBody(node: AST.Element, cache: WeakMap<AST.Element, boolean>): boolean {
+function ambiguousRepeatBody(node: AST.Element, alphabets: Alphabets, cache: WeakMap<AST.Element, boolean>): boolean {
   const cached = cache.get(node);
   if (cached !== undefined) return cached;
   let ambiguous = false;
   if (node.type === 'Quantifier') {
-    ambiguous = node.min !== node.max || ambiguousRepeatBody(node.element, cache);
+    ambiguous = node.min !== node.max || ambiguousRepeatBody(node.element, alphabets, cache);
   } else if (node.type === 'Group' || node.type === 'CapturingGroup') {
     ambiguous =
-      !disjointAlternatives(node.alternatives) ||
+      !disjointAlternatives(node.alternatives, alphabets) ||
       node.alternatives.some((alternative) =>
-        alternative.elements.some((element) => ambiguousRepeatBody(element, cache))
+        alternative.elements.some((element) => ambiguousRepeatBody(element, alphabets, cache))
       );
   } else if (node.type === 'Backreference') {
     ambiguous = true;
@@ -249,13 +249,14 @@ function branchChoices(node: AST.Element, cache: WeakMap<AST.Element, number>): 
   return capped;
 }
 
-function disjointAlternatives(alternatives: AST.Alternative[]): boolean {
+function disjointAlternatives(alternatives: AST.Alternative[], alphabets: Alphabets): boolean {
   if (alternatives.length <= 1) return true;
   const prefixes = alternatives.map(({ elements }) => {
     let prefix = '';
     for (const element of elements) {
       if (element.type !== 'Character') break;
-      prefix += String.fromCodePoint(element.value).toUpperCase().toLowerCase();
+      // Direct literals share the group's case mode, so the lowest member identifies each equivalence set.
+      prefix += String.fromCodePoint(possibleCharacters(element, alphabets).ranges[0].min);
     }
     return prefix;
   });

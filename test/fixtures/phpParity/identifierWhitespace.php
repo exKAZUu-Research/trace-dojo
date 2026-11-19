@@ -9,3 +9,8 @@ var_dump(function_exists(__NAMESPACE__ . '\hello'), function_exists(__NAMESPACE_
 var_dump(hello　(), (new Box )::class, (new Box )->method ());
 $box = new namespace\Box ;
 var_dump($box->value　);
+$row = ['氏　名' => 'Ada', 'first name' => 'Grace'];
+echo "$row[氏　名];$row[first name]\n";
+echo <<<TEXT
+$row[氏　名];$row[first name]
+TEXT, "\n";

@@ -494,11 +494,16 @@ function isAllowed(code: number, doctype: Doctype): boolean {
   }
   const control =
     doctype === Doctype.Html5 ? code >= 0x09 && code <= 0x0d && code !== 0x0b : [0x09, 0x0a, 0x0d].includes(code);
-  return (code >= 0x20 && code <= 0x7e) || control || (code >= 0xa0 && code <= 0xd7_ff) || isAllowedHigh(code);
+  return (
+    (code >= 0x20 && code <= 0x7e) ||
+    control ||
+    (code >= 0xa0 && code <= 0xd7_ff) ||
+    (code >= 0xe0_00 && code <= 0x10_ff_ff && (doctype === Doctype.Html401 || !isNoncharacter(code)))
+  );
 }
 
-function isAllowedHigh(code: number): boolean {
-  return code >= 0xe0_00 && code <= 0x10_ff_ff && (code & 0xff_ff) < 0xff_fe && (code < 0xfd_d0 || code > 0xfd_ef);
+function isNoncharacter(code: number): boolean {
+  return (code & 0xff_ff) >= 0xff_fe || (code >= 0xfd_d0 && code <= 0xfd_ef);
 }
 
 /** Whether `double_encode` false with ENT_DISALLOWED keeps a numeric entity, as PHP's numeric_entity_is_allowed says. */
@@ -508,7 +513,7 @@ function numericAllowed(code: number, doctype: Doctype): boolean {
     return (
       (code >= 0x20 && code <= 0x7e) ||
       (code >= 0x09 && code <= 0x0c && code !== 0x0b) ||
-      (code >= 0xa0 && (code & 0xff_ff) < 0xff_fe && (code < 0xfd_d0 || code > 0xfd_ef))
+      (code >= 0xa0 && !isNoncharacter(code))
     );
   }
   return isAllowed(code, doctype);

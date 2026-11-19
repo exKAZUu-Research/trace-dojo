@@ -2048,7 +2048,7 @@ export class Converter extends DeclarationConverter {
       const [baseNode, indexNode] = node.namedChildren.filter((child) => child.type !== 'comment');
       const row = node.startPosition.row;
       const subscript = this.source.slice(baseNode.endIndex, node.endIndex);
-      if (/\s/.test(subscript)) this.error(node, 'Invalid whitespace in simple string interpolation');
+      if (/[ \t\r\n]/.test(subscript)) this.error(node, 'Invalid whitespace in simple string interpolation');
       if (indexNode?.type === 'name') {
         return { k: 'idx', base: this.expr(baseNode), index: { k: 'lit', v: enc(indexNode.text), row }, row };
       }
