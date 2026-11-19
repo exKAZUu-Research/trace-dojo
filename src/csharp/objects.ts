@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
-// code-gauge-allow-file fileNcss 402 -- The module keeps the runtime behavior of .NET's base objects together.
+import { compareCulture } from './culture';
 import { CsDecimal } from './decimal';
 import type { Evaluator } from './evaluator';
 import { formatFloat } from './format';
@@ -329,90 +329,6 @@ export function structHash(evaluator: Evaluator, value: CsStruct, frame: Frame):
 
 // ---- Ordering ----
 
-/** Compares two strings as the ja-JP culture's collation roughly does: letters ignoring case first, then case. */
-export function compareCulture(a: string, b: string, ignoreCase = false): number {
-  const primary = comparePrimary(a, b);
-  if (primary !== 0) return primary;
-  const secondary = compareSecondary(a, b);
-  if (secondary !== 0) return secondary;
-  if (ignoreCase) return 0;
-  const tertiary = compareTertiary(a, b);
-  if (tertiary !== 0) return tertiary;
-  return 0;
-}
-
-/** The primary collation class and weight of a character: spaces, punctuation, digits, Latin letters, kana, then the rest. */
-// code-gauge-allow functionCognitiveComplexity 23 -- Each branch handles one case of the C# rule that the function applies.
-function primaryKey(code: number): [number, number] {
-  const char = String.fromCharCode(code);
-  if (/\s/.test(char)) return [0, code];
-  if (code < 0x80 && /[\p{P}\p{S}]/u.test(char))
-    return [1, PUNCTUATION_ORDER.includes(char) ? PUNCTUATION_ORDER.indexOf(char) : code];
-  if (code >= 0x30 && code <= 0x39) return [3, code];
-  if ((code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a)) return [4, code | 0x20];
-  // A Latin letter with diacritics sorts with its base letter; the diacritics decide only between equal bases.
-  const base = latinBase(code);
-  if (base !== undefined) return [4, base | 0x20];
-  if (code >= 0xff_10 && code <= 0xff_19) return [3, code - 0xff_10 + 0x30];
-  if ((code >= 0xff_21 && code <= 0xff_3a) || (code >= 0xff_41 && code <= 0xff_5a)) return [4, (code - 0xfe_e0) | 0x20];
-  if (code >= 0x30_a1 && code <= 0x30_f6) return [6, code - 0x60];
-  if (code >= 0x30_41 && code <= 0x30_96) return [6, code];
-  if (/[\p{P}\p{S}]/u.test(char)) return [2, code];
-  return [7, code];
-}
-
-/** ICU's order of the ASCII punctuation and symbols, which precede digits and letters. */
-const PUNCTUATION_ORDER = '_-,;:!?.\'"()[]{}@*/\\&#%`^+<=>|~$';
-
-function comparePrimary(a: string, b: string): number {
-  const length = Math.min(a.length, b.length);
-  for (let index = 0; index < length; index++) {
-    const [classA, weightA] = primaryKey(a.charCodeAt(index));
-    const [classB, weightB] = primaryKey(b.charCodeAt(index));
-    if (classA !== classB) return classA < classB ? -1 : 1;
-    if (weightA !== weightB) return weightA < weightB ? -1 : 1;
-  }
-  return a.length === b.length ? 0 : a.length < b.length ? -1 : 1;
-}
-
-/** The ASCII base letter of a Latin letter with diacritics, such as `a` of `ä`. */
-function latinBase(code: number): number | undefined {
-  if (code < 0xc0 || code > 0x2_4f) return undefined;
-  const base = String.fromCharCode(code).normalize('NFD').charCodeAt(0);
-  return (base >= 0x41 && base <= 0x5a) || (base >= 0x61 && base <= 0x7a) ? base : undefined;
-}
-
-/** Letters without diacritics before those with them, as ICU's secondary strength orders them. */
-function compareSecondary(a: string, b: string): number {
-  const length = Math.min(a.length, b.length);
-  for (let index = 0; index < length; index++) {
-    const accentA = accentOf(a.charCodeAt(index));
-    const accentB = accentOf(b.charCodeAt(index));
-    if (accentA !== accentB) return accentA < accentB ? -1 : 1;
-  }
-  return 0;
-}
-
-/** The combining marks of a Latin letter's decomposition, which order its diacritics; 0 for none. */
-function accentOf(code: number): number {
-  if (latinBase(code) === undefined) return 0;
-  return String.fromCharCode(code).normalize('NFD').charCodeAt(1) || 0;
-}
-
-/** Lowercase before uppercase, hiragana before katakana, half width before full width. */
-function compareTertiary(a: string, b: string): number {
-  for (let index = 0; index < a.length; index++) {
-    const x = a.charCodeAt(index);
-    const y = b.charCodeAt(index);
-    // Hiragana and katakana differ below the strength that .NET's default comparison uses.
-    if (x === y || (primaryKey(x)[1] === primaryKey(y)[1] && primaryKey(x)[0] === 6)) continue;
-    const order = weight(x) - weight(y);
-    if (order !== 0) return order < 0 ? -1 : 1;
-    return x < y ? -1 : 1;
-  }
-  return 0;
-}
-
 export function compareOrdinal(a: string, b: string): number {
   return a === b ? 0 : a < b ? -1 : 1;
 }
@@ -609,19 +525,10 @@ function deconstructRecord(owner: TypeSymbol, value: CsObject | CsStruct, args: 
   }
 }
 
-export { namedType, specialOf };
+export { compareCulture, namedType, specialOf };
 
 /** A number wrapped to a 32-bit integer, as C#'s unchecked int arithmetic gives hash codes. */
 function toInt32(value: number): number {
   // oxlint-disable-next-line unicorn/prefer-math-trunc -- `| 0` wraps to 32 bits, which Math.trunc does not.
   return value | 0;
-}
-
-/** The tertiary weight of a character: lowercase before uppercase, half width before full width. */
-function weight(code: number): number {
-  if (code >= 0x41 && code <= 0x5a) return 1;
-  if (latinBase(code) !== undefined)
-    return String.fromCharCode(code).toLowerCase() === String.fromCharCode(code) ? 0 : 1;
-  if (code >= 0xff_01 && code <= 0xff_5e) return 2;
-  return 0;
 }

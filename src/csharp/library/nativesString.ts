@@ -1,7 +1,17 @@
-// code-gauge-allow-file fileNcss 580 -- The nativesString module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 626 -- The nativesString module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
+import {
+  compareCulture,
+  type CultureComparison,
+  cultureEndsWith,
+  cultureHashKey,
+  cultureIndexOf,
+  cultureLastIndexOf,
+  cultureStartsWith,
+  equalsCulture,
+} from '../culture';
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
-import { compareCulture, primitiveHash, unboxed } from '../objects';
+import { primitiveHash, unboxed } from '../objects';
 import type { NativeState } from '../runtime';
 import { specialOf, type Type } from '../types';
 import { type CsArray, CsBox, CsObject, type Value, type VariableReference } from '../values';
@@ -24,19 +34,38 @@ import {
 
 const STRING = 'System.String';
 
-/** `StringComparison`'s values, of which the odd ones ignore case and those from 4 compare ordinally. */
+/**
+ * `StringComparison`'s values: 0 and 1 the current culture, 2 and 3 the invariant one, 4 and 5 ordinal, of which the
+ * odd ones ignore case.
+ */
 function compareWith(a: string, b: string, comparison: number): number {
   const ignoreCase = comparison % 2 === 1;
   // An ordinal comparison gives the difference of the first differing characters, as .NET's does.
-  if (comparison >= 4)
-    return ordinalDifference(ignoreCase ? caseMappedText(a, true) : a, ignoreCase ? caseMappedText(b, true) : b);
-  return compareCulture(a, b, ignoreCase);
+  if (comparison >= 4) return ordinalDifference(ignoreCase ? ordinalUpper(a) : a, ignoreCase ? ordinalUpper(b) : b);
+  return compareCulture(a, b, cultureOf(comparison));
 }
 
 function equalsWith(a: string, b: string, comparison: number): boolean {
-  if (comparison % 2 === 1) return a.toUpperCase() === b.toUpperCase();
-  if (comparison >= 4) return a === b;
-  return compareCulture(a, b) === 0 && a.length === b.length ? a === b || compareCulture(a, b) === 0 : false;
+  if (comparison === 4) return a === b;
+  if (comparison === 5) return ordinalUpper(a) === ordinalUpper(b);
+  return equalsCulture(a, b, cultureOf(comparison));
+}
+
+function cultureOf(comparison: number): CultureComparison {
+  return { isInvariant: comparison >= 2, ignoreCase: comparison % 2 === 1 };
+}
+
+/** Whether a string contains, starts with, or ends with another under a `StringComparison`. */
+function searchWith(text: string, value: string, comparison: number, how: 'contains' | 'starts' | 'ends'): boolean {
+  if (comparison >= 4) {
+    const [haystack, needle] = comparison === 5 ? [ordinalUpper(text), ordinalUpper(value)] : [text, value];
+    if (how === 'starts') return haystack.startsWith(needle);
+    return how === 'ends' ? haystack.endsWith(needle) : haystack.includes(needle);
+  }
+  const culture = cultureOf(comparison);
+  if (how === 'starts') return cultureStartsWith(text, value, culture);
+  if (how === 'ends') return cultureEndsWith(text, value, culture);
+  return cultureIndexOf(text, value, 0, text.length, culture) !== -1;
 }
 
 function receiverText(receiver: Value): string {
@@ -46,7 +75,9 @@ function receiverText(receiver: Value): string {
 }
 
 /** The characters `Trim` removes by default: Unicode whitespace. */
-const WHITESPACE = /[\s\u0085]/u;
+// .NET's `char.IsWhiteSpace`: the space separators, the line and paragraph separators, and the controls from tab to
+// carriage return and U+0085, but not U+FEFF, which JavaScript's `\s` includes.
+const WHITESPACE = /[\t-\r\u0085\p{Zs}\u2028\u2029]/u;
 
 function trimWith(text: string, chars: string[] | undefined, start: boolean, end: boolean): string {
   const isTrimmed = (char: string): boolean =>
@@ -116,7 +147,7 @@ function splitParts(
   const trimEntries = (options & 2) !== 0;
   const parts: string[] = [];
   const push = (part: string): void => {
-    const piece = trimEntries ? part.trim() : part;
+    const piece = trimEntries ? trimWith(part, undefined, true, true) : part;
     if (removeEmpty && piece === '') return;
     parts.push(piece);
   };
@@ -191,42 +222,32 @@ const stringNatives: Record<string, NativeMethod> = {
   },
   [`${STRING}.Contains(char)`]: (_call, receiver, [value]) =>
     receiverText(receiver).includes(String.fromCodePoint(value as number)),
-  [`${STRING}.Contains(string, StringComparison)`]: (_call, receiver, [value, comparison]) =>
-    (comparison as number) % 2 === 1
-      ? receiverText(receiver)
-          .toUpperCase()
-          .includes((value as string).toUpperCase())
-      : receiverText(receiver).includes(value as string),
+  [`${STRING}.Contains(string, StringComparison)`]: (_call, receiver, [value, comparison]) => {
+    if (value === undefined) failNull('value');
+    return searchWith(receiverText(receiver), value as string, comparison as number, 'contains');
+  },
   [`${STRING}.Contains(char, StringComparison)`]: (_call, receiver, [value, comparison]) =>
-    (comparison as number) % 2 === 1
-      ? receiverText(receiver)
-          .toUpperCase()
-          .includes(String.fromCodePoint(value as number).toUpperCase())
-      : receiverText(receiver).includes(String.fromCodePoint(value as number)),
+    searchWith(receiverText(receiver), String.fromCodePoint(value as number), comparison as number, 'contains'),
   [`${STRING}.StartsWith(string)`]: (_call, receiver, [value]) => {
     if (value === undefined) failNull('value');
-    return receiverText(receiver).startsWith(value as string);
+    return cultureStartsWith(receiverText(receiver), value as string);
   },
   [`${STRING}.StartsWith(char)`]: (_call, receiver, [value]) =>
     receiverText(receiver).startsWith(String.fromCodePoint(value as number)),
-  [`${STRING}.StartsWith(string, StringComparison)`]: (_call, receiver, [value, comparison]) =>
-    (comparison as number) % 2 === 1
-      ? receiverText(receiver)
-          .toUpperCase()
-          .startsWith((value as string).toUpperCase())
-      : receiverText(receiver).startsWith(value as string),
+  [`${STRING}.StartsWith(string, StringComparison)`]: (_call, receiver, [value, comparison]) => {
+    if (value === undefined) failNull('value');
+    return searchWith(receiverText(receiver), value as string, comparison as number, 'starts');
+  },
   [`${STRING}.EndsWith(string)`]: (_call, receiver, [value]) => {
     if (value === undefined) failNull('value');
-    return receiverText(receiver).endsWith(value as string);
+    return cultureEndsWith(receiverText(receiver), value as string);
   },
   [`${STRING}.EndsWith(char)`]: (_call, receiver, [value]) =>
     receiverText(receiver).endsWith(String.fromCodePoint(value as number)),
-  [`${STRING}.EndsWith(string, StringComparison)`]: (_call, receiver, [value, comparison]) =>
-    (comparison as number) % 2 === 1
-      ? receiverText(receiver)
-          .toUpperCase()
-          .endsWith((value as string).toUpperCase())
-      : receiverText(receiver).endsWith(value as string),
+  [`${STRING}.EndsWith(string, StringComparison)`]: (_call, receiver, [value, comparison]) => {
+    if (value === undefined) failNull('value');
+    return searchWith(receiverText(receiver), value as string, comparison as number, 'ends');
+  },
   [`${STRING}.Equals(object?)`]: (_call, receiver, [other]) => receiver === other,
   [`${STRING}.Equals(string?)`]: (_call, receiver, [other]) => receiver === other,
   [`${STRING}.Equals(string?, StringComparison)`]: (_call, receiver, [other, comparison]) =>
@@ -346,7 +367,7 @@ const stringNatives: Record<string, NativeMethod> = {
   [`${STRING}.ToLower`]: (_call, receiver) => caseMappedText(receiverText(receiver), false),
   [`${STRING}.ToLowerInvariant`]: (_call, receiver) => caseMappedText(receiverText(receiver), false),
   [`${STRING}.ToUpper`]: (_call, receiver) => caseMappedText(receiverText(receiver), true),
-  [`${STRING}.ToUpperInvariant`]: (_call, receiver) => caseMappedText(receiverText(receiver), true),
+  [`${STRING}.ToUpperInvariant`]: (_call, receiver) => caseMappedText(receiverText(receiver), true, true),
   [`${STRING}.ToString`]: (_call, receiver) => receiverText(receiver),
   [`${STRING}.Trim()`]: (_call, receiver) => trimWith(receiverText(receiver), undefined, true, true),
   [`${STRING}.Trim(char)`]: (_call, receiver, [char]) =>
@@ -372,7 +393,7 @@ const stringNatives: Record<string, NativeMethod> = {
     }
     if (a === undefined) return b === undefined ? 0 : -1;
     if (b === undefined) return 1;
-    if (typeof args[2] === 'boolean') return compareCulture(a, b, args[2]);
+    if (typeof args[2] === 'boolean') return compareCulture(a, b, { ignoreCase: args[2] });
     if (typeof args[2] === 'number') return compareWith(a, b, args[2]);
     return compareCulture(a, b);
   },
@@ -461,14 +482,17 @@ export function formatCall(call: NativeCall, args: Value[]): string {
   return text;
 }
 
+/**
+ * `IndexOf` and `LastIndexOf`: a char searches ordinally and a string with the current culture, unless a
+ * `StringComparison` says otherwise.
+ */
 function indexOf(call: NativeCall, text: string, args: Value[], fromEnd: boolean): number {
   const value = args[0];
   if (value === undefined) failNull('value');
-  const needle = typeof value === 'number' ? String.fromCodePoint(value) : (value as string);
-  const { start, count, ignoreCase } = searchArguments(call, args, fromEnd ? text.length - 1 : 0);
-  const haystack = ignoreCase ? text.toUpperCase() : text;
-  const target = ignoreCase ? needle.toUpperCase() : needle;
-  if (fromEnd) return lastIndexFrom(call, text, haystack, target, start);
+  const isChar = typeof value === 'number';
+  const needle = isChar ? String.fromCodePoint(value) : (value as string);
+  const { start, count, comparison } = searchArguments(call, args, fromEnd ? text.length - 1 : 0, isChar ? 4 : 0);
+  if (fromEnd) return lastIndexFrom(call, text, needle, start, count, comparison);
   if (start < 0 || start > text.length)
     failOutOfRange(
       call,
@@ -481,39 +505,60 @@ function indexOf(call: NativeCall, text: string, args: Value[], fromEnd: boolean
       'count',
       'Count must be positive and count must refer to a location within the string/array/collection.'
     );
+  const end = count === undefined ? text.length : start + count;
+  if (comparison < 4 && needle !== '') return cultureIndexOf(text, needle, start, end, cultureOf(comparison));
+  const [haystack, target] = ordinalForms(text, needle, comparison);
   const found = haystack.indexOf(target, start);
-  if (found === -1 || (count !== undefined && found + target.length > start + count)) return -1;
+  if (found === -1 || found + target.length > end) return -1;
   return found;
+}
+
+/** The texts an ordinal search compares: as they are, or case-mapped for `OrdinalIgnoreCase`. */
+function ordinalForms(text: string, needle: string, comparison: number): [string, string] {
+  return comparison % 2 === 1 ? [ordinalUpper(text), ordinalUpper(needle)] : [text, needle];
 }
 
 function searchArguments(
   call: NativeCall,
   args: Value[],
-  defaultStart: number
-): { start: number; count: number | undefined; ignoreCase: boolean } {
+  defaultStart: number,
+  defaultComparison: number
+): { start: number; count: number | undefined; comparison: number } {
   let start = defaultStart;
   let count: number | undefined;
-  let ignoreCase = false;
+  let comparison = defaultComparison;
   for (const [index, parameter] of call.method.parameters.entries()) {
     if (index === 0) continue;
     if (parameter.name === 'startIndex') start = args[index] as number;
     else if (parameter.name === 'count') count = args[index] as number;
-    else if (parameter.name === 'comparisonType') ignoreCase = (args[index] as number) % 2 === 1;
+    else if (parameter.name === 'comparisonType') comparison = args[index] as number;
   }
-  return { start, count, ignoreCase };
+  return { start, count, comparison };
 }
 
-function lastIndexFrom(call: NativeCall, text: string, haystack: string, target: string, start: number): number {
-  if (text.length === 0) return target === '' ? 0 : -1;
+function lastIndexFrom(
+  call: NativeCall,
+  text: string,
+  needle: string,
+  start: number,
+  count: number | undefined,
+  comparison: number
+): number {
+  if (text.length === 0) return needle === '' ? 0 : -1;
   if (start < 0 || start >= text.length)
     failOutOfRange(
       call,
       'startIndex',
       'Index was out of range. Must be non-negative and less than the size of the collection.'
     );
+  const first = count === undefined ? 0 : start - count + 1;
+  if (comparison < 4 && needle !== '')
+    return cultureLastIndexOf(text, needle, Math.max(0, first), start + 1, cultureOf(comparison));
+  const [haystack, target] = ordinalForms(text, needle, comparison);
   const last = start - target.length + 1;
-  if (last >= 0) return haystack.lastIndexOf(target, last);
-  return haystack.lastIndexOf(target, target === '' ? start : -1);
+  const found =
+    last >= 0 ? haystack.lastIndexOf(target, last) : haystack.lastIndexOf(target, target === '' ? start : -1);
+  return found >= first ? found : -1;
 }
 
 /** `CharEnumerator`'s state: the text and the position before the current character. */
@@ -589,7 +634,7 @@ defineNatives({
   [`${CHAR}.IsSymbol`]: charTest((char) => /\p{S}/u.test(char)),
   [`${CHAR}.IsSeparator`]: charTest((char) => /\p{Z}/u.test(char)),
   [`${CHAR}.IsControl`]: charTest((char) => /\p{Cc}/u.test(char)),
-  [`${CHAR}.IsWhiteSpace`]: charTest((char) => /[\s\u0085]/u.test(char)),
+  [`${CHAR}.IsWhiteSpace`]: charTest((char) => WHITESPACE.test(char)),
   [`${CHAR}.IsSurrogate`]: charTest((char) => /[\uD800-\uDFFF]/.test(char)),
   [`${CHAR}.IsHighSurrogate`]: charTest((char) => /[\uD800-\uDBFF]/.test(char)),
   [`${CHAR}.IsLowSurrogate`]: charTest((char) => /[\uDC00-\uDFFF]/.test(char)),
@@ -603,7 +648,7 @@ defineNatives({
   [`${CHAR}.IsBetween`]: (_call, _receiver, [value, low, high]) =>
     (value as number) >= (low as number) && (value as number) <= (high as number),
   [`${CHAR}.ToUpper`]: (_call, _receiver, [value]) => caseMapped(value as number, true),
-  [`${CHAR}.ToUpperInvariant`]: (_call, _receiver, [value]) => caseMapped(value as number, true),
+  [`${CHAR}.ToUpperInvariant`]: (_call, _receiver, [value]) => caseMapped(value as number, true, true),
   [`${CHAR}.ToLower`]: (_call, _receiver, [value]) => caseMapped(value as number, false),
   [`${CHAR}.ToLowerInvariant`]: (_call, _receiver, [value]) => caseMapped(value as number, false),
   [`${CHAR}.GetNumericValue`]: (_call, _receiver, args) => {
@@ -654,7 +699,9 @@ defineNatives({
  * .NET's simple case mapping of a character, which keeps one character: `ß` stays as JavaScript's `SS` would expand
  * it, and `İ` lowers to `i` without JavaScript's combining dot.
  */
-function caseMapped(code: number, upper: boolean): number {
+function caseMapped(code: number, upper: boolean, isInvariant = false): number {
+  // The invariant culture keeps the dotless i, whose uppercase `I` belongs to Turkish.
+  if (isInvariant && upper && code === DOTLESS_I) return code;
   const char = String.fromCharCode(code);
   const mapped = upper ? char.toUpperCase() : char.toLowerCase();
   if (mapped.length === 1) return mapped.charCodeAt(0);
@@ -662,10 +709,23 @@ function caseMapped(code: number, upper: boolean): number {
 }
 
 /** Maps each character of a text as `ToUpper` and `ToLower` do, without JavaScript's context-sensitive rules. */
-function caseMappedText(text: string, upper: boolean): string {
+function caseMappedText(text: string, upper: boolean, isInvariant = false): string {
   let result = '';
   for (let index = 0; index < text.length; index++)
-    result += String.fromCharCode(caseMapped(text.charCodeAt(index), upper));
+    result += String.fromCharCode(caseMapped(text.charCodeAt(index), upper, isInvariant));
+  return result;
+}
+
+const DOTLESS_I = 0x1_31;
+const LONG_S = 0x1_7f;
+
+/** A text as `OrdinalIgnoreCase` compares it: uppercased, except that no other letter becomes an ASCII one. */
+function ordinalUpper(text: string): string {
+  let result = '';
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
+    result += String.fromCharCode(code === DOTLESS_I || code === LONG_S ? code : caseMapped(code, true));
+  }
   return result;
 }
 
@@ -695,6 +755,7 @@ const NUMERIC_VALUES = new Map<number, number>([
   [0xb2, 2],
   [0xb3, 3],
   [0x20_70, 0],
+  [0x30_07, 0],
   [0x21_50, 1 / 7],
   [0x21_51, 1 / 9],
   [0x21_52, 0.1],
@@ -774,8 +835,10 @@ defineNatives({
   },
   [`${STRING_COMPARER}.GetHashCode`]: (_call, receiver, [text]) => {
     if (text === undefined) failNull('obj');
-    const ignoresCase = comparisonOfComparer(receiver) % 2 === 1;
-    return primitiveHash(ignoresCase ? caseMappedText(text as string, true) : (text as string)) ?? 0;
+    const comparison = comparisonOfComparer(receiver);
+    if (comparison === 4) return primitiveHash(text as string) ?? 0;
+    if (comparison === 5) return primitiveHash(ordinalUpper(text as string)) ?? 0;
+    return primitiveHash(cultureHashKey(text as string)) ?? 0;
   },
 });
 
