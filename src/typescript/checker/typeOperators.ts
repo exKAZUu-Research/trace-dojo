@@ -256,6 +256,7 @@ export class TypeOperators {
       return mappedArrayOrTuple(this.c, info, source, withSource);
     }
     return anonymousObject(() => this.mappedStructure(info), {
+      isResolvedMappedType: true,
       mappedKeys: info.nameType ? undefined : info.constraint,
     });
   }

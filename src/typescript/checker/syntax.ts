@@ -64,7 +64,7 @@ export function arrayLiteralLength(array: TreeNode): number {
   return parts.length === 0 || parts.at(-1)?.type === ',' ? commas : commas + 1;
 }
 
-/** The elements of an array pattern with their positions, which holes such as `[, x]` skip. */
+/** The elements of an array literal or pattern with their positions, which holes such as `[, x]` skip. */
 export function arrayPatternElements(pattern: TreeNode): { element: TreeNode; index: number }[] {
   const elements: { element: TreeNode; index: number }[] = [];
   let index = 0;

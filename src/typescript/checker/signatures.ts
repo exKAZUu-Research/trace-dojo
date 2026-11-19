@@ -675,7 +675,7 @@ function firstArgumentParameter(node: TreeNode): TreeNode | undefined {
   return argumentParameters(parameterNodes(node))[0];
 }
 
-function parameterNodes(node: TreeNode): TreeNode[] {
+export function parameterNodes(node: TreeNode): TreeNode[] {
   const parametersNode = node.childForFieldName('parameters');
   const nodes = parametersNode ? named(parametersNode) : [];
   const single = node.childForFieldName('parameter');

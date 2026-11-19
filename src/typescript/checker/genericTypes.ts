@@ -1,12 +1,12 @@
 import type { Checker, Mapper } from './checker';
 import { keyedIndexes } from './indexInfos';
 import {
-  anyType,
   isAnyLike,
   isIntrinsic,
   type MappedInfo,
   newTypeId,
   type ObjectType,
+  permissiveAnyType,
   type Type,
   type TypeParameter,
 } from './types';
@@ -63,7 +63,8 @@ export function conditionalBranch(
     const mapper: Mapper = new Map(parameters.map((parameter) => [parameter.id, map(parameter)]));
     return c.relations.isAssignable(c.instantiate(checkType, mapper), c.instantiate(extendsType, mapper));
   };
-  if (!isAssignableWith(() => anyType)) return 'false';
+  // The permissive probe must allow even `never` in positions a type variable can fill.
+  if (!isAssignableWith(() => permissiveAnyType)) return 'false';
   // A type parameter without its constraint, so that `T[] extends string[]` with `T extends string` is deferred.
   if (isAssignableWith((parameter) => ({ ...parameter, id: newTypeId(), constraint: undefined }))) return 'true';
   return undefined;

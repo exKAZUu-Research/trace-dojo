@@ -168,6 +168,7 @@ export interface ObjectType {
   isClassStatic?: boolean;
   tuple?: TupleInfo;
   mapped?: MappedInfo;
+  isResolvedMappedType?: true;
   /** For an object a mapped type without `as` resolved to, its constraint, which `keyof` gives instead of its members. */
   mappedKeys?: Type;
   /** For a function or object literal whose type was inferred from an expression. */
@@ -287,6 +288,7 @@ function intrinsic(name: IntrinsicName): IntrinsicType {
 }
 
 export const anyType = intrinsic('any');
+export const permissiveAnyType = intrinsic('any');
 export const unknownType = intrinsic('unknown');
 export const neverType = intrinsic('never');
 export const voidType = intrinsic('void');
@@ -427,6 +429,7 @@ function unionSortKey(type: Type): number {
 // code-gauge-allow functionCognitiveComplexity 30 -- Flattens, deduplicates, and reduces members as TypeScript's unions do.
 export function unionOf(types: Type[], keepFresh = false): Type {
   const flat = flattenedMembers(types, 'union', keepFresh).filter((type) => !isIntrinsic(type, 'never'));
+  if (flat.includes(permissiveAnyType)) return permissiveAnyType;
   if (flat.some((type) => type === anyType || type === errorType)) return flat.find((type) => isAnyLike(type)) as Type;
   if (flat.some((type) => isIntrinsic(type, 'unknown'))) return unknownType;
   const primitives = new Set<IntrinsicName>(flat.filter((type) => type.kind === 'intrinsic').map((type) => type.name));
@@ -457,6 +460,7 @@ export function intersectionOf(types: Type[], budget: ExecutionBudget): Type {
   budget.spend(types.length);
   const flat = flattenedMembers(types, 'intersection', true, budget);
   if (flat.some((type) => isIntrinsic(type, 'never'))) return neverType;
+  if (flat.includes(permissiveAnyType)) return permissiveAnyType;
   if (flat.some((type) => isAnyLike(type))) return anyType;
   const members = flat.filter((type) => !isIntrinsic(type, 'unknown'));
   if (members.length === 0) return unknownType;

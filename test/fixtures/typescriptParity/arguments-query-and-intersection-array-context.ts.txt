@@ -1,0 +1,21 @@
+function read(...values: number[]) {
+  const args: typeof arguments = arguments;
+  const inner = () => {
+    const length: typeof arguments.length = args.length;
+    return length;
+  };
+  return inner();
+}
+console.log(read(1, 2));
+
+const pair: [number, string] & { tag?: string } = [1, 'a'];
+const handlers: [(x: number) => number] & { tag?: string } = [x => x + 1];
+const actions: ((x: string) => number)[] & { label?: string } = [x => x.length];
+console.log(pair[1], handlers[0](3), actions[0]('hello'));
+
+const positive = +1;
+const asserted = +2 as const;
+const one: 1 = positive;
+const two: 2 = asserted;
+function move(direction: -1 | 1) { return direction; }
+console.log(one, two, move(+1), move(-1));

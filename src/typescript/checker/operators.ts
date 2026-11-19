@@ -73,10 +73,8 @@ export class OperatorChecker {
   /** `-x`, `+x`, or `~x`, which convert their operand to a number, or keep a bigint for `-` and `~`. */
   private numericUnary(operator: string, argument: TreeNode): Type {
     const type = this.c.expressions.check(argument);
-    if (argument.type === 'number' && operator === '-') {
-      const value = numberValue(argument.text);
-      return freshLiteralType(typeof value === 'bigint' ? -value : -value);
-    }
+    const literal = signedNumericLiteral(operator, argument);
+    if (literal) return literal;
     if (!this.checkNonNullOperand(argument, type)) return numberType;
     // TypeScript rejects a numeric unary operator on a value that may be a symbol, even through a constraint.
     if (this.c.expressions.mayBeSymbol(type)) {
@@ -624,4 +622,11 @@ function isInvalidInstanceofLeft(type: Type): boolean {
 
 function includesUndefined(type: Type): boolean {
   return (type.kind === 'union' ? type.types : [type]).some((member) => isIntrinsic(member, 'undefined'));
+}
+
+function signedNumericLiteral(operator: string, argument: TreeNode): Type | undefined {
+  if (argument.type !== 'number' || (operator !== '+' && operator !== '-')) return undefined;
+  const value = numberValue(argument.text);
+  if (typeof value === 'bigint') return operator === '-' ? freshLiteralType(-value) : undefined;
+  return freshLiteralType(operator === '-' ? -value : value);
 }

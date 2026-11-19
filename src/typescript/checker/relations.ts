@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 717 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 724 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -25,8 +25,10 @@ import {
   isAnyLike,
   isIntrinsic,
   literalType,
+  nullType,
   numberType,
   type ObjectType,
+  permissiveAnyType,
   type Property,
   regularOf,
   type Signature,
@@ -304,11 +306,25 @@ export class Relations {
 
   /** The relation that holds whatever the types' structures are, if any. */
   private trivialRelation(s: Type, t: Type): boolean | undefined {
-    if (s === t || s === errorType || t === errorType) return true;
+    if (s === t || s === errorType || t === errorType || s === permissiveAnyType || t === permissiveAnyType)
+      return true;
     if (isAnyLike(t) || isIntrinsic(t, 'unknown')) return true;
     if (isAnyLike(s)) return !isIntrinsic(t, 'never');
     if (isIntrinsic(s, 'never')) return true;
+    if (t.kind === 'union' && this.isUnknownLikeUnion(t.types)) return true;
     return undefined;
+  }
+
+  private isUnknownLikeUnion(members: Type[]): boolean {
+    if (members.length < 3 || !members.includes(undefinedType) || !members.includes(nullType)) return false;
+    this.c.budget.spend(members.length);
+    return members.some(
+      (member) =>
+        member.kind === 'object' &&
+        member.objectKind === 'anonymous' &&
+        !member.isResolvedMappedType &&
+        this.hasNoMembers(member)
+    );
   }
 
   private relatedToUnion(s: Type, t: UnionType, relation: Relation): boolean {

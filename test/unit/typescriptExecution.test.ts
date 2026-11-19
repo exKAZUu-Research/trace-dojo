@@ -568,6 +568,24 @@ test('nullable relation diagnostics retain TypeScript error heads and constituen
   }
 });
 
+test('whole-tuple mismatches name the positional types reported by TypeScript', () => {
+  const fixture = new URL('../fixtures/typescriptTypeErrors/rejects-tuple-element-offsets.ts.txt', import.meta.url);
+  const reference = fs.readFileSync(
+    new URL('../fixtures/typescriptTypeErrors/rejects-tuple-element-offsets.out', import.meta.url),
+    'utf8'
+  );
+  const expected = [
+    ...reference.matchAll(
+      /^\((\d+),\d+\)[^\n]*\n  Type at position [^\n]*\n    Type '(.+?)' is not assignable to type '(.+?)'\./gm
+    ),
+  ];
+  const diagnostics = diagnosticsOf(fs.readFileSync(fixture, 'utf8'));
+  for (const [, row, source, target] of expected) {
+    const diagnostic = diagnostics.find((message) => message.startsWith(`${row}: `));
+    expect(diagnostic).toContain(`\n  型 '${source}' を型 '${target}' に代入することはできません。`);
+  }
+});
+
 test('an optional object type reports the missing property of its non-nullish member', () => {
   const source = `interface Point { x: number; y: number }
 const nullable: Point | null = { x: 1 };

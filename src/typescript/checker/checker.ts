@@ -474,6 +474,7 @@ export class Checker {
       isLiteral: type.isLiteral,
       classInfo: type.classInfo,
       isClassStatic: type.isClassStatic,
+      isResolvedMappedType: type.isResolvedMappedType,
       mappedKeys: type.mappedKeys,
       name: type.name,
       aliasName: type.aliasName,

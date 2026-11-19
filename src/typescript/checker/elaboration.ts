@@ -1,8 +1,9 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
+import { spreadLength, tupleArgumentContexts, tupleTypeAt } from './callArity';
 import type { Checker } from './checker';
 import { printedPropertyName } from './print';
-import { named, propertyNameText, skipParentheses } from './syntax';
+import { arrayPatternElements, named, propertyNameText, skipParentheses } from './syntax';
 import { booleanType, isAnyLike, type ObjectType, type Type, undefinedType, unionOf } from './types';
 
 /**
@@ -22,7 +23,7 @@ export class Elaboration {
         return this.reportProperties(node, source, target);
       }
       case 'array': {
-        return this.reportElements(node, target);
+        return this.reportElements(node, source, target);
       }
       case 'arrow_function': {
         return this.reportArrowReturn(node, source, target);
@@ -51,15 +52,40 @@ export class Elaboration {
   }
 
   private assignmentDetails(source: Type, target: Type): string {
-    if (source.kind !== 'union' || source === booleanType) return this.missingMembers(source, target);
+    if (source.kind !== 'union' || source === booleanType) {
+      const tuple = this.tupleMismatch(source, target);
+      return tuple ? `\n  ${tuple}` : this.missingMembers(source, target);
+    }
     this.c.budget.spend(source.types.length);
     const failing = source.types.find((member) => !this.c.relations.isAssignable(member, target));
     if (!failing) return '';
     const types = this.c.typesForMessage(failing, target);
     const detail =
+      this.tupleMismatch(failing, types.target) ||
       this.missingMembers(failing, types.target) ||
       assignmentMessage(this.c.print(types.source), this.c.print(types.target));
     return `\n  ${detail}`;
+  }
+
+  private tupleMismatch(source: Type, target: Type): string {
+    if (source.kind !== 'object' || !source.tuple || target.kind !== 'object' || !target.tuple) return '';
+    const sourceElements = source.tuple.elements;
+    if (sourceElements.some((element) => element.rest)) return '';
+    const positions = tupleArgumentContexts(
+      this.c,
+      target,
+      sourceElements.map(() => 1)
+    );
+    for (const [index, element] of sourceElements.entries()) {
+      const position = positions[index];
+      if (!position) continue;
+      const expected = target.tuple.elements[index]?.optional ? unionOf([position, undefinedType]) : position;
+      const actual = this.c.relations.tupleElementTargetType(element);
+      if (this.c.relations.isAssignable(actual, expected)) continue;
+      const types = this.c.typesForMessage(actual, expected);
+      return assignmentMessage(this.c.print(types.source), this.c.print(types.target));
+    }
+    return '';
   }
 
   private missingMembers(source: Type, target: Type): string {
@@ -101,25 +127,43 @@ export class Elaboration {
     return reported;
   }
 
-  private reportElements(node: TreeNode, target: Type): boolean {
+  private reportElements(node: TreeNode, source: Type, target: Type): boolean {
     const targets = arrayTargets(this.c, target);
     if (targets.length === 0) return false;
+    const tupleTargets = targets.filter((member) => member.tuple);
+    const tupleSource = source.kind === 'object' && source.tuple ? source : undefined;
     let reported = false;
-    for (const [index, element] of named(node).entries()) {
-      const spread = element.type === 'spread_element' ? named(element)[0] : undefined;
-      // A spread moves the elements after it to positions a tuple cannot tell.
-      if (spread && targets.some((member) => member.tuple)) return reported;
-      const targetType = targetElementType(this.c, targets, index);
-      const sourceType = this.c.silently(() =>
-        spread
-          ? this.c.patterns.iteratedType(spread, this.c.expressions.check(spread))
-          : this.c.expressions.check(element, targetType)
-      );
-      if (this.c.relations.isAssignable(sourceType, targetType)) continue;
+    for (const { element, index } of arrayPatternElements(node)) {
+      if (element.type === 'spread_element' && tupleTargets.length > 0) {
+        if (spreadLength(this.c, element) === undefined) return reported;
+        continue;
+      }
+      if (tupleTargets.some((member) => !this.c.propertyOf(member, String(index)))) continue;
+      const expected = targetElementType(this.c, target, index);
+      const actual = this.mismatchedArrayElement(element, tupleSource, index, expected);
+      if (!actual) continue;
       reported = true;
-      this.c.expressions.reportNotAssignable(element, sourceType, targetType);
+      this.c.expressions.reportNotAssignable(element, actual, expected);
     }
     return reported;
+  }
+
+  private mismatchedArrayElement(
+    element: TreeNode,
+    tuple: ObjectType | undefined,
+    index: number,
+    target: Type
+  ): Type | undefined {
+    // tsc elaborates at syntax positions only when the constructed tuple itself mismatches there.
+    const tupleElement = tuple ? this.c.propertyOf(tuple, String(index))?.type() : undefined;
+    if (tuple && (!tupleElement || this.c.relations.isAssignable(tupleElement, target))) return undefined;
+    const spread = element.type === 'spread_element' ? named(element)[0] : undefined;
+    const source = this.c.silently(() =>
+      spread
+        ? this.c.patterns.iteratedType(spread, this.c.expressions.check(spread))
+        : this.c.expressions.check(element, target)
+    );
+    return this.c.relations.isAssignable(source, target) ? tupleElement : source;
   }
 
   /** An arrow function whose expression body returns what its target's signatures do not is reported at the body. */
@@ -157,24 +201,25 @@ function memberKey(member: TreeNode): TreeNode | undefined {
   return undefined;
 }
 
-/** The arrays and tuples among a target's members. */
+/** The arrays, tuples and objects with numeric indexes among the target's constituents. */
 export function arrayTargets(c: Checker, target: Type): ObjectType[] {
-  return (target.kind === 'union' ? target.types : [target]).filter(
-    (member): member is ObjectType =>
-      member.kind === 'object' && (c.isArrayOrTuple(member) || c.structureOf(member).numberIndex !== undefined)
-  );
+  if (target.kind === 'union') return target.types.flatMap((member) => arrayTargets(c, member));
+  if (target.kind === 'intersection') {
+    const groups = target.types.map((member) => arrayTargets(c, member)).filter((members) => members.length > 0);
+    return groups.length === 1 ? groups[0] : [];
+  }
+  return target.kind === 'object' && (c.isArrayOrTuple(target) || c.structureOf(target).numberIndex !== undefined)
+    ? [target]
+    : [];
 }
 
-/** The type the arrays and tuples of a target give the element at `index`. */
-export function targetElementType(c: Checker, targets: ObjectType[], index: number): Type {
+export function targetElementType(c: Checker, target: Type, index: number): Type {
   return unionOf(
-    targets.map((member) => {
-      const elements = member.tuple?.elements;
-      return elements?.[index] && !elements[index].rest
-        ? c.relations.tupleElementTargetType(elements[index])
-        : c.isArrayOrTuple(member)
-          ? c.elementTypeOf(member)
-          : (c.structureOf(member).numberIndex?.type ?? c.elementTypeOf(member));
+    arrayTargets(c, target).map((array) => {
+      const elements = array.tuple?.elements;
+      return elements
+        ? (tupleTypeAt(c, elements, index) ?? c.elementTypeOf(array))
+        : (c.structureOf(array).numberIndex?.type ?? c.elementTypeOf(array));
     })
   );
 }

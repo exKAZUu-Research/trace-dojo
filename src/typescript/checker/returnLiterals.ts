@@ -6,13 +6,7 @@ import { type LiteralType, regularOf, type Type } from './types';
  * return type takes literals of its kind.
  */
 export function returnedLiteralType(c: Checker, literal: LiteralType, contextual: Type | undefined): Type {
-  // TypeScript first instantiates a type parameter of a generic call with what the call's own contextual type infers
-  // for it, as `"x"` for `T` in `const a: "x" = id(() => "x")`, which the contextual return type here lacks, so a type
-  // parameter keeps the literal.
-  const keeps =
-    isLiteralOfContextualType(c, literal, contextual) ||
-    (contextual !== undefined &&
-      (contextual.kind === 'union' ? contextual.types : [contextual]).some((type) => type.kind === 'typeParameter'));
+  const keeps = isLiteralOfContextualType(c, literal, contextual);
   return regularOf(keeps ? literal : c.widenLiteral(literal));
 }
 

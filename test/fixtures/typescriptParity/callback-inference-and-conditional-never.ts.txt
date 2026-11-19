@@ -1,0 +1,36 @@
+function combine<T>(callback: (a: T, b: T) => T): (a: T, b: T) => T {
+  return callback;
+}
+const add = combine((a: number, b) => a + b);
+const join = combine((a, b: string) => a + b);
+const fromReturn = combine((a, b): number => a + b);
+console.log(add(2, 3), join('a', 'b'), fromReturn(3, 4));
+
+function evaluate<T>(fn: () => T): T { return fn(); }
+let count = evaluate(() => 0);
+count = 1;
+let state = evaluate(() => 'ready');
+state = 'done';
+const context: 'expected' = evaluate(() => 'expected');
+const explicit: 0 = evaluate(() => 0 as const);
+function evaluateString<T extends string>(fn: () => T): T { return fn(); }
+const constrained: 'keep' = evaluateString(() => 'keep');
+console.log(count, state, context, explicit, constrained);
+
+type IsNever<T> = [T] extends [never] ? true : false;
+type Empty<T> = T[] extends never[] ? 1 : 2;
+const yes: IsNever<never> = true;
+const no: IsNever<string> = false;
+const unknownResult: IsNever<any> = false;
+const empty: Empty<never> = 1;
+const populated: Empty<number> = 2;
+console.log(yes, no, unknownResult, empty, populated);
+
+function apply(kind: 'text', fn: (x: string) => void): void;
+function apply(kind: 'number', fn: (x: number, y: number) => void): void;
+function apply(kind: string, fn: any): void {
+  if (kind === 'number') fn(2, 3);
+  else fn('hello');
+}
+apply('number', (x = 1, y: number) => console.log(x + y));
+apply('text', (value) => console.log(value.toUpperCase()));

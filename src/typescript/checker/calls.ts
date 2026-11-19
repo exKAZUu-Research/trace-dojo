@@ -1,11 +1,13 @@
-// code-gauge-allow-file fileNcss 566 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
+// code-gauge-allow-file fileNcss 617 -- Resolves calls as TypeScript does: callees, overloads, inference, and the effects of calls on the flow.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
 import { CallArity, minimumArguments, tupleArgumentContexts, tupleTypeAt } from './callArity';
 import type { Checker, Mapper } from './checker';
+import { contextualSignatureOf } from './contextualSignatures';
 import { InferencePriority, type InferenceRun, newInferenceRun } from './inference';
-import { named, skipParentheses, stringValue, withoutAssertions } from './syntax';
+import { isContextSensitiveFunction, parameterNodes } from './signatures';
+import { argumentParameters, named, skipParentheses, stringValue, withoutAssertions } from './syntax';
 import {
   anyType,
   errorType,
@@ -438,7 +440,7 @@ export class Calls {
   // Resolution ---------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionParameterCount 7 -- Tries each overload as TypeScript does, then reports the failure as it does.
-  // code-gauge-allow functionCognitiveComplexity 19 -- Tries overloads before demanding the selected generic call context.
+  // code-gauge-allow functionCognitiveComplexity 23 -- Tries overloads before demanding the selected generic call context.
   private resolve(
     node: TreeNode,
     callee: TreeNode,
@@ -463,29 +465,72 @@ export class Calls {
     }
     const instantiate = (candidate: Signature): Signature =>
       this.instantiateFor(candidate, args, typeArguments, contextual, receiver);
-    for (const candidate of candidates) {
-      if (!this.arity.arityMatches(candidate, args)) continue;
-      const instantiated = this.c.silently(() => instantiate(candidate));
-      if (
-        this.arity.instanceArityMatches(instantiated, candidate, args) &&
-        this.c.silently(() => this.argumentsMatch(instantiated, args))
-      ) {
-        const deferred =
-          candidate.typeParameters.length > 0 && !typeArguments
-            ? this.c.expressions.deferredContexts.typeOf(node)
-            : undefined;
-        const final = this.instantiateFor(candidate, args, typeArguments, deferred ?? contextual, receiver);
-        this.checkArguments(final, args, true, node);
-        if (typeArguments)
-          this.c.typeNodes.checkTypeArgumentConstraints(
-            node,
-            candidate.typeParameters,
-            this.fillTypeArguments(candidate, typeArguments)
+    const callbacks = candidates.length > 1 ? this.contextSensitiveArguments(args) : new Set<number>();
+    const contexts = new Map<number, Type>();
+    const choose = (): Resolution => {
+      for (const candidate of candidates) {
+        if (!this.arity.arityMatches(candidate, args)) continue;
+        const instantiated = this.c.silently(() => instantiate(candidate));
+        if (!this.arity.instanceArityMatches(instantiated, candidate, args)) continue;
+        if (callbacks.size > 0 && contexts.size === 0)
+          this.c.flow.from(this.c.flow.current?.clone(), () =>
+            this.c.silently(() => this.prepareOverloadContexts(instantiated, args, callbacks, contexts))
           );
-        return { signature: final, returnType: final.returnType() };
+        if (this.c.silently(() => this.argumentsMatch(instantiated, args)))
+          return this.finishOverload(node, candidate, args, { typeArguments, contextual, receiver });
       }
+      return this.reportUnresolved(node, callee, candidates, args, instantiate);
+    };
+    return callbacks.size > 0 ? this.c.expressions.withOverloadContexts(contexts, choose) : choose();
+  }
+
+  private finishOverload(
+    node: TreeNode,
+    candidate: Signature,
+    args: TreeNode[],
+    { typeArguments, contextual, receiver }: { typeArguments?: Type[]; contextual?: Type; receiver?: Type }
+  ): Resolution {
+    const deferred =
+      candidate.typeParameters.length > 0 && !typeArguments
+        ? this.c.expressions.deferredContexts.typeOf(node)
+        : undefined;
+    const final = this.instantiateFor(candidate, args, typeArguments, deferred ?? contextual, receiver);
+    this.checkArguments(final, args, true, node);
+    if (typeArguments)
+      this.c.typeNodes.checkTypeArgumentConstraints(
+        node,
+        candidate.typeParameters,
+        this.fillTypeArguments(candidate, typeArguments)
+      );
+    return { signature: final, returnType: final.returnType() };
+  }
+
+  private contextSensitiveArguments(args: TreeNode[]): Set<number> {
+    if (args.some((arg) => arg.type === 'spread_element')) return new Set();
+    const callbacks = new Set<number>();
+    for (const [index, arg] of args.entries()) {
+      const expression = skipParentheses(arg);
+      if (functionExpressionTypes.has(expression.type) && isContextSensitiveFunction(expression)) callbacks.add(index);
     }
-    return this.reportUnresolved(node, callee, candidates, args, instantiate);
+    return callbacks;
+  }
+
+  private prepareOverloadContexts(
+    signature: Signature,
+    args: TreeNode[],
+    callbacks: Set<number>,
+    contexts: Map<number, Type>
+  ): void {
+    const provisional = new Map<number, Type>();
+    for (const [index, arg] of args.entries()) {
+      const target = this.parameterTypeAt(signature, index);
+      const expression = skipParentheses(arg);
+      if (target && callbacks.has(index) && contextualSignatureOf(this.c, target, expression))
+        provisional.set(expression.id, target);
+      else if (!this.checkArgument(arg, target, false, false)) return;
+    }
+    // Once ordinary arguments fit, the compiler starts checking callback bodies and keeps their contextual inputs.
+    for (const [id, type] of provisional) contexts.set(id, type);
   }
 
   /** Reports that no overload accepts the arguments as TypeScript does, for the only fitting signature or the call. */
@@ -711,8 +756,8 @@ export class Calls {
   // Inference ----------------------------------------------------------------------------------------------------
 
   /** A signature with its type parameters replaced by the given or inferred type arguments. */
-  // code-gauge-allow functionNcss 36 -- Follows TypeScript's inference passes: context-insensitive arguments, the contextual return, then callbacks.
-  // code-gauge-allow functionCognitiveComplexity 20 -- Follows TypeScript's inference passes: context-insensitive arguments, the contextual return, then callbacks.
+  // code-gauge-allow functionNcss 36 -- Follows TypeScript's inference passes: the contextual return, context-insensitive arguments, then callbacks.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Follows TypeScript's inference passes: the contextual return, context-insensitive arguments, then callbacks.
   private instantiateFor(
     signature: Signature,
     args: TreeNode[],
@@ -734,6 +779,13 @@ export class Calls {
     this.recordImpliedArity(run, signature, arguments_);
     // A `this` parameter infers from the object the method is called on.
     if (receiver && signature.thisType) this.c.inference.inferTypes(run, receiver, signature.thisType, true);
+    if (contextual)
+      this.c.inference.inferTypes(
+        { ...run, priority: InferencePriority.ReturnType },
+        contextual,
+        signature.returnType(),
+        true
+      );
     // Context-insensitive arguments infer first; functions without parameter annotations then see what they inferred.
     const sensitive = arguments_.map((arg) => !arg.spread && this.isContextSensitive(arg.node));
     for (const [index, arg] of arguments_.entries()) {
@@ -759,17 +811,11 @@ export class Calls {
         (signature.parameters.at(-1) as Parameter).type,
         true
       );
-    if (contextual)
-      this.c.inference.inferTypes(
-        { ...run, priority: InferencePriority.ReturnType },
-        contextual,
-        signature.returnType(),
-        true
-      );
     for (const [index, arg] of arguments_.entries()) {
       if (!sensitive[index]) continue;
       // A callback's parameters fix what they mention, while its return type keeps the rest to infer from it.
       const parameterType = parameterTypes[index];
+      this.inferAnnotatedCallback(run, arg.node, parameterType);
       const callbacks = parameterType ? this.c.signaturesOf(parameterType, 'call') : [];
       const typesCallbackParameter = (parameter: TypeParameter): boolean =>
         callbacks.some((callback) => callback.parameters.some((p) => this.c.inference.mentions(p.type, parameter)));
@@ -783,6 +829,24 @@ export class Calls {
     }
     const mapper = this.c.inference.finalMapper(signature, parameters, run.inferences);
     return { ...this.c.instantiateSignature(signature, mapper), typeParameters: [] };
+  }
+
+  private inferAnnotatedCallback(run: InferenceRun, node: TreeNode, context: Type | undefined): void {
+    const expression = skipParentheses(node);
+    if (!functionExpressionTypes.has(expression.type) || !isContextSensitiveFunction(expression)) return;
+    const signature = contextualSignatureOf(this.c, context, expression);
+    if (!signature) return;
+    for (const [index, parameter] of argumentParameters(parameterNodes(expression)).entries()) {
+      if (parameter.childForFieldName('pattern')?.type === 'rest_pattern') continue;
+      const annotation = this.c.typeNodes.annotationType(parameter.childForFieldName('type'));
+      const target = this.parameterTypeAt(signature, index);
+      if (annotation && target) {
+        const source = parameter.type === 'optional_parameter' ? unionOf([annotation, undefinedType]) : annotation;
+        this.c.inference.inferTypes(run, source, target, false);
+      }
+    }
+    const returned = this.c.functions.declaredReturnType(expression);
+    if (returned) this.c.inference.inferTypes(run, returned, signature.returnType(), true);
   }
 
   /** Records how many arguments `...args: A` takes, which splits what `A` infers from `[...A, ...B]`. */

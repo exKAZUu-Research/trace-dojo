@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 603 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 610 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { spreadLength, tupleArgumentContexts } from './callArity';
@@ -197,35 +197,39 @@ export class LiteralChecker {
     return node !== undefined && property.declaration?.parent?.id === node.id;
   }
 
-  /** Whether an array literal is a tuple by where it is written, as TypeScript's `checkArrayLiteral` decides. */
   private isInTupleContext(node: TreeNode, contextual: Type | undefined): boolean {
+    return isSpreadIntoCall(node) || (contextual !== undefined && this.takesTupleContext(contextual));
+  }
+
+  private takesTupleContext(type: Type): boolean {
+    if (type.kind === 'union' || type.kind === 'intersection')
+      return type.types.some((member) => this.takesTupleContext(member));
+    if (type.kind !== 'object') return false;
     return (
-      (contextual !== undefined &&
-        (this.tupleContexts(contextual).length > 0 || this.isGenericHomomorphicMapped(contextual))) ||
-      isSpreadIntoCall(node)
-    );
-  }
-
-  private tupleContexts(contextual: Type): ObjectType[] {
-    const members = contextual.kind === 'union' ? contextual.types : [contextual];
-    return members.filter((member): member is ObjectType => member.kind === 'object' && member.objectKind === 'tuple');
-  }
-
-  /** Whether `contextual` has a generic homomorphic mapped type, which TypeScript takes as a tuple context. */
-  private isGenericHomomorphicMapped(contextual: Type): boolean {
-    return (contextual.kind === 'union' ? contextual.types : [contextual]).some(
-      (member) =>
-        member.kind === 'object' &&
-        member.objectKind === 'mapped' &&
-        member.mapped?.source !== undefined &&
-        !member.mapped.nameType &&
-        this.c.relations.isGeneric(member)
+      type.objectKind === 'tuple' ||
+      (type.objectKind === 'mapped' &&
+        type.mapped?.source !== undefined &&
+        !type.mapped.nameType &&
+        this.c.relations.isGeneric(type))
     );
   }
 
   private arrayElementContexts(contextual: Type, index: number, lengths: (number | undefined)[]): Type[] {
     if (contextual.kind === 'union')
       return contextual.types.flatMap((member) => this.arrayElementContexts(member, index, lengths));
+    if (contextual.kind === 'intersection') {
+      const contexts = contextual.types
+        .map((member) => this.arrayElementContexts(member, index, lengths))
+        .filter((types) => types.length > 0);
+      return contexts.length > 0
+        ? [
+            intersectionOf(
+              contexts.map((types) => unionOf(types)),
+              this.c.budget
+            ),
+          ]
+        : [];
+    }
     const context =
       contextual.kind === 'object' && contextual.objectKind === 'tuple'
         ? tupleArgumentContexts(this.c, contextual, lengths)[index]
@@ -234,16 +238,11 @@ export class LiteralChecker {
   }
 
   private elementContext(contextual: Type): Type | undefined {
-    const members = (contextual.kind === 'union' ? contextual.types : [contextual]).filter(
-      (member) => member.kind === 'object' && this.c.isArrayOrTuple(member)
-    );
-    if (members.length > 0) return unionOf(members.map((member) => this.c.elementTypeOf(member as ObjectType)));
-    // Any other iterable, such as `Iterable<[string, T]>`, gives its elements the type it iterates.
-    const iterated = (contextual.kind === 'union' ? contextual.types : [contextual])
-      .filter((member) => member.kind === 'object' && this.c.propertyOf(member, '__@iterator'))
-      .map((member) => this.c.silently(() => this.c.patterns.iteratedType(undefined, member)))
-      .filter((type) => type !== errorType && !isAnyLike(type));
-    return iterated.length > 0 ? unionOf(iterated) : undefined;
+    if (contextual.kind !== 'object') return undefined;
+    if (this.c.isArrayOrTuple(contextual)) return this.c.elementTypeOf(contextual);
+    if (!this.c.propertyOf(contextual, '__@iterator')) return undefined;
+    const iterated = this.c.silently(() => this.c.patterns.iteratedType(undefined, contextual));
+    return iterated === errorType || isAnyLike(iterated) ? undefined : iterated;
   }
 
   /** Whether a literal is checked with const inference or inside a const assertion. */

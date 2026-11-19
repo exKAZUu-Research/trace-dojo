@@ -22,6 +22,7 @@ import {
   named,
   numberValue,
   patternIdentifiers,
+  skipParentheses,
   stringValue,
   templateFragmentText,
 } from './syntax';
@@ -58,6 +59,7 @@ export class ExpressionChecker {
   readonly expandos: Expandos;
   readonly elaboration: Elaboration;
   private readonly silentTypes: ExpressionTypeCache;
+  private readonly overloadContexts: ReadonlyMap<number, Type>[] = [];
   private readonly uniqueSymbols: UniqueSymbols;
   /** Types of variables computed from their declarations, by symbol. */
   private readonly variableTypes = new Map<number, Type>();
@@ -114,8 +116,21 @@ export class ExpressionChecker {
 
   // Entry points -------------------------------------------------------------------------------------------------
 
+  withOverloadContexts<T>(contexts: ReadonlyMap<number, Type>, check: () => T): T {
+    this.overloadContexts.push(contexts);
+    try {
+      return check();
+    } finally {
+      this.overloadContexts.pop();
+    }
+  }
+
   check(node: TreeNode, contextual?: Type): Type {
     this.c.budget.spend();
+    if (this.overloadContexts.length > 0) {
+      const { id } = skipParentheses(node);
+      contextual = this.overloadContexts.findLast((contexts) => contexts.has(id))?.get(id) ?? contextual;
+    }
     if (this.c.silent === 0) return this.compute(node, contextual);
     return this.silentTypes.check(node, contextual, () => this.compute(node, contextual));
   }
@@ -241,7 +256,7 @@ export class ExpressionChecker {
   typeOfQuery(node: TreeNode): Type {
     if (node.type === 'identifier') {
       const symbol = this.c.scopeOf(node).lookupValue(node.text);
-      if (!symbol) return this.reportUnknownValue(node, node.text);
+      if (!symbol) return this.implicitArgumentsType(node) ?? this.reportUnknownValue(node, node.text);
       return this.reportUnavailableValue(node, symbol)
         ? errorType
         : this.variableReferenceType(node, symbol, undefined, true);
@@ -263,12 +278,15 @@ export class ExpressionChecker {
     const symbol = this.c.scopeOf(node).lookupValue(name);
     if (!symbol) {
       if (name === 'undefined') return undefinedType;
-      if (name === 'arguments' && this.hasArguments(node)) return this.c.globalType('IArguments');
-      return this.reportUnknownValue(node, name);
+      return this.implicitArgumentsType(node) ?? this.reportUnknownValue(node, name);
     }
     if (this.reportUnavailableValue(node, symbol)) return errorType;
     this.checkUsedBeforeDeclaration(node, symbol);
     return this.variableReferenceType(node, symbol, contextual);
+  }
+
+  private implicitArgumentsType(node: TreeNode): Type | undefined {
+    return node.text === 'arguments' && this.hasArguments(node) ? this.c.globalType('IArguments') : undefined;
   }
 
   private variableReferenceType(node: TreeNode, symbol: Sym, contextual?: Type, typeQuery = false): Type {
@@ -819,7 +837,7 @@ export class ExpressionChecker {
     const elementCount = sourceElements?.length ?? 1;
     for (let index = 0; index < elementCount; index++) {
       const element = sourceElements ? sourceElements[index].type : this.c.elementTypeOf(source);
-      this.checkExcessProperties(node, element, targetElementType(this.c, targets, index));
+      this.checkExcessProperties(node, element, targetElementType(this.c, target, index));
     }
   }
 
