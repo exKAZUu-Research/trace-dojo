@@ -3665,4 +3665,14 @@ $c = [4]; next($c); count([$c]); $c['b'] = 8;
 echo key($c), ':', current($c);
 `);
   expect(retiredObjectFreeWrapper).toMatchObject({ kind: 'executed', stdout: 'b:8;b:8' });
+
+  const nestedCycleArrayCount = run(String.raw`<?php
+$x = [1]; $y = [$x]; $a = [$y]; $a[] =& $a; unset($x, $y, $a);
+echo gc_collect_cycles(), ',';
+$x = [1]; $y = [$x]; $z = [$y]; $a = [$z]; $a[] =& $a; unset($x, $y, $z, $a);
+echo gc_collect_cycles(), ',';
+$v = 1; $a = [[$v]]; $a[] =& $a; unset($a);
+echo gc_collect_cycles();
+`);
+  expect(nestedCycleArrayCount).toMatchObject({ kind: 'executed', stdout: '2,3,2' });
 });

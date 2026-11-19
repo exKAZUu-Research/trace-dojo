@@ -606,8 +606,6 @@ function heldArrayCount(values: unknown[], reachedArrays: Set<PhpArray>): number
   return collectibleGraph(values, reachedArrays).arrays.size;
 }
 
-// code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 29 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function collectibleGraph(
   values: unknown[],
   reachedArrays: Set<PhpArray>,
@@ -615,9 +613,7 @@ function collectibleGraph(
   allowed?: Set<PhpObject>
 ): { arrays: Set<PhpArray>; objects: Set<PhpObject> } {
   const arrays = new Set<PhpArray>();
-  const eligible = new Set<PhpArray>();
   const objects = new Set<PhpObject>();
-  const parents = new Map<PhpArray, Set<PhpArray>>();
   const pending: unknown[] = [...values];
   while (pending.length > 0) {
     const item = pending.pop();
@@ -625,15 +621,7 @@ function collectibleGraph(
     else if (item instanceof PhpArray) {
       if (reachedArrays.has(item) || arrays.has(item)) continue;
       arrays.add(item);
-      for (const slot of item.map.ownedSlots()) {
-        if (slot instanceof Ref || slot instanceof PhpObject) eligible.add(item);
-        if (slot instanceof PhpArray) {
-          const holders = parents.get(slot) ?? new Set<PhpArray>();
-          holders.add(item);
-          parents.set(slot, holders);
-        }
-        pending.push(slot);
-      }
+      for (const slot of item.map.ownedSlots()) pending.push(slot);
     } else if (
       item instanceof PhpObject &&
       !objects.has(item) &&
@@ -644,16 +632,7 @@ function collectibleGraph(
       pushObject(item, pending);
     }
   }
-  const affected = [...eligible];
-  while (affected.length > 0) {
-    const child = affected.pop() as PhpArray;
-    for (const parent of parents.get(child) ?? [])
-      if (!eligible.has(parent)) {
-        eligible.add(parent);
-        affected.push(parent);
-      }
-  }
-  return { arrays: eligible, objects };
+  return { arrays, objects };
 }
 
 function finishArrayCollection(runtime: Runtime, arrays: Iterable<PhpArray>): void {
