@@ -237,6 +237,22 @@ int main() {
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '1000000' });
 });
 
+test.each([
+  ['std::set<int> a{1, 2}, b{3, 4}; a.erase(a.begin(), b.end());', 'イテレータ'],
+  ['std::map<int, int> a{{1, 2}}, b{{3, 4}}; a.erase(b.begin(), b.end());', 'イテレータ'],
+  ['std::set<int> a{1, 2}; auto it = a.begin(); a.erase(it); a.erase(it, a.end());', 'イテレータ'],
+  ['std::set<int> a{1, 2}; a.erase(a.end(), a.begin());', '範囲'],
+  ['std::set<int> a{1, 2}, b{3, 4}; a.insert(b.begin(), 5);', 'イテレータ'],
+])('ordered container edits require a valid iterator range: %s', (body, diagnostic) => {
+  const program = `#include <map>
+#include <set>
+int main() { ${body} }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining(diagnostic),
+  });
+});
+
 test('an exception message cannot hide an output limit', () => {
   const program = `#include <iostream>
 #include <stdexcept>

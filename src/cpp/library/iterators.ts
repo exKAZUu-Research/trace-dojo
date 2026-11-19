@@ -3,7 +3,7 @@ import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import type { Eval } from '../runtime';
 import { BOOL, ClassInfo, classType, isInteger, LONG, PTRDIFF_T, type Type, typeName, withConst } from '../types';
-import { NULL_PTR, type Ptr } from '../values';
+import { NULL_PTR, Ptr, type Store } from '../values';
 import type { IteratorCategory } from './libraryClass';
 import { nativeConstructor } from './support';
 
@@ -82,6 +82,22 @@ function withTemporaryTarget(compiler: ExpressionCompiler, operator: string, ope
 /** The element a sequence iterator designates, checking that it is one. */
 export function elementLocation(pointer: Ptr, isReverse: boolean): Ptr {
   return pointer.element(isReverse);
+}
+
+export function positionOf(container: Store, position: unknown, allowEnd = true): number {
+  if (!(position instanceof Ptr) || position.store !== container) throw new CppRuntimeError('invalidIterator');
+  container.checkAlive();
+  const index = position.index;
+  const last = allowEnd ? container.length : container.length - 1;
+  if (index < 0 || index > last) throw new CppRuntimeError('invalidIterator');
+  return index;
+}
+
+export function rangePositions(container: Store, first: unknown, last: unknown): [number, number] {
+  const from = positionOf(container, first);
+  const to = positionOf(container, last);
+  if (from > to) throw new CppRuntimeError('invalidRange');
+  return [from, to];
 }
 
 /** Moves an iterator by `delta` elements, within the sequence and one past its end. */

@@ -1,6 +1,6 @@
 import { byteAt } from '../bytes';
 import { CppException, CppRuntimeError } from '../errors';
-import type { Frame } from '../runtime';
+import type { Frame, Runtime } from '../runtime';
 import {
   type ClassInfo,
   classType,
@@ -110,12 +110,14 @@ export function throwLibrary(frame: Frame, cls: ClassInfo, message: string): nev
 }
 
 /** Reads up to `limit` bytes from a character buffer, stopping at a null byte. */
-export function readCString(pointer: Ptr, limit = Number.POSITIVE_INFINITY): string {
+export function readCString(pointer: Ptr, limit = Number.POSITIVE_INFINITY, runtime?: Runtime): string {
   const store = pointer.target();
-  if (pointer.index < 0 || pointer.index >= store.length) throw new CppRuntimeError('unterminatedString');
+  const start = pointer.index;
+  if (start < 0 || start >= store.length) throw new CppRuntimeError('unterminatedString');
   let bytes = '';
-  const end = pointer.index + limit;
-  for (let index = pointer.index; index < end; index++) {
+  const end = start + limit;
+  for (let index = start; index < end; index++) {
+    if ((index - start) % 64 === 0) runtime?.spend();
     if (index >= store.length) throw new CppRuntimeError('unterminatedString');
     const value = store.get(index) as number;
     if (value === 0) return bytes;

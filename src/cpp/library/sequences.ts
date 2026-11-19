@@ -37,7 +37,7 @@ import {
   swapElements,
   truthy,
 } from './elements';
-import { elementLocation, randomAccessIterator } from './iterators';
+import { elementLocation, positionOf, randomAccessIterator, rangePositions } from './iterators';
 import type { Library } from './registry';
 import { listSort, SequenceEditor, type Source } from './sequenceEdits';
 import { addMethod, asNumber, constRef, native, nativeConstructor, throwLibrary } from './support';
@@ -569,15 +569,12 @@ function sequenceMethods(
     );
   });
   method('erase', [types.constIterator], types.iterator, (self, [at], frame) => {
-    const index = positionOf(self, at);
-    if (index >= self.items.length) throw new CppRuntimeError('invalidIterator');
+    const index = positionOf(self, at, false);
     editor.erase(frame, self, index, index + 1);
     return self.iteratorLocation(index);
   });
   method('erase', [types.constIterator, types.constIterator], types.iterator, (self, [first, last], frame) => {
-    const from = positionOf(self, first);
-    const to = positionOf(self, last);
-    if (from > to) throw new CppRuntimeError('invalidRange');
+    const [from, to] = rangePositions(self, first, last);
     editor.erase(frame, self, from, to);
     return self.iteratorLocation(from);
   });
@@ -654,13 +651,6 @@ function listElementsOf(
 
 const nonEmpty = (self: SequenceValue): void => {
   if (self.items.length === 0) throw new CppRuntimeError('emptyContainer');
-};
-
-const positionOf = (self: SequenceValue, at: unknown): number => {
-  const pointer = at as Ptr;
-  if (pointer.store !== self || pointer.index < 0 || pointer.index > self.items.length)
-    throw new CppRuntimeError('invalidIterator');
-  return pointer.index;
 };
 
 function listMethods(

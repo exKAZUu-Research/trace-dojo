@@ -47,6 +47,7 @@ import type { IteratorCategory } from './libraryClass';
 import type { EngineValue } from './random';
 import { uniformInteger } from './random';
 import type { Library } from './registry';
+import type { StringValue } from './string';
 import { constRef, generic, native, readCString } from './support';
 
 /** What an argument's type tells of an iterator: the element it designates, its category, and whether it goes backward. */
@@ -360,13 +361,13 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('find', (args) => {
     const info = rangeAt(args, 0);
     if (!info || args.length !== 3) return;
-    const equal = valueEquality(info.element, args[2].type);
+    const equal = valueEquality(info.element, decayed(args[2].type));
     if (!equal) return;
-    return native('find', params(args), unqualified(args[0].type), ([first, last, value]) => {
+    const types = params(args);
+    return native('find', types, unqualified(args[0].type), ([first, last, value], { frame }) => {
       const values = range(first, last, info);
-      const target = readArg(value, params(args)[2]);
-      for (let index = 0; index < values.length; index++)
-        if (equal(values.get(index), target)) return values.iterator(index);
+      const matches = bindEquality(equal, frame, readArg(value, types[2]));
+      for (let index = 0; index < values.length; index++) if (matches(values.get(index))) return values.iterator(index);
       return values.iterator(values.length);
     });
   });
@@ -388,13 +389,14 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('count', (args) => {
     const info = rangeAt(args, 0);
     if (!info || args.length !== 3) return;
-    const equal = valueEquality(info.element, args[2].type);
+    const equal = valueEquality(info.element, decayed(args[2].type));
     if (!equal) return;
-    return native('count', params(args), PTRDIFF_T, ([first, last, value]) => {
+    const types = params(args);
+    return native('count', types, PTRDIFF_T, ([first, last, value], { frame }) => {
       const values = range(first, last, info);
-      const target = readArg(value, params(args)[2]);
+      const matches = bindEquality(equal, frame, readArg(value, types[2]));
       let count = 0;
-      for (let index = 0; index < values.length; index++) if (equal(values.get(index), target)) count++;
+      for (let index = 0; index < values.length; index++) if (matches(values.get(index))) count++;
       return BigInt(count);
     });
   });
@@ -479,7 +481,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const equal = valueEquality(info.element, other.element);
     if (predicateArg ? !predicate : !equal) return;
     const same = (frame: Frame, a: Value, b: Value): boolean =>
-      predicate ? truthy(predicate(frame, a, b)) : (equal as (x: Value, y: Value) => boolean)(a, b);
+      predicate ? truthy(predicate(frame, a, b)) : (equal as ValueEquality).test(frame, a, b);
     // libc++ compares the lengths first only when both ranges are random access.
     const random = isRandomAccess(decayed(args[0].type)) && isRandomAccess(decayed(args[2].type));
     return native('equal', params(args), BOOL, ([first, last, start, end], { frame }) => {
@@ -549,7 +551,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const info = writableRangeAt(args, 0);
       if (!info || args.length !== 4) return;
       const predicate = name === 'replace_if' ? predicateOf(args[2], info.element) : undefined;
-      const equal = name === 'replace' ? valueEquality(info.element, args[2].type) : undefined;
+      const equal = name === 'replace' ? valueEquality(info.element, decayed(args[2].type)) : undefined;
       if (!predicate && !equal) return;
       const ops = elementOperations(compiler(), unqualified(info.element), args[0].row, 'assign');
       const types = params(args);
@@ -560,7 +562,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         const value = readArg(replacement, types[3]);
         for (let index = 0; index < values.length; index++) {
           const item = values.get(index);
-          if (predicate ? truthy(predicate(frame, item)) : (equal as (a: Value, b: Value) => boolean)(item, target))
+          if (predicate ? truthy(predicate(frame, item)) : (equal as ValueEquality).test(frame, item, target))
             convert(frame, value, (converted) => assignElement(frame, values.location(index), ops, converted));
         }
         return;
@@ -574,10 +576,10 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       if (name === 'unique' ? args.length > 3 : args.length !== 3) return;
       let keep: (frame: Frame, item: Value, previous: Value | undefined) => boolean;
       if (name === 'remove') {
-        const equal = valueEquality(info.element, args[2].type);
+        const equal = valueEquality(info.element, decayed(args[2].type));
         if (!equal) return;
         const types = params(args);
-        keep = (frame, item) => !equal(item, readArg(frame.pending.at(-1) as Ptr, types[2]));
+        keep = (frame, item) => !equal.test(frame, item, readArg(frame.pending.at(-1) as Ptr, types[2]));
       } else if (name === 'remove_if') {
         const predicate = predicateOf(args[2], info.element);
         if (!predicate) return;
@@ -1060,19 +1062,66 @@ function commonDeduced(a: Expr, b: Expr): Type | undefined {
   return x;
 }
 
+interface ValueEquality {
+  test: (frame: Frame, element: Value, other: Value) => boolean;
+  bindStable?: (frame: Frame, target: Value) => (element: Value) => boolean;
+}
+
 /** How `==` compares an element with an argument, after converting the argument to the element's type. */
-function valueEquality(element: Type, compared: Type): ((a: Value, b: Value) => boolean) | undefined {
+function valueEquality(element: Type, compared: Type): ValueEquality | undefined {
   const type = unqualified(element);
   const argType = unqualified(compared);
   if (isArithmetic(type) && isArithmetic(argType)) {
     const promoted = commonType(type, argType);
-    return (a, b) => convertScalar(a as Scalar, type, promoted) === convertScalar(b as Scalar, argType, promoted);
+    return {
+      test: (frame, a, b) => {
+        frame.runtime.spend();
+        return convertScalar(a as Scalar, type, promoted) === convertScalar(b as Scalar, argType, promoted);
+      },
+    };
   }
-  if (type.kind === 'class' && type.cls.library?.kind === 'string' && argType.kind === 'pointer') {
-    return (a, b) => (a as unknown as { bytes: string }).bytes === readCString(b as Ptr);
+  if (type.kind === 'class' && type.cls.library?.kind === 'string') {
+    if (argType.kind === 'pointer' && argType.to.kind === 'int' && argType.to.name === 'char') {
+      return {
+        test: (frame, a, b) =>
+          compareStringBytes(frame, stringValueBytes(a), readCString(b as Ptr, undefined, frame.runtime)),
+        bindStable: (frame, b) => {
+          let target: string | undefined;
+          return (a) =>
+            compareStringBytes(
+              frame,
+              stringValueBytes(a),
+              (target ??= readCString(b as Ptr, undefined, frame.runtime))
+            );
+        },
+      };
+    }
+    if (argType.kind === 'class' && argType.cls === type.cls) {
+      return { test: (frame, a, b) => compareStringBytes(frame, stringValueBytes(a), stringValueBytes(b)) };
+    }
   }
   if (typeName(type) !== typeName(argType)) return undefined;
-  return equalTo(type);
+  const equal = equalTo(type);
+  if (!equal) return;
+  return {
+    test: (frame, a, b) => {
+      frame.runtime.spend();
+      return equal(a, b);
+    },
+  };
+}
+
+function bindEquality(equal: ValueEquality, frame: Frame, target: Value): (element: Value) => boolean {
+  return equal.bindStable?.(frame, target) ?? ((element) => equal.test(frame, element, target));
+}
+
+function compareStringBytes(frame: Frame, left: string, right: string): boolean {
+  frame.runtime.spend(left.length === right.length ? Math.max(1, Math.ceil(left.length / 64)) : 1);
+  return left === right;
+}
+
+function stringValueBytes(value: Value): string {
+  return (value as StringValue).bytes;
 }
 
 function assignmentSource(

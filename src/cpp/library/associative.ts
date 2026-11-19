@@ -34,7 +34,7 @@ import {
   swapElements,
 } from './elements';
 import { addRangeMembers, emplacementCall, type EntryTable, insertCopy } from './emplacement';
-import { randomAccessIterator } from './iterators';
+import { positionOf, randomAccessIterator, rangePositions } from './iterators';
 import type { Library } from './registry';
 import { StringValue } from './string';
 import { addMethod, constRef, generic, native, nativeConstructor, throwLibrary } from './support';
@@ -747,8 +747,14 @@ export function orderedClass(
       }
     );
   }
-  method('insert', [types.constIterator, constRef(unqualified(entryType))], types.iterator, (self, [, entry], frame) =>
-    self.location(insertCopy(table, frame, self, (entry as Ptr).read())[0])
+  method(
+    'insert',
+    [types.constIterator, constRef(unqualified(entryType))],
+    types.iterator,
+    (self, [hint, entry], frame) => {
+      positionOf(self, hint);
+      return self.location(insertCopy(table, frame, self, (entry as Ptr).read())[0]);
+    }
   );
   method('erase', [constRef(keyType)], SIZE_T, (self, [k], frame) => {
     const keyValue = keyArg(k);
@@ -759,16 +765,13 @@ export function orderedClass(
     return BigInt(removed.length);
   });
   method('erase', [types.constIterator], types.iterator, (self, [at], frame) => {
-    const index = (at as Ptr).index;
-    if ((at as Ptr).store !== self || index >= self.entries.length) throw new CppRuntimeError('invalidIterator');
+    const index = positionOf(self, at, false);
     const [removed] = self.splice(index, 1);
     ops().destroy?.(frame, removed);
     return self.location(index);
   });
   method('erase', [types.constIterator, types.constIterator], types.iterator, (self, [first, last], frame) => {
-    const from = (first as Ptr).index;
-    const to = (last as Ptr).index;
-    if (from > to) throw new CppRuntimeError('invalidRange');
+    const [from, to] = rangePositions(self, first, last);
     destroyAll(frame, self.splice(from, to - from));
     return self.location(from);
   });
