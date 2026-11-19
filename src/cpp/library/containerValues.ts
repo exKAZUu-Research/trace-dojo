@@ -1,7 +1,7 @@
 import type { DisplayNode } from '../../problems/trace';
 import { CppRuntimeError } from '../errors';
 import type { Type } from '../types';
-import { type ArrayStore, CObject, Ptr, Store, UNINIT, type Value } from '../values';
+import { type ArrayStore, Box, CObject, Ptr, Store, UNINIT, type Value } from '../values';
 
 interface IndexedValue {
   index: number;
@@ -114,6 +114,15 @@ export class NodePositions {
 
   install(node: NodePosition): void {
     this.positions.set(node.index, node);
+  }
+
+  detach(index: number, value: Value): NodePosition | undefined {
+    const node = this.positions.get(index);
+    if (!node) return;
+    this.positions.delete(index);
+    node.owner = new Box(value, false);
+    node.position = 0;
+    return node;
   }
 
   invalidateFrom(index: number): void {
@@ -233,7 +242,6 @@ export class SequenceValue extends Store {
     const dequeMiddle = this.storageKind === 'deque' && start > 0 && start + remove < this.length;
     this.editPositions(start, remove, items.length);
     const removed = this.items.splice(start, remove, ...items);
-    this.releaseElements(removed);
     if (dequeMiddle) this.bindElements(0, this.length);
     else this.bindElements(start, this.storageKind === 'vector' ? this.length : start + items.length);
     return removed;
@@ -287,13 +295,6 @@ export class SequenceValue extends Store {
     }
   }
 
-  releaseElements(values: readonly Value[]): void {
-    if (this.elementType.kind !== 'class') return;
-    for (const value of values) {
-      if (value instanceof CObject) value.releaseContainerCell();
-    }
-  }
-
   editPositions(from: number, remove: number, insert: number): void {
     const atEnd = from + remove === this.length;
     const changesMiddle = from > 0 && !atEnd;
@@ -308,10 +309,38 @@ export class SequenceValue extends Store {
     else if (epoch && remove && atEnd) epoch.end++;
   }
 
-  reorder(edit: (items: IndexedValue[]) => IndexedValue[]): void {
+  reorder(edit: (items: IndexedValue[]) => IndexedValue[], destroy?: (values: Value[]) => void): void {
     const next = edit(this.items.map((value, index) => ({ value, index })));
-    this.nodes?.reorder(next);
-    this.items = next.map(({ value }) => value);
+    const install = (): void => {
+      this.nodes?.reorder(next);
+      this.items = next.map(({ value }) => value);
+    };
+    if (!destroy) {
+      install();
+      return;
+    }
+    const kept = new Set(next.map(({ index }) => index));
+    const removed = this.items.flatMap<IndexedValue>((value, index) => (kept.has(index) ? [] : [{ index, value }]));
+    this.destroyUnlinked(removed, install, destroy);
+  }
+
+  eraseNodes(from: number, count: number, destroy: (values: Value[]) => void): void {
+    const removed = this.items
+      .slice(from, from + count)
+      .map<IndexedValue>((value, index) => ({ index: from + index, value }));
+    this.destroyUnlinked(removed, () => this.splice(from, count), destroy);
+  }
+
+  private destroyUnlinked(removed: IndexedValue[], unlink: () => void, destroy: (values: Value[]) => void): void {
+    const nodes = removed.map(({ index, value }) => this.nodes?.detach(index, value));
+    try {
+      unlink();
+      destroy(removed.map(({ value }) => value));
+    } finally {
+      for (const node of nodes) {
+        if (node) node.position = -1;
+      }
+    }
   }
 
   takeItems(other: SequenceValue): void {

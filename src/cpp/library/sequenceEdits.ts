@@ -88,12 +88,27 @@ export class SequenceEditor {
 
   /** Destroys the elements from `length` on, as `__destruct_at_end` and `__erase_to_end` do. */
   truncate(frame: Frame, self: SequenceValue, length: number): void {
-    if (length < self.items.length) this.destroy(frame, self.splice(length, self.items.length - length));
+    const count = self.length - length;
+    if (count > 0) this.destroyRange(frame, self, length, count);
   }
 
   removeFront(frame: Frame, self: SequenceValue): void {
-    const [removed] = self.splice(0, 1);
-    this.ops.destroy?.(frame, removed);
+    this.destroyRange(frame, self, 0, 1);
+  }
+
+  private destroyRange(frame: Frame, self: SequenceValue, from: number, count: number, dequeEraseAt = from): void {
+    if (this.kind === 'list') {
+      self.eraseNodes(from, count, (values) => this.destroy(frame, values));
+      return;
+    }
+    this.destroy(frame, self.items.slice(from, from + count));
+    if (dequeEraseAt === from) {
+      self.splice(from, count);
+      return;
+    }
+    self.editPositions(dequeEraseAt, count, 0);
+    self.items.splice(from, count);
+    self.bindElements(0, self.length);
   }
 
   /** Constructs `count` elements at the end, reallocating a vector first if needed, as `resize` does. */
@@ -208,24 +223,16 @@ export class SequenceEditor {
     if (count === 0) return;
     const items = self.items;
     if (this.kind === 'list') {
-      this.destroy(frame, self.splice(from, count));
+      this.destroyRange(frame, self, from, count);
     } else if (this.kind === 'deque' && from <= Math.floor((items.length - count) / 2)) {
       // A deque shifts the elements before the erased ones when they are fewer.
       for (let index = from - 1; index >= 0; index--) this.moveAt(frame, items, index + count, items[index]);
-      if (from !== 0) self.editPositions(from, count, 0);
-      if (from === 0) this.destroy(frame, self.splice(0, count));
-      else {
-        const removed = items.splice(0, count);
-        self.releaseElements(removed);
-        self.bindElements(0, self.length);
-        this.destroy(frame, removed);
-      }
+      this.destroyRange(frame, self, 0, count, from);
     } else {
       for (let index = to; index < items.length; index++) this.moveAt(frame, items, index - count, items[index]);
-      if (this.kind === 'deque' && to < items.length) self.editPositions(from, count, 0);
-      this.truncate(frame, self, items.length - count);
+      const tail = items.length - count;
+      this.destroyRange(frame, self, tail, count, this.kind === 'deque' ? from : tail);
       if (this.kind === 'vector') self.finishVectorEdit(from);
-      else if (to < items.length + count) self.bindElements(0, self.length);
     }
   }
 

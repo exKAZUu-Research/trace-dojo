@@ -194,11 +194,6 @@ export class CObject extends Store {
     this.hasContainerCell = true;
   }
 
-  releaseContainerCell(): void {
-    if (!this.hasContainerCell) return;
-    this.completeLocation = undefined;
-    this.hasContainerCell = false;
-  }
   /**
    * @param cls The dynamic type, which construction and destruction set to the class whose constructor or destructor
    * is running, as virtual calls during them see it.

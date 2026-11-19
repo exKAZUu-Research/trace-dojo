@@ -731,17 +731,15 @@ function listMethods(
   method('remove', [constRef(element)], SIZE_T, (self, [value], frame) => {
     if (!equal) throw new CppRuntimeError('custom', `${typeName(element)} の値は == で比べられません。`);
     const target = (value as Ptr).read();
-    const removed: Value[] = [];
-    self.reorder((items) =>
-      items.filter(({ value: item }) => {
-        if (!equal(item, target)) return true;
-        removed.push(item);
-        return false;
-      })
+    let count = 0;
+    self.reorder(
+      (items) => items.filter(({ value: item }) => !equal(item, target)),
+      (removed) => {
+        count = removed.length;
+        editor.destroy(frame, removed);
+      }
     );
-    self.releaseElements(removed);
-    editor.destroy(frame, removed);
-    return BigInt(removed.length);
+    return BigInt(count);
   });
   method('reverse', [], VOID, (self) => {
     self.reorder((items) => items.toReversed());
@@ -751,21 +749,21 @@ function listMethods(
     self.reorder((items) => listSort(items, (a, b) => less(a.value, b.value) < 0));
   });
   const unique = (self: SequenceValue, frame: Frame, same: (a: Value, b: Value) => boolean): bigint => {
-    const removed: Value[] = [];
+    let count = 0;
     let first: Value;
-    self.reorder((items) =>
-      items.filter(({ value }, index) => {
-        if (index > 0 && same(first, value)) {
-          removed.push(value);
-          return false;
-        }
-        first = value;
-        return true;
-      })
+    self.reorder(
+      (items) =>
+        items.filter(({ value }, index) => {
+          if (index > 0 && same(first, value)) return false;
+          first = value;
+          return true;
+        }),
+      (removed) => {
+        count = removed.length;
+        editor.destroy(frame, removed);
+      }
     );
-    self.releaseElements(removed);
-    editor.destroy(frame, removed);
-    return BigInt(removed.length);
+    return BigInt(count);
   };
   method('unique', [], SIZE_T, (self, _args, frame) => {
     if (!equal) throw new CppRuntimeError('custom', `${typeName(element)} の値は == で比べられません。`);

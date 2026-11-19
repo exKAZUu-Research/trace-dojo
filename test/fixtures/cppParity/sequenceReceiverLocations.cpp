@@ -28,6 +28,17 @@ struct Relocated {
   Relocated(const Relocated&) { std::cout << this - newest << '\n'; }
 };
 
+struct Probe;
+Probe* observed = nullptr;
+struct Probe {
+  ~Probe() {
+    if (observed != nullptr) {
+      std::cout << (observed == this);
+      observed = nullptr;
+    }
+  }
+};
+
 void show(Cell& cell, char separator = ' ') {
   std::cout << cell.self - &cell << ':' << cell.value << separator;
 }
@@ -80,4 +91,25 @@ int main() {
   auto last = std::copy(inputs, inputs + 2, oldFirst);
   std::cout << (saved == &*oldFirst) << ' ' << ((saved + 1) - saved) << ' '
             << *saved << ' ' << (last == nodes.end()) << '\n';
+
+  std::vector<Probe> vectorProbe(2);
+  observed = &vectorProbe.back();
+  vectorProbe.pop_back();
+  observed = &vectorProbe.front();
+  vectorProbe.clear();
+  std::deque<Probe> dequeProbe(3);
+  observed = &dequeProbe.back();
+  dequeProbe.pop_back();
+  observed = &dequeProbe.front();
+  dequeProbe.pop_front();
+  observed = &dequeProbe.front();
+  dequeProbe.erase(dequeProbe.begin());
+  std::list<Probe> listProbe(3);
+  observed = &listProbe.back();
+  listProbe.pop_back();
+  observed = &listProbe.front();
+  listProbe.erase(listProbe.begin());
+  observed = &listProbe.front();
+  listProbe.clear();
+  std::cout << '\n';
 }
