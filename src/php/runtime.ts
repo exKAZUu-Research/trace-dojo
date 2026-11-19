@@ -26,7 +26,6 @@ import {
   setDropHandler,
   setOwnershipWorkHandler,
   setReferenceDropObserver,
-  type Slot,
   type UserFunction,
   type Value,
 } from './values';
@@ -440,13 +439,14 @@ export class Runtime {
 
   // code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   freeObject(object: PhpObject): void {
+    this.retiringObjects.delete(object);
     if (this.objects.get(object.id) !== object) return;
     this.objects.delete(object.id);
     this.objectCycles.delete(object);
     this.collectingObjects.delete(object);
     this.turtleObjects.delete(object);
     object.releaseInternal();
-    for (const slot of object.props.values())
+    for (const slot of object.props.values()) {
       if (slot instanceof Ref) {
         slot.rc--;
         if (slot.typedBy) {
@@ -454,7 +454,8 @@ export class Runtime {
           slot.typedBy = constraints.length > 0 ? constraints : undefined;
         }
       }
-    for (const slot of object.props.values()) this.bufferFreedProperty(slot);
+      this.pendingGcRoots.add(slot instanceof Ref ? slot.v : slot);
+    }
     this.gcRoots.delete(object);
     object.props.clear();
     const closure = isClosure(object) ? (object.internal as ClosureData | undefined) : undefined;
@@ -470,17 +471,15 @@ export class Runtime {
     if (object.turtle) this.world.remove(object.turtle, this.releasingGlobalsAtShutdown);
   }
 
-  private bufferFreedProperty(slot: Slot): void {
-    const value = slot instanceof Ref ? slot.v : slot;
-    this.pendingGcRoots.add(value);
-    if (
-      !this.collectingCycles &&
-      value instanceof PhpObject &&
-      !value.isResource &&
-      !this.collectingObjects.has(value) &&
-      this.objects.get(value.id) === value
-    )
-      this.gcRoots.add(value);
+  isCollectableObject(value: PhpObject): boolean {
+    return !value.isResource && !this.collectingObjects.has(value) && this.objects.get(value.id) === value;
+  }
+
+  bufferRetiringSurvivor(value: PhpArray | PhpObject): void {
+    if (this.retiringObjects.size === 0 || this.collectingCycles || this.gcRoots.size >= this.gcThreshold - 1) return;
+    if (value instanceof PhpArray) {
+      if (!value.uncollectable) this.gcRoots.add(value);
+    } else if (this.isCollectableObject(value)) this.gcRoots.add(value);
   }
 
   /** Writes bytes to standard output, decoding complete UTF-8 sequences as they arrive. */

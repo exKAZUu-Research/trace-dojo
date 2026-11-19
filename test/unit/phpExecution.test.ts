@@ -3748,4 +3748,31 @@ echo var_export(key($d), true), ':', var_export(current($d), true);
     kind: 'executed',
     stdout: '8:16|8:16|8:16|NULL:false',
   });
+
+  const liveScanCycleOrder = run(String.raw`<?php
+class N {
+  public $x;
+  function __construct(public $id) {}
+  function __destruct() { echo $this->id; }
+}
+$a = new N('a'); $b = new N('b'); $c = new N('c'); $d = new N('d');
+$a->x = $d; $b->x = [$a]; $c->x =& $a; $d->x = $c;
+unset($a); gc_collect_cycles();
+unset($b, $c, $d);
+echo '|', gc_collect_cycles(), ';';
+$a = new N('a'); $b = new N('b'); $c = new N('c'); $d = new N('d');
+$a->x = [$d]; $b->x = [$a]; $c->x =& $a; $d->x = [$c];
+unset($a); gc_collect_cycles();
+unset($b, $c, $d);
+echo '|', gc_collect_cycles(), ';';
+$a = new N('a'); $b = new N('b'); $c = new N('c'); $d = new N('d');
+$a->x = $d; $b->x = [[$a]]; $c->x =& $a; $d->x = $c;
+unset($a); gc_collect_cycles();
+unset($b, $d, $c);
+echo '|', gc_collect_cycles();
+`);
+  expect(liveScanCycleOrder).toMatchObject({
+    kind: 'executed',
+    stdout: 'b|cad3;b|cad5;b|dac3',
+  });
 });

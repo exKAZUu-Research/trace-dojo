@@ -397,24 +397,15 @@ class Release {
     }
   }
 
-  // code-gauge-allow functionNcss 34 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   // code-gauge-allow functionCognitiveComplexity 21 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private releaseValue(item: unknown, pending: unknown[], onFailure: (error: CleanupException) => void): void {
     if (item instanceof ReleaseFinish) {
       this.runtime.freeObject(item.object);
       pendingReleaseObjects.delete(item.object);
-      this.runtime.retiringObjects.delete(item.object);
     } else if (item instanceof Ref) {
       this.enqueue(pending, [item.v]);
     } else if (item instanceof PhpArray) {
-      if (
-        !item.composite ||
-        this.visitedArrays.has(item) ||
-        ownedReachable(item, this.roots, this.runtime, this.unreachable, this.retainedBefore)
-      )
-        return;
-      this.visitedArrays.add(item);
-      this.enqueue(pending, [...item.map.ownedSlots()]);
+      this.releaseArray(item, pending);
     } else if (item instanceof PhpObject) {
       const owner = activeReleaseObjects.get(item);
       if (owner && owner !== this) {
@@ -426,7 +417,7 @@ class Release {
         return;
       }
       const finish = this.prepare(item, onFailure);
-      if (!finish) return;
+      if (!finish) return this.visited.has(item) ? undefined : this.runtime.bufferRetiringSurvivor(item);
       if (item.internal !== undefined) this.releaseNative(item, onFailure);
       pending.push(finish);
       this.runtime.retiringObjects.add(item);
@@ -434,6 +425,15 @@ class Release {
       pushObject(item, children);
       this.enqueue(pending, children);
     }
+  }
+
+  private releaseArray(item: PhpArray, pending: unknown[]): void {
+    if (this.visitedArrays.has(item)) return;
+    if (ownedReachable(item, this.roots, this.runtime, this.unreachable, this.retainedBefore))
+      return this.runtime.bufferRetiringSurvivor(item);
+    if (!item.composite) return;
+    this.visitedArrays.add(item);
+    this.enqueue(pending, [...item.map.ownedSlots()]);
   }
 
   private releaseNative(object: PhpObject, onFailure: (error: CleanupException) => void): void {
@@ -651,13 +651,7 @@ function retireArrays(runtime: Runtime, arrays: Iterable<PhpArray>, dropped: unk
     const value = item instanceof Ref ? item.v : item;
     if (value instanceof PhpArray && remaining.has(value))
       retireArrayGraph(runtime, value, roots, seen, remaining, released);
-    else if (
-      value instanceof PhpObject &&
-      !value.isResource &&
-      !runtime.collectingObjects.has(value) &&
-      runtime.objects.get(value.id) === value
-    )
-      runtime.gcRoots.add(value);
+    else if (value instanceof PhpObject && runtime.isCollectableObject(value)) runtime.gcRoots.add(value);
   }
   if (released.length > 0) runtime.release(released);
 }
