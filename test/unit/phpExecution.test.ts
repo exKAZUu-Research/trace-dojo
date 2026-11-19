@@ -3823,4 +3823,24 @@ unset($b, $c, $d); echo '|', gc_collect_cycles();
 `)
     ).toMatchObject({ kind: 'executed', stdout });
   }
+
+  for (const [setup, expected] of [
+    ['$a->x = $d; $q = [$a]; $b->x = $q;', 'b|acd3'],
+    ['$a->x = $d; $q = [$a]; $b->x =& $q;', 'b|acd3'],
+    ['$a->x = $d; $q = [[$a]]; $b->x = $q;', 'b|acd3'],
+    ['$a->x = $d; $q = [$a]; $b->x = [$q];', 'b|acd3'],
+    ['$a->x = $d; $q = [$a]; $b->x = [&$q];', 'b|acd3'],
+    ['$a->x = [$d]; $q = [$a]; $b->x = $q;', 'b|acd4'],
+  ] as const) {
+    expect(
+      run(String.raw`<?php
+class N { public $x; function __construct(public $id) {} function __destruct() { echo $this->id; } }
+$a = new N('a'); $b = new N('b'); $c = new N('c'); $d = new N('d');
+${setup} $c->x =& $a; $d->x = $c;
+unset($a); gc_collect_cycles();
+unset($q, $b, $c, $d);
+echo '|', gc_collect_cycles();
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
 });

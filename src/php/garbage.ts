@@ -413,6 +413,7 @@ class Release {
     if (this.visitedArrays.has(item)) return;
     if (ownedReachable(item, this.roots, this.runtime, this.unreachable, this.retainedBefore))
       return this.bufferSurvivor(item);
+    this.runtime.gcRoots.delete(item);
     if (!item.composite) return;
     this.visitedArrays.add(item);
     this.enqueue(pending, [...item.map.ownedSlots()]);
