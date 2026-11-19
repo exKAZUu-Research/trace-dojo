@@ -27,6 +27,7 @@ import {
 import { arrayIsShared, ElementPlace, share, VarPlace } from './places';
 import { ExitSignal, PhpThrow, rt } from './runtime';
 import { shuffle } from './shuffle';
+import { checkedDynamicVariable } from './unsupported';
 import {
   copyValueSlot,
   deref,
@@ -656,7 +657,7 @@ defineFunction(
         warn(`compact(): Argument #${argument} must be string or array of strings, ${valueName(value)} given`);
         return;
       }
-      const name = value;
+      const name = checkedDynamicVariable(value);
       const ref = frame.vars.get(name);
       if (name === 'this' && frame.thisObj) result.set('this', frame.thisObj);
       else if (ref?.isDefinedBinding) result.set(normalizeKeyString(name), share(ref.v));

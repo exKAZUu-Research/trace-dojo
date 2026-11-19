@@ -71,7 +71,7 @@ export class VarPlace implements Place {
     private readonly kind: 'compiled' | 'dynamic' | 'global' = 'compiled',
     private readonly fetchRow?: number
   ) {
-    if (kind !== 'compiled') checkedDynamicVariable(name);
+    checkedDynamicVariable(name);
   }
 
   get(): Value | undefined {

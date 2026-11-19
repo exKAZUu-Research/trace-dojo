@@ -30,12 +30,12 @@ const PREG_CONSTANTS: [string, bigint][] = [
 ];
 for (const [name, value] of PREG_CONSTANTS) defineConstant(name, value);
 // These constants describe the linked PCRE2 build of the PHP CLI used to record the parity fixtures.
-const PHP_REFERENCE_PCRE_VERSION = '10.49 2026-09-28';
-const [major, minor] = PHP_REFERENCE_PCRE_VERSION.split(/[. ]/, 2).map(BigInt);
-defineConstant('PCRE_VERSION', PHP_REFERENCE_PCRE_VERSION);
+const REFERENCE_PCRE = { version: '10.49 2026-09-28', jitSupport: true };
+const [major, minor] = REFERENCE_PCRE.version.split(/[. ]/, 2).map(BigInt);
+defineConstant('PCRE_VERSION', REFERENCE_PCRE.version);
 defineConstant('PCRE_VERSION_MAJOR', major);
 defineConstant('PCRE_VERSION_MINOR', minor);
-defineConstant('PCRE_JIT_SUPPORT', false);
+defineConstant('PCRE_JIT_SUPPORT', REFERENCE_PCRE.jitSupport);
 
 /**
  * Translated patterns, shared by all runs in the server's process, so that a pattern in a loop is translated once. It

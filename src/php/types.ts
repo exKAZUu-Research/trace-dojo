@@ -59,13 +59,13 @@ export function typeToString(type: TypeDecl): string {
 }
 
 const BUILTIN_ORDER = [
+  'callable',
   'object',
   'array',
   'string',
   'int',
   'float',
   'iterable',
-  'callable',
   'bool',
   'false',
   'true',

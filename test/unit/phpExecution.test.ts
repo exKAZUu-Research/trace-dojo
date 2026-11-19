@@ -281,6 +281,9 @@ test.each([
   ['_GET', '$value = 1; $$name =& $value;', 'スーパーグローバル変数'],
   ['argv', '$values = [1]; [&$$name] = $values;', 'コマンドライン引数'],
   ['_POST', '$values = [1]; foreach ($values as &$$name) {}', 'スーパーグローバル変数'],
+  ['_GET', 'extract([$name => 1]);', 'スーパーグローバル変数'],
+  ['argc', 'global $$name;', 'コマンドライン引数'],
+  ['argv', 'compact([[$name]]);', 'コマンドライン引数'],
 ])('rejects indirect access to $%s through %s', (name, action, label) => {
   expect(run(`<?php $name = '${name}'; echo 'before'; ${action} echo 'after';`)).toMatchObject({
     kind: 'executed',
@@ -734,6 +737,10 @@ test.each([
   ['class D { public static int $n = __METHOD__; }', 'Cannot use string as default value'],
   ['trait T { public int $n = __TRAIT__; }', 'Cannot use string as default value'],
   ['class D { const int NAME = __CLASS__; }', 'Cannot use string as value for class constant'],
+  ['class D { const int|callable X = UNKNOWN; }', 'Class constant D::X cannot have type callable|int'],
+  ['interface D { const ?callable X = UNKNOWN; }', 'Class constant D::X cannot have type ?callable'],
+  ['trait D { const never X = UNKNOWN; }', 'Class constant D::X cannot have type never'],
+  ['class D { const void X = 1; }', 'Class constant D::X cannot have type void'],
   ['function f(int $n = __FUNCTION__) {}', 'Cannot use string as default value'],
   ['class D { function f(int $n = __METHOD__) {} }', 'Cannot use string as default value'],
   ['if (false) { $object = new class { public int $n = __CLASS__; }; }', 'Cannot use string as default value'],

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 935 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 938 -- Holds the cases of one concern of the interpreter, which share their helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -1033,6 +1033,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     for (const element of member.namedChildren.filter((child) => child.type === 'const_element')) {
       const [nameNode, valueNode] = element.namedChildren.filter((part) => part.type !== 'comment');
       const name = this.nameText(nameNode);
+      const constantType = this.classConstantType(typeNode, element, `${decl.name}::${name}`);
       if (!this.preserveSyntax && modifiers.isFinal && modifiers.visibility === 'private')
         this.error(
           element,
@@ -1052,7 +1053,6 @@ export abstract class DeclarationConverter extends ConverterBase {
       if (!this.preserveSyntax && kind === 'interface' && modifiers.visibility && modifiers.visibility !== 'public') {
         this.error(element, 'インターフェースの定数は public にしてください。');
       }
-      const constantType = typeNode ? this.typeDecl(typeNode) : undefined;
       const constantValue = this.constantExpr(valueNode);
       decl.consts.push({
         name,
@@ -1076,6 +1076,14 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
+  private classConstantType(typeNode: Node | null, element: Node, name: string): TypeDecl | undefined {
+    if (!typeNode) return undefined;
+    const type = this.typeDecl(typeNode);
+    if (!this.preserveSyntax && hasProhibitedMemberType(type))
+      this.error(element, `Class constant ${name} cannot have type ${this.typeMemberName(type, element)}`);
+    return type;
+  }
+
   private checkPropertyType(
     node: Node | number,
     className: string,
@@ -1084,13 +1092,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     const { name, type, isReadonly, isStatic, visibility, setVisibility } = property;
     if (setVisibility && visibilityRank(visibility) < visibilityRank(setVisibility))
       this.error(node, `Visibility of property ${className}::$${name} must not be weaker than set visibility`);
-    if (
-      type &&
-      (type.k === 'named'
-        ? ['void', 'never', 'callable'].includes(type.name)
-        : type.types.some((part) => part.k === 'named' && ['void', 'never', 'callable'].includes(part.name)))
-    )
-      this.error(node, 'Property cannot have type void, never or callable');
+    if (type && hasProhibitedMemberType(type)) this.error(node, 'Property cannot have type void, never or callable');
     if (isReadonly && !type && !isStatic)
       this.error(
         node,
@@ -1548,6 +1550,12 @@ function defaultFits(type: TypeDecl, literalType: string): boolean {
   if (literalType === 'true' || literalType === 'false') return name === 'bool';
   if (literalType === 'array') return name === 'iterable';
   return false;
+}
+
+function hasProhibitedMemberType(type: TypeDecl): boolean {
+  return type.k === 'named'
+    ? ['void', 'never', 'callable'].includes(type.name)
+    : type.types.some(hasProhibitedMemberType);
 }
 
 function builtinType(type: TypeDecl): boolean {
