@@ -749,6 +749,60 @@ echo 'after;';`);
 );
 
 test.each([
+  ['ArrayObject', '$settings[0] = 9;', '$settings[1] = 5;', '', "exit('exit;');", 'A;B;exit;[9,5,{}];C;'],
+  [
+    'ArrayIterator',
+    '$settings->{0} = 9;',
+    '$settings->offsetSet(1, 5);',
+    '',
+    "throw new Exception('stop');",
+    'A;B;caught;after;[9,5,{}];C;',
+  ],
+  [
+    'ArrayObject',
+    '$settings[0] = 9;',
+    '$settings[1] = 5;',
+    'unset($settings[0]);',
+    "exit('exit;');",
+    'A;B;exit;[9,5,{}];C;',
+  ],
+])(
+  'keeps outer packed writes valid when inner destructor fills a packed hole on %s (%s, %s, %s, %s)',
+  (name, write, inner, extraUnset, tail, stdout) => {
+    const execution = run(`<?php
+class C { function __destruct() { echo 'C;'; } }
+class B {
+    function __destruct() {
+        global $settings;
+        echo 'B;';
+        ${extraUnset}
+        unset($settings[1]);
+        $settings[] = new C;
+        ${tail}
+    }
+}
+class A {
+    function __destruct() {
+        global $settings;
+        echo 'A;';
+        ${inner}
+    }
+}
+class R {
+    function __destruct() {
+        global $settings;
+        echo json_encode($settings->getArrayCopy()), ';';
+    }
+}
+$settings = new ${name}([new A, new B], ${name}::ARRAY_AS_PROPS);
+$reader = new R;
+try { ${write} } catch (Throwable $e) { echo 'caught;'; }
+echo 'after;';`);
+    expect(execution).toMatchObject({ kind: 'executed', stdout });
+  }
+);
+
+test.each([
   ['ArrayObject', 'new stdClass', 30_000],
   ['ArrayIterator', 'new stdClass', 30_000],
   ['ArrayObject', 'new D', 10_000],

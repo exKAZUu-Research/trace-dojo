@@ -313,7 +313,6 @@ export class ArrayOrder {
   }
 
   replace(keys: Iterable<Key>, packed: boolean, rebuild?: ArrayRebuild): void {
-    this.storageVersion++;
     const orderedKeys = [...keys];
     const cursors = [...this.liveCursors()].map((cursor) => ({ cursor, index: cursor.index }));
     let positions: ReadonlyMap<Key, number> | undefined;
@@ -330,10 +329,13 @@ export class ArrayOrder {
     this.keyOffset = 0n;
     this.indexOffset = 0;
     for (const key of orderedKeys) this.appendEntry(key, positions?.get(key) ?? this.entries.size);
-    if (!positions) this.nextIndex = this.entries.size;
+    if (!positions) {
+      this.storageVersion++;
+      this.nextIndex = this.entries.size;
+    }
     while (this.capacity < this.nextIndex) this.capacity *= 2;
     this.listLayout = orderedKeys.every((key, index) => key === BigInt(index));
-    this.packed = packed && this.listLayout;
+    this.packed = packed && (this.listLayout || positions !== undefined);
     this.restorePositions(cursors, positions !== undefined);
   }
 
