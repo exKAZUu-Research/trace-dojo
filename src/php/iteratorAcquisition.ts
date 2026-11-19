@@ -1,4 +1,4 @@
-import { callMethod, consumeInvokedResult } from './callables';
+import { callMethod, consumeInvokedResult, discardInvokedResult } from './callables';
 import { toBool } from './conversions';
 import { throwError, withPendingException } from './errors';
 import { PhpThrow, rt } from './runtime';
@@ -13,7 +13,17 @@ const iteratorMethods = ['rewind', 'valid', 'current', 'key', 'next'] as const;
 type IteratorMethod = (typeof iteratorMethods)[number];
 const nativeRecursiveClasses = new WeakMap<PhpClass, boolean>();
 
-export function callIteratorMethod(iterator: PhpObject, method: IteratorMethod): Value {
+export function callIteratorMethod(iterator: PhpObject, method: 'valid'): boolean;
+export function callIteratorMethod(iterator: PhpObject, method: 'rewind' | 'next'): void;
+export function callIteratorMethod(iterator: PhpObject, method: 'current' | 'key'): Value;
+export function callIteratorMethod(iterator: PhpObject, method: IteratorMethod): Value | void {
+  const call = (): Value => invokeIteratorMethod(iterator, method);
+  if (method === 'valid') return consumeInvokedResult(call, toBool);
+  if (method === 'rewind' || method === 'next') return discardInvokedResult(call);
+  return call();
+}
+
+function invokeIteratorMethod(iterator: PhpObject, method: IteratorMethod): Value {
   return usesNativeRecursiveIterator(iterator.cls)
     ? callMethod(iterator, method, [], rt().row, { inline: true })
     : callMethod(iterator, method, []);
@@ -149,7 +159,7 @@ export class InnerIterator extends EngineIteratorOwner {
   }
 
   valid(): boolean {
-    return toBool(callIteratorMethod(this.object, 'valid'));
+    return callIteratorMethod(this.object, 'valid');
   }
 
   current(): Value {

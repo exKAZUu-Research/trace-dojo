@@ -262,7 +262,6 @@ function checkPropertyOverride(
 }
 
 // code-gauge-allow functionCognitiveComplexity 27 -- Populates property slots, defaults and hooks together.
-// code-gauge-allow functionNcss 35 -- The storage variants share property metadata and defaults.
 function addProperty(cls: PhpClass, ast: PropertyDeclAst, declarationScope = cls): void {
   const inherited = cls.propByName.get(ast.name);
   if (ast.isFinal && ast.visibility === 'private' && !ast.promoted)
@@ -282,15 +281,7 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst, declarationScope = cls
     hasDefault: ast.defaultExpr !== undefined,
     isVirtual: ast.isVirtual,
   };
-  if (ast.defaultExpr) {
-    const expression = ast.defaultExpr;
-    let cached: { value: Value } | undefined;
-    decl.defaultValue = () => {
-      cached ??= { value: evaluatePropertyDefault(decl, expression, cls) };
-      if (cached.value instanceof PhpArray) cached.value.persistentHolder = true;
-      return share(cached.value);
-    };
-  }
+  if (ast.defaultExpr) decl.defaultValue = cachePropertyDefault(decl, ast.defaultExpr);
   const parent = inherited?.cls !== cls && inherited?.visibility !== 'private' ? inherited : undefined;
   linkPropertyHooks(decl, ast, parent);
   if (ast.isStatic) {
@@ -398,10 +389,23 @@ function propertyTypeError(parent: PropDecl, child: PhpClass, name: string, row:
   );
 }
 
-function evaluatePropertyDefault(decl: PropDecl, expression: Expr, scope: PhpClass): Value {
+function cachePropertyDefault(decl: PropDecl, expression: Expr): () => Value {
+  let cached: Value | undefined;
+  return () => {
+    if (cached === undefined) {
+      cached = evaluatePropertyDefault(decl, expression);
+      if (cached instanceof PhpArray) cached.persistentHolder = true;
+      if (!decl.isStatic && (cached instanceof PhpArray || cached instanceof PhpObject))
+        rt().declarationRoots.add(cached);
+    }
+    return share(cached);
+  };
+}
+
+function evaluatePropertyDefault(decl: PropDecl, expression: Expr): Value {
   const runtime = rt();
   const row = runtime.row;
-  const value = evaluateInClass(expression, scope);
+  const value = evaluateInClass(expression, decl.cls);
   runtime.row = row;
   if (!decl.type) return value;
   const coerced = coerce(value, decl.type, { strict: true, internal: false, scope: decl.cls });

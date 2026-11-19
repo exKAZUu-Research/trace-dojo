@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 697 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 701 -- Keeps implicit dispatch and native result ownership together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { placeOf } from './assignment';
 import type { Arg, Expr, ResolvedName } from './ast';
@@ -20,7 +20,7 @@ import {
   paramIsByRef,
 } from './calls';
 import { canCall, classScopeMessage, lookupMethod, requireClass } from './classes';
-import { debugType, valueName } from './conversions';
+import { debugType, toBool, valueName } from './conversions';
 import { deprecated, notice, probe, ProbeFailure, throwError, warn, withPendingException } from './errors';
 import {
   type Chain,
@@ -548,6 +548,10 @@ function reportStaticTraitCall(cls: PhpClass, name: string): void {
     );
 }
 
+export function callOffsetExists(object: PhpObject, key: Value): boolean {
+  return consumeInvokedResult(() => callMethod(object, 'offsetExists', [key], rt().row), toBool);
+}
+
 export function readOffset(object: PhpObject, key: Value | undefined): Value {
   const getter = object.cls.findMethod('offsetget');
   const owner = getter?.scope.lname;
@@ -959,6 +963,10 @@ export function callCallbackRefs(callable: Value, args: ArgValue[], discardResul
 
 export function consumeCallbackResult<T>(callable: Value, args: Value[], consume: (value: Value) => T): T {
   return consumeInvokedResult(() => callCallback(callable, args), consume);
+}
+
+export function discardInvokedResult(call: () => Value | undefined): void {
+  consumeInvokedResult(call, () => {});
 }
 
 export function consumeInvokedResult<V extends Value | undefined, T>(

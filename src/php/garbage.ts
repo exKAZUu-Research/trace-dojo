@@ -1091,7 +1091,7 @@ function objectHasOwnedValues(runtime: Runtime, object: PhpObject): boolean {
 
 function runGlobalDestructor(runtime: Runtime, object: PhpObject): boolean {
   const roots = callbackRoots(runtime);
-  const constants = runtime.rootConstants.size;
+  const declarations = runtime.declarationRoots.size;
   const releases = runtime.durableReleaseVersion;
   let newOwners = false;
   const stop = observeOwnership(() => {
@@ -1110,7 +1110,7 @@ function runGlobalDestructor(runtime: Runtime, object: PhpObject): boolean {
   return (
     newOwners ||
     runtime.durableReleaseVersion !== releases ||
-    runtime.rootConstants.size !== constants ||
+    runtime.declarationRoots.size !== declarations ||
     roots.length !== after.length ||
     roots.some((root, index) => root !== after[index])
   );
@@ -1185,7 +1185,7 @@ function ownershipRootSlots(runtime: Runtime, includeTemporaries = true): unknow
     for (const method of cls.methods.values())
       if (method.fn.kind === 'user') appendValues(roots, [...method.fn.statics.values()]);
   }
-  roots.push(...runtime.rootConstants, ...runtime.held, ...callbackRoots(runtime), runtime.thrown);
+  roots.push(...runtime.declarationRoots, ...runtime.held, ...callbackRoots(runtime), runtime.thrown);
   for (const held of runtime.nativeHeld) appendValues(roots, [...held]);
   return roots;
 }

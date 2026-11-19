@@ -17,7 +17,7 @@ import builtinNames from './builtinNames.json';
 import { lower } from './bytes';
 import {
   callExpression,
-  callMethod,
+  callOffsetExists,
   callValue,
   createArrow,
   createClosure,
@@ -150,7 +150,7 @@ function evaluateValue(runtime: Runtime, e: Expr, discardResult: boolean): Value
     const scopes = literals ?? new Map<PhpClass | undefined, PhpArray>();
     scopes.set(scope, value);
     runtime.literalArrays.set(e, scopes);
-    runtime.rootConstants.add(value);
+    runtime.declarationRoots.add(value);
     value.persistentHolder = true;
     value.shared = true;
     value.uncollectable = value.size === 0;
@@ -579,7 +579,7 @@ export function readIndex(base: Value, index: Value, mode: OffsetRead = 'read'):
   if (typeof base === 'string') return readStringOffset(base, index, mode);
   if (base instanceof PhpObject && !base.isResource) {
     if (base.cls.findMethod('offsetget') && isArrayAccess(base)) {
-      if (quiet && !toBool(callMethod(base, 'offsetExists', [index], rt().row))) return null;
+      if (quiet && !callOffsetExists(base, index)) return null;
       return readOffset(base, index);
     }
     throwError('Error', `Cannot use object of type ${base.cls.name} as array`);
@@ -844,7 +844,7 @@ function* iterateObject(
   let failure: PhpThrow | undefined;
   try {
     callIteratorMethod(iterator, 'rewind');
-    while (toBool(callIteratorMethod(iterator, 'valid'))) {
+    while (callIteratorMethod(iterator, 'valid')) {
       runtime.spend();
       const frame = runtime.frame;
       const mark = frame.temporaries.length;

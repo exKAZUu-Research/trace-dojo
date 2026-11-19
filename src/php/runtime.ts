@@ -134,7 +134,7 @@ export class Runtime {
   readonly globalFrame: Frame;
   readonly globalStatics = new Map<string, Ref>();
   readonly userFunctions: UserFunction[] = [];
-  readonly rootConstants = new Set<Value>();
+  readonly declarationRoots = new Set<Value>();
   readonly literalArrays = new WeakMap<Expr, Map<PhpClass | undefined, PhpArray>>();
   readonly parameterDefaults = new WeakMap<Expr, Map<PhpClass | undefined, Value>>();
   constantEvaluationEpoch = 0;

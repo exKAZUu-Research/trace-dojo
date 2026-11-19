@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { callMethod } from './callables';
+import { callMethod, consumeInvokedResult } from './callables';
 import { createObject } from './classes';
 import { debugType, normalizeKeyString } from './conversions';
 import { type CleanupException, isCleanupException, throwError, withCleanupExceptions } from './errors';
@@ -369,7 +369,10 @@ class HeapStorage {
   private compare(a: HeapElement, b: HeapElement): number {
     if (this.pending !== undefined) return 0;
     try {
-      return Math.sign(Number(toInt(this.compareMethod(a, b))));
+      return consumeInvokedResult(
+        () => this.compareMethod(a, b),
+        (value) => Math.sign(Number(toInt(value)))
+      );
     } catch (error) {
       if (!isCleanupException(error)) throw error;
       this.pending = error;

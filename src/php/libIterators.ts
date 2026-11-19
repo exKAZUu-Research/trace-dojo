@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { callCallback, callMethod, consumeInvokedResult } from './callables';
+import { callCallback, callMethod, consumeInvokedResult, discardInvokedResult } from './callables';
 import { createObject, findClass } from './classes';
 import { toBool } from './conversions';
 import { throwError, warn } from './errors';
@@ -356,7 +356,7 @@ function limitSeek(state: DualState, position: bigint): void {
   const inner = state.innerObject as PhpObject;
   if (position !== state.pos && inner.cls.isSubclassOf(rt().classes.get('seekableiterator') as PhpClass)) {
     state.free();
-    callMethod(inner, 'seek', [position]);
+    discardInvokedResult(() => callMethod(inner, 'seek', [position]));
     state.pos = position;
     if (limitInRange(state) && state.valid()) state.fetch(false);
     return;

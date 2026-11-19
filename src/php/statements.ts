@@ -314,7 +314,7 @@ export function defineConstant(name: string, value: Value): boolean {
     return false;
   }
   runtime.constants.set(key, share(value));
-  if (value instanceof PhpArray || value instanceof PhpObject) runtime.rootConstants.add(value);
+  if (value instanceof PhpArray || value instanceof PhpObject) runtime.declarationRoots.add(value);
   if (value instanceof PhpArray) value.persistentHolder = true;
   return true;
 }

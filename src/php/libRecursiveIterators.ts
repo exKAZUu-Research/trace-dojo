@@ -1,8 +1,8 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { callMethod, consumeInvokedResult } from './callables';
+import { callMethod, consumeInvokedResult, discardInvokedResult } from './callables';
 import { implicitCallRow } from './calls';
 import { toBool } from './conversions';
-import { type CleanupException, throwError, withCleanupExceptions } from './errors';
+import { type CleanupException, isCleanupException, throwError, withCleanupExceptions } from './errors';
 import { InnerIterator } from './iteratorAcquisition';
 import { innerIteratorOf } from './libIterators';
 import { defineClass, type NativeMethod } from './native';
@@ -152,34 +152,40 @@ function recursiveInput(argument: PhpObject): PhpObject {
   return iterator;
 }
 
-/** Calls a hook method that a subclass overrides; PHP skips the hooks RecursiveIteratorIterator itself declares. */
-function hook(object: PhpObject, name: string): Value | undefined {
+function notifyHook(object: PhpObject, name: string): void {
+  discardInvokedResult(() => invokeHook(object, name));
+}
+
+/** PHP skips the hooks RecursiveIteratorIterator itself declares. */
+function invokeHook(object: PhpObject, name: string): Value | undefined {
   const method = object.cls.findMethod(name.toLowerCase());
   if (!method || method.cls.name === 'RecursiveIteratorIterator') return undefined;
   return callMethod(object, name, []);
 }
 
-/** Runs a step whose exception CATCH_GET_CHILD tells the iteration to swallow; returns whether it threw. */
-function catching(state: RecursiveState, step: () => void): boolean {
+function runChildStep(state: RecursiveState, step: () => void): void {
   try {
     step();
-    return false;
   } catch (error) {
-    if (!isCaught(state, error)) throw error;
-    return true;
+    if (!clearCaught(state, error)) throw error;
   }
 }
 
-function isCaught(state: RecursiveState, error: unknown): boolean {
-  return error instanceof PhpThrow && (state.flags & CATCH_GET_CHILD) !== 0;
+function clearCaught(state: RecursiveState, error: unknown): boolean {
+  if (!(state.flags & CATCH_GET_CHILD) || !isCleanupException(error)) return false;
+  if (error instanceof PhpThrow && rt().thrown === error.object) rt().thrown = undefined;
+  return true;
 }
 
 /** Transcribes spl_recursive_it_valid_ex, which reports the end of the iteration to endIteration. */
 function validAt(object: PhpObject, state: RecursiveState): boolean {
   if (state.levels.length === 0) return false;
   for (let level = state.depth; level >= 0; level--) if (state.levels[level].iterator.valid()) return true;
-  if (state.inIteration) hook(object, 'endIteration');
-  state.inIteration = false;
+  try {
+    if (state.inIteration) notifyHook(object, 'endIteration');
+  } finally {
+    state.inIteration = false;
+  }
   return false;
 }
 
@@ -188,13 +194,16 @@ function rewind(object: PhpObject, state: RecursiveState, fromNative: boolean): 
   state.checkConstructed();
   while (state.levels.length > 1) {
     releaseLevel(object, state, 'rewind', fromNative);
-    callMethod(object, 'endChildren', []);
+    notifyHook(object, 'endChildren');
   }
   const root = state.levels[0];
   root.step = Step.Start;
-  root.iterator.rewind();
-  if (!state.inIteration) hook(object, 'beginIteration');
-  state.inIteration = true;
+  try {
+    root.iterator.rewind();
+    if (!state.inIteration) notifyHook(object, 'beginIteration');
+  } finally {
+    state.inIteration = true;
+  }
   moveForward(object, state, fromNative);
 }
 
@@ -206,7 +215,7 @@ function moveForward(object: PhpObject, state: RecursiveState, fromNative: boole
     if (outcome === 'exhausted') {
       if (state.levels.length === 1) return;
       const exhausted = state.top;
-      catching(state, () => hook(object, 'endChildren'));
+      runChildStep(state, () => notifyHook(object, 'endChildren'));
       if (state.levels.at(-1) === exhausted) releaseLevel(object, state, 'advance', fromNative);
     }
   }
@@ -234,7 +243,7 @@ function advanceLevel(object: PhpObject, state: RecursiveState, level: Level): '
   switch (level.step) {
     case Step.Next:
     case Step.Start: {
-      if (level.step === Step.Next) catching(state, () => level.iterator.next());
+      if (level.step === Step.Next) runChildStep(state, () => level.iterator.next());
       if (!level.iterator.valid()) return 'exhausted';
       level.step = Step.Test;
       return testElement(object, state, level) ? 'reported' : 'moved';
@@ -243,8 +252,11 @@ function advanceLevel(object: PhpObject, state: RecursiveState, level: Level): '
       return testElement(object, state, level) ? 'reported' : 'moved';
     }
     case Step.Self: {
-      if (state.mode === SELF_FIRST || state.mode === CHILD_FIRST) hook(object, 'nextElement');
-      level.step = state.mode === SELF_FIRST ? Step.Child : Step.Next;
+      try {
+        if (state.mode === SELF_FIRST || state.mode === CHILD_FIRST) notifyHook(object, 'nextElement');
+      } finally {
+        level.step = state.mode === SELF_FIRST ? Step.Child : Step.Next;
+      }
       return 'reported';
     }
     case Step.Child: {
@@ -258,31 +270,40 @@ function advanceLevel(object: PhpObject, state: RecursiveState, level: Level): '
 function testElement(object: PhpObject, state: RecursiveState, level: Level): boolean {
   let hasChildren = false;
   try {
-    hasChildren = toBool(overridableCall(object, 'callHasChildren', level.object, 'hasChildren'));
+    consumeInvokedResult(
+      () => overridableCall(object, 'callHasChildren', level.object, 'hasChildren'),
+      (value) => {
+        hasChildren = toBool(value);
+      }
+    );
   } catch (error) {
-    if (!isCaught(state, error)) {
-      level.step = Step.Next;
+    if (!isCleanupException(error)) throw error;
+    // PHP chooses the next state from the truth value even if releasing the result interrupted it.
+    const childStep = hasChildren ? stepForChildren(state) : undefined;
+    if (childStep === Step.Self || !clearCaught(state, error)) {
+      level.step = childStep === Step.Self ? Step.Child : (childStep ?? Step.Next);
       throw error;
     }
-  }
-  if (hasChildren) {
-    if (state.maxDepth === -1 || state.maxDepth > state.depth) {
-      level.step = state.mode === SELF_FIRST ? Step.Self : Step.Child;
-      return false;
-    }
-    if (state.mode === LEAVES_ONLY) {
+    if (childStep !== undefined) {
       level.step = Step.Next;
       return false;
     }
   }
-  level.step = Step.Next;
-  catching(state, () => hook(object, 'nextElement'));
+  const childStep = hasChildren ? stepForChildren(state) : undefined;
+  level.step = childStep ?? Step.Next;
+  if (childStep !== undefined) return false;
+  runChildStep(state, () => notifyHook(object, 'nextElement'));
   return true;
+}
+
+function stepForChildren(state: RecursiveState): Step | undefined {
+  if (state.maxDepth === -1 || state.maxDepth > state.depth) return state.mode === SELF_FIRST ? Step.Self : Step.Child;
+  return state.mode === LEAVES_ONLY ? Step.Next : undefined;
 }
 
 /** Calls `name` of the iterator when a subclass overrides it, and otherwise `fallback` of the sub-iterator directly. */
 function overridableCall(object: PhpObject, name: string, sub: PhpObject, fallback: string): Value {
-  const result = hook(object, name);
+  const result = invokeHook(object, name);
   return result === undefined ? callMethod(sub, fallback, []) : result;
 }
 
@@ -293,7 +314,7 @@ function descend(object: PhpObject, state: RecursiveState, level: Level): void {
       try {
         return overridableCall(object, 'callGetChildren', level.object, 'getChildren');
       } catch (error) {
-        if (!isCaught(state, error)) throw error;
+        if (!clearCaught(state, error)) throw error;
         failed = true;
         return null;
       }
@@ -306,7 +327,7 @@ function descend(object: PhpObject, state: RecursiveState, level: Level): void {
   }
   level.step = state.mode === CHILD_FIRST ? Step.Self : Step.Next;
   child.iterator.rewind();
-  catching(state, () => hook(object, 'beginChildren'));
+  runChildStep(state, () => notifyHook(object, 'beginChildren'));
 }
 
 function appendChild(object: PhpObject, state: RecursiveState, child: Value): Level {

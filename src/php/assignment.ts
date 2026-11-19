@@ -2,11 +2,11 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
-import { callMethod, readOffset } from './callables';
+import { callMethod, callOffsetExists, discardInvokedResult, readOffset } from './callables';
 import { propRef, readProp, staticPropRef, unsetProp, writeProp } from './classes';
 import * as classesModule from './classes';
 import * as conversionsModule from './conversions';
-import { debugType, numericPrefix, toBool, valueName } from './conversions';
+import { debugType, numericPrefix, valueName } from './conversions';
 import {
   deprecated,
   invalidObjectDimension,
@@ -594,8 +594,7 @@ function arrayAccessPlace(
     get unbound() {
       return refPlace?.unbound;
     },
-    getForIsset: () =>
-      toBool(callMethod(object, 'offsetExists', [key ?? null], rt().row)) ? readOffset(object, key) : undefined,
+    getForIsset: () => (callOffsetExists(object, key ?? null) ? readOffset(object, key) : undefined),
     nested,
     incrementTarget: () => nested('update'),
     get: () => readOffset(object, key),
@@ -610,7 +609,7 @@ function arrayAccessPlace(
       const storage = object.internal as { unsetOffset?: (value: Value) => void } | undefined;
       if (storage?.unsetOffset && object.cls.findMethod('offsetunset')?.fn.kind === 'native')
         storage.unsetOffset(key ?? null);
-      else callMethod(object, 'offsetUnset', [key ?? null], rt().row);
+      else discardInvokedResult(() => callMethod(object, 'offsetUnset', [key ?? null], rt().row));
     },
   };
 }
@@ -620,7 +619,7 @@ function writeOffset(object: PhpObject, key: Value | undefined, value: Value): v
   if (key === undefined && setter?.fn.kind === 'native' && setter.scope.lname === 'splfixedarray')
     throwError('Error', '[] operator not supported for SplFixedArray');
   const inline = object.cls.lname === 'splobjectstorage' && key instanceof PhpObject && !key.isResource;
-  callMethod(object, 'offsetSet', [key ?? null, value], rt().row, { inline });
+  discardInvokedResult(() => callMethod(object, 'offsetSet', [key ?? null, value], rt().row, { inline }));
 }
 
 function writesOffsetWithException(object: PhpObject, key: Value | undefined): boolean {
@@ -1411,5 +1410,5 @@ function issetArrayAccess(object: PhpObject, index: Value): boolean {
   if (!isArrayAccess(object)) throwError('Error', `Cannot use object of type ${object.cls.name} as array`);
   if (nativeArrayStorage(object.internal) && object.cls.findMethod('offsetexists')?.fn.kind === 'native')
     return object.internal.array.isSet(toKey(index, 'isset'));
-  return toBool(callMethod(object, 'offsetExists', [index], rt().row));
+  return callOffsetExists(object, index);
 }

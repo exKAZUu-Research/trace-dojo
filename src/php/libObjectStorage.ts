@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { callMethod } from './callables';
+import { callMethod, consumeInvokedResult, discardInvokedResult } from './callables';
 import { implicitCallRow } from './calls';
 import { objectToArray } from './classes';
 import { valueName } from './conversions';
@@ -143,7 +143,7 @@ class ObjectStorage {
 
   unsetOffset(value: Value): void {
     if (this.holder.cls.lname !== 'splobjectstorage' || !(value instanceof PhpObject) || value.isResource) {
-      callMethod(this.holder, 'offsetUnset', [value], rt().row);
+      discardInvokedResult(() => callMethod(this.holder, 'offsetUnset', [value], rt().row));
       return;
     }
     this.detach(value);
@@ -523,7 +523,7 @@ const multipleMethods: NativeMethod[] = [
       if (storage.entries.size === 0) return false;
       const expect = (storage.flags & MIT_NEED_ALL) !== 0n;
       for (const { object: iterator } of storage.entriesFromStart()) {
-        const valid = storage.withIterator(iterator, () => callMethod(iterator, 'valid', []) === true);
+        const valid = storage.withIterator(iterator, () => subIteratorValid(iterator));
         if (valid !== expect) return !expect;
       }
       return expect;
@@ -534,10 +534,10 @@ const multipleMethods: NativeMethod[] = [
   { signature: 'next(): void', impl: ({ thisObj }) => (callEach(thisObj, 'next'), null) },
 ];
 
-function callEach(object: PhpObject, method: string): void {
+function callEach(object: PhpObject, method: 'rewind' | 'next'): void {
   const storage = storageOf(object);
   for (const { object: iterator } of storage.entriesFromStart())
-    storage.withIterator(iterator, () => callMethod(iterator, method, []));
+    storage.withIterator(iterator, () => discardInvokedResult(() => callMethod(iterator, method, [])));
 }
 
 /** Transcribes spl_multiple_iterator_get_all, which collects the current values or keys of the iterators. */
@@ -565,7 +565,7 @@ function getAll(object: PhpObject, method: 'current' | 'key'): PhpArray {
 function iteratorValue(storage: ObjectStorage, iterator: PhpObject, method: 'current' | 'key'): Value {
   let valid: boolean;
   try {
-    valid = callMethod(iterator, 'valid', []) === true;
+    valid = subIteratorValid(iterator);
   } catch (error) {
     if (error instanceof PhpThrow && storage.flags & MIT_NEED_ALL)
       throwError('RuntimeException', `Called ${method}() with non valid sub iterator`, error.object);
@@ -581,6 +581,13 @@ function iteratorValue(storage: ObjectStorage, iterator: PhpObject, method: 'cur
     if (error instanceof PhpThrow) throwError('RuntimeException', 'Failed to call sub iterator method', error.object);
     throw error;
   }
+}
+
+function subIteratorValid(iterator: PhpObject): boolean {
+  return consumeInvokedResult(
+    () => callMethod(iterator, 'valid', []),
+    (value) => value === true
+  );
 }
 
 defineClass({

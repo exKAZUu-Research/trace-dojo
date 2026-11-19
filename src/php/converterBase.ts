@@ -160,7 +160,7 @@ export abstract class ConverterBase {
   }
 
   protected nameText(node: Node): string {
-    return enc(node.text.replaceAll(/\s+/g, ''));
+    return enc(node.text.replaceAll(/[ \t\r\n]+/g, ''));
   }
 
   protected declaredIdentifier(node: Node, expected = 'identifier'): string {

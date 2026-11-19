@@ -183,7 +183,7 @@ export function installNatives(): void {
   for (const [name, definition] of constants) {
     const value = typeof definition === 'function' ? definition() : definition;
     runtime.constants.set(name, value);
-    if (value instanceof PhpArray || value instanceof PhpObject) runtime.rootConstants.add(value);
+    if (value instanceof PhpArray || value instanceof PhpObject) runtime.declarationRoots.add(value);
     if (value instanceof PhpArray) value.persistentHolder = true;
   }
   for (const definition of classDefinitions) runtime.classes.set(lower(definition.name), buildClass(definition));
@@ -276,7 +276,7 @@ function registerNativeEnumCases(cls: PhpClass, cases: readonly string[] | undef
         const runtime = rt();
         const value = runtime.newObject(cls);
         value.props.set('name', name);
-        runtime.rootConstants.add(value);
+        runtime.declarationRoots.add(value);
         return value;
       },
     });
