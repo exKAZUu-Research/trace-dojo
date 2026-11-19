@@ -364,7 +364,6 @@ export class Calls {
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- Matches the direct String argument and literal console placeholders in order.
-
   private textConversionArguments(callee: TreeNode, args: TreeNode[]): TreeNode[] {
     if (this.c.silent > 0 || args.length === 0) return [];
     const symbol = callee.type === 'identifier' ? this.c.scopeOf(callee).lookupValue(callee.text) : undefined;
