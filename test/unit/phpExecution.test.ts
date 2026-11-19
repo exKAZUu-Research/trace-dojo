@@ -803,6 +803,45 @@ echo 'after;';`);
 );
 
 test.each([
+  [
+    'ArrayObject',
+    "$settings['k0'] = 5;",
+    "$settings['new'] = 99;",
+    "exit('exit;');",
+    'A;exit;{"k0":5,"k3":3,"k4":4,"k5":5,"k6":6,"k7":7,"new":99}',
+  ],
+  [
+    'ArrayIterator',
+    '$settings->k0 = 5;',
+    '$settings[] = 99;',
+    "throw new Exception('stop');",
+    'A;caught;after;{"k0":5,"k3":3,"k4":4,"k5":5,"k6":6,"k7":7,"0":99}',
+  ],
+])('keeps fetched %s writes valid across in-place compaction (%s, %s, %s)', (name, write, add, tail, stdout) => {
+  const execution = run(`<?php
+class A {
+    function __destruct() {
+        global $settings;
+        echo 'A;';
+        unset($settings['k1'], $settings['k2']);
+        ${add}
+        ${tail}
+    }
+}
+class R {
+    function __destruct() {
+        global $settings;
+        echo json_encode($settings->getArrayCopy());
+    }
+}
+$settings = new ${name}(['k0' => new A, 'k1' => 1, 'k2' => 2, 'k3' => 3, 'k4' => 4, 'k5' => 5, 'k6' => 6, 'k7' => 7], ${name}::ARRAY_AS_PROPS);
+$reader = new R;
+try { ${write} } catch (Throwable $e) { echo 'caught;'; }
+echo 'after;';`);
+  expect(execution).toMatchObject({ kind: 'executed', stdout });
+});
+
+test.each([
   ['ArrayObject', 'new stdClass', 30_000],
   ['ArrayIterator', 'new stdClass', 30_000],
   ['ArrayObject', 'new D', 10_000],

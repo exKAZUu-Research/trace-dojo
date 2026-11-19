@@ -224,7 +224,6 @@ export class ArrayOrder {
 
   compact(): void {
     if (this.nextIndex === this.entries.size) return;
-    this.storageVersion++;
     const previousEnd = this.nextIndex;
     let index = 0;
     this.buckets.clear();
