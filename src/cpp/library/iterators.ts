@@ -1,7 +1,7 @@
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import type { Eval } from '../runtime';
+import { type Eval, holdAll } from '../runtime';
 import { BOOL, ClassInfo, classType, isInteger, LONG, PTRDIFF_T, type Type, typeName, withConst } from '../types';
 import { NULL_PTR, Ptr, type Store } from '../values';
 import type { BitReferences } from './bitReference';
@@ -229,7 +229,10 @@ function iteratorOperator(
         type: proxy ?? element,
         isLvalue: !proxy,
         row,
-        run: (frame) => elementLocation(moveIterator(it(frame), Number(n(frame)), isReverse), isReverse),
+        run: (frame) =>
+          holdAll(frame, [it, n], ([iterator, offset]) =>
+            elementLocation(moveIterator(iterator as Ptr, Number(offset), isReverse), isReverse)
+          ),
       };
     }
     case '==':

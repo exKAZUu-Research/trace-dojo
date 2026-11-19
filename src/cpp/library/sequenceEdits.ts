@@ -634,30 +634,28 @@ class Followed {
   }
 }
 
-/**
- * libc++'s `list::__sort`, a merge sort that compares the elements in the same order, which a comparator with
- * effects shows.
- */
-export function listSort<T>(items: T[], less: (a: T, b: T) => boolean): T[] {
-  if (items.length < 2) return items;
-  if (items.length === 2) return less(items[1], items[0]) ? [items[1], items[0]] : items;
-  const half = Math.floor(items.length / 2);
-  const left = listSort(items.slice(0, half), less);
-  const right = listSort(items.slice(half), less);
-  const merged: T[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < left.length && j < right.length) {
-    if (less(right[j], left[i])) {
-      // The run of the right half's elements that go before left[i] moves there at once.
-      let end = j + 1;
-      while (end < right.length && less(right[end], left[i])) end++;
-      merged.push(...right.slice(j, end));
-      j = end;
+export function listSort(self: SequenceValue, less: (a: Ptr, b: Ptr) => boolean): void {
+  const sort = (first: number, last: number): void => {
+    if (last - first < 2) return;
+    const middle = first + Math.floor((last - first) / 2);
+    sort(first, middle);
+    sort(middle, last);
+    let left = first;
+    let right = middle;
+    while (left < right && right < last) {
+      const item = self.location(left);
+      if (!less(self.location(right), item)) {
+        left++;
+        continue;
+      }
+      let end = right + 1;
+      while (end < last && less(self.location(end), item)) end++;
+      self.moveNodesBefore(right, end, left);
+      left += end - right + 1;
+      right = end;
     }
-    merged.push(left[i++]);
-  }
-  return [...merged, ...left.slice(i), ...right.slice(j)];
+  };
+  sort(0, self.length);
 }
 
 /** `__recommend`: the capacity a vector grows to, twice the old one or the needed size if larger. */

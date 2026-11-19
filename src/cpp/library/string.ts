@@ -935,18 +935,17 @@ function stringOperator(
     case '[]': {
       if (!isString(left)) return undefined;
       const index = compiler.convert(right, SIZE_T, row).run;
-      const object = left.isLvalue ? left.run : compiler.materialize(left).run;
       const elementType = left.type.kind === 'class' && left.type.isConst ? withConst(CHAR) : CHAR;
       return {
         type: elementType,
         isLvalue: true,
         row,
-        run: (frame) => {
-          const target = (object(frame) as Ptr).read() as StringValue;
-          const at = Number(index(frame) as bigint);
+        run: compiler.subscriptObject(left, index, (_frame, receiver, operand) => {
+          const target = receiver as StringValue;
+          const at = Number(operand);
           if (at < 0 || at > target.bytes.length) throw new CppRuntimeError('outOfBounds');
           return new Ptr(target.characterBuffer(), at);
-        },
+        }),
       };
     }
     default: {

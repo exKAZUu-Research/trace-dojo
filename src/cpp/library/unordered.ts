@@ -666,7 +666,6 @@ export function unorderedClass(
       if (isConstType(left.type))
         return compiler_.error(row, `const の ${cls.name} には [] を使えません（at を使ってください）。`);
       const keyRun = compiler_.convert(right, constRef(keyType), row).run;
-      const object = left.isLvalue ? left.run : compiler_.materialize(left).run;
       const keyOps = elementOperations(compiler, unqualified(keyType), row);
       const mappedOps = elementOperations(compiler, valueType as Type, row);
       if (!mappedOps.isDefaultConstructible) return mappedNotDefaultConstructible(compiler_, valueType as Type, row);
@@ -676,9 +675,9 @@ export function unorderedClass(
         type: valueType as Type,
         isLvalue: true,
         row,
-        run: (frame) => {
-          const self = (object(frame) as Ptr).read() as HashValue;
-          const keyValue = (keyRun(frame) as Ptr).read();
+        run: compiler_.subscriptObject(left, keyRun, (frame, receiver, key) => {
+          const self = receiver as HashValue;
+          const keyValue = (key as Ptr).read();
           let node = self.lookup(keyValue);
           if (!node) {
             [node] = self.insert(
@@ -692,7 +691,7 @@ export function unorderedClass(
             );
           }
           return new Ptr(node.value as CObject, 1);
-        },
+        }),
       };
     },
     memberCall: (compiler_, object, member, callArgs, row) =>

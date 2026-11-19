@@ -1318,7 +1318,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         const storage = new Box(catchValue(error, caught));
         frame.slots[conversion.slot] = storage;
         frame.slots[local.slot] = storage.location(0);
-      } else frame.slots[local.slot] = error.location();
+      } else {
+        const location = error.location();
+        frame.slots[local.slot] = caught.kind === 'class' ? location.forClass(caught.cls) : location;
+      }
     };
   }
 

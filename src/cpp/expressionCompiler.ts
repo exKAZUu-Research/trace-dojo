@@ -1370,11 +1370,11 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const constantLocation = offsetConstantLocation(pointer.constantPointee, n.constant);
     const original = reversed ? index : array;
     const temporaryArray = original.type.kind === 'array' ? original.temporaryBinding : undefined;
-    const locate = (frame: Frame, pointerAt: Eval<Ptr>): Ptr => {
-      if (!reversed) return pointerAt(frame).offset(Number(n.run(frame)));
-      const position = Number(n.run(frame));
-      return pointerAt(frame).offset(position);
-    };
+    const locate = (frame: Frame, pointerAt: Eval<Ptr>): Ptr =>
+      holdAll(frame, reversed ? [n.run, pointerAt] : [pointerAt, n.run], ([first, second]) => {
+        const [location, position] = reversed ? [second, first] : [first, second];
+        return (location as Ptr).offset(Number(position));
+      });
     return {
       type,
       isLvalue: true,
@@ -1389,6 +1389,16 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         temporaryArray &&
         ((frame, retain) => locate(frame, (f) => new Ptr(temporaryArray(f, retain).read() as ArrayStore, 0))),
     };
+  }
+
+  subscriptObject(
+    object: Expr,
+    index: Expr['run'],
+    locate: (frame: Frame, receiver: Value, index: unknown) => Ptr
+  ): Eval<Ptr> {
+    const receiver = this.objectOf(object);
+    return (frame) =>
+      holdAll(frame, [receiver, index], ([location, operand]) => locate(frame, (location as Ptr).read(), operand));
   }
 
   // Conversions -----------------------------------------------------------------------------------------------------

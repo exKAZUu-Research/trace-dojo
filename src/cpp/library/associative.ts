@@ -642,14 +642,13 @@ export function orderedClass(
         requireDefaultConstruction(compiler_, valueType as Type, row);
         requireElementUse(compiler_, keyType, row, 'copy');
         const keyRun = compiler_.convert(right, constRef(keyType), row).run;
-        const object = left.isLvalue ? left.run : compiler_.materialize(left).run;
         return {
           type: valueType as Type,
           isLvalue: true,
           row,
-          run: (frame) => {
-            const self = (object(frame) as Ptr).read() as OrderedValue;
-            const keyValue = (keyRun(frame) as Ptr).read();
+          run: compiler_.subscriptObject(left, keyRun, (frame, receiver, key) => {
+            const self = receiver as OrderedValue;
+            const keyValue = (key as Ptr).read();
             let at = find(self, keyValue);
             if (at < 0) {
               const keyOps = elementOperations(compiler, unqualified(keyType), row);
@@ -665,7 +664,7 @@ export function orderedClass(
               );
             }
             return new Ptr(self.entries[at] as CObject, 1);
-          },
+          }),
         };
       }
       if (['==', '!=', '<', '<=', '>', '>='].includes(operator) && isSelf(left) && isSelf(right)) {

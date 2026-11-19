@@ -258,6 +258,53 @@ int main() { make().${next}; }`;
 });
 
 test.each([
+  [
+    'ordered map',
+    `#include <map>
+std::map<int, Turtle>& make() {
+  auto* receiver = new std::map<int, Turtle>();
+  receiver->try_emplace(0, 0, 1);
+  return *receiver;
+}`,
+  ],
+  [
+    'unordered map',
+    `#include <unordered_map>
+std::unordered_map<int, Turtle>& make() {
+  auto* receiver = new std::unordered_map<int, Turtle>();
+  receiver->try_emplace(0, 0, 1);
+  return *receiver;
+}`,
+  ],
+  [
+    'vector',
+    `#include <vector>
+std::vector<Turtle*>& make() { return *new std::vector<Turtle*>{new Turtle(0, 1)}; }`,
+  ],
+  [
+    'vector iterator',
+    `#include <vector>
+std::vector<Turtle*>::iterator make() {
+  auto* receiver = new std::vector<Turtle*>{new Turtle(0, 1)};
+  return receiver->begin();
+}`,
+  ],
+  ['built-in array', 'Turtle** make() { return new Turtle*[1]{new Turtle(0, 1)}; }'],
+])('keeps the heap storage for a %s subscript reachable during indexing', (_, factory) => {
+  const program = `#include <iostream>
+Turtle observer(0, 0);
+${factory}
+int probe() {
+  std::cout << observer.canMoveForward();
+  return 0;
+}
+int main() { make()[probe()]; }`;
+  const result = executeProgram('cpp', program);
+  if (result.kind !== 'executed') throw new Error(JSON.stringify(result));
+  expect(result.stdout).toBe('0');
+});
+
+test.each([
   ['a member buffer', 'struct Row { std::vector<Turtle*> items; Token token; };', 'items'],
   ['a base buffer', 'struct Row : Storage { Token token; };', 'items'],
   ['a built-in array', 'struct Row { Entry cells[2]; };', 'cells[0].items'],

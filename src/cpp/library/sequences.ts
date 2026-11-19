@@ -783,7 +783,7 @@ function listMethods(
   });
   method('sort', [], VOID, (self) => {
     if (!less) throw new CppRuntimeError('custom', `${typeName(element)} の値は < で比べられません。`);
-    self.reorder((items) => listSort(items, (a, b) => less(a.value, b.value) < 0));
+    listSort(self, (a, b) => less(a.read(), b.read()) < 0);
   });
   const unique = (self: SequenceValue, frame: Frame, same: (a: Ptr, b: Ptr) => boolean): bigint =>
     removeListRuns(frame, self, editor, 1, (first, candidate) => same(self.location(first), self.location(candidate)));
@@ -808,9 +808,7 @@ function listMethods(
       VOID,
       (_args, { self, frame }) => {
         const list = self as SequenceValue;
-        list.reorder((items) =>
-          listSort(items, (a, b) => compare(frame, list.location(a.index), list.location(b.index)))
-        );
+        listSort(list, (a, b) => compare(frame, a, b));
       },
       { owner: cls }
     );
@@ -962,7 +960,6 @@ function sequenceOperator(
   const isSelf = (expr: Expr | undefined): boolean => expr?.type.kind === 'class' && expr.type.cls === cls;
   if (operator === '[]' && isSelf(left) && kind !== 'list') {
     const index = compiler.convert(right, SIZE_T, row);
-    const object = left.isLvalue ? left.run : compiler.materialize(left).run;
     const isConst = isConstType(left.type);
     const proxy = cls.memberTypes.get(isConst ? 'const_reference' : 'reference');
     const type = proxy ?? (isConst ? withConst(element) : element);
@@ -974,12 +971,12 @@ function sequenceOperator(
       constantInitialization: hasConstantObject(constantLocation),
       constantLocation,
       row,
-      run: (frame) => {
-        const target = (object(frame) as Ptr).read() as SequenceValue;
-        const at = Number(index.run(frame));
+      run: compiler.subscriptObject(left, index.run, (_frame, receiver, operand) => {
+        const target = receiver as SequenceValue;
+        const at = Number(operand);
         if (at < 0 || at >= target.items.length) throw new CppRuntimeError('outOfBounds');
         return target.location(at);
-      },
+      }),
     };
   }
   if (operator === '=' && kind !== 'array' && isSelf(left)) {

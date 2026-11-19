@@ -3,6 +3,13 @@
 struct Base {};
 struct Private : private Base {};
 struct Packet { int field; };
+struct Tagged;
+Tagged* saved = nullptr;
+struct Payload { int number = 7; };
+struct Tagged : Payload {
+  virtual void marker() {}
+  Tagged() { saved = this; }
+};
 
 int main() {
   try { throw "error"; }
@@ -36,5 +43,17 @@ int main() {
     catch (int*& address) { address = &replacement; throw; }
   } catch (int* address) {
     std::cout << *address << '\n';
+  }
+
+  try { throw Tagged{}; }
+  catch (Payload& caught) {
+    caught.number = 8;
+    std::cout << (static_cast<void*>(&caught) == static_cast<void*>(saved))
+              << (&caught == static_cast<Payload*>(saved)) << saved->number << '\n';
+  }
+  try { throw Tagged{}; }
+  catch (const Payload& caught) {
+    std::cout << (static_cast<const void*>(&caught) == static_cast<void*>(saved))
+              << (&caught == static_cast<Payload*>(saved)) << caught.number << '\n';
   }
 }

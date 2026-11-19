@@ -45,9 +45,32 @@ void check(bool shouldFail) {
   std::cout << ' ';
 }
 
+int comparisons = 0;
+int failAt = 0;
+
+bool sortOrder(const int& left, const int& right) {
+  if (++comparisons == failAt) throw 2;
+  return left < right;
+}
+
+void checkSort() {
+  for (failAt = 1; failAt <= 6; ++failAt) {
+    comparisons = 0;
+    std::list<int> values{4, 1, 3, 2};
+    auto first = values.begin();
+    const int* original = &*first;
+    try { values.sort(sortOrder); }
+    catch (int) { std::cout << 'E'; }
+    std::cout << comparisons << ':' << (&*first == original) << ':' << *first << ':';
+    for (int value : values) std::cout << value;
+    std::cout << '\n';
+  }
+}
+
 int main() {
   check(false);
   std::cout << '\n';
   check(true);
   std::cout << '\n';
+  checkSort();
 }
