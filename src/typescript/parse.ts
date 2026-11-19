@@ -107,7 +107,7 @@ function decodeNameEscapes(root: Node, source: string): { text: string; offsets:
   const visit = (node: Node): void => {
     if (node.childCount > 0) {
       for (const child of node.children) if (child) visit(child);
-    } else if (node.type.endsWith('identifier') && node.text.includes('\\')) {
+    } else if ((node.type.endsWith('identifier') || strictIdentifierTypes.has(node.type)) && node.text.includes('\\')) {
       decoded += source.slice(end, node.startIndex) + decodedName(node);
       end = node.endIndex;
       offsets.push({ end: decoded.length, removed: end - decoded.length });

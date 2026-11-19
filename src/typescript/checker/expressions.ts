@@ -612,7 +612,7 @@ export class ExpressionChecker {
         return this.functionSymbolType(symbol);
       }
       case 'class': {
-        return this.c.classes.classInfoOf(symbol).staticType;
+        return this.c.classes.valueTypeOf(this.c.classes.classInfoOf(symbol));
       }
       case 'catch': {
         const annotation = this.c.typeNodes.annotationType(declaration.childForFieldName('type'));

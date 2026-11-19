@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 629 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 639 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -6,6 +6,7 @@ import type { Checker } from './checker';
 import { FlowState, type State } from './flow';
 import { mergedPatternIndexes } from './indexInfos';
 import { isUsedBeforeInitialization } from './initializationOrder';
+import { isBaseTypeVariable } from './mixinConstructors';
 import type { Sym, ValueKind } from './scopes';
 import {
   argumentParameters,
@@ -23,6 +24,7 @@ import {
   type ClassInfo,
   emptyStructure,
   errorType,
+  intersectionOf,
   isAnyLike,
   isIntrinsic,
   newTypeId,
@@ -231,6 +233,14 @@ export class ClassChecker {
   extendsClause(node: TreeNode): TreeNode | undefined {
     const heritage = node.namedChildren.find((child) => child?.type === 'class_heritage');
     return heritage?.namedChildren.find((child) => child?.type === 'extends_clause') ?? undefined;
+  }
+
+  valueTypeOf(info: ClassInfo): Type {
+    const base = this.c.flow.probe(() => this.baseStaticType(info.declaration));
+    if (!base) return info.staticType;
+    const variable =
+      base.kind === 'intersection' ? base.types.find(isBaseTypeVariable) : isBaseTypeVariable(base) ? base : undefined;
+    return variable ? intersectionOf([info.staticType, variable], this.c.budget) : info.staticType;
   }
 
   baseStaticType(node: TreeNode): Type | undefined {
@@ -570,13 +580,7 @@ export class ClassChecker {
   private inferredFieldType(member: TreeNode, nameNode: TreeNode): Type {
     const value = member.childForFieldName('value');
     if (value) {
-      const owner = member.parent?.parent;
-      const info = owner ? this.classInfoOfNode(owner) : undefined;
-      const valueType = this.c.silently(() =>
-        this.withThis(info && !hasToken(member, 'static') ? info.instanceType : info?.staticType, () =>
-          this.c.expressions.check(value)
-        )
-      );
+      const valueType = this.c.silently(() => this.withFieldInitializer(member, () => this.c.expressions.check(value)));
       return this.c.literals.widenDeclared(valueType, hasToken(member, 'readonly'));
     }
     const types = this.constructorExitTypes(member, nameNode);
@@ -584,6 +588,13 @@ export class ClassChecker {
     if (!isIntrinsic(this.c.relations.removeNullish(unionOf(types)), 'never')) return unionOf(types);
     if (!this.c.isLibrary(member)) this.c.error(nameNode, `メンバー ${nameNode.text} の型が暗黙に any になります。`);
     return anyType;
+  }
+
+  withFieldInitializer<T>(member: TreeNode, run: () => T): T {
+    const owner = member.parent?.parent;
+    const info = owner ? this.classInfoOfNode(owner) : undefined;
+    const receiver = hasToken(member, 'static') ? info?.staticType : info?.instanceType;
+    return this.withThis(receiver, () => this.c.functions.withInitializerFlow(member, 'field', run));
   }
 
   /** The types an instance field holds where its class's constructor finishes. */
@@ -645,7 +656,7 @@ export class ClassChecker {
   classExpression(node: TreeNode): Type {
     const info = this.classInfoOfNode(node);
     this.c.classDeclarations.checkClass(node);
-    return info.staticType;
+    return this.valueTypeOf(info);
   }
 
   // this ---------------------------------------------------------------------------------------------------------

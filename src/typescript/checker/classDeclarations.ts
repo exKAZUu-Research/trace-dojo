@@ -4,6 +4,7 @@ import type { Checker } from './checker';
 import { checkDuplicateMembers, checkOverloadOptionality, memberName } from './declarations';
 import { FlowState, propertyReferenceKey, type State } from './flow';
 import { checkIndexConformance } from './indexConformance';
+import { isBaseTypeVariable, isMixinConstructor } from './mixinConstructors';
 import { hasToken, isClassConstructor, isWithin, named } from './syntax';
 import {
   anyType,
@@ -33,7 +34,7 @@ export class ClassDeclarationChecker {
     const info = this.c.classes.classInfoOfNode(node);
     const clause = this.c.classes.extendsClause(node);
     const baseValue = clause?.childForFieldName('value');
-    if (baseValue) this.checkBaseValue(node, baseValue);
+    if (baseValue) this.checkBaseValue(node, info, baseValue);
     const body = node.childForFieldName('body');
     const members = body ? named(body) : [];
     if (body) {
@@ -77,7 +78,7 @@ export class ClassDeclarationChecker {
     }
   }
 
-  private checkBaseValue(node: TreeNode, baseValue: TreeNode): void {
+  private checkBaseValue(node: TreeNode, info: ClassInfo, baseValue: TreeNode): void {
     const baseType = this.c.expressions.check(baseValue);
     if (isAnyLike(baseType) || baseType === errorType || isIntrinsic(baseType, 'null')) return;
     if (this.c.signaturesOf(baseType, 'construct').length === 0) {
@@ -85,6 +86,7 @@ export class ClassDeclarationChecker {
       return;
     }
     this.checkBaseTypeArguments(node, baseValue, baseType);
+    if (isBaseTypeVariable(baseType)) this.checkMixinConstructor(node, info, baseType);
     const restricted = this.c.classes.restrictedConstructor(baseType);
     const baseInfo = baseType.kind === 'object' ? baseType.classInfo : undefined;
     // A class may extend a class with a private constructor only inside the class it extends.
@@ -93,6 +95,18 @@ export class ClassDeclarationChecker {
         baseValue,
         `クラス '${baseInfo.name}' は継承できません。クラスのコンストラクタが private になっています。`
       );
+    }
+  }
+
+  private checkMixinConstructor(node: TreeNode, info: ClassInfo, baseType: Type): void {
+    const at = node.childForFieldName('name') ?? node;
+    if (!isMixinConstructor(this.c, info.staticType.resolve().constructSignatures)) {
+      this.c.error(at, "mixin クラスには、型 'any[]' の単一の残余引数を持つコンストラクタが必要です。");
+    } else if (
+      !info.isAbstract &&
+      this.c.signaturesOf(baseType, 'construct').some((signature) => signature.isAbstract)
+    ) {
+      this.c.error(at, "抽象コンストラクタを持つ型変数から継承する mixin クラスは、'abstract' と宣言してください。");
     }
   }
 
@@ -163,10 +177,9 @@ export class ClassDeclarationChecker {
 
   private checkMember(classNode: TreeNode, member: TreeNode, info: ClassInfo, ctor: TreeNode | undefined): void {
     this.checkMemberDeclaration(member, info);
-    const isStatic = hasToken(member, 'static');
     switch (member.type) {
       case 'field_definition': {
-        this.checkFieldInitializer(member, info, isStatic);
+        this.checkFieldInitializer(member);
         break;
       }
       case 'method_signature': {
@@ -220,40 +233,21 @@ export class ClassDeclarationChecker {
     }
   }
 
-  private checkFieldInitializer(member: TreeNode, info: ClassInfo, isStatic: boolean): void {
+  private checkFieldInitializer(member: TreeNode): void {
     const value = member.childForFieldName('value');
+    if (!value) return;
     const declared = this.c.typeNodes.annotationType(member.childForFieldName('type'));
     const annotation = declared && hasToken(member, '?') ? unionOf([declared, undefinedType]) : declared;
-    if (value) {
-      if (hasToken(member, 'abstract'))
-        this.c.error(
-          member.childForFieldName('name') ?? member,
-          'abstract プロパティに初期値を指定することはできません。'
-        );
-      const valueType = this.c.classes.withThis(isStatic ? info.staticType : info.instanceType, () =>
-        this.c.flow.from(new FlowState(), () => {
-          this.c.functions.contexts.push({
-            node: member,
-            returnTypes: [],
-            endReachable: false,
-            isConstructor: false,
-            hasReturnWithValue: false,
-            hasReturnWithoutValue: false,
-            returnStates: [],
-          });
-          this.c.functions.capturedTypes.push(new Map());
-          try {
-            const type = this.c.expressions.check(value, annotation);
-            if (annotation)
-              this.c.expressions.checkAssignable(member.childForFieldName('name') ?? value, type, annotation, value);
-          } finally {
-            this.c.functions.capturedTypes.pop();
-            this.c.functions.contexts.pop();
-          }
-        })
+    if (hasToken(member, 'abstract'))
+      this.c.error(
+        member.childForFieldName('name') ?? member,
+        'abstract プロパティに初期値を指定することはできません。'
       );
-      void valueType;
-    }
+    this.c.classes.withFieldInitializer(member, () => {
+      const type = this.c.expressions.check(value, annotation);
+      if (annotation)
+        this.c.expressions.checkAssignable(member.childForFieldName('name') ?? value, type, annotation, value);
+    });
   }
 
   private checkMemberDeclaration(member: TreeNode, info: ClassInfo): void {

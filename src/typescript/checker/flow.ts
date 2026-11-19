@@ -158,25 +158,28 @@ export class Flow {
 
   /** Runs `run` from `state`, returning the state it ends in. */
   from(state: State, run: () => void): State {
+    return this.withState(state, () => {
+      run();
+      return this.current;
+    });
+  }
+
+  withState<T>(state: State, run: () => T): T {
     const outer = this.current;
     this.current = state?.clone();
     try {
-      run();
-      return this.current;
+      return run();
     } finally {
       this.current = outer;
     }
   }
 
   probe<T>(run: () => T, ...source: [] | [State]): T {
-    const outer = this.current;
     const probing = this.probing;
-    this.current = (source.length === 0 ? outer : source[0])?.clone();
     this.probing = true;
     try {
-      return this.exceptions.isolate(run);
+      return this.withState(source.length === 0 ? this.current : source[0], () => this.exceptions.isolate(run));
     } finally {
-      this.current = outer;
       this.probing = probing;
     }
   }

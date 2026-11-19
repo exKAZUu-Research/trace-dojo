@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 408 -- Keeps function signatures, body checking, and parameter flow together.
+// code-gauge-allow-file fileNcss 420 -- Keeps function signatures, body checking, and parameter flow together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -303,7 +303,7 @@ export class FunctionChecker {
   checkFunctionBody(node: TreeNode, signature: Signature, contextualReturn: Type | undefined, isolated: boolean): Type {
     if (this.reentersBody(node)) return anyType;
     const body = node.childForFieldName('body');
-    const context = this.newContext(node, contextualReturn);
+    const context = this.newContext(node, contextualReturn, this.declaredReturnType(node));
     this.bindParameters(node, signature);
     this.contexts.push(context);
     this.capturedTypes.push(this.capture());
@@ -378,7 +378,7 @@ export class FunctionChecker {
       if (!value || !symbol) continue;
       const declared = this.c.expressions.valueTypeOf(symbol);
       if (!mayBeUndefined(declared)) continue;
-      if (this.c.patterns.defaultMayBeUndefined(this.c.silently(() => this.c.expressions.check(value, declared))))
+      if (this.c.patterns.defaultMayBeUndefined(this.c.silently(() => this.parameterInitializerType(value, declared))))
         continue;
       this.c.flow.set(`s${symbol.id}`, { type: this.c.relations.removeUndefined(declared), assigned: true });
     }
@@ -409,8 +409,7 @@ export class FunctionChecker {
     context.hasReturnWithValue = true;
   }
 
-  private newContext(node: TreeNode, contextualReturn: Type | undefined): FunctionContext {
-    const declaredReturn = this.declaredReturnType(node);
+  private newContext(node: TreeNode, contextualReturn?: Type, declaredReturn?: Type): FunctionContext {
     return {
       node,
       returnTypes: [],
@@ -534,32 +533,41 @@ export class FunctionChecker {
   checkFunctionLike(node: TreeNode, signature: Signature, contextual?: Signature): Type | undefined {
     if (this.c.silent > 0) return undefined;
     const parameters = node.childForFieldName('parameters');
-    this.checkParameterInitializers(parameters ? named(parameters) : [], signature, contextual);
+    this.withInitializerFlow(node, 'parameters', () =>
+      this.checkParameterInitializers(parameters ? named(parameters) : [], signature, contextual)
+    );
     return node.childForFieldName('body')
       ? this.checkFunctionBody(node, signature, contextual?.returnType(), false)
       : undefined;
   }
 
+  withInitializerFlow<T>(node: TreeNode, kind: 'field' | 'parameters', run: () => T): T {
+    const context = this.newContext(node);
+    context.inlined = kind === 'parameters' && isInlinedInvocation(node);
+    this.contexts.push(context);
+    this.capturedTypes.push(kind === 'parameters' ? this.capture() : new Map());
+    try {
+      return this.c.flow.withState(context.inlined ? this.c.flow.current : new FlowState(), run);
+    } finally {
+      this.capturedTypes.pop();
+      this.contexts.pop();
+    }
+  }
+
   private checkParameterInitializers(parameters: TreeNode[], signature: Signature, contextual?: Signature): void {
-    this.c.flow.from(new FlowState(), () => {
-      const sourceParameters = argumentParameters(parameters);
-      for (const [index, parameter] of sourceParameters.entries()) {
-        const defaultType = this.checkParameterDefault(parameter, contextual, index);
-        const pattern = parameter.childForFieldName('pattern') ?? parameter;
-        const type = this.sourceParameterType(parameter, pattern, signature, index) ?? anyType;
-        this.recordParameterInitialization(parameter, type, defaultType);
-      }
-    });
+    const sourceParameters = argumentParameters(parameters);
+    for (const [index, parameter] of sourceParameters.entries()) {
+      const defaultType = this.checkParameterDefault(parameter, contextual, index);
+      const pattern = parameter.childForFieldName('pattern') ?? parameter;
+      const type = this.sourceParameterType(parameter, pattern, signature, index) ?? anyType;
+      this.recordParameterInitialization(parameter, type, defaultType);
+    }
   }
 
   recordParameterInitialization(parameter: TreeNode, type: Type, initializer?: Type): void {
     const pattern = parameter.childForFieldName('pattern') ?? parameter;
-    const value = parameter.childForFieldName('value');
-    const defaultType =
-      initializer ??
-      (value && mayBeUndefined(type) ? this.c.silently(() => this.c.expressions.check(value, type)) : undefined);
     const boundType =
-      defaultType && !this.c.patterns.defaultMayBeUndefined(defaultType)
+      initializer && !this.c.patterns.defaultMayBeUndefined(initializer)
         ? this.c.relations.removeUndefined(type)
         : type;
     this.c.patterns.bindPattern(
@@ -571,6 +579,16 @@ export class FunctionChecker {
       },
       parameter.childForFieldName('type') !== null
     );
+  }
+
+  parameterInitializerType(value: TreeNode, contextual?: Type): Type {
+    const skipped = this.c.flow.current;
+    let type: Type = anyType;
+    const initialized = this.c.flow.from(skipped, () => {
+      type = this.c.expressions.check(value, contextual);
+    });
+    this.c.flow.current = this.c.flow.merge([skipped, initialized]);
+    return type;
   }
 
   private checkParameterDefault(
@@ -585,7 +603,7 @@ export class FunctionChecker {
       (contextual && this.c.signatures.contextualParameterType(contextual, index, false));
     const pattern = parameter.childForFieldName('pattern') ?? parameter;
     const implied = expected ? undefined : this.c.patterns.impliedType(pattern);
-    const valueType = this.c.expressions.check(value, expected ?? implied);
+    const valueType = this.parameterInitializerType(value, expected ?? implied);
     if (expected) this.c.expressions.checkAssignable(pattern, valueType, expected, value);
     else this.c.patterns.checkInitializer(pattern, value, valueType, implied);
     return valueType;

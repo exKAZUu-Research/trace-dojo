@@ -25,6 +25,7 @@ import {
 } from './library';
 import { LiteralChecker } from './literals';
 import { MemberChecker } from './members';
+import { intersectConstructSignatures } from './mixinConstructors';
 import { OperatorChecker } from './operators';
 import { OverloadContexts } from './overloadContexts';
 import { BindingPatterns } from './patterns';
@@ -836,7 +837,10 @@ export class Checker {
     return {
       properties,
       callSignatures: structures.flatMap((structure) => structure.callSignatures),
-      constructSignatures: structures.flatMap((structure) => structure.constructSignatures),
+      constructSignatures: intersectConstructSignatures(
+        this,
+        structures.map((structure) => structure.constructSignatures)
+      ),
       stringIndex: this.intersectedIndex(structures.map((structure) => structure.stringIndex)),
       numberIndex: this.intersectedIndex(structures.map((structure) => structure.numberIndex)),
       symbolIndex: this.intersectedIndex(structures.map((structure) => structure.symbolIndex)),

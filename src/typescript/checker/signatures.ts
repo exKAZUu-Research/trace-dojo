@@ -1,9 +1,8 @@
-// code-gauge-allow-file fileNcss 432 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
+// code-gauge-allow-file fileNcss 435 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { erasedStatementTypes } from '../erasedSyntax';
 import type { Checker } from './checker';
-import { FlowState } from './flow';
 import type { Scope, Sym } from './scopes';
 import {
   argumentParameters,
@@ -215,24 +214,23 @@ export class Signatures {
     const argumentNodes = argumentParameters(nodes);
     const thisNode = argumentNodes.length < nodes.length ? nodes[0] : undefined;
     const parameters: Parameter[] = [];
-    const lastDefault =
-      contextual?.immediateArgumentCount === undefined
-        ? -1
-        : argumentNodes.findLastIndex((parameter) => parameter.childForFieldName('value') !== null);
+    const lastDefault = argumentNodes.findLastIndex(
+      (parameter) =>
+        parameter.childForFieldName('value') !== null ||
+        !!parameter.childForFieldName('pattern')?.descendantsOfType(['assignment_pattern', 'object_assignment_pattern'])
+          .length
+    );
     const collect = (): void => {
       for (const [index, parameterNode] of argumentNodes.entries()) {
-        const parameter = this.declaredParameter(node, parameterNode, contextual, index);
+        const { parameter, initializer } = this.declaredParameter(node, parameterNode, contextual, index);
         parameters.push(parameter);
-        if (index < lastDefault) {
-          const possibleOmission = parameter.optional && !parameterNode.childForFieldName('value');
-          this.c.functions.recordParameterInitialization(
-            parameterNode,
-            possibleOmission ? unionOf([parameter.type, undefinedType]) : parameter.type
-          );
-        }
+        if (index >= lastDefault) continue;
+        const possibleOmission = parameter.optional && !parameterNode.childForFieldName('value');
+        const type = possibleOmission ? unionOf([parameter.type, undefinedType]) : parameter.type;
+        this.c.silently(() => this.c.functions.recordParameterInitialization(parameterNode, type, initializer));
       }
     };
-    if (lastDefault > 0) this.c.flow.from(this.c.flow.current ?? new FlowState(), collect);
+    if (lastDefault !== -1) this.c.functions.withInitializerFlow(node, 'parameters', collect);
     else collect();
     return {
       parameters: withRequiredPrefix(parameters),
@@ -245,7 +243,7 @@ export class Signatures {
     parameterNode: TreeNode,
     contextual: Signature | undefined,
     index: number
-  ): Parameter {
+  ): { parameter: Parameter; initializer?: Type } {
     const pattern = parameterNode.childForFieldName('pattern') ?? parameterNode;
     const annotation = this.c.typeNodes.annotationType(parameterNode.childForFieldName('type'));
     const rest = pattern.type === 'rest_pattern';
@@ -254,25 +252,31 @@ export class Signatures {
     const contextualParameter = contextual ? this.contextualParameterType(contextual, index, rest) : undefined;
     const immediateArgumentCount = contextual?.immediateArgumentCount;
     const omitted = immediateArgumentCount !== undefined && index >= immediateArgumentCount;
+    const expected = annotation ?? contextualParameter;
+    const initializer = value
+      ? this.c.silently(() =>
+          this.c.functions.parameterInitializerType(value, expected ?? this.c.patterns.impliedType(pattern))
+        )
+      : undefined;
     const type =
-      annotation ??
-      contextualParameter ??
+      expected ??
       (immediateArgumentCount !== undefined && !value ? undefinedType : undefined) ??
       this.setterParameterType(node) ??
-      (value
-        ? this.c.silently(() =>
-            this.c.literals.widenDeclared(this.c.expressions.check(value, this.c.patterns.impliedType(pattern)), false)
-          )
+      (initializer
+        ? this.c.literals.widenDeclared(initializer, false)
         : this.c.expressions.implicitParameterType(parameterNode, pattern, rest));
     return {
-      name: rest
-        ? (named(pattern)[0]?.text ?? 'args')
-        : ['identifier', 'this'].includes(pattern.type)
-          ? pattern.text
-          : `__${index}`,
-      type,
-      optional: parameterNode.type === 'optional_parameter' || value !== null || (omitted && !annotation && !rest),
-      rest,
+      initializer,
+      parameter: {
+        name: rest
+          ? (named(pattern)[0]?.text ?? 'args')
+          : ['identifier', 'this'].includes(pattern.type)
+            ? pattern.text
+            : `__${index}`,
+        type,
+        optional: parameterNode.type === 'optional_parameter' || value !== null || (omitted && !annotation && !rest),
+        rest,
+      },
     };
   }
 

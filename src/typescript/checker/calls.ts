@@ -82,8 +82,7 @@ export class Calls {
         ? this.c.members.checkAccess(expression)
         : undefined;
     const chained = callee.id === expression.id ? access?.continued : undefined;
-    const checkedCallee =
-      chained ?? access?.type ?? this.c.expressions.check(callee, this.immediateCallContext(callee, args));
+    const checkedCallee = chained ?? access?.type ?? this.checkCallCallee(callee, args);
     if (optional) this.c.members.continueChain(callee);
     if (checkedCallee === errorType) return this.checkArgumentsOnly(args, errorType);
     const shortCircuits = chained !== undefined || (optional && this.c.relations.isNullable(checkedCallee));
@@ -135,12 +134,14 @@ export class Calls {
     return result;
   }
 
-  /** For a function called where it is written, as `((x) => x * 2)(3)`, a context giving its parameters the arguments' types. */
-  private immediateCallContext(callee: TreeNode, args: TreeNode[]): Type | undefined {
+  private checkCallCallee(callee: TreeNode, args: TreeNode[]): Type {
     const expression = skipParentheses(callee);
-    if (!functionExpressionTypes.has(expression.type) || !isContextSensitiveFunction(expression)) return undefined;
+    if (!functionExpressionTypes.has(expression.type) || !isContextSensitiveFunction(expression))
+      return this.c.expressions.check(callee);
+    const { effective, afterArguments } = this.c.flow.probe(() =>
+      this.c.silently(() => ({ effective: this.argumentElements(args), afterArguments: this.c.flow.current }))
+    );
     const first = parameterNodes(expression)[0];
-    const effective = this.c.flow.probe(() => this.c.silently(() => this.argumentElements(args)));
     const offset = first && isThisParameter(first) ? 1 : 0;
     const parameters = effective.slice(offset).map(({ type, optional, rest }, index) => ({
       name: `arg${index}`,
@@ -148,12 +149,13 @@ export class Calls {
       optional,
       rest,
     }));
-    return functionType({
+    const context = functionType({
       typeParameters: [],
       parameters,
       immediateArgumentCount: args.length,
       returnType: () => unknownType,
     });
+    return this.c.flow.withState(afterArguments, () => this.c.expressions.check(callee, context));
   }
 
   private checkArgumentsOnly(args: TreeNode[], result: Type = anyType): Type {
