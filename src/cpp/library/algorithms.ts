@@ -4,7 +4,7 @@ import { CompileError } from '../../interpreter/diagnostics';
 import { CppRuntimeError, overflowError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { constructArray, withTemporaries } from '../objectCompiler';
+import { constructArray, initializeAt, withTemporaries } from '../objectCompiler';
 import { type Frame, holdAll } from '../runtime';
 import {
   BOOL,
@@ -28,7 +28,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { Box, endLifetime, NULL_PTR, Ptr, type Store, type Value } from '../values';
+import { ArrayStore, Box, endLifetime, NULL_PTR, Ptr, type Store, UNINIT, type Value } from '../values';
 import { pairClass } from './associative';
 import {
   assignElement,
@@ -143,17 +143,15 @@ class Range {
     return object;
   }
 
-  temporary(position: number, frame: Frame): Ptr {
-    frame.runtime.reserve(1);
-    const object = new Box(this.take(position), false);
-    frame.temporaries.push({ object, destroy: (_frame, value) => endLifetime(value) });
-    return new AlgorithmLocal(object, 0);
-  }
-
   withTemporary<T>(position: number, use: (location: Ptr) => T): T {
     const frame = this.write?.frame;
     if (!frame) throw new Error('Sorting requires a writable range');
-    return withTemporaries(frame, () => use(this.temporary(position, frame)));
+    return withTemporaries(frame, () => {
+      frame.runtime.reserve(1);
+      const object = new Box(this.take(position), false);
+      frame.temporaries.push({ object, destroy: (_frame, value) => endLifetime(value) });
+      return use(new AlgorithmLocal(object, 0));
+    });
   }
 
   swap(a: number, b: number): void {
@@ -308,7 +306,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         const values = mutableRange(first, last, info, frame, ops, true);
         frame.runtime.spend(values.length);
         if (name === 'sort') introsort(values, less(frame));
-        else stableSort(values, less(frame), frame);
+        else stableSort(values, less(frame), frame, ops);
         return;
       });
     });
@@ -1876,21 +1874,177 @@ function sortPart(
   }
 }
 
-/** A stable merge sort, whose result `std::stable_sort` guarantees. */
-function stableSort(values: Range, less: Less, frame: Frame): void {
-  const items = Array.from({ length: values.length }, (_, index) => values.temporary(index, frame));
-  const merge = (list: Ptr[]): Ptr[] => {
-    if (list.length <= 1) return list;
-    const middle = list.length >> 1;
-    const left = merge(list.slice(0, middle));
-    const right = merge(list.slice(middle));
-    const result: Ptr[] = [];
-    let i = 0;
-    let j = 0;
-    while (i < left.length && j < right.length) result.push(less(right[j], left[i]) ? right[j++] : left[i++]);
-    return [...result, ...left.slice(i), ...right.slice(j)];
-  };
-  for (const [index, item] of merge(items).entries()) values.set(index, item.read());
+function stableSort(values: Range, less: Less, frame: Frame, ops: ElementOperations): void {
+  const threshold = hasTrivialCopyAssignment(ops.type) ? 128 : 0;
+  const length = values.length;
+  if (length <= Math.max(2, threshold)) {
+    stableSortSmall(values, 0, length, less);
+    return;
+  }
+  frame.runtime.reserve(length);
+  const storage = new ArrayStore(
+    Array.from({ length }, (): Value => UNINIT),
+    ops.type
+  );
+  withTemporaries(frame, () => {
+    frame.temporaries.push({ object: storage, destroy: (_frame, object) => endLifetime(object) });
+    const buffer = new StableSortBuffer(frame, storage, ops);
+    stableSortRange(values, 0, length, less, buffer, threshold);
+  });
+}
+
+function hasTrivialCopyAssignment(type: Type): boolean {
+  if (type.kind === 'array') return type.length === 0 || hasTrivialCopyAssignment(type.of);
+  if (type.kind !== 'class') return type.kind !== 'reference' && !isConstType(type);
+  const { cls } = type;
+  const array = cls.library?.aggregateArray;
+  if (array) return hasTrivialCopyAssignment(array.type);
+  return (
+    !cls.library &&
+    !cls.isAssignmentDeleted &&
+    cls.virtuals.size === 0 &&
+    (!cls.base || hasTrivialCopyAssignment(classType(cls.base))) &&
+    cls.ownFields.every(({ type: fieldType }) => hasTrivialCopyAssignment(fieldType))
+  );
+}
+
+function stableSortSmall(values: Range, first: number, last: number, less: Less): void {
+  const length = last - first;
+  if (length < 2) return;
+  if (length === 2) {
+    if (less(values.location(first + 1), values.location(first))) values.swap(first, first + 1);
+    return;
+  }
+  insertionSort(values, first, last, less, true);
+}
+
+function stableSortRange(
+  values: Range,
+  first: number,
+  last: number,
+  less: Less,
+  buffer: StableSortBuffer,
+  threshold: number
+): void {
+  const length = last - first;
+  if (length <= Math.max(2, threshold)) {
+    stableSortSmall(values, first, last, less);
+    return;
+  }
+  const middle = first + Math.floor(length / 2);
+  buffer.withConstructedRange(first, last, () => {
+    stableSortIntoBuffer(values, first, middle, less, buffer, threshold);
+    stableSortIntoBuffer(values, middle, last, less, buffer, threshold);
+    mergeStableRuns(
+      first,
+      middle,
+      last,
+      less,
+      (index) => buffer.location(index),
+      (target, source) => values.set(target, source.read())
+    );
+  });
+}
+
+function stableSortIntoBuffer(
+  values: Range,
+  first: number,
+  last: number,
+  less: Less,
+  buffer: StableSortBuffer,
+  threshold: number
+): void {
+  const length = last - first;
+  if (length <= 2) {
+    const swap = length === 2 && less(values.location(first + 1), values.location(first));
+    buffer.construct(first, values.location(swap ? first + 1 : first));
+    if (length === 2) buffer.construct(first + 1, values.location(swap ? first : first + 1));
+    return;
+  }
+  if (length <= 8) {
+    buffer.construct(first, values.location(first));
+    for (let index = first + 1; index < last; index++) {
+      const input = values.location(index);
+      if (!less(input, buffer.location(index - 1))) {
+        buffer.construct(index, input);
+        continue;
+      }
+      buffer.construct(index, buffer.location(index - 1));
+      let position = index - 1;
+      while (position > first && less(input, buffer.location(position - 1))) {
+        buffer.assign(position, buffer.location(position - 1));
+        position--;
+      }
+      buffer.assign(position, input);
+    }
+    return;
+  }
+  const middle = first + Math.floor(length / 2);
+  stableSortRange(values, first, middle, less, buffer, threshold);
+  stableSortRange(values, middle, last, less, buffer, threshold);
+  mergeStableRuns(
+    first,
+    middle,
+    last,
+    less,
+    (index) => values.location(index),
+    (target, source) => buffer.construct(target, source)
+  );
+}
+
+function mergeStableRuns(
+  first: number,
+  middle: number,
+  last: number,
+  less: Less,
+  locate: (index: number) => Ptr,
+  put: (index: number, source: Ptr) => void
+): void {
+  let left = first;
+  let right = middle;
+  for (let out = first; out < last; out++) {
+    const fromRight = right < last && (left >= middle || less(locate(right), locate(left)));
+    put(out, locate(fromRight ? right++ : left++));
+  }
+}
+
+class StableSortBuffer {
+  constructor(
+    private readonly frame: Frame,
+    private readonly storage: ArrayStore,
+    private readonly ops: ElementOperations
+  ) {}
+
+  location(index: number): Ptr {
+    return new AlgorithmLocal(this.storage, index);
+  }
+
+  construct(index: number, source: Ptr): void {
+    const { frame, storage, ops } = this;
+    initializeAt(frame, ops.type, storage.location(index), storage.values[index], (target) =>
+      constructElementFromRvalue(frame, ops.type, source.read(), target)
+    );
+  }
+
+  assign(index: number, source: Ptr): void {
+    moveAssignElement(this.frame, this.storage.location(index), this.ops.type, source.read());
+  }
+
+  withConstructedRange(first: number, last: number, run: () => void): void {
+    withTemporaries(this.frame, () => {
+      this.frame.temporaries.push({
+        object: this.storage,
+        destroy: (frame) => {
+          for (let index = first; index < last; index++) {
+            const value = this.storage.values[index];
+            if (value !== UNINIT) this.ops.destroy?.(frame, value);
+            this.storage.values[index] = UNINIT;
+          }
+        },
+      });
+      run();
+    });
+  }
 }
 
 /** Rearranges a range into the next permutation in the order `less`, telling whether one existed. */
