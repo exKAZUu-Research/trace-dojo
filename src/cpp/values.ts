@@ -1,7 +1,15 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { CppRuntimeError } from './errors';
 import type { Frame, Temporary } from './runtime';
-import { baseSubobjectOffset, type ClassInfo, classType, type FunctionInfo, sizeOf, type Type } from './types';
+import {
+  baseSubobjectOffset,
+  type ClassInfo,
+  classType,
+  fieldSubobjectOffset,
+  type FunctionInfo,
+  sizeOf,
+  type Type,
+} from './types';
 
 /** The value of a variable or an element that the program has not written yet. */
 export const UNINIT = Symbol('uninitialized');
@@ -39,6 +47,10 @@ export abstract class Store {
   allocation?: 'new' | 'newArray';
 
   abstract get length(): number;
+
+  get pointerLength(): number {
+    return this.length;
+  }
 
   get iteratorLength(): number {
     return this.length;
@@ -138,6 +150,10 @@ interface ExceptionMessage {
   storage?: ArrayStore;
 }
 
+interface ObjectLocation {
+  location?: Ptr;
+}
+
 /** An object of a class the program declares, or of a library class with members, holding its data members. */
 export class CObject extends Store {
   readonly completeClass: ClassInfo;
@@ -147,11 +163,31 @@ export class CObject extends Store {
   private exceptionMessage?: ExceptionMessage;
   referenceTemporaries?: Temporary[];
   needsConstruction = false;
-  completeLocation?: Ptr;
+  private receiverLocation: ObjectLocation = {};
+  private hasContainerCell = false;
   private receiverStorage?: Store;
   private baseLocations?: Map<ClassInfo, Ptr>;
   private memberStorage?: Map<number, MemberStorage>;
 
+  get completeLocation(): Ptr | undefined {
+    return this.receiverLocation.location;
+  }
+
+  set completeLocation(location: Ptr | undefined) {
+    this.receiverLocation.location = location;
+  }
+
+  bindContainerCell(location: Ptr): void {
+    if (this.completeLocation !== location && this.hasContainerCell) this.receiverLocation = { location };
+    else this.completeLocation = location;
+    this.hasContainerCell = true;
+  }
+
+  releaseContainerCell(): void {
+    if (!this.hasContainerCell) return;
+    this.completeLocation = undefined;
+    this.hasContainerCell = false;
+  }
   /**
    * @param cls The dynamic type, which construction and destruction set to the class whose constructor or destructor
    * is running, as virtual calls during them see it.
@@ -170,7 +206,8 @@ export class CObject extends Store {
   }
 
   receiver(asClass = this.cls): Ptr {
-    if (this.completeClass === asClass) return new CompleteObjectPointer(this, this.fallbackReceiver());
+    if (this.completeClass === asClass)
+      return new CompleteObjectPointer(this.receiverLocation, this.fallbackReceiver());
     this.baseLocations ??= new Map();
     let location = this.baseLocations.get(asClass);
     if (!location) {
@@ -181,13 +218,26 @@ export class CObject extends Store {
   }
 
   subobjectAddress(cls: ClassInfo, index: number): { store: Store | undefined; index: number } {
-    const offset = baseSubobjectOffset(this.completeClass, cls) + index * sizeOf(classType(cls));
-    if (offset === 0) return { store: this, index: 0 };
+    return this.addressAt(baseSubobjectOffset(this.completeClass, cls) + index * sizeOf(classType(cls)));
+  }
+
+  memberAddress(fieldIndex: number, index: number): { store: Store | undefined; index: number } {
+    const field = this.completeClass.fields[fieldIndex];
+    if (!field) return { store: this, index: fieldIndex + index };
+    return this.addressAt(fieldSubobjectOffset(this.completeClass, field) + index * sizeOf(field.type));
+  }
+
+  addressAt(offset: number): { store: Store | undefined; index: number } {
+    const complete = this.completeLocation;
+    const member = complete?.memberOwner;
+    if (member) {
+      const field = member.object.completeClass.fields[member.field];
+      if (field) return member.object.addressAt(fieldSubobjectOffset(member.object.completeClass, field) + offset);
+    }
     if (offset === sizeOf(classType(this.completeClass))) {
-      const complete = this.completeLocation;
       return new Ptr(complete?.store ?? this.fallbackReceiver(), (complete?.index ?? 0) + 1).address;
     }
-    return { store: this.fallbackReceiver(), index: offset };
+    return { store: this, index: offset };
   }
 
   private fallbackReceiver(): Store {
@@ -406,7 +456,7 @@ export class Ptr {
     if (delta === 0 && this.isNull) return this;
     const store = this.target();
     const index = this.index + delta;
-    if (index < 0 || index > (asIterator ? store.iteratorLength : store.length))
+    if (index < 0 || index > (asIterator ? store.iteratorLength : store.pointerLength))
       throw new CppRuntimeError('pointerOutOfRange');
     if (delta === 0 && !asIterator) return this;
     return asIterator ? store.iteratorLocation(index) : store.location(index);
@@ -452,8 +502,9 @@ export class Ptr {
   get address(): { store: Store | undefined; index: number } {
     const store = this.store;
     if (store instanceof BaseSubobjectStorage) return store.object.subobjectAddress(store.cls, this.index);
+    if (store instanceof MemberStorage) return store.owner.memberAddress(store.field, this.index);
     const object = this.addressedObject();
-    return object ? { store: object, index: 0 } : this.storageAddress;
+    return object ? object.addressAt(0) : this.storageAddress;
   }
 
   get storageAddress(): { store: Store | undefined; index: number } {
@@ -468,7 +519,7 @@ export class Ptr {
 
   private addressedObject(): CObject | undefined {
     const { store, index } = this;
-    if (!store || index < 0 || index >= store.length || store.liveness !== Liveness.Alive) return;
+    if (!store || index < 0 || index >= store.pointerLength || store.liveness !== Liveness.Alive) return;
     try {
       const value = this.readRaw();
       return value instanceof CObject ? value : undefined;
@@ -482,7 +533,7 @@ export const NULL_PTR = new Ptr(undefined, 0);
 
 class CompleteObjectPointer extends Ptr {
   constructor(
-    private readonly object: CObject,
+    private readonly receiver: ObjectLocation,
     private readonly fallback: Store,
     private readonly offsetFromObject = 0
   ) {
@@ -490,17 +541,17 @@ class CompleteObjectPointer extends Ptr {
   }
 
   override get store(): Store {
-    return this.object.completeLocation?.store ?? this.fallback;
+    return this.receiver.location?.store ?? this.fallback;
   }
 
   override get index(): number {
-    return (this.object.completeLocation?.index ?? 0) + this.offsetFromObject;
+    return (this.receiver.location?.index ?? 0) + this.offsetFromObject;
   }
 
   override offset(delta: number, asIterator = false): Ptr {
     super.offset(delta, asIterator);
     if (delta === 0) return this;
-    return new CompleteObjectPointer(this.object, this.fallback, this.offsetFromObject + delta);
+    return new CompleteObjectPointer(this.receiver, this.fallback, this.offsetFromObject + delta);
   }
 }
 

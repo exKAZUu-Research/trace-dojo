@@ -2,7 +2,7 @@ import type { Expr, Initializer } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import type { Frame } from '../runtime';
 import type { Syntax } from '../syntax';
-import type { ArithmeticType, ArrayType, ClassInfo, FunctionInfo, Type } from '../types';
+import type { ArithmeticType, ArrayType, ClassInfo, Type } from '../types';
 import type { ArrayStore, CObject, Value } from '../values';
 
 export type IteratorCategory = 'forward' | 'bidirectional' | 'randomAccess';
@@ -57,7 +57,7 @@ export interface LibraryClass {
   iteratorCategory?: IteratorCategory;
   readonly iteratorReference?: Type;
   readonly valueInitializedMembers?: readonly Type[];
-  appendMethod?: FunctionInfo;
+  outputContainer?: Type;
   /** Whether a program's class may derive from this one, as from the exception classes. */
   isInheritable?: boolean;
 }

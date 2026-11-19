@@ -4,7 +4,7 @@ import { CompileError } from '../../interpreter/diagnostics';
 import { CppRuntimeError, overflowError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { invoke, makeEach, withTemporaries } from '../objectCompiler';
+import { makeEach, withTemporaries } from '../objectCompiler';
 import { type Frame, holdAll } from '../runtime';
 import {
   BOOL,
@@ -64,7 +64,7 @@ interface IteratorInfo {
   category: IteratorCategory;
   isReverse: boolean;
   isOutput?: boolean;
-  appendMethod?: FunctionInfo;
+  outputContainer?: Type;
 }
 
 function iteratorInfo(type: Type): IteratorInfo | undefined {
@@ -84,7 +84,7 @@ function iteratorInfo(type: Type): IteratorInfo | undefined {
       category: 'forward',
       isReverse: false,
       isOutput: true,
-      appendMethod: type.cls.library.appendMethod,
+      outputContainer: type.cls.library.outputContainer,
     };
   }
   return undefined;
@@ -179,24 +179,18 @@ class Output {
     private readonly start: Ptr,
     private readonly info: IteratorInfo,
     private readonly frame: Frame,
-    private readonly operations: ElementOperations,
-    private readonly prepare: ReturnType<typeof assignmentSource>
+    private readonly assign: ReturnType<typeof outputAssignment>
   ) {}
 
   write(value: Value): void {
-    this.prepare(this.frame, value, (converted) => this.writeConverted(converted));
+    this.assign(this.frame, () => this.location(), value);
+    this.position++;
   }
 
-  private writeConverted(value: Value): void {
-    const append = this.info.appendMethod;
-    if (append) {
-      const argument = append.params[0].type.kind === 'reference' ? locationOf(value) : value;
-      invoke(this.frame, append, [argument], this.start, append.row);
-      return;
-    }
+  private location(): Ptr {
+    if (this.info.isOutput) return this.start;
     const offset = this.info.isReverse ? -1 - this.position : this.position;
-    assignElement(this.frame, this.start.offset(offset), this.operations, value);
-    this.position++;
+    return this.start.offset(offset);
   }
 
   get end(): Ptr {
@@ -728,16 +722,10 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       if (!info || !output || args.length !== (name === 'copy' ? 3 : 4)) return;
       const predicate = name === 'copy_if' ? predicateOf(args[3], iteratorOperand(info)) : undefined;
       if (name === 'copy_if' && !predicate) return;
-      const ops = elementOperations(
-        compiler(),
-        unqualified(output.element),
-        args[2].row,
-        output.isOutput ? 'copy' : 'assign'
-      );
-      const convert = assignmentSource(compiler(), iteratorOperand(info), output.element, args[2].row);
+      const assign = outputAssignment(compiler(), iteratorOperand(info), output, args[2].row);
       return native(name, params(args), unqualified(args[2].type), ([first, last, start], { frame }) => {
         const values = range(first, last, info);
-        const out = new Output(start as Ptr, output, frame, ops, convert);
+        const out = new Output(start as Ptr, output, frame, assign);
         for (let index = 0; index < values.length; index++) {
           const value = values.location(index);
           if (!predicate || truthy(predicate(frame, value))) out.write(value);
@@ -759,14 +747,12 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       second ? [iteratorOperand(info), iteratorOperand(second)] : [iteratorOperand(info)]
     );
     if (!operation) return;
-    const destination = unqualified(output.element);
-    const ops = elementOperations(compiler(), destination, args[0].row, output.isOutput ? 'copy' : 'assign');
-    const prepare = assignmentSource(compiler(), operation, destination, args[0].row);
+    const assign = outputAssignment(compiler(), operation, output, args[0].row);
     return native('transform', params(args), unqualified(args[isBinary ? 3 : 2].type), (values, { frame }) => {
       const [first, last] = values;
       const source = range(first, last, info);
       const others = second ? rangeWithLength(values[2], source.length, second) : undefined;
-      const out = new Output(values[isBinary ? 3 : 2] as Ptr, output, frame, ops, prepare);
+      const out = new Output(values[isBinary ? 3 : 2] as Ptr, output, frame, assign);
       for (let index = 0; index < source.length; index++) {
         withTemporaries(frame, () => {
           const result = others
@@ -858,16 +844,10 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       : binaryStep(compiler(), '+', operands, args[0].row);
     if (!add) return;
     const accumulator = numericAccumulator(compiler(), sumType, add, args[0].row);
-    const ops = elementOperations(
-      compiler(),
-      unqualified(output.element),
-      args[2].row,
-      output.isOutput ? 'copy' : 'assign'
-    );
-    const convert = assignmentSource(compiler(), { type: sumType }, output.element, args[2].row);
+    const assign = outputAssignment(compiler(), { type: sumType }, output, args[2].row);
     return native('partial_sum', params(args), unqualified(args[2].type), ([first, last, start], { frame }) => {
       const values = range(first, last, info);
-      const out = new Output(start as Ptr, output, frame, ops, convert);
+      const out = new Output(start as Ptr, output, frame, assign);
       if (values.length === 0) return out.end;
       return withTemporaries(frame, () => {
         const initial = accumulator.ops.copy(frame, values.get(0));
@@ -1217,7 +1197,7 @@ function backInserter(library: Library, container: Type, appendMethod: FunctionI
   const cls = new ClassInfo(`std::back_insert_iterator<${typeName(container)}>`, 'class');
   cls.isComplete = true;
   const element = unqualified(nonReference(appendMethod.params[0].type));
-  cls.library = { kind: 'back_insert_iterator', args: [element], size: 8, align: 8, appendMethod };
+  cls.library = { kind: 'back_insert_iterator', args: [element], size: 8, align: 8, outputContainer: container };
   cls.operations = {
     copyIsNoexcept: true,
     copy: (_frame, value) => value,
@@ -1361,6 +1341,27 @@ function compareStringBytes(frame: Frame, left: string, right: string): boolean 
 
 function stringValueBytes(value: Value): string {
   return (value as StringValue).bytes;
+}
+
+function outputAssignment(compiler: ExpressionCompiler, operand: CallbackOperand, output: IteratorInfo, row: number) {
+  const active: { destination: () => Ptr; value: Value }[] = [];
+  const container = output.outputContainer;
+  const [target, source] = callbackOperands([{ type: container ?? output.element }, operand], row, (_frame, index) =>
+    index === 0 ? active.at(-1)?.destination() : active.at(-1)?.value
+  );
+  const { run } = compiler.withLibraryAccess(() => {
+    if (!container) return compiler.assign('=', target, source, row);
+    const argument = compiler.convert(source, constRef(output.element), row);
+    return compiler.callWith(compiler.member(target, 'push_back', row), [argument], row);
+  });
+  return (frame: Frame, destination: () => Ptr, value: Value): void => {
+    active.push({ destination, value });
+    try {
+      withTemporaries(frame, () => run(frame));
+    } finally {
+      active.pop();
+    }
+  };
 }
 
 function assignmentSource(

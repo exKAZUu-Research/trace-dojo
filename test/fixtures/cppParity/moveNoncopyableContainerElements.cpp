@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <deque>
 #include <iostream>
+#include <iterator>
 #include <list>
 #include <map>
 #include <queue>
@@ -30,6 +31,8 @@ Wrapper slicedResult() { return DerivedWrapper(4); }
 bool smaller(const Wrapper& a, const Wrapper& b) { return a.items.size() < b.items.size(); }
 bool hasOne(const Wrapper& a) { return a.items.size() == 1; }
 bool sameSize(const Wrapper& a, const Wrapper& b) { return a.items.size() == b.items.size(); }
+Wrapper sized(int length) { return Wrapper{std::vector<Item>(length)}; }
+Wrapper combined(int left, int right) { return sized(left + right); }
 
 struct Component {
   Component() {}
@@ -148,4 +151,16 @@ int main() {
   auto distinct = std::unique(duplicate, duplicate + 3, sameSize);
   std::cout << (distinct - duplicate) << ' ' << duplicate[0].items.size()
             << ' ' << duplicate[1].items.size() << '\n';
+
+  int lengths[] = {1, 2};
+  Wrapper output[2];
+  output[0] = sized(10);
+  std::transform(lengths, lengths + 2, output, sized);
+  std::cout << output[0].items.size() << ' ' << output[0].items.capacity() << '\n';
+  output[0] = sized(10);
+  std::transform(lengths, lengths + 2, lengths, output, combined);
+  std::cout << output[0].items.size() << ' ' << output[0].items.capacity() << '\n';
+  std::vector<Wrapper> appended;
+  std::transform(lengths, lengths + 2, std::back_inserter(appended), sized);
+  std::cout << appended[0].items.size() << ' ' << appended[1].items.size() << '\n';
 }

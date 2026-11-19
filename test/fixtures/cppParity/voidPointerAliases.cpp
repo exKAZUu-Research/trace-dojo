@@ -17,7 +17,7 @@ int main() {
   int* exact = static_cast<int*>(erased);
   unsigned int* corresponding = static_cast<unsigned int*>(erased);
   unsigned char* bytes = static_cast<unsigned char*>(erased);
-  std::cout << (exact == values + 1) << ' ' << corresponding[-1] << ' '
+  std::cout << (exact == values + 1) << ' ' << *corresponding << ' '
             << int(bytes[0]) << ' ' << int(bytes[3]) << '\n';
   *corresponding = 0x11223355u;
   bytes[1] = 0x66;

@@ -183,7 +183,9 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
         );
       }
       reserve(frame, items.length);
-      return make(editor.construct(frame, items.length, (index) => ops().copy(frame, items[index])));
+      return editor.construct(frame, make([]), items.length, (index, destination) =>
+        ops().copy(frame, items[index], destination)
+      );
     },
     assign: (frame, target, source) => {
       const to = target as SequenceValue;
@@ -216,7 +218,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
         checkVectorLength(frame, library, kind, element, count);
         const n = asNumber(count);
         reserve(frame, n);
-        return make(editor.construct(frame, n, () => ops().make(frame)));
+        return editor.construct(frame, make([]), n, (_index, destination) => ops().make(frame, destination));
       },
       {
         isExplicit: true,
@@ -247,7 +249,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
           const n = asNumber(count);
           reserve(frame, n);
           const source = (value as Ptr).read();
-          return make(editor.construct(frame, n, () => ops().copy(frame, source)));
+          return editor.construct(frame, make([]), n, (_index, destination) => ops().copy(frame, source, destination));
         },
         { uses: (row) => requireElementUse(library.compiler, element, row, 'copy') }
       ),
@@ -265,8 +267,8 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
             ([first, last], { frame }) => {
               const source = range.read(first, last);
               reserve(frame, source.values.length);
-              return make(
-                editor.construct(frame, source.values.length, (index) => source.construct(frame, source.values[index]))
+              return editor.construct(frame, make([]), source.values.length, (index, destination) =>
+                source.construct(frame, source.values[index], destination)
               );
             },
             { uses: (row) => library.compiler.requireLibraryObjectUse(element, 'destroy', row) }
@@ -332,11 +334,11 @@ export function iteratorRange(
   const isSameType =
     typeName(unqualified(from)) === typeName(target) &&
     (target.kind !== 'class' || (from.kind === 'class' && from.cls === target.cls));
-  let construct: Source['construct'] = (frame, value) => ops().copy(frame, value);
+  let construct: Source['construct'] = (frame, value, destination) => ops().copy(frame, value, destination);
   if (isSameType) requireElementUse(compiler, element, first.row, 'copy');
   if (!isSameType) {
     const slot: Expr = { type: from, isLvalue: true, row: first.row, run: (frame) => frame.pending.at(-1) as Ptr };
-    let run: Eval<Value>;
+    let run: ReturnType<typeof constructElement>;
     try {
       run =
         output === 'assign'
@@ -346,10 +348,10 @@ export function iteratorRange(
       if (error instanceof CompileError) return;
       throw error;
     }
-    construct = (frame, value) => {
+    construct = (frame, value, destination) => {
       frame.pending.push(locationOf(value));
       try {
-        return run(frame);
+        return run(frame, destination);
       } finally {
         frame.pending.pop();
       }
@@ -542,7 +544,7 @@ function sequenceMethods(
   method('clear', [], VOID, (self, _args, frame) => editor.truncate(frame, self, 0));
   method('push_back', [constRef(element)], VOID, (self, [value], frame) => {
     reserve(frame, 1);
-    editor.append(frame, self, 1, () => ops().copy(frame, (value as Ptr).read()));
+    editor.append(frame, self, 1, (target) => ops().copy(frame, (value as Ptr).read(), target));
   });
   method('pop_back', [], VOID, (self, _args, frame) => {
     nonEmpty(self);
@@ -632,13 +634,13 @@ function sequenceMethods(
     checkVectorLength(frame, library, kind, element, count);
     const n = asNumber(count);
     reserve(frame, Math.max(0, n - self.items.length));
-    editor.resize(frame, self, n, () => ops().make(frame));
+    editor.resize(frame, self, n, (target) => ops().make(frame, target));
   });
   method('resize', [SIZE_T, constRef(element)], VOID, (self, [count, value], frame) => {
     checkVectorLength(frame, library, kind, element, count);
     const n = asNumber(count);
     reserve(frame, Math.max(0, n - self.items.length));
-    editor.resize(frame, self, n, () => ops().copy(frame, (value as Ptr).read()));
+    editor.resize(frame, self, n, (target) => ops().copy(frame, (value as Ptr).read(), target));
   });
   method('assign', [SIZE_T, constRef(element)], VOID, (self, [count, value], frame) => {
     checkVectorLength(frame, library, kind, element, count);
@@ -737,6 +739,7 @@ function listMethods(
         return false;
       })
     );
+    self.releaseElements(removed);
     editor.destroy(frame, removed);
     return BigInt(removed.length);
   });
@@ -760,6 +763,7 @@ function listMethods(
         return true;
       })
     );
+    self.releaseElements(removed);
     editor.destroy(frame, removed);
     return BigInt(removed.length);
   };
@@ -878,7 +882,7 @@ function rvalueInsertion(
           editor.insert(frame, sequence, index, location, true);
           return sequence.iteratorLocation(index);
         }
-        const make = (): Value => constructElementFromRvalue(frame, element, location.read());
+        const make = (target?: CObject): Value => constructElementFromRvalue(frame, element, location.read(), target);
         if (isFront) sequence.splice(0, 0, make());
         else editor.append(frame, sequence, 1, make);
         return;
@@ -1076,9 +1080,11 @@ function sequenceList(
   const list = listElementsOf(inits, () => editor.ops);
   const run: Eval<Value> = (frame) =>
     list(frame, ({ values, construct }) =>
-      make(
-        editor.ops.destroy ? editor.construct(frame, values.length, (index) => construct(frame, values[index])) : values
-      )
+      editor.ops.destroy
+        ? editor.construct(frame, make([]), values.length, (index, destination) =>
+            construct(frame, values[index], destination)
+          )
+        : make(values)
     );
   listElements.set(run, inits);
   return run;
@@ -1133,19 +1139,25 @@ function emplacement(
         return sequence.location(0);
       }
       if (member === 'emplace_back') {
-        editor.append(frame, sequence, 1, () => value(frame));
+        editor.append(frame, sequence, 1, (target) => value(frame, target));
         return sequence.location(sequence.items.length - 1);
       }
       const at = positionOf(sequence, (position as Eval)(frame));
-      editor.emplace(frame, sequence, at, () => value(frame));
+      editor.emplace(frame, sequence, at, (target) => value(frame, target));
       return sequence.iteratorLocation(at);
     },
   };
 }
 
 /** Compiles the construction of an element from arguments, as `emplace_back` and the like do. */
-export function constructElement(compiler: ExpressionCompiler, element: Type, args: Expr[], row: number): Eval<Value> {
-  return elementConstruction(compiler, element, args, row).run as Eval<Value>;
+export function constructElement(
+  compiler: ExpressionCompiler,
+  element: Type,
+  args: Expr[],
+  row: number
+): (frame: Frame, destination?: CObject) => Value {
+  const { run } = elementConstruction(compiler, element, args, row);
+  return (frame, destination) => run(frame, undefined, destination) as Value;
 }
 
 export function elementConstruction(compiler: ExpressionCompiler, element: Type, args: Expr[], row: number): Expr {
@@ -1160,7 +1172,8 @@ export function elementConstruction(compiler: ExpressionCompiler, element: Type,
         type: element,
         isLvalue: false,
         row,
-        run: (frame) => constructElementFromRvalue(frame, element, source(frame).read()),
+        run: (frame, _zeroInitialize, destination) =>
+          constructElementFromRvalue(frame, element, source(frame).read(), destination),
       };
     }
     if (element.kind === 'class') return compiler.constructObject(element.cls, args, row, false);

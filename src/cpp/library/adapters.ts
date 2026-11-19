@@ -16,7 +16,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { type Ptr, type Value } from '../values';
+import { type CObject, type Ptr, type Value } from '../values';
 import { comparatorOrder } from './associative';
 import { SequenceValue } from './containerValues';
 import {
@@ -78,7 +78,7 @@ export function adapterClass(
     sequence.capacity = items.length;
     return sequence;
   };
-  const push = (frame: Frame, self: SequenceValue, create: () => Value): void => {
+  const push = (frame: Frame, self: SequenceValue, create: (target?: CObject) => Value): void => {
     frame.runtime.reserve(1);
     editor.append(frame, self, 1, create);
     if (kind === 'priority_queue') new Heap(frame, self, ops(), less).push();
@@ -126,9 +126,7 @@ export function adapterClass(
         return;
       }
       if (isConstType(object.type)) return compiler_.error(row, `const の ${cls.name} には ${member} を使えません。`);
-      const create = source
-        ? (frame: Frame, bound: unknown): Value => constructElementFromRvalue(frame, element, (bound as Ptr).read())
-        : constructElement(compiler_, element, args, row);
+      const construct = source ? undefined : constructElement(compiler_, element, args, row);
       if (source && kind !== 'priority_queue') requireMoveConstruction(compiler_, element, row);
       const self = compiler_.objectOf(object);
       const result = member === 'emplace' && kind !== 'priority_queue' ? reference : VOID;
@@ -139,16 +137,22 @@ export function adapterClass(
         run: (frame) =>
           holdAll(frame, [self, source ?? (() => {})], ([receiver, bound]) => {
             const sequence = (receiver as Ptr).read() as SequenceValue;
-            push(frame, sequence, () => create(frame, bound));
+            push(frame, sequence, (target) =>
+              construct
+                ? construct(frame, target)
+                : constructElementFromRvalue(frame, element, (bound as Ptr).read(), target)
+            );
             if (result.kind !== 'void') return sequence.location(sequence.items.length - 1);
           }),
       };
     },
     constructingMembers: ['emplace'],
   };
-  const copyItems = (frame: Frame, { items }: SequenceValue): Value[] => {
+  const copyItems = (frame: Frame, { items }: SequenceValue): SequenceValue => {
     frame.runtime.reserve(items.length);
-    return editor.construct(frame, items.length, (index) => ops().copy(frame, items[index]));
+    return editor.construct(frame, make([]), items.length, (index, destination) =>
+      ops().copy(frame, items[index], destination)
+    );
   };
   const storageOperations = storage.cls.operations;
   if (storageOperations) {
@@ -163,14 +167,13 @@ export function adapterClass(
   }
   cls.constructors = [nativeConstructor(cls, [], () => make([]))];
   if (compareType) {
-    const fromItems = (frame: Frame, items: Value[]): SequenceValue => {
-      const sequence = make(items);
+    const heapify = (frame: Frame, sequence: SequenceValue): SequenceValue => {
       return holdAll(frame, [() => sequence], () => {
         try {
           new Heap(frame, sequence, ops(), less).build();
           return sequence;
         } catch (error) {
-          if (error instanceof CppException) editor.destroy(frame, items);
+          if (error instanceof CppException) editor.destroy(frame, sequence.items);
           throw error;
         }
       });
@@ -181,7 +184,7 @@ export function adapterClass(
       nativeConstructor(
         cls,
         [constRef(compareType), constRef(storage)],
-        ([, from], { frame }) => fromItems(frame, copyItems(frame, (from as Ptr).read() as SequenceValue)),
+        ([, from], { frame }) => heapify(frame, copyItems(frame, (from as Ptr).read() as SequenceValue)),
         {
           uses: (row) => {
             requireElementUse(compiler, element, row, 'copy');
@@ -203,9 +206,11 @@ export function adapterClass(
             ([first, last], { frame }) => {
               const source = range.read(first, last);
               frame.runtime.reserve(source.values.length);
-              return fromItems(
+              return heapify(
                 frame,
-                editor.construct(frame, source.values.length, (index) => source.construct(frame, source.values[index]))
+                editor.construct(frame, make([]), source.values.length, (index, destination) =>
+                  source.construct(frame, source.values[index], destination)
+                )
               );
             },
             { uses }
@@ -218,7 +223,7 @@ export function adapterClass(
       nativeConstructor(
         cls,
         [constRef(storage)],
-        ([from], { frame }) => make(copyItems(frame, (from as Ptr).read() as SequenceValue)),
+        ([from], { frame }) => copyItems(frame, (from as Ptr).read() as SequenceValue),
         {
           isExplicit: true,
           uses: (row) => compiler.requireLibraryObjectUse(element, 'copy', row),
@@ -241,7 +246,7 @@ export function adapterClass(
   method('size', [], SIZE_T, (self) => BigInt(self.items.length), true);
   method('empty', [], BOOL, (self) => (self.items.length === 0 ? 1 : 0), true);
   method('push', [constRef(element)], VOID, (self, [value], frame) =>
-    push(frame, self, () => ops().copy(frame, (value as Ptr).read()))
+    push(frame, self, (target) => ops().copy(frame, (value as Ptr).read(), target))
   );
   method('pop', [], VOID, (self, _args, frame) => {
     nonEmpty(self);

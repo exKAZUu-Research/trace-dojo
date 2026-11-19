@@ -1,7 +1,7 @@
 import type { DisplayNode } from '../../problems/trace';
 import { CppRuntimeError } from '../errors';
 import type { Type } from '../types';
-import { type ArrayStore, Ptr, Store, UNINIT, type Value } from '../values';
+import { type ArrayStore, CObject, Ptr, Store, UNINIT, type Value } from '../values';
 
 interface IndexedValue {
   index: number;
@@ -79,6 +79,10 @@ export class NodePositions {
     this.end = new NodePosition(this.owner, undefined);
   }
 
+  install(node: NodePosition): void {
+    this.positions.set(node.index, node);
+  }
+
   invalidateFrom(index: number): void {
     this.invalidateEnd();
     for (const [position, node] of this.positions) {
@@ -133,7 +137,7 @@ export class NodePositions {
 /** The elements of a sequence container: `std::vector`, `std::deque`, `std::array`, or `std::list`. */
 export class SequenceValue extends Store {
   constructor(
-    public items: Value[],
+    private cells: Value[],
     readonly elementType: Type,
     /** Whether the trace shows the container as an array, as it shows a Java array. */
     public isArrayLike: boolean,
@@ -147,8 +151,19 @@ export class SequenceValue extends Store {
 
   private readonly nodes?: NodePositions;
   private dequeEpoch?: { all: number; end: number };
+  private constructingEnd?: { location: NodePosition; value: Value };
+
+  get items(): Value[] {
+    return this.cells;
+  }
+
+  set items(values: Value[]) {
+    this.cells = values;
+    this.bindElements(0, values.length);
+  }
 
   override location(index: number): Ptr {
+    if (this.constructingEnd && index === this.length + 1) return new Ptr(this, index);
     return this.fixedStorage?.location(index) ?? this.nodes?.at(index) ?? super.location(index);
   }
 
@@ -160,13 +175,34 @@ export class SequenceValue extends Store {
   append(value: Value): void {
     if (this.dequeEpoch) this.dequeEpoch.all++;
     if (this.storageKind === 'vector') this.nodes?.invalidateEnd();
-    this.items.push(value);
+    const index = this.items.push(value) - 1;
+    this.bindElements(index, index + 1);
+  }
+
+  appendInPlace(initialize: (location: Ptr) => Value): void {
+    const location = new NodePosition(this, this.length);
+    this.constructingEnd = { location, value: UNINIT };
+    try {
+      const value = initialize(location);
+      this.nodes?.install(location);
+      this.append(value);
+    } catch (error) {
+      location.position = -1;
+      throw error;
+    } finally {
+      this.constructingEnd = undefined;
+    }
   }
 
   splice(from: number, remove: number, ...items: Value[]): Value[] {
     const start = from < 0 ? Math.max(0, this.length + from) : from;
+    const dequeMiddle = this.storageKind === 'deque' && start > 0 && start + remove < this.length;
     this.editPositions(start, remove, items.length);
-    return this.items.splice(start, remove, ...items);
+    const removed = this.items.splice(start, remove, ...items);
+    this.releaseElements(removed);
+    if (dequeMiddle) this.bindElements(0, this.length);
+    else this.bindElements(start, this.storageKind === 'vector' ? this.length : start + items.length);
+    return removed;
   }
 
   insertValues(at: number, values: Value[]): void {
@@ -188,8 +224,40 @@ export class SequenceValue extends Store {
     this.capacity = capacity;
   }
 
+  newAllocation(length: number, capacity: number): SequenceValue {
+    const items = Array.from({ length }, (): Value => UNINIT);
+    const value = new SequenceValue(items, this.elementType, this.isArrayLike, this.storageKind);
+    value.capacity = capacity;
+    return value;
+  }
+
+  installAllocation(allocation: SequenceValue): void {
+    this.invalidateVectorSuffix(0);
+    this.takeItems(allocation);
+  }
+
   invalidateVectorSuffix(from: number): void {
     if (this.storageKind === 'vector') this.nodes?.invalidateFrom(from);
+  }
+
+  finishVectorEdit(from: number): void {
+    this.invalidateVectorSuffix(from);
+    this.bindElements(from, this.length);
+  }
+
+  bindElements(from: number, to: number): void {
+    if (this.elementType.kind !== 'class' || this.fixedStorage) return;
+    for (let index = from; index < to; index++) {
+      const item = this.items[index];
+      if (item instanceof CObject) item.bindContainerCell(this.location(index));
+    }
+  }
+
+  releaseElements(values: readonly Value[]): void {
+    if (this.elementType.kind !== 'class') return;
+    for (const value of values) {
+      if (value instanceof CObject) value.releaseContainerCell();
+    }
   }
 
   editPositions(from: number, remove: number, insert: number): void {
@@ -237,7 +305,7 @@ export class SequenceValue extends Store {
       [this.dequeEpoch, other.dequeEpoch] = [other.dequeEpoch, this.dequeEpoch];
     }
     if (this.nodes && other.nodes) this.nodes.swap(other.nodes);
-    [this.items, other.items] = [other.items, this.items];
+    [this.cells, other.cells] = [other.cells, this.cells];
     [this.capacity, other.capacity] = [other.capacity, this.capacity];
   }
 
@@ -259,22 +327,28 @@ export class SequenceValue extends Store {
     return this.items.length;
   }
 
+  override get pointerLength(): number {
+    return this.constructingEnd ? this.length + 1 : this.length;
+  }
+
   get(index: number): Value {
     this.checkAlive();
-    if (index < 0 || index >= this.items.length) throw new CppRuntimeError('outOfBounds');
-    const value = this.items[index];
+    if (index < 0 || index >= this.pointerLength) throw new CppRuntimeError('outOfBounds');
+    const value = index === this.length ? this.constructingEnd?.value : this.items[index];
     if (value === UNINIT) throw new CppRuntimeError('uninitialized');
     return value;
   }
 
   set(index: number, value: Value): void {
     this.checkAlive();
-    if (index < 0 || index >= this.items.length) throw new CppRuntimeError('outOfBounds');
-    this.items[index] = value;
+    if (index < 0 || index >= this.pointerLength) throw new CppRuntimeError('outOfBounds');
+    if (index === this.length && this.constructingEnd) this.constructingEnd.value = value;
+    else this.items[index] = value;
   }
 
   children(): Iterable<Value> {
-    return this.fixedStorage ? [this.fixedStorage] : this.items;
+    if (this.fixedStorage) return [this.fixedStorage];
+    return this.constructingEnd ? [...this.items, this.constructingEnd.value] : this.items;
   }
 }
 

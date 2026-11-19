@@ -43,7 +43,7 @@ import { StringValue } from './string';
 export interface ElementOperations {
   type: Type;
   /** A value-initialized element, as `std::vector<T>(n)` makes. */
-  make: (frame: Frame) => Value;
+  make: (frame: Frame, destination?: CObject) => Value;
   /** Whether the type has a default constructor, which `make` needs. */
   isDefaultConstructible: boolean;
   copy: (frame: Frame, value: Value, destination?: CObject) => Value;
@@ -147,10 +147,15 @@ export function moveAssignElement(frame: Frame, location: Ptr, type: Type, value
   location.write(moveValue(frame, type, location.readRaw(), value));
 }
 
-export function moveConstructElement(frame: Frame, operations: ElementOperations, source: Value): Value {
+export function moveConstructElement(
+  frame: Frame,
+  operations: ElementOperations,
+  source: Value,
+  destination?: CObject
+): Value {
   return canTransferElementStorage(operations.type)
-    ? constructElementFromRvalue(frame, operations.type, source)
-    : operations.copy(frame, source);
+    ? constructElementFromRvalue(frame, operations.type, source, destination)
+    : operations.copy(frame, source, destination);
 }
 
 export function canTransferElementStorage(type: Type): boolean {
@@ -297,7 +302,7 @@ export function elementOperations(
     const { cls } = type;
     const operations = cls.operations;
     let checkedDefault = false;
-    let construct: ((frame: Frame) => Value) | undefined;
+    let construct: ElementOperations['make'] | undefined;
     const findDefault = (): typeof construct => {
       if (!checkedDefault) {
         checkedDefault = true;
@@ -307,10 +312,10 @@ export function elementOperations(
     };
     return {
       type,
-      make: (frame) => {
+      make: (frame, destination) => {
         const make = findDefault();
         if (!make) throw new CppRuntimeError('custom', `${cls.name} のオブジェクトは、引数なしでは作れません。`);
-        return make(frame);
+        return make(frame, destination);
       },
       get isDefaultConstructible() {
         return findDefault() !== undefined;
@@ -392,9 +397,10 @@ function defaultConstructor(
   compiler: ExpressionCompiler,
   cls: ClassInfo,
   row: number
-): ((frame: Frame) => Value) | undefined {
+): ElementOperations['make'] | undefined {
   try {
-    return compiler.withLibraryAccess(() => compiler.defaultConstructed(cls, row, true).run as Eval<Value>);
+    const { run } = compiler.withLibraryAccess(() => compiler.defaultConstructed(cls, row, true));
+    return (frame, destination) => run(frame, undefined, destination) as Value;
   } catch {
     return undefined;
   }

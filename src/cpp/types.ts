@@ -571,11 +571,17 @@ export function baseSubobjectOffset(derived: ClassInfo, base: ClassInfo): number
   return offset;
 }
 
+export function fieldSubobjectOffset(derived: ClassInfo, field: FieldInfo): number {
+  const own = classLayout(field.owner).fieldOffsets?.get(field.index) ?? 0;
+  return baseSubobjectOffset(derived, field.owner) + own;
+}
+
 interface ClassLayout {
   size: number;
   align: number;
   dataSize: number;
   baseOffset: number;
+  fieldOffsets?: ReadonlyMap<number, number>;
   atOrigin: ReadonlySet<ClassInfo>;
 }
 
@@ -606,6 +612,7 @@ function classLayout(cls: ClassInfo): ClassLayout {
     }
     align = Math.max(align, base.align);
   }
+  const fieldOffsets = new Map<number, number>();
   for (const field of cls.ownFields) {
     // A reference member takes the room of a pointer, though `sizeof` of a reference type is that of its referent.
     const type = field.type.kind === 'reference' ? pointerTo(field.type.to) : field.type;
@@ -614,11 +621,13 @@ function classLayout(cls: ClassInfo): ClassLayout {
     const members = at === 0 ? typesAtOrigin(type) : undefined;
     const hasConflict = members && emptyBase && [...members].some((member) => emptyBase.has(member));
     if (members && !hasConflict) for (const member of members) atOrigin.add(member);
-    offset = at + (hasConflict ? fieldAlign : 0) + sizeOf(type);
+    const fieldOffset = at + (hasConflict ? fieldAlign : 0);
+    fieldOffsets.set(field.index, fieldOffset);
+    offset = fieldOffset + sizeOf(type);
     align = Math.max(align, fieldAlign);
   }
   const size = Math.ceil(offset / align) * align;
-  const layout = { size: size === 0 ? 1 : size, align, dataSize: offset, baseOffset, atOrigin };
+  const layout = { size: size === 0 ? 1 : size, align, dataSize: offset, baseOffset, fieldOffsets, atOrigin };
   if (cls.isComplete) completedLayouts.set(cls, layout);
   return layout;
 }

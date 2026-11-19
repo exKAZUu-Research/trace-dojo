@@ -17,7 +17,7 @@ struct VirtualDerived : VirtualBase {
   ~VirtualDerived() { destroyed += 2; }
 };
 
-struct Plain { int values[2]; };
+struct Plain { int value; int other; };
 struct Tagged : Plain { virtual void identify() {} };
 struct Extended : Tagged {};
 
@@ -62,8 +62,10 @@ int main() {
   Plain* heapBase = allocated;
   std::cout << (static_cast<void*>(localBase) == static_cast<void*>(&extended))
             << (static_cast<void*>(tagged) == static_cast<void*>(&extended))
+            << (static_cast<void*>(localBase) == static_cast<void*>(&extended.value))
             << (static_cast<void*>(localBase + 1) == static_cast<void*>(&extended + 1))
             << (static_cast<void*>(heapBase) == static_cast<void*>(allocated))
+            << (static_cast<void*>(heapBase) == static_cast<void*>(&allocated->value))
             << (static_cast<void*>(heapBase + 1) == static_cast<void*>(allocated + 1)) << '\n';
   delete allocated;
 }
