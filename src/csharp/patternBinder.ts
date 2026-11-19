@@ -112,7 +112,7 @@ export abstract class PatternBinder extends ExpressionBinder {
       this.error(
         position,
         'CS8116',
-        `null 許容型 '${displayType(type)}' をパターンで使用することはできません。代わりに基となる型 '${displayType(type.args[0])}' を使用してください。`
+        `パターンで Null 許容型 '${displayType(type)}' を使用することはできません。代わりに基になる型 '${displayType(type.args[0])}' をご使用ください。`
       );
       return;
     }
@@ -121,7 +121,7 @@ export abstract class PatternBinder extends ExpressionBinder {
       this.error(
         position,
         'CS8121',
-        `型 '${displayType(inputType)}' の式を型 '${displayType(type)}' のパターンで処理することはできません。`
+        `種類 '${displayType(inputType)}' の式は、種類 '${displayType(type)}' のパターンで処理することができません。`
       );
     }
   }
@@ -193,7 +193,7 @@ export abstract class PatternBinder extends ExpressionBinder {
       this.error(
         pattern,
         'CS8781',
-        `リレーショナル パターンは型 '${displayType(comparedType)}' の値には使用できません。`
+        `リレーショナル パターンは、'${displayType(comparedType)}' 型の値に使用することはできません。`
       );
       return { kind: 'relational', operator: pattern.operator, value, operandKind: 'int', inputType };
     }

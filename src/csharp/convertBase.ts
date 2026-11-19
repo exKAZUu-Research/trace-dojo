@@ -54,10 +54,11 @@ export function unescape(node: Node, text: string): string {
   const simple = SIMPLE_ESCAPES[text];
   if (simple !== undefined) return simple;
   const hex = /^\\(?:u([\dA-Fa-f]{4})|U([\dA-Fa-f]{8})|x([\dA-Fa-f]{1,4}))$/.exec(text);
-  if (!hex) throw new CompileError([{ row: node.startPosition.row, message: 'エスケープ シーケンスが無効です' }]);
+  if (!hex)
+    throw new CompileError([{ row: node.startPosition.row, message: 'CS1009: 認識できないエスケープ シーケンスです' }]);
   const code = Number.parseInt(hex[1] ?? hex[2] ?? hex[3], 16);
   if (code > 0x10_ff_ff)
-    throw new CompileError([{ row: node.startPosition.row, message: 'エスケープ シーケンスが無効です' }]);
+    throw new CompileError([{ row: node.startPosition.row, message: 'CS1009: 認識できないエスケープ シーケンスです' }]);
   return String.fromCodePoint(code);
 }
 

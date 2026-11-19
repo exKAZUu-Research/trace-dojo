@@ -116,7 +116,7 @@ export class ExpressionConverter {
       default: {
         const what = UNSUPPORTED_TYPES[node.type];
         if (what) unsupported(node, what);
-        throw new CompileError([{ row: node.startPosition.row, message: '型が必要です' }]);
+        throw new CompileError([{ row: node.startPosition.row, message: 'CS1031: 型が必要です' }]);
       }
     }
   }
@@ -361,7 +361,7 @@ export class ExpressionConverter {
         const what = UNSUPPORTED_EXPRESSIONS[node.type];
         if (what) unsupported(node, what);
         if (node.type === 'unary_expression') unsupported(node, 'プリプロセッサ ディレクティブ（`#if` など）');
-        throw new CompileError([{ row: node.startPosition.row, message: '式が必要です' }]);
+        throw new CompileError([{ row: node.startPosition.row, message: 'CS1733: 式が必要です' }]);
       }
     }
   }
@@ -402,7 +402,7 @@ export class ExpressionConverter {
         return unsupported(node, 'ポインターの間接参照（`*`）');
       }
       default: {
-        throw new CompileError([{ row: node.startPosition.row, message: '式が必要です' }]);
+        throw new CompileError([{ row: node.startPosition.row, message: 'CS1733: 式が必要です' }]);
       }
     }
   }
@@ -484,7 +484,7 @@ export class ExpressionConverter {
 
   private convertMemberInitializer(node: Node): MemberInitializer {
     if (node.type !== 'assignment_expression' || requiredField(node, 'operator').type !== '=') {
-      throw new CompileError([{ row: node.startPosition.row, message: '無効な初期化子メンバー宣言子です' }]);
+      throw new CompileError([{ row: node.startPosition.row, message: 'CS0747: 初期化子のメンバー宣言子が無効です' }]);
     }
     const left = requiredField(node, 'left');
     const right = requiredField(node, 'right');
@@ -499,7 +499,7 @@ export class ExpressionConverter {
         ...positionOf(node),
       };
     }
-    throw new CompileError([{ row: node.startPosition.row, message: '無効な初期化子メンバー宣言子です' }]);
+    throw new CompileError([{ row: node.startPosition.row, message: 'CS0747: 初期化子のメンバー宣言子が無効です' }]);
   }
 
   private convertWithMembers(node: Node): MemberInitializer[] {
@@ -800,7 +800,7 @@ export class ExpressionConverter {
         ...position,
       };
     }
-    throw new CompileError([{ row: node.startPosition.row, message: '識別子が必要です' }]);
+    throw new CompileError([{ row: node.startPosition.row, message: 'CS1001: 識別子がありません' }]);
   }
 
   // code-gauge-allow functionNcss 50 -- One case per kind of literal.
@@ -821,7 +821,7 @@ export class ExpressionConverter {
         const [content] = namedChildren(node);
         const text = content.type === 'escape_sequence' ? unescape(content, content.text) : content.text;
         if (text.length !== 1)
-          throw new CompileError([{ row: node.startPosition.row, message: '文字リテラル内の文字が多すぎます' }]);
+          throw new CompileError([{ row: node.startPosition.row, message: 'CS1012: 文字リテラルに文字が多すぎます' }]);
         return { type: 'char', value: text.charCodeAt(0) };
       }
       case 'string_literal': {
@@ -882,7 +882,7 @@ export class ExpressionConverter {
       else if (part.type === 'interpolation_format_clause') format = part.text.slice(1);
       else if (part.type !== 'interpolation_brace') expression = this.convertExpression(part);
     }
-    if (!expression) throw new CompileError([{ row: node.startPosition.row, message: '式が必要です' }]);
+    if (!expression) throw new CompileError([{ row: node.startPosition.row, message: 'CS1733: 式が必要です' }]);
     return { expression, alignment, format };
   }
 }
@@ -894,7 +894,7 @@ function rankOf(rank: Node): number {
 function parseIntegerLiteral(node: Node): LiteralValue {
   const text = node.text;
   const match = /^(0[xX][\dA-Fa-f_]+|0[bB][01_]+|[\d_]+)([uUlL]*)$/.exec(text);
-  if (!match) throw new CompileError([{ row: node.startPosition.row, message: '整数定数が無効です' }]);
+  if (!match) throw new CompileError([{ row: node.startPosition.row, message: 'CS1021: 整数定数が大きすぎます' }]);
   const digits = match[1].replaceAll('_', '');
   const value = BigInt(digits);
   const suffixText = match[2].toLowerCase();
@@ -917,7 +917,7 @@ function dedentRaw(node: Node, inner: string): string {
     throw new CompileError([
       {
         row: node.startPosition.row,
-        message: '複数行の生文字列リテラルの終わりの区切り記号は、独自の行に存在する必要があります。',
+        message: 'CS9000: 生文字列リテラルの区切り記号は、独自の行に置かれる必要があります。',
       },
     ]);
   }
@@ -928,7 +928,7 @@ function dedentRaw(node: Node, inner: string): string {
       throw new CompileError([
         {
           row: node.startPosition.row,
-          message: '複数行の生文字列リテラルの行は、閉じる引用符と同じ空白で始まる必要があります。',
+          message: 'CS8999: 行の先頭が生文字列リテラルの終了行と同じ空白ではありません。',
         },
       ]);
     }
@@ -947,7 +947,7 @@ function dedentRawParts(node: Node, parts: InterpolationPart[]): InterpolationPa
     throw new CompileError([
       {
         row: node.startPosition.row,
-        message: '複数行の生文字列リテラルの終わりの区切り記号は、独自の行に存在する必要があります。',
+        message: 'CS9000: 生文字列リテラルの区切り記号は、独自の行に置かれる必要があります。',
       },
     ]);
   }

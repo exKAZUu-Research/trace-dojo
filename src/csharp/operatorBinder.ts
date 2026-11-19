@@ -142,7 +142,7 @@ export abstract class OperatorBinder extends ConversionBinder {
       this.error(
         row,
         'CS0034',
-        `演算子 '${operator}' は型 '${displayType(left.type)}' および '${displayType(right.type)}' のオペランドに対してあいまいです`
+        `型 '${displayType(left.type)}' および '${displayType(right.type)}' のオペランドの演算子 '${operator}' があいまいです`
       );
       return { kind: 'binary', operator, left, right, operandKind: 'int', isLifted: false, type: ERROR_TYPE, row };
     }

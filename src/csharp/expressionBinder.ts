@@ -122,7 +122,7 @@ export abstract class ExpressionBinder extends MemberBinder {
           !nullableUnderlying(type) &&
           isReferenceType(type)
         ) {
-          this.error(node, 'CS8628', 'Null 許容参照型ではオブジェクト作成を使用できません。');
+          this.error(node, 'CS8628', 'オブジェクト作成では Null 許容参照型を使用できません。');
         }
         return this.bindCreation(type, node.args, node.initializer, node, context);
       }
@@ -146,7 +146,7 @@ export abstract class ExpressionBinder extends MemberBinder {
         this.error(
           node,
           'CS0623',
-          '配列初期化子は、変数またはフィールド初期化子でのみ使用できます。代わりに new 式を使用してください。'
+          '配列初期化子は変数かフィールド初期化子の中でのみ使用できます。new 式を使用してください。'
         );
         return { kind: 'default', type: ERROR_TYPE, row };
       }
@@ -198,7 +198,7 @@ export abstract class ExpressionBinder extends MemberBinder {
         return { kind: 'is', operand, pattern, type: this.boolType, row };
       }
       case 'declaration': {
-        this.error(node, 'CS8185', '宣言は、このコンテキストでは使用できません。');
+        this.error(node, 'CS8185', '宣言はこのコンテキストでは許可されていません。');
         return { kind: 'default', type: ERROR_TYPE, row };
       }
       case 'tuple': {
@@ -217,7 +217,7 @@ export abstract class ExpressionBinder extends MemberBinder {
       }
       case 'throw': {
         if (!this.allowsThrowExpression) {
-          this.error(node, 'CS8115', 'このコンテキストでは throw 式を使用できません。');
+          this.error(node, 'CS8115', 'このコンテキストではスロー式は許可されていません。');
         }
         const value = this.bindThrowValue(node.value, context, node);
         return { kind: 'throw', value, type: NULL_TYPE, row };
@@ -325,11 +325,7 @@ export abstract class ExpressionBinder extends MemberBinder {
     }
     const number = Number(text);
     if (!Number.isFinite(number)) {
-      this.error(
-        position,
-        'CS0594',
-        `浮動小数点定数が、型 '${suffix === 'f' ? 'float' : 'double'}' の範囲外にあります`
-      );
+      this.error(position, 'CS0594', `浮動小数点定数が型 '${suffix === 'f' ? 'float' : 'double'}' の範囲外です`);
       return this.constant(0, this.specialType('double'), position.row);
     }
     if (suffix === 'f') return this.constant(Math.fround(number), this.specialType('float'), position.row);
@@ -649,7 +645,7 @@ export abstract class ExpressionBinder extends MemberBinder {
       });
     if (!node.initializer) {
       if (sizes.length === 0) {
-        this.error(node, 'CS1586', '配列の作成には配列のサイズまたは配列初期化子が必要です');
+        this.error(node, 'CS1586', '配列を作成するには、配列のサイズまたは配列の初期化子を指定する必要があります');
         return { kind: 'default', type: ERROR_TYPE, row: node.row };
       }
       return { kind: 'newArray', arrayType: type, sizes, elements: undefined, type, row: node.row };
@@ -669,7 +665,7 @@ export abstract class ExpressionBinder extends MemberBinder {
         this.error(
           initializer,
           'CS0622',
-          '配列初期化子を使用できるのは、配列型を初期化する場合のみです。代わりに新しい式を使用してください。'
+          '配列型を割り当てるには配列初期化子式だけを使用してください。new 式を使用してください。'
         );
       return { kind: 'default', type: ERROR_TYPE, row: initializer.row };
     }
@@ -678,11 +674,11 @@ export abstract class ExpressionBinder extends MemberBinder {
     const visit = (node: Extract<Expression, { kind: 'arrayInitializer' }>, depth: number): void => {
       if (lengths[depth] === undefined) lengths[depth] = node.elements.length;
       else if (lengths[depth] !== node.elements.length)
-        this.error(node, 'CS0847', `長さ '${lengths[depth]}' の配列初期化子が必要です`);
+        this.error(node, 'CS0847', `長さが '${lengths[depth]}' の配列初期化子が必要です`);
       for (const element of node.elements) {
         if (depth + 1 < type.rank) {
           if (element.kind !== 'arrayInitializer') {
-            this.error(element, 'CS0846', '入れ子にされた配列初期化子が必要です');
+            this.error(element, 'CS0846', '入れ子になった配列初期化子が必要です');
             continue;
           }
           visit(element, depth + 1);
@@ -697,7 +693,7 @@ export abstract class ExpressionBinder extends MemberBinder {
     for (const [index, size] of sizes.entries()) {
       if (size.kind !== 'constant') this.error(size.row, 'CS0150', '定数値が必要です');
       else if (Number(size.value) !== (lengths[index] ?? 0))
-        this.error(size.row, 'CS0847', `長さ '${Number(size.value)}' の配列初期化子が必要です`);
+        this.error(size.row, 'CS0847', `長さが '${Number(size.value)}' の配列初期化子が必要です`);
     }
     const lengthNodes = Array.from({ length: type.rank }, (_unused, index) =>
       this.constant(lengths[index] ?? 0, this.intType, initializer.row)
@@ -733,7 +729,7 @@ export abstract class ExpressionBinder extends MemberBinder {
   // code-gauge-allow functionNcss 40 -- Each kind of tuple element binds alike.
   private bindTuple(node: Extract<Expression, { kind: 'tuple' }>, context: BindContext): BoundExpression {
     if (node.elements.length < 2) {
-      this.error(node, 'CS8124', 'タプルには少なくとも 2 つの要素が必要です。');
+      this.error(node, 'CS8124', 'タプルには 2 つ以上の要素が必要です。');
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
     const elements = node.elements.map((element) => this.bindValue(element.value, context));
@@ -958,7 +954,7 @@ export abstract class ExpressionBinder extends MemberBinder {
             this.error(
               node,
               'CS1660',
-              `ラムダ式 はデリゲート型ではないため、型 '${displayType(target)}' に変換できません`
+              `ラムダ式 はデリゲート型ではないため、'${displayType(target)}' 型に変換できません`
             );
           return undefined;
         }
@@ -967,7 +963,7 @@ export abstract class ExpressionBinder extends MemberBinder {
             this.error(
               node,
               'CS1593',
-              `デリゲート '${displayType(target)}' に ${node.parameters.length} 個の引数を指定することはできません`
+              `デリゲート '${displayType(target)}' には引数 ${node.parameters.length} を指定できません`
             );
           return undefined;
         }
@@ -979,7 +975,7 @@ export abstract class ExpressionBinder extends MemberBinder {
               this.error(
                 parameter,
                 'CS1678',
-                `パラメーター ${index + 1} は型 '${displayType(declared)}' で宣言されていますが、'${displayType(invoke.parameterTypes[index])}' である必要があります`
+                `パラメーター ${index + 1} は '${displayType(declared)}' 型として宣言しますが、'${displayType(invoke.parameterTypes[index])}' である必要があります`
               );
             return undefined;
           }
@@ -1179,7 +1175,7 @@ export abstract class ExpressionBinder extends MemberBinder {
         this.error(
           row,
           'CS0407',
-          `'${displayType(returnType)} ${displayTypeSymbol(method.owner)}.${method.name}(${method.parameters.map((parameter) => displayType(parameter.type)).join(', ')})' の戻り値の型が正しくありません`
+          `'${displayType(returnType)} ${displayTypeSymbol(method.owner)}.${method.name}(${method.parameters.map((parameter) => displayType(parameter.type)).join(', ')})' には、不適切な戻り値の型が指定されています`
         );
       return undefined;
     }
@@ -1236,7 +1232,7 @@ export abstract class ExpressionBinder extends MemberBinder {
       this.error(
         node,
         'CS9174',
-        `コレクション式の対象の型 '${displayType(target)}' に、適切なコンストラクターまたは 'Add' メソッドがないため、コレクション式に変換できません`
+        `型が構築可能でないため、コレクション式で型 '${displayType(target)}' を初期化できません。`
       );
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
@@ -1319,7 +1315,7 @@ export abstract class ExpressionBinder extends MemberBinder {
         this.error(
           member.value,
           'CS0746',
-          '無効な匿名型メンバー宣言子です。匿名型メンバーは、メンバーの割り当て、簡易名、またはメンバー アクセスで宣言する必要があります。'
+          '匿名型のメンバー宣言子が無効です。メンバー代入、簡易名、またはメンバー アクセスを使用して、匿名型メンバーを宣言する必要があります。'
         );
       const value = this.bindValue(member.value, context);
       if (value.type.kind === 'null' || value.kind === 'unbound' || value.type.kind === 'void') {
@@ -1411,7 +1407,7 @@ export abstract class ExpressionBinder extends MemberBinder {
       this.error(
         node,
         'CS8858',
-        `受信側の型 '${displayType(type)}' は有効なレコード型ではなく、構造体型ではありません。`
+        `レシーバーの種類 '${displayType(type)}' は有効なレコード型でも構造体型でもありません。`
       );
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
@@ -1662,7 +1658,7 @@ export abstract class ExpressionBinder extends MemberBinder {
         this.error(
           position,
           'CS8132',
-          `'${type.args.length}' 要素のタプルを '${count}' 個の変数に分解することはできません。`
+          `'${type.args.length}' 要素のタプルを '${count}' 変数に分解することはできません。`
         );
         return { elementTypes: [], deconstruct: undefined };
       }
@@ -1694,7 +1690,7 @@ export abstract class ExpressionBinder extends MemberBinder {
       this.error(
         position,
         'CS8129',
-        `型 '${displayType(type)}' の適切な 'Deconstruct' インスタンスまたは拡張メソッドが見つかりませんでした。出力パラメーターが ${count} 個で戻り値の型が void のものが必要です。`
+        `${count} out パラメーターと void 戻り値の型を持つ、型 '${displayType(type)}' の適切な分解インスタンスまたは拡張メソッドが見つかりませんでした。`
       );
       return { elementTypes: [], deconstruct: undefined };
     }
@@ -1722,13 +1718,13 @@ export abstract class ExpressionBinder extends MemberBinder {
       return { pattern, guard, value: result, row: arm.row, syntax: arm.value };
     });
     if (arms.length === 0) {
-      this.error(node, 'CS8506', 'switch 式の最適な型が見つかりませんでした。');
+      this.error(node, 'CS8506', 'switch 式に最適な型が見つかりませんでした。');
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
     const type = target ?? this.bestCommonType(arms.map((arm) => arm.value));
     if (!type) {
       if (arms.every((arm) => arm.value.kind !== 'unbound' && arm.value.type.kind !== 'null')) {
-        this.error(node, 'CS8506', 'switch 式の最適な型が見つかりませんでした。');
+        this.error(node, 'CS8506', 'switch 式に最適な型が見つかりませんでした。');
         return { kind: 'default', type: ERROR_TYPE, row: node.row };
       }
       return undefined;

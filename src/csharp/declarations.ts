@@ -192,14 +192,14 @@ export class DeclarationBinder extends BinderBase {
       this.error(
         declaration,
         'CS1527',
-        '名前空間で定義された要素は、明示的に private、protected、protected internal、または private protected として宣言することはできません'
+        '名前空間で定義された要素は明示的に private、protected、protected internal、または private protected に宣言することはできません'
       );
     }
     if (modifiers.set.has('abstract') && modifiers.set.has('sealed')) {
       this.error(
         declaration,
         'CS0418',
-        `'${declaration.name}': 抽象クラスを sealed または static にすることはできません`
+        `'${declaration.name}': 抽象型を sealed または static に指定することはできません`
       );
     }
   }
@@ -217,7 +217,7 @@ export class DeclarationBinder extends BinderBase {
         this.error(
           declaration,
           'CS1008',
-          'byte、sbyte、short、ushort、int、uint、long、または ulong のいずれかの型が必要です'
+          'byte、sbyte、short、ushort、int、uint、long または ulong のいずれかの型を使用してください'
         );
         symbol.enumUnderlying = this.intType;
       } else {
@@ -236,13 +236,13 @@ export class DeclarationBinder extends BinderBase {
         this.error(
           node,
           'CS0527',
-          `型 '${displayType(baseType)}': インターフェイス リストに含まれる型はインターフェイスではありません`
+          `インターフェイス リストの型 '${displayType(baseType)}' はインターフェイスではありません`
         );
         continue;
       }
       if (baseType.symbol.kind === 'interface') {
         if (symbol.interfaces.some((existing) => sameType(existing, baseType))) {
-          this.error(node, 'CS0528', `'${displayType(baseType)}' は既にインターフェイス リストに含まれています`);
+          this.error(node, 'CS0528', `'${displayType(baseType)}' は既にインターフェイス リストに存在します`);
         }
         symbol.interfaces.push(baseType);
         continue;
@@ -258,7 +258,7 @@ export class DeclarationBinder extends BinderBase {
           this.error(
             node,
             'CS0527',
-            `型 '${displayType(baseType)}': インターフェイス リストに含まれる型はインターフェイスではありません`
+            `インターフェイス リストの型 '${displayType(baseType)}' はインターフェイスではありません`
           );
         }
         continue;
@@ -274,7 +274,7 @@ export class DeclarationBinder extends BinderBase {
           this.error(
             node,
             'CS0509',
-            `'${displayTypeSymbol(symbol)}': シールド型 '${displayType(baseType)}' から派生することはできません`
+            `'${displayTypeSymbol(symbol)}': シール型 '${displayType(baseType)}' から派生することはできません`
           );
         continue;
       }
@@ -285,7 +285,7 @@ export class DeclarationBinder extends BinderBase {
         this.error(
           node,
           'CS0644',
-          `'${displayTypeSymbol(symbol)}' は特殊クラス '${displayType(baseType)}' から派生できません`
+          `'${displayTypeSymbol(symbol)}' は特殊クラス '${displayType(baseType)}' から派生することはできません`
         );
         continue;
       }
@@ -321,7 +321,7 @@ export class DeclarationBinder extends BinderBase {
         this.error(
           type.declaration,
           'CS0146',
-          `'${displayTypeSymbol(type.symbol)}' と '${displayType(type.symbol.baseType ?? this.objectType)}' を含む、循環する基底クラスの依存関係です`
+          `'${displayTypeSymbol(type.symbol)}' と '${displayType(type.symbol.baseType ?? this.objectType)}' を含む、循環する基本データ型の依存関係です`
         );
         type.symbol.baseType = this.objectType;
         return;
@@ -355,7 +355,11 @@ export class DeclarationBinder extends BinderBase {
     for (const clause of clauses) {
       const parameter = parameters.find((candidate) => candidate.name === clause.name);
       if (!parameter) {
-        this.error(clause, 'CS0699', `'${context.type?.name ?? ''}' は型パラメーター '${clause.name}' を定義しません`);
+        this.error(
+          clause,
+          'CS0699',
+          `'${context.type?.name ?? ''}' は、型のパラメーター '${clause.name}' を定義しません`
+        );
         continue;
       }
       for (const constraint of clause.constraints) {
@@ -443,13 +447,13 @@ export class DeclarationBinder extends BinderBase {
               this.error(
                 declarator,
                 'CS0708',
-                `'${declarator.name}': 静的クラスでインスタンス メンバーを宣言できません`
+                `'${declarator.name}': 静的クラスでインスタンスのメンバーを宣言することはできません`
               );
             if (field.isConst && member.modifiers.set.has('static'))
               this.error(
                 declarator,
                 'CS0504',
-                `定数 '${displayTypeSymbol(symbol)}.${declarator.name}' を静的としてマークすることはできません`
+                `定数 '${displayTypeSymbol(symbol)}.${declarator.name}' を static に設定することはできません`
               );
             if (
               symbol.kind === 'struct' &&
@@ -484,7 +488,7 @@ export class DeclarationBinder extends BinderBase {
               this.error(
                 declarator,
                 'CS0066',
-                `'${displayTypeSymbol(symbol)}.${declarator.name}': イベントはデリゲート型でなければなりません`
+                `'${displayTypeSymbol(symbol)}.${declarator.name}': イベントはデリゲート型である必要があります`
               );
             }
             this.addMember(symbol, field, declarator);
@@ -524,7 +528,7 @@ export class DeclarationBinder extends BinderBase {
           break;
         }
         case 'destructor': {
-          if (symbol.kind !== 'class') this.error(member, 'CS0575', 'クラス型のみがデストラクターを含むことができます');
+          if (symbol.kind !== 'class') this.error(member, 'CS0575', 'クラスのみがデストラクターを含むことができます');
           break;
         }
         case 'property':
@@ -589,25 +593,12 @@ export class DeclarationBinder extends BinderBase {
     constructor.row = member.row;
     constructor.access = isStatic ? 'private' : accessibilityOf(member.modifiers, 'private');
     if (member.name !== symbol.name) {
-      this.error(member, 'CS1520', 'メソッドには戻り値の型が必要です');
+      this.error(member, 'CS1520', 'メソッドは戻り値の型を持たなければなりません');
       return;
     }
     if (symbol.kind === 'interface')
-      this.error(member, 'CS0526', 'インターフェイスにコンストラクターを含めることはできません');
-    if (symbol.isStatic && !isStatic)
-      this.error(member, 'CS0710', '静的クラスにインスタンス コンストラクターを含めることはできません');
-    if (isStatic && member.parameters.length > 0)
-      this.error(
-        member,
-        'CS0132',
-        `'${displayTypeSymbol(symbol)}.${symbol.name}()': 静的コンストラクターはパラメーターなしでなければなりません`
-      );
-    if (isStatic && accessModifierCount(member.modifiers) > 0)
-      this.error(
-        member,
-        'CS0515',
-        `'${displayTypeSymbol(symbol)}.${symbol.name}()': 静的コンストラクターではアクセス修飾子を使用できません`
-      );
+      this.error(member, 'CS0526', 'インターフェイスにインスタンス コンストラクターを含めることはできません');
+    if (symbol.isStatic && !isStatic) this.error(member, 'CS0710', '静的クラスにはコンストラクターを指定できません');
     if (symbol.primaryParameters && !isStatic && member.initializer?.kind !== 'this') {
       this.error(
         member,
@@ -616,6 +607,18 @@ export class DeclarationBinder extends BinderBase {
       );
     }
     constructor.parameters = this.resolveParameters(member.parameters, context, constructor);
+    if (isStatic && member.parameters.length > 0)
+      this.error(
+        member,
+        'CS0132',
+        `'${displayMethod(constructor)}': 静的コンストラクターにパラメーターがあってはなりません`
+      );
+    if (isStatic && accessModifierCount(member.modifiers) > 0)
+      this.error(
+        member,
+        'CS0515',
+        `'${displayMethod(constructor)}': アクセス修飾子は静的コンストラクターでは許可されていません`
+      );
     this.methodContexts.set(constructor, context);
     this.attachNative(constructor, member.body === undefined);
     if (isStatic) {
@@ -656,7 +659,7 @@ export class DeclarationBinder extends BinderBase {
       this.error(
         member,
         'CS0547',
-        `'${displayTypeSymbol(symbol)}.${member.kind === 'property' ? member.name : 'this'}': プロパティまたはインデクサーには void 型を指定することはできません`
+        `'${displayTypeSymbol(symbol)}.${member.kind === 'property' ? member.name : 'this'}': プロパティまたはインデクサーに void 型を指定することはできません`
       );
     const hasBodies = member.accessors.some((accessor) => accessor.body !== undefined);
     const isAuto =
@@ -667,7 +670,11 @@ export class DeclarationBinder extends BinderBase {
       !property.isAbstract &&
       symbol.kind !== 'interface';
     if (member.kind === 'property' && member.initializer && !isAuto) {
-      this.error(member, 'CS8050', '自動実装プロパティのみが初期化子を持つことができます。');
+      this.error(
+        member,
+        'CS8050',
+        `自動実装プロパティ、または 'field' キーワードを使用するプロパティのみが初期化子を持つことができます。`
+      );
     }
     if (isAuto) {
       const field = new FieldSymbol(`<${name}>k__BackingField`, property.type, symbol);
@@ -679,7 +686,7 @@ export class DeclarationBinder extends BinderBase {
       property.backingField = field;
       symbol.fields.push(field);
       if (symbol.isStatic && !property.isStatic)
-        this.error(member, 'CS0708', `'${name}': 静的クラスでインスタンス メンバーを宣言できません`);
+        this.error(member, 'CS0708', `'${name}': 静的クラスでインスタンスのメンバーを宣言することはできません`);
     }
     for (const accessor of member.accessors) this.declareAccessor(type, property, accessor, member.modifiers);
     if (
@@ -688,7 +695,8 @@ export class DeclarationBinder extends BinderBase {
     ) {
       this.error(member, 'CS1007', 'プロパティ アクセサーは既に定義されています');
     }
-    if (isAuto && !property.getter) this.error(member, 'CS8051', '自動実装プロパティには get アクセサーが必要です。');
+    if (isAuto && !property.getter)
+      this.error(member, 'CS8051', '自動実装プロパティは get アクセサーを持つ必要があります。');
     this.addMember(symbol, property, member);
     symbol.properties.push(property);
   }
@@ -796,7 +804,7 @@ export class DeclarationBinder extends BinderBase {
     this.methodContexts.set(method, methodContext);
     this.applyConstraints(method.typeParameters, constraints, methodContext);
     if (symbol.isStatic && !method.isStatic && kind === 'method')
-      this.error(position, 'CS0708', `'${name}': 静的クラスでインスタンス メンバーを宣言できません`);
+      this.error(position, 'CS0708', `'${name}': 静的クラスでインスタンスのメンバーを宣言することはできません`);
     this.checkMethodModifiers(method, modifiers, position);
     return method;
   }
@@ -807,7 +815,7 @@ export class DeclarationBinder extends BinderBase {
       this.error(
         position,
         'CS0513',
-        `'${display()}' は抽象ですが、非抽象型 '${displayTypeSymbol(method.owner)}' に含まれています`
+        `'${display()}' は抽象ですが、非抽象型の '${displayTypeSymbol(method.owner)}' に含まれています`
       );
     }
     if (
@@ -815,19 +823,20 @@ export class DeclarationBinder extends BinderBase {
       modifiers.set.has('private') &&
       method.owner.kind !== 'interface'
     ) {
-      this.error(position, 'CS0621', `'${display()}': 仮想メンバーまたは抽象メンバーを private にすることはできません`);
+      this.error(position, 'CS0621', `'${display()}': 仮想または抽象メンバーには、private を指定できません`);
     }
     if (
       method.isStatic &&
       (method.isVirtual || method.isOverride || (modifiers.set.has('abstract') && method.owner.kind !== 'interface'))
     ) {
-      this.error(position, 'CS0112', `静的メンバーを override、virtual、または abstract とすることはできません`);
+      const keyword = method.isVirtual ? 'virtual' : method.isOverride ? 'override' : 'abstract';
+      this.error(position, 'CS0112', `静的なメンバーを '${keyword}' とマークすることはできません。`);
     }
     if (method.isVirtual && method.isOverride)
       this.error(
         position,
         'CS0113',
-        `override とマークされたメンバー '${display()}' は、new または virtual とマークすることはできません`
+        `override 型のメンバー '${display()}' を、new または virtual にすることはできません`
       );
     if (
       method.owner.kind === 'struct' &&
@@ -882,25 +891,17 @@ export class DeclarationBinder extends BinderBase {
           this.error(
             parameter,
             'CS0231',
-            'params パラメーターは仮パラメーター リストの最後のパラメーターでなければなりません'
+            'params パラメーターは、パラメーター リストの最後のパラメーターでなければなりません'
           );
         if (type.kind !== 'array' && type.kind !== 'error')
-          this.error(
-            parameter,
-            'CS0225',
-            'params パラメーターは 1 次元配列であるか、または有効なコレクション型が必要です'
-          );
+          this.error(parameter, 'CS0225', 'params パラメーターには有効なコレクションの種類が必要です');
       }
       if (
         parameter.modifier === 'this' &&
         method &&
         (!method.owner.isStatic || method.owner.typeParameters.length > 0 || method.owner.containing)
       ) {
-        this.error(
-          parameter,
-          'CS1106',
-          `拡張メソッドは、非ジェネリック、入れ子になっていない静的クラスで定義される必要があります`
-        );
+        this.error(parameter, 'CS1106', `拡張メソッドは、非ジェネリック静的クラスで定義される必要があります`);
       }
       result.push({
         name: parameter.name,
@@ -1116,7 +1117,7 @@ export class DeclarationBinder extends BinderBase {
           this.error(
             symbol.row,
             'CS0535',
-            `'${displayTypeSymbol(symbol)}' は、インターフェイス メンバー '${displayMethodIn(member, face)}' を実装しません`
+            `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${displayMethodIn(member, face)}' を実装しません`
           );
         }
       }
@@ -1126,7 +1127,7 @@ export class DeclarationBinder extends BinderBase {
           this.error(
             symbol.row,
             'CS0535',
-            `'${displayTypeSymbol(symbol)}' は、インターフェイス メンバー '${displayTypeSymbol(face.symbol, face.args)}.${property.isIndexer ? `this[${property.parameters.map((parameter) => displayType(substitute(parameter.type, substitutionOf(face)))).join(', ')}]` : property.name}' を実装しません`
+            `'${displayTypeSymbol(symbol)}' はインターフェイス メンバー '${displayTypeSymbol(face.symbol, face.args)}.${property.isIndexer ? `this[${property.parameters.map((parameter) => displayType(substitute(parameter.type, substitutionOf(face)))).join(', ')}]` : property.name}' を実装しません`
           );
         }
       }
@@ -1159,7 +1160,7 @@ export class DeclarationBinder extends BinderBase {
         this.error(
           method.row,
           'CS0506',
-          `'${displayMethod(method)}': 継承されたメンバー '${displayMethodIn(candidate, current)}' は virtual、abstract または override に設定されていないため、オーバーライドできません`
+          `'${displayMethod(method)}': 継承されたメンバー '${displayMethodIn(candidate, current)}' は virtual、abstract または override に設定されていないためオーバーライドできません`
         );
         return;
       }
@@ -1167,7 +1168,7 @@ export class DeclarationBinder extends BinderBase {
         this.error(
           method.row,
           'CS0239',
-          `'${displayMethod(method)}': 継承されたメンバー '${displayMethodIn(candidate, current)}' は sealed であるため、オーバーライドできません`
+          `'${displayMethod(method)}': 継承されたメンバー '${displayMethodIn(candidate, current)}' はシールされているため、オーバーライドできません`
         );
         return;
       }
@@ -1180,7 +1181,7 @@ export class DeclarationBinder extends BinderBase {
         this.error(
           method.row,
           'CS0508',
-          `'${displayMethod(method)}': 戻り値の型は '${displayType(expectedReturn)}' でなければなりません ('${displayMethodIn(candidate, current)}' をオーバーライドするため)`
+          `'${displayMethod(method)}': オーバーライドされたメンバー '${displayType(expectedReturn)}' に対応するために戻り値の型は '${displayMethodIn(candidate, current)}' でなければなりません`
         );
       }
       if (
@@ -1190,7 +1191,7 @@ export class DeclarationBinder extends BinderBase {
         this.error(
           method.row,
           'CS0507',
-          `'${displayMethod(method)}': '${accessibilityText(candidate.access)}' から継承されたメンバー '${displayMethodIn(candidate, current)}' をオーバーライドするときに、アクセス修飾子を変更できません`
+          `'${displayMethod(method)}': '${accessibilityText(candidate.access)}' の継承メンバー '${displayMethodIn(candidate, current)}' をオーバーライドするときに、アクセス修飾子を変更できません`
         );
       }
       method.overridden = candidate;
@@ -1214,7 +1215,7 @@ export class DeclarationBinder extends BinderBase {
         this.error(
           property.row,
           'CS0506',
-          `'${displayTypeSymbol(symbol)}.${property.name}': 継承されたメンバー '${displayTypeSymbol(current.symbol, current.args)}.${candidate.name}' は virtual、abstract または override に設定されていないため、オーバーライドできません`
+          `'${displayTypeSymbol(symbol)}.${property.name}': 継承されたメンバー '${displayTypeSymbol(current.symbol, current.args)}.${candidate.name}' は virtual、abstract または override に設定されていないためオーバーライドできません`
         );
         return;
       }
@@ -1226,7 +1227,7 @@ export class DeclarationBinder extends BinderBase {
     this.error(
       property.row,
       'CS0115',
-      `'${displayTypeSymbol(symbol)}.${property.name}': オーバーライドする適切なプロパティが見つかりませんでした`
+      `'${displayTypeSymbol(symbol)}.${property.name}': オーバーライドする適切なメソッドが見つかりませんでした`
     );
   }
 

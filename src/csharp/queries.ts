@@ -25,7 +25,7 @@ function translate(clauses: QueryClause[], counter: { value: number }, position:
   const [first, ...rest] = clauses;
   if (first?.kind !== 'from')
     throw new CompileError([
-      { row: position.row, message: 'CS0742: クエリ本体の終わりは select 句か group 句でなければなりません' },
+      { row: position.row, message: 'CS0742: クエリ本体の後には select 句または group 句が必要です' },
     ]);
   let source = first.type ? call(first.source, 'Cast', [], first, [first.type]) : first.source;
   let state: RangeState = { variables: [first.name], parameter: first.name };
@@ -163,14 +163,14 @@ function translate(clauses: QueryClause[], counter: { value: number }, position:
   }
   if (state.variables.length > 0)
     throw new CompileError([
-      { row: position.row, message: 'CS0742: クエリ本体の終わりは select 句か group 句でなければなりません' },
+      { row: position.row, message: 'CS0742: クエリ本体の後には select 句または group 句が必要です' },
     ]);
   return source;
 }
 
 function unexpected(position: Position): CompileError {
   return new CompileError([
-    { row: position.row, message: 'CS0742: クエリ本体の終わりは select 句か group 句でなければなりません' },
+    { row: position.row, message: 'CS0742: クエリ本体の後には select 句または group 句が必要です' },
   ]);
 }
 

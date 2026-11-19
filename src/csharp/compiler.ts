@@ -124,6 +124,8 @@ export class Compiler extends StatementBinder {
     this.runGuarded(() => {
       declared = this.declareUnit(unit, this.userRoot, false);
       const program = unit.statements.length > 0 ? this.declareTopLevel(unit) : undefined;
+      // Roslyn binds no method bodies once the declarations have errors, so their errors would not appear.
+      if (this.diagnostics.length > 0) return;
       for (const type of declared) this.bindTypeMembers(type);
       if (program) {
         this.bindTopLevel(program, unit);
@@ -417,7 +419,7 @@ export class Compiler extends StatementBinder {
         this.error(
           declaration.initializer,
           'CS0522',
-          `'${displayTypeSymbol(symbol)}': 構造体は基底クラス コンストラクターを呼び出すことはできません`
+          `'${displayTypeSymbol(symbol)}': 構造体は、基底クラスのコンストラクターを呼び出すことができません`
         );
       return undefined;
     }
@@ -467,7 +469,7 @@ export class Compiler extends StatementBinder {
       this.error(
         position,
         'CS0516',
-        `コンストラクター '${displayMethod(context.fn.method)}' はそれ自体を呼び出すことはできません`
+        `コンストラクター '${displayMethod(context.fn.method)}' で、それ自体を呼び出すことはできません:`
       );
     }
     return {
@@ -548,11 +550,7 @@ export class Compiler extends StatementBinder {
         this.error(row, 'CS0161', `'${this.methodDisplay(method)}': 値を返さないコード パスがあります`),
       fallsThrough: (label, isLast, row) => {
         if (isLast)
-          this.error(
-            row,
-            'CS8070',
-            `コントロールは最後の case ラベル ('${label}') から switch ステートメントの外へ流れ落ちることはできません`
-          );
+          this.error(row, 'CS8070', `コントロールは switch の最後の case ラベル ('${label}') から出ることができません`);
         else
           this.error(
             row,
@@ -564,7 +562,7 @@ export class Compiler extends StatementBinder {
         this.error(
           row,
           'CS0177',
-          `制御が現在のメソッドから抜ける前に、out パラメーター '${local.name}' は割り当てられなければなりません`
+          `out パラメーター '${local.name}' はコントロールが現在のメソッドを抜ける前に割り当てられる必要があります`
         ),
     });
     const parameters = method.locals.filter((local) => local.isParameter && local.owner === method);
@@ -590,7 +588,7 @@ export class Compiler extends StatementBinder {
       this.error(
         field.row,
         'CS0110',
-        `定数 '${displayTypeSymbol(field.owner)}.${field.name}' の値の評価に、循環定義が含まれています`
+        `'${displayTypeSymbol(field.owner)}.${field.name}' の定数値の評価により、循環定義が発生します`
       );
       return 0;
     }
@@ -620,7 +618,7 @@ export class Compiler extends StatementBinder {
     const bindContext: BindContext = { scope: new LocalScope(undefined, fn), fn };
     if (owner.kind === 'enum') return this.enumMemberValue(field, bindContext);
     if (!field.initializer) {
-      this.error(field.row, 'CS0145', 'const フィールドには値を指定する必要があります');
+      this.error(field.row, 'CS0145', 'const フィールドに値を指定する必要があります');
       return 0;
     }
     const value = this.bindAs(field.initializer as Expression, field.type, bindContext);
@@ -701,7 +699,7 @@ export class Compiler extends StatementBinder {
       this.error(
         syntax,
         'CS1736',
-        `'${parameter.name}' の既定のパラメーター値はコンパイル時の定数である必要があります`
+        `'${parameter.name}' の既定のパラメーター値は、コンパイル時の定数である必要があります`
       );
     parameter.defaultValue = { value: undefined };
     return { kind: 'default', type: ERROR_TYPE, row: syntax.row };

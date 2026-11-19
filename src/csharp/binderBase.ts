@@ -193,7 +193,7 @@ export class BinderBase {
           this.error(
             using,
             'CS0138',
-            `using 名前空間ディレクティブを適用できるのは名前空間のみです。'${using.name.join('.')}' は名前空間ではなく型です。代わりに 'using static' ディレクティブを使用することを検討してください`
+            `using namespace' ディレクティブは名前空間に対してのみ適用できます。'${using.name.join('.')}' は名前空間ではなく型です。代わりに 'using static' ディレクティブを使用することを検討してください。`
           );
           continue;
         }
@@ -276,7 +276,7 @@ export class BinderBase {
           return ERROR_TYPE;
         }
         if (element.kind === 'named' && element.symbol.isStatic) {
-          this.error(node, 'CS0719', `'${displayType(element)}': 配列要素は静的な型にできません`);
+          this.error(node, 'CS0719', `'${displayType(element)}': 配列要素をスタティック型にすることはできません`);
         }
         return arrayType(element, node.rank);
       }
@@ -290,7 +290,7 @@ export class BinderBase {
       }
       case 'tupleType': {
         if (node.elements.length < 2) {
-          this.error(node, 'CS8124', 'タプルには少なくとも 2 つの要素が必要です。');
+          this.error(node, 'CS8124', 'タプルには 2 つ以上の要素が必要です。');
           return ERROR_TYPE;
         }
         return this.tupleType(
@@ -326,7 +326,7 @@ export class BinderBase {
     if (left.kind === 'named') {
       const nested = this.findNestedType(left, node.name, args.length);
       if (nested) return this.construct(node, nested.symbol, [...nested.outerArgs, ...args]);
-      this.error(node, 'CS0426', `型名 '${node.name}' は型 '${displayType(left)}' に存在しません`);
+      this.error(node, 'CS0426', `型名 '${node.name}' が型 '${displayType(left)}' に存在しません`);
     }
     return ERROR_TYPE;
   }

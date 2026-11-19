@@ -654,7 +654,7 @@ export abstract class CallBinder extends OperatorBinder {
       this.error(
         row,
         'CS0310',
-        `'${displayType(arg)}' は、ジェネリック型またはメソッド '${owner}' 内でパラメーター '${parameter.name}' として使用するために、パブリック パラメーターなしのコンストラクターを含む非抽象型でなければなりません`
+        `'${displayType(arg)}' は、ジェネリック型またはメソッド '${owner}' 内でパラメーター '${parameter.name}' として使用するために、パブリック パラメーターなしのコンストラクターを持つ非抽象型でなければなりません`
       );
       return false;
     }
@@ -762,7 +762,7 @@ export abstract class CallBinder extends OperatorBinder {
         this.error(
           named.row,
           'CS1739',
-          `'${description.name}' のベストオーバーロードには '${named.name}' という名前のパラメーターがありません`
+          `'${description.name}' に最も適しているオーバーロードには '${named.name}' という名前のパラメーターがありません`
         );
         return;
       }
@@ -775,7 +775,7 @@ export abstract class CallBinder extends OperatorBinder {
         this.error(
           row,
           'CS7036',
-          `'${displayMethodIn(method, candidates[0].owner)}' の必須パラメーター '${missing.name}' に対応する指定された引数がありません`
+          `'${displayMethodIn(method, candidates[0].owner)}' の必要なパラメーター '${missing.name}' に対応する特定の引数がありません`
         );
         return;
       }
@@ -786,11 +786,7 @@ export abstract class CallBinder extends OperatorBinder {
           `'${description.typeName}' には、引数 ${visibleCount} を指定するコンストラクターは含まれていません`
         );
       } else if (description.kind === 'delegate') {
-        this.error(
-          row,
-          'CS1593',
-          `デリゲート '${description.name}' に ${visibleCount} 個の引数を指定することはできません`
-        );
+        this.error(row, 'CS1593', `デリゲート '${description.name}' には引数 ${visibleCount} を指定できません`);
       } else if (description.kind === 'indexer') {
         this.error(row, 'CS1501', `引数 ${visibleCount} を指定するメソッド 'this' のオーバーロードはありません`);
       } else {
@@ -838,15 +834,15 @@ export abstract class CallBinder extends OperatorBinder {
           this.error(
             arg.row,
             'CS1620',
-            `引数 ${position} は '${parameter.refKind}' キーワードと一緒に渡す必要があります`
+            `引数 ${position} はキーワード '${parameter.refKind}' と共に渡す必要があります`
           );
         else if (parameter.refKind === undefined)
-          this.error(arg.row, 'CS1615', `引数 ${position} は '${arg.refKind}' キーワードと一緒に渡すことはできません`);
+          this.error(arg.row, 'CS1615', `引数 ${position} はキーワード '${arg.refKind}' と共に渡すことはできません`);
         else
           this.error(
             arg.row,
             'CS1620',
-            `引数 ${position} は '${parameter.refKind}' キーワードと一緒に渡す必要があります`
+            `引数 ${position} はキーワード '${parameter.refKind}' と共に渡す必要があります`
           );
         return;
       }
@@ -860,7 +856,7 @@ export abstract class CallBinder extends OperatorBinder {
           this.error(
             row,
             'CS1929',
-            `'${displayType(arg.expression.type)}' に '${description.name}' の定義が含まれておらず、最も適している拡張メソッドのオーバーロード '${displayMethodIn(method, candidate.owner)}' には '${displayType(type)}' 型のレシーバーが必要です`
+            `'${displayType(arg.expression.type)}' に '${description.name}' の定義が含まれておらず、最も適している拡張メソッド オーバーロード '${displayMethodIn(method, candidate.owner)}' には '${displayType(type)}' 型のレシーバーが必要です`
           );
           return;
         }

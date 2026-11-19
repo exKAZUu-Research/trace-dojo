@@ -209,14 +209,14 @@ export abstract class StatementBinder extends PatternBinder {
       this.error(
         position,
         'CS8852',
-        `init 専用プロパティまたはインデクサー '${display}' を割り当てることができるのは、オブジェクト初期化子の中か、インスタンス コンストラクターまたは 'init' アクセサーの中の 'this' か 'base' 上のみです。`
+        `init 専用プロパティまたはインデクサー '${display}' を割り当てることができるのは、オブジェクト初期化子の中か、インスタンス コンストラクターまたは 'init' アクセサーの 'this' か 'base' 上のみです。`
       );
     }
     if (!this.isAccessible(setter.access, property.owner, context.fn.typeContext, target.receiver?.type)) {
       this.error(
         position,
         'CS0272',
-        `アクセサー '${display}.set' にアクセスできないため、このコンテキストではプロパティまたはインデクサー '${display}' を使用できません`
+        `set アクセサーにアクセスできないため、プロパティまたはインデクサー '${display}' はこのコンテキストでは使用できません`
       );
     }
     if (
@@ -270,7 +270,7 @@ export abstract class StatementBinder extends PatternBinder {
         this.error(
           position,
           'CS0198',
-          '静的な読み取り専用フィールドに割り当てることはできません (静的コンストラクターまたは変数初期化子では可)'
+          '静的読み取り専用フィールドへの割り当てはできません (静的コンストラクターまたは変数初期化子では可)'
         );
       else
         this.error(
@@ -334,7 +334,7 @@ export abstract class StatementBinder extends PatternBinder {
       this.error(
         node,
         'CS0206',
-        '非 ref を返すプロパティまたはインデクサーは out または ref パラメーターとして渡すことはできません'
+        '参照を返さないプロパティまたはインデクサーを out 値または ref 値として使用することはできません'
       );
       return { kind: 'discard', type: ERROR_TYPE, row: node.row };
     }
@@ -342,7 +342,7 @@ export abstract class StatementBinder extends PatternBinder {
       this.error(
         node,
         'CS0154',
-        `プロパティまたはインデクサー '${displayTypeSymbol(value.owner.symbol)}.${value.property.name}' は get アクセサーがないため、このコンテキストでは使用できません`
+        `get アクセサーがないため、プロパティまたはインデクサー '${displayTypeSymbol(value.owner.symbol)}.${value.property.name}' をこのコンテキストで使用することはできません`
       );
     }
     return this.checkAssignable(value, node, context, use);
@@ -450,20 +450,12 @@ export abstract class StatementBinder extends PatternBinder {
       }
       case 'break': {
         if (context.fn.breakDepth === 0)
-          this.error(
-            statement,
-            'CS0139',
-            'break または continue が中断されるか、または続行される外側のループが存在しません'
-          );
+          this.error(statement, 'CS0139', 'break または continue に対応するループがありません');
         return { kind: 'break', row, step: 'none' };
       }
       case 'continue': {
         if (context.fn.continueDepth === 0)
-          this.error(
-            statement,
-            'CS0139',
-            'break または continue が中断されるか、または続行される外側のループが存在しません'
-          );
+          this.error(statement, 'CS0139', 'break または continue に対応するループがありません');
         return { kind: 'continue', row, step: 'none' };
       }
       case 'return': {
@@ -472,7 +464,7 @@ export abstract class StatementBinder extends PatternBinder {
       case 'throw': {
         if (!statement.value) {
           if (context.fn.catchDepth === 0)
-            this.error(statement, 'CS0156', 'パラメーターなしの throw ステートメントは catch 句の外では使用できません');
+            this.error(statement, 'CS0156', '引数なしの throw ステートメントは catch 句以外では使えません');
           return { kind: 'throw', value: undefined, row, step: 'none' };
         }
         return {
@@ -536,7 +528,7 @@ export abstract class StatementBinder extends PatternBinder {
   ): BoundStatement {
     const isVar = statement.type.kind === 'varType' && !this.findTypeInScope('var', 0, context.fn.typeContext);
     if (isVar && statement.declarators.length > 1) {
-      this.error(statement, 'CS0819', '暗黙的に型指定された変数に複数の宣言子を含めることはできません');
+      this.error(statement, 'CS0819', '暗黙的に型指定された変数は、複数の宣言子を持つことができません');
     }
     if (isVar && statement.isConst)
       this.error(statement, 'CS0822', '暗黙的に型指定された変数を定数にすることはできません');
@@ -589,7 +581,7 @@ export abstract class StatementBinder extends PatternBinder {
         this.error(declarator, 'CS0818', '暗黙的に型指定された変数は初期化される必要があります');
         type = ERROR_TYPE;
       } else if (initializer.kind === 'arrayInitializer') {
-        this.error(declarator, 'CS0820', '配列初期化子を使って暗黙的に型指定された変数を初期化することはできません');
+        this.error(declarator, 'CS0820', '配列初期化子で暗黙的に型指定された変数を初期化することはできません');
         type = ERROR_TYPE;
       } else {
         const bound = this.bindValue(initializer, context);
@@ -631,7 +623,7 @@ export abstract class StatementBinder extends PatternBinder {
     }
     if (isConst) {
       local.isConst = true;
-      if (!initializer) this.error(declarator, 'CS0145', 'const フィールドには値を指定する必要があります');
+      if (!initializer) this.error(declarator, 'CS0145', 'const フィールドに値を指定する必要があります');
       else if (value?.kind !== 'constant') {
         if (value?.type.kind !== 'error')
           this.error(declarator, 'CS0133', `'${declarator.name}' に割り当てられた式は定数でなければなりません`);
@@ -639,7 +631,7 @@ export abstract class StatementBinder extends PatternBinder {
         local.constantValue = value.value;
       }
       if (type.kind !== 'error' && !this.isConstantType(type))
-        this.error(declarator, 'CS0283', `型 '${displayType(type)}' を const として宣言することはできません`);
+        this.error(declarator, 'CS0283', `型 '${displayType(type)}' を const 宣言することはできません`);
     }
     return { kind: 'localDeclaration', local, value, row: declarator.row, step: 'none' };
   }
@@ -750,7 +742,7 @@ export abstract class StatementBinder extends PatternBinder {
         this.error(
           statement.collection,
           'CS1579',
-          `foreach ステートメントは、'${display}' が 'GetEnumerator' のパブリック インスタンスまたは拡張定義を含んでいないため、型 '${display}' の変数に対して使用できません`
+          `'${display}' は 'GetEnumerator' のパブリック インスタンスまたは拡張機能の定義を含んでいないため、型 '${display}' の変数に対して foreach ステートメントを使用することはできません`
         );
         iteration = { kind: 'array', rank: 1 };
         elementType = ERROR_TYPE;
@@ -943,7 +935,11 @@ export abstract class StatementBinder extends PatternBinder {
           const pattern = this.bindPattern(label.pattern, value.type, sectionContext);
           const guard = label.guard ? this.bindAs(label.guard, this.boolType, sectionContext) : undefined;
           if (isExhausted && value.type.kind !== 'error')
-            this.error(label, 'CS8120', 'switch case は、既に前の case で処理されています。');
+            this.error(
+              label,
+              'CS8120',
+              'switch ケースに到達できません。以前のケースで既に処理されたか、一致させることができません。'
+            );
           const constant = this.constantOfPattern(pattern);
           if (constant && !guard) {
             const value = (constant as Extract<BoundExpression, { kind: 'constant' }>).value;
@@ -977,7 +973,7 @@ export abstract class StatementBinder extends PatternBinder {
 
   private bindReturn(statement: Extract<Statement, { kind: 'return' }>, context: BindContext): BoundStatement {
     const { fn } = context;
-    if (fn.finallyDepth > 0) this.error(statement, 'CS0157', 'コントロールが finally 句の本体から出ることはできません');
+    if (fn.finallyDepth > 0) this.error(statement, 'CS0157', 'コントロールが finally 句の本体から出られません');
     if (fn.returnType === undefined) {
       // A lambda whose return type is being inferred collects the types its returns return.
       if (!statement.value) return { kind: 'return', value: undefined, row: statement.row, step: 'none' };
@@ -994,7 +990,8 @@ export abstract class StatementBinder extends PatternBinder {
     }
     if (fn.returnType.kind === 'void') {
       const value = this.bindValue(statement.value, context);
-      if (fn.kind === 'lambda') this.error(statement, 'CS8030', 'void を返す匿名関数は、値を返すことができません');
+      if (fn.kind === 'lambda')
+        this.error(statement, 'CS8030', 'void に変換されデリゲートを返す匿名関数は、値を返すことができません');
       else
         this.error(
           statement,
@@ -1025,7 +1022,7 @@ export abstract class StatementBinder extends PatternBinder {
         this.error(
           clause.type ?? clause,
           'CS0155',
-          'キャッチされたり、スローされた型は System.Exception から派生しなければなりません'
+          'キャッチ、または スローされた型は System.Exception から派生したものでなければなりません。'
         );
       }
       const earlier = caught.find((previous) => this.conversions.implicit(type, previous) !== undefined);
@@ -1033,7 +1030,7 @@ export abstract class StatementBinder extends PatternBinder {
         this.error(
           clause.type ?? clause,
           'CS0160',
-          `以前の catch 句はこれ、またはスーパー型 ('${this.exceptionDisplay(earlier)}') の例外のすべてを既にキャッチしました`
+          `前の catch 句はこれ、またはスーパー型 ('${this.exceptionDisplay(earlier)}') の例外のすべてを既にキャッチしました`
         );
       }
       if (!clause.filter) caught.push(type);

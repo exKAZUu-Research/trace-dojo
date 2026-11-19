@@ -102,7 +102,7 @@ export class Converter extends ExpressionConverter {
             throw new CompileError([
               {
                 row: child.startPosition.row,
-                message: 'トップレベルのステートメントは、名前空間および型の宣言より前にある必要があります。',
+                message: 'CS8803: トップレベルのステートメントは、名前空間および型の宣言の前にある必要があります。',
               },
             ]);
           }
@@ -180,7 +180,8 @@ export class Converter extends ExpressionConverter {
         throw new CompileError([
           {
             row: node.startPosition.row,
-            message: 'ファイル スコープの名前空間は、ファイル内で 1 つしか使用できません',
+            message:
+              'CS8954: ソース ファイルには、ファイルスコープ付きの名前空間の宣言を 1 つだけ含めることができます。',
           },
         ]);
       }
@@ -197,12 +198,12 @@ export class Converter extends ExpressionConverter {
           throw new CompileError([
             {
               row: node.startPosition.row,
-              message: 'トップレベルのステートメントは、名前空間および型の宣言より前にある必要があります。',
+              message: 'CS8803: トップレベルのステートメントは、名前空間および型の宣言の前にある必要があります。',
             },
           ]);
         }
         throw new CompileError([
-          { row: node.startPosition.row, message: '型または名前空間の定義、またはファイルの終わりが必要です' },
+          { row: node.startPosition.row, message: 'CS1022: 型、名前空間の定義、またはファイルの終わりが必要です' },
         ]);
       }
     }
@@ -456,7 +457,7 @@ export class Converter extends ExpressionConverter {
         throw new CompileError([
           {
             row: node.startPosition.row,
-            message: 'クラス、レコード、構造体、またはインターフェイス メンバー宣言の中のトークンが無効です',
+            message: `CS1519: メンバー宣言のトークン '${node.text.split(/\s/)[0]}' が無効です`,
           },
         ]);
       }
@@ -521,7 +522,9 @@ export class Converter extends ExpressionConverter {
       const kind = requiredField(accessor, 'name').text;
       if (kind === 'add' || kind === 'remove') unsupported(accessor, 'イベントの `add`・`remove` アクセサー');
       if (!['get', 'set', 'init'].includes(kind)) {
-        throw new CompileError([{ row: accessor.startPosition.row, message: 'get または set アクセサーが必要です' }]);
+        throw new CompileError([
+          { row: accessor.startPosition.row, message: 'CS1014: get または set アクセサーが必要です' },
+        ]);
       }
       return {
         kind: kind as Accessor['kind'],
@@ -600,7 +603,9 @@ export class Converter extends ExpressionConverter {
       if (what && !(this.isLibrary && text === 'extern')) unsupported(child, what);
       if (!MODIFIERS.has(text) && text !== 'extern') unsupported(child, `\`${text}\``);
       if (set.has(text as Modifier)) {
-        throw new CompileError([{ row: child.startPosition.row, message: '同じ修飾子が複数回あります' }]);
+        throw new CompileError([
+          { row: child.startPosition.row, message: `CS1004: 修飾子 '${text}' が重複しています` },
+        ]);
       }
       set.add(text as Modifier);
       positions.set(text as Modifier, positionOf(child));
@@ -708,7 +713,9 @@ export class Converter extends ExpressionConverter {
         if (what) unsupported(node, what);
         if (node.type.startsWith('preproc_'))
           unsupported(node, 'プリプロセッサ ディレクティブ（`#region`・`#if` など）');
-        throw new CompileError([{ row: node.startPosition.row, message: '式が無効です' }]);
+        throw new CompileError([
+          { row: node.startPosition.row, message: `CS1525: '${node.text.split(/\s/)[0]}' は無効です` },
+        ]);
       }
     }
   }
@@ -719,7 +726,7 @@ export class Converter extends ExpressionConverter {
       throw new CompileError([
         {
           row: node.startPosition.row,
-          message: '埋め込みステートメントには、宣言またはラベル付きステートメントを使用できません',
+          message: 'CS1023: 埋め込みステートメントを宣言やラベル付きのステートメントにすることはできません',
         },
       ]);
     }
@@ -759,7 +766,8 @@ export class Converter extends ExpressionConverter {
       .filter((child) => child.type === 'variable_declarator')
       .map((declarator) => {
         const nameNode = field(declarator, 'name');
-        if (!nameNode) throw new CompileError([{ row: declarator.startPosition.row, message: '識別子が必要です' }]);
+        if (!nameNode)
+          throw new CompileError([{ row: declarator.startPosition.row, message: 'CS1001: 識別子がありません' }]);
         const parts = namedChildren(declarator).filter((part) => !sameNode(part, nameNode));
         const bracketed = parts.find((part) => part.type === 'bracketed_argument_list');
         if (bracketed) {
@@ -945,5 +953,5 @@ function argumentDesignation(arg: Argument): Designation {
       row: value.row,
       column: value.column,
     };
-  throw new CompileError([{ row: arg.row, message: '識別子が必要です' }]);
+  throw new CompileError([{ row: arg.row, message: 'CS1001: 識別子がありません' }]);
 }

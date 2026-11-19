@@ -93,7 +93,7 @@ export abstract class MemberBinder extends CallBinder {
         this.error(
           position,
           'CS0119',
-          `'${displayType(result.type)}' は 型 です。この型は、指定されたコンテキストでは有効ではありません`
+          `'${displayType(result.type)}' は 型 です。これは特定のコンテンツでは無効になります`
         );
         return { kind: 'default', type: ERROR_TYPE, row: position.row };
       }
@@ -233,7 +233,7 @@ export abstract class MemberBinder extends CallBinder {
       local.isCaptured = true;
       for (let fn: typeof context.fn | undefined = context.fn; fn && fn.method !== local.owner; fn = fn.outer) {
         if (fn.kind === 'lambda' && (fn.method as { isStaticLambda?: boolean }).isStaticLambda) {
-          this.error(position, 'CS8820', `静的匿名関数に、'${local.name}' への参照を含めることはできません。`);
+          this.error(position, 'CS8820', `静的な匿名関数に '${local.name}' への参照を含めることはできません。`);
         }
         fn.captures.add(local);
       }
@@ -446,7 +446,11 @@ export abstract class MemberBinder extends CallBinder {
   ): BindResult {
     if (type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: position.row };
     if (type.kind === 'typeParameter') {
-      this.error(position, 'CS0704', `型パラメーター '${displayType(type)}' でメンバー検索を実行できません`);
+      this.error(
+        position,
+        'CS0704',
+        `'${displayType(type)}' で非 virtual メンバー参照を実行できません。これは型パラメーターであるためです`
+      );
       return { kind: 'default', type: ERROR_TYPE, row: position.row };
     }
     const { found, inaccessible } = this.lookupMember(
@@ -573,7 +577,7 @@ export abstract class MemberBinder extends CallBinder {
       this.error(
         position,
         'CS0572',
-        `'${name}': 式を使って型を参照することはできません。代わりに '${displayTypeSymbol(found.symbol)}' を使用してください`
+        `'${name}': 式から型を参照することはできません。'${displayTypeSymbol(found.symbol)}' を使用してください`
       );
       return { kind: 'default', type: ERROR_TYPE, row: position.row };
     }
@@ -750,7 +754,7 @@ export abstract class MemberBinder extends CallBinder {
             ? undefined
             : undefined;
     if (!name) {
-      this.error(arg, 'CS8081', '式には名前がありません。');
+      this.error(arg, 'CS8081', '式に名前がありません。');
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
     const bound = this.bindExpression(value, context);
@@ -827,7 +831,7 @@ export abstract class MemberBinder extends CallBinder {
       this.error(
         node,
         'CS0205',
-        `抽象基本メンバー '${displayMethodIn(method, resolved.candidate.owner)}' を呼び出すことはできません`
+        `抽象基本メンバーを呼び出すことはできません:'${displayMethodIn(method, resolved.candidate.owner)}'`
       );
     }
     if (!method.native && method.owner.isLibrary && !method.isAbstract && method.kind !== 'delegateInvoke')
@@ -925,11 +929,15 @@ export abstract class MemberBinder extends CallBinder {
     if (target.type.kind === 'array') {
       const arrayType = target.type;
       if (argNodes.length !== arrayType.rank) {
-        this.error(node, 'CS0022', `[] 内のインデックス数が正しくありません。正しい数は '${arrayType.rank}' です`);
+        this.error(
+          node,
+          'CS0022',
+          `角かっこ [] 内のインデックス数が正しくありません。正しい数は ${arrayType.rank} です`
+        );
         return { kind: 'default', type: ERROR_TYPE, row: node.row };
       }
       const indices = argNodes.map((arg) => {
-        if (arg.name) this.error(arg, 'CS1742', '配列アクセスに名前付き引数を含めることはできません');
+        if (arg.name) this.error(arg, 'CS1742', '配列のアクセスには名前付き引数の指定子を指定できません');
         const index = this.bindValue(arg.value, context);
         const special = specialOf(index.type);
         const target = special === 'long' || special === 'ulong' || special === 'uint' ? index.type : this.intType;
@@ -990,12 +998,16 @@ export abstract class MemberBinder extends CallBinder {
         this.error(
           node,
           'CS0304',
-          `変数型 '${type.symbol.name}' のインスタンスを作成できません。new() 制約が指定されていません`
+          `変数型 '${type.symbol.name}' のインスタンスは、new() 制約を含まないため、作成できません`
         );
         return { kind: 'default', type: ERROR_TYPE, row: node.row };
       }
       if (args.length > 0) {
-        this.error(node, 'CS0417', `'${type.symbol.name}': 変数型のインスタンスを作成するときに、引数を指定できません`);
+        this.error(
+          node,
+          'CS0417',
+          `'${type.symbol.name}': 変数型のインスタンスを作成するときに、引数を指定することはできません`
+        );
         return { kind: 'default', type: ERROR_TYPE, row: node.row };
       }
       return {
@@ -1009,13 +1021,17 @@ export abstract class MemberBinder extends CallBinder {
       };
     }
     if (type.kind !== 'named') {
-      this.error(node, 'CS1526', '新しい式には型の後に () または [] が必要です');
+      this.error(
+        node,
+        'CS1526',
+        'new 式は、型の後に引数リストか、丸かっこ ()、角かっこ []、または波かっこ {} を必要とします'
+      );
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
     const symbol = type.symbol;
     if (symbol.kind === 'delegate') return this.bindDelegateCreation(type, argNodes ?? [], node, context);
     if (symbol.isStatic) {
-      this.error(node, 'CS0712', `静的クラス '${displayType(type)}' のインスタンスを作成できません`);
+      this.error(node, 'CS0712', `静的クラス '${displayType(type)}' のインスタンスを作成することはできません`);
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
     if (symbol.isAbstract || symbol.kind === 'interface') {
@@ -1142,7 +1158,7 @@ export abstract class MemberBinder extends CallBinder {
       this.error(
         position,
         'CS1922',
-        `コレクション初期化子を使用して型 '${displayType(type)}' を初期化できません。'System.Collections.IEnumerable' を実装していません。`
+        `System.Collections.IEnumerable' を実装していないため、型 '${displayType(type)}' はコレクション初期化子で初期化することはできません。`
       );
       return [];
     }

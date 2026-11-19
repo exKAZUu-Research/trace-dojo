@@ -35,36 +35,125 @@ const MISSING_TOKENS: Record<string, string> = {
   識別子: 'CS1001: 識別子がありません',
 };
 
-const STATEMENT_ONLY =
-  'CS0201: 代入、呼び出し、インクリメント、デクリメント、新しいオブジェクトの式のみがステートメントとして使用できます';
-
 /**
- * Words the syntax errors as Roslyn does where tree-sitter's recovery shows the same mistake: a missing token, or an
- * expression that is not a statement (which the grammar cannot parse as a statement at all).
+ * Words the syntax errors as Roslyn does for the mistakes learners make most: a token left out, which tree-sitter
+ * shows as a missing node or as an error spanning the next line, an unclosed parenthesis or brace, and an operator
+ * without its operand.
  */
 function roslynSyntaxErrors(root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] {
-  const notStatements = new Set<number>();
-  for (const error of root.descendantsOfType('ERROR')) {
-    if (!error) continue;
-    const next = error.nextNamedSibling;
-    if (
-      next?.type === 'expression_statement' &&
-      next.startPosition.row === error.endPosition.row &&
-      error.parent?.type === 'block'
-    ) {
-      notStatements.add(error.startPosition.row);
+  const diagnostics: SourceDiagnostic[] = [];
+  for (const diagnostic of errors) {
+    const missing = /^「(.+)」が足りません。$/.exec(diagnostic.message);
+    if (missing) {
+      const token = missing[1] === ';' && endsDeclarationBeforeMore(root, diagnostic.row) ? ',' : missing[1];
+      const message = MISSING_TOKENS[token] ?? `CS1003: 構文エラーです。'${token}' が必要です`;
+      diagnostics.push({ row: diagnostic.row, message });
     }
   }
-  return errors.map((diagnostic) => {
-    if (notStatements.has(diagnostic.row)) return { row: diagnostic.row, message: STATEMENT_ONLY };
-    const missing = /^「(.+)」が足りません。$/.exec(diagnostic.message);
-    if (missing)
-      return {
-        row: diagnostic.row,
-        message: MISSING_TOKENS[missing[1]] ?? `CS1003: 構文エラーです。'${missing[1]}' が必要です`,
-      };
-    return { row: diagnostic.row, message: `CS1525: '${firstTokenAt(root, diagnostic.row)}' は無効です` };
-  });
+  for (const error of outermostErrors(root)) diagnostics.push(...roslynErrorsOf(root, error));
+  return diagnostics.toSorted((a, b) => a.row - b.row);
+}
+
+/** Whether a local declaration lacks its `;` on a row before more code, where Roslyn expects another declarator. */
+function endsDeclarationBeforeMore(root: Node, row: number): boolean {
+  const missing = leavesOf(root).find((leaf) => leaf.isMissing && leaf.type === ';' && leaf.startPosition.row === row);
+  if (missing?.parent?.type !== 'local_declaration_statement') return false;
+  const next = nextLeafOf(root, missing);
+  return next !== undefined && next.type !== '}';
+}
+
+function outermostErrors(root: Node): Node[] {
+  return root.descendantsOfType('ERROR').filter((error): error is Node => error !== null && !hasErrorAncestor(error));
+}
+
+function hasErrorAncestor(node: Node): boolean {
+  for (let current = node.parent; current; current = current.parent) if (current.type === 'ERROR') return true;
+  return false;
+}
+
+function roslynErrorsOf(root: Node, error: Node): SourceDiagnostic[] {
+  const tokens = leavesOf(error);
+  const inDeclaration = ancestorOfType(error, 'variable_declaration') !== undefined;
+  if (tokens[0]?.type === '"') {
+    // An unterminated string ends at the line's end, after which a declaration expects its next declarator.
+    const row = tokens[0].startPosition.row;
+    const unterminated = { row, message: 'CS1010: 定数の 新しい行です' };
+    return inDeclaration ? [unterminated, { row, message: MISSING_TOKENS[','] }] : [unterminated];
+  }
+  if (error.parent?.type === 'compilation_unit' && tokens.every((token) => token.type === '}')) {
+    return [{ row: error.startPosition.row, message: 'CS1022: 型、名前空間の定義、またはファイルの終わりが必要です' }];
+  }
+  return [roslynErrorOf(root, error, tokens, inDeclaration)];
+}
+
+function roslynErrorOf(root: Node, error: Node, tokens: Node[], inDeclaration: boolean): SourceDiagnostic {
+  const count = (text: string): number => tokens.filter((token) => token.type === text).length;
+  if (count('{') > count('}') && !nextLeafOf(root, error)) {
+    return { row: lastLeafOf(root).endPosition.row, message: MISSING_TOKENS['}'] };
+  }
+  const open = tokens.find((token) => token.type === '(');
+  if (open && count('(') > count(')')) {
+    // Roslyn expects `)` after the last token before the one that cannot continue the parenthesized part.
+    const stop = tokens.find((token) => token.startIndex > open.startIndex && token.type === '{');
+    const before = stop ? tokens.findLast((token) => token.endIndex <= stop.startIndex) : open;
+    return { row: (before ?? open).endPosition.row, message: MISSING_TOKENS[')'] };
+  }
+  const previous = previousLeafOf(root, error);
+  const first = tokens[0] ?? error;
+  if (previous && first.startPosition.row > previous.endPosition.row) {
+    return { row: previous.endPosition.row, message: inDeclaration ? MISSING_TOKENS[','] : MISSING_TOKENS[';'] };
+  }
+  const next = nextLeafOf(root, error);
+  if (tokens.length > 0 && tokens.every((token) => OPERATORS.has(token.type)) && next) {
+    return { row: next.startPosition.row, message: `CS1525: '${next.text}' は無効です` };
+  }
+  return { row: first.startPosition.row, message: `CS1525: '${first.text.split(/\s/)[0]}' は無効です` };
+}
+
+const OPERATORS = new Set([
+  '+',
+  '-',
+  '*',
+  '/',
+  '%',
+  '==',
+  '!=',
+  '<',
+  '>',
+  '<=',
+  '>=',
+  '&&',
+  '||',
+  '=',
+  '+=',
+  '-=',
+  '&',
+  '|',
+  '^',
+]);
+
+function leavesOf(node: Node): Node[] {
+  if (node.childCount === 0) return [node];
+  return node.children.filter((child): child is Node => child !== null).flatMap(leavesOf);
+}
+
+function lastLeafOf(node: Node): Node {
+  return leavesOf(node).at(-1) ?? node;
+}
+
+function previousLeafOf(root: Node, node: Node): Node | undefined {
+  return leavesOf(root).findLast((leaf) => leaf.endIndex <= node.startIndex && leaf.type !== 'comment');
+}
+
+function nextLeafOf(root: Node, node: Node): Node | undefined {
+  return leavesOf(root).find(
+    (leaf) => leaf.startIndex >= node.endIndex && leaf.id !== node.id && !leaf.isMissing && leaf.type !== 'comment'
+  );
+}
+
+function ancestorOfType(node: Node, type: string): Node | undefined {
+  for (let current = node.parent; current; current = current.parent) if (current.type === type) return current;
+  return undefined;
 }
 
 /**
@@ -96,13 +185,6 @@ function parenthesizeExpressionStatements(source: string): string {
   } finally {
     tree.delete();
   }
-}
-
-/** The text of the first error token on a row, which Roslyn's invalid term error names. */
-function firstTokenAt(root: Node, row: number): string {
-  const error = root.descendantsOfType('ERROR').find((node) => node?.startPosition.row === row);
-  const token = error?.firstChild ?? error;
-  return token?.text.split(/\s/)[0] ?? '';
 }
 
 /** The `// atomic` annotations of a source, read from its line comments. */
