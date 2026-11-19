@@ -594,6 +594,74 @@ $settings->item = 5;`);
   expect(execution).toMatchObject({ kind: 'executed', stdout: 'A;exit;{"item":5};observer;B;' });
 });
 
+test.each([
+  ['ArrayObject', "$settings['item'] = 5;", "echo 'end;';", 'new B', 'A;end;after;{"item":5};B;'],
+  ['ArrayIterator', "$settings->offsetSet('item', 5);", "echo 'end;';", '[new B]', 'A;end;after;{"item":5};B;'],
+  ['ArrayObject', "$settings['item'] = 5;", "throw new Exception('err');", 'new B', 'A;caught;after;{"item":5};B;'],
+  ['ArrayIterator', '$settings->item = 5;', "echo 'end;';", 'new B', 'A;end;after;{"item":5};B;'],
+])('defers a displaced %s value on %s after %s installs %s', (name, write, end, value, stdout) => {
+  const execution = run(`<?php
+class B { function __destruct() { echo 'B;'; } }
+class A {
+    function __destruct() {
+        global $settings, $once;
+        echo 'A;';
+        if (!$once) {
+            $once = true;
+            $settings['item'] = ${value};
+        }
+        ${end}
+    }
+}
+class R {
+    function __destruct() {
+        global $settings;
+        echo json_encode($settings->getArrayCopy()) . ';';
+    }
+}
+$once = false;
+$settings = new ${name}(['item' => new A], ${name}::ARRAY_AS_PROPS);
+$reader = new R;
+try { ${write} } catch (Throwable $e) { echo 'caught;'; }
+echo 'after;';`);
+  expect(execution).toMatchObject({ kind: 'executed', stdout });
+});
+
+test.each([
+  ['ArrayObject', '$settings->item = 5;', "unset($settings['item']);", "exit('exit;');", 'exit;[]'],
+  ['ArrayIterator', "$settings['item'] = 5;", "unset($settings['item']);", "exit('exit;');", 'exit;[]'],
+  ['ArrayObject', "$settings->offsetSet('item', 5);", "unset($settings['item']);", '', '[]'],
+  [
+    'ArrayIterator',
+    "$settings['item'] = 5;",
+    "unset($settings['item']); $settings['item'] = 7;",
+    "exit('exit;');",
+    'exit;{"item":5}',
+  ],
+])(
+  'preserves deleted or recreated %s bucket state for %s when destructor runs %s (%s)',
+  (name, write, action, end, stdout) => {
+    const execution = run(`<?php
+class A {
+    function __destruct() {
+        global $settings;
+        ${action}
+        ${end}
+    }
+}
+class R {
+    function __destruct() {
+        global $settings;
+        echo json_encode($settings->getArrayCopy());
+    }
+}
+$settings = new ${name}(['item' => new A], ${name}::ARRAY_AS_PROPS);
+$reader = new R;
+${write}`);
+    expect(execution).toMatchObject({ kind: 'executed', stdout });
+  }
+);
+
 test.each(['<?php echo "hello"; declare(strict_types=1);', '<?php function f() {} declare(strict_types=1);'])(
   'rejects a late strict_types declaration before execution: %s',
   (source) => {
