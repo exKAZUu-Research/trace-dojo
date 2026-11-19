@@ -99,7 +99,7 @@ export class Converter extends ExpressionConverter {
 
   private convertImportOrExport(node: Node): ImportDirective[] {
     const inner = requireNode(namedOf(node)[0], node);
-    if (inner.type === 'library_export') return unsupported(inner, 'export');
+    if (inner.type === 'library_export') return unsupported(inner, 'export（ライブラリの再公開）');
     const specification = requireNode(
       namedOf(inner).find((child) => child.type === 'import_specification'),
       inner
