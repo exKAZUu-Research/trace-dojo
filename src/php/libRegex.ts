@@ -170,10 +170,7 @@ function scanPlan<T>(
     match(position, retry) {
       const input = inputAt(retry);
       const result = executeMatch(retry ? compiled.retry : (emptyRegex ?? compiled.regex), input, position);
-      if (result) {
-        checkByteCaselessReferences(compiled, result, input);
-        result.range = matchBounds(compiled, result);
-      }
+      if (result) result.range = matchBounds(compiled, result);
       return result;
     },
     value: (result, retry) => project(compiled, result, inputAt(retry), result.range, byteOffset),
@@ -185,18 +182,6 @@ function nextUtf8Byte(text: string, position: number): number {
     position++;
   } while (((text.codePointAt(position) ?? 0) & 0xc0) === 0x80);
   return position;
-}
-
-function checkByteCaselessReferences(
-  { byteCaselessReferences }: Compiled,
-  { groups }: MatchOffsets,
-  text: string
-): void {
-  for (const name of byteCaselessReferences) {
-    const range = groups?.[name];
-    if (range && /[\u0080-\u00FF]/.test(text.slice(...range)))
-      throw new UnsupportedFeatureError('非 ASCII バイトを大文字・小文字を区別せずに後方参照する正規表現');
-  }
 }
 
 function executeMatch(regex: RegExp, text: string, position: number): MatchOffsets | null {

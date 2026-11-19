@@ -22,7 +22,6 @@ export interface Compiled {
   groupCount: number;
   /** The capture names of the `\K` points, the last passed of which starts the reported match. */
   keeps: string[];
-  byteCaselessReferences: Set<string>;
   boundedPattern?: PcrePattern;
 }
 
@@ -101,7 +100,7 @@ export function translate(pattern: string): Compiled {
   const converted = converter.convert();
   if (converted.length > 65_536) throw new UnsupportedFeatureError('大きすぎる正規表現');
   const flags = `d${options.caseless ? 'i' : ''}${converter.unicode ? 'u' : ''}`;
-  const { byteCaselessReferences, emptySource, needsNative } = analyzeRegex(
+  const { emptySource, needsNative } = analyzeRegex(
     converted,
     converter.unicode,
     options.utf8,
@@ -118,7 +117,6 @@ export function translate(pattern: string): Compiled {
     names: options.utf8 ? converter.names.map((name) => (name === undefined ? undefined : enc(name))) : converter.names,
     groupCount: converter.names.length - 1,
     keeps: converter.keeps,
-    byteCaselessReferences,
     boundedPattern: needsNative || matchLimit ? pcrePattern(body, modifiers) : undefined,
   };
 }

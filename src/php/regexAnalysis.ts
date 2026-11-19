@@ -6,7 +6,7 @@ import { UnsupportedFeatureError } from './unsupported';
 
 type Length = readonly [number, number];
 
-// code-gauge-allow functionNcss 55 -- Keeps scoped matching flags, engine selection and lookbehind validation in one traversal.
+// code-gauge-allow functionNcss 53 -- Keeps scoped matching flags, engine selection and lookbehind validation in one traversal.
 // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function analyzeRegex(
   source: string,
@@ -15,7 +15,7 @@ export function analyzeRegex(
   ignoreCase: boolean,
   invalidLookbehind: (start: number, reason: string) => never,
   emptyMarkers: ReadonlyMap<string, string>
-): { byteCaselessReferences: Set<string>; emptySource?: string; needsNative: boolean } {
+): { emptySource?: string; needsNative: boolean } {
   const parser = new RegExpParser({ ecmaVersion: 2025 });
   let tree: AST.Pattern;
   try {
@@ -27,7 +27,6 @@ export function analyzeRegex(
   }
   const capturesAtEntry = new Map<AST.Assertion, number>();
   let captureCount = 0;
-  const references = new Set<string>();
   const contexts: boolean[] = [];
   const lookbehinds: AST.LookaroundAssertion[] = [];
   const lengths = new Map<AST.Element, Length>();
@@ -47,13 +46,12 @@ export function analyzeRegex(
       if (!utf8 && ignoreCase) byteCaseFolding ||= mayFoldNonAsciiBytes(node);
     },
     onCharacterSetEnter(node) {
-      if (!utf8 && ignoreCase && node.kind === 'property')
-        throw new UnsupportedFeatureError('非 UTF-8 の Unicode プロパティの大文字・小文字を区別しない照合');
+      if (!utf8 && ignoreCase) byteCaseFolding ||= node.kind === 'property';
     },
     onBackreferenceEnter(node) {
       const groups = node.ambiguous ? node.resolved : [node.resolved];
       backwardCaptureReference ||= referencesLocalLookbehindGroup(groups, lookbehinds);
-      if (!utf8 && ignoreCase) recordReferenceNames(references, groups);
+      byteCaseFolding ||= !utf8 && ignoreCase;
     },
     onAssertionEnter(node) {
       if (node.kind !== 'lookbehind') return;
@@ -75,7 +73,6 @@ export function analyzeRegex(
   });
   if (backwardCaptureReference) throw new UnsupportedFeatureError('後読みの内部キャプチャへの後方参照');
   return {
-    byteCaselessReferences: references,
     emptySource: emptyMarkers.size === 0 ? undefined : specializeForEmptySubject(tree, emptyMarkers),
     needsNative: byteCaseFolding || hasAmbiguousRepetition(tree, unicode, ignoreCase),
   };
@@ -87,10 +84,6 @@ function mayFoldNonAsciiBytes(node: AST.Character): boolean {
   const last = range?.max.value ?? node.value;
   // JavaScript folds Latin-1 letter pairs, which PCRE leaves distinct in C-locale byte mode.
   return first <= 0xfe && last >= 0xc0;
-}
-
-function recordReferenceNames(references: Set<string>, groups: readonly AST.CapturingGroup[]): void {
-  for (const group of groups) if (group.name) references.add(group.name);
 }
 
 function referencesLocalLookbehindGroup(

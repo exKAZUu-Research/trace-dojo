@@ -31,3 +31,21 @@ int(1)
 int(0)
 int(0)
 int(0)
+int(1)
+int(1)
+int(1)
+int(0)
+int(1)
+int(0)
+int(1)
+int(1)
+array(3) {
+  [0]=>
+  string(2) "Aa"
+  ["letter"]=>
+  string(1) "A"
+  [1]=>
+  string(1) "A"
+}
+int(1)
+int(1)
