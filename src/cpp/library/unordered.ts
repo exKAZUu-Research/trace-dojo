@@ -642,6 +642,8 @@ export function unorderedClass(
       const keyOps = elementOperations(compiler, unqualified(keyType), row);
       const mappedOps = elementOperations(compiler, valueType as Type, row);
       if (!mappedOps.isDefaultConstructible) return mappedNotDefaultConstructible(compiler_, valueType as Type, row);
+      compiler_.valueInitialized(valueType as Type, row);
+      compiler_.requireObjectUse(keyType, 'copy', row);
       return {
         type: valueType as Type,
         isLvalue: true,

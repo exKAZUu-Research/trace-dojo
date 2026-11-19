@@ -473,14 +473,18 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     row: number
   ): ReferenceBinding {
     if (!value) return this.error(row, `参照 ${name} には初期値が要ります。`);
+    const isDeduced = hasAuto(declared.to);
     let target: Expr;
-    if (value.type === 'initializer_list' || value.type === 'argument_list') {
+    if (value.type === 'initializer_list' && !isDeduced) {
+      const bound = this.listReferenceValue(value, declared.to);
+      if (!bound) return this.error(row, `参照 ${name} を {...} の値に束縛できません。`);
+      target = bound;
+    } else if (value.type === 'initializer_list' || value.type === 'argument_list') {
       if (value.children.length !== 1) return this.error(row, `参照 ${name} の初期値には値を1つだけ書いてください。`);
       target = this.compileExpression(value.children[0]);
     } else {
       target = this.compileExpression(value);
     }
-    const isDeduced = hasAuto(declared.to);
     const type = isDeduced ? referenceTo(this.deduceAutoReference(declared.to, target)) : declared;
     // A const reference bound to a temporary extends the temporary's lifetime to the reference's, whether the
     // temporary is the initializer's object or a converted value (C++20 [class.temporary]).

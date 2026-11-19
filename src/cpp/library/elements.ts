@@ -22,6 +22,8 @@ export interface ElementOperations {
   hasEffects: boolean;
 }
 
+type ElementUse = 'copy' | 'assign' | 'relocate' | 'swap';
+
 export function swapElements(frame: Frame, a: Ptr, b: Ptr, ops: ElementOperations): void {
   if (a.equals(b)) return;
   const swap = swapFunction(ops.type);
@@ -37,7 +39,7 @@ export function swapElements(frame: Frame, a: Ptr, b: Ptr, ops: ElementOperation
   });
 }
 
-export function requireSwapUse(compiler: ExpressionCompiler, type: Type, row: number): void {
+function requireSwapUse(compiler: ExpressionCompiler, type: Type, row: number): void {
   const swap = swapFunction(type);
   if (swap) {
     swap.nativeUses?.(row);
@@ -46,6 +48,18 @@ export function requireSwapUse(compiler: ExpressionCompiler, type: Type, row: nu
   compiler.requireObjectUse(type, 'copy', row);
   compiler.requireObjectUse(type, 'assign', row);
   compiler.requireObjectUse(type, 'destroy', row);
+}
+
+export function requireElementUse(compiler: ExpressionCompiler, type: Type, row: number, use: ElementUse): void {
+  if (use === 'swap') {
+    requireSwapUse(compiler, type, row);
+    return;
+  }
+  if (use === 'copy' || use === 'relocate') {
+    compiler.requireObjectUse(type, 'copy', row);
+    compiler.requireObjectUse(type, 'destroy', row);
+  }
+  if (use === 'assign' || use === 'relocate') compiler.requireObjectUse(type, 'assign', row);
 }
 
 function swapFunction(type: Type): FunctionInfo | undefined {
@@ -57,19 +71,35 @@ export function assignElement(frame: Frame, location: Ptr, operations: ElementOp
 }
 
 /** The element operations of a type, which the compiler makes while the class it uses is complete. */
-export function elementOperations(compiler: ExpressionCompiler, type: Type, row: number): ElementOperations {
+export function elementOperations(
+  compiler: ExpressionCompiler,
+  type: Type,
+  row: number,
+  use?: ElementUse
+): ElementOperations {
+  if (use) requireElementUse(compiler, type, row, use);
   if (type.kind === 'class') {
     const { cls } = type;
     const operations = cls.operations;
-    const construct = cls.isComplete && !cls.isAbstract ? defaultConstructor(compiler, cls, row) : undefined;
+    let checkedDefault = false;
+    let construct: ((frame: Frame) => Value) | undefined;
+    const findDefault = (): typeof construct => {
+      if (!checkedDefault) {
+        checkedDefault = true;
+        if (cls.isComplete && !cls.isAbstract) construct = defaultConstructor(compiler, cls, row);
+      }
+      return construct;
+    };
     return {
       type,
-      make:
-        construct ??
-        (() => {
-          throw new CppRuntimeError('custom', `${cls.name} のオブジェクトは、引数なしでは作れません。`);
-        }),
-      isDefaultConstructible: construct !== undefined,
+      make: (frame) => {
+        const make = findDefault();
+        if (!make) throw new CppRuntimeError('custom', `${cls.name} のオブジェクトは、引数なしでは作れません。`);
+        return make(frame);
+      },
+      get isDefaultConstructible() {
+        return findDefault() !== undefined;
+      },
       copy: (frame, value) => {
         if (cls.isNoncopyable) throw new CppRuntimeError('custom', `${cls.name} のオブジェクトはコピーできません。`);
         return operations?.copy(frame, value) ?? value;

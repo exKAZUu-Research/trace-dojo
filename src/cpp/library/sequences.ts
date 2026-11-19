@@ -32,7 +32,7 @@ import {
   equalTo,
   lessThan,
   locationOf,
-  requireSwapUse,
+  requireElementUse,
   swapElements,
   truthy,
 } from './elements';
@@ -206,7 +206,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
           const source = (value as Ptr).read();
           return make(editor.build(frame, n, () => ops().copy(frame, source)));
         },
-        { uses: (row) => requireElementCopy(library.compiler, element, row) }
+        { uses: (row) => requireElementUse(library.compiler, element, row, 'copy') }
       ),
       {
         ...nativeConstructor(cls, [], () => {}),
@@ -232,11 +232,6 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   }
   sequenceMethods(library, cls, element, kind, ops, editor, outOfRange, fixedLength);
   return cls;
-}
-
-function requireElementCopy(compiler: ExpressionCompiler, element: Type, row: number): void {
-  compiler.requireObjectUse(element, 'copy', row);
-  compiler.requireObjectUse(element, 'destroy', row);
 }
 
 const reserve = (frame: Frame, count: number): void => {
@@ -291,7 +286,7 @@ export function iteratorRange(
     typeName(unqualified(from)) === typeName(target) &&
     (target.kind !== 'class' || (from.kind === 'class' && from.cls === target.cls));
   let construct: Source['construct'] = (frame, value) => ops().copy(frame, value);
-  if (isSameType) requireElementCopy(compiler, element, first.row);
+  if (isSameType) requireElementUse(compiler, element, first.row, 'copy');
   if (!isSameType) {
     const slot: Expr = { type: from, isLvalue: true, row: first.row, run: (frame) => frame.pending.at(-1) as Ptr };
     let run: Eval<Value>;
@@ -326,7 +321,7 @@ function iteratorElement(type: Type): Type | undefined {
 /** The values between two iterators of a sequence, a container, or an array. */
 function rangeValues(first: Ptr, last: Ptr, isReverse: boolean): Value[] {
   const store = first.target();
-  if (last.store !== store) throw new CppRuntimeError('invalidRange');
+  if (!first.sharesRange(last)) throw new CppRuntimeError('invalidRange');
   const values: Value[] = [];
   if (isReverse) {
     if (first.index < last.index) throw new CppRuntimeError('invalidRange');
@@ -477,7 +472,10 @@ function sequenceMethods(
       }
     },
     {
-      uses: kind === 'array' && fixedLength !== 0 ? (row) => requireSwapUse(library.compiler, element, row) : undefined,
+      uses:
+        kind === 'array' && fixedLength !== 0
+          ? (row) => requireElementUse(library.compiler, element, row, 'swap')
+          : undefined,
     }
   );
   if (kind === 'array') {
@@ -626,7 +624,7 @@ export function initializerList(
   list: Syntax,
   ops: () => ElementOperations
 ): (frame: Frame, use: (source: Source) => void) => void {
-  requireElementCopy(compiler, element, list.row);
+  requireElementUse(compiler, element, list.row, 'copy');
   return listElementsOf(
     list.children.filter((node) => node.type !== 'comment').map((node) => compiler.elementInitializer(element, node)),
     ops
@@ -779,7 +777,7 @@ function checkElementRequirement(
     (member === 'resize' && (kind === 'vector' || args.length > 1)) ||
     (kind === 'vector' && ['reserve', 'shrink_to_fit', 'emplace', 'emplace_back'].includes(member))
   ) {
-    requireElementCopy(compiler, element, row);
+    requireElementUse(compiler, element, row, 'copy');
   }
   if (kind !== 'list') return;
   const isEqualityCall = (member === 'remove' && args.length === 1) || (member === 'unique' && args.length === 0);
@@ -959,7 +957,7 @@ function sequenceList(
     if (elements.length > 0 && elements.length <= 2) return undefined;
     throw error;
   }
-  if (elements.length > 0) requireElementCopy(compiler, element, row);
+  if (elements.length > 0) requireElementUse(compiler, element, row, 'copy');
   const run: Eval<Value> = (frame) => {
     const { hasEffects, copy, destroy } = editor.ops;
     if (!hasEffects) return holdAll(frame, inits, (values) => make(values as Value[]));

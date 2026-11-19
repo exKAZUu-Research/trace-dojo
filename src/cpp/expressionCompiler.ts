@@ -739,7 +739,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         run: (frame) => {
           const p = a(frame) as Ptr;
           const q = b(frame) as Ptr;
-          if (p.store !== q.store) throw new CppRuntimeError('pointerDifference');
+          if (!p.sharesRange(q)) throw new CppRuntimeError('pointerDifference');
           return BigInt(p.index - q.index);
         },
       };
@@ -1453,26 +1453,39 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   protected abstract withArgumentDependentLookup(name: string, functions: FunctionInfo[], args: Expr[]): FunctionInfo[];
 
   bracedConversion(list: Syntax, to: Type): ConversionSequence | undefined {
-    const [first, ...rest] = list.children.filter((child) => child.type !== 'comment');
-    const arg =
-      first && rest.length === 0 && first.type !== 'initializer_list' ? this.compileExpression(first) : undefined;
+    const arg = this.singleListExpression(list);
     if (to.kind === 'reference' && arg && isReferenceRelated(arg.type, to.to)) {
       const binding = implicitConversion(this, arg, to, false);
       if (binding) return { ...binding, apply: () => binding.apply(arg) };
     }
     if (to.kind === 'reference' && !isConstType(to.to)) return undefined;
     const type = unqualified(nonReference(to));
-    let run: Eval<Value>;
+    let value: Expr;
     try {
-      run = this.listInitializer(type, list, list.row);
+      value = this.listValue(type, list);
     } catch (error) {
       if (error instanceof CompileError) return undefined;
       throw error;
     }
     let rank: Rank = type.kind === 'class' ? Rank.UserDefined : Rank.Exact;
     if (type.kind !== 'class' && arg) rank = implicitConversion(this, arg, type)?.rank ?? Rank.Conversion;
-    const value: Expr = { type, isLvalue: false, row: list.row, run, isTemporaryObject: type.kind === 'class' };
     return sequence(rank, () => (to.kind === 'reference' ? this.materialize(value) : value));
+  }
+
+  protected listReferenceValue(list: Syntax, referent: Type): Expr | undefined {
+    const target = this.singleListExpression(list);
+    if (target && isReferenceRelated(target.type, referent)) return target;
+    if (isConstType(referent)) return this.listValue(unqualified(referent), list);
+  }
+
+  private singleListExpression(list: Syntax): Expr | undefined {
+    const [first, ...rest] = list.children.filter((child) => child.type !== 'comment');
+    if (first && rest.length === 0 && first.type !== 'initializer_list') return this.compileExpression(first);
+  }
+
+  private listValue(type: Type, list: Syntax): Expr {
+    const run = this.listInitializer(type, list, list.row);
+    return { type, isLvalue: false, row: list.row, run, isTemporaryObject: type.kind === 'class' };
   }
 
   /** A prvalue object of a class made from constructor arguments, or by aggregate initialization when braced. */
@@ -1481,6 +1494,11 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const list = args.length === 1 ? args[0].braced : undefined;
     if (list && cls.library) {
       const initialize = cls.library.listInitializer;
+      if (!initialize) {
+        const matching = this.matchingOverloads(cls.constructors, args);
+        const resolved = this.chooseOverload(`${cls.name} のコンストラクタ`, matching, row);
+        if (resolved) return this.constructWith(cls, resolved, args, row);
+      }
       const run = initialize
         ? initialize(
             this,

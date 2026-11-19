@@ -38,7 +38,6 @@ import {
   lessThan,
   locationOf,
   moveValue,
-  requireSwapUse,
   swapElements,
   truthy,
 } from './elements';
@@ -92,7 +91,7 @@ class Range {
     private readonly write?: { frame: Frame; ops: ElementOperations }
   ) {
     const store = first.target();
-    if (last.store !== store) throw new CppRuntimeError('invalidRange');
+    if (!first.sharesRange(last)) throw new CppRuntimeError('invalidRange');
     this.store = store;
     this.length = isReverse ? first.index - last.index : last.index - first.index;
     if (this.length < 0) throw new CppRuntimeError('invalidRange');
@@ -175,8 +174,8 @@ class Output {
       invoke(this.frame, append, [argument], this.start, append.row);
       return;
     }
-    const index = this.info.isReverse ? this.start.index - 1 - this.position : this.start.index + this.position;
-    assignElement(this.frame, this.start.target().location(index), this.operations, value);
+    const offset = this.info.isReverse ? -1 - this.position : this.position;
+    assignElement(this.frame, this.start.offset(offset), this.operations, value);
     this.position++;
   }
 
@@ -277,7 +276,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
           args[0].row,
           `${typeName(info.element)} の値は < で比べられません。比べ方を表す関数を渡してください。`
         );
-      const ops = elementOperations(compiler(), unqualified(info.element), args[0].row);
+      const ops = elementOperations(compiler(), unqualified(info.element), args[0].row, 'relocate');
       return native(name, params(args), VOID, ([first, last], { frame }) => {
         const values = mutableRange(first, last, info, frame, ops);
         frame.runtime.spend(values.length);
@@ -291,7 +290,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const info = writableRangeAt(args, 0);
     if (!info || args.length !== 2) return;
     checkCategory('reverse', info, 'bidirectional', args[0].row);
-    const ops = elementOperations(compiler(), unqualified(info.element), args[0].row);
+    const ops = elementOperations(compiler(), unqualified(info.element), args[0].row, 'swap');
     return native('reverse', params(args), VOID, ([first, last], { frame }) => {
       const values = mutableRange(first, last, info, frame, ops);
       for (let i = 0, j = values.length - 1; i < j; i++, j--) values.swap(i, j);
@@ -305,7 +304,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       checkCategory(name, info, 'bidirectional', args[0].row);
       const less = lessOf(args, 2, info.element);
       if (!less) return;
-      const ops = elementOperations(compiler(), unqualified(info.element), args[0].row);
+      const ops = elementOperations(compiler(), unqualified(info.element), args[0].row, 'swap');
       return native(name, params(args), BOOL, ([first, last], { frame }) => {
         const values = mutableRange(first, last, info, frame, ops);
         const compare = less(frame);
@@ -321,7 +320,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     if (isConstType(args[2].type)) return;
     checkCategory('shuffle', info, 'randomAccess', args[0].row);
     const engineType = args[2].isLvalue ? referenceTo(args[2].type) : args[2].type;
-    const ops = elementOperations(compiler(), unqualified(info.element), args[0].row);
+    const ops = elementOperations(compiler(), unqualified(info.element), args[0].row, 'swap');
     return native('shuffle', [...params(args).slice(0, 2), engineType], VOID, ([first, last, engine], { frame }) => {
       const values = mutableRange(first, last, info, frame, ops);
       const generator = readArg(engine, engineType) as EngineValue;
@@ -487,7 +486,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const otherLength = hasEnd ? range(start, end, other).length : values.length;
       if (random && otherLength !== values.length) return 0;
       const length = Math.min(values.length, otherLength);
-      const others = range(start, (start as Ptr).offset(other.isReverse ? -length : length), other);
+      const others = rangeWithLength(start, length, other);
       for (let index = 0; index < length; index++) if (!same(frame, values.get(index), others.get(index))) return 0;
       return values.length === otherLength ? 1 : 0;
     });
@@ -507,7 +506,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     };
     const convert = tryCompile(() => compiler().convert(argument, constRef(unqualified(info.element)), argument.row));
     if (!convert) return;
-    const ops = elementOperations(compiler(), unqualified(info.element), args[0].row);
+    const ops = elementOperations(compiler(), unqualified(info.element), args[0].row, 'assign');
     return native('fill', [...params(args).slice(0, 2), itemType], VOID, ([first, last, item], { frame }) => {
       const values = range(first, last, info);
       source.push(item as Ptr);
@@ -551,7 +550,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const predicate = name === 'replace_if' ? predicateOf(args[2], info.element) : undefined;
       const equal = name === 'replace' ? valueEquality(info.element, args[2].type) : undefined;
       if (!predicate && !equal) return;
-      const ops = elementOperations(compiler(), unqualified(info.element), args[0].row);
+      const ops = elementOperations(compiler(), unqualified(info.element), args[0].row, 'assign');
       const types = params(args);
       const convert = assignmentSource(compiler(), nonReference(types[3]), info.element, args[3].row);
       return native(name, types, VOID, ([first, last, old, replacement], { frame }) => {
@@ -616,7 +615,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('rotate', (args) => {
     const info = writableRangeAt(args, 0);
     if (!info || args.length !== 3) return;
-    const ops = elementOperations(compiler(), unqualified(info.element), args[0].row);
+    const ops = elementOperations(compiler(), unqualified(info.element), args[0].row, 'relocate');
     return native('rotate', params(args), unqualified(args[0].type), ([first, middle, last], { frame }) => {
       const values = mutableRange(first, last, info, frame, ops);
       const split = range(first, middle, info).length;
@@ -636,8 +635,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     )
       return;
     if (type.kind === 'class' && type.cls.isNoncopyable) return;
-    requireSwapUse(compiler(), type, args[0].row);
-    const ops = elementOperations(compiler(), type, args[0].row);
+    const ops = elementOperations(compiler(), type, args[0].row, 'swap');
     return native('swap', [referenceTo(type), referenceTo(type)], VOID, ([a, b], { frame }) => {
       swapElements(frame, a as Ptr, b as Ptr, ops);
     });
@@ -646,8 +644,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const a = outputOf(args[0]);
     const b = outputOf(args[1]);
     if (!a || !b || a.isOutput || b.isOutput || args.length !== 2 || !sameType(a.element, b.element)) return;
-    requireSwapUse(compiler(), a.element, args[0].row);
-    const ops = elementOperations(compiler(), a.element, args[0].row);
+    const ops = elementOperations(compiler(), a.element, args[0].row, 'swap');
     return native('iter_swap', params(args), VOID, ([x, y], { frame }) => {
       swapElements(frame, elementLocation(x as Ptr, a.isReverse), elementLocation(y as Ptr, b.isReverse), ops);
     });
@@ -661,7 +658,12 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       if (!info || !output || args.length !== (name === 'copy' ? 3 : 4)) return;
       const predicate = name === 'copy_if' ? predicateOf(args[3], info.element) : undefined;
       if (name === 'copy_if' && !predicate) return;
-      const ops = elementOperations(compiler(), unqualified(output.element), args[2].row);
+      const ops = elementOperations(
+        compiler(),
+        unqualified(output.element),
+        args[2].row,
+        output.isOutput ? 'copy' : 'assign'
+      );
       const convert = assignmentSource(compiler(), info.element, output.element, args[2].row);
       return native(name, params(args), unqualified(args[2].type), ([first, last, start], { frame }) => {
         const values = range(first, last, info);
@@ -688,18 +690,12 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     );
     if (!operation) return;
     const destination = unqualified(output.element);
-    const ops = elementOperations(compiler(), destination, args[0].row);
+    const ops = elementOperations(compiler(), destination, args[0].row, output.isOutput ? 'copy' : 'assign');
     const prepare = assignmentSource(compiler(), operation.type, destination, args[0].row);
     return native('transform', params(args), unqualified(args[isBinary ? 3 : 2].type), (values, { frame }) => {
       const [first, last] = values;
       const source = range(first, last, info);
-      const others = isBinary
-        ? range(
-            values[2],
-            (values[2] as Ptr).offset(second?.isReverse ? -source.length : source.length),
-            second as IteratorInfo
-          )
-        : undefined;
+      const others = second ? rangeWithLength(values[2], source.length, second) : undefined;
       const out = new Output(values[isBinary ? 3 : 2] as Ptr, output, frame, ops, prepare);
       for (let index = 0; index < source.length; index++) {
         withTemporaries(frame, () => {
@@ -769,7 +765,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       sumType,
       ([first, last, start, initial], { frame }) => {
         const values = range(first, last, info);
-        const others = range(start, (start as Ptr).offset(values.length), other);
+        const others = rangeWithLength(start, values.length, other);
         let sum = initial as Value;
         for (let index = 0; index < values.length; index++)
           sum = add(frame, sum, product.run(frame, values.get(index), others.get(index)));
@@ -785,7 +781,12 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       ? compileOperation(compiler(), args[3], [info.element, info.element], unqualified(info.element))?.run
       : accumulateStep(compiler(), unqualified(info.element), info.element, args[0].row);
     if (!add) return;
-    const ops = elementOperations(compiler(), unqualified(output.element), args[2].row);
+    const ops = elementOperations(
+      compiler(),
+      unqualified(output.element),
+      args[2].row,
+      output.isOutput ? 'copy' : 'assign'
+    );
     const convert = assignmentSource(compiler(), info.element, output.element, args[2].row);
     return native('partial_sum', params(args), unqualified(args[2].type), ([first, last, start], { frame }) => {
       const values = range(first, last, info);
@@ -994,6 +995,11 @@ const params = (args: Expr[]): Type[] =>
 
 const range = (first: unknown, last: unknown, info: IteratorInfo): Range =>
   new Range(first as Ptr, last as Ptr, info.isReverse);
+
+function rangeWithLength(begin: unknown, length: number, info: IteratorInfo): Range {
+  const first = begin as Ptr;
+  return range(first, first.offset(info.isReverse ? -length : length), info);
+}
 
 function mutableRange(first: unknown, last: unknown, info: IteratorInfo, frame: Frame, ops: ElementOperations): Range {
   const write = info.element.kind === 'class' ? { frame, ops } : undefined;

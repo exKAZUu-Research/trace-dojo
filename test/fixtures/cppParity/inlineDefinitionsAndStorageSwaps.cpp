@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <iostream>
 #include <list>
@@ -19,10 +20,17 @@ struct Copy {
   Copy() {}
   Copy(const Copy&) { missing(); }
 };
+struct Default {
+  int value;
+  Default() { missing(); }
+  Default(int n) : value(n) {}
+};
 
 struct Value { int n; };
 int main() {
   std::vector<Copy> noCopies(1);
+  Default reversed[] = {1, 2};
+  std::reverse(reversed, reversed + 2);
   std::array<Value, 1> a{{{1}}}, b{{{2}}};
   int& arrayMember = a[0].n;
   std::swap(a, b);

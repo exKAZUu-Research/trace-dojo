@@ -2,6 +2,26 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
+test.each([
+  ['reverse', 'v.begin(), v.end()'],
+  ['rotate', 'v.begin(), v.begin() + 1, v.end()'],
+  ['sort', 'v.begin(), v.end(), less'],
+  ['stable_sort', 'v.begin(), v.end(), less'],
+  ['shuffle', 'v.begin(), v.end(), std::mt19937()'],
+  ['next_permutation', 'v.begin(), v.end(), less'],
+])('std::%s requires definitions reached by element copies', (algorithm, args) => {
+  const program = `#include <algorithm>
+#include <random>
+#include <vector>
+struct Item { static int copies; int n = 0; Item() {} Item(const Item&) { ++copies; } };
+bool less(const Item& a, const Item& b) { return a.n < b.n; }
+int main() { std::vector<Item> v(3); std::${algorithm}(${args}); }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 3, message: expect.stringContaining('Item::copies') }],
+  });
+});
+
 // Apple clang++ 21 (`-std=c++20`) rejects each program at the given row, counted from 0.
 test.each([
   ['a private member of a base', 'struct B { private: int x = 1; };\nstruct D : B { int f() { return B::x; } };', 1],
@@ -88,6 +108,16 @@ test.each([
   ['a default value for a mutable reference', 'void f(int& n = 1) {}\nint main() {}', 0],
   ['an incomplete array parameter element', 'void f(int cells[2][]) {}\nint main() {}', 0],
   ['an incomplete global array', 'int cells[];\nint main() {}', 0],
+  [
+    'a priority queue from an unmatched braced argument',
+    '#include <queue>\nint main() { std::priority_queue<int> q({3, 1}); }',
+    1,
+  ],
+  [
+    'narrowing within a nested pair member list',
+    '#include <utility>\nint main() { std::pair<int, int> p{{2.5}, 1}; }',
+    1,
+  ],
   ['a const object allocated without an initializer', 'int main() {\n  auto p = new const int; }', 1],
   ['an assignment to a const object allocated with new', 'int main() { auto p = new int const{7};\n  *p = 8; }', 1],
   ['vector emplacement without a position', '#include <vector>\nint main() { std::vector<int> v;\n  v.emplace(); }', 2],

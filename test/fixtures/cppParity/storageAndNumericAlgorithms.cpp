@@ -6,6 +6,7 @@
 #include <list>
 #include <numeric>
 #include <stack>
+#include <vector>
 
 struct Value {
   int n;
@@ -41,6 +42,8 @@ int main() {
   int a[] = {1, 2};
   double b[] = {1.5, 2.5};
   std::cout << std::inner_product(a, a + 2, b, 0.0) << ' ';
+  std::vector<int> valuesInReverse{1, 2, 3};
+  std::cout << std::inner_product(valuesInReverse.begin(), valuesInReverse.end(), valuesInReverse.rbegin(), 0) << ' ';
   Value values[] = {6, 5, 4, 3, 2, 1};
   std::sort(values, values + 6, less);
   std::cout << '|';

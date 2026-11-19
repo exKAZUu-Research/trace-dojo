@@ -164,7 +164,8 @@ export function childValues(store: Store): Iterable<Value> {
 export class Ptr {
   constructor(
     private readonly initialStore: Store | undefined,
-    private readonly initialIndex: number
+    private readonly initialIndex: number,
+    private readonly memberIndex = initialStore instanceof CObject ? initialIndex : undefined
   ) {}
 
   get store(): Store | undefined {
@@ -188,36 +189,56 @@ export class Ptr {
   }
 
   read(): Value {
-    const value = this.target().get(this.index);
+    const value = this.target().get(this.valueIndex());
     if (value instanceof Store) value.checkAlive();
     return value;
   }
 
   write(value: Value): void {
-    this.target().set(this.index, value);
+    this.target().set(this.valueIndex(), value);
   }
 
   /** Reads the value without checking that it was written, for copying objects member by member. */
   readRaw(): Value {
     const store = this.target();
+    const index = this.valueIndex();
     if (store instanceof Box) return store.value;
-    if (store instanceof ArrayStore || store instanceof CObject) return store.values[this.index];
-    return store.get(this.index);
+    if (store instanceof ArrayStore || store instanceof CObject) return store.values[index];
+    return store.get(index);
+  }
+
+  private valueIndex(): number {
+    const index = this.index;
+    if (this.memberIndex !== undefined && index !== this.memberIndex) throw new CppRuntimeError('outOfBounds');
+    return index;
   }
 
   offset(delta: number, asIterator = false): Ptr {
     const store = this.target();
     const index = this.index + delta;
+    if (this.memberIndex !== undefined) {
+      if (index < this.memberIndex || index > this.memberIndex + 1) throw new CppRuntimeError('pointerOutOfRange');
+      return new Ptr(store, index, this.memberIndex);
+    }
     if (index < 0 || index > (asIterator ? store.iteratorLength : store.length))
       throw new CppRuntimeError('pointerOutOfRange');
     return asIterator ? store.iteratorLocation(index) : store.location(index);
   }
 
   element(isReverse: boolean): Ptr {
+    if (this.memberIndex !== undefined) {
+      const element = this.offset(isReverse ? -1 : 0);
+      element.valueIndex();
+      return element;
+    }
     const store = this.target();
     const index = this.index - (isReverse ? 1 : 0);
     if (index < 0 || index >= store.iteratorLength) throw new CppRuntimeError('invalidIterator');
     return store.location(index);
+  }
+
+  sharesRange(other: Ptr): boolean {
+    return this.store === other.store && this.memberIndex === other.memberIndex;
   }
 
   equals(other: Ptr): boolean {

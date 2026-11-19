@@ -168,6 +168,15 @@ int main() { static const Value& value = Value(); return value.n; }`;
   });
 });
 
+test('a pointer one past a member cannot be dereferenced', () => {
+  const program = `struct Value { int first; int second; };
+int main() { Value value{1, 2}; const int* past = &value.first + 1; return *past; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('範囲'),
+  });
+});
+
 test('an exception escaping a catch parameter copy terminates before outer handlers', () => {
   const program = `#include <iostream>
 struct Print {

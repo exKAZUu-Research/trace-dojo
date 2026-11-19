@@ -164,6 +164,7 @@ export interface Resolved {
   fn: FunctionInfo;
   conversions: ConversionSequence[];
 }
+type MatchingOverload = Resolved & { objectConversion?: ConversionSequence };
 
 /** Making, copying, and destroying objects, converting values, and calling functions. */
 export abstract class ObjectCompiler extends CompilerBase implements ConversionHost {
@@ -319,7 +320,31 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     row: number,
     templateArgs?: Type[]
   ): Resolved {
-    const viable: (Resolved & { objectConversion?: ConversionSequence })[] = [];
+    const viable = this.matchingOverloads(candidates, args, object, templateArgs);
+    const best = this.chooseOverload(description, viable, row);
+    if (best) return best;
+    const argTypes = args.map((arg) => (arg.type.kind === 'void' ? 'void' : typeName(arg.type))).join(', ');
+    const constNote =
+      object && isConstType(object.type) && candidates.some((candidate) => !candidate.isConst && !candidate.isStatic)
+        ? '（const のオブジェクトからは const のメンバ関数しか呼べません）'
+        : '';
+    return this.error(row, `${description} に、引数（${argTypes}）に合うものがありません。${constNote}`);
+  }
+
+  protected chooseOverload(description: string, viable: MatchingOverload[], row: number): Resolved | undefined {
+    const best = bestOf(viable, (a, b) => this.compareCandidates(a, b));
+    if (!best && viable.length > 1)
+      return this.error(row, `${description} の呼び出しに合うものが複数あり、どれを呼ぶのか決まりません。`);
+    return best;
+  }
+
+  protected matchingOverloads(
+    candidates: FunctionInfo[],
+    args: Expr[],
+    object?: Expr,
+    templateArgs?: Type[]
+  ): MatchingOverload[] {
+    const viable: MatchingOverload[] = [];
     for (const candidate of candidates) {
       const instantiated = candidate.instantiate?.(args, templateArgs);
       const fn = candidate.instantiate ? instantiated && { ...instantiated, isTemplate: true } : candidate;
@@ -331,16 +356,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       if (object && !fn.isStatic && !fn.isConstructor && !objectConversion) continue;
       viable.push({ fn, conversions, objectConversion });
     }
-    const best = bestOf(viable, (a, b) => this.compareCandidates(a, b));
-    if (best) return best;
-    if (viable.length > 1)
-      return this.error(row, `${description} の呼び出しに合うものが複数あり、どれを呼ぶのか決まりません。`);
-    const argTypes = args.map((arg) => (arg.type.kind === 'void' ? 'void' : typeName(arg.type))).join(', ');
-    const constNote =
-      object && isConstType(object.type) && candidates.some((candidate) => !candidate.isConst && !candidate.isStatic)
-        ? '（const のオブジェクトからは const のメンバ関数しか呼べません）'
-        : '';
-    return this.error(row, `${description} に、引数（${argTypes}）に合うものがありません。${constNote}`);
+    return viable;
   }
 
   private argumentConversions(fn: FunctionInfo, args: Expr[]): ConversionSequence[] | undefined {

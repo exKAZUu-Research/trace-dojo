@@ -23,7 +23,14 @@ import {
 } from '../types';
 import { CObject, Ptr, type Value } from '../values';
 import { MapValue, NodePositions } from './containerValues';
-import { type ElementOperations, elementOperations, equalTo, lessThan, requireSwapUse, swapElements } from './elements';
+import {
+  type ElementOperations,
+  elementOperations,
+  equalTo,
+  lessThan,
+  requireElementUse,
+  swapElements,
+} from './elements';
 import { addRangeMembers, emplacementCall, type EntryTable, insertCopy } from './emplacement';
 import { randomAccessIterator } from './iterators';
 import type { Library } from './registry';
@@ -64,6 +71,16 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
     args: [first, second],
     size: Math.ceil((secondOffset + sizeOf(secondStorage)) / align) * align,
     align,
+    listInitializer: (compiler, elements, row) => {
+      if (elements.length !== 2) return;
+      // The forwarding constructor deduces its parameters before initializing the pair's member types.
+      return compiler.constructObject(
+        cls,
+        elements.map((element) => compiler.argument(element)),
+        row,
+        false
+      ).run as Eval;
+    },
     operator: (compiler, operator, operands, row) => {
       const [left, right] = operands;
       const isSelf = (expr: Expr | undefined): boolean => expr?.type.kind === 'class' && expr.type.cls === cls;
@@ -95,7 +112,12 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
     },
   };
   cls.constructors = [
-    nativeConstructor(cls, [], (_args, { frame }) => make(ops()[0].make(frame), ops()[1].make(frame))),
+    nativeConstructor(cls, [], (_args, { frame }) => make(ops()[0].make(frame), ops()[1].make(frame)), {
+      uses: (row) => {
+        library.compiler.valueInitialized(first, row);
+        library.compiler.valueInitialized(second, row);
+      },
+    }),
     nativeConstructor(
       cls,
       [constRef(first), constRef(second)],
@@ -177,8 +199,8 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
       },
       {
         uses: (row) => {
-          requireSwapUse(library.compiler, nonReference(first), row);
-          requireSwapUse(library.compiler, nonReference(second), row);
+          requireElementUse(library.compiler, nonReference(first), row, 'swap');
+          requireElementUse(library.compiler, nonReference(second), row, 'swap');
         },
       }
     )
@@ -491,6 +513,8 @@ export function orderedClass(
         if (isConstType(left.type))
           return compiler_.error(row, `const の ${cls.name} には [] を使えません（at を使ってください）。`);
         if (!mapped().isDefaultConstructible) return mappedNotDefaultConstructible(compiler_, valueType as Type, row);
+        compiler_.valueInitialized(valueType as Type, row);
+        requireElementUse(compiler_, keyType, row, 'copy');
         const keyRun = compiler_.convert(right, constRef(keyType), row).run;
         const object = left.isLvalue ? left.run : compiler_.materialize(left).run;
         return {
