@@ -1,0 +1,33 @@
+function inspectAfter(values: (number | undefined)[], mutate: () => void, limit = 100) {
+  Object.defineProperty(values, "0", {
+    get() { mutate(); return 1; },
+    enumerable: true,
+  });
+  console.dir(values, { getters: true, maxArrayLength: limit });
+}
+
+const appended = [1, 2, 3];
+inspectAfter(appended, () => { appended.push(4); });
+const extended = [1, 2, 3];
+inspectAfter(extended, () => { extended[4] = 5; });
+const limited = [1, 2, 3];
+inspectAfter(limited, () => { limited.push(4); }, 2);
+const shortened = [1, 2, 3];
+inspectAfter(shortened, () => { shortened.length = 1; });
+const deleted: (number | undefined)[] = [1, 2, 3];
+inspectAfter(deleted, () => { delete deleted[1]; });
+const sparse = [1, , 3];
+inspectAfter(sparse, () => { sparse.push(4); });
+const hidden = [1, , 3];
+inspectAfter(hidden, () => { Object.defineProperty(hidden, "2", { enumerable: false }); });
+
+const removed: (number | undefined)[] = [, 1, 3];
+Object.defineProperty(removed, "1", {
+  get() { delete removed[2]; return 1; },
+  enumerable: true,
+});
+try {
+  console.dir(removed, { getters: true });
+} catch (error) {
+  console.log(String(error));
+}

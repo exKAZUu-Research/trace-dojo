@@ -479,8 +479,8 @@ export class ClassDeclarationChecker {
     const ownerId = ctor?.id ?? 0;
     const states = [endState, ...returnStates].filter((state): state is FlowState => state !== undefined);
     const isAssigned = (nameNode: TreeNode): boolean => {
-      const names = this.c.silently(() => this.c.patterns.propertyNames(nameNode));
-      const key = propertyReferenceKey(`this${ownerId}`, names?.length === 1 ? names[0] : nameNode.text);
+      const name = this.c.classes.propertyKey(nameNode, nameNode);
+      const key = propertyReferenceKey(`this${ownerId}`, name);
       return ctor !== undefined && states.every((state) => state.assignedFields.has(key));
     };
     for (const member of named(body)) {

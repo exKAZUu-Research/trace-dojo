@@ -245,9 +245,8 @@ export class MemberChecker {
   ): Type {
     objectType = this.c.reducedTypes.of(objectType);
     if (isAnyLike(objectType)) return objectType;
-    if (propertyNode.type === 'private_property_identifier')
-      return this.c.classes.privateNameAccess(node, propertyNode, objectType);
-    if (objectType.kind === 'union') {
+    const isPrivate = propertyNode.type === 'private_property_identifier';
+    if (!isPrivate && objectType.kind === 'union') {
       // TypeScript reports a property some member lacks once, on the whole union, suggesting one all members have.
       if (objectType.types.some((member) => this.lacksProperty(member, name))) {
         const suggestion = this.suggestProperty(objectType, name);
@@ -262,9 +261,12 @@ export class MemberChecker {
         true
       );
     }
-    const property = this.c.propertyOf(objectType, name);
+    const property = isPrivate
+      ? this.c.classes.privateProperty(node, propertyNode, objectType)
+      : this.c.propertyOf(objectType, name);
     this.c.conditions.recordPropertyDeclaration(node, property?.declaration);
     if (!property) {
+      if (isPrivate) return errorType;
       const index = this.indexSignatureType(objectType, name);
       if (index) return index;
       this.reportMissingProperty(propertyNode, name, objectType);

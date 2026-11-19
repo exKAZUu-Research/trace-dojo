@@ -328,7 +328,7 @@ export class Calls {
   /** Reports a call whose `this`, the object it is called on (or `void`), does not fit the `this` parameter. */
   private checkThisContext(callee: TreeNode, signature: Signature, context: Type = voidType): void {
     const { thisType } = signature;
-    if (!thisType || isAnyLike(thisType)) return;
+    if (!thisType || isAnyLike(thisType) || isIntrinsic(thisType, 'void')) return;
     if (this.c.relations.isAssignable(context, thisType)) return;
     this.c.error(
       callee,

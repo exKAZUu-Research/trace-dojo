@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 639 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 642 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -1078,11 +1078,11 @@ export class ClassChecker {
     return classNode?.id !== property.declaringClass.declaration.id;
   }
 
-  privateNameAccess(node: TreeNode, propertyNode: TreeNode, objectType: Type): Type {
+  privateProperty(node: TreeNode, propertyNode: TreeNode, objectType: Type): Property | undefined {
     const name = propertyNode.text;
     const declaring = this.privateNameDeclarer(node, name);
     const property = declaring && this.c.propertyOf(objectType, memberKey(name, declaring));
-    if (property) return property.type();
+    if (property) return property;
     const declaredElsewhere = [...this.c.structureOf(objectType).properties.values()].some(
       (member) => member.name === name
     );
@@ -1092,13 +1092,17 @@ export class ClassChecker {
         ? `プロパティ '${name}' は、それを宣言したクラスの外では使えません。`
         : `プロパティ '${name}' は型 '${this.c.print(objectType)}' にありません。`
     );
-    return errorType;
+    return undefined;
   }
 
   /** The key a property access's name has in class structures, where a `#name` is the one its enclosing classes declare. */
   propertyKey(node: TreeNode, propertyNode: TreeNode): string {
     const name = propertyNode.text;
-    if (propertyNode.type !== 'private_property_identifier') return name;
+    if (propertyNode.type === 'computed_property_name') {
+      const names = this.c.silently(() => this.c.patterns.propertyNames(propertyNode));
+      return names?.length === 1 ? names[0] : name;
+    }
+    if (propertyNode.type !== 'private_property_identifier') return propertyNameText(propertyNode) ?? name;
     const declaring = this.privateNameDeclarer(node, name);
     return declaring ? memberKey(name, declaring) : name;
   }

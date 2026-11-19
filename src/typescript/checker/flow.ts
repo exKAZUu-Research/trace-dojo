@@ -245,7 +245,7 @@ export class Flow {
         const property = expression.childForFieldName('property');
         if (!object || !property) return undefined;
         const base = this.referenceKey(object);
-        return base ? propertyReferenceKey(base, property.text) : undefined;
+        return base ? propertyReferenceKey(base, this.c.classes.propertyKey(expression, property)) : undefined;
       }
       case 'subscript_expression': {
         const object = expression.childForFieldName('object');

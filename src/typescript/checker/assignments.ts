@@ -145,26 +145,29 @@ export class AssignmentChecker {
     this.c.flow.set(key, { type, assigned: true, evolving: entry?.evolving }, target);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Probes the accessor and getter types within isolated flow.
   private assignedAccessorType(target: TreeNode): Type | undefined {
     if (target.type !== 'member_expression' && target.type !== 'subscript_expression') return undefined;
     return this.c.flow.probe(() =>
       this.c.silently(() => {
         const object = target.childForFieldName('object') as TreeNode;
-        const index = target.childForFieldName('index');
-        const indexed = index ? this.c.expressions.check(index) : undefined;
-        const name =
-          target.childForFieldName('property')?.text ??
-          (indexed?.kind === 'literal' ? String(indexed.value) : undefined);
-        if (name === undefined) return;
         const objectType = this.c.expressions.check(object);
+        const name = this.accessorKey(target);
+        if (name === undefined) return;
         const properties = (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) =>
           this.c.propertyOf(member, name)
         );
         if (!properties.some((property) => property?.writeType)) return;
-        return unionOf(properties.map((property) => property?.type() ?? anyType));
+        return unionOf(properties.map((property) => (property ? propertyAccessType(property) : anyType)));
       })
     );
+  }
+
+  private accessorKey(target: TreeNode): string | undefined {
+    const property = target.childForFieldName('property');
+    if (property) return this.c.classes.propertyKey(target, property);
+    const index = target.childForFieldName('index');
+    const indexed = index ? this.c.expressions.check(index) : undefined;
+    return indexed?.kind === 'literal' ? String(indexed.value) : undefined;
   }
 
   isAutoTyped(symbol: Sym, declaration = symbol.valueDeclaration): boolean {

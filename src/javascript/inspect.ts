@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 596 -- One port of Node.js's util.inspect, whose formatters share its context.
+// code-gauge-allow-file fileNcss 617 -- One port of Node.js's util.inspect, whose formatters share its context.
 import { inspect as hostInspect, type InspectStyle, stripVTControlCharacters } from 'node:util';
 
 import { eastAsianWidthType } from 'get-east-asian-width';
@@ -12,7 +12,7 @@ import { WELL_KNOWN_SYMBOLS } from './realmIterators';
 import type { Runtime } from './runtime';
 import {
   type AccessorProperty,
-  HOLE,
+  arrayIndexOf,
   isAccessor,
   isCallable,
   isObject,
@@ -707,30 +707,61 @@ function accessorText(ctx: Context, property: AccessorProperty): string {
   return property.set ? stylize(ctx, '[Setter]', 'special') : stylize(ctx, 'undefined', 'undefined');
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Ports Node.js's util.inspect, so the two stay comparable.
 function formatArray(ctx: Context, array: JsArray, recurseTimes: number): string[] {
-  const { elements } = array;
+  const length = array.elements.length;
+  const limit = Math.min(length, ctx.maxArrayLength);
   const output: string[] = [];
-  let index = 0;
-  while (index < elements.length && output.length < ctx.maxArrayLength) {
-    if (elements[index] === HOLE) {
-      const start = index;
-      while (index < elements.length && elements[index] === HOLE) index++;
-      const count = index - start;
-      output.push(stylize(ctx, `<${count} empty item${count > 1 ? 's' : ''}>`, 'undefined'));
-    } else {
-      const defined = array.definedElements?.get(index);
-      output.push(
-        defined && isAccessor(defined)
-          ? formatAccessor(ctx, array, defined, recurseTimes)
-          : formatIndented(ctx, elements[index] as Value, recurseTimes)
-      );
-      index++;
-    }
+  for (let index = 0; index < limit; index++) {
+    const property = ctx.runtime.getOwnProperty(array, String(index));
+    if (!property) return formatSparseArray(ctx, array, recurseTimes, limit, output, index);
+    output.push(formatArrayProperty(ctx, array, property, recurseTimes));
   }
-  const remaining = elements.length - index;
-  if (remaining > 0) output.push(`... ${remaining} more item${remaining > 1 ? 's' : ''}`);
+  if (length > limit) output.push(remainingArrayItems(length - limit));
   return output;
+}
+
+function formatSparseArray(
+  ctx: Context,
+  array: JsArray,
+  recurseTimes: number,
+  limit: number,
+  output: string[],
+  start: number
+): string[] {
+  const keys = ctx.runtime.ownEnumerableKeys(array);
+  let index = start;
+  for (let position = start; position < keys.length && output.length < limit; position++) {
+    const key = keys[position];
+    const current = arrayIndexOf(key);
+    if (current === undefined) break;
+    if (current !== index) {
+      output.push(emptyArrayItems(ctx, current - index));
+      index = current;
+      if (output.length === limit) break;
+    }
+    const property = ctx.runtime.getOwnProperty(array, key);
+    if (!property) return ctx.runtime.throwError('TypeError', "Cannot read properties of undefined (reading 'value')");
+    output.push(formatArrayProperty(ctx, array, property, recurseTimes));
+    index++;
+  }
+  const remaining = array.elements.length - index;
+  if (remaining > 0)
+    output.push(output.length === limit ? remainingArrayItems(remaining) : emptyArrayItems(ctx, remaining));
+  return output;
+}
+
+function formatArrayProperty(ctx: Context, array: JsArray, property: Property, recurseTimes: number): string {
+  return isAccessor(property)
+    ? formatAccessor(ctx, array, property, recurseTimes)
+    : formatIndented(ctx, property.value, recurseTimes);
+}
+
+function emptyArrayItems(ctx: Context, count: number): string {
+  return stylize(ctx, `<${count} empty item${count > 1 ? 's' : ''}>`, 'undefined');
+}
+
+function remainingArrayItems(count: number): string {
+  return `... ${count} more item${count > 1 ? 's' : ''}`;
 }
 
 /** A Date's ISO string, after the name of its constructor when that is not Date. */
@@ -782,7 +813,7 @@ function formatCollection(ctx: Context, value: JsObject, recurseTimes: number): 
   const output = entries.slice(0, ctx.maxArrayLength).map((entry) => formatEntry(entry));
   ctx.indentationLvl -= 2;
   const remaining = entries.length - output.length;
-  if (remaining > 0) output.push(`... ${remaining} more item${remaining > 1 ? 's' : ''}`);
+  if (remaining > 0) output.push(remainingArrayItems(remaining));
   return output;
 }
 
