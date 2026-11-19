@@ -640,15 +640,13 @@ export function unorderedClass(
       ) {
         const valuesEqual = valueType ? equalTo(valueType) : undefined;
         if (valueType && !valuesEqual) return compiler_.error(row, `${typeName(valueType)} は == で比べられません。`);
-        const a = compiler_.rvalue(left).run;
-        const b = compiler_.rvalue(right).run;
         return {
           type: BOOL,
           isLvalue: false,
           row,
-          run: (frame) => {
-            const first = a(frame) as HashValue;
-            const second = b(frame) as HashValue;
+          run: compiler_.compareObjects(left, right, (a, b) => {
+            const first = a as HashValue;
+            const second = b as HashValue;
             const same =
               first.size === second.size &&
               first.nodes().every((node) => {
@@ -658,8 +656,8 @@ export function unorderedClass(
                   (!valuesEqual || valuesEqual((node.value as CObject).values[1], (found.value as CObject).values[1]))
                 );
               });
-            return same === (operator === '==') ? 1 : 0;
-          },
+            return same === (operator === '==');
+          }),
         };
       }
       if (operator !== '[]' || !isMap || left.type.kind !== 'class' || left.type.cls !== cls) return;

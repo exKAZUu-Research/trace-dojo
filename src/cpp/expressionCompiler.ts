@@ -1403,6 +1403,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       holdAll(frame, [receiver, index], ([location, operand]) => locate(frame, (location as Ptr).read(), operand));
   }
 
+  compareObjects(left: Expr, right: Expr, compare: (first: Value, second: Value) => boolean): Eval<number> {
+    const operands = [this.objectOf(left), this.objectOf(right)];
+    return (frame) =>
+      holdAll(frame, operands, ([first, second]) => (compare((first as Ptr).read(), (second as Ptr).read()) ? 1 : 0));
+  }
+
   // Conversions -----------------------------------------------------------------------------------------------------
 
   /** Converts a value to `bool` as a condition does (contextual conversion). */

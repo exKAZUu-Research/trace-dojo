@@ -1006,18 +1006,13 @@ function sequenceOperator(
         row,
         `${typeName(element)} の値は ${operator === '==' || operator === '!=' ? '==' : '<'} で比べられません。`
       );
-    const a = compiler.objectOf(left);
-    const b = compiler.objectOf(right);
     return {
       type: BOOL,
       isLvalue: false,
       row,
-      run: (frame) =>
-        holdAll(frame, [a, b], ([first, second]) => {
-          const left = (first as Ptr).read() as SequenceValue;
-          const right = (second as Ptr).read() as SequenceValue;
-          return compareSequences(operator, left.items, right.items, element) ? 1 : 0;
-        }),
+      run: compiler.compareObjects(left, right, (first, second) =>
+        compareSequences(operator, (first as SequenceValue).items, (second as SequenceValue).items, element)
+      ),
     };
   }
   return undefined;

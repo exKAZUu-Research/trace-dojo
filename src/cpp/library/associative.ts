@@ -105,10 +105,12 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
       const type = classType(cls);
       const compare = operator === '==' || operator === '!=' ? equalTo(type) : lessThan(type);
       if (!compare) return compiler.error(row, `${cls.name} の値は ${operator} で比べられません。`);
-      const a = compiler.rvalue(left).run;
-      const b = compiler.rvalue(right).run;
-      const test = orderTest(operator, compare);
-      return { type: BOOL, isLvalue: false, row, run: (frame) => (test(a(frame) as Value, b(frame) as Value) ? 1 : 0) };
+      return {
+        type: BOOL,
+        isLvalue: false,
+        row,
+        run: compiler.compareObjects(left, right, orderTest(operator, compare)),
+      };
     },
   };
   const construct = (frame: Frame, initialize: [PairMemberInitializer, PairMemberInitializer]): CObject =>
@@ -671,28 +673,26 @@ export function orderedClass(
         const compareEntry =
           operator === '==' || operator === '!=' ? equalTo(unqualified(entryType)) : lessThan(unqualified(entryType));
         if (!compareEntry) return compiler_.error(row, `${cls.name} の値は ${operator} で比べられません。`);
-        const a = compiler_.rvalue(left).run;
-        const b = compiler_.rvalue(right).run;
         return {
           type: BOOL,
           isLvalue: false,
           row,
-          run: (frame) => {
-            const x = (a(frame) as OrderedValue).entries;
-            const y = (b(frame) as OrderedValue).entries;
+          run: compiler_.compareObjects(left, right, (first, second) => {
+            const x = (first as OrderedValue).entries;
+            const y = (second as OrderedValue).entries;
             if (operator === '==' || operator === '!=') {
               const same =
                 x.length === y.length &&
                 x.every((item, index) => (compareEntry as (p: Value, q: Value) => boolean)(item, y[index]));
-              return (operator === '==') === same ? 1 : 0;
+              return (operator === '==') === same;
             }
             const less = compareEntry as Order;
             let result = 0;
             for (let index = 0; index < Math.min(x.length, y.length) && result === 0; index++)
               result = less(x[index], y[index]);
             if (result === 0) result = x.length - y.length;
-            return orderTest(operator, () => result)(undefined, undefined) ? 1 : 0;
-          },
+            return orderTest(operator, () => result)(undefined, undefined);
+          }),
         };
       }
       return;
