@@ -112,7 +112,7 @@ class ArrayObjectProperty implements Place {
     if (element.get() === undefined) {
       if (mode === 'unset') return new RefPlace(Ref.temporary(null));
       if (mode === 'update') element.warnUndefined();
-      if (element.get() === undefined) element.set(null);
+      element.set(null);
     }
     return element;
   }

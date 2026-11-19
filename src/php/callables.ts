@@ -91,7 +91,7 @@ export function evalArgs(
           fn?.params.some((param) => param.byRef) && arg.e.k === 'var' && arg.e.name !== 'GLOBALS'
             ? placeOf(arg.e)
             : undefined;
-        let value = source ? source.get() : ev(arg.e);
+        let value = source ? (source.getOrWarn ? source.getOrWarn() : source.get()) : ev(arg.e);
         if (value instanceof PhpArray) frame.temporaries.push(value);
         if (value instanceof PhpArray && source) value = writableContainer(source);
         else if (value instanceof PhpArray && fn?.params.some((param) => param.byRef)) {

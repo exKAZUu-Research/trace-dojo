@@ -3090,6 +3090,23 @@ set_error_handler(function () use ($ao) { $ao['p'] = 5; return true; });
 $r4 = $ao->p += 1;
 restore_error_handler();
 echo 'ao:' . json_encode([$r4, $ao->getArrayCopy()]) . "\n";
+
+$ai = new ArrayIterator([]);
+set_error_handler(function () use ($ai) { $ai['x'] = 5; return true; });
+$r5 = $ai['x']++;
+restore_error_handler();
+echo 'ai:' . json_encode([$r5, $ai['x']]) . "\n";
+
+set_error_handler(function () { $GLOBALS['missingForeach'] = [1, 2]; return true; });
+foreach ($missingForeach as &$fv) { echo 'visited;'; }
+restore_error_handler();
+echo 'foreach:' . (isset($fv) ? 'bound' : 'unbound') . ':' . count($missingForeach) . "\n";
+
+function takeRef(&$x) {}
+set_error_handler(function () { echo 'warn;'; $GLOBALS['missingUnpack'] = [1]; return true; });
+try { takeRef(...$missingUnpack); } catch (TypeError $e) { echo 'TypeError;'; }
+restore_error_handler();
+echo 'unpack:' . (isset($missingUnpack) ? 'set' : 'unset') . "\n";
 `);
   expect(result).toMatchObject({
     kind: 'executed',
@@ -3103,6 +3120,9 @@ echo 'ao:' . json_encode([$r4, $ao->getArrayCopy()]) . "\n";
       'nested:[2,1,{"x":{"y":5}}]',
       'prop:[5,6]',
       'ao:[1,{"p":1}]',
+      'ai:[null,1]',
+      'foreach:unbound:2',
+      'warn;TypeError;unpack:set',
       '',
     ].join('\n'),
   });

@@ -288,7 +288,7 @@ export function foreachSubjectPlace(e: Expr): Place {
   if (place instanceof ValuePlace) return new RefPlace(Ref.temporary(place.value));
   if (e.k === 'var' && place.get() === undefined) {
     place.warnUndefined?.();
-    return place;
+    return new RefPlace(Ref.temporary(null));
   }
   return new RefPlace(place.ref());
 }
@@ -782,11 +782,11 @@ function nativeArrayNestedPlace(
         place = detachedArrayOffset(view.get(index));
         return null;
       }
-      const element = new ElementPlace(array, index, unbound);
+      const element = new ElementPlace(array, index, unbound, true);
       place = element;
       if (element.get() === undefined) {
         if (mode === 'update') warning(() => element.warnUndefined());
-        if (element.get() === undefined) element.set(null);
+        element.set(null);
       }
       return null;
     })
