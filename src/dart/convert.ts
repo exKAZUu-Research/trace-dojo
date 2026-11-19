@@ -407,9 +407,11 @@ export class Converter extends ExpressionConverter {
   }
 
   private convertMembers(body: Node): MemberDeclaration[] {
+    const owner = body.parent ? fieldOf(body.parent, 'name')?.text : undefined;
     return namedOf(body)
       .filter((child) => child.type === 'class_member')
-      .flatMap((child) => this.convertMember(child));
+      .flatMap((child) => this.convertMember(child))
+      .map((member) => asUntypedMethod(member, owner) ?? member);
   }
 
   // code-gauge-allow functionNcss 60 -- A member's declaration node holds one of many signatures.
@@ -1095,4 +1097,31 @@ export class Converter extends ExpressionConverter {
 
 function emptyParameters(span: ReturnType<typeof spanOf>): FormalParameters {
   return { positional: [], requiredCount: 0, named: [], ...span };
+}
+
+/**
+ * A method written without a return type, as `noSuchMethod(Invocation i) {}`, which the grammar reads as a constructor
+ * because only its name tells them apart.
+ */
+function asUntypedMethod(member: MemberDeclaration, owner: string | undefined): MemberDeclaration | undefined {
+  if (member.kind !== 'constructor' || member.constructorKind !== 'generative') return undefined;
+  if (member.className === undefined || member.className === owner || member.name !== undefined) return undefined;
+  if (member.isConst || member.initializers.length > 0) return undefined;
+  return {
+    kind: 'method',
+    methodKind: 'method',
+    name: member.className,
+    isStatic: false,
+    isExternal: member.isExternal,
+    typeParameters: [],
+    returnType: undefined,
+    parameters: member.parameters,
+    body: member.body,
+    annotations: member.annotations,
+    headerEndRow: member.headerEndRow,
+    row: member.row,
+    column: member.column,
+    start: member.start,
+    end: member.end,
+  };
 }

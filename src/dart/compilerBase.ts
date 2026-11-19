@@ -561,9 +561,11 @@ export abstract class CompilerBase {
   }
 
   /** Evaluates a type at runtime, replacing the type parameters in scope with the frame's type arguments. */
+  /** A type as the running program sees it: type parameters bound by the frame, and extension types erased. */
   runtimeType(type: DartType): (frame: Frame) => DartType {
-    if (!mentionsTypeParams(type)) return () => type;
-    return (frame) => substitute(type, frame.typeEnv);
+    const erased = eraseExtensionTypes(type);
+    if (!mentionsTypeParams(erased)) return () => erased;
+    return (frame) => eraseExtensionTypes(substitute(erased, frame.typeEnv));
   }
 
   protected newFunctionInfo(name: string, row: number | undefined, showsThis: boolean): FunctionInfo {
@@ -600,9 +602,41 @@ export function instantiateToBounds(params: readonly TypeParam[]): DartType[] {
 
 /** Whether a value is of a type that holds no type parameters, checked against the value's runtime type. */
 export function valueIs(runtime: Runtime, value: Value, type: DartType): boolean {
-  if (isTop(type)) return true;
-  if (value === undefined) return isNullable(type);
-  return isSubtype(runtime.runtimeTypeOf(value), type);
+  const erased = eraseExtensionTypes(type);
+  if (isTop(erased)) return true;
+  if (value === undefined) return isNullable(erased);
+  return isSubtype(runtime.runtimeTypeOf(value), erased);
+}
+
+/** A type with each extension type replaced by its representation type, as runtime type tests see it. */
+export function eraseExtensionTypes(type: DartType): DartType {
+  switch (type.kind) {
+    case 'interface': {
+      const args = type.args.map(eraseExtensionTypes);
+      if (type.cls.kind !== 'extensionType' || !type.cls.representationType) return { ...type, args };
+      const map = new Map(type.cls.typeParams.map((param, index) => [param, args[index] ?? DYNAMIC]));
+      const representation = eraseExtensionTypes(substitute(type.cls.representationType, map));
+      return type.nullable ? makeNullable(representation) : representation;
+    }
+    case 'function': {
+      return {
+        ...type,
+        positional: type.positional.map(eraseExtensionTypes),
+        named: type.named.map((named) => ({ ...named, type: eraseExtensionTypes(named.type) })),
+        returnType: eraseExtensionTypes(type.returnType),
+      };
+    }
+    case 'record': {
+      return {
+        ...type,
+        positional: type.positional.map(eraseExtensionTypes),
+        named: type.named.map((named) => ({ ...named, type: eraseExtensionTypes(named.type) })),
+      };
+    }
+    default: {
+      return type;
+    }
+  }
 }
 
 /**

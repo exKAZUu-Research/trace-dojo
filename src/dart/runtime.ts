@@ -57,7 +57,8 @@ export class Frame implements TracedFrame {
     readonly runtime: Runtime,
     readonly info: FunctionInfo,
     slotCount: number,
-    readonly receiver: Value,
+    /** `this`; an extension type's constructor replaces it with the representation once its initializers have run. */
+    public receiver: Value,
     readonly captured: readonly Cell[],
     readonly typeEnv: TypeEnv,
     readonly callRow: number | undefined
@@ -240,7 +241,7 @@ export class Runtime implements TracedRuntime<Frame> {
       const target = this.readMember(receiver, member, callRow);
       return this.callValue(target, args, typeArgs, callRow);
     }
-    return this.noSuchMethod(receiver, name, 'method', args);
+    return this.noSuchMethod(receiver, name, 'method', args, typeArgs);
   }
 
   getProperty(receiver: Value, name: string, callRow: number | undefined): Value {
@@ -330,12 +331,56 @@ export class Runtime implements TracedRuntime<Frame> {
     return this.invoke(target, 'call', args, typeArgs, callRow);
   }
 
-  noSuchMethod(receiver: Value, name: string, kind: 'method' | 'getter' | 'setter', args: Arguments): never {
-    this.throwError('NoSuchMethodError', '_internal', [
-      receiver,
+  /** Calls the receiver's `noSuchMethod` for a member it lacks; Object's throws a NoSuchMethodError. */
+  noSuchMethod(
+    receiver: Value,
+    name: string,
+    kind: 'method' | 'getter' | 'setter',
+    args: Arguments,
+    typeArgs: readonly DartType[] = []
+  ): Value {
+    const invocation = this.newInvocation(name, kind, args, typeArgs);
+    const handler = this.classOf(receiver).implementation('noSuchMethod');
+    if (handler?.kind === 'method' && handler.owner !== coreTypes.object) {
+      return (handler.impl as NonNullable<typeof handler.impl>)(
+        this,
+        receiver,
+        { positional: [invocation], named: undefined },
+        [],
+        this.userCallRow
+      );
+    }
+    return this.throwError('NoSuchMethodError', '_withInvocation', [receiver, invocation]);
+  }
+
+  private newInvocation(
+    name: string,
+    kind: 'method' | 'getter' | 'setter',
+    args: Arguments,
+    typeArgs: readonly DartType[]
+  ): DartObject {
+    const named = this.links.newMap(this, interfaceType(this.links.classNamed('Symbol')), { kind: 'dynamic' }, false);
+    for (const [key, value] of args.named ?? []) {
+      this.invoke(
+        named,
+        '[]=',
+        { positional: [this.links.construct(this, 'Symbol', '', [key]), value], named: undefined },
+        [],
+        undefined
+      );
+    }
+    return this.links.construct(this, '_InvocationMirror', '_', [
       name,
-      kind,
-      new DartList(coreTypes.list, { kind: 'dynamic' }, args.positional, false),
+      BigInt(['method', 'getter', 'setter'].indexOf(kind)),
+      new DartList(coreTypes.list, { kind: 'dynamic' }, [...args.positional], false, true),
+      named,
+      new DartList(
+        coreTypes.list,
+        interfaceType(coreTypes.type),
+        typeArgs.map((type) => new DartTypeValue(coreTypes.type, type)),
+        false,
+        true
+      ),
     ]);
   }
 

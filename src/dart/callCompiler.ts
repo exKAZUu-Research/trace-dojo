@@ -277,7 +277,7 @@ export abstract class CallCompiler extends ExpressionCompiler {
   ): Compiled {
     const base = resolveBound(target.type);
     if (base.kind === 'dynamic' || (base.kind === 'interface' && base.cls === coreTypes.function && !base.nullable)) {
-      return this.dynamicCall(target, undefined, args, span);
+      return this.dynamicCall(target, undefined, args, span, false, typeArguments ?? []);
     }
     if (isNullable(base)) {
       this.error(span, `${typeName(target.type)} 型の値は null かもしれないので、直接は呼び出せません。`);
@@ -331,7 +331,7 @@ export abstract class CallCompiler extends ExpressionCompiler {
     const receiverType = receiver.type;
     if (receiverType.kind === 'void') this.error(span, 'void の値のメンバーは使えません。');
     if (receiverType.kind === 'dynamic' || (receiverType.kind === 'never' && !receiverType.nullable)) {
-      return this.dynamicCall(receiver, name, args, span, nullAware);
+      return this.dynamicCall(receiver, name, args, span, nullAware, typeArguments);
     }
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
     const resolved = this.memberFor(receiver, lookupType, name, false);
@@ -476,8 +476,10 @@ export abstract class CallCompiler extends ExpressionCompiler {
     name: string | undefined,
     args: ArgumentsSyntax,
     span: Span,
-    nullAware = false
+    nullAware = false,
+    typeArguments: TypeSyntax[] = []
   ): Compiled {
+    const typeArgs = typeArguments.map((argument) => this.runtimeType(this.resolveType(argument)));
     const positional = args.positional.map((argument) => this.compileExpression(argument));
     const named = args.named.map((argument) => ({
       name: argument.name,
@@ -506,8 +508,9 @@ export abstract class CallCompiler extends ExpressionCompiler {
         } finally {
           frame.temporaries.pop();
         }
-        if (name === undefined) return frame.runtime.callValue(value, evaluated, [], row);
-        return frame.runtime.invoke(value, name, evaluated, [], row);
+        const types = typeArgs.map((resolve) => resolve(frame));
+        if (name === undefined) return frame.runtime.callValue(value, evaluated, types, row);
+        return frame.runtime.invoke(value, name, evaluated, types, row);
       },
       isConst: false,
     };

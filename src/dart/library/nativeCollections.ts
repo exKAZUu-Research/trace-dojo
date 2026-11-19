@@ -513,13 +513,9 @@ define('List.shuffle', (runtime, receiver, [random]) => {
   }
   return;
 });
-define('List.asMap', (runtime, receiver) => {
-  const target = list(receiver);
-  const map = runtime.links.newMap(runtime, interfaceType(coreTypes.int), elementTypeOf(target), true);
-  const store = map.native as HashStore;
-  for (const [position, value] of target.elements.entries()) store.set(BigInt(position), value);
-  return map;
-});
+define('List.asMap', (runtime, receiver) =>
+  runtime.links.construct(runtime, 'ListMapView', '', [receiver], undefined, [elementTypeOf(list(receiver))])
+);
 define('List.cast', (runtime, receiver, _args, _named, typeArgs) => {
   const target = list(receiver);
   return new DartList(coreTypes.list, typeArgs[0] ?? DYNAMIC, target.elements, target.growable, target.unmodifiable);

@@ -4,7 +4,7 @@ import { HashStore } from '../hashStore';
 import type { Runtime } from '../runtime';
 import { coreTypes, type DartType, isTop, substitute, TypeParam, typeParamType, typeToString } from '../types';
 import { DartClosure, DartList, DartObject, DartRecord, DartTypeValue, type Value } from '../values';
-import { define, defineConstructor, intArg, stringArg } from './nativeSupport';
+import { define, defineConstructor, intArg, iterableValues, stringArg } from './nativeSupport';
 
 /** A type as the VM's `Type.toString` and closures' `toString` write it: function types as `(int) => int`. */
 export function vmTypeString(type: DartType): string {
@@ -56,10 +56,9 @@ define('Object.==', (_runtime, receiver, [other]) => identical(receiver, other))
 define('Object.hashCode', (_runtime, receiver) => BigInt(identityOf(receiver)));
 define('Object.toString', (runtime, receiver) => objectToString(runtime, receiver));
 define('Object.runtimeType', (runtime, receiver) => new DartTypeValue(coreTypes.type, runtime.runtimeTypeOf(receiver)));
-define('Object.noSuchMethod', (runtime, receiver, [invocation]) => {
-  void invocation;
-  return runtime.noSuchMethod(receiver, 'noSuchMethod', 'method', { positional: [], named: undefined });
-});
+define('Object.noSuchMethod', (runtime, receiver, [invocation]) =>
+  runtime.throwError('NoSuchMethodError', '_withInvocation', [receiver, invocation])
+);
 define('Object._hashValues', (runtime, _receiver, [values]) => {
   let hash = 0;
   for (const value of (values as DartList).elements) {
@@ -204,10 +203,22 @@ export function safeToStringOf(runtime: Runtime, value: Value): string {
   return safeToString(runtime, value);
 }
 
-define('NoSuchMethodError._describe', (runtime, _receiver, [receiver, name, kind, args]) => {
-  const member = name as string;
-  const positional = (args as DartList).elements.map((value) => safeToStringOf(runtime, value)).join(', ');
-  const call = kind === 'getter' ? member : kind === 'setter' ? `${member}${positional}` : `${member}(${positional})`;
+define('NoSuchMethodError._describe', (runtime, _receiver, [receiver, invocation]) => {
+  const field = (name: string): Value => runtime.getProperty(invocation, name, undefined);
+  const member = runtime.getProperty(field('memberName'), '_name', undefined) as string;
+  const kind = field('isGetter') === true ? 'getter' : field('isSetter') === true ? 'setter' : 'method';
+  const parts = (field('positionalArguments') as DartList).elements.map((value) => safeToStringOf(runtime, value));
+  const named = field('namedArguments') as DartObject;
+  for (const key of iterableValues(runtime, runtime.getProperty(named, 'keys', undefined))) {
+    const keyName = runtime.getProperty(key, '_name', undefined) as string;
+    const value = runtime.invoke(named, '[]', { positional: [key], named: undefined }, [], undefined);
+    parts.push(`${keyName}: ${safeToStringOf(runtime, value)}`);
+  }
+  const typeArgs = (field('typeArguments') as DartList).elements.map((type) => stringOf(runtime, type));
+  const typeText = typeArgs.length > 0 ? `<${typeArgs.join(', ')}>` : '';
+  const positional = parts.join(', ');
+  const call =
+    kind === 'getter' ? member : kind === 'setter' ? `${member}${positional}` : `${member}${typeText}(${positional})`;
   if (receiver === undefined) {
     const what = kind === 'getter' ? 'getter' : kind === 'setter' ? 'setter' : 'method';
     return `NoSuchMethodError: The ${what} '${member}' was called on null.\nReceiver: null\nTried calling: ${call}`;

@@ -26,6 +26,20 @@ abstract final class Invocation {
   bool get isAccessor;
 }
 
+final class _InvocationMirror implements Invocation {
+  final String _name;
+  final int _kind;
+  final List<dynamic> positionalArguments;
+  final Map<Symbol, dynamic> namedArguments;
+  final List<Type> typeArguments;
+  _InvocationMirror._(this._name, this._kind, this.positionalArguments, this.namedArguments, this.typeArguments);
+  Symbol get memberName => Symbol(_name);
+  bool get isMethod => _kind == 0;
+  bool get isGetter => _kind == 1;
+  bool get isSetter => _kind == 2;
+  bool get isAccessor => _kind != 0;
+}
+
 final class Null {
   external int get hashCode;
   external String toString();
@@ -544,8 +558,8 @@ class StackOverflowError implements Error {
 
 class NoSuchMethodError extends Error {
   final String _message;
-  NoSuchMethodError._internal(Object? receiver, String name, String kind, List<dynamic> arguments) : _message = _describe(receiver, name, kind, arguments);
-  external static String _describe(Object? receiver, String name, String kind, List<dynamic> arguments);
+  NoSuchMethodError._withInvocation(Object? receiver, Invocation invocation) : _message = _describe(receiver, invocation);
+  external static String _describe(Object? receiver, Invocation invocation);
   String toString() => _message;
 }
 

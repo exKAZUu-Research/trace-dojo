@@ -11,7 +11,7 @@ import type {
   TypeSyntax,
 } from './ast';
 import type { ClassInfo, Member } from './classes';
-import { at, type Compiled, CompilerBase, type Eval, type ResolvedMember, typeName } from './compilerBase';
+import { at, type Compiled, CompilerBase, type Eval, type ResolvedMember, typeName, valueIs } from './compilerBase';
 import type { Declaration, ExtensionInfo, GlobalVariable, TopLevelFunction } from './environment';
 import { formatDouble, stringOf } from './format';
 import {
@@ -28,7 +28,7 @@ import {
   wrap,
 } from './operators';
 import type { Frame, Runtime } from './runtime';
-import { type ConditionFlow, Flow, type LocalVar } from './scope';
+import { type ConditionFlow, Flow, LocalVar } from './scope';
 import {
   coreTypes,
   type DartType,
@@ -40,7 +40,6 @@ import {
   isNullable,
   isPotentiallyNullable,
   isSubtype,
-  isTop,
   makeNullable,
   NEVER,
   nonNullable,
@@ -378,9 +377,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   protected valueIsAt(frame: Frame, value: Value, type: DartType): boolean {
-    if (isTop(type)) return true;
-    if (value === undefined) return isNullable(type);
-    return isSubtype(frame.runtime.runtimeTypeOf(value), type);
+    return valueIs(frame.runtime, value, type);
   }
 
   // code-gauge-allow functionNcss 150 -- One case per kind of expression.
@@ -910,7 +907,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
       case 'extensionMember': {
         this.requireThis(expression, name);
         const receiver = this.thisReceiver(expression);
-        return this.readMember(receiver, resolution.resolved, name, expression, false);
+        const compiled = this.readMember(receiver, resolution.resolved, name, expression, false);
+        return resolution.kind === 'thisMember' ? this.promotableField(compiled, name) : compiled;
       }
       case 'staticMember': {
         return this.readStatic(resolution.member, expression);
@@ -1094,12 +1092,40 @@ export abstract class ExpressionCompiler extends CompilerBase {
     if (object.kind === 'super') return this.readSuperMember(name, expression);
     const receiver = this.compileChainPart(object, undefined);
     const shorting = this.isShorting(object);
-    const compiled = this.readMemberOf(receiver, name, expression, expression.nullAware);
+    const read = this.readMemberOf(receiver, name, expression, expression.nullAware);
+    const compiled = object.kind === 'this' && !expression.nullAware ? this.promotableField(read, name) : read;
     if (!shorting && !expression.nullAware) return compiled;
     const { run } = compiled;
     const receiverRun = receiver.run;
     void receiverRun;
     return { ...compiled, run };
+  }
+
+  /** The keys under which flow analysis promotes `this._x`, one per field. */
+  private readonly fieldKeys = new Map<Member, LocalVar>();
+
+  /** Whether no declaration in the program keeps a private field of this name from being promoted. */
+  protected abstract isPromotableFieldName(name: string): boolean;
+
+  /** `this._x` of a private final field, which Dart promotes as it does a local variable. */
+  private promotableField(compiled: Compiled, name: string): Compiled {
+    const cls = this.currentClass;
+    if (!cls || !name.startsWith('_') || this.isLibraryCode || !this.isPromotableFieldName(name)) return compiled;
+    const resolved = this.lookupMember(cls.thisType, name, false);
+    const member = resolved?.member;
+    if (!resolved || member?.kind !== 'field' || !member.isFinal) return compiled;
+    let variable = this.fieldKeys.get(member);
+    if (!variable) {
+      variable = new LocalVar(name, resolved.type, -1, this.fn, {
+        isFinal: true,
+        isLate: false,
+        isConst: false,
+        isParameter: false,
+        hasInitializer: true,
+      });
+      this.fieldKeys.set(member, variable);
+    }
+    return { ...compiled, type: this.promotedType(variable), variable };
   }
 
   /** What a member access on a value of the receiver's static type reads, checking nullability. */

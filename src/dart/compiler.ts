@@ -596,6 +596,23 @@ export class Compiler extends AssignmentCompiler {
       impl: (_runtime, receiver) => receiver,
     };
     cls.members.set(name, getter);
+    // Constructors initialize the representation as a field of a temporary object; see instantiateObject.
+    const field: FieldMember = {
+      kind: 'field',
+      name,
+      owner: cls,
+      isStatic: false,
+      isAbstract: false,
+      row: declaration.row,
+      type,
+      isFinal: true,
+      isLate: false,
+      isConst: false,
+      isCovariant: false,
+      hasInitializer: false,
+      slot: cls.fieldCount++,
+    };
+    cls.fields.push(field);
   }
 
   private declarePrimaryConstructorFields(cls: ClassInfo, declaration: ClassDeclaration): void {
@@ -677,6 +694,20 @@ export class Compiler extends AssignmentCompiler {
       cls.members.set(name, field);
       if (!declaration.isFinal) cls.setters.set(name, field);
     }
+  }
+
+  /**
+   * Dart promotes a private final field only when no class of the library declares a concrete getter or a non-final
+   * field of that name, which could make two reads differ.
+   */
+  protected isPromotableFieldName(name: string): boolean {
+    for (const { cls } of this.classWork) {
+      const member = cls.members.get(name);
+      if (!member || member.isStatic) continue;
+      if (member.kind === 'getter' && !member.isAbstract) return false;
+      if (member.kind === 'field' && (!member.isFinal || member.isAbstract)) return false;
+    }
+    return true;
   }
 
   /** Infers the types of fields declared without one, once every class's members are declared. */
@@ -1450,10 +1481,12 @@ export class Compiler extends AssignmentCompiler {
         name,
         owner: cls,
         type: functionType([representation], cls.thisType),
-        kind: 'factory',
+        kind: 'generative',
         isConst: primary.isConst,
         row: primary.row,
-        impl: (_runtime, _instance, args) => args.positional[0],
+        impl: (_runtime, instance, args) => {
+          (instance as DartObject).fields[0] = args.positional[0];
+        },
       });
       return;
     }
@@ -1688,6 +1721,7 @@ export class Compiler extends AssignmentCompiler {
       try {
         compiled.bind(frame, args);
         prologue?.(frame);
+        if (cls.kind === 'extensionType') frame.receiver = (instance as DartObject).fields[0];
         compiled.run(frame);
       } finally {
         runtime.exit(frame);
@@ -2327,6 +2361,8 @@ export function instantiateObject(
   runtime.allocate(cls.fieldCount + 1);
   const object = new DartObject(cls, typeArgs, newFields(cls));
   impl(runtime, object, args, typeArgs, callRow);
+  // An extension type's value is its representation, which its constructor stores in the object's only field.
+  if (cls.kind === 'extensionType') return object.fields[0];
   return object;
 }
 

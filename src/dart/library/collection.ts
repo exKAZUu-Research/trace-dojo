@@ -569,6 +569,46 @@ class UnmodifiableMapView<K, V> extends MapBase<K, V> {
   bool containsKey(Object? key) => _map.containsKey(key);
 }
 
+/** The map List.asMap returns: a view of the list, as the VM ListMapView. */
+class ListMapView<E> extends MapBase<int, E> {
+  final List<E> _values;
+  ListMapView(this._values);
+  E? operator [](Object? key) => containsKey(key) ? _values[key as int] : null;
+  void operator []=(int key, E value) => throw UnsupportedError("Cannot modify unmodifiable map");
+  E? remove(Object? key) => throw UnsupportedError("Cannot modify unmodifiable map");
+  void clear() => throw UnsupportedError("Cannot modify unmodifiable map");
+  void addAll(Map<int, E> other) => throw UnsupportedError("Cannot modify unmodifiable map");
+  void addEntries(Iterable<MapEntry<int, E>> entries) => throw UnsupportedError("Cannot modify unmodifiable map");
+  E putIfAbsent(int key, E Function() ifAbsent) => throw UnsupportedError("Cannot modify unmodifiable map");
+  E update(int key, E Function(E value) update, {E Function()? ifAbsent}) => throw UnsupportedError("Cannot modify unmodifiable map");
+  void updateAll(E Function(int key, E value) update) => throw UnsupportedError("Cannot modify unmodifiable map");
+  void removeWhere(bool Function(int key, E value) test) => throw UnsupportedError("Cannot modify unmodifiable map");
+  int get length => _values.length;
+  Iterable<E> get values => SubListIterable<E>(_values, 0, null);
+  Iterable<int> get keys => _ListIndicesIterable(_values);
+  bool get isEmpty => _values.isEmpty;
+  bool get isNotEmpty => _values.isNotEmpty;
+  bool containsValue(Object? value) => _values.contains(value);
+  bool containsKey(Object? key) => key is int && key >= 0 && key < length;
+  void forEach(void Function(int key, E value) f) {
+    int length = _values.length;
+    for (int i = 0; i < length; i++) {
+      f(i, _values[i]);
+      if (length != _values.length) throw ConcurrentModificationError(_values);
+    }
+  }
+}
+
+class _ListIndicesIterable extends ListIterable<int> {
+  final List<Object?> _backedList;
+  _ListIndicesIterable(this._backedList);
+  int get length => _backedList.length;
+  int elementAt(int index) {
+    RangeError.checkValidIndex(index, this);
+    return index;
+  }
+}
+
 // Sets the program implements
 
 abstract mixin class SetMixin<E> implements Set<E> {
