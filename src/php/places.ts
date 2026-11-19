@@ -30,7 +30,7 @@ interface StringStorage {
 export interface Place {
   readonly unbound?: boolean;
   /** The value, or undefined when the location does not exist. */
-  get(update?: PlaceOperation): Value | undefined;
+  get(update?: PlaceOperation, warning?: UpdateWarning): Value | undefined;
   readCompoundName?(warning: UpdateWarning): void;
   fetchCompound?(warning: UpdateWarning, beforeOffsetGet?: BeforeOffsetGet): CompoundRead | typeof SKIP_COMPOUND;
   set(value: Value, operation?: 'assignOp'): Value;
@@ -81,7 +81,7 @@ export function readCompound(
   beforeOffsetGet?: BeforeOffsetGet
 ): CompoundRead | typeof SKIP_COMPOUND {
   if (place.fetchCompound) return place.fetchCompound(warning, beforeOffsetGet);
-  const value = place.get('assignOp');
+  const value = place.get('assignOp', warning);
   if (value === undefined) place.warnUndefined?.();
   return { value: value ?? null, declaration: place.declaration?.(), sources: place.typeSources?.() };
 }

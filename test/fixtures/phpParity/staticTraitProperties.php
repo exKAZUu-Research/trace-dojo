@@ -6,3 +6,27 @@ var_dump(T::$x);
 T::$x = 6;
 restore_error_handler();
 var_dump($replacement);
+
+foreach (['write', 'add', 'increment', 'read', 'invalid'] as $operation) {
+    $replacement = 2;
+    $first = true;
+    set_error_handler(function () use (&$replacement, &$first) {
+        if ($first) {
+            $first = false;
+            T::$y =& $replacement;
+            throw new Exception('trait access');
+        }
+        return true;
+    });
+    try {
+        if ($operation === 'write') T::$y = 3;
+        elseif ($operation === 'add') T::$y += 3;
+        elseif ($operation === 'increment') T::$y++;
+        elseif ($operation === 'invalid') T::$y = 'invalid';
+        else var_dump(T::$y);
+    } catch (Throwable $error) {
+        echo get_class($error), ': ', $error->getMessage(), "\n";
+    }
+    restore_error_handler();
+    var_dump($replacement);
+}

@@ -200,6 +200,17 @@ export class Runtime {
   shuttingDown = false;
   releasingGlobalsAtShutdown = false;
   assignmentWarning?: { frame: Frame; exception: PhpThrow };
+
+  withAssignmentWarning<T>(exception: PhpThrow | undefined, use: () => T): T {
+    if (!exception) return use();
+    const previous = this.assignmentWarning;
+    this.assignmentWarning = { frame: this.frame, exception };
+    try {
+      return use();
+    } finally {
+      this.assignmentWarning = previous;
+    }
+  }
   exhausted = false;
   private rawOutput?: string;
   private pendingOutput = '';

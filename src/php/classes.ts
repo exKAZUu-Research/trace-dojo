@@ -15,10 +15,19 @@ import { lower } from './bytes';
 import { type ArgValue, asInternal, invoke } from './calls';
 import { foldedConstant, selectConstantBranch } from './constantDefaults';
 import { formatFloat, normalizeKeyString, toBool, valueName } from './conversions';
-import { deprecated, E_COMPILE_WARNING, emitError, notice, throwError, warn } from './errors';
+import {
+  deprecated,
+  E_COMPILE_WARNING,
+  emitError,
+  notice,
+  throwError,
+  type UpdateWarning,
+  warn,
+  withOperandWarnings,
+} from './errors';
 import { strictEquals } from './operators';
 import { share } from './places';
-import { FatalError, rt, SCRIPT_PATH } from './runtime';
+import { FatalError, type PhpThrow, rt, SCRIPT_PATH } from './runtime';
 import tentativeReturnMethods from './tentativeReturnMethods.json';
 import { coerce, describePropertyType, describeType, NO_MATCH, parameterType } from './types';
 import { UnsupportedFeatureError } from './unsupported';
@@ -1831,16 +1840,26 @@ export function resolveStatic(ref: LazyRef): Ref {
   return ref;
 }
 
-export function staticPropRef(cls: PhpClass, name: string, scope: PhpClass | undefined, reportTraitAccess = true): Ref {
+export function staticPropRef(
+  cls: PhpClass,
+  name: string,
+  scope: PhpClass | undefined,
+  reportTraitAccess = true,
+  warning?: UpdateWarning
+): Ref {
   const found = cls.findStatic(name);
   if (!found) throwError('Error', `Access to undeclared static property ${cls.name}::$${name}`);
   if (!canAccessProp(found.decl, scope)) {
     throwError('Error', `Cannot access ${found.decl.visibility} property ${cls.name}::$${name}`);
   }
-  if (reportTraitAccess && cls.kind === 'trait')
-    deprecated(
-      `Accessing static trait property ${cls.name}::$${name} is deprecated, it should only be accessed on a class using the trait`
-    );
+  if (reportTraitAccess && cls.kind === 'trait') {
+    const emit = (): void =>
+      deprecated(
+        `Accessing static trait property ${cls.name}::$${name} is deprecated, it should only be accessed on a class using the trait`
+      );
+    if (warning) warning(emit);
+    else emit();
+  }
   initializeClassDefaults(cls);
   const ref = resolveStatic((cls.findStatic(name) ?? found).ref);
   if (found.decl.type) ref.addTypeOwner(found.decl);
@@ -1877,24 +1896,31 @@ export function bindStaticPropertyReference(
   if (valueFallback) {
     staticPropRef(cls, name, scope);
     notice('Only variables should be assigned by reference');
-  }
-  const old = staticPropRef(cls, name, scope, !valueFallback);
-  const found = cls.findStatic(name);
-  if (valueFallback) {
+    const old = staticPropRef(cls, name, scope, false);
     const useReference = old.isRef;
-    const decl = found?.decl;
+    const decl = cls.findStatic(name)?.decl;
     const value = !useReference && decl?.type ? coerceProperty(decl, ref.v) : ref.v;
     const assigned = old.assign(share(value));
     ref.v = useReference ? old.v : assigned;
     return;
   }
-  if (!found || old === ref) return;
-  if (found.decl.type) attachPropertyReference(ref, found.decl);
-  ref.isRef = true;
-  ref.rc++;
-  old.rc--;
-  found.decl.cls.staticProps.set(name, { ...found, ref });
-  dropped(old.v);
+  if (cls.kind === 'trait') withOperandWarnings(bind);
+  else bind();
+
+  function bind(warning?: UpdateWarning, pending?: () => PhpThrow | undefined): Value {
+    const old = staticPropRef(cls, name, scope, true, warning);
+    const found = cls.findStatic(name);
+    if (!found || old === ref) return null;
+    return rt().withAssignmentWarning(pending?.(), () => {
+      if (found.decl.type) attachPropertyReference(ref, found.decl);
+      ref.isRef = true;
+      ref.rc++;
+      old.rc--;
+      found.decl.cls.staticProps.set(name, { ...found, ref });
+      dropped(old.v);
+      return null;
+    });
+  }
 }
 
 export function readStaticProp(cls: PhpClass, name: string, scope: PhpClass | undefined, quiet = false): Value {

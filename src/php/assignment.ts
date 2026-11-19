@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 976 -- Holds assignment and offset access modes with their shared helpers.
+// code-gauge-allow-file fileNcss 988 -- Holds assignment and offset access modes with their shared helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -334,6 +334,7 @@ function globalPlace(index?: Expr): VarPlace {
 
 class StaticPlace implements Place {
   private reportedTraitAccess = false;
+  private pendingTraitDiagnostic?: PhpThrow;
 
   constructor(
     private readonly cls: PhpClass,
@@ -345,8 +346,9 @@ class StaticPlace implements Place {
     return this.cls.findStatic(this.name)?.decl;
   }
 
-  private get target(): Ref {
-    const target = staticPropRef(this.cls, this.name, this.scope, !this.reportedTraitAccess);
+  private target(warning?: UpdateWarning): Ref {
+    const report = warning && ((emit: () => void) => warning(() => this.reportTraitDiagnostic(emit)));
+    const target = staticPropRef(this.cls, this.name, this.scope, !this.reportedTraitAccess, report);
     this.reportedTraitAccess = true;
     return target;
   }
@@ -356,7 +358,7 @@ class StaticPlace implements Place {
   }
 
   reference(): Ref | undefined {
-    const target = this.target;
+    const target = this.target();
     return target.isRef ? target : undefined;
   }
 
@@ -364,8 +366,8 @@ class StaticPlace implements Place {
     return this.decl;
   }
 
-  get(update?: PlaceOperation): Value {
-    const value = this.target.v;
+  get(update?: PlaceOperation, warning?: UpdateWarning): Value {
+    const value = this.target(warning).v;
     if ((value as unknown) === UNINIT) {
       if (update === 'nested' || update === 'receiver') return null;
       throwError(
@@ -381,7 +383,7 @@ class StaticPlace implements Place {
   }
 
   ref(): Ref {
-    const target = this.target;
+    const target = this.target();
     const decl = this.decl;
     if ((target.v as unknown) === UNINIT && decl?.type) {
       if (coerce(null, decl.type, { strict: true, internal: false, scope: decl.cls }) === NO_MATCH)
@@ -395,28 +397,44 @@ class StaticPlace implements Place {
   }
 
   set(value: Value, operation?: 'assignOp'): Value {
-    return this.write(this.target, value, operation);
+    return this.withWriteTarget((target) => this.write(target, value, operation));
   }
 
   stringStorage(): ReturnType<typeof watchStringSlot> {
     return watchStringSlot(
       this.cls,
       this.name,
-      () => this.target,
+      () => this.target(),
       (value) => this.set(value)
     );
   }
 
   assign(read: () => Value): Value {
-    const target = this.target;
-    return this.write(target, read());
+    return this.withWriteTarget((target) => this.write(target, read()));
+  }
+
+  private withWriteTarget(write: (target: Ref) => Value): Value {
+    if (this.cls.kind === 'trait' && !this.reportedTraitAccess)
+      return withOperandWarnings((warning) => write(this.target(warning)));
+    return write(this.target());
   }
 
   private write(target: Ref, value: Value, operation?: 'assignOp'): Value {
-    const decl = this.decl;
-    const assigned =
-      decl?.type && !(operation === 'assignOp' && target.isRef) ? classesModule.coerceProperty(decl, value) : value;
-    return target.assign(assigned);
+    return rt().withAssignmentWarning(this.pendingTraitDiagnostic, () => {
+      const decl = this.decl;
+      const assigned =
+        decl?.type && !(operation === 'assignOp' && target.isRef) ? classesModule.coerceProperty(decl, value) : value;
+      return target.assign(assigned);
+    });
+  }
+
+  private reportTraitDiagnostic(emit: () => void): void {
+    try {
+      emit();
+    } catch (error) {
+      if (error instanceof PhpThrow) this.pendingTraitDiagnostic = error;
+      throw error;
+    }
   }
 
   unset(): void {
@@ -1250,7 +1268,7 @@ function incrementPlace(e: Extract<Expr, { k: 'incdec' }>, warning: UpdateWarnin
   const target = placeOf(e.target, 'incdec');
   const place = target.incrementTarget?.() ?? target;
   runtime.row = compiledOperandRow(e.target);
-  let old = place.get('incdec');
+  let old = place.get('incdec', warning);
   if (old === undefined) {
     if (place instanceof VarPlace && e.target.k !== 'idx') place.fetchCompound(warning);
     else if (e.target.k === 'prop') place.warnUndefined?.(warning);
