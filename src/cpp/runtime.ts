@@ -132,6 +132,7 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** The exceptions whose handlers are running, the innermost last, which `throw;` rethrows. */
   readonly handling: CppException[] = [];
+  private readonly unwinding = new Set<CppException>();
   /**
    * The handlers of the `try` blocks running now, the innermost last. A `throw` that no handler matches ends the
    * program at once, without unwinding the stack, as libc++abi's two-phase exception handling does.
@@ -168,9 +169,18 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** Throws a C++ exception, or ends the program when no reachable handler catches it. */
   throwException(frame: Frame, exception: CppException): never {
-    for (let index = this.tryBlocks.length - 1; index >= this.tryBoundary; index--)
-      if (this.tryBlocks[index](exception)) throw exception;
+    for (let index = this.tryBlocks.length - 1; index >= this.tryBoundary; index--) {
+      if (this.tryBlocks[index](exception)) {
+        this.unwinding.add(exception);
+        throw exception;
+      }
+    }
     throw new ProgramAbort(this.describeUncaught(frame, exception));
+  }
+
+  beginHandler(exception: CppException): void {
+    this.handling.push(exception);
+    this.unwinding.delete(exception);
   }
 
   constructor(input?: ProgramInput) {
@@ -261,6 +271,7 @@ export class Runtime implements TracedRuntime<Frame> {
       for (const value of frame.pending) visit(value);
     }
     for (const exception of this.handling) visit(exception.value);
+    for (const exception of this.unwinding) visit(exception.value);
     for (const global of this.globals) visit(global);
     while (pending.length > 0) {
       const store = pending.pop() as Store;

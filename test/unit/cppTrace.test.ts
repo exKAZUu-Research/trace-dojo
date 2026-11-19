@@ -261,6 +261,29 @@ test('an uncaught exception preserves the turtles reached from main before unwin
   expect(trace.finalTurtles.map(({ x, y }) => [x, y])).toEqual([[3, 5]]);
 });
 
+test('keeps a thrown turtle reachable until an outer handler catches it', () => {
+  const program = `struct Guard { ~Guard() { int cleanup = 1; } };
+void fail() {
+  Guard guard;
+  throw new Turtle;
+}
+int main() {
+  Turtle* kept = nullptr;
+  try {
+    try { fail(); }
+    catch (Turtle* turtle) {
+      Guard guard;
+      throw;
+    }
+  } catch (Turtle* turtle) {
+    kept = turtle;
+  }
+  kept->forward();
+}`;
+  const trace = traceProgram('cpp', program, program);
+  expect(trace.finalTurtles.map(({ x, y }) => [x, y])).toEqual([[0, 1]]);
+});
+
 test.each([
   ['directly', 'Turtle*', 'new Turtle', 'result'],
   ['in a vector', 'std::vector<Turtle*>', 'std::vector<Turtle*>{new Turtle}', 'result[0]'],
@@ -274,6 +297,28 @@ int main() {
 }`;
   const trace = traceProgram('cpp', program, program);
   expect(trace.finalTurtles.map(({ x, y }) => [x, y])).toEqual([[0, 1]]);
+});
+
+test.each([
+  ['a struct', 'Group{Item(1), Item(2)}'],
+  ['an array', 'std::array<Item, 2>{Item(1), Item(2)}'],
+])('keeps the full temporary owner alive while destroying %s', (_, expression) => {
+  const program = `#include <array>
+#include <iostream>
+Turtle observer(0, 0);
+struct Item {
+  Turtle turtle;
+  Item(int y) : turtle(0, y) {}
+  ~Item() { std::cout << observer.canMoveForward(); }
+};
+struct Group { Item first; Item second; };
+int main() { static_cast<void>(${expression}); }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '00',
+    uncaughtException: undefined,
+  });
+  expect(traceProgram('cpp', program, program)).toMatchObject({ stdout: '00', uncaughtException: undefined });
 });
 
 test('an uncaught exception terminates before full-expression temporary destruction', () => {

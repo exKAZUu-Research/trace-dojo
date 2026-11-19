@@ -31,7 +31,19 @@ import {
   typeName,
   unqualified,
 } from './types';
-import { ArrayStore, Box, CObject, endLifetime, Liveness, NULL_PTR, Ptr, Store, UNINIT, type Value } from './values';
+import {
+  ArrayStore,
+  Box,
+  CObject,
+  endLifetime,
+  holdValues,
+  Liveness,
+  NULL_PTR,
+  Ptr,
+  Store,
+  UNINIT,
+  type Value,
+} from './values';
 
 /**
  * Calls a function with its arguments as its parameters declare them: a `Ptr` for a reference, else a value. A member
@@ -106,14 +118,11 @@ export function withTemporaries<T>(frame: Frame, run: Eval<T>): T {
     if (error instanceof CppException) destroyTemporaries(frame, mark);
     throw error;
   }
-  const pending = frame.pending.length;
-  if (result instanceof Store || result instanceof Ptr) frame.pending.push(result);
-  try {
+  const finish = (): T => {
     destroyTemporaries(frame, mark);
     return result;
-  } finally {
-    frame.pending.length = pending;
-  }
+  };
+  return result instanceof Store || result instanceof Ptr ? holdValues(frame, [result], finish) : finish();
 }
 
 export function bindRetainedTemporary(
@@ -158,7 +167,7 @@ function destroyTemporaries(frame: Frame, mark: number): void {
   while (temporaries.length > mark) {
     const temporary = temporaries.pop();
     if (!temporary) break;
-    temporary.destroy(frame, temporary.object);
+    holdValues(frame, [temporary.object], () => temporary.destroy(frame, temporary.object));
   }
 }
 

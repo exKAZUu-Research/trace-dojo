@@ -43,6 +43,7 @@ import {
   CObject,
   destroyRetainedTemporary,
   endLifetime,
+  holdValues,
   Liveness,
   Ptr,
   RetainedTemporary,
@@ -1287,8 +1288,7 @@ function runHandler(
   run: (frame: Frame, exception: CppException) => Completion,
   exception: CppException
 ): Completion {
-  frame.runtime.handling.push(exception);
-  frame.pending.push(exception.value);
+  frame.runtime.beginHandler(exception);
   exception.handlerCount++;
   let completion: Completion;
   try {
@@ -1298,7 +1298,6 @@ function runHandler(
     if (error !== exception && error instanceof CppException) endException(frame, exception);
     throw error;
   } finally {
-    frame.pending.pop();
     frame.runtime.handling.pop();
   }
   exception.handlerCount--;
@@ -1313,7 +1312,10 @@ function runHandler(
 function endException(frame: Frame, exception: CppException): void {
   if (exception.handlerCount > 0 || exception.isDestroyed) return;
   exception.isDestroyed = true;
-  if (exception.type.kind === 'class') exception.type.cls.operations?.destroy?.(frame, exception.value);
+  if (exception.type.kind === 'class') {
+    const destroy = exception.type.cls.operations?.destroy;
+    if (destroy) holdValues(frame, [exception.value], () => destroy(frame, exception.value));
+  }
   exception.endLifetime();
 }
 

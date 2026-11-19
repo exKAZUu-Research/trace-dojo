@@ -8,6 +8,16 @@ export const UNINIT = Symbol('uninitialized');
 
 export type Value = number | bigint | Ptr | Store | FunctionRef | typeof UNINIT | undefined;
 
+export function holdValues<T>(frame: Frame, values: readonly Value[], run: () => T): T {
+  const mark = frame.pending.length;
+  for (const value of values) frame.pending.push(value);
+  try {
+    return run();
+  } finally {
+    frame.pending.length = mark;
+  }
+}
+
 export const enum Liveness {
   Alive,
   /** A variable whose scope ended, or a temporary that was destroyed. */
@@ -175,10 +185,16 @@ export class CObject extends Store {
     const temporaries = this.referenceTemporaries;
     if (!temporaries) return;
     this.referenceTemporaries = undefined;
-    for (let index = temporaries.length - 1; index >= 0; index--) {
-      const temporary = temporaries[index];
-      temporary.destroy(frame, temporary.object);
-    }
+    holdValues(
+      frame,
+      temporaries.map(({ object }) => object),
+      () => {
+        for (let index = temporaries.length - 1; index >= 0; index--) {
+          const temporary = temporaries[index];
+          temporary.destroy(frame, temporary.object);
+        }
+      }
+    );
   }
 
   member(index: number): MemberStorage {

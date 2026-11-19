@@ -2,7 +2,7 @@ import { CppRuntimeError } from '../errors';
 import type { Expr, FunctionCandidates } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { installBaseValue, invoke, makeEach, newObject, withTemporaries, zeroOf } from '../objectCompiler';
-import { type Frame, holdAll } from '../runtime';
+import type { Frame } from '../runtime';
 import {
   type ClassInfo,
   classType,
@@ -12,7 +12,18 @@ import {
   isCopyConstructor,
   type Type,
 } from '../types';
-import { ArrayStore, Box, CObject, endLifetime, FunctionRef, Ptr, Store, UNINIT, type Value } from '../values';
+import {
+  ArrayStore,
+  Box,
+  CObject,
+  endLifetime,
+  FunctionRef,
+  holdValues,
+  Ptr,
+  Store,
+  UNINIT,
+  type Value,
+} from '../values';
 import { SequenceValue } from './containerValues';
 import { StringValue } from './string';
 
@@ -38,15 +49,11 @@ export function destroyElements(
   order: 'forward' | 'reverse' = 'forward'
 ): void {
   if (!destroy) return;
-  const mark = frame.pending.length;
-  for (const value of values) frame.pending.push(value);
-  try {
+  holdValues(frame, values, () => {
     if (order === 'reverse') {
       for (let index = values.length - 1; index >= 0; index--) destroy(frame, values[index]);
     } else for (const value of values) destroy(frame, value);
-  } finally {
-    frame.pending.length = mark;
-  }
+  });
 }
 
 export function swapElements(frame: Frame, a: Ptr, b: Ptr, ops: ElementOperations): void {
@@ -183,7 +190,7 @@ function transferElements(frame: Frame, type: Type, values: Value[]): Value[] {
 function transferSubobjects(frame: Frame, cls: ClassInfo, source: CObject, target: CObject | undefined): CObject {
   return frame.runtime.withoutOuterHandlers(() => {
     const destination = newObject(frame, cls, false, target);
-    return holdAll(frame, [() => destination], () => {
+    return holdValues(frame, [destination], () => {
       if (cls.base) {
         const base = transferElement(frame, classType(cls.base), source, destination) as CObject;
         installBaseValue(cls.base, destination, base);
