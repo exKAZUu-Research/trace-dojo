@@ -323,6 +323,8 @@ export function structHash(evaluator: Evaluator, value: CsStruct, frame: Frame):
 export function compareCulture(a: string, b: string, ignoreCase = false): number {
   const primary = comparePrimary(a, b);
   if (primary !== 0) return primary;
+  const secondary = compareSecondary(a, b);
+  if (secondary !== 0) return secondary;
   if (ignoreCase) return 0;
   const tertiary = compareTertiary(a, b);
   if (tertiary !== 0) return tertiary;
@@ -337,6 +339,9 @@ function primaryKey(code: number): [number, number] {
     return [1, PUNCTUATION_ORDER.includes(char) ? PUNCTUATION_ORDER.indexOf(char) : code];
   if (code >= 0x30 && code <= 0x39) return [3, code];
   if ((code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a)) return [4, code | 0x20];
+  // A Latin letter with diacritics sorts with its base letter; the diacritics decide only between equal bases.
+  const base = latinBase(code);
+  if (base !== undefined) return [4, base | 0x20];
   if (code >= 0xff_10 && code <= 0xff_19) return [3, code - 0xff_10 + 0x30];
   if ((code >= 0xff_21 && code <= 0xff_3a) || (code >= 0xff_41 && code <= 0xff_5a)) return [4, (code - 0xfe_e0) | 0x20];
   if (code >= 0x30_a1 && code <= 0x30_f6) return [6, code - 0x60];
@@ -357,6 +362,30 @@ function comparePrimary(a: string, b: string): number {
     if (weightA !== weightB) return weightA < weightB ? -1 : 1;
   }
   return a.length === b.length ? 0 : a.length < b.length ? -1 : 1;
+}
+
+/** The ASCII base letter of a Latin letter with diacritics, such as `a` of `ä`. */
+function latinBase(code: number): number | undefined {
+  if (code < 0xc0 || code > 0x2_4f) return undefined;
+  const base = String.fromCharCode(code).normalize('NFD').charCodeAt(0);
+  return (base >= 0x41 && base <= 0x5a) || (base >= 0x61 && base <= 0x7a) ? base : undefined;
+}
+
+/** Letters without diacritics before those with them, as ICU's secondary strength orders them. */
+function compareSecondary(a: string, b: string): number {
+  const length = Math.min(a.length, b.length);
+  for (let index = 0; index < length; index++) {
+    const accentA = accentOf(a.charCodeAt(index));
+    const accentB = accentOf(b.charCodeAt(index));
+    if (accentA !== accentB) return accentA < accentB ? -1 : 1;
+  }
+  return 0;
+}
+
+/** The combining marks of a Latin letter's decomposition, which order its diacritics; 0 for none. */
+function accentOf(code: number): number {
+  if (latinBase(code) === undefined) return 0;
+  return String.fromCharCode(code).normalize('NFD').charCodeAt(1) || 0;
 }
 
 /** Lowercase before uppercase, hiragana before katakana, half width before full width. */
@@ -575,6 +604,8 @@ function toInt32(value: number): number {
 /** The tertiary weight of a character: lowercase before uppercase, half width before full width. */
 function weight(code: number): number {
   if (code >= 0x41 && code <= 0x5a) return 1;
+  if (latinBase(code) !== undefined)
+    return String.fromCharCode(code).toLowerCase() === String.fromCharCode(code) ? 0 : 1;
   if (code >= 0xff_01 && code <= 0xff_5e) return 2;
   return 0;
 }
