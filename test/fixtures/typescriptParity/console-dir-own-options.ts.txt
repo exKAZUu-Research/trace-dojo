@@ -5,3 +5,16 @@ const options = {get depth() {console.log("depth"); return 0;}, get sorted() {co
 console.dir(value, options);
 console.dir(value, {get compact() {options.depth; console.log("compact"); return false;}, depth: 0});
 console.dir(value, null as any);
+
+Object.defineProperty(Object.prototype, "depth", { value: 0, configurable: true });
+Object.defineProperty(Object.prototype, "getters", {
+  get() {
+    console.log("inherited getters");
+    return true;
+  },
+  configurable: true,
+});
+console.dir(value);
+console.dir({ get a() { console.log("value getter"); return 1; } });
+console.dir(value, { showHidden: false });
+console.dir({ get a() { console.log("own option"); return 1; } }, { getters: true });

@@ -10,3 +10,8 @@ compact
   a: [Object]
 }
 { a: { b: 1 } }
+{ a: { b: 1 } }
+{ a: [Getter] }
+{ a: { b: 1 } }
+own option
+{ a: [Getter: 1] }

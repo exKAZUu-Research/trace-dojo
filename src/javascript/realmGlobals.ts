@@ -578,7 +578,8 @@ function defineConsoleDir(
 ): void {
   builder.method(console, 'dir', 0, ({ runtime, args }) => {
     const [value, givenOptions] = args;
-    const options = runtime.newObject();
+    // oxlint-disable-next-line unicorn/no-null -- Learner code can add option names to Object.prototype.
+    const options = runtime.newObject(null);
     return runtime.hold<undefined>(options, () => {
       if (givenOptions !== undefined && givenOptions !== null) {
         const source = runtime.toObject(givenOptions);
