@@ -88,8 +88,25 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   const container = name;
   const category = kind === 'list' ? 'bidirectional' : 'randomAccess';
   const bits = kind === 'vector' && element.kind === 'int' && element.name === 'bool' ? bitReferences() : undefined;
-  const reverseIterator = randomAccessIterator(library.iterators, container, element, false, true, category, bits);
-  const constReverseIterator = randomAccessIterator(library.iterators, container, element, true, true, category, bits);
+  const representation = { bits, underlyingSize: kind === 'deque' || bits ? 16 : 8 } as const;
+  const reverseIterator = randomAccessIterator(
+    library.iterators,
+    container,
+    element,
+    false,
+    true,
+    category,
+    representation
+  );
+  const constReverseIterator = randomAccessIterator(
+    library.iterators,
+    container,
+    element,
+    true,
+    true,
+    category,
+    representation
+  );
   if (bits) {
     cls.memberTypes.set('reference', bits.mutable);
     cls.memberTypes.set('const_reference', bits.constant);
@@ -100,13 +117,13 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
     'iterator',
     kind === 'array'
       ? pointerTo(element)
-      : classType(randomAccessIterator(library.iterators, container, element, false, false, category, bits))
+      : classType(randomAccessIterator(library.iterators, container, element, false, false, category, representation))
   );
   cls.memberTypes.set(
     'const_iterator',
     kind === 'array'
       ? pointerTo(withConst(element))
-      : classType(randomAccessIterator(library.iterators, container, element, true, false, category, bits))
+      : classType(randomAccessIterator(library.iterators, container, element, true, false, category, representation))
   );
   cls.memberTypes.set('reverse_iterator', classType(reverseIterator));
   cls.memberTypes.set('const_reverse_iterator', classType(constReverseIterator));

@@ -26,7 +26,7 @@ export function randomAccessIterator(
   isConst: boolean,
   isReverse: boolean,
   category: IteratorCategory = 'randomAccess',
-  bits?: BitReferences
+  representation?: { bits?: BitReferences; underlyingSize: 8 | 16 }
 ): ClassInfo {
   const name = `${container}::${isReverse ? (isConst ? 'const_reverse_iterator' : 'reverse_iterator') : isConst ? 'const_iterator' : 'iterator'}`;
   const cached = cache.get(name);
@@ -35,13 +35,16 @@ export function randomAccessIterator(
   cls.isComplete = true;
   cache.set(name, cls);
   const elementType = isConst ? withConst(element) : element;
+  const bits = representation?.bits;
+  const underlyingSize = representation?.underlyingSize ?? 8;
   cls.library = {
     kind: 'iterator',
     args: [elementType],
     isReverse,
     iteratorCategory: category,
     iteratorReference: isConst ? bits?.constant : bits?.mutable,
-    size: 8,
+    // Apple's libc++ reverse_iterator stores two underlying iterators.
+    size: isReverse ? 2 * underlyingSize : underlyingSize,
     align: 8,
     operator: (compiler, operator, operands, row) =>
       hasOperator(category, operator)
@@ -63,7 +66,7 @@ export function randomAccessIterator(
   };
   cls.constructors = [nativeConstructor(cls, [], () => NULL_PTR)];
   if (isConst) {
-    const mutable = randomAccessIterator(cache, container, element, false, isReverse, category, bits);
+    const mutable = randomAccessIterator(cache, container, element, false, isReverse, category, representation);
     cls.constructors.push(nativeConstructor(cls, [classType(mutable)], ([value]) => value));
   }
   return cls;
