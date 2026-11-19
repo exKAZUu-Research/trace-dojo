@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 960 -- Keeps PHP value storage and the ownership helpers it uses together.
+// code-gauge-allow-file fileNcss 964 -- Keeps class defaults with PHP value storage and ownership helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
@@ -762,6 +762,11 @@ export interface ClassConst {
 }
 
 export type ClassKind = 'class' | 'interface' | 'trait' | 'enum';
+export interface PropertyDefault {
+  expression: Expr;
+  value?: Value;
+}
+
 export type NativeObjectComparison = (
   left: PhpObject,
   right: PhpObject
@@ -781,6 +786,7 @@ export class PhpClass {
   staticProps = new Map<string, { ref: Ref; decl: PropDecl }>();
   /** The instance property declarations, in the order an object's table holds them. */
   props: PropDecl[] = [];
+  readonly propertyDefaults = new Map<PropDecl, PropertyDefault>();
   private instanceKeys?: Set<string>;
   hasReservedProperty(key: string): boolean {
     this.instanceKeys ??= new Set(this.props.map((property) => property.key));

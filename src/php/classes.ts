@@ -34,6 +34,7 @@ import {
   PhpClass,
   PhpObject,
   type PropDecl,
+  type PropertyDefault,
   Ref,
   setReferenceTypeCheck,
   type Slot,
@@ -196,6 +197,8 @@ export function linkInterfaces(parent: PhpClass | undefined, own: PhpClass[]): P
 
 function inherit(cls: PhpClass, parent: PhpClass): void {
   cls.props = [...parent.props];
+  for (const [decl, initial] of parent.propertyDefaults)
+    cls.propertyDefaults.set(decl, initial.value === undefined ? { expression: initial.expression } : initial);
   for (const [name, decl] of parent.propByName) cls.propByName.set(name, decl);
   for (const [name, constant] of parent.consts) {
     if (constant.visibility !== 'private') cls.consts.set(name, constant);
@@ -282,7 +285,7 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst, declarationScope = cls
     hasDefault: ast.defaultExpr !== undefined,
     isVirtual: ast.isVirtual,
   };
-  if (ast.defaultExpr) decl.defaultValue = cachePropertyDefault(decl, ast.defaultExpr);
+  if (ast.defaultExpr) registerPropertyDefault(decl, ast.defaultExpr);
   const parent = inherited?.cls !== cls && inherited?.visibility !== 'private' ? inherited : undefined;
   linkPropertyHooks(decl, ast, parent);
   if (ast.isStatic) {
@@ -296,8 +299,10 @@ function addProperty(cls: PhpClass, ast: PropertyDeclAst, declarationScope = cls
     return;
   }
   const index = cls.props.findIndex((existing) => existing.name === ast.name && existing.visibility !== 'private');
-  if (index !== -1) cls.props[index] = decl;
-  else cls.props.push(decl);
+  if (index !== -1) {
+    cls.propertyDefaults.delete(cls.props[index]);
+    cls.props[index] = decl;
+  } else cls.props.push(decl);
   cls.propByName.set(ast.name, decl);
   if (decl.visibility === 'private') cls.privateProps.set(ast.name, decl);
 }
@@ -390,17 +395,27 @@ function propertyTypeError(parent: PropDecl, child: PhpClass, name: string, row:
   );
 }
 
-function cachePropertyDefault(decl: PropDecl, expression: Expr): () => Value {
-  let cached: Value | undefined;
-  return () => {
-    if (cached === undefined) {
-      cached = evaluatePropertyDefault(decl, expression);
-      if (cached instanceof PhpArray) cached.persistentHolder = true;
-      if (!decl.isStatic && (cached instanceof PhpArray || cached instanceof PhpObject))
-        rt().declarationRoots.add(cached);
-    }
-    return share(cached);
-  };
+function registerPropertyDefault(decl: PropDecl, expression: Expr): void {
+  const initial: PropertyDefault = { expression };
+  if (decl.isStatic) decl.defaultValue = () => resolvePropertyDefault(decl, initial);
+  else decl.cls.propertyDefaults.set(decl, initial);
+}
+
+function initialPropertyValue(cls: PhpClass, decl: PropDecl): Value | typeof UNINIT {
+  const initial = cls.propertyDefaults.get(decl);
+  if (initial) return resolvePropertyDefault(decl, initial);
+  if (decl.defaultValue) return decl.defaultValue();
+  return decl.type ? UNINIT : null;
+}
+
+function resolvePropertyDefault(decl: PropDecl, initial: PropertyDefault): Value {
+  if (initial.value === undefined) {
+    const value = evaluatePropertyDefault(decl, initial.expression);
+    if (value instanceof PhpArray) value.persistentHolder = true;
+    if (!decl.isStatic && (value instanceof PhpArray || value instanceof PhpObject)) rt().declarationRoots.add(value);
+    initial.value = value;
+  }
+  return share(initial.value);
 }
 
 function evaluatePropertyDefault(decl: PropDecl, expression: Expr): Value {
@@ -624,7 +639,6 @@ function applyTraitProperties(cls: PhpClass, trait: PhpClass, origins: Map<strin
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function traitPropertyCompatible(
   existing: PropDecl,
   property: PropertyDeclAst,
@@ -647,7 +661,7 @@ function traitPropertyCompatible(
     !sameDeclarationType(existing.type, existing.declarationScope ?? existing.cls, property.type, declarationScope)
   )
     return false;
-  const left = existing.defaultValue ? existing.defaultValue() : existing.type ? UNINIT : null;
+  const left = initialPropertyValue(cls, existing);
   const right = property.defaultExpr ? evaluateInClass(property.defaultExpr, cls) : property.type ? UNINIT : null;
   return left === UNINIT || right === UNINIT ? left === right : strictEquals(left, right);
 }
@@ -999,10 +1013,7 @@ export function createObject(cls: PhpClass): PhpObject {
 export function initializeObjectProperties(object: PhpObject): void {
   for (const decl of object.cls.props) {
     if (decl.isVirtual && decl.hooks) continue;
-    let value: Slot;
-    if (decl.defaultValue) value = decl.defaultValue();
-    else value = decl.type ? UNINIT : null;
-    object.props.set(decl.key, value);
+    object.props.set(decl.key, initialPropertyValue(object.cls, decl));
   }
 }
 
@@ -1223,6 +1234,7 @@ export function readProp(
   return null;
 }
 
+// code-gauge-allow functionCognitiveComplexity 16 -- Keeps the property probe guards tied to their result boundaries.
 function readOverloadedProp(
   object: PhpObject,
   name: string,
@@ -1231,10 +1243,16 @@ function readOverloadedProp(
 ): Value | undefined {
   const isset = mode === 'coalesce' || mode === 'empty' ? object.cls.findMethod('__isset') : undefined;
   if (isset && !object.guards?.has(`isset:${name}`)) {
-    const present = (): boolean => magicIsset(object, isset, name);
+    const key = `isset:${name}`;
     if (mode === 'empty')
-      return guarded(object, `isset:${name}`, () => (present() ? readOverloadedProp(object, name, 'quiet') : null));
-    if (!guarded(object, `isset:${name}`, present)) return null;
+      return guarded(object, key, () => {
+        if (!magicIsset(object, isset, name)) return false;
+        return consumeInvokedResult(
+          () => readOverloadedProp(object, name, 'quiet'),
+          (value) => value !== undefined && toBool(value)
+        );
+      });
+    if (!consumeInvokedResult(() => guarded(object, key, () => callMagic(object, isset, [name])), toBool)) return null;
   }
   if (mode === 'empty') return null;
   const magic = object.cls.findMethod('__get');
@@ -1817,7 +1835,9 @@ function initializeClassDefaults(cls: PhpClass): void {
     const current = pending.pop()!;
     initializeClassConstants(current);
     for (const prop of current.props) {
-      if (prop.cls === current) prop.defaultValue?.();
+      const initial = current.propertyDefaults.get(prop);
+      if (initial) resolvePropertyDefault(prop, initial);
+      else if (prop.cls === current) prop.defaultValue?.();
     }
     for (const { ref } of current.staticProps.values()) resolveStatic(ref);
     initializedClasses.add(current);

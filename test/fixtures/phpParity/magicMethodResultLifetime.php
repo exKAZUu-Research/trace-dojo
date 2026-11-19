@@ -13,6 +13,31 @@ $object = new OverloadedProperties;
 var_dump(isset($object->slot), $object->slot ?? 0, empty($object->slot), $object->slot = 7);
 unset($object->first, $object->second);
 
+class ReentrantIssetResult {
+    function __destruct() {
+        global $owner;
+        echo "reentrant ", $owner->slot ?? 0, "\n";
+    }
+}
+class GuardedProperties {
+    public function __construct(private bool $nested, private bool $first = true) {}
+    function __isset($name) {
+        echo "isset $name\n";
+        if (!$this->first) return false;
+        $this->first = false;
+        return $this->nested ? [new ReentrantIssetResult] : new ReentrantIssetResult;
+    }
+    function __get($name) { echo "get $name\n"; return 5; }
+}
+foreach ([false, true] as $nested) {
+    $owner = new GuardedProperties($nested);
+    var_dump($owner->slot ?? 0);
+    $owner = new GuardedProperties($nested);
+    var_dump(isset($owner->slot));
+    $owner = new GuardedProperties($nested);
+    var_dump(empty($owner->slot));
+}
+
 $calls = 0;
 class ErrorResult {
     function __destruct() { $GLOBALS['calls']++; }
