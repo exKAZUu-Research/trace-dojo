@@ -4,6 +4,12 @@ struct Base { int value = 7; };
 struct Hidden : private Base {};
 struct Nested { Base base; double next; };
 struct Derived : Base {};
+struct Cell {
+  Cell* self;
+  Cell() : self(this) {}
+};
+struct Row { Cell cell; };
+struct Table { Row row; };
 
 int main() {
   int values[] = {1, 0x11223344};
@@ -37,4 +43,12 @@ int main() {
   const int* heapInt = static_cast<const int*>(heapValue);
   std::cout << *heapInt << '\n';
   delete heapInt;
+
+  Table table;
+  Table* recovered = static_cast<Table*>(static_cast<void*>(table.row.cell.self));
+  std::cout << recovered - &table << '\n';
+  Table* heapTable = new Table;
+  Table* recoveredHeap = static_cast<Table*>(static_cast<void*>(heapTable->row.cell.self));
+  std::cout << (recoveredHeap == heapTable) << '\n';
+  delete recoveredHeap;
 }

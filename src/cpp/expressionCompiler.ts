@@ -1142,7 +1142,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   private assignObject(target: Expr, source: Expr, row: number): Expr {
     this.checkAssignable(target, row, '=');
     const cls = (target.type as Extract<Type, { kind: 'class' }>).cls;
-    if (cls.isNoncopyable || cls.isAssignmentDeleted)
+    if (cls.isAssignmentDeleted)
       return this.error(row, `${cls.name} のオブジェクトには代入できません（代入演算子が削除されています）。`);
     const bound = this.convert(source, { kind: 'reference', to: classType(cls, true) }, row);
     const moves = bound.isXvalue && !isConstType(bound.type);

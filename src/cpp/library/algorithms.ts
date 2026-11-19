@@ -45,7 +45,6 @@ import {
   moveAssignElement,
   moveValue,
   predicateCallback,
-  requireElementUse,
   requireMoves,
   swapElements,
   truthy,
@@ -181,15 +180,11 @@ class Output {
     private readonly info: IteratorInfo,
     private readonly frame: Frame,
     private readonly operations: ElementOperations,
-    private readonly prepare?: ReturnType<typeof assignmentSource>
+    private readonly prepare: ReturnType<typeof assignmentSource>
   ) {}
 
   write(value: Value): void {
-    if (this.prepare) {
-      this.prepare(this.frame, value, (converted) => this.writeConverted(converted));
-      return;
-    }
-    this.writeConverted(value);
+    this.prepare(this.frame, value, (converted) => this.writeConverted(converted));
   }
 
   private writeConverted(value: Value): void {
@@ -614,11 +609,16 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       if (!predicate && !equal) return;
       const ops = elementOperations(compiler(), unqualified(info.element), args[0].row, 'assign');
       const types = params(args);
-      const convert = assignmentSource(compiler(), nonReference(types[3]), info.element, args[3].row);
+      const convert = assignmentSource(
+        compiler(),
+        { type: withConst(nonReference(types[3])) },
+        info.element,
+        args[3].row
+      );
       return native(name, types, VOID, ([first, last, old, replacement], { frame }) => {
         const values = range(first, last, info);
         const target = name === 'replace' ? readArg(old, types[2]) : undefined;
-        const value = readArg(replacement, types[3]);
+        const value = types[3].kind === 'reference' ? (replacement as Ptr) : locationOf(replacement as Value);
         for (let index = 0; index < values.length; index++) {
           if (
             predicate
@@ -659,7 +659,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
             : (equal as (a: Value, b: Value) => boolean)(values.get(out - 1), values.get(index)));
       }
       const element = unqualified(info.element);
-      requireElementUse(compiler(), element, args[0].row, 'assign');
+      compiler().requireLibraryObjectUse(element, 'move-assign', args[0].row);
       return native(name, params(args), unqualified(args[0].type), ([first, last, value], { frame }) => {
         const values = range(first, last, info);
         frame.pending.push(value as Value);
@@ -734,12 +734,13 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         args[2].row,
         output.isOutput ? 'copy' : 'assign'
       );
-      const convert = assignmentSource(compiler(), info.element, output.element, args[2].row);
+      const convert = assignmentSource(compiler(), iteratorOperand(info), output.element, args[2].row);
       return native(name, params(args), unqualified(args[2].type), ([first, last, start], { frame }) => {
         const values = range(first, last, info);
         const out = new Output(start as Ptr, output, frame, ops, convert);
         for (let index = 0; index < values.length; index++) {
-          if (!predicate || truthy(predicate(frame, values.location(index)))) out.write(values.get(index));
+          const value = values.location(index);
+          if (!predicate || truthy(predicate(frame, value))) out.write(value);
         }
         return out.end;
       });
@@ -760,7 +761,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     if (!operation) return;
     const destination = unqualified(output.element);
     const ops = elementOperations(compiler(), destination, args[0].row, output.isOutput ? 'copy' : 'assign');
-    const prepare = assignmentSource(compiler(), operation.type, destination, args[0].row);
+    const prepare = assignmentSource(compiler(), operation, destination, args[0].row);
     return native('transform', params(args), unqualified(args[isBinary ? 3 : 2].type), (values, { frame }) => {
       const [first, last] = values;
       const source = range(first, last, info);
@@ -771,7 +772,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
           const result = others
             ? invokeOperation(frame, operation, source.location(index), others.location(index))
             : invokeOperation(frame, operation, source.location(index));
-          out.write(readOperationValue(operation, result));
+          out.write(result);
         });
       }
       return out.end;
@@ -863,7 +864,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       args[2].row,
       output.isOutput ? 'copy' : 'assign'
     );
-    const convert = assignmentSource(compiler(), info.element, output.element, args[2].row);
+    const convert = assignmentSource(compiler(), { type: sumType }, output.element, args[2].row);
     return native('partial_sum', params(args), unqualified(args[2].type), ([first, last, start], { frame }) => {
       const values = range(first, last, info);
       const out = new Output(start as Ptr, output, frame, ops, convert);
@@ -871,10 +872,10 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       return withTemporaries(frame, () => {
         const initial = accumulator.ops.copy(frame, values.get(0));
         const sum = holdAccumulator(frame, accumulator, initial);
-        out.write(initial);
+        out.write(sum);
         for (let index = 1; index < values.length; index++) {
           withTemporaries(frame, () => accumulator.update(frame, sum, values.location(index)));
-          out.write(sum.read());
+          out.write(sum);
         }
         return out.end;
       });
@@ -1364,16 +1365,16 @@ function stringValueBytes(value: Value): string {
 
 function assignmentSource(
   compiler: ExpressionCompiler,
-  source: Type,
+  source: CallbackOperand,
   destination: Type,
   row: number
 ): (frame: Frame, value: Value, use: (value: Value) => void) => void {
-  if (sameType(source, destination, false)) return (_frame, value, use) => use(value);
-  const active: Ptr[] = [];
-  const value: Expr = { type: source, isLvalue: true, row, run: () => active.at(-1) };
+  if (sameType(source.type, destination, false)) return (_frame, value, use) => use(readOperandValue(source, value));
+  const active: Value[] = [];
+  const [value] = callbackOperands([source], row, () => active.at(-1));
   const convert = compiler.convert(value, constRef(destination), row).run;
   return (frame, item, use) => {
-    active.push(locationOf(item));
+    active.push(item);
     try {
       withTemporaries(frame, () => use((convert(frame) as Ptr).read()));
     } finally {
@@ -1401,16 +1402,15 @@ function numericAccumulator(
   row: number
 ): NumericAccumulator {
   const ops = elementOperations(compiler, type, row, 'relocate');
-  const convert = assignmentSource(compiler, operation.type, type, row);
+  const convert = assignmentSource(compiler, operation, type, row);
   const movesResult =
     operation.category !== undefined && !isConstType(operation.type) && sameType(operation.type, type, false);
   return {
     ops,
     update: (frame, sum, operand) => {
       const result = invokeOperation(frame, operation, sum, operand);
-      const value = readOperationValue(operation, result);
-      if (movesResult) moveAssignElement(frame, sum, type, value);
-      else convert(frame, value, (converted) => assignElement(frame, sum, ops, converted));
+      if (movesResult) moveAssignElement(frame, sum, type, readOperandValue(operation, result));
+      else convert(frame, result, (converted) => assignElement(frame, sum, ops, converted));
     },
   };
 }
@@ -1445,9 +1445,9 @@ function invokeOperation(frame: Frame, operation: ElementOperation, ...args: Ope
   return result;
 }
 
-function readOperationValue(operation: ElementOperation, result: Value): Value {
-  if (operation.category === 'prvalue') return result;
-  return operation.type.kind === 'nullptr' ? NULL_PTR : (result as Ptr).read();
+function readOperandValue(operand: CallbackOperand, value: Value): Value {
+  if (operand.category === 'prvalue') return value;
+  return operand.type.kind === 'nullptr' ? NULL_PTR : (value as Ptr).read();
 }
 
 function compileOperation(

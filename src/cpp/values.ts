@@ -1,7 +1,7 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { CppRuntimeError } from './errors';
 import type { Frame, Temporary } from './runtime';
-import { type ClassInfo, classType, type FunctionInfo, sizeOf, type Type } from './types';
+import { baseSubobjectOffset, type ClassInfo, classType, type FunctionInfo, sizeOf, type Type } from './types';
 
 /** The value of a variable or an element that the program has not written yet. */
 export const UNINIT = Symbol('uninitialized');
@@ -180,13 +180,14 @@ export class CObject extends Store {
     return location;
   }
 
-  baseEndpoint(cls: ClassInfo): { store: Store | undefined; index: number } {
-    const size = sizeOf(classType(cls));
-    if (size === sizeOf(classType(this.completeClass))) {
+  subobjectAddress(cls: ClassInfo, index: number): { store: Store | undefined; index: number } {
+    const offset = baseSubobjectOffset(this.completeClass, cls) + index * sizeOf(classType(cls));
+    if (offset === 0) return { store: this, index: 0 };
+    if (offset === sizeOf(classType(this.completeClass))) {
       const complete = this.completeLocation;
       return new Ptr(complete?.store ?? this.fallbackReceiver(), (complete?.index ?? 0) + 1).address;
     }
-    return { store: this.fallbackReceiver(), index: size };
+    return { store: this.fallbackReceiver(), index: offset };
   }
 
   private fallbackReceiver(): Store {
@@ -450,7 +451,7 @@ export class Ptr {
   /** Constructor and destructor receivers can wrap the same object in different storage cells. */
   get address(): { store: Store | undefined; index: number } {
     const store = this.store;
-    if (this.index === 1 && store instanceof BaseSubobjectStorage) return store.object.baseEndpoint(store.cls);
+    if (store instanceof BaseSubobjectStorage) return store.object.subobjectAddress(store.cls, this.index);
     const object = this.addressedObject();
     return object ? { store: object, index: 0 } : this.storageAddress;
   }

@@ -438,7 +438,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       return this.constructWith(cls, selected, [expr], expr.row);
     }
     const type = classType(cls);
-    const movesSource = expr.isXvalue === true && !isConstType(expr.type);
+    const movesSource = (!expr.isLvalue || expr.isXvalue === true) && !isConstType(expr.type);
     if (movesSource) this.checkMoveOperation(type, 'copy', expr.row, { access: this.accessClass, seen: new Set() });
     else this.checkCopySource(type, expr);
     const source = this.rvalue(expr);

@@ -14,6 +14,16 @@ struct WithCopy {
   WithCopy() {}
   WithCopy(const WithCopy& source) : values(source.values) {}
 };
+struct Item {
+  int value;
+  Item(int n) : value(n) {}
+private:
+  Item(const Item&);
+};
+struct Assignable {
+  Item item;
+  Assignable(int n) : item(n) {}
+};
 
 int main() {
   Holder holder;
@@ -41,4 +51,10 @@ int main() {
   second.values.reserve(10);
   second = WithCopy{};
   std::cout << first.values.capacity() << ' ' << second.values.capacity() << '\n';
+
+  Assignable target(1), input(2);
+  target = input;
+  std::cout << target.item.value << ' ';
+  target = Assignable(3);
+  std::cout << target.item.value << '\n';
 }

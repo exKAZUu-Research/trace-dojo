@@ -23,7 +23,13 @@ std::list<Item> listResult(std::list<Item> values) { return values; }
 
 struct Wrapper { std::vector<Item> items; };
 Wrapper wrappedResult(Wrapper value) { return value; }
+struct DerivedWrapper : Wrapper {
+  DerivedWrapper(int n) : Wrapper{std::vector<Item>(n)} {}
+};
+Wrapper slicedResult() { return DerivedWrapper(4); }
 bool smaller(const Wrapper& a, const Wrapper& b) { return a.items.size() < b.items.size(); }
+bool hasOne(const Wrapper& a) { return a.items.size() == 1; }
+bool sameSize(const Wrapper& a, const Wrapper& b) { return a.items.size() == b.items.size(); }
 
 struct Component {
   Component() {}
@@ -131,4 +137,15 @@ int main() {
   Wrapper assigned{std::vector<Item>(2)};
   assigned = Wrapper{std::vector<Item>(3)};
   std::cout << assigned.items.size() << '\n';
+  Wrapper sliced = DerivedWrapper(3);
+  std::cout << sliced.items.size() << ' ' << slicedResult().items.size() << '\n';
+
+  Wrapper removable[] = {{std::vector<Item>(1)}, {std::vector<Item>(2)}, {std::vector<Item>(3)}};
+  auto removed = std::remove_if(removable, removable + 3, hasOne);
+  std::cout << (removed - removable) << ' ' << removable[0].items.size()
+            << ' ' << removable[1].items.size() << '\n';
+  Wrapper duplicate[] = {{std::vector<Item>(1)}, {std::vector<Item>(1)}, {std::vector<Item>(2)}};
+  auto distinct = std::unique(duplicate, duplicate + 3, sameSize);
+  std::cout << (distinct - duplicate) << ' ' << duplicate[0].items.size()
+            << ' ' << duplicate[1].items.size() << '\n';
 }

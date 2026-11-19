@@ -563,10 +563,19 @@ function standardLayoutMember(type: Type): boolean {
   return type.kind !== 'class' || isStandardLayout(type.cls);
 }
 
+export function baseSubobjectOffset(derived: ClassInfo, base: ClassInfo): number {
+  let offset = 0;
+  for (let cls: ClassInfo | undefined = derived; cls && cls !== base; cls = cls.base) {
+    offset += classLayout(cls).baseOffset;
+  }
+  return offset;
+}
+
 interface ClassLayout {
   size: number;
   align: number;
   dataSize: number;
+  baseOffset: number;
   atOrigin: ReadonlySet<ClassInfo>;
 }
 
@@ -577,17 +586,20 @@ function classLayout(cls: ClassInfo): ClassLayout {
   const cached = completedLayouts.get(cls);
   if (cached) return cached;
   const atOrigin = new Set([cls]);
-  if (cls.library) return { size: cls.library.size, align: cls.library.align, dataSize: cls.library.size, atOrigin };
+  if (cls.library)
+    return { size: cls.library.size, align: cls.library.align, dataSize: cls.library.size, baseOffset: 0, atOrigin };
   let offset = cls.isPolymorphic && !cls.base?.isPolymorphic ? 8 : 0;
   let align = offset > 0 ? 8 : 1;
+  let baseOffset = 0;
   let emptyBase: ReadonlySet<ClassInfo> | undefined;
   if (cls.base) {
     const base = classLayout(cls.base);
     // An empty base takes no room (the empty base optimization).
     if (base.dataSize > 0) {
       // The members of a derived class reuse the tail padding of a base that is not POD.
-      if (offset === 0) for (const type of base.atOrigin) atOrigin.add(type);
-      offset = Math.ceil(offset / base.align) * base.align + (isPodForLayout(cls.base) ? base.size : base.dataSize);
+      baseOffset = Math.ceil(offset / base.align) * base.align;
+      if (baseOffset === 0) for (const type of base.atOrigin) atOrigin.add(type);
+      offset = baseOffset + (isPodForLayout(cls.base) ? base.size : base.dataSize);
     } else {
       emptyBase = base.atOrigin;
       for (const type of emptyBase) atOrigin.add(type);
@@ -606,7 +618,7 @@ function classLayout(cls: ClassInfo): ClassLayout {
     align = Math.max(align, fieldAlign);
   }
   const size = Math.ceil(offset / align) * align;
-  const layout = { size: size === 0 ? 1 : size, align, dataSize: offset, atOrigin };
+  const layout = { size: size === 0 ? 1 : size, align, dataSize: offset, baseOffset, atOrigin };
   if (cls.isComplete) completedLayouts.set(cls, layout);
   return layout;
 }

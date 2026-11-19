@@ -13,7 +13,7 @@ import {
   type Type,
   typeName,
 } from './types';
-import { Box, CObject, Ptr, Store, type Value } from './values';
+import { CObject, Ptr, Store, type Value } from './values';
 
 export function erasePointee(pointer: Ptr, pointee: Type): Ptr {
   if (pointer instanceof IncompatiblePointer) return pointer.erased;
@@ -67,15 +67,15 @@ function enclosingSubobject(pointer: Ptr, source: Type, target: ClassType): Ptr 
   const member = pointer.memberOwner;
   if (!member) return;
   const context = pointer.enclosingObject;
-  const location = context?.location ?? new Ptr(new Box(member.object, false), 0);
+  const owner = context?.cls ?? member.object.completeClass;
+  const location = context?.location ?? member.object.receiver(owner);
   const requestedMember = target.cls.fields[0];
   if (
     member.object.cls.isDerivedFrom(target.cls) &&
     requestedMember?.index === member.field &&
     sameType(requestedMember.type, source, false)
   )
-    return location;
-  const owner = context?.cls ?? member.object.cls;
+    return location.forClass(target.cls);
   const first = owner.fields[0];
   if (isStandardLayout(owner) && first?.index === member.field && sameType(first.type, source, false))
     return enclosingSubobject(location, classType(owner), target);
