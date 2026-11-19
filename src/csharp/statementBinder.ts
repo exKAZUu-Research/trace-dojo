@@ -30,6 +30,7 @@ import {
   ERROR_TYPE,
   type FieldSymbol,
   isReferenceType,
+  isValueType,
   LocalSymbol,
   MethodSymbol,
   type NamedType,
@@ -108,6 +109,20 @@ export abstract class StatementBinder extends PatternBinder {
       }
       case 'field': {
         this.checkReadonlyField(target.field, context, position);
+        const holder = target.receiver;
+        if (
+          (holder.kind === 'field' || holder.kind === 'staticField') &&
+          holder.field.isReadonly &&
+          isValueType(holder.field.type) &&
+          !this.canAssignReadonly(holder.field, context)
+        ) {
+          this.error(
+            position,
+            'CS1648',
+            `読み取り専用フィールド '${displayTypeSymbol(holder.field.owner)}.${holder.field.name}' のメンバーは変更できません (コンストラクターまたは変数初期化子では可)`
+          );
+          return target;
+        }
         if (
           target.receiver.type.kind === 'named' &&
           target.receiver.type.symbol.isValueType &&
@@ -244,14 +259,7 @@ export abstract class StatementBinder extends PatternBinder {
       return;
     }
     if (!field.isReadonly) return;
-    const method = context.fn.method;
-    const inConstructor =
-      (field.isStatic
-        ? method.kind === 'staticConstructor'
-        : method.kind === 'constructor' || (method.kind === 'setter' && method.property?.isInitOnly === true)) &&
-      method.owner === field.owner &&
-      context.fn.kind !== 'lambda';
-    if (!inConstructor && context.fn.kind !== 'initializer') {
+    if (!this.canAssignReadonly(field, context)) {
       if (field.isStatic)
         this.error(
           position,
@@ -265,6 +273,18 @@ export abstract class StatementBinder extends PatternBinder {
           '読み取り専用フィールドに割り当てることはできません (フィールドが定義されている型のコンストラクターか init 専用セッター、または変数初期化子では可)'
         );
     }
+  }
+
+  /** Whether code may assign a readonly field: in its type's constructor, init accessor, or field initializer. */
+  private canAssignReadonly(field: FieldSymbol, context: BindContext): boolean {
+    const method = context.fn.method;
+    const inConstructor =
+      (field.isStatic
+        ? method.kind === 'staticConstructor'
+        : method.kind === 'constructor' || (method.kind === 'setter' && method.property?.isInitOnly === true)) &&
+      method.owner === field.owner &&
+      context.fn.kind !== 'lambda';
+    return inConstructor || context.fn.kind === 'initializer';
   }
 
   /** Whether an expression denotes a variable, whose struct value an assignment to a member changes in place. */
@@ -653,13 +673,10 @@ export abstract class StatementBinder extends PatternBinder {
     type: Type
   ): void {
     local.isConst = true;
-    if (!declarator.initializer) this.error(declarator, 'CS0145', 'const フィールドに値を指定する必要があります');
-    else if (value?.kind !== 'constant') {
-      if (value?.type.kind !== 'error')
-        this.error(declarator, 'CS0133', `'${declarator.name}' に割り当てられた式は定数でなければなりません`);
-    } else {
-      local.constantValue = value.value;
-    }
+    // The parser rejects a constant without a value, so `value` is the initializer's.
+    if (value?.kind === 'constant') local.constantValue = value.value;
+    else if (value && value.type.kind !== 'error')
+      this.error(declarator, 'CS0133', `'${declarator.name}' に割り当てられた式は定数でなければなりません`);
     if (type.kind !== 'error' && !this.isConstantType(type))
       this.error(declarator, 'CS0283', `型 '${displayType(type)}' を const 宣言することはできません`);
   }

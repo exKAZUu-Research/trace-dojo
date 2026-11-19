@@ -167,7 +167,8 @@ export type BoundExpression =
       assignments: BoundMemberInit[];
       temporary: LocalSymbol;
     } & Base)
-  | ({ kind: 'default' } & Base)
+  /** A type's default value; `failedCall` marks a call whose arguments fit no method, which stands for that call. */
+  | ({ kind: 'default'; failedCall?: true } & Base)
   | ({ kind: 'deconstructAssign'; targets: BoundDeconstructTarget; value: BoundExpression } & Base)
   | ({ kind: 'eventAccessor'; target: BoundLValue; isAdd: boolean; value: BoundExpression } & Base)
   | ({ kind: 'sequence'; locals: LocalSymbol[]; sideEffects: BoundExpression[]; value: BoundExpression } & Base)

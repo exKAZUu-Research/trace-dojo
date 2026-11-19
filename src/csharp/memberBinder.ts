@@ -795,7 +795,7 @@ export abstract class MemberBinder extends CallBinder {
       const canFallBack = group.extensions.length > 0 && group.receiver !== undefined;
       const resolved = this.resolveCall(group.candidates, args, group.typeArgs, node.row, description);
       if (resolved) return this.callNode(group, resolved, node);
-      if (!canFallBack) return { kind: 'default', type: this.failedCallType(group.candidates), row: node.row };
+      if (!canFallBack) return this.failedCall(group.candidates, args, node);
       this.diagnostics.length = saved;
     }
     const receiver = group.receiver as BoundExpression;
@@ -812,6 +812,13 @@ export abstract class MemberBinder extends CallBinder {
     });
     if (!resolved) return { kind: 'default', type: ERROR_TYPE, row: node.row };
     return this.callNode({ ...group, receiver: undefined }, resolved, node);
+  }
+
+  /** A call whose arguments fit no candidate, which keeps the arguments for the flow analysis to read, as Roslyn's does. */
+  private failedCall(candidates: MethodCandidate[], args: ArgumentInfo[], node: Position): BoundExpression {
+    const type = this.failedCallType(candidates);
+    const value: BoundExpression = { kind: 'default', failedCall: true, type, row: node.row };
+    return { kind: 'sequence', locals: [], sideEffects: args.map((arg) => arg.expression), value, type, row: node.row };
   }
 
   /**

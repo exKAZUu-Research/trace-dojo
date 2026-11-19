@@ -519,7 +519,7 @@ export class DeclarationBinder extends BinderBase {
       this.error(
         declarator,
         'CS0708',
-        `'${declarator.name}': 静的クラスでインスタンスのメンバーを宣言することはできません`
+        `'${displayTypeSymbol(symbol)}.${declarator.name}': 静的クラスでインスタンスのメンバーを宣言することはできません`
       );
     if (field.isConst && member.modifiers.set.has('static'))
       this.error(
@@ -728,7 +728,11 @@ export class DeclarationBinder extends BinderBase {
       property.backingField = field;
       symbol.fields.push(field);
       if (symbol.isStatic && !property.isStatic)
-        this.error(member, 'CS0708', `'${name}': 静的クラスでインスタンスのメンバーを宣言することはできません`);
+        this.error(
+          member,
+          'CS0708',
+          `'${displayTypeSymbol(symbol)}.${name}': 静的クラスでインスタンスのメンバーを宣言することはできません`
+        );
     }
     for (const accessor of member.accessors) this.declareAccessor(type, property, accessor, member.modifiers);
     if (
@@ -1299,12 +1303,15 @@ export class DeclarationBinder extends BinderBase {
     const missing: string[] = [];
     const implemented = new Set<MethodSymbol | PropertySymbol>();
     for (let current: NamedType | undefined = symbol.declaredType; current; current = baseTypeOf(current)) {
+      // The class's own abstract members are CS0513 instead.
+      const isOwn = current.symbol === symbol;
       for (const method of current.symbol.methods) {
-        if (method.isAbstract && !implemented.has(method)) missing.push(displayMethodIn(method, current));
+        if (method.isAbstract && !isOwn && !implemented.has(method)) missing.push(displayMethodIn(method, current));
         addOverriddenChain(method, implemented);
       }
       for (const property of current.symbol.properties) {
-        if (property.isAbstract && !implemented.has(property)) missing.push(...displayAccessorsIn(property, current));
+        if (property.isAbstract && !isOwn && !implemented.has(property))
+          missing.push(...displayAccessorsIn(property, current));
         addOverriddenChain(property, implemented);
       }
     }

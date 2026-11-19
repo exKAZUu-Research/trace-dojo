@@ -635,10 +635,8 @@ export class Compiler extends StatementBinder {
     const fn = new FunctionScope(method, undefined, context, VOID_TYPE, true, undefined, 'initializer');
     const bindContext: BindContext = { scope: new LocalScope(undefined, fn), fn };
     if (owner.kind === 'enum') return this.enumMemberValue(field, bindContext);
-    if (!field.initializer) {
-      this.error(field.row, 'CS0145', 'const フィールドに値を指定する必要があります');
-      return 0;
-    }
+    // The parser rejects a constant without a value.
+    if (!field.initializer) return 0;
     const value = this.bindAs(field.initializer as Expression, field.type, bindContext);
     if (value.kind !== 'constant') {
       if (value.type.kind !== 'error')

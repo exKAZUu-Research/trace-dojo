@@ -1104,6 +1104,9 @@ export abstract class ExpressionBinder extends MemberBinder {
       case 'sequence': {
         return this.isStatementExpression(expression.value);
       }
+      case 'default': {
+        return expression.failedCall === true || expression.type.kind === 'error';
+      }
       default: {
         return expression.type.kind === 'error';
       }
@@ -1844,9 +1847,13 @@ export abstract class ExpressionBinder extends MemberBinder {
       );
       return {
         kind: 'nested',
-        elements: designation.elements.map((element, index) =>
-          this.declareDeconstructed(element, declaredType, elementTypes[index] ?? ERROR_TYPE, context)
-        ),
+        elements: designation.elements.map((element, index) => {
+          const elementType = elementTypes[index];
+          if (!elementType && elementTypes.length > 0 && !declaredType && element.kind === 'single' && !element.type) {
+            this.error(element, 'CS8130', `暗黙的に型指定された分解変数 '${element.name}' の型を推論できません。`);
+          }
+          return this.declareDeconstructed(element, declaredType, elementType ?? ERROR_TYPE, context);
+        }),
         deconstruct,
         elementTypes,
       };
@@ -1878,7 +1885,8 @@ export abstract class ExpressionBinder extends MemberBinder {
           'CS8132',
           `'${type.args.length}' 要素のタプルを '${count}' 変数に分解することはできません。`
         );
-        return { elementTypes: [], deconstruct: undefined };
+        // Roslyn still types the variables that the tuple has elements for.
+        return { elementTypes: type.args.slice(0, count), deconstruct: undefined };
       }
       return { elementTypes: type.args, deconstruct: undefined };
     }

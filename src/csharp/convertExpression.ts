@@ -97,7 +97,7 @@ export class ExpressionConverter {
           throw new CompileError([
             {
               row: rank.startPosition.row,
-              message: "配列のサイズは変数宣言で指定できません (ヒント: 'new' 式を使用してください)",
+              message: "CS0270: 配列のサイズは変数宣言の中で指定できません ('new' を使用して初期化してください)",
             },
           ]);
         }
@@ -942,6 +942,9 @@ export class ExpressionConverter {
       if (part.type === 'interpolation_alignment_clause') alignment = this.convertExpression(namedChildren(part)[0]);
       else if (part.type === 'interpolation_format_clause') {
         format = part.text.slice(1);
+        // The grammar marks an empty format as an error it hides, so the converter reports Roslyn's error for it.
+        if (format === '')
+          throw new CompileError([{ row: part.startPosition.row, message: 'CS8089: 書式指定子が空です。' }]);
         if (hasEscapes)
           format = format.replaceAll(/\\(u[\dA-Fa-f]{4}|U[\dA-Fa-f]{8}|x[\dA-Fa-f]{1,4}|.)/g, (escape) =>
             unescape(part, escape)

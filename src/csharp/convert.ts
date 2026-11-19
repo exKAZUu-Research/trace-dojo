@@ -394,7 +394,9 @@ export class Converter extends ExpressionConverter {
       case 'field_declaration': {
         const declarationNode = namedChildren(node).find((child) => child.type === 'variable_declaration') as Node;
         const { type, declarators } = this.convertVariableDeclaration(declarationNode);
-        return [{ kind: 'field', modifiers: this.convertModifiers(node), type, declarators, ...positionOf(node) }];
+        const modifiers = this.convertModifiers(node);
+        if (modifiers.set.has('const')) rejectConstantsWithoutValues(declarators);
+        return [{ kind: 'field', modifiers, type, declarators, ...positionOf(node) }];
       }
       case 'event_field_declaration': {
         const declarationNode = namedChildren(node).find((child) => child.type === 'variable_declaration') as Node;
@@ -757,6 +759,7 @@ export class Converter extends ExpressionConverter {
       };
     }
     const { type, declarators } = this.convertVariableDeclaration(declarationNode);
+    if (modifiers.includes('const')) rejectConstantsWithoutValues(declarators);
     return { kind: 'localDeclaration', isConst: modifiers.includes('const'), type, declarators, ...positionOf(node) };
   }
 
@@ -774,7 +777,8 @@ export class Converter extends ExpressionConverter {
           throw new CompileError([
             {
               row: bracketed.startPosition.row,
-              message: "配列のサイズは変数宣言で指定できません (ヒント: 'new' 式を使用してください)",
+              message:
+                'CS0650: 不適切な配列の宣言子: マネージ配列を宣言するには、次元指定子を変数の識別子の前に指定します。固定サイズ バッファー フィールドを宣言するには、フィールド型の前に fixed キーワードを使用します。',
             },
           ]);
         }
@@ -827,7 +831,7 @@ export class Converter extends ExpressionConverter {
       type = this.convertType(requiredField(left, 'type'));
       variable = this.convertDesignation(requiredField(left, 'name'));
     } else {
-      // `foreach ((a, b) in xs)` assigns existing variables, and `foreach (var (a, b) in xs)` parses as a call.
+      // `foreach (var (a, b) in xs)` parses as a call of `var`.
       const expression = this.convertExpression(left);
       if (expression.kind === 'invocation' && expression.target.kind === 'name' && expression.target.name === 'var') {
         type = { kind: 'varType', ...positionOf(left) };
@@ -847,7 +851,12 @@ export class Converter extends ExpressionConverter {
           ...positionOf(left),
         };
       } else {
-        return unsupported(node, '既存の変数に代入する `foreach`');
+        // C# has no foreach over existing variables: a name lacks its type, and a tuple of names declares nothing.
+        const message =
+          expression.kind === 'tuple'
+            ? 'CS8186: foreach ループでは繰り返し変数を宣言する必要があります。'
+            : 'CS0230: foreach ステートメントには、型と識別子の両方が必要です';
+        throw new CompileError([{ row: left.startPosition.row, message }]);
       }
     }
     return {
@@ -971,4 +980,11 @@ function typedDesignation(declaration: Expression): Designation {
   const { type, designation } = declaration as Extract<Expression, { kind: 'declaration' }>;
   if (designation.kind !== 'single' || type.kind === 'varType') return designation;
   return { ...designation, type };
+}
+
+/** A constant without a value, which Roslyn's parser rejects before anything else is checked. */
+function rejectConstantsWithoutValues(declarators: VariableDeclarator[]): void {
+  const missing = declarators.find((declarator) => !declarator.initializer);
+  if (missing)
+    throw new CompileError([{ row: missing.row, message: 'CS0145: const フィールドに値を指定する必要があります' }]);
 }
