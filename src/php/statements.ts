@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 652 -- Keeps statement execution with its binding and unwind scopes.
+// code-gauge-allow-file fileNcss 653 -- Keeps statement execution with its binding and unwind scopes.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
@@ -366,13 +366,13 @@ function evaluateForExpression(e: Expr, frame: Frame, held: number, condition = 
     if (e.k === 'var') evQuiet(e);
     else ev(e, true);
   } catch (error) {
-    releaseLoopTemporariesOnThrow(runtime, frame, held, error);
+    releaseTemporariesOnThrow(runtime, frame, held, error);
   }
   runtime.dropTemporaries(frame, held);
   return true;
 }
 
-function releaseLoopTemporariesOnThrow(runtime: Runtime, frame: Frame, mark: number, error: unknown): never {
+function releaseTemporariesOnThrow(runtime: Runtime, frame: Frame, mark: number, error: unknown): never {
   if (error instanceof PhpThrow && frame.temporaries.length > mark)
     withPendingException(runtime, error, () => runtime.dropTemporaries(frame, mark));
   throw error;
@@ -437,10 +437,11 @@ function tryStatement(statement: Extract<Stmt, { k: 'try' }>, seek?: string): Co
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- The pending exception and return slot share the same unwind scope.
-// code-gauge-allow functionNcss 34 -- Carries pending control flow across the finally body.
+// code-gauge-allow functionNcss 35 -- Carries pending control flow across the finally body.
 function runFinally(body: Stmt[], seek: string | undefined, completion: Completion, pending?: PhpThrow): Completion {
   const runtime = rt();
   const frame = runtime.frame;
+  const mark = frame.temporaries.length;
   const returning = completion?.t === 'return' ? completion.slot : undefined;
   if (returning instanceof Ref) runtime.holdTemporaryReference(returning);
   else if (returning !== undefined) frame.temporaries.push(returning);
@@ -451,7 +452,7 @@ function runFinally(body: Stmt[], seek: string | undefined, completion: Completi
   } catch (error) {
     if (completion?.t === 'return') frame.returning = undefined;
     if (error instanceof PhpThrow && pending) setPrevious(error.object, pending.object);
-    throw error;
+    releaseTemporariesOnThrow(runtime, frame, mark, error);
   } finally {
     if (pending) runtime.held.pop();
   }
@@ -510,7 +511,7 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
       ? foreachReferenceSubject(statement)
       : foreachValueSubject(statement, subjectMark);
   } catch (error) {
-    releaseLoopTemporariesOnThrow(runtime, frame, subjectMark, error);
+    releaseTemporariesOnThrow(runtime, frame, subjectMark, error);
   }
 }
 

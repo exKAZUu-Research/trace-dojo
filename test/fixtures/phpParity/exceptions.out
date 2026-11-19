@@ -26,8 +26,11 @@ Array
 handler: [2] Undefined variable $undefinedVar at 25
 handler: [2] Undefined array key "missing" at 26
 end
+release:error;cleanup;previous handler;
+release:exception;cleanup;bool(true)
+during:ReplacingHandler;restored:ReplacingHandler
 
-Fatal error: Uncaught MyException: uncaught! in /main.php:30
+Fatal error: Uncaught MyException: uncaught! in /main.php:66
 Stack trace:
 #0 {main}
-  thrown in /main.php on line 30
+  thrown in /main.php on line 66

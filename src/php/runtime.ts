@@ -181,6 +181,7 @@ export class Runtime {
   nativeStringConversionPending = false;
   errorHandlers: { handler: Value; mask: bigint }[] = [];
   exceptionHandler: Value = null;
+  retiringExceptionHandler: Value | undefined;
   assertionCallback: Value | undefined;
   /** The handlers `set_exception_handler` replaced, latest last, which `restore_exception_handler` brings back. */
   replacedExceptionHandlers: Value[] = [];

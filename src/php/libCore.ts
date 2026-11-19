@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 576 -- Holds the cases of one concern of the interpreter, which share their helpers.
+// code-gauge-allow-file fileNcss 590 -- Keeps core built-ins with their shared interpreter helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { byteAt, lower, untilNul } from './bytes';
 import { callableClosureName, callValue, checkCallable, consumeInvokedResult, explainCallable } from './callables';
@@ -636,7 +636,16 @@ defineFunction('set_error_handler(?callable $callback, int $error_levels = E_ALL
   return previous;
 });
 defineFunction('restore_error_handler(): true', () => {
-  rt().errorHandlers.pop();
+  const runtime = rt();
+  const current = runtime.errorHandlers.at(-1);
+  if (!current) return true;
+  const handler = current.handler;
+  current.handler = null;
+  try {
+    runtime.releaseCallResult(handler);
+  } finally {
+    runtime.errorHandlers.pop();
+  }
   return true;
 });
 defineFunction('set_exception_handler(?callable $callback)', ({ args }) => {
@@ -648,7 +657,15 @@ defineFunction('set_exception_handler(?callable $callback)', ({ args }) => {
 });
 defineFunction('restore_exception_handler(): true', () => {
   const runtime = rt();
-  runtime.exceptionHandler = runtime.replacedExceptionHandlers.pop() ?? null;
+  const handler = runtime.exceptionHandler;
+  const outerRetirement = runtime.retiringExceptionHandler;
+  runtime.retiringExceptionHandler = handler;
+  try {
+    runtime.releaseCallResult(handler);
+  } finally {
+    runtime.exceptionHandler = runtime.replacedExceptionHandlers.pop() ?? null;
+    runtime.retiringExceptionHandler = outerRetirement;
+  }
   return true;
 });
 defineFunction('error_reporting(?int $error_level = null): int', ({ args }) => {

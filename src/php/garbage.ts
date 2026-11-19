@@ -1118,7 +1118,7 @@ function runGlobalDestructor(runtime: Runtime, object: PhpObject): boolean {
 
 function callbackRoots(runtime: Runtime): unknown[] {
   return [
-    runtime.exceptionHandler,
+    runtime.exceptionHandler === runtime.retiringExceptionHandler ? undefined : runtime.exceptionHandler,
     runtime.assertionCallback,
     ...runtime.replacedExceptionHandlers,
     ...runtime.errorHandlers.map(({ handler }) => handler),

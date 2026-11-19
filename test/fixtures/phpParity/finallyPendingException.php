@@ -15,6 +15,22 @@ foreach ([false, true] as $fromCatch) {
         }
     } catch (Exception $final) { echo get_class($final), ':', $final->getMessage(), "\n"; }
 }
+class InterruptedReturn {
+    function __destruct() { throw new Exception('destructor'); }
+}
+function discardReturn($call) {
+    try { return [new InterruptedReturn]; }
+    finally {
+        if ($call) innerFailure();
+        throw new Exception('finally');
+    }
+}
+foreach ([false, true] as $call) {
+    try { discardReturn($call); }
+    catch (Throwable $error) {
+        echo $error->getMessage(), ':', $error->getPrevious()?->getMessage(), "\n";
+    }
+}
 try { throw new Exception('uncaught'); }
 finally {
     try { innerFailure(); }

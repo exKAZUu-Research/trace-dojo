@@ -27,4 +27,40 @@ $arr = []; echo $arr['missing'];
 restore_error_handler();
 $x = @$arr['quiet'];
 echo "end\n";
+class RestoredHandler {
+    function __construct(private $kind) {}
+    function __invoke(...$args) { return true; }
+    function __destruct() {
+        echo "release:$this->kind;";
+        if ($this->kind === 'error') @trigger_error('during restore', E_USER_NOTICE);
+        throw new Exception('cleanup');
+    }
+}
+set_error_handler(function () { echo 'previous handler;'; return true; });
+set_error_handler(new RestoredHandler('error'));
+try { restore_error_handler(); }
+catch (Throwable $error) { echo $error->getMessage(), ';'; }
+trigger_error('after restore', E_USER_NOTICE);
+restore_error_handler();
+echo "\n";
+$previous = function () {};
+set_exception_handler($previous);
+set_exception_handler([new RestoredHandler('exception'), '__invoke']);
+try { restore_exception_handler(); }
+catch (Throwable $error) { echo $error->getMessage(), ';'; }
+var_dump(set_exception_handler(null) === $previous);
+restore_exception_handler();
+restore_exception_handler();
+class ReplacingHandler {
+    function __invoke(Throwable $error) {}
+    function __destruct() {
+        $previous = set_exception_handler(static function () {});
+        echo 'during:', get_debug_type($previous), ';';
+    }
+}
+set_exception_handler(new ReplacingHandler);
+restore_exception_handler();
+echo 'restored:', get_debug_type(set_exception_handler(null)), "\n";
+restore_exception_handler();
+restore_exception_handler();
 throw new MyException("uncaught!");
