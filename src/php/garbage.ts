@@ -1226,7 +1226,7 @@ function ownedReachable(
     }
     visited.add(item);
     path.push(item);
-    cursors.push(reverseOwners(item, runtime, visited));
+    cursors.push(reverseOwners(item, runtime));
   }
   if (unreachable) for (const item of visited) unreachable.add(item);
   return false;
@@ -1258,15 +1258,9 @@ function ownershipRootCheck(
   };
 }
 
-function* reverseOwners(value: object, runtime: Runtime, visited: Set<object>): Generator<object> {
+function* reverseOwners(value: object, runtime: Runtime): Generator<object> {
   for (const owner of valueOwners(value)) {
     if (!(owner instanceof PhpObject && runtime.retiringObjects.has(owner))) yield owner;
-  }
-  for (const object of runtime.internalObjects) {
-    if (visited.has(object) || object.nativeValues || runtime.retiringObjects.has(object)) continue;
-    const held: unknown[] = [];
-    pushObject(object, held);
-    if (held.includes(value)) yield object;
   }
 }
 

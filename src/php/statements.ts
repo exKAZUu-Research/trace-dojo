@@ -32,6 +32,7 @@ import { FatalError, Frame, PhpThrow, rt, type Runtime } from './runtime';
 import {
   type Callable,
   type Key,
+  nativeOwnershipChanged,
   PhpArray,
   type PhpClass,
   PhpObject,
@@ -411,6 +412,7 @@ function staticDeclaration(statement: Extract<Stmt, { k: 'static' }>, frame: Fra
       ref = new Ref(init ? share(ev(init)) : null);
       ref.isRef = true;
       statics.set(name, ref);
+      if (frame.closure) nativeOwnershipChanged(frame.closure);
     }
     new VarPlace(frame, name).bind(ref);
   }

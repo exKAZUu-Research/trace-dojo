@@ -925,7 +925,6 @@ export class PhpObject {
     this.releaseInternal();
     this.internalValue = value;
     this.nativeValues?.attach(this);
-    internalHandler(this);
     nativeOwnershipChanged(this);
   }
   releaseInternal(): void {
@@ -1061,33 +1060,44 @@ export function observeOwnership(observer: (change: OwnershipChange) => void): (
   };
 }
 
-const genericNativeArrays = new WeakMap<PhpObject, Map<PhpArray, number>>();
+const genericNativeValues = new WeakMap<PhpObject, Map<object, number>>();
 
 export function clearNativeOwnership(owner: PhpObject): void {
-  for (const value of genericNativeArrays.get(owner)?.keys() ?? []) nativeOwners.get(value)?.delete(owner);
-  genericNativeArrays.delete(owner);
+  for (const value of genericNativeValues.get(owner)?.keys() ?? []) nativeOwners.get(value)?.delete(owner);
+  genericNativeValues.delete(owner);
 }
 
 export function nativeOwnershipChanged(owner: PhpObject): void {
-  refreshNativeArrays(owner);
+  refreshNativeOwnership(owner);
   invalidateOwner(owner);
   for (const observer of ownershipObservers) observer({ kind: 'native', owner });
 }
 
-function refreshNativeArrays(owner: PhpObject): void {
+function refreshNativeOwnership(owner: PhpObject): void {
   clearNativeOwnership(owner);
-  if (owner.nativeValues || isClosure(owner)) return;
-  const internal = owner.internal as { held?: () => unknown[] } | undefined;
-  if (!internal?.held) return;
-  const counts = new Map<PhpArray, number>();
-  for (const value of internal.held()) {
-    if (!(value instanceof PhpArray)) continue;
+  const values = owner.nativeValues ? undefined : nativeHeldValues(owner);
+  if (!values) return;
+  const counts = new Map<object, number>();
+  for (const value of values) {
+    if (!(value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject)) continue;
     counts.set(value, (counts.get(value) ?? 0) + 1);
-    let holders = nativeOwners.get(value);
-    if (!holders) nativeOwners.set(value, (holders = new Set()));
-    holders.add(owner);
+    const holders = nativeOwners.get(value) ?? new Set<PhpObject>();
+    nativeOwners.set(value, holders.add(owner));
   }
-  genericNativeArrays.set(owner, counts);
+  if (counts.size > 0) genericNativeValues.set(owner, counts);
+}
+
+export function nativeHeldValues(owner: PhpObject): Iterable<unknown> | undefined {
+  if (isClosure(owner)) {
+    const data = owner.internal as ClosureData;
+    return [
+      ...data.bound.values(),
+      ...(data.thisObj ? [data.thisObj] : []),
+      ...(data.fn.kind === 'user' ? data.fn.statics.values() : []),
+    ];
+  }
+  const internal = owner.internal as { held?: () => unknown[] } | undefined;
+  return typeof internal?.held === 'function' ? internal.held() : undefined;
 }
 
 export function ownershipEdgeExists(change: Extract<OwnershipChange, { kind: 'edge' }>): boolean {
@@ -1096,11 +1106,6 @@ export function ownershipEdgeExists(change: Extract<OwnershipChange, { kind: 'ed
   return owner instanceof PhpArray ? owner.map.hasValue(value, key as Key) : owner.props.get(key as string) === value;
 }
 const owners = new WeakMap<object, OwnerLinks<Owner, Key | undefined>>();
-let internalHandler: (object: PhpObject) => void = () => {};
-
-export function setInternalHandler(handler: typeof internalHandler): void {
-  internalHandler = handler;
-}
 
 function trackOwner(value: unknown, parent: Owner, key?: Key): void {
   rewireOwnership(parent, key, value);
@@ -1117,7 +1122,7 @@ function trackOwner(value: unknown, parent: Owner, key?: Key): void {
 export function arrayHolderCount(value: PhpArray): number {
   let count = value.persistentHolder ? 1 : 0;
   for (const parent of nativeOwners.get(value) ?? []) {
-    count += parent.nativeValues?.count(value) ?? genericNativeArrays.get(parent)?.get(value) ?? 0;
+    count += parent.nativeValues?.count(value) ?? genericNativeValues.get(parent)?.get(value) ?? 0;
     if (count > 1) return count;
   }
   const parents = owners.get(value);

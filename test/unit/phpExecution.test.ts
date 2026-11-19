@@ -662,6 +662,30 @@ ${write}`);
   }
 );
 
+test.each([
+  ['ArrayIterator', 'new ArrayIterator([])'],
+  ['SplFixedArray', 'new SplFixedArray(1)'],
+  ['Closure', 'function () {}'],
+])('releases temporary objects without scanning 15000 live %s instances', (_name, ctor) => {
+  const execution = run(`<?php
+$items = [];
+for ($i = 0; $i < 15000; $i++) $items[] = ${ctor};
+for ($i = 0; $i < 15000; $i++) { $tmp = new stdClass; unset($tmp); }
+echo 'done';`);
+  expect(execution).toMatchObject({ kind: 'executed', stdout: 'done' });
+});
+
+test('tracks objects held by lazily initialized closure static variables', () => {
+  const execution = run(`<?php
+class Box { function __destruct() { echo 'D;'; } }
+$f = function () { static $b; $b = new Box; };
+$f();
+echo 'alive;';
+$f = null;
+echo 'after;';`);
+  expect(execution).toMatchObject({ kind: 'executed', stdout: 'alive;D;after;' });
+});
+
 test.each(['<?php echo "hello"; declare(strict_types=1);', '<?php function f() {} declare(strict_types=1);'])(
   'rejects a late strict_types declaration before execution: %s',
   (source) => {

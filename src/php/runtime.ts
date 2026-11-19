@@ -24,7 +24,6 @@ import {
   Ref,
   setAllocationHandler,
   setDropHandler,
-  setInternalHandler,
   setOwnershipWorkHandler,
   setReferenceDropObserver,
   type UserFunction,
@@ -154,7 +153,6 @@ export class Runtime {
   readonly destructedCollectionRoots = new Set<PhpObject>();
   readonly collectingArrays = new Set<PhpArray>();
   collectingCycles = false;
-  readonly internalObjects = new Set<PhpObject>();
   private readonly pendingReleases: unknown[] = [];
   readonly releasingValues = new Map<object, number>();
   readonly retiringObjects = new Set<PhpObject>();
@@ -415,7 +413,6 @@ export class Runtime {
     this.release(values);
   }
 
-  // code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   // code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   freeObject(object: PhpObject): void {
     if (this.objects.get(object.id) !== object) return;
@@ -424,7 +421,6 @@ export class Runtime {
     this.gcRoots.delete(object);
     this.collectingObjects.delete(object);
     this.turtleObjects.delete(object);
-    this.internalObjects.delete(object);
     object.releaseInternal();
     for (const slot of object.props.values())
       if (slot instanceof Ref) {
@@ -554,5 +550,3 @@ export function withRuntime<T>(runtime: Runtime, run: () => T): T {
 export type { PhpArray, Value };
 
 setArraySharingCheck((array) => (current ? arrayHasHolders(current, array, 2) : array.shared));
-
-setInternalHandler((object) => current?.internalObjects.add(object));
