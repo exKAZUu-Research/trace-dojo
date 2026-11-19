@@ -31,17 +31,13 @@ import { type CObject, Ptr, type Value } from '../values';
 import { MapValue, NodePositions } from './containerValues';
 import {
   assignElement,
-  constructElementFromRvalue,
   destroyElements,
   type ElementOperations,
   elementOperations,
   equalTo,
   lessThan,
-  movedArgument,
-  moveValue,
   requireDefaultConstruction,
   requireElementUse,
-  requireMoveConstruction,
   swapElements,
 } from './elements';
 import {
@@ -504,6 +500,7 @@ const COMPARING_MEMBERS = new Set([
   'insert',
   'emplace',
   'try_emplace',
+  'insert_or_assign',
   'find',
   'count',
   'contains',
@@ -713,10 +710,15 @@ export function orderedClass(
         table,
         resultType: isMulti ? types.iterator : classType(insertResult),
         isTemporaryObject: !isMulti,
+        mappedLocation: valueType && !isMulti ? (self, at) => new Ptr(self.entries[at] as CObject, 1) : undefined,
         result: insertionResult,
       });
     },
-    constructingMembers: isMap ? ['emplace', 'try_emplace'] : ['emplace'],
+    constructingMembers: isMap
+      ? isMulti
+        ? ['emplace', 'try_emplace']
+        : ['emplace', 'try_emplace', 'insert_or_assign']
+      : ['emplace'],
     ownedTypes: [entryType],
     elementUseOnAssignment: 'copy',
   };
@@ -835,65 +837,6 @@ export function orderedClass(
     (self, [entry], frame) => insertionResult(frame, self, ...insertCopy(table, frame, self, (entry as Ptr).read())),
     copyEntry
   );
-  if (valueType && !isMulti) {
-    addMethod(cls, {
-      ...native('insert_or_assign', [], VOID, () => {}),
-      isTemplate: true,
-      instantiate: (args) => {
-        if (args.length !== 2) return;
-        const row = args[0].row;
-        const keyMoves = movedArgument(compiler, keyType, args[0]) !== undefined;
-        const valueMoves = movedArgument(compiler, valueType, args[1]) !== undefined;
-        const keyOps = elementOperations(compiler, unqualified(keyType), row);
-        const requireTransfer = (type: Type, moves: boolean, callRow: number): void => {
-          if (moves) requireMoveConstruction(compiler, type, callRow);
-          else requireElementUse(compiler, type, callRow, 'copy');
-        };
-        return native(
-          'insert_or_assign',
-          [constRef(keyType), constRef(valueType)],
-          classType(insertResult),
-          ([key, value], { frame, self: receiver }) => {
-            const self = receiver as OrderedValue;
-            const keyValue = keyArg(key);
-            const source = (value as Ptr).read();
-            const at = find(self, keyValue);
-            if (at >= 0) {
-              const entry = self.entries[at] as CObject;
-              entry.values[1] = valueMoves
-                ? moveValue(frame, valueType, entry.values[1], source)
-                : mapped().assign(frame, entry.values[1], source);
-              return insertionResult(frame, self, at, false);
-            }
-            const entry = constructPair(
-              frame,
-              (entryType as Extract<Type, { kind: 'class' }>).cls,
-              [
-                (f, target) =>
-                  keyMoves
-                    ? constructElementFromRvalue(f, keyType, keyValue, target)
-                    : keyOps.copy(f, keyValue, target),
-                (f, target) =>
-                  valueMoves
-                    ? constructElementFromRvalue(f, valueType, source, target)
-                    : mapped().copy(f, source, target),
-              ],
-              (index) => (index === 0 ? keyOps.destroy : mapped().destroy)
-            );
-            return insertionResult(frame, self, ...insert(frame, self, entry));
-          },
-          {
-            owner: cls,
-            uses: (callRow) => {
-              requireTransfer(keyType, keyMoves, callRow);
-              requireTransfer(valueType, valueMoves, callRow);
-              compiler.requireLibraryObjectUse(valueType, valueMoves ? 'move-assign' : 'assign', callRow);
-            },
-          }
-        );
-      },
-    });
-  }
   method(
     'insert',
     [types.constIterator, constRef(unqualified(entryType))],

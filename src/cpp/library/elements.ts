@@ -323,6 +323,47 @@ export function elementOperations(
   use?: ElementUse
 ): ElementOperations {
   if (use) requireElementUse(compiler, type, row, use);
+  if (type.kind === 'array') {
+    const element = elementOperations(compiler, type.of, row);
+    const length = type.length ?? 0;
+    return {
+      type,
+      arrayElement: element,
+      make: (frame) =>
+        constructArray(
+          frame,
+          length,
+          type.of,
+          (current, target) => element.make(current, target instanceof CObject ? target : undefined),
+          element.destroy
+        ),
+      get isDefaultConstructible() {
+        return length === 0 || element.isDefaultConstructible;
+      },
+      copy: (frame, value, _destination, sourceIsConst) => {
+        const source = value as ArrayStore;
+        return constructArray(
+          frame,
+          length,
+          type.of,
+          (current, target, index) =>
+            element.copy(current, source.values[index], target instanceof CObject ? target : undefined, sourceIsConst),
+          element.destroy
+        );
+      },
+      assign: (frame, target, source) => {
+        const to = target as ArrayStore;
+        const from = source as ArrayStore;
+        for (let index = 0; index < length; index++)
+          to.values[index] = element.assign(frame, to.values[index], from.values[index]);
+        return to;
+      },
+      destroy: (frame, value) => {
+        destroyElements(frame, (value as ArrayStore).values, element.destroy, 'reverse');
+        endLifetime(value);
+      },
+    };
+  }
   if (type.kind === 'class') {
     const { cls } = type;
     const operations = cls.operations;
@@ -359,7 +400,6 @@ export function elementOperations(
   const zero = zeroOf(type);
   return {
     type,
-    arrayElement: type.kind === 'array' ? elementOperations(compiler, type.of, row) : undefined,
     make: () => zero,
     isDefaultConstructible: true,
     copy: (_frame, value) => value,

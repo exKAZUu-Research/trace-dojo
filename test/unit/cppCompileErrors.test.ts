@@ -846,6 +846,16 @@ test.each([
   ['a static local variable of type void', 'int main() { static void v; }', 0],
   ['excess initializers for a multidimensional allocation', 'int main() { new int[1][2]{1, 2, 3}; }', 0],
   [
+    'evaluated parameter shadowing a global in a function default',
+    'int n = 5;\nvoid f(int n, int step = n) {}\nint main() { f(1); }',
+    1,
+  ],
+  [
+    'evaluated parameter shadowing a static member in a constructor default',
+    'struct X { inline static int n = 5;\nX(int n, int step = n) {} };\nint main() { X x(1); }',
+    1,
+  ],
+  [
     'pointer overloads with competing qualification conversions',
     'void f(int* const*, const int* const*);\nvoid f(const int* const*, int* const*);\nint main() { int value; int* p = &value; f(&p, &p); }',
     2,

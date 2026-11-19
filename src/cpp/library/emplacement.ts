@@ -6,7 +6,7 @@ import { constructCells, makeEach, newObject } from '../objectCompiler';
 import { type Eval, type Frame, holdAll } from '../runtime';
 import type { Syntax } from '../syntax';
 import { type ClassInfo, isConstType, type Type, typeName, unqualified, VOID, withConst } from '../types';
-import { CObject, endLifetime, type Ptr, type Store, type Value } from '../values';
+import { CObject, endLifetime, holdValues, type Ptr, type Store, type Value } from '../values';
 import { type ElementOperations, requireElementUse } from './elements';
 import type { Source } from './sequenceEdits';
 import { constructElement, initializerList, iteratorRange, listElementsOf } from './sequences';
@@ -35,6 +35,7 @@ export interface EmplacementCall<T, Position> {
   table: EntryTable<T, Position>;
   resultType: Type;
   isTemporaryObject: boolean;
+  mappedLocation?: (self: T, at: Position) => Ptr;
   /** The call's result for the entry at a position, which it inserted or found. */
   result: (frame: Frame, self: T, at: Position, inserted: boolean) => Value;
 }
@@ -43,6 +44,7 @@ export interface EmplacementCall<T, Position> {
 interface Emplacing {
   key: Value | undefined;
   make: () => Value;
+  assign?: (target: Ptr) => void;
 }
 
 /**
@@ -59,6 +61,9 @@ export function emplacementCall<T, Position>(
 ): Expr | undefined {
   const { entryType, valueType } = call.types;
   if (member === 'try_emplace' && !valueType) return;
+  const mappedLocation = member === 'insert_or_assign' ? call.mappedLocation : undefined;
+  if (mappedLocation && args.length !== 2)
+    return compiler.error(row, 'insert_or_assign にはキーと値を書いてください。');
   const [arg] = args;
   const isPairInsert =
     member === 'insert' &&
@@ -68,10 +73,11 @@ export function emplacementCall<T, Position>(
     arg.type.cls.library?.kind === 'pair' &&
     (arg.type.cls !== (entryType as Extract<Type, { kind: 'class' }>).cls ||
       ((!arg.isLvalue || arg.isXvalue) && !isConstType(arg.type)));
-  if (member !== 'emplace' && member !== 'try_emplace' && !isPairInsert) return;
+  if (member !== 'emplace' && member !== 'try_emplace' && !isPairInsert && !mappedLocation) return;
   if (isConstType(object.type)) return compiler.error(row, `const のオブジェクトには ${member} を使えません。`);
   const self = compiler.objectOf(object);
-  const emplace = compileEmplacing(compiler, args, call.types, member === 'try_emplace', row);
+  const mode = mappedLocation ? 'assign' : member === 'try_emplace' ? 'try' : 'insert';
+  const emplace = compileEmplacing(compiler, args, call.types, mode, row);
   return {
     type: call.resultType,
     isLvalue: false,
@@ -80,7 +86,7 @@ export function emplacementCall<T, Position>(
     run: (frame) => {
       const target = (self(frame) as Ptr).read() as T;
       return emplace(frame, (emplacing) => {
-        const [at, inserted] = emplaceEntry(call.table, frame, target, emplacing);
+        const [at, inserted] = emplaceEntry(call.table, frame, target, emplacing, mappedLocation);
         return call.result(frame, target, at, inserted);
       });
     },
@@ -263,10 +269,14 @@ function emplaceEntry<T, Position>(
   table: EntryTable<T, Position>,
   frame: Frame,
   self: T,
-  { key, make }: Emplacing
+  { key, make, assign }: Emplacing,
+  mappedLocation?: (self: T, at: Position) => Ptr
 ): [Position, boolean] {
   const existing = key === undefined ? undefined : table.lookup(self, key);
-  if (existing !== undefined) return [existing, false];
+  if (existing !== undefined) {
+    if (mappedLocation) assign?.(mappedLocation(self, existing));
+    return [existing, false];
+  }
   const entry = make();
   const [at, inserted] = table.insert(frame, self, entry);
   if (!inserted) table.ops().destroy?.(frame, entry);
@@ -282,33 +292,44 @@ function compileEmplacing(
   compiler: ExpressionCompiler,
   args: Expr[],
   { keyType, entryType, valueType }: EntryTypes,
-  isTry: boolean,
+  mode: 'insert' | 'try' | 'assign',
   row: number
 ): <R>(frame: Frame, use: (emplacing: Emplacing) => R) => R {
   const key = unqualified(keyType);
   const count = args.length;
-  if (isTry && count === 0) return compiler.error(row, 'try_emplace にはキーを書いてください。');
+  const explicitKey = mode !== 'insert';
+  if (explicitKey && count === 0) return compiler.error(row, 'try_emplace にはキーを書いてください。');
   const positions = new WeakMap<Frame, number>();
   // Each argument is evaluated once, into a location the construction then reads, as perfect forwarding passes it.
   const forwarded = args.map((arg, index) =>
-    isTry && index === 0 ? compiler.convert(arg, constRef(key), row) : compiler.materialize(arg)
+    explicitKey && index === 0 ? compiler.convert(arg, constRef(key), row) : compiler.materialize(arg)
   );
   const locations = forwarded.map((arg) => arg.run);
   const slots: Expr[] = forwarded.map((arg, index) => ({
-    type: isTry && index === 0 ? (arg.isXvalue && !isConstType(arg.type) ? key : withConst(key)) : arg.type,
+    type: explicitKey && index === 0 ? (arg.isXvalue && !isConstType(arg.type) ? key : withConst(key)) : arg.type,
     isLvalue: true,
     isXvalue: arg.isXvalue,
     row: arg.row,
     run: (frame) => frame.pending[(positions.get(frame) as number) + index] as Ptr,
   }));
-  const keyOf = isTry ? (location: Ptr) => location.read() : keyExtraction(args, key);
+  const keyOf = explicitKey ? (location: Ptr) => location.read() : keyExtraction(args, key);
   let make: Eval<Value>;
-  if (valueType && (isTry || count === 2)) {
+  let assign: Eval<unknown> | undefined;
+  if (valueType && (explicitKey || count === 2)) {
     const keyValue = constructElement(compiler, key, [slots[0]], row);
     const mappedValue = constructElement(compiler, valueType, slots.slice(1), row);
     const cls = (entryType as Extract<Type, { kind: 'class' }>).cls;
     const destroyers = compiler.withLibraryAccess(() => cls.fields.map(({ type }) => compiler.destroyerOf(type, row)));
     make = (frame) => constructPair(frame, cls, [keyValue, mappedValue], (index) => destroyers[index]);
+    if (mode === 'assign') {
+      const target: Expr = {
+        type: valueType,
+        isLvalue: true,
+        row,
+        run: (frame) => frame.pending[(positions.get(frame) as number) + count] as Ptr,
+      };
+      assign = compiler.withLibraryAccess(() => compiler.assign('=', target, slots[1], row)).run;
+    }
   } else {
     make = constructElement(compiler, unqualified(entryType), slots, row);
   }
@@ -316,7 +337,13 @@ function compileEmplacing(
     const previous = positions.get(frame);
     positions.set(frame, frame.pending.length);
     try {
-      return holdAll(frame, locations, (values) => use({ key: keyOf?.(values[0] as Ptr), make: () => make(frame) }));
+      return holdAll(frame, locations, (values) =>
+        use({
+          key: keyOf?.(values[0] as Ptr),
+          make: () => make(frame),
+          assign: assign ? (target) => holdValues(frame, [target], () => assign(frame)) : undefined,
+        })
+      );
     } finally {
       if (previous === undefined) positions.delete(frame);
       else positions.set(frame, previous);

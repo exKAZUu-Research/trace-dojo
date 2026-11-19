@@ -57,6 +57,7 @@ import {
   isConstType,
   isInteger,
   isReferenceRelated,
+  nonReference,
   type ParamInfo,
   sameParameters,
   sameType,
@@ -2387,13 +2388,30 @@ export class Compiler extends StatementCompiler {
   }
 
   private bindDefaultArguments(fn: FunctionInfo): void {
-    for (const param of fn.params) {
-      const value = param.defaultValue;
-      if (!value || value.use) continue;
-      value.use = this.bindDependencies(() => {
-        const expr = this.argument(value.node);
-        return this.convert(expr, param.type, value.node.row, '引数の既定値').run;
-      });
+    const previous = this.context;
+    this.context = new FunctionContext(undefined, undefined, VOID);
+    const { names } = this.context.scope;
+    try {
+      for (const param of fn.params) {
+        if (param.name) {
+          if (names.has(param.name)) this.error(param.row, `引数 ${param.name} の名前が重複しています。`);
+          names.set(param.name, {
+            kind: 'value',
+            make: (row) => {
+              if (!this.isUnevaluated) return this.error(row, `引数の既定値は、引数 ${param.name} の値を使えません。`);
+              return { type: nonReference(param.type), isLvalue: true, row, run: () => UNINIT };
+            },
+          });
+        }
+        const value = param.defaultValue;
+        if (!value || value.use) continue;
+        value.use = this.bindDependencies(() => {
+          const expr = this.argument(value.node);
+          return this.convert(expr, param.type, value.node.row, '引数の既定値').run;
+        });
+      }
+    } finally {
+      this.context = previous;
     }
   }
 
