@@ -1406,6 +1406,35 @@ catch (Exception $error) { echo $error->getTraceAsString(); }
   }
 );
 
+test('retires the retained reduce accumulator inside the native frame after callback exit', () => {
+  expect(
+    run(`<?php
+class TemporaryValue { public function __destruct() { throw new Exception('drop'); } }
+try { array_reduce([1, 2], fn($carry, $number) => $number === 1 ? [[new TemporaryValue]] : exit('exit;')); }
+catch (Exception $error) { echo $error->getTraceAsString(); }
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'exit;#0 [internal function]: TemporaryValue->__destruct()\n#1 /main.php(3): array_reduce(Array, Object(Closure))\n#2 {main}',
+  });
+});
+
+test.each([
+  ['1, 2', '2:#0 /main.php(6): TemporaryValue->__destruct()'],
+  ['1, 2, 3', '2:#0 [internal function]: TemporaryValue->__destruct()'],
+])('uses the correct frame for a successor reduce result after exit with %s', (items, frame) => {
+  expect(
+    run(`<?php
+class TemporaryValue {
+  public function __construct(private int $number) {}
+  public function __destruct() { echo $this->number, ':'; debug_print_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS); if ($this->number === 1) exit('exit;'); }
+}
+array_reduce([${items}], fn($carry, $number) => new TemporaryValue($number));
+`)
+  ).toMatchObject({ kind: 'executed', stdout: expect.stringContaining(frame) });
+});
+
 test.each([
   "json_encode(array_fill(0,100000,str_repeat('x',10000)));",
   "json_encode(array_fill(0,100,str_repeat('x',10000)),JSON_PRETTY_PRINT);",

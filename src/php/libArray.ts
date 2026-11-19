@@ -8,7 +8,14 @@ import type { ArgValue } from './calls';
 import { canAccessProp, declForKey, issetProp, lookupProp, readProp } from './classes';
 import * as conversionsModule from './conversions';
 import { compareBytes, compareNumbers, debugType, floatFitsInt, normalizeKeyString, valueName } from './conversions';
-import { deprecated, isCleanupException, throwError, warn, withCleanupExceptions } from './errors';
+import {
+  deprecated,
+  isCleanupException,
+  throwError,
+  warn,
+  withCleanupExceptions,
+  withPendingException,
+} from './errors';
 import { releaseDropped } from './garbage';
 import { cast } from './interp';
 import { naturalCompare } from './libString';
@@ -806,23 +813,47 @@ defineFunction('array_filter(array $array, ?callable $callback = null, int $mode
   }
   return result;
 });
-defineFunction('array_reduce(array $array, callable $callback, mixed $initial = null): mixed', ({ args }) => {
+defineFunction('array_reduce(array $array, callable $callback, mixed $initial = null): mixed', ({ args }) =>
+  reduceArray(arr(args[0]), args[1], args[2] ?? null)
+);
+
+function reduceArray(array: PhpArray, callback: Value, initial: Value): Value {
   const runtime = rt();
   const holders = runtime.nativeHeld.at(-1)!;
   const slot = holders.length;
-  let carry = args[2] ?? null;
-  holders.push(null);
-  for (const value of arr(args[0]).iterValues()) {
-    carry = consumeCallbackResult(args[1], [carry, value], (next) => {
-      const previous = holders[slot];
-      holders[slot] = next;
-      if (previous !== next && (previous instanceof PhpObject || previous instanceof PhpArray))
-        runtime.releaseCallResult(previous);
-      return next;
-    });
+  let carry = initial;
+  let remaining = array.size;
+  holders.push(carry);
+  for (const value of array.iterValues()) {
+    remaining--;
+    let produced = false;
+    const previous = carry;
+    try {
+      consumeInvokedResult(
+        () => callCallback(callback, [previous, value]),
+        (next) => {
+          produced = true;
+          carry = next;
+          holders[slot] = next;
+          if (previous !== next) releaseReduceCarry(previous);
+        },
+        true
+      );
+    } catch (error) {
+      if (isCleanupException(error) && (!produced || remaining > 0)) {
+        holders[slot] = undefined;
+        withPendingException(runtime, error instanceof PhpThrow ? error : undefined, () => releaseReduceCarry(carry));
+      }
+      throw error;
+    }
   }
   return carry;
-});
+}
+
+function releaseReduceCarry(carry: Value): void {
+  if (carry instanceof PhpObject || carry instanceof PhpArray) rt().releaseCallResult(carry);
+}
+
 for (const name of ['array_walk', 'array_walk_recursive']) {
   defineFunction(`${name}(array|object &$array, callable $callback, mixed $arg = UNKNOWN): true`, (ctx) => {
     walkValues(ctx.refs[0] as Ref, ctx, name === 'array_walk_recursive', new Set());
