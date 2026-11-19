@@ -88,7 +88,7 @@ export function fdlibmPow(x: number, y: number): number {
   const lx = low(x);
   const hy = high(y);
   const ly = low(y);
-  let ix = hx & 0x7f_ff_ff_ff;
+  const ix = hx & 0x7f_ff_ff_ff;
   const iy = hy & 0x7f_ff_ff_ff;
   if ((iy | ly) === 0) return 1;
   if (
@@ -99,118 +99,155 @@ export function fdlibmPow(x: number, y: number): number {
   ) {
     return x + y;
   }
-  // Whether y is an odd (1) or even (2) integer, or no integer (0), when x is negative.
-  let yisint = 0;
-  if (hx < 0) {
-    if (iy >= 0x43_40_00_00) yisint = 2;
-    else if (iy >= 0x3f_f0_00_00) {
-      const k = (iy >> 20) - 0x3_ff;
-      if (k > 20) {
-        const j = ly >>> (52 - k);
-        if ((j << (52 - k)) >>> 0 === ly) yisint = 2 - (j & 1);
-      } else if (ly === 0) {
-        const j = iy >> (20 - k);
-        if (j << (20 - k) === iy) yisint = 2 - (j & 1);
-      }
-    }
-  }
-  if (ly === 0) {
-    if (iy === 0x7f_f0_00_00) {
-      if (((ix - 0x3f_f0_00_00) | lx) === 0) return y - y;
-      if (ix >= 0x3f_f0_00_00) return hy >= 0 ? y : 0;
-      return hy < 0 ? -y : 0;
-    }
-    if (iy === 0x3f_f0_00_00) return hy < 0 ? 1 / x : x;
-    if (hy === 0x40_00_00_00) return x * x;
-    if (hy === 0x3f_e0_00_00 && hx >= 0) return Math.sqrt(x);
-  }
-  let ax = Math.abs(x);
-  if (lx === 0 && (ix === 0x7f_f0_00_00 || ix === 0 || ix === 0x3f_f0_00_00)) {
-    let z = ax;
-    if (hy < 0) z = 1 / z;
-    if (hx < 0) {
-      if (((ix - 0x3f_f0_00_00) | yisint) === 0) z = (z - z) / (z - z);
-      else if (yisint === 1) z = -z;
-    }
-    return z;
-  }
-  let n = (hx >> 31) + 1;
+  const yisint = hx < 0 ? integerKind(iy, ly) : 0;
+  const special = specialPower(x, y, { hx, lx, hy, ly, ix, iy }, yisint);
+  if (special !== undefined) return special;
+  const n = (hx >> 31) + 1;
   if ((n | yisint) === 0) return (x - x) / (x - x);
-  let s = 1;
-  if ((n | (yisint - 1)) === 0) s = -1;
-  let t1: number;
-  let t2: number;
-  if (iy > 0x41_e0_00_00) {
-    if (iy > 0x43_f0_00_00) {
-      if (ix <= 0x3f_ef_ff_ff) return hy < 0 ? HUGE * HUGE : TINY * TINY;
-      if (ix >= 0x3f_f0_00_00) return hy > 0 ? HUGE * HUGE : TINY * TINY;
-    }
-    if (ix < 0x3f_ef_ff_ff) return hy < 0 ? s * HUGE * HUGE : s * TINY * TINY;
-    if (ix > 0x3f_f0_00_00) return hy > 0 ? s * HUGE * HUGE : s * TINY * TINY;
-    const t = ax - 1;
-    const w = t * t * (0.5 - t * (0.3333333333333333 - t * 0.25));
-    const u = IVLN2_H * t;
-    const v = t * IVLN2_L - w * IVLN2;
-    t1 = withLowZero(u + v);
-    t2 = v - (t1 - u);
-  } else {
-    n = 0;
-    if (ix < 0x00_10_00_00) {
-      ax *= TWO53;
-      n -= 53;
-      ix = high(ax);
-    }
-    n += (ix >> 20) - 0x3_ff;
-    const j = ix & 0x00_0f_ff_ff;
-    ix = j | 0x3f_f0_00_00;
-    let k: number;
-    if (j <= 0x3_98_8e) k = 0;
-    else if (j < 0xb_b6_7a) k = 1;
-    else {
-      k = 0;
-      n += 1;
-      ix -= 0x00_10_00_00;
-    }
-    ax = withHigh(ax, ix);
-    const u = ax - BP[k];
-    const v = 1 / (ax + BP[k]);
-    const ss = u * v;
-    const sH = withLowZero(ss);
-    let tH = fromHigh(((ix >> 1) | 0x20_00_00_00) + 0x00_08_00_00 + (k << 18));
-    let tL = ax - (tH - BP[k]);
-    const sL = v * (u - sH * tH - sH * tL);
-    let s2 = ss * ss;
-    let r = s2 * s2 * (L1 + s2 * (L2 + s2 * (L3 + s2 * (L4 + s2 * (L5 + s2 * L6)))));
-    r += sL * (sH + ss);
-    s2 = sH * sH;
-    tH = withLowZero(3 + s2 + r);
-    tL = r - (tH - 3 - s2);
-    const uu = sH * tH;
-    const vv = sL * tH + tL * ss;
-    const pH = withLowZero(uu + vv);
-    const pL = vv - (pH - uu);
-    const zH = CP_H * pH;
-    const zL = CP_L * pH + pL * CP + DP_L[k];
-    const t = n;
-    t1 = withLowZero(zH + zL + DP_H[k] + t);
-    t2 = zL - (t1 - t - DP_H[k] - zH);
+  const s = (n | (yisint - 1)) === 0 ? -1 : 1;
+  const log = iy > 0x41_e0_00_00 ? logNearOne(Math.abs(x), ix, iy, hy, s) : logOfMagnitude(Math.abs(x), ix);
+  if (typeof log === 'number') return log;
+  return exp2Product(y, log.t1, log.t2, s);
+}
+
+/** The words of x and y, and their magnitudes' high words, which fdlibm's cases test. */
+interface Words {
+  hx: number;
+  lx: number;
+  hy: number;
+  ly: number;
+  ix: number;
+  iy: number;
+}
+
+/** Whether y is an odd (1) or even (2) integer, or no integer (0), which matters when x is negative. */
+function integerKind(iy: number, ly: number): number {
+  if (iy >= 0x43_40_00_00) return 2;
+  if (iy < 0x3f_f0_00_00) return 0;
+  const k = (iy >> 20) - 0x3_ff;
+  if (k > 20) {
+    const j = ly >>> (52 - k);
+    return (j << (52 - k)) >>> 0 === ly ? 2 - (j & 1) : 0;
   }
+  if (ly !== 0) return 0;
+  const j = iy >> (20 - k);
+  return j << (20 - k) === iy ? 2 - (j & 1) : 0;
+}
+
+/** The results of y being ±∞, ±1, 2, or 0.5, and of x being ±0, ±∞, or ±1, or `undefined` for the general case. */
+function specialPower(x: number, y: number, words: Words, yisint: number): number | undefined {
+  return (words.ly === 0 ? specialExponent(x, y, words) : undefined) ?? specialBase(x, words, yisint);
+}
+
+/** The results of y being ±∞, ±1, 2, or 0.5, whose low word is zero. */
+// code-gauge-allow functionCognitiveComplexity 16 -- transcribes a step of fdlibm's e_pow.c statement by statement, so that it can be compared with the C source line by line.
+function specialExponent(x: number, y: number, { hx, lx, hy, ix, iy }: Words): number | undefined {
+  if (iy === 0x7f_f0_00_00) {
+    if (((ix - 0x3f_f0_00_00) | lx) === 0) return y - y;
+    if (ix >= 0x3f_f0_00_00) return hy >= 0 ? y : 0;
+    return hy < 0 ? -y : 0;
+  }
+  if (iy === 0x3f_f0_00_00) return hy < 0 ? 1 / x : x;
+  if (hy === 0x40_00_00_00) return x * x;
+  if (hy === 0x3f_e0_00_00 && hx >= 0) return Math.sqrt(x);
+  return undefined;
+}
+
+/** The results of x being ±0, ±∞, or ±1. */
+function specialBase(x: number, { hx, lx, hy, ix }: Words, yisint: number): number | undefined {
+  if (lx !== 0 || (ix !== 0x7f_f0_00_00 && ix !== 0 && ix !== 0x3f_f0_00_00)) return undefined;
+  let z = Math.abs(x);
+  if (hy < 0) z = 1 / z;
+  if (hx < 0) {
+    if (((ix - 0x3f_f0_00_00) | yisint) === 0) z = (z - z) / (z - z);
+    else if (yisint === 1) z = -z;
+  }
+  return z;
+}
+
+/**
+ * log2(ax) in two parts for |y| beyond 2^31, where x must be near 1 for a finite result; the other x overflow or
+ * underflow, which this returns as the result itself.
+ */
+// code-gauge-allow functionCognitiveComplexity 17 -- transcribes a step of fdlibm's e_pow.c statement by statement, so that it can be compared with the C source line by line.
+function logNearOne(ax: number, ix: number, iy: number, hy: number, s: number): { t1: number; t2: number } | number {
+  if (iy > 0x43_f0_00_00) {
+    if (ix <= 0x3f_ef_ff_ff) return hy < 0 ? HUGE * HUGE : TINY * TINY;
+    if (ix >= 0x3f_f0_00_00) return hy > 0 ? HUGE * HUGE : TINY * TINY;
+  }
+  if (ix < 0x3f_ef_ff_ff) return hy < 0 ? s * HUGE * HUGE : s * TINY * TINY;
+  if (ix > 0x3f_f0_00_00) return hy > 0 ? s * HUGE * HUGE : s * TINY * TINY;
+  const t = ax - 1;
+  const w = t * t * (0.5 - t * (0.3333333333333333 - t * 0.25));
+  const u = IVLN2_H * t;
+  const v = t * IVLN2_L - w * IVLN2;
+  const t1 = withLowZero(u + v);
+  return { t1, t2: v - (t1 - u) };
+}
+
+/** log2(ax) in two parts, t1 + t2, for the general case. */
+// code-gauge-allow functionNcss 44 -- transcribes a step of fdlibm's e_pow.c statement by statement, so that it can be compared with the C source line by line.
+function logOfMagnitude(magnitude: number, highWord: number): { t1: number; t2: number } {
+  let ax = magnitude;
+  let ix = highWord;
+  let n = 0;
+  if (ix < 0x00_10_00_00) {
+    ax *= TWO53;
+    n -= 53;
+    ix = high(ax);
+  }
+  n += (ix >> 20) - 0x3_ff;
+  const j = ix & 0x00_0f_ff_ff;
+  ix = j | 0x3f_f0_00_00;
+  let k: number;
+  if (j <= 0x3_98_8e) k = 0;
+  else if (j < 0xb_b6_7a) k = 1;
+  else {
+    k = 0;
+    n += 1;
+    ix -= 0x00_10_00_00;
+  }
+  ax = withHigh(ax, ix);
+  const u = ax - BP[k];
+  const v = 1 / (ax + BP[k]);
+  const ss = u * v;
+  const sH = withLowZero(ss);
+  let tH = fromHigh(((ix >> 1) | 0x20_00_00_00) + 0x00_08_00_00 + (k << 18));
+  let tL = ax - (tH - BP[k]);
+  const sL = v * (u - sH * tH - sH * tL);
+  let s2 = ss * ss;
+  let r = s2 * s2 * (L1 + s2 * (L2 + s2 * (L3 + s2 * (L4 + s2 * (L5 + s2 * L6)))));
+  r += sL * (sH + ss);
+  s2 = sH * sH;
+  tH = withLowZero(3 + s2 + r);
+  tL = r - (tH - 3 - s2);
+  const uu = sH * tH;
+  const vv = sL * tH + tL * ss;
+  const pH = withLowZero(uu + vv);
+  const pL = vv - (pH - uu);
+  const zH = CP_H * pH;
+  const zL = CP_L * pH + pL * CP + DP_L[k];
+  const t = n;
+  const t1 = withLowZero(zH + zL + DP_H[k] + t);
+  return { t1, t2: zL - (t1 - t - DP_H[k] - zH) };
+}
+
+/** s times 2^(y * (t1 + t2)), where t1 + t2 is log2(|x|) and s is the result's sign. */
+// code-gauge-allow functionNcss 37 -- transcribes a step of fdlibm's e_pow.c statement by statement, so that it can be compared with the C source line by line.
+function exp2Product(y: number, t1: number, t2: number, s: number): number {
   const y1 = withLowZero(y);
   const pL = (y - y1) * t1 + y * t2;
   let pH = y1 * t1;
   let z = pL + pH;
   let j = high(z);
   const i = low(z);
-  if (j >= 0x40_90_00_00) {
-    if (((j - 0x40_90_00_00) | i) !== 0) return s * HUGE * HUGE;
-    if (pL + OVT > z - pH) return s * HUGE * HUGE;
-  } else if ((j & 0x7f_ff_ff_ff) >= 0x40_90_cc_00) {
-    if (((j - 0xc0_90_cc_00) | i) !== 0) return s * TINY * TINY;
-    if (pL <= z - pH) return s * TINY * TINY;
-  }
+  const overflows = j >= 0x40_90_00_00;
+  if (overflows && (((j - 0x40_90_00_00) | i) !== 0 || pL + OVT > z - pH)) return s * HUGE * HUGE;
+  const underflows = !overflows && (j & 0x7f_ff_ff_ff) >= 0x40_90_cc_00;
+  if (underflows && (((j - 0xc0_90_cc_00) | i) !== 0 || pL <= z - pH)) return s * TINY * TINY;
   const absJ = j & 0x7f_ff_ff_ff;
   let k = (absJ >> 20) - 0x3_ff;
-  n = 0;
+  let n = 0;
   if (absJ > 0x3f_e0_00_00) {
     n = j + (0x00_10_00_00 >> (k + 1));
     k = ((n & 0x7f_ff_ff_ff) >> 20) - 0x3_ff;

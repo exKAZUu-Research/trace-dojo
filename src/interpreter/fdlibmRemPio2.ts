@@ -156,140 +156,182 @@ const TWON24 = 5.960464477539063e-8;
 /** `init_jk[prec]` of k_rem_pio2.c for `prec` 2 (53-bit doubles), the only precision that e_rem_pio2.c requests. */
 const JK = 4;
 
+/** The working arrays and indexes of k_rem_pio2.c, which its steps share. */
+interface Reduction {
+  x: number[];
+  jx: number;
+  jv: number;
+  q0: number;
+  jz: number;
+  iq: number[];
+  f: number[];
+  q: number[];
+}
+
 /**
  * k_rem_pio2.c for `prec` 2: stores x - n * pi / 2 into `y` as `y[0] + y[1]` and returns n modulo 8, where x is the sum
  * of `x[i] * 2 ** (e0 - 24 * i)` over the `nx` 24-bit chunks.
  */
 function kernelRemPio2(x: number[], y: number[], e0: number, nx: number): number {
-  let i: number;
-  let j: number;
-  let k: number;
-  let carry: number;
-  let fw: number;
-  let z = 0;
-  let n = 0;
-  let ih = 0;
-  const iq = Array.from({ length: 20 }, () => 0);
-  const f = Array.from({ length: 20 }, () => 0);
-  const fq = Array.from({ length: 20 }, () => 0);
-  const q = Array.from({ length: 20 }, () => 0);
-  const jp = JK;
-  // Determines jx, jv and q0, where 3 > q0.
+  const state = setUp(x, e0, nx);
+  // The loop of the `recompute` label.
+  for (;;) {
+    const { z, n, ih } = distill(state);
+    if (z !== 0 || !needsRecomputation(state)) {
+      trimOrSplit(state, z);
+      compress(state, y, ih);
+      return n & 7;
+    }
+    addTerms(state);
+  }
+}
+
+/** Determines jx, jv, and q0, where 3 > q0, and sets up f[0] to f[jx + JK] and q[0] to q[JK]. */
+function setUp(x: number[], e0: number, nx: number): Reduction {
   const jx = nx - 1;
   let jv = Math.trunc((e0 - 3) / 24);
   if (jv < 0) jv = 0;
-  let q0 = e0 - 24 * (jv + 1);
-  // Sets up f[0] to f[jx + JK], where f[jx + JK] = TWO_OVER_PI[jv + JK].
-  j = jv - jx;
+  const state: Reduction = {
+    x,
+    jx,
+    jv,
+    q0: e0 - 24 * (jv + 1),
+    jz: JK,
+    iq: Array.from({ length: 20 }, () => 0),
+    f: Array.from({ length: 20 }, () => 0),
+    q: Array.from({ length: 20 }, () => 0),
+  };
   const m = jx + JK;
-  for (i = 0; i <= m; i++, j++) f[i] = j < 0 ? 0 : TWO_OVER_PI[j];
-  for (i = 0; i <= JK; i++) {
-    for (j = 0, fw = 0; j <= jx; j++) fw += x[j] * f[jx + i - j];
-    q[i] = fw;
+  for (let i = 0, j = jv - jx; i <= m; i++, j++) state.f[i] = j < 0 ? 0 : TWO_OVER_PI[j];
+  for (let i = 0; i <= JK; i++) state.q[i] = product(state, i);
+  return state;
+}
+
+/** The sum of `x[j] * f[jx + i - j]`, which is q[i]. */
+function product({ x, f, jx }: Reduction, i: number): number {
+  let fw = 0;
+  for (let j = 0; j <= jx; j++) fw += x[j] * f[jx + i - j];
+  return fw;
+}
+
+/** Distills q[] into iq[] reversingly, and computes n, the fraction z, and ih, whether the fraction exceeds 0.5. */
+function distill(state: Reduction): { z: number; n: number; ih: number } {
+  const { iq, q, jz, q0 } = state;
+  let z = q[jz];
+  for (let i = 0, j = jz; j > 0; i++, j--) {
+    const fw = Math.trunc(TWON24 * z);
+    iq[i] = Math.trunc(z - TWO24 * fw);
+    z = q[j - 1] + fw;
   }
-  let jz = JK;
-  // The loop of the `recompute` label.
-  for (;;) {
-    // Distills q[] into iq[] reversingly.
-    for (i = 0, j = jz, z = q[jz]; j > 0; i++, j--) {
-      fw = Math.trunc(TWON24 * z);
-      iq[i] = Math.trunc(z - TWO24 * fw);
-      z = q[j - 1] + fw;
-    }
-    z = scalbn(z, q0);
-    // Trims off the integer part >= 8.
-    z -= 8 * Math.floor(z * 0.125);
-    n = Math.trunc(z);
-    z -= n;
-    ih = 0;
-    if (q0 > 0) {
-      // iq[jz - 1] is needed to determine n.
-      i = iq[jz - 1] >> (24 - q0);
-      n += i;
-      iq[jz - 1] -= i << (24 - q0);
-      ih = iq[jz - 1] >> (23 - q0);
-    } else if (q0 === 0) {
-      ih = iq[jz - 1] >> 23;
-    } else if (z >= 0.5) {
-      ih = 2;
-    }
-    if (ih > 0) {
-      n += 1;
-      carry = 0;
-      // Computes 1 - q.
-      for (i = 0; i < jz; i++) {
-        j = iq[i];
-        if (carry === 0) {
-          if (j !== 0) {
-            carry = 1;
-            iq[i] = 0x1_00_00_00 - j;
-          }
-        } else {
-          iq[i] = 0xff_ff_ff - j;
-        }
-      }
-      if (q0 === 1) iq[jz - 1] &= 0x7f_ff_ff;
-      else if (q0 === 2) iq[jz - 1] &= 0x3f_ff_ff;
-      if (ih === 2) {
-        z = 1 - z;
-        if (carry !== 0) z -= scalbn(1, q0);
-      }
-    }
-    if (z !== 0) break;
-    j = 0;
-    for (i = jz - 1; i >= JK; i--) j |= iq[i];
-    if (j !== 0) break;
-    // Recomputation is needed; k is the number of the terms needed.
-    k = 1;
-    while (iq[JK - k] === 0) k++;
-    // Adds q[jz + 1] to q[jz + k].
-    for (i = jz + 1; i <= jz + k; i++) {
-      f[jx + i] = TWO_OVER_PI[jv + i];
-      for (j = 0, fw = 0; j <= jx; j++) fw += x[j] * f[jx + i - j];
-      q[i] = fw;
-    }
-    jz += k;
+  z = scalbn(z, q0);
+  // Trims off the integer part >= 8.
+  z -= 8 * Math.floor(z * 0.125);
+  let n = Math.trunc(z);
+  z -= n;
+  let ih = 0;
+  if (q0 > 0) {
+    // iq[jz - 1] is needed to determine n.
+    const i = iq[jz - 1] >> (24 - q0);
+    n += i;
+    iq[jz - 1] -= i << (24 - q0);
+    ih = iq[jz - 1] >> (23 - q0);
+  } else if (q0 === 0) {
+    ih = iq[jz - 1] >> 23;
+  } else if (z >= 0.5) {
+    ih = 2;
   }
-  if (z === 0) {
-    // Chops off the zero terms.
-    jz -= 1;
-    q0 -= 24;
-    while (iq[jz] === 0) {
-      jz--;
-      q0 -= 24;
-    }
-  } else {
-    // Breaks z into 24-bit chunks if necessary.
-    z = scalbn(z, -q0);
-    if (z >= TWO24) {
-      fw = Math.trunc(TWON24 * z);
-      iq[jz] = Math.trunc(z - TWO24 * fw);
-      jz += 1;
-      q0 += 24;
-      iq[jz] = fw;
+  if (ih > 0) {
+    n += 1;
+    z = complement(state, z, ih);
+  }
+  return { z, n, ih };
+}
+
+/** Computes 1 - q, for a fraction above 0.5. */
+function complement({ iq, jz, q0 }: Reduction, fraction: number, ih: number): number {
+  let carry = 0;
+  for (let i = 0; i < jz; i++) {
+    const j = iq[i];
+    if (carry === 0) {
+      if (j !== 0) {
+        carry = 1;
+        iq[i] = 0x1_00_00_00 - j;
+      }
     } else {
-      iq[jz] = Math.trunc(z);
+      iq[i] = 0xff_ff_ff - j;
     }
   }
-  // Converts the integer chunks into floating-point values.
-  fw = scalbn(1, q0);
-  for (i = jz; i >= 0; i--) {
+  if (q0 === 1) iq[jz - 1] &= 0x7f_ff_ff;
+  else if (q0 === 2) iq[jz - 1] &= 0x3f_ff_ff;
+  if (ih !== 2) return fraction;
+  const z = 1 - fraction;
+  return carry === 0 ? z : z - scalbn(1, q0);
+}
+
+/** Whether a zero fraction needs more terms of 2/pi, which its zero chunks from JK on show. */
+function needsRecomputation({ iq, jz }: Reduction): boolean {
+  let j = 0;
+  for (let i = jz - 1; i >= JK; i--) j |= iq[i];
+  return j === 0;
+}
+
+/** Adds q[jz + 1] to q[jz + k], where k is the number of the terms needed. */
+function addTerms(state: Reduction): void {
+  const { iq, f, q, jx, jv, jz } = state;
+  let k = 1;
+  while (iq[JK - k] === 0) k++;
+  for (let i = jz + 1; i <= jz + k; i++) {
+    f[jx + i] = TWO_OVER_PI[jv + i];
+    q[i] = product(state, i);
+  }
+  state.jz += k;
+}
+
+/** Chops off the zero terms of a zero fraction, or breaks the fraction into 24-bit chunks if necessary. */
+function trimOrSplit(state: Reduction, fraction: number): void {
+  const { iq } = state;
+  if (fraction === 0) {
+    state.jz -= 1;
+    state.q0 -= 24;
+    while (iq[state.jz] === 0) {
+      state.jz--;
+      state.q0 -= 24;
+    }
+    return;
+  }
+  const z = scalbn(fraction, -state.q0);
+  if (z >= TWO24) {
+    const fw = Math.trunc(TWON24 * z);
+    iq[state.jz] = Math.trunc(z - TWO24 * fw);
+    state.jz += 1;
+    state.q0 += 24;
+    iq[state.jz] = fw;
+  } else {
+    iq[state.jz] = Math.trunc(z);
+  }
+}
+
+/** Converts the integer chunks into floating-point values, multiplies them by pi / 2, and compresses them into y. */
+function compress({ iq, q, jz, q0 }: Reduction, y: number[], ih: number): void {
+  const jp = JK;
+  const fq = Array.from({ length: 20 }, () => 0);
+  let fw = scalbn(1, q0);
+  for (let i = jz; i >= 0; i--) {
     q[i] = fw * iq[i];
     fw *= TWON24;
   }
   // Computes PIO2[0..jp] * q[jz..0].
-  for (i = jz; i >= 0; i--) {
-    for (fw = 0, k = 0; k <= jp && k <= jz - i; k++) fw += PIO2[k] * q[i + k];
+  for (let i = jz; i >= 0; i--) {
+    fw = 0;
+    for (let k = 0; k <= jp && k <= jz - i; k++) fw += PIO2[k] * q[i + k];
     fq[jz - i] = fw;
   }
-  // Compresses fq[] into y[].
   fw = 0;
-  for (i = jz; i >= 0; i--) fw += fq[i];
+  for (let i = jz; i >= 0; i--) fw += fq[i];
   y[0] = ih === 0 ? fw : -fw;
   fw = fq[0] - fw;
-  for (i = 1; i <= jz; i++) fw += fq[i];
+  for (let i = 1; i <= jz; i++) fw += fq[i];
   y[1] = ih === 0 ? fw : -fw;
-  return n & 7;
 }
 
 /** `scalbn` for the `exponent`s in [-1022, 1023] that k_rem_pio2.c passes, where the product is exact. */
