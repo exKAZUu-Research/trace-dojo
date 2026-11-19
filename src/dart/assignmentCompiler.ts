@@ -1,6 +1,7 @@
 import type { CascadeSelector, CollectionElement, Expression, Span, SwitchExpressionCase } from './ast';
 import type { Member } from './classes';
 import { at, type Compiled, type Eval, typeName } from './compilerBase';
+import { ControlCompiler } from './controlCompiler';
 import type { GlobalVariable } from './environment';
 import { checkExhaustive } from './exhaustiveness';
 import { ExpressionCompiler, inferElementType, SHORTED } from './expressionCompiler';
@@ -8,7 +9,6 @@ import type { HashStore } from './hashStore';
 import { doubleModulo, dynamicBinary, wrap } from './operators';
 import type { Frame } from './runtime';
 import { Flow, type LocalVar } from './scope';
-import { StatementCompiler } from './statementCompiler';
 import {
   asInstanceOf,
   coreTypes,
@@ -45,7 +45,7 @@ interface AssignableTarget {
   shorting: boolean;
 }
 
-export abstract class AssignmentCompiler extends StatementCompiler {
+export abstract class AssignmentCompiler extends ControlCompiler {
   protected compileAssignment(
     expression: Extract<Expression, { kind: 'assign' }>,
     context: DartType | undefined

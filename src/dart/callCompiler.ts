@@ -11,7 +11,8 @@ import {
   typeName,
 } from './compilerBase';
 import type { ExtensionInfo, TopLevelFunction } from './environment';
-import { ExpressionCompiler, INFERENCE_HOLE, isInferenceHole, SHORTED } from './expressionCompiler';
+import { INFERENCE_HOLE, isInferenceHole, SHORTED } from './expressionCompiler';
+import { OperatorCompiler } from './operatorCompiler';
 import type { Frame, Runtime, TypeEnv } from './runtime';
 import type { FunctionContext } from './scope';
 import {
@@ -81,7 +82,7 @@ export interface CompiledFunction {
   usesTypeEnv: boolean;
 }
 
-export abstract class CallCompiler extends ExpressionCompiler {
+export abstract class CallCompiler extends OperatorCompiler {
   abstract compileFunction(spec: FunctionSpec): CompiledFunction;
   abstract constructObject(
     cls: ClassInfo,
