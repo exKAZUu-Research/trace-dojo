@@ -57,3 +57,10 @@ $reusable = new ReusableArrayIterator(['old']);
 $reusable->next();
 $reusable->replace(['new']);
 var_dump($reusable->valid(), $reusable->key(), $reusable->current());
+
+$container = new ArrayObject(['abc']);
+$alias =& $container[0];
+set_error_handler(function () use ($container) { $container[0] = 'xyz'; return true; });
+$result = ($container[0][1] = 'KL');
+restore_error_handler();
+var_dump($result, $container[0], $alias);

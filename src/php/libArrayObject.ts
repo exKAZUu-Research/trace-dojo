@@ -113,7 +113,7 @@ export class ArrayStorage {
     }
     this.checkMutation();
     const offset = toKey(key, 'access', className, warning);
-    this.writable().set(offset, share(value));
+    this.writable().setSlot(offset, share(value));
   }
 
   writable(): PhpArray {
