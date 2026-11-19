@@ -1,13 +1,13 @@
 // code-gauge-allow-file fileNcss 414 -- The regex functions share matching, offsets, capture handling, and error state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { dec, enc } from './bytes';
-import { consumeCallbackResult } from './callables';
-import { throwError, warn, withCleanupExceptions } from './errors';
+import { callCallback, consumeInvokedResult } from './callables';
+import { type CleanupException, throwError, warn, withCleanupExceptions } from './errors';
 import { isCallable } from './libCore';
 import { defineConstant, defineFunction } from './native';
 import { toStr } from './operators';
 import { type Compiled, groupName, PatternError, translate } from './pcrePattern';
-import { PhpThrow, rt } from './runtime';
+import { ExitSignal, PhpThrow, rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import { copyValueSlot, deref, PhpArray, PhpObject, type Ref, type Value } from './values';
 
@@ -359,7 +359,7 @@ type MatchReplacement = (compiled: Compiled, match: Match) => string | undefined
 interface ReplacementState {
   value: number;
   callbackFailed: boolean;
-  capture: (error: PhpThrow) => void;
+  capture: (error: CleanupException) => void;
 }
 
 function replaceOne(
@@ -394,7 +394,7 @@ function replaceOne(
 }
 
 // code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 function pregReplace(
   name: string,
   args: Value[],
@@ -431,7 +431,7 @@ function pregReplace(
         canConvert
       );
     } catch (error) {
-      if (!(error instanceof PhpThrow)) throw error;
+      if (!(error instanceof PhpThrow || error instanceof ExitSignal)) throw error;
       capture(error);
     }
     if (countRef) {
@@ -497,7 +497,7 @@ defineFunction(
       try {
         return callbackReplacement(args[1], compiled, match, flags);
       } catch (error) {
-        if (!(error instanceof PhpThrow)) throw error;
+        if (!(error instanceof PhpThrow || error instanceof ExitSignal)) throw error;
         state.callbackFailed = true;
         state.capture(error);
         return;
@@ -508,7 +508,7 @@ defineFunction(
 
 function callbackReplacement(callback: Value, compiled: Compiled, match: Match, flags: bigint): string {
   const args = matchArray(compiled, match, (flags & 256n) !== 0n, (flags & 512n) !== 0n, true);
-  return consumeCallbackResult(callback, [args], toStr);
+  return consumeInvokedResult(() => callCallback(callback, [args]), toStr, true);
 }
 
 defineFunction(

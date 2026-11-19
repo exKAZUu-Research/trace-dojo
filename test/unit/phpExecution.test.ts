@@ -857,6 +857,35 @@ test('weak exit accepts an integral float without precision-loss diagnostics', (
 });
 
 test.each([
+  ['callback', "preg_replace_callback('/a/', fn() => exit('callback;'), ['aaa', 'a'], -1, $count);", 'callback;2'],
+  [
+    'callback result conversion',
+    "preg_replace_callback('/a/', fn() => new Replacement, 'aaa', -1, $count);",
+    'conversion;result=99;1',
+  ],
+  ['pattern conversion', "preg_replace(['/b/', new Replacement], 'x', 'baa', -1, $count);", 'conversion;result=1;1'],
+  [
+    'callback array',
+    "preg_replace_callback_array(['/a/' => fn() => exit('callback;')], ['aaa', 'a'], -1, $count);",
+    'callback;99',
+  ],
+])('preserves PHP replacement counts at shutdown after exit during %s', (_name, program, stdout) => {
+  expect(
+    run(`<?php
+$count = 99;
+class CountReader { function __destruct() { global $count; echo $count; } }
+class Replacement {
+    function __toString() { exit('conversion;'); }
+    function __destruct() { global $count; echo "result=$count;"; }
+}
+$reader = new CountReader;
+${program}
+echo 'unreachable';
+`)
+  ).toMatchObject({ kind: 'executed', stdout });
+});
+
+test.each([
   String.raw`<?php preg_match('/\xe9/i',"\xc9");`,
   String.raw`<?php preg_match('/[\xe0-\xef]/i',"\xc9");`,
   '<?php preg_match("/(a*)+/","aaa");',
