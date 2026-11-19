@@ -26,6 +26,7 @@ export async function loadParser(languageWasmSpecifier: string): Promise<Parser>
  *
  * @param missingTokenNames Names for learners of the grammar's named tokens that error recovery may insert;
  * punctuation names itself.
+ * @param options.isBenignError Tells the error nodes of constructs that the language rejects only when it runs them.
  */
 export function parseSource<T>(
   parser: Parser,
@@ -36,6 +37,7 @@ export function parseSource<T>(
     maxNestingDepth = MAX_NESTING_DEPTH,
     tooDeepMessage = '括弧やブロックなどの入れ子が深すぎます。',
     locateErrors = (_root: Node, errors: SourceDiagnostic[]): SourceDiagnostic[] => errors,
+    isBenignError = (_node: Node): boolean => false,
   } = {}
 ): T {
   const tree = parser.parse(source);
@@ -45,11 +47,14 @@ export function parseSource<T>(
     if (tooDeep) {
       throw new CompileError([{ row: tooDeep.startPosition.row, message: tooDeepMessage }]);
     }
-    const syntaxErrors = locateErrors(tree.rootNode, collectSyntaxErrors(tree.rootNode, missingTokenNames, false));
+    const syntaxErrors = locateErrors(
+      tree.rootNode,
+      collectSyntaxErrors(tree.rootNode, missingTokenNames, false, isBenignError)
+    );
     if (syntaxErrors.length > 0) throw new CompileError(syntaxErrors);
     const converted = convert(tree.rootNode);
     // The converter's own checks name the errors it recognizes better than an error only the tree's flags show.
-    const hiddenErrors = collectSyntaxErrors(tree.rootNode, missingTokenNames, true);
+    const hiddenErrors = collectSyntaxErrors(tree.rootNode, missingTokenNames, true, isBenignError);
     if (hiddenErrors.length > 0) throw new CompileError(hiddenErrors);
     return converted;
   } finally {
@@ -112,20 +117,30 @@ function findTooDeepNode(root: Node, maxDepth: number): Node | undefined {
  * The syntax errors a tree shows, and with `includeHidden` also where only a node's error flag shows one: a token the
  * parser inserted to recover is invisible when its grammar rule is hidden, like Python's newline and dedent.
  */
+// code-gauge-allow functionCognitiveComplexity 17 -- Collects visible and hidden errors in one walk, skipping those a language reports only when it runs.
 function collectSyntaxErrors(
   root: Node,
   missingTokenNames: Record<string, string>,
-  includeHidden: boolean
+  includeHidden: boolean,
+  isBenignError: (node: Node) => boolean = () => false
 ): SourceDiagnostic[] {
   const errors: SourceDiagnostic[] = [];
+  // Whether a node's errors all lie in benign descendants; a hidden token missing in the node itself is not benign.
+  const isExplained = (node: Node): boolean =>
+    isBenignError(node) ||
+    (!node.isError &&
+      !node.isMissing &&
+      node.children.some((child) => child.hasError) &&
+      node.children.every((child) => !child.hasError || isExplained(child)));
   const visit = (node: Node): void => {
     if (errors.length >= 5) return;
+    if (isBenignError(node)) return;
     const own = ownError(node, missingTokenNames);
     if (own) {
       errors.push(own);
       return;
     }
-    if (!node.hasError) return;
+    if (!node.hasError || isExplained(node)) return;
     const found = errors.length;
     for (const child of node.children) visit(child);
     if (includeHidden && errors.length === found) {

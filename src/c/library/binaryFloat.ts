@@ -1,3 +1,5 @@
+import { exactParts } from '../../interpreter/floatFormat';
+
 const DOUBLE_FORMAT = { bits: 53, minimum: -1022, maximum: 1023 };
 const FLOAT_FORMAT = { bits: 24, minimum: -126, maximum: 127 };
 
@@ -15,17 +17,6 @@ export function fma(x: number, y: number, z: number, isFloat = false): number {
   const negative = sum < 0n;
   const rounded = roundBinary(negative ? -sum : sum, 1n, exponent, isFloat);
   return negative ? -rounded : rounded;
-}
-
-export function exactParts(value: number): { mantissa: bigint; exponent: number } {
-  const view = new DataView(new ArrayBuffer(8));
-  view.setFloat64(0, value);
-  const bits = view.getBigUint64(0);
-  const biased = Number((bits >> 52n) & 0x7_ffn);
-  const fraction = bits & ((1n << 52n) - 1n);
-  return biased === 0
-    ? { mantissa: fraction, exponent: -1074 }
-    : { mantissa: fraction | (1n << 52n), exponent: biased - 1075 };
 }
 
 // code-gauge-allow duplicateLines 15 -- Quotient and square-root rounding share range guards but use different scaling and midpoint comparisons.
