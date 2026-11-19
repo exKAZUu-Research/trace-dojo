@@ -10,7 +10,8 @@ import {
   Rank,
 } from './conversions';
 import { CppException, CppRuntimeError } from './errors';
-import { type Expr, hasConstantObject, mapMemberConstants, type TemporaryBinding } from './expr';
+import { type Expr, hasConstantObject, isXvalue, mapMemberConstants, type TemporaryBinding } from './expr';
+import { constructElementFromRvalue } from './library/elements';
 import { type Eval, type Frame, holdAll, type Temporary } from './runtime';
 import type { Syntax } from './syntax';
 import {
@@ -356,20 +357,27 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       const selected = this.resolve(`コピーコンストラクタ ${cls.name}`, candidates, [expr], undefined, expr.row);
       return this.constructWith(cls, selected, [expr], expr.row);
     }
-    if (!cls.implicitCopyFromConst && (!expr.isLvalue || isConstType(expr.type)))
+    if (!cls.implicitCopyFromConst && (!expr.isLvalue || isXvalue(expr) || isConstType(expr.type)))
       this.error(expr.row, `${cls.name} のコピーコンストラクタには const でない左辺値が必要です。`);
     this.requireObjectUse(classType(cls), 'copy', expr.row);
     const source = this.rvalue(expr);
-    const constantInitialization = source.constantInitialization === true && allowsConstantCopy(classType(cls));
+    const type = classType(cls);
+    const constantInitialization = source.constantInitialization === true && allowsConstantCopy(type);
+    const movesSource = expr.isXvalue === true && !isConstType(expr.type);
     return {
-      type: classType(cls),
+      type,
       isLvalue: false,
       row: expr.row,
       isTemporaryObject: true,
       constantInitialization,
       constantStringLength: !expr.isLvalue && constantInitialization ? source.constantStringLength : undefined,
       onlyCalls: expr.onlyCalls,
-      run: (frame, _zeroInitialize, destination) => copyAs(frame, cls, source.run(frame), destination),
+      run: (frame, _zeroInitialize, destination) => {
+        const value = source.run(frame);
+        return movesSource
+          ? constructElementFromRvalue(frame, type, value, destination)
+          : copyAs(frame, cls, value, destination);
+      },
     };
   }
 

@@ -1,6 +1,20 @@
 import { byteAt } from '../bytes';
-import { CppRuntimeError } from '../errors';
-import { CHAR_POINTER, type FunctionInfo, INT, LONG, pointerTo, SIZE_T, type Type, UINT, VOID } from '../types';
+import { CppRuntimeError, overflowError } from '../errors';
+import {
+  CHAR_POINTER,
+  type FunctionInfo,
+  INT,
+  intMax,
+  intMin,
+  type IntType,
+  LONG,
+  pointerTo,
+  SIZE_T,
+  type Type,
+  typeName,
+  UINT,
+  VOID,
+} from '../types';
 import type { Ptr } from '../values';
 import { NULL_PTR } from '../values';
 import { formatPrintf, type PrintfArgument } from './formatting';
@@ -217,23 +231,20 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
       })
     );
   }
-  add(native('atoi', [CONST_CHAR_PTR], INT, ([text]) => atoi(text)));
-  add(
-    native('atol', [CONST_CHAR_PTR], LONG, ([text]) => {
-      const match = /^[\t\n\v\f\r ]*([+-]?\d+)/.exec(readCString(text as Ptr));
-      return match ? BigInt.asIntN(64, BigInt(match[1])) : 0n;
-    })
-  );
+  add(native('atoi', [CONST_CHAR_PTR], INT, ([text]) => Number(parseDecimal(text as Ptr, INT))));
+  add(native('atol', [CONST_CHAR_PTR], LONG, ([text]) => parseDecimal(text as Ptr, LONG)));
   return functions;
 }
 
 const printf = (format: unknown, args: unknown[], spend: (cost: number) => void): string =>
   formatPrintf(readCString(format as Ptr), args as PrintfArgument[], spend);
 
-const atoi = (text: unknown): number => {
-  const match = /^[\t\n\v\f\r ]*([+-]?\d+)/.exec(readCString(text as Ptr));
-  return match ? Number(BigInt.asIntN(32, BigInt(match[1]))) : 0;
-};
+function parseDecimal(text: Ptr, type: IntType): bigint {
+  const match = /^[\t\n\v\f\r ]*([+-]?\d+)/.exec(readCString(text));
+  const value = match ? BigInt(match[1]) : 0n;
+  if (value < intMin(type.name) || value > intMax(type.name)) throw overflowError(typeName(type));
+  return value;
+}
 
 function characterArgument(input: unknown): number {
   const value = asNumber(input);

@@ -347,17 +347,11 @@ function iteratorElement(type: Type): Type | undefined {
 
 /** The values between two iterators of a sequence, a container, or an array. */
 function rangeValues(first: Ptr, last: Ptr, isReverse: boolean): Value[] {
+  const length = first.rangeLength(last, isReverse);
+  if (length === 0) return [];
   const store = first.target();
-  if (!first.sharesRange(last)) throw new CppRuntimeError('invalidRange');
-  const values: Value[] = [];
-  if (isReverse) {
-    if (first.index < last.index) throw new CppRuntimeError('invalidRange');
-    for (let index = first.index - 1; index >= last.index; index--) values.push(store.get(index));
-  } else {
-    if (first.index > last.index) throw new CppRuntimeError('invalidRange');
-    for (let index = first.index; index < last.index; index++) values.push(store.get(index));
-  }
-  return values;
+  const start = first.index - (isReverse ? 1 : 0);
+  return Array.from({ length }, (_, offset) => store.get(start + (isReverse ? -offset : offset)));
 }
 
 /** A member function template, such as `insert(position, first, last)`, whose instance the call's arguments decide. */

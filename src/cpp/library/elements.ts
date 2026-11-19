@@ -1,4 +1,4 @@
-import { CppRuntimeError } from '../errors';
+import { CppException, CppRuntimeError } from '../errors';
 import type { Expr, FunctionCandidates } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { installBaseValue, invoke, makeEach, newObject, withTemporaries, zeroOf } from '../objectCompiler';
@@ -25,6 +25,7 @@ import {
   type Value,
 } from '../values';
 import { SequenceValue } from './containerValues';
+import type { LibraryClass } from './libraryClass';
 import { StringValue } from './string';
 
 /** What a container does with its elements: make them, copy them, assign them, and destroy them. */
@@ -66,7 +67,7 @@ export function swapElements(frame: Frame, a: Ptr, b: Ptr, ops: ElementOperation
   withTemporaries(frame, () => {
     const transfer = canTransferElementStorage(ops.type);
     const source = a.read();
-    const value = transfer ? transferElement(frame, ops.type, source) : ops.copy(frame, source);
+    const value = transfer ? constructElementFromRvalue(frame, ops.type, source) : ops.copy(frame, source);
     if (ops.destroy) frame.temporaries.push({ object: value, destroy: ops.destroy });
     if (transfer) {
       moveAssignElement(frame, a, ops.type, b.read());
@@ -115,7 +116,7 @@ export function moveAssignElement(frame: Frame, location: Ptr, type: Type, value
 
 export function moveConstructElement(frame: Frame, operations: ElementOperations, source: Value): Value {
   return canTransferElementStorage(operations.type)
-    ? transferElement(frame, operations.type, source)
+    ? constructElementFromRvalue(frame, operations.type, source)
     : operations.copy(frame, source);
 }
 
@@ -155,7 +156,7 @@ function canCopyWithoutThrow(type: Type): boolean {
   );
 }
 
-function transferElement(frame: Frame, type: Type, source: Value, target?: CObject): Value {
+export function constructElementFromRvalue(frame: Frame, type: Type, source: Value, target?: CObject): Value {
   if (source === UNINIT) return UNINIT;
   if (type.kind === 'array' && source instanceof ArrayStore) {
     return new ArrayStore(transferElements(frame, type.of, source.values));
@@ -170,11 +171,19 @@ function transferElement(frame: Frame, type: Type, source: Value, target?: CObje
   }
   if (source instanceof SequenceValue) {
     const array = cls.library?.aggregateArray;
-    if (!array) return source.moveStorage();
-    return frame.runtime.withoutOuterHandlers(() => array.make(transferElements(frame, array.type.of, source.items)));
+    if (array) return constructMovedArray(frame, array, source.items);
+    if (ownsMovableSequence(type)) return source.moveStorage();
   }
-  if (source instanceof CObject && canMoveFields(cls)) return transferSubobjects(frame, cls, source, target);
+  if (source instanceof CObject && canMoveFields(cls)) {
+    const move = (): Value => transferSubobjects(frame, cls, source, target);
+    return canTransferElementStorage(type) ? frame.runtime.withoutOuterHandlers(move) : move();
+  }
   return cls.operations?.copy(frame, source, target) ?? source;
+}
+
+function constructMovedArray(frame: Frame, array: NonNullable<LibraryClass['aggregateArray']>, values: Value[]): Value {
+  const move = (): Value => array.make(transferElements(frame, array.type.of, values));
+  return canTransferElementStorage(array.type) ? frame.runtime.withoutOuterHandlers(move) : move();
 }
 
 function transferElements(frame: Frame, type: Type, values: Value[]): Value[] {
@@ -182,25 +191,54 @@ function transferElements(frame: Frame, type: Type, values: Value[]): Value[] {
   return makeEach(
     frame,
     values.length,
-    (index) => transferElement(frame, type, values[index]),
-    () => {}
+    (index) => constructElementFromRvalue(frame, type, values[index]),
+    () => (current, value) => destroyMovedPart(current, type, value)
   );
 }
 
 function transferSubobjects(frame: Frame, cls: ClassInfo, source: CObject, target: CObject | undefined): CObject {
-  return frame.runtime.withoutOuterHandlers(() => {
-    const destination = newObject(frame, cls, false, target);
-    return holdValues(frame, [destination], () => {
-      if (cls.base) {
-        const base = transferElement(frame, classType(cls.base), source, destination) as CObject;
-        installBaseValue(cls.base, destination, base);
+  const destination = newObject(frame, cls, false, target);
+  const { base } = cls;
+  let baseComplete = false;
+  return holdValues(frame, [destination], () => {
+    try {
+      if (base) {
+        destination.cls = base;
+        const initialized = constructElementFromRvalue(frame, classType(base), source, destination) as CObject;
+        installBaseValue(base, destination, initialized);
+        baseComplete = true;
       }
       destination.cls = cls;
-      for (const field of cls.ownFields)
-        destination.values[field.index] = transferElement(frame, field.type, source.values[field.index]);
+      makeEach(
+        frame,
+        cls.ownFields.length,
+        (index) => {
+          const field = cls.ownFields[index];
+          const value = constructElementFromRvalue(frame, field.type, source.values[field.index]);
+          destination.values[field.index] = value;
+          return value;
+        },
+        (index) => (current, value) => destroyMovedPart(current, cls.ownFields[index].type, value)
+      );
       return destination;
-    });
+    } catch (error) {
+      if (error instanceof CppException && base && baseComplete) {
+        destination.cls = base;
+        base.operations?.destroy?.(frame, destination);
+      }
+      endLifetime(destination);
+      throw error;
+    }
   });
+}
+
+function destroyMovedPart(frame: Frame, type: Type, value: Value): void {
+  if (type.kind === 'class') type.cls.operations?.destroy?.(frame, value);
+  if (type.kind !== 'array' || !(value instanceof ArrayStore)) return;
+  for (let index = value.values.length - 1; index >= 0; index--) {
+    const item = value.values[index];
+    if (item !== UNINIT) destroyMovedPart(frame, type.of, item);
+  }
 }
 
 function ownsMovableSequence(type: Type): boolean {

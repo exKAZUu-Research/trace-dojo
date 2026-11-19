@@ -1,5 +1,5 @@
 import { convertScalar } from '../c/arith';
-import { type Expr, mapMemberConstants } from './expr';
+import { type Expr, isXvalue, mapMemberConstants } from './expr';
 import { erasePointee } from './pointerCasts';
 import type { Syntax } from './syntax';
 import {
@@ -119,7 +119,7 @@ function referenceBinding(
   allowUser: boolean
 ): ConversionSequence | undefined {
   const toConst = isConstType(target);
-  if (!toConst && expr.temporaryMember) return undefined;
+  if (!toConst && isXvalue(expr)) return undefined;
   const from = expr.type;
   if (expr.isLvalue && (toConst || !isConstType(from))) {
     if (

@@ -701,6 +701,10 @@ int main() { throw Error{}; }`;
 test.each([
   ['std::abs(INT_MIN)', 'オーバーフロー'],
   ['std::labs(LONG_MIN)', 'オーバーフロー'],
+  ['std::atoi("2147483648")', 'オーバーフロー'],
+  ['std::atoi("-2147483649")', 'オーバーフロー'],
+  ['std::atol("9223372036854775808")', 'オーバーフロー'],
+  ['std::atol("-9223372036854775809")', 'オーバーフロー'],
   ['std::printf("%s", text)', 'nullptr'],
   ['std::printf("%.*s", 0, text)', 'nullptr'],
 ])('reports undefined library behavior for %s', (call, diagnostic) => {

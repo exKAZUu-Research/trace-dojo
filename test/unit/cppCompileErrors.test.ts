@@ -2,6 +2,25 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
+test.each([
+  ['std::accumulate(input, input + 2, 0, add)', 'int add(int& sum, int item) { return sum + item; }'],
+  [
+    'std::inner_product(input, input + 2, input, 0, add, multiply)',
+    'int add(int& sum, int item) { return sum + item; }',
+  ],
+  [
+    'std::inner_product(input, input + 2, input, 0, add, multiply)',
+    'int add(int sum, int& item) { return sum + item; }',
+  ],
+  ['std::partial_sum(input, input + 2, output, add)', 'int add(int& sum, int item) { return sum + item; }'],
+])('rejects a callback taking an rvalue by mutable reference in %s with %s', (call, callback) => {
+  const program = `#include <numeric>
+${callback}
+int multiply(int left, int right) { return left * right; }
+int main() { int input[] = {1, 2}, output[2] = {}; ${call}; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 3 }] });
+});
+
 test.each(['Base value;', 'Base values[1];'])(
   'a protected destructor cannot destroy a separate base-typed member: %s',
   (member) => {

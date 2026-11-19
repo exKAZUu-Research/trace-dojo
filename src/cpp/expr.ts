@@ -36,13 +36,14 @@ export function initializerWithConstancy(run: Initializer, isConstant: boolean, 
 }
 
 /**
- * A compiled expression. An lvalue evaluates to the location it designates (a `Ptr`); a prvalue evaluates to its
+ * A compiled expression. A glvalue evaluates to the location it designates (a `Ptr`); a prvalue evaluates to its
  * value. The type is never a reference type: a reference denotes the object it refers to, as an lvalue.
  */
 export interface Expr extends ConstantValue {
   isAssignmentList?: boolean;
   type: Type;
   isLvalue: boolean;
+  isXvalue?: boolean;
   run: (
     frame: Frame,
     zeroInitialize?: boolean,
@@ -96,6 +97,10 @@ export interface FunctionCandidates {
   isQualified?: boolean;
   /** Explicit template arguments, such as `std::max<int>`. */
   templateArgs?: Type[];
+}
+
+export function isXvalue(expr: Expr): boolean {
+  return expr.isXvalue === true || expr.temporaryMember !== undefined;
 }
 
 export function constantExpr(type: Type, value: number | bigint, row: number): Expr {

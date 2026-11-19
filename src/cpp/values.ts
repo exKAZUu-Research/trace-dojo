@@ -347,6 +347,7 @@ export class Ptr {
   }
 
   offset(delta: number, asIterator = false): Ptr {
+    if (delta === 0 && this.isNull) return this;
     const store = this.target();
     const index = this.index + delta;
     if (index < 0 || index > (asIterator ? store.iteratorLength : store.length))
@@ -364,6 +365,14 @@ export class Ptr {
 
   sharesRange(other: Ptr): boolean {
     return this.store === other.store;
+  }
+
+  rangeLength(last: Ptr, isReverse: boolean): number {
+    if (!this.sharesRange(last)) throw new CppRuntimeError('invalidRange');
+    if (!this.isNull) this.target();
+    const length = isReverse ? this.index - last.index : last.index - this.index;
+    if (length < 0) throw new CppRuntimeError('invalidRange');
+    return length;
   }
 
   equals(other: Ptr): boolean {
