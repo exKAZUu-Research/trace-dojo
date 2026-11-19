@@ -152,7 +152,6 @@ function convert(spec: Spec, take: () => PrintfArgument, count: number): string 
       if (length === 'l') throw new CppRuntimeError('custom', 'ワイド文字列（%ls）は、この採点環境では使えません。');
       const arg = take();
       if (!(arg.value instanceof Ptr) || arg.type.kind !== 'pointer') throw new CppRuntimeError('formatArgumentType');
-      if (arg.value.isNull) return spec.precision === undefined ? '(null)' : '(null)'.slice(0, spec.precision);
       return readCString(arg.value, spec.precision);
     }
     case 'p': {

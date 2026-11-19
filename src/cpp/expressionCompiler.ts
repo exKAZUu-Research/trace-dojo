@@ -1101,8 +1101,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       constantInitialization: chosen?.constantInitialization,
       staticAddress: chosen?.staticAddress,
       constantPointerValue: chosen?.constantPointerValue,
-      run: (frame, zeroInitialize, destination) =>
-        (condition(frame) ? left : right).run(frame, zeroInitialize, destination),
+      run: (...args) => (condition(args[0]) ? left : right).run(...args),
       isTemporaryObject: !isLvalue && type.kind === 'class',
     };
   }
@@ -1173,9 +1172,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       constantInitialization: hasConstantLeft ? right.constantInitialization : undefined,
       staticAddress: hasConstantLeft ? right.staticAddress : undefined,
       constantPointerValue: hasConstantLeft ? right.constantPointerValue : undefined,
-      run: (frame, zeroInitialize, destination, referenceLifetime) => {
-        first(frame);
-        return second(frame, zeroInitialize, destination, referenceLifetime);
+      run: (...args) => {
+        first(args[0]);
+        return second(...args);
       },
     };
   }

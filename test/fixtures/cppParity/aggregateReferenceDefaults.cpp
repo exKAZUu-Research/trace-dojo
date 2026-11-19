@@ -23,6 +23,11 @@ Ref namedReturn() {
 }
 Ref directReturn() { return Ref{Derived{}}; }
 Ref bracedReturn() { return {Derived{}}; }
+Ref conditionalReturn(bool flag) { return flag ? Ref{Derived{}} : Ref{Derived{}}; }
+std::array<Ref, 1> arrayReturn() {
+  std::array<Ref, 1> result{Ref{Derived{}}};
+  return result;
+}
 
 int main() {
   DefaultRef first{};
@@ -58,4 +63,8 @@ int main() {
   std::cout << 'R';
   Ref braced = bracedReturn();
   std::cout << 'L';
+  Ref branch = conditionalReturn(true);
+  std::cout << 'C';
+  auto array = arrayReturn();
+  std::cout << 'A';
 }

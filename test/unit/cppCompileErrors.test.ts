@@ -310,6 +310,21 @@ test.each([
   ['a local variable using a macro from <cmath>', '#include <cmath>\nint main() { double M_PI = 3; }', 1],
   ['a parameter using a macro from <cstdio>', '#include <cstdio>\nvoid report(int EOF) {}', 1],
   ['a global variable using a transitive macro from <iostream>', '#include <iostream>\nint RAND_MAX = 3;', 1],
+  [
+    'a definition that redefines the SDK toupper function',
+    '#include <iostream>\nint toupper(int value) { return value; }',
+    1,
+  ],
+  [
+    'narrowing in the selected vector initializer-list overload',
+    '#include <vector>\nint main() { std::vector<unsigned char> values{300}; }',
+    1,
+  ],
+  [
+    'nested narrowing in a vector initializer list',
+    '#include <vector>\nint main() { std::vector<std::vector<unsigned char>> values{{300}}; }',
+    1,
+  ],
   ['std::sqrt with only <cstdio>', '#include <cstdio>\nint main() {\n  double x = std::sqrt(2.0); }', 2],
   ['std::abs with only <cstdio>', '#include <cstdio>\nint main() {\n  int x = std::abs(-2); }', 2],
 ])('the interpreter rejects %s', (_, program, row) => {

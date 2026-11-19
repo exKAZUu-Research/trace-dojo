@@ -17,7 +17,10 @@ export function conflictsWithLibcGlobal(
     if (!visibleIn(group, headers)) continue;
     if (isVariable) {
       if (kind !== 'var' || compact(typeName(entity)) !== compact(signature)) return true;
-    } else if (kind === 'var' || hasConflictingSignature(entity, kind === 'using', signature)) {
+    } else if (
+      kind === 'var' ||
+      hasConflictingSignature(entity, kind === 'using' || (kind === 'definition' && entity.isDefined), signature)
+    ) {
       return true;
     }
   }
@@ -32,13 +35,13 @@ function visibleIn(group: number, headers: ReadonlySet<string>): boolean {
   return [...headers].some((header) => headerGroups[group].has(header));
 }
 
-function hasConflictingSignature(declared: FunctionInfo, fromUsingDeclaration: boolean, signature: string): boolean {
+function hasConflictingSignature(declared: FunctionInfo, cannotRedeclare: boolean, signature: string): boolean {
   const paramsStart = signature.indexOf('(');
   if (paramsStart === -1) return false;
   const params = declared.params.map(({ type }) => typeName(unqualified(type)));
   if (declared.isVariadic) params.push('...');
   if (compact(`(${params.join(',')})`) !== compact(signature.slice(paramsStart))) return false;
-  return fromUsingDeclaration || compact(typeName(declared.ret)) !== compact(signature.slice(0, paramsStart));
+  return cannotRedeclare || compact(typeName(declared.ret)) !== compact(signature.slice(0, paramsStart));
 }
 
 function compact(type: string): string {

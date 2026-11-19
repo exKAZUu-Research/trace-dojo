@@ -4,6 +4,7 @@ import { permitsQualificationConversion } from './conversions';
 import { CppException, ProgramAbort } from './errors';
 import type { Expr } from './expr';
 import { ExpressionCompiler } from './expressionCompiler';
+import { SequenceValue } from './library/containerValues';
 import { withTemporaries, zeroOf } from './objectCompiler';
 import { BREAK, type Completion, CONTINUE, type Eval, type Exec, type Frame, type LocalInfo, RETURN } from './runtime';
 import { type Entity, Scope } from './scopes';
@@ -1307,9 +1308,14 @@ export function endScope(
 }
 
 function endReturnedReferenceLifetimes(frame: Frame, value: Value): void {
-  if (!(value instanceof CObject || value instanceof ArrayStore)) return;
-  for (let index = value.values.length - 1; index >= 0; index--)
-    endReturnedReferenceLifetimes(frame, value.values[index]);
+  const members =
+    value instanceof SequenceValue
+      ? value.items
+      : value instanceof CObject || value instanceof ArrayStore
+        ? value.values
+        : undefined;
+  if (!members) return;
+  for (let index = members.length - 1; index >= 0; index--) endReturnedReferenceLifetimes(frame, members[index]);
   if (value instanceof CObject) value.destroyReferenceTemporaries(frame);
 }
 

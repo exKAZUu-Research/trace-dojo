@@ -19,7 +19,7 @@ def probe(header):
     )
     aliases = {}
     declarations = set()
-    for category, syntax in global_nodes(result.stdout):
+    for category, syntax, has_body in global_nodes(result.stdout):
         if category == "UsingShadowDecl":
             shadow = USING_SHADOW.search(syntax)
             if shadow:
@@ -36,7 +36,8 @@ def probe(header):
             if name not in TYPE_NAME.findall(signature):
                 aliases[name] = signature
             continue
-        declarations.add((name, "var" if category == "VarDecl" else "function", signature))
+        kind = "var" if category == "VarDecl" else "definition" if has_body else "function"
+        declarations.add((name, kind, signature))
 
     symbols = {
         (name, kind, normalize_type(signature, aliases))
@@ -55,6 +56,7 @@ def probe(header):
 
 def global_nodes(tree):
     ancestors = []
+    item = None
     for line in tree.splitlines():
         match = TREE_NODE.match(line)
         if not match:
@@ -63,8 +65,15 @@ def global_nodes(tree):
         depth = len(prefix) // 2
         del ancestors[depth:]
         if all(node == "LinkageSpecDecl" for node in ancestors):
-            yield category, syntax
+            if item:
+                yield item
+            item = category, syntax, False
+        elif item and category in {"CompoundStmt", "CXXTryStmt"} and ancestors[-1] == "FunctionDecl":
+            if all(node == "LinkageSpecDecl" for node in ancestors[:-1]):
+                item = item[0], item[1], True
         ancestors.append(category)
+    if item:
+        yield item
 
 
 def normalize_type(signature, aliases):

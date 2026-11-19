@@ -64,6 +64,8 @@ export class ProgramAbort extends Error {
   }
 }
 
+export class NarrowingConversionError extends CompileError {}
+
 export function compileError(row: number, message: string): never {
   throw new CompileError([{ row, message }]);
 }

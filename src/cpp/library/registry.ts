@@ -1,6 +1,6 @@
 import { fma } from '../../c/library/binaryFloat';
 import { BINARY, UNARY } from '../../c/library/mathFunctions';
-import { CppRuntimeError, ProgramExit } from '../errors';
+import { CppRuntimeError, overflowError, ProgramExit } from '../errors';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import type { Frame } from '../runtime';
 import type { Entity } from '../scopes';
@@ -13,6 +13,8 @@ import {
   FLOAT,
   type FunctionInfo,
   INT,
+  intMin,
+  type IntType,
   isArithmetic,
   LDOUBLE,
   LLONG,
@@ -21,6 +23,7 @@ import {
   SCHAR,
   SHORT,
   type Type,
+  typeName,
   UCHAR,
   UINT,
   ULLONG,
@@ -449,16 +452,18 @@ function mathFunctions(): Map<string, FunctionInfo[]> {
     promotedMath('fma', 3, ([x, y, z]) => fma(x, y, z)),
   ]);
   functions.set('abs', [
-    native('abs', [INT], INT, ([x]) => abs(x)),
-    native('abs', [LONG], LONG, ([x]) => abs(x)),
-    native('abs', [LLONG], LLONG, ([x]) => abs(x)),
-    native('abs', [FLOAT], FLOAT, ([x]) => abs(x)),
-    native('abs', [DOUBLE], DOUBLE, ([x]) => abs(x)),
-    native('abs', [LDOUBLE], LDOUBLE, ([x]) => abs(x)),
+    native('abs', [INT], INT, ([x]) => integerAbs(x, INT)),
+    native('abs', [LONG], LONG, ([x]) => integerAbs(x, LONG)),
+    native('abs', [LLONG], LLONG, ([x]) => integerAbs(x, LLONG)),
+    native('abs', [FLOAT], FLOAT, ([x]) => Math.abs(x as number)),
+    native('abs', [DOUBLE], DOUBLE, ([x]) => Math.abs(x as number)),
+    native('abs', [LDOUBLE], LDOUBLE, ([x]) => Math.abs(x as number)),
   ]);
   for (const name of ['labs', 'llabs'])
     functions.set(name, [
-      native(name, [name === 'labs' ? LONG : LLONG], name === 'labs' ? LONG : LLONG, ([x]) => abs(x)),
+      native(name, [name === 'labs' ? LONG : LLONG], name === 'labs' ? LONG : LLONG, ([x]) =>
+        integerAbs(x, name === 'labs' ? LONG : LLONG)
+      ),
     ]);
   for (const [name, test] of [
     ['isnan', (x: number) => Number.isNaN(x)],
@@ -494,4 +499,9 @@ const promotedMath = (name: string, arity: number, run: (args: number[]) => numb
     return native(name, types, result, (values) => run(values.map((value) => asNumber(value))));
   });
 
-const abs = (x: unknown): unknown => (typeof x === 'bigint' ? (x < 0n ? -x : x) : Math.abs(x as number));
+function integerAbs(value: unknown, type: IntType): number | bigint {
+  const numeric = BigInt(value as number | bigint);
+  if (numeric === intMin(type.name)) throw overflowError(typeName(type));
+  const magnitude = numeric < 0n ? -numeric : numeric;
+  return typeof value === 'bigint' ? magnitude : Number(magnitude);
+}

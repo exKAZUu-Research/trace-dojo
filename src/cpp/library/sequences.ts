@@ -1,5 +1,6 @@
 import { CompileError } from '../../interpreter/diagnostics';
-import { CppRuntimeError } from '../errors';
+import { implicitConversion } from '../conversions';
+import { CppRuntimeError, NarrowingConversionError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { makeEach } from '../objectCompiler';
@@ -935,12 +936,25 @@ function sequenceList(
   make: (items: Value[]) => SequenceValue,
   editor: SequenceEditor
 ): Eval<Value> | undefined {
-  // A list of one or two sizes is still an initializer list of elements when the elements can take them.
+  const args = elements.map((node) => compiler.argument(node));
+  const canUseOtherConstructors = args.length > 0 && args.length <= 2;
+  if (canUseOtherConstructors && args.some((arg) => !arg.braced && !implicitConversion(compiler, arg, element)))
+    return undefined;
   let inits: Eval<Value>[];
   try {
-    inits = elements.map((node) => compiler.elementInitializer(element, node));
+    inits = args.map((arg) =>
+      arg.braced
+        ? compiler.listInitializer(element, arg.braced, arg.row)
+        : compiler.copyInitializer(element, arg, arg.row, true)
+    );
   } catch (error) {
-    if (elements.length > 0 && elements.length <= 2) return undefined;
+    if (
+      canUseOtherConstructors &&
+      error instanceof CompileError &&
+      !(error instanceof NarrowingConversionError) &&
+      args.some((arg) => arg.braced)
+    )
+      return undefined;
     throw error;
   }
   if (elements.length > 0) requireElementUse(compiler, element, row, 'copy');

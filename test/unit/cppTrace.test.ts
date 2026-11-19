@@ -215,6 +215,16 @@ int main() {
   expect(traceProgram('cpp', program, program)).toMatchObject({ stdout: 'ok' });
 });
 
+test.each(['std::cout.width(100001)', 'std::cout << std::fixed << std::setprecision(100001)'])(
+  'oversized formatted output is charged before padding: %s',
+  (setup) => {
+    const program = `#include <iostream>
+#include <iomanip>
+int main() { ${setup}; std::cout << 1.0; }`;
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'output' });
+  }
+);
+
 test('an exception message cannot hide an output limit', () => {
   const program = `#include <iostream>
 #include <stdexcept>
@@ -227,6 +237,21 @@ struct Error : std::exception {
 };
 int main() { throw Error{}; }`;
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'output' });
+});
+
+test.each([
+  ['std::abs(INT_MIN)', 'オーバーフロー'],
+  ['std::labs(LONG_MIN)', 'オーバーフロー'],
+  ['std::printf("%s", text)', 'nullptr'],
+])('reports undefined library behavior for %s', (call, diagnostic) => {
+  const program = `#include <climits>
+#include <cstdio>
+#include <cstdlib>
+int main() { const char* text = nullptr; ${call}; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining(diagnostic),
+  });
 });
 
 test('an exception message ends its lifetime with the exception object', () => {

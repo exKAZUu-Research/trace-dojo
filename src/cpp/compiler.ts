@@ -3,7 +3,7 @@ import { ExecutionLimitError } from '../interpreter/limits';
 import { misplacedAtomicMessage, type TraceOptions } from '../interpreter/traceAnnotations';
 import { byteAt } from './bytes';
 import { hasAuto } from './compilerBase';
-import { CppException, CppRuntimeError } from './errors';
+import { CppException, CppRuntimeError, NarrowingConversionError } from './errors';
 import { type Expr, type Initializer, type InitializerTarget, initializerWithConstancy } from './expr';
 import { SequenceValue } from './library/containerValues';
 import type { Library } from './library/registry';
@@ -1395,19 +1395,32 @@ export class Compiler extends StatementCompiler {
     this.globalScope.names.set(name, { kind: 'global', global, isReference: true });
     global.hasStaticReferenceBinding = binding.isConstant;
     const initializers = binding.isConstant ? this.constantInitializers : this.dynamicInitializers;
-    initializers.push(this.staticReferenceInitializer(global, binding, row));
+    initializers.push(this.staticReferenceInitializer(global, binding, row, true));
     return binding.type;
   }
 
-  staticReferenceInitializer(global: GlobalInfo, binding: ReferenceBinding, row: number): Eval<undefined> {
+  staticReferenceInitializer(
+    global: GlobalInfo,
+    binding: ReferenceBinding,
+    row: number,
+    fileScope = false
+  ): Eval<undefined> {
     let locate: Eval<Ptr>;
     if ('lifetime' in binding) {
       const { type, make, locate: locateHeld } = binding.lifetime;
       const holder = this.declareStaticStorage(`\0${global.name}`, type, row, false);
-      const store = this.staticStore(type, row);
+      const register = this.staticRegistration(type, row);
+      const registerDuringStartup = fileScope && binding.isConstant;
+      if (registerDuringStartup && register) {
+        this.dynamicInitializers.push((frame) => {
+          register(frame, frame.runtime.globals[holder.index] as Box);
+          return;
+        });
+      }
       locate = (frame) => {
         const box = frame.runtime.globals[holder.index] as Box;
-        store(frame, box, make(frame) as Value);
+        box.value = make(frame);
+        if (!registerDuringStartup) register?.(frame, box);
         return locateHeld(box);
       };
     } else {
@@ -1447,14 +1460,22 @@ export class Compiler extends StatementCompiler {
       if (global.isConstexprPointer && !init.isConstant)
         this.error(row, 'constexpr の変数の初期値には定数式を書いてください。');
       const { index } = global;
-      const store = this.staticStore(type, row);
-      const exec = this.fullExpression<undefined>((frame) => {
+      const register = this.staticRegistration(type, row);
+      const execute = this.fullExpression<undefined>((frame) => {
         const box = frame.runtime.globals[index] as Box;
-        store(frame, box, init.run(frame, initializerTarget(box.value), true));
+        box.value = init.run(frame, initializerTarget(box.value), true);
+        if (!init.isConstant) register?.(frame, box);
         return;
       });
-      if (init.isConstant) this.constantInitializers.push(exec);
-      else this.dynamicInitializers.push(recordsStep ? this.withStep(row, exec, init.isCreation) : exec);
+      if (init.isConstant) {
+        this.constantInitializers.push(execute);
+        if (register) {
+          this.dynamicInitializers.push((frame) => {
+            register(frame, frame.runtime.globals[index] as Box);
+            return;
+          });
+        }
+      } else this.dynamicInitializers.push(recordsStep ? this.withStep(row, execute, init.isCreation) : execute);
     } finally {
       this.context = saved;
     }
@@ -1499,33 +1520,31 @@ export class Compiler extends StatementCompiler {
     const init = this.staticInitialization(type, value, row);
     const { index } = global;
     if (!init) return () => {};
+    const register = this.staticRegistration(type, row);
+    const initialize = this.fullExpression<undefined>((frame) => {
+      const box = frame.runtime.globals[index] as Box;
+      box.value = init.run(frame, initializerTarget(box.value), true);
+      return;
+    });
     if (init.isConstant) {
-      this.constantInitializers.push((frame) => {
-        const box = frame.runtime.globals[index] as Box;
-        box.value = init.run(frame, initializerTarget(box.value), true);
-        return;
-      });
-      return () => {};
+      this.constantInitializers.push(initialize);
+      if (!register) return () => {};
     }
     const initialized = new WeakSet<Box>();
-    const run = this.fullExpression((frame) =>
-      init.run(frame, initializerTarget((frame.runtime.globals[index] as Box).value), true)
-    );
-    const store = this.staticStore(type, row);
     return (frame) => {
       const box = frame.runtime.globals[index] as Box;
       if (initialized.has(box)) return;
-      store(frame, box, run(frame));
+      if (!init.isConstant) initialize(frame);
+      register?.(frame, box);
       initialized.add(box);
     };
   }
 
-  /** Registers the successfully initialized object for destruction at program exit (C++20 [basic.start.term]). */
-  private staticStore(type: Type, row: number): (frame: Frame, box: Box, value: Value) => void {
+  private staticRegistration(type: Type, row: number): ((frame: Frame, box: Box) => void) | undefined {
     const destroy = this.destroyerOf(type, row);
-    return (frame, box, value) => {
-      box.value = value;
-      if (destroy) frame.runtime.staticObjects.push({ box, destroy });
+    if (!destroy) return;
+    return (frame, box) => {
+      frame.runtime.staticObjects.push({ box, destroy });
     };
   }
 
@@ -1584,10 +1603,12 @@ export class Compiler extends StatementCompiler {
     const to = unqualified(type);
     const narrowing = isNarrowing(from, to, value.constant);
     if (narrowing) {
-      this.error(
-        row,
-        `{...} の中では、${typeName(from)} 型の値を ${typeName(to)} 型に縮めて変換できません（縮小変換）。`
-      );
+      throw new NarrowingConversionError([
+        {
+          row,
+          message: `{...} の中では、${typeName(from)} 型の値を ${typeName(type)} 型に縮めて変換できません（縮小変換）。`,
+        },
+      ]);
     }
   }
 
@@ -1952,8 +1973,7 @@ export class Compiler extends StatementCompiler {
       supplied[index] ? undefined : (this.aggregateDefaults.get(field)?.() ?? this.bindAggregateDefault(field, row))
     );
     const destroyers = fields.map((field) => this.destroyerOf(field.type));
-    const isConstant =
-      !cls.destructor && fields.every((_field, index) => (supplied[index] ?? defaults[index])?.isConstant);
+    const isConstant = fields.every((_field, index) => (supplied[index] ?? defaults[index])?.isConstant);
     return initializerWithConstancy((frame, target, zeroInitialize, referenceLifetime) => {
       const object = newObject(frame, cls, zeroInitialize, asObject(target));
       const owner = referenceLifetime === 'full-expression' ? referenceLifetime : object;

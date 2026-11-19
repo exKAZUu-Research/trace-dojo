@@ -1,4 +1,5 @@
 import { isFloatUnderflow, isSpaceByte, parseFloatPrefix, parseIntegerPrefix } from '../../c/library/numberParsing';
+import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import { byteArray, byteAt } from '../bytes';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
@@ -107,10 +108,11 @@ export class StreamValue extends Store {
         return;
       }
       const at = this.writePosition;
-      this.buffer = this.buffer.slice(0, at) + bytes + this.buffer.slice(at + bytes.length);
-      this.writePosition += bytes.length;
+      const end = at + bytes.length;
+      if (end > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
       frame.runtime.reserve(Math.ceil(bytes.length / 8));
-      if (this.buffer.length > 1_000_000) throw new CppRuntimeError('custom', '文字列が長すぎます。');
+      this.buffer = this.buffer.slice(0, at) + bytes + this.buffer.slice(end);
+      this.writePosition = end;
     } else {
       frame.runtime.write(this.target, bytes);
     }
@@ -125,11 +127,20 @@ export class StreamValue extends Store {
       this.write(frame, text);
       return;
     }
+    this.checkFormattedSize(frame, width);
     const padding = this.fill.repeat(width - text.length);
     const adjust = this.flags & FLAGS.adjustfield;
     if (adjust === FLAGS.left) this.write(frame, text + padding);
     else if (adjust === FLAGS.internal) this.write(frame, text.slice(0, internalAt) + padding + text.slice(internalAt));
     else this.write(frame, padding + text);
+  }
+  checkFormattedSize(frame: Frame, length: number): void {
+    if (this.target === 'buffer') {
+      if (this.writePosition + length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
+    } else if (length > LIMITS.maxOutputLength) {
+      throw new ExecutionLimitError('output');
+    }
+    frame.runtime.spend(Math.ceil(length / 64));
   }
 }
 
@@ -635,15 +646,24 @@ function writeInteger(frame: Frame, stream: StreamValue, value: bigint, isSigned
 
 /** Writes a floating-point number as `num_put` does, with the stream's precision and float field. */
 function writeFloat(frame: Frame, stream: StreamValue, value: number): void {
+  if (!stream.isGood) return;
   const field = stream.flags & FLAGS.floatfield;
   const conversion =
     field === FLAGS.fixed ? 'f' : field === FLAGS.scientific ? 'e' : field === FLAGS.floatfield ? 'a' : 'g';
+  const alternate = (stream.flags & FLAGS.showpoint) !== 0;
+  let precision = conversion === 'a' || stream.precision < 0 ? undefined : stream.precision;
+  if (precision !== undefined && Number.isFinite(value)) {
+    if (conversion === 'g' && !alternate) {
+      // A binary64 value is an integer times 2^-1074 at worst; further digits only pad the rounded number.
+      precision = Math.min(precision, 1074);
+    }
+    stream.checkFormattedSize(frame, precision);
+  }
   const text = formatFloat(value, {
     conversion,
-    // `printf` takes a negative precision as omitted.
-    precision: conversion === 'a' || stream.precision < 0 ? undefined : stream.precision,
+    precision,
     upper: (stream.flags & FLAGS.uppercase) !== 0,
-    alternate: (stream.flags & FLAGS.showpoint) !== 0,
+    alternate,
     sign: stream.flags & FLAGS.showpos ? '+' : '',
   });
   stream.writeField(frame, text, paddingPoint(text));

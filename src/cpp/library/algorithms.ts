@@ -14,6 +14,7 @@ import {
   isArithmetic,
   isConstType,
   isInteger,
+  isWide,
   LONG,
   nonReference,
   PTRDIFF_T,
@@ -46,7 +47,7 @@ import type { IteratorCategory } from './libraryClass';
 import type { EngineValue } from './random';
 import { uniformInteger } from './random';
 import type { Library } from './registry';
-import { constRef, generic, native } from './support';
+import { constRef, generic, native, readCString } from './support';
 
 /** What an argument's type tells of an iterator: the element it designates, its category, and whether it goes backward. */
 interface IteratorInfo {
@@ -815,14 +816,15 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         { ...args[1], isLvalue: false, constant: undefined },
         args[0].row
       ).type;
-      return native(name, [common, common], common, ([a, b]) => {
+      if (!isInteger(common)) return;
+      return native(name, types, common, ([a, b]) => {
         let x = BigInt(a as number | bigint);
         let y = BigInt(b as number | bigint);
         if (x < 0n) x = -x;
         if (y < 0n) y = -y;
         const gcd = (p: bigint, q: bigint): bigint => (q === 0n ? p : gcd(q, p % q));
         const result = name === 'gcd' ? gcd(x, y) : x === 0n || y === 0n ? 0n : (x / gcd(x, y)) * y;
-        return typeof a === 'bigint' ? result : Number(result);
+        return isWide(common) ? result : Number(result);
       });
     });
   }
@@ -1063,19 +1065,10 @@ function valueEquality(element: Type, compared: Type): ((a: Value, b: Value) => 
     return (a, b) => convertScalar(a as Scalar, type, promoted) === convertScalar(b as Scalar, argType, promoted);
   }
   if (type.kind === 'class' && type.cls.library?.kind === 'string' && argType.kind === 'pointer') {
-    return (a, b) => (a as unknown as { bytes: string }).bytes === readBytes(b as Ptr);
+    return (a, b) => (a as unknown as { bytes: string }).bytes === readCString(b as Ptr);
   }
   if (typeName(type) !== typeName(argType)) return undefined;
   return equalTo(type);
-}
-
-function readBytes(pointer: Ptr): string {
-  let bytes = '';
-  for (let index = pointer.index; ; index++) {
-    const value = pointer.store?.get(index) as number;
-    if (value === 0) return bytes;
-    bytes += String.fromCodePoint(value & 0xff);
-  }
 }
 
 function assignmentSource(

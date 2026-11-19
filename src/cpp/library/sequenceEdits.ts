@@ -118,7 +118,7 @@ export class SequenceEditor {
         () => this.ops.copy(frame, value.read()),
         () => this.ops.destroy
       );
-      self.splice(at, 0, ...made);
+      self.insertValues(at, made);
     } else if (this.kind === 'deque') this.dequeInsertCopies(frame, self, at, count, value);
     else {
       this.vectorInsertCopies(frame, self, at, count, value);
@@ -130,7 +130,8 @@ export class SequenceEditor {
   insertRange(frame: Frame, self: SequenceValue, at: number, source: Source, isForwardOnly: boolean): void {
     if (source.values.length === 0) return;
     if (this.kind === 'list') {
-      self.splice(at, 0, ...source.values.map((value) => source.construct(frame, value)));
+      const values = this.build(frame, source.values.length, (index) => source.construct(frame, source.values[index]));
+      self.insertValues(at, values);
     } else if (this.kind === 'vector') {
       this.vectorInsertRange(frame, self, at, source);
       self.invalidateVectorSuffix(at);

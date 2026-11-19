@@ -168,6 +168,12 @@ export class SequenceValue extends Store {
     return this.items.splice(start, remove, ...items);
   }
 
+  insertValues(at: number, values: Value[]): void {
+    this.editPositions(at, 0, values.length);
+    // oxlint-disable-next-line unicorn/prefer-spread -- Bulk insertion concatenates whole arrays directly.
+    this.items = this.items.slice(0, at).concat(values, this.items.slice(at));
+  }
+
   replaceItems(items: Value[]): Value[] {
     const previous = this.items;
     this.editPositions(0, previous.length, items.length);
