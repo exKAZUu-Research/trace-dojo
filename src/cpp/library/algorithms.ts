@@ -28,7 +28,18 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { ArrayStore, Box, CObject, endLifetime, NULL_PTR, Ptr, type Store, UNINIT, type Value } from '../values';
+import {
+  ArrayStore,
+  Box,
+  CObject,
+  endLifetime,
+  holdValues,
+  NULL_PTR,
+  Ptr,
+  type Store,
+  UNINIT,
+  type Value,
+} from '../values';
 import { pairClass } from './associative';
 import {
   assignElement,
@@ -1433,7 +1444,7 @@ function accumulatorInitializer(
   return (frame, source) => {
     const storage = new Box();
     const location = storage.location(0);
-    holdAll(frame, [() => storage, () => source], () =>
+    holdValues(frame, [storage, source], () =>
       initializeAt(
         frame,
         ops.type,

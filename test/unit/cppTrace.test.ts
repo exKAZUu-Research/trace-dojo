@@ -305,6 +305,31 @@ int main() { make()[probe()]; }`;
 });
 
 test.each([
+  ['forward iterator', 'iterator', 'begin'],
+  ['reverse iterator', 'reverse_iterator', 'rbegin'],
+  ['built-in pointer', '', ''],
+])('keeps heap storage alive while offsetting a %s', (_, iterator, begin) => {
+  const factory = iterator
+    ? `std::vector<Turtle*>::${iterator} make() {
+  auto* receiver = new std::vector<Turtle*>{new Turtle(0, 1)};
+  return receiver->${begin}();
+}`
+    : 'Turtle** make() { return new Turtle*[1]{new Turtle(0, 1)}; }';
+  const program = `#include <iostream>
+#include <vector>
+Turtle observer(0, 0);
+${factory}
+int probe() {
+  std::cout << observer.canMoveForward();
+  return 0;
+}
+int main() { make() + probe(); }`;
+  const result = executeProgram('cpp', program);
+  if (result.kind !== 'executed') throw new Error(JSON.stringify(result));
+  expect(result.stdout).toBe('0');
+});
+
+test.each([
   ['a member buffer', 'struct Row { std::vector<Turtle*> items; Token token; };', 'items'],
   ['a base buffer', 'struct Row : Storage { Token token; };', 'items'],
   ['a built-in array', 'struct Row { Entry cells[2]; };', 'cells[0].items'],

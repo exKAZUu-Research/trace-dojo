@@ -339,11 +339,13 @@ function compileEmplacing(
     positions.set(frame, frame.pending.length);
     try {
       return holdAll(frame, locations, (values) =>
-        use({
-          key: keyOf?.(values[0] as Ptr),
-          make: () => make(frame),
-          assign: assign ? (target) => holdValues(frame, [target], () => assign(frame)) : undefined,
-        })
+        holdValues(frame, values as Value[], () =>
+          use({
+            key: keyOf?.(values[0] as Ptr),
+            make: () => make(frame),
+            assign: assign ? (target) => holdValues(frame, [target], () => assign(frame)) : undefined,
+          })
+        )
       );
     } finally {
       if (previous === undefined) positions.delete(frame);

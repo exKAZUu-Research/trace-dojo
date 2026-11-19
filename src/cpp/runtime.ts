@@ -50,6 +50,7 @@ export class Frame implements TracedFrame {
   readonly temporaries: Temporary[] = [];
   /** Values the frame holds outside its variables, such as an exception a handler runs for. */
   readonly pending: (Value | Ptr)[] = [];
+  readonly evaluationRoots: Value[] = [];
   /** The slot of the local variable that a `return` returned without copying (the named return value). */
   nrvoSlot: number | undefined;
 
@@ -81,17 +82,18 @@ export class Frame implements TracedFrame {
  * arguments and a list's elements are while the rest of them are evaluated.
  */
 export function holdAll<T>(frame: Frame, runs: readonly Eval<unknown>[], use: (values: unknown[]) => T): T {
-  const mark = frame.pending.length;
+  const roots = frame.evaluationRoots;
+  const mark = roots.length;
   try {
     const values: unknown[] = [];
     for (const run of runs) {
       const value = run(frame);
-      frame.pending.push(value as Value);
+      roots.push(value as Value);
       values.push(value);
     }
     return use(values);
   } finally {
-    frame.pending.length = mark;
+    roots.length = mark;
   }
 }
 
@@ -269,6 +271,7 @@ export class Runtime implements TracedRuntime<Frame> {
       visit(frame.returnValue);
       for (const { object } of frame.temporaries) visit(object);
       for (const value of frame.pending) visit(value);
+      for (const value of frame.evaluationRoots) visit(value);
     }
     for (const exception of this.handling) visit(exception.value);
     for (const exception of this.unwinding) visit(exception.value);

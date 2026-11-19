@@ -818,12 +818,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         type: PTRDIFF_T,
         isLvalue: false,
         row,
-        run: (frame) => {
-          const p = a(frame) as Ptr;
-          const q = b(frame) as Ptr;
-          if (!p.sharesRange(q)) throw new CppRuntimeError('pointerDifference');
-          return BigInt(p.index - q.index);
-        },
+        run: (frame) =>
+          holdAll(frame, [a, b], ([first, second]) => {
+            const p = first as Ptr;
+            const q = second as Ptr;
+            if (!p.sharesRange(q)) throw new CppRuntimeError('pointerDifference');
+            return BigInt(p.index - q.index);
+          }),
       };
     }
     if (COMPARISONS.has(operator) && (isPointerLike(lt) || isPointerLike(rt))) {
@@ -840,7 +841,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         type: BOOL,
         isLvalue: false,
         row,
-        run: (frame) => comparePointers(operator, asPointer(a(frame)), asPointer(b(frame))),
+        run: (frame) => holdAll(frame, [a, b], ([p, q]) => comparePointers(operator, asPointer(p), asPointer(q))),
       };
     }
     return this.error(row, `演算子 ${operator} は ${typeName(lt)} と ${typeName(rt)} には使えません。`);
@@ -859,7 +860,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       staticAddress: pointer.staticAddress && displacement.constant !== undefined,
       constantPointee: offsetConstantLocation(pointer.constantPointee, displacement.constant, sign),
       row,
-      run: (frame) => (p(frame) as Ptr).offset(sign * Number(n(frame))),
+      run: (frame) =>
+        holdAll(frame, [p, n], ([location, distance]) => (location as Ptr).offset(sign * Number(distance))),
     };
   }
 
@@ -1118,7 +1120,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         const evaluated = factors?.(frame).map((factor) => () => factor) ?? [right.run];
         return holdAll(frame, [...evaluated, location], (values) => {
           const place = values.at(-1) as Ptr;
-          place.write(value(frame) as Value);
+          holdValues(frame, values as Value[], () => place.write(value(frame) as Value));
           return place;
         });
       },

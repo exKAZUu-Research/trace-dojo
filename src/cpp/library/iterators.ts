@@ -185,12 +185,13 @@ function iteratorOperator(
           type: PTRDIFF_T,
           isLvalue: false,
           row,
-          run: (frame) => {
-            const p = a(frame);
-            const q = b(frame);
-            if (p.store !== q.store) throw new CppRuntimeError('invalidIterator');
-            return BigInt(isReverse ? q.index - p.index : p.index - q.index);
-          },
+          run: (frame) =>
+            holdAll(frame, [a, b], ([first, second]) => {
+              const p = first as Ptr;
+              const q = second as Ptr;
+              if (p.store !== q.store) throw new CppRuntimeError('invalidIterator');
+              return BigInt(isReverse ? q.index - p.index : p.index - q.index);
+            }),
         };
       }
       const [iterator, offset] = isSelf(first) ? [first, second] : [second, first];
@@ -202,7 +203,10 @@ function iteratorOperator(
         type,
         isLvalue: false,
         row,
-        run: (frame) => moveIterator(it(frame), sign * Number(n(frame)), isReverse),
+        run: (frame) =>
+          holdAll(frame, [it, n], ([location, distance]) =>
+            moveIterator(location as Ptr, sign * Number(distance), isReverse)
+          ),
       };
     }
     case '+=':
@@ -215,11 +219,12 @@ function iteratorOperator(
         type: first.type,
         isLvalue: true,
         row,
-        run: (frame) => {
-          const place = location(frame) as Ptr;
-          place.write(moveIterator(place.read() as Ptr, sign * Number(n(frame)), isReverse));
-          return place;
-        },
+        run: (frame) =>
+          holdAll(frame, [n, location], ([distance, receiver]) => {
+            const place = receiver as Ptr;
+            place.write(moveIterator(place.read() as Ptr, sign * Number(distance), isReverse));
+            return place;
+          }),
       };
     }
     case '[]': {
@@ -253,7 +258,7 @@ function iteratorOperator(
         type: BOOL,
         isLvalue: false,
         row,
-        run: (frame) => compareIterators(operator, a(frame), b(frame), isReverse),
+        run: (frame) => holdAll(frame, [a, b], ([p, q]) => compareIterators(operator, p as Ptr, q as Ptr, isReverse)),
       };
     }
     default: {
