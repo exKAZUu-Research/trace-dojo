@@ -1,9 +1,19 @@
-import { exactParts } from './binaryFloat';
-
 /**
  * Formats doubles as macOS's libc does for `%f`, `%e`, `%g`, and `%a`: from the exact binary value, rounded to the
  * requested digits using macOS rounding rules.
  */
+
+/** The exact value of a finite non-negative double as `mantissa * 2^exponent`. */
+export function exactParts(value: number): { mantissa: bigint; exponent: number } {
+  const view = new DataView(new ArrayBuffer(8));
+  view.setFloat64(0, value);
+  const bits = view.getBigUint64(0);
+  const biased = Number((bits >> 52n) & 0x7_ffn);
+  const fraction = bits & ((1n << 52n) - 1n);
+  return biased === 0
+    ? { mantissa: fraction, exponent: -1074 }
+    : { mantissa: fraction | (1n << 52n), exponent: biased - 1075 };
+}
 
 /** The exact decimal digits of a finite positive double, and the power of ten of the first digit. */
 // code-gauge-allow duplicateLines 16 -- Numeric conversions preserve their reference language's zero representation and coefficient normalization.

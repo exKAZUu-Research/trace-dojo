@@ -1,10 +1,10 @@
+import { formatFixed, formatGeneral, formatHex, formatScientific } from '../../interpreter/floatFormat';
 import type { Scalar, Value } from '../arith';
 import { CRuntimeError } from '../errors';
 import type { Runtime } from '../runtime';
 import { storerOf } from '../runtime';
 import { CHAR, type CType, INT, INT_PROPERTIES, LONG, SHORT } from '../types';
 import { unsupportedMessage } from '../unsupported';
-import { formatFixed, formatGeneral, formatHex, formatScientific } from './floatFormat';
 import { readCString, startsWithAt } from './support';
 
 interface Spec {
