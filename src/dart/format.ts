@@ -1,6 +1,6 @@
 import type { Runtime } from './runtime';
 import { vmTypeString } from './types';
-import type { DartObject, Value } from './values';
+import { type DartObject, DartRecord, type Value } from './values';
 
 /** `double.toString()`: the shortest digits that read back as the value, as the Dart VM prints them. */
 export function formatDouble(value: number): string {
@@ -48,6 +48,7 @@ export function safeToString(runtime: Runtime, value: Value): string {
     return stringOf(runtime, value);
   }
   if (typeof value === 'string') return quoteForError(value);
+  if (value instanceof DartRecord) return `Record ${stringOf(runtime, value)}`;
   return `Instance of '${instanceName(runtime, value)}'`;
 }
 

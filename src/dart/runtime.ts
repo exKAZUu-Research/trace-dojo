@@ -260,6 +260,8 @@ export class Runtime implements TracedRuntime<Frame> {
       const target = this.readMember(receiver, member, callRow);
       return this.callValue(target, args, typeArgs, callRow);
     }
+    // A record has no methods, so the VM looks the name up as a field and reports a missing getter.
+    if (receiver instanceof DartRecord) return this.noSuchMethod(receiver, name, 'getter', NO_ARGUMENTS);
     return this.noSuchMethod(receiver, name, 'method', args, typeArgs);
   }
 

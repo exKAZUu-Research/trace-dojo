@@ -821,7 +821,11 @@ function storeIterator(
 
 function storeCurrent(runtime: Runtime, receiver: Value): Value {
   const state = (receiver as DartObject).native as unknown as StoreIteratorState;
-  if (state.current === undefined) castTo(runtime, undefined, elementTypeOf(receiver as DartObject));
+  if (state.current === undefined) {
+    // The VM's iterator of a map's entries has no entry to give, and says so; the others cast null to the element.
+    if (state.kind === 'entries') runtime.throwError('StateError', '', ['No element']);
+    castTo(runtime, undefined, elementTypeOf(receiver as DartObject));
+  }
   return state.current;
 }
 
