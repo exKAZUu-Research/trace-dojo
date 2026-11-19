@@ -280,6 +280,16 @@ int main() { ${body} }`;
   });
 });
 
+test('copy-list initialization rejects an explicit forwarding pair constructor', () => {
+  const program = `#include <utility>
+#include <vector>
+int main() { std::pair<std::vector<int>, int> pair = {1, 2}; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: expect.stringContaining('explicit') }],
+  });
+});
+
 test.each([
   ['reverse', 'v.begin(), v.end()'],
   ['rotate', 'v.begin(), v.begin() + 1, v.end()'],
@@ -302,6 +312,16 @@ int main() { std::vector<Item> v(3); std::${algorithm}(${args}); }`;
 
 // Apple clang++ 21 (`-std=c++20`) rejects each program at the given row, counted from 0.
 test.each([
+  [
+    'a private member of a class forward-declared as a struct',
+    'struct C;\nclass C { int value; };\nint main() { C c; return c.value; }',
+    2,
+  ],
+  [
+    'a private base of a class forward-declared as a struct',
+    'struct B {};\nstruct D;\nclass D : B {};\nint main() { D d; B& base = d; }',
+    3,
+  ],
   ['a private member of a base', 'struct B { private: int x = 1; };\nstruct D : B { int f() { return B::x; } };', 1],
   ['a private member function of a base', 'struct B { private: void g() {} };\nstruct D : B { void f() { g(); } };', 1],
   [

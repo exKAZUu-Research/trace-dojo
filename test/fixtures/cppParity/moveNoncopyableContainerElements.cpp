@@ -121,4 +121,10 @@ int main() {
   unordered.emplace(1, std::vector<Item>(4));
   unordered.try_emplace(2, std::vector<Item>(5));
   std::cout << map[1].size() << map[2].size() << unordered[1].size() << unordered[2].size() << '\n';
+
+  std::pair<std::vector<Item>, int> pair(std::vector<Item>(2), 3);
+  auto made = std::make_pair(std::vector<Item>(4), 5);
+  std::pair<std::vector<Item>, long> converted(std::make_pair(std::vector<Item>(6), 7));
+  std::cout << pair.first.size() << pair.second << made.first.size() << made.second
+            << converted.first.size() << converted.second << '\n';
 }

@@ -51,6 +51,13 @@ int main() {
   std::cout << std::accumulate(w.begin(), w.end(), std::string(), std::plus<std::string>()) << '\n';
   long long x = 5;
   std::cout << std::min<long long>(3, x) << ' ' << std::max<double>(1, 2.5) << '\n';
+  std::cout << std::clamp<double>(1.5, 0, 1) << ' ' << sizeof(std::gcd<long>(2, 3)) << ' '
+            << sizeof(std::lcm<short, short>(2, 3)) << '\n';
+  int input[]{1, 2, 3};
+  const int* last = input + 3;
+  std::cout << std::accumulate<const int*, double>(input, input + 3, 0.5f) << ' '
+            << std::count<const int*, double>(input, input + 3, 1.9) << ' '
+            << std::equal<const int*, const int*>(input, input + 3, input, last) << '\n';
 
   std::vector<P> ps{{1}, {3}, {5}, {7}};
   std::cout << (std::lower_bound(ps.begin(), ps.end(), 4, lessPk) - ps.begin())

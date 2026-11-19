@@ -1128,6 +1128,10 @@ function emplacement(
 
 /** Compiles the construction of an element from arguments, as `emplace_back` and the like do. */
 export function constructElement(compiler: ExpressionCompiler, element: Type, args: Expr[], row: number): Eval<Value> {
+  return elementConstruction(compiler, element, args, row).run as Eval<Value>;
+}
+
+export function elementConstruction(compiler: ExpressionCompiler, element: Type, args: Expr[], row: number): Expr {
   return compiler.withLibraryAccess(() => {
     const source =
       args.length === 1 && sameType(element, args[0].type, false)
@@ -1135,13 +1139,18 @@ export function constructElement(compiler: ExpressionCompiler, element: Type, ar
         : undefined;
     if (source) {
       requireMoveConstruction(compiler, element, row);
-      return (frame) => constructElementFromRvalue(frame, element, source(frame).read());
+      return {
+        type: element,
+        isLvalue: false,
+        row,
+        run: (frame) => constructElementFromRvalue(frame, element, source(frame).read()),
+      };
     }
-    if (element.kind === 'class') return compiler.constructObject(element.cls, args, row, false).run as Eval<Value>;
-    if (args.length === 0) return compiler.valueInitialized(element, row).run as Eval<Value>;
+    if (element.kind === 'class') return compiler.constructObject(element.cls, args, row, false);
+    if (args.length === 0) return compiler.valueInitialized(element, row);
     if (args.length !== 1) return compiler.error(row, `${typeName(element)} の値には引数を1つだけ書いてください。`);
     const argument = compiler.directInitializerArgument(element, args[0]);
-    return compiler.convert(argument, unqualified(element), row).run as Eval<Value>;
+    return compiler.convert(argument, unqualified(element), row);
   });
 }
 

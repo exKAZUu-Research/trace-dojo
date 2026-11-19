@@ -211,6 +211,8 @@ const ARRAY_REFERENCE_FUNCTIONS = new Set([
   'swap',
 ]);
 
+type TemplateParameterPositions = readonly (readonly number[])[];
+
 /** The function templates of `<algorithm>`, `<numeric>`, `<iterator>`, and `<utility>`. */
 // code-gauge-allow functionNcss 400 -- One definition per algorithm, each a few lines.
 export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]> {
@@ -218,16 +220,18 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   const compiler = (): ExpressionCompiler => library.compiler;
   const define = (
     name: string,
+    parameters: TemplateParameterPositions | ((args: Expr[], types: Type[]) => TemplateParameterPositions),
     instantiate: (args: Expr[], templateArgs: Type[] | undefined) => FunctionInfo | undefined
   ): void => {
     const overload = generic(name, (args, templateArgs) => {
       if (args.some((arg) => arg.functions && arg.functions.candidates.length !== 1)) return;
-      return instantiate(
-        ARRAY_REFERENCE_FUNCTIONS.has(name)
-          ? args
-          : args.map((arg) => (arg.type.kind === 'array' ? compiler().rvalue(arg) : arg)),
-        templateArgs
-      );
+      const adjusted = ARRAY_REFERENCE_FUNCTIONS.has(name)
+        ? args
+        : args.map((arg) => (arg.type.kind === 'array' ? compiler().rvalue(arg) : arg));
+      if (!templateArgs?.length) return instantiate(adjusted, templateArgs);
+      const positions = typeof parameters === 'function' ? parameters(adjusted, templateArgs) : parameters;
+      const typed = explicitAlgorithmArguments(adjusted, positions, templateArgs);
+      if (typed) return instantiate(typed, templateArgs);
     });
     functions.set(name, [...(functions.get(name) ?? []), overload]);
   };
@@ -270,7 +274,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
 
   // Sorting -------------------------------------------------------------------------------------------------------
   for (const name of ['sort', 'stable_sort']) {
-    define(name, (args) => {
+    define(name, [[0, 1], [2]], (args) => {
       const info = writableRangeAt(args, 0);
       if (!info || args.length > 3) return;
       checkCategory(name, info, 'randomAccess', args[0].row);
@@ -292,7 +296,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       });
     });
   }
-  define('reverse', (args) => {
+  define('reverse', [[0, 1]], (args) => {
     const info = writableRangeAt(args, 0);
     if (!info || args.length !== 2) return;
     checkCategory('reverse', info, 'bidirectional', args[0].row);
@@ -304,7 +308,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     });
   });
   for (const name of ['next_permutation', 'prev_permutation']) {
-    define(name, (args) => {
+    define(name, [[0, 1], [2]], (args) => {
       const info = writableRangeAt(args, 0);
       if (!info || args.length > 3) return;
       checkCategory(name, info, 'bidirectional', args[0].row);
@@ -319,7 +323,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       });
     });
   }
-  define('shuffle', (args) => {
+  define('shuffle', [[0, 1], [2]], (args) => {
     const info = writableRangeAt(args, 0);
     if (!info || args.length !== 3 || args[2].type.kind !== 'class' || args[2].type.cls.library?.kind !== 'engine')
       return;
@@ -341,7 +345,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
 
   // Searching and counting ------------------------------------------------------------------------------------------
   for (const name of ['min_element', 'max_element']) {
-    define(name, (args) => {
+    define(name, [[0, 1], [2]], (args) => {
       const info = rangeAt(args, 0);
       if (!info || args.length > 3) return;
       const less = lessOf(args, 2, info.element);
@@ -362,7 +366,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       });
     });
   }
-  define('find', (args) => {
+  define('find', [[0, 1], [2]], (args) => {
     const info = rangeAt(args, 0);
     if (!info || args.length !== 3) return;
     const equal = valueEquality(compiler(), info.element, decayed(args[2].type), args[0].row);
@@ -376,7 +380,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     });
   });
   for (const name of ['find_if', 'find_if_not']) {
-    define(name, (args) => {
+    define(name, [[0, 1], [2]], (args) => {
       const info = rangeAt(args, 0);
       if (!info || args.length !== 3) return;
       const predicate = predicateOf(args[2], info.element);
@@ -390,7 +394,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       });
     });
   }
-  define('count', (args) => {
+  define('count', [[0, 1], [2]], (args) => {
     const info = rangeAt(args, 0);
     if (!info || args.length !== 3) return;
     const equal = valueEquality(compiler(), info.element, decayed(args[2].type), args[0].row);
@@ -404,7 +408,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       return BigInt(count);
     });
   });
-  define('count_if', (args) => {
+  define('count_if', [[0, 1], [2]], (args) => {
     const info = rangeAt(args, 0);
     if (!info || args.length !== 3) return;
     const predicate = predicateOf(args[2], info.element);
@@ -417,7 +421,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     });
   });
   for (const name of ['all_of', 'any_of', 'none_of']) {
-    define(name, (args) => {
+    define(name, [[0, 1], [2]], (args) => {
       const info = rangeAt(args, 0);
       if (!info || args.length !== 3) return;
       const predicate = predicateOf(args[2], info.element);
@@ -435,7 +439,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     });
   }
   for (const name of ['lower_bound', 'upper_bound', 'binary_search']) {
-    define(name, (args) => {
+    define(name, [[0, 1], [2], [3]], (args) => {
       const info = rangeAt(args, 0);
       if (!info || args.length < 3 || args.length > 4) return;
       const types = params(args);
@@ -474,13 +478,13 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       );
     });
   }
-  define('equal', (args) => {
+  define('equal', equalTemplateParameters, (args, templateArgs) => {
     const info = rangeAt(args, 0);
     if (!info || args.length < 3 || args.length > 5) return;
     const other = iteratorInfo(decayed(args[2].type));
     if (!other) return;
     // equal(first1, last1, first2[, last2][, pred]): a fourth argument is the end of the second range or a predicate.
-    const hasEnd = args.length === 5 || (args.length === 4 && rangeAt(args, 2) !== undefined);
+    const hasEnd = !(args.length === 4 && templateArgs?.length === 3) && equalHasSecondEnd(args);
     const predicateArg = args[hasEnd ? 4 : 3];
     const predicate = predicateArg ? predicateOf(predicateArg, [info.element, other.element]) : undefined;
     const equal = valueEquality(compiler(), info.element, other.element, args[0].row);
@@ -501,7 +505,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   });
 
   // Modifying -------------------------------------------------------------------------------------------------------
-  define('fill', (args) => {
+  define('fill', [[0, 1], [2]], (args) => {
     const info = writableRangeAt(args, 0);
     if (!info || args.length !== 3) return;
     const itemType = constRef(unqualified(args[2].type));
@@ -529,7 +533,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       }
     });
   });
-  define('iota', (args) => {
+  define('iota', [[0, 1], [2]], (args) => {
     const info = writableRangeAt(args, 0);
     if (!info || args.length !== 3) return;
     const element = unqualified(info.element);
@@ -549,7 +553,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     });
   });
   for (const name of ['replace', 'replace_if']) {
-    define(name, (args) => {
+    define(name, [[0, 1], ...(name === 'replace' ? [[2, 3]] : [[2], [3]])], (args) => {
       const info = writableRangeAt(args, 0);
       if (!info || args.length !== 4) return;
       const predicate = name === 'replace_if' ? predicateOf(args[2], info.element) : undefined;
@@ -573,7 +577,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     });
   }
   for (const name of ['remove', 'remove_if', 'unique']) {
-    define(name, (args) => {
+    define(name, [[0, 1], [2]], (args) => {
       const info = writableRangeAt(args, 0);
       if (!info) return;
       if (name === 'unique' ? args.length > 3 : args.length !== 3) return;
@@ -619,7 +623,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       });
     });
   }
-  define('rotate', (args) => {
+  define('rotate', [[0, 1, 2]], (args) => {
     const info = writableRangeAt(args, 0);
     if (!info || args.length !== 3) return;
     const ops = elementOperations(compiler(), unqualified(info.element), args[0].row, 'relocate');
@@ -632,7 +636,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       return values.iterator(values.length - split);
     });
   });
-  define('swap', (args) => {
+  define('swap', [[0, 1]], (args) => {
     if (args.length !== 2) return;
     const bitSwap = bitReferenceSwap(args);
     if (bitSwap) return bitSwap;
@@ -650,7 +654,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       swapElements(frame, a as Ptr, b as Ptr, ops);
     });
   });
-  define('iter_swap', (args) => {
+  define('iter_swap', [[0], [1]], (args) => {
     const a = outputOf(args[0]);
     const b = outputOf(args[1]);
     if (!a || !b || a.isOutput || b.isOutput || args.length !== 2 || !sameType(a.element, b.element)) return;
@@ -662,7 +666,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
 
   // Copying and transforming ----------------------------------------------------------------------------------------
   for (const name of ['copy', 'copy_if']) {
-    define(name, (args) => {
+    define(name, [[0, 1], [2], ...(name === 'copy_if' ? [[3]] : [])], (args) => {
       const info = rangeAt(args, 0);
       const output = outputOf(args[2]);
       if (!info || !output || args.length !== (name === 'copy' ? 3 : 4)) return;
@@ -686,7 +690,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       });
     });
   }
-  define('transform', (args) => {
+  define('transform', transformTemplateParameters, (args) => {
     const info = rangeAt(args, 0);
     if (!info || (args.length !== 4 && args.length !== 5)) return;
     const isBinary = args.length === 5;
@@ -718,7 +722,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       return out.end;
     });
   });
-  define('for_each', (args) => {
+  define('for_each', [[0, 1], [2]], (args) => {
     const info = rangeAt(args, 0);
     const callback = args[2];
     if (!info || args.length !== 3 || !callback.functions) return;
@@ -731,7 +735,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   });
 
   // Numeric ------------------------------------------------------------------------------------------------------------
-  define('accumulate', (args) => {
+  define('accumulate', [[0, 1], [2], [3]], (args) => {
     const info = rangeAt(args, 0);
     if (!info || (args.length !== 3 && args.length !== 4)) return;
     const initial = args[2];
@@ -754,7 +758,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       }
     );
   });
-  define('inner_product', (args) => {
+  define('inner_product', [[0, 1], [2], [3], [4], [5]], (args) => {
     const info = rangeAt(args, 0);
     const other = args[2] ? iteratorInfo(unqualified(args[2].type)) : undefined;
     if (!info || !other || (args.length !== 4 && args.length !== 6)) return;
@@ -787,7 +791,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       }
     );
   });
-  define('partial_sum', (args) => {
+  define('partial_sum', [[0, 1], [2], [3]], (args) => {
     const info = rangeAt(args, 0);
     const output = outputOf(args[2]);
     if (!info || !output || (args.length !== 3 && args.length !== 4)) return;
@@ -822,7 +826,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     });
   });
   for (const name of ['gcd', 'lcm']) {
-    define(name, (args) => {
+    define(name, [[0], [1]], (args) => {
       if (args.length !== 2) return;
       const left = unqualified(args[0].type);
       const right = unqualified(args[1].type);
@@ -849,7 +853,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   const extremumOrder = (args: Expr[], index: number, type: Type): ((frame: Frame) => Less) | undefined =>
     orderOf(args[index], [type, type], args[0].row);
   for (const name of ['min', 'max', 'minmax']) {
-    define(name, (args, templateArgs) => {
+    define(name, extremumTemplateParameters, (args, templateArgs) => {
       if (args[0]?.braced && args.length <= 2) {
         const elements = args[0].braced.children.map((node) => compiler().compileExpression(node));
         const type = listElementType(elements, templateArgs);
@@ -887,10 +891,11 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       return fn;
     });
   }
-  define('clamp', (args) => {
+  define('clamp', [[], [3]], (args, templateArgs) => {
     if (args.length !== 3 && args.length !== 4) return;
-    const type = commonDeduced(args[0], args[1]);
-    if (!type || typeName(type) !== typeName(commonDeduced(args[1], args[2]) ?? VOID)) return;
+    const specified = templateArgs?.[0];
+    const type = specified ?? commonDeduced(args[0], args[1]);
+    if (!type || (!specified && !sameType(type, commonDeduced(args[1], args[2]) ?? VOID))) return;
     const less = extremumOrder(args, 3, type);
     if (!less) return;
     return native(
@@ -912,7 +917,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
 
   // Iterators ---------------------------------------------------------------------------------------------------------
   for (const name of ['begin', 'end', 'cbegin', 'cend', 'rbegin', 'rend']) {
-    define(name, (args) => {
+    define(name, [[0]], (args) => {
       if (args.length !== 1) return;
       const type = args[0].type;
       if (type.kind === 'array' && args[0].isLvalue && !name.startsWith('r')) {
@@ -927,14 +932,14 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       return rangeMemberFunction(compiler(), name, args[0]);
     });
   }
-  define('size', (args) => {
+  define('size', [[0]], (args) => {
     if (args.length !== 1) return;
     const type = args[0].type;
     if (type.kind === 'array') return native('size', [referenceTo(type)], SIZE_T, () => BigInt(type.length ?? 0));
     return rangeMemberFunction(compiler(), 'size', args[0]);
   });
   for (const name of ['next', 'prev']) {
-    define(name, (args) => {
+    define(name, [[0]], (args) => {
       const info = args[0] ? iteratorInfo(unqualified(args[0].type)) : undefined;
       if (!info || args.length > 2 || (args[1] && !isInteger(unqualified(args[1].type)))) return;
       if (name === 'prev') checkCategory(name, info, 'bidirectional', args[0].row);
@@ -952,16 +957,22 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       );
     });
   }
-  define('advance', (args) => {
+  define('advance', [[0], [1]], (args) => {
     const info = args[0] ? iteratorInfo(unqualified(args[0].type)) : undefined;
     if (!info || args.length !== 2 || !args[0].isLvalue) return;
-    return native('advance', [referenceTo(unqualified(args[0].type)), LONG], VOID, ([it, count]) => {
-      const location = it as Ptr;
-      location.write((location.read() as Ptr).offset(Number(count) * (info.isReverse ? -1 : 1), true));
-      return;
-    });
+    const distance = unqualified(args[1].type);
+    return native(
+      'advance',
+      [referenceTo(unqualified(args[0].type)), isInteger(distance) ? distance : LONG],
+      VOID,
+      ([it, count]) => {
+        const location = it as Ptr;
+        location.write((location.read() as Ptr).offset(Number(count) * (info.isReverse ? -1 : 1), true));
+        return;
+      }
+    );
   });
-  define('distance', (args) => {
+  define('distance', [[0, 1]], (args) => {
     const info = rangeAt(args, 0);
     if (!info || args.length !== 2) return;
     return native('distance', params(args), PTRDIFF_T, ([first, last]) => {
@@ -971,7 +982,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       return BigInt(info.isReverse ? a.index - b.index : b.index - a.index);
     });
   });
-  define('back_inserter', (args) => {
+  define('back_inserter', [[0]], (args) => {
     const container = args[0];
     if (args.length !== 1 || !container.isLvalue || container.type.kind !== 'class' || isConstType(container.type))
       return;
@@ -983,6 +994,50 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     return native('back_inserter', [referenceTo(container.type)], classType(cls), ([location]) => location);
   });
   return functions;
+}
+
+function explicitAlgorithmArguments(
+  args: Expr[],
+  positions: TemplateParameterPositions,
+  types: Type[]
+): Expr[] | undefined {
+  if (types.length > positions.length) return;
+  const typed = [...args];
+  for (const [parameter, type] of types.entries()) {
+    for (const index of positions[parameter]) {
+      const arg = args[index];
+      if (!arg) return;
+      if (arg.functions) {
+        const [fn] = arg.functions.candidates;
+        const signature: Type = { kind: 'function', ret: fn.ret, params: fn.params.map((p) => p.type) };
+        if (!sameType(signature, type.kind === 'pointer' ? type.to : type)) return;
+      }
+      typed[index] = { ...arg, type: nonReference(type) };
+    }
+  }
+  return typed;
+}
+
+function transformTemplateParameters(args: Expr[]): TemplateParameterPositions {
+  return args.length === 5 ? [[0, 1], [2], [3], [4]] : [[0, 1], [2], [3]];
+}
+
+function extremumTemplateParameters(args: Expr[]): TemplateParameterPositions {
+  return args[0]?.braced && args.length <= 2 ? [[], [1]] : [[], [2]];
+}
+
+function equalTemplateParameters(args: Expr[], types: Type[]): TemplateParameterPositions {
+  return args.length === 5 || (types.length <= 2 && equalHasSecondEnd(args, types[1]))
+    ? [[0, 1], [2, 3], [4]]
+    : [[0, 1], [2], [3]];
+}
+
+function equalHasSecondEnd(args: Expr[], secondIterator?: Type): boolean {
+  if (args.length === 5) return true;
+  if (args.length !== 4) return false;
+  if (!secondIterator) return rangeAt(args, 2) !== undefined;
+  const last = decayed(args[3].type);
+  return iteratorInfo(last) !== undefined && sameType(decayed(secondIterator), last);
 }
 
 function rangeMemberFunction(compiler: ExpressionCompiler, name: string, arg: Expr): FunctionInfo | undefined {

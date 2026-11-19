@@ -278,12 +278,13 @@ export class Compiler extends StatementCompiler {
 
   private defineClass(cls: ClassInfo, node: Syntax, body: Syntax): void {
     const isFinalClass = node.children.some((child) => child.type === 'virtual_specifier' && child.text === 'final');
-    this.baseClause(cls, node);
+    const defaultAccess: Access = node.type === 'struct_specifier' ? 'public' : 'private';
+    this.baseClause(cls, node, defaultAccess);
     const savedClass = this.memberClass;
     this.memberClass = cls;
     const definitions: { fn: FunctionInfo; node: Syntax }[] = [];
     try {
-      let access: Access = cls.key === 'struct' ? 'public' : 'private';
+      let access: Access = defaultAccess;
       for (const member of body.children) {
         switch (member.type) {
           case 'access_specifier': {
@@ -339,7 +340,7 @@ export class Compiler extends StatementCompiler {
     }
   }
 
-  private baseClause(cls: ClassInfo, node: Syntax): void {
+  private baseClause(cls: ClassInfo, node: Syntax, defaultAccess: Access): void {
     const clause = node.children.find((child) => child.type === 'base_class_clause');
     if (!clause) return;
     const bases = clause.children.filter((child) => child.type !== 'access_specifier');
@@ -358,7 +359,7 @@ export class Compiler extends StatementCompiler {
     }
     cls.base = base;
     const accessNode = clause.children.find((child) => child.type === 'access_specifier');
-    cls.baseAccess = (accessNode?.text as Access | undefined) ?? (cls.key === 'struct' ? 'public' : 'private');
+    cls.baseAccess = (accessNode?.text as Access | undefined) ?? defaultAccess;
     cls.fields = [...base.fields];
   }
 

@@ -1,8 +1,9 @@
+import { CompileError } from '../../interpreter/diagnostics';
 import type { DisplayNode } from '../../problems/trace';
+import { implicitConversion } from '../conversions';
 import { CppRuntimeError } from '../errors';
-import { type Expr, initializerWithConstancy } from '../expr';
+import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { makeEach } from '../objectCompiler';
 import type { Eval, Frame } from '../runtime';
 import {
   alignOf,
@@ -42,6 +43,7 @@ import {
 import {
   addRangeMembers,
   associativeInitializerList,
+  constructPair,
   copyEntries,
   emplacementCall,
   type EntryTable,
@@ -49,8 +51,9 @@ import {
 } from './emplacement';
 import { positionOf, randomAccessIterator, rangePositions } from './iterators';
 import type { Library } from './registry';
+import { elementConstruction } from './sequences';
 import { StringValue } from './string';
-import { addMethod, constRef, generic, native, nativeConstructor, throwLibrary } from './support';
+import { addMethod, constRef, generic, native, nativeConstructor, type NativeOptions, throwLibrary } from './support';
 import { typeKey } from './templates';
 
 /** `std::pair<T1, T2>`, an object with the members `first` and `second`. */
@@ -79,7 +82,6 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
     ];
     return operations;
   };
-  const make = (a: Value, b: Value): CObject => new CObject(cls, [a, b]);
   const firstStorage = first.kind === 'reference' ? pointerTo(first.to) : first;
   const secondStorage = second.kind === 'reference' ? pointerTo(second.to) : second;
   const secondAlign = alignOf(secondStorage);
@@ -93,17 +95,6 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
     args: [first, second],
     size: Math.ceil((secondOffset + sizeOf(secondStorage)) / align) * align,
     align,
-    listInitializer: (compiler, elements, row) => {
-      if (elements.length !== 2) return;
-      // The forwarding constructor deduces its parameters before initializing the pair's member types.
-      const expr = compiler.constructObject(
-        cls,
-        elements.map((element) => compiler.argument(element)),
-        row,
-        false
-      );
-      return initializerWithConstancy((frame) => expr.run(frame), expr.constantInitialization === true);
-    },
     operator: (compiler, operator, operands, row) => {
       const [left, right] = operands;
       const isSelf = (expr: Expr | undefined): boolean => expr?.type.kind === 'class' && expr.type.cls === cls;
@@ -117,16 +108,8 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
       return { type: BOOL, isLvalue: false, row, run: (frame) => (test(a(frame) as Value, b(frame) as Value) ? 1 : 0) };
     },
   };
-  const construct = (frame: Frame, initialize: [(frame: Frame) => Value, (frame: Frame) => Value]): CObject => {
-    const parts = ops();
-    const [a, b] = makeEach(
-      frame,
-      2,
-      (index) => initialize[index](frame),
-      (index) => parts[index].destroy
-    );
-    return make(a, b);
-  };
+  const construct = (frame: Frame, initialize: [(frame: Frame) => Value, (frame: Frame) => Value]): CObject =>
+    constructPair(frame, cls, initialize, (index) => ops()[index].destroy);
   cls.operations = {
     copy: (frame, source) => {
       const [a, b] = (source as CObject).values;
@@ -162,81 +145,60 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
         },
       }
     ),
-    nativeConstructor(
-      cls,
-      [first, second].map((type) => (type.kind === 'reference' ? type : constRef(type))),
-      ([a, b], { frame }) =>
-        construct(frame, [
-          (f) => (first.kind === 'reference' ? (a as Ptr) : ops()[0].copy(f, (a as Ptr).read())),
-          (f) => (second.kind === 'reference' ? (b as Ptr) : ops()[1].copy(f, (b as Ptr).read())),
-        ]),
-      {
-        libraryConstant: () => (constantMembers ? true : undefined),
-        uses: (row) => {
-          library.compiler.requireLibraryObjectUse(classType(cls), 'copy', row);
-          library.compiler.requireLibraryObjectUse(classType(cls), 'destroy', row);
-        },
-      }
-    ),
     {
       ...nativeConstructor(cls, [], () => {}),
       instantiate: (args) => {
-        // pair(const pair<U1, U2>&): converts each member, as make_pair's result needs.
+        if (args.length !== 2) return;
+        const forwarded = pairForwarding(library.compiler, cls, args, ops);
+        return nativeConstructor(cls, forwarded.params, forwarded.run, forwarded.options);
+      },
+      isTemplate: true,
+    },
+    {
+      ...nativeConstructor(cls, [], () => {}),
+      instantiate: (args) => {
         const [source] = args;
         if (
           args.length !== 1 ||
           source.type.kind !== 'class' ||
           source.type.cls.library?.kind !== 'pair' ||
           source.type.cls === cls
-        ) {
+        )
           return;
-        }
-        const [u1, u2] = source.type.cls.fields;
-        const compiler = library.compiler;
-        // The members construct from the source's members, which a class member's copy constructor copies.
-        const slot = (type: Type): Expr => ({
-          type,
-          isLvalue: true,
-          row: source.row,
-          run: (frame) => frame.pending.at(-1) as Ptr,
-        });
-        let convertFirst: Eval;
-        let convertSecond: Eval;
-        try {
-          convertFirst = compiler.convert(slot(u1.type), unqualified(first), source.row).run as Eval;
-          convertSecond = compiler.convert(slot(u2.type), unqualified(second), source.row).run as Eval;
-        } catch {
-          return;
-        }
-        return nativeConstructor(
-          cls,
-          [constRef(source.type)],
-          ([pair], { frame }) => {
-            const object = (pair as Ptr).read() as CObject;
-            const member =
-              (index: number, convert: Eval): Eval<Value> =>
-              (f) => {
-                f.pending.push(new Ptr(object, index));
-                try {
-                  return convert(f) as Value;
-                } finally {
-                  f.pending.pop();
-                }
-              };
-            return construct(frame, [member(0, convertFirst), member(1, convertSecond)]);
-          },
-          {
-            libraryConstant: () => {
-              const targets = [first, second];
-              const incoming = [u1.type, u2.type];
-              if (
-                constantMembers &&
-                targets.every((to, index) => to.kind !== 'class' || sameType(to, incoming[index], false))
+        const isXvalue = (!source.isLvalue || source.isXvalue === true) && !isConstType(source.type);
+        const incoming = source.type.cls.fields;
+        return library.compiler.withLibraryAccess(() => {
+          try {
+            const initialize = incoming.map(({ type }, index) =>
+              pairMemberBinding(
+                library.compiler,
+                cls.fields[index].type,
+                type.kind === 'reference' || isXvalue ? nonReference(type) : withConst(type),
+                type.kind !== 'reference' && isXvalue,
+                source.row
               )
-                return true;
-            },
+            );
+            return nativeConstructor(
+              cls,
+              [constRef(source.type)],
+              ([pair], { frame }) => {
+                const object = (pair as Ptr).read() as CObject;
+                const member =
+                  (index: number): Eval<Value> =>
+                  (f) =>
+                    initialize[index].make(
+                      f,
+                      incoming[index].type.kind === 'reference' ? (object.values[index] as Ptr) : new Ptr(object, index)
+                    );
+                return construct(frame, [member(0), member(1)]);
+              },
+              pairConstructionOptions(library.compiler, cls, initialize)
+            );
+          } catch (error) {
+            if (error instanceof CompileError) return;
+            throw error;
           }
-        );
+        });
       },
       isTemplate: true,
     },
@@ -278,23 +240,118 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
 
 /** `std::make_pair(a, b)`, whose pair's member types are the arguments' decayed types. */
 export function makePair(library: Library): FunctionInfo {
-  return generic('make_pair', (args) => {
-    if (args.length !== 2) return;
-    const types = args.map((arg) => decayed(arg.type));
+  return generic('make_pair', (args, specified) => {
+    if (args.length !== 2 || (specified && specified.length > 2)) return;
+    if (specified?.some((type, at) => type.kind !== 'reference' && args[at].isLvalue && !args[at].isXvalue)) return;
+    const types = args.map((arg, at) => decayed(nonReference(specified?.[at] ?? arg.type)));
     if (types.some((type) => type.kind === 'void')) return;
     const cls = pairClass(library, types[0], types[1]);
-    return native(
-      'make_pair',
-      types.map((type) => constRef(type)),
-      classType(cls),
-      ([a, b], { frame }) =>
-        cls.operations?.copy(frame, new CObject(cls, [(a as Ptr).read(), (b as Ptr).read()])) as Value,
-      {
-        libraryConstant: () => (cls.library?.allowsConstantCopy ? true : undefined),
-        uses: (row) => library.compiler.requireLibraryObjectUse(classType(cls), 'copy', row),
-      }
-    );
+    const compiler = library.compiler;
+    const ops = (): ElementOperations[] => types.map((type) => elementOperations(compiler, type, 0));
+    const forwarded = pairForwarding(compiler, cls, args, ops, specified);
+    return native('make_pair', forwarded.params, classType(cls), forwarded.run, forwarded.options);
   });
+}
+
+interface PairMemberBinding {
+  make: (frame: Frame, loc: Ptr) => Value;
+  isImplicit: boolean;
+  isConstant: boolean;
+}
+
+interface PairForwarding {
+  params: Type[];
+  run: NonNullable<FunctionInfo['native']>;
+  options: NativeOptions;
+}
+
+function pairForwarding(
+  compiler: ExpressionCompiler,
+  cls: ClassInfo,
+  args: Expr[],
+  ops: () => ElementOperations[],
+  specified?: Type[]
+): PairForwarding {
+  const params: Type[] = [];
+  const initialize = compiler.withLibraryAccess(() =>
+    cls.fields.map(({ type }, index) => {
+      const arg = args[index];
+      const explicit = specified?.[index];
+      const incoming = explicit ? nonReference(explicit) : arg.braced ? nonReference(type) : arg.type;
+      if (type.kind === 'reference') {
+        params.push(type);
+        return { make: (_frame: Frame, loc: Ptr) => loc, isImplicit: true, isConstant: true };
+      }
+      const parameter = explicit?.kind === 'reference' ? explicit : constRef(decayed(incoming));
+      params.push(parameter);
+      const isXvalue = explicit?.kind !== 'reference' && (!arg.isLvalue || arg.isXvalue === true);
+      return pairMemberBinding(
+        compiler,
+        type,
+        incoming.kind === 'array' ? decayed(incoming) : incoming,
+        isXvalue,
+        arg.row,
+        arg
+      );
+    })
+  );
+  const run: NonNullable<FunctionInfo['native']> = ([a, b], { frame }) =>
+    constructPair(
+      frame,
+      cls,
+      [(f) => initialize[0].make(f, a as Ptr), (f) => initialize[1].make(f, b as Ptr)],
+      (index) => ops()[index].destroy
+    );
+  return { params, run, options: pairConstructionOptions(compiler, cls, initialize) };
+}
+
+function pairMemberBinding(
+  compiler: ExpressionCompiler,
+  type: Type,
+  incoming: Type,
+  isXvalue: boolean,
+  row: number,
+  arg?: Expr
+): PairMemberBinding {
+  const slot: Expr = {
+    type: incoming,
+    isLvalue: true,
+    isXvalue,
+    row,
+    constantInitialization: true,
+    literalBytes: arg?.literalBytes,
+    run: (f) => f.pending.at(-1) as Ptr,
+  };
+  const target = type.kind === 'reference' ? type : unqualified(type);
+  const implicit = implicitConversion(compiler, slot, target);
+  const construct =
+    type.kind === 'reference' ? compiler.convert(slot, type, row) : elementConstruction(compiler, target, [slot], row);
+  return {
+    make: (frame: Frame, loc: Ptr): Value => {
+      frame.pending.push(loc);
+      try {
+        return construct.run(frame) as Value;
+      } finally {
+        frame.pending.pop();
+      }
+    },
+    isImplicit: implicit !== undefined,
+    isConstant:
+      target.kind !== 'class' || sameType(target, incoming, false) || construct.constantInitialization === true,
+  };
+}
+
+function pairConstructionOptions(
+  compiler: ExpressionCompiler,
+  cls: ClassInfo,
+  initialize: readonly PairMemberBinding[]
+): NativeOptions {
+  return {
+    isExplicit: initialize.some((member) => !member.isImplicit),
+    libraryConstant: () =>
+      cls.library?.allowsConstantCopy && initialize.every((member) => member.isConstant) ? true : undefined,
+    uses: (row: number) => compiler.requireLibraryObjectUse(classType(cls), 'destroy', row),
+  };
 }
 
 function decayed(type: Type): Type {

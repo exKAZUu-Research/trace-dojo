@@ -226,6 +226,18 @@ export function insertRange<T, Position>(table: EntryTable<T, Position>, frame: 
   }
 }
 
+export function constructPair(
+  frame: Frame,
+  cls: ClassInfo,
+  members: readonly [Eval<Value>, Eval<Value>],
+  destroyAt: (index: number) => ElementOperations['destroy']
+): CObject {
+  return new CObject(
+    cls,
+    makeEach(frame, members.length, (index) => members[index](frame), destroyAt)
+  );
+}
+
 /**
  * Inserts the entry an emplacement makes: when it gives the key, only after looking the key up, and otherwise by
  * making the entry and destroying it again when its key is there already.
@@ -278,7 +290,8 @@ function compileEmplacing(
     const keyValue = constructElement(compiler, key, [slots[0]], row);
     const mappedValue = constructElement(compiler, valueType, slots.slice(1), row);
     const cls = (entryType as Extract<Type, { kind: 'class' }>).cls;
-    make = (frame) => holdAll(frame, [keyValue, mappedValue], (values) => new CObject(cls, values as Value[]));
+    const destroyers = compiler.withLibraryAccess(() => cls.fields.map(({ type }) => compiler.destroyerOf(type, row)));
+    make = (frame) => constructPair(frame, cls, [keyValue, mappedValue], (index) => destroyers[index]);
   } else {
     make = constructElement(compiler, unqualified(entryType), slots, row);
   }
