@@ -4,7 +4,7 @@ import { CppRuntimeError, NarrowingConversionError } from '../errors';
 import { type ConstantLocation, type Expr, hasConstantObject, offsetConstantLocation } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { makeEach } from '../objectCompiler';
-import type { Eval, Frame } from '../runtime';
+import { type Eval, type Frame, holdAll } from '../runtime';
 import type { Syntax } from '../syntax';
 import {
   alignOf,
@@ -16,6 +16,7 @@ import {
   type FunctionInfo,
   isConstType,
   isInteger,
+  isReferenceRelated,
   pointerTo,
   referenceTo,
   sameType,
@@ -32,6 +33,7 @@ import { bitReferences } from './bitReference';
 import { SequenceValue } from './containerValues';
 import {
   comparatorOf,
+  constructElementFromRvalue,
   type ElementOperations,
   elementOperations,
   equalTo,
@@ -146,6 +148,10 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
     listElementType: fixedLength === undefined ? element : undefined,
     defaultInitializer: kind === 'array' ? arrayDefault : undefined,
     memberCall: (compiler, object, member, args, row) => {
+      if (kind !== 'array') {
+        const insertion = rvalueInsertion(compiler, object, member, args, row, { kind, element, editor });
+        if (insertion) return insertion;
+      }
       checkElementRequirement(compiler, { kind, element, ops }, member, args, row);
       return emplacement(compiler, library, object, member, args, row, element, editor);
     },
@@ -805,23 +811,84 @@ function checkElementRequirement(
   ) {
     requireRelocation(compiler, element, row);
   }
-  if (
-    ['push_back', 'push_front', 'insert', 'assign'].includes(member) ||
-    (member === 'resize' && args.length > 1) ||
-    (kind === 'vector' && member === 'emplace')
-  ) {
+  if (['push_back', 'push_front', 'insert', 'assign'].includes(member) || (member === 'resize' && args.length > 1)) {
     requireElementUse(compiler, element, row, 'copy');
   }
-  if (
-    member === 'assign' ||
-    ((kind === 'vector' || kind === 'deque') && ['erase', 'insert', 'emplace'].includes(member))
-  )
-    requireElementUse(compiler, element, row, 'assign');
+  const shifts = kind === 'vector' || kind === 'deque';
+  if (member === 'assign' || (shifts && member === 'insert')) requireElementUse(compiler, element, row, 'assign');
+  if (shifts && ['emplace', 'insert', 'erase'].includes(member)) {
+    if (member !== 'erase') requireMoveConstruction(compiler, element, row);
+    compiler.requireLibraryObjectUse(element, 'move-assign', row);
+  }
   if (kind !== 'list') return;
   const isEqualityCall = (member === 'remove' && args.length === 1) || (member === 'unique' && args.length === 0);
   if (isEqualityCall && !equalTo(element)) compiler.error(row, `${typeName(element)} の値は == で比べられません。`);
   if (member === 'sort' && args.length === 0 && !lessThan(element))
     compiler.error(row, `${typeName(element)} の値は < で比べられません。比べ方を表す関数を渡してください。`);
+}
+
+function rvalueInsertion(
+  compiler: ExpressionCompiler,
+  object: Expr,
+  member: string,
+  args: Expr[],
+  row: number,
+  { kind, element, editor }: { kind: Exclude<SequenceKind, 'array'>; element: Type; editor: SequenceEditor }
+): Expr | undefined {
+  const isInsert = member === 'insert' && args.length === 2;
+  const isBack = member === 'push_back' && args.length === 1;
+  const isFront = member === 'push_front' && kind !== 'vector' && args.length === 1;
+  if ((!isInsert && !isBack && !isFront) || object.type.kind !== 'class') return;
+  const argument = args[isInsert ? 1 : 0];
+  if (!isMovedElement(element, argument)) return;
+  if (isConstType(object.type)) compiler.error(row, `const の ${typeName(object.type)} には ${member} を使えません。`);
+  if (kind === 'vector') requireRelocation(compiler, element, row);
+  if (isInsert && kind !== 'list') compiler.requireLibraryObjectUse(element, 'move-assign', row);
+  const source = movedElementLocation(compiler, element, argument, row);
+  const self = compiler.objectOf(object);
+  const { memberTypes } = object.type.cls;
+  const position = isInsert ? compiler.convert(args[0], memberTypes.get('const_iterator') as Type, row).run : undefined;
+  return {
+    type: isInsert ? (memberTypes.get('iterator') as Type) : VOID,
+    row,
+    isLvalue: false,
+    run: (frame) =>
+      holdAll(frame, [self, position ?? (() => {}), source], ([receiver, where, value]) => {
+        const sequence = (receiver as Ptr).read() as SequenceValue;
+        const location = value as Ptr;
+        const index = isInsert ? positionOf(sequence, where) : undefined;
+        reserve(frame, 1);
+        if (index !== undefined) {
+          editor.insert(frame, sequence, index, location, true);
+          return sequence.iteratorLocation(index);
+        }
+        const make = (): Value => constructElementFromRvalue(frame, element, location.read());
+        if (isFront) sequence.splice(0, 0, make());
+        else editor.append(frame, sequence, 1, make);
+        return;
+      }),
+  };
+}
+
+function isMovedElement(element: Type, argument: Expr | undefined): argument is Expr {
+  return (
+    element.kind === 'class' &&
+    argument?.type.kind === 'class' &&
+    !argument.braced &&
+    (!argument.isLvalue || argument.isXvalue === true) &&
+    !isConstType(argument.type) &&
+    isReferenceRelated(argument.type, element)
+  );
+}
+
+function movedElementLocation(compiler: ExpressionCompiler, element: Type, argument: Expr, row: number): Eval<Ptr> {
+  requireMoveConstruction(compiler, element, row);
+  return compiler.convert(argument, constRef(element), row).run as Eval<Ptr>;
+}
+
+function requireMoveConstruction(compiler: ExpressionCompiler, element: Type, row: number): void {
+  compiler.requireLibraryObjectUse(element, 'move', row);
+  compiler.requireLibraryObjectUse(element, 'destroy', row);
 }
 
 /** The parameter of a member function taking a comparator or a predicate, as a function's name or an object. */
@@ -1076,6 +1143,10 @@ function emplacement(
 /** Compiles the construction of an element from arguments, as `emplace_back` and the like do. */
 export function constructElement(compiler: ExpressionCompiler, element: Type, args: Expr[], row: number): Eval<Value> {
   return compiler.withLibraryAccess(() => {
+    if (args.length === 1 && isMovedElement(element, args[0]) && sameType(element, args[0].type, false)) {
+      const source = movedElementLocation(compiler, element, args[0], row);
+      return (frame) => constructElementFromRvalue(frame, element, source(frame).read());
+    }
     if (element.kind === 'class') return compiler.constructObject(element.cls, args, row, false).run as Eval<Value>;
     if (args.length === 0) return compiler.valueInitialized(element, row).run as Eval<Value>;
     if (args.length !== 1) return compiler.error(row, `${typeName(element)} の値には引数を1つだけ書いてください。`);

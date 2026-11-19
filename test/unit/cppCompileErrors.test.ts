@@ -2,10 +2,14 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
-test('copying a vector still requires access to the element copy constructor', () => {
+test.each([
+  'auto copy = source;',
+  'std::vector<std::vector<Item>> target; target.push_back(source);',
+  'std::vector<std::vector<Item>> target; target.insert(target.end(), source);',
+])('copying a vector still requires access to the element copy constructor: %s', (copy) => {
   const program = `#include <vector>
 class Item { public: Item() {} private: Item(const Item&); };
-int main() { std::vector<Item> source(2); auto copy = source; }`;
+int main() { std::vector<Item> source(2); ${copy} }`;
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'compileError',
     diagnostics: [{ row: 2, message: expect.stringContaining('private') }],

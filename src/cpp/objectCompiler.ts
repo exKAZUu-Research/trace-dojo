@@ -358,7 +358,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     }
     const type = classType(cls);
     const movesSource = expr.isXvalue === true && !isConstType(expr.type);
-    if (movesSource) this.checkMoveConstruction(type, expr.row, { access: this.accessClass, seen: new Set() });
+    if (movesSource) this.checkMoveOperation(type, 'copy', expr.row, { access: this.accessClass, seen: new Set() });
     else this.checkCopySource(type, expr);
     const source = this.rvalue(expr);
     const constantInitialization = source.constantInitialization === true && allowsConstantCopy(type);
@@ -802,13 +802,17 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     this.checkObjectUse(type, operation, row, { access: this.accessClass, seen: new Set() });
   }
 
-  requireLibraryObjectUse(type: Type, operation: 'copy' | 'assign' | 'destroy' | 'move', row: number): void {
+  requireLibraryObjectUse(
+    type: Type,
+    operation: 'copy' | 'assign' | 'destroy' | 'move' | 'move-assign',
+    row: number
+  ): void {
     const context: ObjectUseContext = { seen: new Set(), sourceIsConst: true };
-    if (operation === 'move') {
-      this.checkMoveConstruction(type, row, context);
+    if (operation === 'assign' || operation === 'move-assign') this.checkLibraryAssignment(type, row);
+    if (operation === 'move' || operation === 'move-assign') {
+      this.checkMoveOperation(type, operation === 'move' ? 'copy' : 'assign', row, context);
       return;
     }
-    if (operation === 'assign') this.checkLibraryAssignment(type, row);
     this.checkObjectUse(type, operation, row, context);
   }
 
@@ -818,19 +822,23 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
 
   private readonly copyDefaults = new Map<FunctionInfo, Eval<unknown>[]>();
 
-  private checkMoveConstruction(type: Type, row: number, context: ObjectUseContext): void {
+  private checkMoveOperation(type: Type, fallback: 'copy' | 'assign', row: number, context: ObjectUseContext): void {
+    if (type.kind === 'reference' && fallback === 'assign') {
+      this.requireLibraryObjectUse(type.to, 'assign', row);
+      return;
+    }
     if (type.kind === 'array') {
-      if ((type.length ?? 1) > 0) this.checkMoveConstruction(type.of, row, context);
+      if ((type.length ?? 1) > 0) this.checkMoveOperation(type.of, fallback, row, context);
       return;
     }
     if (type.kind !== 'class') return;
     const move = moveConstruction(type);
     if (move.kind === 'copy') {
-      this.checkObjectUse(type, 'copy', row, { ...context, sourceIsConst: true, seen: new Set() });
+      this.checkObjectUse(type, fallback, row, { ...context, sourceIsConst: true, seen: new Set() });
       return;
     }
     if (move.kind === 'array') {
-      this.checkMoveConstruction(move.array.type, row, { seen: context.seen });
+      this.checkMoveOperation(move.array.type, fallback, row, { seen: context.seen });
       return;
     }
     if (move.kind !== 'members') return;
@@ -839,8 +847,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     this.requireVirtualDefinitions(cls, row);
     if (seen.has(cls)) return;
     seen.add(cls);
-    if (cls.base) this.checkMoveConstruction(classType(cls.base), row, { access: cls, seen, baseObject: cls });
-    for (const field of cls.ownFields) this.checkMoveConstruction(field.type, row, { access: cls, seen });
+    if (cls.base) this.checkMoveOperation(classType(cls.base), fallback, row, { access: cls, seen, baseObject: cls });
+    for (const field of cls.ownFields) this.checkMoveOperation(field.type, fallback, row, { access: cls, seen });
   }
 
   protected invokeStoredCopy(frame: Frame, fn: FunctionInfo, source: Ptr, target: Ptr): void {
