@@ -231,7 +231,7 @@ private fun deepString(element: Any?): String = when (element) {
 }
 operator fun <T> Array<T>.plus(element: T): Array<T> = (asList() + element).toTypedArray()
 
-external fun <T> arrayOf(vararg elements: T): Array<T>
+external fun <reified T> arrayOf(vararg elements: T): Array<T>
 external fun <T> arrayOfNulls(size: Int): Array<T?>
 
 @Suppress("UNCHECKED_CAST")

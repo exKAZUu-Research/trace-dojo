@@ -14,6 +14,7 @@ abstract external class NativeList<E> : MutableList<E>, RandomAccess {
     external override fun lastIndexOf(element: E): Int
     external override fun iterator(): MutableIterator<E>
     external override fun listIterator(): ListIterator<E>
+    external override fun listIterator(index: Int): ListIterator<E>
     external override fun subList(fromIndex: Int, toIndex: Int): MutableList<E>
     external override fun add(element: E): Boolean
     external override fun add(index: Int, element: E)
@@ -41,6 +42,11 @@ external class SingletonList<E> : NativeList<E>
 external class EmptyList<E> : NativeList<E>
 external class SubList<E> : NativeList<E>
 external class EnumEntriesList<E> : NativeList<E>
+
+/** What \`buildList\` builds, which becomes read-only once built, as kotlin.collections.builders.ListBuilder does. */
+external class ListBuilder<E> : NativeList<E> {
+    internal external fun build(): List<E>
+}
 
 external class ItemIterator<T> : MutableIterator<T>, ListIterator<T> {
     external override fun hasNext(): Boolean

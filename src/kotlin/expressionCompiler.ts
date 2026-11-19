@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 953 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 967 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type { Block, Expression, LambdaExpression } from './ast';
 import { type ArgumentSyntax, CallCompiler, type Candidate, type ResolvedCall } from './callCompiler';
 import {
@@ -235,7 +235,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
         return this.compileMemberAccess(scope, context, expression);
       }
       case 'call': {
-        return this.compileCall(scope, context, expression, expected);
+        return this.isLongConstant(expression, expected)
+          ? this.toLongConstant(this.compileCall(scope, context, expression, undefined))
+          : this.compileCall(scope, context, expression, expected);
       }
       case 'prefix':
       case 'postfix':
@@ -697,6 +699,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (value) return value;
     return this.error(row, `${name} が見つかりません。`);
   }
+
+  protected abstract isLongConstant(expression: Expression, expected: KType | undefined): boolean;
+
+  protected abstract toLongConstant(compiled: Compiled): Compiled;
 
   protected abstract compilePrefix(
     scope: Scope,
@@ -1862,6 +1868,21 @@ export abstract class ExpressionCompiler extends CallCompiler {
     expected: KType | undefined,
     asStatement: boolean
   ): Compiled;
+}
+
+/**
+ * The case of an enum or sealed type that a value always is, an enum entry or an object, named as a `when` covers it,
+ * with the other entries of its enum.
+ */
+export function caseOf(value: Compiled): { id: string; others: string[] } | undefined {
+  const type = resolved(value.type);
+  if (type.kind !== 'class' || !value.stableKey) return undefined;
+  const { cls } = type;
+  if (cls.isObject && value.stableKey === keyOf(cls)) return { id: `class:${keyOf(cls)}`, others: [] };
+  if (cls.kind !== 'enum') return undefined;
+  const ids = cls.enumEntries.map((entry) => `entry:${keyOf(cls)}.${entry.name}`);
+  const id = `entry:${value.stableKey}`;
+  return ids.includes(id) ? { id, others: ids.filter((item) => item !== id) } : undefined;
 }
 
 function withNullabilityOf<T extends KType>(type: T, isNullable: boolean): T {

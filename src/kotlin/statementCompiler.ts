@@ -16,6 +16,7 @@ import {
   type Compiled,
   convertRepr,
   type Eval,
+  excludingCases,
   Flow,
   type FunctionContext,
   Handoff,
@@ -27,9 +28,9 @@ import {
   typeMismatchMessage,
 } from './compilerBase';
 import { getPropertyValue, setPropertyValue } from './dispatch';
-import { type BoundPlace, keyOf, type Place } from './expressionCompiler';
+import { type BoundPlace, caseOf, keyOf, type Place } from './expressionCompiler';
 import { valueEquals } from './format';
-import { OperatorCompiler } from './operatorCompiler';
+import { isExclusion, OperatorCompiler } from './operatorCompiler';
 import { NUMBER_OPERATOR_NAMES } from './operators';
 import { type Frame, KotlinThrow, LoopSignal, UNASSIGNED } from './runtime';
 import { type ClassSymbol, type PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
@@ -221,6 +222,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
     this.flow.assigned.add(variable);
     this.flow.maybeAssigned.add(variable);
     if (unnarrowed) this.flow.narrowed.set(keyOf(variable), initializer.type);
+    if (!declared) this.narrowToCase(keyOf(variable), initializer);
     const write = this.variableAccess(context, variable).write;
     return this.withStep(
       row,
@@ -350,7 +352,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
       const value = this.compileExpression(scope, context, statement.value, place.type);
       const converted = this.expectType(value, place.type, statement.value.row);
       const toPlace = convertRepr(converted, reprOf(this.core, place.type), place.repr);
-      this.narrowAfterAssignment(scope, target, value.type, place.type);
+      this.narrowAfterAssignment(scope, target, value, place.type);
       return this.withStep(
         row,
         (frame) => {
@@ -442,16 +444,22 @@ export abstract class StatementCompiler extends OperatorCompiler {
   }
 
   /** After `x = value`, a stable `x` has the value's type, which may be narrower than its declared one. */
-  private narrowAfterAssignment(scope: Scope, target: Expression, valueType: KType, declared: KType): void {
+  private narrowAfterAssignment(scope: Scope, target: Expression, value: Compiled, declared: KType): void {
     if (target.kind !== 'name') return;
     const variable = this.findVariable(scope, target.name);
     if (!variable) return;
     const key = keyOf(variable);
-    if (isSubtype(valueType, declared) && !isSubtype(declared, valueType) && resolved(valueType).kind !== 'nothing') {
+    const valueType = value.type;
+    this.flow.forget(key);
+    if (isSubtype(valueType, declared) && !isSubtype(declared, valueType) && resolved(valueType).kind !== 'nothing')
       this.flow.narrowed.set(key, valueType);
-    } else {
-      this.flow.narrowed.delete(key);
-    }
+    this.narrowToCase(key, value);
+  }
+
+  /** After a stable value takes an enum entry, a `when` on it need not cover the other entries, as in Kotlin 2.4. */
+  private narrowToCase(key: string, value: Compiled): void {
+    const found = caseOf(value);
+    if (found) this.applyNarrowing(excludingCases(key, found.others));
   }
 
   compilePlace(scope: Scope, context: FunctionContext, target: Expression, row: number, isCompound: boolean): Place {
@@ -699,7 +707,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
   private forgetAssignedIn(scope: Scope, statements: Statement[] | Expression): void {
     for (const name of assignedNames(statements)) {
       const variable = this.findVariable(scope, name);
-      if (variable) this.flow.narrowed.delete(keyOf(variable));
+      if (variable) this.flow.forget(keyOf(variable));
     }
   }
 
@@ -1089,7 +1097,7 @@ export abstract class StatementCompiler extends OperatorCompiler {
         this.compileWhenEntry(scope, context, subjectValue, entry, covered, expected, asStatement, branchFlows)
       );
     }
-    const isExhaustive = hasElse || (subject !== undefined && this.isExhaustive(subject.type, covered));
+    const isExhaustive = hasElse || (subject !== undefined && this.coversSubject(subject, covered, before));
     this.checkWhenExhaustive(subject, isExhaustive, asStatement, row);
     if (!isExhaustive) branchFlows.push(this.flow);
     this.flow = branchFlows.length > 0 ? Flow.merge(branchFlows) : before;
@@ -1187,9 +1195,10 @@ export abstract class StatementCompiler extends OperatorCompiler {
       const actual = resolved(type);
       if (!condition.negated && actual.kind === 'class') covered.add(`class:${keyOf(actual.cls)}`);
       if (!condition.negated && actual.kind === 'nothing') covered.add('null');
+      const exclusion = isExclusion(subject.stableKey, type);
       return condition.negated
-        ? { test: (frame) => !test(evaluate(frame)), whenTrue: new Map(), whenFalse: narrowing }
-        : { test: (frame) => test(evaluate(frame)), whenTrue: narrowing, whenFalse: new Map() };
+        ? { test: (frame) => !test(evaluate(frame)), whenTrue: exclusion, whenFalse: narrowing }
+        : { test: (frame) => test(evaluate(frame)), whenTrue: narrowing, whenFalse: exclusion };
     }
     if (condition.kind === 'in') return this.compileWhenIn(scope, context, subject, condition);
     return this.compileWhenValue(scope, context, subject, condition.expression, condition.row, covered);
@@ -1252,7 +1261,9 @@ export abstract class StatementCompiler extends OperatorCompiler {
         `演算子 == は ${typeToString(resolved(subject.type))} と ${typeToString(resolved(value.type))} には使えません。`
       );
     }
-    const narrowing = new Map<string, KType>();
+    const valueCase = caseOf(value);
+    const narrowing =
+      subject.stableKey && valueCase ? excludingCases(subject.stableKey, [valueCase.id]) : new Map<string, KType>();
     if (resolved(value.type).kind === 'nothing' && subject.stableKey)
       narrowing.set(subject.stableKey, nonNull(subject.type));
     return {
@@ -1271,10 +1282,8 @@ export abstract class StatementCompiler extends OperatorCompiler {
   private recordCovered(value: Compiled, expression: Expression, covered: Set<string>): void {
     if (expression.kind === 'boolean') covered.add(String(expression.value));
     if (expression.kind === 'null') covered.add('null');
-    if (value.stableKey && value.stableKey.includes('.')) covered.add(`entry:${value.stableKey}`);
-    const type = resolved(value.type);
-    if (type.kind === 'class' && type.cls.isObject && value.stableKey === keyOf(type.cls))
-      covered.add(`class:${keyOf(type.cls)}`);
+    const found = caseOf(value);
+    if (found) covered.add(found.id);
   }
 
   /** Whether a `when` statement on the subject must cover every case, as one on an enum, sealed type, or Boolean must. */
@@ -1283,6 +1292,15 @@ export abstract class StatementCompiler extends OperatorCompiler {
     return (
       actual.kind === 'class' && (actual.cls.kind === 'enum' || actual.cls.isSealed || actual.cls === this.core.boolean)
     );
+  }
+
+  /**
+   * Whether the branches cover every case of the subject, where the cases a smart cast rules out need no branch, as
+   * `if (c == C.R) return` before `when (c)` in Kotlin 2.4.
+   */
+  private coversSubject(subject: Compiled, covered: Set<string>, flow: Flow): boolean {
+    const all = new Set([...covered, ...(subject.stableKey ? flow.excludedCases(subject.stableKey) : [])]);
+    return this.isExhaustive(subject.type, all);
   }
 
   private isExhaustive(type: KType, covered: Set<string>): boolean {

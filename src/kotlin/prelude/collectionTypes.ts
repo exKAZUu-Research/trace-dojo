@@ -50,6 +50,7 @@ interface List<out E> : Collection<E> {
     fun indexOf(element: E): Int
     fun lastIndexOf(element: E): Int
     fun listIterator(): ListIterator<E>
+    fun listIterator(index: Int): ListIterator<E>
     fun subList(fromIndex: Int, toIndex: Int): List<E>
 }
 

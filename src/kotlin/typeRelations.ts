@@ -7,11 +7,13 @@ import {
   isNothing,
   isNullable,
   type KType,
+  mentionsVariable,
   nonNull,
   NOTHING,
   nullable,
   resolved,
   substitute,
+  type Substitution,
   type TypeArgument,
   withNullability,
 } from './types';
@@ -169,6 +171,53 @@ export function commonSupertype(types: KType[]): KType {
   return isAnyNullable ? nullable(result) : result;
 }
 
+/**
+ * Whether the types have two or more most specific common supertypes, which kotlinc infers as their intersection, as
+ * `Number & Comparable<*>` for `1` and `2.0`.
+ */
+export function hasIntersectionSupertype(types: KType[]): boolean {
+  const classes = types
+    .map(resolved)
+    .filter((type) => type.kind !== 'nothing')
+    .map((type) => nonNull(type));
+  if (classes.length < 2 || classes.some((type) => type.kind !== 'class')) return false;
+  const [first] = classes as ClassType[];
+  if (classes.every((type) => isSubtype(type, first))) return false;
+  const common = supertypesInOrder(first).filter(
+    (candidate): candidate is ClassType =>
+      candidate.kind === 'class' &&
+      candidate.cls !== coreClasses().any &&
+      classes.every((type) => type.kind === 'class' && asSuper(type, candidate.cls) !== undefined)
+  );
+  const mostSpecific = common.filter(
+    (candidate) => !common.some((other) => other !== candidate && asSuper(other, candidate.cls) !== undefined)
+  );
+  const serializable = classes.every((type) => type.kind === 'class' && isJvmSerializable(type.cls)) ? 1 : 0;
+  return mostSpecific.length + serializable >= 2;
+}
+
+const JVM_SERIALIZABLE = new Set([
+  'kotlin.Boolean',
+  'kotlin.Byte',
+  'kotlin.Char',
+  'kotlin.Double',
+  'kotlin.Float',
+  'kotlin.Int',
+  'kotlin.Long',
+  'kotlin.Number',
+  'kotlin.Short',
+  'kotlin.String',
+  'kotlin.text.StringBuilder',
+]);
+
+/**
+ * Whether a class is java.io.Serializable on the JVM, which the prelude does not declare: the boxed primitives,
+ * String, StringBuilder, Number, and enums.
+ */
+function isJvmSerializable(cls: ClassSymbol): boolean {
+  return cls.kind === 'enum' || JVM_SERIALIZABLE.has(cls.kotlinName);
+}
+
 function nonNullCommonSupertype(types: KType[]): KType {
   const [first] = types;
   if (types.every((type) => isSubtype(type, first))) return first;
@@ -247,6 +296,32 @@ export function fixVariable(variable: InferenceVariable): KType | undefined {
   else if (upper.length > 0) fixed = upper[0];
   if (fixed) variable.fixed = fixed;
   return fixed;
+}
+
+/**
+ * Fixes the variables whose bounds mention `target` and checks those bounds, which gives `target` its lower bounds, as
+ * `C : Iterable<T>` of `onEach` gives `T` the element type of the receiver before the lambda's body is compiled.
+ */
+export function constrainThroughBounds(
+  target: InferenceVariable,
+  variables: InferenceVariable[],
+  substitution: Substitution
+): void {
+  for (const other of variables) {
+    if (other === target || other.fixed) continue;
+    const bounds = other.param.bounds.map((bound) => substitute(bound, substitution));
+    if (!bounds.some((bound) => mentionsVariable(bound, (candidate) => candidate === target))) continue;
+    const fixed = fixVariable(other);
+    if (fixed) for (const bound of bounds) isSubtype(fixed, bound);
+  }
+}
+
+/** The type that all lower bounds of an open variable agree on, which an integer literal passed for it may take. */
+export function soleLowerBound(type: KType): KType | undefined {
+  if (type.kind !== 'variable' || type.variable.fixed) return undefined;
+  const [first, ...rest] = type.variable.lower.map(resolved);
+  if (!first || first.kind !== 'class' || rest.some((other) => !isSameType(other, first))) return undefined;
+  return first;
 }
 
 /** Whether every bound of a fixed variable holds. */

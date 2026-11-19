@@ -7,6 +7,26 @@ package kotlin.io
 external fun println(message: Any?)
 external fun println()
 external fun print(message: Any?)
+
+// The overloads that kotlin.io declares on the JVM, so that resolving a call chooses among them as kotlinc does.
+fun println(message: Boolean) = println(message as Any?)
+fun print(message: Boolean) = print(message as Any?)
+fun println(message: Byte) = println(message as Any?)
+fun print(message: Byte) = print(message as Any?)
+fun println(message: Char) = println(message as Any?)
+fun print(message: Char) = print(message as Any?)
+fun println(message: Double) = println(message as Any?)
+fun print(message: Double) = print(message as Any?)
+fun println(message: Float) = println(message as Any?)
+fun print(message: Float) = print(message as Any?)
+fun println(message: Int) = println(message as Any?)
+fun print(message: Int) = print(message as Any?)
+fun println(message: Long) = println(message as Any?)
+fun print(message: Long) = print(message as Any?)
+fun println(message: Short) = println(message as Any?)
+fun print(message: Short) = print(message as Any?)
+fun println(message: CharArray) = println(message.concatToString())
+fun print(message: CharArray) = print(message.concatToString())
 `;
 
 /** `System.out` and `System.err`, which Kotlin programs reach through Java's `java.lang`. */

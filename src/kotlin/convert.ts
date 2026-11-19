@@ -51,6 +51,21 @@ const MEMBER_MODIFIERS = new Set([
 const NO_MODIFIERS = new Set<string>();
 
 /** Converts tree-sitter's tree into the AST, rejecting syntax that this environment does not run. */
+/** What the parser puts in place of a `;` between a getter and a setter. */
+export const ACCESSOR_SEPARATOR = '\f';
+
+/**
+ * Rejects a setter on the getter's line after an expression body without `;`, as kotlinc reads `get() = c set(v) {}`
+ * as the getter `c set(v) {}`, an infix call of `set`.
+ */
+function checkAccessorsSeparated(property: Node, getter: Node, setter: Node): void {
+  const [first, second] = getter.startIndex < setter.startIndex ? [getter, setter] : [setter, getter];
+  if (first !== getter || !hasToken(firstOfType(getter, 'function_body') ?? getter, '=')) return;
+  const between = property.text.slice(first.endIndex - property.startIndex, second.startIndex - property.startIndex);
+  if (!/[\n;]/.test(between) && !between.includes(ACCESSOR_SEPARATOR))
+    throw syntaxError(second, 'get と set を同じ行に書くときは、間に ; を書いてください。');
+}
+
 export class Converter extends ExpressionConverter {
   convertFile(root: Node): KotlinFile {
     let packageName: string | undefined;
@@ -256,6 +271,7 @@ export class Converter extends ExpressionConverter {
     );
     const getterNode = firstOfType(node, 'getter');
     const setterNode = firstOfType(node, 'setter');
+    if (getterNode && setterNode) checkAccessorsSeparated(node, getterNode, setterNode);
     if (!isTopLevel && this.isLocal && (getterNode || setterNode))
       throw syntaxError(node, 'ローカル変数には get・set を書けません。');
     return {

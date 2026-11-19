@@ -39,6 +39,8 @@ export interface FunctionInfo {
 
 export type Invoker = (caller: Frame, receiver: Value, args: Value[], callRow: number | undefined) => Value;
 
+const JVM_MAX_STRING_LENGTH = 2 ** 31 - 5;
+
 export class Frame implements TracedFrame {
   readonly locals: Slot[];
   /** Values in use that no variable holds, such as evaluated arguments while the next one is evaluated. */
@@ -131,6 +133,13 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** Charges for a string the program builds, which may not grow beyond the limit. */
   allocateString(frame: Frame, length: number): void {
+    // The JVM refuses so long an array of a string's characters before it looks for memory, measured with kotlinc's
+    // `"a".repeat(Int.MAX_VALUE - 3)`, `StringBuilder(Int.MAX_VALUE)`, and `padStart(Int.MAX_VALUE)`.
+    if (length > JVM_MAX_STRING_LENGTH) {
+      throw new KotlinThrow(
+        this.exceptions.create(frame, 'java.lang.OutOfMemoryError', 'Requested array size exceeds VM limit')
+      );
+    }
     if (length > LIMITS.maxStringLength) {
       throw new KotlinThrow(this.exceptions.create(frame, 'java.lang.OutOfMemoryError', 'Java heap space'));
     }

@@ -1,6 +1,7 @@
 import { formatJava, type FormatValues } from '../../interpreter/javaFormatter';
 import { runtimeClassOf } from '../dispatch';
 import { charToString, formatPrimitive, hashOf, stringOf } from '../format';
+import { toInt32 } from '../operators';
 import type { Frame } from '../runtime';
 import { Boxed, KObject, UNIT, type Value } from '../values';
 import { newList } from './collections';
@@ -211,7 +212,12 @@ const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
     const times = count as number;
     if (times < 0)
       throwError(frame, 'java.lang.IllegalArgumentException', `Count 'n' must be non-negative, but was ${times}.`);
-    frame.runtime.allocateString(frame, text(receiver).length * times);
+    const { length } = text(receiver);
+    // Kotlin's repeat sizes its StringBuilder with `n * length` in Int arithmetic, which overflows for a long result.
+    const capacity = toInt32(length * times);
+    if (times > 1 && length > 1 && capacity < 0)
+      throwError(frame, 'java.lang.NegativeArraySizeException', String(capacity));
+    frame.runtime.allocateString(frame, length * times);
     return text(receiver).repeat(times);
   },
   'CharSequence.split(vararg String, Boolean, Int)': (frame, receiver, [delimiters, ignoreCase, limit]) =>
@@ -259,6 +265,8 @@ const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
       ? compareStrings(text(receiver).toLowerCase(), text(other).toLowerCase())
       : compareStrings(text(receiver), text(other)),
   'String.format(vararg Any?)': (frame, receiver, [args]) =>
+    result(frame, formatText(frame, text(receiver), (args as KObject).items as Value[])),
+  'String.format(Locale?, vararg Any?)': (frame, receiver, [, args]) =>
     result(frame, formatText(frame, text(receiver), (args as KObject).items as Value[])),
 };
 

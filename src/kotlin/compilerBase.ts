@@ -199,6 +199,16 @@ export class Scope {
   ) {}
 }
 
+const CASE_SEPARATOR = '!';
+
+/**
+ * The narrowing that records that the value of `key` is none of `caseIds`, kept among the smart casts so that branches
+ * merge and forget it as they do the smart casts. Kotlin 2.4 uses it to decide whether a `when` covers every case.
+ */
+export function excludingCases(key: string, caseIds: readonly string[]): Map<string, KType> {
+  return new Map(caseIds.map((caseId) => [`${key}${CASE_SEPARATOR}${caseId}`, NOTHING]));
+}
+
 /** What the compiler knows at a point of a function: narrowed types and which variables are assigned. */
 export class Flow {
   constructor(
@@ -209,6 +219,19 @@ export class Flow {
     /** Whether the point cannot be reached, after a `return`, `throw`, `break`, or `continue`. */
     public isDead = false
   ) {}
+
+  /** Forgets the smart casts of a stable value, with the cases it was known not to be. */
+  forget(key: string): void {
+    this.narrowed.delete(key);
+    for (const narrowedKey of this.narrowed.keys())
+      if (narrowedKey.startsWith(`${key}${CASE_SEPARATOR}`)) this.narrowed.delete(narrowedKey);
+  }
+
+  /** The cases of an enum or sealed type that a stable value is known not to be, as a `when` on it need not cover them. */
+  excludedCases(key: string): string[] {
+    const prefix = `${key}${CASE_SEPARATOR}`;
+    return [...this.narrowed.keys()].filter((item) => item.startsWith(prefix)).map((item) => item.slice(prefix.length));
+  }
 
   copy(): Flow {
     return new Flow(new Map(this.narrowed), new Set(this.assigned), new Set(this.maybeAssigned), this.isDead);

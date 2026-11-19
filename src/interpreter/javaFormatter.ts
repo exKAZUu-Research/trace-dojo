@@ -242,7 +242,7 @@ function formatDecimal(value: number, precision: number, conversion: string, fla
   if (Number.isNaN(value)) return 'NaN';
   if (!Number.isFinite(value)) return withSign('Infinity', value < 0, flags);
   const isNegative = value < 0 || Object.is(value, -0);
-  const [mantissa, exponentText] = Math.abs(value).toExponential().split('e');
+  const [mantissa, exponentText] = javaDigits(Math.abs(value)).split('e');
   const digits = mantissa.replace('.', '');
   const exponent = Number(exponentText);
   if (conversion === 'e') return withSign(scientificDigits(digits, exponent, precision, flags), isNegative, flags);
@@ -270,6 +270,15 @@ function formatDecimal(value: number, precision: number, conversion: string, fla
 }
 
 /** The digits of `%e`, rounded half up to `precision`, with the point that `#` keeps even with no digits after it. */
+/**
+ * The digits Java's Formatter starts from: the shortest that read back as the value, but at least two, the closest
+ * two-digit decimal, as Java's FloatingDecimal gives `4.9E-324` for Double.MIN_VALUE where the shortest is `5e-324`.
+ */
+function javaDigits(magnitude: number): string {
+  const shortest = magnitude.toExponential();
+  return shortest.includes('.') ? shortest : magnitude.toExponential(1);
+}
+
 function scientificDigits(digits: string, exponent: number, precision: number, flags: string): string {
   const { digits: rounded, carried } = roundDigits(digits, precision + 1);
   const finalExponent = exponent + carried;

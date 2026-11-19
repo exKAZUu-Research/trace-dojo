@@ -1,9 +1,11 @@
-import type { Expression, TypeRef } from './ast';
+// code-gauge-allow-file fileNcss 413 -- the compiler of one area of Kotlin, whose parts call each other closely.
+import type { CallExpression, Expression, TypeRef } from './ast';
 import { type ArgumentSyntax } from './callCompiler';
 import {
   type Compiled,
   convertRepr,
   type Eval,
+  excludingCases,
   Flow,
   type FunctionContext,
   isBareCallExpression,
@@ -32,7 +34,7 @@ import { box, Boxed, type PrimitiveKind, type Value } from './values';
 
 const INTEGER_KINDS = new Set<PrimitiveKind>(['Int', 'Long', 'Short', 'Byte']);
 
-import { ExpressionCompiler, type Place } from './expressionCompiler';
+import { caseOf, ExpressionCompiler, keyOf, type Place } from './expressionCompiler';
 
 /** Compiles the operators, the conditions, and the `in`, `is`, and `as` tests. */
 export abstract class OperatorCompiler extends ExpressionCompiler {
@@ -468,6 +470,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         nonNullWhen.set(operand.stableKey, nonNull(operand.type));
       for (const [key, type] of operand.whenNonNull ?? []) nonNullWhen.set(key, type);
     }
+    addCaseNarrowing(left, right, whenEqual, whenUnequal);
+    addCaseNarrowing(right, left, whenEqual, whenUnequal);
     return negated ? { whenTrue: whenUnequal, whenFalse: whenEqual } : { whenTrue: whenEqual, whenFalse: whenUnequal };
   }
 
@@ -543,6 +547,8 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     expression: Extract<Expression, { kind: 'infix' }>,
     expected: KType | undefined
   ): Compiled {
+    if (this.isLongConstant(expression, expected))
+      return this.toLongConstant(this.compileInfix(scope, context, expression, undefined));
     const { name, row } = expression;
     const left = this.compileExpression(scope, context, expression.left);
     const members = this.memberCandidates(nonNull(left.type), name).filter((candidate) => candidate.symbol.isInfix);
@@ -644,13 +650,14 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
     const evaluate = convertRepr(operand.eval, operand.repr, 'ref');
     const narrowing = new Map<string, KType>();
     if (operand.stableKey) narrowing.set(operand.stableKey, this.narrowedType(operand.type, type));
+    const exclusion = isExclusion(operand.stableKey, type);
     return {
       type: this.booleanType,
       repr: 'ref',
       eval: expression.negated ? (frame) => !test(evaluate(frame)) : (frame) => test(evaluate(frame)),
       narrowing: expression.negated
-        ? { whenTrue: new Map(), whenFalse: narrowing }
-        : { whenTrue: narrowing, whenFalse: new Map() },
+        ? { whenTrue: exclusion, whenFalse: narrowing }
+        : { whenTrue: narrowing, whenFalse: exclusion },
     };
   }
 
@@ -716,6 +723,25 @@ const COMPARISON_TESTS: Record<'<' | '<=' | '>' | '>=', (order: number) => boole
 function Flow_merge(flows: Flow[]): Flow {
   return Flow.merge(flows);
 }
+/** The cases a stable value is not, when it equals an enum entry or an object and when it does not. */
+function addCaseNarrowing(
+  operand: Compiled,
+  other: Compiled,
+  whenEqual: Map<string, KType>,
+  whenUnequal: Map<string, KType>
+): void {
+  const otherCase = caseOf(other);
+  if (!operand.stableKey || !otherCase) return;
+  for (const [key, type] of excludingCases(operand.stableKey, otherCase.others)) whenEqual.set(key, type);
+  for (const [key, type] of excludingCases(operand.stableKey, [otherCase.id])) whenUnequal.set(key, type);
+}
+
+/** That a stable value is not of a class, which `is` gives when it is false, for a `when` to skip that case. */
+export function isExclusion(key: string | undefined, type: KType): Map<string, KType> {
+  const actual = resolved(type);
+  return key && actual.kind === 'class' ? excludingCases(key, [`class:${keyOf(actual.cls)}`]) : new Map();
+}
+
 function intersectNarrowing(a: Map<string, KType>, b: Map<string, KType>): Map<string, KType> {
   const result = new Map<string, KType>();
   for (const [key, type] of a) {
@@ -724,6 +750,30 @@ function intersectNarrowing(a: Map<string, KType>, b: Map<string, KType>): Map<s
   }
   return result;
 }
+/** The methods of the integer types that kotlinc evaluates on constants, as it does the operators. */
+const CONSTANT_BINARY_METHODS = new Set([
+  'plus',
+  'minus',
+  'times',
+  'div',
+  'rem',
+  'and',
+  'or',
+  'xor',
+  'shl',
+  'shr',
+  'ushr',
+]);
+const CONSTANT_UNARY_METHODS = new Set(['unaryMinus', 'unaryPlus', 'inv']);
+
+function isConstantMethodCall(call: CallExpression): boolean {
+  const { callee, args } = call;
+  if (callee.kind !== 'member' || callee.isSafe || call.typeArgs.length > 0 || call.trailingLambda) return false;
+  if (!isIntegerConstant(callee.receiver) || args.some((arg) => arg.name !== undefined || arg.isSpread)) return false;
+  if (args.length === 0) return CONSTANT_UNARY_METHODS.has(callee.name);
+  return args.length === 1 && CONSTANT_BINARY_METHODS.has(callee.name) && isIntegerConstant(args[0].value);
+}
+
 function isIntegerConstant(expression: Expression): boolean {
   switch (expression.kind) {
     case 'integer': {
@@ -741,6 +791,16 @@ function isIntegerConstant(expression: Expression): boolean {
         isIntegerConstant(expression.left) &&
         isIntegerConstant(expression.right)
       );
+    }
+    case 'infix': {
+      return (
+        CONSTANT_BINARY_METHODS.has(expression.name) &&
+        isIntegerConstant(expression.left) &&
+        isIntegerConstant(expression.right)
+      );
+    }
+    case 'call': {
+      return isConstantMethodCall(expression);
     }
     default: {
       return false;

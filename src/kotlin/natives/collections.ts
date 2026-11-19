@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 662 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 685 -- the natives of the collections, which share the helpers of their items.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -25,15 +25,26 @@ function className(value: Value): string {
 
 /** Throws `UnsupportedOperationException` for a change a read-only or fixed-size list does not allow. */
 function requireResizable(frame: Frame, list: Value): void {
-  if (className(list) !== 'ArrayList' && className(list) !== 'SubList')
-    throwError(frame, 'java.lang.UnsupportedOperationException');
+  const name = className(list);
+  const isResizable = name === 'ArrayList' || name === 'SubList' || (name === 'ListBuilder' && !isBuilt(list));
+  if (!isResizable) throwError(frame, 'java.lang.UnsupportedOperationException');
 }
 
 function requireMutable(frame: Frame, list: Value): void {
   const name = className(list);
-  if (name === 'SingletonList' || name === 'EmptyList' || name === 'EnumEntriesList') {
+  if (
+    name === 'SingletonList' ||
+    name === 'EmptyList' ||
+    name === 'EnumEntriesList' ||
+    (name === 'ListBuilder' && isBuilt(list))
+  ) {
     throwError(frame, 'java.lang.UnsupportedOperationException');
   }
+}
+
+/** Whether `buildList` has finished a list it built, which no longer changes. */
+function isBuilt(list: Value): boolean {
+  return (list as KObject).native?.isBuilt === true;
 }
 
 /** Checks an index of `get`, `set`, and `removeAt`, with the message each list class gives. */
@@ -53,6 +64,10 @@ function checkIndex(frame: Frame, list: Value, index: number): void {
     }
     case 'EmptyList': {
       throwError(frame, 'java.lang.IndexOutOfBoundsException', `Empty list doesn't contain element at index ${index}.`);
+      break;
+    }
+    case 'ListBuilder': {
+      throwError(frame, 'java.lang.IndexOutOfBoundsException', `index: ${index}, size: ${size}`);
       break;
     }
     default: {
@@ -86,7 +101,7 @@ export function collectionToString(frame: Frame, collection: Value, elements: Va
 
 export function newList(
   frame: Frame,
-  className: 'ArrayList' | 'ArraysList' | 'SingletonList' | 'EmptyList',
+  className: 'ArrayList' | 'ArraysList' | 'SingletonList' | 'EmptyList' | 'ListBuilder',
   values: Value[]
 ): KObject {
   frame.runtime.allocate(frame, values.length + 1);
@@ -152,6 +167,23 @@ const LIST_READING_NATIVES: Record<string, ListNative> = {
   },
   'iterator()': (frame, list) => arrayIterator(frame, list as KObject),
   'listIterator()': (frame, list) => arrayIterator(frame, list as KObject),
+  'listIterator(Int)': (frame, list, [index]) => {
+    const size = items(list).length;
+    const position = index as number;
+    if (position < 0 || position > size) {
+      const name = className(list);
+      const message =
+        name === 'EmptyList'
+          ? `Index: ${position}`
+          : name === 'ListBuilder'
+            ? `index: ${position}, size: ${size}`
+            : `Index: ${position}, Size: ${size}`;
+      throwError(frame, 'java.lang.IndexOutOfBoundsException', message);
+    }
+    const iterator = arrayIterator(frame, list as KObject);
+    (iterator.native as { index: number }).index = position;
+    return iterator;
+  },
   'subList(Int, Int)': (frame, list, [from, to]) => subList(frame, list as KObject, from as number, to as number),
   'equals(Any?)': (frame, list, [other]) => listEquals(frame, list as KObject, other),
   'hashCode()': (frame, list) => listHash(frame, items(list)),
@@ -270,6 +302,11 @@ function defineLists(): void {
       },
     ],
   ];
+  defineNative('kotlin.collections.NativeLists.builder()', (frame) => newList(frame, 'ListBuilder', []));
+  defineNative('kotlin.collections.ListBuilder.build()', (_frame, list) => {
+    (list as KObject).native = { isBuilt: true };
+    return list;
+  });
   for (const [signature, initialize] of constructors) {
     defineNative(`kotlin.collections.ArrayList.<init>${signature}`, (frame, instance, args) => {
       const list = instance as KObject;

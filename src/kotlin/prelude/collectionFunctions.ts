@@ -1272,9 +1272,9 @@ fun <T> MutableList<T>.fill(value: T) {
 }
 
 inline fun <T> buildList(builderAction: MutableList<T>.() -> Unit): List<T> {
-    val list = ArrayList<T>()
+    val list = NativeLists.builder<T>()
     list.builderAction()
-    return list
+    return list.build()
 }
 
 inline fun <E> buildSet(builderAction: MutableSet<E>.() -> Unit): Set<E> {
@@ -1326,6 +1326,7 @@ fun <T : Comparable<T>> List<T?>.binarySearch(element: T?, fromIndex: Int = 0, t
 
 object NativeLists {
     external fun <T> of(elements: Collection<T>): MutableList<T>
+    external fun <T> builder(): ListBuilder<T>
     external fun <T> toArray(elements: Iterable<T>): Array<T>
 }
 

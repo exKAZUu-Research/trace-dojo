@@ -1,8 +1,17 @@
 import { kotlin } from './source';
 
+/** `java.util.Locale`, which the prelude declares only for the overloads of `format` that take one. */
+export const UTIL_SOURCE = kotlin`
+package java.util
+
+class Locale private constructor()
+`;
+
 /** `kotlin.text`: `StringBuilder` and the functions of strings and characters. */
 export const TEXT_SOURCE = kotlin`
 package kotlin.text
+
+import java.util.Locale
 
 external class StringBuilder : CharSequence, Comparable<StringBuilder> {
     external constructor()
@@ -195,6 +204,9 @@ external fun String.padEnd(length: Int, padChar: Char = ' '): String
 external fun String.equals(other: String?, ignoreCase: Boolean): Boolean
 external fun String.compareTo(other: String, ignoreCase: Boolean): Int
 external fun String.format(vararg args: Any?): String
+// The overload taking a Locale, which only a null literal can reach, so that \`"%d".format(null)\` passes the null as
+// the locale and no argument, as kotlinc resolves it.
+external fun String.format(locale: Locale?, vararg args: Any?): String
 fun String.Companion.format(format: String, vararg args: Any?): String = format.format(*args)
 external fun String.removePrefix(prefix: CharSequence): String
 external fun String.removeSuffix(suffix: CharSequence): String

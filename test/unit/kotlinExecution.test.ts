@@ -183,6 +183,27 @@ fun square(x: Int) = x * x`,
       'fun main() {\n    val a = Any()\n    println(a == a)\n    println(a.toString().startsWith("java.lang.Object@"))\n}',
     stdout: 'true\ntrue\n',
   },
+  {
+    name: 'the calls that kotlinc resolves among the JVM overloads of the library',
+    source: `fun main() {
+    val it = mutableListOf(1, 2, 3).listIterator(1)
+    println("\${it.next()} \${it.previousIndex()}")
+    val built = buildList { add(1) }
+    try { built[1] } catch (e: Exception) { println(e) }
+    try { (built as MutableList<Int>).add(2) } catch (e: Exception) { println(e) }
+    try { "%d".format(null) } catch (e: Exception) { println(e) }
+    println("%e".format(Double.MIN_VALUE))
+    println(charArrayOf('a', 'b'))
+    val long: Long = 1.plus(2).shl(1)
+    println(long)
+    println(arrayOf(1, 2L)[0] is Long)
+    (1..3).onEach { print(it) }
+    println()
+    try { "ab".repeat(Int.MAX_VALUE) } catch (e: Throwable) { println(e) }
+}`,
+    stdout:
+      "2 1\njava.lang.IndexOutOfBoundsException: index: 1, size: 1\njava.lang.UnsupportedOperationException\njava.util.MissingFormatArgumentException: Format specifier '%d'\n4.900000e-324\nab\n6\ntrue\n123\njava.lang.NegativeArraySizeException: -2\n",
+  },
 ])('runs $name as Kotlin does', ({ source, stdout }) => {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
@@ -317,6 +338,38 @@ test.each([
     false,
     'class Node(val v: Int, var next: Node?)\nfun main() {\n    var head: Node? = null\n    for (i in 1..3) head = Node(i, head)\n    println(head.v)\n}',
   ],
+  [
+    'a when that a smart cast leaves exhaustive',
+    true,
+    'enum class C { R, G, B }\nfun f(c: C): String {\n    if (c == C.R) return "first"\n    return when (c) { C.G -> "g"; C.B -> "b" }\n}\nfun main() { println(f(C.R)); println(f(C.B)) }',
+  ],
+  [
+    'a when on a variable whose declared type keeps every case',
+    false,
+    'enum class C { R, G, B }\nfun main() {\n    val c: C = C.R\n    println(when (c) { C.R -> "r"; C.G -> "g" })\n}',
+  ],
+  [
+    'arrayOf whose reified type argument is an intersection of types',
+    false,
+    'fun main() {\n    println(arrayOf(1, "s").size)\n}',
+  ],
+  ['println of a Nothing value, which every overload accepts', false, 'fun main() {\n    println(TODO())\n}'],
+  [
+    'a setter on the line of an expression getter without a semicolon',
+    false,
+    'class A {\n    var c = 1\n    var f: Int get() = c  set(v) { c = v }\n}\nfun main() { val a = A(); a.f = 2; println(a.f) }',
+  ],
+  [
+    'a setter after a getter and a semicolon',
+    true,
+    'class A {\n    var c = 1\n    var f: Int get() = c; set(v) { c = v }\n}\nfun main() { val a = A(); a.f = 2; println(a.f) }',
+  ],
+  [
+    'the list builder that buildList uses',
+    false,
+    'class ListBuilderUser\nfun main() {\n    println(ListBuilder<Int>())\n}',
+  ],
+  ['Locale without its import', false, 'fun main() {\n    val l: Locale? = null\n}'],
 ])('decides whether %s compiles as kotlinc does', (_name, compiles, source) => {
   expect(executeProgram('kotlin', source).kind === 'compileError').toBe(!compiles);
 });

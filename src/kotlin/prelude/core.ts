@@ -69,6 +69,7 @@ class Char private constructor() : Comparable<Char> {
 class Byte private constructor() : Number(), Comparable<Byte> {
 ${numberOperators('Byte')}
     external operator fun unaryMinus(): Int
+    operator fun unaryPlus(): Int = toInt()
     external operator fun inc(): Byte
     external operator fun dec(): Byte
     external override fun toDouble(): Double
@@ -91,6 +92,7 @@ ${numberOperators('Byte')}
 class Short private constructor() : Number(), Comparable<Short> {
 ${numberOperators('Short')}
     external operator fun unaryMinus(): Int
+    operator fun unaryPlus(): Int = toInt()
     external operator fun inc(): Short
     external operator fun dec(): Short
     external override fun toDouble(): Double
@@ -113,6 +115,7 @@ ${numberOperators('Short')}
 class Int private constructor() : Number(), Comparable<Int> {
 ${numberOperators('Int')}
     external operator fun unaryMinus(): Int
+    operator fun unaryPlus(): Int = this
     external operator fun inc(): Int
     external operator fun dec(): Int
     external override fun toDouble(): Double
@@ -148,6 +151,7 @@ ${numberOperators('Int')}
 class Long private constructor() : Number(), Comparable<Long> {
 ${numberOperators('Long')}
     external operator fun unaryMinus(): Long
+    operator fun unaryPlus(): Long = this
     external operator fun inc(): Long
     external operator fun dec(): Long
     external override fun toDouble(): Double
@@ -180,6 +184,7 @@ ${numberOperators('Long')}
 class Float private constructor() : Number(), Comparable<Float> {
 ${numberOperators('Float')}
     external operator fun unaryMinus(): Float
+    operator fun unaryPlus(): Float = this
     external operator fun inc(): Float
     external operator fun dec(): Float
     external override fun toDouble(): Double
@@ -203,6 +208,7 @@ ${numberOperators('Float')}
 class Double private constructor() : Number(), Comparable<Double> {
 ${numberOperators('Double')}
     external operator fun unaryMinus(): Double
+    operator fun unaryPlus(): Double = this
     external operator fun inc(): Double
     external operator fun dec(): Double
     external override fun toDouble(): Double

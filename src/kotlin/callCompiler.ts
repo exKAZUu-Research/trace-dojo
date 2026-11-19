@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 469 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 476 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { type ArgumentEvaluation, argumentEvaluator, expectedArgumentType, firstAttempts } from './argumentTypes';
 import type { Expression, LambdaExpression } from './ast';
 import { type Compiled, type Eval, FunctionContext, reprOf, type Scope, typeMismatchMessage } from './compilerBase';
@@ -7,7 +7,15 @@ import { callFunction, parameterReprs, receiverRepr, returnRepr } from './dispat
 import { literalFits } from './literals';
 import type { Frame } from './runtime';
 import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
-import { checkVariableBounds, determinedType, fixVariable, isSubtype } from './typeRelations';
+import {
+  checkVariableBounds,
+  constrainThroughBounds,
+  determinedType,
+  fixVariable,
+  hasIntersectionSupertype,
+  isSubtype,
+  soleLowerBound,
+} from './typeRelations';
 import {
   type FunctionType,
   hasOpenVariables,
@@ -140,8 +148,9 @@ export abstract class CallCompiler extends CompilerCore {
   protected acceptsArgument(compiled: Compiled, type: KType): boolean {
     if (compiled.integerLiteral) {
       // A variable that the receiver already determines, as `T` of `plusAssign` on a `MutableList<Long>`, takes the
-      // literal as the type it requires.
-      const target = determinedType(resolved(type)) ?? resolved(type);
+      // literal as the type it requires; one that other arguments give a type, as `T` of `listOf(1, 2L)`, takes it as
+      // that type.
+      const target = determinedType(resolved(type)) ?? soleLowerBound(resolved(type)) ?? resolved(type);
       if (target.kind === 'class' && literalFits(compiled.integerLiteral, target.cls.name))
         return isSubtype(target, type);
     }
@@ -318,19 +327,19 @@ export abstract class CallCompiler extends CompilerCore {
       const receiverType = substitute(symbol.extensionReceiver, attempt.substitution);
       if (!isSubtype(receiver.type, receiverType)) return false;
     }
-    for (const [paramIndex, indexes] of attempt.mapping.entries()) {
-      const param = symbol.params[paramIndex];
+    // Integer literals come last, so that they take the type the other arguments give a type parameter.
+    const checks = [...attempt.mapping.entries()]
+      .flatMap(([paramIndex, indexes]) => indexes.map((index) => ({ param: symbol.params[paramIndex], index })))
+      .toSorted((a, b) => Number(isLiteralAt(compiledArgs, a.index)) - Number(isLiteralAt(compiledArgs, b.index)));
+    for (const { param, index } of checks) {
       const paramType = substitute(param.type, attempt.substitution);
-      for (const index of indexes) {
-        const compiled = compiledArgs[index];
-        if (!compiled) {
-          if (!this.lambdaFits(args[index].value as LambdaExpression, paramType)) return false;
-          continue;
-        }
-        if (args[index].isSpread) continue;
-        if (!this.acceptsArgument(compiled, param.isVararg ? this.varargElementType(paramType) : paramType))
-          return false;
+      const compiled = compiledArgs[index];
+      if (!compiled) {
+        if (!this.lambdaFits(args[index].value as LambdaExpression, paramType)) return false;
+        continue;
       }
+      if (args[index].isSpread) continue;
+      if (!this.acceptsArgument(compiled, param.isVararg ? this.varargElementType(paramType) : paramType)) return false;
     }
     for (const variable of attempt.variables) {
       const copy: InferenceVariable = {
@@ -478,7 +487,7 @@ export abstract class CallCompiler extends CompilerCore {
     const lambdaTypes = attempts.map((attempt) => {
       const paramIndex = attempt.mapping.findIndex((indexes) => indexes.includes(lambdaIndex));
       const type = substitute(attempt.candidate.symbol.params[paramIndex].type, attempt.substitution);
-      return this.lambdaTypeFor(type, attempt.variables) ?? resolved(type);
+      return this.lambdaTypeFor(type, attempt) ?? resolved(type);
     });
     const first = lambdaTypes[0];
     if (first.kind !== 'function') return undefined;
@@ -624,16 +633,16 @@ export abstract class CallCompiler extends CompilerCore {
   private compileLambdaArgument(
     scope: Scope,
     context: FunctionContext,
-    { candidate, substitution, variables }: Attempt,
+    attempt: Attempt,
     paramIndex: number,
     argument: ArgumentSyntax
   ): Compiled {
-    const { symbol } = candidate;
+    const { symbol } = attempt.candidate;
     const param = symbol.params[paramIndex];
-    const paramType = substitute(param.type, substitution);
+    const paramType = substitute(param.type, attempt.substitution);
     const elementType = param.isVararg ? this.varargElementType(paramType) : paramType;
     const sam = this.samOf(elementType);
-    const lambdaType = this.lambdaTypeFor(sam ? sam.functionType : elementType, variables);
+    const lambdaType = this.lambdaTypeFor(sam ? sam.functionType : elementType, attempt);
     const compiled = this.compileLambda(
       scope,
       context,
@@ -670,8 +679,7 @@ export abstract class CallCompiler extends CompilerCore {
       const waiting = pending.filter((variable) => !fixVariable(variable));
       for (const variable of pending) {
         if (!variable.fixed) continue;
-        if (!checkVariableBounds(variable))
-          this.error(row, `${symbol.name} の型引数 ${variable.param.name} に合う型がありません。`);
+        this.checkFixedVariable(symbol.name, variable, row);
         if (waiting.length > 0)
           for (const bound of variable.param.bounds) isSubtype(variable.fixed, substitute(bound, substitution));
       }
@@ -691,6 +699,20 @@ export abstract class CallCompiler extends CompilerCore {
         }
       }
     }
+  }
+
+  /**
+   * Rejects a fixed variable that misses its bounds, or that is reified and fixed to an intersection of types, which
+   * kotlinc rejects as `arrayOf(1, "a")` makes `Comparable<*> & Serializable`.
+   */
+  private checkFixedVariable(name: string, variable: InferenceVariable, row: number): void {
+    if (!checkVariableBounds(variable))
+      this.error(row, `${name} の型引数 ${variable.param.name} に合う型がありません。`);
+    if (variable.param.isReified && hasIntersectionSupertype(variable.lower))
+      this.error(
+        row,
+        `${name} の型引数 ${variable.param.name} が、複数の型の組み合わせになります。${name}<Any> のように型を書いてください。`
+      );
   }
 
   /** The arguments, in the order they are written, converted to the parameters' declared representations. */
@@ -751,13 +773,15 @@ export abstract class CallCompiler extends CompilerCore {
   protected abstract varargArrayFactory(elementType: KType): (frame: Frame, values: Value[]) => KObject;
 
   /** The function type a lambda argument is checked against, fixing the variables its parameters need. */
-  private lambdaTypeFor(type: KType, variables: InferenceVariable[]): FunctionType | undefined {
+  private lambdaTypeFor(type: KType, { variables, substitution }: Attempt): FunctionType | undefined {
     const actual = determinedType(resolved(type));
     if (actual?.kind !== 'function') return undefined;
     const inputs = actual.receiver ? [actual.receiver, ...actual.params] : actual.params;
     for (const input of inputs) {
       for (const variable of variables) {
-        if (!variable.fixed && mentionsVariable(input, (candidate) => candidate === variable)) fixVariable(variable);
+        if (variable.fixed || !mentionsVariable(input, (candidate) => candidate === variable)) continue;
+        constrainThroughBounds(variable, variables, substitution);
+        fixVariable(variable);
       }
     }
     return resolved(actual) as FunctionType;
@@ -873,4 +897,8 @@ function unusedParameters(attempt: Attempt): number {
   const { params } = attempt.candidate.symbol;
   const defaults = attempt.mapping.filter((indexes, index) => indexes.length === 0 && params[index].hasDefault).length;
   return defaults + (params.some((param) => param.isVararg) ? 1 : 0);
+}
+
+function isLiteralAt(compiledArgs: (Compiled | undefined)[], index: number): boolean {
+  return compiledArgs[index]?.integerLiteral !== undefined;
 }
