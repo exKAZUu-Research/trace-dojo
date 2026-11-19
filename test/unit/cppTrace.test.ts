@@ -184,6 +184,7 @@ test.each([
     'イテレータ',
   ],
   ['random', 'std::uniform_real_distribution<float> d(-3e38f, 3e38f);', '範囲が広すぎ'],
+  ['unordered_set', 'std::unordered_set<int> s{3}; auto i = s.begin(); s.rehash(100); return *i;', 'イテレータ'],
 ])('reports an invalid operation from <%s>', (header, body, reason) => {
   const program = `#include <${header}>\nint main() { ${body} }`;
   expect(executeProgram('cpp', program)).toMatchObject({

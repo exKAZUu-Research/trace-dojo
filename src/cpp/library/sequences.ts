@@ -32,6 +32,7 @@ import {
   equalTo,
   lessThan,
   locationOf,
+  swapElements,
   truthy,
 } from './elements';
 import { elementLocation, randomAccessIterator } from './iterators';
@@ -462,9 +463,15 @@ function sequenceMethods(
     isConst: true,
   });
   method('crend', [], types.constReverseIterator, (self) => self.iteratorLocation(0), { isConst: true });
-  method('swap', [referenceTo(type)], VOID, (self, [other]) => {
+  method('swap', [referenceTo(type)], VOID, (self, [other], frame) => {
     const target = (other as Ptr).read() as SequenceValue;
-    self.swapItems(target);
+    if (kind === 'array') {
+      const operations = ops();
+      for (let index = 0; index < self.length; index++)
+        swapElements(frame, self.location(index), target.location(index), operations);
+    } else {
+      self.swapItems(target);
+    }
   });
   if (kind === 'array') {
     method('fill', [constRef(element)], VOID, (self, [value], frame) => {

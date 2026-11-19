@@ -173,14 +173,19 @@ interface HashNode {
 }
 
 class HashPosition extends Ptr {
+  private readonly generation: number | undefined;
+
   constructor(
     private readonly table: HashValue,
-    readonly node: HashNode | undefined
+    readonly node: HashNode | undefined,
+    private readonly epoch?: { generation: number }
   ) {
     super(undefined, 0);
+    this.generation = epoch?.generation;
   }
 
   override get store(): HashValue {
+    if (this.epoch && this.epoch.generation !== this.generation) throw new CppRuntimeError('invalidIterator');
     return this.node?.owner ?? this.table;
   }
 
@@ -200,8 +205,8 @@ class HashPosition extends Ptr {
 
   override element(isReverse: boolean): Ptr {
     if (isReverse) return super.element(true);
-    this.entry();
-    return this;
+    const node = this.entry();
+    return new HashPosition(this.store, node);
   }
 
   override readRaw(): Value {
@@ -257,6 +262,7 @@ export class HashValue extends MapValue {
   maxLoadFactor = 1;
   private ordered: HashNode[] | undefined;
   private readonly positions = new Map<HashNode, number>();
+  private iteratorEpoch = { generation: 0 };
 
   constructor(
     readonly hash: (value: Value) => bigint,
@@ -278,7 +284,7 @@ export class HashValue extends MapValue {
   }
 
   iterator(node: HashNode | undefined): Ptr {
-    return new HashPosition(this, node);
+    return new HashPosition(this, node, this.iteratorEpoch);
   }
 
   first(): Ptr {
@@ -286,6 +292,11 @@ export class HashValue extends MapValue {
   }
 
   override location(index: number): Ptr {
+    if (index < 0 || index > this.size) throw new CppRuntimeError('invalidIterator');
+    return new HashPosition(this, index === this.size ? undefined : this.nodes()[index]);
+  }
+
+  override iteratorLocation(index: number): Ptr {
     if (index < 0 || index > this.size) throw new CppRuntimeError('invalidIterator');
     return this.iterator(index === this.size ? undefined : this.nodes()[index]);
   }
@@ -425,6 +436,7 @@ export class HashValue extends MapValue {
       value.buckets.flatMap((before, index) => (before === value.head ? [index] : []));
     const ownHeads = headsOf(this);
     const otherHeads = headsOf(other);
+    [this.iteratorEpoch, other.iteratorEpoch] = [other.iteratorEpoch, this.iteratorEpoch];
     const next = this.head.next;
     this.head.next = other.head.next;
     other.head.next = next;
@@ -470,6 +482,7 @@ export class HashValue extends MapValue {
 
   /** `__do_rehash<true>`, which keeps each bucket's nodes together in the list. */
   private redistribute(count: number): void {
+    this.iteratorEpoch.generation++;
     const buckets: (HashNode | undefined)[] = Array.from({ length: count });
     this.buckets = buckets;
     if (count === 0) return;

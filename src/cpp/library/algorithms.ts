@@ -4,7 +4,7 @@ import { CompileError } from '../../interpreter/diagnostics';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { destroyTemporaries, invoke, makeEach } from '../objectCompiler';
+import { destroyTemporaries, invoke, makeEach, withTemporaries } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import {
   BOOL,
@@ -29,6 +29,7 @@ import {
 import { CObject, Ptr, type Store, type Value } from '../values';
 import { pairClass } from './associative';
 import {
+  assignElement,
   comparatorOf,
   type ElementOperations,
   elementOperations,
@@ -37,6 +38,7 @@ import {
   lessThan,
   locationOf,
   moveValue,
+  swapElements,
   truthy,
 } from './elements';
 import { elementLocation } from './iterators';
@@ -125,12 +127,7 @@ class Range {
   withTemporary<T>(position: number, use: (value: Value) => T): T {
     const frame = this.write?.frame;
     if (!frame) return use(this.get(position));
-    const mark = frame.temporaries.length;
-    try {
-      return use(this.take(position));
-    } finally {
-      destroyTemporaries(frame, mark);
-    }
+    return withTemporaries(frame, () => use(this.take(position)));
   }
 
   swap(a: number, b: number): void {
@@ -1012,20 +1009,6 @@ function mutableRange(first: unknown, last: unknown, info: IteratorInfo, frame: 
   return new Range(first as Ptr, last as Ptr, info.isReverse, write);
 }
 
-function swapElements(frame: Frame, a: Ptr, b: Ptr, ops: ElementOperations): void {
-  if (a.equals(b)) return;
-  const value = ops.copy(frame, a.read());
-  const mark = frame.pending.length;
-  frame.pending.push(value);
-  try {
-    assignElement(frame, a, ops, b.read());
-    assignElement(frame, b, ops, value);
-  } finally {
-    frame.pending.length = mark;
-    ops.destroy?.(frame, value);
-  }
-}
-
 const readArg = (arg: unknown, type: Type): Value => (type.kind === 'reference' ? (arg as Ptr).read() : (arg as Value));
 
 const tryCompile = <T>(make: () => T): T | undefined => {
@@ -1054,10 +1037,6 @@ function backInserter(library: Library, container: Type, appendMethod: FunctionI
   cls.operations = { copy: (_frame, value) => value, assign: (_frame, _target, source) => source };
   library.instances.set(key, cls);
   return cls;
-}
-
-function assignElement(frame: Frame, location: Ptr, operations: ElementOperations, value: Value): void {
-  location.write(operations.assign(frame, location.readRaw(), value));
 }
 
 /** The common type `T` of two arguments of `const T&` parameters, or undefined when deduction fails. */
@@ -1388,54 +1367,56 @@ function partitionWithEqualsOnRight(values: Range, start: number, end: number, l
   const begin = start;
   let first = start;
   let last = end;
-  const pivot = values.take(first);
-  do first++;
-  while (less(values.get(first), pivot));
-  if (begin === first - 1) {
-    while (first < last && !less(values.get(--last), pivot));
-  } else {
-    while (!less(values.get(--last), pivot));
-  }
-  const alreadyPartitioned = first >= last;
-  while (first < last) {
-    values.swap(first, last);
+  return values.withTemporary(first, (pivot) => {
     do first++;
     while (less(values.get(first), pivot));
-    do last--;
-    while (!less(values.get(last), pivot));
-  }
-  const pivotPosition = first - 1;
-  if (begin !== pivotPosition) values.set(begin, values.get(pivotPosition));
-  values.set(pivotPosition, pivot);
-  return [pivotPosition, alreadyPartitioned];
+    if (begin === first - 1) {
+      while (first < last && !less(values.get(--last), pivot));
+    } else {
+      while (!less(values.get(--last), pivot));
+    }
+    const alreadyPartitioned = first >= last;
+    while (first < last) {
+      values.swap(first, last);
+      do first++;
+      while (less(values.get(first), pivot));
+      do last--;
+      while (!less(values.get(last), pivot));
+    }
+    const pivotPosition = first - 1;
+    if (begin !== pivotPosition) values.set(begin, values.get(pivotPosition));
+    values.set(pivotPosition, pivot);
+    return [pivotPosition, alreadyPartitioned];
+  });
 }
 
 function partitionWithEqualsOnLeft(values: Range, start: number, end: number, less: Less): number {
   const begin = start;
   let first = start;
   let last = end;
-  const pivot = values.take(first);
-  if (less(pivot, values.get(last - 1))) {
-    do first++;
-    while (!less(pivot, values.get(first)));
-  } else {
-    while (++first < last && !less(pivot, values.get(first)));
-  }
-  if (first < last) {
-    do last--;
-    while (less(pivot, values.get(last)));
-  }
-  while (first < last) {
-    values.swap(first, last);
-    do first++;
-    while (!less(pivot, values.get(first)));
-    do last--;
-    while (less(pivot, values.get(last)));
-  }
-  const pivotPosition = first - 1;
-  if (begin !== pivotPosition) values.set(begin, values.get(pivotPosition));
-  values.set(pivotPosition, pivot);
-  return first;
+  return values.withTemporary(first, (pivot) => {
+    if (less(pivot, values.get(last - 1))) {
+      do first++;
+      while (!less(pivot, values.get(first)));
+    } else {
+      while (++first < last && !less(pivot, values.get(first)));
+    }
+    if (first < last) {
+      do last--;
+      while (less(pivot, values.get(last)));
+    }
+    while (first < last) {
+      values.swap(first, last);
+      do first++;
+      while (!less(pivot, values.get(first)));
+      do last--;
+      while (less(pivot, values.get(last)));
+    }
+    const pivotPosition = first - 1;
+    if (begin !== pivotPosition) values.set(begin, values.get(pivotPosition));
+    values.set(pivotPosition, pivot);
+    return first;
+  });
 }
 
 /** The heap sort that introsort falls back to (`__partial_sort` over the whole range). */
@@ -1447,16 +1428,17 @@ function heapSort(values: Range, first: number, last: number, less: Less): void 
     child = 2 * child + 1;
     if (child + 1 < size && less(values.get(first + child), values.get(first + child + 1))) child++;
     if (less(values.get(first + child), values.get(first + start))) return;
-    const top = values.take(first + start);
-    let hole = start;
-    do {
-      values.set(first + hole, values.get(first + child));
-      hole = child;
-      if ((size - 2) >> 1 < child) break;
-      child = 2 * child + 1;
-      if (child + 1 < size && less(values.get(first + child), values.get(first + child + 1))) child++;
-    } while (!less(values.get(first + child), top));
-    values.set(first + hole, top);
+    values.withTemporary(first + start, (top) => {
+      let hole = start;
+      do {
+        values.set(first + hole, values.get(first + child));
+        hole = child;
+        if ((size - 2) >> 1 < child) break;
+        child = 2 * child + 1;
+        if (child + 1 < size && less(values.get(first + child), values.get(first + child + 1))) child++;
+      } while (!less(values.get(first + child), top));
+      values.set(first + hole, top);
+    });
   };
   for (let start = (length - 2) >> 1; start >= 0; start--) siftDown(start, length);
   for (let size = length; size > 1; size--) {

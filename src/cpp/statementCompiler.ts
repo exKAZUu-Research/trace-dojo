@@ -4,7 +4,7 @@ import { permitsQualificationConversion } from './conversions';
 import { CppException, ProgramAbort } from './errors';
 import type { Expr } from './expr';
 import { ExpressionCompiler } from './expressionCompiler';
-import { destroyTemporaries, zeroOf } from './objectCompiler';
+import { withTemporaries, zeroOf } from './objectCompiler';
 import { BREAK, type Completion, CONTINUE, type Eval, type Exec, type Frame, type LocalInfo, RETURN } from './runtime';
 import { type Entity, Scope } from './scopes';
 import { isObjectCreation, onlyCalls } from './stepRules';
@@ -49,18 +49,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   /** Runs an expression as a full-expression, whose temporaries end their lifetime when it completes. */
   fullExpression<T>(run: Eval<T>): Eval<T> {
-    return (frame) => {
-      const mark = frame.temporaries.length;
-      let result: T;
-      try {
-        result = run(frame);
-      } catch (error) {
-        if (error instanceof CppException) destroyTemporaries(frame, mark);
-        throw error;
-      }
-      destroyTemporaries(frame, mark);
-      return result;
-    };
+    return (frame) => withTemporaries(frame, run);
   }
 
   /** Compiles statements in a new block scope, whose variables end their lifetime when the block completes. */
@@ -876,11 +865,16 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   /** A temporary array holding the values of a braced list, for `for (int x : {1, 2, 3})`. */
   private braceArray(list: Syntax): Expr {
-    if (list.children.length === 0) return this.error(list.row, '範囲 for 文の {} には値を書いてください。');
-    const first = this.compileExpression(list.children[0]);
-    const elementType = this.deduceAuto(AUTO, first, list.row);
-    const type: Type = { kind: 'array', of: withConst(elementType), length: list.children.length };
-    const run = this.listInitializer({ kind: 'array', of: elementType, length: list.children.length }, list, list.row);
+    const values = list.children.filter((child) => child.type !== 'comment');
+    if (values.length === 0) return this.error(list.row, '範囲 for 文の {} には値を書いてください。');
+    const elementType = this.deduceAuto(AUTO, this.compileExpression(values[0]), list.row);
+    for (const value of values.slice(1)) {
+      const candidate = this.deduceAuto(AUTO, this.compileExpression(value), value.row);
+      if (!sameType(candidate, elementType))
+        return this.error(value.row, '範囲 for 文の {} には同じ型の値を書いてください。');
+    }
+    const type: Type = { kind: 'array', of: withConst(elementType), length: values.length };
+    const run = this.listInitializer({ ...type, of: elementType }, list, list.row);
     return { type, isLvalue: false, row: list.row, run };
   }
 

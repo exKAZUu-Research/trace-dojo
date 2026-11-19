@@ -404,11 +404,7 @@ export class Compiler extends StatementCompiler {
     if (isConstructor && rawName !== cls.name) return this.error(node.row, `${rawName} の戻り値の型を書いてください。`);
     if (isDestructor && rawName !== `~${cls.name}`)
       return this.error(node.row, `デストラクタの名前は ~${cls.name} です。`);
-    if (
-      (rawName === cls.name || isDestructor) &&
-      (typeNode || node.children.some((child) => child.type === 'type_qualifier'))
-    )
-      return this.error(node.row, 'コンストラクタとデストラクタには戻り値の型を書けません。');
+    this.checkSpecialMemberReturnType(cls, rawName, node);
     const fn = this.functionInfo(rawName, declared.type, functionDeclarator, node, cls);
     fn.access = access;
     fn.isConstructor = isConstructor;
@@ -1058,6 +1054,7 @@ export class Compiler extends StatementCompiler {
       const declarator = fieldOf(node, 'declarator') as Syntax;
       const nameNode = fieldOf(qualified, 'name') as Syntax;
       const typeNode = fieldOf(node, 'type');
+      this.checkSpecialMemberReturnType(cls, nameNode.text, node);
       const ret = typeNode ? this.specifiedType(node, true) : VOID;
       const declared = this.applyDeclarator(ret, declarator);
       const probe = this.functionInfo(declared.name ?? '', declared.type, declared.function as Syntax, node, cls);
@@ -1096,9 +1093,19 @@ export class Compiler extends StatementCompiler {
     }
   }
 
+  private checkSpecialMemberReturnType(cls: ClassInfo, name: string, node: Syntax): void {
+    if (name !== cls.name && name !== `~${cls.name}`) return;
+    if (
+      fieldOf(node, 'type') ||
+      node.children.some((child) => child.type === 'type_qualifier' && ['const', 'volatile'].includes(child.text))
+    ) {
+      this.error(node.row, 'コンストラクタとデストラクタには戻り値の型を書けません。');
+    }
+  }
+
   /** Compiles a function's body, binding its parameters to the first slots of its frame. */
   private compileFunction(fn: FunctionInfo, node: Syntax): void {
-    if (fn.isInline && fn.name !== 'main' && !fn.isConstructor && !fn.isDestructor && !fn.isVirtual) {
+    if (fn.isInline && fn.name !== 'main') {
       this.inlineDependencies.set(
         fn,
         this.bindDependencies(() => this.compileFunctionBody(fn, node))

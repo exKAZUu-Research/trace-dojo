@@ -1,6 +1,6 @@
 import { CppRuntimeError } from '../errors';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { destroyTemporaries, zeroOf } from '../objectCompiler';
+import { destroyTemporaries, withTemporaries, zeroOf } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import { type ClassInfo, type FunctionInfo, isArithmetic, type Type, typeName } from '../types';
 import { type ArrayStore, Box, CObject, endLifetime, FunctionRef, Ptr, Store, UNINIT, type Value } from '../values';
@@ -20,6 +20,20 @@ export interface ElementOperations {
   destroy?: (frame: Frame, value: Value) => void;
   /** Whether copying or destroying an element runs code the program wrote, which reallocation then shows. */
   hasEffects: boolean;
+}
+
+export function swapElements(frame: Frame, a: Ptr, b: Ptr, ops: ElementOperations): void {
+  if (a.equals(b)) return;
+  withTemporaries(frame, () => {
+    const value = ops.copy(frame, a.read());
+    if (ops.destroy) frame.temporaries.push({ object: value, destroy: ops.destroy });
+    assignElement(frame, a, ops, b.read());
+    assignElement(frame, b, ops, value);
+  });
+}
+
+export function assignElement(frame: Frame, location: Ptr, operations: ElementOperations, value: Value): void {
+  location.write(operations.assign(frame, location.readRaw(), value));
 }
 
 /** The element operations of a type, which the compiler makes while the class it uses is complete. */

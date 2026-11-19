@@ -90,7 +90,20 @@ export function virtualKey(fn: FunctionInfo): string {
   return `${fn.name}(${fn.params.map((param) => typeName(param.type)).join(',')})${fn.isConst ? 'const' : ''}`;
 }
 
-/** Ends the lifetime of the temporaries a full-expression created since `mark`, the last first. */
+export function withTemporaries<T>(frame: Frame, run: Eval<T>): T {
+  const mark = frame.temporaries.length;
+  let result: T;
+  try {
+    result = run(frame);
+  } catch (error) {
+    if (error instanceof CppException) destroyTemporaries(frame, mark);
+    throw error;
+  }
+  destroyTemporaries(frame, mark);
+  return result;
+}
+
+/** Ends the lifetime of temporaries created since `mark`, the last first. */
 export function destroyTemporaries(frame: Frame, mark: number): void {
   const { temporaries } = frame;
   while (temporaries.length > mark) {

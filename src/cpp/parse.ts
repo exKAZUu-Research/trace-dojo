@@ -33,7 +33,7 @@ export function parseCpp(source: string): Syntax {
 }
 
 function locateErrors(root: Node, errors: SourceDiagnostic[], source: string): SourceDiagnostic[] {
-  if (errors.length === 0) return errors;
+  if (errors.length === 0) return afterStringLiteral(root, source) ?? errors;
   const strayElse = root
     .descendantsOfType('compound_literal_expression')
     .find(
@@ -51,15 +51,33 @@ function locateErrors(root: Node, errors: SourceDiagnostic[], source: string): S
   ];
   for (const previous of new Set(sites)) {
     if (!previous || previous.type === ';' || previous.type === '{') continue;
-    const patched = parser.parse(source.slice(0, previous.endIndex) + ';' + source.slice(previous.endIndex));
-    try {
-      if (patched && !patched.rootNode.hasError)
-        return [{ row: previous.endPosition.row, message: '「;」が足りません。' }];
-    } finally {
-      patched?.delete();
-    }
+    const repaired = missingSemicolon(previous, source);
+    if (repaired) return repaired;
   }
   return errors;
+}
+
+function afterStringLiteral(root: Node, source: string): SourceDiagnostic[] | undefined {
+  for (const string of root.descendantsOfType('concatenated_string')) {
+    const parts = string.namedChildren.filter((child) => child.type !== 'comment');
+    for (const [index, part] of parts.entries()) {
+      const previous = parts[index - 1];
+      if (part.type !== 'identifier' || previous?.type !== 'string_literal') continue;
+      if (part.startPosition.row <= previous.endPosition.row) continue;
+      const repaired = missingSemicolon(previous, source);
+      if (repaired) return repaired;
+    }
+  }
+}
+
+function missingSemicolon(previous: Node, source: string): SourceDiagnostic[] | undefined {
+  const patched = parser.parse(source.slice(0, previous.endIndex) + ';' + source.slice(previous.endIndex));
+  try {
+    if (patched && !patched.rootNode.hasError)
+      return [{ row: previous.endPosition.row, message: '「;」が足りません。' }];
+  } finally {
+    patched?.delete();
+  }
 }
 
 function tokenBeforeRow(node: Node, row: number): Node | undefined {

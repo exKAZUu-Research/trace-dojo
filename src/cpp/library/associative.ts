@@ -22,7 +22,7 @@ import {
 } from '../types';
 import { CObject, Ptr, type Value } from '../values';
 import { MapValue, NodePositions } from './containerValues';
-import { type ElementOperations, elementOperations, equalTo, lessThan } from './elements';
+import { type ElementOperations, elementOperations, equalTo, lessThan, swapElements } from './elements';
 import { addRangeMembers, emplacementCall, type EntryTable, insertCopy } from './emplacement';
 import { randomAccessIterator } from './iterators';
 import type { Library } from './registry';
@@ -144,13 +144,21 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
   ];
   addMethod(
     cls,
-    native('swap', [referenceTo(classType(cls))], VOID, ([other], { self }) => {
+    native('swap', [referenceTo(classType(cls))], VOID, ([other], { frame, self }) => {
       const a = self as CObject;
       const b = (other as Ptr).read() as CObject;
       for (const index of [0, 1]) {
-        const value = a.values[index];
-        a.values[index] = b.values[index];
-        b.values[index] = value;
+        const type = cls.fields[index].type;
+        if (type.kind === 'reference') {
+          swapElements(
+            frame,
+            a.values[index] as Ptr,
+            b.values[index] as Ptr,
+            elementOperations(library.compiler, type.to, 0)
+          );
+        } else {
+          swapElements(frame, new Ptr(a, index), new Ptr(b, index), ops()[index]);
+        }
       }
       return;
     })
