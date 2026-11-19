@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 443 -- Keeps array bucket layout, mutations and their cursor positions together.
+// code-gauge-allow-file fileNcss 445 -- Keeps array bucket layout, mutations and their cursor positions together.
 import type { Key } from './values';
 
 class ArrayEntry {
@@ -61,6 +61,7 @@ export class ArrayOrder {
   keyOffset = 0n;
   indexOffset = 0;
   storageVersion = 0;
+  invalidPointer: number | undefined;
   private listLayout = false;
   private nextIndex = 0;
   private capacity = 8;
@@ -175,8 +176,8 @@ export class ArrayOrder {
   }
 
   // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  insert(key: Key, count = this.entries.size): void {
-    if (this.get(key)) return;
+  insert(key: Key, count = this.entries.size): number | undefined {
+    if (this.get(key)) return undefined;
     const numeric = typeof key === 'bigint' && key >= 0n && key < BigInt(Number.MAX_SAFE_INTEGER);
     const position = numeric ? Number(key) : -1;
     this.packed ??= numeric && position < this.capacity;
@@ -197,13 +198,13 @@ export class ArrayOrder {
       }
     }
     if (key !== BigInt(this.entries.size)) this.listLayout = false;
-    const index = this.packed ? position : this.nextIndex;
-    this.nextIndex = index + 1;
-    const entry = this.appendEntry(key, index);
+    const entry = this.appendEntry(key, this.packed ? position : this.nextIndex);
+    this.nextIndex = entry.index + 1;
     for (const cursor of this.liveCursors()) {
-      if (!cursor.entry && (!cursor.preservesPosition || index >= (cursor.index ?? 0)))
+      if (!cursor.entry && (!cursor.preservesPosition || entry.index >= (cursor.index ?? 0)))
         cursor.setPosition(entry, cursor.index);
     }
+    return entry.index;
   }
 
   unpack(preservePositions = false): void {
@@ -308,7 +309,10 @@ export class ArrayOrder {
     }
     this.entries.delete(entry.rawKey);
     this.buckets.delete(entry.rawIndex);
-    if (!entry.next) for (const cursor of this.liveCursors()) cursor.clamp(this.nextIndex);
+    if (!entry.next) {
+      if (this.invalidPointer !== undefined) this.invalidPointer = Math.min(this.invalidPointer, this.nextIndex);
+      for (const cursor of this.liveCursors()) cursor.clamp(this.nextIndex);
+    }
   }
 
   replace(keys: Iterable<Key>, packed: boolean, rebuild?: ArrayRebuild): void {

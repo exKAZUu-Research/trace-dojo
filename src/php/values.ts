@@ -160,8 +160,16 @@ export class PhpArray {
   uncollectable = false;
   /** Whether an element may hold an object, an array, or a reference, which garbage collection must visit. */
   composite = false;
+  private pointerKey: Key | undefined | null = null;
   /** The internal pointer of `current()`, `next()`, and `reset()`, as the key it points at. */
-  pointer: Key | undefined | null = null;
+  get pointer(): Key | undefined | null {
+    return this.pointerKey;
+  }
+  set pointer(value: Key | undefined | null) {
+    this.pointerKey = value;
+    if (value === undefined || this.order)
+      this.ordered().invalidPointer = value === undefined ? this.ordered().endPosition : undefined;
+  }
 
   constructor(
     map?: Map<Key, Value | Ref>,
@@ -282,20 +290,25 @@ export class PhpArray {
       order.unpack(wasDense);
       this.removeUndefinedSlot(key, wasDense);
     }
-    if (!this.map.has(key)) {
-      allocationHandler(1, this.map.size + 1);
-      if (this.pointer === undefined) this.pointer = key;
-    }
+    const existed = this.map.has(key);
+    if (!existed) allocationHandler(1, this.map.size + 1);
     this.invalidate();
     this.trackSlot(key, slot);
     this.map.set(key, slot);
-    this.advanceAppendKey(key);
-    order?.insert(key, count);
+    this.finishInsert(key, existed, order, count);
     if (wasPacked && !wasDense && !order.isPacked && this.map.mayHaveUndefinedSlots) {
       for (const [oldKey, oldSlot] of this.map.physicalEntries())
         if (oldSlot === UNDEFINED_RESULT) this.removeUndefinedSlot(oldKey);
       order.compact();
     }
+  }
+
+  private finishInsert(key: Key, existed: boolean, order: ArrayOrder | undefined, count: number | undefined): void {
+    const inserted = order?.insert(key, count);
+    if (order?.isPacked && !existed) this.nextFree = BigInt(order.endPosition);
+    else this.advanceAppendKey(key);
+    if (!existed && this.pointer === undefined && (inserted === undefined || inserted >= (order?.invalidPointer ?? 0)))
+      this.pointer = key;
   }
 
   private removeUndefinedSlot(key: Key, preserveEndPosition = false): void {
@@ -537,13 +550,14 @@ export class PhpArray {
     const old = this.map.ownedSlot(key);
     if (old instanceof Ref) old.rc--;
     // PHP moves a pointer at the deleted element on to the next one.
-    if (this.pointer === key) this.pointer = this.keyAfter(key);
+    const nextPointer = this.pointer === key ? this.keyAfter(key) : null;
     this.invalidate();
     this.map.delete(key);
     order.delete(key);
     if (trim) {
       while (order.last && this.map.get(order.last.key) === UNDEFINED_RESULT) this.removeUndefinedSlot(order.last.key);
     }
+    if (this.pointer === key) this.pointer = nextPointer;
     dropped(old);
   }
 
@@ -611,34 +625,20 @@ export class PhpArray {
    * Copies the array for a holder that writes to it. Nested arrays become shared, and references held only by this
    * array become plain values, as PHP's copy does.
    */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Duplicates both the buckets and their values with the array's reference ownership.
   copy(): PhpArray {
     const map = new Map<Key, Value | Ref>();
     const order = this.map.countsUndefinedSlots ? this.ordered() : this.order;
     const dense = order?.endPosition === this.size;
     const keepsHoles = !this.map.countsUndefinedSlots || dense || order?.isPacked;
-    for (const [key, slot] of keepsHoles ? this.map.physicalEntries() : this.map.entries()) {
-      if (slot instanceof Ref) {
-        if (slot.rc <= 1) {
-          const value = slot.v;
-          if (value instanceof PhpArray) value.shared = true;
-          map.set(key, value);
-        } else {
-          slot.rc++;
-          map.set(key, slot);
-        }
-      } else {
-        if (slot instanceof PhpArray) slot.shared = true;
-        map.set(key, slot);
-      }
-    }
+    for (const [key, slot] of keepsHoles ? this.map.physicalEntries() : this.map.entries())
+      map.set(key, copyValueSlot(slot));
     const copy = new PhpArray(map, this.capacityHint);
     if (keepsHoles) copy.map.removedUndefinedSlots = this.map.removedUndefinedSlots;
     copy.order = order?.copy(dense, keepsHoles ? undefined : map);
     copy.orderPacked = this.orderPacked;
     copy.nextFree = this.nextFree;
     copy.composite = this.composite;
-    copy.pointer = this.pointer;
+    copy.pointer = this.currentKey() === undefined ? null : this.pointer;
     return copy;
   }
 
@@ -1296,10 +1296,7 @@ function wouldProofCycle(owner: object, child: object): boolean {
 }
 
 export function copyValueSlot(slot: Value | Ref, preserveSingleReference = false): Value | Ref {
-  if (slot instanceof Ref && slot.isRef && (preserveSingleReference || slot.rc > 1)) {
-    slot.rc++;
-    return slot;
-  }
+  if (slot instanceof Ref && slot.isRef && (preserveSingleReference || slot.rc > 1)) return (slot.rc++, slot);
   const value = slot instanceof Ref ? slot.v : slot;
   if (value instanceof PhpArray) value.shared = true;
   return value;

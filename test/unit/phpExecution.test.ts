@@ -3473,3 +3473,37 @@ echo '|', gc_collect_cycles(), "\n";
 `);
   expect(threeCycle).toMatchObject({ kind: 'executed', stdout: '|abc3\n' });
 });
+
+test('matches PHP array internal pointer and packed append-key transitions across copy, unset, and insert', () => {
+  const copyInvalid = run(String.raw`<?php
+$a = [10, 20];
+prev($a);
+$b = $a;
+$a[] = 30;
+var_dump(key($a), current($a), key($b), current($b));
+`);
+  expect(copyInvalid).toMatchObject({ kind: 'executed', stdout: 'int(0)\nint(10)\nNULL\nbool(false)\n' });
+
+  const emptiedPacked = run(String.raw`<?php
+$a = [1, 2, 3];
+unset($a[0], $a[1], $a[2]);
+$a[0] = 7;
+$a[] = 9;
+echo json_encode($a);
+`);
+  expect(emptiedPacked).toMatchObject({ kind: 'executed', stdout: '[7,9]' });
+
+  const invalidPhysicalPointer = run(String.raw`<?php
+$a = [1, 2, 3];
+unset($a[0]);
+prev($a);
+$a[0] = 7;
+var_dump(key($a), current($a));
+$a[9] = 8;
+var_dump(key($a), current($a));
+`);
+  expect(invalidPhysicalPointer).toMatchObject({
+    kind: 'executed',
+    stdout: 'NULL\nbool(false)\nint(9)\nint(8)\n',
+  });
+});
