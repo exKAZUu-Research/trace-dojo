@@ -357,6 +357,42 @@ int main() { ${body} }`;
 });
 
 test.each([
+  ['array decay', 'int values[1]{7};', 'int* make() { return (new Owner)->values; }', 'int* p = make();', '*p'],
+  [
+    'a nested array reference',
+    'int values[1][1]{{7}};',
+    'int& make() { return (new Owner)->values[0][0]; }',
+    'int& value = make();',
+    'value',
+  ],
+  [
+    'a base subobject reference',
+    'Entry entry;',
+    'Base& make() { return (new Owner)->entry; }',
+    'Base& value = make();',
+    'value.number',
+  ],
+])('retains the heap owner through %s', (_, field, factory, bind, value) => {
+  const program = `#include <iostream>
+Turtle observer(0, 0);
+struct Base { int number = 7; };
+struct Entry : Base { virtual void marker() {} };
+struct Owner {
+  ${field}
+  Turtle blocker;
+  Owner() : blocker(0, 1) {}
+};
+${factory}
+int main() {
+  ${bind}
+  std::cout << observer.canMoveForward() << ':' << ${value};
+}`;
+  const result = executeProgram('cpp', program);
+  if (result.kind !== 'executed') throw new Error(JSON.stringify(result));
+  expect(result.stdout).toBe('0:7');
+});
+
+test.each([
   ['a member buffer', 'struct Row { std::vector<Turtle*> items; Token token; };', 'items'],
   ['a base buffer', 'struct Row : Storage { Token token; };', 'items'],
   ['a built-in array', 'struct Row { Entry cells[2]; };', 'cells[0].items'],

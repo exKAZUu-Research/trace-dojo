@@ -140,6 +140,10 @@ export class ArrayStore extends Store {
     this.enclosingLocation = location;
   }
 
+  get containingLocation(): Ptr | undefined {
+    return this.enclosingLocation;
+  }
+
   get length(): number {
     return this.values.length;
   }
