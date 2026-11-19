@@ -1,4 +1,4 @@
-import { ExitSignal, FatalError, PhpThrow, rt, type Runtime, SCRIPT_PATH } from './runtime';
+import { ExitSignal, FatalError, type Frame, PhpThrow, rt, type Runtime, SCRIPT_PATH } from './runtime';
 import { PhpObject, Ref, type Value } from './values';
 
 let formatThrowable: (object: PhpObject) => string;
@@ -64,14 +64,15 @@ export function throwError(className: string, message: string, previous?: PhpObj
 
 /** How many checks are running that only ask whether code would throw, such as `is_callable`. */
 let probes = 0;
-let suppressedHandlers = 0;
+let suppressedHandlerFrame: Frame | undefined;
 
 export function withSuppressedErrorHandlers<T>(run: () => T): T {
-  suppressedHandlers++;
+  const previous = suppressedHandlerFrame;
+  suppressedHandlerFrame = rt().frame;
   try {
     return run();
   } finally {
-    suppressedHandlers--;
+    suppressedHandlerFrame = previous;
   }
 }
 
@@ -152,7 +153,7 @@ export function emitError(level: bigint, message: string, row = rt().diagnosticR
     !runtime.activeErrorHandlers.has(current.handler) &&
     (current.mask & level) !== 0n &&
     (skipMatchingHandler ||
-      suppressedHandlers > 0 ||
+      suppressedHandlerFrame === runtime.frame ||
       runtime.pendingAssignmentWarning ||
       runtime.nativeStringConversionPending ||
       callUserHandler(current.handler, level, message, row))
@@ -275,10 +276,14 @@ export function withOperandWarnings(
 ): Value {
   // oxlint-disable-next-line unicorn/no-null -- PHP operators can return a null zval.
   let result: Value = null;
-  withCleanupExceptions(rt(), (capture) => {
-    const state = createOperandWarningState(capture);
-    result = update(state.warning, state.pendingThrow);
-  });
+  withCleanupExceptions(
+    rt(),
+    (capture) => {
+      const state = createOperandWarningState(capture);
+      result = update(state.warning, state.pendingThrow);
+    },
+    'latest'
+  );
   return result;
 }
 

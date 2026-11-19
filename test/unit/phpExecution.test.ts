@@ -3418,4 +3418,28 @@ set_error_handler(function ($no) { echo "err:$no;"; throw new Exception('e'); })
 try { $a->x--; } catch (Throwable $e) { echo 'caught;'; }
 `);
   expect(magicGetNoSet).toMatchObject({ kind: 'executed', stdout: 'get;err:2;caught;{"x":null}' });
+
+  const displacedDestructorThrow = run(String.raw`<?php
+class D { function __destruct() { echo 'drop;'; throw new Exception('drop'); } }
+class C extends ArrayObject { function offsetGet(mixed $n): mixed { echo 'get;'; return null; } }
+class R { function __construct(public $a) {} function __destruct() { echo json_encode($this->a->getArrayCopy()); } }
+$a = new C(['x' => new D()], ArrayObject::ARRAY_AS_PROPS);
+$r = new R($a);
+set_error_handler(function () { exit('exit;'); });
+try { $a->x--; } catch (Throwable $e) { echo 'caught:' . $e->getMessage() . ';'; }
+`);
+  expect(displacedDestructorThrow).toMatchObject({ kind: 'executed', stdout: 'get;exit;drop;caught:drop;{"x":null}' });
+
+  const displacedDestructorWarning = run(String.raw`<?php
+class D { function __destruct() { trigger_error('second', E_USER_WARNING); } }
+class C extends ArrayIterator { function offsetGet(mixed $n): mixed { echo 'get;'; return null; } }
+$a = new C(['x' => new D()], ArrayObject::ARRAY_AS_PROPS);
+set_error_handler(function ($no, $msg) { echo "h:$msg;"; throw new Exception('first'); });
+try { $a->x--; } catch (Throwable $e) { echo 'caught:' . $e->getMessage() . ';'; }
+`);
+  expect(displacedDestructorWarning).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'get;h:Decrement on type null has no effect, this will change in the next major version of PHP;h:second;caught:first;',
+  });
 });
