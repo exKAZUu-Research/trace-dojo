@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 435 -- Keeps array bucket layout, mutations and their cursor positions together.
+// code-gauge-allow-file fileNcss 443 -- Keeps array bucket layout, mutations and their cursor positions together.
 import type { Key } from './values';
 
 class ArrayEntry {
@@ -60,6 +60,7 @@ export class ArrayOrder {
   last: ArrayEntry | undefined;
   keyOffset = 0n;
   indexOffset = 0;
+  storageVersion = 0;
   private listLayout = false;
   private nextIndex = 0;
   private capacity = 8;
@@ -182,13 +183,18 @@ export class ArrayOrder {
     if (this.packed) {
       if (!numeric || position < this.nextIndex) this.toMixed();
       else if (position >= this.capacity) {
-        if (position < this.capacity * 2 && count > this.capacity / 2) this.capacity *= 2;
-        else this.toMixed();
+        if (position < this.capacity * 2 && count > this.capacity / 2) {
+          this.capacity *= 2;
+          this.storageVersion++;
+        } else this.toMixed();
       }
     }
     if (!this.packed && this.nextIndex >= this.capacity) {
       if (this.nextIndex > count + (count >> 5)) this.compact();
-      else this.capacity *= 2;
+      else {
+        this.capacity *= 2;
+        this.storageVersion++;
+      }
     }
     if (key !== BigInt(this.entries.size)) this.listLayout = false;
     const index = this.packed ? position : this.nextIndex;
@@ -205,17 +211,20 @@ export class ArrayOrder {
     if (preservePositions) {
       this.packed = false;
       this.listLayout = false;
+      this.storageVersion++;
     } else this.replace(this.keys(), false);
   }
 
   private toMixed(): void {
     if (this.nextIndex >= this.capacity) this.capacity *= 2;
     this.packed = false;
+    this.storageVersion++;
     this.compact();
   }
 
   compact(): void {
     if (this.nextIndex === this.entries.size) return;
+    this.storageVersion++;
     const previousEnd = this.nextIndex;
     let index = 0;
     this.buckets.clear();
@@ -250,6 +259,7 @@ export class ArrayOrder {
 
   prependList(count: number): void {
     this.normalizeList();
+    this.storageVersion++;
     this.keyOffset -= BigInt(count);
     this.indexOffset -= count;
     for (let index = count - 1; index >= 0; index--) {
@@ -303,6 +313,7 @@ export class ArrayOrder {
   }
 
   replace(keys: Iterable<Key>, packed: boolean, rebuild?: ArrayRebuild): void {
+    this.storageVersion++;
     const orderedKeys = [...keys];
     const cursors = [...this.liveCursors()].map((cursor) => ({ cursor, index: cursor.index }));
     let positions: ReadonlyMap<Key, number> | undefined;

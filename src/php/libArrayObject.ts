@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import type { ArrayCursor } from './arrayOrder';
+import type { ArrayCursor, ArrayOrder } from './arrayOrder';
 import { withArrayReadView } from './arrayTable';
 import { callMethod } from './callables';
 import { invoke } from './calls';
@@ -19,7 +19,7 @@ import { setNativeArrayStorage } from './nativeArrayStorage';
 import { toKey } from './operators';
 import { arrayIsShared, share } from './places';
 import './splInterfaces';
-import { rt } from './runtime';
+import { rt, type Runtime } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import { type Key, NativeValueIndex, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
 
@@ -179,7 +179,10 @@ export class ArrayStorage {
       array.setSlot(offset, replacement);
       return;
     }
-    const bucket = array.ordered().get(offset)?.index;
+    const order = array.ordered();
+    const bucket = order.get(offset)?.index;
+    const storageVersion = order.storageVersion;
+    const wasPacked = order.isPacked;
     runtime.held.push(replacement);
     try {
       withCleanupExceptions(runtime, (capture) => {
@@ -189,11 +192,9 @@ export class ArrayStorage {
           if (!isCleanupException(error)) throw error;
           capture(error);
         }
-        if (!arrayHasHolders(runtime, array, 1) || bucket === undefined) return;
-        const target = array.ordered().keyAtBucket(bucket);
-        if (target === undefined) return;
-        runtime.holdForShutdown(array.releaseSlot(target));
-        array.setSlot(target, replacement);
+        if (!arrayHasHolders(runtime, array, 1) || bucket === undefined || order.storageVersion !== storageVersion)
+          return;
+        finishBucketWrite(runtime, array, order, bucket, wasPacked, replacement);
       });
     } finally {
       runtime.held.pop();
@@ -474,6 +475,49 @@ function sortStorage(object: PhpObject, name: string, args: Value[]): Value {
   } finally {
     ref.releaseWithoutGc();
   }
+}
+
+function finishBucketWrite(
+  runtime: Runtime,
+  array: PhpArray,
+  order: ArrayOrder,
+  bucket: number,
+  wasPacked: boolean,
+  replacement: Value
+): void {
+  if (wasPacked) {
+    if (bucket >= order.endPosition) return;
+    const target = BigInt(bucket);
+    if (array.has(target)) {
+      runtime.holdForShutdown(array.releaseSlot(target));
+      array.setSlot(target, replacement);
+    } else fillPackedHole(array, target, replacement);
+    return;
+  }
+  const target = order.keyAtBucket(bucket);
+  if (target === undefined) return;
+  runtime.holdForShutdown(array.releaseSlot(target));
+  array.setSlot(target, replacement);
+}
+
+function fillPackedHole(array: PhpArray, key: bigint, replacement: Value): void {
+  const entries: [Key, Value | Ref][] = [];
+  const positions = new Map<Key, number>();
+  let inserted = false;
+  for (const [existingKey, slot] of array.map.physicalEntries()) {
+    if (!inserted && typeof existingKey === 'bigint' && existingKey > key) {
+      entries.push([key, replacement]);
+      positions.set(key, Number(key));
+      inserted = true;
+    }
+    entries.push([existingKey, slot]);
+    positions.set(existingKey, Number(existingKey));
+  }
+  if (!inserted) {
+    entries.push([key, replacement]);
+    positions.set(key, Number(key));
+  }
+  array.replaceTable(entries, true, { positions, keepPositions: true, packed: true }, true);
 }
 
 function keyAt(storage: ArrayStorage): Key | undefined {

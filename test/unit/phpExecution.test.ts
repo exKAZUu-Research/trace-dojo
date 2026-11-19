@@ -709,6 +709,46 @@ echo 'after;';`);
 );
 
 test.each([
+  ['ArrayObject', '$settings[0] = 5;', '$settings[] = new B;', "exit('exit;');", 'A;exit;[5,{}];B;'],
+  [
+    'ArrayIterator',
+    '$settings->{0} = 5;',
+    '$settings[] = new B;',
+    "throw new Exception('stop');",
+    'A;caught;after;[5,{}];B;',
+  ],
+  ['ArrayObject', '$settings->offsetSet(0, 5);', '', "exit('exit;');", 'A;exit;[];'],
+  ['ArrayObject', '$settings[0] = 5;', '$settings[10] = new B;', "exit('exit;');", 'A;exit;{"10":{}};B;'],
+  ['ArrayIterator', '$settings->{0} = 5;', "$settings['new'] = new B;", "exit('exit;');", 'A;exit;{"new":{}};B;'],
+])(
+  'handles packed hole visibility and packed-to-mixed conversion on %s (%s, %s, %s)',
+  (name, write, action, tail, stdout) => {
+    const execution = run(`<?php
+class B { function __destruct() { echo 'B;'; } }
+class A {
+    function __destruct() {
+        global $settings;
+        echo 'A;';
+        unset($settings[0]);
+        ${action}
+        ${tail}
+    }
+}
+class R {
+    function __destruct() {
+        global $settings;
+        echo json_encode($settings->getArrayCopy()), ';';
+    }
+}
+$settings = new ${name}([new A], ${name}::ARRAY_AS_PROPS);
+$reader = new R;
+try { ${write} } catch (Throwable $e) { echo 'caught;'; }
+echo 'after;';`);
+    expect(execution).toMatchObject({ kind: 'executed', stdout });
+  }
+);
+
+test.each([
   ['ArrayObject', 'new stdClass', 30_000],
   ['ArrayIterator', 'new stdClass', 30_000],
   ['ArrayObject', 'new D', 10_000],
