@@ -688,17 +688,6 @@ export class Compiler extends StatementCompiler {
       cls.ownFields.some((field) => !this.isCopyInitializable(field.type, cls));
   }
 
-  private hasConstCopyParameter(type: Type): boolean {
-    if (type.kind === 'array') return type.length === 0 || this.hasConstCopyParameter(type.of);
-    if (type.kind !== 'class') return true;
-    const candidates = this.writtenCopyConstructors(type.cls);
-    return candidates.length === 0
-      ? type.cls.implicitCopyFromConst
-      : candidates.some(
-          ({ params: [{ type: parameter }] }) => parameter.kind === 'reference' && isConstType(parameter.to)
-        );
-  }
-
   private isCopyInitializable(type: Type, owner: ClassInfo, isBase = false): boolean {
     if (type.kind === 'array') return type.length === 0 || this.isCopyInitializable(type.of, owner);
     if (type.kind !== 'class') return true;

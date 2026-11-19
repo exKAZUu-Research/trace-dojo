@@ -466,6 +466,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     if (movesSource) this.checkMoveOperation(type, 'copy', expr.row, { access: this.accessClass, seen: new Set() });
     else this.checkCopySource(type, expr);
     const source = this.rvalue(expr);
+    const sourceIsConst = isConstType(expr.type);
     const constantInitialization = source.constantInitialization === true && allowsConstantCopy(type);
     return {
       type,
@@ -479,7 +480,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
         const value = source.run(frame);
         return movesSource
           ? constructElementFromRvalue(frame, type, value, destination)
-          : copyAs(frame, cls, value, destination);
+          : copyAs(frame, cls, value, destination, sourceIsConst);
       },
     };
   }
@@ -491,7 +492,11 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     }
     if (!cls.implicitCopyFromConst && (!expr.isLvalue || expr.isXvalue || isConstType(expr.type)))
       this.error(expr.row, `${cls.name} のコピーコンストラクタには const でない左辺値が必要です。`);
-    this.requireObjectUse(type, 'copy', expr.row);
+    this.checkObjectUse(type, 'copy', expr.row, {
+      access: this.accessClass,
+      seen: new Set(),
+      sourceIsConst: isConstType(expr.type),
+    });
   }
 
   protected implicitMoveSource(expr: Expr, destination: Type): Expr {
@@ -506,6 +511,17 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
 
   protected writtenCopyConstructors(cls: ClassInfo): FunctionInfo[] {
     return cls.constructors.filter((fn) => !fn.native && isCopyConstructor(fn, cls));
+  }
+
+  hasConstCopyParameter(type: Type): boolean {
+    if (type.kind === 'array') return type.length === 0 || this.hasConstCopyParameter(type.of);
+    if (type.kind !== 'class') return true;
+    const candidates = this.writtenCopyConstructors(type.cls);
+    return candidates.length === 0
+      ? type.cls.implicitCopyFromConst
+      : candidates.some(
+          ({ params: [{ type: parameter }] }) => parameter.kind === 'reference' && isConstType(parameter.to)
+        );
   }
 
   protected copySource(cls: ClassInfo, sourceIsConst: boolean, row: number): Expr {
@@ -1073,8 +1089,14 @@ export function staticZero(runtime: Frame['runtime'], type: Type, location?: Ptr
 }
 
 /** Copies an object as the copy constructor of `cls` does, slicing an object of a derived class. */
-export function copyAs(frame: Frame, cls: ClassInfo, source: Value, destination?: CObject): Value {
+function copyAs(
+  frame: Frame,
+  cls: ClassInfo,
+  source: Value,
+  destination: CObject | undefined,
+  sourceIsConst: boolean
+): Value {
   const operations = cls.operations;
   if (!operations) throw new Error(`${cls.name} cannot be copied`);
-  return operations.copy(frame, source, destination);
+  return operations.copy(frame, source, destination, sourceIsConst);
 }

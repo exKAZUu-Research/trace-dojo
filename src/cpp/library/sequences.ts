@@ -123,7 +123,8 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   // std::array destroys its elements as a built-in array does, from the last.
   const editor = new SequenceEditor(kind === 'array' ? 'vector' : kind, ops);
   // libc++ copies vector elements through the source's mutable storage pointers.
-  const ownedCopyFromConst = kind !== 'vector';
+  cls.implicitCopyFromConst = kind !== 'array' || fixedLength === 0 || library.compiler.hasConstCopyParameter(element);
+  const ownedCopyFromConst = kind !== 'vector' && cls.implicitCopyFromConst;
   const arrayDefault = (compiler: ExpressionCompiler, row: number, valueInitialize: boolean): Expr['run'] => {
     if (fixedLength === 0) return () => make(new ArrayStore([]));
     const initialize = compiler.withLibraryAccess<Initializer>(() => {
@@ -172,7 +173,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
           : ['emplace_back', 'emplace', 'emplace_front'],
   };
   cls.operations = {
-    copy: (frame, source) => {
+    copy: (frame, source, _destination, sourceIsConst) => {
       const items = (source as SequenceValue).items;
       if (kind === 'array') {
         const operations = ops();
@@ -181,7 +182,13 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
             frame,
             items.length,
             element,
-            (f, target, index) => operations.copy(f, items[index], target instanceof CObject ? target : undefined),
+            (f, target, index) =>
+              operations.copy(
+                f,
+                items[index],
+                target instanceof CObject ? target : undefined,
+                ownedCopyFromConst || sourceIsConst === true || isConstType(element)
+              ),
             operations.destroy
           )
         );

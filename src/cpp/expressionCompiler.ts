@@ -309,9 +309,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         return this.staticStorageExpr(entity.global, row, entity.constant);
       }
       case 'field': {
+        const { field } = entity;
+        if (this.isUnevaluated && this.context.isStaticContext) {
+          this.checkAccess(field.access, field.owner, this.namingClass(node, field.owner), row, name);
+          return { type: nonReference(field.type), isLvalue: true, row, run: () => {} };
+        }
         if (isQualified && !this.context.cls)
           return this.error(row, `メンバ変数 ${name} を使うには、オブジェクトが要ります。`);
-        const { field } = entity;
         const object = this.implicitThis(row, name);
         this.checkAccess(field.access, field.owner, this.namingClass(node, field.owner), row, name, this.context.cls);
         return this.fieldAccess(object, field, row);
@@ -1560,22 +1564,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   private sizeofExpression(node: Syntax): Expr {
     if (node.all.some((child) => child.type === '...')) return this.unsupported(node.row, 'sizeof...');
-    const typeNode = fieldOf(node, 'type');
-    let type: Type;
-    if (typeNode) {
-      const named = fieldOf(typeNode, 'type');
-      const entity =
-        named?.type === 'qualified_identifier' && !fieldOf(typeNode, 'declarator')
-          ? this.lookupQualified(named)
-          : undefined;
-      type =
-        entity && entity.kind !== 'type' && entity.kind !== 'class' && entity.kind !== 'template'
-          ? this.entityExpr(entity, named as Syntax, true).type
-          : this.typeDescriptor(typeNode);
-    } else {
-      const value = fieldOf(node, 'value') as Syntax;
-      type = this.typeOfUnevaluated(value);
-    }
+    const type = this.sizeofOperandType(node);
     if (type.kind === 'function') return this.error(node.row, '関数には sizeof を使えません。');
     if (type.kind === 'void') return this.error(node.row, 'void 型には sizeof を使えません。');
     if (type.kind === 'array' && type.length === undefined)
@@ -1587,15 +1576,25 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return constantExpr(SIZE_T, BigInt(sizeOf(type)), node.row);
   }
 
-  /** The type of an expression that is not evaluated, as the operand of `sizeof`. */
-  private typeOfUnevaluated(node: Syntax): Type {
+  private sizeofOperandType(node: Syntax): Type {
     const previous = this.isUnevaluated;
     this.isUnevaluated = true;
     try {
-      const target = node.type === 'parenthesized_expression' ? node.children[0] : undefined;
+      const typeNode = fieldOf(node, 'type');
+      if (typeNode) {
+        const named = fieldOf(typeNode, 'type');
+        if (named?.type === 'qualified_identifier' && !fieldOf(typeNode, 'declarator')) {
+          const entity = this.lookupQualified(named);
+          if (entity.kind !== 'type' && entity.kind !== 'class' && entity.kind !== 'template')
+            return this.entityExpr(entity, named, true).type;
+        }
+        return this.typeDescriptor(typeNode);
+      }
+      const value = fieldOf(node, 'value') as Syntax;
+      const target = value.type === 'parenthesized_expression' ? value.children[0] : undefined;
       const type = target && this.expressionAsType(target);
       if (type) return type;
-      return this.compileExpression(node).type;
+      return this.compileExpression(value).type;
     } finally {
       this.isUnevaluated = previous;
     }

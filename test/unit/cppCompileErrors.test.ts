@@ -846,6 +846,11 @@ test.each([
   ['a static local variable of type void', 'int main() { static void v; }', 0],
   ['excess initializers for a multidimensional allocation', 'int main() { new int[1][2]{1, 2, 3}; }', 0],
   [
+    'std::array copying a const source with a mutable-only element copy constructor',
+    '#include <array>\nstruct X { X() {} X(X&) {} };\nint main() { const std::array<X, 1> source; auto copy = source; }',
+    2,
+  ],
+  [
     'evaluated parameter shadowing a global in a function default',
     'int n = 5;\nvoid f(int n, int step = n) {}\nint main() { f(1); }',
     1,
@@ -853,6 +858,11 @@ test.each([
   [
     'evaluated parameter shadowing a static member in a constructor default',
     'struct X { inline static int n = 5;\nX(int n, int step = n) {} };\nint main() { X x(1); }',
+    1,
+  ],
+  [
+    'inaccessible data member in an unevaluated operand',
+    'class X { int size; };\nint main() { return sizeof(X::size); }',
     1,
   ],
   [
