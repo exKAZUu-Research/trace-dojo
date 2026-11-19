@@ -344,3 +344,21 @@ $walker->walk();
   expect(moves.map(({ vars }) => vars['$this->steps'])).toEqual([1, 1]);
   expect(moves.at(-1)?.turtles).toEqual([{ x: 0, y: 1, color: '#', dir: 'N' }]);
 });
+
+test.each([
+  ['["x" => 0]', '"x"', 'x'],
+  ['[1 => 0]', '1', '1'],
+])('records caller step after a call updates an associative or sparse PHP array: %s', (init, keyExpr, entryKey) => {
+  const program = `<?php
+$a = ${init};
+f($a);
+function f(&$a) {
+    $x = 1;
+    return $a[${keyExpr}] = 2;
+}`;
+  const recording = traceProgram('php', program, program);
+  expect(recording.traceItems.at(-1)).toMatchObject({
+    line: 3,
+    referenceVars: { $a: { kind: 'object', entries: { [entryKey]: { kind: 'value', value: 2 } } } },
+  });
+});

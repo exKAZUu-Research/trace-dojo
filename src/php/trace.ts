@@ -27,9 +27,11 @@ export function tracePhpProgram(program: string, trace: TraceOptions, input?: Pr
   return { traceItems: recorder.traceItems, finalVars, ...run };
 }
 
+const arrayDisplayNodes = new WeakSet<DisplayNode>();
+
 function stateVariables({ vars, referenceVars }: TraceVariables): Record<string, unknown> {
   const previews = Object.entries(referenceVars).filter(
-    ([name, node]) => node.kind === 'array' && !Object.hasOwn(vars, name)
+    ([name, node]) => arrayDisplayNodes.has(node) && !Object.hasOwn(vars, name)
   );
   return previews.length > 0 ? { ...vars, ...Object.fromEntries(previews) } : vars;
 }
@@ -97,7 +99,10 @@ function addVariable(variables: TraceVariables, name: string, value: Value): voi
   // Arrays also appear as references so that learners can expand their elements.
   if (scalar !== NOT_SCALAR && !(value instanceof PhpArray)) return;
   const node = displayNodeOf(value, new Set(), { remaining: MAX_DISPLAY_EXPANSION });
-  if (node) define(variables.referenceVars, name, node);
+  if (node) {
+    if (value instanceof PhpArray) arrayDisplayNodes.add(node);
+    define(variables.referenceVars, name, node);
+  }
 }
 
 const NOT_SCALAR = Symbol('notScalar');
