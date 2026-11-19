@@ -2,6 +2,24 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
+test('a viable initializer-list insertion still requires copying its elements', () => {
+  const program = `#include <vector>
+class Item { public: Item() {} private: Item(const Item&); };
+struct Box { std::vector<Item> items; Box(int n) : items(n) {} };
+int main() { std::vector<Box> target; target.insert(target.end(), {2}); }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 3, message: expect.stringContaining('private') }],
+  });
+});
+
+test('a braced argument to push_back cannot select an explicit constructor', () => {
+  const program = `#include <random>
+#include <vector>
+int main() { std::vector<std::mt19937> target; target.push_back({2}); }`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 2 }] });
+});
+
 test.each([
   'auto copy = source;',
   'std::vector<std::vector<Item>> target; target.push_back(source);',

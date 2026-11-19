@@ -838,13 +838,16 @@ function rvalueInsertion(
   const isInsert = member === 'insert' && args.length === 2;
   const isBack = member === 'push_back' && args.length === 1;
   const isFront = member === 'push_front' && kind !== 'vector' && args.length === 1;
-  if ((!isInsert && !isBack && !isFront) || object.type.kind !== 'class') return;
+  if ((!isInsert && !isBack && !isFront) || object.type.kind !== 'class' || element.kind !== 'class') return;
   const argument = args[isInsert ? 1 : 0];
-  if (!isMovedElement(element, argument)) return;
+  if (isInsert && argument.braced && listArgumentMatches(compiler, argument.braced, element)) return;
+  const bound = implicitConversion(compiler, argument, constRef(element))?.apply(argument);
+  if (!isMovedElement(element, bound)) return;
   if (isConstType(object.type)) compiler.error(row, `const の ${typeName(object.type)} には ${member} を使えません。`);
   if (kind === 'vector') requireRelocation(compiler, element, row);
   if (isInsert && kind !== 'list') compiler.requireLibraryObjectUse(element, 'move-assign', row);
-  const source = movedElementLocation(compiler, element, argument, row);
+  requireMoveConstruction(compiler, element, row);
+  const source = bound.run;
   const self = compiler.objectOf(object);
   const { memberTypes } = object.type.cls;
   const position = isInsert ? compiler.convert(args[0], memberTypes.get('const_iterator') as Type, row).run : undefined;
@@ -868,6 +871,10 @@ function rvalueInsertion(
         return;
       }),
   };
+}
+
+function listArgumentMatches(compiler: ExpressionCompiler, list: Syntax, element: Type): boolean {
+  return list.children.every((node) => implicitConversion(compiler, compiler.argument(node), element) !== undefined);
 }
 
 function isMovedElement(element: Type, argument: Expr | undefined): argument is Expr {

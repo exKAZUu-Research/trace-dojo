@@ -18,6 +18,15 @@ std::list<Item> listResult(std::list<Item> values) { return values; }
 struct Wrapper { std::vector<Item> items; };
 Wrapper wrappedResult(Wrapper value) { return value; }
 
+struct Box {
+  std::vector<Item> items;
+  Box(int n) : items(n) {}
+};
+struct Two {
+  std::vector<Item> items;
+  Two(int a, int b) : items(a + b) {}
+};
+
 int main() {
   auto v = vectorResult(std::vector<Item>(2));
   auto d = dequeResult(std::deque<Item>(3));
@@ -53,4 +62,17 @@ int main() {
   list.push_front(std::vector<Item>(5));
   list.insert(list.end(), std::vector<Item>(6));
   std::cout << list.front().size() << list.back().size() << '\n';
+
+  positioned.push_back({});
+  deque.push_front({});
+  std::cout << positioned.back().size() << deque.front().size() << '\n';
+
+  std::vector<Box> boxes;
+  boxes.push_back(2);
+  boxes.push_back({3});
+  boxes.insert(boxes.begin(), 4);
+  std::cout << boxes[0].items.size() << boxes[1].items.size() << boxes[2].items.size() << '\n';
+  std::vector<Two> two;
+  two.insert(two.end(), {2, 3});
+  std::cout << two.front().items.size() << '\n';
 }

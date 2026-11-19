@@ -1837,7 +1837,7 @@ export class Compiler extends StatementCompiler {
       this.error(row, `${typeName(type)} 型の値には初期値を書いてください（const の値は、あとから変えられません）。`);
   }
 
-  defaultConstructed(cls: ClassInfo, row: number, isValueInitialized: boolean): Expr {
+  defaultConstructed(cls: ClassInfo, row: number, isValueInitialized: boolean, allowsExplicit = true): Expr {
     if (!cls.isComplete) return this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
     if (cls.isAbstract)
       return this.error(row, `${cls.name} は抽象クラス（純粋仮想関数があるクラス）なので、オブジェクトを作れません。`);
@@ -1853,6 +1853,7 @@ export class Compiler extends StatementCompiler {
     }
     if (cls.constructors.length > 0) {
       const resolved = this.resolve(`${cls.name} のコンストラクタ`, cls.constructors, [], undefined, row);
+      this.checkListConstructor(resolved.fn, allowsExplicit, row);
       return this.constructWith(cls, resolved, [], row);
     }
     this.requireVirtualDefinitions(cls, row);
@@ -1886,7 +1887,7 @@ export class Compiler extends StatementCompiler {
   protected initializeList(type: Type, elements: readonly Syntax[], row: number, direct = false): Initializer {
     if (type.kind === 'reference') return this.error(row, '参照は {...} で初期化できません。');
     if (type.kind === 'array') return this.arrayInitializer(type, elements, row);
-    if (type.kind === 'class') return this.initializeClassList(type, elements, row);
+    if (type.kind === 'class') return this.initializeClassList(type, elements, row, direct);
     if (elements.length === 0) {
       const zero = zeroOf(type);
       return initializerWithConstancy(() => zero, true, {
@@ -1904,7 +1905,8 @@ export class Compiler extends StatementCompiler {
   private initializeClassList(
     type: Extract<Type, { kind: 'class' }>,
     elements: readonly Syntax[],
-    row: number
+    row: number,
+    direct: boolean
   ): Initializer {
     const library = type.cls.library;
     const isAggregate = this.isAggregate(type.cls);
@@ -1930,10 +1932,16 @@ export class Compiler extends StatementCompiler {
     }
     if (copy && library) return this.copyInitializer(type, copy, row, false);
     if (isAggregate) return this.aggregateInitializer(type.cls, elements, row);
-    if (elements.length === 0) return this.objectInitializer(this.defaultConstructed(type.cls, row, true));
+    if (elements.length === 0) return this.objectInitializer(this.defaultConstructed(type.cls, row, true, direct));
     const args = single ? [single] : elements.map((element) => this.argument(element));
     const resolved = this.resolveConstructor(type.cls, args, row, true);
+    this.checkListConstructor(resolved.fn, direct, row);
     return this.objectInitializer(this.constructWith(type.cls, resolved, args, row));
+  }
+
+  private checkListConstructor(constructor: FunctionInfo, allowsExplicit: boolean, row: number): void {
+    if (!allowsExplicit && constructor.isExplicit)
+      this.error(row, `${constructor.displayName} は explicit なので、変換には使えません。`);
   }
 
   private resolveConstructor(cls: ClassInfo, args: Expr[], row: number, isList: boolean): Resolved {
