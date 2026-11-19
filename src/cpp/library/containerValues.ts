@@ -125,6 +125,19 @@ export class NodePositions {
     return node;
   }
 
+  transferTo(destination: NodePositions, from: number, count: number): void {
+    const start = destination.owner.length;
+    for (let offset = 0; offset < count; offset++) {
+      const index = from + offset;
+      const node = this.positions.get(index);
+      if (!node) continue;
+      this.positions.delete(index);
+      node.owner = destination.owner;
+      node.position = start + offset;
+      destination.install(node);
+    }
+  }
+
   invalidateFrom(index: number, until = Infinity): void {
     this.invalidateEnd();
     for (const [position, node] of this.positions) {
@@ -309,33 +322,24 @@ export class SequenceValue extends Store {
     else if (epoch && remove && atEnd) epoch.end++;
   }
 
-  reorder(edit: (items: IndexedValue[]) => IndexedValue[], destroy?: (values: Value[]) => void): void {
+  reorder(edit: (items: IndexedValue[]) => IndexedValue[]): void {
     const next = edit(this.items.map((value, index) => ({ value, index })));
-    const install = (): void => {
-      this.nodes?.reorder(next);
-      this.items = next.map(({ value }) => value);
-    };
-    if (!destroy) {
-      install();
-      return;
-    }
-    const kept = new Set(next.map(({ index }) => index));
-    const removed = this.items.flatMap<IndexedValue>((value, index) => (kept.has(index) ? [] : [{ index, value }]));
-    this.destroyUnlinked(removed, install, destroy);
+    this.nodes?.reorder(next);
+    this.items = next.map(({ value }) => value);
+  }
+
+  transferNodesTo(destination: SequenceValue, from: number, count: number): void {
+    if (!this.nodes || !destination.nodes) throw new Error('Node transfer requires two node stores');
+    this.nodes.transferTo(destination.nodes, from, count);
+    for (const value of this.splice(from, count)) destination.items.push(value);
   }
 
   eraseNodes(from: number, count: number, destroy: (values: Value[]) => void): void {
-    const removed = this.items
-      .slice(from, from + count)
-      .map<IndexedValue>((value, index) => ({ index: from + index, value }));
-    this.destroyUnlinked(removed, () => this.splice(from, count), destroy);
-  }
-
-  private destroyUnlinked(removed: IndexedValue[], unlink: () => void, destroy: (values: Value[]) => void): void {
-    const nodes = removed.map(({ index, value }) => this.nodes?.detach(index, value));
+    const removed = this.items.slice(from, from + count);
+    const nodes = removed.map((value, offset) => this.nodes?.detach(from + offset, value));
     try {
-      unlink();
-      destroy(removed.map(({ value }) => value));
+      this.splice(from, count);
+      destroy(removed);
     } finally {
       for (const node of nodes) {
         if (node) node.position = -1;

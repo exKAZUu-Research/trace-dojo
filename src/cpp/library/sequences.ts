@@ -3,7 +3,7 @@ import { implicitConversion } from '../conversions';
 import { CppRuntimeError, NarrowingConversionError } from '../errors';
 import { type ConstantLocation, type Expr, hasConstantObject, type Initializer, offsetConstantLocation } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { constructArray } from '../objectCompiler';
+import { constructArray, withTemporaries } from '../objectCompiler';
 import { type Eval, type Frame, holdAll } from '../runtime';
 import type { Syntax } from '../syntax';
 import {
@@ -27,7 +27,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { ArrayStore, CObject, holdValues, NULL_PTR, type Ptr, type Value } from '../values';
+import { ArrayStore, CObject, endLifetime, holdValues, NULL_PTR, type Ptr, type Value } from '../values';
 import { bitReferences } from './bitReference';
 import { SequenceValue } from './containerValues';
 import {
@@ -777,16 +777,9 @@ function listMethods(
   // `checkElementRequirement` stops a call of these members for elements without == or <.
   method('remove', [constRef(element)], SIZE_T, (self, [value], frame) => {
     if (!equal) throw new CppRuntimeError('custom', `${typeName(element)} の値は == で比べられません。`);
-    const target = (value as Ptr).read();
-    let count = 0;
-    self.reorder(
-      (items) => items.filter(({ value: item }) => !equal(item, target)),
-      (removed) => {
-        count = removed.length;
-        editor.destroy(frame, removed);
-      }
+    return removeListRuns(frame, self, editor, 0, (_first, candidate) =>
+      equal(self.get(candidate), (value as Ptr).read())
     );
-    return BigInt(count);
   });
   method('reverse', [], VOID, (self) => {
     self.reorder((items) => items.toReversed());
@@ -795,24 +788,8 @@ function listMethods(
     if (!less) throw new CppRuntimeError('custom', `${typeName(element)} の値は < で比べられません。`);
     self.reorder((items) => listSort(items, (a, b) => less(a.value, b.value) < 0));
   });
-  const unique = (self: SequenceValue, frame: Frame, same: (a: Ptr, b: Ptr) => boolean): bigint => {
-    let count = 0;
-    let first: Ptr | undefined;
-    self.reorder(
-      (items) =>
-        items.filter(({ index }) => {
-          const next = self.location(index);
-          if (first && same(first, next)) return false;
-          first = next;
-          return true;
-        }),
-      (removed) => {
-        count = removed.length;
-        editor.destroy(frame, removed);
-      }
-    );
-    return BigInt(count);
-  };
+  const unique = (self: SequenceValue, frame: Frame, same: (a: Ptr, b: Ptr) => boolean): bigint =>
+    removeListRuns(frame, self, editor, 1, (first, candidate) => same(self.location(first), self.location(candidate)));
   method('unique', [], SIZE_T, (self, _args, frame) => {
     if (!equal) throw new CppRuntimeError('custom', `${typeName(element)} の値は == で比べられません。`);
     return unique(self, frame, (a, b) => equal(a.read(), b.read()));
@@ -851,6 +828,32 @@ function listMethods(
       (_args, { self, frame }) => unique(self as SequenceValue, frame, (a, b) => same(frame, a, b)),
       { owner: cls }
     );
+  });
+}
+
+function removeListRuns(
+  frame: Frame,
+  self: SequenceValue,
+  editor: SequenceEditor,
+  keepFirst: 0 | 1,
+  matches: (first: number, candidate: number) => boolean
+): bigint {
+  return withTemporaries(frame, () => {
+    const removed = new SequenceValue([], self.elementType, false, 'list');
+    frame.temporaries.push({
+      object: removed,
+      destroy: (current) => {
+        editor.destroy(current, removed.items);
+        endLifetime(removed);
+      },
+    });
+    for (let first = 0; first < self.length; first++) {
+      const start = first + keepFirst;
+      let end = start;
+      while (end < self.length && matches(first, end)) end++;
+      if (start !== end) self.transferNodesTo(removed, start, end - start);
+    }
+    return BigInt(removed.length);
   });
 }
 
