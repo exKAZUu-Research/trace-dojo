@@ -3576,4 +3576,34 @@ $c['new2'] = 20;
 echo key($c), ',', key($d);
 `);
   expect(compactedPointerCopy).toMatchObject({ kind: 'executed', stdout: 'd:4,c:3;null,new2,k4' });
+
+  const nestedDestructorGc = run(String.raw`<?php
+class N { public $p; function __construct(public $n) {} function __destruct() { echo $this->n; } }
+class A { function __destruct() {
+  $a = new N('a'); $b = new N('b'); $c = new N('c');
+  $a->p = $b; $b->p = $c; $c->p = $a;
+  gc_collect_cycles(); unset($c, $b, $a); echo '|', gc_collect_cycles();
+} }
+$x = new A; unset($x);
+`);
+  expect(nestedDestructorGc).toMatchObject({ kind: 'executed', stdout: '|cba3' });
+
+  const arrayAccessRefKeys = run(String.raw`<?php
+class A implements ArrayAccess {
+  function offsetExists($k): bool { return true; }
+  function offsetGet($k): mixed { echo get_debug_type($k), ';'; return 1; }
+  function offsetSet($k, $v): void {}
+  function offsetUnset($k): void {}
+}
+$s = new A; $x = 4;
+foreach ([new stdClass, 1.5] as $k) {
+  try { @$s[$k] =& $x; } catch (Throwable $e) { echo get_class($e), '|'; }
+}
+$ao = new ArrayObject;
+try { $ao[new stdClass] =& $x; } catch (Throwable $e) { echo get_class($e), ':', $e->getMessage(); }
+`);
+  expect(arrayAccessRefKeys).toMatchObject({
+    kind: 'executed',
+    stdout: 'stdClass;Error|float;Error|TypeError:Cannot access offset of type stdClass on ArrayObject',
+  });
 });

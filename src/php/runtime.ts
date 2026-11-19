@@ -149,7 +149,7 @@ export class Runtime {
   readonly arrayCycles = new Set<PhpArray>();
   readonly objectCycles = new Set<PhpObject>();
   readonly gcRoots = new GcRoots<PhpObject | PhpArray>();
-  readonly pendingGcRoots = new Set<unknown>();
+  pendingGcRoots = new Set<unknown>();
   gcThreshold = GC_THRESHOLD_DEFAULT;
   gcEnabled = true;
   readonly collectingObjects = new Set<PhpObject>();
@@ -414,6 +414,17 @@ export class Runtime {
     const values = frame.temporaries.splice(mark);
     for (const value of values) if (value instanceof Ref) value.rc--;
     this.release(values);
+  }
+
+  scopePendingGcRoots(action: () => void): void {
+    const ownPending = this.pendingGcRoots;
+    this.pendingGcRoots = new Set();
+    try {
+      action();
+    } finally {
+      for (const value of this.pendingGcRoots) ownPending.add(value);
+      this.pendingGcRoots = ownPending;
+    }
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.

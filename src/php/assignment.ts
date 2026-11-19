@@ -63,6 +63,7 @@ import { FatalError, PhpThrow, rt } from './runtime';
 import { incrementString } from './strings';
 import { coerce, describePropertyType, matches, NO_MATCH, typeToString } from './types';
 import {
+  type Key,
   PhpArray,
   type PhpClass,
   PhpObject,
@@ -981,28 +982,33 @@ function bindDimensionRef(target: Extract<Expr, { k: 'idx' }>, ref: Ref): void {
   if (target.base.k === 'var' && target.base.name === 'GLOBALS') return globalPlace(target.index).bind(ref);
   const parent = nestedPlace(placeOf(target.base, 'write', true), 'write');
   const rawKey = target.index === undefined ? undefined : ev(target.index);
-  let container = writableContainer(parent);
+  const container = writableContainer(parent);
   if (typeof container === 'string') return rejectStringReference(rawKey);
-  const key = rawKey === undefined ? undefined : toKey(rawKey);
-  if (
-    container instanceof PhpObject &&
-    key !== undefined &&
-    nativeArrayStorage(container.internal) &&
-    container.cls.findMethod('offsetget')?.fn.kind === 'native'
-  )
-    container = container.internal.writable();
-  if (container instanceof PhpObject) {
-    arrayAccessPlace(container, key).nested?.('unset');
-    throwError('Error', 'Cannot assign by reference to an array dimension of an object');
-  }
+  const [array, key] =
+    container instanceof PhpObject
+      ? nativeRefDimension(container, rawKey)
+      : ([container, rawKey === undefined ? undefined : toKey(rawKey)] as const);
   ref.isRef = true;
-  if (key !== undefined && container.map.get(key) === ref) return;
+  if (key !== undefined && array.map.get(key) === ref) return;
   ref.rc++;
-  if (key !== undefined) container.setSlot(key, ref);
-  else if (!container.append(ref)) {
+  if (key !== undefined) array.setSlot(key, ref);
+  else if (!array.append(ref)) {
     ref.rc--;
     throwError('Error', 'Cannot add element to the array as the next element is already occupied');
   }
+}
+
+function nativeRefDimension(object: PhpObject, rawKey: Value | undefined): readonly [PhpArray, Key] {
+  if (
+    rawKey !== undefined &&
+    nativeArrayStorage(object.internal) &&
+    object.cls.findMethod('offsetget')?.fn.kind === 'native'
+  ) {
+    const key = toKey(rawKey, 'access', object.cls.name);
+    return [object.internal.writable(), key];
+  }
+  arrayAccessPlace(object, rawKey).nested?.('unset');
+  throwError('Error', 'Cannot assign by reference to an array dimension of an object');
 }
 
 export function assignReference(target: Expr, source: Expr): Value {

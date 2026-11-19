@@ -218,13 +218,14 @@ export function releaseDropped(
 ): void {
   if (runtime.shuttingDown || runtime.exhausted) return;
   const collectible = releaseCollectionDescendants(runtime, dropped);
-  try {
-    releaseDroppedNow(runtime, dropped, fromNative, mode, initialFailure);
-  } finally {
-    for (const object of collectible)
-      if (runtime.objects.get(object.id) === object) runtime.collectingObjects.add(object);
-  }
-  if (releasing > 0) return;
+  runtime.scopePendingGcRoots(() => {
+    try {
+      releaseDroppedNow(runtime, dropped, fromNative, mode, initialFailure);
+    } finally {
+      for (const object of collectible)
+        if (runtime.objects.get(object.id) === object) runtime.collectingObjects.add(object);
+    }
+  });
   const candidates = runtime.collectingCycles ? [] : [...runtime.pendingGcRoots];
   runtime.pendingGcRoots.clear();
   let roots: Set<unknown> | undefined;
