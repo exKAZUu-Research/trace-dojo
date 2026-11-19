@@ -4,6 +4,9 @@ import { traceCProgram } from '../c/trace';
 import { executeGoProgram } from '../go/execute';
 import { findGoTraceAnnotations } from '../go/parse';
 import { traceGoProgram } from '../go/trace';
+import { findHaskellTraceAnnotations } from '../haskell/parse';
+import { executeHaskellProgram } from '../haskell/run';
+import { traceHaskellProgram } from '../haskell/trace';
 import { executeJavaProgram } from '../java/execute';
 import { traceJavaProgram } from '../java/trace';
 import { findJavaScriptTraceAnnotations } from '../javascript/parse';
@@ -48,7 +51,7 @@ export interface ProgramRecording extends ProgramRun {
 }
 
 export interface ProgramTrace extends ProgramRecording {
-  /** The program without its atomic annotations (`// atomic`, or `# atomic` in Python and Ruby), whose rows match the lines that trace items refer to. */
+  /** The program without its atomic annotations (`// atomic`, `# atomic` in Python and Ruby, or `-- atomic` in Haskell), whose rows match the lines that trace items refer to. */
   displayProgram: string;
 }
 
@@ -81,10 +84,15 @@ const interpreters = {
   },
   c: { findTraceAnnotations: findCTraceAnnotations, record: traceCProgram, execute: executeCProgram },
   rust: { findTraceAnnotations: findRustTraceAnnotations, record: traceRustProgram, execute: executeRustProgram },
+  haskell: {
+    findTraceAnnotations: findHaskellTraceAnnotations,
+    record: traceHaskellProgram,
+    execute: executeHaskellProgram,
+  },
 } satisfies Record<string, Interpreter>;
 
 /**
- * Runs a model program and records its steps outside the methods marked `// atomic` (`# atomic` in Python and Ruby).
+ * Runs a model program and records its steps outside the methods marked `// atomic` (`# atomic` in Python and Ruby, `-- atomic` in Haskell).
  *
  * @param program The program to run, with every blank filled in.
  * @param displayProgram The program shown to learners, whose blanks may be placeholders on the same rows.
