@@ -84,7 +84,7 @@ export function invoke(
         param.type.kind === 'reference'
           ? (value as Ptr)
           : param.type.kind === 'class' && value instanceof CObject
-            ? value.parameterStorage(param.type.cls)
+            ? value.parameterStorage()
             : new Box(value, param.type.kind !== 'class');
     }
     if (fn.isNoexcept) runtime.withoutOuterHandlers(() => compiled.body(callee));
@@ -265,12 +265,12 @@ export function initializeAt(
       object.needsConstruction = true;
       location.write(object);
     }
-    object.completePosition = { location, cls: type.cls };
+    object.completeLocation = location;
     target = object;
   }
   try {
     const value = initialize(target);
-    if (type.kind === 'class' && value instanceof CObject) value.completePosition = { location, cls: type.cls };
+    if (type.kind === 'class' && value instanceof CObject) value.completeLocation = location;
     if (target instanceof CObject && target !== value && target.needsConstruction) endLifetime(target);
     location.write(value);
     return value;

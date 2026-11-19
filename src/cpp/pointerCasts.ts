@@ -47,7 +47,7 @@ function pointerInterconvertible(pointer: Ptr, source: Type, target: Type): Ptr 
 function firstSubobject(pointer: Ptr, source: Type, target: Type): Ptr | undefined {
   if (sameType(source, target, false)) return pointer;
   if (source.kind !== 'class' || !isStandardLayout(source.cls)) return;
-  if (target.kind === 'class' && source.cls.isDerivedFrom(target.cls)) return pointer;
+  if (target.kind === 'class' && source.cls.isDerivedFrom(target.cls)) return pointer.forClass(target.cls);
   const object = pointer.readRaw();
   if (!(object instanceof CObject)) return;
   if (
@@ -56,7 +56,7 @@ function firstSubobject(pointer: Ptr, source: Type, target: Type): Ptr | undefin
     object.cls.isDerivedFrom(target.cls) &&
     isStandardLayout(object.cls)
   )
-    return pointer;
+    return pointer.forClass(target.cls);
   const first = source.cls.fields[0];
   if (!first) return;
   const location = new Ptr(object, first.index, { location: pointer, cls: source.cls });

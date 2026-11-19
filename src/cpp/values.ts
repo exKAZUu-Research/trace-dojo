@@ -1,7 +1,7 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { CppRuntimeError } from './errors';
 import type { Frame, Temporary } from './runtime';
-import type { ClassInfo, FunctionInfo, Type } from './types';
+import { type ClassInfo, classType, type FunctionInfo, sizeOf, type Type } from './types';
 
 /** The value of a variable or an element that the program has not written yet. */
 export const UNINIT = Symbol('uninitialized');
@@ -140,13 +140,14 @@ interface ExceptionMessage {
 
 /** An object of a class the program declares, or of a library class with members, holding its data members. */
 export class CObject extends Store {
+  readonly completeClass: ClassInfo;
   /** The turtle of a `Turtle` object. */
   turtle?: TurtleState;
   /** The message of a library exception, which `what()` returns, as bytes. */
   private exceptionMessage?: ExceptionMessage;
   referenceTemporaries?: Temporary[];
   needsConstruction = false;
-  completePosition?: { location: Ptr; cls: ClassInfo };
+  completeLocation?: Ptr;
   private receiverStorage?: Store;
   private baseLocations?: Map<ClassInfo, Ptr>;
   private memberStorage?: Map<number, MemberStorage>;
@@ -161,6 +162,7 @@ export class CObject extends Store {
     public zeroInitialized = false
   ) {
     super();
+    this.completeClass = cls;
   }
 
   get length(): number {
@@ -168,23 +170,33 @@ export class CObject extends Store {
   }
 
   receiver(asClass = this.cls): Ptr {
-    const complete = this.completePosition;
-    if (!(complete?.location.store instanceof ArrayStore) || complete.cls === asClass) {
-      this.receiverStorage ??= new ObjectReceiverStorage(this);
-      return new CompleteObjectPointer(this, this.receiverStorage);
-    }
+    if (this.completeClass === asClass) return new CompleteObjectPointer(this, this.fallbackReceiver());
     this.baseLocations ??= new Map();
     let location = this.baseLocations.get(asClass);
     if (!location) {
-      location = new ObjectReceiverStorage(this).location(0);
+      location = new BaseSubobjectStorage(this, asClass).location(0);
       this.baseLocations.set(asClass, location);
     }
     return location;
   }
 
-  parameterStorage(cls: ClassInfo): Box {
+  baseEndpoint(cls: ClassInfo): { store: Store | undefined; index: number } {
+    const size = sizeOf(classType(cls));
+    if (size === sizeOf(classType(this.completeClass))) {
+      const complete = this.completeLocation;
+      return new Ptr(complete?.store ?? this.fallbackReceiver(), (complete?.index ?? 0) + 1).address;
+    }
+    return { store: this.fallbackReceiver(), index: size };
+  }
+
+  private fallbackReceiver(): Store {
+    this.receiverStorage ??= new ObjectReceiverStorage(this);
+    return this.receiverStorage;
+  }
+
+  parameterStorage(): Box {
     const storage = new ObjectReceiverStorage(this);
-    this.completePosition = { location: storage.location(0), cls };
+    this.completeLocation = storage.location(0);
     return storage;
   }
 
@@ -265,12 +277,21 @@ export class CObject extends Store {
 }
 
 class ObjectReceiverStorage extends Box {
-  constructor(private readonly object: CObject) {
+  constructor(readonly object: CObject) {
     super(object, false);
   }
 
   override checkAlive(): void {
     this.object.checkAlive();
+  }
+}
+
+class BaseSubobjectStorage extends ObjectReceiverStorage {
+  constructor(
+    object: CObject,
+    readonly cls: ClassInfo
+  ) {
+    super(object);
   }
 }
 
@@ -403,7 +424,12 @@ export class Ptr {
 
   forClass(cls: ClassInfo): Ptr {
     const object = this.addressedObject();
-    return object?.completePosition ? object.receiver(cls) : this;
+    return object && (object.completeLocation || object.completeClass !== cls) ? object.receiver(cls) : this;
+  }
+
+  allocationLocation(): Ptr {
+    const store = this.store;
+    return this.index === 0 && store instanceof BaseSubobjectStorage ? (store.object.completeLocation ?? this) : this;
   }
 
   rangeLength(last: Ptr, isReverse: boolean): number {
@@ -423,6 +449,8 @@ export class Ptr {
 
   /** Constructor and destructor receivers can wrap the same object in different storage cells. */
   get address(): { store: Store | undefined; index: number } {
+    const store = this.store;
+    if (this.index === 1 && store instanceof BaseSubobjectStorage) return store.object.baseEndpoint(store.cls);
     const object = this.addressedObject();
     return object ? { store: object, index: 0 } : this.storageAddress;
   }
@@ -461,11 +489,11 @@ class CompleteObjectPointer extends Ptr {
   }
 
   override get store(): Store {
-    return this.object.completePosition?.location.store ?? this.fallback;
+    return this.object.completeLocation?.store ?? this.fallback;
   }
 
   override get index(): number {
-    return (this.object.completePosition?.location.index ?? 0) + this.offsetFromObject;
+    return (this.object.completeLocation?.index ?? 0) + this.offsetFromObject;
   }
 
   override offset(delta: number, asIterator = false): Ptr {

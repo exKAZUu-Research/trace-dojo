@@ -8,6 +8,14 @@ struct Base {
 };
 
 struct Derived : Base { int padding[4]; };
+struct SameSize : Base {};
+
+int destroyed = 0;
+struct VirtualBase { virtual ~VirtualBase() { ++destroyed; } };
+struct VirtualDerived : VirtualBase {
+  int padding[4];
+  ~VirtualDerived() { destroyed += 2; }
+};
 
 void show(Derived* elements) {
   Base* first = elements;
@@ -31,4 +39,15 @@ int main() {
   delete[] dynamic;
   std::array<Derived, 2> stored;
   show(stored.data());
+
+  Derived local;
+  Derived* heap = new Derived;
+  SameSize same;
+  std::cout << (static_cast<void*>(local.end) == static_cast<void*>(&local + 1))
+            << (static_cast<void*>(heap->end) == static_cast<void*>(heap + 1))
+            << (static_cast<void*>(same.end) == static_cast<void*>(&same + 1)) << '\n';
+  delete heap;
+  VirtualBase* base = new VirtualDerived;
+  delete base;
+  std::cout << destroyed << '\n';
 }

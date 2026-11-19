@@ -2019,8 +2019,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const hasVirtualDestructor = cls?.destructor?.isVirtual === true;
     const run = operand.run;
     const exec = (frame: Frame): Value => {
-      const pointer = run(frame) as Ptr;
-      if (pointer.isNull) return undefined;
+      const source = run(frame) as Ptr;
+      if (source.isNull) return undefined;
+      const pointer = source.allocationLocation();
       if (pointer.store?.liveness === Liveness.Deleted) throw new CppRuntimeError('doubleDelete');
       const store = pointer.target();
       if (store.allocation !== (isArray ? 'newArray' : 'new') || pointer.index !== 0)
