@@ -24,6 +24,7 @@ import type { BindContext } from './convertBinder';
 import { constantText } from './convertBinder';
 import type { MemberLookup } from './lookup';
 import { PatternBinder } from './patternBinder';
+import type { Space } from './patternSpace';
 import { TRANSPARENT_PREFIX } from './queries';
 import { FunctionScope, LocalScope } from './scopes';
 import {
@@ -55,7 +56,8 @@ import { unavailableTypeOf } from './unavailable';
 interface SwitchLabelsSeen {
   constants: unknown[];
   hasDefault: boolean;
-  isExhausted: boolean;
+  /** The values that the earlier unguarded case labels surely match. */
+  handled: Space;
 }
 
 /** Binds statements and the storage that assignments write. */
@@ -968,7 +970,7 @@ export abstract class StatementBinder extends PatternBinder {
     const temporary = new LocalSymbol('\0switch', value.type, statement.row, statement.column);
     temporary.isHidden = true;
     context.fn.addLocal(temporary);
-    const seen: SwitchLabelsSeen = { constants: [], hasDefault: false, isExhausted: false };
+    const seen: SwitchLabelsSeen = { constants: [], hasDefault: false, handled: [] };
     context.fn.breakDepth++;
     let sections: BoundSwitchSection[];
     try {
@@ -1011,17 +1013,13 @@ export abstract class StatementBinder extends PatternBinder {
     }
     const pattern = this.bindPattern(label.pattern, value.type, context);
     const guard = label.guard ? this.bindAs(label.guard, this.boolType, context) : undefined;
-    if (seen.isExhausted && value.type.kind !== 'error')
-      this.error(
-        label,
-        'CS8120',
-        'switch ケースに到達できません。以前のケースで既に処理されたか、一致させることができません。'
-      );
     const constant = this.constantOfPattern(pattern);
+    let isDuplicate = false;
     if (constant && !guard) {
       const constantValue = (constant as Extract<BoundExpression, { kind: 'constant' }>).value;
       const key = constantKey(constantValue);
-      if (seen.constants.includes(key))
+      isDuplicate = seen.constants.includes(key);
+      if (isDuplicate)
         this.error(
           label,
           'CS0152',
@@ -1029,7 +1027,13 @@ export abstract class StatementBinder extends PatternBinder {
         );
       seen.constants.push(key);
     }
-    if (!guard && this.isIrrefutable(pattern, value.type)) seen.isExhausted = true;
+    if (!isDuplicate && value.type.kind !== 'error' && this.patternSpaces.isSubsumed(seen.handled, pattern))
+      this.error(
+        label,
+        'CS8120',
+        'switch ケースに到達できません。以前のケースで既に処理されたか、一致させることができません。'
+      );
+    if (!guard) seen.handled.push(...this.patternSpaces.under(pattern));
     return { pattern, guard };
   }
 

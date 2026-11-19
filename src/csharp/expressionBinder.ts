@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 995 -- The expressionBinder module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 1000 -- The expressionBinder module keeps one stage of the C# interpreter together.
 import type { SourceDiagnostic } from '../interpreter/diagnostics';
 import type { Block, Designation, Expression, LambdaParameter, Pattern, Position } from './ast';
 import type {
@@ -15,6 +15,7 @@ import { isEnum, isNumeric } from './conversions';
 import type { BindContext, ConversionMode } from './convertBinder';
 import { CsDecimal } from './decimal';
 import { type BindResult, isNonValue, MemberBinder, type NonValue } from './memberBinder';
+import type { Space } from './patternSpace';
 import { desugarQuery, TRANSPARENT_PREFIX } from './queries';
 import { FunctionScope, LocalScope } from './scopes';
 import {
@@ -50,6 +51,13 @@ type LambdaExpression = Extract<Expression, { kind: 'lambda' }>;
 export abstract class ExpressionBinder extends MemberBinder {
   /** Binds a pattern against an input type, declaring its variables in the context's scope. */
   abstract bindPattern(pattern: Pattern, inputType: Type, context: BindContext): BoundPattern;
+
+  /** Reports a switch arm whose pattern the earlier arms handle, then adds an unguarded arm's values to them. */
+  protected abstract checkArmReachable(
+    handled: Space,
+    arm: { pattern: BoundPattern; guard: unknown },
+    position: Position
+  ): void;
 
   /** Binds a block that forms a function's body, such as a lambda's. */
   protected abstract bindFunctionBlock(block: Block, context: BindContext): BoundBlock;
@@ -1978,11 +1986,13 @@ export abstract class ExpressionBinder extends MemberBinder {
     let parts = this.switchParts.get(node);
     if (parts?.scope !== context.scope) {
       const value = this.bindValue(node.value, context);
+      const handled: Space = [];
       const arms = node.arms.map((arm) => {
         const scope = new LocalScope(context.scope, context.fn);
         const armContext: BindContext = { scope, fn: context.fn };
         const pattern = this.bindPattern(arm.pattern, value.type, armContext);
         const guard = arm.guard ? this.bindAs(arm.guard, this.boolType, armContext) : undefined;
+        if (value.type.kind !== 'error') this.checkArmReachable(handled, { pattern, guard }, arm.pattern);
         const result = this.bindAllowingThrow(arm.value, armContext);
         return { pattern, guard, value: result, row: arm.row, syntax: arm.value };
       });

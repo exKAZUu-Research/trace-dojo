@@ -3,6 +3,7 @@ import type { BoundExpression, BoundPattern, OperandKind } from './bound';
 import { isEnum, isNumeric } from './conversions';
 import type { BindContext } from './convertBinder';
 import { ExpressionBinder } from './expressionBinder';
+import { PatternSpaces, type Space } from './patternSpace';
 import {
   displayType,
   ERROR_TYPE,
@@ -21,6 +22,25 @@ import {
 
 /** Binds patterns, checking that each can match its input's type. */
 export abstract class PatternBinder extends ExpressionBinder {
+  /** The values of patterns, for the switch cases and arms that earlier ones handle. */
+  protected readonly patternSpaces = new PatternSpaces((sub, sup) =>
+    ['identity', 'reference', 'boxing'].includes(this.conversions.implicit(sub, sup) ?? '')
+  );
+
+  protected checkArmReachable(
+    handled: Space,
+    arm: { pattern: BoundPattern; guard: unknown },
+    position: Position
+  ): void {
+    if (this.patternSpaces.isSubsumed(handled, arm.pattern))
+      this.error(
+        position,
+        'CS8510',
+        'このパターンには到達できません。これは、switch 式の以前のアームによって既に処理されたか、一致させることができません。'
+      );
+    if (!arm.guard) handled.push(...this.patternSpaces.under(arm.pattern));
+  }
+
   // code-gauge-allow functionNcss 40 -- One case per kind of pattern.
   bindPattern(pattern: Pattern, inputType: Type, context: BindContext): BoundPattern {
     switch (pattern.kind) {
