@@ -377,80 +377,10 @@ function defineUnsignedArrayStrings(): void {
   }
 }
 
-// code-gauge-allow functionNcss 60 -- One native per function of arrays that the prelude declares.
 function defineArrayFunctions(): void {
   for (const [receiver, kind] of ARRAY_RECEIVERS) {
-    const prefix = `kotlin.collections.${receiver}`;
-    const element = kind ?? 'T';
-    defineNative(`${prefix}.asList()`, (frame, array) => {
-      // Arrays.asList shares the array of objects; a primitive array's list holds boxed copies of its elements.
-      if (kind === undefined) {
-        const list = newList(frame, 'ArraysList', []);
-        list.items = (array as KObject).items;
-        return list;
-      }
-      return newList(frame, 'ArraysList', boxedItems(array, kind));
-    });
-    defineNative(`${prefix}.contentToString()`, (frame, array) => {
-      const text = `[${boxedItems(array, kind)
-        .map((value) => stringOf(frame, value))
-        .join(', ')}]`;
-      frame.runtime.allocateString(frame, text.length);
-      return text;
-    });
-    defineNative(`${prefix}.copyOf()`, (frame, array) =>
-      copyArray(frame, array, [...((array as KObject).items as Value[])])
-    );
-    defineNative(`${prefix}.copyOfRange(Int, Int)`, (frame, array, [from, to]) => {
-      const items = (array as KObject).items as Value[];
-      const start = from as number;
-      const end = to as number;
-      if (end > items.length)
-        frame.runtime.throwError(
-          frame,
-          'java.lang.IndexOutOfBoundsException',
-          `toIndex (${end}) is greater than size (${items.length}).`
-        );
-      if (start > end) frame.runtime.throwError(frame, 'java.lang.IllegalArgumentException', `${start} > ${end}`);
-      return copyArray(frame, array, items.slice(start, end));
-    });
-    defineNative(`${prefix}.contentEquals(${receiver})`, (frame, array, [other]) => {
-      if (other === undefined) return false;
-      const a = boxedItems(array, kind);
-      const b = boxedItems(other, kind);
-      return a.length === b.length && a.every((value, index) => valueEquals(frame, value, b[index]));
-    });
-    defineNative(`${prefix}.fill(${element}, Int, Int)`, (frame, array, [value, from, to]) => {
-      const items = (array as KObject).items as Value[];
-      const start = from as number;
-      const end = to as number;
-      if (start < 0 || end > items.length)
-        frame.runtime.throwError(
-          frame,
-          'java.lang.ArrayIndexOutOfBoundsException',
-          `Array index out of range: ${start < 0 ? start : end}`
-        );
-      if (start > end)
-        frame.runtime.throwError(frame, 'java.lang.IllegalArgumentException', `fromIndex(${start}) > toIndex(${end})`);
-      items.fill(value, start, end);
-      return UNIT;
-    });
-    defineNative(`${prefix}.reverse()`, (_frame, array) => {
-      ((array as KObject).items as Value[]).reverse();
-      return UNIT;
-    });
-    if (kind !== undefined && kind !== 'Boolean') {
-      defineNative(`${prefix}.sort()`, (_frame, array) => {
-        const items = (array as KObject).items as Value[];
-        const isFloating = kind === 'Double' || kind === 'Float';
-        items.sort((a, b) =>
-          isFloating
-            ? compareDoubles(a as number, b as number)
-            : compareNumbers(a as number | bigint, b as number | bigint)
-        );
-        return UNIT;
-      });
-    }
+    defineArrayReading(receiver, kind);
+    defineArrayChanging(receiver, kind);
   }
   defineNative('kotlin.collections.arrayOf(vararg T)', fromVararg('Array'));
   defineNative('kotlin.collections.emptyArray()', (frame) =>
@@ -464,6 +394,86 @@ function defineArrayFunctions(): void {
   });
   for (const [name, kind] of PRIMITIVE_ARRAYS) {
     defineNative(`kotlin.collections.${arrayFactoryName(name)}(vararg ${kind})`, fromVararg(name));
+  }
+}
+
+/** What reads an array, of objects for an undefined `kind` or of a primitive kind. */
+function defineArrayReading(receiver: string, kind: PrimitiveKind | 'Boolean' | undefined): void {
+  const prefix = `kotlin.collections.${receiver}`;
+  defineNative(`${prefix}.asList()`, (frame, array) => {
+    // Arrays.asList shares the array of objects; a primitive array's list holds boxed copies of its elements.
+    if (kind === undefined) {
+      const list = newList(frame, 'ArraysList', []);
+      list.items = (array as KObject).items;
+      return list;
+    }
+    return newList(frame, 'ArraysList', boxedItems(array, kind));
+  });
+  defineNative(`${prefix}.contentToString()`, (frame, array) => {
+    const text = `[${boxedItems(array, kind)
+      .map((value) => stringOf(frame, value))
+      .join(', ')}]`;
+    frame.runtime.allocateString(frame, text.length);
+    return text;
+  });
+  defineNative(`${prefix}.copyOf()`, (frame, array) =>
+    copyArray(frame, array, [...((array as KObject).items as Value[])])
+  );
+  defineNative(`${prefix}.copyOfRange(Int, Int)`, (frame, array, [from, to]) => {
+    const items = (array as KObject).items as Value[];
+    const start = from as number;
+    const end = to as number;
+    if (end > items.length)
+      frame.runtime.throwError(
+        frame,
+        'java.lang.IndexOutOfBoundsException',
+        `toIndex (${end}) is greater than size (${items.length}).`
+      );
+    if (start > end) frame.runtime.throwError(frame, 'java.lang.IllegalArgumentException', `${start} > ${end}`);
+    return copyArray(frame, array, items.slice(start, end));
+  });
+  defineNative(`${prefix}.contentEquals(${receiver})`, (frame, array, [other]) => {
+    if (other === undefined) return false;
+    const a = boxedItems(array, kind);
+    const b = boxedItems(other, kind);
+    return a.length === b.length && a.every((value, index) => valueEquals(frame, value, b[index]));
+  });
+}
+
+/** What changes an array in place. */
+function defineArrayChanging(receiver: string, kind: PrimitiveKind | 'Boolean' | undefined): void {
+  const prefix = `kotlin.collections.${receiver}`;
+  const element = kind ?? 'T';
+  defineNative(`${prefix}.fill(${element}, Int, Int)`, (frame, array, [value, from, to]) => {
+    const items = (array as KObject).items as Value[];
+    const start = from as number;
+    const end = to as number;
+    if (start < 0 || end > items.length)
+      frame.runtime.throwError(
+        frame,
+        'java.lang.ArrayIndexOutOfBoundsException',
+        `Array index out of range: ${start < 0 ? start : end}`
+      );
+    if (start > end)
+      frame.runtime.throwError(frame, 'java.lang.IllegalArgumentException', `fromIndex(${start}) > toIndex(${end})`);
+    items.fill(value, start, end);
+    return UNIT;
+  });
+  defineNative(`${prefix}.reverse()`, (_frame, array) => {
+    ((array as KObject).items as Value[]).reverse();
+    return UNIT;
+  });
+  if (kind !== undefined && kind !== 'Boolean') {
+    defineNative(`${prefix}.sort()`, (_frame, array) => {
+      const items = (array as KObject).items as Value[];
+      const isFloating = kind === 'Double' || kind === 'Float';
+      items.sort((a, b) =>
+        isFloating
+          ? compareDoubles(a as number, b as number)
+          : compareNumbers(a as number | bigint, b as number | bigint)
+      );
+      return UNIT;
+    });
   }
 }
 

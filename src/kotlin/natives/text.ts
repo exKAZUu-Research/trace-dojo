@@ -155,250 +155,271 @@ const TITLECASE_DIGRAPHS = new Map(
   ])
 );
 
-function defineStrings(): void {
-  const natives: Record<string, (frame: Frame, receiver: Value, args: Value[]) => Value> = {
-    'CharSequence.isBlank()': (frame, receiver) => codeUnits(sequenceText(frame, receiver)).every(isKotlinWhitespace),
-    'String.uppercase()': (frame, receiver) => result(frame, text(receiver).toUpperCase()),
-    'String.lowercase()': (frame, receiver) => result(frame, text(receiver).toLowerCase()),
-    'String.trim()': (frame, receiver) => result(frame, trimWith(text(receiver), true, true)),
-    'String.trimStart()': (frame, receiver) => result(frame, trimWith(text(receiver), true, false)),
-    'String.trimEnd()': (frame, receiver) => result(frame, trimWith(text(receiver), false, true)),
-    'String.trimIndent()': (frame, receiver) => result(frame, trimIndent(text(receiver))),
-    'String.trimMargin(String)': (frame, receiver, [prefix]) => result(frame, trimMargin(text(receiver), text(prefix))),
-    'String.substring(Int)': (frame, receiver, [start]) =>
-      substring(frame, text(receiver), start as number, text(receiver).length),
-    'String.substring(Int, Int)': (frame, receiver, [start, end]) =>
-      substring(frame, text(receiver), start as number, end as number),
-    'String.startsWith(String, Boolean)': (_frame, receiver, [prefix, ignoreCase]) =>
-      ignoreCase
-        ? text(receiver).toLowerCase().startsWith(text(prefix).toLowerCase())
-        : text(receiver).startsWith(text(prefix)),
-    'String.endsWith(String, Boolean)': (_frame, receiver, [suffix, ignoreCase]) =>
-      ignoreCase
-        ? text(receiver).toLowerCase().endsWith(text(suffix).toLowerCase())
-        : text(receiver).endsWith(text(suffix)),
-    'CharSequence.contains(CharSequence)': (frame, receiver, [other]) =>
-      sequenceText(frame, receiver).includes(sequenceText(frame, other)),
-    'CharSequence.indexOf(String, Int, Boolean)': (frame, receiver, [other, start, ignoreCase]) =>
-      search(sequenceText(frame, receiver), text(other), ignoreCase === true).indexOf(Math.max(0, start as number)),
-    'CharSequence.indexOf(Char, Int, Boolean)': (frame, receiver, [char, start, ignoreCase]) =>
-      search(sequenceText(frame, receiver), charToString(char as number), ignoreCase === true).indexOf(
-        Math.max(0, start as number)
-      ),
-    'CharSequence.lastIndexOf(String, Int, Boolean)': (frame, receiver, [other, start, ignoreCase]) =>
-      search(sequenceText(frame, receiver), text(other), ignoreCase === true).lastIndexOf(start as number),
-    'CharSequence.lastIndexOf(Char, Int, Boolean)': (frame, receiver, [char, start, ignoreCase]) =>
-      search(sequenceText(frame, receiver), charToString(char as number), ignoreCase === true).lastIndexOf(
-        start as number
-      ),
-    'String.replace(String, String, Boolean)': (frame, receiver, [oldValue, newValue, ignoreCase]) =>
-      result(frame, replaceAll(text(receiver), text(oldValue), text(newValue), ignoreCase === true)),
-    'String.replace(Char, Char)': (frame, receiver, [oldChar, newChar]) =>
-      result(frame, text(receiver).replaceAll(charToString(oldChar as number), charToString(newChar as number))),
-    'String.replaceFirst(String, String)': (frame, receiver, [oldValue, newValue]) =>
-      result(
-        frame,
-        text(receiver).replace(text(oldValue), () => text(newValue))
-      ),
-    'String.repeat(Int)': (frame, receiver, [count]) => {
-      const times = count as number;
-      if (times < 0)
-        throwError(frame, 'java.lang.IllegalArgumentException', `Count 'n' must be non-negative, but was ${times}.`);
-      frame.runtime.allocateString(frame, text(receiver).length * times);
-      return text(receiver).repeat(times);
-    },
-    'CharSequence.split(vararg String, Boolean, Int)': (frame, receiver, [delimiters, ignoreCase, limit]) =>
-      splitText(frame, sequenceText(frame, receiver), ((delimiters as KObject).items as Value[]).map(text), {
-        ignoreCase: ignoreCase === true,
-        limit: limit as number,
-      }),
-    'CharSequence.split(vararg Char, Boolean, Int)': (frame, receiver, [delimiters, ignoreCase, limit]) =>
-      splitText(
-        frame,
-        sequenceText(frame, receiver),
-        ((delimiters as KObject).items as Value[]).map((char) => charToString(char as number)),
-        { ignoreCase: ignoreCase === true, limit: limit as number }
-      ),
-    'CharSequence.lines()': (frame, receiver) =>
-      newList(frame, 'ArrayList', sequenceText(frame, receiver).split(/\r\n|\n|\r/)),
-    'String.reversed()': (frame, receiver) => result(frame, reverseKeepingPairs(text(receiver))),
-    'String.toCharArray()': (frame, receiver) => {
-      const array = new KObject(libraryClass('kotlin.CharArray'), 0);
-      // oxlint-disable-next-line unicorn/prefer-code-point -- Kotlin chars are UTF-16 code units.
-      array.items = Array.from({ length: text(receiver).length }, (_, index) => text(receiver).charCodeAt(index));
-      frame.runtime.allocate(frame, array.items.length);
-      return array;
-    },
-    'String.padStart(Int, Char)': (frame, receiver, [length, char]) => {
-      if ((length as number) < 0)
-        throwError(
-          frame,
-          'java.lang.IllegalArgumentException',
-          `Desired length ${length as number} is less than zero.`
-        );
-      // The padded text is charged before it is built, as its length may be far beyond the limit.
-      frame.runtime.allocateString(frame, length as number);
-      return text(receiver).padStart(length as number, charToString(char as number));
-    },
-    'String.padEnd(Int, Char)': (frame, receiver, [length, char]) => {
-      if ((length as number) < 0)
-        throwError(
-          frame,
-          'java.lang.IllegalArgumentException',
-          `Desired length ${length as number} is less than zero.`
-        );
-      // The padded text is charged before it is built, as its length may be far beyond the limit.
-      frame.runtime.allocateString(frame, length as number);
-      return text(receiver).padEnd(length as number, charToString(char as number));
-    },
-    'String.equals(String?, Boolean)': (_frame, receiver, [other, ignoreCase]) => {
-      if (other === undefined) return false;
-      return ignoreCase ? text(receiver).toLowerCase() === text(other).toLowerCase() : receiver === other;
-    },
-    'String.compareTo(String, Boolean)': (_frame, receiver, [other, ignoreCase]) =>
-      ignoreCase
-        ? compareStrings(text(receiver).toLowerCase(), text(other).toLowerCase())
-        : compareStrings(text(receiver), text(other)),
-    'String.format(vararg Any?)': (frame, receiver, [args]) =>
-      result(frame, formatText(frame, text(receiver), (args as KObject).items as Value[])),
-    'String.removePrefix(CharSequence)': (frame, receiver, [prefix]) => {
-      const value = text(receiver);
-      const start = sequenceText(frame, prefix);
-      return value.startsWith(start) ? value.slice(start.length) : value;
-    },
-    'String.removeSuffix(CharSequence)': (frame, receiver, [suffix]) => {
-      const value = text(receiver);
-      const end = sequenceText(frame, suffix);
-      return end.length > 0 && value.endsWith(end) ? value.slice(0, -end.length) : value;
-    },
-    'String.removeSurrounding(CharSequence)': (frame, receiver, [delimiter]) => {
-      const value = text(receiver);
-      const around = sequenceText(frame, delimiter);
-      return value.length >= 2 * around.length && value.startsWith(around) && value.endsWith(around)
-        ? value.slice(around.length, value.length - around.length)
-        : value;
-    },
-    'String.substringBefore(String, String)': (_frame, receiver, [delimiter, missing]) => {
-      const index = text(receiver).indexOf(text(delimiter));
-      return index === -1 ? missing : text(receiver).slice(0, index);
-    },
-    'String.substringAfter(String, String)': (_frame, receiver, [delimiter, missing]) => {
-      const index = text(receiver).indexOf(text(delimiter));
-      return index === -1 ? missing : text(receiver).slice(index + text(delimiter).length);
-    },
-    'String.substringBeforeLast(String, String)': (_frame, receiver, [delimiter, missing]) => {
-      const index = text(receiver).lastIndexOf(text(delimiter));
-      return index === -1 ? missing : text(receiver).slice(0, index);
-    },
-    'String.substringAfterLast(String, String)': (_frame, receiver, [delimiter, missing]) => {
-      const index = text(receiver).lastIndexOf(text(delimiter));
-      return index === -1 ? missing : text(receiver).slice(index + text(delimiter).length);
-    },
-    'String.toInt()': (frame, receiver) => {
-      const parsed = parseInteger(frame, text(receiver), 10, 32);
-      return parsed === undefined ? numberFormatError(frame, text(receiver)) : Number(parsed);
-    },
-    'String.toInt(Int)': (frame, receiver, [radix]) => {
-      const parsed = parseInteger(frame, text(receiver), radix as number, 32);
-      return parsed === undefined ? numberFormatError(frame, text(receiver), radix as number) : Number(parsed);
-    },
-    'String.toIntOrNull()': (frame, receiver) => {
-      const parsed = parseInteger(frame, text(receiver), 10, 32);
-      return parsed === undefined ? undefined : new Boxed('Int', Number(parsed));
-    },
-    'String.toIntOrNull(Int)': (frame, receiver, [radix]) => {
-      const parsed = parseInteger(frame, text(receiver), radix as number, 32);
-      return parsed === undefined ? undefined : new Boxed('Int', Number(parsed));
-    },
-    'String.toLong()': (frame, receiver) =>
-      parseInteger(frame, text(receiver), 10, 64) ?? numberFormatError(frame, text(receiver)),
-    'String.toLong(Int)': (frame, receiver, [radix]) =>
-      parseInteger(frame, text(receiver), radix as number, 64) ??
-      numberFormatError(frame, text(receiver), radix as number),
-    'String.toLongOrNull(Int)': (frame, receiver, [radix]) => {
-      const parsed = parseInteger(frame, text(receiver), radix as number, 64);
-      return parsed === undefined ? undefined : new Boxed('Long', parsed);
-    },
-    'String.toShort()': (frame, receiver) => parseNarrow(frame, text(receiver), 16),
-    'String.toShortOrNull()': (frame, receiver) => {
-      const parsed = parseInteger(frame, text(receiver), 10, 16);
-      return parsed === undefined ? undefined : new Boxed('Short', Number(parsed));
-    },
-    'String.toByte()': (frame, receiver) => parseNarrow(frame, text(receiver), 8),
-    'String.toByteOrNull()': (frame, receiver) => {
-      const parsed = parseInteger(frame, text(receiver), 10, 8);
-      return parsed === undefined ? undefined : new Boxed('Byte', Number(parsed));
-    },
-    'String.toLongOrNull()': (frame, receiver) => {
-      const parsed = parseInteger(frame, text(receiver), 10, 64);
-      return parsed === undefined ? undefined : new Boxed('Long', parsed);
-    },
-    'String.toDouble()': (frame, receiver) => parseDouble(text(receiver)) ?? doubleFormatError(frame, text(receiver)),
-    'String.toDoubleOrNull()': (_frame, receiver) => {
-      const parsed = parseDouble(text(receiver));
-      return parsed === undefined ? undefined : new Boxed('Double', parsed);
-    },
-    'String.toFloat()': (frame, receiver) => {
-      const parsed = parseDouble(text(receiver));
-      return parsed === undefined ? numberFormatError(frame, text(receiver)) : Math.fround(parsed);
-    },
-    'String.toBoolean()': (_frame, receiver) => text(receiver).toLowerCase() === 'true',
-    'String.toBooleanStrict()': (frame, receiver) => {
-      if (receiver === 'true') return true;
-      if (receiver === 'false') return false;
-      return throwError(
+/** The natives of strings and characters, by signature without the package. */
+type TextNative = (frame: Frame, receiver: Value, args: Value[]) => Value;
+
+/** Case conversion, trimming, and substrings. */
+const TEXT_CASE_AND_TRIM_NATIVES: Record<string, TextNative> = {
+  'CharSequence.isBlank()': (frame, receiver) => codeUnits(sequenceText(frame, receiver)).every(isKotlinWhitespace),
+  'String.uppercase()': (frame, receiver) => result(frame, text(receiver).toUpperCase()),
+  'String.lowercase()': (frame, receiver) => result(frame, text(receiver).toLowerCase()),
+  'String.trim()': (frame, receiver) => result(frame, trimWith(text(receiver), true, true)),
+  'String.trimStart()': (frame, receiver) => result(frame, trimWith(text(receiver), true, false)),
+  'String.trimEnd()': (frame, receiver) => result(frame, trimWith(text(receiver), false, true)),
+  'String.trimIndent()': (frame, receiver) => result(frame, trimIndent(text(receiver))),
+  'String.trimMargin(String)': (frame, receiver, [prefix]) => result(frame, trimMargin(text(receiver), text(prefix))),
+  'String.substring(Int)': (frame, receiver, [start]) =>
+    substring(frame, text(receiver), start as number, text(receiver).length),
+  'String.substring(Int, Int)': (frame, receiver, [start, end]) =>
+    substring(frame, text(receiver), start as number, end as number),
+  'String.startsWith(String, Boolean)': (_frame, receiver, [prefix, ignoreCase]) =>
+    ignoreCase
+      ? text(receiver).toLowerCase().startsWith(text(prefix).toLowerCase())
+      : text(receiver).startsWith(text(prefix)),
+  'String.endsWith(String, Boolean)': (_frame, receiver, [suffix, ignoreCase]) =>
+    ignoreCase
+      ? text(receiver).toLowerCase().endsWith(text(suffix).toLowerCase())
+      : text(receiver).endsWith(text(suffix)),
+};
+
+/** Searching, replacing, splitting, padding, and comparing. */
+const TEXT_SEARCH_NATIVES: Record<string, TextNative> = {
+  'CharSequence.contains(CharSequence)': (frame, receiver, [other]) =>
+    sequenceText(frame, receiver).includes(sequenceText(frame, other)),
+  'CharSequence.indexOf(String, Int, Boolean)': (frame, receiver, [other, start, ignoreCase]) =>
+    search(sequenceText(frame, receiver), text(other), ignoreCase === true).indexOf(Math.max(0, start as number)),
+  'CharSequence.indexOf(Char, Int, Boolean)': (frame, receiver, [char, start, ignoreCase]) =>
+    search(sequenceText(frame, receiver), charToString(char as number), ignoreCase === true).indexOf(
+      Math.max(0, start as number)
+    ),
+  'CharSequence.lastIndexOf(String, Int, Boolean)': (frame, receiver, [other, start, ignoreCase]) =>
+    search(sequenceText(frame, receiver), text(other), ignoreCase === true).lastIndexOf(start as number),
+  'CharSequence.lastIndexOf(Char, Int, Boolean)': (frame, receiver, [char, start, ignoreCase]) =>
+    search(sequenceText(frame, receiver), charToString(char as number), ignoreCase === true).lastIndexOf(
+      start as number
+    ),
+  'String.replace(String, String, Boolean)': (frame, receiver, [oldValue, newValue, ignoreCase]) =>
+    result(frame, replaceAll(text(receiver), text(oldValue), text(newValue), ignoreCase === true)),
+  'String.replace(Char, Char)': (frame, receiver, [oldChar, newChar]) =>
+    result(frame, text(receiver).replaceAll(charToString(oldChar as number), charToString(newChar as number))),
+  'String.replaceFirst(String, String)': (frame, receiver, [oldValue, newValue]) =>
+    result(
+      frame,
+      text(receiver).replace(text(oldValue), () => text(newValue))
+    ),
+  'String.repeat(Int)': (frame, receiver, [count]) => {
+    const times = count as number;
+    if (times < 0)
+      throwError(frame, 'java.lang.IllegalArgumentException', `Count 'n' must be non-negative, but was ${times}.`);
+    frame.runtime.allocateString(frame, text(receiver).length * times);
+    return text(receiver).repeat(times);
+  },
+  'CharSequence.split(vararg String, Boolean, Int)': (frame, receiver, [delimiters, ignoreCase, limit]) =>
+    splitText(frame, sequenceText(frame, receiver), ((delimiters as KObject).items as Value[]).map(text), {
+      ignoreCase: ignoreCase === true,
+      limit: limit as number,
+    }),
+  'CharSequence.split(vararg Char, Boolean, Int)': (frame, receiver, [delimiters, ignoreCase, limit]) =>
+    splitText(
+      frame,
+      sequenceText(frame, receiver),
+      ((delimiters as KObject).items as Value[]).map((char) => charToString(char as number)),
+      { ignoreCase: ignoreCase === true, limit: limit as number }
+    ),
+  'CharSequence.lines()': (frame, receiver) =>
+    newList(frame, 'ArrayList', sequenceText(frame, receiver).split(/\r\n|\n|\r/)),
+  'String.reversed()': (frame, receiver) => result(frame, reverseKeepingPairs(text(receiver))),
+  'String.toCharArray()': (frame, receiver) => {
+    const array = new KObject(libraryClass('kotlin.CharArray'), 0);
+    // oxlint-disable-next-line unicorn/prefer-code-point -- Kotlin chars are UTF-16 code units.
+    array.items = Array.from({ length: text(receiver).length }, (_, index) => text(receiver).charCodeAt(index));
+    frame.runtime.allocate(frame, array.items.length);
+    return array;
+  },
+  'String.padStart(Int, Char)': (frame, receiver, [length, char]) => {
+    if ((length as number) < 0)
+      throwError(frame, 'java.lang.IllegalArgumentException', `Desired length ${length as number} is less than zero.`);
+    // The padded text is charged before it is built, as its length may be far beyond the limit.
+    frame.runtime.allocateString(frame, length as number);
+    return text(receiver).padStart(length as number, charToString(char as number));
+  },
+  'String.padEnd(Int, Char)': (frame, receiver, [length, char]) => {
+    if ((length as number) < 0)
+      throwError(frame, 'java.lang.IllegalArgumentException', `Desired length ${length as number} is less than zero.`);
+    // The padded text is charged before it is built, as its length may be far beyond the limit.
+    frame.runtime.allocateString(frame, length as number);
+    return text(receiver).padEnd(length as number, charToString(char as number));
+  },
+  'String.equals(String?, Boolean)': (_frame, receiver, [other, ignoreCase]) => {
+    if (other === undefined) return false;
+    return ignoreCase ? text(receiver).toLowerCase() === text(other).toLowerCase() : receiver === other;
+  },
+  'String.compareTo(String, Boolean)': (_frame, receiver, [other, ignoreCase]) =>
+    ignoreCase
+      ? compareStrings(text(receiver).toLowerCase(), text(other).toLowerCase())
+      : compareStrings(text(receiver), text(other)),
+  'String.format(vararg Any?)': (frame, receiver, [args]) =>
+    result(frame, formatText(frame, text(receiver), (args as KObject).items as Value[])),
+};
+
+/** Removing and extracting the parts around a delimiter. */
+const TEXT_EXTRACTION_NATIVES: Record<string, TextNative> = {
+  'String.removePrefix(CharSequence)': (frame, receiver, [prefix]) => {
+    const value = text(receiver);
+    const start = sequenceText(frame, prefix);
+    return value.startsWith(start) ? value.slice(start.length) : value;
+  },
+  'String.removeSuffix(CharSequence)': (frame, receiver, [suffix]) => {
+    const value = text(receiver);
+    const end = sequenceText(frame, suffix);
+    return end.length > 0 && value.endsWith(end) ? value.slice(0, -end.length) : value;
+  },
+  'String.removeSurrounding(CharSequence)': (frame, receiver, [delimiter]) => {
+    const value = text(receiver);
+    const around = sequenceText(frame, delimiter);
+    return value.length >= 2 * around.length && value.startsWith(around) && value.endsWith(around)
+      ? value.slice(around.length, value.length - around.length)
+      : value;
+  },
+  'String.substringBefore(String, String)': (_frame, receiver, [delimiter, missing]) => {
+    const index = text(receiver).indexOf(text(delimiter));
+    return index === -1 ? missing : text(receiver).slice(0, index);
+  },
+  'String.substringAfter(String, String)': (_frame, receiver, [delimiter, missing]) => {
+    const index = text(receiver).indexOf(text(delimiter));
+    return index === -1 ? missing : text(receiver).slice(index + text(delimiter).length);
+  },
+  'String.substringBeforeLast(String, String)': (_frame, receiver, [delimiter, missing]) => {
+    const index = text(receiver).lastIndexOf(text(delimiter));
+    return index === -1 ? missing : text(receiver).slice(0, index);
+  },
+  'String.substringAfterLast(String, String)': (_frame, receiver, [delimiter, missing]) => {
+    const index = text(receiver).lastIndexOf(text(delimiter));
+    return index === -1 ? missing : text(receiver).slice(index + text(delimiter).length);
+  },
+};
+
+/** Parsing numbers and booleans, worded as Java and Kotlin word their errors. */
+const TEXT_PARSING_NATIVES: Record<string, TextNative> = {
+  'String.toInt()': (frame, receiver) => {
+    const parsed = parseInteger(frame, text(receiver), 10, 32);
+    return parsed === undefined ? numberFormatError(frame, text(receiver)) : Number(parsed);
+  },
+  'String.toInt(Int)': (frame, receiver, [radix]) => {
+    const parsed = parseInteger(frame, text(receiver), radix as number, 32);
+    return parsed === undefined ? numberFormatError(frame, text(receiver), radix as number) : Number(parsed);
+  },
+  'String.toIntOrNull()': (frame, receiver) => {
+    const parsed = parseInteger(frame, text(receiver), 10, 32);
+    return parsed === undefined ? undefined : new Boxed('Int', Number(parsed));
+  },
+  'String.toIntOrNull(Int)': (frame, receiver, [radix]) => {
+    const parsed = parseInteger(frame, text(receiver), radix as number, 32);
+    return parsed === undefined ? undefined : new Boxed('Int', Number(parsed));
+  },
+  'String.toLong()': (frame, receiver) =>
+    parseInteger(frame, text(receiver), 10, 64) ?? numberFormatError(frame, text(receiver)),
+  'String.toLong(Int)': (frame, receiver, [radix]) =>
+    parseInteger(frame, text(receiver), radix as number, 64) ??
+    numberFormatError(frame, text(receiver), radix as number),
+  'String.toLongOrNull(Int)': (frame, receiver, [radix]) => {
+    const parsed = parseInteger(frame, text(receiver), radix as number, 64);
+    return parsed === undefined ? undefined : new Boxed('Long', parsed);
+  },
+  'String.toShort()': (frame, receiver) => parseNarrow(frame, text(receiver), 16),
+  'String.toShortOrNull()': (frame, receiver) => {
+    const parsed = parseInteger(frame, text(receiver), 10, 16);
+    return parsed === undefined ? undefined : new Boxed('Short', Number(parsed));
+  },
+  'String.toByte()': (frame, receiver) => parseNarrow(frame, text(receiver), 8),
+  'String.toByteOrNull()': (frame, receiver) => {
+    const parsed = parseInteger(frame, text(receiver), 10, 8);
+    return parsed === undefined ? undefined : new Boxed('Byte', Number(parsed));
+  },
+  'String.toLongOrNull()': (frame, receiver) => {
+    const parsed = parseInteger(frame, text(receiver), 10, 64);
+    return parsed === undefined ? undefined : new Boxed('Long', parsed);
+  },
+  'String.toDouble()': (frame, receiver) => parseDouble(text(receiver)) ?? doubleFormatError(frame, text(receiver)),
+  'String.toDoubleOrNull()': (_frame, receiver) => {
+    const parsed = parseDouble(text(receiver));
+    return parsed === undefined ? undefined : new Boxed('Double', parsed);
+  },
+  'String.toFloat()': (frame, receiver) => {
+    const parsed = parseDouble(text(receiver));
+    return parsed === undefined ? numberFormatError(frame, text(receiver)) : Math.fround(parsed);
+  },
+  'String.toBoolean()': (_frame, receiver) => text(receiver).toLowerCase() === 'true',
+  'String.toBooleanStrict()': (frame, receiver) => {
+    if (receiver === 'true') return true;
+    if (receiver === 'false') return false;
+    return throwError(
+      frame,
+      'java.lang.IllegalArgumentException',
+      `The string doesn't represent a boolean value: ${text(receiver)}`
+    );
+  },
+};
+
+/** Characters, and the conversions between characters, numbers, and text. */
+const CHAR_NATIVES: Record<string, TextNative> = {
+  'String.capitalize()': (_frame, receiver) => text(receiver).charAt(0).toUpperCase() + text(receiver).slice(1),
+  'String.decapitalize()': (_frame, receiver) => text(receiver).charAt(0).toLowerCase() + text(receiver).slice(1),
+  'Char.isDigit()': (_frame, receiver) => /\p{Nd}/u.test(charToString(receiver as number)),
+  'Char.isLetter()': (_frame, receiver) => /\p{L}/u.test(charToString(receiver as number)),
+  'Char.isLetterOrDigit()': (_frame, receiver) => /[\p{L}\p{Nd}]/u.test(charToString(receiver as number)),
+  'Char.isWhitespace()': (_frame, receiver) => isKotlinWhitespace(receiver as number),
+  'Char.isUpperCase()': (_frame, receiver) => /\p{Lu}/u.test(charToString(receiver as number)),
+  'Char.isLowerCase()': (_frame, receiver) => /\p{Ll}/u.test(charToString(receiver as number)),
+  'Char.uppercaseChar()': (_frame, receiver) => upperChar(receiver as number),
+  'Char.lowercaseChar()': (_frame, receiver) => lowerChar(receiver as number),
+  'Char.toUpperCase()': (_frame, receiver) => upperChar(receiver as number),
+  'Char.toLowerCase()': (_frame, receiver) => lowerChar(receiver as number),
+  'Char.uppercase()': (_frame, receiver) => charToString(receiver as number).toUpperCase(),
+  'Char.lowercase()': (_frame, receiver) => charToString(receiver as number).toLowerCase(),
+  'Char.titlecase()': (_frame, receiver) => {
+    const char = charToString(receiver as number);
+    return TITLECASE_DIGRAPHS.get(char) ?? char.toUpperCase();
+  },
+  'Char.digitToInt()': (frame, receiver) => {
+    const digit = digitOf(receiver as number);
+    return (
+      digit ??
+      throwError(
         frame,
         'java.lang.IllegalArgumentException',
-        `The string doesn't represent a boolean value: ${text(receiver)}`
-      );
-    },
-    'String.capitalize()': (_frame, receiver) => text(receiver).charAt(0).toUpperCase() + text(receiver).slice(1),
-    'String.decapitalize()': (_frame, receiver) => text(receiver).charAt(0).toLowerCase() + text(receiver).slice(1),
-    'Char.isDigit()': (_frame, receiver) => /\p{Nd}/u.test(charToString(receiver as number)),
-    'Char.isLetter()': (_frame, receiver) => /\p{L}/u.test(charToString(receiver as number)),
-    'Char.isLetterOrDigit()': (_frame, receiver) => /[\p{L}\p{Nd}]/u.test(charToString(receiver as number)),
-    'Char.isWhitespace()': (_frame, receiver) => isKotlinWhitespace(receiver as number),
-    'Char.isUpperCase()': (_frame, receiver) => /\p{Lu}/u.test(charToString(receiver as number)),
-    'Char.isLowerCase()': (_frame, receiver) => /\p{Ll}/u.test(charToString(receiver as number)),
-    'Char.uppercaseChar()': (_frame, receiver) => upperChar(receiver as number),
-    'Char.lowercaseChar()': (_frame, receiver) => lowerChar(receiver as number),
-    'Char.toUpperCase()': (_frame, receiver) => upperChar(receiver as number),
-    'Char.toLowerCase()': (_frame, receiver) => lowerChar(receiver as number),
-    'Char.uppercase()': (_frame, receiver) => charToString(receiver as number).toUpperCase(),
-    'Char.lowercase()': (_frame, receiver) => charToString(receiver as number).toLowerCase(),
-    'Char.titlecase()': (_frame, receiver) => {
-      const char = charToString(receiver as number);
-      return TITLECASE_DIGRAPHS.get(char) ?? char.toUpperCase();
-    },
-    'Char.digitToInt()': (frame, receiver) => {
-      const digit = digitOf(receiver as number);
-      return (
-        digit ??
-        throwError(
-          frame,
-          'java.lang.IllegalArgumentException',
-          `Char ${charToString(receiver as number)} is not a decimal digit`
-        )
-      );
-    },
-    'Char.digitToIntOrNull()': (_frame, receiver) => {
-      const digit = digitOf(receiver as number);
-      return digit === undefined ? undefined : new Boxed('Int', digit);
-    },
-    'Char.isDefined()': () => true,
-    'Char.plus(String)': (frame, receiver, [other]) => result(frame, charToString(receiver as number) + text(other)),
-    'Int.toString(Int)': (frame, receiver, [radix]) =>
-      result(frame, (receiver as number).toString(checkRadix(frame, radix as number))),
-    'Long.toString(Int)': (frame, receiver, [radix]) =>
-      result(frame, (receiver as bigint).toString(checkRadix(frame, radix as number))),
-    'Char(Int)': (frame, _receiver, [code]) => {
-      const value = code as number;
-      if (value < 0 || value > 0xff_ff)
-        throwError(frame, 'java.lang.IllegalArgumentException', `Invalid Char code: ${value}`);
-      return value;
-    },
-  };
-  for (const [signature, native] of Object.entries(natives)) defineNative(`${TEXT}.${signature}`, native);
+        `Char ${charToString(receiver as number)} is not a decimal digit`
+      )
+    );
+  },
+  'Char.digitToIntOrNull()': (_frame, receiver) => {
+    const digit = digitOf(receiver as number);
+    return digit === undefined ? undefined : new Boxed('Int', digit);
+  },
+  'Char.isDefined()': () => true,
+  'Char.plus(String)': (frame, receiver, [other]) => result(frame, charToString(receiver as number) + text(other)),
+  'Int.toString(Int)': (frame, receiver, [radix]) =>
+    result(frame, (receiver as number).toString(checkRadix(frame, radix as number))),
+  'Long.toString(Int)': (frame, receiver, [radix]) =>
+    result(frame, (receiver as bigint).toString(checkRadix(frame, radix as number))),
+  'Char(Int)': (frame, _receiver, [code]) => {
+    const value = code as number;
+    if (value < 0 || value > 0xff_ff)
+      throwError(frame, 'java.lang.IllegalArgumentException', `Invalid Char code: ${value}`);
+    return value;
+  },
+};
+
+function defineStrings(): void {
+  for (const natives of [
+    TEXT_CASE_AND_TRIM_NATIVES,
+    TEXT_SEARCH_NATIVES,
+    TEXT_EXTRACTION_NATIVES,
+    TEXT_PARSING_NATIVES,
+    CHAR_NATIVES,
+  ]) {
+    for (const [signature, native] of Object.entries(natives)) defineNative(`${TEXT}.${signature}`, native);
+  }
 }
 
 function checkRadix(frame: Frame, radix: number): number {
@@ -559,6 +580,14 @@ function appendText(frame: Frame, receiver: Value, added: string): Value {
 }
 
 function defineBuilder(): void {
+  defineBuilderReading();
+  defineBuilderAppending();
+  defineBuilderEditing();
+}
+
+/** StringBuilder's constructors and what reads it. */
+// code-gauge-allow functionNcss 37 -- registers the natives of one class together, in the order the prelude declares them.
+function defineBuilderReading(): void {
   defineNative(`${BUILDER}.<init>()`, (_frame, instance) => {
     builder(instance).builder = '';
     return UNIT;
@@ -587,6 +616,33 @@ function defineBuilder(): void {
   defineNative(`${BUILDER}.subSequence(Int, Int)`, (frame, receiver, [start, end]) =>
     substring(frame, builder(receiver).builder as string, start as number, end as number)
   );
+  defineNative(`${BUILDER}.indexOf(String)`, (_frame, receiver, [value]) =>
+    (builder(receiver).builder as string).indexOf(text(value))
+  );
+  defineNative(`${BUILDER}.lastIndexOf(String)`, (_frame, receiver, [value]) =>
+    (builder(receiver).builder as string).lastIndexOf(text(value))
+  );
+  defineNative(`${BUILDER}.substring(Int)`, (frame, receiver, [start]) => {
+    const current = builder(receiver).builder as string;
+    return substring(frame, current, start as number, current.length);
+  });
+  defineNative(`${BUILDER}.substring(Int, Int)`, (frame, receiver, [start, end]) =>
+    substring(frame, builder(receiver).builder as string, start as number, end as number)
+  );
+  defineNative(`${BUILDER}.replace(Int, Int, String)`, (frame, receiver, [start, end, value]) => {
+    const current = builder(receiver).builder as string;
+    const from = start as number;
+    const to = Math.min(end as number, current.length);
+    if (from < 0 || from > current.length || from > to) rangeError(frame, from, to, current.length);
+    return setBuilder(frame, receiver, current.slice(0, from) + text(value) + current.slice(to));
+  });
+  defineNative(`${BUILDER}.compareTo(StringBuilder)`, (_frame, receiver, [other]) =>
+    compareStrings(builder(receiver).builder as string, builder(other).builder as string)
+  );
+  defineNative(`${BUILDER}.toString()`, (frame, receiver) => result(frame, builder(receiver).builder as string));
+}
+
+function defineBuilderAppending(): void {
   defineNative(`${BUILDER}.append(Any?)`, (frame, receiver, [value]) =>
     appendText(frame, receiver, stringOf(frame, value))
   );
@@ -614,6 +670,11 @@ function defineBuilder(): void {
   defineNative(`${BUILDER}.append(CharArray)`, (frame, receiver, [value]) =>
     appendText(frame, receiver, ((value as KObject).items as number[]).map(charToString).join(''))
   );
+}
+
+/** What changes a StringBuilder in place. */
+// code-gauge-allow functionNcss 34 -- registers the natives of one class together, in the order the prelude declares them.
+function defineBuilderEditing(): void {
   defineNative(`${BUILDER}.insert(Int, Any?)`, (frame, receiver, [index, value]) => {
     const current = builder(receiver).builder as string;
     const position = index as number;
@@ -655,30 +716,6 @@ function defineBuilder(): void {
     );
     return UNIT;
   });
-  defineNative(`${BUILDER}.indexOf(String)`, (_frame, receiver, [value]) =>
-    (builder(receiver).builder as string).indexOf(text(value))
-  );
-  defineNative(`${BUILDER}.lastIndexOf(String)`, (_frame, receiver, [value]) =>
-    (builder(receiver).builder as string).lastIndexOf(text(value))
-  );
-  defineNative(`${BUILDER}.substring(Int)`, (frame, receiver, [start]) => {
-    const current = builder(receiver).builder as string;
-    return substring(frame, current, start as number, current.length);
-  });
-  defineNative(`${BUILDER}.substring(Int, Int)`, (frame, receiver, [start, end]) =>
-    substring(frame, builder(receiver).builder as string, start as number, end as number)
-  );
-  defineNative(`${BUILDER}.replace(Int, Int, String)`, (frame, receiver, [start, end, value]) => {
-    const current = builder(receiver).builder as string;
-    const from = start as number;
-    const to = Math.min(end as number, current.length);
-    if (from < 0 || from > current.length || from > to) rangeError(frame, from, to, current.length);
-    return setBuilder(frame, receiver, current.slice(0, from) + text(value) + current.slice(to));
-  });
-  defineNative(`${BUILDER}.compareTo(StringBuilder)`, (_frame, receiver, [other]) =>
-    compareStrings(builder(receiver).builder as string, builder(other).builder as string)
-  );
-  defineNative(`${BUILDER}.toString()`, (frame, receiver) => result(frame, builder(receiver).builder as string));
 }
 
 /** The check of `StringBuilder`'s indexes in the JDK, worded as its `Preconditions.checkIndex` words it. */

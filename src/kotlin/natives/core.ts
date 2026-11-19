@@ -21,8 +21,6 @@ import type { PropertySymbol } from '../symbols';
 import { Boxed, KObject, type PrimitiveKind, UNIT, type Value } from '../values';
 import { defineNative, defineNativeProperty, libraryClass, newItems, throwError } from './registry';
 
-const INT_KINDS: PrimitiveKind[] = ['Byte', 'Short', 'Int'];
-
 const SIGNED_NUMBER_KIND_NAMES = new Set<PrimitiveKind>(SIGNED_NUMBER_KINDS);
 
 /** Converts a number of one kind to another, as `toInt()`, `toLong()`, and their kin do. */
@@ -200,44 +198,49 @@ function definePrimitives(): void {
     });
   }
   defineNativeProperty('kotlin.Char.code', (_frame, receiver) => receiver as number);
-  for (const kind of ['Int', 'Long', 'UInt'] as const) {
-    const isLong = kind === 'Long';
-    const prefix = `kotlin.${kind}`;
-    const self = kind;
-    const wrap = (value: bigint | number): Value =>
+  for (const kind of ['Int', 'Long', 'UInt'] as const) defineBits(kind);
+  defineRanges();
+  defineBooleans();
+}
+
+/** The bit operations of Int, Long, and UInt, which wrap their results to the type's width. */
+// code-gauge-allow functionCognitiveComplexity 25 -- each operator chooses between the widths of Int, Long, and UInt, which read best side by side.
+function defineBits(kind: 'Int' | 'Long' | 'UInt'): void {
+  const isLong = kind === 'Long';
+  const prefix = `kotlin.${kind}`;
+  const self = kind;
+  const wrap = (value: bigint | number): Value =>
+    isLong ? BigInt.asIntN(64, value as bigint) : kind === 'UInt' ? (value as number) >>> 0 : toInt32(value as number);
+  defineNative(`${prefix}.and(${self})`, (_frame, a, [b]) =>
+    wrap(isLong ? (a as bigint) & (b as bigint) : (a as number) & (b as number))
+  );
+  defineNative(`${prefix}.or(${self})`, (_frame, a, [b]) =>
+    wrap(isLong ? (a as bigint) | (b as bigint) : (a as number) | (b as number))
+  );
+  defineNative(`${prefix}.xor(${self})`, (_frame, a, [b]) =>
+    wrap(isLong ? (a as bigint) ^ (b as bigint) : (a as number) ^ (b as number))
+  );
+  defineNative(`${prefix}.shl(Int)`, (_frame, a, [b]) =>
+    wrap(isLong ? (a as bigint) << BigInt((b as number) & 63) : (a as number) << ((b as number) & 31))
+  );
+  defineNative(`${prefix}.shr(Int)`, (_frame, a, [b]) =>
+    isLong
+      ? (a as bigint) >> BigInt((b as number) & 63)
+      : kind === 'UInt'
+        ? (a as number) >>> ((b as number) & 31)
+        : (a as number) >> ((b as number) & 31)
+  );
+  if (kind !== 'UInt') {
+    defineNative(`${prefix}.ushr(Int)`, (_frame, a, [b]) =>
       isLong
-        ? BigInt.asIntN(64, value as bigint)
-        : kind === 'UInt'
-          ? (value as number) >>> 0
-          : toInt32(value as number);
-    defineNative(`${prefix}.and(${self})`, (_frame, a, [b]) =>
-      wrap(isLong ? (a as bigint) & (b as bigint) : (a as number) & (b as number))
+        ? BigInt.asIntN(64, BigInt.asUintN(64, a as bigint) >> BigInt((b as number) & 63))
+        : toInt32((a as number) >>> ((b as number) & 31))
     );
-    defineNative(`${prefix}.or(${self})`, (_frame, a, [b]) =>
-      wrap(isLong ? (a as bigint) | (b as bigint) : (a as number) | (b as number))
-    );
-    defineNative(`${prefix}.xor(${self})`, (_frame, a, [b]) =>
-      wrap(isLong ? (a as bigint) ^ (b as bigint) : (a as number) ^ (b as number))
-    );
-    defineNative(`${prefix}.shl(Int)`, (_frame, a, [b]) =>
-      wrap(isLong ? (a as bigint) << BigInt((b as number) & 63) : (a as number) << ((b as number) & 31))
-    );
-    defineNative(`${prefix}.shr(Int)`, (_frame, a, [b]) =>
-      isLong
-        ? (a as bigint) >> BigInt((b as number) & 63)
-        : kind === 'UInt'
-          ? (a as number) >>> ((b as number) & 31)
-          : (a as number) >> ((b as number) & 31)
-    );
-    if (kind !== 'UInt') {
-      defineNative(`${prefix}.ushr(Int)`, (_frame, a, [b]) =>
-        isLong
-          ? BigInt.asIntN(64, BigInt.asUintN(64, a as bigint) >> BigInt((b as number) & 63))
-          : toInt32((a as number) >>> ((b as number) & 31))
-      );
-      defineNative(`${prefix}.inv()`, (_frame, a) => (isLong ? BigInt.asIntN(64, ~(a as bigint)) : ~(a as number)));
-    }
+    defineNative(`${prefix}.inv()`, (_frame, a) => (isLong ? BigInt.asIntN(64, ~(a as bigint)) : ~(a as number)));
   }
+}
+
+function defineRanges(): void {
   defineNative('kotlin.Int.rangeTo(Int)', (_frame, a, [b]) => range('IntRange', a, b));
   defineNative('kotlin.Int.rangeTo(Long)', (_frame, a, [b]) => range('LongRange', BigInt(a as number), b));
   defineNative('kotlin.Int.rangeUntil(Int)', (_frame, a, [b]) =>
@@ -252,6 +255,9 @@ function definePrimitives(): void {
   defineNative('kotlin.Char.rangeUntil(Char)', (_frame, a, [b]) =>
     (b as number) <= 0 ? range('CharRange', 1, 0) : range('CharRange', a, (b as number) - 1)
   );
+}
+
+function defineBooleans(): void {
   defineNative('kotlin.Boolean.and(Boolean)', (_frame, a, [b]) => (a as boolean) && (b as boolean));
   defineNative('kotlin.Boolean.or(Boolean)', (_frame, a, [b]) => (a as boolean) || (b as boolean));
   defineNative('kotlin.Boolean.xor(Boolean)', (_frame, a, [b]) => a !== b);
@@ -259,7 +265,6 @@ function definePrimitives(): void {
   defineNative('kotlin.Boolean.equals(Any?)', (_frame, a, [b]) => a === b);
   defineNative('kotlin.Boolean.hashCode()', (_frame, a) => (a ? 1231 : 1237));
   defineNative('kotlin.Boolean.toString()', (_frame, a) => (a ? 'true' : 'false'));
-  void INT_KINDS;
 }
 
 // code-gauge-allow functionNcss 32 -- registers the natives of one class together, in the order the prelude declares them.
