@@ -56,9 +56,6 @@ abstract final class Invocation {
 /** The VM's class of String.codeUnits, which the list of code units shows as its runtimeType. */
 abstract final class CodeUnits implements List<int> {}
 
-/** The VM's class of List.cast, which the cast list shows as its runtimeType. */
-abstract final class CastList<S, T> implements List<T> {}
-
 final class _InvocationMirror implements Invocation {
   final String _name;
   final int _kind;

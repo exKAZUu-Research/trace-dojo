@@ -109,3 +109,11 @@ export function castTo(runtime: Runtime, value: Value, type: DartType): void {
     `type '${vmTypeString(runtime.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(type)}' in type cast`
   );
 }
+
+/** An implicit downcast of a dynamic value, whose error, unlike `as`, names no cast. */
+export function implicitCast(runtime: Runtime, value: Value, type: DartType): void {
+  if (type.kind === 'dynamic' || runtime.links.isValueOf(runtime, value, type)) return;
+  runtime.throwTypeError(
+    `type '${vmTypeString(runtime.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(type)}'`
+  );
+}

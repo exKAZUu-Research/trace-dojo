@@ -40,6 +40,15 @@ defineConstructor('RegExp.new', (runtime, _instance, args) => {
   const caseSensitive = named(args.named, 'caseSensitive', true) !== false;
   const unicode = named(args.named, 'unicode', false) === true;
   const dotAll = named(args.named, 'dotAll', false) === true;
+  // The VM caches regular expressions, so equal sources and flags give the identical object.
+  const key = `${multiLine ? 'm' : ''}${caseSensitive ? '' : 'i'}${unicode ? 'u' : ''}${dotAll ? 's' : ''}/${source}`;
+  let cache = regExpCaches.get(runtime);
+  if (!cache) {
+    cache = new Map();
+    regExpCaches.set(runtime, cache);
+  }
+  const cached = cache.get(key);
+  if (cached) return cached;
   let regex: RegExp;
   try {
     regex = new RegExp(
@@ -53,8 +62,11 @@ defineConstructor('RegExp.new', (runtime, _instance, args) => {
   }
   const object = new DartObject(runtime.links.classNamed('_RegExp'), [], []);
   object.native = { source, multiLine, caseSensitive, unicode, dotAll, regex, values: () => [] };
+  cache.set(key, object);
   return object;
 });
+
+const regExpCaches = new WeakMap<Runtime, Map<string, DartObject>>();
 
 function execAt(state: RegExpState, input: string, start: number, sticky: boolean): MatchState | undefined {
   const regex = new RegExp(state.regex.source, state.regex.flags.replace('g', '') + (sticky ? 'y' : 'g'));

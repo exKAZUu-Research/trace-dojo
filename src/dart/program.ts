@@ -121,14 +121,14 @@ export function libraries(): Libraries {
           'CastIterator',
           'LateError',
           'CodeUnits',
-          'CastList',
           'UnmodifiableMapView',
           'UnmodifiableSetView',
         ]) {
           core.hiddenNames.add(name);
         }
         // The VM's view of List.asMap is internal to the SDK, not part of dart:collection's API.
-        (envs.get('dart:collection') as LibraryEnv).hiddenNames.add('ListMapView');
+        for (const name of ['ListMapView', 'CastList'])
+          (envs.get('dart:collection') as LibraryEnv).hiddenNames.add(name);
         for (const name of ['LinkedHashMap', 'LinkedHashSet']) {
           core.hiddenNames.add(name);
           (envs.get('dart:collection') as LibraryEnv).reexports.set(name, core.declarations.get(name) as never);

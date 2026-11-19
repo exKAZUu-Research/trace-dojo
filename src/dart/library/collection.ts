@@ -588,6 +588,54 @@ abstract mixin class ListMixin<E> implements List<E> {
 
 bool _isEfficientLength(Iterable<Object?> iterable) => iterable is List || iterable is Set || iterable is ListIterable;
 
+/** The view List.cast returns, as the SDK's CastList (internal/cast.dart). */
+class CastList<S, T> extends ListBase<T> {
+  final List<S> _source;
+  CastList(this._source);
+  List<R> cast<R>() => CastList<S, R>(_source);
+  int get length => _source.length;
+  bool get isEmpty => _source.isEmpty;
+  bool get isNotEmpty => _source.isNotEmpty;
+  bool contains(Object? other) => _source.contains(other);
+  T operator [](int index) => _source[index] as T;
+  void operator []=(int index, T value) {
+    _source[index] = value as S;
+  }
+  void set length(int length) {
+    _source.length = length;
+  }
+  void add(T value) {
+    _source.add(value as S);
+  }
+  void addAll(Iterable<T> values) {
+    for (var value in values) _source.add(value as S);
+  }
+  void sort([int Function(T v1, T v2)? compare]) {
+    _source.sort(compare == null ? null : (S v1, S v2) => compare(v1 as T, v2 as T));
+  }
+  void shuffle([Random? random]) {
+    _source.shuffle(random);
+  }
+  void insert(int index, T element) {
+    _source.insert(index, element as S);
+  }
+  bool remove(Object? value) => _source.remove(value);
+  T removeAt(int index) => _source.removeAt(index) as T;
+  T removeLast() => _source.removeLast() as T;
+  void removeWhere(bool Function(T element) test) {
+    _source.removeWhere((S element) => test(element as T));
+  }
+  void retainWhere(bool Function(T element) test) {
+    _source.retainWhere((S element) => test(element as T));
+  }
+  void removeRange(int start, int end) {
+    _source.removeRange(start, end);
+  }
+  void fillRange(int start, int end, [T? fillValue]) {
+    _source.fillRange(start, end, fillValue as S);
+  }
+}
+
 abstract class ListBase<E> with ListMixin<E> {
   static String listToString(List list) => Iterable.iterableToFullString(list, '[', ']');
 }
@@ -1315,7 +1363,8 @@ class _HashSetIterator<E> implements Iterator<E> {
 
 // Sorted maps and sets
 
-int _defaultCompare(Object? a, Object? b) => Comparable.compare(a as Comparable, b as Comparable);
+// As the SDK's _dynamicCompare, a key that is not Comparable fails the implicit cast of the parameter.
+int _defaultCompare(dynamic a, dynamic b) => Comparable.compare(a, b);
 
 class SplayTreeMap<K, V> extends MapBase<K, V> {
   final List<K> _keys = <K>[];
@@ -1344,6 +1393,8 @@ class SplayTreeMap<K, V> extends MapBase<K, V> {
   int _find(Object? key) {
     int low = 0;
     int high = _keys.length - 1;
+    // The SDK compares a key with itself on an empty tree, which checks that the comparator accepts it.
+    if (_keys.isEmpty) _compare(key as dynamic, key as dynamic);
     K target = key as K;
     while (low <= high) {
       int middle = (low + high) ~/ 2;
@@ -1433,6 +1484,7 @@ class SplayTreeSet<E> extends SetBase<E> {
   int _find(Object? key) {
     int low = 0;
     int high = _elements.length - 1;
+    if (_elements.isEmpty) _compare(key as dynamic, key as dynamic);
     E target = key as E;
     while (low <= high) {
       int middle = (low + high) ~/ 2;

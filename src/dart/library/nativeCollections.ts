@@ -11,6 +11,7 @@ import {
   define,
   defineConstructor,
   elementTypeOf,
+  implicitCast,
   index,
   intArg,
   iterableValues,
@@ -101,7 +102,8 @@ defineConstructor(
 defineConstructor('List.from', (runtime, _instance, args, typeArgs) => {
   const elementType = typeArgs[0] ?? DYNAMIC;
   const values = iterableValues(runtime, args.positional[0]);
-  for (const value of values) checkElement(runtime, value, elementType, 'element');
+  // The SDK's List.from adds each element of a dynamic iteration, an implicit cast.
+  for (const value of values) implicitCast(runtime, value, elementType);
   runtime.allocate(values.length + 1);
   return new DartList(coreTypes.list, elementType, values, named(args.named, 'growable', true) !== false);
 });
@@ -487,8 +489,14 @@ define('List.lastIndexWhere', (runtime, receiver, [test, start]) => {
 define('List.sort', (runtime, receiver, [compare]) => {
   const target = list(receiver);
   checkModifiable(runtime, target);
+  // Without a comparator, the SDK compares as `Comparable.compare(a as Comparable, b as Comparable)`.
+  const comparable = interfaceType(runtime.links.classNamed('Comparable'), [DYNAMIC]);
   const comparator = (a: Value, b: Value): number => {
     runtime.spend();
+    if (compare === undefined) {
+      castTo(runtime, a, comparable);
+      castTo(runtime, b, comparable);
+    }
     const result =
       compare === undefined
         ? runtime.invoke(a, 'compareTo', { positional: [b], named: undefined }, [], undefined)
@@ -518,11 +526,12 @@ define('List.asMap', (runtime, receiver) =>
   runtime.links.construct(runtime, 'ListMapView', '', [receiver], undefined, [elementTypeOf(list(receiver))])
 );
 define('List.cast', (runtime, receiver, _args, _named, typeArgs) => {
+  // As the SDK's List.castFrom, a view of the list that casts what it reads and writes.
   const target = list(receiver);
-  const element = typeArgs[0] ?? DYNAMIC;
-  const cast = new DartList(coreTypes.list, element, target.elements, target.growable, target.unmodifiable);
-  cast.vmType = interfaceType(runtime.links.classNamed('CastList'), [elementTypeOf(target), element]);
-  return cast;
+  return runtime.links.construct(runtime, 'CastList', '', [target], undefined, [
+    elementTypeOf(target),
+    typeArgs[0] ?? DYNAMIC,
+  ]);
 });
 
 /**
@@ -758,7 +767,7 @@ function setFrom(
 ): DartObject {
   const set = newSet(runtime, elementType, false);
   for (const value of iterableValues(runtime, elements)) {
-    if (check) checkElement(runtime, value, elementType, 'element');
+    if (check) castTo(runtime, value, elementType);
     store(set).set(value, undefined);
   }
   (set as DartObject & { unmodifiable?: boolean }).unmodifiable = isConst;
@@ -962,8 +971,8 @@ function mapFrom(
     const key = source.keyAt(position);
     const value = source.entryValues[position];
     if (check) {
-      checkElement(runtime, key, typeArgs[0] ?? DYNAMIC, 'key');
-      checkElement(runtime, value, typeArgs[1] ?? DYNAMIC, 'value');
+      castTo(runtime, key, typeArgs[0] ?? DYNAMIC);
+      castTo(runtime, value, typeArgs[1] ?? DYNAMIC);
     }
     store(map).set(key, value);
   }
