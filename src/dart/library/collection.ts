@@ -1429,206 +1429,609 @@ class _HashSetIterator<E> implements Iterator<E> {
 // As the SDK's _dynamicCompare, a key that is not Comparable fails the implicit cast of the parameter.
 int _defaultCompare(dynamic a, dynamic b) => Comparable.compare(a, b);
 
-class SplayTreeMap<K, V> extends MapBase<K, V> {
-  final List<K> _keys = <K>[];
-  final List<V> _values = <V>[];
-  final int Function(K, K) _compare;
+class _SplayTreeNode<K> {
+  final K key;
+  _SplayTreeNode<K>? _left;
+  _SplayTreeNode<K>? _right;
+  _SplayTreeNode(this.key);
+}
+
+class _SplayTreeSetNode<K> extends _SplayTreeNode<K> {
+  _SplayTreeSetNode(K key) : super(key);
+}
+
+class _SplayTreeMapNode<K, V> extends _SplayTreeNode<K> {
+  V value;
+  _SplayTreeMapNode(K key, this.value) : super(key);
+}
+
+/**
+ * The SDK's top-down splay tree (collection/splay_tree.dart), held by SplayTreeMap and SplayTreeSet, which report
+ * concurrent modification of themselves as the SDK's classes, which are the tree, do.
+ */
+class _SplayTree<K> {
+  final Object _owner;
+  _SplayTreeNode<K>? _root;
+  int _count = 0;
   int _modificationCount = 0;
-  SplayTreeMap([int Function(K key1, K key2)? compare, bool Function(dynamic potentialKey)? isValidKey])
-      : _compare = compare ?? _defaultCompare;
-  factory SplayTreeMap.from(Map<dynamic, dynamic> other, [int Function(K key1, K key2)? compare, bool Function(dynamic potentialKey)? isValidKey]) {
-    SplayTreeMap<K, V> result = SplayTreeMap<K, V>(compare);
+  int _splayCount = 0;
+  final int Function(K, K) _compare;
+  final bool Function(Object?)? _validKey;
+  _SplayTree(this._owner, this._compare, this._validKey);
+
+  int _splay(K key) {
+    final root = _root;
+    if (root == null) {
+      _compare(key, key);
+      return -1;
+    }
+    _SplayTreeNode<K>? right;
+    _SplayTreeNode<K>? newTreeRight;
+    _SplayTreeNode<K>? left;
+    _SplayTreeNode<K>? newTreeLeft;
+    var current = root;
+    var compare = _compare;
+    int comparison;
+    while (true) {
+      comparison = compare(current.key, key);
+      if (comparison > 0) {
+        var currentLeft = current._left;
+        if (currentLeft == null) break;
+        comparison = compare(currentLeft.key, key);
+        if (comparison > 0) {
+          current._left = currentLeft._right;
+          currentLeft._right = current;
+          current = currentLeft;
+          currentLeft = current._left;
+          if (currentLeft == null) break;
+        }
+        if (right == null) {
+          newTreeRight = current;
+        } else {
+          right._left = current;
+        }
+        right = current;
+        current = currentLeft;
+      } else if (comparison < 0) {
+        var currentRight = current._right;
+        if (currentRight == null) break;
+        comparison = compare(currentRight.key, key);
+        if (comparison < 0) {
+          current._right = currentRight._left;
+          currentRight._left = current;
+          current = currentRight;
+          currentRight = current._right;
+          if (currentRight == null) break;
+        }
+        if (left == null) {
+          newTreeLeft = current;
+        } else {
+          left._right = current;
+        }
+        left = current;
+        current = currentRight;
+      } else {
+        break;
+      }
+    }
+    if (left != null) {
+      left._right = current._left;
+      current._left = newTreeLeft;
+    }
+    if (right != null) {
+      right._left = current._right;
+      current._right = newTreeRight;
+    }
+    if (!identical(_root, current)) {
+      _root = current;
+      _splayCount++;
+    }
+    return comparison;
+  }
+
+  _SplayTreeNode<K> _splayMin(_SplayTreeNode<K> node) {
+    var current = node;
+    var modified = 0;
+    while (true) {
+      var left = current._left;
+      if (left != null) {
+        current._left = left._right;
+        left._right = current;
+        current = left;
+        modified = 1;
+      } else {
+        break;
+      }
+    }
+    _splayCount += modified;
+    return current;
+  }
+
+  _SplayTreeNode<K> _splayMax(_SplayTreeNode<K> node) {
+    var current = node;
+    var modified = 0;
+    while (true) {
+      var right = current._right;
+      if (right != null) {
+        current._right = right._left;
+        right._left = current;
+        current = right;
+        modified = 1;
+      } else {
+        break;
+      }
+    }
+    _splayCount += modified;
+    return current;
+  }
+
+  void _removeRoot() {
+    final root = _root!;
+    final left = root._left;
+    final right = root._right;
+    if (left == null) {
+      _root = right;
+    } else if (right == null) {
+      _root = left;
+    } else {
+      _root = _splayMax(left).._right = right;
+    }
+    _count--;
+    _modificationCount++;
+  }
+
+  void _addNewRoot(_SplayTreeNode<K> node, int comparison) {
+    final root = _root;
+    if (root != null) {
+      if (comparison < 0) {
+        node._left = root;
+        node._right = root._right;
+        root._right = null;
+      } else {
+        node._right = root;
+        node._left = root._left;
+        root._left = null;
+      }
+    }
+    _modificationCount++;
+    _count++;
+    _root = node;
+  }
+
+  void _clear() {
+    _root = null;
+    _count = 0;
+    _modificationCount++;
+  }
+
+  _SplayTreeNode<K>? _untypedLookup(Object? key) {
+    final isValidKey = _validKey;
+    if (isValidKey == null) {
+      if (key is! K) return null;
+    } else {
+      if (!isValidKey(key)) return null;
+    }
+    if (_splay(key as K) == 0) return _root;
+    return null;
+  }
+}
+
+class SplayTreeMap<K, V> extends MapBase<K, V> {
+  late final _SplayTree<K> _tree;
+  SplayTreeMap([int Function(K key1, K key2)? compare, bool Function(dynamic potentialKey)? isValidKey]) {
+    _tree = _SplayTree<K>(this, compare ?? _defaultCompare, isValidKey);
+  }
+  factory SplayTreeMap.from(Map<Object?, Object?> other, [int Function(K key1, K key2)? compare, bool Function(dynamic potentialKey)? isValidKey]) {
+    if (other is Map<K, V>) return SplayTreeMap<K, V>.of(other, compare, isValidKey);
+    SplayTreeMap<K, V> result = SplayTreeMap<K, V>(compare, isValidKey);
     other.forEach((dynamic k, dynamic v) {
-      result[k as K] = v as V;
+      result[k] = v;
     });
     return result;
   }
   factory SplayTreeMap.of(Map<K, V> other, [int Function(K key1, K key2)? compare, bool Function(dynamic potentialKey)? isValidKey]) =>
-      SplayTreeMap<K, V>(compare)..addAll(other);
-  factory SplayTreeMap.fromIterables(Iterable<K> keys, Iterable<V> values, [int Function(K key1, K key2)? compare]) {
-    SplayTreeMap<K, V> map = SplayTreeMap<K, V>(compare);
-    var keyList = keys.toList();
-    var valueList = values.toList();
-    if (keyList.length != valueList.length) throw ArgumentError("Iterables do not have same length.");
-    for (int i = 0; i < keyList.length; i++) map[keyList[i]] = valueList[i];
+      SplayTreeMap<K, V>(compare, isValidKey)..addAll(other);
+  factory SplayTreeMap.fromIterable(Iterable iterable, {K Function(dynamic element)? key, V Function(dynamic element)? value, int Function(K key1, K key2)? compare, bool Function(dynamic potentialKey)? isValidKey}) {
+    SplayTreeMap<K, V> map = SplayTreeMap<K, V>(compare, isValidKey);
+    for (var element in iterable) {
+      map[key == null ? element as K : key(element)] = value == null ? element as V : value(element);
+    }
     return map;
   }
-  int _find(Object? key) {
-    int low = 0;
-    int high = _keys.length - 1;
-    // The SDK compares a key with itself on an empty tree, which checks that the comparator accepts it.
-    if (_keys.isEmpty) _compare(key as dynamic, key as dynamic);
-    K target = key as K;
-    while (low <= high) {
-      int middle = (low + high) ~/ 2;
-      int comparison = _compare(_keys[middle], target);
-      if (comparison == 0) return middle;
-      if (comparison < 0) {
-        low = middle + 1;
-      } else {
-        high = middle - 1;
-      }
+  factory SplayTreeMap.fromIterables(Iterable<K> keys, Iterable<V> values, [int Function(K key1, K key2)? compare, bool Function(dynamic potentialKey)? isValidKey]) {
+    SplayTreeMap<K, V> map = SplayTreeMap<K, V>(compare, isValidKey);
+    Iterator<K> keyIterator = keys.iterator;
+    Iterator<V> valueIterator = values.iterator;
+    bool hasNextKey = keyIterator.moveNext();
+    bool hasNextValue = valueIterator.moveNext();
+    while (hasNextKey && hasNextValue) {
+      map[keyIterator.current] = valueIterator.current;
+      hasNextKey = keyIterator.moveNext();
+      hasNextValue = valueIterator.moveNext();
     }
-    return -(low + 1);
+    if (hasNextKey || hasNextValue) throw ArgumentError("Iterables do not have same length.");
+    return map;
   }
-  V? operator [](Object? key) {
-    if (key is! K) return null;
-    int index = _find(key);
-    return index >= 0 ? _values[index] : null;
+  V? operator [](Object? key) => (_tree._untypedLookup(key) as _SplayTreeMapNode<K, V>?)?.value;
+  V? remove(Object? key) {
+    final root = _tree._untypedLookup(key) as _SplayTreeMapNode<K, V>?;
+    if (root == null) return null;
+    _tree._removeRoot();
+    return root.value;
   }
   void operator []=(K key, V value) {
-    int index = _find(key);
-    if (index >= 0) {
-      _values[index] = value;
+    int comparison = _tree._splay(key);
+    if (comparison == 0) {
+      (_tree._root as _SplayTreeMapNode<K, V>).value = value;
       return;
     }
-    _keys.insert(-index - 1, key);
-    _values.insert(-index - 1, value);
-    _modificationCount++;
+    _tree._addNewRoot(_SplayTreeMapNode<K, V>(key, value), comparison);
   }
-  V? remove(Object? key) {
-    if (key is! K) return null;
-    int index = _find(key);
-    if (index < 0) return null;
-    _keys.removeAt(index);
-    _modificationCount++;
-    return _values.removeAt(index);
+  V putIfAbsent(K key, V Function() ifAbsent) {
+    int comparison = _tree._splay(key);
+    if (comparison == 0) return (_tree._root as _SplayTreeMapNode<K, V>).value;
+    int originalModificationCount = _tree._modificationCount;
+    int originalSplayCount = _tree._splayCount;
+    V value = ifAbsent();
+    if (originalModificationCount != _tree._modificationCount || originalSplayCount != _tree._splayCount) {
+      comparison = _tree._splay(key);
+      if (comparison == 0) {
+        (_tree._root as _SplayTreeMapNode<K, V>).value = value;
+        return value;
+      }
+    }
+    _tree._addNewRoot(_SplayTreeMapNode<K, V>(key, value), comparison);
+    return value;
   }
-  void clear() {
-    _keys.clear();
-    _values.clear();
-    _modificationCount++;
+  V update(K key, V Function(V value) update, {V Function()? ifAbsent}) {
+    var comparison = _tree._splay(key);
+    if (comparison == 0) {
+      final originalModificationCount = _tree._modificationCount;
+      final originalSplayCount = _tree._splayCount;
+      var newValue = update((_tree._root as _SplayTreeMapNode<K, V>).value);
+      if (originalModificationCount != _tree._modificationCount) throw ConcurrentModificationError(this);
+      if (originalSplayCount != _tree._splayCount) {
+        comparison = _tree._splay(key);
+        if (comparison != 0) throw ConcurrentModificationError(this);
+      }
+      (_tree._root as _SplayTreeMapNode<K, V>).value = newValue;
+      return newValue;
+    }
+    if (ifAbsent != null) {
+      final originalModificationCount = _tree._modificationCount;
+      final originalSplayCount = _tree._splayCount;
+      var newValue = ifAbsent();
+      if (originalModificationCount != _tree._modificationCount) throw ConcurrentModificationError(this);
+      if (originalSplayCount != _tree._splayCount) {
+        comparison = _tree._splay(key);
+        if (comparison == 0) throw ConcurrentModificationError(this);
+      }
+      _tree._addNewRoot(_SplayTreeMapNode<K, V>(key, newValue), comparison);
+      return newValue;
+    }
+    throw ArgumentError.value(key, "key", "Key not in map.");
   }
-  bool containsKey(Object? key) => key is K && _find(key) >= 0;
-  bool containsValue(Object? value) => _values.contains(value);
-  int get length => _keys.length;
-  bool get isEmpty => _keys.isEmpty;
-  bool get isNotEmpty => _keys.isNotEmpty;
-  Iterable<K> get keys => _keys.toList(growable: false);
-  Iterable<V> get values => _values.toList(growable: false);
+  void updateAll(V Function(K key, V value) update) {
+    if (_tree._root == null) return;
+    var iterator = _SplayTreeMapEntryIterator<K, V>(_tree);
+    while (iterator.moveNext()) {
+      var node = iterator.current;
+      var newValue = update(node.key, node.value);
+      iterator._replaceValue(newValue);
+    }
+  }
+  void addAll(Map<K, V> other) {
+    other.forEach((K key, V value) {
+      this[key] = value;
+    });
+  }
+  bool get isEmpty => _tree._root == null;
+  bool get isNotEmpty => !isEmpty;
   void forEach(void Function(K key, V value) f) {
-    int stamp = _modificationCount;
-    for (int i = 0; i < _keys.length; i++) {
-      f(_keys[i], _values[i]);
-      if (stamp != _modificationCount) throw ConcurrentModificationError(this);
+    Iterator<MapEntry<K, V>> nodes = _SplayTreeMapEntryIterator<K, V>(_tree);
+    while (nodes.moveNext()) {
+      MapEntry<K, V> node = nodes.current;
+      f(node.key, node.value);
     }
   }
-  K? firstKey() => _keys.isEmpty ? null : _keys.first;
-  K? lastKey() => _keys.isEmpty ? null : _keys.last;
-  K? lastKeyBefore(K key) {
-    for (int i = _keys.length - 1; i >= 0; i--) {
-      if (_compare(_keys[i], key) < 0) return _keys[i];
+  int get length => _tree._count;
+  void clear() {
+    _tree._clear();
+  }
+  bool containsKey(Object? key) => _tree._untypedLookup(key) != null;
+  bool containsValue(Object? value) {
+    int initialSplayCount = _tree._splayCount;
+    bool visit(_SplayTreeNode<K>? node) {
+      while (node != null) {
+        if ((node as _SplayTreeMapNode<K, V>).value == value) return true;
+        if (initialSplayCount != _tree._splayCount) throw ConcurrentModificationError(this);
+        if (node._right != null && visit(node._right)) return true;
+        node = node._left;
+      }
+      return false;
     }
-    return null;
+    return visit(_tree._root);
+  }
+  Iterable<K> get keys => _SplayTreeKeyIterable<K, _SplayTreeMapNode<K, V>>(_tree);
+  Iterable<V> get values => _SplayTreeValueIterable<K, V>(_tree);
+  Iterable<MapEntry<K, V>> get entries => _SplayTreeMapEntryIterable<K, V>(_tree);
+  K? firstKey() {
+    final root = _tree._root;
+    if (root == null) return null;
+    return (_tree._root = _tree._splayMin(root)).key;
+  }
+  K? lastKey() {
+    final root = _tree._root;
+    if (root == null) return null;
+    return (_tree._root = _tree._splayMax(root)).key;
+  }
+  K? lastKeyBefore(K key) {
+    if (key == null) throw ArgumentError(key);
+    if (_tree._root == null) return null;
+    int comparison = _tree._splay(key);
+    if (comparison < 0) return _tree._root!.key;
+    _SplayTreeNode<K>? node = _tree._root!._left;
+    if (node == null) return null;
+    var nodeRight = node._right;
+    while (nodeRight != null) {
+      node = nodeRight;
+      nodeRight = node._right;
+    }
+    return node!.key;
   }
   K? firstKeyAfter(K key) {
-    for (int i = 0; i < _keys.length; i++) {
-      if (_compare(_keys[i], key) > 0) return _keys[i];
+    if (key == null) throw ArgumentError(key);
+    if (_tree._root == null) return null;
+    int comparison = _tree._splay(key);
+    if (comparison > 0) return _tree._root!.key;
+    _SplayTreeNode<K>? node = _tree._root!._right;
+    if (node == null) return null;
+    var nodeLeft = node._left;
+    while (nodeLeft != null) {
+      node = nodeLeft;
+      nodeLeft = node._left;
     }
-    return null;
+    return node!.key;
+  }
+}
+
+abstract class _SplayTreeIterator<K, T> implements Iterator<T> {
+  final _SplayTree<K> _tree;
+  final List<_SplayTreeNode<K>> _path = [];
+  int? _modificationCount;
+  int _splayCount;
+  _SplayTreeIterator(_SplayTree<K> tree) : _tree = tree, _splayCount = tree._splayCount;
+  T get current {
+    if (_path.isEmpty) return null as T;
+    var node = _path.last;
+    return _getValue(node);
+  }
+  void _rebuildPath(K key) {
+    _path.clear();
+    var comparison = _tree._splay(key);
+    if (comparison == 0) {
+      _path.add(_tree._root!);
+      _splayCount = _tree._splayCount;
+      return;
+    }
+    throw ConcurrentModificationError(this);
+  }
+  bool moveNext() {
+    if (_modificationCount != _tree._modificationCount) {
+      if (_modificationCount == null) {
+        _modificationCount = _tree._modificationCount;
+        var node = _tree._root;
+        while (node != null) {
+          _path.add(node);
+          node = node._left;
+        }
+        return _path.isNotEmpty;
+      }
+      throw ConcurrentModificationError(_tree._owner);
+    }
+    if (_path.isEmpty) return false;
+    if (_splayCount != _tree._splayCount) _rebuildPath(_path.last.key);
+    var node = _path.last;
+    var next = node._right;
+    if (next != null) {
+      while (next != null) {
+        _path.add(next);
+        next = next._left;
+      }
+      return true;
+    }
+    _path.removeLast();
+    while (_path.isNotEmpty && identical(_path.last._right, node)) {
+      node = _path.removeLast();
+    }
+    return _path.isNotEmpty;
+  }
+  T _getValue(_SplayTreeNode<K> node);
+}
+
+class _SplayTreeKeyIterable<K, Node> extends EfficientLengthIterable<K> {
+  final _SplayTree<K> _tree;
+  _SplayTreeKeyIterable(this._tree);
+  int get length => _tree._count;
+  bool get isEmpty => _tree._count == 0;
+  Iterator<K> get iterator => _SplayTreeKeyIterator<K, Node>(_tree);
+  bool contains(Object? element) => _tree._untypedLookup(element) != null;
+  Set<K> toSet() => SplayTreeSet<K>._copied(_tree);
+}
+
+class _SplayTreeValueIterable<K, V> extends EfficientLengthIterable<V> {
+  final _SplayTree<K> _tree;
+  _SplayTreeValueIterable(this._tree);
+  int get length => _tree._count;
+  bool get isEmpty => _tree._count == 0;
+  Iterator<V> get iterator => _SplayTreeValueIterator<K, V>(_tree);
+}
+
+class _SplayTreeMapEntryIterable<K, V> extends EfficientLengthIterable<MapEntry<K, V>> {
+  final _SplayTree<K> _tree;
+  _SplayTreeMapEntryIterable(this._tree);
+  int get length => _tree._count;
+  bool get isEmpty => _tree._count == 0;
+  Iterator<MapEntry<K, V>> get iterator => _SplayTreeMapEntryIterator<K, V>(_tree);
+}
+
+class _SplayTreeKeyIterator<K, Node> extends _SplayTreeIterator<K, K> {
+  _SplayTreeKeyIterator(_SplayTree<K> tree) : super(tree);
+  K _getValue(_SplayTreeNode<K> node) => node.key;
+}
+
+class _SplayTreeValueIterator<K, V> extends _SplayTreeIterator<K, V> {
+  _SplayTreeValueIterator(_SplayTree<K> tree) : super(tree);
+  V? _current;
+  bool moveNext() {
+    var result = super.moveNext();
+    _current = result ? (_path.last as _SplayTreeMapNode<K, V>).value : null;
+    return result;
+  }
+  V _getValue(_SplayTreeNode<K> node) => _current as V;
+}
+
+class _SplayTreeMapEntryIterator<K, V> extends _SplayTreeIterator<K, MapEntry<K, V>> {
+  _SplayTreeMapEntryIterator(_SplayTree<K> tree) : super(tree);
+  MapEntry<K, V>? _current;
+  MapEntry<K, V> _getValue(_SplayTreeNode<K> node) =>
+      _current ??= MapEntry<K, V>(node.key, (node as _SplayTreeMapNode<K, V>).value);
+  bool moveNext() {
+    _current = null;
+    return super.moveNext();
+  }
+  void _replaceValue(V value) {
+    if (_modificationCount != _tree._modificationCount) throw ConcurrentModificationError(_tree._owner);
+    if (_splayCount != _tree._splayCount) _rebuildPath(_path.last.key);
+    (_path.last as _SplayTreeMapNode<K, V>).value = value;
   }
 }
 
 class SplayTreeSet<E> extends SetBase<E> {
-  final List<E> _elements = <E>[];
-  final int Function(E, E) _compare;
-  int _modificationCount = 0;
-  SplayTreeSet([int Function(E key1, E key2)? compare, bool Function(dynamic potentialKey)? isValidKey])
-      : _compare = compare ?? _defaultCompare;
+  late final _SplayTree<E> _tree;
+  SplayTreeSet([int Function(E key1, E key2)? compare, bool Function(dynamic potentialKey)? isValidKey]) {
+    _tree = _SplayTree<E>(this, compare ?? _defaultCompare, isValidKey);
+  }
+  SplayTreeSet._copied(_SplayTree<E> source) {
+    _tree = _SplayTree<E>(this, source._compare, source._validKey);
+    var root = source._root;
+    if (root != null) {
+      _tree._root = _copyNode(root);
+      _tree._count = source._count;
+    }
+  }
   factory SplayTreeSet.from(Iterable elements, [int Function(E key1, E key2)? compare, bool Function(dynamic potentialKey)? isValidKey]) {
-    SplayTreeSet<E> result = SplayTreeSet<E>(compare);
+    if (elements is Iterable<E>) return SplayTreeSet<E>.of(elements, compare, isValidKey);
+    SplayTreeSet<E> result = SplayTreeSet<E>(compare, isValidKey);
     for (var element in elements) {
-      result.add(element as E);
+      result.add(element as dynamic);
     }
     return result;
   }
   factory SplayTreeSet.of(Iterable<E> elements, [int Function(E key1, E key2)? compare, bool Function(dynamic potentialKey)? isValidKey]) =>
-      SplayTreeSet<E>(compare)..addAll(elements);
-  int _find(Object? key) {
-    int low = 0;
-    int high = _elements.length - 1;
-    if (_elements.isEmpty) _compare(key as dynamic, key as dynamic);
-    E target = key as E;
-    while (low <= high) {
-      int middle = (low + high) ~/ 2;
-      int comparison = _compare(_elements[middle], target);
-      if (comparison == 0) return middle;
-      if (comparison < 0) {
-        low = middle + 1;
-      } else {
-        high = middle - 1;
-      }
-    }
-    return -(low + 1);
-  }
-  Iterator<E> get iterator => _SplayTreeSetIterator<E>(this);
-  int get length => _elements.length;
-  bool get isEmpty => _elements.isEmpty;
-  bool get isNotEmpty => _elements.isNotEmpty;
+      SplayTreeSet<E>(compare, isValidKey)..addAll(elements);
+  Iterator<E> get iterator => _SplayTreeKeyIterator<E, _SplayTreeSetNode<E>>(_tree);
+  int get length => _tree._count;
+  bool get isEmpty => _tree._root == null;
+  bool get isNotEmpty => _tree._root != null;
   E get first {
-    if (_elements.isEmpty) throw StateError("No element");
-    return _elements.first;
+    final root = _tree._root;
+    if (root == null) throw StateError("No element");
+    return (_tree._root = _tree._splayMin(root)).key;
   }
   E get last {
-    if (_elements.isEmpty) throw StateError("No element");
-    return _elements.last;
+    final root = _tree._root;
+    if (root == null) throw StateError("No element");
+    return (_tree._root = _tree._splayMax(root)).key;
   }
-  bool contains(Object? element) => element is E && _find(element) >= 0;
-  bool add(E element) {
-    int index = _find(element);
-    if (index >= 0) return false;
-    _elements.insert(-index - 1, element);
-    _modificationCount++;
+  E get single {
+    if (_tree._count == 1) return _tree._root!.key;
+    throw _tree._count == 0 ? StateError("No element") : StateError("Too many elements");
+  }
+  bool contains(Object? element) => _tree._untypedLookup(element) != null;
+  bool add(E element) => _add(element);
+  bool _add(E element) {
+    int compare = _tree._splay(element);
+    if (compare == 0) return false;
+    _tree._addNewRoot(_SplayTreeSetNode<E>(element), compare);
     return true;
   }
   bool remove(Object? object) {
-    if (object is! E) return false;
-    int index = _find(object);
-    if (index < 0) return false;
-    _elements.removeAt(index);
-    _modificationCount++;
+    if (_tree._untypedLookup(object) == null) return false;
+    _tree._removeRoot();
     return true;
   }
-  E? lookup(Object? object) {
-    if (object is! E) return null;
-    int index = _find(object);
-    return index >= 0 ? _elements[index] : null;
+  void addAll(Iterable<E> elements) {
+    for (E element in elements) {
+      _add(element);
+    }
   }
+  void removeAll(Iterable<Object?> elements) {
+    for (Object? element in elements) {
+      if (_tree._untypedLookup(element) != null) _tree._removeRoot();
+    }
+  }
+  void retainAll(Iterable<Object?> elements) {
+    SplayTreeSet<E> retainSet = SplayTreeSet<E>(_tree._compare, _tree._validKey);
+    final int originalModificationCount = _tree._modificationCount;
+    for (Object? object in elements) {
+      if (originalModificationCount != _tree._modificationCount) throw ConcurrentModificationError(this);
+      final root = _tree._untypedLookup(object);
+      if (root != null) retainSet.add(root.key);
+    }
+    if (retainSet._tree._count != _tree._count) {
+      _tree._root = retainSet._tree._root;
+      _tree._count = retainSet._tree._count;
+      _tree._modificationCount++;
+    }
+  }
+  E? lookup(Object? object) => _tree._untypedLookup(object)?.key;
+  Set<E> intersection(Set<Object?> other) => _filter(other, true);
+  Set<E> difference(Set<Object?> other) => _filter(other, false);
+  SplayTreeSet<E> _filter(Set<Object?> other, bool include) {
+    _SplayTreeNode<E>? root = null;
+    var count = 0;
+    for (E element in this) {
+      if (other.contains(element) == include) {
+        root = _SplayTreeSetNode<E>(element).._left = root;
+        count++;
+      }
+    }
+    var result = SplayTreeSet<E>(_tree._compare, _tree._validKey);
+    result._tree._root = root;
+    result._tree._count = count;
+    return result;
+  }
+  Set<E> union(Set<E> other) => _clone()..addAll(other);
+  SplayTreeSet<E> _clone() => SplayTreeSet<E>._copied(_tree);
   void clear() {
-    _elements.clear();
-    _modificationCount++;
+    _tree._clear();
   }
-  Set<E> toSet() => SplayTreeSet<E>(_compare)..addAll(_elements);
-  E? lastBefore(E element) {
-    for (int i = _elements.length - 1; i >= 0; i--) {
-      if (_compare(_elements[i], element) < 0) return _elements[i];
-    }
-    return null;
-  }
-  E? firstAfter(E element) {
-    for (int i = 0; i < _elements.length; i++) {
-      if (_compare(_elements[i], element) > 0) return _elements[i];
-    }
-    return null;
-  }
+  Set<E> toSet() => _clone();
+  String toString() => Iterable.iterableToFullString(this, '{', '}');
 }
 
-class _SplayTreeSetIterator<E> implements Iterator<E> {
-  final SplayTreeSet<E> _set;
-  final int _stamp;
-  int _index = 0;
-  E? _current;
-  _SplayTreeSetIterator(this._set) : _stamp = _set._modificationCount;
-  bool moveNext() {
-    if (_stamp != _set._modificationCount) throw ConcurrentModificationError(_set);
-    if (_index >= _set._elements.length) {
-      _current = null;
-      return false;
+_SplayTreeSetNode<E> _copyNode<E>(_SplayTreeNode<E> source) {
+  _SplayTreeSetNode<E> result = _SplayTreeSetNode<E>(source.key);
+  _SplayTreeNode<E> target = result;
+  while (true) {
+    var sourceLeft = source._left;
+    var sourceRight = source._right;
+    if (sourceLeft != null) {
+      if (sourceRight != null) {
+        target._left = _copyNode<E>(sourceLeft);
+      } else {
+        source = sourceLeft;
+        target = target._left = _SplayTreeSetNode<E>(source.key);
+        continue;
+      }
+    } else if (sourceRight == null) {
+      break;
     }
-    _current = _set._elements[_index++];
-    return true;
+    source = sourceRight;
+    target = target._right = _SplayTreeSetNode<E>(sourceRight.key);
   }
-  E get current => _current as E;
+  return result;
 }
 
 // Queues

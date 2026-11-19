@@ -1400,6 +1400,7 @@ class FollowedByIterable<E> extends Iterable<E> {
  * map's keys), which give their length the same way.
  */
 bool _hasEfficientLength(Iterable<Object?> iterable) =>
+    iterable is EfficientLengthIterable ||
     iterable is List ||
     iterable is Set ||
     iterable is ListIterable ||
@@ -1411,6 +1412,11 @@ bool _hasEfficientLength(Iterable<Object?> iterable) =>
     iterable is EfficientLengthTakeIterable ||
     iterable is EfficientLengthSkipIterable ||
     iterable is EfficientLengthFollowedByIterable;
+
+/** The VM's marker of iterables whose length is known without iterating them, as dart:collection's views use it. */
+abstract class EfficientLengthIterable<E> extends Iterable<E> {
+  const EfficientLengthIterable();
+}
 
 class EfficientLengthMappedIterable<S, T> extends MappedIterable<S, T> {
   EfficientLengthMappedIterable(Iterable<S> iterable, T Function(S) f) : super(iterable, f);
