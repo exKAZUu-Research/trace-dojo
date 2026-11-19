@@ -90,7 +90,8 @@ export class KObject {
     public cls: ClassSymbol,
     fieldCount = cls.fieldCount
   ) {
-    this.fields = Array.from({ length: fieldCount });
+    this.fields = fieldCount === cls.fieldCount ? [...cls.fieldDefaults] : Array.from({ length: fieldCount });
+    this.fields.length = fieldCount;
   }
 }
 

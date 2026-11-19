@@ -52,6 +52,8 @@ export interface ResolvedCall {
   receiverRepr: ReturnType<typeof reprOf>;
   /** The substitution of the function's type parameters, for reified ones. */
   typeArguments: Map<TypeParameterSymbol, KType>;
+  /** Whether every argument creates an object, which makes `arrayOf(A(), B())` a creation, as Java's `{ new A(), new B() }` is. */
+  argumentsCreateObjects: boolean;
 }
 
 interface Attempt {
@@ -611,6 +613,7 @@ export abstract class CallCompiler extends CompilerCore {
       call,
       evaluateArgs,
       callRow,
+      argumentsCreateObjects: args.length > 0 && compiledArgs.every((compiled) => compiled?.isCreation === true),
       receiverRepr: receiverRepr(symbol),
       typeArguments,
     };

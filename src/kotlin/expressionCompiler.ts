@@ -1062,7 +1062,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
       repr: call.repr,
       eval: (frame) => invoke(frame, receiverEval(frame)),
       isCall: true,
-      isCreation: call.candidate.kind === 'constructor' || symbol.isConstructor,
+      isCreation:
+        call.candidate.kind === 'constructor' ||
+        symbol.isConstructor ||
+        (symbol.isLibrary && COLLECTION_FACTORIES.has(symbol.name) && call.argumentsCreateObjects),
     };
   }
 
@@ -2253,6 +2256,9 @@ function unboxNumber(value: Value): number | bigint {
 function returnUnit(): Value {
   return UNIT;
 }
+
+/** The library's functions that collect their arguments, which only create objects when every argument does. */
+const COLLECTION_FACTORIES = new Set(['arrayOf', 'listOf', 'mutableListOf', 'arrayListOf', 'setOf', 'mutableSetOf']);
 
 const PROBE_PARAM = new (class extends Object {})() as unknown as TypeParameterSymbol;
 

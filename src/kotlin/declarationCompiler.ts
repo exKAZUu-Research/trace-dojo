@@ -10,6 +10,7 @@ import type {
   Modifiers,
   ParameterDecl,
   PropertyDecl,
+  Statement,
   SuperSpec,
   TypeParameterDecl,
 } from './ast';
@@ -829,6 +830,14 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     return repr === 'ref' ? value : convertRepr(() => value, repr, 'ref')(undefined as unknown as Frame);
   }
 
+  /** The JVM's default value of a field of the type, before its initializer runs. */
+  private defaultValueOf(type: KType | undefined): Value {
+    const kind = type ? this.primitiveOf(type) : undefined;
+    if (kind === undefined)
+      return type && this.isClass(type, this.core.boolean) && !resolved(type).nullable ? false : undefined;
+    return kind === 'Long' || kind === 'ULong' ? 0n : 0;
+  }
+
   // Phase 3: layout, overrides, and dispatch.
 
   /** Lays out fields and links overrides, superclasses before subclasses. */
@@ -1052,6 +1061,18 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   protected compileBodies(): void {
     for (const entry of this.propertyEntries) this.ensurePropertyCompiled(entry);
+    // The defaults need the types of the fields, which inferred properties have only now.
+    const done = new Set<ClassSymbol>();
+    const setDefaults = (cls: ClassSymbol): void => {
+      if (done.has(cls) || !this.entryOfClass.has(cls)) return;
+      done.add(cls);
+      if (cls.superclass) setDefaults(cls.superclass.cls);
+      const defaults: Value[] = [...(cls.superclass?.cls.fieldDefaults ?? [])];
+      defaults.length = cls.fieldCount;
+      for (const property of cls.ownFields) defaults[property.slot as number] = this.defaultValueOf(property.type);
+      cls.fieldDefaults = defaults;
+    };
+    for (const entry of this.classEntries) setDefaults(entry.symbol);
     for (const entry of this.functionEntries) this.ensureFunctionCompiled(entry);
     for (const entry of this.classEntries) {
       this.file = entry.file;
@@ -1105,7 +1126,9 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       context.info.isAtomic = symbol.isAtomic;
       const scope = new Scope(entry.scope, context);
       const thisType = this.addReceivers(scope, context, entry.cls, symbol.extensionReceiver, symbol.name);
-      context.info.showsThis = thisType !== undefined && entry.cls !== undefined && !entry.file.isLibrary;
+      // An object's members show its properties as `Name.x`, as Java's static members do, rather than as `this.x`.
+      context.info.showsThis =
+        thisType !== undefined && entry.cls !== undefined && !entry.cls.symbol.isObject && !entry.file.isLibrary;
       const variables = symbol.params.map((param, index) => {
         const declared = decl.params[index];
         const variable = this.newVariable(
@@ -1269,7 +1292,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (!context) {
       const name = entry.cls ? entry.cls.symbol.name : '<init>';
       context = new FunctionContext(undefined, false, name, entry.file.isLibrary, undefined);
-      context.info.showsThis = entry.cls !== undefined && !entry.file.isLibrary;
+      context.info.showsThis = entry.cls !== undefined && !entry.cls.symbol.isObject && !entry.file.isLibrary;
       this.initializerContexts.set(key, context);
     }
     return context;
@@ -1334,7 +1357,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       undefined
     );
     Object.defineProperty(context, 'returnTarget', { value: context });
-    context.info.showsThis = entry.cls !== undefined && !entry.file.isLibrary;
+    context.info.showsThis = entry.cls !== undefined && !entry.cls.symbol.isObject && !entry.file.isLibrary;
     const scope = new Scope(entry.scope, context);
     this.addReceivers(scope, context, entry.cls, entry.symbol.extensionReceiver);
     const { slot } = entry.symbol;
@@ -1549,15 +1572,14 @@ export abstract class DeclarationCompiler extends StatementCompiler {
           propertyRepr(property)
         );
         const slot = property.slot;
-        steps.push(
-          this.withStep(
-            member.row,
-            (frame) => {
-              (frame.thisValue as KObject).fields[slot] = evaluate(frame);
-            },
-            compiled.isCreation === true
-          )
-        );
+        const store = (frame: Frame): void => {
+          (frame.thisValue as KObject).fields[slot] = evaluate(frame);
+        };
+        if (compiled.constant !== undefined) property.constantInitializer = compiled.constant;
+        // An object's property initialized with a constant records no step, as a Java static field's does: the trace
+        // shows the constant from the start.
+        const isQuiet = symbol.isObject && compiled.constant !== undefined;
+        steps.push(isQuiet ? store : this.withStep(member.row, store, compiled.isCreation === true));
         this.markInitialized(property);
       } else if (member.kind === 'init') {
         const compiled = this.compileBlockValue(scope, context, member.block, undefined, true);
@@ -1624,15 +1646,21 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
+  /** Whether an `init` block assigns a property, as `name = ...` or `this.name = ...`. */
   private assignedInInit(decl: ClassDecl, name: string): boolean {
-    const text = JSON.stringify(
-      decl.members.filter((member) => member.kind === 'init'),
-      (key, value) => (typeof value === 'bigint' ? 0 : value)
-    );
-    return (
-      text.includes(`"target":{"kind":"name","row":`) &&
-      new RegExp(`"kind":"assignment"[^]*?"name":"${name}"`).test(text)
-    );
+    const isTarget = (target: Expression): boolean =>
+      (target.kind === 'name' && target.name === name) ||
+      (target.kind === 'member' && target.name === name && target.receiver.kind === 'this');
+    const visit = (statements: Statement[]): boolean =>
+      statements.some((statement) => {
+        if (statement.kind === 'assignment') return isTarget(statement.target);
+        if (statement.kind === 'expressionStatement' && statement.expression.kind === 'if') {
+          const { thenBranch, elseBranch } = statement.expression;
+          return elseBranch !== undefined && visit(thenBranch.statements) && visit(elseBranch.statements);
+        }
+        return false;
+      });
+    return decl.members.some((member) => member.kind === 'init' && visit(member.block.statements));
   }
 
   protected mayInitializeVal(scope: Scope, symbol: PropertySymbol): boolean {
@@ -1708,9 +1736,12 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     ) {
       this.error(decl.row, `${superclass.cls.name} のコンストラクタは private なので呼べません。`);
     }
+    // A superclass constructor called without arguments, as in `: MyTurtle()`, is part of the step of the
+    // constructor that calls it, as Java's implicit `super()` is.
+    const isExplicit = spec?.kind === 'constructorCall' && spec.args.length > 0;
     const initializer = this.superInitializer(
       call,
-      spec !== undefined && this.recordsSteps && !entry.file.isLibrary ? spec.row : undefined
+      isExplicit && this.recordsSteps && !entry.file.isLibrary ? spec.row : undefined
     );
     return (frame) => initializer(frame, frame.thisValue);
   }

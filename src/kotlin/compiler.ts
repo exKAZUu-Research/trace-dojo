@@ -87,7 +87,7 @@ export interface CompiledProgram {
   initializers: { row: number; isConstant: boolean; run: (frame: Frame) => void }[];
   globalCount: number;
   /** The top-level properties of the program, which traces show by their names. */
-  globals: { name: string; slot: number; type: KType }[];
+  globals: { name: string; slot: number; type: KType; isConstant: boolean }[];
   /** The objects and companion objects of the program, whose properties traces show as `Name.property`. */
   objects: ClassSymbol[];
 }
@@ -194,6 +194,7 @@ export class Compiler extends DeclarationCompiler {
         reprOf(this.core, type)
       );
       const { slot } = entry.symbol;
+      if (compiled.constant !== undefined) entry.symbol.constantInitializer = compiled.constant;
       const { info } = context;
       const run = (frame: Frame): void => {
         frame.runtime.call(info, frame, [], undefined, [], undefined, (inner) => {
@@ -233,6 +234,7 @@ export class Compiler extends DeclarationCompiler {
         name: entry.symbol.name,
         slot: entry.symbol.slot as number,
         type: entry.symbol.type as KType,
+        isConstant: !entry.symbol.isVar && entry.symbol.constantInitializer !== undefined,
       }));
     const objects = this.classEntries
       .filter((entry) => entry.file === context && entry.symbol.isObject)

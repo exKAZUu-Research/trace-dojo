@@ -46,6 +46,8 @@ export class ClassSymbol {
   visibility: Visibility = 'public';
   /** The number of fields each instance holds, its superclasses' first. */
   fieldCount = 0;
+  /** The value of each field before its initializer runs: the JVM's default of its type (0, false, or null). */
+  fieldDefaults: Value[] = [];
   /** The member that runs for each overridable member, by the member it overrides first. */
   readonly vtable = new Map<MemberSymbol, MemberSymbol>();
   /** The instance fields of the class itself, which traces show and data classes compare. */
@@ -201,6 +203,8 @@ export class PropertySymbol implements MemberBase {
   hasCustomGetter = false;
   get: ((frame: Frame, receiver: Value) => Value) | undefined;
   set: ((frame: Frame, receiver: Value, value: Value) => void) | undefined;
+  /** The value of a constant initializer, such as `0` in `var count = 0`, which a trace shows before it runs. */
+  constantInitializer: Value | undefined;
   /** The visibility of a `var`'s setter, such as `private set`. */
   setterVisibility: Visibility = 'public';
 
