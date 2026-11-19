@@ -3147,6 +3147,12 @@ try { --$p3->x; } catch (Exception $e) {}
 restore_error_handler();
 echo 'propUnsetThrow:' . json_encode([$p2, $p3]) . "\n";
 
+$p4 = (object)['x' => null];
+set_error_handler(function () use ($p4) { unset($p4->x); throw new Exception('e'); });
+try { $p4->x--; } catch (Exception $e) {}
+restore_error_handler();
+echo 'nullDynUnset:' . json_encode($p4) . "\n";
+
 class ThrowOnReset { function __destruct() { throw new Exception('d'); } }
 $ao5 = new ArrayObject([], ArrayObject::ARRAY_AS_PROPS);
 set_error_handler(function () use ($ao5) { $ao5['x'] = new ThrowOnReset(); return true; });
@@ -3177,6 +3183,7 @@ echo 'aoResetThrow:' . $chain . ':' . json_encode($ao5->getArrayCopy()) . "\n";
       'aoThrow:{"x":null,"y":1}',
       'aoRef:[5,1,2]',
       'propUnsetThrow:[{"x":null},{"x":null}]',
+      'nullDynUnset:{}',
       'aoResetThrow:d->h:{"x":1,"y":2}',
       '',
     ].join('\n'),

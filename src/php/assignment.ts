@@ -49,6 +49,7 @@ import {
   RefPlace,
   share,
   SKIP_COMPOUND,
+  storeIncrement,
   ValuePlace,
   VarPlace,
   warnPropertySlot,
@@ -1296,7 +1297,7 @@ function incrementPlace(e: Extract<Expr, { k: 'incdec' }>, warning: UpdateWarnin
   const updated = withIncrementCleanup(place, old, () => incrementedValue(old, e.inc, warning));
   if (updated === undefined) return old;
   if (typeof old === 'bigint' && typeof updated === 'number') checkIntOverflow(place, e.inc);
-  const stored = writeDetached ? updated : place.set(updated);
+  const stored = storeIncrement(place, old, updated, writeDetached);
   return e.prefix ? stored : old;
 }
 

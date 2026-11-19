@@ -58,6 +58,19 @@ export interface Place {
   getForIsset?(): Value | undefined;
 }
 
+export function storeIncrement(place: Place, old: Value, updated: Value, detached: boolean): Value {
+  if (detached) return updated;
+  if (
+    updated === old &&
+    !(place instanceof VarPlace) &&
+    !place.declaration?.() &&
+    !(place instanceof ElementPlace && place.hasBucketWrite) &&
+    place.get() === undefined
+  )
+    return updated;
+  return place.set(updated);
+}
+
 export function withIncrementCleanup<T>(place: Place, old: Value, update: () => T): T {
   try {
     return update();
@@ -301,6 +314,10 @@ export class ElementPlace implements Place {
     readonly unbound = false,
     private readonly objectBacked: boolean | BucketReset = false
   ) {}
+
+  get hasBucketWrite(): boolean {
+    return this.bucketWrite !== undefined;
+  }
 
   get(): Value | undefined {
     if (this.key === undefined) return undefined;
