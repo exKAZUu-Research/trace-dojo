@@ -27,7 +27,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { type CObject, Ptr, type Value } from '../values';
+import { CObject, Ptr, type Value } from '../values';
 import { MapValue, NodePositions } from './containerValues';
 import {
   assignElement,
@@ -398,7 +398,8 @@ export class OrderedValue extends MapValue {
     readonly keyOf: (entry: Value) => Value,
     readonly isMap: boolean,
     readonly keyType: Type,
-    readonly valueType: Type | undefined
+    readonly valueType: Type | undefined,
+    private readonly entryType: Type
   ) {
     super();
   }
@@ -406,6 +407,14 @@ export class OrderedValue extends MapValue {
   private readonly nodes = new NodePositions(this);
 
   override location(index: number): Ptr {
+    if (index === this.length) throw new CppRuntimeError('invalidIterator');
+    const location = this.nodes.at(index).cellLocation(this.entryType);
+    const value = this.entries[index];
+    if (value instanceof CObject) value.bindContainerCell(location);
+    return location;
+  }
+
+  override iteratorLocation(index: number): Ptr {
     return this.nodes.at(index);
   }
 
@@ -576,7 +585,8 @@ export function orderedClass(
     return mappedOps;
   };
   const keyOf = isMap ? (entry: Value): Value => (entry as CObject).values[0] : (entry: Value): Value => entry;
-  const make = (entries: Value[]): OrderedValue => new OrderedValue(entries, keyOf, isMap, keyType, valueType);
+  const make = (entries: Value[]): OrderedValue =>
+    new OrderedValue(entries, keyOf, isMap, keyType, valueType, entryType);
   /** The first position whose key is not less than `key` (`upper` false) or greater than it (`upper` true). */
   const bound = (self: OrderedValue, key: Value, upper: boolean): number => {
     let low = 0;
@@ -621,7 +631,7 @@ export function orderedClass(
   };
   const insertResult = pairClass(library, types.iterator, BOOL);
   const insertionResult = (frame: Frame, self: OrderedValue, at: number, inserted: boolean): Value => {
-    const position = self.location(at);
+    const position = self.iteratorLocation(at);
     return isMulti ? position : pairResult(frame, insertResult, position, inserted ? 1 : 0);
   };
   cls.library = {
@@ -768,8 +778,8 @@ export function orderedClass(
   for (const isConst of [false, true]) {
     const it = isConst ? types.constIterator : types.iterator;
     const rit = isConst ? types.constReverseIterator : types.reverseIterator;
-    method('begin', [], it, (self) => self.location(0), { isConst });
-    method('end', [], it, (self) => self.location(self.entries.length), { isConst });
+    method('begin', [], it, (self) => self.iteratorLocation(0), { isConst });
+    method('end', [], it, (self) => self.iteratorLocation(self.entries.length), { isConst });
     const range = pairClass(library, it, it);
     method(
       'equal_range',
@@ -780,28 +790,34 @@ export function orderedClass(
         return pairResult(
           frame,
           range,
-          self.location(bound(self, value, false)),
-          self.location(bound(self, value, true))
+          self.iteratorLocation(bound(self, value, false)),
+          self.iteratorLocation(bound(self, value, true))
         );
       },
       { isConst }
     );
-    method('rbegin', [], rit, (self) => self.location(self.entries.length), { isConst });
-    method('rend', [], rit, (self) => self.location(0), { isConst });
+    method('rbegin', [], rit, (self) => self.iteratorLocation(self.entries.length), { isConst });
+    method('rend', [], rit, (self) => self.iteratorLocation(0), { isConst });
     method(
       'find',
       [constRef(keyType)],
       it,
       (self, [k]) => {
         const at = find(self, keyArg(k));
-        return self.location(at < 0 ? self.entries.length : at);
+        return self.iteratorLocation(at < 0 ? self.entries.length : at);
       },
       { isConst }
     );
-    method('lower_bound', [constRef(keyType)], it, (self, [k]) => self.location(bound(self, keyArg(k), false)), {
-      isConst,
-    });
-    method('upper_bound', [constRef(keyType)], it, (self, [k]) => self.location(bound(self, keyArg(k), true)), {
+    method(
+      'lower_bound',
+      [constRef(keyType)],
+      it,
+      (self, [k]) => self.iteratorLocation(bound(self, keyArg(k), false)),
+      {
+        isConst,
+      }
+    );
+    method('upper_bound', [constRef(keyType)], it, (self, [k]) => self.iteratorLocation(bound(self, keyArg(k), true)), {
       isConst,
     });
     if (isMap && !isMulti) {
@@ -818,8 +834,8 @@ export function orderedClass(
       );
     }
   }
-  method('cbegin', [], types.constIterator, (self) => self.location(0), { isConst: true });
-  method('cend', [], types.constIterator, (self) => self.location(self.entries.length), { isConst: true });
+  method('cbegin', [], types.constIterator, (self) => self.iteratorLocation(0), { isConst: true });
+  method('cend', [], types.constIterator, (self) => self.iteratorLocation(self.entries.length), { isConst: true });
   method(
     'count',
     [constRef(keyType)],
@@ -842,7 +858,7 @@ export function orderedClass(
     types.iterator,
     (self, [hint, entry], frame) => {
       positionOf(self, hint);
-      return self.location(insertCopy(table, frame, self, (entry as Ptr).read())[0]);
+      return self.iteratorLocation(insertCopy(table, frame, self, (entry as Ptr).read())[0]);
     },
     copyEntry
   );
@@ -858,12 +874,12 @@ export function orderedClass(
     const index = positionOf(self, at, false);
     const [removed] = self.splice(index, 1);
     ops().destroy?.(frame, removed);
-    return self.location(index);
+    return self.iteratorLocation(index);
   });
   method('erase', [types.constIterator, types.constIterator], types.iterator, (self, [first, last], frame) => {
     const [from, to] = rangePositions(self, first, last);
     destroyAll(frame, self.splice(from, to - from));
-    return self.location(from);
+    return self.iteratorLocation(from);
   });
   method('swap', [referenceTo(classType(cls))], VOID, (self, [other]) => {
     const target = (other as Ptr).read() as OrderedValue;

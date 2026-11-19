@@ -40,11 +40,11 @@ class NodePosition extends Ptr {
   }
 }
 
-class NodeCell extends Store {
+export class NodeCell extends Store {
   readonly length = 1;
 
   constructor(
-    private readonly node: NodePosition,
+    private readonly node: Ptr,
     private readonly type: Type
   ) {
     super();

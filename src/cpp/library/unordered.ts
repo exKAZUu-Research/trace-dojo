@@ -17,9 +17,9 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { type CObject, Ptr, Store, type Value } from '../values';
+import { CObject, Ptr, Store, type Value } from '../values';
 import { keyText, mappedNotDefaultConstructible, pairClass } from './associative';
-import { MapValue } from './containerValues';
+import { MapValue, NodeCell } from './containerValues';
 import {
   destroyElements,
   type ElementOperations,
@@ -187,6 +187,7 @@ interface HashNode {
   hash: bigint;
   value: Value;
   owner?: HashValue;
+  location?: Ptr;
 }
 
 class HashPosition extends Ptr {
@@ -222,8 +223,7 @@ class HashPosition extends Ptr {
 
   override element(isReverse: boolean): Ptr {
     if (isReverse) return super.element(true);
-    const node = this.entry();
-    return new HashPosition(this.store, node);
+    return this.store.entryLocation(this.entry());
   }
 
   override readRaw(): Value {
@@ -293,7 +293,8 @@ export class HashValue extends MapValue {
     readonly equal: (a: Value, b: Value) => boolean,
     readonly isMap: boolean,
     readonly keyType: Type,
-    readonly valueType: Type | undefined
+    readonly valueType: Type | undefined,
+    private readonly entryType: Type
   ) {
     super();
   }
@@ -315,8 +316,15 @@ export class HashValue extends MapValue {
   }
 
   override location(index: number): Ptr {
-    if (index < 0 || index > this.size) throw new CppRuntimeError('invalidIterator');
-    return new HashPosition(this, index === this.size ? undefined : this.nodes()[index]);
+    const node = this.nodes()[index];
+    if (!node) throw new CppRuntimeError('invalidIterator');
+    return this.entryLocation(node);
+  }
+
+  entryLocation(node: HashNode): Ptr {
+    const location = (node.location ??= new NodeCell(new HashPosition(this, node), this.entryType).location(0));
+    if (node.value instanceof CObject) node.value.bindContainerCell(location);
+    return location;
   }
 
   override iteratorLocation(index: number): Ptr {
@@ -607,7 +615,7 @@ export function unorderedClass(
     return entryOps;
   };
   const keyOf = isMap ? (entry: Value): Value => (entry as CObject).values[0] : (entry: Value): Value => entry;
-  const make = (): HashValue => new HashValue(hash, keyOf, equal, isMap, keyType, valueType);
+  const make = (): HashValue => new HashValue(hash, keyOf, equal, isMap, keyType, valueType, entryType);
   const destroyAll = (frame: Frame, entries: Value[]): void => {
     destroyElements(frame, entries, ops().destroy);
   };
