@@ -340,7 +340,8 @@ export class ArrayOrder {
     if (rebuild !== undefined) {
       if (typeof rebuild === 'object' && 'positions' in rebuild) {
         if (rebuild.keepPositions) positions = rebuild.positions;
-        else if (cursors.length > 0) this.remapShiftedBuckets(rebuild, cursors);
+        else if (cursors.length > 0)
+          this.remapShiftedPositions([...rebuild.positions.values()], rebuild.packed, cursors);
       } else if (cursors.length > 0) this.remapRebuild(rebuild, cursors);
     }
     this.entries.clear();
@@ -360,17 +361,6 @@ export class ArrayOrder {
     this.restorePositions(cursors, positions !== undefined);
   }
 
-  private remapShiftedBuckets({ positions, packed }: ShiftedBuckets, cursors: CursorPosition[]): void {
-    const previous = [...positions.values()];
-    for (const state of cursors) {
-      const position = state.index;
-      if (position === undefined) continue;
-      const next = previous.findIndex((index) => (packed ? index === position : index >= position));
-      if (next !== -1) state.index = next;
-      else if (!packed && position === this.nextIndex) state.index = previous.length;
-    }
-  }
-
   private restorePositions(cursors: CursorPosition[], preserve: boolean): void {
     if (cursors.length === 0) return;
     const entries = [...this.orderedEntries()];
@@ -382,16 +372,25 @@ export class ArrayOrder {
   }
 
   private remapRebuild(rebuild: ArrayReindex, cursors: CursorPosition[]): void {
-    if (rebuild === 'shift') {
-      const positions = new Map([...this.orderedEntries()].map((entry, ordinal) => [entry.index, ordinal]));
-      if (!this.packed) positions.set(this.nextIndex, positions.size);
-      for (const state of cursors) {
-        const index = state.index;
-        if (index !== undefined) state.index = positions.get(index) ?? index;
-      }
-    } else if ('prepend' in rebuild) {
+    if (rebuild === 'shift')
+      this.remapShiftedPositions(
+        [...this.orderedEntries()].map((entry) => entry.index),
+        this.isPacked,
+        cursors
+      );
+    else if ('prepend' in rebuild) {
       for (const state of cursors) if (state.index !== undefined) state.index += rebuild.prepend;
     } else this.remapSplice(rebuild, cursors);
+  }
+
+  private remapShiftedPositions(previous: readonly number[], packed: boolean, cursors: CursorPosition[]): void {
+    for (const state of cursors) {
+      const position = state.index;
+      if (position === undefined) continue;
+      const next = previous.findIndex((index) => (packed ? index === position : index >= position));
+      if (next !== -1) state.index = next;
+      else if (!packed && position === this.nextIndex) state.index = previous.length;
+    }
   }
 
   private remapSplice(splice: SpliceRange, cursors: CursorPosition[]): void {

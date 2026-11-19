@@ -3606,4 +3606,15 @@ try { $ao[new stdClass] =& $x; } catch (Throwable $e) { echo get_class($e), ':',
     kind: 'executed',
     stdout: 'stdClass;Error|float;Error|TypeError:Cannot access offset of type stdClass on ArrayObject',
   });
+
+  const mixedHoleShift = run(String.raw`<?php
+$a = [1, 2, 3]; $a['x'] = 4; unset($a[1]);
+foreach ($a as &$v) { echo "$v;"; if ($v === 1) array_shift($a); }
+unset($v);
+echo '|';
+$b = [1, 2, 3, 4]; unset($b[1]);
+foreach ($b as &$v) { echo "$v;"; if ($v === 1) array_shift($b); }
+unset($v);
+`);
+  expect(mixedHoleShift).toMatchObject({ kind: 'executed', stdout: '1;3;4;|1;4;' });
 });
