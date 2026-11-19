@@ -146,7 +146,8 @@ export class CObject extends Store {
   private exceptionMessage?: ExceptionMessage;
   referenceTemporaries?: Temporary[];
   needsConstruction = false;
-  arrayPosition?: { location: Ptr; elementClass: ClassInfo };
+  completePosition?: { location: Ptr; cls: ClassInfo };
+  private receiverStorage?: Store;
   private baseLocations?: Map<ClassInfo, Ptr>;
   private memberStorage?: Map<number, MemberStorage>;
 
@@ -167,9 +168,11 @@ export class CObject extends Store {
   }
 
   receiver(asClass = this.cls): Ptr {
-    const array = this.arrayPosition;
-    if (!array) return new ObjectReceiverStorage(this).location(0);
-    if (array.elementClass === asClass) return array.location;
+    const complete = this.completePosition;
+    if (!(complete?.location.store instanceof ArrayStore) || complete.cls === asClass) {
+      this.receiverStorage ??= new ObjectReceiverStorage(this);
+      return new CompleteObjectPointer(this, this.receiverStorage);
+    }
     this.baseLocations ??= new Map();
     let location = this.baseLocations.get(asClass);
     if (!location) {
@@ -177,6 +180,12 @@ export class CObject extends Store {
       this.baseLocations.set(asClass, location);
     }
     return location;
+  }
+
+  parameterStorage(cls: ClassInfo): Box {
+    const storage = new ObjectReceiverStorage(this);
+    this.completePosition = { location: storage.location(0), cls };
+    return storage;
   }
 
   get message(): string | undefined {
@@ -394,7 +403,7 @@ export class Ptr {
 
   forClass(cls: ClassInfo): Ptr {
     const object = this.addressedObject();
-    return object?.arrayPosition ? object.receiver(cls) : this;
+    return object?.completePosition ? object.receiver(cls) : this;
   }
 
   rangeLength(last: Ptr, isReverse: boolean): number {
@@ -441,6 +450,30 @@ export class Ptr {
 }
 
 export const NULL_PTR = new Ptr(undefined, 0);
+
+class CompleteObjectPointer extends Ptr {
+  constructor(
+    private readonly object: CObject,
+    private readonly fallback: Store,
+    private readonly offsetFromObject = 0
+  ) {
+    super(fallback, offsetFromObject);
+  }
+
+  override get store(): Store {
+    return this.object.completePosition?.location.store ?? this.fallback;
+  }
+
+  override get index(): number {
+    return (this.object.completePosition?.location.index ?? 0) + this.offsetFromObject;
+  }
+
+  override offset(delta: number, asIterator = false): Ptr {
+    super.offset(delta, asIterator);
+    if (delta === 0) return this;
+    return new CompleteObjectPointer(this.object, this.fallback, this.offsetFromObject + delta);
+  }
+}
 
 /** A function used as a value, which a library algorithm calls. */
 export class FunctionRef {

@@ -79,10 +79,13 @@ export function invoke(
   const callee = runtime.pushFrame(fn, row, compiled, self);
   try {
     for (const [index, param] of fn.params.entries()) {
+      const value = args[index] as Value;
       callee.slots[index] =
         param.type.kind === 'reference'
-          ? (args[index] as Ptr)
-          : new Box(args[index] as Value, param.type.kind !== 'class');
+          ? (value as Ptr)
+          : param.type.kind === 'class' && value instanceof CObject
+            ? value.parameterStorage(param.type.cls)
+            : new Box(value, param.type.kind !== 'class');
     }
     if (fn.isNoexcept) runtime.withoutOuterHandlers(() => compiled.body(callee));
     else compiled.body(callee);
@@ -232,24 +235,10 @@ export function constructArray(
       makeEach(
         frame,
         length,
-        (index) => {
-          let value = store.values[index];
-          if (element.kind === 'class' && !element.cls.library) {
-            const object = value instanceof CObject ? value : newObject(frame, element.cls);
-            if (object !== value) {
-              object.needsConstruction = true;
-              store.values[index] = object;
-            }
-            object.arrayPosition = { location: store.location(index), elementClass: element.cls };
-            value = object;
-          }
-          const destination = value instanceof CObject || value instanceof ArrayStore ? value : undefined;
-          const initialized = initialize(frame, destination, index);
-          if (initialized instanceof CObject && element.kind === 'class') {
-            initialized.arrayPosition ??= { location: store.location(index), elementClass: element.cls };
-          }
-          return initialized;
-        },
+        (index) =>
+          initializeAt(frame, element, store.location(index), store.values[index], (destination) =>
+            initialize(frame, destination, index)
+          ),
         () => destroy,
         store.values
       );
@@ -259,6 +248,36 @@ export function constructArray(
       throw error;
     }
   });
+}
+
+export function initializeAt(
+  frame: Frame,
+  type: Type,
+  location: Ptr,
+  previous: Value,
+  initialize: (target: InitializerTarget | undefined) => Value
+): Value {
+  let target = previous instanceof CObject || previous instanceof ArrayStore ? previous : undefined;
+  if (type.kind === 'class' && !type.cls.library) {
+    const object =
+      target instanceof CObject && target.liveness === Liveness.Alive ? target : newObject(frame, type.cls);
+    if (object !== target) {
+      object.needsConstruction = true;
+      location.write(object);
+    }
+    object.completePosition = { location, cls: type.cls };
+    target = object;
+  }
+  try {
+    const value = initialize(target);
+    if (type.kind === 'class' && value instanceof CObject) value.completePosition = { location, cls: type.cls };
+    if (target instanceof CObject && target !== value && target.needsConstruction) endLifetime(target);
+    location.write(value);
+    return value;
+  } catch (error) {
+    if (target instanceof CObject) endLifetime(target);
+    throw error;
+  }
 }
 
 /** A zero of a scalar type, as static storage and value-initialization start with. */
@@ -387,7 +406,17 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     const destroy = this.destroyerOf(expr.type, expr.row);
     const { run } = expr;
     return (frame, retain) => {
-      const box = new Box(run(frame) as Value);
+      const box = new Box();
+      const location = box.location(0);
+      holdValues(frame, [box], () =>
+        initializeAt(
+          frame,
+          expr.type,
+          location,
+          UNINIT,
+          (target) => run(frame, false, target instanceof CObject ? target : undefined) as Value
+        )
+      );
       const temporary = {
         object: box,
         destroy: (f: Frame) => {
@@ -397,7 +426,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       };
       if (retain) retain(temporary);
       else frame.temporaries.push(temporary);
-      return new Ptr(box, 0);
+      return location;
     };
   }
 
@@ -977,6 +1006,7 @@ export function newObject(frame: Frame, cls: ClassInfo, zeroInitialize = false, 
     for (const field of cls.fields) destination.values[field.index] = staticZero(frame.runtime, field.type);
     destination.zeroInitialized = true;
   }
+  destination.needsConstruction = false;
   return destination;
 }
 

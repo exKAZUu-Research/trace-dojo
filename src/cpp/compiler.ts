@@ -19,6 +19,7 @@ import type { Library } from './library/registry';
 import {
   bindRetainedTemporary,
   constructArray,
+  initializeAt,
   installBaseValue,
   invoke,
   makeEach,
@@ -1052,7 +1053,9 @@ export class Compiler extends StatementCompiler {
       const init = this.defaultInitializer(type, row);
       return (frame) => {
         const object = frame.self?.read() as CObject;
-        object.values[index] = init(frame, initializerTarget(object.values[index]), object.zeroInitialized);
+        initializeAt(frame, type, object.location(index), object.values[index], (target) =>
+          init(frame, target, object.zeroInitialized)
+        );
         return;
       };
     } else {
@@ -1060,7 +1063,9 @@ export class Compiler extends StatementCompiler {
     }
     const exec = this.fullExpression<undefined>((frame) => {
       const object = frame.self?.read() as CObject;
-      object.values[index] = value(frame, initializerTarget(object.values[index]), object.zeroInitialized);
+      initializeAt(frame, type, object.location(index), object.values[index], (target) =>
+        value(frame, target, object.zeroInitialized)
+      );
       return;
     });
     return this.withStep(row, exec, isCreation);
@@ -1111,13 +1116,8 @@ export class Compiler extends StatementCompiler {
         target.cls = cls;
         for (const field of ownFields) {
           const member = source.values[field.index];
-          const destination = initializerTarget(target.values[field.index]);
-          target.values[field.index] = this.copyMember(
-            frame,
-            field.type,
-            member,
-            destination,
-            cls.implicitCopyFromConst
+          initializeAt(frame, field.type, target.location(field.index), target.values[field.index], (destination) =>
+            this.copyMember(frame, field.type, member, destination, cls.implicitCopyFromConst)
           );
         }
       } catch (error) {
@@ -1683,7 +1683,7 @@ export class Compiler extends StatementCompiler {
       const register = this.staticRegistration(type, row);
       const execute = this.fullExpression<undefined>((frame) => {
         const box = frame.runtime.globals[index] as Box;
-        box.value = init.run(frame, initializerTarget(box.value), true);
+        initializeAt(frame, type, box.location(0), box.value, (target) => init.run(frame, target, true));
         if (!init.isConstant) register?.(frame, box);
         return;
       });
@@ -1757,7 +1757,7 @@ export class Compiler extends StatementCompiler {
     const register = this.staticRegistration(type, row);
     const initialize = this.fullExpression<undefined>((frame) => {
       const box = frame.runtime.globals[index] as Box;
-      box.value = init.run(frame, initializerTarget(box.value), true);
+      initializeAt(frame, type, box.location(0), box.value, (target) => init.run(frame, target, true));
       return;
     });
     if (init.isConstant) {
@@ -2259,14 +2259,19 @@ export class Compiler extends StatementCompiler {
           fields.length,
           (index) => {
             const init = supplied[index];
-            const target = initializerTarget(object.values[fields[index].index]);
-            const value = init
-              ? init(frame, target, zeroInitialize, owner)
-              : frame.runtime.withReceiver(frame, receiver, (f) =>
-                  (defaults[index] as Initializer)(f, target, zeroInitialize, owner)
-                );
-            object.values[fields[index].index] = value;
-            return value;
+            const field = fields[index];
+            return initializeAt(
+              frame,
+              field.type,
+              object.location(field.index),
+              object.values[field.index],
+              (target) =>
+                init
+                  ? init(frame, target, zeroInitialize, owner)
+                  : frame.runtime.withReceiver(frame, receiver, (f) =>
+                      (defaults[index] as Initializer)(f, target, zeroInitialize, owner)
+                    )
+            );
           },
           (index) => destroyers[index]
         );
@@ -2406,10 +2411,6 @@ class TemporaryConstructorReferenceError extends CompileError {}
 
 function sameDeclaredSignature(a: FunctionInfo, b: FunctionInfo): boolean {
   return !a.instantiate && !b.instantiate && sameParameters(a, b);
-}
-
-function initializerTarget(value: Value): InitializerTarget | undefined {
-  return value instanceof CObject || value instanceof ArrayStore ? value : undefined;
 }
 
 function registerStaticTemporary(frame: Frame, box: Box): void {

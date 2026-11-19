@@ -30,7 +30,7 @@ import {
 } from './expr';
 import { throwLibrary } from './library/support';
 import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
-import { constructArray, ObjectCompiler, zeroOf } from './objectCompiler';
+import { constructArray, initializeAt, ObjectCompiler, zeroOf } from './objectCompiler';
 import { erasePointee, recoverPointee } from './pointerCasts';
 import { type Eval, type Frame, holdAll } from './runtime';
 import type { Entity } from './scopes';
@@ -1910,17 +1910,17 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     if (baseType.kind === 'void') return this.error(node.row, 'void のオブジェクトは new で作れません。');
     const type = unqualified(baseType);
-    let value: Eval<Value>;
-    if (!argsNode) value = this.defaultInitializer(baseType, node.row);
+    let initialize: Initializer;
+    if (!argsNode) initialize = this.defaultInitializer(baseType, node.row);
     else if (argsNode.type === 'initializer_list') {
-      const initialize = this.listInitializer(type, argsNode, node.row, true);
-      value = (frame) => initialize(frame, undefined, false, 'full-expression');
+      initialize = this.listInitializer(type, argsNode, node.row, true);
     } else {
       const args = argsNode.children.map((arg) => this.argument(arg));
-      if (type.kind === 'class') value = this.constructObject(type.cls, args, node.row, false).run as Eval<Value>;
-      else if (args.length === 0) value = this.valueInitialized(type, node.row).run as Eval<Value>;
+      if (type.kind === 'class')
+        initialize = this.copyInitializer(type, this.constructObject(type.cls, args, node.row, false), node.row, false);
+      else if (args.length === 0) initialize = this.valueInitialized(type, node.row).run as Eval<Value>;
       else if (args.length === 1)
-        value = this.convert(this.directInitializerArgument(type, args[0]), type, node.row).run as Eval<Value>;
+        initialize = this.convert(this.directInitializerArgument(type, args[0]), type, node.row).run as Eval<Value>;
       else return this.error(node.row, `new ${typeName(type)}(...) には値を1つだけ書いてください。`);
     }
     return {
@@ -1930,9 +1930,20 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       onlyCalls: type.kind === 'class',
       run: (frame) => {
         if (type.kind !== 'class' || type.cls.library || type.cls.fields.length === 0) frame.runtime.reserve(1);
-        const box = new Box(value(frame));
+        const box = new Box();
         box.allocation = 'new';
-        return new Ptr(box, 0);
+        const location = box.location(0);
+        return holdValues(frame, [box], () => {
+          try {
+            initializeAt(frame, type, location, box.value, (target) =>
+              initialize(frame, target, false, 'full-expression')
+            );
+            return location;
+          } catch (error) {
+            endLifetime(box, Liveness.Deleted);
+            throw error;
+          }
+        });
       },
     };
   }

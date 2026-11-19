@@ -15,7 +15,7 @@ import {
 } from './expr';
 import { ExpressionCompiler } from './expressionCompiler';
 import { SequenceValue } from './library/containerValues';
-import { bindRetainedTemporary, withTemporaries, zeroOf } from './objectCompiler';
+import { bindRetainedTemporary, initializeAt, withTemporaries, zeroOf } from './objectCompiler';
 import { parseInitializerArguments } from './parse';
 import { BREAK, type Completion, CONTINUE, type Eval, type Exec, type Frame, type LocalInfo, RETURN } from './runtime';
 import { type ConstantReference, type Entity, Scope } from './scopes';
@@ -314,7 +314,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const exec: Exec = (frame) => {
       const store = new Box(UNINIT);
       frame.slots[slot] = store;
-      store.value = init(frame);
+      initializeAt(frame, type, store.location(0), UNINIT, (target) => init(frame, target));
       return;
     };
     return {
@@ -429,7 +429,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       const args = value.children.map((arg) => this.argument(arg));
       if (type.kind === 'class')
         return {
-          init: this.constructObject(type.cls, args, row, false).run as Eval<Value>,
+          init: this.copyInitializer(type, this.constructObject(type.cls, args, row, false), row, false),
           createsObject: !type.cls.library,
         };
       if (args.length !== 1) return this.error(row, `${name} の初期値には値を1つだけ書いてください。`);
