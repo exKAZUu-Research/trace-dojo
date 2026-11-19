@@ -232,7 +232,7 @@ abstract final class String implements Comparable<String>, Pattern {
   external bool get isEmpty;
   external bool get isNotEmpty;
   external String operator +(String other);
-  external String substring(int start, [int? end]);
+  external String substring(int startIndex, [int? endIndex]);
   external String trim();
   external String trimLeft();
   external String trimRight();
@@ -684,9 +684,10 @@ class StackOverflowError implements Error {
 
 class NoSuchMethodError extends Error {
   final String _message;
-  NoSuchMethodError._withInvocation(Object? receiver, Invocation invocation) : _message = _describe(receiver, invocation);
+  NoSuchMethodError._withInvocation(Object? receiver, Invocation invocation) : _message = _describe(receiver, invocation, null);
+  NoSuchMethodError._withFound(Object? receiver, Invocation invocation, String found) : _message = _describe(receiver, invocation, found);
   NoSuchMethodError._withMessage(this._message);
-  external static String _describe(Object? receiver, Invocation invocation);
+  external static String _describe(Object? receiver, Invocation invocation, String? found);
   String toString() => _message;
 }
 

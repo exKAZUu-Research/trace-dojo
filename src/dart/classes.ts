@@ -29,6 +29,8 @@ export interface MethodMember extends MemberBase {
   type: FunctionType;
   impl: Callable | undefined;
   isOperator: boolean;
+  /** For a library method a native implements, its positional parameters' names, which a dynamic call's checks name. */
+  nativeParameterNames?: readonly string[];
 }
 
 export interface GetterMember extends MemberBase {

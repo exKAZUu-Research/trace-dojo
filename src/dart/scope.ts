@@ -56,6 +56,14 @@ export class FunctionContext {
   /** The element type a `sync*` function's return type gives its `yield` statements. */
   yieldElement: DartType | undefined;
 
+  /** The name the VM gives the function in errors, as `main.<anonymous closure>` or `A.m`. */
+  get qualifiedName(): string {
+    const { name } = this.info;
+    if (this.parent) return `${this.parent.qualifiedName}.${name}`;
+    const cls = this.kind.thisClass;
+    return cls && name !== cls.name && !name.startsWith(`${cls.name}.`) ? `${cls.name}.${name}` : name;
+  }
+
   constructor(
     readonly parent: FunctionContext | undefined,
     readonly info: FunctionInfo,

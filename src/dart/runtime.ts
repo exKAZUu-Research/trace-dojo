@@ -13,7 +13,8 @@ import {
   interfaceType,
   mentionsTypeParams,
   substitute,
-  type TypeParam,
+  TypeParam,
+  typeParamType,
   vmTypeString,
 } from './types';
 import {
@@ -248,8 +249,13 @@ export class Runtime implements TracedRuntime<Frame> {
       return receiver.call(this, receiver.receiver, args, typeArgs, callRow);
     const cls = this.classOf(receiver);
     const member = cls.implementation(name);
-    if (member?.kind === 'method')
+    if (member?.kind === 'method') {
+      if (args.isDynamic && !argumentsFit(member.type, args)) {
+        return this.noSuchMethod(receiver, name, 'method', args, typeArgs, vmSignature(name, member));
+      }
+      if (args.isDynamic && member.nativeParameterNames) this.checkNativeArguments(receiver, member, args);
       return (member.impl as NonNullable<typeof member.impl>)(this, receiver, args, typeArgs, callRow);
+    }
     if (member) {
       const target = this.readMember(receiver, member, callRow);
       return this.callValue(target, args, typeArgs, callRow);
@@ -340,7 +346,11 @@ export class Runtime implements TracedRuntime<Frame> {
       (runtime, _receiver, args, typeArgs, callRow) => impl(runtime, receiver, args, typeArgs, callRow),
       receiver,
       [],
-      { name: member.name, origin: `Function '${member.name}':${member.isStatic ? ' static' : ''}.` },
+      {
+        name: member.name,
+        origin: `Function '${member.name}':${member.isStatic ? ' static' : ''}.`,
+        qualifiedName: `${member.owner.name}.${member.name}`,
+      },
       member
     );
   }
@@ -356,18 +366,45 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** Calls a value as a function: a closure, or an object with a `call` method. */
   callValue(target: Value, args: Arguments, typeArgs: readonly DartType[], callRow: number | undefined): Value {
-    if (target instanceof DartClosure) return target.call(this, target.receiver, args, typeArgs, callRow);
+    if (target instanceof DartClosure) {
+      if (args.isDynamic && !argumentsFit(target.type, args)) this.throwClosureMismatch(target, args);
+      return target.call(this, target.receiver, args, typeArgs, callRow);
+    }
     if (target === undefined) return this.noSuchMethod(target, 'call', 'method', args);
     return this.invoke(target, 'call', args, typeArgs, callRow);
   }
 
-  /** Calls the receiver's `noSuchMethod` for a member it lacks; Object's throws a NoSuchMethodError. */
+  /** A dynamic call of a native checks its positional arguments' types as a Dart method's parameters would. */
+  private checkNativeArguments(receiver: Value, member: Member & { kind: 'method' }, args: Arguments): void {
+    const type = this.memberTypeFor(receiver, member);
+    for (const [index, value] of args.positional.entries()) {
+      const expected = type.positional[index];
+      if (!expected || this.links.isValueOf(this, value, expected)) continue;
+      this.throwTypeError(
+        `type '${vmTypeString(this.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(expected)}' of '${member.nativeParameterNames?.[index] ?? ''}'`
+      );
+    }
+  }
+
+  private throwClosureMismatch(closure: DartClosure, args: Arguments): never {
+    const name = closure.description.qualifiedName ?? closure.description.name ?? '<anonymous closure>';
+    const call = `${name}(${describeArguments(this, args)})`;
+    return this.throwError('NoSuchMethodError', '_withMessage', [
+      `NoSuchMethodError: Closure call with mismatched arguments: function '${name}'\nReceiver: ${this.links.stringify(this, closure)}\nTried calling: ${call}\nFound: ${name}${vmTypeString(closure.type)}`,
+    ]);
+  }
+
+  /**
+   * Calls the receiver's `noSuchMethod` for a member it lacks, or whose parameters the arguments do not fit (`found`
+   * is then the member's signature); Object's throws a NoSuchMethodError.
+   */
   noSuchMethod(
     receiver: Value,
     name: string,
     kind: 'method' | 'getter' | 'setter',
     args: Arguments,
-    typeArgs: readonly DartType[] = []
+    typeArgs: readonly DartType[] = [],
+    found?: string
   ): Value {
     const invocation = this.newInvocation(name, kind, args, typeArgs);
     const handler = this.classOf(receiver).implementation('noSuchMethod');
@@ -380,6 +417,7 @@ export class Runtime implements TracedRuntime<Frame> {
         this.userCallRow
       );
     }
+    if (found) return this.throwError('NoSuchMethodError', '_withFound', [receiver, invocation, found]);
     return this.throwError('NoSuchMethodError', '_withInvocation', [receiver, invocation]);
   }
 
@@ -512,3 +550,27 @@ function substituteFunction(type: FunctionType, map: Map<TypeParam, DartType>): 
 }
 
 export { Cell, type ConstructorInfo };
+
+/** Whether arguments fit a function's parameters by count and name, which dynamic calls check before calling. */
+function argumentsFit(type: FunctionType, args: Arguments): boolean {
+  const count = args.positional.length;
+  if (count < type.requiredCount || count > type.positional.length) return false;
+  const names = new Set(type.named.map((named) => named.name));
+  for (const name of args.named?.keys() ?? []) if (!names.has(name)) return false;
+  return type.named.every((named) => !named.isRequired || args.named?.has(named.name) === true);
+}
+
+/** A member's signature as the VM's NoSuchMethodError writes it: its class's type parameters as X0, X1. */
+function vmSignature(memberName: string, member: Member & { kind: 'method' }): string {
+  const params = member.owner.typeParams;
+  const map = new Map(params.map((param, index) => [param, typeParamType(new TypeParam(`X${index}`))]));
+  return `${memberName}${vmTypeString(substitute(member.type, map))}`;
+}
+
+/** Arguments as `Tried calling:` lists them: positional ones in order, then named ones by name. */
+function describeArguments(runtime: Runtime, args: Arguments): string {
+  const parts = args.positional.map((value) => runtime.links.stringify(runtime, value));
+  const named = [...(args.named ?? new Map<string, Value>())].toSorted(([a], [b]) => (a < b ? -1 : 1));
+  for (const [key, value] of named) parts.push(`${key}: ${runtime.links.stringify(runtime, value)}`);
+  return parts.join(', ');
+}

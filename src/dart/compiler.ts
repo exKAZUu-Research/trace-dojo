@@ -1112,6 +1112,9 @@ export class Compiler extends ConstructorCompiler {
         type,
         impl,
         isOperator: methodKind === 'operator',
+        nativeParameterNames: declaration.isExternal
+          ? declaration.parameters.positional.map((parameter) => parameter.name)
+          : undefined,
       };
     }
     const target = isExtension ? (owner as ExtensionInfo) : cls;

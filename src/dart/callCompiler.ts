@@ -926,6 +926,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     });
     const resolveType = this.runtimeType(type);
     const ownParams = type.typeParams;
+    const { qualifiedName } = fn;
     return (frame) => {
       const captured: Cell[] = sources.map(({ local, captured: index }) =>
         local >= 0 ? (frame.locals[local] as Cell) : frame.captured[index]
@@ -947,7 +948,7 @@ export abstract class CallCompiler extends OperatorCompiler {
         callable,
         undefined,
         captured,
-        { name: undefined, origin: undefined },
+        { name: undefined, origin: undefined, qualifiedName },
         undefined
       );
     };

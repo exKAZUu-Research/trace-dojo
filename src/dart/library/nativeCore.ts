@@ -166,17 +166,20 @@ export function safeToStringOf(runtime: Runtime, value: Value): string {
 }
 
 // code-gauge-allow functionCognitiveComplexity 17 -- A transcription of the SDK's algorithm, case by case.
-define('NoSuchMethodError._describe', (runtime, _receiver, [receiver, invocation]) => {
+define('NoSuchMethodError._describe', (runtime, _receiver, [receiver, invocation, found]) => {
   const field = (name: string): Value => runtime.getProperty(invocation, name, undefined);
   const member = runtime.getProperty(field('memberName'), '_name', undefined) as string;
   const kind = field('isGetter') === true ? 'getter' : field('isSetter') === true ? 'setter' : 'method';
   const parts = (field('positionalArguments') as DartList).elements.map((value) => safeToStringOf(runtime, value));
   const named = field('namedArguments') as DartObject;
+  const namedParts: [string, string][] = [];
   for (const key of iterableValues(runtime, runtime.getProperty(named, 'keys', undefined))) {
     const keyName = runtime.getProperty(key, '_name', undefined) as string;
     const value = runtime.invoke(named, '[]', { positional: [key], named: undefined }, [], undefined);
-    parts.push(`${keyName}: ${safeToStringOf(runtime, value)}`);
+    namedParts.push([keyName, `${keyName}: ${safeToStringOf(runtime, value)}`]);
   }
+  // The VM lists named arguments by name.
+  for (const [, part] of namedParts.toSorted(([a], [b]) => (a < b ? -1 : 1))) parts.push(part);
   const typeArgs = (field('typeArguments') as DartList).elements.map((type) => stringOf(runtime, type));
   const typeText = typeArgs.length > 0 ? `<${typeArgs.join(', ')}>` : '';
   const positional = parts.join(', ');
@@ -186,8 +189,13 @@ define('NoSuchMethodError._describe', (runtime, _receiver, [receiver, invocation
     const what = kind === 'getter' ? 'getter' : kind === 'setter' ? 'setter' : 'method';
     return `NoSuchMethodError: The ${what} '${member}' was called on null.\nReceiver: null\nTried calling: ${call}`;
   }
-  const className = vmTypeString(runtime.runtimeTypeOf(receiver)).replace(/<.*$/, '');
   const what = kind === 'getter' ? 'getter' : kind === 'setter' ? 'setter' : 'method';
+  if (typeof found === 'string') {
+    // A member whose parameters the arguments do not fit names the receiver's type with its type arguments.
+    const typeName = vmTypeString(runtime.runtimeTypeOf(receiver));
+    return `NoSuchMethodError: Class '${typeName}' has no instance ${what} '${member}' with matching arguments.\nReceiver: ${safeToStringOf(runtime, receiver)}\nTried calling: ${call}\nFound: ${found}`;
+  }
+  const className = vmTypeString(runtime.runtimeTypeOf(receiver)).replace(/<.*$/, '');
   return `NoSuchMethodError: Class '${className}' has no instance ${what} '${member}'.\nReceiver: ${safeToStringOf(runtime, receiver)}\nTried calling: ${call}`;
 });
 

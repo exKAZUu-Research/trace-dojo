@@ -108,6 +108,8 @@ export class DartClosure extends DartObject {
 
 export interface ClosureDescription {
   name: string | undefined;
+  /** The name errors about the closure's calls give it, as `main.<anonymous closure>`. */
+  qualifiedName?: string;
   /** `Function 'main': static.` and similar, which `toString` appends. */
   origin: string | undefined;
 }
