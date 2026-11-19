@@ -16,7 +16,6 @@ import {
   type FunctionInfo,
   isConstType,
   isInteger,
-  isReferenceRelated,
   pointerTo,
   referenceTo,
   sameType,
@@ -39,7 +38,10 @@ import {
   equalTo,
   lessThan,
   locationOf,
+  movedArgument,
+  requireDefaultConstruction,
   requireElementUse,
+  requireMoveConstruction,
   requireRelocation,
   swapElements,
   truthy,
@@ -111,11 +113,13 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   const editor = new SequenceEditor(kind === 'array' ? 'vector' : kind, ops);
   const arrayDefault = (compiler: ExpressionCompiler, row: number, valueInitialize: boolean): Expr['run'] => {
     if (fixedLength === 0) return () => make([]);
-    const defaultInitialize = valueInitialize ? undefined : compiler.defaultInitializer(element, row);
+    const defaultInitialize = valueInitialize
+      ? undefined
+      : compiler.withLibraryAccess(() => compiler.defaultInitializer(element, row));
     const initialize = defaultInitialize
       ? (frame: Frame, zeroInitialize?: boolean) => defaultInitialize(frame, undefined, zeroInitialize)
-      : compiler.valueInitialized(element, row).run;
-    const destroy = compiler.destroyerOf(element, row);
+      : compiler.withLibraryAccess(() => compiler.valueInitialized(element, row).run);
+    const destroy = compiler.withLibraryAccess(() => compiler.destroyerOf(element, row));
     const length = fixedLength ?? 0;
     return (frame, zeroInitialize) => {
       frame.runtime.reserve(length);
@@ -201,10 +205,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
       },
       {
         isExplicit: true,
-        uses: (row) => {
-          library.compiler.valueInitialized(element, row);
-          library.compiler.requireLibraryObjectUse(element, 'destroy', row);
-        },
+        uses: (row) => requireDefaultConstruction(library.compiler, element, row),
       }
     );
     cls.constructors = [
@@ -804,7 +805,7 @@ function checkElementRequirement(
       `${typeName(element)} のオブジェクトは引数なしでは作れないので、resize には要素の値も渡してください。`
     );
   }
-  if (member === 'resize' && args.length === 1) compiler.valueInitialized(element, row);
+  if (member === 'resize' && args.length === 1) requireDefaultConstruction(compiler, element, row);
   if (
     kind === 'vector' &&
     ['reserve', 'shrink_to_fit', 'resize', 'emplace', 'emplace_back', 'push_back', 'insert'].includes(member)
@@ -841,13 +842,12 @@ function rvalueInsertion(
   if ((!isInsert && !isBack && !isFront) || object.type.kind !== 'class' || element.kind !== 'class') return;
   const argument = args[isInsert ? 1 : 0];
   if (isInsert && argument.braced && listArgumentMatches(compiler, argument.braced, element)) return;
-  const bound = implicitConversion(compiler, argument, constRef(element))?.apply(argument);
-  if (!isMovedElement(element, bound)) return;
+  const source = movedArgument(compiler, element, argument);
+  if (!source) return;
   if (isConstType(object.type)) compiler.error(row, `const の ${typeName(object.type)} には ${member} を使えません。`);
   if (kind === 'vector') requireRelocation(compiler, element, row);
   if (isInsert && kind !== 'list') compiler.requireLibraryObjectUse(element, 'move-assign', row);
   requireMoveConstruction(compiler, element, row);
-  const source = bound.run;
   const self = compiler.objectOf(object);
   const { memberTypes } = object.type.cls;
   const position = isInsert ? compiler.convert(args[0], memberTypes.get('const_iterator') as Type, row).run : undefined;
@@ -875,27 +875,6 @@ function rvalueInsertion(
 
 function listArgumentMatches(compiler: ExpressionCompiler, list: Syntax, element: Type): boolean {
   return list.children.every((node) => implicitConversion(compiler, compiler.argument(node), element) !== undefined);
-}
-
-function isMovedElement(element: Type, argument: Expr | undefined): argument is Expr {
-  return (
-    element.kind === 'class' &&
-    argument?.type.kind === 'class' &&
-    !argument.braced &&
-    (!argument.isLvalue || argument.isXvalue === true) &&
-    !isConstType(argument.type) &&
-    isReferenceRelated(argument.type, element)
-  );
-}
-
-function movedElementLocation(compiler: ExpressionCompiler, element: Type, argument: Expr, row: number): Eval<Ptr> {
-  requireMoveConstruction(compiler, element, row);
-  return compiler.convert(argument, constRef(element), row).run as Eval<Ptr>;
-}
-
-function requireMoveConstruction(compiler: ExpressionCompiler, element: Type, row: number): void {
-  compiler.requireLibraryObjectUse(element, 'move', row);
-  compiler.requireLibraryObjectUse(element, 'destroy', row);
 }
 
 /** The parameter of a member function taking a comparator or a predicate, as a function's name or an object. */
@@ -1150,8 +1129,12 @@ function emplacement(
 /** Compiles the construction of an element from arguments, as `emplace_back` and the like do. */
 export function constructElement(compiler: ExpressionCompiler, element: Type, args: Expr[], row: number): Eval<Value> {
   return compiler.withLibraryAccess(() => {
-    if (args.length === 1 && isMovedElement(element, args[0]) && sameType(element, args[0].type, false)) {
-      const source = movedElementLocation(compiler, element, args[0], row);
+    const source =
+      args.length === 1 && sameType(element, args[0].type, false)
+        ? movedArgument(compiler, element, args[0])
+        : undefined;
+    if (source) {
+      requireMoveConstruction(compiler, element, row);
       return (frame) => constructElementFromRvalue(frame, element, source(frame).read());
     }
     if (element.kind === 'class') return compiler.constructObject(element.cls, args, row, false).run as Eval<Value>;

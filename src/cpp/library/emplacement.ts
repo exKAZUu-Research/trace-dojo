@@ -261,16 +261,14 @@ function compileEmplacing(
   if (isTry && count === 0) return compiler.error(row, 'try_emplace にはキーを書いてください。');
   const positions = new WeakMap<Frame, number>();
   // Each argument is evaluated once, into a location the construction then reads, as perfect forwarding passes it.
-  const locations = args.map((arg, index) =>
-    isTry && index === 0
-      ? compiler.convert(arg, constRef(key), row).run
-      : arg.isLvalue
-        ? arg.run
-        : compiler.materialize(arg).run
+  const forwarded = args.map((arg, index) =>
+    isTry && index === 0 ? compiler.convert(arg, constRef(key), row) : compiler.materialize(arg)
   );
-  const slots: Expr[] = args.map((arg, index) => ({
-    type: isTry && index === 0 ? withConst(key) : arg.type,
+  const locations = forwarded.map((arg) => arg.run);
+  const slots: Expr[] = forwarded.map((arg, index) => ({
+    type: isTry && index === 0 ? (arg.isXvalue && !isConstType(arg.type) ? key : withConst(key)) : arg.type,
     isLvalue: true,
+    isXvalue: arg.isXvalue,
     row: arg.row,
     run: (frame) => frame.pending[(positions.get(frame) as number) + index] as Ptr,
   }));

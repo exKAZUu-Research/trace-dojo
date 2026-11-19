@@ -2,6 +2,62 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
+test.each(['Derived()', 'make()'])('a reference cannot bind to an inaccessible base of %s', (source) => {
+  const program = `struct Base {};
+class Derived : private Base {};
+Derived make() { return Derived(); }
+int main() { const Base& value = ${source}; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 3 }] });
+});
+
+test.each([
+  'std::vector<Item> items(1);',
+  'std::vector<Item> items; items.resize(1);',
+  'std::map<int, Item> items; items[0];',
+  'std::unordered_map<int, Item> items; items[0];',
+  'std::pair<int, Item> item;',
+  'std::array<Item, 1> items;',
+])('library default construction cannot access a private constructor in %s', (statement) => {
+  const program = `#include <array>
+#include <map>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+class Item {
+public:
+  static void make() { ${statement} }
+private:
+  Item() {}
+};
+int main() { Item::make(); }`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 7 }] });
+});
+
+test.each(['uniform_int_distribution<int>', 'uniform_real_distribution<double>'])(
+  'copy-list initialization cannot select the explicit constructor of std::%s',
+  (distribution) => {
+    const program = `#include <random>
+int main() { std::${distribution} value = {1, 6}; }`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 1, message: expect.stringContaining('explicit') }],
+    });
+  }
+);
+
+test.each([
+  ['int source() {return 2;}\nstruct S { static const int count{source()}; };', 1, '定数'],
+  ['struct S { static const int count{2.5}; };', 0, '縮小変換'],
+  ['struct S { static const int count{3}; };\nint main() { const int* p = &S::count; }', 1, '定義'],
+  ['struct S { static const int count{3}; };\nconst int S::count{4};', 1, 'すでに指定'],
+])('validates a braced static member and its definition: %s', (source, row, message) => {
+  const program = source.includes('int main') ? source : `${source}\nint main() {}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row, message: expect.stringContaining(message) }],
+  });
+});
+
 test('a viable initializer-list insertion still requires copying its elements', () => {
   const program = `#include <vector>
 class Item { public: Item() {} private: Item(const Item&); };
@@ -37,13 +93,15 @@ test.each([
   'auto copy = source;',
   'std::vector<std::vector<Item>> target; target.push_back(source);',
   'std::vector<std::vector<Item>> target; target.insert(target.end(), source);',
+  'std::stack<std::vector<Item>> target; target.push(source);',
 ])('copying a vector still requires access to the element copy constructor: %s', (copy) => {
-  const program = `#include <vector>
+  const program = `#include <stack>
+#include <vector>
 class Item { public: Item() {} private: Item(const Item&); };
 int main() { std::vector<Item> source(2); ${copy} }`;
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'compileError',
-    diagnostics: [{ row: 2, message: expect.stringContaining('private') }],
+    diagnostics: [{ row: 3, message: expect.stringContaining('private') }],
   });
 });
 

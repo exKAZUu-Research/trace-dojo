@@ -35,6 +35,7 @@ import {
   elementOperations,
   equalTo,
   lessThan,
+  requireDefaultConstruction,
   requireElementUse,
   swapElements,
 } from './elements';
@@ -156,8 +157,8 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
       {
         libraryConstant: () => (constantMembers ? true : undefined),
         uses: (row) => {
-          library.compiler.valueInitialized(first, row);
-          library.compiler.valueInitialized(second, row);
+          requireDefaultConstruction(library.compiler, first, row);
+          requireDefaultConstruction(library.compiler, second, row);
         },
       }
     ),
@@ -573,7 +574,7 @@ export function orderedClass(
         if (isConstType(left.type))
           return compiler_.error(row, `const の ${cls.name} には [] を使えません（at を使ってください）。`);
         if (!mapped().isDefaultConstructible) return mappedNotDefaultConstructible(compiler_, valueType as Type, row);
-        compiler_.valueInitialized(valueType as Type, row);
+        requireDefaultConstruction(compiler_, valueType as Type, row);
         requireElementUse(compiler_, keyType, row, 'copy');
         const keyRun = compiler_.convert(right, constRef(keyType), row).run;
         const object = left.isLvalue ? left.run : compiler_.materialize(left).run;

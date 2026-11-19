@@ -413,7 +413,7 @@ export function randomClasses(library: Library): LibraryTemplate[] {
           }
           return new DistributionValue(low, high);
         },
-        { optional: 1, isExplicit: false }
+        { optional: 1, isExplicit: true }
       ),
     ];
     for (const [name, pick] of [

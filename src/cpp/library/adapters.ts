@@ -20,11 +20,15 @@ import { type Ptr, type Value } from '../values';
 import { comparatorOrder } from './associative';
 import { SequenceValue } from './containerValues';
 import {
+  constructElementFromRvalue,
   type ElementOperations,
   elementOperations,
   moveAssignElement,
-  moveConstructElement,
+  movedArgument,
   requireElementUse,
+  requireMoveConstruction,
+  requireMoves,
+  requireRelocation,
 } from './elements';
 import type { Library } from './registry';
 import { SequenceEditor } from './sequenceEdits';
@@ -112,24 +116,32 @@ export function adapterClass(
       );
     },
     memberCall: (compiler_, object, member, args, row) => {
-      if (kind === 'priority_queue' && ['push', 'pop', 'emplace'].includes(member))
-        requireElementUse(compiler_, element, row, 'relocate');
-      else if (member === 'push') requireElementUse(compiler_, element, row, 'copy');
-      if (member !== 'emplace') return;
-      if (isConstType(object.type)) return compiler_.error(row, `const の ${cls.name} には emplace を使えません。`);
-      const value = constructElement(compiler_, element, args, row);
+      const appends = member === 'push' || member === 'emplace';
+      if (kind === 'priority_queue' && (appends || member === 'pop')) requireMoves(compiler_, element, row);
+      if (!appends) return;
+      if (storageKind === 'vector') requireRelocation(compiler_, element, row);
+      const source = member === 'push' && args.length === 1 ? movedArgument(compiler_, element, args[0]) : undefined;
+      if (member === 'push' && !source) {
+        requireElementUse(compiler_, element, row, 'copy');
+        return;
+      }
+      if (isConstType(object.type)) return compiler_.error(row, `const の ${cls.name} には ${member} を使えません。`);
+      const create = source
+        ? (frame: Frame, bound: unknown): Value => constructElementFromRvalue(frame, element, (bound as Ptr).read())
+        : constructElement(compiler_, element, args, row);
+      if (source && kind !== 'priority_queue') requireMoveConstruction(compiler_, element, row);
       const self = compiler_.objectOf(object);
-      const result = kind === 'priority_queue' ? VOID : reference;
+      const result = member === 'emplace' && kind !== 'priority_queue' ? reference : VOID;
       return {
         type: nonReference(result),
         isLvalue: result.kind === 'reference',
         row,
-        run: (frame) => {
-          const sequence = (self(frame) as Ptr).read() as SequenceValue;
-          push(frame, sequence, () => value(frame));
-          if (result.kind !== 'void') return sequence.location(sequence.items.length - 1);
-          return;
-        },
+        run: (frame) =>
+          holdAll(frame, [self, source ?? (() => {})], ([receiver, bound]) => {
+            const sequence = (receiver as Ptr).read() as SequenceValue;
+            push(frame, sequence, () => create(frame, bound));
+            if (result.kind !== 'void') return sequence.location(sequence.items.length - 1);
+          }),
       };
     },
     constructingMembers: ['emplace'],
@@ -163,14 +175,19 @@ export function adapterClass(
         }
       });
     };
-    const uses = (row: number): void => requireElementUse(compiler, element, row, 'relocate');
+    const uses = (row: number): void => requireMoves(compiler, element, row);
     cls.constructors.push(
       nativeConstructor(cls, [constRef(compareType)], () => make([]), { isExplicit: true }),
       nativeConstructor(
         cls,
         [constRef(compareType), constRef(storage)],
         ([, from], { frame }) => fromItems(frame, copyItems(frame, (from as Ptr).read() as SequenceValue)),
-        { uses }
+        {
+          uses: (row) => {
+            requireElementUse(compiler, element, row, 'copy');
+            uses(row);
+          },
+        }
       ),
       {
         ...nativeConstructor(cls, [], () => make([])),
@@ -352,7 +369,7 @@ class Heap {
 
   private withMoved(index: number, run: (value: Value) => void): void {
     withTemporaries(this.frame, () => {
-      const object = moveConstructElement(this.frame, this.operations, this.items[index]);
+      const object = constructElementFromRvalue(this.frame, this.operations.type, this.items[index]);
       const { destroy } = this.operations;
       if (destroy) this.frame.temporaries.push({ object, destroy });
       run(object);

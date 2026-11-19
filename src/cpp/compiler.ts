@@ -15,7 +15,6 @@ import {
   memberConstantOf,
   NO_CONSTANT_MEMBERS,
 } from './expr';
-import { SequenceValue } from './library/containerValues';
 import type { Library } from './library/registry';
 import {
   bindRetainedTemporary,
@@ -457,12 +456,9 @@ export class Compiler extends StatementCompiler {
     info.global = global;
     global.isDefined = isInline;
     if (initializer || (isInline && this.isClassType(type)))
-      this.initializeGlobal(global, type, initializer, row, directInitializer);
-    if (isConstType(type) && initializer && initializer.type !== 'initializer_list') {
-      info.constant = this.constantOf(this.compileExpression(initializer), type);
-      if (!isInline && info.constant === undefined)
-        this.error(row, 'クラスの中で初期化する static const の整数には定数を書いてください。');
-    }
+      info.constant = this.initializeGlobal(global, type, initializer, row, directInitializer);
+    if (!isInline && initializer && info.constant === undefined)
+      this.error(row, 'クラスの中で初期化する static const の整数には定数を書いてください。');
   }
 
   private isFunctionDeclarator(declarator: Syntax): boolean {
@@ -963,8 +959,18 @@ export class Compiler extends StatementCompiler {
       if (base.isDefaultConstructorDeleted) this.error(row, deletedDefaultMessage(base));
       const implicit = this.implicitDefaults.get(base)?.();
       return (frame) => {
-        (frame.self?.read() as CObject).cls = base;
-        if (implicit) invoke(frame, implicit, [], frame.self, row);
+        const object = frame.self?.read() as CObject;
+        object.cls = base;
+        const zeroInitialized = object.zeroInitialized;
+        if (initializer && !zeroInitialized) {
+          for (const field of base.fields) object.values[field.index] = staticZero(frame.runtime, field.type);
+          object.zeroInitialized = true;
+        }
+        try {
+          if (implicit) invoke(frame, implicit, [], frame.self, row);
+        } finally {
+          object.zeroInitialized = zeroInitialized;
+        }
         return;
       };
     }
@@ -1519,11 +1525,11 @@ export class Compiler extends StatementCompiler {
     const savedClass = this.memberClass;
     this.memberClass = scope.cls;
     try {
-      if (value) this.initializeGlobal(global, info.type, value, declarator.row, !hasToken(declarator, '='));
-      else if (this.isClassType(info.type)) this.initializeGlobal(global, info.type, undefined, declarator.row);
-      if (isConstType(info.type) && value && value.type !== 'initializer_list' && value.type !== 'argument_list') {
-        info.constant = this.constantOf(this.compileExpression(value), info.type);
-      }
+      if (value) {
+        if (info.constant !== undefined)
+          this.error(declarator.row, `${scope.cls.name}::${name} の初期値はクラスの中ですでに指定されています。`);
+        info.constant = this.initializeGlobal(global, info.type, value, declarator.row, !hasToken(declarator, '='));
+      } else if (this.isClassType(info.type)) this.initializeGlobal(global, info.type, undefined, declarator.row);
     } finally {
       this.memberClass = savedClass;
     }
@@ -1549,13 +1555,11 @@ export class Compiler extends StatementCompiler {
     global.isDefined = true;
     global.isConstexprPointer = isConstexpr && type.kind === 'pointer';
     const direct = !hasToken(declarator, '=');
-    let constant: number | bigint | undefined;
-    if (isConstexpr) constant = this.requireConstantInitializer(type, value, declarator.row, direct);
-    else if (isConstant && value && value.type !== 'initializer_list' && value.type !== 'argument_list') {
-      constant = this.constantOf(this.compileExpression(value), type);
-    }
-    this.globalScope.names.set(name, { kind: 'global', global, isReference: false, constant });
-    this.initializeGlobal(global, type, value, declarator.row, direct);
+    const constant = isConstexpr ? this.requireConstantInitializer(type, value, declarator.row, direct) : undefined;
+    const entity: Extract<Entity, { kind: 'global' }> = { kind: 'global', global, isReference: false, constant };
+    this.globalScope.names.set(name, entity);
+    const initializedConstant = this.initializeGlobal(global, type, value, declarator.row, direct);
+    entity.constant ??= initializedConstant;
     return type;
   }
 
@@ -1628,7 +1632,7 @@ export class Compiler extends StatementCompiler {
     value: Syntax | undefined,
     row: number,
     direct = false
-  ): void {
+  ): number | bigint | undefined {
     const saved = this.context;
     this.context = new FunctionContext(undefined, this.memberClass, VOID);
     try {
@@ -1656,6 +1660,7 @@ export class Compiler extends StatementCompiler {
           });
         }
       } else this.dynamicInitializers.push(this.withStep(row, execute, init.isCreation));
+      return init.constant;
     } finally {
       this.context = saved;
     }
@@ -1667,7 +1672,7 @@ export class Compiler extends StatementCompiler {
     value: Syntax | undefined,
     row: number,
     direct: boolean
-  ): { run: Initializer; isConstant: boolean; isCreation: boolean } | undefined {
+  ): { run: Initializer; isConstant: boolean; isCreation: boolean; constant?: number | bigint } | undefined {
     let run: Initializer;
     const createsClass = type.kind === 'class' && !type.cls.library;
     let isCreation = false;
@@ -1697,7 +1702,7 @@ export class Compiler extends StatementCompiler {
         (createsClass && expr.isTemporaryObject === true && value.type !== 'call_expression') ||
         isObjectCreation(value);
     }
-    return { run, isConstant: run.isConstant === true, isCreation };
+    return { run, isConstant: run.isConstant === true, isCreation, constant: this.initializerConstant(type, run) };
   }
 
   staticInitializer(
@@ -1706,7 +1711,7 @@ export class Compiler extends StatementCompiler {
     value: Syntax | undefined,
     row: number,
     direct = false
-  ): { run: Eval<void>; isCreation: boolean } {
+  ): { run: Eval<void>; isCreation: boolean; constant?: number | bigint } {
     const init = this.staticInitialization(type, value, row, direct);
     const { index } = global;
     if (!init) return { run: () => {}, isCreation: false };
@@ -1718,11 +1723,12 @@ export class Compiler extends StatementCompiler {
     });
     if (init.isConstant) {
       this.constantInitializers.push(initialize);
-      if (!register) return { run: () => {}, isCreation: init.isCreation };
+      if (!register) return { run: () => {}, isCreation: init.isCreation, constant: init.constant };
     }
     const initialized = new WeakSet<Box>();
     return {
       isCreation: init.isCreation,
+      constant: init.constant,
       run: (frame) => {
         const box = frame.runtime.globals[index] as Box;
         if (initialized.has(box)) return;
@@ -1861,10 +1867,6 @@ export class Compiler extends StatementCompiler {
     this.requireVirtualDefinitions(cls, row);
     if (cls.isDefaultConstructorDeleted) return this.error(row, deletedDefaultMessage(cls));
     const implicit = this.implicitDefaults.get(cls)?.();
-    const zeroed = isValueInitialized;
-    const zeroFields = cls.fields.map((field) =>
-      field.type.kind === 'class' || field.type.kind === 'array' ? UNINIT : zeroOf(field.type)
-    );
     return {
       type: classType(cls),
       isLvalue: false,
@@ -1872,12 +1874,11 @@ export class Compiler extends StatementCompiler {
       isTemporaryObject: true,
       onlyCalls: true,
       run: (frame, zeroInitialize, destination) => {
-        const object = newObject(frame, cls, zeroInitialize, destination);
-        if (zeroed && !zeroInitialize) for (const [index, zero] of zeroFields.entries()) object.values[index] = zero;
+        const object = newObject(frame, cls, isValueInitialized || zeroInitialize, destination);
         if (implicit) invoke(frame, implicit, [], new Ptr(new Box(object), 0), row);
         else object.cls = cls;
         object.needsConstruction = false;
-        return zeroed ? zeroFilled(object, classType(cls)) : object;
+        return object;
       },
     };
   }
@@ -2460,22 +2461,6 @@ function isConstDefaultConstructible(type: Type): boolean {
 
 function deletedDefaultMessage(cls: ClassInfo): string {
   return `${cls.name} のオブジェクトは初期値なしでは作れません（デフォルトコンストラクタが削除されています）。`;
-}
-
-/** Completes zero initialization for implicit value construction. */
-function zeroFilled(value: Value, type: Type): Value {
-  if (value === UNINIT) return type.kind === 'class' || type.kind === 'array' ? value : zeroOf(type);
-  if (type.kind === 'array' && value instanceof ArrayStore) {
-    for (const [index, item] of value.values.entries()) value.values[index] = zeroFilled(item, type.of);
-  } else if (type.kind === 'class' && type.cls.library?.kind === 'array' && value instanceof SequenceValue) {
-    for (const [index, item] of value.items.entries()) value.items[index] = zeroFilled(item, value.elementType);
-  } else if (type.kind === 'class' && value instanceof CObject && !type.cls.library) {
-    for (const field of value.cls.fields) {
-      if (field.type.kind !== 'reference')
-        value.values[field.index] = zeroFilled(value.values[field.index], field.type);
-    }
-  }
-  return value;
 }
 
 /** Copies a member's value as the implicit copy constructor does. */

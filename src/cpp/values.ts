@@ -155,7 +155,7 @@ export class CObject extends Store {
   constructor(
     public cls: ClassInfo,
     readonly values: Value[],
-    readonly zeroInitialized = false
+    public zeroInitialized = false
   ) {
     super();
   }

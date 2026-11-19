@@ -7,8 +7,10 @@ import {
   type ConstantLocation,
   constantLocationOf,
   type Expr,
+  type Initializer,
   type MemberConstant,
   memberConstantOf,
+  NO_CONSTANT_MEMBERS,
   type TemporaryBinding,
 } from './expr';
 import { ExpressionCompiler } from './expressionCompiler';
@@ -413,8 +415,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const { row } = declarator;
     if (!value) return { init: this.defaultInitializer(type, row), createsObject: this.isClassLike(type) };
     if (value.type === 'initializer_list') {
+      const init = this.listInitializer(type, value, row, !hasToken(declarator, '='));
       return {
-        init: this.listInitializer(type, value, row, !hasToken(declarator, '=')),
+        init,
+        constant: this.initializerConstant(type, init),
         createsObject: (type.kind === 'class' && !isLibraryClass(type)) || isObjectCreation(value),
       };
     }
@@ -455,6 +459,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     } catch {
       return undefined;
     }
+  }
+
+  protected initializerConstant(type: Type, init: Initializer): number | bigint | undefined {
+    if (init.isConstant && isArithmetic(type) && isConstType(type)) return init.memberConstant?.(NO_CONSTANT_MEMBERS);
   }
 
   protected requireConstantInitializer(
@@ -549,15 +557,14 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   protected referenceBinding(type: Extract<Type, { kind: 'reference' }>, target: Expr, row: number): ReferenceBinding {
-    const isDirect = target.isLvalue && isReferenceRelated(target.type, type.to);
+    const { type: source } = target;
+    const { to } = type;
+    const isDirect = target.isLvalue && isReferenceRelated(source, to);
     const isTemporaryClass =
-      !target.isLvalue &&
-      target.type.kind === 'class' &&
-      type.to.kind === 'class' &&
-      target.type.cls.isDerivedFrom(type.to.cls);
-    if (!isDirect && isConstType(type.to) && !target.functions && target.type.kind !== 'void') {
-      const heldType = isTemporaryClass ? target.type : unqualified(type.to);
-      const bound = isTemporaryClass ? target : this.convert(target, heldType, row);
+      !target.isLvalue && source.kind === 'class' && to.kind === 'class' && source.cls.isDerivedFrom(to.cls);
+    if (!isDirect && isConstType(to) && !target.functions && source.kind !== 'void') {
+      if (isTemporaryClass) this.checkBaseConversion(source.cls, to.cls, row);
+      const bound = isTemporaryClass ? target : this.convert(target, unqualified(to), row);
       return {
         type,
         isConstant: this.isConstantInitializer(bound),
@@ -625,12 +632,23 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       !reference && this.isConstexpr(declaration)
         ? this.requireConstantInitializer(type, value, row, direct)
         : undefined;
-    this.context.scope.names.set(name, { kind: 'local', local, isReference: reference !== undefined, constant });
+    const entity: Extract<Entity, { kind: 'local' }> = {
+      kind: 'local',
+      local,
+      isReference: reference !== undefined,
+      constant,
+    };
+    this.context.scope.names.set(name, entity);
     const { slot } = local;
     const { index } = global;
-    const { run: initialize, isCreation } = reference
-      ? { run: this.staticReferenceInitializer(global, reference, row), isCreation: false }
+    const {
+      run: initialize,
+      isCreation,
+      constant: initializedConstant,
+    } = reference
+      ? { run: this.staticReferenceInitializer(global, reference, row), isCreation: false, constant: undefined }
       : this.staticInitializer(global, type, value, row, direct);
+    entity.constant ??= initializedConstant;
     this.context.scope.slots.splice(this.context.scope.slots.indexOf(slot), 1);
     this.context.scope.returnSlots.delete(local);
     this.context.scope.statics.push(slot);
@@ -663,7 +681,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     value: Syntax | undefined,
     row: number,
     direct?: boolean
-  ): { run: Eval<void>; isCreation: boolean };
+  ): { run: Eval<void>; isCreation: boolean; constant?: number | bigint };
 
   checkRedeclaration(name: string, row: number): void {
     const { names, conflictingDeclarations } = this.context.scope;

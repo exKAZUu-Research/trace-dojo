@@ -32,7 +32,6 @@ import { Box, CObject, endLifetime, NULL_PTR, Ptr, type Store, type Value } from
 import { pairClass } from './associative';
 import {
   assignElement,
-  canTransferElementStorage,
   comparatorOf,
   constructElementFromRvalue,
   type ElementOperations,
@@ -42,9 +41,9 @@ import {
   lessThan,
   locationOf,
   moveAssignElement,
-  moveConstructElement,
   moveValue,
   requireElementUse,
+  requireMoves,
   swapElements,
   truthy,
 } from './elements';
@@ -131,7 +130,7 @@ class Range {
     const value = this.get(position);
     if (!this.write) return value;
     const { frame, ops, move } = this.write;
-    const object = move ? moveConstructElement(frame, ops, value) : ops.copy(frame, value);
+    const object = move ? constructElementFromRvalue(frame, ops.type, value) : ops.copy(frame, value);
     if (ops.destroy) frame.temporaries.push({ object, destroy: ops.destroy });
     return object;
   }
@@ -281,9 +280,11 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
           args[0].row,
           `${typeName(info.element)} の値は < で比べられません。比べ方を表す関数を渡してください。`
         );
-      const ops = elementOperations(compiler(), unqualified(info.element), args[0].row, 'relocate');
+      const type = unqualified(info.element);
+      requireMoves(compiler(), type, args[0].row);
+      const ops = elementOperations(compiler(), type, args[0].row);
       return native(name, params(args), VOID, ([first, last], { frame }) => {
-        const values = mutableRange(first, last, info, frame, ops, canTransferElementStorage(ops.type));
+        const values = mutableRange(first, last, info, frame, ops, true);
         frame.runtime.spend(values.length);
         if (name === 'sort') introsort(values, less(frame));
         else stableSort(values, less(frame));

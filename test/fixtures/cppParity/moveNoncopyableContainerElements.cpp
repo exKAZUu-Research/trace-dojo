@@ -1,6 +1,12 @@
+#include <algorithm>
 #include <deque>
 #include <iostream>
 #include <list>
+#include <map>
+#include <queue>
+#include <stack>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 class Item {
@@ -17,6 +23,13 @@ std::list<Item> listResult(std::list<Item> values) { return values; }
 
 struct Wrapper { std::vector<Item> items; };
 Wrapper wrappedResult(Wrapper value) { return value; }
+bool smaller(const Wrapper& a, const Wrapper& b) { return a.items.size() < b.items.size(); }
+
+struct Component {
+  Component() {}
+  Component(const Component&) {}
+};
+struct WithCopyingMember { std::vector<Item> items; Component component; };
 
 struct Box {
   std::vector<Item> items;
@@ -75,4 +88,37 @@ int main() {
   std::vector<Two> two;
   two.insert(two.end(), {2, 3});
   std::cout << two.front().items.size() << '\n';
+
+  WithCopyingMember first{std::vector<Item>(2)}, second{std::vector<Item>(3)};
+  std::swap(first, second);
+  std::cout << first.items.size() << second.items.size() << '\n';
+  Wrapper sorted[] = {{std::vector<Item>(5)}, {std::vector<Item>(1)}, {std::vector<Item>(2)}};
+  std::iter_swap(sorted, sorted + 2);
+  std::cout << sorted[0].items.size() << sorted[2].items.size() << '\n';
+  std::sort(sorted, sorted + 3, smaller);
+  std::cout << sorted[0].items.size() << sorted[1].items.size() << sorted[2].items.size() << '\n';
+
+  std::stack<Wrapper, std::vector<Wrapper>> stack;
+  stack.push(Wrapper{std::vector<Item>(2)});
+  stack.push({std::vector<Item>(3)});
+  std::queue<Box> queue;
+  queue.push(4);
+  queue.push({5});
+  std::cout << stack.top().items.size() << queue.front().items.size() << queue.back().items.size() << '\n';
+
+  std::priority_queue<std::vector<int>> priority;
+  priority.push(std::vector<int>{2, 7});
+  priority.push({3, 1});
+  std::cout << priority.top()[0];
+  priority.pop();
+  std::cout << priority.top()[0] << '\n';
+
+  std::map<int, std::vector<Item>> map;
+  map.emplace(1, std::vector<Item>(2));
+  map.try_emplace(2, std::vector<Item>(3));
+  map.try_emplace(2, std::vector<Item>(9));
+  std::unordered_map<int, std::vector<Item>> unordered;
+  unordered.emplace(1, std::vector<Item>(4));
+  unordered.try_emplace(2, std::vector<Item>(5));
+  std::cout << map[1].size() << map[2].size() << unordered[1].size() << unordered[2].size() << '\n';
 }

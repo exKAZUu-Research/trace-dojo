@@ -20,7 +20,13 @@ import {
 import { CObject, Ptr, Store, type Value } from '../values';
 import { keyText, mappedNotDefaultConstructible, pairClass } from './associative';
 import { MapValue } from './containerValues';
-import { destroyElements, type ElementOperations, elementOperations, equalTo } from './elements';
+import {
+  destroyElements,
+  type ElementOperations,
+  elementOperations,
+  equalTo,
+  requireDefaultConstruction,
+} from './elements';
 import {
   addRangeMembers,
   associativeInitializerList,
@@ -661,7 +667,7 @@ export function unorderedClass(
       const keyOps = elementOperations(compiler, unqualified(keyType), row);
       const mappedOps = elementOperations(compiler, valueType as Type, row);
       if (!mappedOps.isDefaultConstructible) return mappedNotDefaultConstructible(compiler_, valueType as Type, row);
-      compiler_.valueInitialized(valueType as Type, row);
+      requireDefaultConstruction(compiler_, valueType as Type, row);
       compiler_.requireLibraryObjectUse(keyType, 'copy', row);
       return {
         type: valueType as Type,

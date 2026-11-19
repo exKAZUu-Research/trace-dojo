@@ -1,8 +1,9 @@
+import { implicitConversion } from '../conversions';
 import { CppException, CppRuntimeError } from '../errors';
 import type { Expr, FunctionCandidates } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { installBaseValue, invoke, makeEach, newObject, withTemporaries, zeroOf } from '../objectCompiler';
-import type { Frame } from '../runtime';
+import type { Eval, Frame } from '../runtime';
 import {
   type ClassInfo,
   type ClassType,
@@ -12,6 +13,7 @@ import {
   isConstType,
   isCopyConstructor,
   type Type,
+  withConst,
 } from '../types';
 import {
   ArrayStore,
@@ -70,17 +72,10 @@ export function swapElements(frame: Frame, a: Ptr, b: Ptr, ops: ElementOperation
     return;
   }
   withTemporaries(frame, () => {
-    const transfer = canTransferElementStorage(ops.type);
-    const source = a.read();
-    const value = transfer ? constructElementFromRvalue(frame, ops.type, source) : ops.copy(frame, source);
+    const value = constructElementFromRvalue(frame, ops.type, a.read());
     if (ops.destroy) frame.temporaries.push({ object: value, destroy: ops.destroy });
-    if (transfer) {
-      moveAssignElement(frame, a, ops.type, b.read());
-      moveAssignElement(frame, b, ops.type, value);
-    } else {
-      assignElement(frame, a, ops, b.read());
-      assignElement(frame, b, ops, value);
-    }
+    moveAssignElement(frame, a, ops.type, b.read());
+    moveAssignElement(frame, b, ops.type, value);
   });
 }
 
@@ -90,9 +85,29 @@ function requireSwapUse(compiler: ExpressionCompiler, type: Type, row: number): 
     swap.nativeUses?.(row);
     return;
   }
-  compiler.requireLibraryObjectUse(type, 'copy', row);
-  compiler.requireLibraryObjectUse(type, 'assign', row);
+  requireMoves(compiler, type, row);
+}
+
+export function requireMoves(compiler: ExpressionCompiler, type: Type, row: number): void {
+  requireMoveConstruction(compiler, type, row);
+  compiler.requireLibraryObjectUse(type, 'move-assign', row);
+}
+
+export function requireMoveConstruction(compiler: ExpressionCompiler, type: Type, row: number): void {
+  compiler.requireLibraryObjectUse(type, 'move', row);
   compiler.requireLibraryObjectUse(type, 'destroy', row);
+}
+
+export function requireDefaultConstruction(compiler: ExpressionCompiler, type: Type, row: number): void {
+  compiler.withLibraryAccess(() => compiler.valueInitialized(type, row));
+  compiler.requireLibraryObjectUse(type, 'destroy', row);
+}
+
+export function movedArgument(compiler: ExpressionCompiler, type: Type, argument: Expr): Eval<Ptr> | undefined {
+  if (type.kind !== 'class') return undefined;
+  const target: Type = { kind: 'reference', to: withConst(type) };
+  const bound = implicitConversion(compiler, argument, target)?.apply(argument);
+  if (bound?.isXvalue && !isConstType(bound.type)) return bound.run as Eval<Ptr>;
 }
 
 export function requireElementUse(compiler: ExpressionCompiler, type: Type, row: number, use: ElementUse): void {
@@ -258,7 +273,7 @@ function destroyMovedPart(frame: Frame, type: Type, value: Value): void {
 
 function ownsMovableSequence(type: Type): boolean {
   const kind = type.kind === 'class' ? type.cls.library?.kind : undefined;
-  return kind === 'vector' || kind === 'deque' || kind === 'list';
+  return kind !== undefined && ['vector', 'deque', 'list', 'stack', 'queue', 'priority_queue'].includes(kind);
 }
 
 /** The element operations of a type, which the compiler makes while the class it uses is complete. */
@@ -370,7 +385,7 @@ function defaultConstructor(
   row: number
 ): ((frame: Frame) => Value) | undefined {
   try {
-    return compiler.defaultConstructed(cls, row, true).run as (frame: Frame) => Value;
+    return compiler.withLibraryAccess(() => compiler.defaultConstructed(cls, row, true).run as Eval<Value>);
   } catch {
     return undefined;
   }
