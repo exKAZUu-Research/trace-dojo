@@ -501,7 +501,7 @@ export class OperatorChecker {
     return this.c.literals.subtypeReduced([trueType, falseType]);
   }
 
-  assertion(node: TreeNode): Type {
+  assertion(node: TreeNode, contextual?: Type): Type {
     const expression = node.type === 'type_assertion' ? (named(node).at(-1) as TreeNode) : named(node)[0];
     const typeNode = node.type === 'type_assertion' ? named(named(node)[0])[0] : named(node)[1];
     if (!typeNode || isConstAssertion(node)) {
@@ -515,7 +515,7 @@ export class OperatorChecker {
         !signedLiteral
       )
         this.c.error(node, 'const アサーションは、リテラル式にのみ使えます。');
-      return regularOf(this.c.expressions.check(expression));
+      return regularOf(this.c.expressions.check(expression, contextual));
     }
     const target = this.c.typeNodes.typeFromNode(typeNode);
     const source = this.c.expressions.check(expression, target);

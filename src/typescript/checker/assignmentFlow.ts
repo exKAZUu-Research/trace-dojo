@@ -172,11 +172,24 @@ class AssignmentFlow {
     return merge([consequence, alternative ? this.statements(named(alternative), whenFalse) : whenFalse]);
   }
 
-  /** The values where a condition is true and where it is false, which no path reaches for `false` and `true`. */
-  private branch(condition: TreeNode, values: Values): [Values, Values] {
+  private branch(node: TreeNode, values: Values): [Values, Values] {
+    if (!values) return [undefined, undefined];
+    const condition = skipParentheses(node);
+    const operator = condition.childForFieldName('operator')?.type;
+    if (condition.type === 'binary_expression' && (operator === '&&' || operator === '||'))
+      return this.logicalBranch(condition, operator, values);
     const tested = this.expression(condition, values);
     const constant = constantCondition(condition);
     return [constant === false ? undefined : tested, constant === true ? undefined : tested];
+  }
+
+  private logicalBranch(node: TreeNode, operator: '&&' | '||', values: Values): [Values, Values] {
+    const [leftTrue, leftFalse] = this.branch(node.childForFieldName('left') as TreeNode, values);
+    const [rightTrue, rightFalse] = this.branch(
+      node.childForFieldName('right') as TreeNode,
+      operator === '&&' ? leftTrue : leftFalse
+    );
+    return operator === '&&' ? [rightTrue, merge([leftFalse, rightFalse])] : [merge([leftTrue, rightTrue]), rightFalse];
   }
 
   /**
@@ -206,8 +219,7 @@ class AssignmentFlow {
     for (let index = returnCount; index < this.returns.length; index++)
       this.returns[index] = replaceEntry(this.returns[index]);
     this.atRead = replaceEntry(this.atRead);
-    const endless = condition ? constantCondition(condition) === true : !isForIn;
-    return merge([endless ? undefined : replaceEntry(tested), ...target.breaks.map(replaceEntry)]);
+    return merge([replaceEntry(tested), ...target.breaks.map(replaceEntry)]);
   }
 
   /** The values where one iteration decides whether to iterate again, and those the next iteration starts with. */
@@ -220,15 +232,15 @@ class AssignmentFlow {
     const body = node.childForFieldName('body') as TreeNode;
     if (node.type === 'do_statement') {
       const end = merge([this.statement(body, start), ...target.continues]);
-      const tested = condition ? this.expression(condition, end) : end;
-      return { tested, next: tested };
+      const [next, tested] = condition ? this.branch(condition, end) : [end, end];
+      return { tested, next };
     }
-    const tested = condition ? this.expression(condition, start) : start;
-    if (condition && constantCondition(condition) === false) return { tested, next: undefined };
+    const isForIn = node.type === 'for_in_statement';
+    const [entered, tested] = condition ? this.branch(condition, start) : [start, isForIn ? start : undefined];
     const iteration =
-      node.type === 'for_in_statement' && this.bindings
-        ? this.bindValues(tested, (assign, evaluate) => this.bindings!.iteration(node, assign, evaluate))
-        : tested;
+      isForIn && this.bindings
+        ? this.bindValues(entered, (assign, evaluate) => this.bindings!.iteration(node, assign, evaluate))
+        : entered;
     const end = merge([this.statement(body, iteration), ...target.continues]);
     const increment = (node.childForFieldName('header') ?? node)
       .childrenForFieldName('increment')
@@ -314,9 +326,10 @@ class AssignmentFlow {
       }
       case 'binary_expression': {
         const operator = node.childForFieldName('operator')?.text;
+        if (operator === '&&' || operator === '||') return merge(this.logicalBranch(node, operator, values));
         const left = this.expression(node.childForFieldName('left') as TreeNode, values);
         const right = this.expression(node.childForFieldName('right') as TreeNode, left);
-        return operator === '&&' || operator === '||' || operator === '??' ? merge([left, right]) : right;
+        return operator === '??' ? merge([left, right]) : right;
       }
       default: {
         return this.expressions(named(node), values);

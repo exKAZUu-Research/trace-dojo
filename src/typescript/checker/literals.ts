@@ -129,7 +129,7 @@ export class LiteralChecker {
         elements,
         types,
         isConstContext,
-        isConstContext && !this.hasMutableConstConstraint(contextual)
+        isConstContext && !this.hasMutableArrayContext(contextual)
       );
     }
     const elementTypes = types.map(({ type, spread }, index) =>
@@ -143,12 +143,13 @@ export class LiteralChecker {
     return array;
   }
 
-  private hasMutableConstConstraint(contextual: Type | undefined): boolean {
-    if (contextual?.kind !== 'typeParameter' || !contextual.isConst) return false;
-    const constraint = contextual.constraint?.();
-    return (
-      constraint?.kind === 'object' &&
-      (this.c.isArrayType(constraint) || (constraint.objectKind === 'tuple' && !constraint.tuple?.readonly))
+  private hasMutableArrayContext(contextual: Type | undefined): boolean {
+    if (!contextual) return false;
+    const apparent = this.c.apparentType(contextual);
+    return (apparent.kind === 'union' ? apparent.types : [apparent]).some(
+      (type) =>
+        (type.kind === 'object' || type.kind === 'intersection') &&
+        this.c.relations.isAssignable(type, this.c.arrayType(anyType))
     );
   }
 
