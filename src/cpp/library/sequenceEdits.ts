@@ -3,7 +3,7 @@ import { makeEach } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import { Ptr, UNINIT, type Value } from '../values';
 import type { SequenceValue } from './containerValues';
-import { type ElementOperations, moveConstructElement } from './elements';
+import { destroyElements, type ElementOperations, moveConstructElement } from './elements';
 
 /** The values a range insertion or assignment takes, which may have another type than the elements. */
 export interface Source {
@@ -45,10 +45,7 @@ export class SequenceEditor {
 
   /** Destroys elements: a vector from its last, a deque and a list from their first. */
   destroy(frame: Frame, values: Value[]): void {
-    const destroy = this.ops.destroy;
-    if (!destroy) return;
-    if (this.kind === 'vector') for (let index = values.length - 1; index >= 0; index--) destroy(frame, values[index]);
-    else for (const value of values) destroy(frame, value);
+    destroyElements(frame, values, this.ops.destroy, this.kind === 'vector' ? 'reverse' : 'forward');
   }
 
   /** Destroys the elements from `length` on, as `__destruct_at_end` and `__erase_to_end` do. */
@@ -151,8 +148,7 @@ export class SequenceEditor {
         construct: (f, value) => this.ops.copy(f, value),
         isSameType: true,
       });
-      const destroy = this.ops.destroy;
-      if (destroy) for (let index = buffer.length - 1; index >= 0; index--) destroy(frame, buffer[index]);
+      destroyElements(frame, buffer, this.ops.destroy, 'reverse');
     } else this.dequeInsertBidirectional(frame, self, at, source);
   }
 

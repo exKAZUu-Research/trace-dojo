@@ -30,6 +30,7 @@ import { CObject, Ptr, type Value } from '../values';
 import { MapValue, NodePositions } from './containerValues';
 import {
   assignElement,
+  destroyElements,
   type ElementOperations,
   elementOperations,
   equalTo,
@@ -537,8 +538,7 @@ export function orderedClass(
     return [at, true];
   };
   const destroyAll = (frame: Frame, entries: Value[]): void => {
-    const destroy = ops().destroy;
-    if (destroy) for (const entry of entries) destroy(frame, entry);
+    destroyElements(frame, entries, ops().destroy);
   };
   const table: EntryTable<OrderedValue> = {
     make: () => make([]),

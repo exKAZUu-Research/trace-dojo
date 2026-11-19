@@ -210,6 +210,48 @@ int main() {
   expect(trace.finalTurtles.map(({ x, y }) => [x, y])).toEqual([[0, 1]]);
 });
 
+test.each([
+  [
+    'vector clear',
+    'std::vector<Item> items; items.reserve(2); items.emplace_back(1); items.emplace_back(2); items.clear();',
+  ],
+  [
+    'vector resize',
+    'std::vector<Item> items; items.reserve(2); items.emplace_back(1); items.emplace_back(2); items.resize(0);',
+  ],
+  [
+    'vector erase',
+    'std::vector<Item> items; items.reserve(2); items.emplace_back(1); items.emplace_back(2); items.erase(items.begin(), items.end());',
+  ],
+  ['deque clear', 'std::deque<Item> items; items.emplace_back(2); items.emplace_back(1); items.clear();'],
+  ['list clear', 'std::list<Item> items; items.emplace_back(2); items.emplace_back(1); items.clear();'],
+  ['map clear', 'std::map<int, Item> items; items.try_emplace(1, 2); items.try_emplace(2, 1); items.clear();'],
+  [
+    'unordered map clear',
+    'std::unordered_map<int, Item> items; items.try_emplace(1, 1); items.try_emplace(2, 2); items.clear();',
+  ],
+])('keeps removed elements reachable through %s', (_, edit) => {
+  const program = `#include <deque>
+#include <iostream>
+#include <list>
+#include <map>
+#include <unordered_map>
+#include <vector>
+Turtle observer(0, 0);
+struct Item {
+  Turtle* turtle;
+  Item(int y = 1) : turtle(new Turtle(0, y)) {}
+  ~Item() { std::cout << observer.canMoveForward(); delete turtle; }
+};
+int main() { ${edit} }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '00',
+    uncaughtException: undefined,
+  });
+  expect(traceProgram('cpp', program, program)).toMatchObject({ stdout: '00', uncaughtException: undefined });
+});
+
 test('an uncaught exception preserves the turtles reached from main before unwinding', () => {
   const program = `int main() {
   Turtle t(3, 5);

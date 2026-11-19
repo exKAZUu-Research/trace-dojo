@@ -31,6 +31,24 @@ export interface ElementOperations {
 
 type ElementUse = 'copy' | 'assign' | 'relocate' | 'swap';
 
+export function destroyElements(
+  frame: Frame,
+  values: readonly Value[],
+  destroy: ElementOperations['destroy'],
+  order: 'forward' | 'reverse' = 'forward'
+): void {
+  if (!destroy) return;
+  const mark = frame.pending.length;
+  for (const value of values) frame.pending.push(value);
+  try {
+    if (order === 'reverse') {
+      for (let index = values.length - 1; index >= 0; index--) destroy(frame, values[index]);
+    } else for (const value of values) destroy(frame, value);
+  } finally {
+    frame.pending.length = mark;
+  }
+}
+
 export function swapElements(frame: Frame, a: Ptr, b: Ptr, ops: ElementOperations): void {
   if (a.equals(b)) return;
   const swap = swapFunction(ops.type);

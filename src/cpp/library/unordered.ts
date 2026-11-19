@@ -20,7 +20,7 @@ import {
 import { CObject, Ptr, Store, type Value } from '../values';
 import { keyText, mappedNotDefaultConstructible, pairClass } from './associative';
 import { MapValue } from './containerValues';
-import { type ElementOperations, elementOperations, equalTo } from './elements';
+import { destroyElements, type ElementOperations, elementOperations, equalTo } from './elements';
 import {
   addRangeMembers,
   associativeInitializerList,
@@ -584,8 +584,7 @@ export function unorderedClass(
   const keyOf = isMap ? (entry: Value): Value => (entry as CObject).values[0] : (entry: Value): Value => entry;
   const make = (): HashValue => new HashValue(hash, keyOf, equal, isMap, keyType, valueType);
   const destroyAll = (frame: Frame, entries: Value[]): void => {
-    const destroy = ops().destroy;
-    if (destroy) for (const entry of entries) destroy(frame, entry);
+    destroyElements(frame, entries, ops().destroy);
   };
   const insertResult = pairClass(library, iterator, BOOL);
   const table: EntryTable<HashValue, HashNode> = {
