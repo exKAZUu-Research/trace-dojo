@@ -160,12 +160,80 @@ class DequeElementPointer extends Ptr {
   }
 }
 
-interface DequeStorage {
-  all: number;
-  end: number;
-  start: number;
-  blocks: Map<number, Store>;
-  hasStorage: boolean;
+class DequeStorage {
+  all = 0;
+  end = 0;
+  private start = 0;
+  private firstBlock?: number;
+  private lastBlock?: number;
+  private readonly blocks = new Map<number, Store>();
+  private readonly width: number;
+
+  constructor(
+    private readonly elementSize: number,
+    length: number
+  ) {
+    this.width = dequeBlockElements(elementSize);
+    this.extend(length);
+  }
+
+  address(index: number, byteOffset: number): { store: Store; index: number } {
+    const slot = this.start + index;
+    const block = Math.floor(slot / this.width);
+    let storage = this.blocks.get(block);
+    if (!storage) {
+      storage = new Box();
+      this.blocks.set(block, storage);
+    }
+    return { store: storage, index: (slot - block * this.width) * this.elementSize + byteOffset };
+  }
+
+  extend(length: number): void {
+    if (length === 0) return;
+    const first = Math.floor(this.start / this.width);
+    const end = Math.floor((this.start + length) / this.width);
+    this.firstBlock = Math.min(this.firstBlock ?? first, first);
+    this.lastBlock = Math.max(this.lastBlock ?? end, end);
+  }
+
+  insert(length: number, count: number, front: boolean): void {
+    const occupiedFirst = Math.floor(this.start / this.width);
+    const occupiedLast = Math.floor((this.start + length - count) / this.width);
+    if (front) {
+      if (this.firstBlock === undefined) this.start = Math.floor(this.width / 2);
+      this.start -= count;
+    }
+    if (this.firstBlock !== undefined && this.lastBlock !== undefined) {
+      if (front) {
+        const needed = Math.max(0, this.firstBlock - Math.floor(this.start / this.width));
+        this.lastBlock -= Math.min(needed, this.lastBlock - occupiedLast);
+      } else {
+        const needed = Math.max(0, Math.floor((this.start + length) / this.width) - this.lastBlock);
+        this.firstBlock += Math.min(needed, occupiedFirst - this.firstBlock);
+      }
+      this.trimAddresses(this.firstBlock, this.lastBlock);
+    }
+    this.extend(length);
+  }
+
+  remove(length: number, count: number, side: 'front' | 'back' | 'clear'): void {
+    if (this.firstBlock === undefined || this.lastBlock === undefined) return;
+    if (side === 'front') {
+      this.start += count;
+      this.firstBlock = Math.max(this.firstBlock, Math.floor(this.start / this.width) - 1);
+    } else if (side === 'back') {
+      this.lastBlock = Math.min(this.lastBlock, Math.floor((this.start + length) / this.width) + 1);
+    } else {
+      this.firstBlock = Math.max(this.firstBlock, this.lastBlock - 1);
+      this.start = this.lastBlock * this.width;
+      if (this.firstBlock === this.lastBlock) this.start += Math.floor(this.width / 2);
+    }
+    this.trimAddresses(this.firstBlock, this.lastBlock);
+  }
+
+  private trimAddresses(first: number, last: number): void {
+    for (const block of this.blocks.keys()) if (block < first || block > last) this.blocks.delete(block);
+  }
 }
 
 function dequeBlockElements(elementSize: number): number {
@@ -299,8 +367,7 @@ export class SequenceValue extends Store {
   ) {
     super();
     this.nodes = storageKind ? new NodePositions(this) : undefined;
-    if (storageKind === 'deque')
-      this.deque = { all: 0, end: 0, start: 0, blocks: new Map(), hasStorage: cells.length > 0 };
+    if (storageKind === 'deque') this.deque = new DequeStorage(sizeOf(elementType), cells.length);
   }
 
   private readonly nodes?: NodePositions;
@@ -314,7 +381,7 @@ export class SequenceValue extends Store {
 
   set items(values: Value[]) {
     this.cells = values;
-    if (this.deque && values.length > 0) this.deque.hasStorage = true;
+    this.deque?.extend(values.length);
     this.bindElements(0, values.length);
   }
 
@@ -341,28 +408,15 @@ export class SequenceValue extends Store {
   }
 
   override projectAddress(index: number, byteOffset: number): { store: Store; index: number } | undefined {
-    const width = sizeOf(this.elementType);
-    if (this.storageKind === 'vector') return { store: this, index: index * width + byteOffset };
-    const deque = this.deque;
-    if (!deque) return;
-    const blockWidth = dequeBlockElements(width);
-    const slot = deque.start + index;
-    const block = Math.floor(slot / blockWidth);
-    let storage = deque.blocks.get(block);
-    if (!storage) {
-      storage = new Box();
-      deque.blocks.set(block, storage);
-    }
-    return { store: storage, index: (slot - block * blockWidth) * width + byteOffset };
+    if (this.storageKind === 'vector') return { store: this, index: index * sizeOf(this.elementType) + byteOffset };
+    return this.deque?.address(index, byteOffset);
   }
 
   append(value: Value): void {
-    if (this.deque) {
-      this.deque.all++;
-      this.deque.hasStorage = true;
-    }
+    if (this.deque) this.deque.all++;
     if (this.storageKind === 'vector') this.nodes?.invalidateEnd();
     const index = this.items.push(value) - 1;
+    this.deque?.insert(this.length, 1, false);
     this.bindElements(index, index + 1);
   }
 
@@ -449,13 +503,7 @@ export class SequenceValue extends Store {
     const atEnd = from + remove === this.length;
     const changesMiddle = from > 0 && !atEnd;
     const epoch = this.deque;
-    if (epoch) {
-      if (shiftsFront) {
-        if (insert && !epoch.hasStorage) epoch.start = Math.floor(dequeBlockElements(sizeOf(this.elementType)) / 2);
-        epoch.start += remove - insert;
-      }
-      if (insert) epoch.hasStorage = true;
-    }
+    if (epoch && insert > 0) epoch.insert(this.length + insert - remove, insert, shiftsFront);
     if (this.storageKind === 'vector' && (remove || insert)) {
       this.invalidateVectorSuffix(from);
       return;
@@ -464,6 +512,14 @@ export class SequenceValue extends Store {
     else this.nodes?.splice(from, remove, insert);
     if (epoch && (insert || changesMiddle)) epoch.all++;
     else if (epoch && remove && atEnd) epoch.end++;
+  }
+
+  removeDequeValues(from: number, count: number, position: number, side: 'front' | 'back' | 'clear'): void {
+    const middle = position > 0 && position + count < this.length;
+    this.editPositions(position, count, 0);
+    this.items.splice(from, count);
+    this.deque?.remove(this.length, count, side);
+    if (middle) this.bindElements(0, this.length);
   }
 
   reorder(edit: (items: IndexedValue[]) => IndexedValue[]): void {
@@ -518,7 +574,7 @@ export class SequenceValue extends Store {
     if (this.deque && other.deque) {
       this.deque.all++;
       this.deque = other.deque;
-      other.deque = { all: 0, end: 0, start: 0, blocks: new Map(), hasStorage: false };
+      other.deque = new DequeStorage(sizeOf(other.elementType), 0);
     }
     if (this.nodes && other.nodes) this.nodes.take(other.nodes);
     this.items = other.items;

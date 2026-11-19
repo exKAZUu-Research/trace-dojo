@@ -97,6 +97,7 @@ export class SequenceEditor {
 
   clear(frame: Frame, self: SequenceValue): void {
     if (this.kind === 'list') self.eraseNodes(frame, 0, self.length, 'all', this.ops.destroy);
+    else if (this.kind === 'deque') this.destroyRange(frame, self, 0, self.length, { position: 0, side: 'clear' });
     else this.truncate(frame, self, 0);
   }
 
@@ -107,22 +108,23 @@ export class SequenceEditor {
   }
 
   removeFront(frame: Frame, self: SequenceValue): void {
-    this.destroyRange(frame, self, 0, 1);
+    this.destroyRange(frame, self, 0, 1, { position: 0, side: 'front' });
   }
 
-  private destroyRange(frame: Frame, self: SequenceValue, from: number, count: number, dequeEraseAt = from): void {
+  private destroyRange(
+    frame: Frame,
+    self: SequenceValue,
+    from: number,
+    count: number,
+    deque?: { position: number; side: 'front' | 'back' | 'clear' }
+  ): void {
     if (this.kind === 'list') {
       self.eraseNodes(frame, from, count, 'per-element', this.ops.destroy);
       return;
     }
     this.destroy(frame, self.items.slice(from, from + count));
-    if (dequeEraseAt === from) {
-      self.splice(from, count);
-      return;
-    }
-    self.editPositions(dequeEraseAt, count, 0, from === 0);
-    self.items.splice(from, count);
-    self.bindElements(0, self.length);
+    if (this.kind === 'deque') self.removeDequeValues(from, count, deque?.position ?? from, deque?.side ?? 'back');
+    else self.splice(from, count);
   }
 
   /** Constructs `count` elements at the end, reallocating a vector first if needed, as `resize` does. */
@@ -236,11 +238,11 @@ export class SequenceEditor {
     } else if (this.kind === 'deque' && from <= Math.floor((items.length - count) / 2)) {
       // A deque shifts the elements before the erased ones when they are fewer.
       for (let index = from - 1; index >= 0; index--) this.moveAt(frame, items, index + count, items[index]);
-      this.destroyRange(frame, self, 0, count, from);
+      this.destroyRange(frame, self, 0, count, { position: from, side: 'front' });
     } else {
       for (let index = to; index < items.length; index++) this.moveAt(frame, items, index - count, items[index]);
       const tail = items.length - count;
-      this.destroyRange(frame, self, tail, count, this.kind === 'deque' ? from : tail);
+      this.destroyRange(frame, self, tail, count, { position: from, side: 'back' });
       if (this.kind === 'vector') self.finishVectorEdit(from);
     }
   }
@@ -455,12 +457,14 @@ export class SequenceEditor {
     else {
       this.withTemporaryElement(frame, make(), (temporary) => {
         if (at < length - at) {
-          items.unshift(this.moveConstruct(frame, items[0]));
+          const first = this.moveConstruct(frame, items[0]);
           self.editPositions(at, 0, 1, true);
+          items.unshift(first);
           for (let index = 1; index < at; index++) this.moveAt(frame, items, index, items[index + 1]);
         } else {
-          items.push(this.moveConstruct(frame, items[length - 1]));
+          const last = this.moveConstruct(frame, items[length - 1]);
           self.editPositions(at, 0, 1);
+          items.push(last);
           for (let index = length - 2; index >= at; index--) this.moveAt(frame, items, index + 1, items[index]);
         }
         self.bindElements(0, self.length);
