@@ -19,9 +19,9 @@ import { setNativeArrayStorage } from './nativeArrayStorage';
 import { toKey } from './operators';
 import { arrayIsShared, share } from './places';
 import './splInterfaces';
-import { rt } from './runtime';
+import { PhpThrow, rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
-import { type Key, NativeValueIndex, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
+import { dropped, type Key, NativeValueIndex, PhpArray, type PhpClass, PhpObject, Ref, type Value } from './values';
 
 const STD_PROP_LIST = 1;
 const ARRAY_AS_PROPS = 2;
@@ -142,7 +142,7 @@ export class ArrayStorage {
       this.writable().append(share(value));
       return;
     }
-    this.mutateOffset(key, 'access', className, (array, offset) => array.setSlot(offset, share(value)), warning);
+    this.mutateOffset(key, 'access', className, (array, offset) => this.replaceOffset(array, offset, value), warning);
   }
 
   deleteOffset(key: Value, className: string): void {
@@ -164,6 +164,30 @@ export class ArrayStorage {
     };
     if (warning) update(warning);
     else withOperandWarnings(update);
+  }
+
+  private replaceOffset(array: PhpArray, offset: Key, value: Value): void {
+    const replacement = share(value);
+    const previous = array.getSlot(offset);
+    if (previous === null || typeof previous !== 'object') {
+      array.setSlot(offset, replacement);
+      return;
+    }
+    const runtime = rt();
+    runtime.held.push(replacement);
+    try {
+      withCleanupExceptions(runtime, (capture) => {
+        try {
+          dropped(array.releaseSlot(offset));
+        } catch (error) {
+          if (!(error instanceof PhpThrow)) throw error;
+          capture(error);
+        }
+        this.writable().setSlot(offset, replacement);
+      });
+    } finally {
+      runtime.held.pop();
+    }
   }
 
   writable(): PhpArray {

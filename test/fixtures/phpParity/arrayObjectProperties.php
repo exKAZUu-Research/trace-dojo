@@ -84,3 +84,23 @@ try {
     echo $error->getMessage(), "\n";
 }
 var_dump($getter->getArrayCopy());
+
+class ThrowingArraySetting {
+    public function __destruct() {
+        echo 'release;';
+        throw new Exception('saved');
+    }
+}
+foreach (['ArrayObject', 'ArrayIterator'] as $class) {
+    foreach (['property', 'offset', 'method'] as $access) {
+        $data = new $class(['item' => new ThrowingArraySetting], $class::ARRAY_AS_PROPS);
+        try {
+            if ($access === 'property') $data->item = 5;
+            elseif ($access === 'offset') $data['item'] = 5;
+            else $data->offsetSet('item', 5);
+        } catch (Exception $error) {
+            echo $error->getMessage(), ';';
+        }
+        echo json_encode($data->getArrayCopy()), "\n";
+    }
+}

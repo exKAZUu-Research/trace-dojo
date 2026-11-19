@@ -450,6 +450,24 @@ test('string offset padding stops at the string limit before allocating', () => 
   expect(execution.kind === 'executed' && execution.stdout).toMatch(/^\nFatal error: Allowed memory size/);
 });
 
+test.each(['ArrayObject', 'ArrayIterator'])('finishes %s property replacement after the destructor runs', (name) => {
+  const execution = run(`<?php
+class ReplacedSetting {
+    function __destruct() {
+        global $settings, $releasing;
+        echo 'drop;';
+        if ($releasing) return;
+        $releasing = true;
+        $settings->item = 20;
+    }
+}
+$releasing = false;
+$settings = new ${name}(['item' => new ReplacedSetting], ${name}::ARRAY_AS_PROPS);
+$settings->item = 5;
+echo json_encode($settings->getArrayCopy());`);
+  expect(execution).toMatchObject({ kind: 'executed', stdout: 'drop;{"item":5}' });
+});
+
 test.each(['<?php echo "hello"; declare(strict_types=1);', '<?php function f() {} declare(strict_types=1);'])(
   'rejects a late strict_types declaration before execution: %s',
   (source) => {
