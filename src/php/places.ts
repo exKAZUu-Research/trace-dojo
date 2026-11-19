@@ -54,18 +54,36 @@ export interface Place {
   writeAfterFailedIncrement?(value: Value): void;
   /** Warns that the place does not exist, as a read-modify-write (`++`, `.=`) of it does, creating what PHP creates. */
   warnUndefined?(warning?: UpdateWarning): boolean | void;
-  /** Whether the fetched non-overloaded slot still exists, without invoking user getters. */
-  hasSlot?(): boolean;
+  /** Whether a no-op inc/dec write should still store, without invoking user getters. */
+  hasSlot?(interrupted?: boolean): boolean;
   /** The value as `isset` and `??` read it, asking `__isset` or `offsetExists` first; undefined when unset. */
   getForIsset?(): Value | undefined;
 }
 
-export function hasPropertySlot(object: PhpObject, name: string, decl: PropDecl | undefined): boolean {
-  return Boolean(decl) || object.props.has(name) || Boolean(object.cls.findMethod('__get'));
+export function isDynamicSlot(object: PhpObject, name: string, decl: PropDecl | undefined): boolean {
+  return !decl && object.props.has(name);
 }
 
-export function storeIncrement(place: Place, old: Value, updated: Value, detached: boolean): Value {
-  if (detached || (updated === old && place.hasSlot?.() === false)) return updated;
+export function hasPropertySlot(
+  object: PhpObject,
+  name: string,
+  decl: PropDecl | undefined,
+  fetchedDynamic: boolean,
+  interrupted = false
+): boolean {
+  if (fetchedDynamic) return object.props.has(name);
+  if (decl && !decl.hooks) return true;
+  return !interrupted;
+}
+
+export function storeIncrement(
+  place: Place,
+  old: Value,
+  updated: Value,
+  detached: boolean,
+  interrupted = false
+): Value {
+  if (detached || (updated === old && place.hasSlot?.(interrupted) === false)) return updated;
   return place.set(updated);
 }
 

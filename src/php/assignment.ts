@@ -42,6 +42,7 @@ import {
   type CompoundRead,
   ElementPlace,
   hasPropertySlot,
+  isDynamicSlot,
   type NestMode,
   type Place,
   type PlaceOperation,
@@ -454,7 +455,6 @@ class StaticPlace implements Place {
 }
 
 // code-gauge-allow functionNcss 38 -- Keeps the property lookup shared across all place operations.
-// code-gauge-allow functionCognitiveComplexity 16 -- Shares the receiver and property lookup across ordinary access modes.
 function propPlace(object: PhpObject, name: string, unbound = false): Place {
   const scope = rt().frame.scope;
   const storage = arrayObjectProperty(object, name, scope, undefined, unbound);
@@ -471,10 +471,11 @@ function propPlace(object: PhpObject, name: string, unbound = false): Place {
     const slot = object.props.get(lookup(false)?.key ?? name);
     return slot instanceof Ref && slot.isRef ? slot : undefined;
   };
+  let fetchedDynamic = false;
   return {
     unbound,
     get: (operation) => {
-      if (operation) lookup(true);
+      fetchedDynamic = isDynamicSlot(object, name, lookup(Boolean(operation)));
       return readPropertyPlace(object, name, scope, operation);
     },
     fetchCompound(warning) {
@@ -493,7 +494,7 @@ function propPlace(object: PhpObject, name: string, unbound = false): Place {
     ref: () => propRef(object, name, scope),
     unset: () => unsetProp(object, name, scope),
     declaration: () => lookup(false),
-    hasSlot: () => hasPropertySlot(object, name, lookup(false)),
+    hasSlot: (interrupted) => hasPropertySlot(object, name, lookup(false), fetchedDynamic, interrupted),
     reference,
     typeSources: () => reference()?.typeOwners(),
     getForIsset: () => readProp(object, name, scope, 'coalesce'),
@@ -1277,6 +1278,8 @@ export function applyOperator(op: string, left: Value, right: Value, pending?: P
   throw new Error(`Unknown operator ${op}`);
 }
 
+const INTERRUPTED_NULL = Symbol('interrupted null decrement');
+
 export function incDec(e: Extract<Expr, { k: 'incdec' }>): Value {
   return withOperandWarnings((warning) => incrementPlace(e, warning));
 }
@@ -1297,22 +1300,26 @@ function incrementPlace(e: Extract<Expr, { k: 'incdec' }>, warning: UpdateWarnin
     old ??= null;
   }
   const updated = withIncrementCleanup(place, old, () => incrementedValue(old, e.inc, warning));
-  if (updated === undefined) return old;
-  if (typeof old === 'bigint' && typeof updated === 'number') checkIntOverflow(place, e.inc);
-  const stored = storeIncrement(place, old, updated, writeDetached);
+  const interrupted = updated === INTERRUPTED_NULL;
+  const next = interrupted ? null : updated;
+  if (typeof old === 'bigint' && typeof next === 'number') checkIntOverflow(place, e.inc);
+  const stored = storeIncrement(place, old, next, writeDetached, interrupted);
   return e.prefix ? stored : old;
 }
 
 // code-gauge-allow functionCognitiveComplexity 23 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
-function incrementedValue(old: Value, increment: boolean, warning: UpdateWarning): Value | undefined {
+function incrementedValue(old: Value, increment: boolean, warning: UpdateWarning): Value | typeof INTERRUPTED_NULL {
   let updated: Value;
   if (typeof old === 'bigint') updated = increment ? arithmetic('+', old, 1n) : arithmetic('-', old, 1n);
   else if (typeof old === 'number') updated = increment ? old + 1 : old - 1;
   else if (old === null) {
     if (increment) updated = 1n;
     else {
-      warning(() => warn('Decrement on type null has no effect, this will change in the next major version of PHP'));
-      updated = null;
+      return warning(() =>
+        warn('Decrement on type null has no effect, this will change in the next major version of PHP')
+      )
+        ? null
+        : INTERRUPTED_NULL;
     }
   } else if (typeof old === 'boolean') {
     warn(

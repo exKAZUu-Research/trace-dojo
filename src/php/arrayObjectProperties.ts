@@ -103,6 +103,10 @@ class ArrayObjectProperty implements Place {
     return this.overrides('offsetget') ? this : this.element();
   }
 
+  hasSlot(interrupted = false): boolean {
+    return !interrupted;
+  }
+
   writeAfterFailedIncrement(value: Value): void {
     if (!this.overrides('offsetset')) this.storage.setOffset(this.name, value, this.object.cls.name);
   }

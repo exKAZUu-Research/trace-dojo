@@ -3153,6 +3153,24 @@ try { $p4->x--; } catch (Exception $e) {}
 restore_error_handler();
 echo 'nullDynUnset:' . json_encode($p4) . "\n";
 
+class MagicGetOnly { function __get($n) { echo 'get;'; return null; } }
+$p5 = new MagicGetOnly();
+@$p5->x = null;
+set_error_handler(function () use ($p5) { unset($p5->x); throw new Exception('e'); });
+try { $p5->x--; } catch (Exception $e) {}
+restore_error_handler();
+echo 'magicDynUnset:' . json_encode($p5) . "\n";
+
+class MagicGetSet {
+  function __get($n) { echo 'get;'; return null; }
+  function __set($n, $v) { echo 'set;'; }
+}
+$p6 = new MagicGetSet();
+set_error_handler(function () { throw new Exception('e'); });
+try { $p6->x--; } catch (Exception $e) { echo 'caught;'; }
+restore_error_handler();
+echo "\n";
+
 class ThrowOnReset { function __destruct() { throw new Exception('d'); } }
 $ao5 = new ArrayObject([], ArrayObject::ARRAY_AS_PROPS);
 set_error_handler(function () use ($ao5) { $ao5['x'] = new ThrowOnReset(); return true; });
@@ -3184,6 +3202,8 @@ echo 'aoResetThrow:' . $chain . ':' . json_encode($ao5->getArrayCopy()) . "\n";
       'aoRef:[5,1,2]',
       'propUnsetThrow:[{"x":null},{"x":null}]',
       'nullDynUnset:{}',
+      'magicDynUnset:{}',
+      'get;caught;',
       'aoResetThrow:d->h:{"x":1,"y":2}',
       '',
     ].join('\n'),
