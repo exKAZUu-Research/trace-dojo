@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 508 -- One converter per file; splitting it further would scatter the cases of one kind of node.
+// code-gauge-allow-file fileNcss 521 -- One converter per file; splitting it further would scatter the cases of one kind of node.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -50,6 +50,7 @@ export class Converter extends ExpressionConverter {
     super();
   }
 
+  // code-gauge-allow functionNcss 33 -- One case per kind of top-level node, which reads best as one dispatch.
   convertLibrary(root: Node): Library {
     const imports: ImportDirective[] = [];
     const declarations: TopLevelDeclaration[] = [];

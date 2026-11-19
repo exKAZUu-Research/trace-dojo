@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 426 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 450 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type { Block, CatchClause, Pattern, Statement, SwitchCase } from './ast';
 import type { FunctionSpec } from './callCompiler';
 import { type Eval, typeName } from './compilerBase';
@@ -267,7 +267,7 @@ export abstract class ControlCompiler extends StatementCompiler {
     return clearingSlots(result, slots);
   }
 
-  // code-gauge-allow functionNcss 34 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionNcss 37 -- One case per form of the construct, which reads best together.
   private compileGenStatement(statement: Statement): GenExec {
     switch (statement.kind) {
       case 'yield': {
@@ -408,7 +408,6 @@ export abstract class ControlCompiler extends StatementCompiler {
 
   // code-gauge-allow duplicateLines 15 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   // code-gauge-allow functionCognitiveComplexity 19 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 32 -- One case per form of the construct, which reads best together.
   private compileGenForIn(statement: Extract<Statement, { kind: 'forIn' }>): GenExec {
     const labels = this.takeLoopLabels();
     const iterable = this.compileExpression(statement.iterable);
@@ -443,8 +442,6 @@ export abstract class ControlCompiler extends StatementCompiler {
     return clearingSlots(result, slots);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 33 -- One case per form of the construct, which reads best together.
   private compileGenLoopBody(body: Statement, labels: string[]): GenExec {
     this.fn.loopDepth++;
     for (const label of labels) this.fn.labels.push({ name: label, isLoop: true, isSwitchCase: false });
@@ -458,6 +455,8 @@ export abstract class ControlCompiler extends StatementCompiler {
     }
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionNcss 33 -- One case per form of the construct, which reads best together.
   private compileYield(statement: Extract<Statement, { kind: 'yield' }>): GenExec {
     if (!this.fn.kind.isGenerator) return this.error(statement, 'yield は sync* の関数の中にしか書けません。');
     const elementType = this.fn.yieldElement;

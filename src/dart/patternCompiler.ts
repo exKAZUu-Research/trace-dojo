@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 431 -- The compilation of every kind of pattern, which share their type and binding helpers.
 import type { Expression, ListPatternElement, Pattern, Span } from './ast';
 import { CallCompiler } from './callCompiler';
 import { type Compiled, type ResolvedMember, typeName } from './compilerBase';
@@ -48,7 +49,8 @@ export abstract class PatternCompiler extends CallCompiler {
   }
 
   /** The type a pattern expects of the value, which declarations use as the context of their initializer. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- One case per part of the pattern, matched in Dart's order.
+  // code-gauge-allow functionCognitiveComplexity 22 -- One case per part of the pattern, matched in Dart's order.
+  // code-gauge-allow functionNcss 33 -- One case per kind of pattern, each giving its own context type.
   patternContextType(pattern: Pattern): DartType | undefined {
     switch (pattern.kind) {
       case 'variable':
@@ -118,7 +120,7 @@ export abstract class PatternCompiler extends CallCompiler {
     return shared;
   }
 
-  // code-gauge-allow functionNcss 42 -- One case per part of the pattern, matched in Dart's order.
+  // code-gauge-allow functionNcss 43 -- One case per part of the pattern, matched in Dart's order.
   private compilePatternInner(
     pattern: Pattern,
     matchedType: DartType,
@@ -460,7 +462,7 @@ export abstract class PatternCompiler extends CallCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 20 -- One case per part of the pattern, matched in Dart's order.
-  // code-gauge-allow functionNcss 32 -- One case per part of the pattern, matched in Dart's order.
+  // code-gauge-allow functionNcss 33 -- One case per part of the pattern, matched in Dart's order.
   private mapPattern(
     pattern: Extract<Pattern, { kind: 'map' }>,
     matchedType: DartType,

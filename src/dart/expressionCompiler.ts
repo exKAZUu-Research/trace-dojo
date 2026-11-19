@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 846 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 858 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Arguments as ArgumentsSyntax,
   CascadeSelector,

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 912 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 927 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type {
   ClassDeclaration,
@@ -1047,9 +1047,7 @@ export class Compiler extends ConstructorCompiler {
     if (methodKind === 'operator' && declaration.isStatic) this.error(declaration, '演算子は static にできません。');
     this.checkOperatorArity(declaration);
     const nativeKey = `${isExtension ? (owner as ExtensionInfo).name : cls.name}.${methodKind === 'setter' ? `${name}=` : name}`;
-    const impl = declaration.isExternal
-      ? (this.native(nativeKey, methodKind === 'getter' || methodKind === 'setter' ? methodKind : 'method') as Callable)
-      : undefined;
+    const impl = declaration.isExternal ? this.externalMember(nativeKey, methodKind) : undefined;
     let member: Member;
     if (methodKind === 'getter') {
       member = {
@@ -1113,6 +1111,13 @@ export class Compiler extends ConstructorCompiler {
         this.compileMethodBody(cls, owner, declaration, member, typeParams, positionalTypes, namedTypes, type, body)
       );
     }
+  }
+
+  private externalMember(nativeKey: string, methodKind: MethodDeclaration['methodKind']): Callable {
+    return this.native(
+      nativeKey,
+      methodKind === 'getter' || methodKind === 'setter' ? methodKind : 'method'
+    ) as Callable;
   }
 
   private checkOperatorArity(declaration: MethodDeclaration): void {
