@@ -259,8 +259,97 @@ abstract final class String implements Comparable<String>, Pattern {
 final class Runes extends Iterable<int> {
   final String string;
   Runes(this.string);
-  external Iterator<int> get iterator;
-  external int get last;
+  RuneIterator get iterator => RuneIterator(string);
+  int get last {
+    if (string.length == 0) throw StateError('No elements.');
+    int length = string.length;
+    int code = string.codeUnitAt(length - 1);
+    if (_isTrailSurrogate(code) && string.length > 1) {
+      int previousCode = string.codeUnitAt(length - 2);
+      if (_isLeadSurrogate(previousCode)) return _combineSurrogatePair(previousCode, code);
+    }
+    return code;
+  }
+}
+
+bool _isLeadSurrogate(int code) => (code & 0xFC00) == 0xD800;
+bool _isTrailSurrogate(int code) => (code & 0xFC00) == 0xDC00;
+int _combineSurrogatePair(int start, int end) => 0x10000 + ((start & 0x3FF) << 10) + (end & 0x3FF);
+
+final class RuneIterator implements Iterator<int> {
+  final String string;
+  int _position;
+  int _nextPosition;
+  int _currentCodePoint = -1;
+  RuneIterator(String string) : this.string = string, _position = 0, _nextPosition = 0;
+  RuneIterator.at(String string, int index) : string = string, _position = index, _nextPosition = index {
+    RangeError.checkValueInInterval(index, 0, string.length);
+    _checkSplitSurrogate(index);
+  }
+  void _checkSplitSurrogate(int index) {
+    if (index > 0 && index < string.length && _isLeadSurrogate(string.codeUnitAt(index - 1)) && _isTrailSurrogate(string.codeUnitAt(index))) {
+      throw ArgumentError('Index inside surrogate pair: ' + index.toString());
+    }
+  }
+  int get rawIndex => (_position != _nextPosition) ? _position : -1;
+  void set rawIndex(int rawIndex) {
+    IndexError.check(rawIndex, string.length, indexable: string, name: "rawIndex");
+    reset(rawIndex);
+    moveNext();
+  }
+  void reset([int rawIndex = 0]) {
+    RangeError.checkValueInInterval(rawIndex, 0, string.length, "rawIndex");
+    _checkSplitSurrogate(rawIndex);
+    _position = _nextPosition = rawIndex;
+    _currentCodePoint = -1;
+  }
+  int get current => _currentCodePoint;
+  int get currentSize => _nextPosition - _position;
+  String get currentAsString {
+    if (_position == _nextPosition) return "";
+    if (_position + 1 == _nextPosition) return string[_position];
+    return string.substring(_position, _nextPosition);
+  }
+  bool moveNext() {
+    _position = _nextPosition;
+    if (_position == string.length) {
+      _currentCodePoint = -1;
+      return false;
+    }
+    int codeUnit = string.codeUnitAt(_position);
+    int nextPosition = _position + 1;
+    if (_isLeadSurrogate(codeUnit) && nextPosition < string.length) {
+      int nextCodeUnit = string.codeUnitAt(nextPosition);
+      if (_isTrailSurrogate(nextCodeUnit)) {
+        _nextPosition = nextPosition + 1;
+        _currentCodePoint = _combineSurrogatePair(codeUnit, nextCodeUnit);
+        return true;
+      }
+    }
+    _nextPosition = nextPosition;
+    _currentCodePoint = codeUnit;
+    return true;
+  }
+  bool movePrevious() {
+    _nextPosition = _position;
+    if (_position == 0) {
+      _currentCodePoint = -1;
+      return false;
+    }
+    int position = _position - 1;
+    int codeUnit = string.codeUnitAt(position);
+    if (_isTrailSurrogate(codeUnit) && position > 0) {
+      int prevCodeUnit = string.codeUnitAt(position - 1);
+      if (_isLeadSurrogate(prevCodeUnit)) {
+        _position = position - 1;
+        _currentCodePoint = _combineSurrogatePair(prevCodeUnit, codeUnit);
+        return true;
+      }
+    }
+    _position = position;
+    _currentCodePoint = codeUnit;
+    return true;
+  }
 }
 
 abstract interface class StringSink {
@@ -538,6 +627,10 @@ class IndexError extends ArgumentError implements RangeError {
       : this.indexable = indexable, this.length = length ?? indexable.length, super.value(invalidValue, name, message ?? "Index out of range");
   IndexError.withLength(int invalidValue, this.length, {this.indexable, String? name, String? message})
       : super.value(invalidValue, name, message ?? "Index out of range");
+  static int check(int index, int length, {Object? indexable, String? name, String? message}) {
+    if (index < 0 || index >= length) throw IndexError.withLength(index, length, indexable: indexable, name: name ?? "index", message: message);
+    return index;
+  }
   String get _errorName => "RangeError";
   String get _errorExplanation {
     int invalidValue = this.invalidValue;
@@ -1909,6 +2002,19 @@ abstract interface class RegExpMatch implements Match {
   external Pattern get pattern;
   external String? namedGroup(String name);
   external Iterable<String> get groupNames;
+}
+
+/** The VM's iterables of allMatches, which print as iterables, not lists. */
+final class _AllMatchesIterable extends Iterable<RegExpMatch> {
+  final List<RegExpMatch> _matches;
+  _AllMatchesIterable._(this._matches);
+  Iterator<RegExpMatch> get iterator => _matches.iterator;
+}
+
+final class _StringAllMatchesIterable extends Iterable<Match> {
+  final List<Match> _matches;
+  _StringAllMatchesIterable._(this._matches);
+  Iterator<Match> get iterator => _matches.iterator;
 }
 
 class _RegExp extends RegExp {

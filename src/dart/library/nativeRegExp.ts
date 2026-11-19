@@ -158,7 +158,8 @@ define('RegExp.allMatches', (runtime, receiver, [input, start = 0n]) => {
   if (at < 0n || at > BigInt(text.length))
     runtime.throwError('RangeError', 'range', [at, 0n, BigInt(text.length), 'start']);
   const matches = allMatchesOf(runtime, receiver, text, index(at)).map((match) => newMatch(runtime, match));
-  return newList(runtime, interfaceType(runtime.links.classNamed('RegExpMatch')), matches, false);
+  const list = newList(runtime, interfaceType(runtime.links.classNamed('RegExpMatch')), matches, false);
+  return runtime.links.construct(runtime, '_AllMatchesIterable', '_', [list]);
 });
 define('RegExp.matchAsPrefix', (runtime, receiver, [input, start = 0n]) => {
   const text = stringArg(runtime, input, 'string');

@@ -320,7 +320,8 @@ define('String.allMatches', (runtime, receiver, [input, start = 0n]) => {
   const matches = matchesOf(runtime, receiver, text, index(at)).map((match) =>
     runtime.links.construct(runtime, '_StringMatch', '', [BigInt(match.start), text, receiver])
   );
-  return newList(runtime, interfaceType(runtime.links.classNamed('Match')), matches, false);
+  const list = newList(runtime, interfaceType(runtime.links.classNamed('Match')), matches, false);
+  return runtime.links.construct(runtime, '_StringAllMatchesIterable', '_', [list]);
 });
 define('String.matchAsPrefix', (runtime, receiver, [input, start = 0n]) => {
   const text = stringArg(runtime, input, 'string');
@@ -350,22 +351,6 @@ define('String.fromCharCode', (runtime, _receiver, [code]) => {
   return String.fromCodePoint(value);
 });
 define('String.fromEnvironment', (_runtime, _receiver, _args, namedArgs) => named(namedArgs, 'defaultValue', ''));
-
-// Runes
-
-define('Runes.iterator', (runtime, receiver) => {
-  const text = runtime.getProperty(receiver, 'string', undefined) as string;
-  // oxlint-disable-next-line typescript/no-misused-spread -- Runes are code points, which spreading a string gives.
-  const codes = [...text].map((char) => BigInt(char.codePointAt(0) as number));
-  return runtime.links.listIterator(runtime, newList(runtime, interfaceType(coreTypes.int), codes, false));
-});
-define('Runes.last', (runtime, receiver) => {
-  const text = runtime.getProperty(receiver, 'string', undefined) as string;
-  // oxlint-disable-next-line typescript/no-misused-spread -- Runes are code points, which spreading a string gives.
-  const chars = [...text];
-  if (chars.length === 0) runtime.throwError('StateError', '', ['No element']);
-  return BigInt((chars.at(-1) as string).codePointAt(0) as number);
-});
 
 // StringBuffer
 
