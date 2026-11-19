@@ -115,14 +115,15 @@ export function destroyTemporaries(frame: Frame, mark: number): void {
 
 /**
  * Makes the elements of an array, or the members of an aggregate, in order, keeping the ones made reachable. An
- * exception destroys the ones already made, the last first (C++20 [except.ctor]).
+ * exception destroys the ones already made in the owner's destruction order (C++20 [except.ctor]).
  */
 export function makeEach(
   frame: Frame,
   count: number,
   make: (index: number) => Value,
   destroyerAt: (index: number) => ((frame: Frame, value: Value) => void) | undefined,
-  existing?: Value[]
+  existing?: Value[],
+  order: 'forward' | 'reverse' = 'reverse'
 ): Value[] {
   const values = existing ?? [];
   const mark = frame.pending.length;
@@ -136,11 +137,12 @@ export function makeEach(
     return values;
   } catch (error) {
     if (error instanceof CppException) {
-      for (index--; index >= 0; index--) {
-        const value = values[index];
-        destroyerAt(index)?.(frame, value);
+      for (let step = 0; step < index; step++) {
+        const at = order === 'forward' ? step : index - 1 - step;
+        const value = values[at];
+        destroyerAt(at)?.(frame, value);
         endLifetime(value);
-        values[index] = UNINIT;
+        values[at] = UNINIT;
       }
     }
     throw error;

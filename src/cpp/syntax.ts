@@ -61,8 +61,3 @@ export function hasToken(node: Syntax, token: string): boolean {
 export function tokenOf(node: Syntax, tokens: readonly string[]): string | undefined {
   return node.all.find((child) => !child.isNamed && tokens.includes(child.type))?.type;
 }
-
-/** The named children of a node that are not in any field, such as the specifiers of a declaration. */
-export function unfieldedChildren(node: Syntax): Syntax[] {
-  return node.children.filter((child) => child.field === undefined);
-}

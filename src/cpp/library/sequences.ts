@@ -122,7 +122,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
     operator: (compiler, operator, operands, row) =>
       sequenceOperator(compiler, cls, element, kind, operator, operands, row, editor, ops),
     listInitializer: (compiler, elements, row) =>
-      sequenceList(compiler, element, elements, row, make, fixedLength, ops),
+      sequenceList(compiler, element, elements, row, make, fixedLength, editor),
     defaultInitializer: kind === 'array' ? arrayDefault : undefined,
     memberCall: (compiler, object, member, args, row) => {
       checkElementRequirement(compiler, { kind, element, ops }, member, args, row);
@@ -139,14 +139,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
     copy: (frame, source) => {
       const items = (source as SequenceValue).items;
       reserve(frame, items.length);
-      return make(
-        makeEach(
-          frame,
-          items.length,
-          (index) => ops().copy(frame, items[index]),
-          () => ops().destroy
-        )
-      );
+      return make(editor.build(frame, items.length, (index) => ops().copy(frame, items[index])));
     },
     assign: (frame, target, source) => {
       const to = target as SequenceValue;
@@ -177,14 +170,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
         checkVectorLength(frame, library, kind, element, count);
         const n = asNumber(count);
         reserve(frame, n);
-        return make(
-          makeEach(
-            frame,
-            n,
-            () => ops().make(frame),
-            () => ops().destroy
-          )
-        );
+        return make(editor.build(frame, n, () => ops().make(frame)));
       },
       {
         isExplicit: true,
@@ -218,14 +204,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
           const n = asNumber(count);
           reserve(frame, n);
           const source = (value as Ptr).read();
-          return make(
-            makeEach(
-              frame,
-              n,
-              () => ops().copy(frame, source),
-              () => ops().destroy
-            )
-          );
+          return make(editor.build(frame, n, () => ops().copy(frame, source)));
         },
         { uses: (row) => requireElementCopy(library.compiler, element, row) }
       ),
@@ -241,12 +220,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
               const source = range.read(first, last);
               reserve(frame, source.values.length);
               return make(
-                makeEach(
-                  frame,
-                  source.values.length,
-                  (index) => source.construct(frame, source.values[index]),
-                  () => ops().destroy
-                )
+                editor.build(frame, source.values.length, (index) => source.construct(frame, source.values[index]))
               );
             },
             { uses: (row) => library.compiler.requireObjectUse(element, 'destroy', row) }
@@ -957,7 +931,7 @@ function sequenceList(
   row: number,
   make: (items: Value[]) => SequenceValue,
   fixedLength: number | undefined,
-  ops: () => ElementOperations
+  editor: SequenceEditor
 ): Eval<Value> | undefined {
   if (fixedLength !== undefined) {
     if (elements.length > fixedLength)
@@ -987,21 +961,14 @@ function sequenceList(
   }
   if (elements.length > 0) requireElementCopy(compiler, element, row);
   const run: Eval<Value> = (frame) => {
-    const { hasEffects, copy, destroy } = ops();
+    const { hasEffects, copy, destroy } = editor.ops;
     if (!hasEffects) return holdAll(frame, inits, (values) => make(values as Value[]));
     const temporaries = inits.map((init) => {
       const object = init(frame);
       if (destroy) frame.temporaries.push({ object, destroy });
       return object;
     });
-    return make(
-      makeEach(
-        frame,
-        temporaries.length,
-        (index) => copy(frame, temporaries[index]),
-        () => destroy
-      )
-    );
+    return make(editor.build(frame, temporaries.length, (index) => copy(frame, temporaries[index])));
   };
   listElements.set(run, inits);
   return run;

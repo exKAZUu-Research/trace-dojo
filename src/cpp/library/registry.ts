@@ -43,11 +43,6 @@ import { asNumber, generic, native } from './support';
 import { turtleClass } from './turtle';
 import { hasLocaleCtypeOverload, headerOf, isVisible } from './visibility';
 
-/** Looks a name up in namespace `std`. */
-export function lookupStd(library: Library, name: string): Entity | undefined {
-  return library.std(name);
-}
-
 /** A class template of the library, such as `std::vector`, which template arguments instantiate. */
 export interface LibraryTemplate {
   name: string;

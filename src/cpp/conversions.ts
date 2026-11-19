@@ -12,7 +12,8 @@ import {
   type Type,
   unqualified,
 } from './types';
-import { NULL_PTR, Ptr, type Value } from './values';
+import type { Ptr } from './values';
+import { NULL_PTR } from './values';
 
 /** The ranks of implicit conversion sequences, better first. */
 export const enum Rank {
@@ -312,9 +313,4 @@ export function bestOf<T>(candidates: T[], compare: (a: T, b: T) => number): T |
   if (!best) return undefined;
   const found = best;
   return candidates.every((other) => other === found || compare(found, other) > 0) ? found : undefined;
-}
-
-/** Whether a value read from storage is a pointer that is null. */
-export function isNullPointer(value: Value): boolean {
-  return value instanceof Ptr && value.isNull;
 }

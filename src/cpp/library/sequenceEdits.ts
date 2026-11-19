@@ -25,8 +25,19 @@ export class SequenceEditor {
     private readonly operations: () => ElementOperations
   ) {}
 
-  private get ops(): ElementOperations {
+  get ops(): ElementOperations {
     return this.operations();
+  }
+
+  build(frame: Frame, count: number, make: (index: number) => Value): Value[] {
+    return makeEach(
+      frame,
+      count,
+      make,
+      () => this.ops.destroy,
+      undefined,
+      this.kind === 'vector' ? 'reverse' : 'forward'
+    );
   }
 
   /** Destroys elements: a vector from its last, a deque and a list from their first. */
@@ -46,7 +57,7 @@ export class SequenceEditor {
   append(frame: Frame, self: SequenceValue, count: number, make: () => Value): void {
     const length = self.items.length;
     if (this.kind === 'vector' && length + count > self.capacity) {
-      const made = makeEach(frame, count, make, () => this.ops.destroy);
+      const made = this.build(frame, count, make);
       this.reallocate(frame, self, recommend(self, length + count), length, made);
     } else for (let index = 0; index < count; index++) self.append(make());
   }

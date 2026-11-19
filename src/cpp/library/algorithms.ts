@@ -318,6 +318,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const info = writableRangeAt(args, 0);
     if (!info || args.length !== 3 || args[2].type.kind !== 'class' || args[2].type.cls.library?.kind !== 'engine')
       return;
+    if (isConstType(args[2].type)) return;
     checkCategory('shuffle', info, 'randomAccess', args[0].row);
     const engineType = args[2].isLvalue ? referenceTo(args[2].type) : args[2].type;
     const ops = elementOperations(compiler(), unqualified(info.element), args[0].row);

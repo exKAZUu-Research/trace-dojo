@@ -124,6 +124,11 @@ test.each([
     3,
   ],
   [
+    'shuffling with a const engine',
+    '#include <algorithm>\n#include <random>\nint main() { int a[] = {1, 2}; const std::mt19937 engine(9);\n  std::shuffle(a, a + 2, engine); }',
+    3,
+  ],
+  [
     'copying to a const iterator',
     '#include <algorithm>\n#include <vector>\nint main() { std::vector<int> v{1}; int data[1] = {2};\n  std::copy(data, data + 1, v.cbegin()); }',
     3,

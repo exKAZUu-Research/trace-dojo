@@ -1,5 +1,4 @@
 import { CppRuntimeError } from '../errors';
-import { makeEach } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import {
   BOOL,
@@ -18,6 +17,7 @@ import { comparatorOrder } from './associative';
 import { SequenceValue } from './containerValues';
 import { type ElementOperations, elementOperations } from './elements';
 import type { Library } from './registry';
+import { SequenceEditor } from './sequenceEdits';
 import { constructElement, iteratorRange, sequenceClass } from './sequences';
 import { addMethod, constRef, native, nativeConstructor } from './support';
 import { typeKey } from './templates';
@@ -53,6 +53,7 @@ export function adapterClass(
     return elementOps;
   };
   const storageKind = storage.cls.library?.kind;
+  const editor = new SequenceEditor(storageKind === 'deque' || storageKind === 'list' ? storageKind : 'vector', ops);
   const make = (items: Value[]): SequenceValue =>
     new SequenceValue(
       items,
@@ -106,12 +107,7 @@ export function adapterClass(
   };
   const copyItems = (frame: Frame, { items }: SequenceValue): Value[] => {
     frame.runtime.reserve(items.length);
-    return makeEach(
-      frame,
-      items.length,
-      (index) => ops().copy(frame, items[index]),
-      () => ops().destroy
-    );
+    return editor.build(frame, items.length, (index) => ops().copy(frame, items[index]));
   };
   cls.operations = {
     copy: (frame, source) => make(copyItems(frame, source as SequenceValue)),
@@ -151,12 +147,7 @@ export function adapterClass(
             const source = range.read(first, last);
             frame.runtime.reserve(source.values.length);
             return fromItems(
-              makeEach(
-                frame,
-                source.values.length,
-                (index) => source.construct(frame, source.values[index]),
-                () => ops().destroy
-              )
+              editor.build(frame, source.values.length, (index) => source.construct(frame, source.values[index]))
             );
           });
         },

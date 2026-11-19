@@ -8,7 +8,6 @@ import {
   classType,
   type GlobalInfo,
   type IntName,
-  isConstType,
   pointerTo,
   referenceTo,
   type Type,
@@ -441,10 +440,6 @@ export abstract class CompilerBase {
   describeType(type: Type): string {
     return typeName(type);
   }
-
-  isConst(type: Type): boolean {
-    return isConstType(type);
-  }
 }
 
 /** The type that `auto` stands for until an initializer decides it. */
@@ -506,10 +501,4 @@ function sizedIntType(words: string[]): Type | undefined {
 function unsignedName(name: IntName): IntName {
   const names: Partial<Record<IntName, IntName>> = { short: 'ushort', int: 'uint', long: 'ulong', llong: 'ullong' };
   return names[name] ?? name;
-}
-
-/** Makes `const` the target of a type's reference or the type itself, as `const T&` or `const T`. */
-export function constOf(type: Type): Type {
-  if (type.kind === 'reference') return referenceTo(withConst(type.to));
-  return withConst(type);
 }
