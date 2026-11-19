@@ -98,10 +98,8 @@ final IOSink stderr = _StandardSink._(true);
 external Never exit(int code);
 `;
 
-/** dart:collection, as the interpreter declares it. */
-export const COLLECTION_SOURCE = String.raw`
-`;
+/** dart:collection, as the interpreter declares it, with the VM's hash maps transcribed so that their order matches. */
+export { COLLECTION_SOURCE } from './collection';
 
 /** dart:convert, as the interpreter declares it. */
-export const CONVERT_SOURCE = String.raw`
-`;
+export { CONVERT_SOURCE } from './convert';

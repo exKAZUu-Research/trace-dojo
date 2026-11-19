@@ -4,6 +4,7 @@ import {
   at,
   type Compiled,
   type Eval,
+  inferFromContext,
   inferFromSubtype,
   instantiateToBounds,
   type ResolvedMember,
@@ -25,7 +26,7 @@ import {
   interfaceType,
   isNullable,
   isSubtype,
-  makeNullable,
+  isTop,
   mentionsTypeParams,
   NEVER,
   nonNullable,
@@ -98,7 +99,7 @@ export abstract class CallCompiler extends ExpressionCompiler {
     const { callee, arguments: args, typeArguments } = expression;
     if (callee.kind === 'identifier') {
       const resolution = this.resolveName(callee.name);
-      if (!resolution) return this.error(callee, `${callee.name} という名前は定義されていません。`);
+      if (!resolution) return this.undefinedName(callee, callee.name);
       switch (resolution.kind) {
         case 'thisMember':
         case 'extensionMember': {
@@ -339,10 +340,10 @@ export abstract class CallCompiler extends ExpressionCompiler {
     const row = this.callRow(span);
     const isSuper = (receiver as { isSuper?: boolean }).isSuper === true;
     const specialType = this.specialNumericReturn(receiverType, name, args);
-    const returnType = nullAware ? makeNullable(specialType ?? bound.returnType) : (specialType ?? bound.returnType);
+    const returnType = specialType ?? bound.returnType;
     const completes = !isNeverType(bound.returnType);
     if (resolved.extension) {
-      const impl = resolved.member.impl as Callable;
+      const extensionMember = resolved.member;
       const extensionArgs = resolved.extension.typeArgs;
       const extensionTypeArgs = this.runtimeTypes(extensionArgs);
       return {
@@ -357,18 +358,24 @@ export abstract class CallCompiler extends ExpressionCompiler {
           } finally {
             frame.temporaries.pop();
           }
-          return impl(frame.runtime, value, evaluated, [...extensionTypeArgs(frame), ...bound.typeArgs(frame)], row);
+          return (extensionMember.impl as Callable)(
+            frame.runtime,
+            value,
+            evaluated,
+            [...extensionTypeArgs(frame), ...bound.typeArgs(frame)],
+            row
+          );
         },
         isConst: false,
         completes,
       };
     }
     if (isSuper) {
-      const owner = (receiver.type as InterfaceType).cls;
+      const { classAt } = this.superclassOf(span);
       return {
         type: returnType,
         run: (frame) => {
-          const member = owner.implementation(name);
+          const member = classAt(frame).implementation(name);
           if (member?.kind !== 'method')
             return frame.runtime.noSuchMethod(frame.receiver, name, 'method', { positional: [], named: undefined });
           const evaluated = bound.args(frame);
@@ -400,6 +407,8 @@ export abstract class CallCompiler extends ExpressionCompiler {
           cachedMember = cls.implementation(name);
         }
         const member = cachedMember;
+        if (name === 'call' && value instanceof DartClosure)
+          return value.call(runtime, value.receiver, evaluated, bound.typeArgs(frame), row);
         if (member?.kind === 'method')
           return (member.impl as Callable)(runtime, value, evaluated, bound.typeArgs(frame), row);
         if (member)
@@ -671,18 +680,22 @@ export abstract class CallCompiler extends ExpressionCompiler {
       signature = instantiateFunction(type, staticTypeArgs);
     } else if (type.typeParams.length > 0) {
       const fromContext = new Map<TypeParam, DartType>();
-      if (context && !isInferenceHole(context) && context.kind !== 'void') {
-        inferFromSubtype(context, type.returnType, params, fromContext, (a) => a);
+      if (context && !isInferenceHole(context) && !isTop(context)) {
+        inferFromContext(context, type.returnType, params, fromContext);
       }
       const solution = new Map<TypeParam, DartType>();
+      // Arguments other than function literals see only what the context gave; function literals, compiled after
+      // them, also see what those arguments gave.
+      let closurePass = false;
       const contextFor = (parameterType: DartType): DartType => {
         const map = new Map<TypeParam, DartType>();
         for (const param of type.typeParams) {
-          map.set(param, solution.get(param) ?? fromContext.get(param) ?? INFERENCE_HOLE);
+          map.set(param, (closurePass ? solution.get(param) : undefined) ?? fromContext.get(param) ?? INFERENCE_HOLE);
         }
         return substitute(parameterType, map);
       };
       for (const pass of [false, true]) {
+        closurePass = pass;
         for (const [index, argument] of args.positional.entries()) {
           if (isClosure(argument) !== pass) continue;
           const parameterType = type.positional[index] ?? DYNAMIC;
@@ -715,13 +728,22 @@ export abstract class CallCompiler extends ExpressionCompiler {
         if (contextual && !isInferenceHole(contextual)) return contextual;
         return defaults[index];
       });
-      // A solution outside a bound falls back to the bound, which then fails the argument check as Dart's does.
+      // A solution outside its bound moves up to the nearest supertype within it (an F-bounded `T extends
+      // Comparable<T>` takes num for ints), and otherwise to the bound, which then fails the argument check.
       staticTypeArgs = staticTypeArgs.map((argument, index) => {
         const param = type.typeParams[index];
         if (!param.bound) return argument;
-        const map = new Map(type.typeParams.map((other, at) => [other, staticTypeArgs[at]]));
-        const bound = substitute(param.bound, map);
-        return isSubtype(argument, bound) ? argument : bound;
+        const boundFor = (candidate: DartType): DartType =>
+          substitute(
+            param.bound as DartType,
+            new Map(type.typeParams.map((other, at) => [other, at === index ? candidate : staticTypeArgs[at]]))
+          );
+        if (isSubtype(argument, boundFor(argument))) return argument;
+        if (argument.kind === 'interface') {
+          for (const supertype of supertypesOf(argument))
+            if (isSubtype(supertype, boundFor(supertype))) return supertype;
+        }
+        return boundFor(argument);
       });
       signature = instantiateFunction(type, staticTypeArgs);
     }
@@ -1046,6 +1068,24 @@ export abstract class CallCompiler extends ExpressionCompiler {
     if (!member) return this.error(expression, `クラス ${cls.name} に static なメンバー ${name} がありません。`);
     return this.readStatic(member, expression);
   }
+}
+
+/** The supertypes of an interface type, nearest first along the superclass chain, then the interfaces. */
+function supertypesOf(type: InterfaceType): InterfaceType[] {
+  const result: InterfaceType[] = [];
+  const queue: InterfaceType[] = [type];
+  while (queue.length > 0) {
+    const current = queue.shift() as InterfaceType;
+    const map = new Map(current.cls.typeParams.map((param, index) => [param, current.args[index] ?? DYNAMIC]));
+    for (const supertype of current.cls.directSupertypes) {
+      const substituted = substitute(supertype, map) as InterfaceType;
+      if (!result.some((other) => other.cls === substituted.cls)) {
+        result.push(substituted);
+        queue.push(substituted);
+      }
+    }
+  }
+  return result;
 }
 
 function isClosure(expression: Expression): boolean {

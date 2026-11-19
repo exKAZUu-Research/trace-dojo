@@ -736,13 +736,20 @@ export abstract class ExpressionConverter {
   private convertRecordLiteral(node: Node): Expression {
     const positional: Expression[] = [];
     const named: NamedArgument[] = [];
-    for (const field of namedOf(node).filter((child) => child.type === 'record_field')) {
-      const label = namedOf(field).find((child) => child.type === 'label');
-      const rest = childrenOf(field).filter((child) => child.id !== label?.id);
-      const value = this.soleExpression(field, rest);
+    // A record of one field has no record_field node; its parts sit directly in the literal.
+    const children = childrenOf(node).filter(
+      (child) => child.type !== '(' && child.type !== ')' && child.type !== 'const'
+    );
+    const groups = children.some((child) => child.type === 'record_field')
+      ? children.filter((child) => child.type === 'record_field').map((field) => childrenOf(field))
+      : splitByComma(children).filter((group) => group.length > 0);
+    for (const group of groups) {
+      const label = group.find((child) => child.type === 'label');
+      const rest = group.filter((child) => child.id !== label?.id);
+      const value = this.soleExpression(node, rest);
       if (label) {
         const name = requireNode(namedOf(label)[0], label).text;
-        named.push({ name, value, ...spanOf(field) });
+        named.push({ name, value, ...spanOf(label) });
       } else {
         positional.push(value);
       }

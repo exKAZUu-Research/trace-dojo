@@ -72,6 +72,10 @@ interface Import {
 export class LibraryEnv {
   readonly declarations = new Map<string, Declaration>();
   readonly imports: Import[] = [];
+  /** Names only the interpreter's other libraries see, such as dart:core's LinkedHashMap, which dart:collection exports. */
+  readonly hiddenNames = new Set<string>();
+  /** Declarations of other libraries this library exports as its own. */
+  readonly reexports = new Map<string, Declaration>();
 
   constructor(readonly name: string) {}
 
@@ -93,10 +97,12 @@ export class LibraryEnv {
   }
 
   private lookupImported(name: string, prefix: string | undefined): Declaration | undefined {
+    const isInternal = this.name.startsWith('dart:');
     for (const entry of this.imports) {
       if (entry.prefix !== prefix) continue;
-      if (!isVisible(entry, name)) continue;
-      const found = entry.library.declarations.get(name);
+      if (!isVisible(entry, name, isInternal)) continue;
+      if (!isInternal && entry.library.hiddenNames.has(name)) continue;
+      const found = entry.library.declarations.get(name) ?? entry.library.reexports.get(name);
       if (found) return found;
     }
     return undefined;
@@ -116,8 +122,8 @@ export class LibraryEnv {
   }
 }
 
-function isVisible(entry: Import, name: string): boolean {
-  if (name.startsWith('_')) return false;
+function isVisible(entry: Import, name: string, isInternal = false): boolean {
+  if (name.startsWith('_') && !isInternal) return false;
   if (entry.show && !entry.show.has(name)) return false;
   return !entry.hide.has(name);
 }

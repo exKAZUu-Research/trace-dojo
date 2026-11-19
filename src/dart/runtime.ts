@@ -127,6 +127,8 @@ export class Runtime implements TracedRuntime<Frame> {
   globals: Cell[] = [];
   /** Canonical constants by their structure, so that equal constants are identical. */
   readonly constants = new Map<string, Value>();
+  /** The canonical tear-offs of top-level functions and static methods. */
+  readonly tearOffs = new Map<unknown, DartClosure>();
   /** The value of each constant expression evaluated so far, by the code that builds it. */
   readonly constantSites = new Map<unknown, Value>();
   allocatedSlots = 0;
@@ -227,6 +229,8 @@ export class Runtime implements TracedRuntime<Frame> {
     typeArgs: readonly DartType[],
     callRow: number | undefined
   ): Value {
+    if (name === 'call' && receiver instanceof DartClosure)
+      return receiver.call(this, receiver.receiver, args, typeArgs, callRow);
     const cls = this.classOf(receiver);
     const member = cls.implementation(name);
     if (member?.kind === 'method')
@@ -285,6 +289,17 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** A method's tear-off, which is equal to another tear-off of the same method from the same receiver. */
   tearOff(receiver: Value, member: Member & { kind: 'method' }): DartClosure {
+    // A static method's tear-off is canonical, as a top-level function's is.
+    if (member.isStatic) {
+      const existing = this.tearOffs.get(member);
+      if (existing) return existing;
+    }
+    const closure = this.newTearOff(receiver, member);
+    if (member.isStatic) this.tearOffs.set(member, closure);
+    return closure;
+  }
+
+  private newTearOff(receiver: Value, member: Member & { kind: 'method' }): DartClosure {
     const impl = member.impl as NonNullable<typeof member.impl>;
     const type = this.memberTypeFor(receiver, member);
     return new DartClosure(
@@ -300,7 +315,7 @@ export class Runtime implements TracedRuntime<Frame> {
 
   /** A member's function type with the receiver's type arguments in place of its class's type parameters. */
   memberTypeFor(receiver: Value, member: Member & { kind: 'method' }): FunctionType {
-    if (member.owner.typeParams.length === 0) return member.type;
+    if (member.owner.typeParams.length === 0 || member.isStatic) return member.type;
     const instance = asInstanceOf(this.runtimeTypeOf(receiver) as InterfaceType, member.owner);
     if (!instance) return member.type;
     const map = new Map(member.owner.typeParams.map((param, index) => [param, instance.args[index]]));

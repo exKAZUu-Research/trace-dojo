@@ -83,7 +83,7 @@ function recordToString(runtime: Runtime, record: DartRecord): string {
   if (runtime.toStringVisiting.includes(record)) return '(...)';
   const parts = record.positional.map((value) => stringOf(runtime, value));
   for (const [name, value] of record.named) parts.push(`${name}: ${stringOf(runtime, value)}`);
-  return parts.length === 1 && record.named.length === 0 ? `(${parts[0]},)` : `(${parts.join(', ')})`;
+  return `(${parts.join(', ')})`;
 }
 
 let nextIdentity = 1;

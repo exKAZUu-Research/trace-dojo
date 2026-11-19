@@ -492,7 +492,8 @@ export class Converter extends ExpressionConverter {
       parts.find((child) => child.isNamed && child.type.endsWith('signature')),
       declaration
     );
-    const span = spanOf(declaration);
+    // A member's position is its signature's, after any annotations, which is where Dart reports its errors.
+    const span = { ...spanOf(declaration), row: signature.startPosition.row };
     const headerEndRow = body ? body.row : declaration.endPosition.row;
     const initializersNode = parts.find((child) => child.type === 'initializers');
     const redirection = parts.find((child) => child.type === 'redirection');
@@ -907,7 +908,9 @@ export class Converter extends ExpressionConverter {
         const children = childrenOf(node).filter((child) => child.type !== 'return' && child.type !== ';');
         return {
           kind: 'return',
-          value: children.some((child) => child.isNamed && child.type !== 'comment')
+          value: children.some(
+            (child) => (child.isNamed && child.type !== 'comment') || child.type === 'this' || child.type === 'super'
+          )
             ? this.soleExpression(node, children)
             : undefined,
           ...span,

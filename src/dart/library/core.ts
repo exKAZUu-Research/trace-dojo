@@ -1247,6 +1247,7 @@ abstract interface class List<E> extends Iterable<E> {
   external factory List.of(Iterable<E> elements, {bool growable = true});
   external factory List.generate(int length, E Function(int index) generator, {bool growable = true});
   external factory List.unmodifiable(Iterable elements);
+  static List<T> castFrom<S, T>(List<S> source) => source.cast<T>();
   static void copyRange<T>(List<T> target, int at, List<T> source, [int? start, int? end]) {
     start ??= 0;
     end = RangeError.checkValidRange(start, end, source.length);
@@ -1404,6 +1405,7 @@ abstract interface class Set<E> extends Iterable<E> {
   external factory Set.from(Iterable elements);
   external factory Set.of(Iterable<E> elements);
   external factory Set.unmodifiable(Iterable<E> elements);
+  static Set<T> castFrom<S, T>(Set<S> source, {Set<R> Function<R>()? newSet}) => source.cast<T>();
   external Iterator<E> get iterator;
   external bool contains(Object? value);
   external bool add(E value);
@@ -1429,9 +1431,18 @@ abstract interface class Set<E> extends Iterable<E> {
   external String toString();
 }
 
-class _Set<E> extends Set<E> {
+class _Set<E> extends Set<E> implements LinkedHashSet<E> {
   _Set._() : super._base();
 }
+
+abstract final class LinkedHashSet<E> implements Set<E> {
+  factory LinkedHashSet({bool Function(E, E)? equals, int Function(E)? hashCode, bool Function(dynamic)? isValidKey}) => _newSet<E>();
+  factory LinkedHashSet.identity() => _newSet<E>();
+  factory LinkedHashSet.from(Iterable<dynamic> elements) => Set<E>.from(elements) as LinkedHashSet<E>;
+  factory LinkedHashSet.of(Iterable<E> elements) => Set<E>.of(elements) as LinkedHashSet<E>;
+}
+
+LinkedHashSet<E> _newSet<E>() => <E>{} as LinkedHashSet<E>;
 
 class _SetIterator<E> implements Iterator<E> {
   _SetIterator._();
@@ -1457,6 +1468,7 @@ abstract interface class Map<K, V> {
   external factory Map.fromIterable(Iterable iterable, {K Function(dynamic element)? key, V Function(dynamic element)? value});
   external factory Map.fromIterables(Iterable<K> keys, Iterable<V> values);
   external factory Map.fromEntries(Iterable<MapEntry<K, V>> entries);
+  static Map<K2, V2> castFrom<K, V, K2, V2>(Map<K, V> source) => source.cast<K2, V2>();
   external Map<RK, RV> cast<RK, RV>();
   external bool containsValue(Object? value);
   external bool containsKey(Object? key);
@@ -1507,9 +1519,22 @@ abstract interface class Map<K, V> {
   String toString() => _mapToString(this);
 }
 
-class _Map<K, V> extends Map<K, V> {
+class _Map<K, V> extends Map<K, V> implements LinkedHashMap<K, V> {
   _Map._() : super._base();
 }
+
+abstract final class LinkedHashMap<K, V> implements Map<K, V> {
+  factory LinkedHashMap({bool Function(K, K)? equals, int Function(K)? hashCode, bool Function(dynamic)? isValidKey}) => _newMap<K, V>();
+  factory LinkedHashMap.identity() => _newMap<K, V>();
+  factory LinkedHashMap.from(Map<dynamic, dynamic> other) => Map<K, V>.from(other) as LinkedHashMap<K, V>;
+  factory LinkedHashMap.of(Map<K, V> other) => Map<K, V>.of(other) as LinkedHashMap<K, V>;
+  factory LinkedHashMap.fromIterable(Iterable iterable, {K Function(dynamic element)? key, V Function(dynamic element)? value}) =>
+      Map<K, V>.fromIterable(iterable, key: key, value: value) as LinkedHashMap<K, V>;
+  factory LinkedHashMap.fromIterables(Iterable<K> keys, Iterable<V> values) => Map<K, V>.fromIterables(keys, values) as LinkedHashMap<K, V>;
+  factory LinkedHashMap.fromEntries(Iterable<MapEntry<K, V>> entries) => Map<K, V>.fromEntries(entries) as LinkedHashMap<K, V>;
+}
+
+LinkedHashMap<K, V> _newMap<K, V>() => <K, V>{} as LinkedHashMap<K, V>;
 
 String _mapToString(Map<Object?, Object?> m) {
   if (_isToStringVisiting(m)) return '{...}';

@@ -13,6 +13,8 @@ import './library/nativeNumbers';
 import './library/nativeStrings';
 import './library/nativeRegExp';
 import './library/nativeOthers';
+import './library/nativeConvert';
+import './library/nativeBigInt';
 import { NATIVES } from './library/nativeSupport';
 import { parseDart } from './parse';
 import { DartThrow, type LibraryLinks, type Runtime } from './runtime';
@@ -86,7 +88,14 @@ export function libraries(): Libraries {
       for (const imported of imports) env.addImport(envs.get(imported) as LibraryEnv, undefined, undefined, []);
     }
     for (const phase of ['declare', 'resolve', 'compile'] as const) {
-      if (phase === 'resolve') assignCoreTypes(envs.get('dart:core') as LibraryEnv);
+      if (phase === 'resolve') {
+        const core = envs.get('dart:core') as LibraryEnv;
+        assignCoreTypes(core);
+        for (const name of ['LinkedHashMap', 'LinkedHashSet']) {
+          core.hiddenNames.add(name);
+          (envs.get('dart:collection') as LibraryEnv).reexports.set(name, core.declarations.get(name) as never);
+        }
+      }
       for (const { compiler, syntax, uri } of compilers) {
         current = uri;
         if (phase === 'declare') compiler.declareAll(syntax);

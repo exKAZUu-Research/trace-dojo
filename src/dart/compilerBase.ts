@@ -12,6 +12,7 @@ import {
   DYNAMIC,
   type FunctionType,
   functionType,
+  instantiateFunction,
   type InterfaceType,
   interfaceType,
   isNullable,
@@ -29,7 +30,7 @@ import {
   typeToString,
   VOID,
 } from './types';
-import type { Cell, DartRecord, Value } from './values';
+import { type Cell, DartClosure as DartClosureValue, type DartRecord, type Value } from './values';
 
 export type Eval = (frame: Frame) => Value;
 
@@ -62,6 +63,38 @@ export function at(span: Span): Span {
   return { row: span.row, column: span.column, start: span.start, end: span.end };
 }
 
+/** Names of the SDK the interpreter does not provide, with what they are, for the message that they are unavailable. */
+const UNAVAILABLE_NAMES: Record<string, string> = {
+  DateTime: 'DateTime（日付と時刻）',
+  Stopwatch: 'Stopwatch（時間の計測）',
+  Future: 'Future（非同期処理）',
+  FutureOr: 'FutureOr（非同期処理）',
+  Stream: 'Stream（非同期処理）',
+  StreamController: 'StreamController（非同期処理）',
+  Timer: 'Timer（非同期処理）',
+  Completer: 'Completer（非同期処理）',
+  Zone: 'Zone（非同期処理）',
+  scheduleMicrotask: 'scheduleMicrotask（非同期処理）',
+  Isolate: 'Isolate',
+  stdin: 'stdin（標準入力）',
+  File: 'File（ファイルの読み書き）',
+  Directory: 'Directory（ファイルの読み書き）',
+  FileSystemEntity: 'FileSystemEntity（ファイルの読み書き）',
+  Platform: 'Platform（実行環境の情報）',
+  Process: 'Process（外部のプロセス）',
+  HttpClient: 'HttpClient（ネットワーク）',
+  HttpServer: 'HttpServer（ネットワーク）',
+  Socket: 'Socket（ネットワーク）',
+  Uri: 'Uri',
+  Expando: 'Expando',
+  WeakReference: 'WeakReference',
+  Finalizer: 'Finalizer',
+  Uint8List: 'Uint8List（dart:typed_data）',
+  Int32List: 'Int32List（dart:typed_data）',
+  Float64List: 'Float64List（dart:typed_data）',
+  ByteData: 'ByteData（dart:typed_data）',
+};
+
 export function typeName(type: DartType): string {
   return `'${typeToString(type)}'`;
 }
@@ -93,6 +126,13 @@ export abstract class CompilerBase {
 
   unsupported(span: Span | { row: number }, what: string): never {
     return this.error(span, `${what}は、この採点環境では使えません。`);
+  }
+
+  /** Rejects a name the program does not define: as unavailable when the SDK has it outside what the interpreter runs. */
+  undefinedName(span: Span | { row: number }, name: string): never {
+    const unavailable = UNAVAILABLE_NAMES[name];
+    if (unavailable) return this.unsupported(span, unavailable);
+    return this.error(span, `${name} という名前は定義されていません。`);
   }
 
   get isTracing(): boolean {
@@ -217,6 +257,7 @@ export abstract class CompilerBase {
       return substitute(alias.aliased, new Map(alias.typeParams.map((param, index) => [param, args[index]])));
     }
     if (declaration) return this.error(syntax, `${name} は型ではありません。`);
+    if (UNAVAILABLE_NAMES[name]) return this.unsupported(syntax, UNAVAILABLE_NAMES[name]);
     return this.error(syntax, `型 ${name} が見つかりません。`);
   }
 
@@ -406,6 +447,8 @@ export abstract class CompilerBase {
    */
   coerce(compiled: Compiled, target: DartType, span: Span, describe: (from: string, to: string) => string): Compiled {
     if (isSubtype(compiled.type, target)) return compiled;
+    const instantiated = this.instantiateGeneric(compiled, target);
+    if (instantiated) return instantiated;
     if (compiled.type.kind === 'dynamic') {
       if (isTop(target)) return compiled;
       return { ...compiled, type: target, run: this.runtimeCast(compiled.run, target, false), isConst: false };
@@ -428,6 +471,51 @@ export abstract class CompilerBase {
       }
     }
     return this.error(span, describe(typeName(compiled.type), typeName(target)));
+  }
+
+  /**
+   * A generic function where a non-generic function type is expected, instantiated with the type arguments that make
+   * it fit, as `[1, 2].reduce(max)` instantiates `max<int>`.
+   */
+  private instantiateGeneric(compiled: Compiled, target: DartType): Compiled | undefined {
+    const source = resolveBound(compiled.type);
+    const expected = resolveBound(target);
+    if (source.kind !== 'function' || source.typeParams.length === 0) return undefined;
+    if (expected.kind !== 'function' || expected.typeParams.length > 0) return undefined;
+    const params = new Set(source.typeParams);
+    const solution = new Map<TypeParam, DartType>();
+    for (const [index, parameter] of source.positional.entries()) {
+      const given = expected.positional[index];
+      if (given) inferFromSubtype(given, parameter, params, solution, (a) => a);
+    }
+    for (const named of source.named) {
+      const given = expected.named.find((other) => other.name === named.name);
+      if (given) inferFromSubtype(given.type, named.type, params, solution, (a) => a);
+    }
+    const defaults = instantiateToBounds(source.typeParams);
+    const typeArgs = source.typeParams.map((param, index) => solution.get(param) ?? defaults[index]);
+    const type = instantiateFunction(source, typeArgs);
+    if (!isSubtype(type, target)) return undefined;
+    const { run } = compiled;
+    const resolveArgs = typeArgs.map((arg) => this.runtimeType(arg));
+    return {
+      ...compiled,
+      type,
+      isConst: compiled.isConst,
+      run: (frame) => {
+        const original = run(frame);
+        const fixed = resolveArgs.map((resolve) => resolve(frame));
+        return new DartClosureValue(
+          coreTypes.function,
+          substitute(type, frame.typeEnv) as FunctionType,
+          (runtime, _receiver, args, _typeArgs, callRow) => runtime.callValue(original, args, fixed, callRow),
+          undefined,
+          [],
+          { name: undefined, origin: undefined },
+          undefined
+        );
+      },
+    };
   }
 
   /** Casts a value at runtime, throwing the VM's `TypeError` when it is not of the type. */
@@ -489,6 +577,35 @@ export function valueIs(runtime: Runtime, value: Value, type: DartType): boolean
   if (isTop(type)) return true;
   if (value === undefined) return isNullable(type);
   return isSubtype(runtime.runtimeTypeOf(value), type);
+}
+
+/**
+ * Collects the constraints a context puts on a function's result type: where the result is a subclass of the context's
+ * class (`R<int> r = E()`), its type arguments are matched through the subclass's supertype.
+ */
+export function inferFromContext(
+  context: DartType,
+  formal: DartType,
+  params: ReadonlySet<TypeParam>,
+  solution: Map<TypeParam, DartType>
+): void {
+  const base = resolveBound(context);
+  if (
+    formal.kind === 'interface' &&
+    base.kind === 'interface' &&
+    formal.cls !== base.cls &&
+    formal.cls.isSubclassOf(base.cls)
+  ) {
+    const path = asInstanceOf(formal, base.cls);
+    if (path) {
+      for (const [index, arg] of path.args.entries()) {
+        const given = base.args[index];
+        if (given) inferFromSubtype(given, arg, params, solution, (a) => a);
+      }
+      return;
+    }
+  }
+  inferFromSubtype(context, formal, params, solution, (a) => a);
 }
 
 /**

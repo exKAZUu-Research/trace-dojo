@@ -228,6 +228,8 @@ export class Compiler extends AssignmentCompiler {
     for (const work of this.classWork) this.layoutClass(work.cls);
     for (const work of this.orderedClassWork()) this.declareMembers(work);
     for (const { ext, declaration } of this.extensionWork) this.declareExtension(ext, declaration);
+    for (const infer of this.fieldInferences) infer();
+    this.fieldInferences.length = 0;
     for (const declaration of syntax.declarations) {
       if (declaration.kind === 'function') this.resolveTopLevelSignature(declaration);
     }
@@ -477,7 +479,82 @@ export class Compiler extends AssignmentCompiler {
       for (const [name, member] of mixin.setters)
         application.setters.set(name, this.copyMixinMember(member, application, map, slotMap));
       (application as ClassInfo & { mixinFieldSlots?: Map<number, number> }).mixinFieldSlots = slotMap;
+      this.declareForwardingConstructors(application, mixin, slotMap);
       application.resetCaches();
+    }
+  }
+
+  /**
+   * A mixin application has a constructor for each generative constructor of its superclass, which initializes the
+   * mixin's fields and passes its arguments on, as Dart's forwarding constructors do.
+   */
+  private declareForwardingConstructors(application: ClassInfo, mixin: ClassInfo, slotMap: Map<number, number>): void {
+    const superclass = application.superclass as InterfaceType;
+    const superMap = new Map(
+      superclass.cls.typeParams.map((param, index) => [param, superclass.args[index] ?? DYNAMIC])
+    );
+    let initializeFields: ((runtime: Runtime, instance: DartObject) => void) | undefined;
+    const fieldDeclarations =
+      mixin.declaration?.members.filter(
+        (member): member is FieldDeclaration => member.kind === 'field' && !member.isStatic && !member.isLate
+      ) ?? [];
+    if (fieldDeclarations.some((member) => member.variables.some((variable) => variable.initializer))) {
+      this.deferredBodies.push(() => {
+        const savedClass = this.currentClass;
+        this.currentClass = mixin;
+        try {
+          this.withTypeParams(mixin.typeParams, () =>
+            this.inTemporaryFunction(
+              false,
+              mixin,
+              () => {
+                const writes: { slot: number; run: Eval }[] = [];
+                for (const member of fieldDeclarations) {
+                  for (const variable of member.variables) {
+                    if (!variable.initializer) continue;
+                    const field = mixin.fields.find((candidate) => candidate.name === variable.name) as FieldMember;
+                    const compiled = this.coerce(
+                      this.compileExpression(variable.initializer, field.type),
+                      field.type,
+                      variable.initializer,
+                      (from, to) => `${from} 型の値は、${to} 型のフィールド ${field.name} に代入できません。`
+                    );
+                    writes.push({ slot: slotMap.get(field.slot) ?? field.slot, run: compiled.run });
+                  }
+                }
+                const fn = this.fn;
+                initializeFields = (runtime, instance) => {
+                  const frame = new Frame(runtime, fn.info, fn.slotCount, instance, [], EMPTY_ENV, undefined);
+                  for (const { slot, run } of writes) instance.fields[slot] = run(frame);
+                };
+              },
+              true
+            )
+          );
+        } finally {
+          this.currentClass = savedClass;
+        }
+      });
+    }
+    for (const [name, constructor] of superclass.cls.constructors) {
+      if (constructor.kind !== 'generative') continue;
+      const signature = substitute({ ...constructor.type, typeParams: [] }, superMap) as FunctionType;
+      const superArgs = superclass.args;
+      const params = application.typeParams;
+      application.constructors.set(name, {
+        name,
+        owner: application,
+        type: { ...signature, returnType: application.thisType },
+        kind: 'generative',
+        isConst: constructor.isConst,
+        row: undefined,
+        impl: (runtime, instance, args, typeArgs, callRow) => {
+          initializeFields?.(runtime, instance as DartObject);
+          const env = new Map(params.map((param, index) => [param, typeArgs[index] ?? DYNAMIC]));
+          const resolved = superArgs.map((arg) => substitute(arg, env));
+          return (constructor.impl as ConstructorImpl)(runtime, instance, args, resolved, callRow);
+        },
+      });
     }
   }
 
@@ -554,10 +631,13 @@ export class Compiler extends AssignmentCompiler {
       const { name } = variable;
       if (cls.members.has(name) || cls.staticMembers.has(name))
         this.error(variable, `${name} という名前は、このクラスで既に宣言されています。`);
-      let type = declaredType;
-      type ??=
-        this.inheritedFieldType(cls, name) ??
-        (variable.initializer ? this.inferInitializerType(variable.initializer, declaration.isStatic, cls) : DYNAMIC);
+      let type = declaredType ?? this.inheritedFieldType(cls, name);
+      const { initializer } = variable;
+      if (!type && initializer) {
+        // The initializer may use classes declared later, so its type is inferred once every member is declared.
+        this.fieldInferences.push(() => this.inferFieldType(cls, name, initializer, declaration.isStatic));
+      }
+      type ??= DYNAMIC;
       if (declaration.isStatic) {
         this.declareStaticField(cls, declaration, variable, type);
         continue;
@@ -597,6 +677,28 @@ export class Compiler extends AssignmentCompiler {
       cls.members.set(name, field);
       if (!declaration.isFinal) cls.setters.set(name, field);
     }
+  }
+
+  /** Infers the types of fields declared without one, once every class's members are declared. */
+  private readonly fieldInferences: (() => void)[] = [];
+
+  private inferFieldType(cls: ClassInfo, name: string, initializer: Expression, isStatic: boolean): void {
+    const savedClass = this.currentClass;
+    this.currentClass = cls;
+    let type: DartType;
+    try {
+      type = this.withTypeParams(cls.typeParams, () => this.inferInitializerType(initializer, isStatic, cls));
+    } finally {
+      this.currentClass = savedClass;
+    }
+    for (const table of [cls.members, cls.setters, cls.staticMembers, cls.staticSetters]) {
+      const member = table.get(name);
+      if (member && member.kind !== 'method') member.type = type;
+    }
+    const field = cls.fields.find((candidate) => candidate.name === name);
+    if (field) field.type = type;
+    const staticField = cls.staticMembers.get(name);
+    if (staticField?.kind === 'field') this.globals[staticField.slot].type = type;
   }
 
   /** A field without a type takes the type of the member it overrides, as Dart infers. */
@@ -1235,11 +1337,7 @@ export class Compiler extends AssignmentCompiler {
         const { name } = constant;
         global.initialize = (runtime) => {
           const frame = new Frame(runtime, fn.info, fn.slotCount, undefined, [], new Map(), undefined);
-          const object = new DartObject(
-            cls,
-            resolvedArgs,
-            Array.from({ length: cls.fieldCount }, () => UNINITIALIZED)
-          );
+          const object = new DartObject(cls, resolvedArgs, newFields(cls));
           object.native = { index: BigInt(index), name, values: () => [] };
           const evaluated = bound.args(frame);
           (constructor.impl as ConstructorImpl)(runtime, object, evaluated, resolvedArgs, undefined);
@@ -1866,13 +1964,14 @@ export class Compiler extends AssignmentCompiler {
     isRedirecting: boolean
   ): void {
     if (isRedirecting || this.isLibraryCode) return;
+    // Dart reports a field the implicit default constructor leaves unset at the field, and others at the constructor.
+    const isDefault = declaration.start === cls.declaration?.start;
     for (const field of cls.fields) {
       if (initialized.has(field.name) || field.isLate || field.hasInitializer) continue;
-      if (field.isFinal) {
-        this.error(declaration, `final のフィールド ${field.name} が、コンストラクタで初期化されていません。`);
-      }
+      const at = isDefault ? { row: field.row ?? declaration.row } : declaration;
+      if (field.isFinal) this.error(at, `final のフィールド ${field.name} が、コンストラクタで初期化されていません。`);
       if (!isNullable(field.type) && field.type.kind !== 'dynamic') {
-        this.error(declaration, `null にならないフィールド ${field.name} が、コンストラクタで初期化されていません。`);
+        this.error(at, `null にならないフィールド ${field.name} が、コンストラクタで初期化されていません。`);
       }
     }
   }
@@ -2098,9 +2197,12 @@ export class Compiler extends AssignmentCompiler {
   }
 
   tearOffFunction(fn: TopLevelFunction): Eval {
-    let closure: DartClosure | undefined;
     return (frame) => {
-      closure ??= new DartClosure(
+      // Tear-offs of a top-level function are canonical, so `identical(f, f)` holds.
+      const { tearOffs } = frame.runtime;
+      const existing = tearOffs.get(fn);
+      if (existing) return existing;
+      const closure = new DartClosure(
         coreTypes.function,
         fn.type,
         (runtime, _receiver, args, typeArgs, callRow) =>
@@ -2110,7 +2212,7 @@ export class Compiler extends AssignmentCompiler {
         { name: fn.name, origin: `Function '${fn.name}': static.` },
         fn
       );
-      void frame;
+      tearOffs.set(fn, closure);
       return closure;
     };
   }
@@ -2200,6 +2302,20 @@ function isFieldParameter(parameter: FormalParameter): boolean {
   );
 }
 
+/**
+ * The fields of a new object: a nullable field without an initializer starts as null, and the others are unset until
+ * their initializers run, which traces show by leaving them out.
+ */
+function newFields(cls: ClassInfo): Value[] {
+  const fields: Value[] = Array.from({ length: cls.fieldCount }, () => UNINITIALIZED);
+  for (const current of cls.superclassChain()) {
+    for (const field of current.fields) {
+      if (!field.isLate && !field.hasInitializer && isNullable(field.type)) fields[field.slot] = undefined;
+    }
+  }
+  return fields;
+}
+
 /** Creates an object with a constructor: allocates it for a generative one, or lets a factory make it. */
 export function instantiateObject(
   runtime: Runtime,
@@ -2212,12 +2328,7 @@ export function instantiateObject(
   const impl = constructor.impl as ConstructorImpl;
   if (constructor.kind !== 'generative') return impl(runtime, undefined, args, typeArgs, callRow);
   runtime.allocate(cls.fieldCount + 1);
-  // Fields are unset until their initializers run, which traces show by leaving them out.
-  const object = new DartObject(
-    cls,
-    typeArgs,
-    Array.from({ length: cls.fieldCount }, () => UNINITIALIZED)
-  );
+  const object = new DartObject(cls, typeArgs, newFields(cls));
   impl(runtime, object, args, typeArgs, callRow);
   return object;
 }

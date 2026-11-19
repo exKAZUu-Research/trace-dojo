@@ -362,8 +362,6 @@ export abstract class PatternCompiler extends CallCompiler {
       match: (frame, value) => {
         if (!typeCheck.match(frame, value)) return false;
         const list = value as DartList;
-        const length = frame.runtime.invoke(list, 'length', { positional: [], named: undefined }, [], undefined);
-        void length;
         const elements = list instanceof DartList ? list.elements : [];
         const count = elements.length;
         if (hasRest ? count < minimum : count !== minimum) return false;

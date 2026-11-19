@@ -280,7 +280,7 @@ export abstract class AssignmentCompiler extends StatementCompiler {
   // code-gauge-allow functionCognitiveComplexity 30 -- Locals, members of this, statics, and globals.
   private nameTarget(name: string, span: Span, isPlainAssignment: boolean): AssignableTarget {
     const resolution = this.resolveName(name);
-    if (!resolution) return this.error(span, `${name} という名前は定義されていません。`);
+    if (!resolution) return this.undefinedName(span, name);
     switch (resolution.kind) {
       case 'local': {
         const { variable } = resolution;
@@ -341,6 +341,9 @@ export abstract class AssignmentCompiler extends StatementCompiler {
   private localTarget(variable: LocalVar, span: Span, isPlainAssignment: boolean): AssignableTarget {
     const { options, name } = variable;
     if (options.isConst) this.error(span, `const の変数 ${name} には代入できません。`);
+    if (options.isFinal && options.isLate && this.flow.assigned.has(variable)) {
+      this.error(span, `late final の変数 ${name} には、もう値を代入できません。`);
+    }
     if (options.isFinal && !options.isLate) {
       const assigned =
         options.hasInitializer ||
@@ -468,10 +471,10 @@ export abstract class AssignmentCompiler extends StatementCompiler {
     }
     const getter = this.lookupMember(lookupType, name, false);
     const isSuper = (receiver as { isSuper?: boolean }).isSuper === true;
-    const superclass = isSuper ? this.currentClass?.superclass?.cls : undefined;
+    const superclassAt = isSuper ? this.superclassOf(span).classAt : undefined;
     if (setter.extension) {
-      const impl = setter.member.impl as unknown as Callable;
-      const getterImpl = getter?.member.impl as unknown as Callable | undefined;
+      const setterMember = setter.member;
+      const getterMember = getter?.member;
       const typeArgs = setter.extension.typeArgs;
       return {
         writeType: setter.type,
@@ -481,7 +484,7 @@ export abstract class AssignmentCompiler extends StatementCompiler {
           return value === SHORTED || (nullAware && value === undefined) ? SHORTED : value;
         },
         read: (frame, prepared) =>
-          (getterImpl as Callable)(
+          (getterMember?.impl as unknown as Callable | undefined)?.(
             frame.runtime,
             prepared as Value,
             { positional: [], named: undefined },
@@ -489,7 +492,13 @@ export abstract class AssignmentCompiler extends StatementCompiler {
             span.row
           ),
         write: (frame, prepared, value) => {
-          impl(frame.runtime, prepared as Value, { positional: [value], named: undefined }, typeArgs, span.row);
+          (setterMember.impl as unknown as Callable)(
+            frame.runtime,
+            prepared as Value,
+            { positional: [value], named: undefined },
+            typeArgs,
+            span.row
+          );
         },
         shorting: nullAware || shorting,
       };
@@ -502,15 +511,15 @@ export abstract class AssignmentCompiler extends StatementCompiler {
         return value === SHORTED || (nullAware && value === undefined) ? SHORTED : value;
       },
       read: (frame, prepared) => {
-        if (superclass) {
-          const member = superclass.implementation(name);
+        if (superclassAt) {
+          const member = superclassAt(frame).implementation(name);
           return member ? frame.runtime.readMember(prepared as Value, member, span.row) : undefined;
         }
         return frame.runtime.getProperty(prepared as Value, name, span.row);
       },
       write: (frame, prepared, value) => {
-        if (superclass) {
-          const member = superclass.setterImplementation(name);
+        if (superclassAt) {
+          const member = superclassAt(frame).setterImplementation(name);
           if (member?.kind === 'field') (prepared as DartObject).fields[member.slot] = value;
           else if (member)
             (member.impl as Callable)(
@@ -921,8 +930,12 @@ export abstract class AssignmentCompiler extends StatementCompiler {
       }
       const { init } = element;
       let initRun: ((frame: Frame) => void) | undefined;
+      const loopSlots: number[] = [];
       if (init && !Array.isArray(init)) {
+        const before = new Set(this.fn.scopes.at(-1)?.values());
         const exec = this.compileLocalDeclaration(init, false);
+        for (const variable of this.fn.scopes.at(-1)?.values() ?? [])
+          if (!before.has(variable)) loopSlots.push(variable.slot);
         initRun = (frame) => void exec(frame);
       } else if (init) {
         const runs = init.map((expression) => this.compileExpression(expression).run);
@@ -941,6 +954,8 @@ export abstract class AssignmentCompiler extends StatementCompiler {
         initRun?.(frame);
         while (!test || test(frame)) {
           body.run(frame, add);
+          // Each iteration has its own loop variables, which closures created in the body keep.
+          for (const slot of loopSlots) frame.locals[slot] = new Cell((frame.locals[slot] as Cell).v);
           for (const update of updates) update(frame);
           frame.runtime.spend();
         }

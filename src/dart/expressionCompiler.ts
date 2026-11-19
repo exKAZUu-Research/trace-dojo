@@ -34,6 +34,7 @@ import {
   type DartType,
   DYNAMIC,
   type FunctionType,
+  type InterfaceType,
   interfaceType,
   isNonNullable,
   isNullable,
@@ -148,6 +149,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const { run } = compiled;
     return {
       ...compiled,
+      type: makeNullable(compiled.type),
+      variable: undefined,
       run: (frame) => {
         const value = run(frame);
         return value === SHORTED ? undefined : value;
@@ -588,7 +591,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
         : inferElementType(elements.types.map((type) => type.key));
     const type = interfaceType(coreTypes.list, [elementType]);
     const resolve = this.runtimeType(elementType);
-    const { isConst } = expression;
+    // Inside a constant context, a literal without `const` is constant too.
+    const isConst = expression.isConst || (this.inConstContext && elements.isConst);
     const build: Eval = (frame) => {
       const list = new DartList(coreTypes.list, resolve(frame), [], !isConst, isConst);
       // The elements built so far stay reachable while later ones are evaluated.
@@ -629,7 +633,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
         (contextElement && !isInferenceHole(contextElement)
           ? contextElement
           : inferElementType(compiled.types.map((type) => type.key)));
-      return this.buildSet(interfaceType(coreTypes.set, [elementType]), compiled.run, expression.isConst);
+      return this.buildSet(
+        interfaceType(coreTypes.set, [elementType]),
+        compiled.run,
+        expression.isConst || (this.inConstContext && compiled.isConst)
+      );
     }
     const contextMap = mapTypesOfContext(context);
     const keyContext = types?.[0] ?? contextMap?.[0];
@@ -649,7 +657,11 @@ export abstract class ExpressionCompiler extends CompilerBase {
       (valueContext && !isInferenceHole(valueContext)
         ? valueContext
         : inferElementType(compiled.types.map((type) => type.value ?? DYNAMIC)));
-    return this.buildMap(interfaceType(coreTypes.map, [keyType, valueType]), compiled.run, expression.isConst);
+    return this.buildMap(
+      interfaceType(coreTypes.map, [keyType, valueType]),
+      compiled.run,
+      expression.isConst || (this.inConstContext && compiled.isConst)
+    );
   }
 
   /** Whether braces without type arguments make a set or a map, from the elements and then the context. */
@@ -675,7 +687,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return 'map';
       }
       case 'spread': {
-        return undefined;
+        return this.spreadKind(element.value);
       }
       case 'ifElement': {
         return (
@@ -694,6 +706,27 @@ export abstract class ExpressionCompiler extends CompilerBase {
         return 'set';
       }
     }
+  }
+
+  /** Whether a spread names a map or another iterable, read from the type of a variable it names. */
+  private spreadKind(value: Expression): 'set' | 'map' | undefined {
+    let type: DartType | undefined;
+    if (value.kind === 'identifier') {
+      const resolution = this.resolveName(value.name);
+      if (resolution?.kind === 'local') type = this.promotedType(resolution.variable);
+      else if (resolution?.kind === 'declaration' && resolution.declaration.kind === 'variable')
+        type = resolution.declaration.global.type;
+    } else if (value.kind === 'list') {
+      return 'set';
+    } else if (value.kind === 'setOrMap' && value.typeArguments) {
+      return value.typeArguments.length === 2 ? 'map' : 'set';
+    }
+    if (!type) return undefined;
+    const base = resolveBound(nonNullable(type));
+    if (base.kind !== 'interface') return undefined;
+    if (base.cls.isSubclassOf(coreTypes.map)) return 'map';
+    if (base.cls.isSubclassOf(coreTypes.iterable)) return 'set';
+    return undefined;
   }
 
   protected abstract buildSet(
@@ -852,7 +885,19 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const { name } = expression;
     if (name === '_') return this.error(expression, '_ は値として使えません。');
     const resolution = this.resolveName(name);
-    if (!resolution) return this.error(expression, `${name} という名前は定義されていません。`);
+    if (!resolution) {
+      // A type parameter is a value of type Type, its type argument at runtime.
+      const param = this.findTypeParam(name);
+      if (param) {
+        const resolve = this.runtimeType(typeParamType(param));
+        return {
+          type: interfaceType(coreTypes.type),
+          run: (frame) => new DartTypeValue(coreTypes.type, resolve(frame)),
+          isConst: false,
+        };
+      }
+      return this.undefinedName(expression, name);
+    }
     switch (resolution.kind) {
       case 'local': {
         return this.readLocal(resolution.variable, expression);
@@ -1098,7 +1143,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const receiverRun = receiver.run;
     const { member } = resolved;
     let type = resolved.type;
-    if (nullAware) type = makeNullable(type);
+    // Inside a null-shorting chain the value is not null; the end of the chain (compileExpression) makes it nullable.
     if (resolved.extension) {
       const extensionMember = member;
       const typeArgs = resolved.extension.typeArgs;
@@ -1158,15 +1203,13 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   private readSuperMember(name: string, span: Span): Compiled {
     this.requireThis(span, name);
-    const superclass = this.currentClass?.superclass;
-    if (!superclass) return this.error(span, 'このクラスにはスーパークラスがありません。');
+    const { type: superclass, classAt } = this.superclassOf(span);
     const resolved = this.lookupMember(superclass, name, false);
     if (!resolved) return this.error(span, `スーパークラスに ${name} というメンバーがありません。`);
-    const owner = superclass.cls;
     return {
       type: resolved.type,
       run: (frame) => {
-        const member = owner.implementation(name);
+        const member = classAt(frame).implementation(name);
         if (!member)
           return frame.runtime.noSuchMethod(frame.receiver, name, 'getter', { positional: [], named: undefined });
         return frame.runtime.readMember(frame.receiver, member, span.row);
@@ -1295,9 +1338,35 @@ export abstract class ExpressionCompiler extends CompilerBase {
 
   protected superReceiver(span: Span): Compiled {
     this.requireThis(span, 'super');
-    const superclass = this.currentClass?.superclass;
+    const { type } = this.superclassOf(span);
+    return { type, run: (frame) => frame.receiver, isConst: false, ...({ isSuper: true } as object) };
+  }
+
+  /**
+   * The class `super` names: a class's superclass, or for a mixin, the superclass of the application of the mixin
+   * that the receiver's class contains, which is known only at runtime.
+   */
+  protected superclassOf(span: Span): { type: InterfaceType; classAt: (frame: Frame) => ClassInfo } {
+    const cls = this.currentClass;
+    if (cls?.kind === 'mixin') {
+      const type = cls.onTypes[0] ?? objectType();
+      return {
+        type,
+        classAt: (frame) => {
+          for (
+            let current: ClassInfo | undefined = frame.runtime.classOf(frame.receiver);
+            current;
+            current = current.superclass?.cls
+          ) {
+            if (current.mixinOf === cls) return current.superclass?.cls ?? coreTypes.object;
+          }
+          return type.cls;
+        },
+      };
+    }
+    const superclass = cls?.superclass;
     if (!superclass) return this.error(span, 'このクラスにはスーパークラスがありません。');
-    return { type: superclass, run: (frame) => frame.receiver, isConst: false, ...({ isSuper: true } as object) };
+    return { type: superclass, classAt: () => superclass.cls };
   }
 
   // Operators
@@ -1334,6 +1403,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
   private compileNullAssert(expression: Extract<Expression, { kind: 'nullAssert' }>): Compiled {
     const value = this.compileChainPart(expression.operand, undefined);
     const { run } = value;
+    // After `x!` completes, x is known not to be null.
+    if (value.variable && this.isPromotable(value.variable)) {
+      const current = this.promotedType(value.variable);
+      const nonNull = nonNullable(current);
+      if (!sameType(nonNull, current)) this.flow = this.flow.promote(value.variable, nonNull);
+    }
     return {
       type: value.type.kind === 'dynamic' ? DYNAMIC : nonNullable(value.type),
       run: (frame) => {
@@ -1665,7 +1740,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const variableType = target.type;
     const sections = expression.sections.map((section) => {
       const receiver: Compiled = {
-        type: section.nullAware ? nonNullable(variableType) : variableType,
+        // A null-aware cascade skips every section when the target is null, so each sees a value that is not.
+        type: expression.sections[0]?.nullAware ? nonNullable(variableType) : variableType,
         run: (frame) => (frame.locals[slot] as Cell).v,
         isConst: false,
       };

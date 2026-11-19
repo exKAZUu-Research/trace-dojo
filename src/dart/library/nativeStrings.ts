@@ -37,17 +37,19 @@ define('String.codeUnitAt', (runtime, receiver, [position]) => {
 });
 define('String.length', (_runtime, receiver) => BigInt(self(receiver).length));
 define('String.hashCode', (_runtime, receiver) => {
-  // The VM hashes the code units with a variant of Jenkins' one-at-a-time hash, kept to 30 bits.
+  // The VM hashes the UTF-16 code units with Jenkins' one-at-a-time hash, kept to 30 bits and never 0.
+  const text = self(receiver);
   let hash = 0;
-  for (const char of self(receiver)) {
-    hash = (hash + (char.codePointAt(0) as number)) >>> 0;
+  for (let position = 0; position < text.length; position++) {
+    // oxlint-disable-next-line unicorn/prefer-code-point -- The VM hashes UTF-16 code units.
+    hash = (hash + text.charCodeAt(position)) >>> 0;
     hash = (hash + (hash << 10)) >>> 0;
-    hash ^= hash >>> 6;
+    hash = (hash ^ (hash >>> 6)) >>> 0;
   }
   hash = (hash + (hash << 3)) >>> 0;
-  hash ^= hash >>> 11;
+  hash = (hash ^ (hash >>> 11)) >>> 0;
   hash = (hash + (hash << 15)) >>> 0;
-  return BigInt(hash & 0x3f_ff_ff_ff);
+  return BigInt(hash & 0x3f_ff_ff_ff || 1);
 });
 define('String.==', (_runtime, receiver, [other]) => receiver === other);
 define('String.compareTo', (runtime, receiver, [other]) => {

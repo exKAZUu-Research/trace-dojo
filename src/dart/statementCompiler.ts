@@ -84,7 +84,20 @@ export abstract class StatementCompiler extends PatternCompiler {
     if (spec.kind.isGenerator) fn.yieldTypes = [];
     fn.contextReturn = spec.contextReturnType;
     this.fn = fn;
-    this.flow = Flow.start();
+    // A closure sees what is known of the enclosing function's variables where it is created, except promotions of
+    // variables assigned anywhere after their declarations, which may change before the closure runs.
+    this.flow = isClosure
+      ? new Flow(
+          true,
+          new Map(
+            [...savedFlow.promotions].filter(
+              ([variable]) => !variable.owner.assignedNames.has(variable.name) && !variable.isWriteCaptured
+            )
+          ),
+          savedFlow.assigned,
+          savedFlow.maybeAssigned
+        )
+      : Flow.start();
     this.recordsSteps = this.isTracing;
     try {
       const binders = this.compileParameters(spec);
@@ -497,7 +510,7 @@ export abstract class StatementCompiler extends PatternCompiler {
   private compilePatternDeclaration(statement: Extract<Statement, { kind: 'patternDeclaration' }>): Exec {
     const value = this.compileExpression(statement.value, this.patternContextType(statement.pattern));
     const pattern = this.compilePattern(statement.pattern, value.type, { mode: 'declare', isFinal: statement.isFinal });
-    if (!pattern.irrefutable)
+    if (isRefutableSyntax(statement.pattern))
       this.error(
         statement,
         'このパターンには合わない値があるので、変数の宣言には使えません。if-case か switch を使ってください。'
@@ -870,7 +883,7 @@ export abstract class StatementCompiler extends PatternCompiler {
           mode: 'declare',
           isFinal: binding.isFinal,
         });
-        if (!pattern.irrefutable)
+        if (isRefutableSyntax(binding.pattern))
           this.error(binding, 'このパターンには合わない要素があるので、for-in の変数には使えません。');
         for (const variable of pattern.variables.values()) this.flow = this.flow.assign(variable);
         return (frame, value) => {
@@ -1082,8 +1095,12 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   private compileReturn(statement: Extract<Statement, { kind: 'return' }>): Exec {
-    if (this.fn.kind.isGenerator)
-      this.error(statement, 'sync* の関数では、値を return できません。yield を使ってください。');
+    if (this.fn.kind.isGenerator) {
+      if (statement.value) this.error(statement, 'sync* の関数では、値を return できません。yield を使ってください。');
+      this.flow = this.flow.unreachable;
+      const done: Completion = { kind: 'return', value: undefined };
+      return () => done;
+    }
     const expected = this.fn.kind.returnType ?? (this.fn.returnTypes ? undefined : VOID);
     if (!statement.value) {
       this.fn.returnTypes?.push(NULL);
@@ -1562,6 +1579,46 @@ export abstract class StatementCompiler extends PatternCompiler {
   }
 
   static readonly SHORTED = SHORTED;
+}
+
+/**
+ * Whether a pattern can fail to match in a way a declaration may not allow: constants, relational patterns, and null
+ * checks. Other patterns that do not match the value throw at runtime, as Dart's declarations do.
+ */
+function isRefutableSyntax(pattern: Pattern): boolean {
+  switch (pattern.kind) {
+    case 'constant':
+    case 'relational':
+    case 'nullCheck': {
+      return true;
+    }
+    case 'or':
+    case 'and': {
+      return isRefutableSyntax(pattern.left) || isRefutableSyntax(pattern.right);
+    }
+    case 'parenthesized':
+    case 'cast':
+    case 'nullAssert': {
+      return isRefutableSyntax(pattern.pattern);
+    }
+    case 'list': {
+      return pattern.elements.some((element) =>
+        element.kind === 'rest'
+          ? element.pattern !== undefined && isRefutableSyntax(element.pattern)
+          : isRefutableSyntax(element)
+      );
+    }
+    case 'map': {
+      return pattern.entries.some((entry) => isRefutableSyntax(entry.value));
+    }
+    case 'record':
+    case 'object': {
+      return pattern.fields.some((field) => isRefutableSyntax(field.pattern));
+    }
+    default: {
+      return false;
+    }
+  }
 }
 
 function loopCompletion(completion: Completion, labels: readonly string[]): Completion | undefined | 'continue' {

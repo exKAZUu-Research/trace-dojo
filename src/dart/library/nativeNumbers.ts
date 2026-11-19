@@ -29,6 +29,27 @@ export function compareNumbers(a: bigint | number, b: bigint | number): number {
   return -1;
 }
 
+/**
+ * The VM's hash of a number: an int multiplied by 0x2d51 in 128 bits with the halves folded together, an integral
+ * double as the int it equals, and any other double as the bits of its representation.
+ */
+export function numberHash(value: bigint | number): bigint {
+  if (typeof value === 'number') {
+    if (Number.isInteger(value) && Math.abs(value) < 2 ** 63) return intHash(BigInt(value));
+    const bits = new DataView(new ArrayBuffer(8));
+    bits.setFloat64(0, value);
+    return bits.getBigInt64(0);
+  }
+  return intHash(value);
+}
+
+function intHash(value: bigint): bigint {
+  const product = BigInt.asUintN(64, value) * 0x2d_51n;
+  let hash = BigInt.asUintN(64, product) ^ (product >> 64n);
+  hash ^= hash >> 32n;
+  return hash & 0x3f_ff_ff_ffn;
+}
+
 function roundHalfAway(value: number): number {
   return Math.sign(value) * Math.round(Math.abs(value));
 }
@@ -178,11 +199,7 @@ function clamp(runtime: Runtime, value: bigint | number, lower: Value, upper: Va
 }
 
 defineAll(['num.==', 'int.==', 'double.=='], (runtime, self, [other]) => runtime.equals(self, other));
-defineAll(['num.hashCode', 'int.hashCode', 'double.hashCode'], (_runtime, self) => {
-  if (typeof self === 'number')
-    return Number.isInteger(self) ? BigInt(self) : BigInt(Math.trunc(self * 1_000_003) % 1_073_741_823);
-  return self;
-});
+defineAll(['num.hashCode', 'int.hashCode', 'double.hashCode'], (_runtime, self) => numberHash(self as bigint | number));
 defineAll(['num.compareTo', 'int.compareTo', 'double.compareTo'], (runtime, self, [other]) =>
   BigInt(compareNumbers(self as bigint | number, numArg(runtime, other, 'other')))
 );
