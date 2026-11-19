@@ -249,6 +249,19 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       };
     }
     const { type, run } = expr;
+    if (type.kind === 'nullptr') {
+      return {
+        type: unqualified(type),
+        isLvalue: false,
+        row: expr.row,
+        constantInitialization: expr.constantDesignation || expr.staticAddress || expr.constantInitialization,
+        onlyCalls: expr.onlyCalls,
+        run: (frame) => {
+          run(frame);
+          return NULL_PTR;
+        },
+      };
+    }
     if (type.kind === 'array') {
       return {
         type: pointerTo(type.of),

@@ -61,6 +61,8 @@ export interface Expr extends ConstantValue {
   isNullConstant?: boolean;
   /** An lvalue location or pointer value that can be formed before dynamic initialization. */
   staticAddress?: boolean;
+  /** The lvalue can be evaluated in a constant expression, even when its address and stored value are not constant. */
+  constantDesignation?: boolean;
   constantPointerValue?: boolean;
   constantInitialization?: boolean;
   constantLocation?: ConstantLocation;

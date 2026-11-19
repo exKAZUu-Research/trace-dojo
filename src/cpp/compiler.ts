@@ -241,7 +241,7 @@ export class Compiler extends StatementCompiler {
     const functions = [...previous.functions];
     for (const fn of entity.functions) {
       if (functions.includes(fn)) continue;
-      const declared = functions.find((candidate) => sameParameters(candidate, fn));
+      const declared = functions.find((candidate) => sameDeclaredSignature(candidate, fn));
       if (declared && this.library.sameCFunction(declared, fn)) continue;
       this.addOverload(functions, fn, node.row);
     }
@@ -540,7 +540,7 @@ export class Compiler extends StatementCompiler {
 
   /** Adds a function to an overload set, rejecting a second declaration with the same parameters. */
   private addOverload(overloads: FunctionInfo[], fn: FunctionInfo, row: number): void {
-    const same = overloads.find((other) => sameParameters(other, fn));
+    const same = overloads.find((other) => sameDeclaredSignature(other, fn));
     if (same) this.error(row, `${fn.displayName} は、同じ引数の型ですでに宣言されています。`);
     overloads.push(fn);
   }
@@ -1108,7 +1108,7 @@ export class Compiler extends StatementCompiler {
     };
     const destroy = this.destructionOf(cls);
     return {
-      copyIsNoexcept: constCopy?.isNoexcept === true && constCopy.params.length === 1,
+      copyIsNoexcept: constCopy?.isNoexcept === true,
       copy: (frame, source, destination, sourceIsConst = true) => {
         const target = newObject(frame, cls, false, destination);
         copyInto(frame, target, source as CObject, sourceIsConst);
@@ -1202,7 +1202,7 @@ export class Compiler extends StatementCompiler {
     if (existing && existing.kind !== 'functions')
       return this.error(node.row, `${name} はすでに別のものとして宣言されています。`);
     const overloads = existing?.kind === 'functions' ? existing.functions : [];
-    let same = overloads.find((other) => sameParameters(other, fn));
+    let same = overloads.find((other) => sameDeclaredSignature(other, fn));
     if (same?.native) {
       if (!this.library.sameCFunction(fn, same))
         this.error(node.row, `関数 ${name} は、同じ型の引数を取る using 宣言と重複しています。`);
@@ -2333,6 +2333,10 @@ export class Compiler extends StatementCompiler {
 }
 
 class TemporaryConstructorReferenceError extends CompileError {}
+
+function sameDeclaredSignature(a: FunctionInfo, b: FunctionInfo): boolean {
+  return !a.instantiate && !b.instantiate && sameParameters(a, b);
+}
 
 function installBaseValue(base: ClassInfo, target: CObject, initialized: CObject): void {
   if (initialized === target) return;

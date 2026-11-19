@@ -159,7 +159,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
     copy: (frame, source) => {
       const items = (source as SequenceValue).items;
       reserve(frame, items.length);
-      return make(editor.build(frame, items.length, (index) => ops().copy(frame, items[index])));
+      return make(editor.construct(frame, items.length, (index) => ops().copy(frame, items[index])));
     },
     assign: (frame, target, source) => {
       const to = target as SequenceValue;
@@ -190,7 +190,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
         checkVectorLength(frame, library, kind, element, count);
         const n = asNumber(count);
         reserve(frame, n);
-        return make(editor.build(frame, n, () => ops().make(frame)));
+        return make(editor.construct(frame, n, () => ops().make(frame)));
       },
       {
         isExplicit: true,
@@ -224,7 +224,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
           const n = asNumber(count);
           reserve(frame, n);
           const source = (value as Ptr).read();
-          return make(editor.build(frame, n, () => ops().copy(frame, source)));
+          return make(editor.construct(frame, n, () => ops().copy(frame, source)));
         },
         { uses: (row) => requireElementUse(library.compiler, element, row, 'copy') }
       ),
@@ -240,7 +240,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
               const source = range.read(first, last);
               reserve(frame, source.values.length);
               return make(
-                editor.build(frame, source.values.length, (index) => source.construct(frame, source.values[index]))
+                editor.construct(frame, source.values.length, (index) => source.construct(frame, source.values[index]))
               );
             },
             { uses: (row) => library.compiler.requireLibraryObjectUse(element, 'destroy', row) }
@@ -1000,7 +1000,7 @@ function sequenceList(
       frame.temporaries.push({ object, destroy });
       return object;
     });
-    return make(editor.build(frame, temporaries.length, (index) => copy(frame, temporaries[index]), true));
+    return make(editor.construct(frame, temporaries.length, (index) => copy(frame, temporaries[index])));
   };
   listElements.set(run, inits);
   return run;
@@ -1071,7 +1071,8 @@ export function constructElement(compiler: ExpressionCompiler, element: Type, ar
     if (element.kind === 'class') return compiler.constructObject(element.cls, args, row, false).run as Eval<Value>;
     if (args.length === 0) return compiler.valueInitialized(element, row).run as Eval<Value>;
     if (args.length !== 1) return compiler.error(row, `${typeName(element)} の値には引数を1つだけ書いてください。`);
-    return compiler.convert(args[0], unqualified(element), row).run as Eval<Value>;
+    const argument = compiler.directInitializerArgument(element, args[0]);
+    return compiler.convert(argument, unqualified(element), row).run as Eval<Value>;
   });
 }
 

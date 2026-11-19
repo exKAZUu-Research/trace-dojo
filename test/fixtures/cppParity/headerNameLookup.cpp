@@ -31,6 +31,10 @@ int endl(int value) { return value + 2; }
 int merge(int value) { return value + 3; }
 int sort(int value) { return value + 4; }
 using std::sort;
+int min() { return 7; }
+using std::min;
+using std::max;
+int max() { return 8; }
 
 int main() {
   struct time first{3};
@@ -46,4 +50,5 @@ int main() {
   int values[] = {5, 3};
   sort(values, values + 2);
   cout << sort(values[0]) << '\n';
+  cout << min() << min(1, 2) << max() << max(1, 2) << '\n';
 }

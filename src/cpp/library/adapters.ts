@@ -136,7 +136,7 @@ export function adapterClass(
   };
   const copyItems = (frame: Frame, { items }: SequenceValue): Value[] => {
     frame.runtime.reserve(items.length);
-    return editor.build(frame, items.length, (index) => ops().copy(frame, items[index]));
+    return editor.construct(frame, items.length, (index) => ops().copy(frame, items[index]));
   };
   const storageOperations = storage.cls.operations;
   if (storageOperations) {
@@ -187,7 +187,7 @@ export function adapterClass(
               frame.runtime.reserve(source.values.length);
               return fromItems(
                 frame,
-                editor.build(frame, source.values.length, (index) => source.construct(frame, source.values[index]))
+                editor.construct(frame, source.values.length, (index) => source.construct(frame, source.values[index]))
               );
             },
             { uses }

@@ -523,6 +523,16 @@ test.each([
   ['NULL without a declaring header', 'int main() { int* p = NULL; }', 0],
   ['copy-initialization of bool from nullptr', 'int main() { bool flag = nullptr; }', 0],
   ['copy-list-initialization of bool from nullptr', 'int main() { bool flag = {nullptr}; }', 0],
+  [
+    'constant bool initialization with a call returning nullptr',
+    '#include <cstddef>\nstd::nullptr_t value() { return nullptr; }\nint main() { constexpr bool flag(value()); }',
+    2,
+  ],
+  [
+    'passing nullptr to a vector Boolean push operation',
+    '#include <vector>\nint main() { std::vector<bool> values; values.push_back(nullptr); }',
+    1,
+  ],
   ['a default member initializer copy-initializing bool from nullptr', 'struct Flag { bool value = {nullptr}; };', 0],
   [
     'an empty aggregate missing explicit braces in a deduced array',

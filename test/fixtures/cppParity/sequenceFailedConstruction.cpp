@@ -58,4 +58,20 @@ int main() {
   try { auto copy = original; } catch (int) { std::cout << 'L'; }
   try { std::deque<ListValue> values{ListValue(1), ListValue(2)}; } catch (int) { std::cout << 'Q'; }
   try { std::vector<ListValue> values{ListValue(1), ListValue(2)}; } catch (int) { std::cout << 'V'; }
+  std::cout << '\n';
+
+  nextId = 0;
+  failId = 2;
+  try { std::deque<Node> values(3); } catch (int) { std::cout << 'N'; }
+  failOn = copies + 2;
+  try { std::deque<Value> values(3, v[0]); } catch (int) { std::cout << 'F'; }
+  ListValue elements[] = {ListValue(1), ListValue(2), ListValue(3)};
+  try { std::deque<ListValue> values(elements, elements + 3); } catch (int) { std::cout << 'R'; }
+  failOn = 0;
+  std::deque<Value> entries(3, v[0]);
+  failOn = copies + 2;
+  try { std::deque<Value> values(entries); } catch (int) { std::cout << 'C'; }
+  nextId = 0;
+  std::deque<Node> edited;
+  try { edited.resize(3); } catch (int) { std::cout << 'E' << edited.size(); }
 }

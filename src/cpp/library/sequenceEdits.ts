@@ -29,9 +29,17 @@ export class SequenceEditor {
     return this.operations();
   }
 
-  build(frame: Frame, count: number, make: (index: number) => Value, fromInitializerList = false): Value[] {
-    // Apple's deque initializer-list constructor leaves partial elements to its allocation cleanup without invoking their destructors.
-    const destroy = fromInitializerList && this.kind === 'deque' ? undefined : this.ops.destroy;
+  construct(frame: Frame, count: number, make: (index: number) => Value): Value[] {
+    // Apple's deque constructors release partial allocations without calling element destructors.
+    return this.build(frame, count, make, this.kind === 'deque' ? undefined : this.ops.destroy);
+  }
+
+  private build(
+    frame: Frame,
+    count: number,
+    make: (index: number) => Value,
+    destroy: ElementOperations['destroy']
+  ): Value[] {
     return makeEach(frame, count, make, () => destroy, undefined, this.kind === 'vector' ? 'reverse' : 'forward');
   }
 
@@ -57,7 +65,7 @@ export class SequenceEditor {
   append(frame: Frame, self: SequenceValue, count: number, make: () => Value): void {
     const length = self.items.length;
     if (this.kind === 'vector' && length + count > self.capacity) {
-      const made = this.build(frame, count, make);
+      const made = this.build(frame, count, make, this.ops.destroy);
       this.reallocate(frame, self, recommend(self, length + count), length, made);
     } else for (let index = 0; index < count; index++) self.append(make());
   }
@@ -125,7 +133,12 @@ export class SequenceEditor {
   insertRange(frame: Frame, self: SequenceValue, at: number, source: Source, isForwardOnly: boolean): void {
     if (source.values.length === 0) return;
     if (this.kind === 'list') {
-      const values = this.build(frame, source.values.length, (index) => source.construct(frame, source.values[index]));
+      const values = this.build(
+        frame,
+        source.values.length,
+        (index) => source.construct(frame, source.values[index]),
+        this.ops.destroy
+      );
       self.insertValues(at, values);
     } else if (this.kind === 'vector') {
       this.vectorInsertRange(frame, self, at, source);

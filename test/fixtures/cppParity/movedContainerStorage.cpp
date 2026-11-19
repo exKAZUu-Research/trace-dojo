@@ -13,10 +13,25 @@ struct Inner {
 struct Outer { Inner inner; };
 struct Token {
   Token() {}
-  Token(const Token&) noexcept { std::cout << 'N'; }
+  Token(const Token&, int value = 1) noexcept { std::cout << value; }
 };
 struct MemberFallback { Token token; std::vector<int> values; };
 struct BaseFallback : Token { std::vector<int> values; };
+
+int noThrowDefault() noexcept { return 2; }
+int mayThrowDefault() { return 3; }
+int wrapDefault(int value = mayThrowDefault()) noexcept { return value; }
+
+struct SafeDefault {
+  SafeDefault() {}
+  SafeDefault(const SafeDefault&, int value = noThrowDefault()) noexcept { std::cout << value; }
+};
+struct SafeRow { SafeDefault token; std::vector<int> values; };
+struct RiskyDefault {
+  RiskyDefault() {}
+  RiskyDefault(const RiskyDefault&, int value = wrapDefault()) noexcept { std::cout << value; }
+};
+struct RiskyRow { RiskyDefault token; std::vector<int> values; };
 
 int main() {
   std::vector<std::vector<int>> rows{{1}, {4}, {5}, {2}, {3}, {6}};
@@ -56,4 +71,17 @@ int main() {
   int* savedBaseFallback = baseFallback[0].values.data();
   baseFallback.reserve(16);
   std::cout << *savedMemberFallback << *savedBaseFallback << '\n';
+
+  std::vector<SafeRow> safe(1);
+  safe[0].values.reserve(9);
+  safe[0].values.push_back(7);
+  int* savedSafe = safe[0].values.data();
+  safe.reserve(16);
+  std::cout << *savedSafe << ' ' << safe[0].values.capacity() << '\n';
+
+  std::vector<RiskyRow> risky(1);
+  risky[0].values.reserve(9);
+  risky[0].values.push_back(8);
+  risky.reserve(16);
+  std::cout << risky[0].values[0] << ' ' << risky[0].values.capacity() << '\n';
 }

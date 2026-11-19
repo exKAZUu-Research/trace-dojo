@@ -119,6 +119,8 @@ function canCopyWithoutThrow(type: Type): boolean {
   const fixedArray = cls.library?.aggregateArray;
   if (fixedArray) return canCopyWithoutThrow(fixedArray.type);
   if (cls.library && cls.library.kind !== 'pair') return cls.operations?.copyIsNoexcept === true;
+  // Apple clang++ uses the selected constructor's exception specification for the enclosing implicit move,
+  // even when the constructor's default argument could throw.
   if (cls.constructors.some((ctor) => !ctor.native && isCopyConstructor(ctor, cls)))
     return cls.operations?.copyIsNoexcept === true;
   return (
@@ -146,15 +148,19 @@ function transferElement(frame: Frame, type: Type, source: Value, target?: CObje
     const array = cls.library?.aggregateArray;
     if (!array) return source.moveStorage();
     frame.runtime.reserve(source.items.length);
-    return array.make(source.items.map((value) => transferElement(frame, array.type.of, value)));
+    return frame.runtime.withoutOuterHandlers(() =>
+      array.make(source.items.map((value) => transferElement(frame, array.type.of, value)))
+    );
   }
   if (source instanceof CObject && canMoveFields(cls)) {
-    const destination = newObject(frame, cls, false, target);
-    if (cls.base) transferElement(frame, classType(cls.base), source, destination);
-    destination.cls = cls;
-    for (const field of cls.ownFields)
-      destination.values[field.index] = transferElement(frame, field.type, source.values[field.index]);
-    return destination;
+    return frame.runtime.withoutOuterHandlers(() => {
+      const destination = newObject(frame, cls, false, target);
+      if (cls.base) transferElement(frame, classType(cls.base), source, destination);
+      destination.cls = cls;
+      for (const field of cls.ownFields)
+        destination.values[field.index] = transferElement(frame, field.type, source.values[field.index]);
+      return destination;
+    });
   }
   return cls.operations?.copy(frame, source, target) ?? source;
 }

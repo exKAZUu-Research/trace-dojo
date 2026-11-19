@@ -269,6 +269,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
           isLvalue: true,
           row,
           constant,
+          constantDesignation: true,
           run: (frame) => {
             const store = frame.slots[slot];
             if (!store) throw new CppRuntimeError('uninitialized');
@@ -545,6 +546,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         isLvalue: true,
         staticAddress: object.staticAddress,
         constantInitialization: object.constantInitialization,
+        constantDesignation: object.constantDesignation,
         memberConstant: object.isThis && isArithmetic(type) ? (members) => members.get(field) : undefined,
         row,
         run: (frame) => locate(run(frame) as Ptr),
@@ -1180,6 +1182,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       constantPointee: chosen?.constantPointee,
       constantStringLength: chosen?.constantStringLength,
       staticAddress: chosen?.staticAddress,
+      constantDesignation: chosen?.constantDesignation,
       constantPointerValue: chosen?.constantPointerValue,
       run: (...args) => (condition(args[0]) ? left : right).run(...args),
       temporaryMember:
@@ -1265,6 +1268,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       constantPointee: hasConstantLeft ? right.constantPointee : undefined,
       constantStringLength: hasConstantLeft ? right.constantStringLength : undefined,
       staticAddress: hasConstantLeft ? right.staticAddress : undefined,
+      constantDesignation: hasConstantLeft ? right.constantDesignation : undefined,
       constantPointerValue: hasConstantLeft ? right.constantPointerValue : undefined,
       temporaryMember:
         temporaryMember &&
@@ -1320,6 +1324,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type,
       isLvalue: true,
       staticAddress: pointer.staticAddress && offset.constant !== undefined,
+      constantDesignation: original.type.kind === 'array' && original.constantDesignation && n.constant !== undefined,
       constantInitialization: hasConstantObject(constantLocation),
       constantLocation,
       row,
@@ -1397,17 +1402,17 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return this.convert(expr, unqualified(type), row);
   }
 
-  protected directInitializerArgument(type: Type, expr: Expr): Expr {
+  directInitializerArgument(type: Type, expr: Expr): Expr {
     if (type.kind !== 'int' || type.name !== 'bool' || expr.type.kind !== 'nullptr') return expr;
-    const run = expr.run;
+    const value = this.rvalue(expr);
     return {
       type: BOOL,
       row: expr.row,
       isLvalue: false,
       onlyCalls: expr.onlyCalls,
-      constant: expr.isNullConstant ? 0 : undefined,
+      constant: this.isConstantInitializer(value) ? 0 : undefined,
       run: (frame) => {
-        run(frame);
+        value.run(frame);
         return 0;
       },
     };
