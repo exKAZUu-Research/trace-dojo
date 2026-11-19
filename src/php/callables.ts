@@ -88,12 +88,19 @@ export function evalArgs(
     try {
       if (arg.spread) {
         const source =
-          fn?.params.some((param) => param.byRef) && arg.e.k === 'var' && arg.e.name !== 'GLOBALS'
-            ? placeOf(arg.e)
-            : undefined;
-        let value = source ? (source.getOrWarn ? source.getOrWarn() : source.get()) : ev(arg.e);
+          arg.e.k === 'var' && arg.e.name !== 'GLOBALS' && arg.e.name !== 'this' ? placeOf(arg.e) : undefined;
+        let value = source?.readUnpack
+          ? source.readUnpack((live, previous) =>
+              throwError(
+                'TypeError',
+                `Only arrays and Traversables can be unpacked, ${valueName(live)} given`,
+                previous?.object
+              )
+            )
+          : ev(arg.e);
         if (value instanceof PhpArray) frame.temporaries.push(value);
-        if (value instanceof PhpArray && source) value = writableContainer(source);
+        if (value instanceof PhpArray && source && fn?.params.some((param) => param.byRef))
+          value = writableContainer(source);
         else if (value instanceof PhpArray && fn?.params.some((param) => param.byRef)) {
           value = value.copy();
           frame.temporaries.push(value);

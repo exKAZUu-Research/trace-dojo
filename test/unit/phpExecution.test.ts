@@ -3104,9 +3104,13 @@ echo 'foreach:' . (isset($fv) ? 'bound' : 'unbound') . ':' . count($missingForea
 
 function takeRef(&$x) {}
 set_error_handler(function () { echo 'warn;'; $GLOBALS['missingUnpack'] = [1]; return true; });
-try { takeRef(...$missingUnpack); } catch (TypeError $e) { echo 'TypeError;'; }
+try { takeRef(...$missingUnpack); } catch (TypeError $e) { echo $e->getMessage() . ';'; }
 restore_error_handler();
 echo 'unpack:' . (isset($missingUnpack) ? 'set' : 'unset') . "\n";
+
+set_error_handler(function () { throw new Exception('handler'); });
+try { takeRef(...$missingUnpack2); } catch (TypeError $e) { echo 'unpackThrow:' . $e->getMessage() . '|' . $e->getPrevious()?->getMessage() . "\n"; }
+restore_error_handler();
 
 $p1 = new stdClass();
 set_error_handler(function () use ($p1) { $p1->x = 5; throw new Exception('stop'); });
@@ -3167,7 +3171,8 @@ echo 'aoResetThrow:' . $chain . ':' . json_encode($ao5->getArrayCopy()) . "\n";
       'ao:[1,{"p":1}]',
       'ai:[null,1]',
       'foreach:unbound:2',
-      'warn;TypeError;unpack:set',
+      'warn;Only arrays and Traversables can be unpacked, array given;unpack:set',
+      'unpackThrow:Only arrays and Traversables can be unpacked, null given|handler',
       'propThrow:{"x":5}',
       'aoThrow:{"x":null,"y":1}',
       'aoRef:[5,1,2]',

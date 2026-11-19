@@ -31,8 +31,8 @@ export interface Place {
   readonly unbound?: boolean;
   /** The value, or undefined when the location does not exist. */
   get(update?: PlaceOperation, warning?: UpdateWarning): Value | undefined;
-  /** The value, emitting its undefined warning and returning null when missing. */
-  getOrWarn?(): Value;
+  /** Reads a variable for argument unpacking, warning and failing with the live binding when undefined. */
+  readUnpack?(fail: (live: Value, previous?: PhpThrow) => never): Value;
   readCompoundName?(warning: UpdateWarning): void;
   fetchCompound?(warning: UpdateWarning, beforeOffsetGet?: BeforeOffsetGet): CompoundRead | typeof SKIP_COMPOUND;
   set(value: Value, operation?: 'assignOp'): Value;
@@ -173,11 +173,17 @@ export class VarPlace implements Place {
     emitError(E_WARNING, `Undefined ${this.kind === 'global' ? 'global ' : ''}variable $${this.name}`, this.fetchRow);
   }
 
-  getOrWarn(): Value {
+  readUnpack(fail: (live: Value, previous?: PhpThrow) => never): Value {
     const value = this.get();
     if (value !== undefined) return value;
-    this.warnUndefined();
-    return null;
+    let previous: PhpThrow | undefined;
+    try {
+      this.warnUndefined();
+    } catch (error) {
+      if (!(error instanceof PhpThrow)) throw error;
+      previous = error;
+    }
+    return fail(this.get() ?? null, previous);
   }
 
   fetchCompound(warning: UpdateWarning): CompoundRead {
