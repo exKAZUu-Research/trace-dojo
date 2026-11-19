@@ -2,13 +2,16 @@
 #include <iostream>
 
 struct Base {
+  Base* self;
   Base* end;
-  Base() : end(this + 1) {}
+  Base() : self(this), end(this + 1) {}
   Base* endFromMethod() { return this + 1; }
 };
 
 struct Derived : Base { int padding[4]; };
 struct SameSize : Base {};
+struct Retained : Derived { ~Retained() { std::cout << "retained\n"; } };
+struct ReferenceMember { const Base& value; };
 
 int destroyed = 0;
 struct VirtualBase { virtual ~VirtualBase() { ++destroyed; } };
@@ -96,4 +99,14 @@ int main() {
   showMatrix(&fileZeros, fileZeros[0], fileZeros + 2, &fileZeros + 1, fileZeros[1][1]);
   showMatrix(&localZeros, localZeros[0], localZeros + 2, &localZeros + 1, localZeros[1][1]);
   showMatrix(&explicitZeros, explicitZeros[0], explicitZeros + 2, &explicitZeros + 1, explicitZeros[1][1]);
+
+  {
+    const Base& direct = Retained{};
+    const Base& braced{Retained{}};
+    ReferenceMember member{Retained{}};
+    std::cout << (direct.end == &direct + 1) << ' ' << (braced.self - &braced)
+              << ' ' << (member.value.end == &member.value + 1) << '\n';
+  }
+  static const Base& retainedStatic = Retained{};
+  std::cout << (retainedStatic.end == &retainedStatic + 1) << '\n';
 }

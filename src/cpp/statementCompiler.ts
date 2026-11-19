@@ -600,7 +600,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         isConstant: this.isConstantInitializer(bound),
         memberConstant: memberConstantOf(bound),
         constantLocation: constantLocationOf(bound),
-        lifetime: this.temporaryLocation(bound),
+        lifetime: this.temporaryLocation(bound, isTemporaryClass ? to.cls : undefined),
       };
     }
     const member = isDirect ? target.temporaryBinding : undefined;

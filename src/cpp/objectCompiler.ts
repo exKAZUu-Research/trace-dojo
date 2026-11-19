@@ -408,7 +408,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     };
   }
 
-  protected temporaryLocation(expr: Expr): TemporaryBinding {
+  protected temporaryLocation(expr: Expr, view?: ClassInfo): TemporaryBinding {
     const destroy = this.destroyerOf(expr.type, expr.row);
     const { run } = expr;
     return (frame, retain) => {
@@ -432,7 +432,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       };
       if (retain) retain(temporary);
       else frame.temporaries.push(temporary);
-      return location;
+      return view ? location.forClass(view) : location;
     };
   }
 
