@@ -1,6 +1,6 @@
 import type { CascadeSelector, CollectionElement, Expression, Span, SwitchExpressionCase } from './ast';
-import type { Member } from './classes';
-import { at, type Compiled, type Eval, typeName } from './compilerBase';
+import type { ClassInfo, Member } from './classes';
+import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
 import { ControlCompiler } from './controlCompiler';
 import type { GlobalVariable } from './environment';
 import { checkExhaustive } from './exhaustiveness';
@@ -441,15 +441,12 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     shorting = false
   ): AssignableTarget {
     const receiverType = receiver.type;
-    const { run } = receiver;
+    const prepare = preparingReceiver(receiver.run, nullAware);
     if (receiverType.kind === 'dynamic') {
       return {
         writeType: DYNAMIC,
         readType: DYNAMIC,
-        prepare: (frame) => {
-          const value = run(frame);
-          return value === SHORTED || (nullAware && value === undefined) ? SHORTED : value;
-        },
+        prepare,
         read: (frame, prepared) => frame.runtime.getProperty(prepared as Value, name, span.row),
         write: (frame, prepared, value) => frame.runtime.setProperty(prepared as Value, name, value, span.row),
         shorting: true,
@@ -466,70 +463,14 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       this.error(span, `${typeName(receiverType)} 型の値は null かもしれないので、${name} に直接は代入できません。`);
     }
     const getter = this.lookupMember(lookupType, name, false);
+    const target = { writeType: setter.type, readType: getter?.type, prepare, shorting: nullAware || shorting };
+    if (setter.extension) return { ...target, ...extensionAccessors(setter, getter, span.row) };
     const isSuper = (receiver as { isSuper?: boolean }).isSuper === true;
-    const superclassAt = isSuper ? this.superclassOf(span).classAt : undefined;
-    if (setter.extension) {
-      const setterMember = setter.member;
-      const getterMember = getter?.member;
-      const typeArgs = setter.extension.typeArgs;
-      return {
-        writeType: setter.type,
-        readType: getter?.type,
-        prepare: (frame) => {
-          const value = run(frame);
-          return value === SHORTED || (nullAware && value === undefined) ? SHORTED : value;
-        },
-        read: (frame, prepared) =>
-          (getterMember?.impl as unknown as Callable | undefined)?.(
-            frame.runtime,
-            prepared as Value,
-            { positional: [], named: undefined },
-            typeArgs,
-            span.row
-          ),
-        write: (frame, prepared, value) => {
-          (setterMember.impl as unknown as Callable)(
-            frame.runtime,
-            prepared as Value,
-            { positional: [value], named: undefined },
-            typeArgs,
-            span.row
-          );
-        },
-        shorting: nullAware || shorting,
-      };
-    }
+    if (isSuper) return { ...target, ...superAccessors(this.superclassOf(span).classAt, name, span.row) };
     return {
-      writeType: setter.type,
-      readType: getter?.type,
-      prepare: (frame) => {
-        const value = run(frame);
-        return value === SHORTED || (nullAware && value === undefined) ? SHORTED : value;
-      },
-      read: (frame, prepared) => {
-        if (superclassAt) {
-          const member = superclassAt(frame).implementation(name);
-          return member ? frame.runtime.readMember(prepared as Value, member, span.row) : undefined;
-        }
-        return frame.runtime.getProperty(prepared as Value, name, span.row);
-      },
-      write: (frame, prepared, value) => {
-        if (superclassAt) {
-          const member = superclassAt(frame).setterImplementation(name);
-          if (member?.kind === 'field') (prepared as DartObject).fields[member.slot] = value;
-          else if (member)
-            (member.impl as Callable)(
-              frame.runtime,
-              prepared as Value,
-              { positional: [value], named: undefined },
-              [],
-              span.row
-            );
-          return;
-        }
-        frame.runtime.setProperty(prepared as Value, name, value, span.row);
-      },
-      shorting: nullAware || shorting,
+      ...target,
+      read: (frame, prepared) => frame.runtime.getProperty(prepared as Value, name, span.row),
+      write: (frame, prepared, value) => frame.runtime.setProperty(prepared as Value, name, value, span.row),
     };
   }
 
@@ -600,129 +541,27 @@ export abstract class AssignmentCompiler extends ControlCompiler {
 
   // Collections
 
-  // code-gauge-allow functionCognitiveComplexity 50 -- One case per kind of collection element.
   compileCollectionElements(
     elements: CollectionElement[],
     kind: 'list' | 'set' | 'map',
     elementContext: DartType | undefined,
     valueContext: DartType | undefined
   ): {
-    types: { key: DartType; value?: DartType }[];
-    run: (frame: Frame, add: (key: Value, value?: Value) => void) => void;
+    types: ElementTypes[];
+    run: (frame: Frame, add: AddElement) => void;
     isConst: boolean;
     creates: boolean;
   } {
-    const types: { key: DartType; value?: DartType }[] = [];
+    const types: ElementTypes[] = [];
     let isConst = true;
     // A literal of objects being created counts as creating them, as Java's array initializers do.
     let creates = elements.length > 0;
-    const runs: ((frame: Frame, add: (key: Value, value?: Value) => void) => void)[] = [];
-    const elementName = kind === 'list' ? 'リスト' : kind === 'set' ? 'セット' : 'マップ';
-    const coerceElement = (compiled: Compiled, target: DartType | undefined, span: Span): Compiled => {
-      if (!target || target.kind === 'dynamic') return compiled;
-      if (compiled.type.kind === 'void') this.error(span, `void の値は${elementName}に入れられません。`);
-      return this.coerce(
-        compiled,
-        target,
-        span,
-        (from, to) => `${from} 型の値は、${to} 型の${elementName}の要素にできません。`
-      );
-    };
+    const runs: ((frame: Frame, add: AddElement) => void)[] = [];
     for (const element of elements) {
-      switch (element.kind) {
-        case 'mapEntry': {
-          if (kind !== 'map') this.error(element, `${elementName}のリテラルには、キーと値の組は書けません。`);
-          const key = coerceElement(
-            this.compileExpression(
-              element.key,
-              element.nullAwareKey ? (elementContext ? makeNullable(elementContext) : undefined) : elementContext
-            ),
-            element.nullAwareKey ? undefined : elementContext,
-            element.key
-          );
-          const value = coerceElement(
-            this.compileExpression(
-              element.value,
-              element.nullAwareValue ? (valueContext ? makeNullable(valueContext) : undefined) : valueContext
-            ),
-            element.nullAwareValue ? undefined : valueContext,
-            element.value
-          );
-          isConst &&= key.isConst && value.isConst;
-          types.push({
-            key: element.nullAwareKey ? nonNullable(key.type) : key.type,
-            value: element.nullAwareValue ? nonNullable(value.type) : value.type,
-          });
-          const keyRun = key.run;
-          const valueRun = value.run;
-          const { nullAwareKey, nullAwareValue } = element;
-          runs.push((frame, add) => {
-            const k = keyRun(frame);
-            if (nullAwareKey && k === undefined) return;
-            frame.temporaries.push(k);
-            try {
-              const v = valueRun(frame);
-              if (nullAwareValue && v === undefined) return;
-              add(k, v);
-            } finally {
-              frame.temporaries.pop();
-            }
-          });
-          break;
-        }
-        case 'spread': {
-          runs.push(this.compileSpread(element, kind, elementContext, valueContext, types));
-          isConst = false;
-          break;
-        }
-        case 'nullAwareElement': {
-          if (kind === 'map') this.error(element, 'マップのリテラルには、キーと値の組を書いてください。');
-          const compiled = this.compileExpression(
-            element.value,
-            elementContext ? makeNullable(elementContext) : undefined
-          );
-          if (
-            elementContext &&
-            !isSubtype(nonNullable(compiled.type), elementContext) &&
-            compiled.type.kind !== 'dynamic'
-          ) {
-            {
-              this.error(
-                element,
-                `${typeName(compiled.type)} 型の値は、${typeName(elementContext)} 型の${elementName}の要素にできません。`
-              );
-            }
-          }
-          isConst &&= compiled.isConst;
-          types.push({ key: nonNullable(compiled.type) });
-          const { run } = compiled;
-          runs.push((frame, add) => {
-            const value = run(frame);
-            if (value !== undefined) add(value);
-          });
-          break;
-        }
-        case 'ifElement': {
-          runs.push(this.compileIfElement(element, kind, elementContext, valueContext, types));
-          isConst = false;
-          break;
-        }
-        case 'forElement':
-        case 'forInElement': {
-          runs.push(this.compileForElement(element, kind, elementContext, valueContext, types));
-          isConst = false;
-          break;
-        }
-        default: {
-          if (kind === 'map') this.error(element, 'マップのリテラルには、キーと値の組を書いてください。');
-          const compiled = coerceElement(this.compileExpression(element, elementContext), elementContext, element);
-          isConst &&= compiled.isConst;
-          creates &&= compiled.creates === true;
-          types.push({ key: compiled.type });
-          const { run } = compiled;
-          runs.push((frame, add) => add(run(frame)));
-        }
-      }
+      const compiled = this.compileCollectionElement(element, kind, elementContext, valueContext, types);
+      runs.push(compiled.run);
+      isConst &&= compiled.isConst;
+      creates &&= compiled.creates;
     }
     return {
       types,
@@ -730,14 +569,145 @@ export abstract class AssignmentCompiler extends ControlCompiler {
         for (const run of runs) run(frame, add);
       },
       isConst,
-      creates:
-        creates &&
-        elements.every(
-          (element) =>
-            !['mapEntry', 'spread', 'nullAwareElement', 'ifElement', 'forElement', 'forInElement'].includes(
-              element.kind
-            )
-        ),
+      creates,
+    };
+  }
+
+  /** One element of a collection literal; only plain elements that create objects count as creating them. */
+  private compileCollectionElement(
+    element: CollectionElement,
+    kind: 'list' | 'set' | 'map',
+    elementContext: DartType | undefined,
+    valueContext: DartType | undefined,
+    types: ElementTypes[]
+  ): { run: (frame: Frame, add: AddElement) => void; isConst: boolean; creates: boolean } {
+    switch (element.kind) {
+      case 'mapEntry': {
+        return { ...this.compileMapEntryElement(element, kind, elementContext, valueContext, types), creates: false };
+      }
+      case 'spread': {
+        return {
+          run: this.compileSpread(element, kind, elementContext, valueContext, types),
+          isConst: false,
+          creates: false,
+        };
+      }
+      case 'nullAwareElement': {
+        return { ...this.compileNullAwareElement(element, kind, elementContext, types), creates: false };
+      }
+      case 'ifElement': {
+        return {
+          run: this.compileIfElement(element, kind, elementContext, valueContext, types),
+          isConst: false,
+          creates: false,
+        };
+      }
+      case 'forElement':
+      case 'forInElement': {
+        return {
+          run: this.compileForElement(element, kind, elementContext, valueContext, types),
+          isConst: false,
+          creates: false,
+        };
+      }
+      default: {
+        if (kind === 'map') this.error(element, 'マップのリテラルには、キーと値の組を書いてください。');
+        const compiled = this.coerceElement(
+          this.compileExpression(element, elementContext),
+          elementContext,
+          element,
+          kind
+        );
+        types.push({ key: compiled.type });
+        const { run } = compiled;
+        return { run: (frame, add) => add(run(frame)), isConst: compiled.isConst, creates: compiled.creates === true };
+      }
+    }
+  }
+
+  private coerceElement(
+    compiled: Compiled,
+    target: DartType | undefined,
+    span: Span,
+    kind: 'list' | 'set' | 'map'
+  ): Compiled {
+    if (!target || target.kind === 'dynamic') return compiled;
+    const elementName = collectionName(kind);
+    if (compiled.type.kind === 'void') this.error(span, `void の値は${elementName}に入れられません。`);
+    return this.coerce(
+      compiled,
+      target,
+      span,
+      (from, to) => `${from} 型の値は、${to} 型の${elementName}の要素にできません。`
+    );
+  }
+
+  private compileMapEntryElement(
+    element: Extract<CollectionElement, { kind: 'mapEntry' }>,
+    kind: 'list' | 'set' | 'map',
+    elementContext: DartType | undefined,
+    valueContext: DartType | undefined,
+    types: ElementTypes[]
+  ): { run: (frame: Frame, add: AddElement) => void; isConst: boolean } {
+    if (kind !== 'map') this.error(element, `${collectionName(kind)}のリテラルには、キーと値の組は書けません。`);
+    const { nullAwareKey, nullAwareValue } = element;
+    const key = this.coerceElement(
+      this.compileExpression(element.key, nullAwareKey ? nullableContext(elementContext) : elementContext),
+      nullAwareKey ? undefined : elementContext,
+      element.key,
+      kind
+    );
+    const value = this.coerceElement(
+      this.compileExpression(element.value, nullAwareValue ? nullableContext(valueContext) : valueContext),
+      nullAwareValue ? undefined : valueContext,
+      element.value,
+      kind
+    );
+    types.push({
+      key: nullAwareKey ? nonNullable(key.type) : key.type,
+      value: nullAwareValue ? nonNullable(value.type) : value.type,
+    });
+    const keyRun = key.run;
+    const valueRun = value.run;
+    return {
+      run: (frame, add) => {
+        const k = keyRun(frame);
+        if (nullAwareKey && k === undefined) return;
+        frame.temporaries.push(k);
+        try {
+          const v = valueRun(frame);
+          if (nullAwareValue && v === undefined) return;
+          add(k, v);
+        } finally {
+          frame.temporaries.pop();
+        }
+      },
+      isConst: key.isConst && value.isConst,
+    };
+  }
+
+  private compileNullAwareElement(
+    element: Extract<CollectionElement, { kind: 'nullAwareElement' }>,
+    kind: 'list' | 'set' | 'map',
+    elementContext: DartType | undefined,
+    types: ElementTypes[]
+  ): { run: (frame: Frame, add: AddElement) => void; isConst: boolean } {
+    if (kind === 'map') this.error(element, 'マップのリテラルには、キーと値の組を書いてください。');
+    const compiled = this.compileExpression(element.value, nullableContext(elementContext));
+    if (elementContext && !isSubtype(nonNullable(compiled.type), elementContext) && compiled.type.kind !== 'dynamic') {
+      this.error(
+        element,
+        `${typeName(compiled.type)} 型の値は、${typeName(elementContext)} 型の${collectionName(kind)}の要素にできません。`
+      );
+    }
+    types.push({ key: nonNullable(compiled.type) });
+    const { run } = compiled;
+    return {
+      run: (frame, add) => {
+        const value = run(frame);
+        if (value !== undefined) add(value);
+      },
+      isConst: compiled.isConst,
     };
   }
 
@@ -746,54 +716,58 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     kind: 'list' | 'set' | 'map',
     elementContext: DartType | undefined,
     valueContext: DartType | undefined,
-    types: { key: DartType; value?: DartType }[]
-  ): (frame: Frame, add: (key: Value, value?: Value) => void) => void {
+    types: ElementTypes[]
+  ): (frame: Frame, add: AddElement) => void {
     const contextType =
       kind === 'map'
         ? interfaceType(coreTypes.map, [elementContext ?? DYNAMIC, valueContext ?? DYNAMIC])
         : interfaceType(coreTypes.iterable, [elementContext ?? DYNAMIC]);
     const compiled = this.compileExpression(element.value, element.nullAware ? makeNullable(contextType) : contextType);
-    const base = element.nullAware ? nonNullable(compiled.type) : compiled.type;
     if (!element.nullAware && isNullable(compiled.type) && compiled.type.kind !== 'dynamic') {
       this.error(
         element,
         `${typeName(compiled.type)} 型の値は null かもしれないので、... では展開できません。...? を使ってください。`
       );
     }
+    if (kind === 'map') return this.compileMapSpread(element, compiled, elementContext, valueContext, types);
+    return this.compileIterableSpread(element, compiled, elementContext, types);
+  }
+
+  private compileMapSpread(
+    element: Extract<CollectionElement, { kind: 'spread' }>,
+    compiled: Compiled,
+    keyContext: DartType | undefined,
+    valueContext: DartType | undefined,
+    types: ElementTypes[]
+  ): (frame: Frame, add: AddElement) => void {
+    const base = element.nullAware ? nonNullable(compiled.type) : compiled.type;
+    const resolved = resolveBound(base);
+    const instance =
+      resolved.kind === 'interface' ? asInstanceOf({ ...resolved, nullable: false }, coreTypes.map) : undefined;
+    if (!instance && base.kind !== 'dynamic' && base.kind !== 'null')
+      this.error(element, `${typeName(compiled.type)} 型の値は Map ではないので、マップの中では展開できません。`);
+    const [keyType, valueType] = instance?.args ?? [DYNAMIC, DYNAMIC];
+    if (keyContext && !isSubtype(keyType, keyContext))
+      this.error(element, `${typeName(keyType)} 型のキーは、${typeName(keyContext)} 型のマップに入れられません。`);
+    if (valueContext && !isSubtype(valueType, valueContext))
+      this.error(element, `${typeName(valueType)} 型の値は、${typeName(valueContext)} 型のマップに入れられません。`);
+    types.push({ key: keyType, value: valueType });
     const { run } = compiled;
     const { nullAware } = element;
-    if (kind === 'map') {
-      const resolved = resolveBound(base);
-      const instance =
-        resolved.kind === 'interface' ? asInstanceOf({ ...resolved, nullable: false }, coreTypes.map) : undefined;
-      if (!instance && base.kind !== 'dynamic' && base.kind !== 'null')
-        this.error(element, `${typeName(compiled.type)} 型の値は Map ではないので、マップの中では展開できません。`);
-      const [keyType, valueType] = instance?.args ?? [DYNAMIC, DYNAMIC];
-      if (elementContext && !isSubtype(keyType, elementContext))
-        this.error(
-          element,
-          `${typeName(keyType)} 型のキーは、${typeName(elementContext)} 型のマップに入れられません。`
-        );
-      if (valueContext && !isSubtype(valueType, valueContext))
-        this.error(element, `${typeName(valueType)} 型の値は、${typeName(valueContext)} 型のマップに入れられません。`);
-      types.push({ key: keyType, value: valueType });
-      return (frame, add) => {
-        const map = run(frame);
-        if (nullAware && map === undefined) return;
-        const { runtime } = frame;
-        const entries = runtime.getProperty(map, 'entries', undefined);
-        const iterator = runtime.getProperty(entries, 'iterator', undefined);
-        frame.temporaries.push(iterator);
-        try {
-          while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
-            const entry = runtime.getProperty(iterator, 'current', undefined);
-            add(runtime.getProperty(entry, 'key', undefined), runtime.getProperty(entry, 'value', undefined));
-          }
-        } finally {
-          frame.temporaries.pop();
-        }
-      };
-    }
+    return (frame, add) => {
+      const map = run(frame);
+      if (nullAware && map === undefined) return;
+      addMapEntries(frame, map, add);
+    };
+  }
+
+  private compileIterableSpread(
+    element: Extract<CollectionElement, { kind: 'spread' }>,
+    compiled: Compiled,
+    elementContext: DartType | undefined,
+    types: ElementTypes[]
+  ): (frame: Frame, add: AddElement) => void {
+    const base = element.nullAware ? nonNullable(compiled.type) : compiled.type;
     const elementType = base.kind === 'null' ? DYNAMIC : iterableElementOf(base);
     if (!elementType)
       this.error(element, `${typeName(compiled.type)} 型の値は Iterable ではないので、展開できません。`);
@@ -805,32 +779,16 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       elementType.kind === 'dynamic' && elementContext && elementContext.kind !== 'dynamic'
         ? this.runtimeCast((frame) => frame.temporaries.at(-1), elementContext, false)
         : undefined;
+    const { run } = compiled;
+    const { nullAware } = element;
     return (frame, add) => {
       const iterable = run(frame);
       if (nullAware && iterable === undefined) return;
-      const { runtime } = frame;
       if (iterable instanceof DartList && !castElements) {
         for (const value of iterable.elements) add(value);
         return;
       }
-      const iterator = runtime.getProperty(iterable, 'iterator', undefined);
-      frame.temporaries.push(iterator);
-      try {
-        while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
-          const value = runtime.getProperty(iterator, 'current', undefined);
-          if (castElements) {
-            frame.temporaries.push(value);
-            try {
-              castElements(frame);
-            } finally {
-              frame.temporaries.pop();
-            }
-          }
-          add(value);
-        }
-      } finally {
-        frame.temporaries.pop();
-      }
+      addIterableElements(frame, iterable, castElements, add);
     };
   }
 
@@ -894,69 +852,14 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     kind: 'list' | 'set' | 'map',
     elementContext: DartType | undefined,
     valueContext: DartType | undefined,
-    types: { key: DartType; value?: DartType }[]
-  ): (frame: Frame, add: (key: Value, value?: Value) => void) => void {
+    types: ElementTypes[]
+  ): (frame: Frame, add: AddElement) => void {
     const before = this.flow;
-    const { result, slots } = this.withScope(() => {
-      if (element.kind === 'forInElement') {
-        const iterable = this.compileExpression(element.iterable);
-        const elementType = this.elementTypeOfIterable(iterable, element.iterable);
-        this.enterLoop(element);
-        const savedRecords = this.recordsSteps;
-        this.recordsSteps = false;
-        const bind = this.compileForInBinding(element.binding, elementType, element);
-        this.recordsSteps = savedRecords;
-        const body = this.compileCollectionElements([element.body], kind, elementContext, valueContext);
-        types.push(...body.types);
-        const source = iterable.run;
-        return (frame: Frame, add: (key: Value, value?: Value) => void) => {
-          const { runtime } = frame;
-          const iterator = runtime.getProperty(source(frame), 'iterator', undefined);
-          frame.temporaries.push(iterator);
-          try {
-            while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
-              bind(frame, runtime.getProperty(iterator, 'current', undefined));
-              body.run(frame, add);
-              runtime.spend();
-            }
-          } finally {
-            frame.temporaries.pop();
-          }
-        };
-      }
-      const { init } = element;
-      let initRun: ((frame: Frame) => void) | undefined;
-      const loopSlots: number[] = [];
-      if (init && !Array.isArray(init)) {
-        const before = new Set(this.fn.scopes.at(-1)?.values());
-        const exec = this.compileLocalDeclaration(init, false);
-        for (const variable of this.fn.scopes.at(-1)?.values() ?? [])
-          if (!before.has(variable)) loopSlots.push(variable.slot);
-        initRun = (frame) => void exec(frame);
-      } else if (init) {
-        const runs = init.map((expression) => this.compileExpression(expression).run);
-        initRun = (frame) => {
-          for (const run of runs) run(frame);
-        };
-      }
-      this.enterLoop(element);
-      const condition = element.condition ? this.compileCondition(element.condition) : undefined;
-      if (condition) this.flow = condition.flow.whenTrue;
-      const body = this.compileCollectionElements([element.body], kind, elementContext, valueContext);
-      types.push(...body.types);
-      const updates = element.updates.map((update) => this.compileExpression(update).run);
-      const test = condition?.compiled.run;
-      return (frame: Frame, add: (key: Value, value?: Value) => void) => {
-        initRun?.(frame);
-        while (!test || test(frame)) {
-          body.run(frame, add);
-          // Each iteration has its own loop variables, which closures created in the body keep.
-          for (const slot of loopSlots) frame.locals[slot] = new Cell((frame.locals[slot] as Cell).v);
-          for (const update of updates) update(frame);
-          frame.runtime.spend();
-        }
-      };
-    });
+    const { result, slots } = this.withScope(() =>
+      element.kind === 'forInElement'
+        ? this.compileForInElement(element, kind, elementContext, valueContext, types)
+        : this.compileCountedForElement(element, kind, elementContext, valueContext, types)
+    );
     this.flow = before;
     return (frame, add) => {
       try {
@@ -964,6 +867,89 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       } finally {
         for (const slot of slots) frame.locals[slot] = undefined;
       }
+    };
+  }
+
+  private compileForInElement(
+    element: Extract<CollectionElement, { kind: 'forInElement' }>,
+    kind: 'list' | 'set' | 'map',
+    elementContext: DartType | undefined,
+    valueContext: DartType | undefined,
+    types: ElementTypes[]
+  ): (frame: Frame, add: AddElement) => void {
+    const iterable = this.compileExpression(element.iterable);
+    const elementType = this.elementTypeOfIterable(iterable, element.iterable);
+    this.enterLoop(element);
+    const savedRecords = this.recordsSteps;
+    this.recordsSteps = false;
+    const bind = this.compileForInBinding(element.binding, elementType, element);
+    this.recordsSteps = savedRecords;
+    const body = this.compileCollectionElements([element.body], kind, elementContext, valueContext);
+    types.push(...body.types);
+    const source = iterable.run;
+    return (frame, add) => {
+      const { runtime } = frame;
+      const iterator = runtime.getProperty(source(frame), 'iterator', undefined);
+      frame.temporaries.push(iterator);
+      try {
+        while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
+          bind(frame, runtime.getProperty(iterator, 'current', undefined));
+          body.run(frame, add);
+          runtime.spend();
+        }
+      } finally {
+        frame.temporaries.pop();
+      }
+    };
+  }
+
+  private compileCountedForElement(
+    element: Extract<CollectionElement, { kind: 'forElement' }>,
+    kind: 'list' | 'set' | 'map',
+    elementContext: DartType | undefined,
+    valueContext: DartType | undefined,
+    types: ElementTypes[]
+  ): (frame: Frame, add: AddElement) => void {
+    const { initRun, loopSlots } = this.compileForElementInit(element);
+    this.enterLoop(element);
+    const condition = element.condition ? this.compileCondition(element.condition) : undefined;
+    if (condition) this.flow = condition.flow.whenTrue;
+    const body = this.compileCollectionElements([element.body], kind, elementContext, valueContext);
+    types.push(...body.types);
+    const updates = element.updates.map((update) => this.compileExpression(update).run);
+    const test = condition?.compiled.run;
+    return (frame, add) => {
+      initRun?.(frame);
+      while (!test || test(frame)) {
+        body.run(frame, add);
+        // Each iteration has its own loop variables, which closures created in the body keep.
+        for (const slot of loopSlots) frame.locals[slot] = new Cell((frame.locals[slot] as Cell).v);
+        for (const update of updates) update(frame);
+        frame.runtime.spend();
+      }
+    };
+  }
+
+  private compileForElementInit(element: Extract<CollectionElement, { kind: 'forElement' }>): {
+    initRun: ((frame: Frame) => void) | undefined;
+    loopSlots: number[];
+  } {
+    const { init } = element;
+    const loopSlots: number[] = [];
+    if (init && !Array.isArray(init)) {
+      const before = new Set(this.fn.scopes.at(-1)?.values());
+      const exec = this.compileLocalDeclaration(init, false);
+      for (const variable of this.fn.scopes.at(-1)?.values() ?? [])
+        if (!before.has(variable)) loopSlots.push(variable.slot);
+      return { initRun: (frame) => void exec(frame), loopSlots };
+    }
+    if (!init) return { initRun: undefined, loopSlots };
+    const runs = init.map((expression) => this.compileExpression(expression).run);
+    return {
+      initRun: (frame) => {
+        for (const run of runs) run(frame);
+      },
+      loopSlots,
     };
   }
 
@@ -1084,3 +1070,112 @@ export abstract class AssignmentCompiler extends ControlCompiler {
 }
 
 export type { Member };
+
+/** Evaluates a target's receiver, giving SHORTED where a null-aware access short-circuits. */
+function preparingReceiver(run: Eval, nullAware: boolean): AssignableTarget['prepare'] {
+  return (frame) => {
+    const value = run(frame);
+    return value === SHORTED || (nullAware && value === undefined) ? SHORTED : value;
+  };
+}
+
+/** The accessors of an extension's setter and getter, which run on the receiver without dispatch. */
+function extensionAccessors(
+  setter: ResolvedMember,
+  getter: ResolvedMember | undefined,
+  row: number
+): Pick<AssignableTarget, 'read' | 'write'> {
+  const setterMember = setter.member;
+  const getterMember = getter?.member;
+  const typeArgs = setter.extension?.typeArgs ?? [];
+  return {
+    read: (frame, prepared) =>
+      (getterMember?.impl as unknown as Callable | undefined)?.(
+        frame.runtime,
+        prepared as Value,
+        { positional: [], named: undefined },
+        typeArgs,
+        row
+      ),
+    write: (frame, prepared, value) => {
+      (setterMember.impl as unknown as Callable)(
+        frame.runtime,
+        prepared as Value,
+        { positional: [value], named: undefined },
+        typeArgs,
+        row
+      );
+    },
+  };
+}
+
+/** The accessors of `super.x`, which use the superclass's implementation of the member. */
+function superAccessors(
+  superclassAt: (frame: Frame) => ClassInfo,
+  name: string,
+  row: number
+): Pick<AssignableTarget, 'read' | 'write'> {
+  return {
+    read: (frame, prepared) => {
+      const member = superclassAt(frame).implementation(name);
+      return member ? frame.runtime.readMember(prepared as Value, member, row) : undefined;
+    },
+    write: (frame, prepared, value) => {
+      const member = superclassAt(frame).setterImplementation(name);
+      if (member?.kind === 'field') (prepared as DartObject).fields[member.slot] = value;
+      else if (member)
+        (member.impl as Callable)(frame.runtime, prepared as Value, { positional: [value], named: undefined }, [], row);
+    },
+  };
+}
+
+interface ElementTypes {
+  key: DartType;
+  value?: DartType;
+}
+type AddElement = (key: Value, value?: Value) => void;
+
+function collectionName(kind: 'list' | 'set' | 'map'): string {
+  return kind === 'list' ? 'リスト' : kind === 'set' ? 'セット' : 'マップ';
+}
+
+function nullableContext(context: DartType | undefined): DartType | undefined {
+  return context ? makeNullable(context) : undefined;
+}
+
+function addMapEntries(frame: Frame, map: Value, add: AddElement): void {
+  const { runtime } = frame;
+  const entries = runtime.getProperty(map, 'entries', undefined);
+  const iterator = runtime.getProperty(entries, 'iterator', undefined);
+  frame.temporaries.push(iterator);
+  try {
+    while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
+      const entry = runtime.getProperty(iterator, 'current', undefined);
+      add(runtime.getProperty(entry, 'key', undefined), runtime.getProperty(entry, 'value', undefined));
+    }
+  } finally {
+    frame.temporaries.pop();
+  }
+}
+
+function addIterableElements(frame: Frame, iterable: Value, castElements: Eval | undefined, add: AddElement): void {
+  const { runtime } = frame;
+  const iterator = runtime.getProperty(iterable, 'iterator', undefined);
+  frame.temporaries.push(iterator);
+  try {
+    while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
+      const value = runtime.getProperty(iterator, 'current', undefined);
+      if (castElements) {
+        frame.temporaries.push(value);
+        try {
+          castElements(frame);
+        } finally {
+          frame.temporaries.pop();
+        }
+      }
+      add(value);
+    }
+  } finally {
+    frame.temporaries.pop();
+  }
+}
