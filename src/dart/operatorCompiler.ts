@@ -35,7 +35,7 @@ import { Cell, type Value } from './values';
 
 /** Operators, conditionals, casts, throws, and cascades. */
 export abstract class OperatorCompiler extends ExpressionCompiler {
-  // code-gauge-allow functionCognitiveComplexity 24 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionCognitiveComplexity 25 -- Each branch is one of the cases Dart distinguishes for this construct.
   protected compilePrefix(
     expression: Extract<Expression, { kind: 'prefix' }>,
     context: DartType | undefined
@@ -65,25 +65,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         constValue,
       };
     }
-    if (value.type.kind === 'dynamic') {
-      const { run } = value;
-      return {
-        type: DYNAMIC,
-        run: (frame) => {
-          const operandValue = run(frame);
-          if (typeof operandValue === 'bigint' || typeof operandValue === 'number')
-            return negate(operandValue, operator);
-          return frame.runtime.invoke(
-            operandValue,
-            methodName,
-            { positional: [], named: undefined, isDynamic: true },
-            [],
-            expression.row
-          );
-        },
-        isConst: false,
-      };
-    }
+    if (value.type.kind === 'dynamic') return dynamicPrefix(value.run, operator, methodName, expression.row);
     return this.compileOperatorCall(value, methodName, [], expression);
   }
 
@@ -652,4 +634,17 @@ function safeConstant(compute: () => { value: Value } | undefined): { value: Val
 
 function isNumber(value: Value): value is bigint | number {
   return typeof value === 'bigint' || typeof value === 'number';
+}
+
+/** `-d` or `~d` of a dynamic value: arithmetic for numbers, and otherwise a dynamic call of the operator method. */
+function dynamicPrefix(run: Eval, operator: '-' | '~', methodName: string, row: number): Compiled {
+  return {
+    type: DYNAMIC,
+    run: (frame) => {
+      const operand = run(frame);
+      if (typeof operand === 'bigint' || typeof operand === 'number') return negate(operand, operator);
+      return frame.runtime.invoke(operand, methodName, { positional: [], named: undefined, isDynamic: true }, [], row);
+    },
+    isConst: false,
+  };
 }

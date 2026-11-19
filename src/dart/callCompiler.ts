@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 587 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 594 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type { Arguments as ArgumentsSyntax, Expression, FormalParameters, FunctionBody, Span, TypeSyntax } from './ast';
 import type { ClassInfo, ConstructorInfo, Member } from './classes';
 import {
@@ -690,7 +690,6 @@ export abstract class CallCompiler extends OperatorCompiler {
    * other than function literals see only what the context gave; function literals, compiled after them, also see
    * what those arguments gave.
    */
-  // code-gauge-allow functionCognitiveComplexity 26 -- Each branch is one of the cases Dart distinguishes for this construct.
   private inferTypeArguments(
     type: FunctionType,
     args: ArgumentsSyntax,
@@ -706,27 +705,9 @@ export abstract class CallCompiler extends OperatorCompiler {
     const solution = new Map<TypeParam, DartType>();
     for (const closurePass of [false, true]) {
       const infer = (argument: Expression, parameterType: DartType): Compiled => {
-        const map = new Map<TypeParam, DartType>();
-        for (const param of type.typeParams) {
-          // A closure's parameters take the context's type over what the other arguments gave, as Dart solves the
-          // context first: `num n = ap(1, (a) => a + 1)` types `a` as num.
-          // Other arguments see only a context that says more than Object?, as `[3, 9]` in `print(maxOf([3, 9]))`
-          // stays a List<int>.
-          const contextual = fromContext.get(param);
-          const usable =
-            contextual &&
-            !mentionsTypeParams(contextual, params) &&
-            withinBound(param, contextual, type.typeParams) &&
-            (closurePass || !isTop(contextual))
-              ? contextual
-              : undefined;
-          // A context beyond the bound is clamped to it, as `print(pick([1], (x) => x.isEven))` types x as num.
-          const clamped =
-            closurePass && contextual && !usable && param.bound && !mentionsTypeParams(param.bound, params)
-              ? param.bound
-              : undefined;
-          map.set(param, usable ?? clamped ?? (closurePass ? solution.get(param) : undefined) ?? INFERENCE_HOLE);
-        }
+        const map = new Map(
+          type.typeParams.map((param) => [param, argumentContextFor(param, type, fromContext, solution, closurePass)])
+        );
         const result = this.compileExpression(argument, substitute(parameterType, map));
         inferFromSubtype(result.type, parameterType, params, solution, upperBound);
         return result;
@@ -1184,6 +1165,34 @@ interface CompiledArguments {
 }
 
 /** The context wins over the arguments when they fit it, as `List<num> l = List.filled(3, 0)` makes a List<num>. */
+/**
+ * What a type parameter stands for in an argument's context. A closure's parameters take the context's type over what
+ * the other arguments gave, as Dart solves the context first: `num n = ap(1, (a) => a + 1)` types `a` as num. Other
+ * arguments see only a context that says more than Object?, as `[3, 9]` in `print(maxOf([3, 9]))` stays a List<int>.
+ * A context beyond the bound is clamped to it, as `print(pick([1], (x) => x.isEven))` types x as num.
+ */
+function argumentContextFor(
+  param: TypeParam,
+  type: FunctionType,
+  fromContext: ReadonlyMap<TypeParam, DartType>,
+  solution: ReadonlyMap<TypeParam, DartType>,
+  closurePass: boolean
+): DartType {
+  const params = new Set(type.typeParams);
+  const contextual = fromContext.get(param);
+  const usable =
+    contextual &&
+    !mentionsTypeParams(contextual, params) &&
+    withinBound(param, contextual, type.typeParams) &&
+    (closurePass || !isTop(contextual))
+      ? contextual
+      : undefined;
+  if (usable) return usable;
+  if (!closurePass) return INFERENCE_HOLE;
+  if (contextual && param.bound && !mentionsTypeParams(param.bound, params)) return param.bound;
+  return solution.get(param) ?? INFERENCE_HOLE;
+}
+
 /** Whether a type argument satisfies its parameter's bound, with the parameter itself in place of F-bounded uses. */
 function withinBound(param: TypeParam, argument: DartType, typeParams: readonly TypeParam[]): boolean {
   const { bound } = param;

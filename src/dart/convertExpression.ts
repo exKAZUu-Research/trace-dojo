@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 812 -- One converter per file; splitting it further would scatter the cases of one kind of node.
+// code-gauge-allow-file fileNcss 815 -- One converter per file; splitting it further would scatter the cases of one kind of node.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {

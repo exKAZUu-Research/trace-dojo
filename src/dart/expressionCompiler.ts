@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 876 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 901 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Arguments as ArgumentsSyntax,
   CascadeSelector,
@@ -218,6 +218,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     return flow;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of condition that tells flow analysis something.
+  // code-gauge-allow functionNcss 34 -- One case per kind of condition that tells flow analysis something.
   protected compileConditionInner(expression: Expression): { compiled: Compiled; flow: ConditionFlow } {
     switch (expression.kind) {
       case 'parenthesized': {
@@ -807,7 +809,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     isConst: boolean
   ): Compiled;
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionCognitiveComplexity 26 -- Each branch is one of the cases Dart distinguishes for this construct.
   // code-gauge-allow functionNcss 37 -- One case per form of the construct, which reads best together.
   private compileRecordLiteral(
     expression: Extract<Expression, { kind: 'record' }>,

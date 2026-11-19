@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 521 -- One converter per file; splitting it further would scatter the cases of one kind of node.
+// code-gauge-allow-file fileNcss 529 -- One converter per file; splitting it further would scatter the cases of one kind of node.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import type {
@@ -911,7 +911,8 @@ export class Converter extends ExpressionConverter {
     return nodes.filter((child) => child.type !== 'comment').map((child) => this.convertStatement(child));
   }
 
-  // code-gauge-allow functionNcss 55 -- One case per kind of statement node in the grammar.
+  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of statement node in the grammar.
+  // code-gauge-allow functionNcss 57 -- One case per kind of statement node in the grammar.
   convertStatement(node: Node): Statement {
     const span = spanOf(node);
     switch (node.type) {
