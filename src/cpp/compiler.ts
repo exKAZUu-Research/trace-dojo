@@ -55,6 +55,7 @@ import {
   intMin,
   isArithmetic,
   isConstType,
+  isCopyConstructor,
   isInteger,
   isReferenceRelated,
   nonReference,
@@ -501,6 +502,7 @@ export class Compiler extends StatementCompiler {
       return this.error(node.row, `デストラクタの名前は ~${cls.name} です。`);
     this.checkSpecialMemberReturnType(cls, rawName, node);
     const fn = this.functionInfo(rawName, declared.type, functionDeclarator, node, cls);
+    this.checkTrailingDefaults(fn.params);
     fn.access = access;
     fn.isConstructor = isConstructor;
     fn.isDestructor = isDestructor;
@@ -610,7 +612,6 @@ export class Compiler extends StatementCompiler {
 
   private parameters(list: Syntax): ParamInfo[] {
     const params: ParamInfo[] = [];
-    let seenDefault = false;
     const declarations = list.children;
     for (const param of declarations) {
       if (param.type === 'variadic_parameter') return this.unsupported(param.row, '可変長引数（...）');
@@ -627,8 +628,6 @@ export class Compiler extends StatementCompiler {
       if (type.kind === 'array') type = { kind: 'pointer', to: type.of };
       const defaultValue =
         param.type === 'optional_parameter_declaration' ? fieldOf(param, 'default_value') : undefined;
-      if (defaultValue) seenDefault = true;
-      else if (seenDefault) this.error(param.row, '引数の既定値は、後ろの引数から順に付けてください。');
       params.push({
         name: declared.name,
         type,
@@ -1235,7 +1234,6 @@ export class Compiler extends StatementCompiler {
     else if (!isDefinition && this.hasSpecifier(node, 'static'))
       this.unsupported(node.row, 'static の関数（内部結合）');
     const fn = this.functionInfo(name, declared.type, declarator, node, undefined);
-    this.bindDefaultArguments(fn);
     if (name === 'main') {
       if (!sameType(fn.ret, INT)) this.error(node.row, 'main 関数の戻り値の型は int にしてください。');
       this.checkMainParameters(fn);
@@ -1251,6 +1249,9 @@ export class Compiler extends StatementCompiler {
       overloads.splice(overloads.indexOf(same), 1);
       same = undefined;
     }
+    if (same) fn.params = mergeDefaults(same.params, fn.params, node.row, (row, message) => this.error(row, message));
+    this.checkTrailingDefaults(fn.params);
+    this.bindDefaultArguments(fn);
     if (same) {
       this.checkExceptionSpecifier(same, fn, node.row);
       if (!sameType(same.ret, fn.ret))
@@ -1262,7 +1263,7 @@ export class Compiler extends StatementCompiler {
         same.definition = node;
         this.claimAtomic(same, node);
       }
-      same.params = mergeDefaults(same.params, fn.params, node.row, (row, message) => this.error(row, message));
+      same.params = fn.params;
       return same;
     }
     if (name === 'main' && overloads.length > 0) this.error(node.row, 'main 関数はオーバーロードできません。');
@@ -1326,16 +1327,18 @@ export class Compiler extends StatementCompiler {
       this.checkExceptionSpecifier(fn, probe, node.row);
       if (typeNode && !sameType(fn.ret, probe.ret))
         return this.error(node.row, `${fn.displayName} の戻り値の型が宣言と違います。`);
-      if (probe.params.some((param) => param.defaultValue)) {
-        this.error(node.row, '引数の既定値は、クラスの中の宣言に書いてください。');
+      probe.params = mergeDefaults(fn.params, probe.params, node.row, (row, message) => this.error(row, message));
+      this.checkTrailingDefaults(probe.params);
+      if (fn.isConstructor) {
+        if (fn.params.some((param) => !param.defaultValue) && probe.params.every((param) => param.defaultValue))
+          this.error(node.row, 'クラスの外で既定値を追加して、既定コンストラクタにすることはできません。');
+        if (!isCopyConstructor(fn, cls) && isCopyConstructor(probe, cls))
+          this.error(node.row, 'クラスの外で既定値を追加して、コピーコンストラクタにすることはできません。');
       }
+      this.bindDefaultArguments(probe);
       fn.isDefined = true;
       fn.definition = node;
-      fn.params = fn.params.map((param, index) => ({
-        ...param,
-        name: probe.params[index].name,
-        type: probe.params[index].type,
-      }));
+      fn.params = probe.params;
       if (probe.isInline) fn.isInline = true;
       this.claimAtomic(fn, node);
       if (cls === fn.owner && fn.isDestructor) {
@@ -2415,6 +2418,14 @@ export class Compiler extends StatementCompiler {
     }
   }
 
+  private checkTrailingDefaults(params: ParamInfo[]): void {
+    let seenDefault = false;
+    for (const param of params) {
+      if (param.defaultValue) seenDefault = true;
+      else if (seenDefault) this.error(param.row, '引数の既定値は、後ろの引数から順に付けてください。');
+    }
+  }
+
   private bindDependencies<T>(compile: () => T): () => T {
     const dependencies = { functions: new Map<FunctionInfo, number>(), staticMembers: new Map<GlobalInfo, number>() };
     const previous = this.defaultDependencies;
@@ -2492,7 +2503,7 @@ function mergeDefaults(
     const other = defined[index];
     if (param.defaultValue && other.defaultValue)
       error(row, '引数の既定値は、宣言と定義のどちらか一方にだけ書いてください。');
-    return { ...param, name: other.name, type: other.type, defaultValue: param.defaultValue ?? other.defaultValue };
+    return { ...other, defaultValue: param.defaultValue ?? other.defaultValue };
   });
 }
 

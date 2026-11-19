@@ -861,6 +861,16 @@ test.each([
     1,
   ],
   [
+    'adding the same default argument in a second declaration',
+    'int f(int value = 1);\nint f(int value = 2);\nint main() {}',
+    1,
+  ],
+  [
+    'adding a default that turns an out-of-class definition into a default constructor',
+    'struct X { X(int); };\nX::X(int value = 2) {}\nint main() {}',
+    1,
+  ],
+  [
     'inaccessible data member in an unevaluated operand',
     'class X { int size; };\nint main() { return sizeof(X::size); }',
     1,
