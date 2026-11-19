@@ -16,6 +16,11 @@ export const UNINIT = Symbol('uninitialized');
 
 export type Value = number | bigint | Ptr | Store | FunctionRef | typeof UNINIT | undefined;
 
+interface Address {
+  store: Store | undefined;
+  index: number;
+}
+
 export function holdValues<T>(frame: Frame, values: readonly Value[], run: () => T): T {
   const mark = frame.pending.length;
   for (const value of values) frame.pending.push(value);
@@ -117,6 +122,8 @@ export function destroyRetainedTemporary(frame: Frame, value: Value): void {
 /** A built-in array, whose elements may be arrays or objects. */
 export class ArrayStore extends Store {
   allocatedElementType?: Type;
+  elementSize?: number;
+  enclosingLocation?: Ptr;
   /** Whether the array is a string literal, which the program must not write. */
   isLiteral = false;
 
@@ -126,6 +133,10 @@ export class ArrayStore extends Store {
 
   get length(): number {
     return this.values.length;
+  }
+
+  addressAt(offset: number): Address {
+    return this.enclosingLocation?.embeddedAddress(offset) ?? { store: this, index: offset };
   }
 
   get(index: number): Value {
@@ -217,23 +228,20 @@ export class CObject extends Store {
     return location;
   }
 
-  subobjectAddress(cls: ClassInfo, index: number): { store: Store | undefined; index: number } {
+  subobjectAddress(cls: ClassInfo, index: number): Address {
     return this.addressAt(baseSubobjectOffset(this.completeClass, cls) + index * sizeOf(classType(cls)));
   }
 
-  memberAddress(fieldIndex: number, index: number): { store: Store | undefined; index: number } {
+  memberAddress(fieldIndex: number, index: number, offset: number): Address {
     const field = this.completeClass.fields[fieldIndex];
-    if (!field) return { store: this, index: fieldIndex + index };
-    return this.addressAt(fieldSubobjectOffset(this.completeClass, field) + index * sizeOf(field.type));
+    if (!field) return { store: this, index: fieldIndex + index + offset };
+    return this.addressAt(fieldSubobjectOffset(this.completeClass, field) + index * sizeOf(field.type) + offset);
   }
 
-  addressAt(offset: number): { store: Store | undefined; index: number } {
+  addressAt(offset: number): Address {
     const complete = this.completeLocation;
-    const member = complete?.memberOwner;
-    if (member) {
-      const field = member.object.completeClass.fields[member.field];
-      if (field) return member.object.addressAt(fieldSubobjectOffset(member.object.completeClass, field) + offset);
-    }
+    const embedded = complete?.embeddedAddress(offset);
+    if (embedded) return embedded;
     if (offset === sizeOf(classType(this.completeClass))) {
       return new Ptr(complete?.store ?? this.fallbackReceiver(), (complete?.index ?? 0) + 1).address;
     }
@@ -474,8 +482,10 @@ export class Ptr {
   }
 
   forClass(cls: ClassInfo): Ptr {
-    const object = this.addressedObject();
-    return object && (object.completeLocation || object.completeClass !== cls) ? object.receiver(cls) : this;
+    const object = this.addressedValue();
+    return object instanceof CObject && (object.completeLocation || object.completeClass !== cls)
+      ? object.receiver(cls)
+      : this;
   }
 
   allocationLocation(): Ptr {
@@ -498,13 +508,23 @@ export class Ptr {
     return a.store === b.store && a.index === b.index;
   }
 
-  /** Constructor and destructor receivers can wrap the same object in different storage cells. */
-  get address(): { store: Store | undefined; index: number } {
-    const store = this.store;
+  get address(): Address {
+    const { store } = this;
     if (store instanceof BaseSubobjectStorage) return store.object.subobjectAddress(store.cls, this.index);
-    if (store instanceof MemberStorage) return store.owner.memberAddress(store.field, this.index);
-    const object = this.addressedObject();
-    return object ? object.addressAt(0) : this.storageAddress;
+    const embedded = this.embeddedAddress(0);
+    if (embedded) return embedded;
+    const value = this.addressedValue();
+    if (value instanceof CObject || value instanceof ArrayStore) return value.addressAt(0);
+    if (store instanceof Box && this.index === 1 && store.value instanceof ArrayStore && store.value.elementSize)
+      return store.value.addressAt(store.value.length * store.value.elementSize);
+    return this.storageAddress;
+  }
+
+  embeddedAddress(offset: number): Address | undefined {
+    const { store, index } = this;
+    if (store instanceof MemberStorage) return store.owner.memberAddress(store.field, index, offset);
+    if (store instanceof ArrayStore && store.elementSize !== undefined)
+      return store.addressAt(index * store.elementSize + offset);
   }
 
   get storageAddress(): { store: Store | undefined; index: number } {
@@ -517,12 +537,11 @@ export class Ptr {
     if (store instanceof MemberStorage && index === 0) return { object: store.owner, field: store.field };
   }
 
-  private addressedObject(): CObject | undefined {
+  private addressedValue(): Value {
     const { store, index } = this;
     if (!store || index < 0 || index >= store.pointerLength || store.liveness !== Liveness.Alive) return;
     try {
-      const value = this.readRaw();
-      return value instanceof CObject ? value : undefined;
+      return this.readRaw();
     } catch (error) {
       if (!(error instanceof CppRuntimeError)) throw error;
     }

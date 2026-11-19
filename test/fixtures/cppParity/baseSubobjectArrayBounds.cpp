@@ -20,6 +20,16 @@ struct VirtualDerived : VirtualBase {
 struct Plain { int value; int other; };
 struct Tagged : Plain { virtual void identify() {} };
 struct Extended : Tagged {};
+struct ArrayBase { int values[2][2]; };
+struct TaggedArray : ArrayBase { virtual void identify() {} };
+struct PlainArray : ArrayBase {};
+
+void showArray(ArrayBase* p) {
+  std::cout << (static_cast<void*>(p) == static_cast<void*>(&p->values))
+            << (static_cast<void*>(p) == static_cast<void*>(p->values[0]))
+            << (static_cast<void*>(p->values + 1) == static_cast<void*>(p->values[1]))
+            << (static_cast<void*>(p->values + 2) == static_cast<void*>(&p->values + 1)) << '\n';
+}
 
 void show(Derived* elements) {
   Base* first = elements;
@@ -68,4 +78,9 @@ int main() {
             << (static_cast<void*>(heapBase) == static_cast<void*>(&allocated->value))
             << (static_cast<void*>(heapBase + 1) == static_cast<void*>(allocated + 1)) << '\n';
   delete allocated;
+  PlainArray plainArray;
+  TaggedArray* taggedArray = new TaggedArray;
+  showArray(&plainArray);
+  showArray(taggedArray);
+  delete taggedArray;
 }
