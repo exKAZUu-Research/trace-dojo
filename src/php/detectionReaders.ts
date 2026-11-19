@@ -1,8 +1,8 @@
 // oxlint-disable unicorn/prefer-code-point -- Each code unit is one PHP byte.
 import { detectionCodePoint, mobileDetectionTable } from './detectionDecodeTables';
 import { decodeEucCn, decodeGb18030, gb2312CodePoint } from './gb18030Detection';
-import { readExtendedJisEncoding, readJisEncoding, readSjis2004 } from './jisDetectionReader';
-import { legacyDetectionCodePoint } from './legacyDetectionTables';
+import { readEucJp, readExtendedJisEncoding, readJisEncoding, readSjis2004 } from './jisDetectionReader';
+import { appendLegacyMapping, legacyDetectionCodePoint } from './legacyDetectionTables';
 import { rt } from './runtime';
 
 const BAD = -1;
@@ -10,6 +10,8 @@ const TABLE_REPLACEMENT = 0xff_fd;
 const PLANE_WIDTH = 94;
 const PLANE_SIZE = PLANE_WIDTH * PLANE_WIDTH;
 const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const SJIS_TABLE = 512 + 3 * PLANE_SIZE;
+const CP932_TABLE = SJIS_TABLE + 256 + 60 * 189;
 const IMAP_BASE64 = BASE64.slice(0, -1) + ',';
 const MOBILE_CARRIERS = ['DOCOMO', 'KDDI-A', 'KDDI-B', 'SOFTBANK'];
 type Decode = (bytes: string) => number[];
@@ -24,8 +26,20 @@ const FIXED_READERS = new Map<string, Decode>([
   ['CP50221', readCp5022x],
   ['CP50222', readCp5022x],
   ['ISO-2022-JP-MS', (bytes) => readExtendedJisEncoding(bytes, 'ms')],
+  ['ISO-2022-JP-MOBILE#KDDI', (bytes) => readExtendedJisEncoding(bytes, 'kddi')],
   ['ISO-2022-JP-2004', (bytes) => readExtendedJisEncoding(bytes, '2004')],
+  ['EUC-JP', (bytes) => readEucJp(bytes, 'plain')],
+  ['eucJP-win', (bytes) => readEucJp(bytes, 'windows')],
+  ['EUC-JP-2004', (bytes) => readEucJp(bytes, '2004')],
+  ['CP51932', (bytes) => readEucJp(bytes, 'cp51932')],
+  ['SJIS', (bytes) => decodeShiftJis(bytes, SJIS_TABLE, false)],
+  ['CP932', readCp932],
+  ['SJIS-win', readCp932],
   ['SJIS-2004', readSjis2004],
+  ['SJIS-mac', (bytes) => readSjisVariant(bytes, 'sjisMac')],
+  ['SJIS-Mobile#DOCOMO', (bytes) => readSjisVariant(bytes, 'sjisDocomo')],
+  ['SJIS-Mobile#KDDI', (bytes) => readSjisVariant(bytes, 'sjisKddi')],
+  ['SJIS-Mobile#SOFTBANK', (bytes) => readSjisVariant(bytes, 'sjisSoftbank')],
   ['EUC-KR', (bytes) => decodeMappedPairs(bytes, 'eucKr')],
   ['CP950', (bytes) => decodeMappedPairs(bytes, 'cp950')],
   ['BIG-5', (bytes) => decodeMappedPairs(bytes, 'big5')],
@@ -57,11 +71,6 @@ export function extraEncodingReader(name: string, utf8: Decode, utf16: Decode): 
         rt().spend(Math.ceil(bytes.length / 64));
         return Array.from(bytes, (byte) => tableCode(offset + byte.charCodeAt(0)));
       };
-    }
-    case 'SJIS':
-    case 'CP932': {
-      const offset = 512 + 3 * PLANE_SIZE + (name === 'CP932' ? 256 + 60 * 189 : 0);
-      return (bytes) => decodeShiftJis(bytes, offset, name === 'CP932');
     }
     case 'UTF-7':
     case 'UTF7-IMAP': {
@@ -193,21 +202,96 @@ function taiwaneseLead(lead: number, plane: number): boolean {
   return plane === 2 && lead >= 0xa1 && lead <= 0xe7;
 }
 
+function readCp932(bytes: string): number[] {
+  return decodeShiftJis(bytes, CP932_TABLE, true);
+}
+
 function decodeShiftJis(bytes: string, offset: number, extended: boolean): number[] {
   const values: number[] = [];
   rt().spend(Math.ceil(bytes.length / 64));
   for (let index = 0; index < bytes.length;) {
     const lead = bytes.charCodeAt(index++);
-    const double = (lead >= 0x81 && lead <= 0x9f) || (lead >= 0xe0 && lead <= (extended ? 0xfc : 0xef));
-    if (!double) {
+    const row = sjisLeadRow(lead, extended ? 0xfc : 0xef);
+    if (row < 0) {
       values.push(tableCode(offset + lead));
       continue;
     }
     const trail = bytes.charCodeAt(index++);
-    const row = lead < 0xe0 ? lead - 0x81 : 31 + lead - 0xe0;
     values.push(trail >= 0x40 && trail <= 0xfc ? tableCode(offset + 256 + row * 189 + trail - 0x40) : BAD);
   }
   return values;
+}
+
+type SjisVariant = 'sjisMac' | 'sjisDocomo' | 'sjisKddi' | 'sjisSoftbank';
+
+function readSjisVariant(bytes: string, encoding: SjisVariant): number[] {
+  const values: number[] = [];
+  const mac = encoding === 'sjisMac';
+  rt().spend(Math.ceil(bytes.length / 64));
+  for (let index = 0; index < bytes.length;) {
+    const lead = bytes.charCodeAt(index++);
+    if (encoding === 'sjisSoftbank' && lead === 0x1b) {
+      index = readSoftbankEscape(bytes, index, values);
+      continue;
+    }
+    const row = sjisLeadRow(lead, mac ? 0xed : 0xfc);
+    if (row < 0) {
+      pushSjisSingle(values, lead, mac);
+      continue;
+    }
+    const trail = bytes.charCodeAt(index++);
+    if (!(trail >= 0x40 && trail <= 0xfc)) {
+      values.push(BAD);
+      continue;
+    }
+    const offset = row * 189 + trail - 0x40;
+    const code = legacyDetectionCodePoint(encoding, offset) || detectionCodePoint(CP932_TABLE + 256 + offset);
+    appendLegacyMapping(values, code, BAD);
+  }
+  return values;
+}
+
+function sjisLeadRow(lead: number, last: number): number {
+  if (lead >= 0x81 && lead <= 0x9f) return lead - 0x81;
+  return lead >= 0xe0 && lead <= last ? lead - 0xe0 + 31 : -1;
+}
+
+const MAC_SINGLE = new Map<number, number>([
+  [0x5c, 0xa5],
+  [0x80, 0x5c],
+  [0xa0, 0xa0],
+  [0xfd, 0xa9],
+  [0xfe, 0x21_22],
+]);
+
+function pushSjisSingle(values: number[], byte: number, mac: boolean): void {
+  if (mac && byte === 0xff) values.push(0x20_26, 0xf8_7f);
+  else if (mac && MAC_SINGLE.has(byte)) values.push(MAC_SINGLE.get(byte)!);
+  else if (byte < 0x80) values.push(byte);
+  else values.push(byte >= 0xa1 && byte <= 0xdf ? 0xfe_c0 + byte : BAD);
+}
+
+function readSoftbankEscape(bytes: string, index: number, values: number[]): number {
+  if (bytes[index++] !== '$' || index >= bytes.length) {
+    values.push(BAD);
+    return index;
+  }
+  const bank = 'EFGOPQ'.indexOf(bytes[index++]);
+  if (bank === -1) {
+    values.push(BAD);
+    return index;
+  }
+  while (index < bytes.length) {
+    const next = bytes.charCodeAt(index++);
+    if (next === 0x0f) break;
+    const code =
+      next >= 0x21 && next <= 0x7a
+        ? legacyDetectionCodePoint('softbankEscape', bank * 90 + next - 0x21)
+        : TABLE_REPLACEMENT;
+    appendLegacyMapping(values, code, BAD);
+    if (code === TABLE_REPLACEMENT) break;
+  }
+  return index;
 }
 
 function decodeShiftedUtf16(bytes: string, imap: boolean, utf16: Decode, validating = false): number[] {

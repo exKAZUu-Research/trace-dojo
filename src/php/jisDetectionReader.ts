@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/prefer-code-point -- Each code unit is one PHP byte.
 import { jisDetectionCodePoint } from './detectionDecodeTables';
-import { legacyDetectionCodePoint, type LegacyDetectionTable } from './legacyDetectionTables';
+import { appendLegacyMapping, legacyDetectionCodePoint, type LegacyDetectionTable } from './legacyDetectionTables';
 import { rt } from './runtime';
 
 const BAD = -1;
@@ -32,23 +32,24 @@ const ESCAPES = new Map([
   ['$(D', JIS_0212],
 ]);
 const ISO_ESCAPES = new Set(['(B', '(J', '$@', '$B']);
+const WINDOWS_JIS_ESCAPES = new Map([
+  ['(B', ASCII],
+  ['(J', ASCII],
+  ['(I', KANA],
+  ['$@', JIS_0208],
+  ['$B', JIS_0208],
+  ['$(@', JIS_0208],
+  ['$(B', JIS_0208],
+]);
 
 const EXTENDED_JIS = {
   cp5022x: { escapes: ESCAPES, lastLead: 0x97, kanji: 'cp5022x' },
   ms: {
-    escapes: new Map([
-      ['(B', ASCII],
-      ['(J', ASCII],
-      ['(I', KANA],
-      ['$@', JIS_0208],
-      ['$B', JIS_0208],
-      ['$(@', JIS_0208],
-      ['$(B', JIS_0208],
-      ['$(?', MS_USER],
-    ]),
+    escapes: new Map([...WINDOWS_JIS_ESCAPES, ['$(?', MS_USER]]),
     lastLead: 0x7f,
     kanji: 'iso2022JpMs',
   },
+  kddi: { escapes: WINDOWS_JIS_ESCAPES, lastLead: 0x7f, kanji: 'iso2022JpKddi' },
   '2004': {
     escapes: new Map([
       ['(B', ASCII],
@@ -61,7 +62,7 @@ const EXTENDED_JIS = {
   },
 } satisfies Record<string, { escapes: ReadonlyMap<string, number>; lastLead: number; kanji?: LegacyDetectionTable }>;
 
-// code-gauge-allow functionCognitiveComplexity 20 -- Keeps the cursor and designation shifts in one state machine.
+// code-gauge-allow functionCognitiveComplexity 23 -- Keeps the cursor and designation shifts in one state machine.
 export function readExtendedJisEncoding(bytes: string, kind: keyof typeof EXTENDED_JIS): number[] {
   const { escapes, lastLead, kanji } = EXTENDED_JIS[kind];
   const replayInvalid = kind === 'cp5022x';
@@ -82,12 +83,60 @@ export function readExtendedJisEncoding(bytes: string, kind: keyof typeof EXTEND
       continue;
     }
     if (state >= JIS_0208 && lead >= 0x21 && lead <= lastLead) {
-      pushExtendedPair(codes, state, kanji, lead, bytes.charCodeAt(index++));
+      pushExtendedPair(codes, state, state === JIS_0208 ? kanji : undefined, lead, bytes.charCodeAt(index++));
       continue;
     }
     codes.push(kind === '2004' && lead >= 0x80 ? BAD : directCode(state, lead));
   }
   return codes;
+}
+
+type EucJpProfile = 'plain' | 'windows' | 'cp51932' | '2004';
+interface EucJpPlane {
+  state: number;
+  delta?: LegacyDetectionTable;
+}
+const EUC_JP_PROFILES: Record<EucJpProfile, { first: EucJpPlane; second?: EucJpPlane }> = {
+  plain: { first: { state: JIS_0208 }, second: { state: JIS_0212 } },
+  windows: { first: { state: JIS_0208, delta: 'eucJpWin' }, second: { state: JIS_0212, delta: 'eucJpWinSecond' } },
+  cp51932: { first: { state: JIS_0208, delta: 'cp51932' } },
+  '2004': { first: { state: JIS_0213_PLANE_1 }, second: { state: JIS_0213_PLANE_2 } },
+};
+
+// code-gauge-allow functionCognitiveComplexity 20 -- The lead byte and plane jointly determine how many bytes to consume.
+export function readEucJp(bytes: string, profile: EucJpProfile): number[] {
+  const { first, second } = EUC_JP_PROFILES[profile];
+  const codes: number[] = [];
+  rt().spend(Math.ceil(bytes.length / 64));
+  for (let index = 0; index < bytes.length;) {
+    const lead = bytes.charCodeAt(index++);
+    if (lead < 0x80) {
+      codes.push(lead);
+      continue;
+    }
+    if (lead === 0x8e) {
+      const kana = bytes.charCodeAt(index++);
+      codes.push(kana >= 0xa1 && kana <= 0xdf ? 0xfe_c0 + kana : BAD);
+      continue;
+    }
+    if (lead === 0x8f && second) {
+      const row = bytes.charCodeAt(index++) - 0xa1;
+      if (second.state === JIS_0213_PLANE_2 && !JIS_0213_SECOND_PLANE_ROWS.includes(row)) {
+        codes.push(BAD);
+        continue;
+      }
+      pushEucJpPair(codes, second, row, bytes.charCodeAt(index++));
+      continue;
+    }
+    if (lead >= 0xa1 && lead <= 0xfe) pushEucJpPair(codes, first, lead - 0xa1, bytes.charCodeAt(index++));
+    else codes.push(BAD);
+  }
+  return codes;
+}
+
+function pushEucJpPair(codes: number[], plane: EucJpPlane, row: number, trail: number): void {
+  if (row >= 0 && row < 94) pushExtendedPair(codes, plane.state, plane.delta, row + 0x21, trail - 0x80);
+  else codes.push(BAD);
 }
 
 export function readSjis2004(bytes: string): number[] {
@@ -127,11 +176,11 @@ function pushSjis2004Pair(codes: number[], lead: number, trail: number): void {
 function pushExtendedPair(
   codes: number[],
   state: number,
-  kanji: LegacyDetectionTable | undefined,
+  delta: LegacyDetectionTable | undefined,
   lead: number,
   trail: number
 ): void {
-  if (!isGraphic(trail)) {
+  if (!(lead >= 0x21 && lead <= 0x97) || !isGraphic(trail)) {
     codes.push(BAD);
     return;
   }
@@ -140,15 +189,10 @@ function pushExtendedPair(
     codes.push(lead <= 0x34 ? 0xe0_00 + index : BAD);
     return;
   }
-  const table = state === JIS_0208 ? kanji : JIS_0213_TABLES.get(state);
+  const table = delta ?? JIS_0213_TABLES.get(state);
   const extended = table ? legacyDetectionCodePoint(table, index) : 0;
-  if (extended >= 0x80_00_00_00) {
-    // The high bit marks two BMP code points emitted for one JIS pair.
-    codes.push((extended >>> 16) & 0x7f_ff, extended & 0xff_ff);
-    return;
-  }
   if (extended !== 0) {
-    codes.push(extended === 0xff_fd ? BAD : extended);
+    appendLegacyMapping(codes, extended, BAD);
     return;
   }
   codes.push(isGraphic(lead) ? jisPair(state === JIS_0212 ? JIS_0212 : JIS_0208, lead, trail) : BAD);

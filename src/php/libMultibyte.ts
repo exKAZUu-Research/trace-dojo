@@ -959,10 +959,7 @@ function encodingReader(name: string): EncodingReader {
 
 function legacyTextDecoder(name: string): TextDecoder | undefined {
   let label = name;
-  if (/^(?:SJIS|CP932)/.test(name)) label = 'shift_jis';
-  else if (/^(?:EUC-JP|eucJP|CP51932)/.test(name)) label = 'euc-jp';
-  else if (/^(?:ISO-2022-JP|JIS)/.test(name)) label = 'iso-2022-jp';
-  else if (name === 'CP936') label = 'gbk';
+  if (name === 'CP936') label = 'gbk';
   else if (name === 'UHC') label = 'euc-kr';
   try {
     return new TextDecoder(label, { ignoreBOM: true });

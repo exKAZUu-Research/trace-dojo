@@ -53,3 +53,22 @@ foreach ([
     mb_detect_encoding(hex2bin($bytes), [$encoding, 'UTF-8']),
   ]), "\n";
 }
+
+foreach ([
+  ['ad40', 'EUC'],
+  ['8ea1', 'EUC-JP'],
+  ['f5a1', 'eucJP-win'],
+  ['8ff5a1', 'eucJP-win'],
+  ['a3a1', 'EUC_JP-2004'],
+  ['8fa1a1', 'EUC-JP-2004'],
+  ['8040', 'SJIS-Mobile#DOCOMO'],
+  ['8740', 'MacJapanese'],
+  ['fba1', 'SJIS-Mobile#KDDI'],
+  ['1b2445220f', 'SJIS-Mobile#SOFTBANK'],
+  ['1b244275211b2842', 'ISO-2022-JP-KDDI'],
+] as [$bytes, $encoding]) {
+  echo $bytes, " ", json_encode([
+    mb_detect_encoding(hex2bin($bytes), $encoding, true),
+    mb_detect_encoding(hex2bin($bytes), [$encoding, 'SJIS', 'UTF-8']),
+  ]), "\n";
+}
