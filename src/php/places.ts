@@ -101,10 +101,7 @@ export class VarPlace implements Place {
   set(value: Value): Value {
     this.checkWritableName();
     const ref = this.frame.vars.get(this.name);
-    if (ref) {
-      ref.assign(value);
-      return ref.v;
-    }
+    if (ref) return ref.assign(value);
     this.frame.vars.set(this.name, new Ref(value));
     return value;
   }
@@ -166,8 +163,7 @@ export class RefPlace implements Place {
   }
 
   set(value: Value): Value {
-    this.target.assign(value);
-    return this.target.v;
+    return this.target.assign(value);
   }
 
   typeSources(): Ref['typedBy'] {
@@ -223,8 +219,7 @@ export class ElementPlace implements Place {
       this.key = key;
       return value;
     }
-    this.array.set(this.key, value);
-    return this.array.get(this.key) as Value;
+    return this.array.set(this.key, value);
   }
 
   typeSources(): Ref['typedBy'] {

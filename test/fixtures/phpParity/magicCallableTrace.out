@@ -66,3 +66,58 @@ Notice: Only variables should be assigned by reference in /main.php on line 79
 int(9)
 int(9)
 int(5)
+
+Notice: Only variables should be assigned by reference in /main.php on line 97
+array(1) {
+  [0]=>
+  int(4)
+}
+array(2) {
+  [0]=>
+  int(4)
+  [1]=>
+  int(8)
+}
+array(2) {
+  [0]=>
+  int(4)
+  [1]=>
+  int(8)
+}
+array(1) {
+  [0]=>
+  int(4)
+}
+int(3)
+array(1) {
+  [0]=>
+  int(4)
+}
+array(1) {
+  [0]=>
+  int(4)
+}
+array(1) {
+  [0]=>
+  int(4)
+}
+array(2) {
+  [0]=>
+  int(4)
+  [1]=>
+  int(8)
+}
+
+Notice: Only variables should be assigned by reference in /main.php on line 123
+array(2) {
+  [0]=>
+  int(4)
+  [1]=>
+  int(8)
+}
+array(2) {
+  [0]=>
+  int(4)
+  [1]=>
+  int(8)
+}

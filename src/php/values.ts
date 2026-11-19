@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 994 -- Keeps class defaults with PHP value storage and ownership helpers.
+// code-gauge-allow-file fileNcss 995 -- Keeps class defaults with PHP value storage and ownership helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
@@ -76,10 +76,7 @@ export class Ref {
     return this.value;
   }
   set v(value: Value) {
-    const old = this.value;
-    this.value = this.typedBy ? referenceTypeCheck(this, value) : value;
-    trackOwner(this.value, this);
-    dropped(old);
+    this.assign(value);
   }
 
   get isDefinedBinding(): boolean {
@@ -91,8 +88,13 @@ export class Ref {
   }
 
   /** Writes a value, converting or rejecting it for the type of the property the reference was taken from. */
-  assign(value: Value): void {
-    this.v = value;
+  assign(value: Value): Value {
+    const old = this.value;
+    const assigned = this.typedBy ? referenceTypeCheck(this, value) : value;
+    this.value = assigned;
+    trackOwner(assigned, this);
+    dropped(old);
+    return assigned;
   }
 }
 
@@ -234,15 +236,13 @@ export class PhpArray {
     return isSetSlot(this.map.get(key));
   }
 
-  set(key: Key, value: Value): void {
+  set(key: Key, value: Value): Value {
     const slot = this.map.ownedSlot(key);
-    if (slot instanceof Ref) {
-      slot.assign(value);
-    } else {
-      this.insert(key, value);
-    }
     if (value !== null && typeof value === 'object') this.composite = true;
-    if (!(slot instanceof Ref)) dropped(slot);
+    if (slot instanceof Ref) return slot.assign(value);
+    this.insert(key, value);
+    dropped(slot);
+    return value;
   }
 
   setSlot(key: Key, slot: Value | Ref): void {

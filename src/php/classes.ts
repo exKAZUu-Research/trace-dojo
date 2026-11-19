@@ -1330,21 +1330,17 @@ export function writeProp(
     const slot = object.props.get(decl.key);
     const referenceUpdate = options.operation === 'assignOp' && slot instanceof Ref && slot.isRef;
     const coerced = decl.type && !referenceUpdate ? coerceProperty(decl, value, object) : value;
-    if (slot instanceof Ref) slot.assign(coerced);
-    else {
-      object.props.set(decl.key, share(coerced));
-      dropped(slot);
-    }
-    return slot instanceof Ref ? slot.v : coerced;
+    if (slot instanceof Ref) return slot.assign(coerced);
+    object.props.set(decl.key, share(coerced));
+    dropped(slot);
+    return coerced;
   }
   const slot = object.props.get(name);
   if (slot !== undefined) {
-    if (slot instanceof Ref) slot.assign(value);
-    else {
-      object.props.set(name, share(value));
-      dropped(slot);
-    }
-    return slot instanceof Ref ? slot.v : value;
+    if (slot instanceof Ref) return slot.assign(value);
+    object.props.set(name, share(value));
+    dropped(slot);
+    return value;
   }
   if (writeOverloadedProperty(object, name, value)) return value;
   createDynamicProp(object, name, share(value));
@@ -1596,7 +1592,7 @@ export function bindPropertyReference(
   if (valueFallback) notice('Only variables should be assigned by reference');
   const key = decl?.key ?? name;
   const old = object.props.get(key);
-  if (valueFallback && old instanceof Ref) return writeFallbackReference(old, ref);
+  if (valueFallback) return writePropertyFallback(object, key, old, ref, decl);
   if (decl?.type) attachPropertyReference(ref, decl, object);
   if (!decl && old === undefined) {
     ref.isRef = true;
@@ -1615,9 +1611,24 @@ export function bindPropertyReference(
   dropped(old);
 }
 
-function writeFallbackReference(target: Ref, source: Ref): void {
-  target.assign(source.v);
-  source.v = target.v;
+function writePropertyFallback(
+  object: PhpObject,
+  key: string,
+  old: Slot | undefined,
+  source: Ref,
+  decl?: PropDecl
+): void {
+  if (old instanceof Ref) {
+    source.v = old.assign(share(source.v));
+    return;
+  }
+  const value = decl?.type ? coerceProperty(decl, source.v, object) : source.v;
+  if (!decl && old === undefined) createDynamicProp(object, key, share(value));
+  else {
+    object.props.set(key, share(value));
+    dropped(old);
+  }
+  source.v = value;
 }
 
 export function attachPropertyReference(ref: Ref, decl: PropDecl, object?: PhpObject): void {
@@ -1863,12 +1874,20 @@ export function bindStaticPropertyReference(
   ref: Ref,
   valueFallback = false
 ): void {
-  const old = staticPropRef(cls, name, scope);
   if (valueFallback) {
+    staticPropRef(cls, name, scope);
     notice('Only variables should be assigned by reference');
-    if (old.isRef) return writeFallbackReference(old, ref);
   }
+  const old = staticPropRef(cls, name, scope, !valueFallback);
   const found = cls.findStatic(name);
+  if (valueFallback) {
+    const useReference = old.isRef;
+    const decl = found?.decl;
+    const value = !useReference && decl?.type ? coerceProperty(decl, ref.v) : ref.v;
+    const assigned = old.assign(share(value));
+    ref.v = useReference ? old.v : assigned;
+    return;
+  }
   if (!found || old === ref) return;
   if (found.decl.type) attachPropertyReference(ref, found.decl);
   ref.isRef = true;

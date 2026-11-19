@@ -80,3 +80,45 @@ foreach (['dynamic', 'named', 'unpacked'] as $call) {
     $box->value = 9;
     var_dump($old, PropertyCallbackAlias::$shared, MagicReference::$shared);
 }
+
+class ReentrantPropertyAssignment {
+    public $value;
+    public static $shared;
+
+    function __destruct() {
+        $GLOBALS['destination']->value[] = 8;
+    }
+}
+function arrayAssignmentValue() { return [4]; }
+
+$destination = new stdClass;
+$previous = new ReentrantPropertyAssignment;
+$destination->value = &$previous;
+$result = ($destination->value = &$dynamic('arrayAssignmentValue'));
+var_dump($result, $previous, $destination->value);
+
+$previous = 3;
+$replacement = 5;
+ReentrantPropertyAssignment::$shared = &$previous;
+set_error_handler(function () use (&$replacement) {
+    ReentrantPropertyAssignment::$shared = &$replacement;
+    return true;
+});
+$result = (ReentrantPropertyAssignment::$shared = &$dynamic('arrayAssignmentValue'));
+restore_error_handler();
+var_dump($result, $previous, $replacement, ReentrantPropertyAssignment::$shared);
+
+class ReentrantStaticAssignment {
+    public static $value;
+
+    function __destruct() {
+        self::$value[] = 8;
+    }
+}
+ReentrantStaticAssignment::$value = new ReentrantStaticAssignment;
+$result = (ReentrantStaticAssignment::$value = arrayAssignmentValue());
+var_dump($result, ReentrantStaticAssignment::$value);
+$previous = new ReentrantStaticAssignment;
+ReentrantStaticAssignment::$value = &$previous;
+$result = (ReentrantStaticAssignment::$value = &arrayAssignmentValue());
+var_dump($result, ReentrantStaticAssignment::$value);

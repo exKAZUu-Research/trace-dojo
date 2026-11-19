@@ -404,9 +404,9 @@ class StaticPlace implements Place {
 
   private write(target: Ref, value: Value, operation?: 'assignOp'): Value {
     const decl = this.decl;
-    target.v =
+    const assigned =
       decl?.type && !(operation === 'assignOp' && target.isRef) ? classesModule.coerceProperty(decl, value) : value;
-    return target.v;
+    return target.assign(assigned);
   }
 
   unset(): void {
@@ -825,8 +825,7 @@ export function assignExpression(target: Expr, valueExpr: Expr): Value {
       frame.vars.set(target.name, new Ref(value));
       return value;
     }
-    ref.assign(value);
-    return ref.v;
+    return ref.assign(value);
   }
   const place = placeOf(target, 'deferred');
   const read = prepareOperand(valueExpr);
