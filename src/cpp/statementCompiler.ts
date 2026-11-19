@@ -583,6 +583,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       if (type.kind === 'array' && type.length === undefined && value) type = this.completeArrayType(type, value);
       if (type.kind === 'array' && type.length === undefined)
         return this.error(declarator.row, `配列 ${name} の大きさを書いてください。`);
+      if (type.kind === 'void') return this.error(declarator.row, `void 型の変数 ${name} は作れません。`);
       const global = this.declareStaticStorage(name, type, declarator.row, false);
       const local = this.context.declareLocal(name, type, false);
       const constant =
@@ -1081,8 +1082,6 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       frame.nrvoSlot = slot;
       return (frame.slots[slot] as Box).value;
     };
-    // An object that cannot be copied leaves the function as it is, as moving it would.
-    if (returnType.kind === 'class' && returnType.cls.isNoncopyable) return share;
     const copy = this.copyInitializer(returnType, expr, row, false);
     const { namedReturns } = this.context;
     return (frame) => (namedReturns.has(local) ? share(frame) : copy(frame));

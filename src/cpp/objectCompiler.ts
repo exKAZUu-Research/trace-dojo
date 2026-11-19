@@ -680,9 +680,12 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   }
 
   requireLibraryObjectUse(type: Type, operation: 'copy' | 'assign' | 'destroy', row: number): void {
-    if (operation === 'assign' && !allowsMemberAssignment(type))
-      this.error(row, `${typeName(type)} 型の要素には代入できません。`);
+    if (operation === 'assign') this.checkLibraryAssignment(type, row);
     this.checkObjectUse(type, operation, row, { seen: new Set(), sourceIsConst: true });
+  }
+
+  private checkLibraryAssignment(type: Type, row: number): void {
+    if (!allowsMemberAssignment(type)) this.error(row, `${typeName(type)} 型の要素には代入できません。`);
   }
 
   private readonly copyDefaults = new Map<FunctionInfo, Eval<unknown>[]>();
@@ -743,8 +746,10 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     for (const field of cls.ownFields) this.checkObjectUse(field.type, operation, row, nested);
     for (const owned of cls.library?.ownedTypes ?? []) {
       const library = { seen, sourceIsConst: true };
+      if (operation === 'assign' && cls.library?.elementUseOnAssignment === 'assign-and-copy')
+        this.checkLibraryAssignment(owned, row);
       this.checkObjectUse(owned, operation, row, library);
-      if (operation === 'assign' && cls.library?.assignmentCopies)
+      if (operation === 'assign' && cls.library?.elementUseOnAssignment)
         this.checkObjectUse(owned, 'copy', row, { ...library, seen: new Set() });
     }
   }

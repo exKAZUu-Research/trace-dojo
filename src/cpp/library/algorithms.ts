@@ -903,9 +903,12 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       referenceTo(withConst(type)),
       ([v, low, high], { frame }) => {
         const compare = less(frame);
+        const lower = (low as Ptr).read();
+        const upper = (high as Ptr).read();
+        if (compare(upper, lower)) throw new CppRuntimeError('invalidRange');
         const value = (v as Ptr).read();
-        if (compare(value, (low as Ptr).read())) return low;
-        if (compare((high as Ptr).read(), value)) return high;
+        if (compare(value, lower)) return low;
+        if (compare(upper, value)) return high;
         return v;
       }
     );

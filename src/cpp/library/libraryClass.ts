@@ -13,7 +13,7 @@ export interface LibraryClass {
   readonly kind: string;
   readonly args: readonly Type[];
   readonly ownedTypes?: readonly Type[];
-  readonly assignmentCopies?: boolean;
+  readonly elementUseOnAssignment?: 'copy' | 'assign-and-copy';
   readonly allowsConstantCopy?: boolean;
   readonly scalarValue?: { type: ArithmeticType; read: (value: Value) => number | bigint };
   readonly aggregateArray?: { type: ArrayType; make: (items: Value[]) => Value };

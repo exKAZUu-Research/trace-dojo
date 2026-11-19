@@ -58,22 +58,32 @@ export abstract class CompilerBase {
   }
 
   /** Looks a name up as an unqualified name at the current point, or undefined when nothing declares it. */
-  findName(name: string): Entity | undefined {
-    const local = this.context.lookupLocal(name);
+  findName(name: string, typeOnly = false): Entity | undefined {
+    const local = this.context.lookupLocal(name, typeOnly ? isTypeName : undefined);
     if (local) return local;
     for (let cls = this.enclosingClass; cls; cls = cls.base) {
       const member = this.memberEntity(cls, name);
-      if (member) return member;
+      if (member && (!typeOnly || isTypeName(member))) return member;
       if (name === cls.name) return { kind: 'class', cls };
     }
+    if (typeOnly) {
+      const global = this.typeOnlyGlobalName(name);
+      if (global) return global;
+      const candidate = this.hasUsingStd ? this.findStdName(name) : undefined;
+      return candidate && isTypeName(candidate) ? candidate : undefined;
+    }
     return this.findGlobalName(name);
+  }
+
+  private get hasUsingStd(): boolean {
+    return this.usesStd || this.context.scopes.some((scope) => scope.usesStd);
   }
 
   /** Looks a name up in the global namespace, including the names `using` brought in. */
   findGlobalName(name: string): Entity | undefined {
     const found = this.ordinaryGlobalName(name);
     const own = found === this.globalScope.names.get(name) ? found : undefined;
-    const usesStd = this.usesStd || this.context.scopes.some((scope) => scope.usesStd);
+    const usesStd = this.hasUsingStd;
     if (own && usesStd && this.library.conflictsWithStdName(name, own.kind === 'functions')) {
       return { kind: 'ambiguous', name };
     }
@@ -101,6 +111,13 @@ export abstract class CompilerBase {
     return own ?? library;
   }
 
+  private typeOnlyGlobalName(name: string): Entity | undefined {
+    const own = this.globalScope.names.get(name);
+    if (own && isTypeName(own)) return own;
+    const library = this.library.global(name);
+    return library && isTypeName(library) ? library : undefined;
+  }
+
   protected findStdName(name: string): Entity | undefined {
     const std = this.library.std(name);
     const local = this.globalScope.names.get(name);
@@ -110,8 +127,8 @@ export abstract class CompilerBase {
     return std;
   }
 
-  lookupName(name: string, row: number): Entity {
-    const entity = this.findName(name);
+  lookupName(name: string, row: number, typeOnly = false): Entity {
+    const entity = this.findName(name, typeOnly);
     if (!entity) {
       const header = this.library.missingHeader(name);
       if (header)
@@ -140,18 +157,18 @@ export abstract class CompilerBase {
   }
 
   /** Looks up `scope::name` for a qualified identifier, its scope being a namespace or a class. */
-  lookupQualified(node: Syntax): Entity {
+  lookupQualified(node: Syntax, typeOnly = false): Entity {
     const scopeNode = fieldOf(node, 'scope');
     const nameNode = fieldOf(node, 'name') as Syntax;
-    if (!scopeNode) return this.lookupInGlobal(nameNode);
+    if (!scopeNode) return this.lookupInGlobal(nameNode, typeOnly);
     const scope = this.resolveScope(scopeNode);
     if (scope.kind === 'namespace') return this.lookupInNamespace(nameNode, node.row);
     return this.lookupInClass(scope.cls, nameNode, node.row);
   }
 
-  private lookupInGlobal(nameNode: Syntax): Entity {
+  private lookupInGlobal(nameNode: Syntax, typeOnly: boolean): Entity {
     const name = this.plainName(nameNode);
-    const entity = this.ordinaryGlobalName(name);
+    const entity = typeOnly ? this.typeOnlyGlobalName(name) : this.ordinaryGlobalName(name);
     if (!entity) return this.error(nameNode.row, `::${name} は宣言されていません。`);
     return entity;
   }
@@ -205,13 +222,13 @@ export abstract class CompilerBase {
   resolveScope(node: Syntax): { kind: 'namespace' } | { kind: 'class'; cls: ClassInfo } {
     if (node.type === 'namespace_identifier' && node.text === 'std') return { kind: 'namespace' };
     if (node.type === 'namespace_identifier' || node.type === 'type_identifier' || node.type === 'identifier') {
-      const entity = this.findName(node.text);
+      const entity = this.findName(node.text, true);
       if (entity?.kind === 'class') return { kind: 'class', cls: entity.cls };
       if (entity?.kind === 'type' && entity.type.kind === 'class') return { kind: 'class', cls: entity.type.cls };
       if (!entity) return this.error(node.row, `${node.text} は宣言されていません。`);
       return this.error(node.row, `${node.text} はクラスでも名前空間でもありません。`);
     }
-    const type = this.resolveTypeSpecifier(node);
+    const type = this.resolveTypeSpecifier(node, false, true);
     if (type.kind === 'class') return { kind: 'class', cls: type.cls };
     return this.error(node.row, `${node.text} はクラスでも名前空間でもありません。`);
   }
@@ -255,7 +272,7 @@ export abstract class CompilerBase {
     );
   }
 
-  resolveTypeSpecifier(node: Syntax, allowAuto = false): Type {
+  resolveTypeSpecifier(node: Syntax, allowAuto = false, typeOnly = false): Type {
     switch (node.type) {
       case 'primitive_type': {
         if (WIDE_CHARACTER_TYPES.has(node.text)) return this.unsupported(node.row, `ワイド文字の型（${node.text}）`);
@@ -273,13 +290,13 @@ export abstract class CompilerBase {
       case 'type_identifier':
       case 'identifier':
       case 'namespace_identifier': {
-        return this.typeOfEntity(this.lookupName(node.text, node.row), node);
+        return this.typeOfEntity(this.lookupName(node.text, node.row, typeOnly), node);
       }
       case 'qualified_identifier': {
-        return this.typeOfEntity(this.lookupQualified(node), node);
+        return this.typeOfEntity(this.lookupQualified(node, typeOnly), node);
       }
       case 'template_type': {
-        return this.templateType(node, this.lookupName((fieldOf(node, 'name') as Syntax).text, node.row));
+        return this.templateType(node, this.lookupName((fieldOf(node, 'name') as Syntax).text, node.row, typeOnly));
       }
       case 'class_specifier':
       case 'struct_specifier': {
@@ -484,6 +501,10 @@ export const AUTO: Extract<Type, { kind: 'class' }> = classType(new ClassInfo('a
 
 export function isAuto(type: Type): boolean {
   return type.kind === 'class' && type.cls === AUTO.cls;
+}
+
+function isTypeName(entity: Entity): boolean {
+  return entity.kind === 'class' || entity.kind === 'type' || entity.kind === 'template' || entity.kind === 'namespace';
 }
 
 export function hasAuto(type: Type): boolean {

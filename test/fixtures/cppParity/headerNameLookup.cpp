@@ -6,9 +6,13 @@
 
 struct time {
   int value;
-  time(int n) : value(n) {}
-  time twice() const { time copy{2 * value}; return copy; }
+  time(int n);
+  time twice() const;
 };
+time::time(int n) : value(n) {}
+struct time time::twice() const { time copy{2 * value}; return copy; }
+struct clock { static int count; };
+int clock::count = 8;
 struct timer : time {
   timer(int n) : time(n) {}
   time elapsed() const { return twice(); }
@@ -36,5 +40,5 @@ int main() {
   handle plain{6};
   cout << id << target << insert << plain.value << '\n';
   timer elapsed(7);
-  cout << first.twice().value << ' ' << elapsed.elapsed().value << '\n';
+  cout << first.twice().value << ' ' << elapsed.elapsed().value << ' ' << clock::count << '\n';
 }

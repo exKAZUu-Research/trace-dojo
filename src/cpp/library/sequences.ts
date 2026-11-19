@@ -130,7 +130,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
     kind,
     args: [element],
     ownedTypes: fixedLength === 0 ? [] : [element],
-    assignmentCopies: kind !== 'array',
+    elementUseOnAssignment: kind === 'array' ? undefined : 'assign-and-copy',
     allowsConstantCopy: kind === 'array' && (fixedLength === 0 || allowsConstantCopy(element)),
     size: kind === 'array' ? Math.max(1, fixedLength ?? 0) * sizeOf(element) : kind === 'deque' ? 48 : 24,
     align: kind === 'array' ? alignOf(element) : 8,
@@ -807,6 +807,11 @@ function checkElementRequirement(
   ) {
     requireElementUse(compiler, element, row, 'copy');
   }
+  if (
+    member === 'assign' ||
+    ((kind === 'vector' || kind === 'deque') && ['erase', 'insert', 'emplace'].includes(member))
+  )
+    requireElementUse(compiler, element, row, 'assign');
   if (kind !== 'list') return;
   const isEqualityCall = (member === 'remove' && args.length === 1) || (member === 'unique' && args.length === 0);
   if (isEqualityCall && !equalTo(element)) compiler.error(row, `${typeName(element)} の値は == で比べられません。`);
@@ -903,6 +908,7 @@ function assignment(
   const target = left.run;
   // C++17 evaluates the right operand of an assignment first.
   if (listInits) {
+    requireElementUse(compiler, ops().type, row, 'assign');
     const list = listElementsOf(listInits, ops);
     return {
       type: left.type,

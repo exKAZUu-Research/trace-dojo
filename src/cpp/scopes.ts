@@ -115,10 +115,10 @@ export class FunctionContext {
     if (local && scope.slots.includes(local.slot)) this.namedReturns.add(local);
   }
 
-  lookupLocal(name: string): Entity | undefined {
+  lookupLocal(name: string, accept?: (entity: Entity) => boolean): Entity | undefined {
     for (let index = this.scopes.length - 1; index >= 0; index--) {
       const entity = this.scopes[index].names.get(name);
-      if (entity) return entity;
+      if (entity && (!accept || accept(entity))) return entity;
     }
   }
 }

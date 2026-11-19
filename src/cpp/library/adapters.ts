@@ -82,7 +82,7 @@ export function adapterClass(
     kind,
     args: [element],
     ownedTypes: [element],
-    assignmentCopies: storage.cls.library?.assignmentCopies,
+    elementUseOnAssignment: storage.cls.library?.elementUseOnAssignment,
     size: kind === 'priority_queue' ? 32 : 48,
     align: 8,
     operator: (compiler_, operator, operands, row) => {

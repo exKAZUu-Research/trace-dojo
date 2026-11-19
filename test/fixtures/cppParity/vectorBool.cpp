@@ -9,6 +9,10 @@ char select(int) { return 'i'; }
 int main() {
   std::vector<bool> values{true, true, false};
   std::cout << std::to_string(values[0]) << select(values[0]) << '\n';
+  std::string text;
+  text = values[0];
+  text += values[2];
+  std::cout << int(text[0]) << int(text[1]) << '\n';
   std::vector<bool>::reference first = values[0];
   first = false;
   auto second = values.begin()[1];

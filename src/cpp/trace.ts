@@ -205,8 +205,10 @@ function nodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNode | und
   if (type.kind === 'pointer') {
     const pointer = value as Ptr;
     if (pointer.isNull) return NULL_NODE;
-    // oxlint-disable-next-line unicorn/no-null -- The trace format shows a pointer to an unreadable string as null.
-    if (isCharType(type.to)) return { kind: 'value', value: cStringOf(pointer) ?? null };
+    if (isCharType(type.to)) {
+      const text = cStringOf(pointer);
+      if (text !== undefined) return { kind: 'value', value: text };
+    }
     return nodeOf(readLocation(pointer), type.to, seen);
   }
   const scalar = scalarOf(value, type);

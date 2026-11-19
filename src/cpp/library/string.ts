@@ -1,6 +1,7 @@
 import { isFloatUnderflow, isSpaceByte, parseFloatPrefix, parseIntegerPrefix } from '../../c/library/numberParsing';
 import { LIMITS } from '../../interpreter/limits';
 import { byteArray, byteAt } from '../bytes';
+import { scalarValue } from '../conversions';
 import { CppRuntimeError } from '../errors';
 import { type Expr, type Initializer, initializerWithConstancy, type LibraryConstant } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
@@ -903,7 +904,7 @@ function stringOperator(
       const append = operator === '+=';
       if (!append && isString(right) && !right.isLvalue) return moveAssignment(compiler, left, right, row);
       const location = left.run;
-      const source = textRun(right) ?? charRun(right, isArithmetic);
+      const source = textRun(right) ?? charRun(scalarValue(compiler, right), isArithmetic);
       if (!source) return undefined;
       return {
         type: left.type,

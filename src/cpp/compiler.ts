@@ -313,8 +313,7 @@ export class Compiler extends StatementCompiler {
     if (bases.length > 1) return this.unsupported(clause.row, '多重継承');
     if (hasToken(clause, 'virtual')) return this.unsupported(clause.row, '仮想継承（virtual で継承すること）');
     const baseName = bases[0];
-    const declaration = baseName.type === 'type_identifier' ? this.globalScope.names.get(baseName.text) : undefined;
-    const baseType = declaration?.kind === 'class' ? classType(declaration.cls) : this.resolveTypeSpecifier(baseName);
+    const baseType = this.resolveTypeSpecifier(baseName, false, true);
     if (baseType.kind !== 'class')
       return this.error(clause.row, `${bases[0].text} はクラスではないので継承できません。`);
     const base = baseType.cls;

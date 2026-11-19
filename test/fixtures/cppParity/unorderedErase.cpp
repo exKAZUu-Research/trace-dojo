@@ -7,4 +7,9 @@ int main() {
   s.erase(4); s.erase(100);
   for (int x : s) std::cout << x << " ";
   std::cout << s.size() << std::endl;
+  s.clear();
+  s.rehash(100);
+  std::cout << s.bucket_count() << ' ';
+  s.rehash(0);
+  std::cout << s.bucket_count() << '\n';
 }

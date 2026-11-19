@@ -12,6 +12,7 @@ import {
   ClassInfo,
   classType,
   type FunctionInfo,
+  intMax,
   isConstType,
   nonReference,
   pointerTo,
@@ -412,8 +413,11 @@ export function comparatorOrder(
   if (!comparator) return less;
   if (comparator.kind === 'class' && comparator.cls.library?.kind === 'functor') {
     const name = comparator.cls.name.replace(/<.*$/, '');
-    if (name === 'std::less') return less;
-    if (name === 'std::greater') return (a, b) => less(b, a);
+    if (name === 'std::less' || name === 'std::greater') {
+      const apply = comparator.cls.library.apply?.(unqualified(keyType), unqualified(keyType));
+      if (!apply) return compiler.error(row, `${typeName(comparator)} は ${typeName(keyType)} のキーに使えません。`);
+      return (a, b) => (apply(a, b) ? -1 : apply(b, a) ? 1 : 0);
+    }
   }
   return compiler.unsupported(row, `比べ方に ${typeName(comparator)} を使うこと`);
 }
@@ -646,7 +650,7 @@ export function orderedClass(
     },
     constructingMembers: isMap ? ['emplace', 'try_emplace'] : ['emplace'],
     ownedTypes: [entryType],
-    assignmentCopies: true,
+    elementUseOnAssignment: 'copy',
   };
   cls.operations = {
     copy: (frame, source) => make((source as OrderedValue).entries.map((entry) => ops().copy(frame, entry))),
@@ -681,7 +685,7 @@ export function orderedClass(
     );
   };
   method('size', [], SIZE_T, (self) => BigInt(self.entries.length), { isConst: true });
-  method('max_size', [], SIZE_T, () => 0x0c_cc_cc_cc_cc_cc_cc_ccn, { isConst: true });
+  method('max_size', [], SIZE_T, () => treeMaxSize(entryType), { isConst: true });
   method('empty', [], BOOL, (self) => (self.entries.length === 0 ? 1 : 0), { isConst: true });
   method('clear', [], VOID, (self, _args, frame) => {
     const old = self.replace([]);
@@ -812,6 +816,15 @@ export function orderedClass(
 const keyArg = (arg: unknown): Value => (arg as Ptr).read();
 
 /** Stops at `m[key]` of a map whose mapped type has no default constructor, which `[]` needs to insert an entry. */
+function treeMaxSize(entry: Type): bigint {
+  const alignment = alignOf(entry);
+  // libc++ uses the tail padding after the three pointers and color flag in its arm64 tree node base.
+  const offset = Math.ceil(25 / alignment) * alignment;
+  const nodeAlignment = Math.max(8, alignment);
+  const nodeSize = Math.ceil((offset + sizeOf(entry)) / nodeAlignment) * nodeAlignment;
+  return intMax(SIZE_T.name) / BigInt(nodeSize);
+}
+
 export function mappedNotDefaultConstructible(compiler: ExpressionCompiler, mapped: Type, row: number): never {
   return compiler.error(
     row,

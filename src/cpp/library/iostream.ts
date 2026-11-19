@@ -21,7 +21,7 @@ import {
   UINT,
   VOID,
 } from '../types';
-import { NULL_PTR, Ptr, Store, type Value } from '../values';
+import { NULL_PTR, type Ptr, Store, type Value } from '../values';
 import { formatFloat, pointerText } from './formatting';
 import type { Library } from './registry';
 import { StringValue } from './string';
@@ -260,7 +260,6 @@ export class Streams {
   }
 
   private commonMethods(cls: ClassInfo, isOutput: boolean): void {
-    const refType: Type = { kind: 'reference', to: classType(cls) };
     const method = (
       name: string,
       params: Type[],
@@ -326,19 +325,31 @@ export class Streams {
       stream.atEnd = false;
     });
     if (isOutput) {
-      method('put', [CHAR], refType, (stream, [char], frame) => {
+      const result = referenceTo(classType(this.ostream ?? cls));
+      const output = (
+        name: string,
+        params: Type[],
+        run: (stream: StreamValue, args: unknown[], frame: Frame) => void
+      ): void => {
+        addMethod(
+          cls,
+          native(name, params, result, (args, { self: object, selfLocation, frame }) => {
+            run(self(object), args, frame);
+            return selfLocation;
+          })
+        );
+      };
+      output('put', [CHAR], (stream, [char], frame) => {
         stream.write(frame, String.fromCodePoint(asNumber(char) & 0xff));
-        return selfRef(stream);
       });
-      method('write', [CONST_CHAR_PTR, LONG], refType, (stream, [pointer, count], frame) => {
+      output('write', [CONST_CHAR_PTR, LONG], (stream, [pointer, count], frame) => {
         const start = pointer as Ptr;
         let bytes = '';
         for (let index = 0; index < Number(count); index++)
           bytes += String.fromCodePoint(asNumber(start.offset(index).read()) & 0xff);
         stream.write(frame, bytes);
-        return selfRef(stream);
       });
-      method('flush', [], refType, (stream) => selfRef(stream));
+      output('flush', [], () => {});
     }
   }
 
@@ -369,6 +380,8 @@ export class Streams {
       };
     }
     if (left.type.kind !== 'class' || !left.type.cls.isDerivedFrom(cls) || !right) return undefined;
+    if (((operator === '<<' && isOutput) || (operator === '>>' && isInput)) && isConstType(left.type))
+      return compiler.error(row, `const の ${typeName(left.type)} には演算子 ${operator} を使えません。`);
     if (operator === '<<' && isOutput)
       return this.namedManipulator(compiler, left, right, row, true) ?? this.insertion(compiler, left, right, row);
     if (operator === '>>' && isInput) {
@@ -472,7 +485,10 @@ export class Streams {
     }
     if (type.kind === 'int' && isCharType(type)) {
       read = (stream) => {
-        if (stream.position < stream.buffer.length) return signedChar(byteAt(stream.buffer, stream.position++));
+        if (stream.position < stream.buffer.length) {
+          const byte = byteAt(stream.buffer, stream.position++);
+          return type.name === 'uchar' ? byte : signedChar(byte);
+        }
         stream.failed = true;
         stream.atEnd = true;
         return;
@@ -574,8 +590,6 @@ const readLine = ([stream, text, delimiter]: unknown[]): Ptr => {
 };
 
 const self = (value: unknown): StreamValue => value as StreamValue;
-
-const selfRef = (stream: StreamValue): Ptr => new Ptr(stream, 0);
 
 /** A manipulator such as `std::endl` or `std::setw(3)`, which `<<` applies to a stream. */
 export class ManipulatorValue extends Store {

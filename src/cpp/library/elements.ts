@@ -2,7 +2,7 @@ import { CppRuntimeError } from '../errors';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { destroyTemporaries, invoke, withTemporaries, zeroOf } from '../objectCompiler';
 import type { Frame } from '../runtime';
-import { type ClassInfo, type FunctionInfo, isArithmetic, type Type, typeName } from '../types';
+import { type ClassInfo, type FunctionInfo, isArithmetic, isCopyConstructor, type Type, typeName } from '../types';
 import { type ArrayStore, Box, CObject, endLifetime, FunctionRef, Ptr, Store, UNINIT, type Value } from '../values';
 import { SequenceValue } from './containerValues';
 import { StringValue } from './string';
@@ -129,7 +129,8 @@ export function elementOperations(
         endLifetime(value);
       },
       hasEffects:
-        !cls.library && (operations?.destroy !== undefined || cls.constructors.some((ctor) => isUserCopy(ctor, cls))),
+        !cls.library &&
+        (operations?.destroy !== undefined || cls.constructors.some((ctor) => isCopyConstructor(ctor, cls))),
     };
   }
   const zero = zeroOf(type);
@@ -175,19 +176,10 @@ export function moveValue(frame: Frame, type: Type, target: Value, source: Value
 /** Whether a class or a base declares a copy constructor or a destructor, which leaves it without an implicit move. */
 function declaresCopyOrDestructor(cls: ClassInfo): boolean {
   for (let current: ClassInfo | undefined = cls; current; current = current.base) {
-    if (current.destructor || current.constructors.some((ctor) => isUserCopy(ctor, current as ClassInfo))) return true;
+    if (current.destructor || current.constructors.some((ctor) => isCopyConstructor(ctor, current as ClassInfo)))
+      return true;
   }
   return false;
-}
-
-function isUserCopy(ctor: FunctionInfo, cls: ClassInfo): boolean {
-  const [first] = ctor.params;
-  return (
-    ctor.params.length === 1 &&
-    first.type.kind === 'reference' &&
-    first.type.to.kind === 'class' &&
-    first.type.to.cls === cls
-  );
 }
 
 function defaultConstructor(
@@ -207,6 +199,7 @@ export type Compare = (frame: Frame, a: Value, b: Value) => boolean;
 
 /** Compares two values of a type with `<` as the library's default comparators do, or undefined when `<` does not apply. */
 export function lessThan(type: Type): ((a: Value, b: Value) => number) | undefined {
+  if (type.kind === 'reference') return compareReferences(lessThan(type.to));
   if (isArithmetic(type)) {
     return (a, b) => {
       const x = a as number | bigint;
@@ -261,6 +254,7 @@ export function lessThan(type: Type): ((a: Value, b: Value) => number) | undefin
 
 /** Whether two values of a type are equal, as `==` says, or undefined when `==` does not apply. */
 export function equalTo(type: Type): ((a: Value, b: Value) => boolean) | undefined {
+  if (type.kind === 'reference') return compareReferences(equalTo(type.to));
   if (type.kind === 'pointer') return (a, b) => (a as Ptr).equals(b as Ptr);
   if (type.kind === 'class' && type.cls.library?.kind === 'pair') {
     const [first, second] = type.cls.fields;
@@ -273,6 +267,12 @@ export function equalTo(type: Type): ((a: Value, b: Value) => boolean) | undefin
   const less = lessThan(type);
   if (!less) return undefined;
   return (a, b) => less(a, b) === 0;
+}
+
+function compareReferences<T>(
+  compare: ((a: Value, b: Value) => T) | undefined
+): ((a: Value, b: Value) => T) | undefined {
+  if (compare) return (a, b) => compare((a as Ptr).read(), (b as Ptr).read());
 }
 
 /** The location of a value, for passing it by reference to a function the program wrote. */

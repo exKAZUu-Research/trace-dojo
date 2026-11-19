@@ -511,6 +511,27 @@ test.each([
   ['an out-of-range case label', 'int main() { switch (1) { case 4294967295ULL: return 0; } }', 0],
   ['a non-const reference to a temporary member', 'struct X { int n = 1; };\nint main() { int& r = X{}.n; }', 1],
   ['NULL without a declaring header', 'int main() { int* p = NULL; }', 0],
+  [
+    'insertion and extraction on a const stream',
+    '#include <sstream>\nint main() { const std::ostringstream s; s << 42; }',
+    1,
+  ],
+  ['a static local variable of type void', 'int main() { static void v; }', 0],
+  [
+    'vector erase requiring deleted element assignment',
+    '#include <vector>\nstruct X { const int n; };\nint main() { std::vector<X> v{{1}, {2}}; v.erase(v.begin()); }',
+    2,
+  ],
+  [
+    'vector copy assignment requiring deleted element assignment',
+    '#include <vector>\nstruct X { const int n; };\nint main() { std::vector<X> a{{1}}, b{{2}}; a = b; }',
+    2,
+  ],
+  [
+    'returning a named local with a deleted copy constructor',
+    'class Base { Base(const Base&) {} public: Base() {} };\nstruct Derived : Base {};\nDerived make() { Derived value; return value; }',
+    2,
+  ],
 ])('the interpreter rejects %s', (_, program, row) => {
   const execution = executeProgram('cpp', program.includes('int main') ? program : `${program}\nint main() {}`);
   expect(execution).toMatchObject({ kind: 'compileError', diagnostics: [{ row }] });

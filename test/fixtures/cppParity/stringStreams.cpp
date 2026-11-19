@@ -13,4 +13,12 @@ int main() {
   istringstream bad("12x"); int v; bad >> v; cout << v << " " << bad.fail() << endl; char ch; bad >> ch; cout << ch << endl;
   cerr << "to stderr" << endl;
   int k = 7; istringstream empty(""); if (!(empty >> k)) cout << "failed " << k << endl;
+  ostringstream receiver;
+  cout << (&receiver == &receiver.put('a')) << (&receiver == &receiver.write("bc", 2))
+       << (&receiver == &receiver.flush()) << receiver.str() << '\n';
+  istringstream bytes("\xc3\xa9");
+  unsigned char unsignedByte;
+  signed char signedByte;
+  bytes >> unsignedByte >> signedByte;
+  cout << int(unsignedByte) << ' ' << int(signedByte) << '\n';
 }

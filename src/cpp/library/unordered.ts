@@ -484,10 +484,9 @@ export class HashValue extends MapValue {
     if (n > count) this.redistribute(frame, n);
     else if (n < count) {
       const needed = Math.ceil(Math.fround(this.size / this.maxLoadFactor));
-      n = Math.max(
-        n,
-        isPowerOfTwo(count) ? (needed < 2 ? needed : 2 ** Math.ceil(Math.log2(needed))) : nextPrime(frame, needed)
-      );
+      const rounded =
+        needed === 0 ? 0 : isPowerOfTwo(count) ? 2 ** Math.ceil(Math.log2(needed)) : nextPrime(frame, needed);
+      n = Math.max(n, rounded);
       if (n < count) this.redistribute(frame, n);
     }
   }
@@ -688,7 +687,7 @@ export function unorderedClass(
       }),
     constructingMembers: isMap ? ['emplace', 'try_emplace'] : ['emplace'],
     ownedTypes: [entryType],
-    assignmentCopies: true,
+    elementUseOnAssignment: 'copy',
   };
   cls.operations = {
     copy: (frame, source) => {

@@ -31,7 +31,7 @@ int main() {
   auto s = std::minmax({std::string("bb"), std::string("a"), std::string("cc"), std::string("d")}, byLength);
   std::cout << s.first << s.second << '\n';
   std::cout << std::min({4, 1, 9}, gt) << std::max({4, 1, 9}, gt) << '\n';
-  std::cout << std::clamp(10, 1, 5, gt) << std::clamp(3, 5, 1, gt) << '\n';
+  std::cout << std::clamp(10, 5, 1, gt) << std::clamp(3, 5, 1, gt) << '\n';
 
   std::string a = "abc", b = "ABC", c = "ABCD";
   std::cout << std::equal(a.begin(), a.end(), b.begin(), b.end(), ieq)

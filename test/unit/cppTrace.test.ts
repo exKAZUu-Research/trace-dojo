@@ -260,6 +260,25 @@ int main() {
   expect(traceProgram('cpp', program, program)).toMatchObject({ stdout: 'ok' });
 });
 
+test('a character pointer can refer to one character without representing a C string', () => {
+  const program = `int main() {
+  char c = 'A';
+  char* p = &c;
+  char* empty = nullptr;
+  int next = 1;
+}`;
+  const { traceItems } = traceProgram('cpp', program, program);
+  expect(traceItems).toContainEqual(
+    expect.objectContaining({
+      referenceVars: expect.objectContaining({
+        p: { kind: 'value', value: 'A' },
+        // oxlint-disable-next-line unicorn/no-null -- The trace protocol represents nullptr as null.
+        empty: { kind: 'value', value: null },
+      }),
+    })
+  );
+});
+
 test.each(['std::cout.width(100001)', 'std::cout << std::fixed << std::setprecision(100001)'])(
   'oversized formatted output is charged before padding: %s',
   (setup) => {
@@ -308,6 +327,14 @@ int main() { Base value; Derived* p = static_cast<Derived*>(&value); return p->y
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'executed',
     uncaughtException: expect.stringContaining('Derived'),
+  });
+});
+
+test('clamp rejects bounds reversed under its comparator', () => {
+  const program = '#include <algorithm>\nint main() { return std::clamp(3, 5, 1); }';
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('範囲'),
   });
 });
 

@@ -35,5 +35,6 @@ int main() {
   Child copy = child;
   std::vector<Choice> choices;
   choices.push_back(source);
+  std::vector<Choice> braceCopies{Choice()};
   std::cout << '\n';
 }
