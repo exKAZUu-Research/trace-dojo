@@ -487,11 +487,17 @@ function applyTraitAlias(
       cls,
       scope: cls,
       visibility: rule.visibility ?? method.visibility,
+      isFinal: method.isFinal || rule.isFinal === true,
       fn: copyFunction(method.fn),
     });
-  } else if (rule.visibility && added.get(name) === source) {
+  } else if ((rule.visibility || rule.isFinal) && added.get(name) === source) {
     const own = cls.methods.get(name);
-    if (own) cls.methods.set(name, { ...own, visibility: rule.visibility });
+    if (own)
+      cls.methods.set(name, {
+        ...own,
+        visibility: rule.visibility ?? own.visibility,
+        isFinal: own.isFinal || rule.isFinal === true,
+      });
   }
 }
 
@@ -622,35 +628,43 @@ function copyFunction(fn: Callable): Callable {
   return { ...fn, statics: new Map() };
 }
 
-// code-gauge-allow functionNcss 48 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+const interfaceMethods = new WeakMap<PhpClass, Map<string, Method>>();
+
 function checkInheritance(cls: PhpClass, row: number): void {
   const ancestors: PhpClass[] = [];
   for (let parent = cls.parent; parent; parent = parent.parent) ancestors.push(parent);
   const inherited = new Map<string, Method>();
   for (const parent of ancestors.toReversed()) {
     for (const method of parent.methods.values()) inherited.set(method.lname, method);
+    for (const [name, method] of interfaceMethods.get(parent) ?? []) inherited.set(name, method);
   }
-  const checked = new Set<string>();
-  for (const parentMethod of inherited.values()) {
-    const method = cls.methods.get(parentMethod.lname);
-    if (method && parentMethod.visibility !== 'private') {
-      checkOverride(cls, method, parentMethod);
-      checked.add(method.lname);
-    }
-  }
-  for (const iface of cls.interfaces) {
-    for (const ifaceMethod of iface.methods.values()) {
-      const own = cls.methods.get(ifaceMethod.lname);
-      if (!own && cls.parent?.interfaces.includes(iface)) continue;
-      const method = own ?? inherited.get(ifaceMethod.lname);
-      if (method && ifaceMethod !== method) {
-        checkOverride(cls, method, ifaceMethod, !checked.has(method.lname));
-        checked.add(method.lname);
-      }
-    }
-  }
+  const contracts = bindInterfaceMethods(cls, inherited, checkParentMethods(cls, inherited));
   const hooks = missingPropertyHooks(cls, ancestors, row);
   if (cls.kind !== 'class' || cls.isAbstract) return;
+  const missing = unimplementedMethods(cls, inherited, contracts);
+  const allNames = [...missing.map((method) => `${method.cls.name}::${method.name}`), ...hooks];
+  if (allNames.length === 0) return;
+  const names = allNames.slice(0, 3);
+  const count = allNames.length;
+  const methods = count === 1 ? 'method' : 'methods';
+  const requirement = cls.isAnonymous
+    ? `must implement ${count} abstract ${methods}`
+    : `contains ${count} abstract ${methods} and must therefore be declared abstract or implement the remaining ${methods}`;
+  throw new FatalError(`Class ${cls.name} ${requirement} (${names.join(', ')}${count > 3 ? ', ...' : ''})`, row);
+}
+
+function checkParentMethods(cls: PhpClass, inherited: Map<string, Method>): Set<string> {
+  const checked = new Set<string>();
+  for (const [name, parentMethod] of inherited) {
+    const method = cls.methods.get(name);
+    if (!method || parentMethod.visibility === 'private') continue;
+    checkOverride(cls, method, parentMethod);
+    checked.add(name);
+  }
+  return checked;
+}
+
+function unimplementedMethods(cls: PhpClass, inherited: Map<string, Method>, contracts: Map<string, Method>): Method[] {
   const missing: Method[] = [];
   const seen = new Set<string>();
   for (let current: PhpClass | undefined = cls; current; current = current.parent) {
@@ -660,23 +674,39 @@ function checkInheritance(cls: PhpClass, row: number): void {
       if (method.isAbstract) missing.push(method);
     }
   }
-  for (const iface of cls.interfaces) {
-    for (const method of iface.methods.values()) {
-      if (seen.has(method.lname)) continue;
-      seen.add(method.lname);
-      missing.push(method);
+  for (const [name, method] of inherited) if (!seen.has(name) && method.isAbstract) missing.push(method);
+  return [...missing, ...contracts.values()];
+}
+
+function bindInterfaceMethods(
+  cls: PhpClass,
+  inherited: Map<string, Method>,
+  checked: Set<string>
+): Map<string, Method> {
+  const contracts = new Map<string, Method>();
+  for (const iface of cls.ownInterfaces) {
+    if (cls.parent?.interfaces.includes(iface)) continue;
+    for (const [name, contract] of effectiveInterfaceMethods(iface)) {
+      const method = cls.methods.get(name) ?? inherited.get(name) ?? contracts.get(name);
+      if (!method) contracts.set(name, contract);
+      else if (method !== contract) {
+        checkOverride(cls, method, contract, !checked.has(name));
+        checked.add(name);
+      }
     }
   }
-  if (missing.length > 0 || hooks.length > 0) {
-    const allNames = [...missing.map((method) => `${method.cls.name}::${method.name}`), ...hooks];
-    const names = allNames.slice(0, 3);
-    const count = allNames.length;
-    const methods = count === 1 ? 'method' : 'methods';
-    const requirement = cls.isAnonymous
-      ? `must implement ${count} abstract ${methods}`
-      : `contains ${count} abstract ${methods} and must therefore be declared abstract or implement the remaining ${methods}`;
-    throw new FatalError(`Class ${cls.name} ${requirement} (${names.join(', ')}${count > 3 ? ', ...' : ''})`, row);
-  }
+  interfaceMethods.set(cls, cls.kind === 'interface' ? new Map([...cls.methods, ...contracts]) : contracts);
+  return contracts;
+}
+
+function effectiveInterfaceMethods(iface: PhpClass): Map<string, Method> {
+  const contracts = interfaceMethods.get(iface);
+  if (contracts) return contracts;
+  const methods = new Map(iface.methods);
+  for (const parent of iface.ownInterfaces)
+    for (const [name, method] of effectiveInterfaceMethods(parent)) if (!methods.has(name)) methods.set(name, method);
+  interfaceMethods.set(iface, methods);
+  return methods;
 }
 
 function missingPropertyHooks(cls: PhpClass, ancestors: PhpClass[], row: number): string[] {
@@ -765,14 +795,14 @@ function checkOverride(cls: PhpClass, method: Method, parent: Method, reportTent
   if (parent.isStatic !== method.isStatic) {
     throw new FatalError(
       parent.isStatic
-        ? `Cannot make static method ${parent.cls.name}::${parent.name}() non static in class ${cls.name}`
-        : `Cannot make non static method ${parent.cls.name}::${parent.name}() static in class ${cls.name}`,
+        ? `Cannot make static method ${parent.cls.name}::${parent.name}() non static in class ${method.cls.name}`
+        : `Cannot make non static method ${parent.cls.name}::${parent.name}() static in class ${method.cls.name}`,
       row
     );
   }
   if (visibilityRank(method.visibility) < visibilityRank(parent.visibility)) {
     throw new FatalError(
-      `Access level to ${cls.name}::${method.name}() must be ${parent.visibility}${parent.visibility === 'protected' ? ' (as in class ' + parent.cls.name + ') or weaker' : ` (as in class ${parent.cls.name})`}`,
+      `Access level to ${method.cls.name}::${method.name}() must be ${parent.visibility}${parent.visibility === 'protected' ? ' (as in class ' + parent.cls.name + ') or weaker' : ` (as in class ${parent.cls.name})`}`,
       row
     );
   }

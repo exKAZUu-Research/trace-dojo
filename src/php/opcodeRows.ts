@@ -1,7 +1,20 @@
 import type { Expr } from './ast';
 
-export function constantAstRow(expression: Expr): number {
+const operandRows = new WeakMap<Expr, { entered: number; completed: number }>();
+
+export function recordOperandRows<E extends Expr>(expression: E, entered: number, completed = entered): E {
+  operandRows.set(expression, { entered, completed });
+  return expression;
+}
+
+export function operandAstRow(expression: Expr): number {
+  return constantAstRow(expression, true);
+}
+
+export function constantAstRow(expression: Expr, useOperandRows = false): number {
   for (;;) {
+    const rows = useOperandRows ? operandRows.get(expression) : undefined;
+    if (rows) return rows.entered;
     switch (expression.k) {
       case 'bin': {
         expression = expression.l;
@@ -34,6 +47,8 @@ export function constantAstRow(expression: Expr): number {
 
 export function compiledOperandRow(expression: Expr): number {
   for (;;) {
+    const rows = operandRows.get(expression);
+    if (rows) return rows.completed;
     const last = lastCompiledOperand(expression);
     if (!last) return expression.row;
     expression = last;

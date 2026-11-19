@@ -238,7 +238,7 @@ export interface ClassDecl {
 
 export type TraitRule =
   | { k: 'insteadof'; trait: string; method: string; instead: string[] }
-  | { k: 'as'; trait?: string; method: string; alias?: string; visibility?: Visibility };
+  | { k: 'as'; trait?: string; method: string; alias?: string; visibility?: Visibility; isFinal?: boolean };
 
 export interface Program {
   body: Stmt[];

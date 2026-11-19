@@ -1430,26 +1430,28 @@ export abstract class DeclarationConverter extends ConverterBase {
           instead: instead.map((child) => this.namedClass(child, '', 'trait')),
         });
       } else if (clause.type === 'use_as_clause') {
-        const parts = clause.namedChildren.filter((child) => child.type !== 'comment');
-        const [target, ...rest] = parts;
-        let trait: string | undefined;
-        let method: string;
-        if (target.type === 'class_constant_access_expression') {
-          trait = this.namedClass(semanticChildren(target)[0], '', 'trait');
-          method = this.nameText(semanticChildren(target)[1]);
-        } else method = this.nameText(target);
-        const visibilityNode = rest.find((child) => child.type === 'visibility_modifier');
-        const aliasNode = rest.find((child) => child.type === 'name');
-        rules.push({
-          k: 'as',
-          trait,
-          method,
-          alias: aliasNode ? this.nameText(aliasNode) : undefined,
-          visibility: visibilityNode ? (lower(visibilityNode.text) as Visibility) : undefined,
-        });
+        rules.push(this.traitAlias(clause));
       }
     }
     return { names, rules, row: member.startPosition.row };
+  }
+
+  private traitAlias(clause: Node): Extract<TraitRule, { k: 'as' }> {
+    const [target, ...rest] = semanticChildren(clause);
+    const qualified = target.type === 'class_constant_access_expression';
+    const [trait, method] = qualified ? semanticChildren(target) : [undefined, target];
+    const modifier = clause.childForFieldName('modifier') ?? rest.find((child) => child.type === 'visibility_modifier');
+    const aliasField = clause.childForFieldName('alias');
+    const alias = aliasField ?? rest.find((child) => child.type === 'name');
+    const legacyFinal = !modifier && !aliasField && lower(alias?.text ?? '') === 'final';
+    return {
+      k: 'as',
+      trait: trait ? this.namedClass(trait, '', 'trait') : undefined,
+      method: this.nameText(method),
+      alias: alias && !legacyFinal ? this.nameText(alias) : undefined,
+      visibility: modifier?.type === 'visibility_modifier' ? (lower(modifier.text) as Visibility) : undefined,
+      isFinal: legacyFinal || modifier?.type === 'final_modifier',
+    };
   }
 
   // Expressions -------------------------------------------------------------------------------------------------------

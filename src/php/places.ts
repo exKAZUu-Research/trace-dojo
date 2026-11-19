@@ -1,5 +1,5 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { deprecated, throwError, type UpdateWarning, warn } from './errors';
+import { deprecated, E_WARNING, emitError, throwError, type UpdateWarning, warn } from './errors';
 import { type Frame, type PhpThrow, rt } from './runtime';
 import { describePropertyType } from './types';
 import { dropped, type Key, PhpArray, PhpObject, type PropDecl, Ref, type Value } from './values';
@@ -67,7 +67,8 @@ export class VarPlace implements Place {
   constructor(
     private readonly frame: Frame,
     readonly name: string,
-    private readonly kind: 'compiled' | 'dynamic' | 'global' = 'compiled'
+    private readonly kind: 'compiled' | 'dynamic' | 'global' = 'compiled',
+    private readonly fetchRow?: number
   ) {}
 
   get(): Value | undefined {
@@ -76,7 +77,7 @@ export class VarPlace implements Place {
   }
 
   warnUndefined(): void {
-    warn(`Undefined ${this.kind === 'global' ? 'global ' : ''}variable $${this.name}`);
+    emitError(E_WARNING, `Undefined ${this.kind === 'global' ? 'global ' : ''}variable $${this.name}`, this.fetchRow);
   }
 
   fetchCompound(warning: UpdateWarning): CompoundRead {

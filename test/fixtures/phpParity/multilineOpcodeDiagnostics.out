@@ -1,3 +1,11 @@
+
+Deprecated: Using ${var} in strings is deprecated, use {$var} instead in /main.php on line 558
+
+Deprecated: Using ${expr} (variable variables) in strings is deprecated, use {${expr}} instead in /main.php on line 597
+
+Deprecated: Using ${var} in strings is deprecated, use {$var} instead in /main.php on line 599
+
+Deprecated: Using ${expr} (variable variables) in strings is deprecated, use {${expr}} instead in /main.php on line 602
 array:
 Warning: Array to string conversion in /main.php on line 3
 Array
@@ -289,3 +297,29 @@ Warning: Undefined variable $missingVariable in /main.php on line 521
 532:Call to undefined method stdClass::missing()
 
 Warning: Undefined variable $missingValue in /main.php on line 537
+545
+551
+559
+
+Warning: Undefined variable $unknown in /main.php on line 567
+
+Warning: Undefined variable $unknown in /main.php on line 570
+
+Warning: Undefined variable $unknown in /main.php on line 576
+
+Warning: Undefined variable $unknown in /main.php on line 580
+
+Warning: Undefined variable $unknown in /main.php on line 581
+
+Warning: Undefined variable $unknown in /main.php on line 584
+
+Warning: Undefined variable $ad in /main.php on line 588
+
+Warning: Undefined variable $unknown in /main.php on line 590
+name;value;
+Warning: Undefined variable $uncaptured in /main.php on line 594
+a
+Warning: Undefined variable $absent in /main.php on line 600
+
+Warning: Trying to access array offset on null in /main.php on line 600
+Undefined constant "absentName"

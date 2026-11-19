@@ -511,9 +511,9 @@ function exportPropertyHooks(hooks: PropertyHookSyntax[], depth: number): string
 function exportTraitRule(rule: TraitRule): string {
   const method = rule.trait ? `${rule.trait}::${rule.method}` : rule.method;
   if (rule.k === 'insteadof') return `${method} insteadof ${rule.instead.join(', ')}`;
-  const visibility = rule.visibility ? ` ${rule.visibility}` : '';
+  const modifier = rule.isFinal ? ' final' : rule.visibility ? ` ${rule.visibility}` : '';
   const alias = rule.alias ? ` ${rule.alias}` : '';
-  return `${method} as${visibility}${alias}`;
+  return `${method} as${modifier}${alias}`;
 }
 
 function exportClass(cls: ClassRef, depth: number): string {

@@ -8,7 +8,7 @@ import type { ArgValue } from './calls';
 import { canAccessProp, declForKey, issetProp, lookupProp, readProp } from './classes';
 import * as conversionsModule from './conversions';
 import { compareBytes, compareNumbers, debugType, floatFitsInt, normalizeKeyString, valueName } from './conversions';
-import { deprecated, throwError, warn, withCleanupExceptions } from './errors';
+import { deprecated, throwError, warn, withCleanupExceptions, withPendingException } from './errors';
 import { cast } from './interp';
 import { naturalCompare } from './libString';
 import { defineAlias, defineConstant, defineFunction, markDirectOnly, markInlined } from './native';
@@ -1062,19 +1062,39 @@ function accumulate(name: string, op: string, word: string, total: Value, value:
 
 defineFunction(
   'array_column(array $array, string|int|null $column_key, string|int|null $index_key = null): array',
-  ({ args }) => {
-    const [rows, column, index] = args;
-    const result = new PhpArray();
-    for (const row of arr(rows).iterValues()) {
-      const value = column === null ? row : columnField(row, column);
-      if (value === undefined) continue;
-      const indexValue = index === null || index === undefined ? undefined : columnField(row, index);
-      if (indexValue === undefined) result.append(share(value));
-      else result.set(toKey(indexValue), share(value));
-    }
-    return result;
-  }
+  ({ args: [rows, column, index] }) => arrayColumn(arr(rows), column, index)
 );
+
+function arrayColumn(rows: PhpArray, column: Value, index: Value | undefined): PhpArray {
+  const runtime = rt();
+  const result = new PhpArray();
+  runtime.held.push(result);
+  try {
+    for (const row of rows.iterValues()) addColumnRow(result, row, column, index);
+  } catch (error) {
+    runtime.held.pop();
+    if (error instanceof PhpThrow) withPendingException(runtime, error, () => runtime.release([result], true));
+    throw error;
+  }
+  runtime.held.pop();
+  return result;
+}
+
+function addColumnRow(result: PhpArray, row: Value, column: Value, index: Value | undefined): void {
+  consumeInvokedResult(
+    () => (column === null ? row : columnField(row, column)),
+    (value) => {
+      if (value === undefined) return;
+      consumeInvokedResult(
+        () => (index === null || index === undefined ? undefined : columnField(row, index)),
+        (key) => {
+          if (key === undefined) result.append(share(value));
+          else result.set(toKey(key), share(value));
+        }
+      );
+    }
+  );
+}
 
 /** A row's field for `array_column`: an element of an array row or a property of an object row that the caller can read. */
 function columnField(row: Value, key: Value): Value | undefined {

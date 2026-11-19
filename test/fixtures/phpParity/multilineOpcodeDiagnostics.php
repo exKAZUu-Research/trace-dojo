@@ -537,3 +537,69 @@ $object->{
     $namePrefix .
     "Property"
 } ??= $missingValue;
+
+$prefix = 'a';
+$object = new stdClass;
+try {
+    $object->{
+        "$prefix
+"
+    }();
+} catch (Error $error) { echo $error->getLine(), "\n"; }
+try {
+    $object->{
+        "{$prefix}a
+"
+    }();
+} catch (Error $error) { echo $error->getLine(), "\n"; }
+try {
+    $object->{
+        <<<NAME
+
+${prefix}
+b
+NAME
+    }();
+} catch (Error $error) { echo $error->getLine(), "\n"; }
+$target = [];
+$target[
+    $prefix .
+    'b'
+] = $unknown;
+$target[
+    $prefix .
+    'c'
+] ??= $unknown;
+$target[
+    'a' .
+    'd'
+] ??= $unknown;
+$object->{
+    'a' .
+    'b'
+} ??= $unknown;
+${$prefix .
+    'b'
+} = $unknown;
+${$prefix .
+    'c'
+} ??= $unknown;
+${$prefix .
+    'd'
+} .=
+    $unknown;
+
+function fetchCompoundName() { echo 'name;'; return 'uncaptured'; }
+function fetchCompoundValue() { echo 'value;'; return 'suffix'; }
+${fetchCompoundName()} .= fetchCompoundValue();
+
+const LOOKUP_NAME = 'prefix';
+echo "${LOOKUP_NAME
+}";
+echo "${absent[
+    0]}";
+try {
+    echo "$prefix ${
+        absentName
+    }";
+} catch (Error $error) { echo $error->getMessage(), "\n"; }

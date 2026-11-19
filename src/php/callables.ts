@@ -961,7 +961,7 @@ export function consumeCallbackResult<T>(callable: Value, args: Value[], consume
   return consumeInvokedResult(() => callCallback(callable, args), consume);
 }
 
-export function consumeInvokedResult<T>(call: () => Value, consume: (value: Value) => T): T {
+export function consumeInvokedResult<V extends Value | undefined, T>(call: () => V, consume: (value: V) => T): T {
   const runtime = rt();
   const nativeMark = runtime.nativeHeld.at(-1)?.length ?? 0;
   const temporaryMark = runtime.frame.temporaries.length;

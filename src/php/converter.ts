@@ -29,7 +29,7 @@ import { DeclarationConverter } from './declarationConverter';
 import { exportExpr, UnexportableSyntax } from './export';
 import { decodeLiteral, decodeSingleQuoted, parseIntegerLiteral } from './literals';
 import { builtinLiteralKey } from './native';
-import { compiledOperandRow } from './opcodeRows';
+import { compiledOperandRow, operandAstRow, recordOperandRows } from './opcodeRows';
 
 export type { CompileNotice } from './converterBase';
 
@@ -905,52 +905,13 @@ export class Converter extends DeclarationConverter {
         return this.interpolated(node);
       }
       case 'nowdoc': {
-        return { k: 'lit', v: this.nowdoc(node), row };
+        return recordOperandRows({ k: 'lit', v: this.nowdoc(node), row }, row + 1);
       }
       case 'variable_name': {
         return this.variable(this.variableName(node), row);
       }
       case 'dynamic_variable_name': {
-        const inner = node.namedChildren.find((child) => child.type !== 'comment') as Node;
-        const interpolating =
-          node.text.startsWith('${') &&
-          this.source[node.startIndex - 1] !== '{' &&
-          (node.parent?.type === 'encapsed_string' || node.parent?.type === 'heredoc_body');
-        const parts = inner.namedChildren.filter((child) => child.type !== 'comment');
-        const indexedName =
-          inner.type === 'subscript_expression' &&
-          parts[0]?.type === 'name' &&
-          node.text.startsWith('${' + parts[0].text + '[');
-        if (interpolating && !indexedName && /^\$\{[A-Z_a-z\u0080-\uFFFF][\w\u0080-\uFFFF]*\[/.test(node.text))
-          this.error(node, 'syntax error, unexpected token, expecting "}"');
-        if (interpolating) {
-          this.notices.push({
-            level: 'Deprecated',
-            message:
-              inner.type === 'name' || indexedName
-                ? 'Using ${var} in strings is deprecated, use {$var} instead'
-                : 'Using ${expr} (variable variables) in strings is deprecated, use {${expr}} instead',
-            row,
-          });
-        }
-        if (interpolating && inner.type === 'name') return this.variable(enc(inner.text), row);
-        if (interpolating && indexedName) {
-          return {
-            k: 'idx',
-            base: this.variable(enc(parts[0].text), row),
-            index: parts[1] ? this.expr(parts[1]) : undefined,
-            row,
-          };
-        }
-        const name = this.compileStringName(this.expr(inner), inner);
-        const nameRow = this.memberOperandRow(name, inner);
-        const constant = interpolating
-          ? undefined
-          : foldedConstant(name, { compiler: true, preserveNamedConstants: true, budget: this.compileBudget });
-        if (typeof constant !== 'string') return { k: 'varvar', name, row: nameRow };
-        if (this.preserveSyntax) return { k: 'varvar', name: { k: 'lit', v: constant, row }, row };
-        this.checkVariableAvailability(node, constant);
-        return this.variable(constant, nameRow);
+        return this.dynamicVariable(node);
       }
       case 'name':
       case 'qualified_name':
@@ -1261,15 +1222,56 @@ export class Converter extends DeclarationConverter {
   }
 
   private memberOperandRow(name: string | Expr, node: Node): number {
-    if (typeof name === 'string') return node.startPosition.row;
-    const value = unparenthesizedNode(node);
-    if (value.type === 'heredoc' || value.type === 'nowdoc') {
-      const body = value.childForFieldName('value');
-      return name.k === 'interp' ? value.endPosition.row - 1 : (body?.endPosition.row ?? value.endPosition.row);
+    return typeof name === 'string' ? node.startPosition.row : compiledOperandRow(name);
+  }
+
+  private dynamicVariable(node: Node): Expr {
+    const inner = semanticChildren(node)[0];
+    const name = this.compileStringName(this.expr(inner), inner);
+    const row = compiledOperandRow(name);
+    const constant = foldedConstant(name, {
+      compiler: true,
+      preserveNamedConstants: true,
+      budget: this.compileBudget,
+    });
+    if (typeof constant !== 'string') return { k: 'varvar', name, row };
+    if (this.preserveSyntax)
+      return { k: 'varvar', name: { k: 'lit', v: constant, row: node.startPosition.row }, row: node.startPosition.row };
+    this.checkVariableAvailability(node, constant);
+    return this.variable(constant, row);
+  }
+
+  private dynamicInterpolation(node: Node, previousRow?: number): Expr {
+    const inner = semanticChildren(node)[0];
+    const label = /^\$\{([A-Z_a-z\u0080-\uFFFF][\w\u0080-\uFFFF]*)([[}])/.exec(node.text);
+    const row = inner.startPosition.row;
+    const part = this.notices.length;
+    let expression: Expr;
+    if (label?.[2] === '[') {
+      const [base, index] = semanticChildren(inner);
+      if (inner.type !== 'subscript_expression' || base?.text !== label[1])
+        this.error(node, 'syntax error, unexpected token, expecting "}"');
+      const key = index ? this.expr(index) : undefined;
+      expression = {
+        k: 'idx',
+        base: this.variable(enc(label[1]), row),
+        index: key,
+        row: key ? compiledOperandRow(key) : row,
+      };
+    } else if (label) {
+      expression = this.variable(enc(label[1]), row);
+    } else {
+      const name = this.compileStringName(this.expr(inner), inner);
+      expression = { k: 'varvar', name, row: compiledOperandRow(name) };
     }
-    if (name.k === 'interp') return value.endPosition.row;
-    if (name.k === 'bin' && name.op === '.' && directiveLiteral(value, name)) return followingTokenRow(value);
-    return compiledOperandRow(name);
+    this.notices.splice(part, 0, {
+      level: 'Deprecated',
+      message: label
+        ? 'Using ${var} in strings is deprecated, use {$var} instead'
+        : 'Using ${expr} (variable variables) in strings is deprecated, use {${expr}} instead',
+      row: previousRow ?? (expression.k === 'varvar' ? operandAstRow(expression.name) : row),
+    });
+    return expression;
   }
 
   // code-gauge-allow functionCognitiveComplexity 19 -- Classifies literal, named and magic constants in order.
@@ -1558,9 +1560,11 @@ export class Converter extends DeclarationConverter {
     }
     const expression: Extract<Expr, { k: 'bin' }> = { k: 'bin', op: op === '<>' ? '!=' : op, l, r, row };
     if (this.initializerContext?.kind === 'array') expression.opcodeRow = this.resultOpcodeRow(r, rightNode);
-    return this.preserveSyntax || this.initializerContext?.kind === 'deferred'
-      ? expression
-      : this.compileBinary(expression);
+    const compiled =
+      this.preserveSyntax || this.initializerContext?.kind === 'deferred' ? expression : this.compileBinary(expression);
+    return op === '.' && directiveLiteral(node, expression)
+      ? recordOperandRows(compiled, followingTokenRow(node))
+      : compiled;
   }
 
   private instanceOf(l: Expr, right: Node, row: number): Expr {
@@ -1947,19 +1951,21 @@ export class Converter extends DeclarationConverter {
     const indent = end ? end.startPosition.column : 0;
     const parts: (string | Expr)[] = [];
     if (end) this.checkMultilineIndent(node, end);
-    if (!container) return { k: 'lit', v: '', row };
+    if (!container) return recordOperandRows({ k: 'lit', v: '', row }, end?.startPosition.row ?? row);
     const children = container.children;
     let cursor = isHeredoc ? container.startIndex : this.source.indexOf('"', node.startIndex) + 1;
     let limit = isHeredoc ? container.endIndex : node.endIndex - 1;
     if (isHeredoc) {
       // The body runs from the line after the opening marker to the line break before the closing one.
-      if (this.source.startsWith('\r\n', cursor)) cursor += 2;
-      else if (this.source[cursor] === '\n') cursor++;
+      cursor = Math.max(cursor, this.source.indexOf('\n', node.startIndex) + 1);
       if (this.source[limit - 1] === '\n') limit -= this.source[limit - 2] === '\r' ? 2 : 1;
     }
     let raw = '';
     let rawStart = cursor;
     let rawAtLineStart = isHeredoc;
+    let rawRow = row + Number(isHeredoc);
+    let firstRow: number | undefined;
+    let lastRow: number | undefined;
     const flush = (): void => {
       if (raw === '') return;
       const text = isHeredoc
@@ -1975,6 +1981,8 @@ export class Converter extends DeclarationConverter {
         return row + before.split('\n').length - 1;
       };
       parts.push(decodeLiteral(text, !isHeredoc, (message, offset) => this.error(escapeRow(offset), message)));
+      firstRow ??= rawRow;
+      lastRow = rawRow;
       raw = '';
     };
     let braced = false;
@@ -1987,6 +1995,8 @@ export class Converter extends DeclarationConverter {
         if (child.type === '{') {
           raw += this.source.slice(cursor, child.startIndex);
           braced = true;
+        } else {
+          rawRow = child.endPosition.row;
         }
         cursor = child.endIndex;
         continue;
@@ -1994,23 +2004,29 @@ export class Converter extends DeclarationConverter {
       if (child.type === 'comment') continue;
       raw += this.source.slice(cursor, child.startIndex);
       flush();
-      const part = braced ? this.expr(child) : this.simpleInterpolation(child);
+      const part = braced ? this.expr(child) : this.simpleInterpolation(child, lastRow);
+      firstRow ??= operandAstRow(part);
+      lastRow = compiledOperandRow(part);
       if (braced && !['var', 'varvar', 'idx', 'prop', 'sprop', 'mcall', 'scall', 'call'].includes(part.k))
         this.error(child, 'Invalid expression in string interpolation');
       parts.push(part);
       braced = false;
       cursor = child.endIndex;
       rawStart = cursor;
+      rawRow = child.endPosition.row;
       rawAtLineStart = false;
     }
     raw += this.source.slice(cursor, limit);
     flush();
-    if (parts.every((part) => typeof part === 'string')) return { k: 'lit', v: parts.join(''), row };
-    return { k: 'interp', parts, row };
+    if (parts.every((part) => typeof part === 'string'))
+      return recordOperandRows({ k: 'lit', v: parts.join(''), row }, isHeredoc ? (firstRow ?? rawRow) : row);
+    return recordOperandRows({ k: 'interp', parts, row }, firstRow ?? row, lastRow ?? row);
   }
 
   /** Converts a variable written in a string without braces, where `$a[key]` names the key `'key'`. */
-  private simpleInterpolation(node: Node): Expr {
+  private simpleInterpolation(node: Node, previousRow?: number): Expr {
+    if (node.type === 'dynamic_variable_name' && node.text.startsWith('${'))
+      return this.dynamicInterpolation(node, previousRow);
     if (node.type === 'subscript_expression') {
       const [baseNode, indexNode] = node.namedChildren.filter((child) => child.type !== 'comment');
       const row = node.startPosition.row;

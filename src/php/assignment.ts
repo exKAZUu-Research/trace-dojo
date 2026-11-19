@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 947 -- Holds assignment and offset access modes with their shared helpers.
+// code-gauge-allow-file fileNcss 949 -- Holds assignment and offset access modes with their shared helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -31,7 +31,7 @@ import {
   stringOffsetIndex,
   withPropertyName,
 } from './interp';
-import { compiledOperandRow, constantAstRow, dimensionWriteRow } from './opcodeRows';
+import { compiledOperandRow, dimensionWriteRow, operandAstRow } from './opcodeRows';
 import { arithmetic, bitwise, concat, toKey, toStr } from './operators';
 import {
   type BeforeOffsetGet,
@@ -88,7 +88,7 @@ export function placeOf(e: Expr, mode: PlaceMode = 'write', through = false): Pl
     case 'varvar': {
       return namedPlace(e.name, mode, (name) => {
         if (name === 'this') throwError('Error', 'Cannot re-assign $this');
-        return new VarPlace(frame, name, 'dynamic');
+        return new VarPlace(frame, name, 'dynamic', e.row);
       });
     }
     case 'idx': {
@@ -831,12 +831,13 @@ export function assignExpression(target: Expr, valueExpr: Expr): Value {
   }
   const place = placeOf(target, 'deferred');
   const read = prepareOperand(valueExpr);
+  const row = assignmentWriteRow(target, 'plain');
   if (isCompiledVariable(valueExpr) && !dimensionWritesOwnVariable(target, valueExpr)) {
-    runtime.row = target.row;
-    return assignWithOperandWarning(place, valueExpr, read, target.row);
+    runtime.row = row;
+    return assignWithOperandWarning(place, valueExpr, read, row);
   }
   const value = share(read());
-  runtime.row = target.row;
+  runtime.row = row;
   return assignPlace(place, () => value);
 }
 
@@ -1072,7 +1073,7 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
     const current = place.getForIsset ? place.getForIsset() : place.get();
     if (current !== undefined && current !== null && current !== UNDEFINED_RESULT) return current;
     const read = prepareOperand(e.value);
-    const row = coalesceWriteRow(e.target);
+    const row = assignmentWriteRow(e.target, 'coalesce');
     if (dimensionWritesOwnVariable(e.target, e.value)) return place.set(share(read(row)));
     return assignPlace(place, () => share(read(row)));
   }
@@ -1082,7 +1083,9 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
   return withOperandWarnings((warning, warningPending) => {
     place.readCompoundName?.(warning);
     let readAfterFetch =
-      e.target.k === 'idx' && isCompiledVariable(e.value) && !dimensionWritesOwnVariable(e.target, e.value);
+      (e.target.k === 'idx' || e.target.k === 'varvar') &&
+      isCompiledVariable(e.value) &&
+      !dimensionWritesOwnVariable(e.target, e.value);
     let value = readAfterFetch ? null : share(readUpdateValue(e, read, warning, row));
     runtime.row = row;
     const fetched = readCompound(place, warning, () => {
@@ -1099,10 +1102,15 @@ export function compoundAssign(e: Extract<Expr, { k: 'assignOp' }>): Value {
   });
 }
 
-function coalesceWriteRow(target: Expr): number {
-  if (target.k === 'idx') return dimensionWriteRow(target);
-  if (target.k === 'prop' || target.k === 'sprop')
-    return typeof target.name === 'string' ? target.row : constantAstRow(target.name);
+function assignmentWriteRow(target: Expr, kind: 'coalesce' | 'plain'): number {
+  if (target.k === 'varvar') return operandAstRow(target.name);
+  const name =
+    target.k === 'idx'
+      ? (target.index ?? target.base)
+      : target.k === 'prop' || target.k === 'sprop'
+        ? target.name
+        : undefined;
+  if (name && typeof name !== 'string') return kind === 'coalesce' ? operandAstRow(name) : compiledOperandRow(name);
   return target.row;
 }
 
