@@ -20,9 +20,9 @@ import {
   numberType,
   type ObjectType,
   type Property,
+  propertyAccessType,
   regularOf,
   type Type,
-  undefinedType,
   unionOf,
 } from './types';
 
@@ -522,8 +522,7 @@ export class AssignmentChecker {
     const property = this.c.propertyOf(type, name);
     // The access, checked before, has reported a property that neither exists nor falls under an index signature.
     if (!property) return isAnyLike(type) ? type : (this.c.members.indexSignatureType(type, name) ?? errorType);
-    const value = (property.writeType ?? property.type)();
-    return property.optional ? unionOf([value, undefinedType]) : value;
+    return propertyAccessType(property, 'write');
   }
 
   private reportReadonlyIndex(expression: TreeNode, objectType: Type): Type {

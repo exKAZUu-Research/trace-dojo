@@ -5,6 +5,7 @@ import {
   isIntrinsic,
   neverType,
   type Property,
+  propertyAccessType,
   type Type,
   unionOf,
 } from './types';
@@ -50,7 +51,7 @@ export class ReducedTypes {
 
   private hasConflictingDiscriminant(properties: Property[]): boolean {
     if (properties.every((property) => property.optional)) return false;
-    const types = properties.map((property) => property.type());
+    const types = properties.map((property) => propertyAccessType(property));
     return (
       types.some(isDiscriminant) &&
       !types.some((member) => isIntrinsic(member, 'never')) &&

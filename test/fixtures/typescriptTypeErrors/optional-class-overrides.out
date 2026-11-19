@@ -1,0 +1,11 @@
+(2,30): error TS2416: Property 'value' in type 'Derived' is not assignable to the same property in base type 'Base'.
+  Type 'number | undefined' is not assignable to type 'number'.
+    Type 'undefined' is not assignable to type 'number'.
+(5,7): error TS2417: Class static side 'typeof DerivedStatic' incorrectly extends base class static side 'typeof BaseStatic'.
+  Types of property 'value' are incompatible.
+    Type 'number | undefined' is not assignable to type 'number'.
+      Type 'undefined' is not assignable to type 'number'.
+(8,7): error TS2415: Class 'DerivedUndefined' incorrectly extends base class 'BaseUndefined'.
+  Property 'value' is optional in type 'DerivedUndefined' but required in type 'BaseUndefined'.
+(11,7): error TS2417: Class static side 'typeof DerivedStaticUndefined' incorrectly extends base class static side 'typeof BaseStaticUndefined'.
+  Property 'value' is optional in type 'typeof DerivedStaticUndefined' but required in type 'typeof BaseStaticUndefined'.

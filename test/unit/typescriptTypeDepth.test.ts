@@ -22,6 +22,38 @@ test.each([
   });
 });
 
+test('infers type arguments beyond eight nested generic references', () => {
+  const depth = 24;
+  const nested = (type: string): string => `${'Box<'.repeat(depth)}${type}${'>'.repeat(depth)}`;
+  const source = `
+    interface Box<T> { value: T }
+    function unpack<T>(input: ${nested('T')}): T { return 1 as any; }
+    const data: ${nested('number')} = null as any;
+    console.log(unpack(data).toFixed(1));
+  `;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1.0\n',
+    uncaughtException: undefined,
+  });
+});
+
+test('infers a contextual return type through expanding recursive members', () => {
+  const source = `
+    type Source<T> = { next?: Source<Source<T>> };
+    type Target<T> = { next?: Target<T>; value?: T };
+    function read<T>(input: Target<T>): T { return 1 as any; }
+    const node: Source<number> = null as any;
+    const value: number = read(node);
+    console.log(value.toFixed(1));
+  `;
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'executed',
+    stdout: '1.0\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('formats a wide shared object diagnostic within the execution budget', () => {
   const properties = Array.from({ length: 100 }, (_, index) => `p${index}: previous`).join(', ');
   const objects = Array.from(

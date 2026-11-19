@@ -594,6 +594,11 @@ export function simpleProperty(name: string, type: Type, options: Partial<Proper
   };
 }
 
+export function propertyAccessType(property: Property, access: 'read' | 'write' = 'read'): Type {
+  const type = (access === 'write' ? (property.writeType ?? property.type) : property.type)();
+  return property.optional ? unionOf([type, undefinedType]) : type;
+}
+
 export function functionType(signature: Signature): ObjectType {
   return anonymousObject(() => ({ ...emptyStructure(), callSignatures: [signature] }), { isFunction: true });
 }

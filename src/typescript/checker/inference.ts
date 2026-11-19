@@ -1,4 +1,5 @@
-// code-gauge-allow-file fileNcss 434 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 465 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { childTypes, objectMemberTypes } from './genericTypes';
 import { applicableIndex, isIndexKeyOf, isPropertyKeyOf, keyedIndexes } from './indexInfos';
@@ -60,8 +61,15 @@ export interface InferenceRun {
 
 type Recurse = (source: Type, target: Type, covariant?: boolean, priority?: number) => void;
 
+interface InferencePath {
+  active: Set<string>;
+  sources: Type[];
+  targets: Type[];
+}
+
 /** Infers type arguments from the types that are matched against the types their parameters appear in. */
 export class TypeInference {
+  private depth = 0;
   constructor(private readonly c: Checker) {}
 
   /**
@@ -186,16 +194,36 @@ export class TypeInference {
   }
 
   /** Collects the types `source` gives the type parameters that `target` mentions. */
-  // code-gauge-allow functionCognitiveComplexity 20 -- Infers through each target form, including literal strings matched against template placeholders.
-  inferTypes(run: InferenceRun, source: Type, target: Type, covariant: boolean, depth = 0): void {
-    if (depth > 8 || target.noInfer) return;
-    const recurse: Recurse = (s, t, isCovariant = covariant, priority = run.priority) =>
-      this.inferTypes({ ...run, priority }, s, t, isCovariant, depth + 1);
+  inferTypes(run: InferenceRun, source: Type, target: Type, covariant: boolean): void {
+    this.inferPair(run, source, target, covariant, { active: new Set(), sources: [], targets: [] });
+  }
+
+  private inferPair(run: InferenceRun, source: Type, target: Type, covariant: boolean, path: InferencePath): void {
+    const { active } = path;
+    this.c.budget.spend();
+    if (target.noInfer) return;
     if (target.kind === 'typeParameter') {
-      this.inferToParameter(run, source, target, covariant, depth === 0);
+      this.inferToParameter(run, source, target, covariant, active.size === 0);
       return;
     }
-    if (isAnyLike(source) && depth > 0) {
+    const key = `${source.id}/${target.id}/${run.priority}/${covariant}`;
+    if (active.has(key)) return;
+    if (this.depth >= LIMITS.maxCallDepth) throw new ExecutionLimitError('operations');
+    active.add(key);
+    this.depth++;
+    try {
+      const recurse: Recurse = (s, t, isCovariant = covariant, priority = run.priority) =>
+        this.inferPair({ ...run, priority }, s, t, isCovariant, path);
+      this.inferDeeper(run, source, target, path, recurse);
+    } finally {
+      this.depth--;
+      active.delete(key);
+    }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 20 -- Dispatches each target form to its inference rules.
+  private inferDeeper(run: InferenceRun, source: Type, target: Type, path: InferencePath, recurse: Recurse): void {
+    if (isAnyLike(source) && path.active.size > 1) {
       // `any` infers `any` for every parameter the target mentions.
       for (const parameter of run.parameters) {
         if (this.mentions(target, parameter)) recurse(source, parameter);
@@ -216,7 +244,7 @@ export class TypeInference {
     }
     if (target.kind === 'templateLiteral' && source.kind === 'literal' && typeof source.value === 'string')
       this.inferTemplateLiteral(source.value, target, recurse);
-    if (target.kind === 'object') this.inferToObject(run, source, target, recurse);
+    if (target.kind === 'object') this.inferToObject(run, source, target, path, recurse);
   }
 
   private inferTemplateLiteral(value: string, target: TemplateLiteralType, recurse: Recurse): void {
@@ -283,7 +311,13 @@ export class TypeInference {
     if (naked.length === 1 && remaining.length > 0) recurse(unionOf(remaining, true), naked[0]);
   }
 
-  private inferToObject(run: InferenceRun, source: Type, target: ObjectType, recurse: Recurse): void {
+  private inferToObject(
+    run: InferenceRun,
+    source: Type,
+    target: ObjectType,
+    path: InferencePath,
+    recurse: Recurse
+  ): void {
     if (this.c.isLibraryType(target, 'ArrayLike')) source = this.c.apparentType(source);
     // An iterable target infers its element from what iterating the source gives, as a string's characters.
     if (
@@ -304,7 +338,17 @@ export class TypeInference {
       return;
     }
     if (source.kind === 'object' && this.inferFromElements(run, source, target, recurse)) return;
-    this.inferFromMembers(run, source, target, recurse);
+    const { sources, targets } = path;
+    sources.push(source);
+    targets.push(target);
+    try {
+      const relations = this.c.relations;
+      if (relations.isDeeplyNested(source, sources, 2) && relations.isDeeplyNested(target, targets, 2)) return;
+      this.inferFromMembers(run, source, target, recurse);
+    } finally {
+      sources.pop();
+      targets.pop();
+    }
   }
 
   private inferToMapped(source: Type, target: ObjectType, recurse: Recurse): void {

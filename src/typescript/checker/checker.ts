@@ -53,6 +53,7 @@ import {
   type ObjectType,
   primitiveOfLiteral,
   type Property,
+  propertyAccessType,
   regularOf,
   type Signature,
   simpleProperty,
@@ -848,13 +849,10 @@ export class Checker {
       optional: existing.optional && property.optional,
       readonly: existing.readonly && property.readonly,
       getterOnly: existing.getterOnly === true && property.getterOnly === true,
-      type: () => intersectionOf([existing.type(), property.type()], this.budget),
+      type: () => intersectionOf([propertyAccessType(existing), propertyAccessType(property)], this.budget),
       writeType: hasWriteType
         ? () =>
-            intersectionOf(
-              [(existing.writeType ?? existing.type)(), (property.writeType ?? property.type)()],
-              this.budget
-            )
+            intersectionOf([propertyAccessType(existing, 'write'), propertyAccessType(property, 'write')], this.budget)
         : undefined,
     };
   }

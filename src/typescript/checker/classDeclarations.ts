@@ -12,6 +12,7 @@ import {
   isAnyLike,
   isIntrinsic,
   type Property,
+  propertyAccessType,
   type Type,
   undefinedType,
   unionOf,
@@ -287,7 +288,7 @@ export class ClassDeclarationChecker {
     for (const property of target.resolve().properties.values()) {
       const own = this.c.propertyOf(info.instanceType, property.name);
       if (!own || own.declaringClass !== info || own.declaration?.parent?.type !== 'class_body') continue;
-      if (this.c.relations.isAssignable(readType(own), readType(property))) continue;
+      if (this.c.relations.isAssignable(propertyAccessType(own), propertyAccessType(property))) continue;
       this.c.error(
         own.declaration?.childForFieldName('name') ?? own.declaration ?? info.declaration,
         `型 '${info.name}' のプロパティ '${property.name}' は、基底の型 '${this.c.print(target)}' の同じプロパティに代入できません。`
@@ -334,12 +335,17 @@ export class ClassDeclarationChecker {
         this.c.error(nameNode, kindMismatch);
         continue;
       }
-      const ownType = property.type();
-      const baseType = baseProperty.type();
+      const ownType = propertyAccessType(property);
+      const baseType = propertyAccessType(baseProperty);
       if (!this.c.relations.isAssignable(ownType, baseType)) {
         this.c.error(
           nameNode,
           `型 '${info.name}' のプロパティ '${name}' は、基底の型の同じプロパティに代入できません。${this.c.expressions.elaboration.typeRelationMessage(ownType, baseType)}`
+        );
+      } else if (property.optional && !baseProperty.optional) {
+        this.c.error(
+          node.childForFieldName('name') ?? node,
+          `クラス '${info.name}' は、基底クラスを正しく継承していません。プロパティ '${name}' は基底クラスで必須です。`
         );
       }
     }
@@ -422,11 +428,7 @@ export class ClassDeclarationChecker {
     for (const [name, property] of own.properties) {
       const baseProperty = name === 'prototype' ? undefined : this.c.propertyOf(baseStatic, name);
       if (!baseProperty) continue;
-      const mismatch = conflictsInVisibility(property, baseProperty)
-        ? 'の可視性が異なります'
-        : this.c.relations.isAssignable(property.type(), baseProperty.type())
-          ? undefined
-          : 'の型が合いません';
+      const mismatch = this.staticOverrideMismatch(property, baseProperty);
       if (!mismatch) continue;
       this.c.error(
         node.childForFieldName('name') ?? node,
@@ -434,6 +436,13 @@ export class ClassDeclarationChecker {
       );
       return;
     }
+  }
+
+  private staticOverrideMismatch(property: Property, baseProperty: Property): string | undefined {
+    if (conflictsInVisibility(property, baseProperty)) return 'の可視性が異なります';
+    if (!this.c.relations.isAssignable(propertyAccessType(property), propertyAccessType(baseProperty)))
+      return 'の型が合いません';
+    if (property.optional && !baseProperty.optional) return 'は基底クラスで必須です';
   }
 
   /** Reports the fields a constructor leaves unassigned, which strict property initialization requires. */
@@ -516,10 +525,6 @@ function isInterfaceMember(property: Property): boolean {
 function memberNameNode(property: Property): TreeNode | undefined {
   const { declaration } = property;
   return declaration?.childForFieldName('name') ?? declaration?.childForFieldName('pattern') ?? undefined;
-}
-
-function readType(property: Property): Type {
-  return property.optional ? unionOf([property.type(), undefinedType]) : property.type();
 }
 
 /** How narrowly each visibility exposes a member, which a derived class may not narrow further. */
