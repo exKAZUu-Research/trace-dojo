@@ -71,6 +71,7 @@
     "@trpc/server": "11.25.0",
     "@willbooster/shared-lib": "11.1.0",
     "@willbooster/shared-lib-react": "6.3.0",
+    "@willbooster/tree-sitter-bash": "15.0.1",
     "@willbooster/tree-sitter-c": "40.0.0",
     "@willbooster/tree-sitter-go": "13.0.0",
     "@willbooster/tree-sitter-haskell": "26.0.0",
