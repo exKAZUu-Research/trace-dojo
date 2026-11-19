@@ -484,12 +484,8 @@ export class TypeNodes {
       if (!constraint) continue;
       const argument = typeArguments[index];
       const instantiated = this.c.instantiate(constraint, mapper);
-      if (!this.c.relations.isAssignable(argument, instantiated)) {
-        this.c.error(
-          node,
-          `型 '${this.c.print(argument)}' は制約 '${this.c.print(instantiated)}' を満たしていません。`
-        );
-      }
+      if (!this.c.relations.isAssignable(argument, instantiated))
+        this.c.error(node, this.c.expressions.elaboration.typeRelationMessage(argument, instantiated, 'constraint'));
     }
   }
 

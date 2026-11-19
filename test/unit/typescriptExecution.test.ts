@@ -534,7 +534,7 @@ target.apply(undefined, Object('ab') as any);`;
   });
 });
 
-test('nullable assignment diagnostics retain the source and target types reported by TypeScript', () => {
+test('nullable relation diagnostics retain TypeScript error heads and constituent hints', () => {
   const fixture = new URL(
     '../fixtures/typescriptTypeErrors/rejects-nullable-assignment-message-types.ts.txt',
     import.meta.url
@@ -551,7 +551,8 @@ test('nullable assignment diagnostics retain the source and target types reporte
       );
     if (!match) return [];
     const detail = /^  Type '(.+?)' is not assignable to type '(.+?)'\./.exec(referenceLines[index + 1]);
-    return [{ row: Number(match[1]) - 1, source: match[2], target: match[3], detail: detail?.slice(1) }];
+    const missing = /^  Property '(.+?)' is missing/.exec(referenceLines[index + 1])?.[1];
+    return [{ row: Number(match[1]) - 1, source: match[2], target: match[3], detail: detail?.slice(1), missing }];
   });
   const execution = executeProgram('typescript', fs.readFileSync(fixture, 'utf8'));
   if (execution.kind !== 'compileError') throw new Error(`not rejected: ${JSON.stringify(execution)}`);
@@ -563,6 +564,7 @@ test('nullable assignment diagnostics retain the source and target types reporte
     expect(reported?.slice(1)).toEqual([expected[index].source, expected[index].target]);
     const detail = /\n  型 '(.+?)' を型 '(.+?)'/.exec(diagnostic.message);
     expect(detail?.slice(1)).toEqual(expected[index].detail);
+    expect(/\n  プロパティ '(.+?)' がありません。/.exec(diagnostic.message)?.[1]).toEqual(expected[index].missing);
   }
 });
 

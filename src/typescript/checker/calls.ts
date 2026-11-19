@@ -677,11 +677,7 @@ export class Calls {
         ? this.c.silently(() => this.c.expressions.check(named(args[0])[0]))
         : this.argumentTuple(args, contexts);
     if (this.c.relations.isAssignable(tuple, restType)) return true;
-    if (report && at)
-      this.c.error(
-        at,
-        `型 '${this.c.print(tuple)}' の引数を型 '${this.c.print(restType)}' のパラメーターに渡すことはできません。`
-      );
+    if (report && at) this.c.error(at, this.c.expressions.elaboration.typeRelationMessage(tuple, restType, 'argument'));
     return false;
   }
 
@@ -709,11 +705,7 @@ export class Calls {
     this.c.expressions.checkExcessProperties(arg, argType, parameterType);
     if (this.c.diagnostics.length > before) return;
     if (this.c.expressions.elaboration.report(arg, argType, parameterType)) return;
-    const types = this.c.typesForMessage(argType, parameterType);
-    this.c.error(
-      arg,
-      `型 '${this.c.print(types.source)}' の引数を型 '${this.c.print(types.target)}' のパラメーターに渡すことはできません。${this.c.expressions.assignmentDetails(argType, types.target)}`
-    );
+    this.c.error(arg, this.c.expressions.elaboration.typeRelationMessage(argType, parameterType, 'argument'));
   }
 
   // Inference ----------------------------------------------------------------------------------------------------

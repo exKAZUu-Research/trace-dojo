@@ -338,7 +338,7 @@ export class ClassDeclarationChecker {
       if (!this.c.relations.isAssignable(ownType, baseType)) {
         this.c.error(
           nameNode,
-          `型 '${info.name}' のプロパティ '${name}' は、基底の型の同じプロパティに代入できません。型 '${this.c.print(ownType)}' を型 '${this.c.print(baseType)}' に代入することはできません。`
+          `型 '${info.name}' のプロパティ '${name}' は、基底の型の同じプロパティに代入できません。${this.c.expressions.elaboration.typeRelationMessage(ownType, baseType)}`
         );
       }
     }

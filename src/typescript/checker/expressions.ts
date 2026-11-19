@@ -11,7 +11,6 @@ import { ExpressionTypeCache } from './expressionTypeCache';
 import type { FlowEntry } from './flow';
 import { applicableIndex, applicablePatternIndexes } from './indexInfos';
 import { nonNullableType } from './nullishConstraints';
-import { printedPropertyName } from './print';
 import type { Sym } from './scopes';
 import { nameSuggestionHint } from './spelling';
 import {
@@ -33,7 +32,6 @@ import {
 } from './templateContexts';
 import {
   anyType,
-  booleanType,
   errorType,
   freshLiteralType,
   isAnyLike,
@@ -683,45 +681,7 @@ export class ExpressionChecker {
    */
   reportNotAssignable(node: TreeNode, source: Type, target: Type, expression?: TreeNode): void {
     if (this.elaboration.report(expression ?? node, source, target)) return;
-    const types = this.c.typesForMessage(source, target);
-    this.c.error(
-      node,
-      `型 '${this.c.print(types.source)}' を型 '${this.c.print(types.target)}' に代入することはできません。${this.assignmentDetails(source, types.target)}`
-    );
-  }
-
-  assignmentDetails(source: Type, target: Type): string {
-    if (source.kind !== 'union' || source === booleanType) return this.missingMembers(source, target);
-    this.c.budget.spend(source.types.length);
-    const failing = source.types.find((member) => !this.c.relations.isAssignable(member, target));
-    if (!failing) return '';
-    const types = this.c.typesForMessage(failing, target);
-    return (
-      this.missingMembers(failing, types.target) ||
-      `\n  型 '${this.c.print(types.source)}' を型 '${this.c.print(types.target)}' に代入することはできません。`
-    );
-  }
-
-  private missingMembers(source: Type, target: Type): string {
-    if (source.kind !== 'object' || target.kind !== 'object' || this.c.isArrayOrTuple(target)) return '';
-    const sourceStructure = this.c.structureOf(source);
-    const missing = [...target.resolve().properties]
-      .filter(
-        ([key, property]) =>
-          !property.optional && !sourceStructure.properties.has(key) && !this.c.propertyOf(source, key)
-      )
-      .map(([, property]) => property);
-    const sourceNames = new Set([...sourceStructure.properties.values()].map((property) => property.name));
-    const otherPrivateName = missing.find((property) => property.isPrivateName && sourceNames.has(property.name));
-    if (otherPrivateName)
-      return `型 '${this.c.print(source)}' のプロパティ '${otherPrivateName.name}' は、型 '${this.c.print(target)}' の中からは使えない別のメンバーです。`;
-    if (missing.length === 1) return `プロパティ '${printedPropertyName(missing[0].name)}' がありません。`;
-    if (missing.length > 1)
-      return `プロパティ ${missing
-        .slice(0, 4)
-        .map((property) => `'${printedPropertyName(property.name)}'`)
-        .join(', ')} がありません。`;
-    return '';
+    this.c.error(node, this.elaboration.typeRelationMessage(source, target));
   }
 
   /** Reports the properties of a fresh object literal that its target does not declare. */

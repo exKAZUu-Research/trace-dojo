@@ -47,3 +47,9 @@ function unionArgument(value: string | number) {
   function accepts(value: symbol | undefined) {}
   accepts(value);
 }
+function defaultedUnion<T extends string | undefined = string | number>() {}
+class DefaultedUnion<T extends string | undefined = string | number> {}
+interface FullPoint { x: number; y: number }
+function defaultedPoint<T extends FullPoint | undefined = { x: 1 } | { y: 2 }>() {}
+type Constrained<T extends string | undefined> = { item: T };
+function instantiatedUnion(value: Constrained<string | number>) {}

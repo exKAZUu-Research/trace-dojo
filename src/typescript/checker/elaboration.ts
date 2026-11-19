@@ -1,13 +1,14 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
+import { printedPropertyName } from './print';
 import { named, propertyNameText, skipParentheses } from './syntax';
-import { isAnyLike, type ObjectType, type Type, undefinedType, unionOf } from './types';
+import { booleanType, isAnyLike, type ObjectType, type Type, undefinedType, unionOf } from './types';
 
 /**
  * Reports an assignment that does not fit at the members of the literal that spells its value, as TypeScript
  * elaborates it: the properties of an object literal, the elements of an array literal, and the expression an arrow
- * function returns.
+ * function returns. It also formats relation diagnostics when the whole expression or type is rejected.
  */
 export class Elaboration {
   constructor(private readonly c: Checker) {}
@@ -30,6 +31,57 @@ export class Elaboration {
         return false;
       }
     }
+  }
+
+  typeRelationMessage(
+    source: Type,
+    target: Type,
+    context: 'assignment' | 'argument' | 'constraint' = 'assignment'
+  ): string {
+    const types = this.c.typesForMessage(source, target);
+    const actual = this.c.print(types.source);
+    const expected = this.c.print(types.target);
+    const head =
+      context === 'constraint'
+        ? `型 '${actual}' は制約 '${expected}' を満たしていません。`
+        : context === 'argument'
+          ? `型 '${actual}' の引数を型 '${expected}' のパラメーターに渡すことはできません。`
+          : assignmentMessage(actual, expected);
+    return head + this.assignmentDetails(source, types.target);
+  }
+
+  private assignmentDetails(source: Type, target: Type): string {
+    if (source.kind !== 'union' || source === booleanType) return this.missingMembers(source, target);
+    this.c.budget.spend(source.types.length);
+    const failing = source.types.find((member) => !this.c.relations.isAssignable(member, target));
+    if (!failing) return '';
+    const types = this.c.typesForMessage(failing, target);
+    const detail =
+      this.missingMembers(failing, types.target) ||
+      assignmentMessage(this.c.print(types.source), this.c.print(types.target));
+    return `\n  ${detail}`;
+  }
+
+  private missingMembers(source: Type, target: Type): string {
+    if (source.kind !== 'object' || target.kind !== 'object' || this.c.isArrayOrTuple(target)) return '';
+    const sourceStructure = this.c.structureOf(source);
+    const missing = [...target.resolve().properties]
+      .filter(
+        ([key, property]) =>
+          !property.optional && !sourceStructure.properties.has(key) && !this.c.propertyOf(source, key)
+      )
+      .map(([, property]) => property);
+    const sourceNames = new Set([...sourceStructure.properties.values()].map((property) => property.name));
+    const otherPrivateName = missing.find((property) => property.isPrivateName && sourceNames.has(property.name));
+    if (otherPrivateName)
+      return `型 '${this.c.print(source)}' のプロパティ '${otherPrivateName.name}' は、型 '${this.c.print(target)}' の中からは使えない別のメンバーです。`;
+    if (missing.length === 1) return `プロパティ '${printedPropertyName(missing[0].name)}' がありません。`;
+    if (missing.length > 1)
+      return `プロパティ ${missing
+        .slice(0, 4)
+        .map((property) => `'${printedPropertyName(property.name)}'`)
+        .join(', ')} がありません。`;
+    return '';
   }
 
   private reportProperties(node: TreeNode, source: Type, target: Type): boolean {
@@ -125,4 +177,8 @@ export function targetElementType(c: Checker, targets: ObjectType[], index: numb
           : (c.structureOf(member).numberIndex?.type ?? c.elementTypeOf(member));
     })
   );
+}
+
+function assignmentMessage(source: string, target: string): string {
+  return `型 '${source}' を型 '${target}' に代入することはできません。`;
 }

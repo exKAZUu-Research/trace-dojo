@@ -230,10 +230,7 @@ export class TypeOperators {
   private reportUnlessAssignable(node: TreeNode, type: Type, target: Type): void {
     this.c.typeNodes.interfaceBases.afterResolving(() => {
       if (this.c.relations.isAssignable(type, target)) return;
-      this.c.errorWhileResolving(
-        node,
-        `型 '${this.c.print(type)}' を型 '${this.c.print(target)}' に代入することはできません。`
-      );
+      this.c.errorWhileResolving(node, this.c.expressions.elaboration.typeRelationMessage(type, target));
     });
   }
 
