@@ -3,6 +3,7 @@ import type { Runtime } from '../runtime';
 import { coreTypes, interfaceType, makeNullable } from '../types';
 import { type DartList, DartObject, type Value } from '../values';
 import { define, defineConstructor, index, intArg, named, newList, stringArg } from './nativeSupport';
+import { type CompiledRegExp, compileRegExp, execRegExp, isSurrogatePairAt } from './regExpEngine';
 
 /** A match of a pattern: where it is and the texts of its groups. */
 export interface MatchState {
@@ -22,7 +23,7 @@ interface RegExpState {
   caseSensitive: boolean;
   unicode: boolean;
   dotAll: boolean;
-  regex: RegExp;
+  compiled: CompiledRegExp;
   values(): Iterable<Value>;
 }
 
@@ -31,7 +32,7 @@ function stateOf(value: Value): RegExpState {
 }
 
 export function isRegExp(value: Value): boolean {
-  return value instanceof DartObject && (value.native as { regex?: RegExp } | undefined)?.regex instanceof RegExp;
+  return value instanceof DartObject && value.cls.name === '_RegExp';
 }
 
 defineConstructor('RegExp.new', (runtime, _instance, args) => {
@@ -49,39 +50,47 @@ defineConstructor('RegExp.new', (runtime, _instance, args) => {
   }
   const cached = cache.get(key);
   if (cached) return cached;
-  let regex: RegExp;
   try {
-    regex = new RegExp(
-      source,
-      `g${multiLine ? 'm' : ''}${caseSensitive ? '' : 'i'}${unicode ? 'u' : ''}${dotAll ? 's' : ''}d`
-    );
+    // Only to report syntax errors: matching runs on the interpreter's own engine, which the budget can stop.
+    new RegExp(source, `${multiLine ? 'm' : ''}${caseSensitive ? '' : 'i'}${unicode ? 'u' : ''}${dotAll ? 's' : ''}`);
   } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
     const reason = error.message.replace(/^Invalid regular expression: (\/.*\/[a-z]*: )?/, '');
     return runtime.throwError('FormatException', '', [IRREGEXP_MESSAGES[reason] ?? reason, source]);
   }
   const object = new DartObject(runtime.links.classNamed('_RegExp'), [], []);
-  object.native = { source, multiLine, caseSensitive, unicode, dotAll, regex, values: () => [] };
+  const compiled = compileRegExp(source, { multiLine, ignoreCase: !caseSensitive, unicode, dotAll });
+  object.native = { source, multiLine, caseSensitive, unicode, dotAll, compiled, values: () => [] };
   cache.set(key, object);
   return object;
 });
 
 const regExpCaches = new WeakMap<Runtime, Map<string, DartObject>>();
 
-function execAt(state: RegExpState, input: string, start: number, sticky: boolean): MatchState | undefined {
-  const regex = new RegExp(state.regex.source, state.regex.flags.replace('g', '') + (sticky ? 'y' : 'g'));
-  regex.lastIndex = start;
-  const found = regex.exec(input);
+function execAt(
+  runtime: Runtime,
+  state: RegExpState,
+  input: string,
+  start: number,
+  sticky: boolean
+): MatchState | undefined {
+  let steps = 0;
+  const found = execRegExp(state.compiled, input, start, sticky, () => {
+    if (++steps % STEPS_PER_OPERATION === 0) runtime.spend();
+  });
   if (!found) return undefined;
-  return {
-    start: found.index,
-    end: found.index + found[0].length,
-    groups: [...found],
-    names: found.groups ? { ...found.groups } : undefined,
-    input,
-    pattern: undefined,
-  };
+  let names: Record<string, string | undefined> | undefined;
+  if (state.compiled.names.size > 0) {
+    names = {};
+    for (const [name, numbers] of state.compiled.names) {
+      names[name] = numbers.map((number) => found.groups[number]).find((text) => text !== undefined);
+    }
+  }
+  return { start: found.start, end: found.end, groups: found.groups, names, input, pattern: undefined };
 }
+
+/** Matcher steps that cost one operation, a rate at which ordinary patterns stay well within the budget. */
+const STEPS_PER_OPERATION = 8;
 
 /** Every match of a regular expression, after an empty match moving on by one, as Dart does. */
 export function allMatchesOf(runtime: Runtime, pattern: Value, input: string, start: number): MatchState[] {
@@ -89,12 +98,16 @@ export function allMatchesOf(runtime: Runtime, pattern: Value, input: string, st
   const matches: MatchState[] = [];
   let position = start;
   while (position <= input.length) {
-    const match = execAt(state, input, position, false);
+    const match = execAt(runtime, state, input, position, false);
     if (!match) break;
     match.pattern = pattern;
     matches.push(match);
     runtime.spend();
-    position = match.end === match.start ? match.end + 1 : match.end;
+    // After an empty match the search moves on by a character, a code point in Unicode mode.
+    position =
+      match.end === match.start
+        ? match.end + (state.unicode && isSurrogatePairAt(input, match.end) ? 2 : 1)
+        : match.end;
   }
   return matches;
 }
@@ -115,7 +128,7 @@ export function matchAt(
       : { start: found, end: found + pattern.length, groups: [pattern], names: undefined, input, pattern };
   }
   if (isRegExp(pattern)) {
-    const match = execAt(stateOf(pattern), input, position, anchored);
+    const match = execAt(runtime, stateOf(pattern), input, position, anchored);
     if (match) match.pattern = pattern;
     return match;
   }
@@ -159,7 +172,7 @@ define('RegExp.escape', (runtime, _receiver, [text]) =>
   stringArg(runtime, text, 'text').replaceAll(/[$()*+./?[\\\]^{|}-]/g, String.raw`\$&`)
 );
 define('RegExp.firstMatch', (runtime, receiver, [input]) => {
-  const match = execAt(stateOf(receiver), stringArg(runtime, input, 'input'), 0, false);
+  const match = execAt(runtime, stateOf(receiver), stringArg(runtime, input, 'input'), 0, false);
   if (!match) return;
   match.pattern = receiver;
   return newMatch(runtime, match);
@@ -178,18 +191,20 @@ define('RegExp.matchAsPrefix', (runtime, receiver, [input, start = 0n]) => {
   const at = intArg(runtime, start, 'start');
   if (at < 0n || at > BigInt(text.length))
     runtime.throwError('RangeError', 'range', [at, 0n, BigInt(text.length), 'start']);
-  const match = execAt(stateOf(receiver), text, index(at), true);
+  const match = execAt(runtime, stateOf(receiver), text, index(at), true);
   if (!match) return;
   match.pattern = receiver;
   return newMatch(runtime, match);
 });
 define(
   'RegExp.hasMatch',
-  (runtime, receiver, [input]) => execAt(stateOf(receiver), stringArg(runtime, input, 'input'), 0, false) !== undefined
+  (runtime, receiver, [input]) =>
+    execAt(runtime, stateOf(receiver), stringArg(runtime, input, 'input'), 0, false) !== undefined
 );
 define(
   'RegExp.stringMatch',
-  (runtime, receiver, [input]) => execAt(stateOf(receiver), stringArg(runtime, input, 'input'), 0, false)?.groups[0]
+  (runtime, receiver, [input]) =>
+    execAt(runtime, stateOf(receiver), stringArg(runtime, input, 'input'), 0, false)?.groups[0]
 );
 define('RegExp.pattern', (_runtime, receiver) => stateOf(receiver).source);
 define('RegExp.isMultiLine', (_runtime, receiver) => stateOf(receiver).multiLine);
@@ -206,6 +221,7 @@ const IRREGEXP_MESSAGES: Record<string, string> = {
   'invalid \\k<> named backreference': 'Invalid named capture referenced',
   'range out of order in character class': 'Range out of order in character class',
   'invalid group specifier name': 'Invalid capture group name',
+  'invalid property expression': 'Invalid property name',
 };
 
 define(
