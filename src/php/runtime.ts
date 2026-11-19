@@ -26,6 +26,7 @@ import {
   setDropHandler,
   setOwnershipWorkHandler,
   setReferenceDropObserver,
+  type Slot,
   type UserFunction,
   type Value,
 } from './values';
@@ -88,7 +89,7 @@ export class Frame {
   /** Values that an expression being evaluated holds, which garbage collection must keep. */
   temporaries: (Value | Ref)[] = [];
   /** Active `foreach` subjects in this frame, which PHP's cycle collector keeps in its root buffer. */
-  foreachSubjects: (PhpArray | PhpObject)[] = [];
+  foreachSubjects: (PhpArray | PhpObject | Ref)[] = [];
   args: Value[] = [];
   argumentHolders: (Value | Ref)[] = [];
   argumentRefs: (Ref | undefined)[] = [];
@@ -420,7 +421,6 @@ export class Runtime {
     if (this.objects.get(object.id) !== object) return;
     this.objects.delete(object.id);
     this.objectCycles.delete(object);
-    this.gcRoots.delete(object);
     this.collectingObjects.delete(object);
     this.turtleObjects.delete(object);
     object.releaseInternal();
@@ -432,7 +432,8 @@ export class Runtime {
           slot.typedBy = constraints.length > 0 ? constraints : undefined;
         }
       }
-    for (const slot of object.props.values()) this.pendingGcRoots.add(slot instanceof Ref ? slot.v : slot);
+    for (const slot of object.props.values()) this.bufferFreedProperty(slot);
+    this.gcRoots.delete(object);
     object.props.clear();
     const closure = isClosure(object) ? (object.internal as ClosureData | undefined) : undefined;
     if (closure) {
@@ -445,6 +446,19 @@ export class Runtime {
     }
     this.freeHandles.push(object.id);
     if (object.turtle) this.world.remove(object.turtle, this.releasingGlobalsAtShutdown);
+  }
+
+  private bufferFreedProperty(slot: Slot): void {
+    const value = slot instanceof Ref ? slot.v : slot;
+    this.pendingGcRoots.add(value);
+    if (
+      !this.collectingCycles &&
+      value instanceof PhpObject &&
+      !value.isResource &&
+      !this.collectingObjects.has(value) &&
+      this.objects.get(value.id) === value
+    )
+      this.gcRoots.add(value);
   }
 
   /** Writes bytes to standard output, decoding complete UTF-8 sequences as they arrive. */

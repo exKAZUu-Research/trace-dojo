@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 657 -- Keeps statement execution with its binding and unwind scopes.
+// code-gauge-allow-file fileNcss 659 -- Keeps statement execution with its binding and unwind scopes.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { CompileError } from '../interpreter/diagnostics';
 import { assignTo, bindRef, destructure, foreachSubjectPlace, unsetTarget } from './assignment';
@@ -501,7 +501,7 @@ function catches(object: PhpObject, name: string): boolean {
   return cls !== undefined && object.cls.isSubclassOf(cls);
 }
 
-function withForeachSubject<T>(subject: PhpArray | PhpObject, run: () => T): T {
+function withForeachSubject<T>(subject: PhpArray | PhpObject | Ref, run: () => T): T {
   const subjects = rt().frame.foreachSubjects;
   subjects.push(subject);
   try {
@@ -540,7 +540,6 @@ function foreachStatement(statement: Extract<Stmt, { k: 'foreach' }>): Completio
 const FOREACH_REPLACED = Symbol();
 type ForeachCompletion = Completion | typeof FOREACH_REPLACED;
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Both container kinds share the same subject and completion state.
 function foreachReferenceSubject(statement: Extract<Stmt, { k: 'foreach' }>): Completion {
   const runtime = rt();
   const place = foreachSubjectPlace(statement.subject);
@@ -549,19 +548,25 @@ function foreachReferenceSubject(statement: Extract<Stmt, { k: 'foreach' }>): Co
     return warnForeachSubject(statement, initial);
   const reference = place instanceof ValuePlace ? Ref.temporary(initial) : place.ref();
   runtime.holdTemporaryReference(reference);
-  const traversable = runtime.classes.get('traversable') as PhpClass;
+  return withForeachSubject(reference, () => foreachReferenceLoop(statement, initial, reference));
+}
+
+function foreachReferenceLoop(
+  statement: Extract<Stmt, { k: 'foreach' }>,
+  initial: PhpArray | PhpObject,
+  reference: Ref
+): Completion {
+  const traversable = rt().classes.get('traversable') as PhpClass;
   for (;;) {
     const container = reference.v;
     let result: ForeachCompletion;
     if (container instanceof PhpArray) {
       const array = writableContainer(new RefPlace(reference), container) as PhpArray;
-      result = withForeachSubject(array, () => foreachArrayByRef(statement, array, reference));
+      result = foreachArrayByRef(statement, array, reference);
     } else if (container instanceof PhpObject && !container.isResource) {
       if (container.cls.isSubclassOf(traversable))
-        return container === initial
-          ? withForeachSubject(container, () => foreachObject(statement, container, true))
-          : undefined;
-      result = withForeachSubject(container, () => foreachPropertyByRef(statement, container, reference));
+        return container === initial ? foreachObject(statement, container, true) : undefined;
+      result = foreachPropertyByRef(statement, container, reference);
     } else return warnForeachSubject(statement, container);
     if (result !== FOREACH_REPLACED) return result;
   }

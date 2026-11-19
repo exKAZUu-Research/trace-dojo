@@ -3522,6 +3522,19 @@ echo '|', gc_collect_cycles();
 `);
   expect(byRefForeachGc).toMatchObject({ kind: 'executed', stdout: '|cab3' });
 
+  const replacedSubjectGc = run(String.raw`<?php
+class N { public $p; function __construct(public $id) {} function __destruct() { echo $this->id; } }
+(function () {
+  $a = new N('a'); $b = new N('b'); $c = new N('c');
+  $x = [$a, $b];
+  foreach ($x as &$v) { $x = [$c]; gc_collect_cycles(); break; }
+  unset($v);
+  $b->p = $c; $c->p = $b; $a->p = $b;
+})();
+echo '|', gc_collect_cycles();
+`);
+  expect(replacedSubjectGc).toMatchObject({ kind: 'executed', stdout: 'a|bc2' });
+
   const sparseSortCursor = run(String.raw`<?php
 $a = [0 => 1, 3 => 2, 5 => 3, 7 => 4];
 foreach ($a as $k => &$v) { echo "$v;"; if ($v === 2) ksort($a); }

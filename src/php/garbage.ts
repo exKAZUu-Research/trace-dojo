@@ -47,8 +47,11 @@ export function collectGarbage(runtime: Runtime, cycles = false, stopOnException
 function gcForeachSubjects(runtime: Runtime): (PhpArray | PhpObject)[] {
   return runtime.frames
     .flatMap((frame) => frame.foreachSubjects)
-    .filter((value) =>
-      value instanceof PhpArray ? !value.uncollectable : !value.isResource && runtime.objects.get(value.id) === value
+    .map((subject) => (subject instanceof Ref ? subject.v : subject))
+    .filter((value): value is PhpArray | PhpObject =>
+      value instanceof PhpArray
+        ? !value.uncollectable
+        : value instanceof PhpObject && !value.isResource && runtime.objects.get(value.id) === value
     );
 }
 
@@ -221,9 +224,9 @@ export function releaseDropped(
     for (const object of collectible)
       if (runtime.objects.get(object.id) === object) runtime.collectingObjects.add(object);
   }
-  const candidates = [...runtime.pendingGcRoots];
+  if (releasing > 0) return;
+  const candidates = runtime.collectingCycles ? [] : [...runtime.pendingGcRoots];
   runtime.pendingGcRoots.clear();
-  if (runtime.collectingCycles) return;
   let roots: Set<unknown> | undefined;
   for (const value of candidates) {
     if (value instanceof PhpObject) {
