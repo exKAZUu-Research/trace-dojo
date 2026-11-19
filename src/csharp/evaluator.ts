@@ -756,9 +756,11 @@ export class Evaluator extends StatementExecutor {
       case 'local':
       case 'this':
       case 'element':
-      case 'staticField':
       case 'compoundOperand': {
         return true;
+      }
+      case 'staticField': {
+        return !expression.field.isReadonly;
       }
       case 'field': {
         return !expression.field.isReadonly && this.isVariableExpression(expression.receiver);
@@ -769,7 +771,6 @@ export class Evaluator extends StatementExecutor {
     }
   }
 
-  /** Evaluates arguments in order: values copied as their parameters receive them, and references to variables. */
   /** Evaluates elements in order, keeping the evaluated ones alive (with their turtles) while the rest run. */
   private evaluateHeld(elements: BoundExpression[], frame: Frame): Value[] {
     const values: Value[] = [];
@@ -786,6 +787,7 @@ export class Evaluator extends StatementExecutor {
     }
   }
 
+  /** Evaluates arguments in order: values copied as their parameters receive them, and references to variables. */
   evaluateArguments(args: BoundArgument[], frame: Frame): (Value | VariableReference)[] {
     const values: (Value | VariableReference)[] = [];
     const start = frame.temporaries.length;

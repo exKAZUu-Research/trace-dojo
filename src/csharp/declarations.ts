@@ -494,6 +494,7 @@ export class DeclarationBinder extends BinderBase {
     field.access = accessibilityOf(member.modifiers, symbol.kind === 'interface' ? 'public' : 'private');
     field.initializer = declarator.initializer;
     field.row = declarator.row;
+    field.column = declarator.column;
     if (member.type.kind === 'varType' && field.type.kind === 'error') this.diagnostics.pop();
     this.checkField(type, member, declarator, field);
     this.addMember(symbol, field, declarator);
@@ -552,6 +553,7 @@ export class DeclarationBinder extends BinderBase {
     field.access = accessibilityOf(member.modifiers, 'private');
     field.initializer = declarator.initializer;
     field.row = declarator.row;
+    field.column = declarator.column;
     if (field.type.kind !== 'error' && !(field.type.kind === 'named' && field.type.symbol.kind === 'delegate')) {
       this.error(
         declarator,
@@ -596,6 +598,7 @@ export class DeclarationBinder extends BinderBase {
       field.access = 'public';
       field.initializer = member.value;
       field.row = member.row;
+      field.column = member.column;
       this.addMember(symbol, field, member);
       symbol.fields.push(field);
     }
@@ -687,6 +690,7 @@ export class DeclarationBinder extends BinderBase {
     property.isAbstract = modifiers.has('abstract') || (symbol.kind === 'interface' && !modifiers.has('static'));
     property.isOverride = modifiers.has('override');
     property.row = member.row;
+    property.column = member.column;
     if (member.kind === 'property') property.declaration = member;
     if (isIndexer) {
       if (property.isStatic) this.error(member, 'CS0106', "修飾子 'static' がこの項目に対して有効ではありません");
@@ -720,6 +724,7 @@ export class DeclarationBinder extends BinderBase {
       field.property = property;
       field.initializer = member.initializer;
       field.row = member.row;
+      field.column = member.column;
       property.backingField = field;
       symbol.fields.push(field);
       if (symbol.isStatic && !property.isStatic)
@@ -959,12 +964,14 @@ export class DeclarationBinder extends BinderBase {
   /** Declares the members that the compiler gives a record. */
   private declareRecordMembers(type: DeclaredType): void {
     const { symbol, context } = type;
-    for (const parameter of symbol.primaryParameters ?? []) {
+    for (const [index, parameter] of (symbol.primaryParameters ?? []).entries()) {
       const existing = this.ownMembers(symbol, parameter.name);
-      if (existing.length > 0) continue;
+      if (existing.length > 0 || this.inheritsProperty(symbol, parameter.name)) continue;
       const property = new PropertySymbol(parameter.name, parameter.type, symbol, false);
       property.access = 'public';
       property.row = symbol.row;
+      // The positional properties come before the body's members.
+      property.column = index - (symbol.primaryParameters?.length ?? 0);
       const field = new FieldSymbol(`<${parameter.name}>k__BackingField`, parameter.type, symbol);
       field.property = property;
       field.isReadonly = symbol.kind === 'class';
@@ -1056,6 +1063,15 @@ export class DeclarationBinder extends BinderBase {
     if (symbol.isLibrary) constructor.native = nativeOf(constructor);
     symbol.constructors.push(constructor);
     this.methodContexts.set(constructor, type.context);
+  }
+
+  /** Whether a record's base has an accessible property of a name, which a positional parameter then does not declare. */
+  private inheritsProperty(symbol: TypeSymbol, name: string): boolean {
+    for (let base = symbol.baseType; base; base = base.symbol.baseType) {
+      if (base.symbol.properties.some((property) => property.name === name && property.access !== 'private'))
+        return true;
+    }
+    return false;
   }
 
   private ownMembers(symbol: TypeSymbol, name: string): (FieldSymbol | MethodSymbol | PropertySymbol | TypeSymbol)[] {

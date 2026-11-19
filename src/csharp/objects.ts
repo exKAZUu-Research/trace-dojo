@@ -438,44 +438,53 @@ function printedMembers(type: NamedType): PrintedMember[] {
       : undefined
   )
     chain.unshift(current);
-  const members: PrintedMember[] = [];
-  for (const owner of chain) {
-    const substitution = substitutionOf(owner);
-    for (const field of owner.symbol.fields) {
-      if (field.isStatic || field.isConst || field.access !== 'public' || field.property || field.isPrimaryParameter)
-        continue;
-      members.push({
-        name: field.name,
-        read: (value) => value.fields[field.slot],
-        type: substitute(field.type, substitution),
-      });
-    }
-    for (const property of owner.symbol.properties) {
-      if (
-        property.isStatic ||
-        property.isIndexer ||
-        property.access !== 'public' ||
-        !property.getter ||
-        property.isOverride
-      )
-        continue;
-      const backing = property.backingField;
-      if (backing)
-        members.push({
-          name: property.name,
-          read: (value) => value.fields[backing.slot],
-          type: substitute(property.type, substitution),
-        });
-      else
-        members.push({
-          name: property.name,
-          read: () => {},
-          type: substitute(property.type, substitution),
-          getter: property.getter,
-        });
-    }
+  return chain.flatMap(ownPrintedMembers);
+}
+
+/** A type's own printed members in the order of their declarations. */
+function ownPrintedMembers(owner: NamedType): PrintedMember[] {
+  const members: (PrintedMember & { row: number; column: number })[] = [];
+  const substitution = substitutionOf(owner);
+  for (const field of owner.symbol.fields) {
+    if (field.isStatic || field.isConst || field.access !== 'public' || field.property || field.isPrimaryParameter)
+      continue;
+    members.push({
+      name: field.name,
+      read: (value) => value.fields[field.slot],
+      type: substitute(field.type, substitution),
+      row: field.row,
+      column: field.column,
+    });
   }
-  return members;
+  for (const property of owner.symbol.properties) {
+    if (
+      property.isStatic ||
+      property.isIndexer ||
+      property.access !== 'public' ||
+      !property.getter ||
+      property.isOverride
+    )
+      continue;
+    const backing = property.backingField;
+    if (backing)
+      members.push({
+        name: property.name,
+        read: (value) => value.fields[backing.slot],
+        type: substitute(property.type, substitution),
+        row: property.row,
+        column: property.column,
+      });
+    else
+      members.push({
+        name: property.name,
+        read: () => {},
+        type: substitute(property.type, substitution),
+        getter: property.getter,
+        row: property.row,
+        column: property.column,
+      });
+  }
+  return members.toSorted((a, b) => a.row - b.row || a.column - b.column);
 }
 
 /** Runs a member that the compiler synthesizes for records and anonymous types. */

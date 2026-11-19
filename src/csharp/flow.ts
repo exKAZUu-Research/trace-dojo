@@ -8,7 +8,7 @@ import type {
   BoundPattern,
   BoundStatement,
 } from './bound';
-import type { LocalSymbol, MethodSymbol } from './types';
+import type { LocalSymbol, MethodSymbol, Type } from './types';
 
 /** The locals definitely assigned at a point, or every local when the point is unreachable. */
 type State = Set<LocalSymbol> | 'unreachable';
@@ -21,6 +21,7 @@ interface ConditionalState {
 export interface FlowDiagnostics {
   unassigned(local: LocalSymbol, row: number): void;
   notAllPathsReturn(row: number): void;
+  lambdaNotAllPathsReturn(delegateType: Type, row: number): void;
   fallsThrough(label: string, isLast: boolean, row: number): void;
   outNotAssigned(local: LocalSymbol, row: number): void;
 }
@@ -497,7 +498,7 @@ export class FlowAnalyzer {
         return expression.receiver ? this.expression(expression.receiver, state) : state;
       }
       case 'lambda': {
-        this.lambda(expression.lambda.method, state);
+        this.lambda(expression.lambda.method, expression.type, state);
         return state;
       }
       case 'with': {
@@ -675,7 +676,7 @@ export class FlowAnalyzer {
   }
 
   /** Analyzes a lambda's body, which may read the locals assigned where it is created. */
-  private lambda(method: MethodSymbol, state: State): void {
+  private lambda(method: MethodSymbol, delegateType: Type, state: State): void {
     if (!method.body) return;
     const savedJumps = this.jumps;
     const savedOut = this.outParameters;
@@ -685,7 +686,7 @@ export class FlowAnalyzer {
     const start = state === 'unreachable' ? state : new Set([...state, ...parameters]);
     const end = this.statement(method.body, start);
     if (end !== 'unreachable' && method.returnType.kind !== 'void' && method.returnType.kind !== 'error') {
-      this.diagnostics.notAllPathsReturn(method.row);
+      this.diagnostics.lambdaNotAllPathsReturn(delegateType, method.row);
     }
     this.jumps = savedJumps;
     this.outParameters = savedOut;

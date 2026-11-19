@@ -288,13 +288,29 @@ export class Runtime {
     const implementsMethod = (candidate: MethodSymbol): boolean =>
       candidate.name === method.name &&
       (isInterface ? this.implementsByName(candidate, method) : this.overrides(candidate, method));
-    for (let current: NamedType | undefined = type; current; current = baseTypeOf(current)) {
+    // An interface's members map to those of the most derived class that lists the interface, searching up from it
+    // (C# spec §19.6.5), so a `new` member of a class below does not implement it; virtual ones then dispatch.
+    const start = isInterface ? (this.declaringClass(type, method.owner) ?? type) : type;
+    for (let current: NamedType | undefined = start; current; current = baseTypeOf(current)) {
       const found =
         current.symbol.methods.find((candidate) => !candidate.isStatic && implementsMethod(candidate)) ??
         current.symbol.properties
           .flatMap((property) => [property.getter, property.setter])
           .find((accessor): accessor is MethodSymbol => accessor !== undefined && implementsMethod(accessor));
-      if (found) return found;
+      if (found) {
+        if (!isInterface || start === type || !(found.isVirtual || found.isOverride || found.isAbstract)) return found;
+        return this.findImplementation(type, found) ?? found;
+      }
+    }
+    return undefined;
+  }
+
+  /** The most derived class of a type's chain whose own base list includes an interface, directly or inherited. */
+  private declaringClass(type: NamedType, face: TypeSymbol): NamedType | undefined {
+    const listsInterface = (symbol: TypeSymbol): boolean =>
+      symbol === face || symbol.interfaces.some((parent) => listsInterface(parent.symbol));
+    for (let current: NamedType | undefined = type; current; current = baseTypeOf(current)) {
+      if (current.symbol.interfaces.some((parent) => listsInterface(parent.symbol))) return current;
     }
     return undefined;
   }

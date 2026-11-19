@@ -541,12 +541,16 @@ export class Compiler extends StatementBinder {
     if (fn.kind === 'lambda') return;
     const analyzer = new FlowAnalyzer({
       unassigned: (local, row) => {
+        // A local function reads the locals it captures as assigned; Roslyn checks them where it is called instead.
+        if (method.kind === 'localFunction' && local.owner !== method) return;
         if (local.isParameter && local.refKind === 'out')
           this.error(row, 'CS0269', `未割り当ての out パラメーター '${local.name}' が使用されました`);
         else this.error(row, 'CS0165', `未割り当てのローカル変数 '${local.name}' が使用されました`);
       },
       notAllPathsReturn: (row) =>
         this.error(row, 'CS0161', `'${this.methodDisplay(method)}': 値を返さないコード パスがあります`),
+      lambdaNotAllPathsReturn: (delegateType, row) =>
+        this.error(row, 'CS1643', `型 '${displayType(delegateType)}' の ラムダ式 に値を返さないコード パスがあります`),
       fallsThrough: (label, isLast, row) => {
         if (isLast)
           this.error(row, 'CS8070', `コントロールは switch の最後の case ラベル ('${label}') から出ることができません`);

@@ -175,6 +175,8 @@ export class FieldSymbol {
   /** For an event's backing field, the event. */
   isEvent = false;
   row = 0;
+  /** The column of the declaration, which orders the members a record prints. */
+  column = 0;
   /** Whether the field holds a primary constructor's parameter, which the program reads by the parameter's name. */
   isPrimaryParameter = false;
 
@@ -202,6 +204,8 @@ export class PropertySymbol {
   isOverride = false;
   overridden: PropertySymbol | undefined;
   row = 0;
+  /** The column of the declaration, which orders the members a record prints. */
+  column = 0;
 
   constructor(
     readonly name: string,

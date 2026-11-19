@@ -989,8 +989,12 @@ export abstract class StatementBinder extends PatternBinder {
           if (!guard && this.isIrrefutable(pattern, value.type)) isExhausted = true;
           return { pattern, guard };
         });
+        const patternLocals = new Set(sectionScope.locals);
         this.predeclare(section.statements, sectionContext);
         const statements = this.bindStatements(section.statements, sectionContext);
+        // The sections of a switch share one scope for the locals their statements declare (C# spec §13.8.3), while
+        // the variables of a case's patterns belong to its section.
+        for (const local of sectionScope.locals) if (!patternLocals.has(local)) scope.variables.set(local.name, local);
         return {
           labels,
           statements,
@@ -1212,7 +1216,8 @@ export abstract class StatementBinder extends PatternBinder {
           step: 'none',
         };
       }
-      const value = this.bindAs(body, returnType, context);
+      // A `throw` expression converts to any return type.
+      const value = body.kind === 'throw' ? this.bindValue(body, context) : this.bindAs(body, returnType, context);
       return {
         kind: 'block',
         statements: [{ kind: 'return', value, row: body.row, step: 'none' }],
