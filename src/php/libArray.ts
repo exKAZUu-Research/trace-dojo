@@ -741,7 +741,7 @@ function validName(name: string): string | undefined {
 }
 
 function isVariableName(name: string): boolean {
-  return /^[A-Za-z_\u007F-ÿ][\w\u007F-ÿ]*$/.test(name);
+  return /^[A-Za-z_\u0080-\u00FF][\w\u0080-\u00FF]*$/.test(name);
 }
 
 // Transforming arrays ------------------------------------------------------------------------------------------------

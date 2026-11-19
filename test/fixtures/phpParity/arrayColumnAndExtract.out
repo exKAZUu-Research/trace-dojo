@@ -66,3 +66,11 @@ int(1)
 int(5)
 array_column(): Argument #2 ($column_key) must be of type string|int|null, array given
 array_column(): Argument #3 ($index_key) must be of type string|int|null, array given
+int(0)
+bool(false)
+bool(false)
+extract(): Argument #3 ($prefix) must be a valid identifier
+int(2)
+bool(true)
+bool(true)
+int(1)

@@ -27,3 +27,11 @@ foreach ( [[[], [], null], [[], 'key', []]] as $args) {
     try { array_column(...$args); }
     catch (TypeError $error) { echo $error->getMessage(), "\n"; }
 }
+
+foreach ([127, 128] as $byte) {
+    $first = chr($byte) . 'a';
+    $last = 'b' . chr($byte);
+    var_dump(extract([$first => 1, $last => 1]), isset(${$first}), isset(${$last}));
+    try { var_dump(extract(['key' => 1], EXTR_PREFIX_ALL, chr($byte))); }
+    catch (ValueError $error) { echo $error->getMessage(), "\n"; }
+}
