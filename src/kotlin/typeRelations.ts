@@ -77,6 +77,7 @@ function classBoundsOf(type: KType): KType[] {
  * makes the check succeed; {@link checkVariableBounds} later rejects bounds no type satisfies.
  */
 // code-gauge-allow functionCognitiveComplexity 30 -- One case per pair of kinds of types.
+// code-gauge-allow functionNcss 33 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
 export function isSubtype(subType: KType, superType: KType): boolean {
   const sub = resolved(subType);
   const sup = resolved(superType);

@@ -89,6 +89,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
    *
    * @param clearsLocals Function bodies keep their locals so that a trace can report `main`'s final variables.
    */
+  // code-gauge-allow functionCognitiveComplexity 18 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected compileStatementsValue(
     scope: Scope,
     context: FunctionContext,
@@ -147,7 +148,6 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return !['if', 'when', 'try', 'return', 'throw', 'break', 'continue', 'lambda'].includes(expression.kind);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of statement.
   protected compileStatement(scope: Scope, context: FunctionContext, statement: Statement): Exec {
     const exec = this.compileStatementBody(scope, context, statement);
     return (frame) => {
@@ -447,7 +447,6 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 35 -- One case per kind of assignable place.
   compilePlace(scope: Scope, context: FunctionContext, target: Expression, row: number, isCompound: boolean): Place {
     if (target.kind === 'parenthesized') return this.compilePlace(scope, context, target.expression, row, isCompound);
     if (target.kind === 'name') {
@@ -505,6 +504,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return this.error(row, 'ここには代入できません。');
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private variablePlace(context: FunctionContext, variable: VariableSymbol, row: number, isCompound: boolean): Place {
     const { delegateRead, delegateWrite } = variable;
     if (delegateRead) {
@@ -592,6 +592,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
    * `a[i]` as a place: `set` stores into it, and for a compound assignment `get` reads it. The receiver and indexes
    * are evaluated once and held, where the compiled `get` and `set` calls read them.
    */
+  // code-gauge-allow functionNcss 40 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private indexPlace(
     scope: Scope,
     context: FunctionContext,
@@ -778,7 +779,6 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss 70 -- Ranges and progressions loop over numbers; the rest use iterators.
   private compileFor(scope: Scope, context: FunctionContext, statement: ForStatement): Exec {
     this.forgetAssignedIn(scope, [...statement.body.statements]);
     const iterable = this.compileExpression(scope, context, statement.iterable);
@@ -907,6 +907,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   /** The kind of the numbers a range or progression of the standard library steps through. */
   protected abstract progressionOf(type: KType): 'Int' | 'Long' | 'Char' | undefined;
 
+  // code-gauge-allow functionNcss 39 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity 16 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileLoopBinding(
     scope: Scope,
     context: FunctionContext,
@@ -965,6 +967,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   // Control structures as expressions.
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected compileIf(
     scope: Scope,
     context: FunctionContext,
@@ -1025,8 +1028,6 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return commonSupertype(types);
   }
 
-  // code-gauge-allow functionNcss 80 -- Subjects, conditions of three kinds, smart casts, and exhaustiveness.
-  // code-gauge-allow functionCognitiveComplexity 40 -- Subjects, conditions of three kinds, smart casts, and exhaustiveness.
   protected compileWhen(
     scope: Scope,
     context: FunctionContext,
@@ -1113,6 +1114,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of when condition.
+  // code-gauge-allow functionNcss 47 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileWhenCondition(
     scope: Scope,
     context: FunctionContext,
@@ -1211,7 +1213,6 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Booleans, enums, sealed hierarchies, and null.
   private isExhaustive(type: KType, covered: Set<string>): boolean {
     const actual = resolved(type);
     if (actual.nullable && !covered.has('null')) return false;
@@ -1228,6 +1229,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   // code-gauge-allow functionNcss 50 -- try, catch clauses, and finally, as an expression.
+  // code-gauge-allow functionCognitiveComplexity 22 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected compileTry(
     scope: Scope,
     context: FunctionContext,
@@ -1330,6 +1332,7 @@ const ASSIGN_OPERATORS = {
 const OPERATOR_FUNCTION = { '+': 'plus', '-': 'minus', '*': 'times', '/': 'div', '%': 'rem' } as const;
 
 /** The names that statements assign, which loops forget smart casts of. */
+// code-gauge-allow functionCognitiveComplexity 20 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
 function assignedNames(node: unknown): Set<string> {
   const names = new Set<string>();
   const visit = (value: unknown): void => {

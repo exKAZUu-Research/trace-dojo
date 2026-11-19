@@ -227,7 +227,6 @@ export class Converter extends ExpressionConverter {
     }
   }
 
-  // code-gauge-allow functionNcss 45 -- One case per part of a property declaration.
   private convertProperty(node: Node, isTopLevel: boolean): PropertyDecl {
     const parts = named(node);
     const modifiers = this.convertModifiers(
@@ -285,8 +284,6 @@ export class Converter extends ExpressionConverter {
     };
   }
 
-  // code-gauge-allow functionNcss 60 -- One case per part of a class declaration.
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per part of a class declaration.
   private convertClass(node: Node, isTopLevel: boolean): ClassDecl {
     if (!isTopLevel && this.isLocal && !this.isLibrary) throw unavailable(node, '関数の中でのクラスの宣言');
     const modifiersNode = firstOfType(node, 'modifiers');
@@ -497,7 +494,6 @@ export class Converter extends ExpressionConverter {
     };
   }
 
-  // code-gauge-allow functionNcss 60 -- One case per kind of statement node of the grammar.
   protected convertStatement(node: Node): Statement {
     const row = rowOf(node);
     switch (node.type) {

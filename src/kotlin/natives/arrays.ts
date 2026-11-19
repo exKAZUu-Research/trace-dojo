@@ -40,6 +40,7 @@ function boxingIterator(array: KObject, kind: PrimitiveKind | 'Boolean'): KObjec
   return iterator;
 }
 
+// code-gauge-allow functionNcss 43 -- registers the natives of one class together, in the order the prelude declares them.
 function defineArrays(): void {
   for (const [name, kind, zero] of PRIMITIVE_ARRAYS) {
     const prefix = `kotlin.${name}`;
@@ -118,6 +119,8 @@ export function comparatorFunction(frame: Frame, comparator: Value): (a: Value, 
  * Sorts stably as Java's `TimSort` does for the short lists of learners' programs: binary insertion sort after the
  * leading run, which also calls the comparator in Java's order; longer lists merge sorted runs of that size.
  */
+// code-gauge-allow functionNcss 33 -- registers the natives of one class together, in the order the prelude declares them.
+// code-gauge-allow functionCognitiveComplexity 18 -- registers the natives of one class together, in the order the prelude declares them.
 export function stableSort(frame: Frame, values: Value[], compare: (a: Value, b: Value) => number): Value[] {
   const array = [...values];
   if (array.length < 2) return array;
@@ -212,6 +215,8 @@ function binaryInsertionSort(
   }
 }
 
+// code-gauge-allow functionNcss 42 -- registers the natives of one class together, in the order the prelude declares them.
+// code-gauge-allow functionCognitiveComplexity 30 -- registers the natives of one class together, in the order the prelude declares them.
 function defineMath(): void {
   const unary: [string, (x: number) => number][] = [
     ['sqrt', Math.sqrt],

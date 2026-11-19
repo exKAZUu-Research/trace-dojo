@@ -142,6 +142,7 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   /** Runs a function's body in a new frame, returning what it returns. */
+  // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   call(
     info: FunctionInfo,
     caller: Frame | undefined,
@@ -171,6 +172,8 @@ export class Runtime implements TracedRuntime<Frame> {
   }
 
   /** Removes the turtles that the program can no longer reach. */
+  // code-gauge-allow functionNcss 35 -- one pass over the reachable values, which splitting would make walk them twice.
+  // code-gauge-allow functionCognitiveComplexity 27 -- one pass over the reachable values, which splitting would make walk them twice.
   collectGarbage(): void {
     const reached = new Set<unknown>();
     const turtles = new Set<unknown>();

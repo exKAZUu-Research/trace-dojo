@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 1300 -- The declarations of Kotlin: classes and their kinds, members, and their checks.
 import type {
   ClassDecl,
   ClassParameterDecl,
@@ -133,6 +132,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   // code-gauge-allow functionNcss 45 -- One flag per modifier of a class.
+  // code-gauge-allow functionCognitiveComplexity 24 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private declareClass(decl: ClassDecl, file: FileContext, outer: ClassEntry | undefined): ClassEntry {
     const kind: ClassSymbolKind = decl.classKind === 'enum' ? 'enum' : decl.classKind;
     const prefix = outer ? `${outer.symbol.qualifiedName}$` : file.packageName ? `${file.packageName}.` : '';
@@ -192,7 +192,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   /** Resolves a file's imports, which name classes, top-level functions and properties, and members of objects. */
-  // code-gauge-allow functionCognitiveComplexity 25 -- Packages, classes, nested classes, and object members.
   protected resolveImports(file: KotlinFile, context: FileContext): void {
     for (const declaration of file.imports) {
       const { path, row } = declaration;
@@ -316,7 +315,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Kotlin's rules for superclasses and interfaces.
   private declareSupertypes(entry: ClassEntry): void {
     const { symbol, decl } = entry;
     for (const spec of decl.supers) {
@@ -378,8 +376,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     return decl.members.some((member) => member.kind === 'constructor');
   }
 
-  // code-gauge-allow functionNcss 70 -- The members a class declares, including those of data classes and enums.
-  // code-gauge-allow functionCognitiveComplexity 30 -- The members a class declares, including those of data classes and enums.
   private declareMembers(entry: ClassEntry): void {
     const { symbol, decl, scope } = entry;
     const primary = decl.primaryConstructor;
@@ -481,6 +477,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   /** A constructor of a library class that a native implements, which initializes the instance `invoke` creates. */
+  // code-gauge-allow functionNcss 33 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private declareNativeConstructor(entry: ClassEntry, member: Extract<MemberDecl, { kind: 'constructor' }>): void {
     const { symbol: cls } = entry;
     const ctor = new FunctionSymbol(cls.name);
@@ -641,6 +638,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   ): NonNullable<FunctionSymbol['invoke']>;
 
   // code-gauge-allow functionNcss 45 -- The parts of a property declaration and their checks.
+  // code-gauge-allow functionCognitiveComplexity 19 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private declareProperty(
     decl: PropertyDecl,
     ownerScope: Scope,
@@ -939,8 +937,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     };
   }
 
-  // code-gauge-allow functionNcss 70 -- Kotlin's rules for overriding and implementing members.
-  // code-gauge-allow functionCognitiveComplexity 40 -- Kotlin's rules for overriding and implementing members.
   private linkOverrides(entry: ClassEntry): void {
     const { symbol } = entry;
     for (const supertype of symbol.supertypes) {
@@ -1003,6 +999,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   /** The members of the supertypes that a member overrides: same name, and for functions the same parameter types. */
+  // code-gauge-allow functionCognitiveComplexity 24 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private findOverridden(cls: ClassSymbol, member: MemberSymbol): MemberSymbol[] {
     const found: MemberSymbol[] = [];
     for (const supertype of cls.supertypes) {
@@ -1024,6 +1021,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   /** Forwards the members of an interface delegated with `by` that the class does not override to the delegate. */
+  // code-gauge-allow functionCognitiveComplexity 23 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private linkDelegates(entry: ClassEntry): void {
     const { symbol } = entry;
     for (const field of entry.delegateFields) {
@@ -1130,8 +1128,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     }
   }
 
-  // code-gauge-allow functionNcss 80 -- Parameters, receivers, defaults, the body, and the frame of a function.
   // code-gauge-allow functionCognitiveComplexity 30 -- Parameters, receivers, defaults, the body, and the frame of a function.
+  // code-gauge-allow functionNcss 52 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private ensureFunctionCompiled(entry: FunctionEntry): void {
     if (entry.state !== 'pending') return;
     entry.state = 'compiling';
@@ -1271,8 +1269,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       caller.runtime.call(info, caller, none, receiver, args, callRow, run);
   }
 
-  // code-gauge-allow functionNcss 80 -- Initializers, accessors, and delegates of a property.
-  // code-gauge-allow functionCognitiveComplexity 35 -- Initializers, accessors, and delegates of a property.
+  // code-gauge-allow functionCognitiveComplexity 24 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private ensurePropertyCompiled(entry: PropertyEntry): void {
     if (entry.state !== 'pending') return;
     entry.state = 'compiling';
@@ -1458,6 +1455,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   }
 
   /** A property delegated with `by`, whose delegate's `getValue` and `setValue` read and write it. */
+  // code-gauge-allow functionNcss 41 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileMemberDelegate(entry: PropertyEntry): void {
     const { symbol, decl } = entry;
     const context = this.initializerContext(entry);
@@ -1526,8 +1524,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
 
   // Classes' initializers.
 
-  // code-gauge-allow functionNcss 90 -- The steps of a constructor: superclass, parameters, initializers, init blocks.
-  // code-gauge-allow functionCognitiveComplexity 35 -- The steps of a constructor: superclass, parameters, initializers, init blocks.
   private compileClassInitializer(entry: ClassEntry): void {
     const { symbol, decl } = entry;
     if (symbol.isInterface || symbol.isNative) return;
@@ -1690,7 +1686,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     return context !== undefined && this.receiversOf(scope).some((receiver) => receiver.context === context);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Enum entries, explicit and implicit superclass constructors.
   private compileSuperConstructorCall(
     entry: ClassEntry,
     scope: Scope,

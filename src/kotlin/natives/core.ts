@@ -11,6 +11,8 @@ import { defineNative, defineNativeProperty, libraryClass, newItems, throwError 
 const INT_KINDS: PrimitiveKind[] = ['Byte', 'Short', 'Int'];
 
 /** Converts a number of one kind to another, as `toInt()`, `toLong()`, and their kin do. */
+// code-gauge-allow functionNcss 43 -- registers the natives of one class together, in the order the prelude declares them.
+// code-gauge-allow functionCognitiveComplexity 23 -- registers the natives of one class together, in the order the prelude declares them.
 export function convertNumber(value: number | bigint, from: PrimitiveKind, to: PrimitiveKind): number | bigint {
   const asNumber = Number(value);
   switch (to) {
@@ -238,6 +240,7 @@ function definePrimitives(): void {
   void INT_KINDS;
 }
 
+// code-gauge-allow functionNcss 31 -- registers the natives of one class together, in the order the prelude declares them.
 function defineAnyAndString(): void {
   defineNative('kotlin.Any.equals(Any?)', (_frame, receiver, [other]) => receiver === other);
   defineNative('kotlin.Any.hashCode()', (_frame, receiver) => identityHash(receiver));

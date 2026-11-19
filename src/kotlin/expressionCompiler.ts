@@ -1,4 +1,3 @@
-// code-gauge-allow-file fileNcss 1400 -- One method per kind of Kotlin expression, as the language defines them.
 import type { Block, Expression, LambdaExpression, TypeRef } from './ast';
 import { type ArgumentSyntax, CallCompiler, type Candidate, type ResolvedCall } from './callCompiler';
 import {
@@ -186,7 +185,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return this.compileAny(scope, context, expression, undefined, true);
   }
 
-  // code-gauge-allow functionNcss 80 -- One case per kind of expression.
   protected compileAny(
     scope: Scope,
     context: FunctionContext,
@@ -289,6 +287,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   // Literals.
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileInteger(expression: Extract<Expression, { kind: 'integer' }>, expected: KType | undefined): Compiled {
     const { value, suffix, row } = expression;
     const isUnsigned = suffix === 'u' || suffix === 'uL';
@@ -365,7 +364,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Kotlin's order of name resolution.
   protected compileName(scope: Scope, context: FunctionContext, name: string, row: number): Compiled {
     const variable = this.findVariable(scope, name);
     if (variable) return this.readVariable(context, variable, row);
@@ -413,6 +411,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return undefined;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private findStaticMember(scope: Scope, name: string): Compiled | undefined {
     for (let current: Scope | undefined = scope; current; current = current.parent) {
       for (let cls = current.staticClass; cls; cls = cls.outer) {
@@ -572,7 +571,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   // Members.
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- Qualified names, safe calls, and properties on receivers.
   protected compileMemberAccess(
     scope: Scope,
     context: FunctionContext,
@@ -775,7 +773,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   // Calls.
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- One case per form of callee.
   protected compileCall(
     scope: Scope,
     context: FunctionContext,
@@ -822,7 +819,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return this.compileInvoke(scope, context, functionValue, args, hasTrailingLambda, row);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Kotlin's order of call resolution.
   private compileNamedCall(
     scope: Scope,
     context: FunctionContext,
@@ -979,6 +975,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   protected abstract reportUnknownFunction(name: string, row: number): never;
 
   /** Resolves a call whose candidates come with different receivers, the nearest level first. */
+  // code-gauge-allow functionParameterCount 9 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   protected resolveInLevels(
     scope: Scope,
     context: FunctionContext,
@@ -1080,6 +1077,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     void row;
   }
 
+  // code-gauge-allow functionParameterCount 9 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity 21 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileMethodCall(
     scope: Scope,
     context: FunctionContext,
@@ -1148,6 +1147,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return this.finishCall(resolvedCall, receiver, row);
   }
 
+  // code-gauge-allow functionParameterCount 9 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionNcss 31 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity 20 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileQualifiedCall(
     scope: Scope,
     context: FunctionContext,
@@ -1214,6 +1216,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     row: number
   ): Compiled;
 
+  // code-gauge-allow functionParameterCount 8 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   private compileSuperCall(
     scope: Scope,
     context: FunctionContext,
@@ -1259,6 +1262,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
   protected abstract nonVirtualCall(call: ResolvedCall): (frame: Frame, receiver: Value) => Value;
 
   /** Calls a value of a function type, such as a lambda held in a variable. */
+  // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionNcss 40 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity 22 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected compileInvoke(
     scope: Scope,
     context: FunctionContext,
@@ -1360,6 +1366,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   /** Calls an operator function such as `get` or `contains` on a compiled receiver. */
+  // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   protected compileOperatorCall(
     scope: Scope,
     context: FunctionContext,
@@ -1383,6 +1390,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   /** Resolves an operator call, giving both the resolved function and its compiled call. */
+  // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   protected resolveOperator(
     scope: Scope,
     context: FunctionContext,
@@ -1528,7 +1536,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
     isCompound: boolean
   ): Place;
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- One case per binary operator.
   protected compileBinary(
     scope: Scope,
     context: FunctionContext,
@@ -1588,6 +1595,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return this.compileArithmeticWith(scope, context, operator, left, rightExpression, row);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 29 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected compileArithmeticWith(
     scope: Scope,
     context: FunctionContext,
@@ -1742,6 +1750,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 30 -- Kotlin's rules of equality by the operands' types.
+  // code-gauge-allow functionNcss 38 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileEquality(
     scope: Scope,
     context: FunctionContext,
@@ -1817,7 +1826,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Primitive comparisons, then compareTo.
   private compileComparison(
     scope: Scope,
     context: FunctionContext,
@@ -1934,6 +1942,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   /** The type `is` narrows to: the class type with the arguments the value's static type gives it. */
+  // code-gauge-allow functionCognitiveComplexity 20 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected narrowedType(staticType: KType, checked: KType): KType {
     const target = resolved(checked);
     const source = nonNull(resolved(staticType));
@@ -1972,6 +1981,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileAs(scope: Scope, context: FunctionContext, expression: Extract<Expression, { kind: 'as' }>): Compiled {
     const operand = this.compileExpression(scope, context, expression.operand);
     const written = this.resolveType(scope, expression.type, true);
@@ -2082,7 +2092,6 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   // Lambdas.
 
-  // code-gauge-allow functionNcss 60 -- Parameters, receiver, body, captures, and the function value.
   compileLambda(
     scope: Scope,
     context: FunctionContext,

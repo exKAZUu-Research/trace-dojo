@@ -11,6 +11,7 @@ function isUnsignedKind(kind: PrimitiveKind): boolean {
 }
 
 /** The type of an arithmetic operation's result, as Kotlin's operator overloads of the number types declare it. */
+// code-gauge-allow functionCognitiveComplexity 23 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
 export function arithmeticResult(
   left: PrimitiveKind,
   right: PrimitiveKind,

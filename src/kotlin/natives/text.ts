@@ -110,7 +110,6 @@ function parseDouble(value: string): number | undefined {
   return Number(trimmed.replace(/[fFdD]$/, ''));
 }
 
-// code-gauge-allow functionNcss 150 -- One native per function of kotlin.text that the prelude declares.
 function defineStrings(): void {
   const natives: Record<string, (frame: Frame, receiver: Value, args: Value[]) => Value> = {
     'CharSequence.isBlank()': (frame, receiver) => codeUnits(sequenceText(frame, receiver)).every(isKotlinWhitespace),

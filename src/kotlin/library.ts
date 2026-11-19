@@ -86,6 +86,8 @@ function loadLibrary(): Library {
   }
 }
 
+// code-gauge-allow functionNcss 36 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+// code-gauge-allow functionCognitiveComplexity 22 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
 function compileLibrary(
   packages: Map<string, PackageScope>,
   compiler: Compiler,

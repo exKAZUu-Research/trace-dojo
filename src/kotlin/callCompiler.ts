@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 457 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import type { Expression, LambdaExpression } from './ast';
 import { type Compiled, type Eval, FunctionContext, reprOf, type Scope, typeMismatchMessage } from './compilerBase';
 import { CompilerCore } from './compilerCore';
@@ -11,6 +12,7 @@ import {
   type InferenceVariable,
   isNullable,
   type KType,
+  mentionsVariable,
   nullable,
   resolved,
   substitute,
@@ -65,6 +67,8 @@ interface Attempt {
 }
 
 /** The parameters each argument goes to, or `undefined` when the arguments do not fit the parameters. */
+// code-gauge-allow functionNcss 34 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+// code-gauge-allow functionCognitiveComplexity 22 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
 function mapArguments(
   params: ParameterSymbol[],
   args: ArgumentSyntax[],
@@ -159,7 +163,6 @@ export abstract class CallCompiler extends CompilerCore {
    * Resolves a call among candidate levels, the nearest first: the first level with an applicable candidate decides,
    * as Kotlin's resolution goes from inner scopes to outer ones.
    */
-  // code-gauge-allow functionCognitiveComplexity 30 -- The steps of Kotlin's overload resolution.
   protected resolveCall(
     scope: Scope,
     context: FunctionContext,
@@ -230,6 +233,7 @@ export abstract class CallCompiler extends CompilerCore {
     return this.completeCall(scope, context, chosen, args, compiledArgs, expected, row);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private startAttempt(
     candidate: Candidate,
     args: ArgumentSyntax[],
@@ -274,6 +278,7 @@ export abstract class CallCompiler extends CompilerCore {
     return symbol.typeParameters;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 27 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private isApplicable(
     attempt: Attempt,
     args: ArgumentSyntax[],
@@ -366,7 +371,6 @@ export abstract class CallCompiler extends CompilerCore {
     return lambda.params.length === actual.params.length;
   }
 
-  // code-gauge-allow functionNcss 40 -- Kotlin's choice of the most specific overload, then by lambda result.
   private mostSpecific(
     attempts: Attempt[],
     compiledArgs: (Compiled | undefined)[],
@@ -473,8 +477,6 @@ export abstract class CallCompiler extends CompilerCore {
     type: FunctionType
   ): KType | undefined;
 
-  // code-gauge-allow functionNcss 80 -- Finishes inference and builds the evaluation of the arguments.
-  // code-gauge-allow functionCognitiveComplexity 30 -- Finishes inference and builds the evaluation of the arguments.
   /** Rejects a use of a `private` or `protected` member outside the code that may see it, as kotlinc does. */
   protected checkAccessible(scope: Scope, member: FunctionSymbol | PropertySymbol, row: number): void {
     const { owner, visibility } = member;
@@ -681,7 +683,7 @@ export abstract class CallCompiler extends CompilerCore {
     const inputs = actual.receiver ? [actual.receiver, ...actual.params] : actual.params;
     for (const input of inputs) {
       for (const variable of variables) {
-        if (!variable.fixed && mentions(input, variable)) fixVariable(variable);
+        if (!variable.fixed && mentionsVariable(input, (candidate) => candidate === variable)) fixVariable(variable);
       }
     }
     return resolved(actual) as FunctionType;
@@ -715,6 +717,8 @@ export abstract class CallCompiler extends CompilerCore {
     return this.error(row, `${name} の引数の書き方に誤りがあります。`);
   }
 
+  // code-gauge-allow functionParameterCount 8 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity 27 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private reportInapplicable(
     all: Candidate[],
     args: ArgumentSyntax[],
@@ -759,29 +763,6 @@ export abstract class CallCompiler extends CompilerCore {
   /** A context for compiling a lambda only to learn its result type, whose code is thrown away. */
   protected probeContext(context: FunctionContext): FunctionContext {
     return new FunctionContext(context, true, '<probe>', context.info.isLibrary, undefined);
-  }
-}
-
-function mentions(type: KType, variable: InferenceVariable): boolean {
-  switch (type.kind) {
-    case 'variable': {
-      return (
-        type.variable === variable || (type.variable.fixed !== undefined && mentions(type.variable.fixed, variable))
-      );
-    }
-    case 'class': {
-      return type.args.some((argument) => argument.variance !== 'star' && mentions(argument.type, variable));
-    }
-    case 'function': {
-      return (
-        (type.receiver !== undefined && mentions(type.receiver, variable)) ||
-        type.params.some((param) => mentions(param, variable)) ||
-        mentions(type.returnType, variable)
-      );
-    }
-    default: {
-      return false;
-    }
   }
 }
 

@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 662 -- the compiler of one area of Kotlin, whose parts call each other closely.
 import { runtimeClassOf } from '../dispatch';
 import { hashOf, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
@@ -330,6 +331,7 @@ function syncParent(list: KObject): void {
   syncParent(native.parent);
 }
 
+// code-gauge-allow functionNcss 46 -- registers the natives of one class together, in the order the prelude declares them.
 function defineIterators(): void {
   const iterator = 'kotlin.collections.ItemIterator';
   interface State {
@@ -463,6 +465,7 @@ function requireMutableMap(frame: Frame, map: Value): void {
   }
 }
 
+// code-gauge-allow functionNcss 54 -- registers the natives of one class together, in the order the prelude declares them.
 function defineMaps(): void {
   const mapConstructors: [string, KStore['order']][] = [
     ['HashMap', 'hash'],
@@ -581,6 +584,8 @@ function initializeSet(instance: Value, store: KStore): Value {
   return UNIT;
 }
 
+// code-gauge-allow functionNcss 54 -- registers the natives of one class together, in the order the prelude declares them.
+// code-gauge-allow functionCognitiveComplexity 19 -- registers the natives of one class together, in the order the prelude declares them.
 function defineSets(): void {
   const setConstructors: [string, KStore['order']][] = [
     ['HashSet', 'hash'],

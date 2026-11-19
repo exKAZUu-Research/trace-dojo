@@ -49,7 +49,6 @@ function generics(kind: ArrayKind, own: string): string {
   return all ? `<${all}> ` : '';
 }
 
-// code-gauge-allow functionNcss 120 -- One template per function of arrays.
 function functionsOf(kind: ArrayKind): string {
   const { receiver: r, element: e } = kind;
   const g = (own = ''): string => generics(kind, own);

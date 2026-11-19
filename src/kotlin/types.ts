@@ -157,18 +157,23 @@ export function resolved(type: KType): KType {
 
 /** Whether a type mentions an inference variable that is not fixed yet. */
 export function hasOpenVariables(type: KType): boolean {
+  return mentionsVariable(type, (variable) => variable.fixed === undefined);
+}
+
+/** Whether a type mentions an inference variable that `test` accepts, looking through fixed variables to their types. */
+export function mentionsVariable(type: KType, test: (variable: InferenceVariable) => boolean): boolean {
   switch (type.kind) {
     case 'variable': {
-      return type.variable.fixed ? hasOpenVariables(type.variable.fixed) : true;
+      return test(type.variable) || (type.variable.fixed !== undefined && mentionsVariable(type.variable.fixed, test));
     }
     case 'class': {
-      return type.args.some((argument) => argument.variance !== 'star' && hasOpenVariables(argument.type));
+      return type.args.some((argument) => argument.variance !== 'star' && mentionsVariable(argument.type, test));
     }
     case 'function': {
       return (
-        (type.receiver !== undefined && hasOpenVariables(type.receiver)) ||
-        type.params.some(hasOpenVariables) ||
-        hasOpenVariables(type.returnType)
+        (type.receiver !== undefined && mentionsVariable(type.receiver, test)) ||
+        type.params.some((param) => mentionsVariable(param, test)) ||
+        mentionsVariable(type.returnType, test)
       );
     }
     default: {
@@ -178,6 +183,7 @@ export function hasOpenVariables(type: KType): boolean {
 }
 
 /** Writes a type as Kotlin's compiler does in its messages. */
+// code-gauge-allow functionCognitiveComplexity 18 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
 export function typeToString(type: KType): string {
   const suffix = type.nullable ? '?' : '';
   switch (type.kind) {

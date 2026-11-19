@@ -15,7 +15,7 @@ import type { ClassSymbol, PropertySymbol } from './symbols';
 import { type KType, resolved } from './types';
 import { Boxed, Cell, KObject, type PrimitiveKind, type Value } from './values';
 
-// code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
+// code-gauge-allow duplicateLines 17 -- the same trace setup as the other interpreters, adapted to Kotlin's values.
 export function traceKotlinProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileKotlin(parseKotlin(program), {
     atomicRows: new Set(trace.atomicAnnotations.keys()),
@@ -46,6 +46,7 @@ class Snapshotter {
    * The variables a frame shows: its locals and what a lambda captured, then with `withContext` the properties of
    * `this` as `this.x`, the program's top-level properties, and the properties of its objects as `Name.x`.
    */
+  // code-gauge-allow functionCognitiveComplexity 21 -- builds one snapshot of a frame, whose kinds of variables are listed side by side as Java's trace does.
   variablesOf(frame: Frame, withContext: boolean): TraceVariables {
     const variables: TraceVariables = { vars: {}, referenceVars: {} };
     const shown = new Set<string>();
@@ -187,6 +188,7 @@ function arrayElementKind(array: KObject): PrimitiveKind | undefined {
   return name === '' || name === 'Boolean' ? undefined : (name as PrimitiveKind);
 }
 
+// code-gauge-allow duplicateLines 15 -- converts a primitive to a trace value, which differs from format.ts's conversion to text in every case.
 function primitiveScalar(kind: PrimitiveKind, value: number | bigint): Scalar {
   switch (kind) {
     case 'Long':
@@ -247,6 +249,7 @@ function displayNodeOf(value: Value, seen: Set<unknown>): DisplayNode | undefine
 }
 
 /** Lists, arrays, and sets show as arrays of their elements, and maps as objects keyed by their keys. */
+// code-gauge-allow duplicateLines 16 -- the same snapshot of objects as Java's trace, over Kotlin's objects.
 function collectionNodeOf(object: KObject, seen: Set<unknown>): DisplayNode | undefined {
   const kind = isArray(object) ? arrayElementKind(object) : undefined;
   const items =

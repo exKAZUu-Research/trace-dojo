@@ -103,6 +103,7 @@ export abstract class CompilerCore {
   // Types.
 
   /** @param allowsBareClass Whether a generic class may be written without arguments, as `is List` may. */
+  // code-gauge-allow functionCognitiveComplexity 30 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   resolveType(scope: Scope, ref: TypeRef, allowsBareClass = false): KType {
     if (ref.kind === 'function') {
       return {
@@ -226,6 +227,8 @@ export abstract class CompilerCore {
   // Members.
 
   /** The members of a name on a receiver type, those of subclasses hiding the ones they override. */
+  // code-gauge-allow functionNcss 31 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity 23 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected membersOf<T extends MemberSymbol>(type: KType, name: string, kind: T['kind']): MemberRef<T>[] {
     const actual = resolved(type);
     if (actual.kind === 'param') {
@@ -357,6 +360,7 @@ export abstract class CompilerCore {
     return (frame) => readers.map((read) => read(frame));
   }
 
+  // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
   protected newVariable(
     scope: Scope,
     context: FunctionContext,

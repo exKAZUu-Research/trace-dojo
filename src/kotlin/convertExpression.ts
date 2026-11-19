@@ -69,8 +69,6 @@ export abstract class ExpressionConverter {
     };
   }
 
-  // code-gauge-allow functionNcss 120 -- One case per kind of expression node of the grammar.
-  // code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of expression node of the grammar.
   convertExpression(node: Node): Expression {
     const row = rowOf(node);
     switch (node.type) {
@@ -360,6 +358,7 @@ export abstract class ExpressionConverter {
     return { kind: 'prefix', row: rowOf(node), operator: operator as '-' | '+' | '!' | '++' | '--', operand };
   }
 
+  // code-gauge-allow functionCognitiveComplexity 26 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private convertWhen(node: Node): Expression {
     let subject: Expression | undefined;
     const entries: WhenEntry[] = [];
@@ -461,7 +460,6 @@ export abstract class ExpressionConverter {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- One case per kind of type node of the grammar.
   convertType(node: Node): TypeRef {
     const row = rowOf(node);
     switch (node.type) {
