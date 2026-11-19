@@ -119,7 +119,8 @@ function rebuild(
         yield [newKey, slot];
       }
     }
-    array.replaceTable(renamed(), renumber, mutation, !renumber);
+    const packed = mutation === 'shift' ? array.ordered().isPacked : renumber;
+    array.replaceTable(renamed(), packed, mutation, !renumber);
     return array;
   }
   for (const [key, source] of entries) {

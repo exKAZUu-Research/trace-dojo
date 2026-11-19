@@ -3729,4 +3729,23 @@ echo json_encode($s->getArrayCopy());
     kind: 'executed',
     stdout: '1;3;|1;3;|1;20;30;|0:1;2:2;|{"0":1,"2":2,"5":3}|b:2|a:1;c:3;d:4;|err:[1,2]',
   });
+
+  const shiftPreservesStorage = run(String.raw`<?php
+$a = [19]; unset($a[0]); $a[] = 3; $a[0] = 5;
+array_shift($a); $a[7] = 2; prev($a); $a[] = 16;
+echo var_export(key($a), true), ':', var_export(current($a), true), '|';
+$b = [19]; unset($b[0]); $b[] = 3; $b[0] = 5;
+array_shift($b); $b[6] = 2; prev($b); $b[8] = 16;
+echo var_export(key($b), true), ':', var_export(current($b), true), '|';
+$c = [19]; unset($c[0]); $c[] = 3; $c[0] = 5; unset($c[1]);
+array_shift($c); $c[0] = 5; $c[7] = 2; prev($c); $c[] = 16;
+echo var_export(key($c), true), ':', var_export(current($c), true), '|';
+$d = [0 => 1, 2 => 2];
+array_shift($d); $d[7] = 2; prev($d); $d[] = 16;
+echo var_export(key($d), true), ':', var_export(current($d), true);
+`);
+  expect(shiftPreservesStorage).toMatchObject({
+    kind: 'executed',
+    stdout: '8:16|8:16|8:16|NULL:false',
+  });
 });
