@@ -22,7 +22,6 @@ import {
   named,
   numberValue,
   patternIdentifiers,
-  skipParentheses,
   stringValue,
   templateFragmentText,
 } from './syntax';
@@ -59,7 +58,6 @@ export class ExpressionChecker {
   readonly expandos: Expandos;
   readonly elaboration: Elaboration;
   private readonly silentTypes: ExpressionTypeCache;
-  private readonly overloadContexts: ReadonlyMap<number, Type>[] = [];
   private readonly uniqueSymbols: UniqueSymbols;
   /** Types of variables computed from their declarations, by symbol. */
   private readonly variableTypes = new Map<number, Type>();
@@ -116,21 +114,8 @@ export class ExpressionChecker {
 
   // Entry points -------------------------------------------------------------------------------------------------
 
-  withOverloadContexts<T>(contexts: ReadonlyMap<number, Type>, check: () => T): T {
-    this.overloadContexts.push(contexts);
-    try {
-      return check();
-    } finally {
-      this.overloadContexts.pop();
-    }
-  }
-
   check(node: TreeNode, contextual?: Type): Type {
     this.c.budget.spend();
-    if (this.overloadContexts.length > 0) {
-      const { id } = skipParentheses(node);
-      contextual = this.overloadContexts.findLast((contexts) => contexts.has(id))?.get(id) ?? contextual;
-    }
     if (this.c.silent === 0) return this.compute(node, contextual);
     return this.silentTypes.check(node, contextual, () => this.compute(node, contextual));
   }

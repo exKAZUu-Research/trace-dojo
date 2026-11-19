@@ -7,6 +7,7 @@ import type { Runtime } from './runtime';
 import {
   type AccessorProperty,
   appendAll,
+  type Binding,
   type Element,
   freeze,
   HOLE,
@@ -27,28 +28,28 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
   /** The strings array of each tagged template site, which every evaluation of the site passes to its tag. */
   private readonly templateObjects = new WeakMap<Expression, JsArray>();
 
-  abstract evaluateClass(cls: ClassNode, inferredName?: Key, isDeclaration?: boolean): JsFunction;
+  abstract evaluateClass(cls: ClassNode, inferredName?: Key, binding?: Binding): JsFunction;
 
   abstract superCall(args: Value[], callRow: number, skipsAfterSuper?: boolean): JsObject;
 
-  evaluate(expression: Expression): Value {
-    const value = this.evaluateChain(expression);
+  evaluate(expression: Expression, classBinding?: Binding): Value {
+    const value = this.evaluateChain(expression, classBinding);
     return value === SHORT_CIRCUIT ? undefined : value;
   }
 
-  protected evaluateChain(expression: Expression): ChainValue {
+  protected evaluateChain(expression: Expression, classBinding?: Binding): ChainValue {
     const { runtime } = this;
     const outerRow = runtime.currentRow;
     runtime.currentRow = expression.row;
     try {
-      return this.evaluateKind(expression);
+      return this.evaluateKind(expression, classBinding);
     } finally {
       runtime.currentRow = outerRow;
     }
   }
 
   // code-gauge-allow functionNcss 60 -- One case per expression kind, each delegating where it grows.
-  private evaluateKind(expression: Expression): ChainValue {
+  private evaluateKind(expression: Expression, classBinding: Binding | undefined): ChainValue {
     const { runtime } = this;
     switch (expression.kind) {
       case 'literal': {
@@ -82,7 +83,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         return this.createFunction(expression.fn, runtime.frame.scope);
       }
       case 'classExpression': {
-        return this.evaluateClass(expression.cls);
+        return this.evaluateClass(expression.cls, undefined, classBinding);
       }
       case 'member': {
         return this.member(expression);
@@ -129,7 +130,7 @@ export abstract class ExpressionEvaluator extends EvaluatorBase {
         return value;
       }
       case 'parenthesized': {
-        return this.evaluate(expression.expression);
+        return this.evaluate(expression.expression, classBinding);
       }
       case 'yield':
       case 'await': {

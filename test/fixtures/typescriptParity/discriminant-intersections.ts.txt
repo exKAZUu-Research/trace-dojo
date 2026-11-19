@@ -22,3 +22,24 @@ function optional(shape: { tag?: "left" } & { tag?: "right"; count: number }): n
 }
 
 console.log(area({ kind: "circle", radius: 3 }), unwrap({ ok: true, value: 7 }), optional({ count: 5 }));
+
+type MultiTag = { tag: "a" | "b"; left: number } | { tag: "c" | "d"; right: string };
+
+function left(value: MultiTag & { tag: "a" | "b" }): number {
+  return value.left;
+}
+
+function inconsistentText(value: { tag: "a" | "b" } & { tag: "c" | "d" }): never {
+  return value;
+}
+
+function inconsistentNumbers(value: { tag: 1 | 2 } & { tag: 3 | 4 }): never {
+  return value;
+}
+
+function overlap(value: { tag: "a" | "b"; count: number } & { tag: "b" | "c" }): number {
+  const tag: "b" = value.tag;
+  return value.count;
+}
+
+console.log(left({ tag: "b", left: 6 }), overlap({ tag: "b", count: 9 }));

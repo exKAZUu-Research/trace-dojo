@@ -149,6 +149,7 @@ export type FunctionBehavior =
       /** Instance fields, initialized when the constructor starts (or `super()` returns). */
       fields: ClassField[];
       traceConstants: Set<Key>;
+      traceBinding?: Binding;
     };
 
 export interface ClassField {
@@ -189,7 +190,6 @@ export interface Binding {
   value: Value | typeof UNINITIALIZED;
   /** The class object visible to trace snapshots before the declaration finishes initializing its binding. */
   initializingClass?: JsFunction;
-  isClassDeclaration?: true;
   isMutable: boolean;
   /** What the TypeError of an assignment to an immutable binding calls it, `constant` unless set. */
   immutableKind?: 'using' | 'await using';

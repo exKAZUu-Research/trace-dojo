@@ -98,7 +98,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
         return undefined;
       }
       case 'class': {
-        this.writeVariable(statement.cls.name, this.evaluateClass(statement.cls, undefined, true), 'initialize');
+        this.declareClass(statement.cls);
         return undefined;
       }
       case 'return': {
@@ -215,7 +215,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
         else if (target.kind === 'identifier') this.revealVar(target.name);
         continue;
       }
-      this.bindDeclared(target, this.evaluate(init), declaration.declarationKind);
+      this.bindDeclared(target, this.evaluate(init, this.classBinding(target)), declaration.declarationKind);
     }
   }
 
@@ -557,7 +557,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
   // Classes -----------------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionCognitiveComplexity 19 -- Transcribes the specification's ClassDefinitionEvaluation step by step, whose branches mirror its steps.
-  evaluateClass(cls: ClassNode, inferredName?: Key, isDeclaration = false): JsFunction {
+  evaluateClass(cls: ClassNode, inferredName?: Key, binding?: Binding): JsFunction {
     const { runtime } = this;
     const { prototypeParent, constructorParent } = this.classParents(cls);
     const classScope = new Scope(runtime.frame.scope);
@@ -582,6 +582,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
       isDerived: cls.superClass !== undefined,
       fields: [],
       traceConstants: new Set(),
+      traceBinding: binding,
     };
     const fn = new JsFunction(constructorParent, behavior);
     runtime.allocate(3);
@@ -601,7 +602,6 @@ export class Evaluator extends SuspendableStatementEvaluator {
     });
     const staticInitializers = this.inScope(classScope, () => this.defineMembers(cls, fn, prototype, behavior));
     if (cls.name) classScope.bindings.set(cls.name, { value: fn, isMutable: false });
-    const binding = isDeclaration ? classScope.parent?.bindings.get(cls.name) : undefined;
     this.initializeStaticMembers(classScope, fn, staticInitializers, binding);
     return fn;
   }
@@ -612,10 +612,7 @@ export class Evaluator extends SuspendableStatementEvaluator {
     initializers: (() => void)[],
     binding: Binding | undefined
   ): void {
-    if (binding) {
-      binding.isClassDeclaration = true;
-      binding.initializingClass = fn;
-    }
+    if (binding) binding.initializingClass = fn;
     try {
       this.runtime.hold(fn, () =>
         this.inScope(classScope, () => {

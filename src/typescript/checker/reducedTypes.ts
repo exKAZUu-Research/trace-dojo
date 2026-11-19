@@ -60,11 +60,11 @@ export class ReducedTypes {
 }
 
 function isDiscriminant(type: Type): boolean {
-  return (
-    type.kind === 'literal' ||
-    type.kind === 'templateLiteral' ||
-    type.kind === 'stringMapping' ||
-    isIntrinsic(type, 'null') ||
-    isIntrinsic(type, 'undefined')
-  );
+  return type.kind === 'union'
+    ? type.types.length > 0 && type.types.every(isUnit)
+    : isUnit(type) || type.kind === 'templateLiteral' || type.kind === 'stringMapping';
+}
+
+function isUnit(type: Type): boolean {
+  return type.kind === 'literal' || isIntrinsic(type, 'null') || isIntrinsic(type, 'undefined');
 }

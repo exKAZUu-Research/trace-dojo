@@ -72,6 +72,9 @@ export class FunctionChecker {
   }
 
   functionExpression(node: TreeNode, contextual?: Type): Type {
+    contextual = this.c.overloadContexts.contextOf(node, contextual);
+    const preview = this.c.overloadContexts.previewType(node, contextual);
+    if (preview) return preview;
     const contextualSignature = isAnyLike(contextual ?? unknownType)
       ? this.anySignature()
       : contextualSignatureOf(this.c, contextual, node);

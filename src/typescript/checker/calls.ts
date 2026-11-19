@@ -33,7 +33,7 @@ interface Resolution {
   returnType: Type;
 }
 
-interface InferenceArgument {
+interface ExpandedArgument {
   node: TreeNode;
   spread?: TupleElement;
 }
@@ -465,23 +465,20 @@ export class Calls {
     }
     const instantiate = (candidate: Signature): Signature =>
       this.instantiateFor(candidate, args, typeArguments, contextual, receiver);
-    const callbacks = candidates.length > 1 ? this.contextSensitiveArguments(args) : new Set<number>();
-    const contexts = new Map<number, Type>();
+    const callbacks = candidates.length > 1 ? this.c.overloadContexts.callbacksOf(args) : new Set<number>();
     const choose = (): Resolution => {
       for (const candidate of candidates) {
         if (!this.arity.arityMatches(candidate, args)) continue;
         const instantiated = this.c.silently(() => instantiate(candidate));
         if (!this.arity.instanceArityMatches(instantiated, candidate, args)) continue;
-        if (callbacks.size > 0 && contexts.size === 0)
-          this.c.flow.from(this.c.flow.current?.clone(), () =>
-            this.c.silently(() => this.prepareOverloadContexts(instantiated, args, callbacks, contexts))
-          );
+        if (callbacks.size > 0)
+          this.c.overloadContexts.capture(callbacks, () => this.previewArguments(instantiated, args));
         if (this.c.silently(() => this.argumentsMatch(instantiated, args)))
           return this.finishOverload(node, candidate, args, { typeArguments, contextual, receiver });
       }
       return this.reportUnresolved(node, callee, candidates, args, instantiate);
     };
-    return callbacks.size > 0 ? this.c.expressions.withOverloadContexts(contexts, choose) : choose();
+    return callbacks.size > 0 ? this.c.overloadContexts.withCall(choose) : choose();
   }
 
   private finishOverload(
@@ -505,32 +502,22 @@ export class Calls {
     return { signature: final, returnType: final.returnType() };
   }
 
-  private contextSensitiveArguments(args: TreeNode[]): Set<number> {
-    if (args.some((arg) => arg.type === 'spread_element')) return new Set();
-    const callbacks = new Set<number>();
-    for (const [index, arg] of args.entries()) {
-      const expression = skipParentheses(arg);
-      if (functionExpressionTypes.has(expression.type) && isContextSensitiveFunction(expression)) callbacks.add(index);
-    }
-    return callbacks;
+  private previewArguments(signature: Signature, args: TreeNode[]): boolean {
+    let fits = false;
+    this.c.flow.from(this.c.flow.current, () => {
+      fits = this.c.silently(() => this.checkExpandedArguments(signature, args));
+    });
+    return fits;
   }
 
-  private prepareOverloadContexts(
-    signature: Signature,
-    args: TreeNode[],
-    callbacks: Set<number>,
-    contexts: Map<number, Type>
-  ): void {
-    const provisional = new Map<number, Type>();
-    for (const [index, arg] of args.entries()) {
-      const target = this.parameterTypeAt(signature, index);
-      const expression = skipParentheses(arg);
-      if (target && callbacks.has(index) && contextualSignatureOf(this.c, target, expression))
-        provisional.set(expression.id, target);
-      else if (!this.checkArgument(arg, target, false, false)) return;
-    }
-    // Once ordinary arguments fit, the compiler starts checking callback bodies and keeps their contextual inputs.
-    for (const [id, type] of provisional) contexts.set(id, type);
+  private checkExpandedArguments(signature: Signature, args: TreeNode[]): boolean {
+    const expanded = this.expandedArguments(args);
+    const parameterTypes = this.argumentParameterTypes(signature, expanded);
+    return expanded.every(({ node, spread }, index) => {
+      const target = parameterTypes[index];
+      if (spread) return !target || this.c.relations.isAssignable(this.spreadValueType(spread), target);
+      return this.checkArgument(node, target, false, false);
+    });
   }
 
   /** Reports that no overload accepts the arguments as TypeScript does, for the only fitting signature or the call. */
@@ -774,8 +761,8 @@ export class Calls {
     const parameters = signature.typeParameters;
     const run = newInferenceRun(parameters, true);
     const restIndex = this.genericRestIndex(signature);
-    const arguments_ = this.inferenceArguments(args);
-    const parameterTypes = this.inferenceParameterTypes(signature, arguments_);
+    const arguments_ = this.expandedArguments(args);
+    const parameterTypes = this.argumentParameterTypes(signature, arguments_);
     this.recordImpliedArity(run, signature, arguments_);
     // A `this` parameter infers from the object the method is called on.
     if (receiver && signature.thisType) this.c.inference.inferTypes(run, receiver, signature.thisType, true);
@@ -850,7 +837,7 @@ export class Calls {
   }
 
   /** Records how many arguments `...args: A` takes, which splits what `A` infers from `[...A, ...B]`. */
-  private recordImpliedArity(run: InferenceRun, signature: Signature, args: InferenceArgument[]): void {
+  private recordImpliedArity(run: InferenceRun, signature: Signature, args: ExpandedArgument[]): void {
     const restIndex = this.genericRestIndex(signature);
     if (restIndex === undefined) return;
     const rest = args.slice(restIndex);
@@ -860,15 +847,15 @@ export class Calls {
     if (inference) inference.impliedArity = rest.length;
   }
 
-  private inferenceArguments(args: TreeNode[]): InferenceArgument[] {
-    return args.flatMap((node): InferenceArgument[] => {
+  private expandedArguments(args: TreeNode[]): ExpandedArgument[] {
+    return args.flatMap((node): ExpandedArgument[] => {
       if (node.type !== 'spread_element') return [{ node }];
       const type = this.c.silently(() => this.c.expressions.check(named(node)[0]));
       return this.c.silently(() => this.spreadElements(node, type)).map((spread) => ({ node, spread }));
     });
   }
 
-  private inferenceParameterTypes(signature: Signature, args: InferenceArgument[]): (Type | undefined)[] {
+  private argumentParameterTypes(signature: Signature, args: ExpandedArgument[]): (Type | undefined)[] {
     const types = args.map((_, index) => this.parameterTypeAt(signature, index));
     if (!isTrailingRestTuple(signature)) return types;
     const restIndex = signature.parameters.length - 1;
@@ -881,7 +868,7 @@ export class Calls {
   }
 
   private inferenceTuple(
-    args: InferenceArgument[],
+    args: ExpandedArgument[],
     contexts: (Type | undefined)[],
     mapper: Mapper | undefined,
     restType?: Type
@@ -942,7 +929,7 @@ export class Calls {
 
   private inferFromArgument(
     run: InferenceRun,
-    arg: InferenceArgument,
+    arg: ExpandedArgument,
     parameterType: Type | undefined,
     mapper: Mapper | undefined
   ): void {

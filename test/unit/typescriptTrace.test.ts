@@ -265,3 +265,26 @@ Shared.turtle.forward();`;
     'Shared.turtles': { kind: 'array', entries: { 0: turtle } },
   });
 });
+
+test('class expression statics follow the primary binding through aliases', () => {
+  const source = `let early: { count: number };
+const Counter = class {
+  static count = 1;
+  static next = this.count + 1;
+};
+early = Counter;
+early.count++;
+const Other = (class Named { static count = 3; });
+const alias = Other;
+alias.count++;
+function make() { return class { static count = 5; }; }
+const Returned = make();
+Returned.count++;`;
+  const { traceItems } = traceProgram('typescript', source, source);
+  expect(traceItems.at(-1)?.vars).toEqual({
+    'Counter.count': 2,
+    'Counter.next': 2,
+    'Other.count': 4,
+    'Returned.count': 6,
+  });
+});

@@ -34,3 +34,11 @@ function apply(kind: string, fn: any): void {
 }
 apply('number', (x = 1, y: number) => console.log(x + y));
 apply('text', (value) => console.log(value.toUpperCase()));
+const prefix: ['number'] = ['number'];
+const emptyArgs: [] = [];
+apply(...prefix, (x = 1, y: number) => console.log(x + y), ...emptyArgs);
+
+function nested(value: { kind: 'text'; tuple: [(x: string) => void] }): void;
+function nested(value: { kind: 'number'; tuple: [(x: number, y: number) => void] }): void;
+function nested(value: any) { value.tuple[0](2, 3); }
+nested({ kind: 'number', tuple: [(x = 1, y: number) => console.log(x + y)] });

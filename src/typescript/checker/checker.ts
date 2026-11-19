@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 561 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 563 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -26,6 +26,7 @@ import {
 import { LiteralChecker } from './literals';
 import { MemberChecker } from './members';
 import { OperatorChecker } from './operators';
+import { OverloadContexts } from './overloadContexts';
 import { BindingPatterns } from './patterns';
 import { Printer } from './print';
 import { ReducedTypes } from './reducedTypes';
@@ -102,6 +103,7 @@ export class Checker {
   readonly members = new MemberChecker(this);
   readonly assignments = new AssignmentChecker(this);
   readonly operators = new OperatorChecker(this);
+  readonly overloadContexts = new OverloadContexts(this);
   readonly conditions = new ConditionChecker(this);
   readonly statements = new StatementChecker(this);
   readonly classes = new ClassChecker(this);

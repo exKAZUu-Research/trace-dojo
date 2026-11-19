@@ -74,11 +74,8 @@ class Snapshotter {
     let top: Scope | undefined = scope;
     while (top?.parent && top.parent !== this.runtime.realm.globals) top = top.parent;
     if (!top) return;
-    for (const [className, binding] of top.bindings) {
-      if (!binding.isClassDeclaration) continue;
-      const cls = binding.initializingClass ?? binding.value;
-      if (!(cls instanceof JsFunction) || cls.behavior.kind !== 'class') continue;
-      // Its private static fields show as instance ones do.
+    for (const [className, cls] of classBindings(top)) {
+      if (cls.behavior.kind !== 'class') continue;
       for (const [key, value] of displayedEntries(cls, this.runtime, cls.behavior.traceConstants))
         addVariable(variables, `${className}.${key}`, value, this.runtime);
     }
@@ -105,6 +102,17 @@ class Snapshotter {
     }
     return functions.flat(2 /* functions, then their scopes */);
   }
+}
+
+function classBindings(scope: Scope): [string, JsFunction][] {
+  const classes = new Map<JsFunction, string>();
+  for (const [name, binding] of scope.bindings) {
+    const value = binding.initializingClass ?? binding.value;
+    if (!(value instanceof JsFunction) || value.behavior.kind !== 'class') continue;
+    if (binding === value.behavior.traceBinding) classes.delete(value);
+    if (!classes.has(value)) classes.set(value, name);
+  }
+  return [...classes].map(([value, name]) => [name, value]);
 }
 
 /** Functions and classes are not variables to learners, and neither is a `var` whose declaration has not run. */

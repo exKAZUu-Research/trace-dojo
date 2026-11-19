@@ -1,5 +1,6 @@
 import type {
   Block,
+  ClassNode,
   DeclarationKind,
   Expression,
   Pattern,
@@ -47,8 +48,8 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
   }
 
   /** Evaluates an expression, step by step when it contains a `yield`. */
-  protected *valueSteps(expression: Expression): Steps<Value> {
-    return expression.suspends ? yield* this.evaluateSteps(expression) : this.evaluate(expression);
+  protected *valueSteps(expression: Expression, classBinding?: Binding): Steps<Value> {
+    return expression.suspends ? yield* this.evaluateSteps(expression) : this.evaluate(expression, classBinding);
   }
 
   /** Records the step of binding a loop's target, whose destructuring stores the values it reads out of an object. */
@@ -88,7 +89,7 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         return undefined;
       }
       case 'class': {
-        this.writeVariable(statement.cls.name, this.evaluateClass(statement.cls, undefined, true), 'initialize');
+        this.declareClass(statement.cls);
         return undefined;
       }
       case 'return': {
@@ -279,8 +280,17 @@ export abstract class SuspendableStatementEvaluator extends StepEvaluator {
         else if (target.kind === 'identifier') this.revealVar(target.name);
         continue;
       }
-      this.bindDeclared(target, yield* this.valueSteps(init), declaration.declarationKind);
+      this.bindDeclared(target, yield* this.valueSteps(init, this.classBinding(target)), declaration.declarationKind);
     }
+  }
+
+  protected declareClass(cls: ClassNode): void {
+    const binding = this.runtime.frame.scope.lookup(cls.name);
+    this.writeVariable(cls.name, this.evaluateClass(cls, undefined, binding), 'initialize');
+  }
+
+  protected classBinding(target: Pattern): Binding | undefined {
+    return target.kind === 'identifier' ? this.runtime.frame.scope.lookup(target.name) : undefined;
   }
 
   /** Initializes the variables a declaration declares, recording the value of a `using` one for disposal. */
