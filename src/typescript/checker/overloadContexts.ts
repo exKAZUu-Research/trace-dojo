@@ -6,13 +6,23 @@ import { isContextSensitiveFunction } from './signatures';
 import { named } from './syntax';
 import type { Type } from './types';
 
+interface Callbacks {
+  nodes: ReadonlySet<number>;
+  mayDefer: boolean;
+}
+
 interface Contexts {
   id: number;
   types: Map<number, Type>;
+  includesDeferred: boolean;
 }
 
-interface Preview extends Contexts {
+interface Preview {
+  id: number;
   callbacks: ReadonlySet<number>;
+  staged: Map<number, Type>;
+  frame: Contexts;
+  eager: boolean;
 }
 
 const functionKinds = new Set(['arrow_function', 'function_expression', 'method_definition']);
@@ -24,23 +34,28 @@ export class OverloadContexts {
 
   constructor(private readonly c: Checker) {}
 
-  callbacksOf(args: TreeNode[]): Set<number> {
-    const result = new Set<number>();
-    const pending = [...args];
+  callbacksOf(args: TreeNode[]): Callbacks {
+    const nodes = new Set<number>();
+    let mayDefer = false;
+    const pending = args.map((node) => ({ node, allowsDeferral: true }));
     while (pending.length > 0) {
       this.c.budget.spend();
-      const node = pending.pop() as TreeNode;
+      const { node, allowsDeferral } = pending.pop() as (typeof pending)[number];
       if (functionKinds.has(node.type)) {
-        if (isContextSensitiveFunction(node)) result.add(node.id);
+        if (isContextSensitiveFunction(node)) {
+          nodes.add(node.id);
+          mayDefer ||= allowsDeferral;
+        }
       } else {
-        for (const child of named(node)) pending.push(child);
+        for (const child of named(node))
+          pending.push({ node: child, allowsDeferral: allowsDeferral && triggersDeferral(node, child) });
       }
     }
-    return result;
+    return { nodes, mayDefer };
   }
 
   withCall<T>(run: () => T): T {
-    this.locked.push({ id: 0, types: new Map() });
+    this.locked.push({ id: 0, includesDeferred: false, types: new Map() });
     try {
       return run();
     } finally {
@@ -48,19 +63,36 @@ export class OverloadContexts {
     }
   }
 
-  capture(callbacks: ReadonlySet<number>, check: () => boolean): void {
+  capture(callbacks: Callbacks, check: () => boolean): void {
     const frame = this.locked.at(-1);
-    if (!frame || frame.types.size > 0) return;
+    if (!frame || frame.types.size === callbacks.nodes.size) return;
     const outer = this.preview;
-    const preview = { id: ++this.nextId, callbacks, types: new Map<number, Type>() };
+    const preview: Preview = {
+      id: ++this.nextId,
+      callbacks: callbacks.nodes,
+      staged: new Map(),
+      frame,
+      eager: frame.includesDeferred || !callbacks.mayDefer,
+    };
     this.preview = preview;
     try {
-      if (check() && preview.types.size > 0) {
-        frame.id = ++this.nextId;
-        frame.types = preview.types;
+      if (check()) {
+        frame.includesDeferred = true;
+        for (const [id, type] of preview.staged) this.lock(frame, id, type);
       }
     } finally {
       this.preview = outer;
+    }
+  }
+
+  eagerly<T>(check: () => T): T {
+    const preview = this.preview;
+    if (!preview || preview.eager) return check();
+    this.preview = { ...preview, id: ++this.nextId, eager: true };
+    try {
+      return check();
+    } finally {
+      this.preview = preview;
     }
   }
 
@@ -69,13 +101,48 @@ export class OverloadContexts {
   }
 
   previewType(node: TreeNode, contextual: Type | undefined): Type | undefined {
-    if (!contextual || !this.preview?.callbacks.has(node.id) || !contextualSignatureOf(this.c, contextual, node))
+    const preview = this.preview;
+    if (!contextual || !preview?.callbacks.has(node.id) || !contextualSignatureOf(this.c, contextual, node))
       return undefined;
-    this.preview.types.set(node.id, contextual);
+    if (preview.eager || preview.frame.types.has(node.id)) {
+      this.lock(preview.frame, node.id, contextual);
+      return undefined;
+    }
+    preview.staged.set(node.id, contextual);
     return contextual;
+  }
+
+  private lock(frame: Contexts, id: number, type: Type): void {
+    if (frame.types.has(id)) return;
+    frame.types.set(id, type);
+    frame.id = ++this.nextId;
   }
 
   get cacheKey(): string {
     return `${this.preview?.id ?? 0}/${this.locked.map(({ id }) => id).join(',')}`;
+  }
+}
+
+/** The expression forms that trigger TypeScript's initial SkipContextSensitive pass on a call. */
+function triggersDeferral(parent: TreeNode, child: TreeNode): boolean {
+  switch (parent.type) {
+    case 'array':
+    case 'object':
+    case 'parenthesized_expression': {
+      return true;
+    }
+    case 'pair': {
+      return parent.childForFieldName('value')?.id === child.id;
+    }
+    case 'ternary_expression': {
+      return parent.childForFieldName('condition')?.id !== child.id;
+    }
+    case 'binary_expression': {
+      const operator = parent.childForFieldName('operator')?.text;
+      return operator === '||' || operator === '??';
+    }
+    default: {
+      return false;
+    }
   }
 }

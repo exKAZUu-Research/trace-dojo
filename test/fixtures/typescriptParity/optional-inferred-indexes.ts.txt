@@ -1,0 +1,22 @@
+function count(source: { count?: number }): number {
+  const indexed: Record<string, number> = source;
+  return indexed.count;
+}
+
+function strings(source: { a?: string; b?: string }): string {
+  const indexed: Record<string, string> = source;
+  return indexed.a + indexed.b;
+}
+
+function pattern(source: { x?: number; x2?: number | undefined }): number {
+  const indexed: Record<`x${string}`, number> = source;
+  return indexed.x + indexed.x2;
+}
+
+const key = Symbol('key');
+function symbol(source: { [key]?: number }): number {
+  const indexed: Record<symbol, number> = source;
+  return indexed[key];
+}
+
+console.log(count({ count: 4 }), strings({ a: 'a', b: 'b' }), pattern({ x: 2, x2: 3 }), symbol({ [key]: 6 }));

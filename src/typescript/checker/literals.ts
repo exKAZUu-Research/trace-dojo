@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 610 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 611 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { spreadLength, tupleArgumentContexts } from './callArity';
@@ -404,9 +404,7 @@ export class LiteralChecker {
     if (member.type === 'spread_element') {
       this.c.flow.from(this.c.flow.current, () =>
         this.c.silently(() => {
-          for (const [name, property] of this.spreadProperties(
-            this.c.expressions.check(named(member)[0], literal.contextual)
-          ))
+          for (const [name, property] of this.spreadProperties(this.spreadOperand(member, literal.contextual)))
             literal.declarations.set(name, property);
         })
       );
@@ -663,9 +661,13 @@ export class LiteralChecker {
       properties.set(name, { ...existing, writeType: () => accessorType, readonly: false, getterOnly: false });
   }
 
+  private spreadOperand(member: TreeNode, contextual: Type | undefined): Type {
+    // TypeScript resets SkipContextSensitive at object spread operands.
+    return this.c.overloadContexts.eagerly(() => this.c.expressions.check(named(member)[0], contextual));
+  }
+
   private spreadMember(literal: ObjectLiteral, member: TreeNode): void {
-    const operand = named(member)[0];
-    const spread = this.c.expressions.check(operand, literal.contextual);
+    const spread = this.spreadOperand(member, literal.contextual);
     const objectPart = filterType(spread, (type) => !isDefinitelyFalsy(type));
     const members = objectPart.kind === 'union' ? objectPart.types : [objectPart];
     const isValid = this.c.patterns.isValidSpreadType(spread);

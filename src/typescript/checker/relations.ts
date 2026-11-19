@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 724 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 728 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -818,10 +818,15 @@ export class Relations {
     for (const property of structure.properties.values()) {
       if (!isPropertyKeyOf(this.c, property, keyType)) continue;
       if (property.isMethod && source.kind === 'object' && source.objectKind !== 'anonymous') continue;
-      const type = property.optional ? unionOf([property.type(), undefinedType]) : property.type();
-      if (!this.isRelated(type, target, relation)) return false;
+      if (!this.isRelated(this.inferredIndexMemberType(property, keyType), target, relation)) return false;
     }
     return true;
+  }
+
+  private inferredIndexMemberType(property: Property, keyType: Type): Type {
+    const type = property.type();
+    if (!property.optional || isIntrinsic(type, 'undefined')) return type;
+    return keyType === numberType ? unionOf([type, undefinedType]) : this.removeUndefined(type);
   }
 
   /**

@@ -48,3 +48,11 @@ function spreadCallback(value: { run: (text: string) => void }): void {
 }
 spreadCallback({ ...{ run: (x) => console.log(x.toUpperCase()) } });
 spreadCallback(true && { run: (x) => console.log(x.toUpperCase()) });
+
+function tagged(value: { kind: 'text'; run: (x: string) => void }): void;
+function tagged(value: { kind: 'number'; run: (x: number, y: number) => void }): void;
+function tagged(value: any) { value.run(2, 3); }
+tagged({ kind: 'number', run: (x = 1, y: number) => console.log(x + y) });
+tagged(true
+  ? { kind: 'number', run: (x = 1, y: number) => console.log(x + y) }
+  : { kind: 'number', run: (x = 1, y: number) => console.log(x + y) });

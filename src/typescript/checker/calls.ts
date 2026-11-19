@@ -465,20 +465,20 @@ export class Calls {
     }
     const instantiate = (candidate: Signature): Signature =>
       this.instantiateFor(candidate, args, typeArguments, contextual, receiver);
-    const callbacks = candidates.length > 1 ? this.c.overloadContexts.callbacksOf(args) : new Set<number>();
+    const callbacks = candidates.length > 1 ? this.c.overloadContexts.callbacksOf(args) : undefined;
     const choose = (): Resolution => {
       for (const candidate of candidates) {
         if (!this.arity.arityMatches(candidate, args)) continue;
         const instantiated = this.c.silently(() => instantiate(candidate));
         if (!this.arity.instanceArityMatches(instantiated, candidate, args)) continue;
-        if (callbacks.size > 0)
+        if (callbacks?.nodes.size)
           this.c.overloadContexts.capture(callbacks, () => this.previewArguments(instantiated, args));
         if (this.c.silently(() => this.argumentsMatch(instantiated, args)))
           return this.finishOverload(node, candidate, args, { typeArguments, contextual, receiver });
       }
       return this.reportUnresolved(node, callee, candidates, args, instantiate);
     };
-    return callbacks.size > 0 ? this.c.overloadContexts.withCall(choose) : choose();
+    return callbacks?.nodes.size ? this.c.overloadContexts.withCall(choose) : choose();
   }
 
   private finishOverload(

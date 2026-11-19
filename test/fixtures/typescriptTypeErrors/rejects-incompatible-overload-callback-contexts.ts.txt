@@ -41,3 +41,15 @@ tupleCall([(x = 1, y: number) => console.log(x + y)]);
 objectCall(true && { run: (x = 1, y: number) => console.log(x + y) });
 objectCall({ ...{ run: (x = 1, y: number) => console.log(x + y) } });
 objectCall(({ ...{ ...{ run: (x = 1, y: number) => console.log(x + y) } } }));
+
+function tagged(value: { kind: 'text'; run: (x: string) => void }): void;
+function tagged(value: { kind: 'number'; run: (x: number, y: number) => void }): void;
+function tagged(value: any) { value.run(2, 3); }
+tagged({ kind: 'number', ...{ run: (x = 1, y: number) => console.log(x + y) } });
+tagged({ ...{ run: (x = 1, y: number) => console.log(x + y) }, kind: 'number' });
+tagged(true && { kind: 'number', run: (x = 1, y: number) => console.log(x + y) });
+
+function mixed(value: { kind: 'text'; run: (x: string) => void; note: (x: string) => void }): void;
+function mixed(value: { kind: 'number'; run: (x: number, y: number) => void; note: (x: number) => void }): void;
+function mixed(value: any) { value.run(2, 3); }
+mixed({ kind: 'number', note: (value = 1) => console.log(value), ...{ run: (x = 1, y: number) => console.log(x + y) } });
