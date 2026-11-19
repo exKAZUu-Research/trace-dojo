@@ -3,7 +3,7 @@ import { makeEach } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import { Ptr, UNINIT, type Value } from '../values';
 import type { SequenceValue } from './containerValues';
-import type { ElementOperations } from './elements';
+import { type ElementOperations, moveConstructElement } from './elements';
 
 /** The values a range insertion or assignment takes, which may have another type than the elements. */
 export interface Source {
@@ -224,7 +224,7 @@ export class SequenceEditor {
   /** `__swap_out_circular_buffer(v, p)`: relocates the elements after `at`, then those before, around `made`. */
   reallocate(frame: Frame, self: SequenceValue, capacity: number, at = self.length, made: Value[] = []): void {
     const old = self.items;
-    const { copy, destroy, type } = this.ops;
+    const { destroy, type } = this.ops;
     if (type.kind !== 'class') {
       self.replaceAllocation([...old.slice(0, at), ...made, ...old.slice(at)], capacity);
       return;
@@ -236,7 +236,7 @@ export class SequenceEditor {
       back = makeEach(
         frame,
         old.length - at,
-        (index) => copy(frame, old[at + index]),
+        (index) => moveConstructElement(frame, this.ops, old[at + index]),
         () => destroy
       );
       for (const value of back) frame.pending.push(value);
@@ -245,7 +245,7 @@ export class SequenceEditor {
       const front = makeEach(
         frame,
         at,
-        (index) => copy(frame, old[index]),
+        (index) => moveConstructElement(frame, this.ops, old[index]),
         () => destroy
       );
       if (destroy) for (const item of old) destroy(frame, item);

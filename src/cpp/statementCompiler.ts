@@ -1,3 +1,4 @@
+import { promote } from '../c/types';
 import { isBaseAccessible } from './access';
 import { AUTO, hasAuto } from './compilerBase';
 import { permitsQualificationConversion } from './conversions';
@@ -12,6 +13,8 @@ import { isObjectCreation, onlyCalls } from './stepRules';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
   type GlobalInfo,
+  intMax,
+  intMin,
   isArithmetic,
   isConstType,
   isInteger,
@@ -91,7 +94,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   compileStatements(nodes: readonly Syntax[]): Exec {
-    const compiled = nodes.filter((node) => node.type !== 'comment').map((node) => this.compileStatement(node));
+    const compiled = nodes.map((node) => this.compileStatement(node));
     if (compiled.length === 1) return compiled[0];
     return (frame) => {
       for (const exec of compiled) {
@@ -421,8 +424,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (!value) return this.error(row, 'constexpr の変数には初期値を書いてください。');
     if (!isArithmetic(type)) return undefined;
     const isList = value.type === 'initializer_list';
-    const args =
-      isList || value.type === 'argument_list' ? value.children.filter((child) => child.type !== 'comment') : [value];
+    const args = isList || value.type === 'argument_list' ? value.children : [value];
     if (args.length === 0 && isList) return zeroOf(type) as number | bigint;
     const constant = args.length === 1 ? this.constantOf(this.compileExpression(args[0]), type) : undefined;
     if (constant === undefined) return this.error(row, 'constexpr の変数の初期値には定数式を書いてください。');
@@ -514,6 +516,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
     const member = isDirect ? target.temporaryMember : undefined;
     if (member) {
+      this.convert(target, type, row);
       return { type, lifetime: { type: member.object.type, make: member.object.run, locate: memberAt(member.path) } };
     }
     return {
@@ -885,7 +888,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   /** A temporary array holding the values of a braced list, for `for (int x : {1, 2, 3})`. */
   private braceArray(list: Syntax): Expr {
-    const values = list.children.filter((child) => child.type !== 'comment');
+    const values = list.children;
     if (values.length === 0) return this.error(list.row, '範囲 for 文の {} には値を書いてください。');
     const elementType = this.deduceAuto(AUTO, this.compileExpression(values[0]), list.row);
     for (const value of values.slice(1)) {
@@ -951,12 +954,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const subject = this.rvalue(this.compileExpression(valueNode));
     if (!isInteger(subject.type))
       return this.error(node.row, `switch 文の () には整数を書いてください（${typeName(subject.type)}）。`);
-    const promoted = this.arithmetic(
-      '+',
-      subject,
-      { type: { kind: 'int', name: 'int' }, isLvalue: false, row: node.row, run: () => 0, constant: 0 },
-      node.row
-    ).type;
+    const promoted = promote(subject.type);
     const value = this.fullExpression(this.convert(subject, promoted, node.row).run);
     const body = fieldOf(node, 'body') as Syntax;
     return this.inScope(() => {
@@ -969,7 +967,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     });
   }
 
-  private compileSwitchBody(body: Syntax, promoted: Type, value: Eval<unknown>): Exec {
+  private compileSwitchBody(body: Syntax, promoted: Extract<Type, { kind: 'int' }>, value: Eval<unknown>): Exec {
     const labels = new Map<string, number>();
     let defaultIndex: number | undefined;
     const statements: Exec[] = [];
@@ -977,7 +975,6 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     let initializedBefore: Syntax | undefined;
     const compile = (nodes: readonly Syntax[]): void => {
       for (const node of nodes) {
-        if (node.type === 'comment') continue;
         if (node.type !== 'case_statement') {
           const execute = this.compileStatement(node);
           if (node.type === 'declaration' && !this.hasSpecifier(node, 'static')) {
@@ -995,9 +992,13 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         }
         const caseValue = fieldOf(node, 'value');
         if (caseValue) {
-          const label = this.convert(this.compileExpression(caseValue), promoted, node.row);
-          if (label.constant === undefined) this.error(node.row, 'case の値には定数を書いてください。');
-          const key = String(label.constant);
+          const label = this.compileExpression(caseValue);
+          if (!isInteger(label.type) || label.constant === undefined)
+            this.error(node.row, 'case の値には整数の定数を書いてください。');
+          const integer = BigInt(label.constant);
+          if (integer < intMin(promoted.name) || integer > intMax(promoted.name))
+            this.error(node.row, `case の値が ${typeName(promoted)} 型の範囲を超えています。`);
+          const key = String(integer);
           if (labels.has(key)) this.error(node.row, `case ${caseValue.text} が重複しています。`);
           labels.set(key, statements.length);
         } else {
@@ -1133,7 +1134,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   } {
     const parameters = fieldOf(clause, 'parameters') as Syntax;
     const bodyNode = fieldOf(clause, 'body') as Syntax;
-    const declarations = parameters.children.filter((child) => child.type !== 'comment');
+    const declarations = parameters.children;
     if (catchesAll(clause)) {
       const body = this.compileBlock(bodyNode);
       return { matches: () => true, run: (frame) => body(frame) };
@@ -1236,7 +1237,7 @@ export function deducedType(pattern: Type, type: Type): Type {
 
 function catchesAll(clause: Syntax): boolean {
   const parameters = fieldOf(clause, 'parameters');
-  const tokens = parameters?.all.filter((parameter) => !['(', ')', 'comment'].includes(parameter.type));
+  const tokens = parameters?.all.filter((parameter) => !['(', ')'].includes(parameter.type));
   return tokens?.length === 1 && ['...', 'variadic_parameter'].includes(tokens[0].type);
 }
 

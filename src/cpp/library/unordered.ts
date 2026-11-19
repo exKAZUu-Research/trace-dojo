@@ -596,6 +596,7 @@ export function unorderedClass(
     args,
     size: 40,
     align: 8,
+    listElementType: unqualified(entryType),
     listInitializer: (compiler_, elements) => {
       const inits = elements.map((node) => compiler_.elementInitializer(unqualified(entryType), node));
       return (frame) => {

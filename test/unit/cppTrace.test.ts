@@ -301,6 +301,16 @@ test.each(['std::isalpha(-2)', 'std::toupper(256)'])('C character functions chec
   });
 });
 
+test('a downcast checks the runtime class of the pointed-to object', () => {
+  const program = `struct Base { int x = 1; };
+struct Derived : Base { int y = 2; };
+int main() { Base value; Derived* p = static_cast<Derived*>(&value); return p->y; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('Derived'),
+  });
+});
+
 test.each([
   ['std::set<int> a{1, 2}, b{3, 4}; a.erase(a.begin(), b.end());', 'イテレータ'],
   ['std::map<int, int> a{{1, 2}}, b{{3, 4}}; a.erase(b.begin(), b.end());', 'イテレータ'],

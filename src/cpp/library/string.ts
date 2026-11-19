@@ -234,6 +234,7 @@ export function stringClass(library: Library): ClassInfo {
     align: 8,
     operator: (compiler, operator, operands, row) => stringOperator(compiler, library, cls, operator, operands, row),
     listInitializer: (compiler, elements, row) => charList(compiler, elements, row),
+    listElementType: CHAR,
   };
   const substring = (frame: Frame, bytes: string, start: unknown, count: unknown): string => {
     const begin = position(start, 0n);
@@ -758,7 +759,7 @@ function iteratorIndex(s: StringValue, iterator: unknown): number {
  * `std::string s = {'a', 'b'}`, whose `initializer_list<char>` constructor wins whenever every element is arithmetic, so
  * `std::string{66}` holds "B" and a narrowing element is an error; other lists use the other constructors.
  */
-function charList(compiler: ExpressionCompiler, elements: Syntax[], row: number): Initializer | undefined {
+function charList(compiler: ExpressionCompiler, elements: readonly Syntax[], row: number): Initializer | undefined {
   if (elements.length === 0 || elements.some((element) => element.type === 'initializer_list')) return undefined;
   const values = elements.map((element) => compiler.rvalue(compiler.compileExpression(element)));
   if (!values.every((value) => isArithmetic(value.type))) return undefined;

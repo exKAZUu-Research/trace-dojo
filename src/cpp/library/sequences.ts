@@ -18,6 +18,7 @@ import {
   isInteger,
   pointerTo,
   referenceTo,
+  sameType,
   SIZE_T,
   sizeOf,
   type Type,
@@ -69,6 +70,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   if (cached) return cached;
   if (element.kind === 'reference') library.compiler.error(0, `${name} の要素を参照にはできません。`);
   if (element.kind === 'void') library.compiler.error(0, `${name} の要素を void にはできません。`);
+  if (kind !== 'array' && isConstType(element)) library.compiler.error(0, `${name} の要素を const 型にはできません。`);
   const cls = new ClassInfo(name, 'class');
   cls.isComplete = true;
   cls.isAssignmentDeleted = kind === 'array' && fixedLength !== 0 && !allowsMemberAssignment(element);
@@ -140,6 +142,7 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
       fixedLength === undefined
         ? (compiler, elements, row) => sequenceList(compiler, element, elements, row, make, editor)
         : undefined,
+    listElementType: fixedLength === undefined ? element : undefined,
     defaultInitializer: kind === 'array' ? arrayDefault : undefined,
     memberCall: (compiler, object, member, args, row) => {
       checkElementRequirement(compiler, { kind, element, ops }, member, args, row);
@@ -295,7 +298,7 @@ export function iteratorRange(
     arg.type.kind === 'array' ? pointerTo(arg.type.of) : unqualified(arg.type)
   );
   const [from, to] = params.map((type) => iteratorElement(type));
-  if (!from || !to || typeName(params[0]).replace('const_', '') !== typeName(params[1]).replace('const_', '')) return;
+  if (!from || !to || !sameType(params[0], params[1])) return;
   const type = params[0];
   const isReverse = type.kind === 'class' && type.cls.library?.isReverse === true;
   const target = unqualified(element);
@@ -651,7 +654,7 @@ export function initializerList(
 ): (frame: Frame, use: (source: Source) => void) => void {
   requireElementUse(compiler, element, list.row, 'copy');
   return listElementsOf(
-    list.children.filter((node) => node.type !== 'comment').map((node) => compiler.elementInitializer(element, node)),
+    list.children.map((node) => compiler.elementInitializer(element, node)),
     ops
   );
 }
@@ -962,7 +965,7 @@ function compareSequences(operator: string, a: Value[], b: Value[], element: Typ
 function sequenceList(
   compiler: ExpressionCompiler,
   element: Type,
-  elements: Syntax[],
+  elements: readonly Syntax[],
   row: number,
   make: (items: Value[]) => SequenceValue,
   editor: SequenceEditor

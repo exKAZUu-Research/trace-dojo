@@ -70,6 +70,25 @@ export function assignElement(frame: Frame, location: Ptr, operations: ElementOp
   location.write(operations.assign(frame, location.readRaw(), value));
 }
 
+export function moveConstructElement(frame: Frame, operations: ElementOperations, source: Value): Value {
+  if (source instanceof StringValue) {
+    const target = new StringValue('');
+    target.moveFrom(source);
+    return target;
+  }
+  if (source instanceof SequenceValue && ownsMovableSequence(operations.type)) return source.moveStorage();
+  return operations.copy(frame, source);
+}
+
+export function canTransferElementStorage(type: Type): boolean {
+  return (type.kind === 'class' && type.cls.library?.kind === 'string') || ownsMovableSequence(type);
+}
+
+function ownsMovableSequence(type: Type): boolean {
+  const kind = type.kind === 'class' ? type.cls.library?.kind : undefined;
+  return kind === 'vector' || kind === 'deque' || kind === 'list';
+}
+
 /** The element operations of a type, which the compiler makes while the class it uses is complete. */
 export function elementOperations(
   compiler: ExpressionCompiler,
@@ -139,13 +158,11 @@ export function moveValue(frame: Frame, type: Type, target: Value, source: Value
   }
   if (type.kind !== 'class') return source;
   const { cls } = type;
-  const kind = cls.library?.kind;
   if (target instanceof StringValue && source instanceof StringValue) {
     target.moveFrom(source);
-  } else if ((kind === 'vector' || kind === 'deque' || kind === 'list') && target instanceof SequenceValue) {
-    const from = source as SequenceValue;
+  } else if (target instanceof SequenceValue && source instanceof SequenceValue && ownsMovableSequence(type)) {
     cls.operations?.destroy?.(frame, target);
-    target.takeItems(from);
+    target.takeItems(source);
   } else if (!cls.library && !declaresCopyOrDestructor(cls)) {
     const to = target as CObject;
     const from = source as CObject;

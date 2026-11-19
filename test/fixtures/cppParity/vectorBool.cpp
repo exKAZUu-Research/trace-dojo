@@ -1,9 +1,14 @@
 #include <algorithm>
 #include <iostream>
+#include <string>
 #include <vector>
+
+char select(bool) { return 'b'; }
+char select(int) { return 'i'; }
 
 int main() {
   std::vector<bool> values{true, true, false};
+  std::cout << std::to_string(values[0]) << select(values[0]) << '\n';
   std::vector<bool>::reference first = values[0];
   first = false;
   auto second = values.begin()[1];

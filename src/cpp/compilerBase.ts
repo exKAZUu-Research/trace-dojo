@@ -327,7 +327,7 @@ export abstract class CompilerBase {
 
   protected instantiateTemplate(template: LibraryTemplate, list: Syntax, row: number): Type {
     if (!template.takesArrayBound) return template.instantiate(this.templateArguments(list), row);
-    const args = list.children.filter((arg) => arg.type !== 'comment');
+    const args = list.children;
     if (args.length !== 2) return this.error(row, `std::${template.name} のテンプレート引数は 2 個です。`);
     const [element, bound] = args;
     const expression =
@@ -336,7 +336,7 @@ export abstract class CompilerBase {
   }
 
   protected templateArguments(list: Syntax): Type[] {
-    return list.children.filter((arg) => arg.type !== 'comment').map((argument) => this.templateTypeArgument(argument));
+    return list.children.map((argument) => this.templateTypeArgument(argument));
   }
 
   private templateTypeArgument(argument: Syntax): Type {

@@ -475,6 +475,42 @@ test.each([
     'class X { ~X() {} public: X() {} };\nvoid f(X) {}\nint main() { f(X()); }',
     2,
   ],
+  [
+    'different iterator types in a single deduced range',
+    '#include <algorithm>\n#include <vector>\nint main() { std::vector<int> v{1, 2}; std::sort(v.begin(), v.cend()); }',
+    2,
+  ],
+  [
+    'different iterator types in a sequence range constructor',
+    '#include <vector>\nint main() { std::vector<int> v{1, 2}; std::vector<int> w(v.begin(), v.cend()); }',
+    1,
+  ],
+  [
+    'a static_cast to an inaccessible base',
+    'struct Base {}; struct Derived : private Base {};\nint main() { Derived value; auto p = static_cast<Base*>(&value); }',
+    1,
+  ],
+  [
+    'comparing class pointers through an inaccessible base',
+    'struct Base {}; struct Derived : private Base {};\nint main() { Derived value; Base* p = nullptr; return p == &value; }',
+    1,
+  ],
+  ['a constructor delegation cycle', 'struct X { X() : X(1) {}\n X(int) : X() {} };', 1],
+  [
+    'adding const in a covariant virtual return',
+    'struct Base { virtual Base* get(); };\nstruct Derived : Base { const Derived* get() override; };',
+    1,
+  ],
+  ['incrementing void pointers', 'int main() { void* p = nullptr; ++p; }', 0],
+  [
+    'two implicit class conversion directions in a conditional expression',
+    'struct B; struct A { A() {} A(const B&) {} };\nstruct B { B() {} B(const A&) {} };\nint main() { auto value = true ? A() : B(); }',
+    2,
+  ],
+  ['a floating-point case label', 'int main() { switch (1) { case 1.5: return 0; } }', 0],
+  ['an out-of-range case label', 'int main() { switch (1) { case 4294967295ULL: return 0; } }', 0],
+  ['a non-const reference to a temporary member', 'struct X { int n = 1; };\nint main() { int& r = X{}.n; }', 1],
+  ['NULL without a declaring header', 'int main() { int* p = NULL; }', 0],
 ])('the interpreter rejects %s', (_, program, row) => {
   const execution = executeProgram('cpp', program.includes('int main') ? program : `${program}\nint main() {}`);
   expect(execution).toMatchObject({ kind: 'compileError', diagnostics: [{ row }] });

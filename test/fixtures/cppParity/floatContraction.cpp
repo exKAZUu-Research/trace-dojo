@@ -5,6 +5,7 @@
 #include <random>
 double A = 0.1, B = 10.0, C = 1.0, D = 0.3, E = 3.0;
 const double K = 0.1 * 10.0 - 1.0;
+double printed(char name, double value) { std::cout << name; return value; }
 int main() {
   double a = A, b = B, c = C, d = D, e = E;
   printf("%a sep\n", a * b - c);
@@ -29,4 +30,5 @@ int main() {
   double sum = 0;
   for (int k = 0; k < 500; k++) { double u = dd(g); float v = df(g); sum += u + v; if (k % 100 == 0) std::cout << u << " " << v << "\n"; }
   std::cout << sum << "\n";
+  std::cout << (printed('a', 1) + printed('b', 2) * printed('c', 3)) << '\n';
 }

@@ -32,6 +32,7 @@ import { Box, CObject, endLifetime, Ptr, type Store, type Value } from '../value
 import { pairClass } from './associative';
 import {
   assignElement,
+  canTransferElementStorage,
   comparatorOf,
   type ElementOperations,
   elementOperations,
@@ -39,6 +40,7 @@ import {
   functionCallback,
   lessThan,
   locationOf,
+  moveConstructElement,
   moveValue,
   requireElementUse,
   swapElements,
@@ -92,7 +94,7 @@ class Range {
     readonly first: Ptr,
     last: Ptr,
     readonly isReverse: boolean,
-    private readonly write?: { frame: Frame; ops: ElementOperations }
+    private readonly write?: { frame: Frame; ops: ElementOperations; move: boolean }
   ) {
     const store = first.target();
     if (!first.sharesRange(last)) throw new CppRuntimeError('invalidRange');
@@ -115,15 +117,21 @@ class Range {
   }
 
   set(position: number, value: Value): void {
-    if (this.write) assignElement(this.write.frame, this.location(position), this.write.ops, value);
-    else this.store.set(this.index(position), value);
+    if (!this.write) {
+      this.store.set(this.index(position), value);
+      return;
+    }
+    const { frame, ops, move } = this.write;
+    const location = this.location(position);
+    if (move) location.write(moveValue(frame, ops.type, location.readRaw(), value));
+    else assignElement(frame, location, ops, value);
   }
 
   take(position: number): Value {
     const value = this.get(position);
     if (!this.write) return value;
-    const { frame, ops } = this.write;
-    const object = ops.copy(frame, value);
+    const { frame, ops, move } = this.write;
+    const object = move ? moveConstructElement(frame, ops, value) : ops.copy(frame, value);
     if (ops.destroy) frame.temporaries.push({ object, destroy: ops.destroy });
     return object;
   }
@@ -284,7 +292,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         );
       const ops = elementOperations(compiler(), unqualified(info.element), args[0].row, 'relocate');
       return native(name, params(args), VOID, ([first, last], { frame }) => {
-        const values = mutableRange(first, last, info, frame, ops);
+        const values = mutableRange(first, last, info, frame, ops, canTransferElementStorage(ops.type));
         frame.runtime.spend(values.length);
         if (name === 'sort') introsort(values, less(frame));
         else stableSort(values, less(frame));
@@ -1010,8 +1018,7 @@ const rangeAt = (args: Expr[], index: number): IteratorInfo | undefined => {
   if (!a || !b) return undefined;
   const info = iteratorInfo(decayed(a.type));
   if (!info || info.isOutput) return undefined;
-  if (typeName(decayed(a.type)).replace('const_', '') !== typeName(decayed(b.type)).replace('const_', ''))
-    return undefined;
+  if (!sameType(decayed(a.type), decayed(b.type))) return undefined;
   return info;
 };
 
@@ -1038,8 +1045,15 @@ function rangeWithLength(begin: unknown, length: number, info: IteratorInfo): Ra
   return range(first, first.offset(info.isReverse ? -length : length), info);
 }
 
-function mutableRange(first: unknown, last: unknown, info: IteratorInfo, frame: Frame, ops: ElementOperations): Range {
-  const write = info.element.kind === 'class' ? { frame, ops } : undefined;
+function mutableRange(
+  first: unknown,
+  last: unknown,
+  info: IteratorInfo,
+  frame: Frame,
+  ops: ElementOperations,
+  move = false
+): Range {
+  const write = info.element.kind === 'class' ? { frame, ops, move } : undefined;
   return new Range(first as Ptr, last as Ptr, info.isReverse, write);
 }
 

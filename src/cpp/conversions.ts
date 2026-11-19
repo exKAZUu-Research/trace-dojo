@@ -38,6 +38,8 @@ export interface ConversionSequence {
   reference?: { toConst: boolean };
   /** The converting constructor of a user-defined conversion. */
   user?: FunctionInfo;
+  scalarSource?: ClassInfo;
+  trailingStandard?: ConversionSequence;
   apply: (expr: Expr) => Expr;
 }
 
@@ -92,7 +94,11 @@ export function implicitConversion(
   if (allowUser && expr.type.kind === 'class' && expr.type.cls.library?.scalarValue) {
     const scalar = scalarValue(host, expr);
     const conversion = standardConversion(host, scalar, to);
-    if (conversion) return sequence(Rank.UserDefined, (e) => conversion.apply(scalarValue(host, e)));
+    if (conversion)
+      return sequence(Rank.UserDefined, (e) => conversion.apply(scalarValue(host, e)), {
+        scalarSource: expr.type.cls,
+        trailingStandard: conversion,
+      });
   }
   return standardConversion(host, expr, to);
 }
@@ -112,6 +118,7 @@ function referenceBinding(
   allowUser: boolean
 ): ConversionSequence | undefined {
   const toConst = isConstType(target);
+  if (!toConst && expr.temporaryMember) return undefined;
   const from = expr.type;
   if (expr.isLvalue && (toConst || !isConstType(from))) {
     if (
@@ -316,7 +323,10 @@ function baseDistance(from: Type, to: Type): number {
 export function compareSequences(a: ConversionSequence, b: ConversionSequence): number {
   if (a.isInitializerList !== b.isInitializerList) return a.isInitializerList ? 1 : -1;
   if (a.rank !== b.rank) return b.rank - a.rank;
-  if (a.rank === Rank.UserDefined) return 0;
+  if (a.rank === Rank.UserDefined)
+    return a.scalarSource === b.scalarSource && a.trailingStandard && b.trailingStandard
+      ? compareSequences(a.trailingStandard, b.trailingStandard)
+      : 0;
   if (a.isBoolean !== b.isBoolean) return a.isBoolean ? -1 : 1;
   if (a.baseDistance > 0 && b.convertsToVoidPointer) return 1;
   if (b.baseDistance > 0 && a.convertsToVoidPointer) return -1;

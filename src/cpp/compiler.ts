@@ -2,9 +2,10 @@ import { CRuntimeError } from '../c/errors';
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionLimitError } from '../interpreter/limits';
 import { misplacedAtomicMessage, type TraceOptions } from '../interpreter/traceAnnotations';
-import { isMemberAccessible } from './access';
+import { isBaseAccessible, isMemberAccessible } from './access';
 import { byteAt } from './bytes';
 import { hasAuto } from './compilerBase';
+import { implicitConversion } from './conversions';
 import { CppException, CppRuntimeError, NarrowingConversionError } from './errors';
 import {
   type Expr,
@@ -93,6 +94,7 @@ export class Compiler extends StatementCompiler {
   private readonly usedStaticMembers = new Map<GlobalInfo, number>();
   private readonly aggregateDefaults = new WeakMap<FieldInfo, () => Initializer>();
   private readonly implicitDefaults = new WeakMap<ClassInfo, () => FunctionInfo | undefined>();
+  private readonly delegatedConstructors = new WeakMap<FunctionInfo, FunctionInfo>();
   private defaultDependencies?: { functions: Map<FunctionInfo, number>; staticMembers: Map<GlobalInfo, number> };
 
   constructor(library: Library, options: CompileOptions = {}) {
@@ -164,9 +166,6 @@ export class Compiler extends StatementCompiler {
   // code-gauge-allow functionNcss 40 -- One case per kind of declaration at file scope.
   private topLevel(node: Syntax): void {
     switch (node.type) {
-      case 'comment': {
-        return;
-      }
       case 'preproc_include': {
         this.library.include(fieldOf(node, 'path')?.text.slice(1, -1).trim() ?? '');
         return;
@@ -258,9 +257,6 @@ export class Compiler extends StatementCompiler {
             access = member.text as Access;
             break;
           }
-          case 'comment': {
-            break;
-          }
           case 'field_declaration': {
             this.memberDeclaration(cls, member, access);
             break;
@@ -293,7 +289,7 @@ export class Compiler extends StatementCompiler {
       for (const methods of cls.methods.values()) {
         for (const fn of methods) this.bindDefaultArguments(fn);
       }
-      if (!cls.base && this.isAggregate(cls)) {
+      if (this.isAggregate(cls)) {
         for (const field of cls.ownFields) {
           if (field.initializer) {
             const bound = this.bindDependencies(() => this.bindAggregateDefault(field, field.row));
@@ -459,7 +455,8 @@ export class Compiler extends StatementCompiler {
     fn.isDestructor = isDestructor;
     if (isDestructor) fn.isNoexcept = true;
     fn.isStatic = this.hasSpecifier(node, 'static');
-    fn.isVirtual = hasToken(node, 'virtual');
+    const inheritedVirtual = !isConstructor && cls.base?.virtuals.has(isDestructor ? '~' : virtualKey(fn));
+    fn.isVirtual = hasToken(node, 'virtual') || inheritedVirtual === true;
     fn.isInline = isDefinition || this.hasSpecifier(node, 'inline');
     if ((isConstructor || isDestructor) && fn.isStatic)
       this.error(node.row, 'コンストラクタとデストラクタは static にできません。');
@@ -563,7 +560,7 @@ export class Compiler extends StatementCompiler {
   private parameters(list: Syntax): ParamInfo[] {
     const params: ParamInfo[] = [];
     let seenDefault = false;
-    const declarations = list.children.filter((param) => param.type !== 'comment');
+    const declarations = list.children;
     for (const param of declarations) {
       if (param.type === 'variadic_parameter') return this.unsupported(param.row, '可変長引数（...）');
       const base = this.specifiedType(param, true);
@@ -720,7 +717,7 @@ export class Compiler extends StatementCompiler {
   }
 
   private checkOverrider(fn: FunctionInfo, overridden: FunctionInfo): void {
-    if (!sameType(unqualified(overridden.ret), unqualified(fn.ret)) && !covariant(overridden.ret, fn.ret)) {
+    if (!sameType(unqualified(overridden.ret), unqualified(fn.ret)) && !covariant(overridden.ret, fn.ret, fn.owner)) {
       this.error(fn.row, `${fn.displayName} の戻り値の型が、上書きする ${overridden.displayName} と違います。`);
     }
     if (overridden.isFinal) this.error(fn.row, `${overridden.displayName} は final なので上書きできません。`);
@@ -821,7 +818,7 @@ export class Compiler extends StatementCompiler {
       if (list && list.children.filter((child) => child.type === 'field_initializer').length > 1) {
         this.error(delegate.row, '他のコンストラクタに任せるときは、ほかのメンバの初期化を書けません。');
       }
-      return this.delegation(cls, delegate);
+      return this.delegation(cls, fn, delegate);
     }
     const parts: Exec[] = [];
     const base = cls.base;
@@ -879,7 +876,7 @@ export class Compiler extends StatementCompiler {
     return entity?.kind === 'type' && entity.type.kind === 'class' && entity.type.cls === cls;
   }
 
-  private delegation(cls: ClassInfo, initializer: Syntax): Exec {
+  private delegation(cls: ClassInfo, from: FunctionInfo, initializer: Syntax): Exec {
     const args = this.initializerArguments(initializer);
     const resolved = this.resolveConstructor(
       cls,
@@ -887,6 +884,10 @@ export class Compiler extends StatementCompiler {
       initializer.row,
       initializer.children[1]?.type === 'initializer_list'
     );
+    for (let target: FunctionInfo | undefined = resolved.fn; target; target = this.delegatedConstructors.get(target)) {
+      if (target === from) this.error(initializer.row, `${cls.name} のコンストラクタの委譲が循環しています。`);
+    }
+    this.delegatedConstructors.set(from, resolved.fn);
     this.checkDefined(resolved.fn, initializer.row);
     const runs = this.callArguments(resolved.fn, this.convertArguments(resolved, args), initializer.row);
     const { row } = initializer;
@@ -900,7 +901,7 @@ export class Compiler extends StatementCompiler {
 
   private initializerArguments(initializer: Syntax): Expr[] {
     const argumentsNode = initializer.children[1];
-    return (argumentsNode?.children ?? []).filter((arg) => arg.type !== 'comment').map((arg) => this.argument(arg));
+    return (argumentsNode?.children ?? []).map((arg) => this.argument(arg));
   }
 
   private baseInitialization(cls: ClassInfo, base: ClassInfo, initializer: Syntax | undefined): Exec {
@@ -1700,12 +1701,13 @@ export class Compiler extends StatementCompiler {
     // Unlike C, C++ needs room for the terminating null character (C++20 [dcl.init.string]).
     if (bytes.length + 1 > length)
       this.error(row, `文字列リテラル（${bytes.length + 1} バイト）が、配列（${length} 要素）に収まりません。`);
+    const signed = type.of.kind === 'int' && type.of.name !== 'uchar';
     return (frame, target) => {
       if (!target) frame.runtime.reserve(length);
       const storage = arrayStorage(target) ?? new ArrayStore([]);
       for (let index = 0; index < length; index++) {
         const byte = index < bytes.length ? byteAt(bytes, index) : 0;
-        storage.values[index] = byte >= 128 ? byte - 256 : byte;
+        storage.values[index] = signed && byte >= 128 ? byte - 256 : byte;
       }
       return storage;
     };
@@ -1800,14 +1802,10 @@ export class Compiler extends StatementCompiler {
   }
 
   listInitializer(type: Type, list: Syntax, row: number): Initializer {
-    return this.initializeList(
-      type,
-      list.children.filter((child) => child.type !== 'comment'),
-      row
-    );
+    return this.initializeList(type, list.children, row);
   }
 
-  protected initializeList(type: Type, elements: Syntax[], row: number): Initializer {
+  protected initializeList(type: Type, elements: readonly Syntax[], row: number): Initializer {
     if (type.kind === 'reference') return this.error(row, '参照は {...} で初期化できません。');
     if (type.kind === 'array') return this.arrayInitializer(type, elements, row);
     if (type.kind === 'class') return this.initializeClassList(type, elements, row);
@@ -1824,20 +1822,19 @@ export class Compiler extends StatementCompiler {
     return this.copyInitializer(type, this.compileExpression(elements[0]), row, true);
   }
 
-  private initializeClassList(type: Extract<Type, { kind: 'class' }>, elements: Syntax[], row: number): Initializer {
+  private initializeClassList(
+    type: Extract<Type, { kind: 'class' }>,
+    elements: readonly Syntax[],
+    row: number
+  ): Initializer {
     const library = type.cls.library;
     const isAggregate = this.isAggregate(type.cls);
-    const [single, ...extra] = elements;
-    if (
-      (isAggregate || library?.aggregateArray) &&
-      single &&
-      extra.length === 0 &&
-      single.type !== 'initializer_list'
-    ) {
-      const value = this.compileExpression(single);
-      if (value.type.kind === 'class' && value.type.cls.isDerivedFrom(type.cls))
-        return this.copyInitializer(type, value, row, false);
-    }
+    const single =
+      elements.length === 1 && elements[0].type !== 'initializer_list'
+        ? this.compileExpression(elements[0])
+        : undefined;
+    const copy = single?.type.kind === 'class' && single.type.cls.isDerivedFrom(type.cls) ? single : undefined;
+    if (copy && (isAggregate || library?.aggregateArray)) return this.copyInitializer(type, copy, row, false);
     if (library?.aggregateArray) {
       const clauses: Clauses = { nodes: elements, next: 0, compiled: new Map() };
       const run = this.takeLibraryArrayClauses(library.aggregateArray, clauses, row)();
@@ -1845,13 +1842,17 @@ export class Compiler extends StatementCompiler {
         return this.error(row, `${type.cls.name} を初期化する {...} の値が多すぎます。`);
       return run;
     }
-    if (library?.listInitializer) {
+    if (
+      library?.listInitializer &&
+      (!copy || (library.listElementType && implicitConversion(this, copy, library.listElementType)))
+    ) {
       const run = library.listInitializer(this, elements, row);
       if (run) return run;
     }
+    if (copy && library) return this.copyInitializer(type, copy, row, false);
     if (isAggregate) return this.aggregateInitializer(type.cls, elements, row);
     if (elements.length === 0) return this.objectInitializer(this.defaultConstructed(type.cls, row, true));
-    const args = elements.map((element) => this.argument(element));
+    const args = single ? [single] : elements.map((element) => this.argument(element));
     const resolved = this.resolveConstructor(type.cls, args, row, true);
     return this.objectInitializer(this.constructWith(type.cls, resolved, args, row));
   }
@@ -1871,12 +1872,11 @@ export class Compiler extends StatementCompiler {
   /** Whether a class is an aggregate, which braces initialize member by member (C++20 [dcl.init.aggr]). */
   private isAggregate(cls: ClassInfo): boolean {
     if (cls.library || cls.constructors.length > 0 || cls.isPolymorphic) return false;
-    if (cls.base && (cls.baseAccess !== 'public' || !this.isAggregate(cls.base))) return false;
-    if (cls.base) return this.unsupported(cls.row, '親クラスのある集成体の {...} による初期化');
+    if (cls.base && cls.baseAccess !== 'public') return false;
     return cls.ownFields.every((field) => field.access === 'public');
   }
 
-  private aggregateInitializer(cls: ClassInfo, elements: Syntax[], row: number): Initializer {
+  private aggregateInitializer(cls: ClassInfo, elements: readonly Syntax[], row: number): Initializer {
     const clauses: Clauses = { nodes: elements, next: 0, compiled: new Map() };
     const run = this.takeMemberClauses(cls, clauses, row)();
     if (clauses.next < elements.length) return this.error(row, `${cls.name} を初期化する {...} の値が多すぎます。`);
@@ -1885,10 +1885,10 @@ export class Compiler extends StatementCompiler {
 
   protected parenthesizedAggregate(cls: ClassInfo, args: Expr[], row: number): Expr | undefined {
     if (!this.isAggregate(cls)) return;
-    const fields = cls.ownFields;
-    if (args.length > fields.length) return this.error(row, `${cls.name} を初期化する値が多すぎます。`);
+    const types = this.aggregateElementTypes(cls);
+    if (args.length > types.length) return this.error(row, `${cls.name} を初期化する値が多すぎます。`);
     const initializers = args.map((arg, index) => {
-      const type = fields[index].type;
+      const type = types[index];
       if (arg.braced && type.kind === 'array') return this.listInitializer(type, arg.braced, arg.row);
       return this.copyInitializer(type, arg, row, false);
     });
@@ -1902,7 +1902,16 @@ export class Compiler extends StatementCompiler {
     };
   }
 
-  private arrayInitializer(type: Extract<Type, { kind: 'array' }>, elements: Syntax[], row: number): Initializer {
+  private aggregateElementTypes(cls: ClassInfo): Type[] {
+    const members = cls.ownFields.map((field) => field.type);
+    return cls.base ? [classType(cls.base), ...members] : members;
+  }
+
+  private arrayInitializer(
+    type: Extract<Type, { kind: 'array' }>,
+    elements: readonly Syntax[],
+    row: number
+  ): Initializer {
     const literal = this.bracedStringLiteral(type, elements);
     if (literal) return this.copyInitializer(type, literal, row, false);
     const clauses: Clauses = { nodes: elements, next: 0, compiled: new Map() };
@@ -1913,7 +1922,7 @@ export class Compiler extends StatementCompiler {
   }
 
   bracedArrayLength(type: Extract<Type, { kind: 'array' }>, list: Syntax): number {
-    const elements = list.children.filter((child) => child.type !== 'comment');
+    const elements = list.children;
     const literal = this.bracedStringLiteral(type, elements);
     if (literal) return (literal.literalBytes as string).length + 1;
     const clauses: Clauses = { nodes: elements, next: 0, compiled: new Map() };
@@ -1923,7 +1932,7 @@ export class Compiler extends StatementCompiler {
   }
 
   /** The string literal that initializes a character array in braces (`char s[4] = {"abc"}`, C++20 [dcl.init.string]). */
-  private bracedStringLiteral(type: Extract<Type, { kind: 'array' }>, elements: Syntax[]): Expr | undefined {
+  private bracedStringLiteral(type: Extract<Type, { kind: 'array' }>, elements: readonly Syntax[]): Expr | undefined {
     if (elements.length !== 1 || (elements[0].type !== 'string_literal' && elements[0].type !== 'concatenated_string'))
       return undefined;
     const literal = this.compileExpression(elements[0]);
@@ -2085,8 +2094,8 @@ export class Compiler extends StatementCompiler {
   }
 
   private takeMemberClauses(cls: ClassInfo, clauses: Clauses, row: number): () => Initializer {
-    const taken = cls.ownFields.map((field) =>
-      clauses.next < clauses.nodes.length ? this.takeClauses(field.type, clauses, row) : undefined
+    const taken = this.aggregateElementTypes(cls).map((type) =>
+      clauses.next < clauses.nodes.length ? this.takeClauses(type, clauses, row) : undefined
     );
     return () =>
       this.initializeAggregate(
@@ -2096,20 +2105,36 @@ export class Compiler extends StatementCompiler {
       );
   }
 
-  private initializeAggregate(cls: ClassInfo, supplied: (Initializer | undefined)[], row: number): Initializer {
+  private initializeAggregate(cls: ClassInfo, elements: (Initializer | undefined)[], row: number): Initializer {
     const fields = cls.ownFields;
+    const base = cls.base;
+    const initializeBase = base && (elements[0] ?? this.initializeList(classType(base), [], row));
+    const destroyBase = base && this.destroyerOf(classType(base), row);
+    const supplied = base ? elements.slice(1) : elements;
     const defaults = fields.map((field, index) =>
       supplied[index] ? undefined : (this.aggregateDefaults.get(field)?.() ?? this.bindAggregateDefault(field, row))
     );
     const destroyers = fields.map((field) => this.destroyerOf(field.type));
-    const isConstant = this.constantAggregate(fields, supplied, defaults);
+    const isConstant =
+      (!initializeBase || initializeBase.isConstant === true) && this.constantAggregate(fields, supplied, defaults);
     return initializerWithConstancy((frame, target, zeroInitialize, referenceLifetime) => {
       const object = newObject(frame, cls, zeroInitialize, asObject(target));
       const owner = referenceLifetime === 'full-expression' ? referenceLifetime : object;
       const receiver = new Ptr(new Box(object, false), 0);
       const mark = frame.pending.length;
       frame.pending.push(object);
+      let baseComplete = false;
       try {
+        if (base && initializeBase) {
+          object.cls = base;
+          const initialized = initializeBase(frame, object, zeroInitialize, owner) as CObject;
+          if (initialized !== object) {
+            object.message = initialized.message;
+            for (const field of base.fields) object.values[field.index] = initialized.values[field.index];
+          }
+          baseComplete = true;
+        }
+        object.cls = cls;
         makeEach(
           frame,
           fields.length,
@@ -2129,7 +2154,13 @@ export class Compiler extends StatementCompiler {
         object.needsConstruction = false;
         return object;
       } catch (error) {
-        if (error instanceof CppException) object.destroyReferenceTemporaries(frame);
+        if (error instanceof CppException) {
+          if (base && baseComplete) {
+            object.cls = base;
+            destroyBase?.(frame, object);
+          }
+          object.destroyReferenceTemporaries(frame);
+        }
         endLifetime(object);
         throw error;
       } finally {
@@ -2291,10 +2322,17 @@ function mergeDefaults(
 }
 
 /** Whether an overriding function's return type is covariant with the overridden one's (a pointer to a derived class). */
-function covariant(base: Type, derived: Type): boolean {
+function covariant(base: Type, derived: Type, owner: ClassInfo | undefined): boolean {
   const a = target(base);
   const b = target(derived);
-  return a?.kind === 'class' && b?.kind === 'class' && b.cls.isDerivedFrom(a.cls) && base.kind === derived.kind;
+  return (
+    a?.kind === 'class' &&
+    b?.kind === 'class' &&
+    base.kind === derived.kind &&
+    (!isConstType(b) || isConstType(a)) &&
+    b.cls.isDerivedFrom(a.cls) &&
+    isBaseAccessible(b.cls, a.cls, owner)
+  );
 }
 
 const target = (type: Type): Type | undefined =>

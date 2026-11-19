@@ -25,7 +25,7 @@ export function copySyntax(node: Node, field?: string): Syntax {
   const all: Syntax[] = [];
   for (let index = 0; index < node.childCount; index++) {
     const child = node.child(index);
-    if (!child) continue;
+    if (!child || child.type === 'comment') continue;
     all.push(copySyntax(child, node.fieldNameForChild(index) ?? undefined));
   }
   return {

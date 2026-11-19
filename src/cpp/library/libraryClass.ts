@@ -33,7 +33,8 @@ export interface LibraryClass {
    * Compiles list-initialization (`std::vector<int> v = {1, 2};`) when the class has an `std::initializer_list`
    * constructor that takes the elements, or gives undefined to initialize through the other constructors.
    */
-  listInitializer?: (compiler: ExpressionCompiler, elements: Syntax[], row: number) => Initializer | undefined;
+  listInitializer?: (compiler: ExpressionCompiler, elements: readonly Syntax[], row: number) => Initializer | undefined;
+  readonly listElementType?: Type;
   defaultInitializer?: (compiler: ExpressionCompiler, row: number, valueInitialize: boolean) => Expr['run'];
   /**
    * Compiles a call of a member function that constructs an element from its arguments, such as `emplace_back`,

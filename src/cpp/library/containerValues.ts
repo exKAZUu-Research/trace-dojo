@@ -223,6 +223,12 @@ export class SequenceValue extends Store {
     other.capacity = 0;
   }
 
+  moveStorage(): SequenceValue {
+    const destination = new SequenceValue([], this.elementType, this.isArrayLike, this.storageKind);
+    destination.takeItems(this);
+    return destination;
+  }
+
   swapItems(other: SequenceValue): void {
     if (this.dequeEpoch && other.dequeEpoch) {
       this.dequeEpoch.end++;

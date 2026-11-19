@@ -549,6 +549,7 @@ export function orderedClass(
     args,
     size: 24,
     align: 8,
+    listElementType: unqualified(entryType),
     listInitializer: (compiler_, elements, row) => {
       checkOrder(compiler_, row);
       const inits = elements.map((node) => compiler_.elementInitializer(unqualified(entryType), node));

@@ -106,7 +106,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       }
       case 'null': {
         // libc++ on macOS defines NULL as `__null`, an integer null pointer constant of type long.
-        if (node.text === 'NULL') return { ...constantExpr(LONG, 0n, node.row), isNullConstant: true };
+        if (node.text === 'NULL')
+          return this.library.isHeaderMacro('NULL')
+            ? { ...constantExpr(LONG, 0n, node.row), isNullConstant: true }
+            : this.identifier(node);
         return { type: NULLPTR, isLvalue: false, row: node.row, run: () => NULL_PTR, isNullConstant: true };
       }
       case 'identifier':
@@ -716,7 +719,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     } else if (b.product) {
       const { left, right } = b.product;
       const addend = a.run as Eval<number>;
-      expr.run = (frame) => fma(sign * left(frame), right(frame), addend(frame), isFloat);
+      expr.run = (frame) => {
+        const value = addend(frame);
+        return fma(sign * left(frame), right(frame), value, isFloat);
+      };
     }
   }
 
@@ -766,6 +772,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     if (operator === '+' && isInteger(lt) && rt.kind === 'pointer') return this.pointerOffset(right, left, 1, row);
     if (operator === '-' && lt.kind === 'pointer' && rt.kind === 'pointer') {
+      this.checkPointerArithmetic(lt, row);
+      this.checkPointerArithmetic(rt, row);
       if (!sameType(unqualified(lt.to), unqualified(rt.to), false)) {
         return this.error(row, `違う型を指すポインタ（${typeName(lt)} と ${typeName(rt)}）の差は求められません。`);
       }
@@ -785,7 +793,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     if (COMPARISONS.has(operator) && (isPointerLike(lt) || isPointerLike(rt))) {
       const comparable =
-        (isPointerLike(lt) && isPointerLike(rt) && this.pointersComparable(lt, rt)) ||
+        (isPointerLike(lt) && isPointerLike(rt) && this.pointersComparable(lt, rt, row)) ||
         (isPointerLike(lt) && right.isNullConstant) ||
         (isPointerLike(rt) && left.isNullConstant);
       if (!comparable) return this.error(row, `${typeName(lt)} と ${typeName(rt)} は比べられません。`);
@@ -804,22 +812,22 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return this.error(row, `演算子 ${operator} は ${typeName(lt)} と ${typeName(rt)} には使えません。`);
   }
 
-  private pointersComparable(a: Type, b: Type): boolean {
+  private pointersComparable(a: Type, b: Type, row: number): boolean {
     if (a.kind === 'nullptr' || b.kind === 'nullptr') return true;
     if (a.kind !== 'pointer' || b.kind !== 'pointer') return false;
     if (a.to.kind === 'void' || b.to.kind === 'void') return true;
     if (sameType(unqualified(a.to), unqualified(b.to), false)) return true;
-    return (
-      a.to.kind === 'class' &&
-      b.to.kind === 'class' &&
-      (a.to.cls.isDerivedFrom(b.to.cls) || b.to.cls.isDerivedFrom(a.to.cls))
-    );
+    if (a.to.kind !== 'class' || b.to.kind !== 'class') return false;
+    if (a.to.cls.isDerivedFrom(b.to.cls)) this.checkBaseConversion(a.to.cls, b.to.cls, row);
+    else if (b.to.cls.isDerivedFrom(a.to.cls)) this.checkBaseConversion(b.to.cls, a.to.cls, row);
+    else return false;
+    return true;
   }
 
   /** A pointer moved by a number of elements, which must stay within its array or one past its end. */
   pointerOffset(pointer: Expr, offset: Expr, sign: 1 | -1, row: number): Expr {
     const type = pointer.type as Extract<Type, { kind: 'pointer' }>;
-    if (type.to.kind === 'void') return this.error(row, 'void * のポインタは足し引きできません。');
+    this.checkPointerArithmetic(type, row);
     const p = pointer.run;
     const displacement = convertArithmetic(this.rvalue(offset), LONG);
     const n = displacement.run;
@@ -831,6 +839,18 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       row,
       run: (frame) => (p(frame) as Ptr).offset(sign * Number(n(frame))),
     };
+  }
+
+  private checkPointerArithmetic(type: Extract<Type, { kind: 'pointer' }>, row: number): void {
+    let { to } = type;
+    while (to.kind === 'array' && to.length !== undefined) to = to.of;
+    if (
+      to.kind === 'void' ||
+      to.kind === 'function' ||
+      to.kind === 'array' ||
+      (to.kind === 'class' && !to.cls.isComplete)
+    )
+      this.error(row, `${typeName(type)} のポインタは足し引きできません。`);
   }
 
   private unaryExpression(node: Syntax): Expr {
@@ -902,6 +922,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const delta = operator === '++' ? 1 : -1;
     let step: (value: Value) => Value;
     if (type.kind === 'pointer') {
+      this.checkPointerArithmetic(type, row);
       step = (value) => (value as Ptr).offset(delta);
     } else if (isArithmetic(type)) {
       if (type.kind === 'int' && type.name === 'bool')
@@ -984,7 +1005,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   addressOf(operand: Expr, row: number): Expr {
     if (operand.functions) return this.unsupported(row, '関数ポインタ');
-    if (!operand.isLvalue) return this.error(row, '& は、変数などの場所を持つ値（左辺値）にしか使えません。');
+    if (!operand.isLvalue || operand.temporaryMember)
+      return this.error(row, '& は、変数などの場所を持つ値（左辺値）にしか使えません。');
     if (operand.type.kind === 'class' && operand.type.cls.library?.operator) {
       const result = operand.type.cls.library.operator(this, '&', [operand], row);
       if (result) return result;
@@ -1120,7 +1142,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** Stops at an assignment to something that cannot be assigned: a const object, or a value without storage. */
   checkAssignable(target: Expr, row: number, operator: string): void {
-    if (!target.isLvalue)
+    if (!target.isLvalue || (target.temporaryMember && target.type.kind !== 'class'))
       return this.error(row, `${operator} の左には、変数などの代入できるもの（左辺値）を書いてください。`);
     if (isConstType(target.type)) {
       const what = target.description ? `const のメンバ ${target.description}` : 'const の変数（または const の値）';
@@ -1202,19 +1224,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       };
     }
     if (av.type.kind === 'class' || bv.type.kind === 'class') {
-      for (const target of [av.type, bv.type]) {
-        if (target.kind !== 'class') continue;
-        try {
-          return {
-            left: this.convert(a, target, row),
-            right: this.convert(b, target, row),
-            type: target,
-            isLvalue: false,
-          };
-        } catch {
-          // Try converting to the other operand's type.
-        }
-      }
+      const toLeft = implicitConversion(this, b, av.type);
+      const toRight = implicitConversion(this, a, bv.type);
+      if (toLeft && toRight)
+        return this.error(row, '条件演算子の2つの値が互いの型に変換できるため、結果の型が決まりません。');
+      if (toLeft)
+        return { left: this.convert(a, av.type, row), right: toLeft.apply(b), type: av.type, isLvalue: false };
+      if (toRight)
+        return { left: toRight.apply(a), right: this.convert(b, bv.type, row), type: bv.type, isLvalue: false };
     }
     return this.error(row, `条件演算子の2つの値の型（${typeName(a.type)} と ${typeName(b.type)}）が合いません。`);
   }
@@ -1332,8 +1349,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         to.cls.isDerivedFrom(from.cls) &&
         (!isConstType(from) || isConstType(to))
       ) {
-        this.checkBaseConversion(to.cls, from.cls, row);
-        return { ...expr, type: to };
+        return this.castClassLocation(expr, to, from.cls, to.cls, row, kind);
       }
       const converted = this.convert(expr, type, row);
       return { ...converted, type: to, isLvalue: true };
@@ -1359,6 +1375,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
           kind === 'C' ? '関係のない型のポインタへのキャスト（reinterpret_cast にあたる）' : 'reinterpret_cast'
         );
       if (isConstType(from) && !isConstType(to)) return this.unsupported(row, 'const を外すキャスト（const_cast）');
+      if (from.kind === 'class' && to.kind === 'class')
+        return this.castClassLocation(value, type, from.cls, to.cls, row, kind);
       return { ...value, type };
     }
     if (
@@ -1381,6 +1399,33 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     if (type.kind === 'class') return this.constructObject(type.cls, [expr], row, false);
     return this.convert(expr, unqualified(type), row);
+  }
+
+  private castClassLocation(
+    expr: Expr,
+    type: Type,
+    from: ClassInfo,
+    to: ClassInfo,
+    row: number,
+    kind: 'static' | 'C'
+  ): Expr {
+    if (from === to) return { ...expr, type };
+    const downcast = to.isDerivedFrom(from);
+    if (kind === 'static') this.checkBaseConversion(downcast ? to : from, downcast ? from : to, row);
+    if (!downcast) return { ...expr, type };
+    const run = expr.run;
+    return {
+      ...expr,
+      type,
+      run: (frame) => {
+        const location = run(frame) as Ptr;
+        if (location.isNull) return location;
+        const object = location.read();
+        if (!(object instanceof CObject) || !object.cls.isDerivedFrom(to))
+          throw new CppRuntimeError('custom', `${to.name} 型ではないオブジェクトをキャストしました。`);
+        return location;
+      },
+    };
   }
 
   private namedCast(node: Syntax): Expr {
@@ -1582,7 +1627,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   private singleListExpression(list: Syntax): Expr | undefined {
-    const [first, ...rest] = list.children.filter((child) => child.type !== 'comment');
+    const [first, ...rest] = list.children;
     if (first && rest.length === 0 && first.type !== 'initializer_list') return this.compileExpression(first);
   }
 
@@ -1612,11 +1657,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         if (resolved) return this.constructWith(cls, resolved, args, row);
       }
       if (!initialize) return this.listValue(classType(cls), list);
-      const run = initialize(
-        this,
-        list.children.filter((child) => child.type !== 'comment'),
-        row
-      );
+      const run = initialize(this, list.children, row);
       if (run)
         return {
           type: classType(cls),
@@ -1692,7 +1733,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   /** Compiles a braced initializer list for an object of a type, as list-initialization does. */
   abstract listInitializer(type: Type, list: Syntax, row: number): Initializer;
 
-  protected abstract initializeList(type: Type, elements: Syntax[], row: number): Initializer;
+  protected abstract initializeList(type: Type, elements: readonly Syntax[], row: number): Initializer;
 
   // new and delete ---------------------------------------------------------------------------------------------------
 
