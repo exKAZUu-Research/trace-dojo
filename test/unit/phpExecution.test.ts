@@ -450,7 +450,12 @@ test('string offset padding stops at the string limit before allocating', () => 
   expect(execution.kind === 'executed' && execution.stdout).toMatch(/^\nFatal error: Allowed memory size/);
 });
 
-test.each(['ArrayObject', 'ArrayIterator'])('finishes %s property replacement after the destructor runs', (name) => {
+test.each([
+  ['ArrayObject', '$settings->item = 20;', 5],
+  ['ArrayIterator', '$settings->item = 20;', 5],
+  ['ArrayObject', "$settings->exchangeArray(['item' => 20]);", 20],
+  ['ArrayIterator', "$settings->__construct(['item' => 20], ArrayIterator::ARRAY_AS_PROPS);", 20],
+])('finishes %s property replacement after %s', (name, change, expected) => {
   const execution = run(`<?php
 class ReplacedSetting {
     function __destruct() {
@@ -458,14 +463,14 @@ class ReplacedSetting {
         echo 'drop;';
         if ($releasing) return;
         $releasing = true;
-        $settings->item = 20;
+        ${change}
     }
 }
 $releasing = false;
 $settings = new ${name}(['item' => new ReplacedSetting], ${name}::ARRAY_AS_PROPS);
 $settings->item = 5;
 echo json_encode($settings->getArrayCopy());`);
-  expect(execution).toMatchObject({ kind: 'executed', stdout: 'drop;{"item":5}' });
+  expect(execution).toMatchObject({ kind: 'executed', stdout: `drop;{"item":${expected}}` });
 });
 
 test.each(['<?php echo "hello"; declare(strict_types=1);', '<?php function f() {} declare(strict_types=1);'])(

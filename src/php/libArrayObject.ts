@@ -183,7 +183,7 @@ export class ArrayStorage {
           if (!(error instanceof PhpThrow)) throw error;
           capture(error);
         }
-        this.writable().setSlot(offset, replacement);
+        if (arrayHasHolders(runtime, array, 1)) array.setSlot(offset, replacement);
       });
     } finally {
       runtime.held.pop();
