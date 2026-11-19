@@ -4,7 +4,7 @@ import { CompileError } from '../../interpreter/diagnostics';
 import { CppRuntimeError, overflowError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { withTemporaries } from '../objectCompiler';
+import { constructArray, withTemporaries } from '../objectCompiler';
 import { type Frame, holdAll } from '../runtime';
 import {
   BOOL,
@@ -36,6 +36,7 @@ import {
   callbackOperands,
   comparatorOf,
   constructElementFromRvalue,
+  destroyElements,
   type ElementOperations,
   elementOperations,
   equalTo,
@@ -201,6 +202,7 @@ class Output {
 }
 
 type Less = (a: Value, b: Value) => boolean;
+type LocationLess = (a: Ptr, b: Ptr) => boolean;
 
 const ARRAY_REFERENCE_FUNCTIONS = new Set([
   'begin',
@@ -888,8 +890,22 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
 
   // min, max, clamp ------------------------------------------------------------------------------------------------
   /** The order of min, max, minmax, or clamp: the comparator argument at `index`, or `<`. */
-  const extremumOrder = (args: Expr[], index: number, type: Type): ((frame: Frame) => Less) | undefined =>
-    orderOf(args[index], [withConst(type), withConst(type)], args[0].row);
+  const extremumOrder = (args: Expr[], index: number, type: Type): ((frame: Frame) => LocationLess) | undefined => {
+    const operand = { type: withConst(type) };
+    const comparator = args[index];
+    if (comparator) {
+      const compare = predicateOf(comparator, operand, operand);
+      return compare && ((frame) => (first, second) => truthy(compare(frame, first, second)));
+    }
+    const build = orderOf(undefined, [operand.type, operand.type], args[0].row);
+    return (
+      build &&
+      ((frame) => {
+        const compare = build(frame);
+        return (first, second) => compare(first.read(), second.read());
+      })
+    );
+  };
   for (const name of ['min', 'max', 'minmax']) {
     define(name, extremumTemplateParameters, (args, templateArgs) => {
       if (args[0]?.braced && args.length <= 2) {
@@ -908,17 +924,15 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       if (name === 'minmax') {
         const result = pairClass(library, referenceTo(withConst(type)), referenceTo(withConst(type)));
         return native('minmax', types, classType(result), ([a, b], { frame }) =>
-          less(frame)((b as Ptr).read(), (a as Ptr).read())
+          less(frame)(b as Ptr, a as Ptr)
             ? pairResult(frame, result, b as Ptr, a as Ptr)
             : pairResult(frame, result, a as Ptr, b as Ptr)
         );
       }
       const fn = native(name, types, referenceTo(withConst(type)), ([a, b], { frame }) => {
-        const x = (a as Ptr).read();
-        const y = (b as Ptr).read();
         // Both return the first of equal values (C++20 [alg.min.max]).
-        if (name === 'min') return less(frame)(y, x) ? b : a;
-        return less(frame)(x, y) ? b : a;
+        if (name === 'min') return less(frame)(b as Ptr, a as Ptr) ? b : a;
+        return less(frame)(a as Ptr, b as Ptr) ? b : a;
       });
       if (args.length === 2 && isArithmetic(type)) {
         fn.evaluateConstant = ([a, b]) => ((name === 'min' ? b < a : a < b) ? b : a);
@@ -942,10 +956,10 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       referenceTo(withConst(type)),
       ([v, low, high], { frame }) => {
         const compare = less(frame);
-        const lower = (low as Ptr).read();
-        const upper = (high as Ptr).read();
+        const lower = low as Ptr;
+        const upper = high as Ptr;
         if (compare(upper, lower)) throw new CppRuntimeError('invalidRange');
-        const value = (v as Ptr).read();
+        const value = v as Ptr;
         if (compare(value, lower)) return low;
         if (compare(upper, value)) return high;
         return v;
@@ -1535,7 +1549,7 @@ function listExtremum(
   name: string,
   elements: Expr[],
   type: Type,
-  less: (frame: Frame) => Less,
+  less: (frame: Frame) => LocationLess,
   comparatorParams: Type[],
   result: ClassInfo | undefined
 ): FunctionInfo {
@@ -1544,62 +1558,69 @@ function listExtremum(
   // The list itself is the argument, which the function evaluates element by element.
   const listParam: Type = { kind: 'function', ret: VOID, params: [] };
   const destroy = ops.destroy;
-  const runs = values.map((initialize) => (frame: Frame) => {
-    const object = initialize(frame);
-    if (destroy) frame.temporaries.push({ object, destroy });
-    return object;
-  });
   const isConstant =
     comparatorParams.length === 0 && supportsConstantOrder(type) && values.every((value) => value.isConstant);
   return native(
     name,
     [listParam, ...comparatorParams],
     result ? classType(result) : type,
-    (_args, { frame }) =>
-      holdAll(frame, runs, (values) => {
-        const items = values as Value[];
-        const compare = less(frame);
-        if (result) {
-          const [low, high] = minmaxPositions(items, compare);
-          return constructPair(
-            frame,
-            result,
-            [(f, target) => ops.copy(f, items[low], target), (f, target) => ops.copy(f, items[high], target)],
-            () => destroy
-          );
-        }
-        let best = 0;
-        for (let index = 1; index < items.length; index++) {
-          if (name === 'min' ? compare(items[index], items[best]) : compare(items[best], items[index])) best = index;
-        }
-        return ops.copy(frame, items[best]);
-      }),
+    (_args, { frame }) => {
+      const items = constructArray(
+        frame,
+        values.length,
+        type,
+        (current, target, index) => values[index](current, target, false, 'full-expression'),
+        destroy
+      );
+      frame.temporaries.push({
+        object: items,
+        destroy: (current) => {
+          destroyElements(current, items.values, destroy, 'reverse');
+          endLifetime(items);
+        },
+      });
+      const lessAt = less(frame);
+      const compare = (first: number, second: number): boolean => lessAt(items.location(first), items.location(second));
+      if (result) {
+        const [low, high] = minmaxPositions(items.length, compare);
+        return constructPair(
+          frame,
+          result,
+          [(f, target) => ops.copy(f, items.get(low), target), (f, target) => ops.copy(f, items.get(high), target)],
+          () => destroy
+        );
+      }
+      let best = 0;
+      for (let index = 1; index < items.length; index++) {
+        if (name === 'min' ? compare(index, best) : compare(best, index)) best = index;
+      }
+      return ops.copy(frame, items.get(best));
+    },
     { libraryConstant: () => (isConstant ? true : undefined) }
   );
 }
 
 /** libc++'s `__minmax_element_impl`: the first least and the last greatest, comparing the values in pairs. */
-function minmaxPositions(items: Value[], less: Less): [number, number] {
-  const length = items.length;
+function minmaxPositions(length: number, less: (a: number, b: number) => boolean): [number, number] {
   let low = 0;
   let high = 0;
   if (length < 2) return [low, high];
   let first = 1;
-  if (less(items[first], items[low])) low = first;
+  if (less(first, low)) low = first;
   else high = first;
   while (++first !== length) {
     const index = first;
     if (++first === length) {
-      if (less(items[index], items[low])) low = index;
-      else if (!less(items[index], items[high])) high = index;
+      if (less(index, low)) low = index;
+      else if (!less(index, high)) high = index;
       return [low, high];
     }
-    if (less(items[first], items[index])) {
-      if (less(items[first], items[low])) low = first;
-      if (!less(items[index], items[high])) high = index;
+    if (less(first, index)) {
+      if (less(first, low)) low = first;
+      if (!less(index, high)) high = index;
     } else {
-      if (less(items[index], items[low])) low = index;
-      if (!less(items[first], items[high])) high = first;
+      if (less(index, low)) low = index;
+      if (!less(first, high)) high = first;
     }
   }
   return [low, high];

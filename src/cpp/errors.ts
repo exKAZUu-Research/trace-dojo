@@ -86,12 +86,16 @@ export class CppException extends Error {
   isDestroyed = false;
 
   constructor(
-    readonly value: Value,
+    private readonly thrown: Value,
     readonly type: Type,
     private box?: Box
   ) {
     super('C++ exception');
     this.name = 'CppException';
+  }
+
+  get value(): Value {
+    return this.box ? this.box.value : this.thrown;
   }
 
   /** The location of the exception object, which handlers that catch by reference refer to. */

@@ -222,8 +222,10 @@ export function insertCopy<T, Position>(
 /** Inserts the elements of an iterator range, as the range constructor and `insert(first, last)` do. */
 export function insertRange<T, Position>(table: EntryTable<T, Position>, frame: Frame, self: T, source: Source): void {
   for (const value of source.values) {
-    if (source.isSameType) insertCopy(table, frame, self, value);
-    else emplaceEntry(table, frame, self, { key: undefined, make: () => source.construct(frame, value) });
+    emplaceEntry(table, frame, self, {
+      key: source.isSameType ? table.keyOf(value) : undefined,
+      make: () => source.construct(frame, value),
+    });
   }
 }
 

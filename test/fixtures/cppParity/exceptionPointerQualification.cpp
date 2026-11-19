@@ -2,6 +2,7 @@
 
 struct Base {};
 struct Private : private Base {};
+struct Packet { int field; };
 
 int main() {
   try { throw "error"; }
@@ -22,4 +23,18 @@ int main() {
   try { throw &object; }
   catch (Base*) { std::cout << "private base\n"; }
   catch (Private*) { std::cout << "exact pointer\n"; }
+
+  Packet packet{7};
+  try { throw &packet.field; }
+  catch (void* erased) { std::cout << static_cast<Packet*>(erased)->field << '\n'; }
+  try { throw &packet.field; }
+  catch (void* const& erased) { std::cout << static_cast<Packet*>(erased)->field << '\n'; }
+
+  int replacement = 9;
+  try {
+    try { throw &value; }
+    catch (int*& address) { address = &replacement; throw; }
+  } catch (int* address) {
+    std::cout << *address << '\n';
+  }
 }

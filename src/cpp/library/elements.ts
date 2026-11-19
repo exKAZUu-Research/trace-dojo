@@ -132,13 +132,19 @@ export function movedArgument(compiler: ExpressionCompiler, type: Type, argument
   if (bound?.isXvalue && !isConstType(bound.type)) return bound.run as Eval<Ptr>;
 }
 
-export function requireElementUse(compiler: ExpressionCompiler, type: Type, row: number, use: ElementUse): void {
+export function requireElementUse(
+  compiler: ExpressionCompiler,
+  type: Type,
+  row: number,
+  use: ElementUse,
+  sourceIsConst = true
+): void {
   if (use === 'swap') {
     requireSwapUse(compiler, type, row);
     return;
   }
   if (use === 'copy' || use === 'relocate') {
-    compiler.requireLibraryObjectUse(type, 'copy', row);
+    compiler.requireLibraryObjectUse(type, 'copy', row, sourceIsConst);
     compiler.requireLibraryObjectUse(type, 'destroy', row);
   }
   if (use === 'assign' || use === 'relocate') compiler.requireLibraryObjectUse(type, 'assign', row);

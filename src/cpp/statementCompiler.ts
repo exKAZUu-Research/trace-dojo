@@ -18,12 +18,12 @@ import { ExpressionCompiler } from './expressionCompiler';
 import { SequenceValue } from './library/containerValues';
 import { bindRetainedTemporary, initializeAt, withTemporaries, zeroOf } from './objectCompiler';
 import { parseInitializerArguments } from './parse';
+import { erasePointee } from './pointerCasts';
 import { BREAK, type Completion, CONTINUE, type Eval, type Exec, type Frame, type LocalInfo, RETURN } from './runtime';
 import { type ConstantReference, type Entity, Scope } from './scopes';
 import { isObjectCreation, onlyCalls } from './stepRules';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
-  type ClassInfo,
   type GlobalInfo,
   hasVacuousInitialization,
   intMax,
@@ -1287,8 +1287,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const scope = this.context.scope;
     const local = this.context.declareLocal(name ?? '\0catch', type, false);
     if (name) scope.names.set(name, { kind: 'local', local, isReference });
-    const pointerClass = caught.kind === 'pointer' && caught.to.kind === 'class' ? caught.to.cls : undefined;
-    if (isReference) return this.catchReference(local, caught, pointerClass);
+    if (isReference) return this.catchReference(local, caught);
     // A handler parameter is ineligible for named return value optimization (C++20 [class.copy.elision]).
     scope.returnSlots.delete(local);
     this.requireObjectUse(type, 'copy', row);
@@ -1298,31 +1297,19 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return (frame, error) =>
       this.initializeLocal(frame, local, (target) => {
         if (copy) return copy(frame, error.value, target instanceof CObject ? target : undefined, false);
-        const value = error.value;
-        return pointerClass && value instanceof Ptr ? value.forClass(pointerClass) : value;
+        return catchValue(error, caught);
       });
   }
 
-  private catchReference(
-    local: LocalInfo,
-    caught: Type,
-    pointerClass: ClassInfo | undefined
-  ): (frame: Frame, error: CppException) => void {
-    if (!pointerClass) {
-      return (frame, error) => {
-        frame.slots[local.slot] = error.location();
-      };
-    }
-    const conversion = this.context.declareLocal('\0catchPointer', caught, false);
+  private catchReference(local: LocalInfo, caught: Type): (frame: Frame, error: CppException) => void {
+    const conversion =
+      caught.kind === 'pointer' ? this.context.declareLocal('\0catchPointer', caught, false) : undefined;
     return (frame, error) => {
-      const original = error.location();
-      const value = original.read();
-      const adjusted = value instanceof Ptr ? value.forClass(pointerClass) : value;
-      if (adjusted !== value) {
-        const storage = new Box(adjusted);
+      if (conversion && !sameType(error.type, caught, false)) {
+        const storage = new Box(catchValue(error, caught));
         frame.slots[conversion.slot] = storage;
         frame.slots[local.slot] = storage.location(0);
-      } else frame.slots[local.slot] = original;
+      } else frame.slots[local.slot] = error.location();
     };
   }
 
@@ -1399,6 +1386,16 @@ function exceptionMatches(handler: Type, thrown: Type): boolean {
   if (to.kind === 'void') return from.kind !== 'function';
   if (from.kind === 'class' && to.kind === 'class') return isBaseAccessible(from.cls, to.cls, undefined);
   return permitsQualificationConversion(from, to);
+}
+
+function catchValue(error: CppException, caught: Type): Value {
+  const { value, type } = error;
+  if (caught.kind !== 'pointer' || type.kind !== 'pointer' || !(value instanceof Ptr)) return value;
+  const from = type.to;
+  const to = caught.to;
+  if (to.kind === 'void' && from.kind !== 'void') return erasePointee(value, from);
+  if (to.kind === 'class' && from.kind === 'class' && to.cls !== from.cls) return value.forClass(to.cls);
+  return value;
 }
 
 /** Runs a handler for an exception, which ends the exception unless the handler rethrows it. */

@@ -344,8 +344,10 @@ export function iteratorRange(
   const isSameType =
     typeName(unqualified(from)) === typeName(target) &&
     (target.kind !== 'class' || (from.kind === 'class' && from.cls === target.cls));
-  let construct: Source['construct'] = (frame, value, destination) => ops().copy(frame, value, destination);
-  if (isSameType) requireElementUse(compiler, element, first.row, 'copy');
+  const sourceIsConst = isConstType(from);
+  let construct: Source['construct'] = (frame, value, destination) =>
+    ops().copy(frame, value, destination, sourceIsConst);
+  if (isSameType) requireElementUse(compiler, element, first.row, 'copy', sourceIsConst);
   if (!isSameType) {
     const [slot] = callbackOperands([{ type: from, category: proxy ? 'prvalue' : undefined }], first.row, (frame) =>
       frame.pending.at(-1)
@@ -595,12 +597,19 @@ function sequenceMethods(
       if (self.capacity > self.length) editor.reallocate(frame, self, self.length);
     });
   }
-  method('insert', [types.constIterator, constRef(element)], types.iterator, (self, [at, value], frame) => {
-    const index = positionOf(self, at);
-    reserve(frame, 1);
-    editor.insert(frame, self, index, value as Ptr);
-    return self.iteratorLocation(index);
-  });
+  const copiesElement = { uses: (row: number) => requireElementUse(library.compiler, element, row, 'copy') };
+  method(
+    'insert',
+    [types.constIterator, constRef(element)],
+    types.iterator,
+    (self, [at, value], frame) => {
+      const index = positionOf(self, at);
+      reserve(frame, 1);
+      editor.insert(frame, self, index, value as Ptr);
+      return self.iteratorLocation(index);
+    },
+    copiesElement
+  );
   method(
     'insert',
     [types.constIterator, SIZE_T, constRef(element)],
@@ -612,7 +621,8 @@ function sequenceMethods(
       reserve(frame, n);
       editor.insertCopies(frame, self, index, n, value as Ptr);
       return self.iteratorLocation(index);
-    }
+    },
+    copiesElement
   );
   addTemplateMethod(cls, 'insert', (args) => {
     if (args.length === 2 && args[1].braced) {
@@ -666,12 +676,18 @@ function sequenceMethods(
     reserve(frame, Math.max(0, n - self.items.length));
     editor.resize(frame, self, n, (target) => ops().copy(frame, (value as Ptr).read(), target));
   });
-  method('assign', [SIZE_T, constRef(element)], VOID, (self, [count, value], frame) => {
-    checkVectorLength(frame, library, kind, element, count);
-    const n = asNumber(count);
-    reserve(frame, n);
-    editor.assignCopies(frame, self, n, value as Ptr);
-  });
+  method(
+    'assign',
+    [SIZE_T, constRef(element)],
+    VOID,
+    (self, [count, value], frame) => {
+      checkVectorLength(frame, library, kind, element, count);
+      const n = asNumber(count);
+      reserve(frame, n);
+      editor.assignCopies(frame, self, n, value as Ptr);
+    },
+    copiesElement
+  );
   addTemplateMethod(cls, 'assign', (args) => {
     if (args.length === 1 && args[0].braced) {
       const list = initializerList(library.compiler, element, args[0].braced, ops);
@@ -851,7 +867,7 @@ function checkElementRequirement(
   ) {
     requireRelocation(compiler, element, row);
   }
-  if (['push_back', 'push_front', 'insert', 'assign'].includes(member) || (member === 'resize' && args.length > 1)) {
+  if (member === 'push_back' || member === 'push_front' || (member === 'resize' && args.length > 1)) {
     requireElementUse(compiler, element, row, 'copy');
   }
   const shifts = kind === 'vector' || kind === 'deque';

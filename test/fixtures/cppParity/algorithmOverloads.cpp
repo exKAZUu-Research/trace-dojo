@@ -19,6 +19,15 @@ bool lessPk(const P& a, int k) { return a.k < k; }
 bool lessKp(int k, const P& a) { return k < a.k; }
 bool near(int a, int b) { return b - a < 2; }
 bool byLength(const std::string& a, const std::string& b) { return a.size() < b.size(); }
+const int* expected = nullptr;
+bool observesReference(const int& a, const int& b) {
+  std::cout << (&a == expected);
+  return a < b;
+}
+bool observesArray(const int& a, const int& b) {
+  std::cout << (&a + 1 == &b);
+  return a < b;
+}
 
 int main() {
   int three = 3, five = 5;
@@ -32,6 +41,11 @@ int main() {
   std::cout << s.first << s.second << '\n';
   std::cout << std::min({4, 1, 9}, gt) << std::max({4, 1, 9}, gt) << '\n';
   std::cout << std::clamp(10, 5, 1, gt) << std::clamp(3, 5, 1, gt) << '\n';
+  expected = &three;
+  std::cout << std::max(three, five, observesReference) << ' ';
+  expected = &five;
+  std::cout << std::min(three, five, observesReference) << ' ';
+  std::cout << std::max({7, 9}, observesArray) << '\n';
 
   std::string a = "abc", b = "ABC", c = "ABCD";
   std::cout << std::equal(a.begin(), a.end(), b.begin(), b.end(), ieq)

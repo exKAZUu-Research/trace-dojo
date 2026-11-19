@@ -910,9 +910,10 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   requireLibraryObjectUse(
     type: Type,
     operation: 'copy' | 'assign' | 'destroy' | 'move' | 'move-assign',
-    row: number
+    row: number,
+    sourceIsConst = true
   ): void {
-    const context: ObjectUseContext = { seen: new Set(), sourceIsConst: true };
+    const context: ObjectUseContext = { seen: new Set(), sourceIsConst };
     if (operation === 'assign' || operation === 'move-assign') this.checkLibraryAssignment(type, row);
     if (operation === 'move' || operation === 'move-assign') {
       this.checkMoveOperation(type, operation === 'move' ? 'copy' : 'assign', row, context);
