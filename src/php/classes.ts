@@ -889,7 +889,7 @@ function signatureCompatible(child: Method, parent: Method, skipReturn = false):
   const parentReturn = returnTypeOf(parent.fn);
   const childReturn = returnTypeOf(child.fn);
   if (!parentReturn) return true;
-  if (!childReturn) return parent.fn.kind !== 'user';
+  if (!childReturn) return false;
   return isSubtype(childReturn, child.cls, parentReturn, parent.cls);
 }
 

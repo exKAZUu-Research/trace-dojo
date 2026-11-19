@@ -1,11 +1,12 @@
 import { type AST, RegExpParser, visitRegExpAST } from '@eslint-community/regexpp';
 
+import { hasAmbiguousRepetition } from './regexBacktracking';
 import { rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 
 type Length = readonly [number, number];
 
-// code-gauge-allow functionNcss 59 -- Keeps the regex AST validation and subject restrictions in the same traversal.
+// code-gauge-allow functionNcss 54 -- Keeps scoped matching flags and lookbehind validation in one traversal.
 // code-gauge-allow functionCognitiveComplexity 30 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
 export function analyzeRegex(
   source: string,
@@ -15,9 +16,10 @@ export function analyzeRegex(
   invalidLookbehind: (start: number, reason: string) => never,
   emptyMarkers: ReadonlyMap<string, string>
 ): { byteCaselessReferences: Set<string>; emptySource?: string; ambiguousRepetition: boolean } {
+  const parser = new RegExpParser({ ecmaVersion: 2025 });
   let tree: AST.Pattern;
   try {
-    tree = new RegExpParser({ ecmaVersion: 2025 }).parsePattern(source, 0, source.length, { unicode });
+    tree = parser.parsePattern(source, 0, source.length, { unicode });
   } catch (error) {
     if (error instanceof SyntaxError || error instanceof RangeError)
       throw new UnsupportedFeatureError('解析器の制限を超える正規表現');
@@ -29,10 +31,7 @@ export function analyzeRegex(
   const contexts: boolean[] = [];
   const lookbehinds: AST.LookaroundAssertion[] = [];
   const lengths = new Map<AST.Element, Length>();
-  const ambiguousBodies = new WeakMap<AST.Element, boolean>();
-  const alphabets = new WeakMap<AST.Element, bigint>();
   let backwardCaptureReference = false;
-  let ambiguousRepetition = false;
   visitRegExpAST(tree, {
     onGroupEnter(node) {
       contexts.push(ignoreCase);
@@ -67,12 +66,8 @@ export function analyzeRegex(
       if (validateLookbehind(node, lengths, invalidLookbehind) && captureCount !== capturesAtEntry.get(node))
         throw new UnsupportedFeatureError('可変長後読みのキャプチャ');
     },
-    onAlternativeLeave(node) {
-      ambiguousRepetition ||= overlapsInSequence(node, alphabets, lengths);
-    },
     onQuantifierLeave(node) {
       validateNullableRepeat(node, lengths);
-      ambiguousRepetition ||= node.max > 1 && ambiguousRepeatBody(node.element, ambiguousBodies);
     },
     onCapturingGroupEnter() {
       captureCount++;
@@ -82,114 +77,8 @@ export function analyzeRegex(
   return {
     byteCaselessReferences: references,
     emptySource: emptyMarkers.size === 0 ? undefined : specializeForEmptySubject(tree, emptyMarkers),
-    ambiguousRepetition,
+    ambiguousRepetition: hasAmbiguousRepetition(tree, unicode, ignoreCase),
   };
-}
-
-const NON_ASCII = 1n << 128n;
-const ANY_CHARACTER = (NON_ASCII << 1n) - 1n;
-
-function overlapsInSequence(
-  alternative: AST.Alternative,
-  alphabets: WeakMap<AST.Element, bigint>,
-  lengths: Map<AST.Element, Length>
-): boolean {
-  let repeated = 0n;
-  for (const atom of alternative.elements) {
-    if (atom.type === 'Assertion') continue;
-    const alphabet = possibleCharacters(atom, alphabets);
-    const repeats = atom.type === 'Quantifier' && atom.max > 1 && atom.min !== atom.max;
-    if (repeats && (repeated & alphabet) !== 0n) return true;
-    if (elementLength(atom, lengths, new Set())[0] > 0) repeated &= alphabet;
-    if (repeats) repeated |= alphabet;
-  }
-  return false;
-}
-
-function possibleCharacters(atom: AST.Element, cache: WeakMap<AST.Element, bigint>): bigint {
-  const known = cache.get(atom);
-  if (known !== undefined) return known;
-  let result = ANY_CHARACTER;
-  switch (atom.type) {
-    case 'Assertion': {
-      result = 0n;
-      break;
-    }
-    case 'Character': {
-      result = characterRange(atom.value, atom.value);
-      break;
-    }
-    case 'CharacterClass': {
-      result = classCharacters(atom);
-      break;
-    }
-    case 'Group':
-    case 'CapturingGroup': {
-      result = 0n;
-      for (const branch of atom.alternatives)
-        for (const element of branch.elements) result |= possibleCharacters(element, cache);
-      break;
-    }
-    case 'Quantifier': {
-      result = possibleCharacters(atom.element, cache);
-      break;
-    }
-  }
-  cache.set(atom, result);
-  return result;
-}
-
-function classCharacters(atom: AST.CharacterClass): bigint {
-  if (atom.negate) return ANY_CHARACTER;
-  let result = 0n;
-  for (const element of atom.elements) {
-    if (element.type === 'Character') result |= characterRange(element.value, element.value);
-    else if (element.type === 'CharacterClassRange') result |= characterRange(element.min.value, element.max.value);
-    else return ANY_CHARACTER;
-  }
-  return result;
-}
-
-function characterRange(min: number, max: number): bigint {
-  let result = max >= 128 ? NON_ASCII : 0n;
-  for (let code = min; code <= Math.min(max, 127); code++) {
-    result |= 1n << BigInt(code);
-    if ((code >= 65 && code <= 90) || (code >= 97 && code <= 122)) result |= 1n << BigInt(code ^ 32);
-  }
-  return result;
-}
-
-function ambiguousRepeatBody(node: AST.Element, cache: WeakMap<AST.Element, boolean>): boolean {
-  const cached = cache.get(node);
-  if (cached !== undefined) return cached;
-  let ambiguous = false;
-  if (node.type === 'Quantifier') {
-    ambiguous = node.min !== node.max || ambiguousRepeatBody(node.element, cache);
-  } else if (node.type === 'Group' || node.type === 'CapturingGroup') {
-    ambiguous =
-      !disjointAlternatives(node.alternatives) ||
-      node.alternatives.some((alternative) =>
-        alternative.elements.some((element) => ambiguousRepeatBody(element, cache))
-      );
-  } else if (node.type === 'Backreference') {
-    ambiguous = true;
-  }
-  cache.set(node, ambiguous);
-  return ambiguous;
-}
-
-function disjointAlternatives(alternatives: AST.Alternative[]): boolean {
-  if (alternatives.length <= 1) return true;
-  const prefixes = alternatives.map(({ elements }) => {
-    let prefix = '';
-    for (const element of elements) {
-      if (element.type !== 'Character') break;
-      prefix += String.fromCodePoint(element.value).toUpperCase().toLowerCase();
-    }
-    return prefix;
-  });
-  prefixes.sort();
-  return prefixes.every((prefix, index) => index === 0 || !prefix.startsWith(prefixes[index - 1]));
 }
 
 function recordReferenceNames(references: Set<string>, groups: readonly AST.CapturingGroup[]): void {
