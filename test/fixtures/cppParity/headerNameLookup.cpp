@@ -29,6 +29,8 @@ int left(int value) { return 2 * value + 1; }
 int fixed(int value) { return value + 1; }
 int endl(int value) { return value + 2; }
 int merge(int value) { return value + 3; }
+int sort(int value) { return value + 4; }
+using std::sort;
 
 int main() {
   struct time first{3};
@@ -41,4 +43,7 @@ int main() {
   cout << id << target << insert << plain.value << '\n';
   timer elapsed(7);
   cout << first.twice().value << ' ' << elapsed.elapsed().value << ' ' << clock::count << '\n';
+  int values[] = {5, 3};
+  sort(values, values + 2);
+  cout << sort(values[0]) << '\n';
 }

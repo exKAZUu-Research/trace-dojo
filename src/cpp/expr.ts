@@ -1,9 +1,10 @@
-import type { Eval, Frame } from './runtime';
+import type { Eval, Frame, Temporary } from './runtime';
 import type { Syntax } from './syntax';
 import type { ClassInfo, FieldInfo, FunctionInfo, Type } from './types';
 import type { ArrayStore, CObject, Ptr, Value } from './values';
 
 export type ReferenceLifetime = CObject | 'full-expression';
+export type TemporaryBinding = (frame: Frame, retain?: (temporary: Temporary) => void) => Ptr;
 export type InitializerTarget = ArrayStore | CObject;
 export type ConstantMembers = ReadonlyMap<FieldInfo, number | bigint>;
 export type MemberConstant = (members: ConstantMembers) => number | bigint | undefined;
@@ -76,10 +77,9 @@ export interface Expr extends ConstantValue {
   /** The member an expression names, for messages such as "assigning to a const member". */
   description?: string;
   /**
-   * For a member of a temporary (`T(1).id`): the temporary's prvalue, and the indices of the members leading to the
-   * member, so that a reference bound to the member can extend the temporary's lifetime (C++20 [class.temporary]).
+   * Locates a temporary subobject and optionally transfers its owner to a reference's lifetime.
    */
-  temporaryMember?: { object: Expr; path: number[] };
+  temporaryMember?: TemporaryBinding;
 }
 
 /** A name that denotes functions: free functions, or the member functions of an object. */

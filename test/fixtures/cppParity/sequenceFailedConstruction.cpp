@@ -1,4 +1,5 @@
 #include <iostream>
+#include <deque>
 #include <list>
 #include <stack>
 #include <vector>
@@ -28,6 +29,16 @@ struct Node {
   ~Node() { std::cout << id; }
 };
 
+struct ListValue {
+  int number;
+  ListValue(int n) : number(n) {}
+  ListValue(const ListValue& other, int offset = 0) : number(other.number + offset) {
+    std::cout << 'C' << number;
+    if (number == 2) throw number;
+  }
+  ~ListValue() { std::cout << 'D' << number; }
+};
+
 int main() {
   std::vector<Value> v(2);
   v[0].n = 7;
@@ -45,4 +56,6 @@ int main() {
   std::list<Node> original(3);
   failId = 3;
   try { auto copy = original; } catch (int) { std::cout << 'L'; }
+  try { std::deque<ListValue> values{ListValue(1), ListValue(2)}; } catch (int) { std::cout << 'Q'; }
+  try { std::vector<ListValue> values{ListValue(1), ListValue(2)}; } catch (int) { std::cout << 'V'; }
 }

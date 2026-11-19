@@ -3,10 +3,17 @@ import { isBaseAccessible } from './access';
 import { AUTO, hasAuto } from './compilerBase';
 import { permitsQualificationConversion } from './conversions';
 import { CppException, ProgramAbort } from './errors';
-import { type ConstantLocation, constantLocationOf, type Expr, type MemberConstant, memberConstantOf } from './expr';
+import {
+  type ConstantLocation,
+  constantLocationOf,
+  type Expr,
+  type MemberConstant,
+  memberConstantOf,
+  type TemporaryBinding,
+} from './expr';
 import { ExpressionCompiler } from './expressionCompiler';
 import { SequenceValue } from './library/containerValues';
-import { withTemporaries, zeroOf } from './objectCompiler';
+import { bindRetainedTemporary, withTemporaries, zeroOf } from './objectCompiler';
 import { BREAK, type Completion, CONTINUE, type Eval, type Exec, type Frame, type LocalInfo, RETURN } from './runtime';
 import { type Entity, Scope } from './scopes';
 import { isObjectCreation, onlyCalls } from './stepRules';
@@ -26,9 +33,22 @@ import {
   type Type,
   typeName,
   unqualified,
+  VOID,
   withConst,
 } from './types';
-import { ArrayStore, Box, CObject, endLifetime, Liveness, Ptr, type Store, UNINIT, type Value } from './values';
+import {
+  ArrayStore,
+  Box,
+  CObject,
+  destroyRetainedTemporary,
+  endLifetime,
+  Liveness,
+  Ptr,
+  RetainedTemporary,
+  type Store,
+  UNINIT,
+  type Value,
+} from './values';
 
 /** The type an `auto` declarator deduced, which the declaration's other declarators must agree with. */
 export type ReferenceBinding = {
@@ -36,7 +56,7 @@ export type ReferenceBinding = {
   isConstant?: boolean;
   memberConstant?: MemberConstant;
   constantLocation?: ConstantLocation;
-} & ({ loc: Eval<Ptr> } | { lifetime: { type: Type; make: Eval<Value | Ptr>; locate: (box: Box) => Ptr } });
+} & ({ loc: Eval<Ptr> } | { lifetime: TemporaryBinding });
 
 export interface AutoDeduction {
   name: string;
@@ -261,7 +281,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       entity.constant = compiled.constant;
       createsObject = compiled.createsObject;
     }
-    if (this.isConstexpr(declaration)) entity.constant = this.requireConstantInitializer(type, value, declarator.row);
+    if (this.isConstexpr(declaration))
+      entity.constant = this.requireConstantInitializer(type, value, declarator.row, !hasToken(declarator, '='));
     if (this.isClassLike(type) && !value) createsObject = true;
     const { local } = entity;
     const destroy = this.destroyerOf(type, declarator.row);
@@ -373,7 +394,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (!value) return { init: this.defaultInitializer(type, row), createsObject: this.isClassLike(type) };
     if (value.type === 'initializer_list') {
       return {
-        init: this.listInitializer(type, value, row),
+        init: this.listInitializer(type, value, row, !hasToken(declarator, '=')),
         createsObject: (type.kind === 'class' && !isLibraryClass(type)) || isObjectCreation(value),
       };
     }
@@ -385,7 +406,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
           createsObject: !type.cls.library,
         };
       if (args.length !== 1) return this.error(row, `${name} の初期値には値を1つだけ書いてください。`);
-      const expr = args[0];
+      const expr = this.directInitializerArgument(type, args[0]);
       if (type.kind === 'array')
         return this.error(row, `配列 ${name} は (...) では初期化できません。{...} を使ってください。`);
       return {
@@ -419,14 +440,22 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   protected requireConstantInitializer(
     type: Type,
     value: Syntax | undefined,
-    row: number
+    row: number,
+    direct = false
   ): number | bigint | undefined {
     if (!value) return this.error(row, 'constexpr の変数には初期値を書いてください。');
     if (!isArithmetic(type)) return undefined;
     const isList = value.type === 'initializer_list';
     const args = isList || value.type === 'argument_list' ? value.children : [value];
     if (args.length === 0 && isList) return zeroOf(type) as number | bigint;
-    const constant = args.length === 1 ? this.constantOf(this.compileExpression(args[0]), type) : undefined;
+    let constant: number | bigint | undefined;
+    if (args.length === 1) {
+      const expr = this.compileExpression(args[0]);
+      constant = this.constantOf(
+        direct && (isList || value.type === 'argument_list') ? this.directInitializerArgument(type, expr) : expr,
+        type
+      );
+    }
     if (constant === undefined) return this.error(row, 'constexpr の変数の初期値には定数式を書いてください。');
     return constant;
   }
@@ -457,8 +486,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     this.context.scope.names.set(name, { kind: 'local', local, isReference: true });
     const { slot } = local;
     if ('lifetime' in binding) {
-      const { type: held, make, locate } = binding.lifetime;
-      return { ...this.extendedReference(slot, name, held, make, locate), deduced };
+      return { ...this.extendedReference(slot, name, binding.lifetime), deduced };
     }
     return {
       exec: this.fullExpression<undefined>((frame) => {
@@ -511,13 +539,13 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         isConstant: this.isConstantInitializer(bound),
         memberConstant: memberConstantOf(bound),
         constantLocation: constantLocationOf(bound),
-        lifetime: { type: heldType, make: bound.run, locate: (box) => new Ptr(box, 0) },
+        lifetime: this.temporaryLocation(bound),
       };
     }
     const member = isDirect ? target.temporaryMember : undefined;
     if (member) {
       this.convert(target, type, row);
-      return { type, lifetime: { type: member.object.type, make: member.object.run, locate: memberAt(member.path) } };
+      return { type, lifetime: member };
     }
     return {
       type,
@@ -528,25 +556,18 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     };
   }
 
-  /**
-   * A reference bound to (a part of) a temporary of type `heldType`, which a hidden variable holds as long as the
-   * reference lives.
-   */
   private extendedReference(
     slot: number,
     name: string,
-    heldType: Type,
-    make: Eval<Value | Ptr>,
-    locate: (box: Box) => Ptr
+    bind: TemporaryBinding
   ): { exec: Exec; hasInitializer: boolean; createsObject: boolean } {
-    const destroy = this.destroyerOf(heldType);
-    const holder = this.context.declareLocal(`\0${name}`, heldType, false);
-    if (destroy) this.context.scope.destructibles.set(holder.slot, destroy);
+    const holder = this.context.declareLocal(`\0${name}`, VOID, false);
+    this.context.scope.destructibles.set(holder.slot, destroyRetainedTemporary);
     return {
       exec: this.fullExpression<undefined>((frame) => {
-        const box = new Box(make(frame) as Value);
-        frame.slots[holder.slot] = box;
-        frame.slots[slot] = locate(box);
+        frame.slots[slot] = bindRetainedTemporary(frame, bind, (temporary) => {
+          frame.slots[holder.slot] = new Box(new RetainedTemporary(temporary));
+        });
         return;
       }),
       hasInitializer: true,
@@ -586,14 +607,17 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       if (type.kind === 'void') return this.error(declarator.row, `void 型の変数 ${name} は作れません。`);
       const global = this.declareStaticStorage(name, type, declarator.row, false);
       const local = this.context.declareLocal(name, type, false);
+      const direct = !hasToken(declarator, '=');
       const constant =
-        !reference && this.isConstexpr(node) ? this.requireConstantInitializer(type, value, declarator.row) : undefined;
+        !reference && this.isConstexpr(node)
+          ? this.requireConstantInitializer(type, value, declarator.row, direct)
+          : undefined;
       this.context.scope.names.set(name, { kind: 'local', local, isReference: reference !== undefined, constant });
       const { slot } = local;
       const { index } = global;
       const initialize = reference
         ? this.staticReferenceInitializer(global, reference, declarator.row)
-        : this.staticInitializer(global, type, value, declarator.row);
+        : this.staticInitializer(global, type, value, declarator.row, direct);
       this.context.scope.slots.splice(this.context.scope.slots.indexOf(slot), 1);
       this.context.scope.returnSlots.delete(local);
       this.context.scope.statics.push(slot);
@@ -624,7 +648,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     global: GlobalInfo,
     type: Type,
     value: Syntax | undefined,
-    row: number
+    row: number,
+    direct?: boolean
   ): (frame: Frame) => void;
 
   checkRedeclaration(name: string, row: number): void {
@@ -916,8 +941,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       const local = this.context.declareLocal(name, type, false);
       this.context.scope.names.set(name, { kind: 'local', local, isReference: true });
       if ('lifetime' in binding) {
-        const { type: held, make, locate } = binding.lifetime;
-        return { bind: this.extendedReference(local.slot, name, held, make, locate).exec, type: type.to };
+        return { bind: this.extendedReference(local.slot, name, binding.lifetime).exec, type: type.to };
       }
       return {
         bind: (frame) => {
@@ -1369,13 +1393,4 @@ function asZeroAssignment(node: Syntax): Syntax | undefined {
     all: [call, equals, zero],
   };
   return { ...node, type: 'expression_statement', children: [assignment], all: [assignment] };
-}
-
-/** Locates the member that the indices `path` lead to in the object a box holds. */
-function memberAt(path: readonly number[]): (box: Box) => Ptr {
-  return (box) => {
-    let object = box.value as CObject;
-    for (const index of path.slice(0, -1)) object = object.values[index] as CObject;
-    return new Ptr(object, path.at(-1) as number);
-  };
 }

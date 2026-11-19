@@ -510,7 +510,50 @@ test.each([
   ['a floating-point case label', 'int main() { switch (1) { case 1.5: return 0; } }', 0],
   ['an out-of-range case label', 'int main() { switch (1) { case 4294967295ULL: return 0; } }', 0],
   ['a non-const reference to a temporary member', 'struct X { int n = 1; };\nint main() { int& r = X{}.n; }', 1],
+  [
+    'a non-const reference to an element in a temporary array member',
+    'struct X { int values[1][1] = {{1}}; };\nint main() { int& r = X{}.values[0][0]; }',
+    1,
+  ],
+  [
+    'a non-const reference to a conditional temporary member',
+    'struct X { int value = 1; };\nint main() { int& r = true ? X{}.value : X{}.value; }',
+    1,
+  ],
   ['NULL without a declaring header', 'int main() { int* p = NULL; }', 0],
+  ['copy-initialization of bool from nullptr', 'int main() { bool flag = nullptr; }', 0],
+  ['copy-list-initialization of bool from nullptr', 'int main() { bool flag = {nullptr}; }', 0],
+  ['a default member initializer copy-initializing bool from nullptr', 'struct Flag { bool value = {nullptr}; };', 0],
+  [
+    'an empty aggregate missing explicit braces in a deduced array',
+    'struct E {};\nint main() { E entries[] = {1}; }',
+    1,
+  ],
+  [
+    'an empty aggregate member missing braces in a deduced array',
+    'struct E {}; struct Item { E empty; int value; };\nint main() { Item entries[] = {1}; }',
+    1,
+  ],
+  [
+    'const default-initialization of an object with an uninitialized nested field',
+    'struct Inner { int value; }; struct Outer { Inner inner; };\nint main() { const Outer value; }',
+    1,
+  ],
+  [
+    'a using-declaration conflicting with a local variable',
+    '#include <iostream>\nint main() { int cout = 1; using std::cout; }',
+    1,
+  ],
+  [
+    'a using-declaration conflicting with a function of the same signature',
+    '#include <string>\nstd::string to_string(int value) { return "x"; }\nusing std::to_string;',
+    2,
+  ],
+  [
+    'a function declaration conflicting with an already imported signature',
+    '#include <string>\nusing std::to_string;\nstd::string to_string(int value);',
+    2,
+  ],
   [
     'insertion and extraction on a const stream',
     '#include <sstream>\nint main() { const std::ostringstream s; s << 42; }',

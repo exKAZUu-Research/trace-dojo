@@ -33,4 +33,8 @@ int main() {
   void* erasedDerived = &derived;
   Base* recoveredBase = static_cast<Base*>(erasedDerived);
   std::cout << recoveredBase->value << ' ' << (static_cast<Derived*>(static_cast<void*>(recoveredBase)) == &derived) << '\n';
+  const void* heapValue = new int(9);
+  const int* heapInt = static_cast<const int*>(heapValue);
+  std::cout << *heapInt << '\n';
+  delete heapInt;
 }

@@ -8,6 +8,10 @@ struct Base { int first = 2; };
 struct Derived : Base { int second = 4; };
 struct FixedBase { int first; FixedBase(int value) : first(value) {} };
 struct FixedDerived : FixedBase { int second; };
+struct Empty {};
+struct Tagged { Empty tag; int number; };
+struct DefaultNumber { int number = 7; };
+struct DefaultArray { DefaultNumber numbers[2]; };
 
 struct Abstract { virtual int value(int n) const = 0; };
 struct Intermediate : Abstract { int value(const int n) const override = 0; };
@@ -41,4 +45,8 @@ int main() {
   std::cout << (/* dispatch */ iface->value(6)) << twice(/* argument */ 3) << (null == nullptr) << '\n';
   unsigned char bytes[] = "\xc3\xa9";
   std::cout << int(bytes[0]) << ' ' << int(bytes[1]) << '\n';
+  Empty empty[]{{}, {}};
+  Tagged tagged[]{{{}, 9}};
+  const DefaultArray defaults;
+  std::cout << sizeof(empty) << ' ' << tagged[0].number << ' ' << defaults.numbers[1].number << '\n';
 }

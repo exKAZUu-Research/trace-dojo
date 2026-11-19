@@ -352,6 +352,17 @@ test('void pointer recovery checks the original type when reading a value', () =
   });
 });
 
+test('delete checks the original allocation type after void pointer recovery', () => {
+  const program = `int main() {
+  void* allocation = new double(2.5);
+  delete static_cast<int*>(allocation);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('ポインタで扱えません'),
+  });
+});
+
 test('a base-class member traces its own field when a derived field hides it', () => {
   const program = `struct Base {
   int value = 1;

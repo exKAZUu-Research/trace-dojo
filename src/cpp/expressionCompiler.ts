@@ -539,7 +539,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const cls = object.type.kind === 'class' ? object.type.cls : field.owner;
     const locate = (location: Ptr): Ptr => new Ptr(location.read() as CObject, index, { location, cls });
     if (object.isLvalue) {
-      const { run } = object;
+      const { run, temporaryMember } = object;
       return {
         type,
         isLvalue: true,
@@ -549,20 +549,17 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         row,
         run: (frame) => locate(run(frame) as Ptr),
         description: field.name,
-        temporaryMember: object.temporaryMember && {
-          object: object.temporaryMember.object,
-          path: [...object.temporaryMember.path, index],
-        },
+        temporaryMember: temporaryMember && ((frame, retain) => locate(temporaryMember(frame, retain))),
       };
     }
     // A member of a prvalue is an xvalue, which the interpreter treats as a temporary's member.
-    const materialized = this.materialize(object).run;
+    const materialized = this.temporaryLocation(object);
     return {
       type,
       isLvalue: true,
       row,
-      run: (frame) => locate(materialized(frame) as Ptr),
-      temporaryMember: { object, path: [index] },
+      run: (frame) => locate(materialized(frame)),
+      temporaryMember: (frame, retain) => locate(materialized(frame, retain)),
     };
   }
 
@@ -1164,6 +1161,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const memberCondition = scalar.memberConstant;
     const leftConstant = memberConstantOf(left);
     const rightConstant = memberConstantOf(right);
+    const leftTemporary = left.temporaryMember;
+    const rightTemporary = right.temporaryMember;
     return {
       type,
       isLvalue,
@@ -1183,6 +1182,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       staticAddress: chosen?.staticAddress,
       constantPointerValue: chosen?.constantPointerValue,
       run: (...args) => (condition(args[0]) ? left : right).run(...args),
+      temporaryMember:
+        isLvalue && leftTemporary && rightTemporary
+          ? (frame, retain) => (condition(frame) ? leftTemporary : rightTemporary)(frame, retain)
+          : undefined,
       isTemporaryObject: !isLvalue && type.kind === 'class',
     };
   }
@@ -1192,7 +1195,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     b: Expr,
     row: number
   ): { left: Expr; right: Expr; type: Type; isLvalue: boolean } {
-    if (a.isLvalue && b.isLvalue && sameType(a.type, b.type, false)) {
+    if (
+      a.isLvalue &&
+      b.isLvalue &&
+      Boolean(a.temporaryMember) === Boolean(b.temporaryMember) &&
+      sameType(a.type, b.type, false)
+    ) {
       return { left: a, right: b, type: isConstType(b.type) ? withConst(a.type) : a.type, isLvalue: true };
     }
     if (a.type.kind === 'void' && b.type.kind === 'void') return { left: a, right: b, type: a.type, isLvalue: false };
@@ -1240,7 +1248,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const left = this.compileExpression(fieldOf(node, 'left') as Syntax);
     const right = this.compileExpression(fieldOf(node, 'right') as Syntax);
     const first = this.discardedValue(left);
-    const second = right.run;
+    const { run: second, temporaryMember } = right;
     const value = this.rvalue(left);
     const hasConstantLeft = value.constant !== undefined;
     return {
@@ -1258,6 +1266,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       constantStringLength: hasConstantLeft ? right.constantStringLength : undefined,
       staticAddress: hasConstantLeft ? right.staticAddress : undefined,
       constantPointerValue: hasConstantLeft ? right.constantPointerValue : undefined,
+      temporaryMember:
+        temporaryMember &&
+        ((frame, retain) => {
+          first(frame);
+          return temporaryMember(frame, retain);
+        }),
       run: (...args) => {
         first(args[0]);
         return second(...args);
@@ -1281,9 +1295,11 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const libraryResult = this.libraryOperator('[]', [array, index], row);
     if (libraryResult) return libraryResult;
     if (index.braced) return this.error(row, 'この型の [] の中に {...} は書けません。');
-    let pointer = this.rvalue(array);
-    let offset = this.rvalue(index);
-    if (isInteger(pointer.type) && offset.type.kind === 'pointer') [pointer, offset] = [offset, pointer];
+    const left = this.rvalue(array);
+    const right = this.rvalue(index);
+    const reversed = isInteger(left.type) && right.type.kind === 'pointer';
+    const pointer = reversed ? right : left;
+    const offset = reversed ? left : right;
     if (pointer.type.kind !== 'pointer') {
       return this.error(row, `[] は配列やポインタ、std::vector などにしか使えません（${typeName(array.type)}）。`);
     }
@@ -1293,6 +1309,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const n = convertArithmetic(offset, LONG);
     const type = (pointer.type as Extract<Type, { kind: 'pointer' }>).to;
     const constantLocation = offsetConstantLocation(pointer.constantPointee, n.constant);
+    const original = reversed ? index : array;
+    const temporaryArray = original.type.kind === 'array' ? original.temporaryMember : undefined;
+    const locate = (frame: Frame, pointerAt: Eval<Ptr>): Ptr => {
+      if (!reversed) return pointerAt(frame).offset(Number(n.run(frame)));
+      const position = Number(n.run(frame));
+      return pointerAt(frame).offset(position);
+    };
     return {
       type,
       isLvalue: true,
@@ -1300,7 +1323,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       constantInitialization: hasConstantObject(constantLocation),
       constantLocation,
       row,
-      run: (frame) => (p(frame) as Ptr).offset(Number(n.run(frame))),
+      run: (frame) => locate(frame, p as Eval<Ptr>),
+      temporaryMember:
+        temporaryArray &&
+        ((frame, retain) => locate(frame, (f) => new Ptr(temporaryArray(f, retain).read() as ArrayStore, 0))),
     };
   }
 
@@ -1340,6 +1366,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       return { type, isLvalue: false, row, run: (frame) => (run(frame), undefined), onlyCalls: expr.onlyCalls };
     }
     if (type.kind === 'reference') return this.castReference(expr, type, row, kind);
+    const direct = this.directInitializerArgument(type, expr);
+    if (direct !== expr) return direct;
     const explicitBool = this.libraryBool(expr, row, type);
     if (explicitBool) return explicitBool;
     const value = this.rvalue(expr);
@@ -1367,6 +1395,22 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     if (type.kind === 'class') return this.constructObject(type.cls, [expr], row, false);
     return this.convert(expr, unqualified(type), row);
+  }
+
+  protected directInitializerArgument(type: Type, expr: Expr): Expr {
+    if (type.kind !== 'int' || type.name !== 'bool' || expr.type.kind !== 'nullptr') return expr;
+    const run = expr.run;
+    return {
+      type: BOOL,
+      row: expr.row,
+      isLvalue: false,
+      onlyCalls: expr.onlyCalls,
+      constant: expr.isNullConstant ? 0 : undefined,
+      run: (frame) => {
+        run(frame);
+        return 0;
+      },
+    };
   }
 
   private castReference(
@@ -1504,7 +1548,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const typeNode = fieldOf(node, 'type') as Syntax;
     if (typeNode.type === 'type_descriptor') return this.unsupported(node.row, '複合リテラル（(型){...}）');
     const type = this.resolveTypeSpecifier(typeNode);
-    const run = this.listInitializer(type, fieldOf(node, 'value') as Syntax, node.row);
+    const run = this.listInitializer(type, fieldOf(node, 'value') as Syntax, node.row, true);
     return {
       type,
       isLvalue: false,
@@ -1763,7 +1807,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   }
 
   /** Compiles a braced initializer list for an object of a type, as list-initialization does. */
-  abstract listInitializer(type: Type, list: Syntax, row: number): Initializer;
+  abstract listInitializer(type: Type, list: Syntax, row: number, direct?: boolean): Initializer;
 
   protected abstract initializeList(type: Type, elements: readonly Syntax[], row: number): Initializer;
 
@@ -1800,13 +1844,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     let value: Eval<Value>;
     if (!argsNode) value = this.defaultInitializer(baseType, node.row);
     else if (argsNode.type === 'initializer_list') {
-      const initialize = this.listInitializer(type, argsNode, node.row);
+      const initialize = this.listInitializer(type, argsNode, node.row, true);
       value = (frame) => initialize(frame, undefined, false, 'full-expression');
     } else {
       const args = argsNode.children.map((arg) => this.argument(arg));
       if (type.kind === 'class') value = this.constructObject(type.cls, args, node.row, false).run as Eval<Value>;
       else if (args.length === 0) value = this.valueInitialized(type, node.row).run as Eval<Value>;
-      else if (args.length === 1) value = this.convert(args[0], type, node.row).run as Eval<Value>;
+      else if (args.length === 1)
+        value = this.convert(this.directInitializerArgument(type, args[0]), type, node.row).run as Eval<Value>;
       else return this.error(node.row, `new ${typeName(type)}(...) には値を1つだけ書いてください。`);
     }
     return {
@@ -1892,16 +1937,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const exec = (frame: Frame): Value => {
       const pointer = run(frame) as Ptr;
       if (pointer.isNull) return undefined;
-      const store = pointer.store as Store;
-      if (store.liveness === Liveness.Deleted) throw new CppRuntimeError('doubleDelete');
-      store.checkAlive();
+      if (pointer.store?.liveness === Liveness.Deleted) throw new CppRuntimeError('doubleDelete');
+      const store = pointer.target();
       if (store.allocation !== (isArray ? 'newArray' : 'new') || pointer.index !== 0)
         throw new CppRuntimeError('invalidDelete');
       if (isArray) {
-        const { allocatedElementType, values } = store as ArrayStore;
-        if (!allocatedElementType || !combinedPointee(allocatedElementType, pointee))
-          throw new CppRuntimeError('invalidDelete');
-        if (destroyStatic) for (let index = values.length - 1; index >= 0; index--) destroyStatic(frame, values[index]);
+        destroyAllocatedArray(frame, store as ArrayStore, pointee, destroyStatic);
       } else {
         const object = (store as Box).value;
         if (cls && object instanceof CObject && object.cls !== cls && !hasVirtualDestructor)
@@ -1958,6 +1999,18 @@ function commonConditionalPointer(left: Expr, right: Expr): Type | undefined {
     if (y.cls.isDerivedFrom(x.cls)) return pointerTo(withConst(x, isConst));
     if (x.cls.isDerivedFrom(y.cls)) return pointerTo(withConst(y, isConst));
   }
+}
+
+function destroyAllocatedArray(
+  frame: Frame,
+  store: ArrayStore,
+  pointee: Type,
+  destroy: ((frame: Frame, value: Value) => void) | undefined
+): void {
+  const { allocatedElementType, values } = store;
+  if (!allocatedElementType || !combinedPointee(allocatedElementType, pointee))
+    throw new CppRuntimeError('invalidDelete');
+  if (destroy) for (let index = values.length - 1; index >= 0; index--) destroy(frame, values[index]);
 }
 
 function combinedPointee(left: Type, right: Type): Type | undefined {

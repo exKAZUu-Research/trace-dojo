@@ -68,6 +68,7 @@ export interface FieldInfo {
   row: number;
   /** The default member initializer (`int speed = 2;`, `Turtle t{1, 2};`), compiled with the class. */
   initializer?: Syntax;
+  directInitializer?: boolean;
 }
 
 export interface StaticFieldInfo {

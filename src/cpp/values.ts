@@ -81,6 +81,17 @@ export class Box extends Store {
   }
 }
 
+export class RetainedTemporary extends Box {
+  constructor(readonly temporary: Temporary) {
+    super(temporary.object);
+  }
+}
+
+export function destroyRetainedTemporary(frame: Frame, value: Value): void {
+  const { temporary } = value as RetainedTemporary;
+  temporary.destroy(frame, temporary.object);
+}
+
 /** A built-in array, whose elements may be arrays or objects. */
 export class ArrayStore extends Store {
   allocatedElementType?: Type;

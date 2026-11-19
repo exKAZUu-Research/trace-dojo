@@ -10,8 +10,8 @@ import {
   Rank,
 } from './conversions';
 import { CppException, CppRuntimeError } from './errors';
-import { type Expr, hasConstantObject, mapMemberConstants } from './expr';
-import { type Eval, type Frame, holdAll } from './runtime';
+import { type Expr, hasConstantObject, mapMemberConstants, type TemporaryBinding } from './expr';
+import { type Eval, type Frame, holdAll, type Temporary } from './runtime';
 import type { Syntax } from './syntax';
 import {
   type Access,
@@ -108,6 +108,42 @@ export function withTemporaries<T>(frame: Frame, run: Eval<T>): T {
   }
   destroyTemporaries(frame, mark);
   return result;
+}
+
+export function bindRetainedTemporary(
+  frame: Frame,
+  bind: TemporaryBinding,
+  retain: (temporary: Temporary) => void,
+  finishExpression = false
+): Ptr {
+  const bindAndTransfer = (f: Frame, keep: (temporary: Temporary) => void): Ptr => {
+    let index: number | undefined;
+    const location = bind(f, (temporary) => {
+      index = f.temporaries.push(temporary) - 1;
+    });
+    if (index === undefined) throw new Error('Reference binding did not create its temporary');
+    const [temporary] = f.temporaries.splice(index, 1);
+    keep(temporary);
+    return location;
+  };
+  if (!finishExpression) return bindAndTransfer(frame, retain);
+  const mark = frame.pending.length;
+  let held: Temporary | undefined;
+  try {
+    const location = withTemporaries(frame, (f) =>
+      bindAndTransfer(f, (temporary) => {
+        held = temporary;
+        f.pending.push(temporary.object);
+      })
+    );
+    if (held) retain(held);
+    return location;
+  } catch (error) {
+    if (error instanceof CppException && held) held.destroy(frame, held.object);
+    throw error;
+  } finally {
+    frame.pending.length = mark;
+  }
 }
 
 /** Ends the lifetime of temporaries created since `mark`, the last first. */
@@ -252,8 +288,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   /** An lvalue designating a temporary holding a prvalue, which lives until the end of the full-expression. */
   materialize(expr: Expr): Expr {
     if (expr.isLvalue) return expr;
-    const destroy = this.destroyerOf(expr.type, expr.row);
-    const { run } = expr;
+    const locate = this.temporaryLocation(expr);
     return {
       type: expr.type,
       isLvalue: true,
@@ -261,17 +296,25 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       constantStringLength: expr.constantStringLength,
       row: expr.row,
       onlyCalls: expr.onlyCalls,
-      run: (frame) => {
-        const box = new Box(run(frame) as Value);
-        frame.temporaries.push({
-          object: box,
-          destroy: (f) => {
-            if (destroy && box.value !== UNINIT) destroy(f, box.value);
-            endLifetime(box);
-          },
-        });
-        return new Ptr(box, 0);
-      },
+      run: (frame) => locate(frame),
+    };
+  }
+
+  protected temporaryLocation(expr: Expr): TemporaryBinding {
+    const destroy = this.destroyerOf(expr.type, expr.row);
+    const { run } = expr;
+    return (frame, retain) => {
+      const box = new Box(run(frame) as Value);
+      const temporary = {
+        object: box,
+        destroy: (f: Frame) => {
+          if (box.value !== UNINIT) destroy?.(f, box.value);
+          endLifetime(box);
+        },
+      };
+      if (retain) retain(temporary);
+      else frame.temporaries.push(temporary);
+      return new Ptr(box, 0);
     };
   }
 

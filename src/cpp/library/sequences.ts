@@ -1000,7 +1000,7 @@ function sequenceList(
       frame.temporaries.push({ object, destroy });
       return object;
     });
-    return make(editor.build(frame, temporaries.length, (index) => copy(frame, temporaries[index])));
+    return make(editor.build(frame, temporaries.length, (index) => copy(frame, temporaries[index]), true));
   };
   listElements.set(run, inits);
   return run;

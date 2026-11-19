@@ -18,6 +18,7 @@ import {
 import { SequenceValue } from './library/containerValues';
 import type { Library } from './library/registry';
 import {
+  bindRetainedTemporary,
   invoke,
   makeEach,
   newObject,
@@ -60,7 +61,18 @@ import {
   unqualified,
   VOID,
 } from './types';
-import { ArrayStore, Box, CObject, endLifetime, Liveness, Ptr, UNINIT, type Value } from './values';
+import {
+  ArrayStore,
+  Box,
+  CObject,
+  destroyRetainedTemporary,
+  endLifetime,
+  Liveness,
+  Ptr,
+  RetainedTemporary,
+  UNINIT,
+  type Value,
+} from './values';
 
 export interface CompileOptions {
   trace?: TraceOptions;
@@ -213,7 +225,27 @@ export class Compiler extends StatementCompiler {
     if (scope?.text !== 'std') return this.unsupported(node.row, '名前空間以外の using 宣言（using Base::f; など）');
     const entity = this.lookupQualified(target);
     const name = (fieldOf(target, 'name') as Syntax).text;
-    (this.context.fn ? this.context.scope : this.globalScope).names.set(name, entity);
+    const names = (this.context.fn ? this.context.scope : this.globalScope).names;
+    const previous = names.get(name);
+    if (!previous) {
+      names.set(name, entity.kind === 'functions' ? { kind: 'functions', functions: [...entity.functions] } : entity);
+      return;
+    }
+    if (
+      previous === entity ||
+      (previous.kind === 'type' && entity.kind === 'type' && sameType(previous.type, entity.type))
+    )
+      return;
+    if (previous.kind !== 'functions' || entity.kind !== 'functions')
+      this.error(node.row, `${name} は、このスコープですでに別のものとして宣言されています。`);
+    const functions = [...previous.functions];
+    for (const fn of entity.functions) {
+      if (functions.includes(fn)) continue;
+      const declared = functions.find((candidate) => sameParameters(candidate, fn));
+      if (declared && this.library.sameCFunction(declared, fn)) continue;
+      this.addOverload(functions, fn, node.row);
+    }
+    names.set(name, { kind: 'functions', functions });
   }
 
   // Classes ----------------------------------------------------------------------------------------------------------
@@ -354,9 +386,14 @@ export class Compiler extends StatementCompiler {
       const name = declared.name as string;
       if (this.memberEntity(cls, name)) this.error(declarator.row, `メンバ ${name} はすでに宣言されています。`);
       const initializer = this.defaultValueOf(node, declarator);
+      const directInitializer =
+        initializer?.type === 'initializer_list' && node.all[node.all.indexOf(initializer) - 1]?.type !== '=';
       if (isStatic) {
-        if (isConstexpr) this.requireConstantInitializer(declared.type, initializer, declarator.row);
-        this.staticMember(cls, name, declared.type, access, declarator.row, initializer, isInline);
+        if (isConstexpr) this.requireConstantInitializer(declared.type, initializer, declarator.row, directInitializer);
+        this.staticMember(cls, name, declared.type, access, declarator.row, initializer, {
+          isInline,
+          directInitializer,
+        });
         continue;
       }
       if (declared.type.kind === 'class' && !declared.type.cls.isComplete) {
@@ -374,6 +411,7 @@ export class Compiler extends StatementCompiler {
         owner: cls,
         row: declarator.row,
         initializer,
+        directInitializer,
       };
       cls.fields.push(field);
     }
@@ -394,7 +432,7 @@ export class Compiler extends StatementCompiler {
     access: Access,
     row: number,
     initializer: Syntax | undefined,
-    isInline: boolean
+    { isInline, directInitializer }: { isInline: boolean; directInitializer: boolean }
   ): void {
     const info = {
       name,
@@ -417,7 +455,7 @@ export class Compiler extends StatementCompiler {
     info.global = global;
     global.isDefined = isInline;
     if (initializer || (isInline && this.isClassType(type)))
-      this.initializeGlobal(global, type, initializer, row, true);
+      this.initializeGlobal(global, type, initializer, row, directInitializer);
     if (isConstType(type) && initializer && initializer.type !== 'initializer_list') {
       info.constant = this.constantOf(this.compileExpression(initializer), type);
       if (!isInline && info.constant === undefined)
@@ -949,7 +987,7 @@ export class Compiler extends StatementCompiler {
         if (args.length !== 1) this.error(row, `参照のメンバ ${field.name} には値を1つ書いてください。`);
         value = this.constructorReference(type, args[0], row) as Initializer;
       } else if (argumentsNode?.type === 'initializer_list') {
-        value = this.listInitializer(type, argumentsNode, row);
+        value = this.listInitializer(type, argumentsNode, row, true);
         isCreation = type.kind === 'class' && !type.cls.library;
       } else {
         const args = this.initializerArguments(explicit);
@@ -960,7 +998,7 @@ export class Compiler extends StatementCompiler {
         } else if (args.length === 0) {
           value = this.valueInitialized(type, row).run as Eval<Value>;
         } else if (args.length === 1 && type.kind !== 'array') {
-          value = this.copyInitializer(type, args[0], row, false);
+          value = this.copyInitializer(type, this.directInitializerArgument(type, args[0]), row, false);
         } else {
           this.error(row, `メンバ ${field.name} の初期値には値を1つだけ書いてください。`);
         }
@@ -969,7 +1007,7 @@ export class Compiler extends StatementCompiler {
       const node = field.initializer;
       if (type.kind === 'reference') value = this.constructorReference(type, this.argument(node), row) as Initializer;
       else if (node.type === 'initializer_list') {
-        value = this.listInitializer(type, node, row);
+        value = this.listInitializer(type, node, row, field.directInitializer);
         isCreation = type.kind === 'class' && !type.cls.library;
       } else {
         const expr = this.compileExpression(node);
@@ -1164,7 +1202,13 @@ export class Compiler extends StatementCompiler {
     if (existing && existing.kind !== 'functions')
       return this.error(node.row, `${name} はすでに別のものとして宣言されています。`);
     const overloads = existing?.kind === 'functions' ? existing.functions : [];
-    const same = overloads.find((other) => sameParameters(other, fn));
+    let same = overloads.find((other) => sameParameters(other, fn));
+    if (same?.native) {
+      if (!this.library.sameCFunction(fn, same))
+        this.error(node.row, `関数 ${name} は、同じ型の引数を取る using 宣言と重複しています。`);
+      overloads.splice(overloads.indexOf(same), 1);
+      same = undefined;
+    }
     if (same) {
       this.checkExceptionSpecifier(same, fn, node.row);
       if (!sameType(same.ret, fn.ret))
@@ -1450,8 +1494,8 @@ export class Compiler extends StatementCompiler {
     const savedClass = this.memberClass;
     this.memberClass = scope.cls;
     try {
-      if (value) this.initializeGlobal(global, info.type, value, declarator.row, true);
-      else if (this.isClassType(info.type)) this.initializeGlobal(global, info.type, undefined, declarator.row, true);
+      if (value) this.initializeGlobal(global, info.type, value, declarator.row, !hasToken(declarator, '='));
+      else if (this.isClassType(info.type)) this.initializeGlobal(global, info.type, undefined, declarator.row);
       if (isConstType(info.type) && value && value.type !== 'initializer_list' && value.type !== 'argument_list') {
         info.constant = this.constantOf(this.compileExpression(value), info.type);
       }
@@ -1479,13 +1523,14 @@ export class Compiler extends StatementCompiler {
     const global = this.declareStaticStorage(name, type, declarator.row, !isConstant);
     global.isDefined = true;
     global.isConstexprPointer = isConstexpr && type.kind === 'pointer';
+    const direct = !hasToken(declarator, '=');
     let constant: number | bigint | undefined;
-    if (isConstexpr) constant = this.requireConstantInitializer(type, value, declarator.row);
+    if (isConstexpr) constant = this.requireConstantInitializer(type, value, declarator.row, direct);
     else if (isConstant && value && value.type !== 'initializer_list' && value.type !== 'argument_list') {
       constant = this.constantOf(this.compileExpression(value), type);
     }
     this.globalScope.names.set(name, { kind: 'global', global, isReference: false, constant });
-    this.initializeGlobal(global, type, value, declarator.row, true);
+    this.initializeGlobal(global, type, value, declarator.row, direct);
     return type;
   }
 
@@ -1514,21 +1559,25 @@ export class Compiler extends StatementCompiler {
   ): Eval<undefined> {
     let locate: Eval<Ptr>;
     if ('lifetime' in binding) {
-      const { type, make, locate: locateHeld } = binding.lifetime;
-      const holder = this.declareStaticStorage(`\0${global.name}`, type, row, false);
-      const register = this.staticRegistration(type, row);
+      const holder = this.declareStaticStorage(`\0${global.name}`, VOID, row, false);
       const registerDuringStartup = fileScope && binding.isConstant;
-      if (registerDuringStartup && register) {
+      if (registerDuringStartup) {
         this.dynamicInitializers.push((frame) => {
-          register(frame, frame.runtime.globals[holder.index] as Box);
+          registerStaticTemporary(frame, frame.runtime.globals[holder.index] as Box);
           return;
         });
       }
       locate = (frame) => {
         const box = frame.runtime.globals[holder.index] as Box;
-        box.value = make(frame);
-        if (!registerDuringStartup) register?.(frame, box);
-        return locateHeld(box);
+        return bindRetainedTemporary(
+          frame,
+          binding.lifetime,
+          (temporary) => {
+            box.value = new RetainedTemporary(temporary);
+            if (!registerDuringStartup) registerStaticTemporary(frame, box);
+          },
+          true
+        );
       };
     } else {
       locate = binding.loc;
@@ -1557,12 +1606,12 @@ export class Compiler extends StatementCompiler {
     type: Type,
     value: Syntax | undefined,
     row: number,
-    recordsStep: boolean
+    direct = false
   ): void {
     const saved = this.context;
     this.context = new FunctionContext(undefined, this.memberClass, VOID);
     try {
-      const init = this.staticInitialization(type, value, row);
+      const init = this.staticInitialization(type, value, row, direct);
       if (!init) return;
       if ((type.kind === 'class' || type.kind === 'array') && isConstType(type))
         global.hasConstantObjectValue = init.isConstant;
@@ -1585,7 +1634,7 @@ export class Compiler extends StatementCompiler {
             return;
           });
         }
-      } else this.dynamicInitializers.push(recordsStep ? this.withStep(row, execute, init.isCreation) : execute);
+      } else this.dynamicInitializers.push(this.withStep(row, execute, init.isCreation));
     } finally {
       this.context = saved;
     }
@@ -1595,7 +1644,8 @@ export class Compiler extends StatementCompiler {
   private staticInitialization(
     type: Type,
     value: Syntax | undefined,
-    row: number
+    row: number,
+    direct: boolean
   ): { run: Initializer; isConstant: boolean; isCreation: boolean } | undefined {
     let run: Initializer;
     const createsClass = type.kind === 'class' && !type.cls.library;
@@ -1608,7 +1658,7 @@ export class Compiler extends StatementCompiler {
       run = this.defaultInitializer(type, row);
       isCreation = true;
     } else if (value.type === 'initializer_list') {
-      run = this.listInitializer(type, value, row);
+      run = this.listInitializer(type, value, row, direct);
       isCreation = createsClass;
     } else if (value.type === 'argument_list') {
       const args = value.children.map((arg) => this.argument(arg));
@@ -1617,7 +1667,7 @@ export class Compiler extends StatementCompiler {
         isCreation = createsClass;
       } else {
         if (args.length !== 1) return this.error(row, '初期値には値を1つだけ書いてください。');
-        run = this.copyInitializer(type, args[0], row, false);
+        run = this.copyInitializer(type, this.directInitializerArgument(type, args[0]), row, false);
       }
     } else {
       run = this.copyInitializer(type, this.compileExpression(value), row, false);
@@ -1626,8 +1676,14 @@ export class Compiler extends StatementCompiler {
     return { run, isConstant: run.isConstant === true, isCreation };
   }
 
-  staticInitializer(global: GlobalInfo, type: Type, value: Syntax | undefined, row: number): (frame: Frame) => void {
-    const init = this.staticInitialization(type, value, row);
+  staticInitializer(
+    global: GlobalInfo,
+    type: Type,
+    value: Syntax | undefined,
+    row: number,
+    direct = false
+  ): (frame: Frame) => void {
+    const init = this.staticInitialization(type, value, row, direct);
     const { index } = global;
     if (!init) return () => {};
     const register = this.staticRegistration(type, row);
@@ -1798,11 +1854,11 @@ export class Compiler extends StatementCompiler {
     };
   }
 
-  listInitializer(type: Type, list: Syntax, row: number): Initializer {
-    return this.initializeList(type, list.children, row);
+  listInitializer(type: Type, list: Syntax, row: number, direct = false): Initializer {
+    return this.initializeList(type, list.children, row, direct);
   }
 
-  protected initializeList(type: Type, elements: readonly Syntax[], row: number): Initializer {
+  protected initializeList(type: Type, elements: readonly Syntax[], row: number, direct = false): Initializer {
     if (type.kind === 'reference') return this.error(row, '参照は {...} で初期化できません。');
     if (type.kind === 'array') return this.arrayInitializer(type, elements, row);
     if (type.kind === 'class') return this.initializeClassList(type, elements, row);
@@ -1816,7 +1872,8 @@ export class Compiler extends StatementCompiler {
       return this.error(row, `${typeName(type)} 型の値を初期化する {...} には、値を1つだけ書いてください。`);
     if (elements[0].type === 'initializer_list')
       return this.error(row, `${typeName(type)} 型の値は、入れ子の {...} では初期化できません。`);
-    return this.copyInitializer(type, this.compileExpression(elements[0]), row, true);
+    const expr = this.compileExpression(elements[0]);
+    return this.copyInitializer(type, direct ? this.directInitializerArgument(type, expr) : expr, row, true);
   }
 
   private initializeClassList(
@@ -1943,6 +2000,14 @@ export class Compiler extends StatementCompiler {
    * so that counting the clauses compiles none.
    */
   private takeClauses(type: Type, clauses: Clauses, row: number): () => Initializer {
+    const start = clauses.next;
+    const initialize = this.consumeClause(type, clauses, row);
+    if (clauses.next === start)
+      this.error(clauses.nodes[start].row, `${typeName(type)} の空の集成体の初期値には {} を書いてください。`);
+    return initialize;
+  }
+
+  private consumeClause(type: Type, clauses: Clauses, row: number): () => Initializer {
     const node = clauses.nodes[clauses.next];
     if (node.type !== 'initializer_list' && (type.kind === 'array' || type.kind === 'class')) {
       const expr = this.clauseExpression(node, clauses);
@@ -1976,23 +2041,17 @@ export class Compiler extends StatementCompiler {
         binding.isConstant === true,
         binding
       );
-    const { type: heldType, make, locate } = binding.lifetime;
-    const create = hasDefault ? this.fullExpression(make) : make;
-    const destroy = this.destroyerOf(heldType);
     return initializerWithConstancy(
-      (frame, _target, _zeroInitialize, owner) => {
-        const box = new Box(create(frame));
-        const temporary = {
-          object: box,
-          destroy: (f: Frame) => {
-            destroy?.(f, box.value);
-            endLifetime(box);
+      (frame, _target, _zeroInitialize, owner) =>
+        bindRetainedTemporary(
+          frame,
+          binding.lifetime,
+          (temporary) => {
+            if (owner instanceof CObject) (owner.referenceTemporaries ??= []).push(temporary);
+            else frame.temporaries.push(temporary);
           },
-        };
-        if (owner instanceof CObject) (owner.referenceTemporaries ??= []).push(temporary);
-        else frame.temporaries.push(temporary);
-        return locate(box);
-      },
+          hasDefault
+        ),
       binding.isConstant === true,
       binding
     );
@@ -2194,7 +2253,7 @@ export class Compiler extends StatementCompiler {
       if (field.type.kind === 'reference') return this.memberReference(field.type, this.argument(node), node.row, true);
       const initialize =
         node.type === 'initializer_list'
-          ? this.listInitializer(field.type, node, node.row)
+          ? this.listInitializer(field.type, node, node.row, field.directInitializer)
           : this.copyInitializer(field.type, this.compileExpression(node), node.row, false);
       return initializerWithConstancy(
         (frame, target, zeroInitialize, referenceLifetime) =>
@@ -2285,6 +2344,10 @@ function initializerTarget(value: Value): InitializerTarget | undefined {
   return value instanceof CObject || value instanceof ArrayStore ? value : undefined;
 }
 
+function registerStaticTemporary(frame: Frame, box: Box): void {
+  frame.runtime.staticObjects.push({ box, destroy: destroyRetainedTemporary });
+}
+
 function asObject(value: InitializerTarget | undefined): CObject | undefined {
   return value instanceof CObject ? value : undefined;
 }
@@ -2345,10 +2408,10 @@ function isConstDefaultConstructible(type: Type): boolean {
   const { cls } = type;
   const fixed = cls.library?.aggregateArray;
   if (fixed) return isConstDefaultConstructible(fixed.type);
+  if (cls.library || cls.constructors.length > 0) return true;
   return (
-    cls.library !== undefined ||
-    cls.constructors.length > 0 ||
-    cls.fields.every((field) => field.initializer !== undefined || field.type.kind === 'class')
+    (!cls.base || isConstDefaultConstructible(classType(cls.base))) &&
+    cls.ownFields.every((field) => field.initializer !== undefined || isConstDefaultConstructible(field.type))
   );
 }
 

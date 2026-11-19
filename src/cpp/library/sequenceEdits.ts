@@ -29,15 +29,10 @@ export class SequenceEditor {
     return this.operations();
   }
 
-  build(frame: Frame, count: number, make: (index: number) => Value): Value[] {
-    return makeEach(
-      frame,
-      count,
-      make,
-      () => this.ops.destroy,
-      undefined,
-      this.kind === 'vector' ? 'reverse' : 'forward'
-    );
+  build(frame: Frame, count: number, make: (index: number) => Value, fromInitializerList = false): Value[] {
+    // Apple's deque initializer-list constructor leaves partial elements to its allocation cleanup without invoking their destructors.
+    const destroy = fromInitializerList && this.kind === 'deque' ? undefined : this.ops.destroy;
+    return makeEach(frame, count, make, () => destroy, undefined, this.kind === 'vector' ? 'reverse' : 'forward');
   }
 
   /** Destroys elements: a vector from its last, a deque and a list from their first. */

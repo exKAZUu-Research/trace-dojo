@@ -281,6 +281,10 @@ export class Library {
     });
   }
 
+  sameCFunction(declaration: FunctionInfo, library: FunctionInfo): boolean {
+    return library.libcGlobal === true && redeclaresLibcFunction(declaration, this.headers);
+  }
+
   mergeCOverloads(name: string, standard: FunctionInfo[], declared: FunctionInfo[]): FunctionInfo[] {
     const visible = this.rebindCOverloads(name, standard, declared);
     const overloads = declared.filter(
