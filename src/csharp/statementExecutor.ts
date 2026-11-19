@@ -254,12 +254,18 @@ export abstract class StatementExecutor extends PatternMatcher {
     const value = this.evaluate(statement.value, frame);
     const chosen = this.chooseSection(statement.sections, value, frame);
     if (!chosen) return undefined;
-    for (const inner of chosen.statements) {
-      const completion = this.execute(inner, frame);
-      if (completion === BREAK) return undefined;
-      if (completion !== undefined) return completion;
+    try {
+      for (const inner of chosen.statements) {
+        const completion = this.execute(inner, frame);
+        if (completion === BREAK) return undefined;
+        if (completion !== undefined) return completion;
+      }
+      return undefined;
+    } finally {
+      // The sections' locals go out of scope with the switch block, so the trace stops showing them.
+      for (const section of statement.sections)
+        for (const local of section.locals) if (!local.isCaptured) frame.slots[local.slot] = UNASSIGNED;
     }
-    return undefined;
   }
 
   /** The section of the first label that matches, or else the default section. */

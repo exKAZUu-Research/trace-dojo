@@ -249,6 +249,8 @@ export interface BoundCatch {
 export interface BoundSwitchSection {
   labels: ({ pattern: BoundPattern; guard: BoundExpression | undefined } | 'default')[];
   statements: BoundStatement[];
+  /** The locals its statements and patterns declare, which leave scope with the switch. */
+  locals: LocalSymbol[];
   row: number;
 }
 

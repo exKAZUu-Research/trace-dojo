@@ -9,6 +9,7 @@ import { type CompiledProgram, compileProgram } from './compiler';
 import { CsDecimal } from './decimal';
 import { Evaluator } from './evaluator';
 import { runProgram } from './execute';
+import { formatFloat } from './format';
 import type { EnumerableState } from './library/iteration';
 import { enumText } from './objects';
 import { parseCSharp } from './parse';
@@ -165,14 +166,8 @@ const NOT_SCALAR = Symbol('notScalar');
 function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[string] | typeof NOT_SCALAR {
   const underlying = nullableUnderlying(type) ?? type;
   if (value instanceof CsBox) return scalarOf(value.value, value.type);
-  if (value === undefined) {
-    // oxlint-disable-next-line unicorn/no-null -- The trace format shows C# null as null.
-    return underlying.kind === 'named' &&
-      (underlying.symbol.special === 'string' || nullableUnderlying(type) !== undefined)
-      ? // oxlint-disable-next-line unicorn/no-null -- The trace format shows C# null as null.
-        null
-      : NOT_SCALAR;
-  }
+  // A null variable shows no value, as a null String in the Java interpreter's traces; arrays show null elements.
+  if (value === undefined) return NOT_SCALAR;
   if (underlying.kind === 'array') {
     if (!(value instanceof CsArray) || !hasScalarElements(underlying)) return NOT_SCALAR;
     return value.values.map((item) => {
@@ -206,9 +201,13 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
     case 'ushort':
     case 'int':
     case 'uint':
-    case 'float':
     case 'double': {
       return value as number;
+    }
+    case 'float': {
+      // A float shows its own shortest digits, as .NET prints `1.1f` as 1.1, not the double it widens to.
+      const number = value as number;
+      return Number.isFinite(number) && number !== 0 ? Number(formatFloat(number, true)) : number;
     }
     case 'object': {
       return typeof value === 'string' ? value : NOT_SCALAR;
