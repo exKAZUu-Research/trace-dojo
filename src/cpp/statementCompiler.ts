@@ -34,6 +34,7 @@ import {
   isLibraryClass,
   isReferenceRelated,
   nonReference,
+  pointerTo,
   referenceTo,
   sameType,
   type Type,
@@ -1258,7 +1259,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const base = this.specifiedType(param);
     const declaratorNode = fieldOf(param, 'declarator');
     const declared = declaratorNode ? this.applyDeclarator(base, declaratorNode) : { name: undefined, type: base };
-    const handlerType = declared.type;
+    const handlerType = declared.type.kind === 'array' ? pointerTo(declared.type.of) : declared.type;
     const caught = unqualified(nonReference(handlerType));
     if (caught.kind === 'void') this.error(clause.row, 'catch の型に void は使えません。');
     const incomplete = incompleteExceptionClass(caught);
