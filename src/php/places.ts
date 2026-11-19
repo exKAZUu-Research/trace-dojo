@@ -1,5 +1,15 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
-import { deprecated, E_WARNING, emitError, throwError, type UpdateWarning, warn, withPendingException } from './errors';
+import {
+  deprecated,
+  E_WARNING,
+  emitError,
+  isCleanupException,
+  throwError,
+  type UpdateWarning,
+  warn,
+  withPendingException,
+  withSuppressedErrorHandlers,
+} from './errors';
 import { type Frame, PhpThrow, rt } from './runtime';
 import { watchSlot } from './slotWatch';
 import { describePropertyType } from './types';
@@ -72,8 +82,8 @@ export function hasPropertySlot(
   interrupted = false
 ): boolean {
   if (fetchedDynamic) return object.props.has(name);
-  if (decl && !decl.hooks) return true;
-  return !interrupted;
+  if (decl) return !interrupted || !decl.hooks?.set;
+  return !interrupted || !object.cls.findMethod('__set');
 }
 
 export function storeIncrement(
@@ -84,15 +94,17 @@ export function storeIncrement(
   interrupted = false
 ): Value {
   if (detached || (updated === old && place.hasSlot?.(interrupted) === false)) return updated;
-  return place.set(updated);
+  return interrupted ? withSuppressedErrorHandlers(() => place.set(updated)) : place.set(updated);
 }
 
 export function withIncrementCleanup<T>(place: Place, old: Value, update: () => T): T {
   try {
     return update();
   } catch (error) {
-    if (error instanceof PhpThrow && place.writeAfterFailedIncrement)
-      withPendingException(rt(), error, () => place.writeAfterFailedIncrement?.(old));
+    if (isCleanupException(error) && place.writeAfterFailedIncrement)
+      withPendingException(rt(), error instanceof PhpThrow ? error : undefined, () =>
+        place.writeAfterFailedIncrement?.(old)
+      );
     throw error;
   }
 }

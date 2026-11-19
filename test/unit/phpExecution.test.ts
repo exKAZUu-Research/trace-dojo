@@ -3387,3 +3387,35 @@ $it->rewind();
 `);
   expect(rewindExit).toMatchObject({ kind: 'executed', stdout: 'exit;valid:0;' });
 });
+
+test('completes native SPL and dynamic property writes after interrupted getter inc/dec warnings', () => {
+  const splThrow = run(String.raw`<?php
+class C extends ArrayObject { function offsetGet(mixed $n): mixed { echo 'get;'; return null; } }
+class R { function __construct(public $a) {} function __destruct() { echo json_encode($this->a->getArrayCopy()); } }
+$a = new C([], ArrayObject::ARRAY_AS_PROPS);
+$r = new R($a);
+set_error_handler(function () { throw new Exception('e'); });
+try { $a->x--; } catch (Throwable $e) { echo 'caught;'; }
+`);
+  expect(splThrow).toMatchObject({ kind: 'executed', stdout: 'get;caught;{"x":null}' });
+
+  const splBoolExit = run(String.raw`<?php
+class C extends ArrayIterator { function offsetGet(mixed $n): mixed { echo 'get;'; return true; } }
+class R { function __construct(public $a) {} function __destruct() { echo json_encode($this->a->getArrayCopy()); } }
+$a = new C([], ArrayObject::ARRAY_AS_PROPS);
+$r = new R($a);
+set_error_handler(function () { exit('exit;'); });
+$a->x++;
+`);
+  expect(splBoolExit).toMatchObject({ kind: 'executed', stdout: 'get;exit;{"x":true}' });
+
+  const magicGetNoSet = run(String.raw`<?php
+class A { function __get($n) { echo 'get;'; return null; } }
+class R { function __construct(public $o) {} function __destruct() { echo json_encode(get_object_vars($this->o)); } }
+$a = new A();
+$r = new R($a);
+set_error_handler(function ($no) { echo "err:$no;"; throw new Exception('e'); });
+try { $a->x--; } catch (Throwable $e) { echo 'caught;'; }
+`);
+  expect(magicGetNoSet).toMatchObject({ kind: 'executed', stdout: 'get;err:2;caught;{"x":null}' });
+});

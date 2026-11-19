@@ -104,7 +104,7 @@ class ArrayObjectProperty implements Place {
   }
 
   hasSlot(interrupted = false): boolean {
-    return !interrupted;
+    return !interrupted || !this.overrides('offsetset');
   }
 
   writeAfterFailedIncrement(value: Value): void {

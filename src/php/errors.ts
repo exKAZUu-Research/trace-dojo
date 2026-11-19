@@ -64,6 +64,16 @@ export function throwError(className: string, message: string, previous?: PhpObj
 
 /** How many checks are running that only ask whether code would throw, such as `is_callable`. */
 let probes = 0;
+let suppressedHandlers = 0;
+
+export function withSuppressedErrorHandlers<T>(run: () => T): T {
+  suppressedHandlers++;
+  try {
+    return run();
+  } finally {
+    suppressedHandlers--;
+  }
+}
 
 /** The failure of a check that {@link probe} runs, which PHP reports without creating an exception object. */
 export class ProbeFailure {}
@@ -142,6 +152,7 @@ export function emitError(level: bigint, message: string, row = rt().diagnosticR
     !runtime.activeErrorHandlers.has(current.handler) &&
     (current.mask & level) !== 0n &&
     (skipMatchingHandler ||
+      suppressedHandlers > 0 ||
       runtime.pendingAssignmentWarning ||
       runtime.nativeStringConversionPending ||
       callUserHandler(current.handler, level, message, row))
