@@ -667,6 +667,7 @@ test.each([
   ['SplFixedArray', 'new SplFixedArray(1)'],
   ['Closure', 'function () {}'],
 ])('releases temporary objects without scanning 15000 live %s instances', (_name, ctor) => {
+  vi.restoreAllMocks();
   const execution = run(`<?php
 $items = [];
 for ($i = 0; $i < 15000; $i++) $items[] = ${ctor};
@@ -691,6 +692,7 @@ test.each([
   ["strlen(preg_replace('/(a?)+/', 'x', str_repeat('a ', 50000)))", '150001'],
   ["preg_match_all('/(あ?)+/u', str_repeat('あ ', 10000))", '20001'],
 ])('completes bounded native regex scan within time budget: %s', (expression, stdout) => {
+  vi.restoreAllMocks();
   const execution = run(`<?php echo ${expression};`);
   expect(execution).toMatchObject({ kind: 'executed', stdout });
 });
@@ -704,6 +706,7 @@ test.each([
   ['replacement limit', "echo strlen(preg_replace('/(a+)+b|c/', 'x', $s, 578));", '38578'],
   ['split limit', "echo count(preg_split('/(a+)+b|c/', $s, 579));", '579'],
 ])('does not speculatively match past early stop in %s', (_label, action, stdout) => {
+  vi.restoreAllMocks();
   const execution = run(`<?php
 $s = str_repeat('c', 578) . str_repeat(str_repeat('a', 18) . 'c', 2000);
 $i = 0;
