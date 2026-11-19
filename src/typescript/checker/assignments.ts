@@ -26,6 +26,12 @@ import {
   unionOf,
 } from './types';
 
+interface AssignmentTargetOptions {
+  evaluate?: (expression: TreeNode, conditional: boolean) => void;
+  expressionTypes?: ReadonlyMap<number, Type>;
+  inferField?: boolean;
+}
+
 /** Checks assignments, compound assignments, and updates, narrowing the references they assign. */
 export class AssignmentChecker {
   constructor(private readonly c: Checker) {}
@@ -34,16 +40,13 @@ export class AssignmentChecker {
     const left = node.childForFieldName('left') as TreeNode;
     const right = node.childForFieldName('right') as TreeNode;
     const leftExpression = skipParentheses(left);
-    if (
-      leftExpression.type === 'object_pattern' ||
-      leftExpression.type === 'array_pattern' ||
-      leftExpression.type === 'object' ||
-      leftExpression.type === 'array'
-    ) {
-      const implied = this.c.flow.probe(() => this.c.silently(() => this.patternContext(leftExpression)));
+    if (isAssignmentPattern(leftExpression)) {
+      const expressionTypes = new Map<number, Type>();
+      this.checkPatternExpressions(leftExpression, expressionTypes);
+      const implied = this.patternContext(leftExpression, expressionTypes);
       const valueType = this.c.expressions.check(right, implied);
       this.c.patterns.checkInitializer(leftExpression, right, valueType, implied);
-      this.destructuringAssignment(leftExpression, valueType);
+      this.destructuringAssignment(leftExpression, valueType, expressionTypes);
       return valueType;
     }
     if (this.isEvolvingArrayAssignment(leftExpression)) {
@@ -60,10 +63,33 @@ export class AssignmentChecker {
     return valueType;
   }
 
-  /** The type the targets of an assignment pattern imply for its right side, so that a literal there takes their types. */
-  private patternContext(pattern: TreeNode): Type | undefined {
+  // TypeScript binds the pattern's expressions before the initializer, then applies the destructured writes.
+  private checkPatternExpressions(pattern: TreeNode, types: Map<number, Type>): void {
+    const target = skipParentheses(pattern);
+    const defaultTarget = defaultedTarget(target);
+    if (defaultTarget) {
+      const value = target.childForFieldName('right') as TreeNode;
+      const nested = isAssignmentPattern(skipParentheses(defaultTarget));
+      if (!nested) this.checkPatternExpressions(defaultTarget, types);
+      types.set(value.id, this.c.expressions.check(value));
+      if (nested) this.checkPatternExpressions(defaultTarget, types);
+    } else if (isAssignmentPattern(target)) {
+      for (const child of named(target)) this.checkPatternExpressions(child, types);
+    } else if (target.type === 'pair' || target.type === 'pair_pattern') {
+      const key = target.childForFieldName('key') as TreeNode;
+      if (key.type === 'computed_property_name') types.set(key.id, this.c.expressions.check(named(key)[0]));
+      this.checkPatternExpressions(target.childForFieldName('value') as TreeNode, types);
+    } else if (target.type === 'spread_element' || target.type === 'rest_pattern') {
+      this.checkPatternExpressions(named(target)[0], types);
+    } else {
+      types.set(pattern.id, this.targetType(pattern, false));
+    }
+  }
+
+  private patternContext(pattern: TreeNode, expressionTypes?: ReadonlyMap<number, Type>): Type | undefined {
     return this.c.patterns.impliedType(pattern, (element) => {
-      const declared = this.targetType(defaultedTarget(element) ?? element, false);
+      const target = defaultedTarget(element) ?? element;
+      const declared = expressionTypes?.get(target.id) ?? this.targetType(target, false);
       return declared === errorType ? anyType : declared;
     });
   }
@@ -156,36 +182,43 @@ export class AssignmentChecker {
     return initializer.type === 'null' || this.c.isGlobalUndefined(initializer);
   }
 
-  destructuringAssignment(pattern: TreeNode, type: Type): void {
-    this.assignmentTargets(pattern, type, (target, valueType) => {
-      const declared = this.targetType(target, false);
-      if (declared !== errorType && !this.c.relations.isAssignable(valueType, declared))
-        this.c.expressions.reportNotAssignable(target, valueType, declared);
-      this.assignReference(skipParentheses(target), declared, valueType);
-    });
+  destructuringAssignment(pattern: TreeNode, type: Type, expressionTypes?: ReadonlyMap<number, Type>): void {
+    this.assignmentTargets(
+      pattern,
+      type,
+      (target, valueType) => {
+        const declared = expressionTypes?.get(target.id) ?? this.targetType(target, false);
+        if (declared !== errorType && !this.c.relations.isAssignable(valueType, declared))
+          this.c.expressions.reportNotAssignable(target, valueType, declared);
+        this.assignReference(skipParentheses(target), declared, valueType);
+      },
+      { expressionTypes }
+    );
   }
 
   assignmentTargets(
     pattern: TreeNode,
     type: Type,
     assignLeaf: (target: TreeNode, type: Type) => void,
-    evaluate?: (expression: TreeNode, conditional: boolean) => void,
-    inferField = false
+    options: AssignmentTargetOptions = {}
   ): void {
+    const { evaluate, expressionTypes, inferField } = options;
     const assign = (target: TreeNode, valueType: Type): void => {
       const left = defaultedTarget(target);
       if (left) {
         const right = target.childForFieldName('right') as TreeNode;
         evaluate?.(right, true);
-        const defaultType = inferField ? this.assignmentValueType(right) : this.c.expressions.check(right);
+        const defaultType =
+          expressionTypes?.get(right.id) ??
+          (inferField ? this.assignmentValueType(right) : this.c.expressions.check(right));
         assign(left, unionOf([this.c.relations.removeUndefined(valueType), regularOf(defaultType)]));
         return;
       }
       const unwrapped = skipParentheses(target);
-      if (['array', 'object', 'array_pattern', 'object_pattern'].includes(unwrapped.type)) {
+      if (isAssignmentPattern(unwrapped)) {
         if (unwrapped.type === 'array' || unwrapped.type === 'array_pattern')
           this.destructuringArrayAssignment(unwrapped, valueType, assign);
-        else this.destructuringObjectAssignment(unwrapped, valueType, assign, evaluate, inferField);
+        else this.destructuringObjectAssignment(unwrapped, valueType, assign, options);
         return;
       }
       evaluate?.(target, false);
@@ -227,8 +260,7 @@ export class AssignmentChecker {
     pattern: TreeNode,
     type: Type,
     assign: (target: TreeNode, type: Type) => void,
-    evaluate?: (expression: TreeNode, conditional: boolean) => void,
-    inferField = false
+    { evaluate, expressionTypes, inferField }: AssignmentTargetOptions
   ): void {
     // Unlike a declaration's pattern, an assignment's empty object pattern accepts `void`, as TypeScript does.
     if (isEmptyPattern(pattern)) this.c.members.checkNonNullable(pattern, type);
@@ -253,7 +285,8 @@ export class AssignmentChecker {
           const value = element.childForFieldName('value') as TreeNode;
           if (key.type === 'computed_property_name') evaluate?.(key, false);
           const computedType =
-            inferField && key.type === 'computed_property_name' ? this.assignmentValueType(named(key)[0]) : undefined;
+            expressionTypes?.get(key.id) ??
+            (inferField && key.type === 'computed_property_name' ? this.assignmentValueType(named(key)[0]) : undefined);
           const selected = this.c.patterns.destructuredKey(key, type, computedType);
           used.push(selected.keyType);
           assign(value, selected.type);
@@ -543,6 +576,10 @@ export class AssignmentChecker {
     this.c.error(expression, `型 '${this.c.print(objectType)}' のインデックスは読み取り専用です。`);
     return errorType;
   }
+}
+
+function isAssignmentPattern(node: TreeNode): boolean {
+  return ['array', 'object', 'array_pattern', 'object_pattern'].includes(node.type);
 }
 
 /** The literals that an index type consists of, or `undefined` when it admits other keys. */

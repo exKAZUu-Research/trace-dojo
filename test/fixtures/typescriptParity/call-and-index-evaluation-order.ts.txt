@@ -43,3 +43,9 @@ let update: string | number = "before";
 const updateTargets = [1];
 updateTargets[update = 0]++;
 console.log(update.toFixed(1), updateTargets[0]);
+
+let savedKey: string | number = "before";
+const patternValues = [0];
+[patternValues[savedKey = 0]] = [(savedKey = "last").length];
+if (typeof savedKey === "string") console.log(savedKey.toUpperCase());
+console.log(patternValues[0], savedKey);

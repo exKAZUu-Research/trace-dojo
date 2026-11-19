@@ -613,8 +613,7 @@ export class ClassChecker {
                 left,
                 this.c.statements.loopElementType(node, this.c.expressions.check(right)),
                 (target, type) => assign(target, this.c.widen(type)),
-                evaluate,
-                true
+                { evaluate, inferField: true }
               )
             );
           },
@@ -624,8 +623,7 @@ export class ClassChecker {
                 pattern,
                 this.c.assignments.assignmentValueType(right, pattern),
                 (target, type) => assign(target, this.c.widen(type)),
-                evaluate,
-                true
+                { evaluate, inferField: true }
               )
             ),
         })

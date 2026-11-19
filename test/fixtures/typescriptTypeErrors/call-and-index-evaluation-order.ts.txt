@@ -26,3 +26,17 @@ let compound: string | number = 0;
 const valuesToWrite = [0];
 valuesToWrite[compound = 0] += (compound = "numeric").length;
 console.log(compound.toFixed());
+
+let patternKey: string | number = "before";
+const patternTargets = [0];
+[patternTargets[patternKey = 0]] = [patternKey.toUpperCase().length];
+patternKey = "before";
+({ value: patternTargets[patternKey = 0] } = { value: patternKey.toUpperCase().length });
+patternKey = "before";
+({ [patternKey = 0]: patternTargets[0] } = { 0: patternKey.toUpperCase().length });
+patternKey = "before";
+[patternTargets[0] = (patternKey = 0)] = [patternKey.toUpperCase().length];
+patternKey = "before";
+[[patternTargets[0]] = [(patternKey = 0)]] = [[patternKey.toUpperCase().length]];
+let pendingTarget: { value: number } | undefined;
+[pendingTarget, pendingTarget.value] = [{ value: 1 }, 2];
