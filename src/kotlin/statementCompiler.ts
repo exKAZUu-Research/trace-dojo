@@ -35,7 +35,7 @@ import { type ClassSymbol, type PropertySymbol, type TypeParameterSymbol, Variab
 import { instanceTest } from './typeChecks';
 import { branchHint, commonSupertype, isSubtype } from './typeRelations';
 import { type ClassType, type KType, nonNull, NOTHING, resolved, substitute, typeToString } from './types';
-import { Boxed, type KObject, NULL, UNIT, type Value } from './values';
+import { Boxed, type KObject, NULL, type PrimitiveKind, UNIT, type Value } from './values';
 
 type Exec = (frame: Frame) => void;
 
@@ -451,59 +451,76 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   compilePlace(scope: Scope, context: FunctionContext, target: Expression, row: number, isCompound: boolean): Place {
     if (target.kind === 'parenthesized') return this.compilePlace(scope, context, target.expression, row, isCompound);
-    if (target.kind === 'name') {
-      const variable = this.findVariable(scope, target.name);
-      if (variable) return this.variablePlace(context, variable, row, isCompound);
-      for (const receiver of this.receiversOf(scope)) {
-        const property = this.findProperty(scope, this.receiverTypeOf(receiver), target.name);
-        if (property)
-          return this.propertyPlace(
-            property,
-            {
-              type: receiver.type,
-              repr: reprOf(this.core, receiver.type),
-              eval: this.receiverAccess(context, receiver),
-            },
-            row,
-            scope
-          );
-      }
-      const companion = this.findCompanionProperty(scope, target.name);
-      if (companion) {
-        const holder: Compiled = {
-          type: companion.holder.type,
-          repr: 'ref',
-          eval: this.objectInstance(companion.holder),
-        };
-        return this.propertyPlace(companion.property, holder, row, scope);
-      }
-      const property = this.topLevelProperties(target.name)[0]?.find((candidate) => !candidate.extensionReceiver);
-      if (property) return this.propertyPlace({ symbol: property, substitution: new Map() }, undefined, row, scope);
-      return this.error(row, `${target.name} が見つかりません。`);
-    }
-    if (target.kind === 'member') {
-      const qualified = this.compileQualifier(scope, target.receiver);
-      if (qualified?.kind === 'class') {
-        const holder = qualified.cls.isObject ? qualified.cls : qualified.cls.companion;
-        const property = holder ? this.findProperty(scope, holder.type, target.name) : undefined;
-        if (!property || !holder) return this.error(row, `${qualified.cls.name}.${target.name} が見つかりません。`);
+    if (target.kind === 'name') return this.namePlace(scope, context, target, row, isCompound);
+    if (target.kind === 'member') return this.memberPlace(scope, context, target, row);
+    if (target.kind === 'index') return this.indexPlace(scope, context, target, row, isCompound);
+    return this.error(row, 'ここには代入できません。');
+  }
+
+  /** A name as a place: a variable, a property of an implicit receiver or a companion object, or a top-level property. */
+  private namePlace(
+    scope: Scope,
+    context: FunctionContext,
+    target: Extract<Expression, { kind: 'name' }>,
+    row: number,
+    isCompound: boolean
+  ): Place {
+    const variable = this.findVariable(scope, target.name);
+    if (variable) return this.variablePlace(context, variable, row, isCompound);
+    for (const receiver of this.receiversOf(scope)) {
+      const property = this.findProperty(scope, this.receiverTypeOf(receiver), target.name);
+      if (property)
         return this.propertyPlace(
           property,
-          { type: holder.type, repr: 'ref', eval: this.objectInstance(holder) },
+          {
+            type: receiver.type,
+            repr: reprOf(this.core, receiver.type),
+            eval: this.receiverAccess(context, receiver),
+          },
           row,
           scope
         );
-      }
-      const receiver = this.compileExpression(scope, context, target.receiver);
-      if (!target.isSafe) this.requireNonNullReceiver(receiver, row, false);
-      const property = this.findProperty(scope, nonNull(receiver.type), target.name);
-      if (!property)
-        return this.error(row, `${typeToString(resolved(receiver.type))} には ${target.name} がありません。`);
-      if (target.isSafe) return this.safePlace(receiver, (holder) => this.propertyPlace(property, holder, row, scope));
-      return this.propertyPlace(property, receiver, row, scope);
     }
-    if (target.kind === 'index') return this.indexPlace(scope, context, target, row, isCompound);
-    return this.error(row, 'ここには代入できません。');
+    const companion = this.findCompanionProperty(scope, target.name);
+    if (companion) {
+      const holder: Compiled = {
+        type: companion.holder.type,
+        repr: 'ref',
+        eval: this.objectInstance(companion.holder),
+      };
+      return this.propertyPlace(companion.property, holder, row, scope);
+    }
+    const property = this.topLevelProperties(target.name)[0]?.find((candidate) => !candidate.extensionReceiver);
+    if (property) return this.propertyPlace({ symbol: property, substitution: new Map() }, undefined, row, scope);
+    return this.error(row, `${target.name} が見つかりません。`);
+  }
+
+  /** `a.b` as a place, where `a` may be an object or a class with a companion, and `a?.b` binds to nothing for a null `a`. */
+  private memberPlace(
+    scope: Scope,
+    context: FunctionContext,
+    target: Extract<Expression, { kind: 'member' }>,
+    row: number
+  ): Place {
+    const qualified = this.compileQualifier(scope, target.receiver);
+    if (qualified?.kind === 'class') {
+      const holder = qualified.cls.isObject ? qualified.cls : qualified.cls.companion;
+      const property = holder ? this.findProperty(scope, holder.type, target.name) : undefined;
+      if (!property || !holder) return this.error(row, `${qualified.cls.name}.${target.name} が見つかりません。`);
+      return this.propertyPlace(
+        property,
+        { type: holder.type, repr: 'ref', eval: this.objectInstance(holder) },
+        row,
+        scope
+      );
+    }
+    const receiver = this.compileExpression(scope, context, target.receiver);
+    if (!target.isSafe) this.requireNonNullReceiver(receiver, row, false);
+    const property = this.findProperty(scope, nonNull(receiver.type), target.name);
+    if (!property)
+      return this.error(row, `${typeToString(resolved(receiver.type))} には ${target.name} がありません。`);
+    if (target.isSafe) return this.safePlace(receiver, (holder) => this.propertyPlace(property, holder, row, scope));
+    return this.propertyPlace(property, receiver, row, scope);
   }
 
   // code-gauge-allow functionCognitiveComplexity 17 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
@@ -788,101 +805,18 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const loopScope = new Scope(scope, context);
     const loop = this.newLoop(context, scope);
     const firstSlot = context.info.slotCount;
-    const { variable } = statement;
     const progression = this.progressionOf(iterable.type);
-    let elementType: KType;
-    let next: (frame: Frame, state: LoopState) => boolean;
-    let start: (frame: Frame, iterableValue: Value) => LoopState;
-    if (progression) {
-      elementType = this.primitiveType(progression);
-      const isLong = progression === 'Long';
-      start = (_, value) => {
-        const object = value as KObject;
-        const [first, last, stepValue] = object.fields as (number | bigint)[];
-        return {
-          current: first,
-          last,
-          step: stepValue,
-          isDone: isLong
-            ? stepValue > 0
-              ? first > last
-              : first < last
-            : (stepValue as number) > 0
-              ? (first as number) > (last as number)
-              : (first as number) < (last as number),
-          iterator: undefined,
-        };
-      };
-      next = (_, state) => {
-        if (state.isDone) return false;
-        state.value = state.current;
-        if (state.current === state.last) state.isDone = true;
-        else
-          state.current = isLong
-            ? (state.current as bigint) + (state.step as bigint)
-            : ((state.current as number) + (state.step as number)) & (progression === 'Char' ? 0xff_ff : -1);
-        return true;
-      };
-    } else {
-      const iterableHandoff = new Handoff<Value>();
-      const stateHandoff = new Handoff<LoopState>();
-      const iteratorCall = this.compileOperatorCall(
-        loopScope,
-        context,
-        { ...iterable, eval: () => iterableHandoff.get() },
-        'iterator',
-        [],
-        statement.row,
-        'for の in'
-      );
-      const iteratorType = iteratorCall.type;
-      const holderScope = new Scope(loopScope, context);
-      const iteratorVariable = new VariableSymbol('\0iterator', iteratorType, false, 0, -1, statement.row);
-      iteratorVariable.owner = context;
-      iteratorVariable.delegateRead = () => stateHandoff.get().iterator;
-      holderScope.variables.set(iteratorVariable.name, iteratorVariable);
-      this.flow.assigned.add(iteratorVariable);
-      const iteratorName: Expression = { kind: 'name', row: statement.row, name: '\0iterator' };
-      const hasNext = this.compileExpression(holderScope, context, {
-        kind: 'call',
-        row: statement.row,
-        callee: { kind: 'member', row: statement.row, receiver: iteratorName, name: 'hasNext', isSafe: false },
-        typeArgs: [],
-        args: [],
-        trailingLambda: undefined,
-      });
-      const nextCall = this.compileExpression(holderScope, context, {
-        kind: 'call',
-        row: statement.row,
-        callee: { kind: 'member', row: statement.row, receiver: iteratorName, name: 'next', isSafe: false },
-        typeArgs: [],
-        args: [],
-        trailingLambda: undefined,
-      });
-      elementType = nextCall.type;
-      const iteratorEval = iteratorCall.eval;
-      const hasNextEval = convertRepr(hasNext.eval, hasNext.repr, 'ref');
-      const nextEval = nextCall.eval;
-      const elementRepr = nextCall.repr;
-      void elementRepr;
-      start = (frame, value) =>
-        iterableHandoff.run(frame, value, () => ({
-          current: 0,
-          last: 0,
-          step: 0,
-          isDone: false,
-          iterator: iteratorEval(frame),
-        }));
-      next = (frame, state) =>
-        stateHandoff.run(frame, state, () => {
-          if (!(hasNextEval(frame) as boolean)) return false;
-          state.value = nextEval(frame);
-          return true;
-        });
-      this.loopElementRepr = nextCall.repr;
-    }
-    const elementRepr = progression ?? this.loopElementRepr;
-    const bind = this.compileLoopBinding(loopScope, context, variable, elementType, elementRepr, statement.row);
+    const { elementType, elementRepr, start, next } = progression
+      ? this.progressionStepping(progression)
+      : this.iteratorStepping(loopScope, context, iterable, statement.row);
+    const bind = this.compileLoopBinding(
+      loopScope,
+      context,
+      statement.variable,
+      elementType,
+      elementRepr,
+      statement.row
+    );
     const body = this.compileLoopBody(loopScope, context, loop, statement.body);
     const lastSlot = context.info.slotCount;
     const iterableEval = iterable.eval;
@@ -905,7 +839,87 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     };
   }
 
-  private loopElementRepr: Repr = 'ref';
+  /** Steps through a range or progression of numbers or characters, without an iterator, as Kotlin compiles it. */
+  private progressionStepping(progression: PrimitiveKind): LoopStepping {
+    const isLong = progression === 'Long';
+    return {
+      elementType: this.primitiveType(progression),
+      elementRepr: progression,
+      start: (_, value) => {
+        const [first, last, stepValue] = (value as KObject).fields as (number | bigint)[];
+        return {
+          current: first,
+          last,
+          step: stepValue,
+          isDone: isEmptyProgression(first, last, stepValue),
+          iterator: undefined,
+        };
+      },
+      next: (_, state) => {
+        if (state.isDone) return false;
+        state.value = state.current;
+        if (state.current === state.last) state.isDone = true;
+        else
+          state.current = isLong
+            ? (state.current as bigint) + (state.step as bigint)
+            : ((state.current as number) + (state.step as number)) & (progression === 'Char' ? 0xff_ff : -1);
+        return true;
+      },
+    };
+  }
+
+  /** Steps through an iterable with the `iterator()`, `hasNext()`, and `next()` that it resolves to. */
+  private iteratorStepping(loopScope: Scope, context: FunctionContext, iterable: Compiled, row: number): LoopStepping {
+    const iterableHandoff = new Handoff<Value>();
+    const stateHandoff = new Handoff<LoopState>();
+    const iteratorCall = this.compileOperatorCall(
+      loopScope,
+      context,
+      { ...iterable, eval: () => iterableHandoff.get() },
+      'iterator',
+      [],
+      row,
+      'for の in'
+    );
+    const holderScope = new Scope(loopScope, context);
+    const iteratorVariable = new VariableSymbol('\0iterator', iteratorCall.type, false, 0, -1, row);
+    iteratorVariable.owner = context;
+    iteratorVariable.delegateRead = () => stateHandoff.get().iterator;
+    holderScope.variables.set(iteratorVariable.name, iteratorVariable);
+    this.flow.assigned.add(iteratorVariable);
+    const callOnIterator = (name: string): Compiled =>
+      this.compileExpression(holderScope, context, {
+        kind: 'call',
+        row,
+        callee: { kind: 'member', row, receiver: { kind: 'name', row, name: '\0iterator' }, name, isSafe: false },
+        typeArgs: [],
+        args: [],
+        trailingLambda: undefined,
+      });
+    const hasNext = callOnIterator('hasNext');
+    const nextCall = callOnIterator('next');
+    const iteratorEval = iteratorCall.eval;
+    const hasNextEval = convertRepr(hasNext.eval, hasNext.repr, 'ref');
+    const nextEval = nextCall.eval;
+    return {
+      elementType: nextCall.type,
+      elementRepr: nextCall.repr,
+      start: (frame, value) =>
+        iterableHandoff.run(frame, value, () => ({
+          current: 0,
+          last: 0,
+          step: 0,
+          isDone: false,
+          iterator: iteratorEval(frame),
+        })),
+      next: (frame, state) =>
+        stateHandoff.run(frame, state, () => {
+          if (!(hasNextEval(frame) as boolean)) return false;
+          state.value = nextEval(frame);
+          return true;
+        }),
+    };
+  }
 
   /** The kind of the numbers a range or progression of the standard library steps through. */
   protected abstract progressionOf(type: KType): 'Int' | 'Long' | 'Char' | undefined;
@@ -1038,6 +1052,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return commonSupertype(types);
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   protected compileWhen(
     scope: Scope,
     context: FunctionContext,
@@ -1061,40 +1076,13 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     let hasElse = false;
     for (const entry of expression.entries) {
       if (hasElse) this.error(entry.row, 'else は、when の最後に書いてください。');
-      if (entry.conditions.length === 0) {
-        hasElse = true;
-        const body = this.compileBlockValue(scope, context, entry.body, expected, asStatement);
-        branchFlows.push(this.flow);
-        entries.push({ tests: [], body });
-        this.flow = this.flow.copy();
-        continue;
-      }
-      const tests: ((frame: Frame) => boolean)[] = [];
-      let whenTrue = new Map<string, KType>();
-      let whenFalse = new Map<string, KType>();
-      for (const condition of entry.conditions) {
-        const compiled = this.compileWhenCondition(scope, context, subjectValue, condition, covered);
-        tests.push(compiled.test);
-        whenTrue = entry.conditions.length === 1 ? compiled.whenTrue : new Map();
-        whenFalse = new Map([...whenFalse, ...compiled.whenFalse]);
-      }
-      const atEntry = this.flow.copy();
-      this.applyNarrowing(whenTrue);
-      const body = this.compileBlockValue(scope, context, entry.body, expected, asStatement);
-      branchFlows.push(this.flow);
-      entries.push({ tests, body });
-      this.flow = this.withNarrowing(atEntry, entry.conditions.length === 1 ? whenFalse : new Map());
-    }
-    const isExhaustive = hasElse || (subject !== undefined && this.isExhaustive(subject.type, covered));
-    const needsExhaustive = !asStatement || (subject !== undefined && this.isSealedLike(subject.type));
-    if (needsExhaustive && !isExhaustive) {
-      this.error(
-        row,
-        asStatement
-          ? 'when の分岐が足りません。すべての場合か else を書いてください。'
-          : 'when を式として使うときは、すべての場合か else を書いてください。'
+      hasElse = entry.conditions.length === 0;
+      entries.push(
+        this.compileWhenEntry(scope, context, subjectValue, entry, covered, expected, asStatement, branchFlows)
       );
     }
+    const isExhaustive = hasElse || (subject !== undefined && this.isExhaustive(subject.type, covered));
+    this.checkWhenExhaustive(subject, isExhaustive, asStatement, row);
     if (!isExhaustive) branchFlows.push(this.flow);
     this.flow = branchFlows.length > 0 ? Flow.merge(branchFlows) : before;
     const bodies = entries.map((entry) => entry.body);
@@ -1106,22 +1094,62 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         ? entry.body.eval
         : convertRepr(this.convertTo(entry.body, type, row), reprOf(this.core, type), repr),
     }));
-    const subjectEval = subject?.eval;
-    return {
-      type,
-      repr,
-      eval: (frame) => {
-        if (subjectEval) frame.locals[subjectSlot] = subjectEval(frame);
-        try {
-          for (const entry of compiledEntries) {
-            if (entry.tests.length === 0 || entry.tests.some((test) => test(frame))) return entry.body(frame);
-          }
-          return UNIT;
-        } finally {
-          if (subjectEval) frame.locals[subjectSlot] = UNASSIGNED;
-        }
-      },
-    };
+    return { type, repr, eval: whenEval(subject?.eval, subjectSlot, compiledEntries) };
+  }
+
+  /**
+   * One branch of a `when`: its conditions, with the smart casts that hold in its body and after it, and its body,
+   * whose flow joins `branchFlows`.
+   */
+  // code-gauge-allow functionParameterCount 8 -- the scope, the function context, and the parts of the when are each needed, and bundling them would only rename them.
+  private compileWhenEntry(
+    scope: Scope,
+    context: FunctionContext,
+    subject: Compiled | undefined,
+    entry: Extract<Expression, { kind: 'when' }>['entries'][number],
+    covered: Set<string>,
+    expected: KType | undefined,
+    asStatement: boolean,
+    branchFlows: Flow[]
+  ): { tests: ((frame: Frame) => boolean)[]; body: Compiled } {
+    if (entry.conditions.length === 0) {
+      const body = this.compileBlockValue(scope, context, entry.body, expected, asStatement);
+      branchFlows.push(this.flow);
+      this.flow = this.flow.copy();
+      return { tests: [], body };
+    }
+    const tests: ((frame: Frame) => boolean)[] = [];
+    let whenTrue = new Map<string, KType>();
+    let whenFalse = new Map<string, KType>();
+    for (const condition of entry.conditions) {
+      const compiled = this.compileWhenCondition(scope, context, subject, condition, covered);
+      tests.push(compiled.test);
+      whenTrue = entry.conditions.length === 1 ? compiled.whenTrue : new Map();
+      whenFalse = new Map([...whenFalse, ...compiled.whenFalse]);
+    }
+    const atEntry = this.flow.copy();
+    this.applyNarrowing(whenTrue);
+    const body = this.compileBlockValue(scope, context, entry.body, expected, asStatement);
+    branchFlows.push(this.flow);
+    this.flow = this.withNarrowing(atEntry, entry.conditions.length === 1 ? whenFalse : new Map());
+    return { tests, body };
+  }
+
+  /** Rejects a `when` that misses cases, where an expression or a statement over a sealed type must cover all. */
+  private checkWhenExhaustive(
+    subject: Compiled | undefined,
+    isExhaustive: boolean,
+    asStatement: boolean,
+    row: number
+  ): void {
+    const needsExhaustive = !asStatement || (subject !== undefined && this.isSealedLike(subject.type));
+    if (!needsExhaustive || isExhaustive) return;
+    this.error(
+      row,
+      asStatement
+        ? 'when の分岐が足りません。すべての場合か else を書いてください。'
+        : 'when を式として使うときは、すべての場合か else を書いてください。'
+    );
   }
 
   private compileWhenCondition(
@@ -1402,4 +1430,35 @@ function laterBranchExpected(
   asStatement: boolean
 ): KType | undefined {
   return asStatement ? expected : branchHint(earlier.type, expected, isBareCall(later));
+}
+
+/** How a `for` loop starts and steps through its iterable, and the type and representation of its elements. */
+interface LoopStepping {
+  elementType: KType;
+  elementRepr: Repr;
+  start: (frame: Frame, iterableValue: Value) => LoopState;
+  next: (frame: Frame, state: LoopState) => boolean;
+}
+
+function isEmptyProgression(first: number | bigint, last: number | bigint, step: number | bigint): boolean {
+  return step > 0 ? first > last : first < last;
+}
+
+/** Runs the first branch of a `when` whose conditions hold, with the subject held in its slot meanwhile. */
+function whenEval(
+  subjectEval: Eval | undefined,
+  subjectSlot: number,
+  entries: { tests: ((frame: Frame) => boolean)[]; body: Eval }[]
+): Eval {
+  return (frame) => {
+    if (subjectEval) frame.locals[subjectSlot] = subjectEval(frame);
+    try {
+      for (const entry of entries) {
+        if (entry.tests.length === 0 || entry.tests.some((test) => test(frame))) return entry.body(frame);
+      }
+      return UNIT;
+    } finally {
+      if (subjectEval) frame.locals[subjectSlot] = UNASSIGNED;
+    }
+  };
 }
