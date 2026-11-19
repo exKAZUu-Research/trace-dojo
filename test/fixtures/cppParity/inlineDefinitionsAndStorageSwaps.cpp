@@ -1,7 +1,9 @@
 #include <array>
 #include <iostream>
+#include <list>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 int missing();
 struct Constructor {
@@ -20,6 +22,7 @@ struct Copy {
 
 struct Value { int n; };
 int main() {
+  std::vector<Copy> noCopies(1);
   std::array<Value, 1> a{{{1}}}, b{{{2}}};
   int& arrayMember = a[0].n;
   std::swap(a, b);
@@ -33,4 +36,13 @@ int main() {
   const int& item = *i;
   values.rehash(100);
   std::cout << item;
+  std::array<std::list<int>, 1> left{{{8}}}, right{{{9}}};
+  auto original = left[0].begin();
+  std::swap(left, right);
+  std::cout << *original << (original == right[0].begin());
+  auto nested = std::pair<std::list<int>, int>({{5}, 6});
+  auto other = std::pair<std::list<int>, int>({{7}, 8});
+  auto position = nested.first.begin();
+  std::swap(nested, other);
+  std::cout << *position << (position == other.first.begin()) << other.second;
 }

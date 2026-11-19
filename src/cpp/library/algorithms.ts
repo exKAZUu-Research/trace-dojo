@@ -26,7 +26,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { CObject, Ptr, type Store, type Value } from '../values';
+import { CObject, endLifetime, Ptr, type Store, type Value } from '../values';
 import { pairClass } from './associative';
 import {
   assignElement,
@@ -38,6 +38,7 @@ import {
   lessThan,
   locationOf,
   moveValue,
+  requireSwapUse,
   swapElements,
   truthy,
 } from './elements';
@@ -634,32 +635,17 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     )
       return;
     if (type.kind === 'class' && type.cls.isNoncopyable) return;
-    const member = type.kind === 'class' && type.cls.library ? type.cls.methods.get('swap')?.[0] : undefined;
+    requireSwapUse(compiler(), type, args[0].row);
+    const ops = elementOperations(compiler(), type, args[0].row);
     return native('swap', [referenceTo(type), referenceTo(type)], VOID, ([a, b], { frame }) => {
-      const x = a as Ptr;
-      const y = b as Ptr;
-      if (member) {
-        invoke(frame, member, [y], x, args[0].row);
-      } else if (type.kind === 'class') {
-        const ops = type.cls.operations;
-        const copy = ops?.copy(frame, x.read()) as Value;
-        const first = ops?.assign(frame, x.read(), y.read());
-        if (first !== undefined) x.write(first);
-        const second = ops?.assign(frame, y.read(), copy);
-        if (second !== undefined) y.write(second);
-        ops?.destroy?.(frame, copy);
-      } else {
-        const value = x.read();
-        x.write(y.read());
-        y.write(value);
-      }
-      return;
+      swapElements(frame, a as Ptr, b as Ptr, ops);
     });
   });
   define('iter_swap', (args) => {
     const a = outputOf(args[0]);
     const b = outputOf(args[1]);
     if (!a || !b || a.isOutput || b.isOutput || args.length !== 2 || !sameType(a.element, b.element)) return;
+    requireSwapUse(compiler(), a.element, args[0].row);
     const ops = elementOperations(compiler(), a.element, args[0].row);
     return native('iter_swap', params(args), VOID, ([x, y], { frame }) => {
       swapElements(frame, elementLocation(x as Ptr, a.isReverse), elementLocation(y as Ptr, b.isReverse), ops);
@@ -697,11 +683,12 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const operation = compileOperation(
       compiler(),
       args[isBinary ? 4 : 3],
-      second ? [info.element, second.element] : [info.element],
-      unqualified(output.element)
-    )?.run;
+      second ? [info.element, second.element] : [info.element]
+    );
     if (!operation) return;
-    const ops = elementOperations(compiler(), unqualified(output.element), args[0].row);
+    const destination = unqualified(output.element);
+    const ops = elementOperations(compiler(), destination, args[0].row);
+    const prepare = assignmentSource(compiler(), operation.type, destination, args[0].row);
     return native('transform', params(args), unqualified(args[isBinary ? 3 : 2].type), (values, { frame }) => {
       const [first, last] = values;
       const source = range(first, last, info);
@@ -712,12 +699,15 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
             second as IteratorInfo
           )
         : undefined;
-      const out = new Output(values[isBinary ? 3 : 2] as Ptr, output, frame, ops);
+      const out = new Output(values[isBinary ? 3 : 2] as Ptr, output, frame, ops, prepare);
       for (let index = 0; index < source.length; index++) {
-        const result = others
-          ? operation(frame, source.get(index), others.get(index))
-          : operation(frame, source.get(index));
-        out.write(result as Value);
+        withTemporaries(frame, () => {
+          const result = others
+            ? operation.run(frame, source.get(index), others.get(index))
+            : operation.run(frame, source.get(index));
+          if (operation.destroyResult) frame.temporaries.push({ object: result, destroy: operation.destroyResult });
+          out.write(result);
+        });
       }
       return out.end;
     });
@@ -1083,13 +1073,11 @@ function assignmentSource(
   const value: Expr = { type: source, isLvalue: true, row, run: () => active.at(-1) };
   const convert = compiler.convert(value, constRef(destination), row).run;
   return (frame, item, use) => {
-    const mark = frame.temporaries.length;
     active.push(locationOf(item));
     try {
-      use((convert(frame) as Ptr).read());
+      withTemporaries(frame, () => use((convert(frame) as Ptr).read()));
     } finally {
       active.pop();
-      destroyTemporaries(frame, mark);
     }
   };
 }
@@ -1099,7 +1087,13 @@ function compileOperation(
   operation: Expr,
   types: Type[],
   resultType?: Type
-): { type: Type; run: (frame: Frame, ...values: Value[]) => Value } | undefined {
+):
+  | {
+      type: Type;
+      run: (frame: Frame, ...values: Value[]) => Value;
+      destroyResult?: ReturnType<ExpressionCompiler['destroyerOf']>;
+    }
+  | undefined {
   const type = operation.type;
   if (!operation.functions && !(type.kind === 'class' && type.cls.library?.kind === 'functor')) return;
   const calls: Ptr[][] = [];
@@ -1115,16 +1109,22 @@ function compileOperation(
   const evaluate = resultType
     ? compiler.copyInitializer(resultType, result, row, false)
     : (compiler.rvalue(result).run as (frame: Frame) => Value);
+  const hasObjectResult = !resultType && result.isTemporaryObject && result.type.kind === 'class';
+  const destroy = hasObjectResult ? compiler.destroyerOf(result.type, row) : undefined;
   return {
     type: resultType ?? result.type,
+    destroyResult: hasObjectResult
+      ? (frame, value) => {
+          destroy?.(frame, value);
+          endLifetime(value);
+        }
+      : undefined,
     run: (frame, ...values) => {
-      const mark = frame.temporaries.length;
       calls.push(values.map(locationOf));
       try {
-        return evaluate(frame);
+        return withTemporaries(frame, evaluate);
       } finally {
         calls.pop();
-        destroyTemporaries(frame, mark);
       }
     },
   };

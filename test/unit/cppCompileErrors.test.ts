@@ -51,6 +51,21 @@ test.each([
     1,
   ],
   ['a const constructor', 'struct A {\n  A() const; };', 1],
+  [
+    'a vector operation reaching an inline copy constructor',
+    '#include <vector>\nvoid missing();\nstruct A { A() {} A(const A&) { missing(); } };\nint main() { std::vector<A> a(1); a.reserve(2); }',
+    2,
+  ],
+  [
+    'a vector operation reaching an inline element destructor',
+    '#include <vector>\nvoid missing();\nstruct A { ~A() { missing(); } };\nint main() { delete new std::vector<A>(1); }',
+    2,
+  ],
+  [
+    'a pair constructor reaching an inline copy constructor',
+    '#include <utility>\nvoid missing();\nstruct A { A() {} A(const A&) { missing(); } };\nint main() { A a; std::pair<A, int> p(a, 1); }',
+    2,
+  ],
   ['a qualified constructor declaration', 'struct A {\n  const A(); };', 1],
   ['a qualified constructor definition', 'struct A { A(); };\nconst A::A() {}\nint main() {}', 1],
   ['an incomplete thrown object', 'struct A;\nvoid f(A* p) { throw *p; }\nint main() {}', 1],

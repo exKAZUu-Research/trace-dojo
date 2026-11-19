@@ -2,6 +2,12 @@
 #include <new>
 
 struct Reference { const int& value; };
+struct Print {
+  Print() { std::cout << 'C'; }
+  ~Print() { std::cout << 'D'; }
+};
+struct ObjectReference { const Print& value; };
+Print make() { return Print{}; }
 
 int main() {
   int n = 2;
@@ -17,4 +23,8 @@ int main() {
   int negative = -1;
   try { auto p = new int[negative]; delete[] p; }
   catch (const std::bad_alloc&) { std::cout << 'A'; }
+  ObjectReference byValue({Print{}});
+  std::cout << 'X';
+  ObjectReference byCall({make()});
+  std::cout << 'X';
 }

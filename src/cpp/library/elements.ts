@@ -1,6 +1,6 @@
 import { CppRuntimeError } from '../errors';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { destroyTemporaries, withTemporaries, zeroOf } from '../objectCompiler';
+import { destroyTemporaries, invoke, withTemporaries, zeroOf } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import { type ClassInfo, type FunctionInfo, isArithmetic, type Type, typeName } from '../types';
 import { type ArrayStore, Box, CObject, endLifetime, FunctionRef, Ptr, Store, UNINIT, type Value } from '../values';
@@ -24,12 +24,32 @@ export interface ElementOperations {
 
 export function swapElements(frame: Frame, a: Ptr, b: Ptr, ops: ElementOperations): void {
   if (a.equals(b)) return;
+  const swap = swapFunction(ops.type);
+  if (swap) {
+    invoke(frame, swap, [b], a, swap.row);
+    return;
+  }
   withTemporaries(frame, () => {
     const value = ops.copy(frame, a.read());
     if (ops.destroy) frame.temporaries.push({ object: value, destroy: ops.destroy });
     assignElement(frame, a, ops, b.read());
     assignElement(frame, b, ops, value);
   });
+}
+
+export function requireSwapUse(compiler: ExpressionCompiler, type: Type, row: number): void {
+  const swap = swapFunction(type);
+  if (swap) {
+    swap.nativeUses?.(row);
+    return;
+  }
+  compiler.requireObjectUse(type, 'copy', row);
+  compiler.requireObjectUse(type, 'assign', row);
+  compiler.requireObjectUse(type, 'destroy', row);
+}
+
+function swapFunction(type: Type): FunctionInfo | undefined {
+  return type.kind === 'class' && type.cls.library ? type.cls.methods.get('swap')?.[0] : undefined;
 }
 
 export function assignElement(frame: Frame, location: Ptr, operations: ElementOperations, value: Value): void {

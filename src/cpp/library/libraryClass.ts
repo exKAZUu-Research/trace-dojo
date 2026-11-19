@@ -12,6 +12,8 @@ export interface LibraryClass {
   /** The class template or class, such as `vector` or `string`. */
   readonly kind: string;
   readonly args: readonly Type[];
+  readonly ownedTypes?: readonly Type[];
+  readonly assignmentCopies?: boolean;
   /** `sizeof` of the class in libc++ on arm64. */
   readonly size: number;
   readonly align: number;

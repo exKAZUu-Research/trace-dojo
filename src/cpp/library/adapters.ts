@@ -72,6 +72,8 @@ export function adapterClass(
   cls.library = {
     kind,
     args: [element],
+    ownedTypes: [element],
+    assignmentCopies: true,
     size: kind === 'priority_queue' ? 32 : 48,
     align: 8,
     operator: (compiler_, operator, operands, row) => {
@@ -85,6 +87,7 @@ export function adapterClass(
       );
     },
     memberCall: (compiler_, object, member, args, row) => {
+      if (member === 'push') compiler_.requireObjectUse(element, 'copy', row);
       if (member !== 'emplace') return;
       if (isConstType(object.type)) return compiler_.error(row, `const の ${cls.name} には emplace を使えません。`);
       const value = constructElement(compiler_, element, args, row);
@@ -167,6 +170,7 @@ export function adapterClass(
         ([from], { frame }) => make(copyItems(frame, (from as Ptr).read() as SequenceValue)),
         {
           isExplicit: true,
+          uses: (row) => compiler.requireObjectUse(element, 'copy', row),
         }
       )
     );

@@ -24,6 +24,7 @@ export interface NativeOptions {
   optional?: number;
   owner?: ClassInfo;
   displayName?: string;
+  uses?: FunctionInfo['nativeUses'];
 }
 
 /** A library function with fixed parameter types. */
@@ -60,6 +61,7 @@ export function native(
     isAtomic: false,
     isDefined: true,
     native: run,
+    nativeUses: options.uses,
     isVariadic: options.isVariadic,
     isExplicit: options.isExplicit,
   };

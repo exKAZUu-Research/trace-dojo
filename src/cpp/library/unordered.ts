@@ -672,6 +672,8 @@ export function unorderedClass(
         result: insertionResult,
       }),
     constructingMembers: isMap ? ['emplace', 'try_emplace'] : ['emplace'],
+    ownedTypes: [entryType],
+    assignmentCopies: true,
   };
   cls.operations = {
     copy: (frame, source) => {

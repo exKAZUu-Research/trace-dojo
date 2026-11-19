@@ -132,6 +132,7 @@ export interface FunctionInfo {
   compiled?: CompiledFunction;
   /** The library's implementation, which runs instead of a body. */
   native?: NativeFunction;
+  nativeUses?: (row: number) => void;
   /** The syntax of the definition, which the compiler compiles once the declarations it may use are known. */
   definition?: Syntax;
   /** Whether the function takes any number of further arguments, as `printf` does. */
@@ -243,6 +244,11 @@ export function isConstType(type: Type): boolean {
   if (type.kind === 'reference' || type.kind === 'function') return false;
   if (type.kind === 'array') return type.isConst === true || isConstType(type.of);
   return type.isConst === true;
+}
+
+export function isReferenceRelated(source: Type, target: Type): boolean {
+  if (source.kind === 'class' && target.kind === 'class') return source.cls.isDerivedFrom(target.cls);
+  return sameType(unqualified(source), unqualified(target), false);
 }
 
 export function unqualified<T extends Type>(type: T): T {

@@ -10,6 +10,7 @@ import {
   classType,
   type FunctionInfo,
   isConstType,
+  nonReference,
   pointerTo,
   referenceTo,
   SIZE_T,
@@ -22,7 +23,7 @@ import {
 } from '../types';
 import { CObject, Ptr, type Value } from '../values';
 import { MapValue, NodePositions } from './containerValues';
-import { type ElementOperations, elementOperations, equalTo, lessThan, swapElements } from './elements';
+import { type ElementOperations, elementOperations, equalTo, lessThan, requireSwapUse, swapElements } from './elements';
 import { addRangeMembers, emplacementCall, type EntryTable, insertCopy } from './emplacement';
 import { randomAccessIterator } from './iterators';
 import type { Library } from './registry';
@@ -95,8 +96,16 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
   };
   cls.constructors = [
     nativeConstructor(cls, [], (_args, { frame }) => make(ops()[0].make(frame), ops()[1].make(frame))),
-    nativeConstructor(cls, [constRef(first), constRef(second)], ([a, b], { frame }) =>
-      make(ops()[0].copy(frame, (a as Ptr).read()), ops()[1].copy(frame, (b as Ptr).read()))
+    nativeConstructor(
+      cls,
+      [constRef(first), constRef(second)],
+      ([a, b], { frame }) => make(ops()[0].copy(frame, (a as Ptr).read()), ops()[1].copy(frame, (b as Ptr).read())),
+      {
+        uses: (row) => {
+          library.compiler.requireObjectUse(classType(cls), 'copy', row);
+          library.compiler.requireObjectUse(classType(cls), 'destroy', row);
+        },
+      }
     ),
     {
       ...nativeConstructor(cls, [], () => {}),
@@ -144,24 +153,35 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
   ];
   addMethod(
     cls,
-    native('swap', [referenceTo(classType(cls))], VOID, ([other], { frame, self }) => {
-      const a = self as CObject;
-      const b = (other as Ptr).read() as CObject;
-      for (const index of [0, 1]) {
-        const type = cls.fields[index].type;
-        if (type.kind === 'reference') {
-          swapElements(
-            frame,
-            a.values[index] as Ptr,
-            b.values[index] as Ptr,
-            elementOperations(library.compiler, type.to, 0)
-          );
-        } else {
-          swapElements(frame, new Ptr(a, index), new Ptr(b, index), ops()[index]);
+    native(
+      'swap',
+      [referenceTo(classType(cls))],
+      VOID,
+      ([other], { frame, self }) => {
+        const a = self as CObject;
+        const b = (other as Ptr).read() as CObject;
+        for (const index of [0, 1]) {
+          const type = cls.fields[index].type;
+          if (type.kind === 'reference') {
+            swapElements(
+              frame,
+              a.values[index] as Ptr,
+              b.values[index] as Ptr,
+              elementOperations(library.compiler, type.to, 0)
+            );
+          } else {
+            swapElements(frame, new Ptr(a, index), new Ptr(b, index), ops()[index]);
+          }
         }
+        return;
+      },
+      {
+        uses: (row) => {
+          requireSwapUse(library.compiler, nonReference(first), row);
+          requireSwapUse(library.compiler, nonReference(second), row);
+        },
       }
-      return;
-    })
+    )
   );
   return cls;
 }
@@ -178,7 +198,8 @@ export function makePair(library: Library): FunctionInfo {
       types.map((type) => constRef(type)),
       classType(cls),
       ([a, b], { frame }) =>
-        cls.operations?.copy(frame, new CObject(cls, [(a as Ptr).read(), (b as Ptr).read()])) as Value
+        cls.operations?.copy(frame, new CObject(cls, [(a as Ptr).read(), (b as Ptr).read()])) as Value,
+      { uses: (row) => library.compiler.requireObjectUse(classType(cls), 'copy', row) }
     );
   });
 }
@@ -538,6 +559,8 @@ export function orderedClass(
       });
     },
     constructingMembers: isMap ? ['emplace', 'try_emplace'] : ['emplace'],
+    ownedTypes: [entryType],
+    assignmentCopies: true,
   };
   cls.operations = {
     copy: (frame, source) => make((source as OrderedValue).entries.map((entry) => ops().copy(frame, entry))),

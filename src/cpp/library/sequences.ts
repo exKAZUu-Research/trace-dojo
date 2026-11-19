@@ -32,6 +32,7 @@ import {
   equalTo,
   lessThan,
   locationOf,
+  requireSwapUse,
   swapElements,
   truthy,
 } from './elements';
@@ -114,6 +115,8 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   cls.library = {
     kind,
     args: [element],
+    ownedTypes: fixedLength === 0 ? [] : [element],
+    assignmentCopies: kind !== 'array',
     size: kind === 'array' ? Math.max(1, fixedLength ?? 0) * sizeOf(element) : kind === 'deque' ? 48 : 24,
     align: kind === 'array' ? alignOf(element) : 8,
     operator: (compiler, operator, operands, row) =>
@@ -183,7 +186,13 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
           )
         );
       },
-      { isExplicit: true }
+      {
+        isExplicit: true,
+        uses: (row) => {
+          library.compiler.valueInitialized(element, row);
+          library.compiler.requireObjectUse(element, 'destroy', row);
+        },
+      }
     );
     cls.constructors = [
       nativeConstructor(cls, [], () => make([])),
@@ -201,37 +210,47 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
         },
         isTemplate: true,
       },
-      nativeConstructor(cls, [SIZE_T, constRef(element)], ([count, value], { frame }) => {
-        checkVectorLength(frame, library, kind, element, count);
-        const n = asNumber(count);
-        reserve(frame, n);
-        const source = (value as Ptr).read();
-        return make(
-          makeEach(
-            frame,
-            n,
-            () => ops().copy(frame, source),
-            () => ops().destroy
-          )
-        );
-      }),
+      nativeConstructor(
+        cls,
+        [SIZE_T, constRef(element)],
+        ([count, value], { frame }) => {
+          checkVectorLength(frame, library, kind, element, count);
+          const n = asNumber(count);
+          reserve(frame, n);
+          const source = (value as Ptr).read();
+          return make(
+            makeEach(
+              frame,
+              n,
+              () => ops().copy(frame, source),
+              () => ops().destroy
+            )
+          );
+        },
+        { uses: (row) => requireElementCopy(library.compiler, element, row) }
+      ),
       {
         ...nativeConstructor(cls, [], () => {}),
         instantiate: (args) => {
           const range = args.length === 2 ? iteratorRange(library.compiler, args, element, ops) : undefined;
           if (!range) return;
-          return nativeConstructor(cls, range.params, ([first, last], { frame }) => {
-            const source = range.read(first, last);
-            reserve(frame, source.values.length);
-            return make(
-              makeEach(
-                frame,
-                source.values.length,
-                (index) => source.construct(frame, source.values[index]),
-                () => ops().destroy
-              )
-            );
-          });
+          return nativeConstructor(
+            cls,
+            range.params,
+            ([first, last], { frame }) => {
+              const source = range.read(first, last);
+              reserve(frame, source.values.length);
+              return make(
+                makeEach(
+                  frame,
+                  source.values.length,
+                  (index) => source.construct(frame, source.values[index]),
+                  () => ops().destroy
+                )
+              );
+            },
+            { uses: (row) => library.compiler.requireObjectUse(element, 'destroy', row) }
+          );
         },
         isTemplate: true,
       },
@@ -239,6 +258,11 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   }
   sequenceMethods(library, cls, element, kind, ops, editor, outOfRange, fixedLength);
   return cls;
+}
+
+function requireElementCopy(compiler: ExpressionCompiler, element: Type, row: number): void {
+  compiler.requireObjectUse(element, 'copy', row);
+  compiler.requireObjectUse(element, 'destroy', row);
 }
 
 const reserve = (frame: Frame, count: number): void => {
@@ -293,6 +317,7 @@ export function iteratorRange(
     typeName(unqualified(from)) === typeName(target) &&
     (target.kind !== 'class' || (from.kind === 'class' && from.cls === target.cls));
   let construct: Source['construct'] = (frame, value) => ops().copy(frame, value);
+  if (isSameType) requireElementCopy(compiler, element, first.row);
   if (!isSameType) {
     const slot: Expr = { type: from, isLvalue: true, row: first.row, run: (frame) => frame.pending.at(-1) as Ptr };
     let run: Eval<Value>;
@@ -371,7 +396,7 @@ function sequenceMethods(
     params: Type[],
     ret: Type,
     run: (self: SequenceValue, args: unknown[], frame: Frame) => unknown,
-    options: { isConst?: boolean; optional?: number } = {}
+    options: { isConst?: boolean; optional?: number; uses?: FunctionInfo['nativeUses'] } = {}
   ): void => {
     addMethod(
       cls,
@@ -463,16 +488,24 @@ function sequenceMethods(
     isConst: true,
   });
   method('crend', [], types.constReverseIterator, (self) => self.iteratorLocation(0), { isConst: true });
-  method('swap', [referenceTo(type)], VOID, (self, [other], frame) => {
-    const target = (other as Ptr).read() as SequenceValue;
-    if (kind === 'array') {
-      const operations = ops();
-      for (let index = 0; index < self.length; index++)
-        swapElements(frame, self.location(index), target.location(index), operations);
-    } else {
-      self.swapItems(target);
+  method(
+    'swap',
+    [referenceTo(type)],
+    VOID,
+    (self, [other], frame) => {
+      const target = (other as Ptr).read() as SequenceValue;
+      if (kind === 'array') {
+        const operations = ops();
+        for (let index = 0; index < self.length; index++)
+          swapElements(frame, self.location(index), target.location(index), operations);
+      } else {
+        self.swapItems(target);
+      }
+    },
+    {
+      uses: kind === 'array' && fixedLength !== 0 ? (row) => requireSwapUse(library.compiler, element, row) : undefined,
     }
-  });
+  );
   if (kind === 'array') {
     method('fill', [constRef(element)], VOID, (self, [value], frame) => {
       const source = (value as Ptr).read();
@@ -619,8 +652,9 @@ export function initializerList(
   list: Syntax,
   ops: () => ElementOperations
 ): (frame: Frame, use: (source: Source) => void) => void {
+  requireElementCopy(compiler, element, list.row);
   return listElementsOf(
-    list.children.map((node) => compiler.elementInitializer(element, node)),
+    list.children.filter((node) => node.type !== 'comment').map((node) => compiler.elementInitializer(element, node)),
     ops
   );
 }
@@ -764,6 +798,14 @@ function checkElementRequirement(
       row,
       `${typeName(element)} のオブジェクトは引数なしでは作れないので、resize には要素の値も渡してください。`
     );
+  }
+  if (member === 'resize' && args.length === 1) compiler.valueInitialized(element, row);
+  if (
+    ['push_back', 'push_front', 'insert', 'assign'].includes(member) ||
+    (member === 'resize' && (kind === 'vector' || args.length > 1)) ||
+    (kind === 'vector' && ['reserve', 'shrink_to_fit', 'emplace', 'emplace_back'].includes(member))
+  ) {
+    requireElementCopy(compiler, element, row);
   }
   if (kind !== 'list') return;
   const isEqualityCall = (member === 'remove' && args.length === 1) || (member === 'unique' && args.length === 0);
@@ -943,6 +985,7 @@ function sequenceList(
     if (elements.length > 0 && elements.length <= 2) return undefined;
     throw error;
   }
+  if (elements.length > 0) requireElementCopy(compiler, element, row);
   const run: Eval<Value> = (frame) => {
     const { hasEffects, copy, destroy } = ops();
     if (!hasEffects) return holdAll(frame, inits, (values) => make(values as Value[]));

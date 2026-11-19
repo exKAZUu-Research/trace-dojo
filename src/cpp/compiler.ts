@@ -11,7 +11,6 @@ import { type CompiledFunction, type Eval, type Exec, type Frame, RETURN, type R
 import { type Entity, FunctionContext } from './scopes';
 import {
   type AutoDeduction,
-  bindsDirectly,
   deducedType,
   endScope,
   type ReferenceBinding,
@@ -32,6 +31,7 @@ import {
   isConstType,
   isCopyConstructor,
   isInteger,
+  isReferenceRelated,
   type ParamInfo,
   sameType,
   type Type,
@@ -1380,7 +1380,7 @@ export class Compiler extends StatementCompiler {
       const store = this.staticStore(type, row);
       const exec = this.fullExpression<undefined>((frame) => {
         const box = frame.runtime.globals[index] as Box;
-        store(frame, box, init.run(frame, arrayStorage(box.value)));
+        store(frame, box, zeroFilled(init.run(frame, arrayStorage(box.value)), type));
         return;
       });
       this.globalInitializers.push({
@@ -1451,20 +1451,16 @@ export class Compiler extends StatementCompiler {
     return (frame) => {
       const box = frame.runtime.globals[index] as Box;
       if (initialized.has(box)) return;
-      store(frame, box, run(frame));
+      store(frame, box, zeroFilled(run(frame), type));
       initialized.add(box);
     };
   }
 
-  /**
-   * Stores the initialized value of a variable with static storage duration. Its storage was zero-initialized
-   * first, so the members its constructor leaves alone are zero; and an object with a destructor is destroyed when
-   * the program exits, the last constructed first (C++20 [basic.start.term]).
-   */
+  /** Registers the successfully initialized object for destruction at program exit (C++20 [basic.start.term]). */
   private staticStore(type: Type, row: number): (frame: Frame, box: Box, value: Value) => void {
     const destroy = this.destroyerOf(type, row);
     return (frame, box, value) => {
-      box.value = zeroFilled(value, type);
+      box.value = value;
       if (destroy) frame.runtime.staticObjects.push({ box, destroy });
     };
   }
@@ -1636,14 +1632,6 @@ export class Compiler extends StatementCompiler {
     const initializers = args.map((arg, index) => {
       const type = fields[index].type;
       if (arg.braced && type.kind === 'array') return this.listInitializer(type, arg.braced, arg.row);
-      if (arg.braced && type.kind === 'reference' && arg.braced.children.length === 1) {
-        const clause = arg.braced.children[0];
-        if (clause.type !== 'initializer_list') {
-          const target = this.compileExpression(clause);
-          if (target.isLvalue && bindsDirectly(target.type, type.to))
-            return this.copyInitializer(type, target, arg.row, false);
-        }
-      }
       return this.copyInitializer(type, arg, row, false);
     });
     return {
@@ -1708,7 +1696,7 @@ export class Compiler extends StatementCompiler {
 
   /** Binds a reference member of an aggregate, whose lifetime a temporary it binds to takes (C++20 [class.temporary]). */
   private memberReference(type: Extract<Type, { kind: 'reference' }>, expr: Expr, row: number): Eval<Value> {
-    if ((expr.isLvalue && bindsDirectly(expr.type, type.to)) || !isConstType(type.to))
+    if ((expr.isLvalue && isReferenceRelated(expr.type, type.to)) || !isConstType(type.to))
       return this.convert(expr, type, row).run as Eval<Value>;
     const heldType = unqualified(type.to);
     const value = this.convert(expr, heldType, row).run;
@@ -1851,7 +1839,11 @@ export class Compiler extends StatementCompiler {
   }
 
   protected checkDefined(fn: FunctionInfo, row: number): void {
-    if (this.isUnevaluated || fn.native) return;
+    if (this.isUnevaluated) return;
+    if (fn.native) {
+      fn.nativeUses?.(row);
+      return;
+    }
     const functions = this.defaultDependencies?.functions ?? this.usedFunctions;
     if (!functions.has(fn)) functions.set(fn, row);
   }

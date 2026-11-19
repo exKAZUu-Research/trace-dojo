@@ -15,6 +15,7 @@ import {
   isConstType,
   isInteger,
   isLibraryClass,
+  isReferenceRelated,
   nonReference,
   referenceTo,
   sameType,
@@ -483,7 +484,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const type = isDeduced ? referenceTo(this.deduceAutoReference(declared.to, target)) : declared;
     // A const reference bound to a temporary extends the temporary's lifetime to the reference's, whether the
     // temporary is the initializer's object or a converted value (C++20 [class.temporary]).
-    const isDirect = target.isLvalue && bindsDirectly(target.type, type.to);
+    const isDirect = target.isLvalue && isReferenceRelated(target.type, type.to);
     const isTemporaryClass =
       !target.isLvalue &&
       target.type.kind === 'class' &&
@@ -1338,10 +1339,4 @@ function memberAt(path: readonly number[]): (box: Box) => Ptr {
     for (const index of path.slice(0, -1)) object = object.values[index] as CObject;
     return new Ptr(object, path.at(-1) as number);
   };
-}
-
-/** Whether a reference to `target` binds to an lvalue of `source` itself, rather than to a converted temporary. */
-export function bindsDirectly(source: Type, target: Type): boolean {
-  if (source.kind === 'class' && target.kind === 'class') return source.cls.isDerivedFrom(target.cls);
-  return sameType(unqualified(source), unqualified(target), false);
 }

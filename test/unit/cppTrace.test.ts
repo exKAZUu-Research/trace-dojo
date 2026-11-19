@@ -159,6 +159,15 @@ int main() { stop(Print{}); }`;
   });
 });
 
+test('lifetime extension by a static reference preserves indeterminate fields', () => {
+  const program = `struct Value { int n; Value() {} };
+int main() { static const Value& value = Value(); return value.n; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('値を入れていない'),
+  });
+});
+
 test('an exception escaping a catch parameter copy terminates before outer handlers', () => {
   const program = `#include <iostream>
 struct Print {

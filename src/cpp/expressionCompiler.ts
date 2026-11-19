@@ -28,6 +28,7 @@ import {
   isConstType,
   isCopyConstructor,
   isInteger,
+  isReferenceRelated,
   isWide,
   LONG,
   nonReference,
@@ -1022,6 +1023,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const cls = (target.type as Extract<Type, { kind: 'class' }>).cls;
     if (cls.isNoncopyable || cls.isAssignmentDeleted)
       return this.error(row, `${cls.name} のオブジェクトには代入できません（代入演算子が削除されています）。`);
+    this.requireObjectUse(target.type, 'assign', row);
     const value = this.convert(source, { kind: 'reference', to: classType(cls, true) }, row).run;
     const location = target.run;
     return {
@@ -1450,8 +1452,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   /** Adds the library's functions an unqualified call finds through its arguments' types (C++20 [basic.lookup.argdep]). */
   protected abstract withArgumentDependentLookup(name: string, functions: FunctionInfo[], args: Expr[]): FunctionInfo[];
 
-  /** Records that a call uses a function, which the program must define (else the linker rejects it). */
   bracedConversion(list: Syntax, to: Type): ConversionSequence | undefined {
+    const [first, ...rest] = list.children.filter((child) => child.type !== 'comment');
+    const arg =
+      first && rest.length === 0 && first.type !== 'initializer_list' ? this.compileExpression(first) : undefined;
+    if (to.kind === 'reference' && arg && isReferenceRelated(arg.type, to.to)) {
+      const binding = implicitConversion(this, arg, to, false);
+      if (binding) return { ...binding, apply: () => binding.apply(arg) };
+    }
     if (to.kind === 'reference' && !isConstType(to.to)) return undefined;
     const type = unqualified(nonReference(to));
     let run: Eval<Value>;
@@ -1462,9 +1470,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       throw error;
     }
     let rank: Rank = type.kind === 'class' ? Rank.UserDefined : Rank.Exact;
-    if (type.kind !== 'class' && list.children.length === 1 && list.children[0].type !== 'initializer_list') {
-      rank = implicitConversion(this, this.compileExpression(list.children[0]), type)?.rank ?? Rank.Conversion;
-    }
+    if (type.kind !== 'class' && arg) rank = implicitConversion(this, arg, type)?.rank ?? Rank.Conversion;
     const value: Expr = { type, isLvalue: false, row: list.row, run, isTemporaryObject: type.kind === 'class' };
     return sequence(rank, () => (to.kind === 'reference' ? this.materialize(value) : value));
   }
@@ -1473,9 +1479,15 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   constructObject(cls: ClassInfo, args: Expr[], row: number, isBraced: boolean): Expr {
     if (args.length === 0 && cls.library?.defaultInitializer) return this.defaultConstructed(cls, row, true);
     const list = args.length === 1 ? args[0].braced : undefined;
-    if (list && cls.library?.listInitializer) {
-      const elements = list.children.filter((child) => child.type !== 'comment');
-      const run = cls.library.listInitializer(this, elements, row);
+    if (list && cls.library) {
+      const initialize = cls.library.listInitializer;
+      const run = initialize
+        ? initialize(
+            this,
+            list.children.filter((child) => child.type !== 'comment'),
+            row
+          )
+        : this.listInitializer(classType(cls), list, row);
       if (run) return { type: classType(cls), isLvalue: false, isTemporaryObject: true, row, run };
     }
     if (args.length === 1 && args[0].type.kind === 'class' && args[0].type.cls.isDerivedFrom(cls) && !isBraced) {

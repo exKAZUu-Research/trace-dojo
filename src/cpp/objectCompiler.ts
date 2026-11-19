@@ -223,7 +223,6 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   }
 
   copyObject(expr: Expr, cls: ClassInfo): Expr {
-    this.requireVirtualDefinitions(cls, expr.row);
     if (cls.isNoncopyable) {
       this.error(expr.row, `${cls.name} のオブジェクトはコピーできません（コピーコンストラクタが削除されています）。`);
     }
@@ -231,8 +230,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     const copyConstructor = cls.constructors.find((ctor) => !ctor.native && isCopyConstructor(ctor, cls));
     if (copyConstructor) {
       this.checkAccess(copyConstructor.access, cls, cls, expr.row, `${cls.name} のコンストラクタ`);
-      this.checkDefined(copyConstructor, expr.row);
     }
+    this.requireObjectUse(classType(cls), 'copy', expr.row);
     const source = this.rvalue(expr);
     return {
       type: classType(cls),
@@ -531,7 +530,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       const { destructor } = type.cls;
       if (row !== undefined && destructor && !destructor.native)
         this.checkAccess(destructor.access, type.cls, type.cls, row, `${type.cls.name} のデストラクタ`);
-      if (row !== undefined) this.requireDestructorDefinitions(type.cls, row, new Set());
+      if (row !== undefined) this.requireObjectUse(type, 'destroy', row);
       return type.cls.operations?.destroy;
     }
     if (type.kind === 'array') {
@@ -546,15 +545,35 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     return undefined;
   }
 
-  private requireDestructorDefinitions(cls: ClassInfo, row: number, seen: Set<ClassInfo>): void {
+  requireObjectUse(
+    type: Type,
+    operation: 'copy' | 'assign' | 'destroy',
+    row: number,
+    seen = new Set<ClassInfo>()
+  ): void {
+    if (type.kind === 'array') {
+      this.requireObjectUse(type.of, operation, row, seen);
+      return;
+    }
+    if (type.kind !== 'class') return;
+    const { cls } = type;
     if (seen.has(cls)) return;
     seen.add(cls);
-    if (cls.destructor) this.checkDefined(cls.destructor, row);
-    if (cls.base) this.requireDestructorDefinitions(cls.base, row, seen);
-    for (const field of cls.ownFields) {
-      let type = field.type;
-      while (type.kind === 'array') type = type.of;
-      if (type.kind === 'class') this.requireDestructorDefinitions(type.cls, row, seen);
+
+    if (operation === 'copy') {
+      this.requireVirtualDefinitions(cls, row);
+      const constructor = cls.constructors.find((fn) => !fn.native && isCopyConstructor(fn, cls));
+      if (constructor) {
+        this.checkDefined(constructor, row);
+        return;
+      }
+    }
+    if (operation === 'destroy' && cls.destructor) this.checkDefined(cls.destructor, row);
+    if (cls.base) this.requireObjectUse(classType(cls.base), operation, row, seen);
+    for (const field of cls.ownFields) this.requireObjectUse(field.type, operation, row, seen);
+    for (const owned of cls.library?.ownedTypes ?? []) {
+      this.requireObjectUse(owned, operation, row, seen);
+      if (operation === 'assign' && cls.library?.assignmentCopies) this.requireObjectUse(owned, 'copy', row);
     }
   }
 }
