@@ -1,3 +1,4 @@
+import { legacyDetectionCodePoint } from './legacyDetectionTables';
 import { rt } from './runtime';
 
 const decoder = new TextDecoder('gb18030', { ignoreBOM: true });
@@ -45,36 +46,16 @@ const revisedMappings = new Map<number, number>([
   [0x84_31_83_34, 59_285],
   [0x84_31_83_35, 59_286],
 ]);
-const eucCnUnassigned = [
-  [0xa2_a1, 0xa2_b0],
-  [0xa2_e3, 0xa2_e4],
-  [0xa2_ef, 0xa2_f0],
-  [0xa2_fd, 0xa2_fe],
-  [0xa4_f4, 0xa4_fe],
-  [0xa5_f7, 0xa5_fe],
-  [0xa6_b9, 0xa6_c0],
-  [0xa6_d9, 0xa6_fe],
-  [0xa7_c2, 0xa7_d0],
-  [0xa7_f2, 0xa7_fe],
-  [0xa8_bb, 0xa8_c4],
-  [0xa8_ea, 0xa8_fe],
-  [0xa9_a1, 0xa9_a3],
-  [0xa9_f0, 0xa9_fe],
-  [0xd7_fa, 0xd7_fe],
-] as const;
-
 export function decodeEucCn(bytes: string, bad: number): number[] {
   const input = Buffer.from(bytes, 'latin1');
   const result: number[] = [];
   rt().spend(Math.ceil(bytes.length / 64));
   for (let index = 0; index < input.length;) {
-    const start = index;
     const lead = input[index++];
     if (lead < 0x80) result.push(lead);
     else if (eucCnLead(lead) && index < input.length) {
       const trail = input[index++];
-      const pair = lead * 256 + trail;
-      result.push(trail >= 0xa1 && trail <= 0xfe ? eucCnPair(input.subarray(start, index), pair, bad) : bad);
+      result.push(trail >= 0xa1 && trail <= 0xfe ? gb2312CodePoint(lead, trail, bad) : bad);
     } else result.push(bad);
   }
   return result;
@@ -84,11 +65,11 @@ function eucCnLead(lead: number): boolean {
   return (lead >= 0xa1 && lead <= 0xa9) || (lead >= 0xb0 && lead <= 0xf7);
 }
 
-function eucCnPair(bytes: Uint8Array, pair: number, bad: number): number {
-  if (pair === 0xa1_a4) return 0x30_fb;
-  if (pair === 0xa1_aa) return 0x20_15;
-  if (eucCnUnassigned.some(([start, end]) => pair >= start && pair <= end)) return bad;
-  return decoder.decode(bytes).codePointAt(0) ?? bad;
+export function gb2312CodePoint(lead: number, trail: number, bad: number, hz = false): number {
+  const index = (lead - 0xa1) * 94 + trail - 0xa1;
+  const shifted = hz ? legacyDetectionCodePoint('hz', index) : 0;
+  const code = shifted || legacyDetectionCodePoint('eucCn', index);
+  return code === 0xff_fd ? bad : code;
 }
 
 // code-gauge-allow functionCognitiveComplexity 19 -- Reads sequences in mbfl's order, including which bytes a malformed unit consumes.

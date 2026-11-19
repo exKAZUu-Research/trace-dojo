@@ -1,6 +1,6 @@
 // oxlint-disable unicorn/prefer-code-point -- Each code unit is one PHP byte.
 import { detectionCodePoint, mobileDetectionTable } from './detectionDecodeTables';
-import { decodeEucCn, decodeGb18030 } from './gb18030Detection';
+import { decodeEucCn, decodeGb18030, gb2312CodePoint } from './gb18030Detection';
 import { readExtendedJisEncoding, readJisEncoding, readSjis2004 } from './jisDetectionReader';
 import { legacyDetectionCodePoint } from './legacyDetectionTables';
 import { rt } from './runtime';
@@ -30,6 +30,8 @@ const FIXED_READERS = new Map<string, Decode>([
   ['CP950', (bytes) => decodeMappedPairs(bytes, 'cp950')],
   ['BIG-5', (bytes) => decodeMappedPairs(bytes, 'big5')],
   ['EUC-TW', decodeEucTw],
+  ['HZ', (bytes) => decodeShiftedPairs(bytes, true)],
+  ['ISO-2022-KR', (bytes) => decodeShiftedPairs(bytes, false)],
 ]);
 
 export function encodingValidator(name: string, utf16: Decode): ((bytes: string) => boolean) | undefined {
@@ -64,12 +66,6 @@ export function extraEncodingReader(name: string, utf8: Decode, utf16: Decode): 
     case 'UTF-7':
     case 'UTF7-IMAP': {
       return (bytes) => decodeShiftedUtf16(bytes, name === 'UTF7-IMAP', utf16);
-    }
-    case 'HZ':
-    case 'ISO-2022-KR': {
-      const hz = name === 'HZ';
-      const decoder = new TextDecoder(hz ? 'gbk' : 'euc-kr');
-      return (bytes) => decodeShiftedPairs(bytes, hz, decoder);
     }
   }
   return undefined;
@@ -274,7 +270,7 @@ function shiftedUtf16Section(
 }
 
 // code-gauge-allow functionCognitiveComplexity 27 -- Maintains the escape and shifted-byte state of the two transport encodings.
-function decodeShiftedPairs(bytes: string, hz: boolean, decoder: TextDecoder): number[] {
+function decodeShiftedPairs(bytes: string, hz: boolean): number[] {
   const result: number[] = [];
   let shifted = false;
   rt().spend(Math.ceil(bytes.length / 64));
@@ -295,7 +291,7 @@ function decodeShiftedPairs(bytes: string, hz: boolean, decoder: TextDecoder): n
       shifted = lead === 0x0e;
     } else if (shifted && validShiftedLead(lead, hz) && index < bytes.length) {
       const trail = bytes.charCodeAt(index++);
-      result.push(trail >= 0x21 && trail <= 0x7e ? decodePair(decoder, lead, trail, hz) : BAD);
+      result.push(trail >= 0x21 && trail <= 0x7e ? shiftedPairCode(lead, trail, hz) : BAD);
     } else {
       result.push(!shifted && lead < 0x80 ? lead : BAD);
     }
@@ -312,20 +308,21 @@ function hzEscape(escape: string, shifted: boolean, result: number[]): boolean {
 }
 
 function invalidKoreanEscapeWidth(bytes: string, index: number): number {
-  if (bytes[index] !== '$') return 1;
-  return bytes[index + 1] === ')' ? 3 : 2;
+  const available = bytes.length - index;
+  const dollar = bytes[index] === '$';
+  if (available < 3) return Math.min(available, dollar ? 2 : 1);
+  if (bytes[index + 1] === ')') return 3;
+  return dollar ? 2 : 1;
 }
 
 function validShiftedLead(lead: number, hz: boolean): boolean {
   return hz ? (lead >= 0x21 && lead <= 0x29) || (lead >= 0x30 && lead <= 0x77) : lead >= 0x21 && lead <= 0x7e;
 }
 
-function decodePair(decoder: TextDecoder, lead: number, trail: number, hz: boolean): number {
-  if (hz && lead === 0x21) {
-    if (trail === 0x24) return 0x30_fb;
-    if (trail === 0x2a) return 0x20_15;
-  }
-  const value = decoder.decode(Uint8Array.of(lead + 0x80, trail + 0x80));
-  const code = value.codePointAt(0);
-  return code !== undefined && code !== TABLE_REPLACEMENT ? code : BAD;
+function shiftedPairCode(lead: number, trail: number, hz: boolean): number {
+  if (hz) return gb2312CodePoint(lead + 0x80, trail + 0x80, BAD, true);
+  const index = (lead - 0x21) * PLANE_WIDTH + trail - 0x21;
+  const shifted = legacyDetectionCodePoint('koreanShift', index);
+  const code = shifted || (lead < 0x7e ? legacyDetectionCodePoint('eucKr', index) : TABLE_REPLACEMENT);
+  return code === TABLE_REPLACEMENT ? BAD : code;
 }

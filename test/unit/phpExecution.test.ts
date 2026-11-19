@@ -1364,6 +1364,22 @@ print_r([$object, 'next']);
   expect(result.kind === 'executed' && result.stdout).toContain('released;}\nstring(4) "next"\nreleased;Array\n');
 });
 
+test.each([
+  ['print_r(new Displayed, true);', '[internal function]'],
+  ['array_filter([1], fn() => new TemporaryValue);', '[internal function]'],
+  ['$value = new TemporaryValue; unset($value);', '/main.php(5)'],
+])('uses the release origin in a destructor stack frame after %s', (action, origin) => {
+  expect(
+    run(`<?php
+class TemporaryValue { public function __destruct() { throw new Exception('drop'); } }
+class Displayed { public function __debugInfo(): array { return [new TemporaryValue]; } }
+try {
+    ${action}
+} catch (Exception $error) { echo $error->getTraceAsString(); }
+`)
+  ).toMatchObject({ kind: 'executed', stdout: expect.stringContaining(`#0 ${origin}: TemporaryValue->__destruct()`) });
+});
+
 test('keeps the native offsetSet frame in SplObjectStorage append errors', () => {
   expect(run('<?php\n$storage = new SplObjectStorage;\n$storage[] = new stdClass;')).toMatchObject({
     kind: 'executed',

@@ -39,3 +39,17 @@ foreach ([
     mb_detect_encoding($bytes, [$encoding, 'CP950', 'UTF-8'], true),
   ]), "\n";
 }
+
+foreach ([
+  ['7e7b28437e7d', 'HZ'],
+  ['7e7b29217e7d', 'HZ'],
+  ['7e7b31317e7d', 'HZ'],
+  ['7e7b212c7e7d', 'HZ'],
+  ['1b2429430e225f0f', 'ISO-2022-KR'],
+  ['1b2429430e227e0f', 'ISO-2022-KR'],
+] as [$bytes, $encoding]) {
+  echo $bytes, " ", json_encode([
+    mb_detect_encoding(hex2bin($bytes), $encoding, true),
+    mb_detect_encoding(hex2bin($bytes), [$encoding, 'UTF-8']),
+  ]), "\n";
+}
