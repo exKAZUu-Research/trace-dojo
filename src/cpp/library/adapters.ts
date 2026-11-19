@@ -54,16 +54,19 @@ export function adapterClass(
   };
   const storageKind = storage.cls.library?.kind;
   const editor = new SequenceEditor(storageKind === 'deque' || storageKind === 'list' ? storageKind : 'vector', ops);
-  const make = (items: Value[]): SequenceValue =>
-    new SequenceValue(
+  const make = (items: Value[]): SequenceValue => {
+    const sequence = new SequenceValue(
       items,
       element,
       kind !== 'priority_queue',
       storageKind === 'deque' || storageKind === 'list' || storageKind === 'vector' ? storageKind : undefined
     );
-  const push = (frame: Frame, self: SequenceValue, value: Value): void => {
+    sequence.capacity = items.length;
+    return sequence;
+  };
+  const push = (frame: Frame, self: SequenceValue, create: () => Value): void => {
     frame.runtime.reserve(1);
-    self.append(value);
+    editor.append(frame, self, 1, create);
     if (kind === 'priority_queue') siftUp(self.items, self.items.length, less);
   };
   cls.memberTypes.set('value_type', element);
@@ -98,7 +101,7 @@ export function adapterClass(
         isLvalue: false,
         row,
         run: (frame) => {
-          push(frame, (self(frame) as Ptr).read() as SequenceValue, value(frame));
+          push(frame, (self(frame) as Ptr).read() as SequenceValue, () => value(frame));
           return;
         },
       };
@@ -109,7 +112,17 @@ export function adapterClass(
     frame.runtime.reserve(items.length);
     return editor.build(frame, items.length, (index) => ops().copy(frame, items[index]));
   };
-  cls.operations = storage.cls.operations;
+  const storageOperations = storage.cls.operations;
+  if (storageOperations) {
+    cls.operations = {
+      ...storageOperations,
+      copy: (frame, source) => {
+        const copied = storageOperations.copy(frame, source) as SequenceValue;
+        copied.isArrayLike = kind !== 'priority_queue';
+        return copied;
+      },
+    };
+  }
   cls.constructors = [nativeConstructor(cls, [], () => make([]))];
   if (compareType) {
     const fromItems = (items: Value[]): SequenceValue => {
@@ -166,18 +179,15 @@ export function adapterClass(
   method('size', [], SIZE_T, (self) => BigInt(self.items.length), true);
   method('empty', [], BOOL, (self) => (self.items.length === 0 ? 1 : 0), true);
   method('push', [constRef(element)], VOID, (self, [value], frame) =>
-    push(frame, self, ops().copy(frame, (value as Ptr).read()))
+    push(frame, self, () => ops().copy(frame, (value as Ptr).read()))
   );
   method('pop', [], VOID, (self, _args, frame) => {
     nonEmpty(self);
-    let removed: Value;
-    if (kind === 'queue') removed = self.splice(0, 1)[0];
-    else if (kind === 'stack') removed = self.splice(-1, 1)[0];
+    if (kind === 'queue') editor.removeFront(frame, self);
     else {
-      popHeap(self.items, less);
-      removed = self.items.pop() as Value;
+      if (kind === 'priority_queue') popHeap(self.items, less);
+      editor.truncate(frame, self, self.items.length - 1);
     }
-    ops().destroy?.(frame, removed);
   });
   const access = (memberName: string, at: (self: SequenceValue) => number): void => {
     for (const isConst of kind === 'priority_queue' ? [true] : [false, true]) {

@@ -18,9 +18,6 @@ import {
   LLONG,
   LONG,
   nonReference,
-  pointerTo,
-  sameParameters,
-  sameType,
   SCHAR,
   SHORT,
   type Type,
@@ -40,23 +37,12 @@ import { constantsOf } from './constants';
 import { containerTemplates } from './containers';
 import { exceptionClasses } from './exceptions';
 import { FLAGS, ManipulatorValue, Streams, type StreamValue } from './iostream';
+import { conflictsWithLibcGlobal } from './libcGlobals';
 import { randomEngines } from './random';
 import { stringClass, stringFunctions } from './string';
-import { asNumber, CONST_CHAR_PTR, generic, native } from './support';
+import { asNumber, generic, native } from './support';
 import { turtleClass } from './turtle';
-import { hasDeclarationOnlyCGlobal, hasLocaleCtypeOverload, headerOf, isVisible } from './visibility';
-
-const C_SIGNAL_HANDLER = pointerTo({ kind: 'function', ret: VOID, params: [INT] });
-const C_GLOBAL_SIGNATURES: ReadonlyMap<string, { params: Type[]; ret?: Type }> = new Map([
-  ['clock', { params: [], ret: ULONG }],
-  ['div', { params: [INT, INT] }],
-  ['index', { params: [CONST_CHAR_PTR, INT], ret: pointerTo(CHAR) }],
-  ['random', { params: [], ret: LONG }],
-  ['remove', { params: [CONST_CHAR_PTR], ret: INT }],
-  ['signal', { params: [INT, C_SIGNAL_HANDLER], ret: C_SIGNAL_HANDLER }],
-  ['time', { params: [pointerTo(LONG)], ret: LONG }],
-  ['y1', { params: [DOUBLE], ret: DOUBLE }],
-]);
+import { hasLocaleCtypeOverload, headerOf, isVisible } from './visibility';
 
 /** A class template of the library, such as `std::vector`, which template arguments instantiate. */
 export type LibraryTemplate =
@@ -241,29 +227,8 @@ export class Library {
     return this.globalNames.get(name);
   }
 
-  conflictsWithGlobalFunction(name: string, declared?: FunctionInfo): boolean {
-    const entity = this.global(name);
-    if (entity?.kind === 'functions') {
-      if (!declared) return true;
-      return entity.functions.some(
-        (fn) =>
-          !fn.isTemplate &&
-          !fn.isVariadic &&
-          !declared.isVariadic &&
-          sameParameters(fn, declared) &&
-          !sameType(fn.ret, declared.ret)
-      );
-    }
-    if (!hasDeclarationOnlyCGlobal(name, this.headers)) return false;
-    if (!declared) return true;
-    const signature = C_GLOBAL_SIGNATURES.get(name);
-    return (
-      !!signature &&
-      !declared.isVariadic &&
-      declared.params.length === signature.params.length &&
-      declared.params.every(({ type }, index) => sameType(unqualified(type), signature.params[index])) &&
-      (!signature.ret || !sameType(unqualified(declared.ret), signature.ret))
-    );
+  conflictsWithGlobal(name: string, entity: Type | FunctionInfo): boolean {
+    return conflictsWithLibcGlobal(name, entity, this.headers);
   }
 
   /** The header to include for a library name the program uses without including it, if the library has the name. */

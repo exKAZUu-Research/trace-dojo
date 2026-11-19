@@ -23,6 +23,8 @@ export interface Expr {
   product?: { left: Eval<number>; right: Eval<number> };
   /** Whether the expression is a null pointer constant: `nullptr`, or an integer literal whose value is zero. */
   isNullConstant?: boolean;
+  /** An lvalue location or pointer value that can be formed before dynamic initialization. */
+  staticAddress?: boolean;
   /** The bytes of a string literal, which may initialize a `char` array. */
   literalBytes?: string;
   /** The functions a name denotes, which a call resolves among. */

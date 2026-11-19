@@ -80,7 +80,7 @@ export function literalBytes(parts: readonly Syntax[]): string {
   let bytes = '';
   for (const part of parts) {
     if (!part.isNamed) continue;
-    bytes += part.type.endsWith('escape_sequence') ? escapeBytes(part.text) : utf8(part.text);
+    bytes += part.type.endsWith('escape_sequence') ? escapeBytes(part) : utf8(part.text);
   }
   return bytes;
 }
@@ -106,15 +106,19 @@ const SIMPLE_ESCAPES: Record<string, string> = {
   '?': '?',
 };
 
-function escapeBytes(text: string): string {
-  const body = text.slice(1);
+function escapeBytes(part: Syntax): string {
+  const body = part.text.slice(1);
   if (body in SIMPLE_ESCAPES) return SIMPLE_ESCAPES[body];
   // A backslash at the end of a line splices the lines (C++20 [lex.phases]), which the grammar reads as an escape.
   if (/^\r?\n$/.test(body)) return '';
   if (/^[0-7]{1,3}$/.test(body)) return String.fromCodePoint(Number.parseInt(body, 8) & 0xff);
   if (/^x[\da-fA-F]+$/.test(body)) return String.fromCodePoint(Number.parseInt(body.slice(1), 16) & 0xff);
-  if (/^u[\da-fA-F]{4}$|^U[\da-fA-F]{8}$/.test(body))
-    return utf8(String.fromCodePoint(Number.parseInt(body.slice(1), 16)));
+  if (/^[uU]/.test(body)) {
+    const point = /^u[\da-fA-F]{4}$|^U[\da-fA-F]{8}$/.test(body) ? Number.parseInt(body.slice(1), 16) : Number.NaN;
+    if (!Number.isInteger(point) || point > 0x10_ff_ff || (point >= 0xd8_00 && point <= 0xdf_ff))
+      return compileError(part.row, `${part.text} は有効な Unicode エスケープではありません。`);
+    return utf8(String.fromCodePoint(point));
+  }
   // clang++ warns of an unknown escape and keeps the character.
   return utf8(body);
 }

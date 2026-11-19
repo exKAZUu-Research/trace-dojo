@@ -27,7 +27,7 @@ import {
 import { Box, type CObject, endLifetime, Liveness, Ptr, type Store, UNINIT, type Value } from './values';
 
 /** The type an `auto` declarator deduced, which the declaration's other declarators must agree with. */
-export type ReferenceBinding = { type: Extract<Type, { kind: 'reference' }> } & (
+export type ReferenceBinding = { type: Extract<Type, { kind: 'reference' }>; isConstant?: boolean } & (
   | { loc: Eval<Ptr> }
   | { lifetime: { type: Type; make: Eval<Value | Ptr>; locate: (box: Box) => Ptr } }
 );
@@ -491,7 +491,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return this.referenceBinding(type, target, row);
   }
 
-  private referenceBinding(type: Extract<Type, { kind: 'reference' }>, target: Expr, row: number): ReferenceBinding {
+  protected referenceBinding(type: Extract<Type, { kind: 'reference' }>, target: Expr, row: number): ReferenceBinding {
     const isDirect = target.isLvalue && isReferenceRelated(target.type, type.to);
     const isTemporaryClass =
       !target.isLvalue &&
@@ -501,13 +501,31 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (!isDirect && isConstType(type.to) && !target.functions && target.type.kind !== 'void') {
       const heldType = isTemporaryClass ? target.type : unqualified(type.to);
       const bound = isTemporaryClass ? target : this.convert(target, heldType, row);
-      return { type, lifetime: { type: heldType, make: bound.run, locate: (box) => new Ptr(box, 0) } };
+      return {
+        type,
+        isConstant: this.isConstantInitializer(bound),
+        lifetime: { type: heldType, make: bound.run, locate: (box) => new Ptr(box, 0) },
+      };
     }
     const member = isDirect ? target.temporaryMember : undefined;
     if (member) {
       return { type, lifetime: { type: member.object.type, make: member.object.run, locate: memberAt(member.path) } };
     }
-    return { type, loc: this.convert(target, type, row).run as Eval<Ptr> };
+    return {
+      type,
+      isConstant: isDirect && target.staticAddress,
+      loc: this.convert(target, type, row).run as Eval<Ptr>,
+    };
+  }
+
+  protected isConstantInitializer(expr: Expr): boolean {
+    const value = this.rvalue(expr);
+    return (
+      value.constant !== undefined ||
+      value.staticAddress === true ||
+      value.literalBytes !== undefined ||
+      value.isNullConstant === true
+    );
   }
 
   /**

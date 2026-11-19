@@ -297,6 +297,16 @@ test.each([
   ],
   ['a negative std::array bound', '#include <array>\nint main() { std::array<int, -1> values; }', 1],
   ['a non-type argument in a std::vector element type', '#include <vector>\nint main() { std::vector<2> values; }', 1],
+  ['a global variable named malloc after a transitive C header', '#include <vector>\nint malloc = 3;', 1],
+  ['a global variable named scanf after <cstdio>', '#include <cstdio>\nint scanf = 3;', 1],
+  [
+    'a new abs overload that duplicates a using-declaration',
+    '#include <iostream>\ndouble abs(double value) { return value; }',
+    1,
+  ],
+  ['a surrogate Unicode string escape', String.raw`int main() { const char* s = "\uD800"; }`, 0],
+  ['a Unicode string escape beyond the last code point', String.raw`int main() { const char* s = "\U00110000"; }`, 0],
+  ['a partially written Unicode string escape', String.raw`int main() { const char* s = "\u123"; }`, 0],
   ['std::sqrt with only <cstdio>', '#include <cstdio>\nint main() {\n  double x = std::sqrt(2.0); }', 2],
   ['std::abs with only <cstdio>', '#include <cstdio>\nint main() {\n  int x = std::abs(-2); }', 2],
 ])('the interpreter rejects %s', (_, program, row) => {

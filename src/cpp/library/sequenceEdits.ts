@@ -53,6 +53,11 @@ export class SequenceEditor {
     if (length < self.items.length) this.destroy(frame, self.splice(length, self.items.length - length));
   }
 
+  removeFront(frame: Frame, self: SequenceValue): void {
+    const [removed] = self.splice(0, 1);
+    this.ops.destroy?.(frame, removed);
+  }
+
   /** Constructs `count` elements at the end, reallocating a vector first if needed, as `resize` does. */
   append(frame: Frame, self: SequenceValue, count: number, make: () => Value): void {
     const length = self.items.length;

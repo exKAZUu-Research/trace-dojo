@@ -136,7 +136,7 @@ export class SequenceValue extends Store {
     public items: Value[],
     readonly elementType: Type,
     /** Whether the trace shows the container as an array, as it shows a Java array. */
-    readonly isArrayLike: boolean,
+    public isArrayLike: boolean,
     private readonly storageKind?: 'list' | 'deque' | 'vector'
   ) {
     super();

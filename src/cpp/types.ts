@@ -88,6 +88,7 @@ export interface GlobalInfo {
   index: number;
   row: number;
   isDefined: boolean;
+  hasStaticReferenceBinding?: boolean;
   /** Whether learners see the variable: constants never change, so they would only crowd the variable table. */
   isShown: boolean;
 }
@@ -327,20 +328,6 @@ export function isSigned(type: IntType): boolean {
 export function decay(type: Type): Type {
   if (type.kind === 'array') return pointerTo(type.of);
   return type;
-}
-
-/** Whether two functions take the same parameter types, as redeclarations and overloads compare them. */
-export function sameParameters(a: FunctionInfo, b: FunctionInfo): boolean {
-  return (
-    a.params.length === b.params.length &&
-    a.params.every((param, index) => sameType(adjustParameter(param.type), adjustParameter(b.params[index].type))) &&
-    (!a.owner || a.isConst === b.isConst)
-  );
-}
-
-/** A parameter's type as overloading compares it: without top-level `const`. */
-function adjustParameter(type: Type): Type {
-  return type.kind === 'reference' ? type : unqualified(type);
 }
 
 /** Whether two types are the same, comparing qualifiers only when `withQualifiers`. */

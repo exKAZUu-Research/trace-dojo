@@ -173,18 +173,17 @@ function shortestFloat(value: number): number {
 
 /** The text of a null-terminated string, or undefined when the pointer reaches none. */
 function cStringOf(pointer: Ptr): string | undefined {
-  const store = pointer.store;
-  if (!store || store.liveness !== Liveness.Alive) return undefined;
-  let bytes = '';
-  for (let index = pointer.index; index < store.length; index++) {
-    let value: Value;
-    try {
-      value = store.get(index);
-    } catch {
-      return undefined;
+  try {
+    const { store, index: first } = pointer;
+    if (!store || store.liveness !== Liveness.Alive) return undefined;
+    let bytes = '';
+    for (let index = first; index < store.length; index++) {
+      const value = store.get(index);
+      if (value === 0) return new TextDecoder().decode(byteArray(bytes));
+      bytes += String.fromCodePoint(Number(value) & 0xff);
     }
-    if (value === 0) return new TextDecoder().decode(byteArray(bytes));
-    bytes += String.fromCodePoint(Number(value) & 0xff);
+  } catch {
+    return undefined;
   }
   return undefined;
 }
@@ -196,10 +195,9 @@ function nodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNode | und
   if (type.kind === 'pointer') {
     const pointer = value as Ptr;
     if (pointer.isNull) return NULL_NODE;
-    const target = readLocation(pointer);
     // oxlint-disable-next-line unicorn/no-null -- The trace format shows a pointer to an unreadable string as null.
     if (isCharType(type.to)) return { kind: 'value', value: cStringOf(pointer) ?? null };
-    return nodeOf(target, type.to, seen);
+    return nodeOf(readLocation(pointer), type.to, seen);
   }
   const scalar = scalarOf(value, type);
   if (scalar !== NOT_SCALAR && scalar !== undefined && !Array.isArray(scalar)) return { kind: 'value', value: scalar };

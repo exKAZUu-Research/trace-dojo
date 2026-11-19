@@ -203,6 +203,18 @@ int main() {
   });
 });
 
+test('tracing continues when a vector invalidates an unused character pointer', () => {
+  const program = `#include <iostream>
+#include <vector>
+int main() {
+  std::vector<char> chars{'a',0};
+  char* old = chars.data();
+  chars.reserve(20);
+  std::cout << "ok";
+}`;
+  expect(traceProgram('cpp', program, program)).toMatchObject({ stdout: 'ok' });
+});
+
 test('an exception message ends its lifetime with the exception object', () => {
   const program = `#include <stdexcept>
 int main() {

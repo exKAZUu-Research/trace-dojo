@@ -15,5 +15,8 @@ int main() {
   std::array<Count, Config::length> counts{Count(8), Count(9)};
   std::array<std::array<int, 2>, 2> grid{{{{1, 2}}, {{3, 4}}}};
   std::array<Count, 0> empty;
-  std::cout << integers[2] << strings[1] << pairs[1].y << counts[0].value << grid[1][0] << empty.size() << '\n';
+  std::array<Count, Config::length> copied{counts};
+  std::array<int, 2> direct{std::array<int, 2>{10, 11}};
+  std::cout << integers[2] << strings[1] << pairs[1].y << counts[0].value << grid[1][0] << empty.size()
+            << copied[1].value << direct[1] << '\n';
 }

@@ -290,6 +290,7 @@ export function compareSequences(a: ConversionSequence, b: ConversionSequence): 
   if (a.isInitializerList !== b.isInitializerList) return a.isInitializerList ? 1 : -1;
   if (a.rank !== b.rank) return b.rank - a.rank;
   if (a.rank === Rank.UserDefined) return 0;
+  if (a.isBoolean !== b.isBoolean) return a.isBoolean ? -1 : 1;
   if (a.baseDistance > 0 && b.convertsToVoidPointer) return 1;
   if (b.baseDistance > 0 && a.convertsToVoidPointer) return -1;
   if (a.baseDistance !== b.baseDistance && a.baseDistance > 0 && b.baseDistance > 0) {
@@ -297,7 +298,6 @@ export function compareSequences(a: ConversionSequence, b: ConversionSequence): 
   }
   if (a.addsQualification !== b.addsQualification) return a.addsQualification ? -1 : 1;
   if (a.reference && b.reference && a.reference.toConst !== b.reference.toConst) return a.reference.toConst ? -1 : 1;
-  if (a.isBoolean !== b.isBoolean) return a.isBoolean ? -1 : 1;
   return 0;
 }
 

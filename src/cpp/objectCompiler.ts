@@ -27,7 +27,7 @@ import {
   typeName,
   unqualified,
 } from './types';
-import { type ArrayStore, Box, CObject, endLifetime, NULL_PTR, Ptr, Store, UNINIT, type Value } from './values';
+import { ArrayStore, Box, CObject, endLifetime, NULL_PTR, Ptr, Store, UNINIT, type Value } from './values';
 
 /**
  * Calls a function with its arguments as its parameters declare them: a `Ptr` for a reference, else a value. A member
@@ -189,6 +189,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       return {
         type: pointerTo(type.of),
         isLvalue: false,
+        staticAddress: expr.staticAddress,
         row: expr.row,
         run: (frame) => new Ptr((run(frame) as Ptr).read() as ArrayStore, 0),
       };
@@ -617,9 +618,16 @@ export function newObject(frame: Frame, cls: ClassInfo, zeroInitialize = false):
   frame.runtime.reserve(cls.fields.length);
   return new CObject(
     cls,
-    cls.fields.map((field) => (zeroInitialize ? zeroOf(field.type) : UNINIT)),
+    cls.fields.map((field) => (zeroInitialize ? staticZero(frame.runtime, field.type) : UNINIT)),
     zeroInitialize
   );
+}
+
+export function staticZero(runtime: Frame['runtime'], type: Type): Value {
+  if (type.kind !== 'array') return zeroOf(type);
+  const length = type.length ?? 0;
+  runtime.reserve(length);
+  return new ArrayStore(Array.from({ length }, () => staticZero(runtime, type.of)));
 }
 
 /** Copies an object as the copy constructor of `cls` does, slicing an object of a derived class. */

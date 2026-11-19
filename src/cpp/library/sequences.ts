@@ -507,8 +507,7 @@ function sequenceMethods(
     });
     method('pop_front', [], VOID, (self, _args, frame) => {
       nonEmpty(self);
-      const removed = self.splice(0, 1)[0];
-      ops().destroy?.(frame, removed);
+      editor.removeFront(frame, self);
     });
   }
   if (kind === 'vector') {

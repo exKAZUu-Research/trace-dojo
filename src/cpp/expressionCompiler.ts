@@ -225,6 +225,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       row: node.row,
       run: () => location,
       literalBytes: bytes,
+      staticAddress: true,
     };
   }
 
@@ -266,7 +267,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
             type: nonReference(type),
             isLvalue: true,
             row,
-            run: (frame) => (frame.runtime.globals[index] as Box).value as Ptr,
+            staticAddress: entity.global.hasStaticReferenceBinding,
+            run: (frame) => (frame.runtime.globals[index] as Box).get(0) as Ptr,
           };
         }
         return {
@@ -274,6 +276,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
           isLvalue: true,
           row,
           constant: entity.constant,
+          staticAddress: true,
           run: (frame) => new Ptr(frame.runtime.globals[index], 0),
         };
       }
@@ -478,6 +481,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       isLvalue: true,
       row,
       constant: evaluateObject ? undefined : constant,
+      staticAddress: !evaluateObject,
       readConstant:
         evaluateObject && constant !== undefined
           ? (frame) => {
@@ -783,10 +787,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const type = pointer.type as Extract<Type, { kind: 'pointer' }>;
     if (type.to.kind === 'void') return this.error(row, 'void * のポインタは足し引きできません。');
     const p = pointer.run;
-    const n = convertArithmetic(this.rvalue(offset), LONG).run;
+    const displacement = convertArithmetic(this.rvalue(offset), LONG);
+    const n = displacement.run;
     return {
       type,
       isLvalue: false,
+      staticAddress: pointer.staticAddress && displacement.constant !== undefined,
       row,
       run: (frame) => (p(frame) as Ptr).offset(sign * Number(n(frame))),
     };
@@ -920,6 +926,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return {
       type,
       isLvalue: true,
+      staticAddress: pointer.staticAddress,
       row,
       run: (frame) => {
         const location = run(frame) as Ptr;
@@ -936,7 +943,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const result = operand.type.cls.library.operator(this, '&', [operand], row);
       if (result) return result;
     }
-    return { type: pointerTo(operand.type), isLvalue: false, row, run: operand.run };
+    return {
+      type: pointerTo(operand.type),
+      isLvalue: false,
+      row,
+      staticAddress: operand.staticAddress,
+      run: operand.run,
+    };
   }
 
   private assignmentExpression(node: Syntax): Expr {
@@ -1176,6 +1189,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     return {
       type,
       isLvalue: true,
+      staticAddress: pointer.staticAddress && offset.constant !== undefined,
       row,
       run: (frame) => (p(frame) as Ptr).offset(Number(n(frame))),
     };

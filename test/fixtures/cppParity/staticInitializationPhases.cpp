@@ -4,7 +4,10 @@ int observe();
 int first = observe();
 int scalar = 7;
 int array[2][2] = {{8}, {9}};
-int observe() { return scalar + array[0][0] + array[1][0]; }
+int* addresses[] = {array[0] + 1, &array[1][0], &scalar};
+int& alias = array[0][0];
+const int& temporary = 2;
+int observe() { return *addresses[0] + *addresses[1] + *addresses[2] + alias + temporary; }
 
 struct Part {
   int field;
@@ -15,7 +18,7 @@ struct Counter {
   Part part;
   int entries[2];
   int field;
-  Counter() { std::cout << entries[1] << field; }
+  Counter() : field(entries[1]) { std::cout << entries[1] << field; }
 };
 Counter global;
 
