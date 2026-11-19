@@ -27,8 +27,9 @@ import {
   typeMismatchMessage,
 } from './compilerBase';
 import { getPropertyValue, setPropertyValue } from './dispatch';
-import { type BoundPlace, ExpressionCompiler, keyOf, type Place } from './expressionCompiler';
+import { type BoundPlace, keyOf, type Place } from './expressionCompiler';
 import { valueEquals } from './format';
+import { OperatorCompiler } from './operatorCompiler';
 import { NUMBER_OPERATOR_NAMES } from './operators';
 import { type Frame, KotlinThrow, LoopSignal, UNASSIGNED } from './runtime';
 import { type ClassSymbol, type PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
@@ -56,7 +57,7 @@ const ANSWERED_CLASSES = new Set([
   'UByte',
 ]);
 
-export abstract class StatementCompiler extends ExpressionCompiler {
+export abstract class StatementCompiler extends OperatorCompiler {
   /** Records the step of a statement after it runs, as `StepTracker.runStatement` says. */
   protected withStep(row: number, exec: Exec, onlyCalls: boolean): Exec {
     if (!this.recordsSteps || this.file.isLibrary) return exec;
