@@ -1045,7 +1045,8 @@ export abstract class ExpressionCompiler extends CompilerBase {
     } else {
       run = (frame) => cell(frame).v;
     }
-    return { type, run, isConst: false, variable };
+    // A const local holds a constant, which other constants may use, as `const b = [...a]`.
+    return { type, run, isConst: variable.options.isConst, variable };
   }
 
   /** Rejects reading a late local without an initializer that no path, closures included, can have assigned yet. */

@@ -181,6 +181,30 @@ export abstract class ControlCompiler extends StatementCompiler {
     matches: (frame: Frame, value: Value) => boolean;
     run: (frame: Frame, error: DartThrow) => Completion | undefined;
   } {
+    const { matches, enter, leave, body } = this.compileCatchClause(clause, (block) => this.compileBlock(block));
+    return {
+      matches,
+      run: (frame, error) => {
+        enter(frame, error);
+        try {
+          return body(frame);
+        } finally {
+          leave(frame);
+        }
+      },
+    };
+  }
+
+  /** A catch clause whose body compiles as `compileBody` does, as a statement or as part of a sync* body. */
+  private compileCatchClause<B>(
+    clause: CatchClause,
+    compileBody: (block: Block) => B
+  ): {
+    matches: (frame: Frame, value: Value) => boolean;
+    enter: (frame: Frame, error: DartThrow) => void;
+    leave: (frame: Frame) => void;
+    body: B;
+  } {
     const type = clause.type ? this.resolveType(clause.type) : undefined;
     const resolve = type ? this.runtimeType(type) : undefined;
     const { result, slots } = this.withScope(() => {
@@ -208,7 +232,7 @@ export abstract class ControlCompiler extends StatementCompiler {
       this.rethrowSlots.push(thrownSlot);
       this.fn.catchDepth++;
       try {
-        const body = this.compileBlock(clause.body);
+        const body = compileBody(clause.body);
         return { body, exception, stackTrace, thrownSlot };
       } finally {
         this.fn.catchDepth--;
@@ -218,16 +242,15 @@ export abstract class ControlCompiler extends StatementCompiler {
     const { body, exception, stackTrace, thrownSlot } = result;
     return {
       matches: (frame, value) => !resolve || this.valueIsAt(frame, value, resolve(frame)),
-      run: (frame, error) => {
+      enter: (frame, error) => {
         frame.locals[thrownSlot] = new Cell(error as unknown as Value);
         if (exception) frame.locals[exception.slot] = new Cell(error.value);
         if (stackTrace) frame.locals[stackTrace.slot] = new Cell(this.stackTraceValue(frame, error));
-        try {
-          return body(frame);
-        } finally {
-          for (const slot of [...slots, thrownSlot]) frame.locals[slot] = undefined;
-        }
       },
+      leave: (frame) => {
+        for (const slot of [...slots, thrownSlot]) frame.locals[slot] = undefined;
+      },
+      body,
     };
   }
 
@@ -296,7 +319,10 @@ export abstract class ControlCompiler extends StatementCompiler {
         if (!containsYield(statement)) break;
         return this.compileGenLabeled(statement);
       }
-      case 'try':
+      case 'try': {
+        if (!containsYield(statement)) break;
+        return this.compileGenTry(statement);
+      }
       case 'switch':
       case 'do': {
         if (containsYield(statement)) return this.unsupported(statement, 'sync* の中の、yield を含むこの文');
@@ -310,6 +336,60 @@ export abstract class ControlCompiler extends StatementCompiler {
     // oxlint-disable-next-line require-yield -- A statement without yield runs as one step of the generator.
     return function* (frame) {
       return exec(frame);
+    };
+  }
+
+  /** try in a sync* body: a body that yields runs in the generator, and an abandoned iterator skips `finally`. */
+  private compileGenTry(statement: Extract<Statement, { kind: 'try' }>): GenExec {
+    const before = this.flow;
+    const body = this.compileGenBlock(statement.body);
+    let after = this.flow;
+    const catches = statement.catches.map((clause) => {
+      this.flow = Flow.join(before, after).forget([]);
+      const compiled = this.compileCatchClause(clause, (block) => this.compileGenBlock(block));
+      after = Flow.join(after, this.flow);
+      return compiled;
+    });
+    let finallyBody: GenExec | undefined;
+    if (statement.finally) {
+      const flowAfterTry = after;
+      this.flow = Flow.join(before, after);
+      finallyBody = this.compileGenBlock(statement.finally);
+      this.flow = this.flow.reachable ? flowAfterTry : this.flow;
+    } else {
+      this.flow = after;
+    }
+    const tryCatch: GenExec = function* (frame) {
+      const mark = frame.temporaries.length;
+      try {
+        return yield* body(frame);
+      } catch (error) {
+        if (!(error instanceof DartThrow)) throw error;
+        frame.temporaries.length = mark;
+        const handler = catches.find((candidate) => candidate.matches(frame, error.value));
+        if (!handler) throw error;
+        handler.enter(frame, error);
+        try {
+          return yield* handler.body(frame);
+        } finally {
+          handler.leave(frame);
+        }
+      }
+    };
+    if (!finallyBody) return tryCatch;
+    const runFinally = finallyBody;
+    return function* (frame) {
+      let completion: Completion | undefined | void;
+      try {
+        completion = yield* tryCatch(frame);
+      } catch (error) {
+        if (!(error instanceof DartThrow)) throw error;
+        const finallyCompletion = yield* runFinally(frame);
+        if (finallyCompletion) return finallyCompletion;
+        throw error;
+      }
+      const finallyCompletion = yield* runFinally(frame);
+      return finallyCompletion ?? completion;
     };
   }
 
