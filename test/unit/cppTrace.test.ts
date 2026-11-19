@@ -330,6 +330,33 @@ int main() { make() + probe(); }`;
 });
 
 test.each([
+  ['concatenation', "char probe() { observe(); return 'b'; }", 'std::cout << (make() + probe());', '0ab'],
+  ['comparison', 'std::string probe() { observe(); return "a"; }', 'std::cout << (make() == probe());', '01'],
+  [
+    'assignment',
+    'std::string target; std::string& probe() { observe(); return target; }',
+    'probe() = make(); std::cout << target;',
+    '0a',
+  ],
+])('keeps a borrowed string owner alive through %s', (_, probe, body, stdout) => {
+  const program = `#include <iostream>
+#include <string>
+Turtle observer(0, 0);
+struct Owner {
+  Turtle blocker;
+  std::string word;
+  Owner() : blocker(0, 1), word("a") {}
+};
+std::string& make() { return (new Owner)->word; }
+void observe() { std::cout << observer.canMoveForward(); }
+${probe}
+int main() { ${body} }`;
+  const result = executeProgram('cpp', program);
+  if (result.kind !== 'executed') throw new Error(JSON.stringify(result));
+  expect(result.stdout).toBe(stdout);
+});
+
+test.each([
   ['a member buffer', 'struct Row { std::vector<Turtle*> items; Token token; };', 'items'],
   ['a base buffer', 'struct Row : Storage { Token token; };', 'items'],
   ['a built-in array', 'struct Row { Entry cells[2]; };', 'cells[0].items'],

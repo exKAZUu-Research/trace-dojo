@@ -5,7 +5,7 @@ import { scalarValue } from '../conversions';
 import { CppRuntimeError } from '../errors';
 import { type Expr, type Initializer, initializerWithConstancy, type LibraryConstant } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import type { Eval, Frame } from '../runtime';
+import { type Eval, type Frame, holdAll } from '../runtime';
 import type { Syntax } from '../syntax';
 import {
   BOOL,
@@ -234,7 +234,7 @@ export function stringClass(library: Library): ClassInfo {
     allowsConstantCopy: true,
     size: 24,
     align: 8,
-    operator: (compiler, operator, operands, row) => stringOperator(compiler, library, cls, operator, operands, row),
+    operator: (compiler, operator, operands, row) => stringOperator(compiler, cls, operator, operands, row),
     listInitializer: (compiler, elements, row) => charList(compiler, elements, row),
     listElementType: CHAR,
   };
@@ -803,48 +803,46 @@ function narrowsToChar(value: Expr): boolean {
   return type.name !== 'char' && type.name !== 'schar' && type.name !== 'bool';
 }
 
-/** The result of `+` from the evaluated operands, which takes the buffer of the operand at `reused`, if any. */
-function concatenation(
-  a: Eval<string | StringValue>,
-  b: Eval<string | StringValue>,
-  reused: number
-): Eval<StringValue> {
-  const bytesOf = (value: string | StringValue): string => (value instanceof StringValue ? value.bytes : value);
-  return (frame) => {
-    const operands = [a(frame), b(frame)];
-    const bytes = appendBytes(frame, bytesOf(operands[0]), bytesOf(operands[1]));
-    const source = operands.at(reused);
-    if (reused < 0 || !(source instanceof StringValue)) return new StringValue(bytes);
-    const result = new StringValue('');
-    result.moveFrom(source);
-    result.bytes = bytes;
-    return result;
-  };
+interface TextOperand {
+  kind: 'string' | 'pointer' | 'character';
+  run: Eval<unknown>;
 }
 
-/** `s = t` of a temporary string `t`, which moves it, taking its buffer. */
-function moveAssignment(compiler: ExpressionCompiler, left: Expr, right: Expr, row: number): Expr {
-  const location = left.run;
-  const moved = compiler.rvalue(right).run;
-  return {
-    type: left.type,
-    isLvalue: true,
-    row,
-    run: (frame) => {
-      const source = moved(frame) as StringValue;
-      const place = location(frame) as Ptr;
-      const target = place.read() as StringValue;
-      if (target !== source) target.moveFrom(source);
-      return place;
-    },
-  };
+function stringObject(value: unknown): StringValue {
+  return (value instanceof Ptr ? value.read() : value) as StringValue;
+}
+
+function operandBytes(frame: Frame, operand: TextOperand, value: unknown): string {
+  switch (operand.kind) {
+    case 'string': {
+      return stringObject(value).bytes;
+    }
+    case 'pointer': {
+      return readCString(value as Ptr, undefined, frame.runtime);
+    }
+    case 'character': {
+      return charOf(value);
+    }
+  }
+}
+
+function concatenation(a: TextOperand, b: TextOperand, reused: number): Eval<StringValue> {
+  return (frame) =>
+    holdAll(frame, [a.run, b.run], ([left, right]) => {
+      const bytes = appendBytes(frame, operandBytes(frame, a, left), operandBytes(frame, b, right));
+      const result = new StringValue(reused < 0 ? bytes : '');
+      if (reused >= 0) {
+        result.moveFrom(stringObject(reused === 0 ? left : right));
+        result.bytes = bytes;
+      }
+      return result;
+    });
 }
 
 /** The operators of `std::string`: `+`, `+=`, `=`, comparisons, and `[]`. */
 // code-gauge-allow functionCognitiveComplexity 30 -- One case per operator, each with its operand forms.
 function stringOperator(
   compiler: ExpressionCompiler,
-  library: Library,
   cls: ClassInfo,
   operator: string,
   operands: Expr[],
@@ -855,37 +853,22 @@ function stringOperator(
   const isString = (expr: Expr): boolean => expr.type.kind === 'class' && expr.type.cls === cls;
   const canMoveString = (expr: Expr): boolean =>
     isString(expr) && !isConstType(expr.type) && (!expr.isLvalue || expr.isXvalue === true);
-  const textRun = (expr: Expr): Eval<string> | undefined => {
-    if (isString(expr)) {
-      const run = compiler.rvalue(expr).run;
-      return (frame) => (run(frame) as StringValue).bytes;
-    }
-    const value = compiler.rvalue(expr);
-    if (value.type.kind === 'pointer' && isCharType(value.type.to)) {
-      const run = value.run;
-      return (frame) => readCString(run(frame) as Ptr, undefined, frame.runtime);
-    }
-    if (value.type.kind === 'class' && library.isStringLike(value.type)) return undefined;
-    return undefined;
+  const textOperand = (expr: Expr): TextOperand | undefined => {
+    if (isString(expr)) return { kind: 'string', run: expr.run };
+    const { type, run } = compiler.rvalue(expr);
+    if (type.kind === 'pointer' && isCharType(type.to)) return { kind: 'pointer', run };
   };
-  // `operator+` deduces its character type from both operands, so only a `char` joins a string; the members `=` and
-  // `+=` take a `char` parameter, to which any arithmetic value converts.
-  const charRun = (expr: Expr, accepts: (type: Type) => boolean): Eval<string> | undefined => {
+  // Concatenation deduces char from both operands, while assignment converts arithmetic values to char.
+  const characterOperand = (expr: Expr, accepts: (type: Type) => boolean): TextOperand | undefined => {
     const value = compiler.rvalue(expr);
-    if (!accepts(value.type)) return undefined;
-    const converted = compiler.convert(value, CHAR, row).run;
-    return (frame) => charOf(converted(frame));
+    if (accepts(value.type)) return { kind: 'character', run: compiler.convert(value, CHAR, row).run };
   };
   switch (operator) {
     case '+': {
       if (!right) return undefined;
       if (!isString(left) && !isString(right)) return undefined;
-      const operandRun = (expr: Expr): Eval<string | StringValue> | undefined =>
-        isString(expr)
-          ? (compiler.rvalue(expr).run as Eval<StringValue>)
-          : (textRun(expr) ?? charRun(expr, isPlainChar));
-      const a = operandRun(left);
-      const b = operandRun(right);
+      const a = textOperand(left) ?? characterOperand(left, isPlainChar);
+      const b = textOperand(right) ?? characterOperand(right, isPlainChar);
       if (!a || !b) return undefined;
       // A temporary string operand gives its buffer to the result, as libc++ appends to it or inserts into it.
       const reused = operands.findIndex(canMoveString);
@@ -905,21 +888,27 @@ function stringOperator(
       if (!isString(left)) return undefined;
       compiler.checkAssignable(left, row, operator);
       const append = operator === '+=';
-      if (!append && canMoveString(right)) return moveAssignment(compiler, left, right, row);
+      const moves = !append && canMoveString(right);
       const location = left.run;
-      const source = textRun(right) ?? charRun(scalarValue(compiler, right), isArithmetic);
+      const source = textOperand(right) ?? characterOperand(scalarValue(compiler, right), isArithmetic);
       if (!source) return undefined;
       return {
         type: left.type,
         isLvalue: true,
         row,
-        run: (frame) => {
-          const bytes = source(frame);
-          const place = location(frame) as Ptr;
-          const target = place.read() as StringValue;
-          target.bytes = append ? appendBytes(frame, target.bytes, bytes) : checkLength(frame, bytes);
-          return place;
-        },
+        run: (frame) =>
+          holdAll(frame, [source.run, location], ([operand, receiver]) => {
+            const place = receiver as Ptr;
+            const target = stringObject(place);
+            if (moves) {
+              const string = stringObject(operand);
+              if (target !== string) target.moveFrom(string);
+            } else {
+              const bytes = operandBytes(frame, source, operand);
+              target.bytes = append ? appendBytes(frame, target.bytes, bytes) : checkLength(frame, bytes);
+            }
+            return place;
+          }),
       };
     }
     case '==':
@@ -929,11 +918,19 @@ function stringOperator(
     case '>':
     case '>=': {
       if (!right) return undefined;
-      const a = textRun(left);
-      const b = textRun(right);
+      const a = textOperand(left);
+      const b = textOperand(right);
       if (!a || !b) return undefined;
       const test = COMPARE[operator];
-      return { type: BOOL, isLvalue: false, row, run: (frame) => (test(a(frame), b(frame)) ? 1 : 0) };
+      return {
+        type: BOOL,
+        isLvalue: false,
+        row,
+        run: (frame) =>
+          holdAll(frame, [a.run, b.run], ([left, right]) =>
+            test(operandBytes(frame, a, left), operandBytes(frame, b, right)) ? 1 : 0
+          ),
+      };
     }
     case '[]': {
       if (!isString(left)) return undefined;

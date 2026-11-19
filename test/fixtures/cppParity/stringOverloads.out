@@ -35,6 +35,7 @@ ba
 31 -158 -1 1
 XYZZkkYXnYZcdefc cXYZZkkYXnYZcdef
 31 31 103 47 207
+1 0 bc xz
 basic_string
 basic_string
 string_view::substr

@@ -15,6 +15,25 @@ string movableText() {
   return text;
 }
 
+string shared = "a";
+char raw[] = "a";
+char letter = 'x';
+
+string changeShared() {
+  shared = "b";
+  return "b";
+}
+
+string changeRaw() {
+  raw[0] = 'b';
+  return "c";
+}
+
+string changeLetter() {
+  letter = 'y';
+  return "z";
+}
+
 int main() {
   string s = "abcdef", t = "XYZ";
   s.insert(2, t, 1, 1); cout << s << '\n';
@@ -65,6 +84,9 @@ int main() {
   reserved = constText();
   cout << left.capacity() << ' ' << right.capacity() << ' ' << moved.capacity() << ' '
        << empty.capacity() << ' ' << reserved.capacity() << '\n';
+  cout << (shared == changeShared()) << ' ';
+  shared = "a";
+  cout << (shared < changeShared()) << ' ' << (raw + changeRaw()) << ' ' << (letter + changeLetter()) << '\n';
   try { s.insert(100, t, 0, 1); } catch (const out_of_range& e) { cout << e.what() << '\n'; }
   try { s.insert(0, t, 100, 1); } catch (const out_of_range& e) { cout << e.what() << '\n'; }
   try { s.compare(0, 1, t, 100, 1); } catch (const out_of_range& e) { cout << e.what() << '\n'; }
