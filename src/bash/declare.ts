@@ -50,7 +50,8 @@ export function runDeclaration(shell: Shell, name: string, args: DeclarationArgu
     throw new UnsupportedFeatureError(`${name} -f（関数の一覧）`);
   }
   if (operands.length === 0) throw new UnsupportedFeatureError(`${name} の変数の一覧`);
-  if (options.set.has('p')) return printDeclarations(shell, name, operands);
+  // `readonly -p` and `export -p` print only without names; with names, they set the attribute as without `-p`.
+  if (options.set.has('p') && name !== 'readonly' && name !== 'export') return printDeclarations(shell, name, operands);
   const isLocal =
     name === 'local' || ((name === 'declare' || name === 'typeset') && shell.isInFunction && !options.set.has('g'));
   let status = 0;
@@ -61,7 +62,7 @@ export function runDeclaration(shell: Shell, name: string, args: DeclarationArgu
 }
 
 /** Reads the options before the operands, reporting an invalid one with the builtin's usage as Bash does. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Bash's option parsing shared by the declaration builtins, with export -n's special case.
+// code-gauge-allow functionCognitiveComplexity 20 -- Bash's option parsing shared by the declaration builtins, with export -n's special case and declare's conflicting -a and -A.
 function parseOptions(
   shell: Shell,
   name: string,
@@ -85,6 +86,10 @@ function parseOptions(
       }
       target.add(option);
     }
+  }
+  if (options.set.has('A') && options.set.has('a')) {
+    shell.reportError(`${name}: -a: invalid option`);
+    return undefined;
   }
   if (name === 'readonly') options.set.add('r');
   if (name === 'export') {
@@ -162,6 +167,11 @@ function declaredVariable(
   if (!scope && !variable && (set.has('g') || builtin === 'readonly' || builtin === 'export')) {
     variable = shell.findVariable(name);
   }
+  if (scope && !variable && isReadonlyGlobal(shell, name)) {
+    // Bash refuses a local copy of a readonly global, though a caller's readonly local may be shadowed.
+    shell.reportError(`${builtin}: ${name}: readonly variable`);
+    return undefined;
+  }
   const changes = assigns || [...set].some((a) => a !== 'r' && a !== 'x' && a !== 'p' && a !== 'g');
   if (variable?.attributes.has('r') && changes) {
     shell.reportError(`${builtin}: ${name}: readonly variable`);
@@ -172,6 +182,11 @@ function declaredVariable(
     (scope ?? scopes[0]).set(name, variable);
   }
   return variable;
+}
+
+function isReadonlyGlobal(shell: Shell, name: string): boolean {
+  const variable = shell.findVariable(name, false);
+  return variable?.attributes.has('r') === true && shell.state.scopes[0].get(name) === variable;
 }
 
 /** Sets and removes a declaration's attributes, converting the value as Bash does, or reports why it cannot. */
@@ -253,7 +268,7 @@ function isCompound(operand: DeclarationArgument): boolean {
 }
 
 /** Assigns a declaration's value to the variable it declared, which may be a local shadowing a global. */
-// code-gauge-allow functionCognitiveComplexity 18 -- Bash's assignment kinds for a declared variable: none, empty, compound, element, and scalar.
+// code-gauge-allow functionCognitiveComplexity 20 -- Bash's assignment kinds for a declared variable: none, empty, compound, element, and scalar.
 function assignLocally(shell: Shell, variable: Variable, assignment: Assignment): boolean {
   if (assignment.value === undefined && !assignment.array) {
     if (variable.attributes.has('a') && !variable.value) variable.value = { kind: 'indexed', elements: new Map() };
@@ -268,10 +283,12 @@ function assignLocally(shell: Shell, variable: Variable, assignment: Assignment)
   const owner = scopes.findLast((scope) => scope.get(variable.name) === variable);
   if (!owner) return true;
   if (assignment.array) {
-    const elements = shell.expander.expandCompound(assignment.array, variable.attributes.has('A'));
+    const { elements, error } = shell.expander.expandCompound(assignment.array, variable.attributes.has('A'), true);
     if (variable.attributes.has('A') && !variable.value)
       variable.value = { kind: 'associative', table: new AssociativeTable() };
-    return shell.assignCompound(variable.name, elements, assignment.append);
+    const ok = shell.assignCompound(variable.name, elements, assignment.append);
+    if (error) shell.discard(error);
+    return ok;
   }
   const value = shell.expander.expandAssignmentValue(assignment.value as NonNullable<Assignment['value']>);
   if (assignment.subscript) {
@@ -295,7 +312,12 @@ function printDeclarations(shell: Shell, builtin: string, names: DeclarationArgu
   let status = 0;
   for (const operand of names) {
     const name = typeof operand === 'string' ? operand : operand.name;
-    const variable = shell.findVariable(name, false);
+    const found = shell.findVariable(name, false);
+    // `local -p` shows only the current function's own variables.
+    const variable =
+      builtin !== 'local' || shell.state.scopes[shell.state.functionScopes.at(-1) as number].get(name) === found
+        ? found
+        : undefined;
     if (!variable || variable.isSystem) {
       if (variable?.isSystem) throw new UnsupportedFeatureError(`シェルの変数の表示（${builtin} -p ${name}）`);
       shell.reportError(`${builtin}: ${name}: not found`);

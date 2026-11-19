@@ -2,9 +2,11 @@ import type { ParameterExpansion, WordPart } from './ast';
 import { charactersOf } from './characters';
 import { decodeAnsiC } from './converter';
 import { declarationText } from './declare';
-import { type Expander, FIELD_BREAK, type ParameterValue, type Piece } from './expansion';
+import type { Expander, ParameterValue } from './expansion';
+import { isFieldBreak, type Piece } from './fields';
 import { matchesPattern } from './pattern';
 import { quoteReusable } from './quoting';
+import { ExitSignal } from './runtime';
 import type { Shell } from './shell';
 import { lowerCase, upperCase } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
@@ -192,7 +194,7 @@ function splitReplacement(parts: WordPart[]): { pattern: WordPart[]; replacement
 function replacementFor(replacement: Piece[], matched: string): string {
   let text = '';
   for (const piece of replacement) {
-    if (piece === FIELD_BREAK) {
+    if (isFieldBreak(piece)) {
       text += ' ';
       continue;
     }
@@ -321,6 +323,7 @@ function sliceList(
     const offset = start < 0n ? start + BigInt(value.values.length + 1) : start;
     return offset < 0n ? undefined : ['main.sh', ...value.values].slice(Number(offset));
   }
+  if (shell.isAssociative(shell.resolveName(name))) return sliceAssociative(value.values, start);
   const keyed = arrayEntries(shell, name, value);
   let offset = start;
   if (offset < 0n) {
@@ -331,15 +334,21 @@ function sliceList(
   return keyed.filter(([key]) => key >= offset).map(([, element]) => element);
 }
 
+/** Bash's `assoc_subrange`, which counts an associative array's elements from 1, so offsets 0 and 1 both start at the first. */
+function sliceAssociative(values: string[], start: bigint): string[] | undefined {
+  const size = BigInt(values.length) + (start < 0n ? 1n : 0n);
+  const offset = start < 0n ? start + size : start;
+  if (offset < 0n || offset > size) return undefined;
+  return values.slice(Math.max(Number(offset) - 1, 0));
+}
+
 /** The keyed elements a list came from, so that slices count by index as Bash's do. */
 function arrayEntries(
   shell: Shell,
   name: string,
   value: Extract<ParameterValue, { kind: 'list' }>
 ): [bigint, string][] {
-  const resolved = shell.resolveName(name);
-  if (shell.isAssociative(resolved)) return value.values.map((element, index) => [BigInt(index), element]);
-  const keys = shell.arrayKeys(resolved);
+  const keys = shell.arrayKeys(shell.resolveName(name));
   return value.values.map((element, index) => [BigInt(keys[index] ?? index), element]);
 }
 
@@ -396,7 +405,7 @@ function changeCase(text: string, pattern: string, operator: string, shell: Shel
 
 /** `${x@Q}` and the other transformations. */
 // code-gauge-allow functionParameterCount 7 -- The transformations need the expansion, the parameter, and how it is quoted, as the other operators do.
-// code-gauge-allow functionNcss 34 -- One case per transformation letter of Bash's parameter expansion.
+// code-gauge-allow functionNcss 35 -- One case per transformation letter of Bash's parameter expansion.
 function transform(
   expander: Expander,
   shell: Shell,
@@ -408,7 +417,11 @@ function transform(
 ): Piece[] {
   const letter =
     expansion.argument.length === 1 && expansion.argument[0].kind === 'literal' ? expansion.argument[0].text : '';
-  if (!/^[QEPAKakuUL]$/.test(letter)) shell.discard(`${expansion.text}: bad substitution`);
+  if (!/^[QEPAKakuUL]$/.test(letter)) {
+    // Unlike most bad substitutions, a non-interactive Bash exits at an unknown transformation.
+    shell.reportError(`${expansion.text}: bad substitution`);
+    throw new ExitSignal(1);
+  }
   switch (letter) {
     case 'Q': {
       return mapValues(expander, value, inDouble, quoteReusable);
@@ -459,20 +472,24 @@ function transform(
       return keyValuePairs(expander, shell, name, value, letter === 'K', inDouble);
     }
     default: {
-      return shell.discard(`${expansion.text}: bad substitution`);
+      throw new Error(`Unknown transformation ${letter}`);
     }
   }
 }
 
 /** `${x@A}`: an assignment that recreates the value, with `declare` and the variable's attributes when it has any. */
+/** `${x@A}`, as Bash's `string_var_assignment`, or `declare -p`'s text for an array (`${a[@]@A}`). */
 function assignmentText(shell: Shell, name: string, value: ParameterValue): string {
   const variable = shell.findVariable(name);
-  if (!variable?.value) return '';
-  // An array, as `${a[@]@A}`, shows as `declare -p` shows it.
-  if (value.kind === 'list') return declarationText(variable);
+  if (!variable) return '';
+  if (value.kind === 'list') return variable.value ? declarationText(variable) : '';
   const flags = ATTRIBUTE_ORDER.filter((attribute) => variable.attributes.has(attribute)).join('');
-  const assignment = `${name}=${quoteReusable(value.value ?? '')}`;
-  return flags ? `declare -${flags} ${assignment}` : assignment;
+  const quoted = variable.value && value.value !== undefined ? quoteReusable(value.value) : undefined;
+  const { scopes, functionScopes } = shell.state;
+  const isCurrentLocal = functionScopes.length > 0 && scopes[functionScopes.at(-1) as number].get(name) === variable;
+  if (flags) return `declare -${flags} ${name}${quoted === undefined ? '' : `=${quoted}`}`;
+  if (isCurrentLocal) return `declare ${name}${quoted === undefined ? '' : `=${quoted}`}`;
+  return quoted === undefined ? '' : `${name}=${quoted}`;
 }
 
 /**
@@ -488,10 +505,8 @@ function keyValuePairs(
   inDouble: boolean
 ): Piece[] {
   if (value.kind === 'scalar') {
-    return expander.valuePieces(
-      { kind: 'scalar', value: quoted ? quoteReusable(value.value ?? '') : value.value },
-      inDouble
-    );
+    if (value.value === undefined) return [];
+    return expander.valuePieces({ kind: 'scalar', value: quoted ? quoteReusable(value.value) : value.value }, inDouble);
   }
   const keys = shell.arrayKeys(shell.resolveName(name));
   if (!quoted) {

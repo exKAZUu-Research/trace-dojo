@@ -20,6 +20,48 @@ RANDOM=42; echo $RANDOM $RANDOM $RANDOM
   });
 });
 
+test('an associative array counts from its declaration, rejects an empty key, and slices from its first element', () => {
+  const program = `declare -A count
+for w in b a b; do (( count[$w]++ )); done
+declare -p count
+k=; count[$k]=1; echo dropped
+echo "[\${count[$k]}]" $(( count[$k] ))
+declare -A n=([one]=1 [two]=2 [three]=3 [four]=4)
+echo "\${n[@]}" "|" "\${n[@]:1:2}" "|" "\${n[@]: -1}"
+`;
+  expect(executeProgram('bash', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'declare -A count=([b]="2" [a]="1" )\n[] 0\n4 2 3 1 | 4 2 | 1\n',
+    stderr: [
+      'main.sh: line 4: count[$k]: bad array subscript',
+      'main.sh: line 5: count: bad array subscript',
+      'main.sh: line 5: count[]: bad array subscript',
+      'main.sh: line 5: count[]: bad array subscript',
+      '',
+    ].join('\n'),
+  });
+});
+
+test('a bad loop count leaves every loop, extra operands abandon the line, and a non-numeric count exits', () => {
+  const program = `for i in 1 2; do for j in 1 2; do break 0; done; echo inner; done; echo "status $?"
+for i in 1 2; do if (( i == 2 )); then break; fi; false; done; echo "status $?"
+echo \`echo "a \\\`echo b\\\`"\`
+for i in 1; do break 1 2; done; echo dropped
+for i in 1; do continue x; done
+echo never
+`;
+  expect(executeProgram('bash', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'status 1\nstatus 0\na b\n',
+    stderr: [
+      'main.sh: line 1: break: 0: loop count out of range',
+      'main.sh: line 4: break: too many arguments',
+      'main.sh: line 5: continue: x: numeric argument required',
+      '',
+    ].join('\n'),
+  });
+});
+
 test('an arithmetic error abandons the rest of its line, except in let, and invalid arithmetic fails only when run', () => {
   const program = `echo $((1/0)); echo same line
 echo next line

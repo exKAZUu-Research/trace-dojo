@@ -4,7 +4,7 @@ import { CompileError } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn, type TraceOptions } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import { maskInvalidArithmetic } from './arithmeticMasking';
-import type { Program, WordPart } from './ast';
+import type { Program, Statement, WordPart } from './ast';
 import { Converter } from './converter';
 import { syntaxErrorsOf } from './syntaxErrors';
 
@@ -20,14 +20,17 @@ export const misplacedBashAtomicMessage =
  * @param trace Marks the functions whose headers hold `# atomic`, for a model program.
  */
 export function parseBash(source: string, trace?: TraceOptions): Program {
-  const atomicRows = new Set(trace?.atomicAnnotations.keys());
+  return parseText(source, new Set(trace?.atomicAnnotations.keys()));
+}
+
+function parseText(source: string, atomicRows: ReadonlySet<number>): Program {
   const { source: parsedSource, masked } = maskInvalidArithmetic(parser, source);
   return parseSource(
     parser,
     parsedSource,
     {},
     (root) => {
-      const converter = new Converter(parsedSource, atomicRows, masked, rawArithmeticPieces);
+      const converter = new Converter(parsedSource, atomicRows, masked, rawArithmeticPieces, reparseBackquoted);
       const program = converter.convertProgram(root);
       for (const row of atomicRows) {
         if (!converter.claimedAtomicRows.has(row)) {
@@ -60,12 +63,17 @@ function rawArithmeticPieces(raw: string): (string | WordPart)[] {
   try {
     const string = tree.rootNode.descendantsOfType('string')[0];
     if (tree.rootNode.hasError || !string) return [raw];
-    const [part] = new Converter(wrapped, new Set(), new Map(), () => [raw]).word(string).parts;
+    const [part] = new Converter(wrapped, new Set(), new Map(), () => [raw], reparseBackquoted).word(string).parts;
     if (part?.kind !== 'double') return [raw];
     return part.parts.map((inner) => (inner.kind === 'literal' ? inner.text.replaceAll(String.raw`\"`, '"') : inner));
   } finally {
     tree.delete();
   }
+}
+
+/** The statements of a backquoted body read again, padded so that its rows stay those of the program. */
+function reparseBackquoted(text: string, row: number): Statement[] {
+  return parseText(`${'\n'.repeat(row)}${text}`, new Set()).units.flat();
 }
 
 /** Matches the annotation a line comment ends with, which may follow an ordinary remark. */

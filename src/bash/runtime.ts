@@ -16,7 +16,11 @@ export interface Frame extends TracedFrame {
 
 /** Leaves loops, as `break n` does. */
 export class BreakSignal {
-  constructor(public count: number) {}
+  /** @param status The loop's status: 1 when `break` or `continue` got a count below 1 and leaves every loop. */
+  constructor(
+    public count: number,
+    readonly status = 0
+  ) {}
 }
 
 /** Starts the next iteration of an enclosing loop, as `continue n` does. */
@@ -39,7 +43,7 @@ export class ExitSignal {
  * or the rest of a command substitution, with status 1.
  */
 export class DiscardSignal {
-  readonly status = 1;
+  constructor(readonly status = 1) {}
 }
 
 /** A turtle's handle, which a variable holds as a string, since every Bash value is one. */

@@ -102,7 +102,7 @@ function readDigits(bytes: number[], index: number, max: number, radix: number):
   return { value, last };
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- Bash's printf option and operand checks, each with its own usage error.
+// code-gauge-allow functionCognitiveComplexity 19 -- Bash's printf option and operand checks, each with its own usage error.
 // code-gauge-allow functionNcss 34 -- Bash's printf option and operand checks, each with its own usage error.
 function printf(shell: Shell, args: string[]): number {
   let list = args;
@@ -115,7 +115,7 @@ function printf(shell: Shell, args: string[]): number {
       return 2;
     }
     const split = shell.splitSubscript(target);
-    if (!isIdentifier(split ? split.name : target)) {
+    if (split ? !isIdentifier(split.name) || split.subscript === '' : !isIdentifier(target)) {
       shell.reportError(`printf: \`${target}': not a valid identifier`);
       return 2;
     }
@@ -160,31 +160,54 @@ function letBuiltin(shell: Shell, args: string[]): number {
   return value === 0n ? 1 : 0;
 }
 
-// code-gauge-allow functionCognitiveComplexity 16 -- Bash's unset: functions, array elements, invalid names, and variables each in their own branch.
 function unsetBuiltin(shell: Shell, args: string[]): number {
-  let mode: 'any' | 'v' | 'f' | 'n' = 'any';
-  let index = 0;
-  for (; index < args.length && /^-[vfn]+$/.test(args[index]); index++) mode = args[index].at(-1) as 'v' | 'f' | 'n';
+  const parsed = parseUnsetOptions(shell, args);
+  if (!parsed) return 2;
   let status = 0;
-  for (const name of operands(args.slice(index))) {
-    const split = shell.splitSubscript(name);
-    let ok: boolean;
-    if (mode === 'f') ok = shell.state.functions.delete(name) || true;
-    else if (split && isIdentifier(split.name)) ok = unsetElement(shell, split.name, split.subscript);
-    else if (!isIdentifier(name) && mode !== 'v') {
-      // A word that cannot name a variable names a function, which Bash then unsets if there is one.
-      shell.state.functions.delete(name);
-      ok = true;
-    } else if (!isIdentifier(name)) {
-      shell.reportError(`unset: \`${name}': not a valid identifier`);
-      ok = false;
-    } else if (!shell.findOwnVariable(name) && mode === 'any' && shell.state.functions.has(name)) {
-      // A name that no variable has unsets the function of that name.
-      ok = shell.state.functions.delete(name);
-    } else ok = shell.unsetVariable(name, mode !== 'n');
-    if (!ok) status = 1;
+  for (const name of parsed.names) {
+    if (!unsetName(shell, name, parsed.mode)) status = 1;
   }
   return status;
+}
+
+type UnsetMode = 'any' | 'v' | 'f' | 'n';
+
+/** The last of `-v`, `-f`, and `-n`, or `undefined` after reporting an option `unset` does not take, as Bash does. */
+function parseUnsetOptions(shell: Shell, args: string[]): { mode: UnsetMode; names: string[] } | undefined {
+  let mode: UnsetMode = 'any';
+  let index = 0;
+  for (; index < args.length && /^-[vfn]+$/.test(args[index]); index++) mode = args[index].at(-1) as UnsetMode;
+  const invalid = /^-(?!-$)[vfn]*([^vfn])/.exec(args[index] ?? '');
+  if (invalid) {
+    shell.reportError(`unset: -${invalid[1]}: invalid option`);
+    shell.state.fd2.write('unset: usage: unset [-f] [-v] [-n] [name ...]\n');
+    return undefined;
+  }
+  return { mode, names: operands(args.slice(index)) };
+}
+
+/** Unsets one operand of `unset`: a function, an array element, or a variable, telling whether it succeeded. */
+function unsetName(shell: Shell, name: string, mode: UnsetMode): boolean {
+  const split = shell.splitSubscript(name);
+  if (mode === 'f') {
+    shell.state.functions.delete(name);
+    return true;
+  }
+  if (split && isIdentifier(split.name)) return unsetElement(shell, split.name, split.subscript);
+  if (!isIdentifier(name)) {
+    if (mode === 'v') {
+      shell.reportError(`unset: \`${name}': not a valid identifier`);
+      return false;
+    }
+    // A word that cannot name a variable names a function, which Bash then unsets if there is one.
+    shell.state.functions.delete(name);
+    return true;
+  }
+  // A name that no variable has unsets the function of that name.
+  if (!shell.findOwnVariable(name) && mode === 'any' && shell.state.functions.has(name)) {
+    return shell.state.functions.delete(name);
+  }
+  return shell.unsetVariable(name, mode !== 'n');
 }
 
 /** `unset 'name[subscript]'`, which unsets the whole array for `@` or `*`. */
@@ -211,8 +234,13 @@ function unsetElement(shell: Shell, name: string, subscript: string): boolean {
   return true;
 }
 
+/** Bash's `no_args`: a builtin given more operands than it takes abandons the line with status 2. */
+function rejectExtraOperands(shell: Shell, name: string, extra: string[]): void {
+  if (extra.length > 0) shell.discard(`${name}: too many arguments`, 2);
+}
+
 function shift(shell: Shell, args: string[]): number {
-  const [countText] = operands(args);
+  const [countText, ...extra] = operands(args);
   let count = 1n;
   if (countText !== undefined) {
     const parsed = legalNumber(countText);
@@ -220,6 +248,7 @@ function shift(shell: Shell, args: string[]): number {
       shell.reportError(`shift: ${countText}: numeric argument required`);
       return 2;
     }
+    rejectExtraOperands(shell, 'shift', extra);
     count = parsed;
   }
   const positional = shell.state.positional.at(-1) as string[];
@@ -237,24 +266,26 @@ function returnBuiltin(shell: Shell, args: string[]): number {
     shell.reportError("return: can only `return' from a function or sourced script");
     return 2;
   }
-  const [statusText] = operands(args);
+  const [statusText, ...extra] = operands(args);
   if (statusText === undefined) throw new ReturnSignal(shell.state.lastStatus);
   const status = legalNumber(statusText);
   if (status === undefined) {
     shell.reportError(`return: ${statusText}: numeric argument required`);
     throw new ReturnSignal(2);
   }
+  rejectExtraOperands(shell, 'return', extra);
   throw new ReturnSignal(Number(BigInt.asUintN(8, status)));
 }
 
 function exitBuiltin(shell: Shell, args: string[]): number {
-  const [statusText] = operands(args);
+  const [statusText, ...extra] = operands(args);
   if (statusText === undefined) throw new ExitSignal(shell.state.lastStatus);
   const status = legalNumber(statusText);
   if (status === undefined) {
     shell.reportError(`exit: ${statusText}: numeric argument required`);
     throw new ExitSignal(2);
   }
+  rejectExtraOperands(shell, 'exit', extra);
   throw new ExitSignal(Number(BigInt.asUintN(8, status)));
 }
 
@@ -264,17 +295,20 @@ function loopControl(kind: 'break' | 'continue'): Builtin {
       shell.reportError(`${kind}: only meaningful in a \`for', \`while', or \`until' loop`);
       return 0;
     }
-    const [countText] = operands(args);
+    const [countText, ...extra] = operands(args);
     let count = 1n;
     if (countText !== undefined) {
       const parsed = legalNumber(countText);
       if (parsed === undefined) {
+        // A non-interactive Bash exits at a count that is not a number.
         shell.reportError(`${kind}: ${countText}: numeric argument required`);
-        throw new BreakSignal(shell.loopCount);
+        throw new ExitSignal(2);
       }
+      rejectExtraOperands(shell, kind, extra);
       if (parsed < 1n) {
+        // Bash then leaves every loop, for `continue` too.
         shell.reportError(`${kind}: ${countText}: loop count out of range`);
-        return 1;
+        throw new BreakSignal(shell.loopCount, 1);
       }
       count = parsed;
     }

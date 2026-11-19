@@ -39,7 +39,9 @@ export class Converter {
     private readonly source: string,
     private readonly atomicRows: ReadonlySet<number>,
     private readonly masked: MaskedArithmetic,
-    private readonly rawPieces: (raw: string) => (string | WordPart)[]
+    private readonly rawPieces: (raw: string) => (string | WordPart)[],
+    /** Parses the text of a backquoted command substitution that Bash reads again after removing backslashes. */
+    private readonly reparse: (text: string, row: number) => Statement[]
   ) {}
 
   convertProgram(root: Node): Program {
@@ -548,7 +550,11 @@ export class Converter {
     if (opening && opening.type !== '$(' && opening.type !== '`') {
       this.unsupported(node, '現在のシェルで実行するコマンド置換（${ ...; }）');
     }
-    const body = this.statements(node.children.filter((child) => child.isNamed || child.type === '&'));
+    // Bash removes the backslashes before `$`, `` ` ``, and `\` in a backquoted body before reading it as commands.
+    const inner = opening?.type === '`' ? node.text.slice(1, -1) : '';
+    const body = /\\[$`\\]/.test(inner)
+      ? this.reparse(inner.replaceAll(/\\([$`\\])/g, '$1'), node.startPosition.row)
+      : this.statements(node.children.filter((child) => child.isNamed || child.type === '&'));
     return { kind: 'commandSubstitution', body, text: node.text };
   }
 

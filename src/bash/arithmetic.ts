@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 559 -- A port of Bash's expr.c, whose recursive-descent levels and token reader share one evaluator's state.
+// code-gauge-allow-file fileNcss 566 -- A port of Bash's expr.c, whose recursive-descent levels and token reader share one evaluator's state.
 /**
  * Bash's arithmetic evaluator, ported from `expr.c` of Bash 5.3 so that its results, its order of side effects, and
  * its error messages (which quote the remaining text as the "error token") match.
@@ -12,6 +12,8 @@ export interface ArithmeticHost {
   assign(lhs: string, value: string): void;
   /** Evaluates an indexed array's subscript, or `undefined` when the variable is an associative array. */
   isAssociative(name: string): boolean;
+  /** Reports an error that does not stop the evaluation, prefixed as every shell error is. */
+  reportError(message: string): void;
 }
 
 /** An evaluation error, whose message already holds Bash's `expression: message (error token is "...")` form. */
@@ -242,7 +244,7 @@ class Evaluator {
     }
     if (this.noeval === 0) {
       if (lind !== -1n) this.bindArrayElement(lhs, lind, value.toString());
-      else this.host.assign(lhs, value.toString());
+      else this.bind(lhs, value.toString());
     }
     if (this.curlval.tokstr !== undefined && this.curlval.tokstr === this.tokstr) this.curlval = newLValue();
     this.tokstr = undefined;
@@ -463,7 +465,7 @@ class Evaluator {
     const value = toInt64(this.tokval + (stok === Token.PREINC ? 1n : -1n));
     if (this.noeval === 0) {
       if (this.curlval.ind !== -1n) this.bindArrayElement(this.curlval.tokstr as string, this.curlval.ind, `${value}`);
-      else if (this.tokstr !== undefined) this.host.assign(this.tokstr, `${value}`);
+      else if (this.tokstr !== undefined) this.bind(this.tokstr, `${value}`);
     }
     this.curtok = Token.NUM;
     this.readtok();
@@ -487,12 +489,20 @@ class Evaluator {
       if (this.noeval === 0) {
         if (this.curlval.ind !== -1n)
           this.bindArrayElement(this.curlval.tokstr as string, this.curlval.ind, `${updated}`);
-        else this.host.assign(this.tokstr as string, `${updated}`);
+        else this.bind(this.tokstr as string, `${updated}`);
       }
       this.curtok = Token.NUM;
     } else this.restoreToken(ec);
     this.readtok();
     return value;
+  }
+
+  /** Assigns a variable, except an element with an empty subscript, which Bash reports and skips. */
+  private bind(lhs: string, value: string): void {
+    if (lhs.endsWith('[]')) {
+      const name = this.commandName === undefined ? '' : `${this.commandName}: `;
+      this.host.reportError(`${name}\`${lhs}': not a valid identifier`);
+    } else this.host.assign(lhs, value);
   }
 
   private bindArrayElement(token: string, index: bigint, value: string): void {

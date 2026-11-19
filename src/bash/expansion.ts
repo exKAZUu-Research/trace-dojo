@@ -2,27 +2,17 @@ import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import type { ArithmeticSource, ParameterExpansion, Word, WordPart } from './ast';
 import { expandBraces } from './braces';
 import { charactersOf } from './characters';
+import { FIELD_BREAK, FieldSplitter, type Fragment, isFieldBreak, type Piece, STAR_BREAK } from './fields';
 import { applyOperator } from './parameterOperators';
 import { hasPatternCharacters, matchesPattern, quotePattern } from './pattern';
+import { singleQuote } from './quoting';
 import { ExitSignal, SCRIPT_NAME } from './runtime';
 import type { CompoundElement, Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
 import { isIdentifier } from './variables';
 
-/** Text from an expansion: whether quotes protect it from splitting and patterns, and whether it may be split. */
-export interface Fragment {
-  text: string;
-  quoted: boolean;
-  /** Whether the text came from an unquoted expansion, which field splitting splits at `IFS` characters. */
-  split: boolean;
-}
-
-/** Separates the fields of `"$@"` and `"${a[@]}"`. */
-export const FIELD_BREAK = Symbol('fieldBreak');
 /** Marks a quoted part that expands to nothing, which still makes a field (`""`), unlike `"$@"` with no elements. */
 const QUOTED_EMPTY: Fragment = { text: '', quoted: true, split: false };
-
-export type Piece = Fragment | typeof FIELD_BREAK;
 
 /** A parameter's value before its operator: one string, or the elements of `$@`, `$*`, or `${a[@]}`. */
 export type ParameterValue =
@@ -100,7 +90,15 @@ export class Expander {
   }
 
   /** The elements of `name=(...)`: words that `[key]=value` makes keyed, and plain words split into fields. */
-  expandCompound(words: Word[], isAssociative: boolean): CompoundElement[] {
+  /**
+   * The elements of `name=(...)` up to the first empty key of an associative array, which Bash reports after it
+   * assigns the elements before it. A declaration builtin gets the elements quoted again, as its error shows them.
+   */
+  expandCompound(
+    words: Word[],
+    isAssociative: boolean,
+    declared: boolean
+  ): { elements: CompoundElement[]; error?: string } {
     const elements: CompoundElement[] = [];
     for (const word of words) {
       const keyed = splitKeyedElement(word);
@@ -108,16 +106,17 @@ export class Expander {
         const key = isAssociative
           ? this.joinPieces(this.expandParts(keyed.key, false))
           : this.joinPieces(this.expandParts(keyed.key, true));
+        const value = this.joinPieces(this.expandParts(keyed.value, false));
         if (isAssociative && key === '') {
-          this.shell.reportError(`${word.text}: bad array subscript`);
-          continue;
+          const text = declared ? `[${singleQuote(key)}]=${singleQuote(value)}` : word.text;
+          return { elements, error: `${text}: bad array subscript` };
         }
-        elements.push({ key, value: this.joinPieces(this.expandParts(keyed.value, false)), append: keyed.append });
+        elements.push({ key, value, append: keyed.append });
         continue;
       }
       elements.push(...this.expandWords([word]));
     }
-    return elements;
+    return { elements };
   }
 
   /** The text of an arithmetic expression after its expansions, which the evaluator reads as Bash's does. */
@@ -155,7 +154,7 @@ export class Expander {
         // `"$@"` with no elements makes no field, but any other quoted text, even empty, makes one.
         const onlyEmptyLists = part.parts.length > 0 && part.parts.every((inPart) => isListExpansion(inPart));
         if (inner.length === 0 && !onlyEmptyLists) return [QUOTED_EMPTY];
-        if (onlyEmptyLists && inner.every((piece) => piece === FIELD_BREAK)) return inner;
+        if (onlyEmptyLists && inner.every((piece) => isFieldBreak(piece))) return inner;
         return [QUOTED_EMPTY, ...inner];
       }
       case 'parameter': {
@@ -165,7 +164,8 @@ export class Expander {
         const { output, status } = this.shell.captureSubshell(part.body);
         this.lastSubstitutionStatus = status;
         this.shell.state.lastStatus = status;
-        return [{ text: output.replace(/\n+$/, ''), quoted: inDouble, split: !inDouble }];
+        if (output.includes('\0')) this.shell.reportError('warning: command substitution: ignored null byte in input');
+        return [{ text: output.replaceAll('\0', '').replace(/\n+$/, ''), quoted: inDouble, split: !inDouble }];
       }
       case 'arithmeticExpansion': {
         const value = this.shell.evaluate(part.expression, undefined);
@@ -192,10 +192,7 @@ export class Expander {
     const subscript = expansion.subscript ? this.subscriptText(name, expansion.subscript) : undefined;
     if (expansion.prefix === '!') return this.expandIndirect(expansion, subscript, inDouble);
     if (expansion.prefix === '#' && subscript !== undefined && subscript !== '@' && subscript !== '*') {
-      const resolved = this.shell.resolveName(name);
-      if (!this.shell.isAssociative(resolved) && this.shell.arrayIndex(resolved, subscript) === undefined) {
-        this.shell.discard(`[${subscript}]: bad array subscript`);
-      }
+      this.checkLengthSubscript(expansion, subscript);
     }
     const value = this.parameterValue(name, subscript, expansion);
     if (expansion.prefix === '#') return this.valuePieces(lengthOf(value), inDouble);
@@ -204,6 +201,16 @@ export class Expander {
       return this.valuePieces(value, inDouble);
     }
     return applyOperator(this, this.shell, expansion, value, name, subscript, inDouble);
+  }
+
+  /** Abandons `${#a[i]}` for an element no index can name: an empty key, or a negative index before the first. */
+  private checkLengthSubscript(expansion: ParameterExpansion, subscript: string): void {
+    const resolved = this.shell.resolveName(expansion.name);
+    if (this.shell.isAssociative(resolved)) {
+      if (subscript === '') this.shell.discard(`[${expansion.subscript?.text}]: bad array subscript`);
+    } else if (this.shell.arrayIndex(resolved, subscript) === undefined) {
+      this.shell.discard(`[${subscript}]: bad array subscript`);
+    }
   }
 
   /** The text of a subscript: `@` and `*` as written, an associative array's key, or an indexed one's expression. */
@@ -222,7 +229,7 @@ export class Expander {
       if (subscript === '@' || subscript === '*') {
         return { kind: 'list', values: shell.arrayValues(resolved), star: subscript === '*' };
       }
-      if (subscript === '' && expansion) shell.discard(`${expansion.text}: bad substitution`);
+      if (subscript === '' && expansion) return this.emptySubscriptValue(expansion, resolved);
       return { kind: 'scalar', value: shell.elementValue(resolved, subscript) };
     }
     const positional = shell.state.positional.at(-1) as string[];
@@ -258,6 +265,14 @@ export class Expander {
     return { kind: 'scalar', value: shell.scalarValue(name) };
   }
 
+  /** `${a[$k]}` whose subscript expands to nothing: element 0 of an indexed array, and an error for an associative one. */
+  private emptySubscriptValue(expansion: ParameterExpansion, resolved: string): ParameterValue {
+    if (expansion.subscript?.text === '') this.shell.discard(`${expansion.text}: bad substitution`);
+    if (!this.shell.isAssociative(resolved)) return { kind: 'scalar', value: this.shell.elementValue(resolved, '0') };
+    this.shell.reportError(`${expansion.name}: bad array subscript`);
+    return { kind: 'scalar', value: undefined };
+  }
+
   /** `${!name}`, `${!name[@]}`, and `${!prefix*}`. */
   // code-gauge-allow functionCognitiveComplexity 16 -- Bash's indirection forms: keys, names by prefix, name references, and indirect values.
   private expandIndirect(expansion: ParameterExpansion, subscript: string | undefined, inDouble: boolean): Piece[] {
@@ -284,7 +299,7 @@ export class Expander {
     const direct = this.parameterValue(name, subscript, expansion);
     const reference = direct.kind === 'scalar' ? direct.value : direct.values.join(' ');
     if (reference === undefined || reference === '') {
-      if (expansion.operator === undefined) shell.discard(`${name}: invalid indirect expansion`);
+      if (expansion.operator === undefined) this.checkIndirectReference(name, subscript);
       return this.finishIndirect(expansion, { kind: 'scalar', value: undefined }, '', inDouble);
     }
     const target = this.indirectTarget(reference, expansion);
@@ -307,18 +322,18 @@ export class Expander {
     return applyOperator(this, this.shell, expansion, value, target.name, target.subscript, inDouble);
   }
 
+  /** Bash rejects `${!x}` for an unset variable, but not for an unset element of an array that exists. */
+  private checkIndirectReference(name: string, subscript: string | undefined): void {
+    if (subscript === undefined) this.shell.discard(`${name}: invalid indirect expansion`);
+    if (!this.shell.findVariable(name)) this.shell.discard(`${name}[${subscript}]: invalid indirect expansion`);
+  }
+
   private indirectTarget(
     reference: string,
     expansion: ParameterExpansion
   ): { name: string; subscript: string | undefined } {
     const split = this.shell.splitSubscript(reference);
-    if (split && isIdentifier(split.name)) {
-      const subscript =
-        split.subscript === '@' || split.subscript === '*' || this.shell.isAssociative(split.name)
-          ? split.subscript
-          : split.subscript;
-      return { name: split.name, subscript };
-    }
+    if (split && isIdentifier(split.name)) return { name: split.name, subscript: split.subscript };
     if (!isValidParameterName(reference)) this.shell.discard(`${reference}: invalid variable name`);
     void expansion;
     return { name: reference, subscript: undefined };
@@ -342,7 +357,7 @@ export class Expander {
   }
 
   /** The pieces of a value: one fragment, or one per element with breaks between them. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- Bash's rules for scalars, "$*", and "$@"-like lists, inside and outside quotes.
+  // code-gauge-allow functionCognitiveComplexity 17 -- Bash's rules for scalars, "$*", and "$@"-like lists, inside and outside quotes.
   valuePieces(value: ParameterValue, inDouble: boolean): Piece[] {
     if (value.kind === 'scalar') {
       return value.value === undefined || value.value === ''
@@ -355,8 +370,9 @@ export class Expander {
         : [{ text: value.values.join(this.ifsJoiner()), quoted: true, split: false }];
     }
     const pieces: Piece[] = [];
+    const separator = value.star ? STAR_BREAK : FIELD_BREAK;
     for (const [index, element] of value.values.entries()) {
-      if (index > 0) pieces.push(FIELD_BREAK);
+      if (index > 0) pieces.push(separator);
       if (element !== '') pieces.push({ text: element, quoted: inDouble, split: !inDouble });
       else if (inDouble) pieces.push(QUOTED_EMPTY);
     }
@@ -377,7 +393,7 @@ export class Expander {
   joinPieces(pieces: Piece[]): string {
     let text = '';
     for (const piece of pieces) {
-      text += piece === FIELD_BREAK ? ' ' : piece.text;
+      text += piece === FIELD_BREAK ? ' ' : piece === STAR_BREAK ? this.ifsJoiner() : piece.text;
       if (text.length > LIMITS.maxStringLength) throw new ExecutionLimitError('storage');
     }
     return text;
@@ -385,7 +401,9 @@ export class Expander {
 
   /** The fragments of pieces joined into one field, as patterns need. */
   flatten(pieces: Piece[]): Fragment[] {
-    return pieces.map((piece) => (piece === FIELD_BREAK ? { text: ' ', quoted: true, split: false } : piece));
+    return pieces.map((piece) =>
+      isFieldBreak(piece) ? { text: piece === STAR_BREAK ? this.ifsJoiner() : ' ', quoted: true, split: false } : piece
+    );
   }
 
   /** The pattern pieces make, with the quoted characters escaped. */
@@ -420,70 +438,6 @@ export class Expander {
   failParameter(name: string, message: string): never {
     this.shell.reportError(`${name}: ${message}`);
     throw new ExitSignal(1);
-  }
-}
-
-/**
- * Bash's field splitting: a run of `IFS` whitespace separates fields, and each other `IFS` character ends one, so two
- * of them in a row make an empty field, though one next to whitespace counts as one separator with it.
- */
-class FieldSplitter {
-  private readonly fields: Fragment[][] = [];
-  private field: Fragment[] = [];
-  private started = false;
-  private afterWhite = false;
-
-  constructor(private readonly ifs: string) {}
-
-  add(piece: Piece): void {
-    if (piece === FIELD_BREAK) {
-      if (this.started) this.end();
-      this.afterWhite = false;
-    } else if (!piece.split || this.ifs === '') {
-      if (piece.text === '' && !piece.quoted) return;
-      this.field.push({ ...piece, split: false });
-      this.started = true;
-      this.afterWhite = false;
-    } else this.split(piece.text);
-  }
-
-  finish(): Fragment[][] {
-    if (this.started) this.end();
-    return this.fields;
-  }
-
-  private end(): void {
-    this.fields.push(this.field);
-    this.field = [];
-    this.started = false;
-  }
-
-  private split(text: string): void {
-    let run = '';
-    for (const c of text) {
-      if (!this.ifs.includes(c)) {
-        run += c;
-        this.started = true;
-        this.afterWhite = false;
-        continue;
-      }
-      if (run) this.field.push({ text: run, quoted: false, split: false });
-      run = '';
-      this.separate(c);
-    }
-    if (run) this.field.push({ text: run, quoted: false, split: false });
-  }
-
-  private separate(c: string): void {
-    if (c === ' ' || c === '\t' || c === '\n') {
-      if (!this.started) return;
-      this.end();
-      this.afterWhite = true;
-      return;
-    }
-    if (this.started) this.end();
-    else if (!this.afterWhite) this.fields.push([]);
-    this.afterWhite = false;
   }
 }
 

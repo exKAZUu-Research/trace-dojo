@@ -1,7 +1,7 @@
-// code-gauge-allow-file fileNcss 850 -- Bash's execution, variables, and scopes share the shell state that subshells copy, so they stay in one class.
+// code-gauge-allow-file fileNcss 878 -- Bash's execution, variables, and scopes share the shell state that subshells copy, so they stay in one class.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { ArithmeticError, type ArithmeticHost, evaluateArithmetic, skipSubscript } from './arithmetic';
-import type { ArithmeticSource, Assignment, Program, Redirect, Statement } from './ast';
+import type { ArithmeticSource, Assignment, Program, Redirect, Statement, Word } from './ast';
 import { BUILTINS } from './builtins';
 import { charactersOf } from './characters';
 import { conditionalStatus } from './conditional';
@@ -62,6 +62,8 @@ export interface ShellState {
   lastArgument: string | undefined;
   randomSeed: number;
   lastRandom: number;
+  /** The dynamic variables the program unset, which then lose their special meaning, as in Bash. */
+  unsetDynamic: Set<string>;
   subshellLevel: number;
   fd1: OutputTarget;
   fd2: OutputTarget;
@@ -123,6 +125,8 @@ const ENVIRONMENT_VARIABLES = new Set([
 
 /** The variables Bash computes whenever a program reads them. */
 const DYNAMIC_VARIABLES = new Set(['RANDOM', 'LINENO', 'FUNCNAME', 'BASH_LINENO', 'BASH_SOURCE', 'BASH_SUBSHELL']);
+/** The dynamic variables Bash refuses to unset. */
+const PERMANENT_DYNAMIC_VARIABLES = new Set(['BASH_LINENO', 'BASH_SOURCE']);
 
 export const BASH_VERSION = '5.3.0(1)-release';
 
@@ -171,6 +175,7 @@ export class Shell implements ArithmeticHost {
       lastArgument: undefined,
       randomSeed: 0,
       lastRandom: 0,
+      unsetDynamic: new Set(),
       subshellLevel: 0,
       fd1: runtime.io.stdout,
       fd2: runtime.io.stderr,
@@ -353,10 +358,12 @@ export class Shell implements ArithmeticHost {
       return 'next';
     } catch (error) {
       if (error instanceof BreakSignal) {
+        last.status = error.status;
         if (--error.count > 0) throw error;
         return 'stop';
       }
       if (error instanceof ContinueSignal) {
+        last.status = 0;
         if (--error.count > 0) throw error;
         return 'next';
       }
@@ -640,6 +647,7 @@ export class Shell implements ArithmeticHost {
       functions: new Map(parent.functions),
       positional: parent.positional.map((args) => [...args]),
       calls: [...parent.calls],
+      unsetDynamic: new Set(parent.unsetDynamic),
       subshellLevel: parent.subshellLevel + 1,
       fd1: capture,
     };
@@ -675,9 +683,9 @@ export class Shell implements ArithmeticHost {
   }
 
   /** Reports an error in an expansion and abandons the command, as Bash does for a non-interactive shell. */
-  discard(message: string): never {
+  discard(message: string, status = 1): never {
     this.reportError(message);
-    throw new DiscardSignal();
+    throw new DiscardSignal(status);
   }
 
   // ---------------------------------------------------------------- arithmetic
@@ -702,7 +710,7 @@ export class Shell implements ArithmeticHost {
   }
 
   /** Evaluates arithmetic for a command that fails on an error instead of abandoning the line, as `let` does. */
-  tryEvaluate(text: string, commandName: string): bigint | undefined {
+  tryEvaluate(text: string, commandName: string | undefined): bigint | undefined {
     try {
       return evaluateArithmetic(text, this, commandName, () => this.runtime.spend());
     } catch (error) {
@@ -717,9 +725,14 @@ export class Shell implements ArithmeticHost {
     const open = token.indexOf('[');
     const name = token.slice(0, open);
     const subscript = token.slice(open + 1, -1);
-    const variable = this.findVariable(name);
-    if (variable?.value?.kind === 'associative') {
-      return { value: variable.value.table.get(this.expander.expandSubscriptText(subscript)), index: -1n };
+    if (subscript === '') {
+      // Bash checks the subscript twice before it reads an element, reporting an empty one each time, and reads 0.
+      this.reportError(`${name}[]: bad array subscript`);
+      this.reportError(`${name}[]: bad array subscript`);
+      return { value: undefined, index: -1n };
+    }
+    if (this.isAssociative(name)) {
+      return { value: this.elementValue(name, this.expander.expandSubscriptText(subscript)), index: -1n };
     }
     if (subscript === '@' || subscript === '*') {
       return { value: this.elementValue(name, '0'), index: -1n };
@@ -737,8 +750,10 @@ export class Shell implements ArithmeticHost {
     this.assignElement(lhs.slice(0, open), lhs.slice(open + 1, -1), value, false, true);
   }
 
+  /** Whether a name holds an associative array, including one declared with `-A` that has no elements yet. */
   isAssociative(name: string): boolean {
-    return this.findVariable(name)?.value?.kind === 'associative';
+    const variable = this.findVariable(name);
+    return variable?.value?.kind === 'associative' || variable?.attributes.has('A') === true;
   }
 
   // ---------------------------------------------------------------- variables
@@ -800,7 +815,7 @@ export class Shell implements ArithmeticHost {
 
   /** The value of a dynamic variable Bash computes when it is read, unless the program unset or shadowed it. */
   private dynamicValue(name: string): string | undefined {
-    if (!DYNAMIC_VARIABLES.has(name) || this.findOwnVariable(name)) return undefined;
+    if (!this.isDynamic(name)) return undefined;
     switch (name) {
       case 'RANDOM': {
         return String(this.nextRandom());
@@ -819,7 +834,7 @@ export class Shell implements ArithmeticHost {
 
   /** The elements of `FUNCNAME`, `BASH_LINENO`, and `BASH_SOURCE`, which describe the calls in progress. */
   dynamicArray(name: string): string[] | undefined {
-    if (!DYNAMIC_VARIABLES.has(name) || this.findOwnVariable(name)) return undefined;
+    if (!this.isDynamic(name)) return undefined;
     const calls = this.state.calls.toReversed();
     if (calls.length === 0) return name === 'FUNCNAME' ? undefined : [];
     switch (name) {
@@ -838,6 +853,10 @@ export class Shell implements ArithmeticHost {
     }
   }
 
+  private isDynamic(name: string): boolean {
+    return DYNAMIC_VARIABLES.has(name) && !this.state.unsetDynamic.has(name) && !this.findOwnVariable(name);
+  }
+
   /** Bash's `RANDOM`: Park and Miller's generator, folded to 15 bits, never repeating the last value. */
   private nextRandom(): number {
     let value: number;
@@ -854,10 +873,11 @@ export class Shell implements ArithmeticHost {
     return value;
   }
 
-  seedRandom(value: string): void {
-    const seed = /^\s*[-+]?\d+\s*$/.test(value) ? BigInt.asUintN(32, BigInt(value.trim())) : undefined;
+  /** Seeds `RANDOM`, whose value Bash evaluates as arithmetic because the variable has the integer attribute. */
+  private seedRandom(value: string): void {
+    const seed = this.tryEvaluate(value, undefined);
     if (seed === undefined) return;
-    this.state.randomSeed = Number(seed);
+    this.state.randomSeed = Number(BigInt.asUintN(32, seed));
     this.state.lastRandom = 0;
   }
 
@@ -954,7 +974,7 @@ export class Shell implements ArithmeticHost {
     const resolved = this.resolveName(name);
     const open = resolved.indexOf('[');
     if (open !== -1) return this.assignElement(resolved.slice(0, open), resolved.slice(open + 1, -1), value, append);
-    if (resolved === 'RANDOM' && !this.findOwnVariable('RANDOM')) {
+    if (resolved === 'RANDOM' && this.isDynamic('RANDOM')) {
       this.seedRandom(value);
       return true;
     }
@@ -1117,26 +1137,45 @@ export class Shell implements ArithmeticHost {
         this.reportError(`${assignment.name}[${assignment.subscript.text}]: cannot assign list to array member`);
         return false;
       }
-      const elements = this.expander.expandCompound(
-        assignment.array,
-        this.isAssociative(this.resolveName(assignment.name))
-      );
-      return this.assignCompound(this.resolveName(assignment.name), elements, assignment.append);
+      const resolved = this.resolveName(assignment.name);
+      const { elements, error } = this.expander.expandCompound(assignment.array, this.isAssociative(resolved), false);
+      const ok = this.assignCompound(resolved, elements, assignment.append);
+      if (error) this.discard(error);
+      return ok;
     }
     const value = assignment.value ? this.expander.expandAssignmentValue(assignment.value) : '';
-    if (assignment.subscript) {
-      const resolved = this.resolveName(assignment.name);
-      const subscript = this.isAssociative(resolved)
-        ? this.expander.expandString(assignment.subscript)
-        : this.expander.expandSubscriptString(assignment.subscript);
-      return this.assignElement(resolved, subscript, value, assignment.append);
-    }
+    if (assignment.subscript)
+      return this.assignElementWord(assignment.name, assignment.subscript, value, assignment.append);
     return this.assignScalar(assignment.name, value, assignment.append);
+  }
+
+  /** `name[subscript]=value`, whose error shows the subscript as written. */
+  private assignElementWord(name: string, subscript: Word, value: string, append: boolean): boolean {
+    const resolved = this.resolveName(name);
+    if (this.isAssociative(resolved)) {
+      const key = this.expander.expandString(subscript);
+      if (key === '') {
+        this.reportError(`${name}[${subscript.text}]: bad array subscript`);
+        return false;
+      }
+      return this.assignElement(resolved, key, value, append);
+    }
+    // Only a subscript written empty is an error; one that expands to nothing evaluates to 0.
+    const index = this.expander.expandSubscriptString(subscript);
+    return this.assignElement(resolved, index === '' && subscript.text !== '' ? '0' : index, value, append);
   }
 
   /** Unsets a variable, as `unset` does. */
   unsetVariable(name: string, followReference = true): boolean {
     const target = followReference ? this.resolveName(name) : name;
+    if (this.isDynamic(target)) {
+      if (PERMANENT_DYNAMIC_VARIABLES.has(target)) {
+        this.reportError(`unset: ${target}: cannot unset`);
+        return false;
+      }
+      this.state.unsetDynamic.add(target);
+      return true;
+    }
     const { scopes } = this.state;
     for (let i = scopes.length - 1; i >= 0; i--) {
       const variable = scopes[i].get(target);
