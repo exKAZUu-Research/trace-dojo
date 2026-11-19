@@ -1,0 +1,2 @@
+(1,5): error TS2397: Declaration name conflicts with built-in global identifier 'undefined'.
+(2,7): error TS2397: Declaration name conflicts with built-in global identifier 'undefined'.

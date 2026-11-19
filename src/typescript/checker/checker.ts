@@ -197,9 +197,10 @@ export class Checker {
   }
 
   isGlobalUndefined(node: TreeNode): boolean {
-    if (node.text !== 'undefined') return false;
-    const declaration = this.scopeOf(node).lookupValue('undefined')?.valueDeclaration;
-    return !declaration || this.isLibrary(declaration);
+    return (
+      node.text === 'undefined' &&
+      this.scopeOf(node).lookupValue('undefined') === this.libraryBinder.globalScope.values.get('undefined')
+    );
   }
 
   ownScope(node: TreeNode): Scope | undefined {

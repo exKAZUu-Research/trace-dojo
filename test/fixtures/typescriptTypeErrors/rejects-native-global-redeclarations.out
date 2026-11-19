@@ -13,3 +13,4 @@
 (12,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'HTMLDivElement' must be of type '{ new (): HTMLDivElement; prototype: HTMLDivElement; }', but here has type 'any'.
 (14,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'scalar' must be of type 'number', but here has type 'any'.
 (16,5): error TS2403: Subsequent variable declarations must have the same type.  Variable 'untouched' must be of type 'number', but here has type 'any'.
+(17,14): error TS2397: Declaration name conflicts with built-in global identifier 'undefined'.

@@ -11,3 +11,15 @@ function capture() {
   return () => value.toUpperCase();
 }
 console.log(capture()());
+
+type GlobalUndefined = typeof undefined;
+const missing: GlobalUndefined = undefined;
+{
+  let undefined = 5;
+  undefined++;
+  console.log(undefined.toFixed(1));
+}
+function shadowedUndefined(undefined: number) {
+  return undefined.toFixed(1);
+}
+console.log(shadowedUndefined(7), missing);

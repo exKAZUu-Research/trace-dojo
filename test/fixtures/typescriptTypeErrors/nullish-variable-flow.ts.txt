@@ -12,3 +12,4 @@ function shadow(undefined: undefined) {
   let value = undefined;
   value = 1;
 }
+undefined = void 0;

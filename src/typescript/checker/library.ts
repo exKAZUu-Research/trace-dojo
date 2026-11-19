@@ -12,7 +12,8 @@ import {
 import { DOM_INTERFACE_MEMBERS } from './domMembers';
 import { ECMASCRIPT_LIBRARY } from './ecmascriptLibrary';
 import { LOCALE_OPTIONS_LIBRARY } from './localeOptionsLibrary';
-import { Scope, type Sym } from './scopes';
+import { Scope, Sym } from './scopes';
+import { undefinedType } from './types';
 
 const omittedLibraryGlobals = [
   'Intl',
@@ -169,7 +170,12 @@ export const nativeOverloadTree = (() => {
 })();
 
 export function libraryScope(): Scope {
-  return new Scope('global', undefined, undefined);
+  const scope = new Scope('global', undefined, undefined);
+  const builtinUndefined = new Sym('undefined', scope);
+  builtinUndefined.valueKind = 'declared';
+  builtinUndefined.valueType = undefinedType;
+  scope.values.set(builtinUndefined.name, builtinUndefined);
+  return scope;
 }
 
 /** Library values that this interpreter does not run yet, with the names learners know them by. */

@@ -14,3 +14,4 @@ var scalar: number;
 var scalar: any;
 var untouched: number;
 var untouched;
+let { value: undefined } = { value: 2 };

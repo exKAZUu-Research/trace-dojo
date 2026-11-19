@@ -10,6 +10,7 @@ import { isAnyLike, isIntrinsic, type Property, type Type, undefinedType, unionO
 
 /** Reports the declarations TypeScript rejects for declaring a name twice, at every declaration it involves. */
 export function checkDuplicateDeclarations(c: Checker, scopes: Scope[]): void {
+  checkBuiltinUndefinedDeclaration(c);
   for (const scope of scopes) {
     for (const symbol of scope.values.values())
       if (symbol.valueEntries.some((entry) => !c.isLibrary(entry.name))) checkValueDuplicates(c, symbol);
@@ -19,6 +20,12 @@ export function checkDuplicateDeclarations(c: Checker, scopes: Scope[]): void {
       checkReservedTypeName(c, symbol);
     }
   }
+}
+
+function checkBuiltinUndefinedDeclaration(c: Checker): void {
+  const entries = c.binder.moduleScope.values.get('undefined')?.valueEntries ?? [];
+  for (const { kind, name } of entries)
+    if (kind !== 'class') c.error(name, "宣言名が組み込みのグローバル識別子 'undefined' と競合しています。");
 }
 
 const blockScopedKinds = new Set(['let', 'const', 'class']);

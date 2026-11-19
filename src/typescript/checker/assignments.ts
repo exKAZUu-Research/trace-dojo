@@ -438,6 +438,10 @@ export class AssignmentChecker {
   }
 
   private variableTargetType(expression: TreeNode, compound: boolean): Type {
+    if (this.c.isGlobalUndefined(expression)) {
+      this.c.error(expression, "変数ではないため、'undefined' に割り当てられません。");
+      return errorType;
+    }
     const symbol = this.c.scopeOf(expression).lookupValue(expression.text);
     if (!symbol) {
       this.c.error(

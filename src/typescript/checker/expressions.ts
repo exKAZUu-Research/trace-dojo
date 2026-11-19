@@ -275,10 +275,7 @@ export class ExpressionChecker {
   identifier(node: TreeNode, contextual?: Type): Type {
     const name = node.text;
     const symbol = this.c.scopeOf(node).lookupValue(name);
-    if (!symbol) {
-      if (name === 'undefined') return undefinedType;
-      return this.implicitArgumentsType(node) ?? this.reportUnknownValue(node, name);
-    }
+    if (!symbol) return this.implicitArgumentsType(node) ?? this.reportUnknownValue(node, name);
     if (this.reportUnavailableValue(node, symbol)) return errorType;
     this.checkUsedBeforeDeclaration(node, symbol);
     return this.variableReferenceType(node, symbol, contextual);
