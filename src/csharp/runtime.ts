@@ -214,33 +214,9 @@ export class Runtime {
     const parts = fullName.split('.');
     const namespace = this.library.root.resolve(parts.slice(0, -1), false);
     const symbol = namespace?.findType(parts.at(-1) as string, 0);
-    if (symbol) return namedType(symbol);
-    return this.exceptionTypeFallback(fullName);
+    if (!symbol) throw new Error(`The library lacks the exception ${fullName}`);
+    return namedType(symbol);
   }
-
-  /** Exceptions that the library declares nowhere, such as those of the runtime's own internals, as plain exceptions. */
-  private exceptionTypeFallback(fullName: string): NamedType {
-    const cached = this.syntheticExceptions.get(fullName);
-    if (cached) return cached;
-    const base = namedType(this.library.specials.get('exception') as TypeSymbol);
-    const name = fullName.slice(fullName.lastIndexOf('.') + 1);
-    const symbol = Object.assign(Object.create(Object.getPrototypeOf(base.symbol)), base.symbol, {
-      name,
-      namespace: fullName.slice(0, fullName.lastIndexOf('.')),
-      baseType: base,
-      runtimeNameOverride: fullName,
-      fields: [],
-      methods: [],
-      properties: [],
-      constructors: [],
-      special: undefined,
-    }) as TypeSymbol;
-    const type = namedType(symbol);
-    this.syntheticExceptions.set(fullName, type);
-    return type;
-  }
-
-  private readonly syntheticExceptions = new Map<string, NamedType>();
 
   createException(
     fullName: string,

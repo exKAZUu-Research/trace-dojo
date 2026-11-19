@@ -383,11 +383,28 @@ export abstract class MemberBinder extends CallBinder {
   /** The value of a constant field, binding its initializer when it has not been bound yet. */
   protected abstract constantField(field: FieldSymbol, type: Type, position: Position): BoundExpression;
 
-  protected reportInaccessible(member: FieldSymbol | PropertySymbol | MethodSymbol, position: Position): void {
+  /**
+   * Reports a member that the code may not access: as CS1540 when a derived class reads a protected member through
+   * an instance of a type that is not its own (`through`), and as CS0122 otherwise.
+   */
+  protected reportInaccessible(
+    member: FieldSymbol | PropertySymbol | MethodSymbol,
+    position: Position,
+    through?: Type,
+    within?: TypeSymbol
+  ): void {
     const name =
       member instanceof FieldSymbol || member instanceof PropertySymbol
         ? `${displayTypeSymbol(member.owner)}.${member.name}`
         : displayMethod(member);
+    if (member.access === 'protected' && within && through && this.derivesFrom(within, member.owner)) {
+      this.error(
+        position,
+        'CS1540',
+        `'${displayType(through)}' 型の修飾子をとおしてプロテクト メンバー '${name}' にアクセスすることはできません。修飾子は '${displayTypeSymbol(within)}' 型、またはそれから派生したものでなければなりません`
+      );
+      return;
+    }
     this.error(position, 'CS0122', `'${name}' はアクセスできない保護レベルになっています`);
   }
 
@@ -553,13 +570,8 @@ export abstract class MemberBinder extends CallBinder {
     isCallee = false
   ): BindResult {
     const type = receiver.type;
-    const lookupType =
-      nullableUnderlying(type) &&
-      !['HasValue', 'Value', 'GetValueOrDefault', 'ToString', 'Equals', 'GetHashCode'].includes(name)
-        ? type
-        : type;
     const { found, inaccessible } = this.lookupMember(
-      lookupType,
+      type,
       name,
       context.fn.typeContext,
       typeArgs?.length ?? 0,
@@ -581,8 +593,18 @@ export abstract class MemberBinder extends CallBinder {
         };
       }
       if (inaccessible) {
-        this.reportInaccessible(inaccessible, position);
+        this.reportInaccessible(inaccessible, position, type, context.fn.typeContext.type);
         return { kind: 'default', type: ERROR_TYPE, row: position.row };
+      }
+      // A call of a field or a property, such as `s.Length()`, which the invoked lookup leaves out.
+      const nonInvocable = isCallee ? this.lookupMember(type, name, context.fn.typeContext).found : undefined;
+      if (nonInvocable?.kind === 'field' || nonInvocable?.kind === 'property') {
+        this.error(
+          position,
+          'CS1955',
+          `実行不可能なメンバー '${displayType(type)}.${name}' をメソッドのように使用することはできません。`
+        );
+        return this.failedAccess(receiver, position);
       }
       this.rejectUnknownLibraryMember(type, name, position);
       this.error(
@@ -1073,7 +1095,7 @@ export abstract class MemberBinder extends CallBinder {
     if (symbol.kind === 'delegate') return this.bindDelegateCreation(type, argNodes ?? [], node, context);
     if (symbol.isStatic) {
       this.error(node, 'CS0712', `静的クラス '${displayType(type)}' のインスタンスを作成することはできません`);
-      return { kind: 'default', type: ERROR_TYPE, row: node.row };
+      return { kind: 'default', failedCall: true, type, row: node.row };
     }
     if (symbol.isAbstract || symbol.kind === 'interface') {
       this.error(node, 'CS0144', `抽象型またはインターフェイス '${displayType(type)}' のインスタンスを作成できません`);

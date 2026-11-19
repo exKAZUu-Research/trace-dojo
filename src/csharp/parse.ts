@@ -81,18 +81,36 @@ function roslynErrorsOf(root: Node, error: Node): SourceDiagnostic[] {
   const inDeclaration =
     ancestorOfType(error, 'variable_declaration') !== undefined &&
     ancestorOfType(error, 'global_statement') !== undefined;
-  if (tokens[0]?.type === '"') {
+  const quote = unterminatedQuote(tokens);
+  if (quote) {
     // An unterminated string ends at the line's end, after which a declaration expects its next declarator.
-    const row = tokens[0].startPosition.row;
-    const unterminated = { row, message: 'CS1010: 定数の 新しい行です' };
-    if (inDeclaration) return [unterminated, { row, message: MISSING_TOKENS[','] }];
-    if (ancestorOfType(error, 'variable_declaration')) return [unterminated, { row, message: MISSING_TOKENS[';'] }];
-    return [unterminated];
+    const row = quote.startPosition.row;
+    const diagnostics = [{ row, message: 'CS1010: 定数の 新しい行です' }];
+    const declares =
+      ancestorOfType(error, 'variable_declaration') !== undefined || tokens.some((token) => token.type === '=');
+    if (inDeclaration) diagnostics.push({ row, message: MISSING_TOKENS[','] });
+    else if (declares) diagnostics.push({ row, message: MISSING_TOKENS[';'] });
+    // The string swallows the rest of its line, with the braces that would have closed the blocks.
+    const before = tokens.filter((token) => token.startIndex < quote.startIndex);
+    const opened =
+      before.filter((token) => token.type === '{').length - before.filter((token) => token.type === '}').length;
+    if (opened > 0 && !nextLeafOf(root, error))
+      diagnostics.push({ row: lastLeafOf(root).endPosition.row, message: MISSING_TOKENS['}'] });
+    return diagnostics;
   }
   if (error.parent?.type === 'compilation_unit' && tokens.every((token) => token.type === '}')) {
     return [{ row: error.startPosition.row, message: 'CS1022: 型、名前空間の定義、またはファイルの終わりが必要です' }];
   }
   return [roslynErrorOf(root, error, tokens, inDeclaration)];
+}
+
+/** The opening quote of a string that its line does not close, which the grammar leaves in an error. */
+function unterminatedQuote(tokens: Node[]): Node | undefined {
+  return tokens.find((token, index) => {
+    if (token.type !== '"') return false;
+    const closing = tokens.slice(index + 1).find((other) => other.type === '"');
+    return !closing || closing.startPosition.row !== token.startPosition.row;
+  });
 }
 
 function roslynErrorOf(root: Node, error: Node, tokens: Node[], inDeclaration: boolean): SourceDiagnostic {
@@ -189,6 +207,20 @@ function parenthesizeExpressionStatements(source: string): string {
       const semicolon = next.lastChild;
       if (semicolon?.type !== ';') continue;
       edits.push({ index: error.startIndex, text: '(' }, { index: semicolon.startIndex, text: ')' });
+    }
+    // `1 + 2;` may also parse as `1` without its `;` and then `+2;`.
+    for (const statement of tree.rootNode.descendantsOfType('expression_statement')) {
+      const missing = statement?.lastChild;
+      if (!statement || !missing?.isMissing || missing.type !== ';') continue;
+      const holder = statement.parent?.type === 'global_statement' ? statement.parent : statement;
+      const nextHolder = holder.nextNamedSibling;
+      const next = nextHolder?.type === 'global_statement' ? nextHolder.firstNamedChild : nextHolder;
+      const operator = next?.firstChild?.firstChild;
+      if (next?.type !== 'expression_statement' || next.startPosition.row !== statement.endPosition.row) continue;
+      if (!operator || !['+', '-', '*', '/', '%', '==', '!=', '<', '>'].includes(operator.type)) continue;
+      const semicolon = next.lastChild;
+      if (semicolon?.type !== ';' || semicolon.isMissing) continue;
+      edits.push({ index: statement.startIndex, text: '(' }, { index: semicolon.startIndex, text: ')' });
     }
     let result = source;
     for (const edit of edits.toSorted((a, b) => b.index - a.index))

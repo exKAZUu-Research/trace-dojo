@@ -157,6 +157,8 @@ export type Expression =
       body: Expression | Block;
       isStatic: boolean;
       returnType: TypeNode | undefined;
+      /** Whether a query clause stands for the lambda, whose conversion errors Roslyn reports without CS1662. */
+      isQuery?: true;
     } & Position)
   | ({ kind: 'default'; type: TypeNode | undefined } & Position)
   | ({ kind: 'declaration'; type: TypeNode; designation: Designation } & Position)

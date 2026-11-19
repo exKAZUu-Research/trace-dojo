@@ -763,6 +763,8 @@ namespace System {
     'ArrayTypeMismatchException:SystemException',
     'TimeoutException:SystemException',
     'PlatformNotSupportedException:NotSupportedException',
+    'TypeInitializationException:SystemException',
+    'EntryPointNotFoundException:SystemException',
   ]
     .map((entry) => {
       const [name, base] = entry.split(':');
@@ -989,6 +991,14 @@ namespace System {
     public static bool operator <=(DateTime t1, DateTime t2);
     public static bool operator >(DateTime t1, DateTime t2);
     public static bool operator >=(DateTime t1, DateTime t2);
+  }
+}
+
+namespace System.Runtime.CompilerServices {
+  public sealed class SwitchExpressionException : InvalidOperationException {
+    public SwitchExpressionException();
+    public SwitchExpressionException(object? unmatchedValue);
+    public object? UnmatchedValue { get; }
   }
 }
 

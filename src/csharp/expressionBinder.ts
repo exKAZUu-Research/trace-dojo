@@ -21,7 +21,7 @@ import {
   displayType,
   displayTypeSymbol,
   ERROR_TYPE,
-  type FieldSymbol,
+  FieldSymbol,
   isReferenceType,
   isValueType,
   LocalSymbol,
@@ -1024,6 +1024,7 @@ export abstract class ExpressionBinder extends MemberBinder {
     const converted = value.kind === 'throw' ? value : this.convert(value, returnType, bodyNode);
     if (
       report &&
+      !node.isQuery &&
       value.kind !== 'throw' &&
       value.type.kind !== 'error' &&
       !this.implicitConversionOf(value, returnType)
@@ -1593,6 +1594,14 @@ export abstract class ExpressionBinder extends MemberBinder {
       getter.returnType = member.type;
       getter.native = (_call, receiver) => (receiver as CsObject).fields[index];
       property.getter = getter;
+      // A backing field, which only a `with` expression assigns.
+      const field = new FieldSymbol(`<${member.name}>i__Field`, member.type, symbol);
+      field.slot = index;
+      field.isReadonly = true;
+      field.property = property;
+      field.access = 'private';
+      property.backingField = field;
+      symbol.fields.push(field);
       symbol.properties.push(property);
     }
     symbol.instanceFieldCount = members.length;
@@ -1648,12 +1657,16 @@ export abstract class ExpressionBinder extends MemberBinder {
           nested: undefined,
         };
       }
-      const target = this.checkAssignable(
-        this.memberAccessOn(receiver, found, member, context),
-        member,
-        context,
-        'initializer'
-      );
+      // A `with` expression of an anonymous type sets the members, which have no setters, through their fields.
+      const anonymousField =
+        found.kind === 'property' &&
+        type.kind === 'named' &&
+        type.symbol.runtimeNameOverride?.startsWith('<>f__AnonymousType')
+          ? found.property.backingField
+          : undefined;
+      const target: BoundLValue = anonymousField
+        ? { kind: 'field', receiver, field: anonymousField, type: anonymousField.type, row: member.row }
+        : this.checkAssignable(this.memberAccessOn(receiver, found, member, context), member, context, 'initializer');
       return {
         kind: 'memberInit',
         target,

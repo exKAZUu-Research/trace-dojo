@@ -131,6 +131,7 @@ function translateJoin(
   const inner = castSource(clause);
   const innerKey: Expression = {
     kind: 'lambda',
+    isQuery: true,
     parameters: [parameter(clause.name, clause)],
     body: clause.innerKey,
     isStatic: false,
@@ -232,6 +233,7 @@ function combine(
 function lambda(state: RangeState, body: Expression, position: Position): Expression {
   return {
     kind: 'lambda',
+    isQuery: true,
     parameters: [parameter(state.parameter, position)],
     body,
     isStatic: false,
@@ -243,6 +245,7 @@ function lambda(state: RangeState, body: Expression, position: Position): Expres
 function lambda2(state: RangeState, second: string, body: Expression, position: Position): Expression {
   return {
     kind: 'lambda',
+    isQuery: true,
     parameters: [parameter(state.parameter, position), parameter(second, position)],
     body,
     isStatic: false,

@@ -441,15 +441,17 @@ export abstract class StatementBinder extends PatternBinder {
       case 'switch': {
         return this.bindSwitch(statement, context);
       }
+      // A `break` or `continue` outside a loop jumps nowhere, so the statements after it stay reachable for the
+      // flow analysis, as in Roslyn.
       case 'break': {
-        if (context.fn.breakDepth === 0)
-          this.error(statement, 'CS0139', 'break または continue に対応するループがありません');
-        return { kind: 'break', row, step: 'none' };
+        if (context.fn.breakDepth > 0) return { kind: 'break', row, step: 'none' };
+        this.error(statement, 'CS0139', 'break または continue に対応するループがありません');
+        return { kind: 'empty', row, step: 'none' };
       }
       case 'continue': {
-        if (context.fn.continueDepth === 0)
-          this.error(statement, 'CS0139', 'break または continue に対応するループがありません');
-        return { kind: 'continue', row, step: 'none' };
+        if (context.fn.continueDepth > 0) return { kind: 'continue', row, step: 'none' };
+        this.error(statement, 'CS0139', 'break または continue に対応するループがありません');
+        return { kind: 'empty', row, step: 'none' };
       }
       case 'return': {
         return this.bindReturn(statement, context);
@@ -608,6 +610,9 @@ export abstract class StatementBinder extends PatternBinder {
     const inferred = declaredType ? { type: declaredType } : this.inferLocalType(declarator, context);
     const { type } = inferred;
     let { value } = inferred;
+    if (type.kind === 'named' && type.symbol.isStatic) {
+      this.error(declarator, 'CS0723', `スタティック型 '${displayType(type)}' の変数を宣言することはできません`);
+    }
     // The variable is in scope in its own initializer, where using it is an error of definite assignment.
     const local = this.declareLocal(declarator.name, type, declarator, context);
     if (initializer && !value) {
