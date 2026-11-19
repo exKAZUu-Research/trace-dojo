@@ -709,6 +709,21 @@ echo 'after;';`);
 );
 
 test.each([
+  ['ArrayObject', 'new stdClass', 30_000],
+  ['ArrayIterator', 'new stdClass', 30_000],
+  ['ArrayObject', 'new D', 10_000],
+])('replaces %s objects in linear time (%s x %i)', (type, ctor, count) => {
+  vi.restoreAllMocks();
+  const execution = run(`<?php
+class D { function __destruct() {} }
+$a = new ${type};
+for ($i = 0; $i < ${count}; $i++) $a[$i] = ${ctor};
+for ($i = 0; $i < ${count}; $i++) $a[$i] = 0;
+echo 'done';`);
+  expect(execution).toMatchObject({ kind: 'executed', stdout: 'done' });
+});
+
+test.each([
   ['ArrayIterator', 'new ArrayIterator([])'],
   ['SplFixedArray', 'new SplFixedArray(1)'],
   ['Closure', 'function () {}'],

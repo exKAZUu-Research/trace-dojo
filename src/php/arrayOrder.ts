@@ -1,9 +1,9 @@
-// code-gauge-allow-file fileNcss 431 -- Keeps array bucket layout, mutations and their cursor positions together.
+// code-gauge-allow-file fileNcss 435 -- Keeps array bucket layout, mutations and their cursor positions together.
 import type { Key } from './values';
 
 class ArrayEntry {
   rawKey!: Key;
-  private rawIndex!: number;
+  rawIndex!: number;
   previous?: ArrayEntry;
   next?: ArrayEntry;
 
@@ -55,6 +55,7 @@ interface CursorPosition {
 
 export class ArrayOrder {
   private readonly entries = new Map<Key, ArrayEntry>();
+  private readonly buckets = new Map<number, ArrayEntry>();
   first: ArrayEntry | undefined;
   last: ArrayEntry | undefined;
   keyOffset = 0n;
@@ -77,11 +78,7 @@ export class ArrayOrder {
   }
 
   keyAtBucket(index: number): Key | undefined {
-    for (const entry of this.orderedEntries()) {
-      if (entry.index === index) return entry.key;
-      if (entry.index > index) return undefined;
-    }
-    return undefined;
+    return this.buckets.get(index + this.indexOffset)?.key;
   }
 
   get isPacked(): boolean {
@@ -221,7 +218,11 @@ export class ArrayOrder {
     if (this.nextIndex === this.entries.size) return;
     const previousEnd = this.nextIndex;
     let index = 0;
-    for (const entry of this.orderedEntries()) entry.index = index++;
+    this.buckets.clear();
+    for (const entry of this.orderedEntries()) {
+      entry.index = index++;
+      this.buckets.set(entry.rawIndex, entry);
+    }
     this.nextIndex = index;
     for (const cursor of this.liveCursors())
       if (cursor.index === undefined || cursor.index <= previousEnd) cursor.refreshPosition();
@@ -234,6 +235,7 @@ export class ArrayOrder {
     else this.first = entry;
     this.last = entry;
     this.entries.set(entry.rawKey, entry);
+    this.buckets.set(entry.rawIndex, entry);
     return entry;
   }
 
@@ -257,6 +259,7 @@ export class ArrayOrder {
       else this.last = entry;
       this.first = entry;
       this.entries.set(entry.rawKey, entry);
+      this.buckets.set(entry.rawIndex, entry);
     }
     this.nextIndex = this.entries.size;
     this.capacity = 8;
@@ -268,12 +271,14 @@ export class ArrayOrder {
     if (this.listLayout) return;
     const previous = [...this.orderedEntries()];
     this.entries.clear();
+    this.buckets.clear();
     this.keyOffset = 0n;
     this.indexOffset = 0;
     for (const [index, entry] of previous.entries()) {
       entry.key = BigInt(index);
       entry.index = index;
       this.entries.set(entry.rawKey, entry);
+      this.buckets.set(entry.rawIndex, entry);
     }
     this.nextIndex = previous.length;
     for (const cursor of this.liveCursors()) cursor.refreshPosition();
@@ -293,6 +298,7 @@ export class ArrayOrder {
       if (!preserveEndPosition) this.nextIndex = (this.last?.index ?? -1) + 1;
     }
     this.entries.delete(entry.rawKey);
+    this.buckets.delete(entry.rawIndex);
     if (!entry.next) for (const cursor of this.liveCursors()) cursor.clamp(this.nextIndex);
   }
 
@@ -307,6 +313,7 @@ export class ArrayOrder {
       } else if (cursors.length > 0) this.remapRebuild(rebuild, cursors);
     }
     this.entries.clear();
+    this.buckets.clear();
     this.first = undefined;
     this.last = undefined;
     this.keyOffset = 0n;

@@ -174,6 +174,11 @@ export class ArrayStorage {
       return;
     }
     const runtime = rt();
+    if (runtime.destructibles === 0) {
+      runtime.release([array.releaseSlot(offset)], true, runtime.nativeCalls > 0);
+      array.setSlot(offset, replacement);
+      return;
+    }
     const bucket = array.ordered().get(offset)?.index;
     runtime.held.push(replacement);
     try {
