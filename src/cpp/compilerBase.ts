@@ -1,6 +1,6 @@
 import { compileError, unsupported } from './errors';
 import type { Expr } from './expr';
-import type { Library } from './library/registry';
+import type { Library, LibraryTemplate } from './library/registry';
 import { type Entity, FunctionContext, Scope } from './scopes';
 import { fieldOf, hasToken, type Syntax } from './syntax';
 import {
@@ -137,7 +137,7 @@ export abstract class CompilerBase {
       if (entity.kind === 'class') type = classType(entity.cls);
       else if (entity.kind === 'type') type = entity.type;
       else if (entity.kind === 'template' && scope.type === 'template_type') {
-        type = entity.template.instantiate(this.templateArguments(fieldOf(scope, 'arguments') as Syntax), row);
+        type = this.instantiateTemplate(entity.template, fieldOf(scope, 'arguments') as Syntax, row);
       }
       if (type?.kind !== 'class') return this.unsupported(row, '入れ子の名前空間');
       return this.lookupInClass(type.cls, fieldOf(nameNode, 'name') as Syntax, row);
@@ -290,36 +290,26 @@ export abstract class CompilerBase {
 
   private templateType(node: Syntax, entity: Entity): Type {
     if (entity.kind !== 'template') return this.error(node.row, `${node.text} はテンプレートではありません。`);
-    const args = this.templateArguments(fieldOf(node, 'arguments') as Syntax);
-    return entity.template.instantiate(args, node.row);
+    return this.instantiateTemplate(entity.template, fieldOf(node, 'arguments') as Syntax, node.row);
   }
 
-  /** The types of a template argument list; a template argument that is not a type is a constant. */
-  templateArguments(list: Syntax): Type[] {
-    return list.children.map((argument) => {
-      if (argument.type === 'type_descriptor') {
-        const name = fieldOf(argument, 'type');
-        if (name && !fieldOf(argument, 'declarator')) {
-          const entity =
-            name.type === 'qualified_identifier'
-              ? this.lookupQualified(name)
-              : name.type === 'type_identifier'
-                ? this.findName(name.text)
-                : undefined;
-          if (entity && entity.kind !== 'type' && entity.kind !== 'class' && entity.kind !== 'template')
-            return this.integralTemplateArgument(name);
-        }
-        return this.typeDescriptor(argument);
-      }
-      // The grammar may read a nested template type (`std::pair<int, int>`) as an expression.
-      const type = this.expressionAsType(argument);
-      if (type) return type;
-      return this.integralTemplateArgument(argument);
-    });
+  protected instantiateTemplate(template: LibraryTemplate, list: Syntax, row: number): Type {
+    if (!template.takesArrayBound) return template.instantiate(this.templateArguments(list), row);
+    const args = list.children.filter((arg) => arg.type !== 'comment');
+    if (args.length !== 2) return this.error(row, `std::${template.name} のテンプレート引数は 2 個です。`);
+    const [element, bound] = args;
+    const expression =
+      bound.type === 'type_descriptor' && !fieldOf(bound, 'declarator') ? (fieldOf(bound, 'type') ?? bound) : bound;
+    return template.instantiate(this.templateTypeArgument(element), this.arrayLength(expression));
   }
 
-  private integralTemplateArgument(argument: Syntax): Type {
-    return { kind: 'int', name: 'long', constant: this.constantArgument(argument) } as unknown as Type;
+  protected templateArguments(list: Syntax): Type[] {
+    return list.children.filter((arg) => arg.type !== 'comment').map((argument) => this.templateTypeArgument(argument));
+  }
+
+  private templateTypeArgument(argument: Syntax): Type {
+    if (argument.type === 'type_descriptor') return this.typeDescriptor(argument);
+    return this.expressionAsType(argument) ?? this.error(argument.row, 'テンプレート引数には型を書いてください。');
   }
 
   /** The type an expression-shaped template argument names, or undefined when it names no type. */
@@ -334,7 +324,7 @@ export abstract class CompilerBase {
       const entity =
         nameNode.type === 'qualified_identifier' ? this.lookupQualified(nameNode) : this.findName(nameNode.text);
       if (entity?.kind !== 'template') return undefined;
-      return entity.template.instantiate(this.templateArguments(fieldOf(node, 'arguments') as Syntax), node.row);
+      return this.instantiateTemplate(entity.template, fieldOf(node, 'arguments') as Syntax, node.row);
     }
     if (node.type !== 'qualified_identifier') return undefined;
     const name = fieldOf(node, 'name') as Syntax;
@@ -344,15 +334,12 @@ export abstract class CompilerBase {
         all: node.all.map((child) => (child === name ? (fieldOf(name, 'name') as Syntax) : child)),
       });
       if (entity.kind !== 'template') return undefined;
-      return entity.template.instantiate(this.templateArguments(fieldOf(name, 'arguments') as Syntax), node.row);
+      return this.instantiateTemplate(entity.template, fieldOf(name, 'arguments') as Syntax, node.row);
     }
     const entity = this.lookupQualified(node);
     if (entity.kind === 'class') return classType(entity.cls);
     return entity.kind === 'type' ? entity.type : undefined;
   }
-
-  /** The value of a constant template argument, such as the `3` of `std::array<int, 3>`. */
-  protected abstract constantArgument(node: Syntax): number;
 
   typeDescriptor(node: Syntax): Type {
     const base = this.specifiedType(node);

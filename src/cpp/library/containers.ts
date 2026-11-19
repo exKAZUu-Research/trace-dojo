@@ -18,11 +18,6 @@ export function containerTemplates(library: Library): LibraryTemplate[] {
       );
     }
   };
-  const constantOf = (type: Type, name: string, row: number): number => {
-    const value = (type as unknown as { constant?: number }).constant;
-    if (value === undefined) return compiler().error(row, `std::${name} の大きさには定数を書いてください。`);
-    return value;
-  };
   /** Checks the container argument of an adapter, which must hold the same element type. */
   const checkContainer = (
     name: string,
@@ -49,10 +44,8 @@ export function containerTemplates(library: Library): LibraryTemplate[] {
   }
   templates.push({
     name: 'array',
-    instantiate: (args, row) => {
-      arity('array', args, 2, 2, row);
-      return classType(sequenceClass(library, 'array', args[0], constantOf(args[1], 'array', row)));
-    },
+    takesArrayBound: true,
+    instantiate: (element, bound) => classType(sequenceClass(library, 'array', element, bound)),
   });
   for (const kind of ['stack', 'queue'] as const) {
     templates.push({

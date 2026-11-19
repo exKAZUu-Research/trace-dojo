@@ -59,10 +59,9 @@ const C_GLOBAL_SIGNATURES: ReadonlyMap<string, { params: Type[]; ret?: Type }> =
 ]);
 
 /** A class template of the library, such as `std::vector`, which template arguments instantiate. */
-export interface LibraryTemplate {
-  name: string;
-  instantiate: (args: Type[], row: number) => Type;
-}
+export type LibraryTemplate =
+  | { name: string; takesArrayBound?: false; instantiate: (args: Type[], row: number) => Type }
+  | { name: string; takesArrayBound: true; instantiate: (element: Type, bound: number) => Type };
 
 /** The names the library declares that the interpreter leaves out, with the feature they belong to. */
 const UNSUPPORTED_STD_NAMES: Record<string, string> = {

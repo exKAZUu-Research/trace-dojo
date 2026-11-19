@@ -1989,13 +1989,6 @@ export class Compiler extends StatementCompiler {
     }
   }
 
-  protected constantArgument(node: Syntax): number {
-    const expr = this.compileExpression(node);
-    const value = this.rvalue(expr).constant;
-    if (value === undefined) return this.error(node.row, 'テンプレート引数には定数を書いてください。');
-    return Number(value);
-  }
-
   protected arrayLength(size: Syntax): number {
     const expr = this.rvalue(this.compileExpression(size));
     if (!isInteger(expr.type))
@@ -2005,6 +1998,7 @@ export class Compiler extends StatementCompiler {
     }
     const length = Number(expr.constant);
     if (length < 0) return this.error(size.row, '配列の大きさは負にできません。');
+    if (!Number.isSafeInteger(length)) return this.error(size.row, '配列の大きさが大きすぎます。');
     return length;
   }
 }

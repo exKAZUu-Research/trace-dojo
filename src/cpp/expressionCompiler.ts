@@ -1388,8 +1388,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const name = fieldOf(node, 'name') as Syntax;
       const entity = name.type === 'qualified_identifier' ? this.lookupQualified(name) : this.findName(name.text);
       if (entity?.kind === 'template') {
-        const args = this.templateArguments(fieldOf(node, 'arguments') as Syntax);
-        return entity.template.instantiate(args, node.row);
+        return this.instantiateTemplate(entity.template, fieldOf(node, 'arguments') as Syntax, node.row);
       }
       return undefined;
     }
@@ -1401,7 +1400,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (entity?.kind === 'template') {
       const nameNode = node.type === 'qualified_identifier' ? fieldOf(node, 'name') : undefined;
       const argumentList = nameNode ? fieldOf(nameNode, 'arguments') : undefined;
-      if (argumentList) return entity.template.instantiate(this.templateArguments(argumentList), node.row);
+      if (argumentList) return this.instantiateTemplate(entity.template, argumentList, node.row);
       return this.error(node.row, `${node.text} には <...> でテンプレート引数を書いてください。`);
     }
     return undefined;

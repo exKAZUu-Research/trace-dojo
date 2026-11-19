@@ -290,6 +290,13 @@ test.each([
     '#include <random>\nint main() { std::mt19937 engine; const std::uniform_int_distribution<int> draw; draw(engine); }',
     1,
   ],
+  [
+    'a floating-point constant in a std::array bound',
+    '#include <array>\nconstexpr double length = 2;\nint main() { std::array<int, length> values; }',
+    2,
+  ],
+  ['a negative std::array bound', '#include <array>\nint main() { std::array<int, -1> values; }', 1],
+  ['a non-type argument in a std::vector element type', '#include <vector>\nint main() { std::vector<2> values; }', 1],
   ['std::sqrt with only <cstdio>', '#include <cstdio>\nint main() {\n  double x = std::sqrt(2.0); }', 2],
   ['std::abs with only <cstdio>', '#include <cstdio>\nint main() {\n  int x = std::abs(-2); }', 2],
 ])('the interpreter rejects %s', (_, program, row) => {
