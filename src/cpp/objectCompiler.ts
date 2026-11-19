@@ -10,7 +10,7 @@ import {
   Rank,
 } from './conversions';
 import { CppException, CppRuntimeError } from './errors';
-import { type Expr, type LibraryConstant, mapMemberConstants } from './expr';
+import { type Expr, mapMemberConstants } from './expr';
 import { type Eval, type Frame, holdAll } from './runtime';
 import type { Syntax } from './syntax';
 import {
@@ -521,21 +521,29 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     };
     const isReference = fn.ret.kind === 'reference';
     const type = nonReference(fn.ret);
-    const arithmeticArgs = object ? undefined : this.constantCallArguments(fn, args);
-    const libraryConstant = object ? undefined : this.libraryConstant(fn, args, converted);
-    const evaluate = fn.evaluateConstant;
-    const allConstant = arithmeticArgs && arithmeticArgs.every((arg) => arg.constant !== undefined);
     return {
       type,
       isLvalue: isReference,
       row,
       run,
-      constant: allConstant ? evaluate?.(arithmeticArgs.map((arg) => arg.constant as number | bigint)) : undefined,
-      memberConstant: arithmeticArgs && evaluate ? mapMemberConstants(arithmeticArgs, evaluate) : undefined,
-      constantInitialization: libraryConstant !== undefined,
-      constantStringLength: libraryConstant && libraryConstant !== true ? libraryConstant.stringLength : undefined,
+      ...(object ? undefined : this.callConstancy(fn, args, converted)),
       onlyCalls: true,
       isTemporaryObject: !isReference && type.kind === 'class',
+    };
+  }
+
+  private callConstancy(
+    fn: FunctionInfo,
+    args: Expr[],
+    converted: Expr[]
+  ): Pick<Expr, 'constant' | 'memberConstant' | 'constantInitialization' | 'constantStringLength'> {
+    const arithmeticArgs = this.constantCallArguments(fn, args);
+    const evaluate = fn.evaluateConstant;
+    const allConstant = arithmeticArgs && arithmeticArgs.every((arg) => arg.constant !== undefined);
+    return {
+      ...this.libraryConstant(fn, args, converted),
+      constant: allConstant ? evaluate?.(arithmeticArgs.map((arg) => arg.constant as number | bigint)) : undefined,
+      memberConstant: arithmeticArgs && evaluate ? mapMemberConstants(arithmeticArgs, evaluate) : undefined,
     };
   }
 
@@ -551,9 +559,14 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     return converted;
   }
 
-  private libraryConstant(fn: FunctionInfo, source: Expr[], converted: Expr[]): LibraryConstant | undefined {
+  private libraryConstant(
+    fn: FunctionInfo,
+    source: Expr[],
+    converted: Expr[]
+  ): Pick<Expr, 'constantInitialization' | 'constantStringLength'> | undefined {
     const result = fn.libraryConstant?.(source);
-    if (result && converted.every((arg) => this.isConstantInitializer(arg))) return result;
+    if (!result || !converted.every((arg) => this.isConstantInitializer(arg))) return;
+    return { constantInitialization: true, constantStringLength: result === true ? undefined : result.stringLength };
   }
 
   /** Evaluates the location of the object of a member function call, materializing a prvalue as a temporary. */
@@ -579,7 +592,6 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     this.requireVirtualDefinitions(cls, row);
     const converted = this.convertArguments(resolved, args);
     const argRuns = this.callArguments(fn, converted, row);
-    const libraryConstant = this.libraryConstant(fn, args, converted);
     const run: Expr['run'] = fn.native
       ? (frame) => holdAll(frame, argRuns, (values) => invoke(frame, fn, values, undefined, row, true) as Value)
       : (frame, zeroInitialize, destination) =>
@@ -596,8 +608,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       run,
       onlyCalls: true,
       isTemporaryObject: true,
-      constantInitialization: libraryConstant !== undefined,
-      constantStringLength: libraryConstant && libraryConstant !== true ? libraryConstant.stringLength : undefined,
+      ...this.libraryConstant(fn, args, converted),
     };
   }
 

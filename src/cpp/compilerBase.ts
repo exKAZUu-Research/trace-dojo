@@ -317,7 +317,7 @@ export abstract class CompilerBase {
   }
 
   /** The type an expression-shaped template argument names, or undefined when it names no type. */
-  private expressionAsType(node: Syntax): Type | undefined {
+  protected expressionAsType(node: Syntax): Type | undefined {
     if (node.type === 'identifier' || node.type === 'type_identifier') {
       const entity = this.findName(node.text);
       if (entity?.kind === 'class') return classType(entity.cls);

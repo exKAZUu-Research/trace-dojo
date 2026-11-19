@@ -1402,15 +1402,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** The type of an expression that is not evaluated, as the operand of `sizeof`. */
   private typeOfUnevaluated(node: Syntax): Type {
-    const target = node.type === 'parenthesized_expression' && node.children[0] ? node.children[0] : node;
-    if (target.type === 'identifier' || target.type === 'type_identifier') {
-      const entity = this.findName(target.text);
-      if (entity?.kind === 'class') return classType(entity.cls);
-      if (entity?.kind === 'type') return entity.type;
-    }
     const previous = this.isUnevaluated;
     this.isUnevaluated = true;
     try {
+      const target = node.type === 'parenthesized_expression' ? node.children[0] : undefined;
+      const type = target && this.expressionAsType(target);
+      if (type) return type;
       return this.compileExpression(node).type;
     } finally {
       this.isUnevaluated = previous;

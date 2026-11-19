@@ -1706,37 +1706,7 @@ export class Compiler extends StatementCompiler {
   protected initializeList(type: Type, elements: Syntax[], row: number): Initializer {
     if (type.kind === 'reference') return this.error(row, '参照は {...} で初期化できません。');
     if (type.kind === 'array') return this.arrayInitializer(type, elements, row);
-    if (type.kind === 'class') {
-      const library = type.cls.library;
-      const isAggregate = this.isAggregate(type.cls);
-      const [single, ...extra] = elements;
-      if (
-        (isAggregate || library?.aggregateArray) &&
-        single &&
-        extra.length === 0 &&
-        single.type !== 'initializer_list'
-      ) {
-        const value = this.compileExpression(single);
-        if (value.type.kind === 'class' && value.type.cls.isDerivedFrom(type.cls))
-          return this.copyInitializer(type, value, row, false);
-      }
-      if (library?.aggregateArray) {
-        const clauses: Clauses = { nodes: elements, next: 0, compiled: new Map() };
-        const run = this.takeLibraryArrayClauses(library.aggregateArray, clauses, row)();
-        if (clauses.next < elements.length)
-          return this.error(row, `${type.cls.name} を初期化する {...} の値が多すぎます。`);
-        return run;
-      }
-      if (library?.listInitializer) {
-        const run = library.listInitializer(this, elements, row);
-        if (run) return run;
-      }
-      if (isAggregate) return this.aggregateInitializer(type.cls, elements, row);
-      if (elements.length === 0) return this.objectInitializer(this.defaultConstructed(type.cls, row, true));
-      const args = elements.map((element) => this.argument(element));
-      const resolved = this.resolveConstructor(type.cls, args, row, true);
-      return this.objectInitializer(this.constructWith(type.cls, resolved, args, row));
-    }
+    if (type.kind === 'class') return this.initializeClassList(type, elements, row);
     if (elements.length === 0) {
       const zero = zeroOf(type);
       return initializerWithConstancy(() => zero, true, {
@@ -1748,6 +1718,38 @@ export class Compiler extends StatementCompiler {
     if (elements[0].type === 'initializer_list')
       return this.error(row, `${typeName(type)} 型の値は、入れ子の {...} では初期化できません。`);
     return this.copyInitializer(type, this.compileExpression(elements[0]), row, true);
+  }
+
+  private initializeClassList(type: Extract<Type, { kind: 'class' }>, elements: Syntax[], row: number): Initializer {
+    const library = type.cls.library;
+    const isAggregate = this.isAggregate(type.cls);
+    const [single, ...extra] = elements;
+    if (
+      (isAggregate || library?.aggregateArray) &&
+      single &&
+      extra.length === 0 &&
+      single.type !== 'initializer_list'
+    ) {
+      const value = this.compileExpression(single);
+      if (value.type.kind === 'class' && value.type.cls.isDerivedFrom(type.cls))
+        return this.copyInitializer(type, value, row, false);
+    }
+    if (library?.aggregateArray) {
+      const clauses: Clauses = { nodes: elements, next: 0, compiled: new Map() };
+      const run = this.takeLibraryArrayClauses(library.aggregateArray, clauses, row)();
+      if (clauses.next < elements.length)
+        return this.error(row, `${type.cls.name} を初期化する {...} の値が多すぎます。`);
+      return run;
+    }
+    if (library?.listInitializer) {
+      const run = library.listInitializer(this, elements, row);
+      if (run) return run;
+    }
+    if (isAggregate) return this.aggregateInitializer(type.cls, elements, row);
+    if (elements.length === 0) return this.objectInitializer(this.defaultConstructed(type.cls, row, true));
+    const args = elements.map((element) => this.argument(element));
+    const resolved = this.resolveConstructor(type.cls, args, row, true);
+    return this.objectInitializer(this.constructWith(type.cls, resolved, args, row));
   }
 
   private resolveConstructor(cls: ClassInfo, args: Expr[], row: number, isList: boolean): Resolved {
