@@ -1,7 +1,7 @@
 import { CppRuntimeError } from '../errors';
 import type { Expr, FunctionCandidates } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { destroyTemporaries, invoke, makeEach, newObject, withTemporaries, zeroOf } from '../objectCompiler';
+import { invoke, makeEach, newObject, withTemporaries, zeroOf } from '../objectCompiler';
 import { type Frame, holdAll } from '../runtime';
 import {
   type ClassInfo,
@@ -433,16 +433,15 @@ function callbackRunner(
   }));
   const call = compile(args);
   const condition = predicate ? compiler.condition(call, row) : undefined;
-  return (frame, ...locations) => {
-    const mark = frame.temporaries.length;
-    argumentsByCall.push(locations);
-    try {
-      return condition ? Number(condition(frame)) : (call.run(frame) as Value);
-    } finally {
-      argumentsByCall.pop();
-      destroyTemporaries(frame, mark);
-    }
-  };
+  return (frame, ...locations) =>
+    withTemporaries(frame, () => {
+      argumentsByCall.push(locations);
+      try {
+        return condition ? Number(condition(frame)) : (call.run(frame) as Value);
+      } finally {
+        argumentsByCall.pop();
+      }
+    });
 }
 
 /** Calls a predicate the program passed, which takes elements and gives a value that converts to `bool`. */

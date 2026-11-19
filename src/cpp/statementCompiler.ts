@@ -14,6 +14,7 @@ import {
 import { ExpressionCompiler } from './expressionCompiler';
 import { SequenceValue } from './library/containerValues';
 import { bindRetainedTemporary, withTemporaries, zeroOf } from './objectCompiler';
+import { parseInitializerArguments } from './parse';
 import { BREAK, type Completion, CONTINUE, type Eval, type Exec, type Frame, type LocalInfo, RETURN } from './runtime';
 import { type Entity, Scope } from './scopes';
 import { isObjectCreation, onlyCalls } from './stepRules';
@@ -61,6 +62,13 @@ export type ReferenceBinding = {
 export interface AutoDeduction {
   name: string;
   type: Type;
+}
+
+interface LocalDeclaration {
+  exec: Exec;
+  hasInitializer: boolean;
+  createsObject: boolean;
+  deduced?: AutoDeduction;
 }
 
 /** Compiles statements to closures that run them and tell how they completed. */
@@ -210,7 +218,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   // Declarations -----------------------------------------------------------------------------------------------------
 
   private localDeclaration(node: Syntax): Exec {
-    if (this.hasSpecifier(node, 'static')) return this.staticLocal(node);
+    const isStatic = this.hasSpecifier(node, 'static');
     const base = this.specifiedType(node, true);
     const declarators = fieldsOf(node, 'declarator');
     if (declarators.length === 0) return this.error(node.row, '変数の名前を書いてください。');
@@ -219,7 +227,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const parts: Exec[] = [];
     let firstDeduced: AutoDeduction | undefined;
     for (const declarator of declarators) {
-      const { exec, hasInitializer, createsObject, deduced } = this.localDeclarator(base, declarator, node);
+      const { exec, hasInitializer, createsObject, deduced } = isStatic
+        ? this.staticDeclarator(base, declarator, node)
+        : this.localDeclarator(base, declarator, node);
       firstDeduced = this.checkAutoDeduction(firstDeduced, deduced, declarator.row);
       parts.push(exec);
       if (hasInitializer || createsObject) recordsStep = true;
@@ -232,11 +242,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return recordsStep ? this.withStep(node.row, run, allCreate) : run;
   }
 
-  private localDeclarator(
-    base: Type,
-    declarator: Syntax,
-    declaration: Syntax
-  ): { exec: Exec; hasInitializer: boolean; createsObject: boolean; deduced?: AutoDeduction } {
+  private localDeclarator(base: Type, declarator: Syntax, declaration: Syntax): LocalDeclaration {
     const declared = this.applyDeclarator(base, declarator);
     const reread = declared.function ? this.asDirectInitialization(declarator, declared.function) : undefined;
     if (reread) return this.localDeclarator(base, reread, declaration);
@@ -353,29 +359,31 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   protected asDirectInitialization(declarator: Syntax, functionDeclarator: Syntax): Syntax | undefined {
     const parameters = fieldOf(functionDeclarator, 'parameters');
     const name = fieldOf(functionDeclarator, 'declarator');
-    if (!parameters || !name || name.type !== 'identifier' || parameters.children.length === 0) return undefined;
-    const args: Syntax[] = [];
-    for (const parameter of parameters.children) {
-      const type = fieldOf(parameter, 'type');
-      if (
-        parameter.type !== 'parameter_declaration' ||
-        fieldOf(parameter, 'declarator') ||
-        parameter.children.length !== 1
-      )
-        return undefined;
-      if (type?.type !== 'type_identifier' && type?.type !== 'qualified_identifier') return undefined;
-      const entity = type.type === 'qualified_identifier' ? this.lookupQualified(type) : this.findName(type.text);
-      if (!entity || entity.kind === 'class' || entity.kind === 'type' || entity.kind === 'template') return undefined;
-      args.push({ ...type, type: type.type === 'type_identifier' ? 'identifier' : type.type, field: undefined });
-    }
-    const argumentList: Syntax = { ...parameters, type: 'argument_list', children: args, all: args, field: 'value' };
-    const variable: Syntax = { ...name, field: 'declarator' };
+    if (!parameters || !name || functionDeclarator.all.some((child) => child !== parameters && child !== name))
+      return undefined;
+    if (!parameters.children.some((parameter) => this.parameterStartsWithValue(parameter))) return undefined;
+    const argumentList = parseInitializerArguments(parameters);
+    if (!argumentList) return undefined;
+    const variable = { ...replaceDeclarator(declarator, functionDeclarator, name), field: 'declarator' };
     return {
       ...declarator,
       type: 'init_declarator',
       children: [variable, argumentList],
       all: [variable, argumentList],
     };
+  }
+
+  private parameterStartsWithValue(parameter: Syntax): boolean {
+    const type = fieldOf(parameter, 'type');
+    if (type?.type !== 'type_identifier' && type?.type !== 'qualified_identifier') return false;
+    const entity = type.type === 'qualified_identifier' ? this.lookupQualified(type) : this.findName(type.text);
+    return (
+      entity !== undefined &&
+      entity.kind !== 'class' &&
+      entity.kind !== 'hiddenClass' &&
+      entity.kind !== 'type' &&
+      entity.kind !== 'template'
+    );
   }
 
   private isClassLike(type: Type): boolean {
@@ -444,13 +452,17 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     direct = false
   ): number | bigint | undefined {
     if (!value) return this.error(row, 'constexpr の変数には初期値を書いてください。');
-    if (!isArithmetic(type)) return undefined;
+    if (!isArithmetic(type) && type.kind !== 'nullptr') return undefined;
     const isList = value.type === 'initializer_list';
     const args = isList || value.type === 'argument_list' ? value.children : [value];
-    if (args.length === 0 && isList) return zeroOf(type) as number | bigint;
+    if (args.length === 0 && isList) return type.kind === 'nullptr' ? undefined : (zeroOf(type) as number | bigint);
     let constant: number | bigint | undefined;
     if (args.length === 1) {
       const expr = this.compileExpression(args[0]);
+      if (type.kind === 'nullptr') {
+        const converted = this.convert(expr, unqualified(type), row);
+        if (this.isConstantInitializer(converted)) return undefined;
+      }
       constant = this.constantOf(
         direct && (isList || value.type === 'argument_list') ? this.directInitializerArgument(type, expr) : expr,
         type
@@ -575,62 +587,51 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     };
   }
 
-  private staticLocal(node: Syntax): Exec {
-    const base = this.specifiedType(node, true);
-    let firstDeduced: AutoDeduction | undefined;
-    const initializers = fieldsOf(node, 'declarator').map((written) => {
-      const declarator = this.variableOrFunctionDeclarator(base, written);
-      const declared = this.applyDeclarator(base, declarator);
-      const name = declared.name as string;
-      this.checkRedeclaration(name, declarator.row);
-      const value = declarator.type === 'init_declarator' ? fieldOf(declarator, 'value') : undefined;
-      let type: Type = declared.type;
-      const reference = type.kind === 'reference' ? this.bindReference(name, type, value, declarator.row) : undefined;
-      if (reference) type = reference.type;
-      else if (hasAuto(type)) {
-        type = this.deduceAuto(
-          type,
-          this.compileExpression(this.autoInitializer(declarator, value, name)),
-          declarator.row
-        );
-      }
-      if (hasAuto(declared.type)) {
-        firstDeduced = this.checkAutoDeduction(
-          firstDeduced,
-          { name, type: deducedType(declared.type, type) },
-          declarator.row
-        );
-      }
-      if (type.kind === 'array' && type.length === undefined && value) type = this.completeArrayType(type, value);
-      if (type.kind === 'array' && type.length === undefined)
-        return this.error(declarator.row, `配列 ${name} の大きさを書いてください。`);
-      if (type.kind === 'void') return this.error(declarator.row, `void 型の変数 ${name} は作れません。`);
-      const global = this.declareStaticStorage(name, type, declarator.row, false);
-      const local = this.context.declareLocal(name, type, false);
-      const direct = !hasToken(declarator, '=');
-      const constant =
-        !reference && this.isConstexpr(node)
-          ? this.requireConstantInitializer(type, value, declarator.row, direct)
-          : undefined;
-      this.context.scope.names.set(name, { kind: 'local', local, isReference: reference !== undefined, constant });
-      const { slot } = local;
-      const { index } = global;
-      const initialize = reference
-        ? this.staticReferenceInitializer(global, reference, declarator.row)
-        : this.staticInitializer(global, type, value, declarator.row, direct);
-      this.context.scope.slots.splice(this.context.scope.slots.indexOf(slot), 1);
-      this.context.scope.returnSlots.delete(local);
-      this.context.scope.statics.push(slot);
-      return (frame: Frame) => {
+  private staticDeclarator(base: Type, written: Syntax, declaration: Syntax): LocalDeclaration {
+    const declarator = this.variableOrFunctionDeclarator(base, written);
+    const declared = this.applyDeclarator(base, declarator);
+    const name = declared.name as string;
+    const row = declarator.row;
+    if (declared.function) this.unsupported(row, '関数の中での関数の宣言');
+    this.checkRedeclaration(name, row);
+    const value = declarator.type === 'init_declarator' ? fieldOf(declarator, 'value') : undefined;
+    let type: Type = declared.type;
+    const reference = type.kind === 'reference' ? this.bindReference(name, type, value, row) : undefined;
+    if (reference) type = reference.type;
+    else if (hasAuto(type)) {
+      type = this.deduceAuto(type, this.compileExpression(this.autoInitializer(declarator, value, name)), row);
+    }
+    const deduced = hasAuto(declared.type) ? { name, type: deducedType(declared.type, type) } : undefined;
+    if (type.kind === 'array' && type.length === undefined && value) type = this.completeArrayType(type, value);
+    if (type.kind === 'array' && type.length === undefined)
+      return this.error(row, `配列 ${name} の大きさを書いてください。`);
+    if (type.kind === 'void') return this.error(row, `void 型の変数 ${name} は作れません。`);
+    const global = this.declareStaticStorage(name, type, row, false);
+    const local = this.context.declareLocal(name, type, false);
+    const direct = !hasToken(declarator, '=');
+    const constant =
+      !reference && this.isConstexpr(declaration)
+        ? this.requireConstantInitializer(type, value, row, direct)
+        : undefined;
+    this.context.scope.names.set(name, { kind: 'local', local, isReference: reference !== undefined, constant });
+    const { slot } = local;
+    const { index } = global;
+    const { run: initialize, isCreation } = reference
+      ? { run: this.staticReferenceInitializer(global, reference, row), isCreation: false }
+      : this.staticInitializer(global, type, value, row, direct);
+    this.context.scope.slots.splice(this.context.scope.slots.indexOf(slot), 1);
+    this.context.scope.returnSlots.delete(local);
+    this.context.scope.statics.push(slot);
+    return {
+      hasInitializer: value !== undefined,
+      createsObject: isCreation,
+      deduced,
+      exec: (frame) => {
         const store = frame.runtime.globals[index];
         if (!reference) frame.slots[slot] = store;
         initialize(frame);
         if (reference) frame.slots[slot] = (store as Box).value as Ptr;
-      };
-    });
-    return (frame) => {
-      for (const initialize of initializers) initialize(frame);
-      return;
+      },
     };
   }
 
@@ -650,7 +651,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     value: Syntax | undefined,
     row: number,
     direct?: boolean
-  ): (frame: Frame) => void;
+  ): { run: Eval<void>; isCreation: boolean };
 
   checkRedeclaration(name: string, row: number): void {
     const { names, conflictingDeclarations } = this.context.scope;
@@ -1350,6 +1351,12 @@ function endReturnedReferenceLifetimes(frame: Frame, value: Value): void {
 }
 
 function doNothing(): undefined {}
+
+function replaceDeclarator(node: Syntax, old: Syntax, replacement: Syntax): Syntax {
+  if (node === old) return { ...replacement, field: node.field };
+  const all = node.all.map((child) => replaceDeclarator(child, old, replacement));
+  return { ...node, all, children: all.filter((child) => child.isNamed) };
+}
 
 /**
  * Reads `f(x, y) = 0;` in a function body as an assignment to what a call returns. The grammar takes it for a

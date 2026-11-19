@@ -4,7 +4,7 @@ import { CompileError } from '../../interpreter/diagnostics';
 import { CppRuntimeError, overflowError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { destroyTemporaries, invoke, makeEach, withTemporaries } from '../objectCompiler';
+import { invoke, makeEach, withTemporaries } from '../objectCompiler';
 import { type Frame, holdAll } from '../runtime';
 import {
   BOOL,
@@ -519,12 +519,9 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       source.push(item as Ptr);
       try {
         for (let index = 0; index < values.length; index++) {
-          const mark = frame.temporaries.length;
-          try {
+          withTemporaries(frame, () => {
             assignElement(frame, values.location(index), ops, (convert.run(frame) as Ptr).read());
-          } finally {
-            destroyTemporaries(frame, mark);
-          }
+          });
         }
       } finally {
         source.pop();

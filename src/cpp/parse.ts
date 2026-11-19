@@ -32,6 +32,25 @@ export function parseCpp(source: string): Syntax {
   );
 }
 
+export function parseInitializerArguments(parameters: Syntax): Syntax | undefined {
+  const prefix = 'void initializer_probe() { initializer_probe';
+  const tree = parser.parse(`${prefix}${parameters.text}; }`);
+  if (!tree) return undefined;
+  try {
+    const { rootNode } = tree;
+    if (rootNode.hasError) return undefined;
+    const body = rootNode.namedChild(0)?.childForFieldName('body');
+    const call = body?.namedChild(0)?.namedChild(0);
+    const args = call?.childForFieldName('arguments');
+    if (!args || args.endIndex !== prefix.length + parameters.text.length) return undefined;
+    const syntax = copySyntax(args, 'value', { row: parameters.row, index: parameters.start - prefix.length });
+    rejectUnsupportedSyntax(syntax);
+    return syntax;
+  } finally {
+    tree.delete();
+  }
+}
+
 function locateErrors(root: Node, errors: SourceDiagnostic[], source: string): SourceDiagnostic[] {
   if (errors.length === 0) return afterStringLiteral(root, source) ?? errors;
   const strayElse = root

@@ -7,8 +7,11 @@
 
 constexpr bool globalFlag{nullptr};
 constexpr std::nullptr_t empty = nullptr;
+constexpr std::nullptr_t emptyCopy = empty;
 constexpr bool namedGlobal(empty);
 constexpr bool castGlobal = static_cast<bool>(empty);
+constexpr int* pointerFromName = emptyCopy;
+constexpr const int* pointerFromCast = static_cast<const int*>(empty);
 
 struct Flags {
   bool fromDefault{nullptr};
@@ -44,6 +47,7 @@ int main() {
   std::cout << parenthesized << braced << constexprFlag << localStatic << *allocated << *allocatedList << '\n';
   std::cout << static_cast<bool>(nullptr) << bool(nullptr) << bool{nullptr} << ((bool)nullptr) << '\n';
   std::cout << namedGlobal << castGlobal << localBraced << noRead << member << '\n';
+  std::cout << (pointerFromName == nullptr) << (pointerFromCast == nullptr) << '\n';
   std::cout << bool(call()) << '\n';
   std::vector<bool> bits;
   std::deque<bool> flagsInOrder;

@@ -106,8 +106,14 @@ export function withTemporaries<T>(frame: Frame, run: Eval<T>): T {
     if (error instanceof CppException) destroyTemporaries(frame, mark);
     throw error;
   }
-  destroyTemporaries(frame, mark);
-  return result;
+  const pending = frame.pending.length;
+  if (result instanceof Store || result instanceof Ptr) frame.pending.push(result);
+  try {
+    destroyTemporaries(frame, mark);
+    return result;
+  } finally {
+    frame.pending.length = pending;
+  }
 }
 
 export function bindRetainedTemporary(
@@ -147,7 +153,7 @@ export function bindRetainedTemporary(
 }
 
 /** Ends the lifetime of temporaries created since `mark`, the last first. */
-export function destroyTemporaries(frame: Frame, mark: number): void {
+function destroyTemporaries(frame: Frame, mark: number): void {
   const { temporaries } = frame;
   while (temporaries.length > mark) {
     const temporary = temporaries.pop();

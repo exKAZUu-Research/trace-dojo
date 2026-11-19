@@ -254,7 +254,7 @@ function pointerConversion(
         type: to,
         isLvalue: false,
         row: e.row,
-        staticAddress: value.isNullConstant === true || value.staticAddress === true,
+        staticAddress: value.isNullConstant || value.staticAddress || value.constantInitialization,
         run: (frame) => {
           value.run(frame);
           return NULL_PTR;

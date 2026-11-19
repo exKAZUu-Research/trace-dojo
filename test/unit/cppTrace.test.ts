@@ -219,6 +219,21 @@ test('an uncaught exception preserves the turtles reached from main before unwin
   expect(trace.finalTurtles.map(({ x, y }) => [x, y])).toEqual([[3, 5]]);
 });
 
+test.each([
+  ['directly', 'Turtle*', 'new Turtle', 'result'],
+  ['in a vector', 'std::vector<Turtle*>', 'std::vector<Turtle*>{new Turtle}', 'result[0]'],
+])('keeps a turtle returned %s during temporary destruction', (_, type, value, pointer) => {
+  const program = `#include <vector>
+struct Guard { ~Guard() { int value = 1; } };
+${type} make() { return (Guard{}, ${value}); }
+int main() {
+  auto result = make();
+  ${pointer}->forward();
+}`;
+  const trace = traceProgram('cpp', program, program);
+  expect(trace.finalTurtles.map(({ x, y }) => [x, y])).toEqual([[0, 1]]);
+});
+
 test('an uncaught exception terminates before full-expression temporary destruction', () => {
   const program = `#include <iostream>
 struct Print { ~Print() { std::cout << 'D' << std::flush; } };
@@ -231,6 +246,29 @@ int main() { stop(Print{}); }`;
   });
 });
 
+test.each([
+  ['find_if', 'bool'],
+  ['for_each', 'void'],
+])('%s destroys callback parameters only when execution returns or unwinds', (algorithm, returnType) => {
+  const declarations = `#include <algorithm>
+#include <iostream>
+struct Value { ~Value() { std::cout << 'D' << std::flush; } };
+${returnType} fail(Value parameter) { throw 1; }`;
+  const call = `std::${algorithm}(values, values + 1, fail);`;
+  const base = `${declarations}
+int main() { Value values[1];`;
+  expect(executeProgram('cpp', `${base} ${call} }`)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: 'libc++abi: terminating due to uncaught exception of type int',
+  });
+  expect(executeProgram('cpp', `${base} try { ${call} } catch (int) { std::cout << 'X'; } }`)).toMatchObject({
+    kind: 'executed',
+    stdout: 'DXD',
+    uncaughtException: undefined,
+  });
+});
+
 test('lifetime extension by a static reference preserves indeterminate fields', () => {
   const program = `struct Value { int n; Value() {} };
 int main() { static const Value& value = Value(); return value.n; }`;
@@ -238,6 +276,28 @@ int main() { static const Value& value = Value(); return value.n; }`;
     kind: 'executed',
     uncaughtException: expect.stringContaining('値を入れていない'),
   });
+});
+
+test('records each visit to an initialized static local without rerunning its initializer', () => {
+  const program = `int calls = 0;
+int initialValue() { ++calls; return 7; }
+int next() {
+  static int count = initialValue();
+  ++count;
+  return count;
+}
+int main() {
+  static int untouched;
+  static bool flag = true;
+  int first = next();
+  int second = next();
+  flag = false;
+}`;
+  const { traceItems } = traceProgram('cpp', program, program);
+  expect(traceItems.filter(({ line }) => line === 4).map(({ vars }) => vars.count)).toEqual([7, 8]);
+  expect(traceItems.some(({ line }) => line === 9)).toBe(false);
+  expect(traceItems.find(({ line }) => line === 10)?.vars.flag).toBe(true);
+  expect(traceItems.at(-1)?.vars).toMatchObject({ calls: 1, first: 8, second: 9, flag: false });
 });
 
 test.each([

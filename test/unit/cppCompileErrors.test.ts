@@ -529,6 +529,16 @@ test.each([
     2,
   ],
   [
+    'constant pointer initialization with a call returning nullptr',
+    '#include <cstddef>\nstd::nullptr_t value() { return nullptr; }\nconstexpr int* pointer = value();',
+    2,
+  ],
+  [
+    'constexpr nullptr variable initialized by a nonconstant call',
+    '#include <cstddef>\nstd::nullptr_t value() { return nullptr; }\nconstexpr std::nullptr_t pointer = value();',
+    2,
+  ],
+  [
     'passing nullptr to a vector Boolean push operation',
     '#include <vector>\nint main() { std::vector<bool> values; values.push_back(nullptr); }',
     1,

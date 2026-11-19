@@ -37,6 +37,7 @@ import {
   type ReferenceBinding,
   StatementCompiler,
 } from './statementCompiler';
+import { isObjectCreation } from './stepRules';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
   type Access,
@@ -1659,7 +1660,7 @@ export class Compiler extends StatementCompiler {
       isCreation = true;
     } else if (value.type === 'initializer_list') {
       run = this.listInitializer(type, value, row, direct);
-      isCreation = createsClass;
+      isCreation = createsClass || isObjectCreation(value);
     } else if (value.type === 'argument_list') {
       const args = value.children.map((arg) => this.argument(arg));
       if (type.kind === 'class') {
@@ -1670,8 +1671,11 @@ export class Compiler extends StatementCompiler {
         run = this.copyInitializer(type, this.directInitializerArgument(type, args[0]), row, false);
       }
     } else {
-      run = this.copyInitializer(type, this.compileExpression(value), row, false);
-      isCreation = value.type === 'new_expression';
+      const expr = this.compileExpression(value);
+      run = this.copyInitializer(type, expr, row, false);
+      isCreation =
+        (createsClass && expr.isTemporaryObject === true && value.type !== 'call_expression') ||
+        isObjectCreation(value);
     }
     return { run, isConstant: run.isConstant === true, isCreation };
   }
@@ -1682,10 +1686,10 @@ export class Compiler extends StatementCompiler {
     value: Syntax | undefined,
     row: number,
     direct = false
-  ): (frame: Frame) => void {
+  ): { run: Eval<void>; isCreation: boolean } {
     const init = this.staticInitialization(type, value, row, direct);
     const { index } = global;
-    if (!init) return () => {};
+    if (!init) return { run: () => {}, isCreation: false };
     const register = this.staticRegistration(type, row);
     const initialize = this.fullExpression<undefined>((frame) => {
       const box = frame.runtime.globals[index] as Box;
@@ -1694,15 +1698,18 @@ export class Compiler extends StatementCompiler {
     });
     if (init.isConstant) {
       this.constantInitializers.push(initialize);
-      if (!register) return () => {};
+      if (!register) return { run: () => {}, isCreation: init.isCreation };
     }
     const initialized = new WeakSet<Box>();
-    return (frame) => {
-      const box = frame.runtime.globals[index] as Box;
-      if (initialized.has(box)) return;
-      if (!init.isConstant) initialize(frame);
-      register?.(frame, box);
-      initialized.add(box);
+    return {
+      isCreation: init.isCreation,
+      run: (frame) => {
+        const box = frame.runtime.globals[index] as Box;
+        if (initialized.has(box)) return;
+        if (!init.isConstant) initialize(frame);
+        register?.(frame, box);
+        initialized.add(box);
+      },
     };
   }
 

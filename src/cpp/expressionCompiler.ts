@@ -5,7 +5,14 @@ import { commonType, promote } from '../c/types';
 import { CompileError } from '../interpreter/diagnostics';
 import { byteAt } from './bytes';
 import { hasAuto, isAuto } from './compilerBase';
-import { type ConversionSequence, convertArithmetic, implicitConversion, Rank, sequence } from './conversions';
+import {
+  type ConversionSequence,
+  convertArithmetic,
+  implicitConversion,
+  Rank,
+  scalarValue,
+  sequence,
+} from './conversions';
 import { CppRuntimeError } from './errors';
 import {
   constantExpr,
@@ -1071,32 +1078,20 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       row,
       run: (frame) => frame.pending.at(-1) as unknown as Ptr,
     };
-    // C++17 sequences the right operand of a compound assignment before the left one, too; an object of class
-    // type stays where it is for its conversion function.
-    const right = source.type.kind === 'class' ? undefined : this.rvalue(source);
-    const operand: Expr = right ? { ...right, run: (frame) => frame.pending.at(-2) as Value } : source;
+    const right = scalarValue(this, source);
+    const operand: Expr = { ...right, run: (frame) => frame.pending.at(-2) as Value };
     const combined = this.binary(binaryOperator, current, operand, row);
     const value = this.convert(combined, unqualified(target.type), row).run;
-    const evaluateRight = right?.run;
     return {
       type: target.type,
       isLvalue: true,
       row,
-      run: (frame) => {
-        const mark = frame.pending.length;
-        let place: Ptr;
-        let result: Value | Ptr;
-        try {
-          frame.pending.push(evaluateRight ? (evaluateRight(frame) as Value) : undefined);
-          place = location(frame) as Ptr;
-          frame.pending.push(place);
-          result = value(frame);
-        } finally {
-          frame.pending.length = mark;
-        }
-        place.write(result as Value);
-        return place;
-      },
+      run: (frame) =>
+        holdAll(frame, [right.run, location], ([, destination]) => {
+          const place = destination as Ptr;
+          place.write(value(frame) as Value);
+          return place;
+        }),
     };
   }
 
