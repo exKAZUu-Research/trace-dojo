@@ -120,6 +120,7 @@ export class Evaluator {
         method,
         typeArgs: method.typeParameters.map((parameter) => typeEnvironment.get(parameter) ?? parameter.type),
         owner: this.ownerFromEnvironment(method, typeEnvironment),
+        row: callRow,
       };
       return method.native(call, self, args);
     }
@@ -972,6 +973,17 @@ export class Evaluator {
       if (receiver === undefined && !method.isStatic && method.owner.special !== 'nullable') throw NULL_REFERENCE();
       // A method of a struct runs on a copy of a value that is not a variable, so it cannot change the original.
       if (receiver instanceof CsStruct && !this.isVariableExpression(expression.receiver)) receiver = receiver.clone();
+      // A value calls a non-virtual method of a reference type, such as `GetType`, through a box of its own type.
+      const receiverType = frame.resolve(expression.receiver.type);
+      if (
+        !expression.isVirtual &&
+        !method.isStatic &&
+        !method.isExtension &&
+        !method.owner.isValueType &&
+        this.isValueTypeValue(receiver, receiverType)
+      ) {
+        receiver = new CsBox(receiverType, copyValue(receiver));
+      }
     } else if (!method.isStatic && method.kind !== 'localFunction') {
       receiver = frame.thisValue;
     }

@@ -1,3 +1,4 @@
+import { CompileError } from '../../interpreter/diagnostics';
 import type { Evaluator } from '../evaluator';
 import type { NativeCall } from '../natives';
 import { PendingException } from '../numeric';
@@ -54,6 +55,11 @@ export function fail(typeName: string, message?: string, paramName?: string): ne
   throw new PendingException(typeName, message, paramName);
 }
 
+/** Rejects a call whose arguments use what this environment cannot run, as the compiler rejects unsupported syntax. */
+export function unsupportedCall(call: NativeCall, what: string): never {
+  throw new CompileError([{ row: call.row ?? 0, message: `${what}は、この採点環境では使えません。` }]);
+}
+
 export function failNull(paramName: string): never {
   throw new PendingException('System.ArgumentNullException', 'Value cannot be null.', paramName);
 }
@@ -61,12 +67,7 @@ export function failNull(paramName: string): never {
 /** Throws `ArgumentOutOfRangeException` with the actual value that .NET's messages show on a second line. */
 export function failOutOfRange(call: NativeCall, paramName: string, message: string, actualValue?: string): never {
   const runtime = call.frame.runtime;
-  const exception = runtime.createException(
-    'System.ArgumentOutOfRangeException',
-    actualValue === undefined ? message : message,
-    undefined,
-    paramName
-  );
+  const exception = runtime.createException('System.ArgumentOutOfRangeException', message, undefined, paramName);
   if (actualValue !== undefined) (exception.native as ExceptionState).actualValue = actualValue;
   throw new CsThrow(exception);
 }

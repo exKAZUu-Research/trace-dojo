@@ -655,7 +655,6 @@ namespace System.Text.RegularExpressions {
   public class Group : Capture {
     public bool Success { get; }
     public string Name { get; }
-    public CaptureCollection Captures { get; }
   }
   public class Match : Group {
     public static Match Empty { get; }
@@ -675,12 +674,6 @@ namespace System.Text.RegularExpressions {
     public Group this[int groupnum] { get; }
     public Group this[string groupname] { get; }
     public IEnumerator<Group> GetEnumerator();
-  }
-  public class CaptureCollection : IList<Capture>, IReadOnlyList<Capture> {
-    public int Count { get; }
-    public bool IsReadOnly { get; }
-    public Capture this[int i] { get; }
-    public IEnumerator<Capture> GetEnumerator();
   }
 }
 `;

@@ -9,11 +9,31 @@ import { type CompiledProgram, compileProgram } from './compiler';
 import { CsDecimal } from './decimal';
 import { Evaluator } from './evaluator';
 import { runProgram } from './execute';
+import type { EnumerableState } from './library/iteration';
 import { enumText } from './objects';
 import { parseCSharp } from './parse';
-import { type Frame, type NativeState, Runtime } from './runtime';
-import { type ArrayType, type FieldSymbol, type NamedType, nullableUnderlying, type Type } from './types';
-import { Cell, CsArray, CsBox, CsDelegate, CsObject, CsStruct, UNASSIGNED, type Value } from './values';
+import { type Frame, Runtime } from './runtime';
+import {
+  type ArrayType,
+  baseTypeOf,
+  type FieldSymbol,
+  type NamedType,
+  nullableUnderlying,
+  substitute,
+  substitutionOf,
+  type Type,
+} from './types';
+import {
+  Cell,
+  CsArray,
+  CsBox,
+  CsDelegate,
+  CsObject,
+  CsStruct,
+  UNASSIGNED,
+  type Value,
+  type VariableReference,
+} from './values';
 
 // code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceCSharpProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
@@ -51,21 +71,9 @@ class Snapshotter {
           continue;
         // The entry point's `args` only receives the launcher's arguments, which these programs never use.
         if (method === this.program.entry && local.isParameter) continue;
-        const slot = frame.slots[local.slot];
-        if (slot === UNASSIGNED) continue;
-        const value = slot instanceof Cell ? slot.value : slot;
+        const value = valueOfSlot(frame.slots[local.slot]);
         if (value === UNASSIGNED) continue;
-        if (
-          typeof slot === 'object' &&
-          slot !== undefined &&
-          'get' in slot &&
-          typeof (slot as { get: unknown }).get === 'function' &&
-          !(slot instanceof CsObject)
-        ) {
-          addVariable(variables, local.name, (slot as { get(): Value }).get(), local.type);
-          continue;
-        }
-        addVariable(variables, local.name, value as Value, frame.resolve(local.type));
+        addVariable(variables, local.name, value, frame.resolve(local.type));
       }
     }
     if (!withContext) return variables;
@@ -93,6 +101,21 @@ class Snapshotter {
   }
 }
 
+/** The value a local's slot holds: directly, in the cell of a captured local, or behind a `ref` parameter. */
+function valueOfSlot(slot: Frame['slots'][number]): Value | typeof UNASSIGNED {
+  if (slot instanceof Cell) return slot.value;
+  if (isReference(slot)) return slot.get();
+  return slot as Value | typeof UNASSIGNED;
+}
+
+function isReference(slot: unknown): slot is VariableReference {
+  return (
+    slot instanceof Object &&
+    !(slot instanceof CsObject || slot instanceof CsStruct || slot instanceof CsArray || slot instanceof CsBox) &&
+    typeof (slot as VariableReference).get === 'function'
+  );
+}
+
 function addVariable(variables: TraceVariables, name: string, value: Value, type: Type): void {
   const scalar = scalarOf(value, type);
   if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
@@ -103,32 +126,36 @@ function addVariable(variables: TraceVariables, name: string, value: Value, type
 }
 
 function addThis(variables: TraceVariables, self: CsObject | CsStruct): void {
-  for (const field of instanceFields(self)) {
-    const scalar = scalarOf(self.fields[field.slot], field.type);
+  for (const [field, type] of instanceFields(self)) {
+    const scalar = scalarOf(self.fields[field.slot], type);
     if (scalar !== NOT_SCALAR) variables.vars[`this.${field.property?.name ?? field.name}`] = scalar;
   }
   const node = displayNodeOf(self, self.type, new Set());
   if (node) variables.referenceVars.this = node;
 }
 
-/** The instance fields of an object's type and its bases, with auto-properties' backing fields under their properties' names. */
-function instanceFields(self: CsObject | CsStruct): FieldSymbol[] {
-  const fields: FieldSymbol[] = [];
-  for (let type: NamedType | undefined = self.type; type; type = type.symbol.baseType) {
-    if (type.symbol.isLibrary) break;
-    fields.unshift(
-      ...type.symbol.fields.filter(
-        (field) =>
-          (!field.isStatic && !field.isConst && !field.name.startsWith('<')) ||
-          (field.property !== undefined && !field.isStatic)
-      )
+/**
+ * The instance fields of an object's type and its bases, with their types in the object's type arguments and
+ * auto-properties' backing fields under their properties' names. The library's types show none, except tuples and
+ * pairs, which hold the program's values in public fields.
+ */
+function instanceFields(self: CsObject | CsStruct): [FieldSymbol, Type][] {
+  const fields: [FieldSymbol, Type][] = [];
+  for (let type: NamedType | undefined = self.type; type; type = baseTypeOf(type)) {
+    if (type.symbol.isLibrary && !SHOWN_LIBRARY_TYPES.has(type.symbol.special ?? type.symbol.metadataName)) break;
+    const substitution = substitutionOf(type);
+    const own = type.symbol.fields.filter(
+      (field) =>
+        !field.isStatic &&
+        !(field.isPrimaryParameter && !field.property) &&
+        (!field.name.startsWith('<') || field.property !== undefined)
     );
+    fields.unshift(...own.map((field): [FieldSymbol, Type] => [field, substitute(field.type, substitution)]));
   }
-  return fields.filter(
-    (field, index) =>
-      fields.indexOf(field) === index && !field.isStatic && !(field.isPrimaryParameter && !field.property)
-  );
+  return fields;
 }
+
+const SHOWN_LIBRARY_TYPES = new Set(['valueTuple', 'KeyValuePair`2']);
 
 const NOT_SCALAR = Symbol('notScalar');
 
@@ -148,7 +175,6 @@ function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[str
     if (!(value instanceof CsArray) || !hasScalarElements(underlying)) return NOT_SCALAR;
     return value.values.map((item) => {
       const scalar = scalarOf(item, underlying.element);
-      // oxlint-disable-next-line unicorn/no-null -- The trace format shows C# null as null.
       // oxlint-disable-next-line unicorn/no-null -- The trace format shows C# null as null.
       return scalar === NOT_SCALAR ? null : scalar;
     }) as TraceItemVariable[string];
@@ -213,7 +239,6 @@ function hasScalarElements(type: ArrayType): boolean {
 }
 
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows C# null as null.
-// oxlint-disable-next-line unicorn/no-null -- The trace format shows C# null as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
 function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNode | undefined {
@@ -236,8 +261,8 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
     const collection = collectionNodeOf(value, seen);
     if (collection) return collection;
     const entries: Record<string, DisplayNode> = {};
-    for (const field of instanceFields(value)) {
-      const node = displayNodeOf(value.fields[field.slot], field.type, seen);
+    for (const [field, fieldType] of instanceFields(value)) {
+      const node = displayNodeOf(value.fields[field.slot], fieldType, seen);
       if (node) entries[field.property?.name ?? field.name] = node;
     }
     return { kind: 'object', entries };
@@ -248,20 +273,14 @@ function displayNodeOf(value: Value, type: Type, seen: Set<unknown>): DisplayNod
 
 /** Lists, sets, and queues show as arrays of their elements, and dictionaries as objects keyed by their keys. */
 function collectionNodeOf(value: CsObject | CsStruct, seen: Set<unknown>): DisplayNode | undefined {
-  const native = value.native as
-    | (NativeState & { display?(): { kind: 'array' | 'object'; items: [string, Value][] } })
-    | undefined;
-  if (!native || typeof native.display !== 'function') return undefined;
-  const { kind, items } = native.display();
+  const native = value.native as EnumerableState | undefined;
+  const shown = native && typeof native.display === 'function' ? native.display() : undefined;
+  if (!shown) return undefined;
   const entries: Record<string, DisplayNode> = {};
-  for (const [key, item] of items) entries[key] = displayNodeOf(item, elementTypeOf(item), seen) ?? NULL_NODE;
-  return { kind, entries };
-}
-
-/** The type that a collection element shows by, which only its value tells. */
-function elementTypeOf(value: Value): Type {
-  return { kind: 'null' } as Type & { kind: 'null' } as Type;
-  void value;
+  for (const [key, item, type] of shown.items) {
+    entries[key] = displayNodeOf(item, type, seen) ?? NULL_NODE;
+  }
+  return { kind: shown.kind, entries };
 }
 
 function turtleNodeOf(turtle: TurtleState): DisplayNode | undefined {

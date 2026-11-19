@@ -2,8 +2,6 @@
 // of the types this grader declares), so that names .NET has but this grader lacks are rejected as unavailable rather
 // than reported as undefined.
 export const DOTNET_TYPES: readonly string[] = [
-  "/Users/fukushiro/Documents/tokyo-online-university/worktrees/csharp/.tmp/ref/dump.cs(7,21): warning IL2026: Using member 'System.Reflection.Assembly.GetExportedTypes()' which has 'RequiresUnreferencedCodeAttribute' can break functionality when trimming application code. Types might be removed.",
-  "/Users/fukushiro/Documents/tokyo-online-university/worktrees/csharp/.tmp/ref/dump.cs(12,23): warning IL2075: 'this' argument does not satisfy 'DynamicallyAccessedMemberTypes.PublicConstructors', 'DynamicallyAccessedMemberTypes.PublicMethods', 'DynamicallyAccessedMemberTypes.PublicFields', 'DynamicallyAccessedMemberTypes.PublicNestedTypes', 'DynamicallyAccessedMemberTypes.PublicProperties', 'DynamicallyAccessedMemberTypes.PublicEvents' in call to 'System.Type.GetMembers(BindingFlags)'. The return value of method 'System.Collections.IEnumerator.Current.get' does not have matching annotations. The source value must declare at least the same requirements as those declared on the target location it is assigned to.",
   'System.AccessViolationException',
   'System.Action',
   'System.Action`1',

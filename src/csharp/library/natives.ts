@@ -4,3 +4,6 @@ import './nativesTime';
 import './nativesString';
 import './nativesCollections';
 import './nativesLinq';
+import './nativesRandom';
+import './nativesRegex';
+import './nativesSorted';

@@ -609,13 +609,14 @@ export class HashState implements EnumerableState {
     return this.entries.flatMap((entry) => [entry.key, entry.value]);
   }
 
-  display(): { kind: 'array' | 'object'; items: [string, Value, Type | undefined][] } {
+  display(): { kind: 'array' | 'object'; items: [string, Value, Type][] } {
     const live = this.entries.filter((entry) => !entry.isFree);
-    if (!this.valueType)
+    const valueType = this.valueType;
+    if (!valueType)
       return { kind: 'array', items: live.map((entry, index) => [String(index), entry.key, this.keyType]) };
     return {
       kind: 'object',
-      items: live.map((entry) => [this.keyText?.(entry.key) ?? String(entry.key), entry.value, this.valueType]),
+      items: live.map((entry) => [this.keyText?.(entry.key) ?? String(entry.key), entry.value, valueType]),
     };
   }
 

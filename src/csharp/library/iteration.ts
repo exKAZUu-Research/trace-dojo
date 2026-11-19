@@ -11,7 +11,7 @@ import { evaluatorOf, fail, failNull } from './support';
 export interface EnumerableState extends NativeState {
   enumerate(): Iterable<Value>;
   /** The elements and how a trace shows them, as an array or as an object keyed by its keys. */
-  display?(): { kind: 'array' | 'object'; items: [string, Value, Type | undefined][] };
+  display?(): { kind: 'array' | 'object'; items: [string, Value, Type][] };
 }
 
 export function isEnumerableState(native: unknown): native is EnumerableState {

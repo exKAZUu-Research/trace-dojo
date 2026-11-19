@@ -591,10 +591,6 @@ class BuilderState implements NativeState {
   references(): Value[] {
     return [];
   }
-
-  display(): { kind: 'array' | 'object'; items: [string, Value, Type | undefined][] } | undefined {
-    return undefined;
-  }
 }
 
 function builder(receiver: Value): BuilderState {

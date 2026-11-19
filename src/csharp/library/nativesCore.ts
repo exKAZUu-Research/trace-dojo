@@ -26,6 +26,7 @@ import { CsThrow, type ExceptionState, ProgramExit } from '../runtime';
 import { type FieldSymbol, type NamedType, specialOf, type SpecialType, type Type } from '../types';
 import { type CsArray, CsBox, CsDelegate, CsObject, CsStruct, type Value, type VariableReference } from '../values';
 import { formatValue, parseNumber } from './formatting';
+import { linqDisplayName } from './nativesLinq';
 import {
   arrayValues,
   evaluatorOf,
@@ -37,6 +38,7 @@ import {
   parameterType,
   refOf,
   textOf,
+  unsupportedCall,
 } from './support';
 import { turtleMethodName } from './turtleSource';
 
@@ -65,8 +67,13 @@ defineNatives({
     if (receiver instanceof CsStruct) return structHash(evaluatorOf(call), receiver, call.frame);
     return primitiveHash(receiver) ?? identityHash(receiver);
   },
-  'System.Object.GetType': (call, receiver) =>
-    typeObject(call, call.frame.runtime.runtimeTypeOf(receiver) ?? libraryType(call, 'System.Object')),
+  'System.Object.GetType': (call, receiver) => {
+    const linqName = receiver instanceof CsObject ? linqDisplayName(receiver.native) : undefined;
+    return typeObject(
+      call,
+      linqName ?? call.frame.runtime.runtimeTypeOf(receiver) ?? libraryType(call, 'System.Object')
+    );
+  },
   'System.Object.ReferenceEquals': (_call, _receiver, [a, b]) => a === b,
   'System.Object.Equals(object?, object?)': (call, _receiver, [a, b]) => {
     if (a === b) return true;
@@ -84,20 +91,53 @@ defineNatives({
   'System.ValueType.GetHashCode': (call, receiver) =>
     receiver instanceof CsStruct ? structHash(evaluatorOf(call), receiver, call.frame) : (primitiveHash(receiver) ?? 0),
   'System.ValueType.ToString': (call, receiver) => defaultToString(evaluatorOf(call), receiver),
-  'System.Type.get_Name': (_call, receiver) => runtimeSimpleName((receiver as CsObject).native as Type),
-  'System.Type.get_FullName': (_call, receiver) => runtimeTypeName((receiver as CsObject).native as Type),
+  'System.Type.get_Name': (_call, receiver) => {
+    const type = typeOf(receiver);
+    return typeof type === 'string' ? (/[.+]([^.+[]+)(?:\[|$)/.exec(type)?.[1] ?? type) : runtimeSimpleName(type);
+  },
+  'System.Type.get_FullName': (call, receiver) => {
+    const type = typeOf(receiver);
+    // .NET qualifies a generic type's arguments with their assemblies, which name the program's own file.
+    if (typeof type === 'string' || (type.kind === 'named' && type.args.length > 0))
+      unsupportedCall(call, '型引数のある型の FullName');
+    return runtimeTypeName(type);
+  },
   'System.Type.get_Namespace': (_call, receiver) => {
-    const type = (receiver as CsObject).native as Type;
+    const type = typeOf(receiver);
+    if (typeof type === 'string') return type.slice(0, type.lastIndexOf('.', type.search(/[+`]/)));
     return type.kind === 'named' ? type.symbol.namespace || undefined : 'System';
   },
-  'System.Type.ToString': (_call, receiver) => runtimeTypeName((receiver as CsObject).native as Type),
+  'System.Type.ToString': (_call, receiver) => {
+    const type = typeOf(receiver);
+    return typeof type === 'string' ? type : runtimeTypeName(type);
+  },
 });
 
-/** A `System.Type` object standing for a type, which only names it. */
-function typeObject(call: NativeCall, type: Type): CsObject {
-  const object = new CsObject(libraryType(call, 'System.Type'), []);
-  object.native = type;
+/**
+ * A `System.Type` object standing for a type, which only names it: a type of the program or the library, or the full
+ * name of a LINQ iterator, which stands for .NET's internal classes.
+ */
+function typeObject(call: NativeCall, type: Type | string): CsObject {
+  // .NET has one `Type` object per type, so that `==` and `ReferenceEquals` compare types.
+  let objects = typeObjects.get(call.frame.runtime);
+  if (!objects) {
+    objects = new Map();
+    typeObjects.set(call.frame.runtime, objects);
+  }
+  const key = typeof type === 'string' ? type : runtimeTypeName(type);
+  let object = objects.get(key);
+  if (!object) {
+    object = new CsObject(libraryType(call, 'System.Type'), []);
+    object.native = type;
+    objects.set(key, object);
+  }
   return object;
+}
+
+const typeObjects = new WeakMap<object, Map<string, CsObject>>();
+
+function typeOf(receiver: Value): Type | string {
+  return (receiver as CsObject).native as Type | string;
 }
 
 // ---- Enum ----

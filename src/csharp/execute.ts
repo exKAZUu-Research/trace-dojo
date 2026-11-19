@@ -22,6 +22,8 @@ export function executeCSharpProgram(source: string, input?: ProgramInput): Prog
     const runtime = new Runtime(compiled.library, input);
     return { kind: 'executed', ...runProgram(new Evaluator(runtime, compiled)) };
   } catch (error) {
+    // A library call whose arguments use what this environment cannot run, such as a regular expression's construct.
+    if (error instanceof CompileError) return { kind: 'compileError', diagnostics: error.diagnostics };
     if (error instanceof ExecutionLimitError) return { kind: 'limitExceeded', limit: error.limit };
     throw error;
   }

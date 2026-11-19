@@ -9,7 +9,8 @@ export interface NativeCall {
   /** The type arguments of a generic method. */
   typeArgs: Type[];
   /** The constructed type the method belongs to, which a static method of a generic type needs. */
-  owner: NamedType | undefined;
+  owner: NamedType | undefined /** The row of the call, where an error about the call's arguments points. */;
+  row: number | undefined;
 }
 
 /** A library method implemented in TypeScript. `ref` and `out` arguments arrive as references. */
