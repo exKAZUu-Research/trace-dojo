@@ -1,7 +1,7 @@
 import { CppException } from '../errors';
-import { makeEach } from '../objectCompiler';
+import { makeEach, withTemporaries } from '../objectCompiler';
 import type { Frame } from '../runtime';
-import { Ptr, UNINIT, type Value } from '../values';
+import { ArrayStore, holdValues, Ptr, UNINIT, type Value } from '../values';
 import type { SequenceValue } from './containerValues';
 import { destroyElements, type ElementOperations, moveConstructElement } from './elements';
 
@@ -140,16 +140,8 @@ export class SequenceEditor {
     } else if (this.kind === 'vector') {
       this.vectorInsertRange(frame, self, at, source);
       self.invalidateVectorSuffix(at);
-    } else if (isForwardOnly) {
-      // A deque copies a forward-only range into a buffer first, and moves the buffer's elements in.
-      const buffer = source.values.map((value) => source.construct(frame, value));
-      this.dequeInsertBidirectional(frame, self, at, {
-        values: buffer,
-        construct: (f, value) => this.ops.copy(f, value),
-        isSameType: true,
-      });
-      destroyElements(frame, buffer, this.ops.destroy, 'reverse');
-    } else this.dequeInsertBidirectional(frame, self, at, source);
+    } else if (isForwardOnly) this.dequeInsertBuffered(frame, self, at, source);
+    else this.dequeInsertBidirectional(frame, self, at, source);
   }
 
   /** `erase(first, last)`. */
@@ -357,13 +349,21 @@ export class SequenceEditor {
   }
 
   private dequeInsertCopies(frame: Frame, self: SequenceValue, at: number, count: number, value: Ptr): void {
-    if (at < self.items.length - at) this.dequeInsertCopiesAtFront(frame, self, at, count, value);
-    else this.dequeInsertCopiesAtBack(frame, self, at, count, value);
+    this.editDequeInsertion(frame, self, at, count, (cells, atFront) => {
+      if (atFront) this.dequeInsertCopiesAtFront(frame, self, cells, at, count, value);
+      else this.dequeInsertCopiesAtBack(frame, self, cells, at, count, value);
+    });
   }
 
   /** libc++'s `deque::insert(p, n, v)` when it shifts the elements before `p` toward the front. */
-  private dequeInsertCopiesAtFront(frame: Frame, self: SequenceValue, at: number, count: number, value: Ptr): void {
-    const cells: Value[] = [...Array.from<Value>({ length: count }).fill(UNINIT), ...self.items];
+  private dequeInsertCopiesAtFront(
+    frame: Frame,
+    self: SequenceValue,
+    cells: Value[],
+    at: number,
+    count: number,
+    value: Ptr
+  ): void {
     const followed = new Followed(value, value.store === self ? value.index + count : undefined, cells);
     const oldBegin = count;
     let first = oldBegin;
@@ -381,13 +381,17 @@ export class SequenceEditor {
       for (let index = moved; index < oldBegin + at; index++) this.assignAt(frame, cells, begin++, cells[index]);
       for (let index = 0; index < remaining; index++) this.assignAt(frame, cells, begin + index, followed.read());
     }
-    self.editPositions(at, 0, count);
-    self.items = cells.slice(first);
   }
 
   /** libc++'s `deque::insert(p, n, v)` when it shifts the elements after `p` toward the back. */
-  private dequeInsertCopiesAtBack(frame: Frame, self: SequenceValue, at: number, count: number, value: Ptr): void {
-    const cells = [...self.items];
+  private dequeInsertCopiesAtBack(
+    frame: Frame,
+    self: SequenceValue,
+    cells: Value[],
+    at: number,
+    count: number,
+    value: Ptr
+  ): void {
     const followed = new Followed(value, value.store === self ? value.index : undefined, cells);
     const length = cells.length;
     const after = length - at;
@@ -407,20 +411,32 @@ export class SequenceEditor {
       for (let index = 0; index < remaining; index++)
         this.assignAt(frame, cells, end - remaining + index, followed.read());
     }
-    self.editPositions(at, 0, count);
-    self.items = cells;
+  }
+
+  private dequeInsertBuffered(frame: Frame, self: SequenceValue, at: number, source: Source): void {
+    withTemporaries(frame, () => {
+      const values: Value[] = [];
+      const { copy, destroy } = this.ops;
+      frame.temporaries.push({
+        object: new ArrayStore(values),
+        destroy: (f) => destroyElements(f, values, destroy, 'reverse'),
+      });
+      for (const value of source.values) values.push(source.construct(frame, value));
+      this.dequeInsertBidirectional(frame, self, at, { values, construct: copy, isSameType: true });
+    });
   }
 
   /** libc++'s `deque::__insert_bidirectional`. */
   private dequeInsertBidirectional(frame: Frame, self: SequenceValue, at: number, source: Source): void {
-    if (at < self.items.length - at) this.dequeInsertRangeAtFront(frame, self, at, source);
-    else this.dequeInsertRangeAtBack(frame, self, at, source);
+    this.editDequeInsertion(frame, self, at, source.values.length, (cells, atFront) => {
+      if (atFront) this.dequeInsertRangeAtFront(frame, cells, at, source);
+      else this.dequeInsertRangeAtBack(frame, cells, at, source);
+    });
   }
 
-  private dequeInsertRangeAtFront(frame: Frame, self: SequenceValue, at: number, source: Source): void {
+  private dequeInsertRangeAtFront(frame: Frame, cells: Value[], at: number, source: Source): void {
     const { values } = source;
     const count = values.length;
-    const cells: Value[] = [...Array.from<Value>({ length: count }).fill(UNINIT), ...self.items];
     const oldBegin = count;
     let first = oldBegin;
     // The values before `middle` go before the old first element; the rest are assigned over moved elements.
@@ -434,14 +450,11 @@ export class SequenceEditor {
       for (let index = moved; index < oldBegin + at; index++) this.assignAt(frame, cells, begin++, cells[index]);
       for (let index = middle; index < count; index++) this.assignFrom(frame, cells, begin++, source, values[index]);
     }
-    self.editPositions(at, 0, count);
-    self.items = cells.slice(first);
   }
 
-  private dequeInsertRangeAtBack(frame: Frame, self: SequenceValue, at: number, source: Source): void {
+  private dequeInsertRangeAtBack(frame: Frame, cells: Value[], at: number, source: Source): void {
     const { values } = source;
     const count = values.length;
-    const cells = [...self.items];
     const length = cells.length;
     const after = length - at;
     let last = length;
@@ -455,8 +468,32 @@ export class SequenceEditor {
       for (let index = moved; index > at;) this.assignAt(frame, cells, --end, cells[--index]);
       for (let index = middle; index > 0;) this.assignFrom(frame, cells, --end, source, values[--index]);
     }
-    self.editPositions(at, 0, count);
-    self.items = cells;
+  }
+
+  private editDequeInsertion(
+    frame: Frame,
+    self: SequenceValue,
+    at: number,
+    count: number,
+    edit: (cells: Value[], atFront: boolean) => void
+  ): void {
+    const length = self.items.length;
+    const atFront = at < length - at;
+    const cells = atFront ? [...Array.from<Value>({ length: count }).fill(UNINIT), ...self.items] : [...self.items];
+    holdValues(frame, [new ArrayStore(cells)], () => {
+      try {
+        edit(cells, atFront);
+      } catch (error) {
+        if (error instanceof CppException) {
+          const committed = atFront ? cells.slice(cells.findIndex((value) => value !== UNINIT)) : cells;
+          self.editPositions(atFront ? 0 : length, 0, committed.length - length);
+          self.items = committed;
+        }
+        throw error;
+      }
+      self.editPositions(at, 0, count);
+      self.items = cells;
+    });
   }
 }
 

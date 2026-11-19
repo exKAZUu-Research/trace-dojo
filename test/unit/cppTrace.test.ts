@@ -252,6 +252,56 @@ int main() { ${edit} }`;
   expect(traceProgram('cpp', program, program)).toMatchObject({ stdout: '00', uncaughtException: undefined });
 });
 
+test.each([
+  ['count at the back', '', 'items.insert(items.end(), 3, value);'],
+  ['count at the front', 'items.emplace_back();', 'items.insert(items.begin(), 3, value);'],
+  ['range at the back', '', 'items.insert(items.end(), source, source + 3);'],
+  ['range at the front', 'items.emplace_back();', 'items.insert(items.begin(), source, source + 3);'],
+])('roots new deque elements during insertion by %s', (_, setup, insert) => {
+  const program = `#include <deque>
+int copies = 0;
+struct Item {
+  Turtle* turtle = nullptr;
+  Item() {}
+  Item(const Item&) { turtle = new Turtle(++copies, 0); }
+};
+int main() {
+  Item value;
+  Item source[3];
+  std::deque<Item> items;
+  ${setup}
+  ${insert}
+}`;
+  const trace = traceProgram('cpp', program, program);
+  expect(trace.finalTurtles.map(({ x }) => x)).toEqual([1, 2, 3]);
+});
+
+test('retains intermediate deque values during forward range insertion', () => {
+  const program = `#include <deque>
+#include <iostream>
+#include <unordered_map>
+#include <utility>
+Turtle observer(0, 0);
+int copies = 0;
+struct Item {
+  Turtle* turtle = nullptr;
+  Item() {}
+  Item(const Item&) {
+    std::cout << observer.canMoveForward();
+    turtle = new Turtle(0, ++copies);
+  }
+};
+int main() {
+  std::unordered_map<int, Item> source;
+  source.try_emplace(1);
+  source.try_emplace(2);
+  source.try_emplace(3);
+  std::deque<std::pair<int, Item>> items;
+  items.insert(items.end(), source.begin(), source.end());
+}`;
+  expect(traceProgram('cpp', program, program)).toMatchObject({ stdout: '100000', uncaughtException: undefined });
+});
+
 test('an uncaught exception preserves the turtles reached from main before unwinding', () => {
   const program = `int main() {
   Turtle t(3, 5);
@@ -538,6 +588,23 @@ test('delete checks the original allocation type after void pointer recovery', (
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'executed',
     uncaughtException: expect.stringContaining('ポインタで扱えません'),
+  });
+});
+
+test('an exception message pointer expires when its last owner ends', () => {
+  const program = `#include <stdexcept>
+int main() {
+  const char* message = nullptr;
+  {
+    std::runtime_error original("message");
+    message = original.what();
+    std::runtime_error copy = original;
+  }
+  return message[0];
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: expect.stringContaining('有効期間が終わった'),
   });
 });
 

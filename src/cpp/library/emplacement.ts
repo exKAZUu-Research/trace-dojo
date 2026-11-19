@@ -2,6 +2,7 @@ import { CompileError } from '../../interpreter/diagnostics';
 import { CppException } from '../errors';
 import type { Expr, Initializer } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
+import { makeEach } from '../objectCompiler';
 import { type Eval, type Frame, holdAll } from '../runtime';
 import type { Syntax } from '../syntax';
 import { type ClassInfo, isConstType, type Type, typeName, unqualified, VOID, withConst } from '../types';
@@ -185,6 +186,23 @@ function constructEntries<T extends Store, Position>(
       throw error;
     }
   });
+}
+
+export function copyEntries(
+  frame: Frame,
+  entries: readonly Value[],
+  ops: ElementOperations,
+  cleanup: 'destroy' | 'release' = 'destroy'
+): Value[] {
+  const destroy = cleanup === 'destroy' ? ops.destroy : undefined;
+  return makeEach(
+    frame,
+    entries.length,
+    (index) => ops.copy(frame, entries[index]),
+    () => destroy,
+    undefined,
+    'forward'
+  );
 }
 
 /** Inserts a copy of an entry unless its key is there already, which libc++ looks up before it copies. */

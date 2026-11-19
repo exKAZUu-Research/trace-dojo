@@ -861,7 +861,7 @@ export function newObject(frame: Frame, cls: ClassInfo, zeroInitialize = false, 
 
 export function installBaseValue(base: ClassInfo, target: CObject, initialized: CObject): void {
   if (initialized === target) return;
-  target.message = initialized.message;
+  target.takeMessageFrom(initialized);
   for (const field of base.fields) target.values[field.index] = initialized.values[field.index];
 }
 

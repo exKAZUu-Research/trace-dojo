@@ -132,13 +132,18 @@ export class ArrayStore extends Store {
   }
 }
 
+interface ExceptionMessage {
+  text: string;
+  owners: number;
+  storage?: ArrayStore;
+}
+
 /** An object of a class the program declares, or of a library class with members, holding its data members. */
 export class CObject extends Store {
   /** The turtle of a `Turtle` object. */
   turtle?: TurtleState;
   /** The message of a library exception, which `what()` returns, as bytes. */
-  private messageText?: string;
-  messageStorage?: ArrayStore;
+  private exceptionMessage?: ExceptionMessage;
   referenceTemporaries?: Temporary[];
   needsConstruction = false;
   private memberStorage?: Map<number, MemberStorage>;
@@ -160,13 +165,40 @@ export class CObject extends Store {
   }
 
   get message(): string | undefined {
-    return this.messageText;
+    return this.exceptionMessage?.text;
   }
 
   set message(text: string | undefined) {
-    if (this.messageStorage) endLifetime(this.messageStorage);
-    this.messageStorage = undefined;
-    this.messageText = text;
+    this.releaseMessage();
+    if (text !== undefined) this.exceptionMessage = { text, owners: 1 };
+  }
+
+  messageLocation(create: (text: string) => ArrayStore): Ptr {
+    const message = (this.exceptionMessage ??= { text: 'std::exception', owners: 1 });
+    message.storage ??= create(message.text);
+    return message.storage.location(0);
+  }
+
+  shareMessageFrom(source: CObject): void {
+    const message = source.exceptionMessage;
+    if (this.exceptionMessage === message) return;
+    this.releaseMessage();
+    this.exceptionMessage = message;
+    if (message) message.owners++;
+  }
+
+  takeMessageFrom(source: CObject): void {
+    if (source === this) return;
+    this.releaseMessage();
+    this.exceptionMessage = source.exceptionMessage;
+    source.exceptionMessage = undefined;
+  }
+
+  releaseMessage(liveness = Liveness.Dead): void {
+    const message = this.exceptionMessage;
+    if (!message) return;
+    this.exceptionMessage = undefined;
+    if (--message.owners === 0) endLifetime(message.storage, liveness);
   }
 
   get(index: number): Value {
@@ -246,7 +278,7 @@ export function endLifetime(value: Value, liveness = Liveness.Dead): void {
   value.liveness = liveness;
   if (value instanceof Box && !value.ownsValue) return;
   if (value instanceof MemberStorage) return;
-  if (value instanceof CObject && value.messageStorage) endLifetime(value.messageStorage, liveness);
+  if (value instanceof CObject) value.releaseMessage(liveness);
   for (const child of childValues(value)) endLifetime(child, liveness);
 }
 

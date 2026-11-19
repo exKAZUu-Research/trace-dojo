@@ -24,6 +24,7 @@ import { destroyElements, type ElementOperations, elementOperations, equalTo } f
 import {
   addRangeMembers,
   associativeInitializerList,
+  copyEntries,
   emplacementCall,
   type EntryTable,
   insertCopy,
@@ -684,10 +685,16 @@ export function unorderedClass(
     copy: (frame, source) => {
       const from = source as HashValue;
       const target = make();
+      // Apple libc++ skips entry destructors when hash-table copy construction throws.
       target.copyStructure(
         frame,
         from,
-        from.nodes().map((node) => ops().copy(frame, node.value))
+        copyEntries(
+          frame,
+          from.nodes().map((node) => node.value),
+          ops(),
+          'release'
+        )
       );
       return target;
     },

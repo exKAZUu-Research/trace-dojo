@@ -45,11 +45,12 @@ export function exceptionClasses(stringType: () => Type): Map<string, ClassInfo>
         const object = source as CObject;
         const copy = new CObject(cls, [...object.values]);
         // Copying as `std::exception` slices the message off, as its copy constructor keeps none.
-        copy.message = hasMessage ? object.message : defaultMessage;
+        if (hasMessage) copy.shareMessageFrom(object);
+        else copy.message = defaultMessage;
         return copy;
       },
       assign: (_frame, target, source) => {
-        if (hasMessage && target !== source) (target as CObject).message = (source as CObject).message;
+        if (hasMessage) (target as CObject).shareMessageFrom(source as CObject);
       },
     };
     classes.set(name, cls);
@@ -57,17 +58,10 @@ export function exceptionClasses(stringType: () => Type): Map<string, ClassInfo>
   };
   const exception = define('exception', undefined, false);
   const what = {
-    ...native(
-      'what',
-      [],
-      CONST_CHAR_PTR,
-      (_args, { self }) => {
-        const exception = self as CObject;
-        exception.messageStorage ??= cStringStore(exception.message ?? 'std::exception');
-        return exception.messageStorage.location(0);
-      },
-      { isConst: true, isVirtual: true }
-    ),
+    ...native('what', [], CONST_CHAR_PTR, (_args, { self }) => (self as CObject).messageLocation(cStringStore), {
+      isConst: true,
+      isVirtual: true,
+    }),
     isNoexcept: true,
   };
   addMethod(exception, what);

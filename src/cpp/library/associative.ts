@@ -41,6 +41,7 @@ import {
 import {
   addRangeMembers,
   associativeInitializerList,
+  copyEntries,
   emplacementCall,
   type EntryTable,
   insertCopy,
@@ -646,13 +647,13 @@ export function orderedClass(
     elementUseOnAssignment: 'copy',
   };
   cls.operations = {
-    copy: (frame, source) => make((source as OrderedValue).entries.map((entry) => ops().copy(frame, entry))),
+    copy: (frame, source) => make(copyEntries(frame, (source as OrderedValue).entries, ops())),
     assign: (frame, target, source) => {
       const to = target as OrderedValue;
       const from = source as OrderedValue;
       if (to === from) return;
       const old = to.entries;
-      to.replace(from.entries.map((entry) => ops().copy(frame, entry)));
+      to.replace(copyEntries(frame, from.entries, ops()));
       destroyAll(frame, old);
     },
     destroy: (frame, value) => destroyAll(frame, (value as OrderedValue).entries),
