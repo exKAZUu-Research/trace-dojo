@@ -1596,6 +1596,7 @@ export class Compiler extends StatementCompiler {
     if (isConstexpr && !binding.isConstant) this.error(row, 'constexpr の変数の初期値には定数式を書いてください。');
     global.hasStaticReferenceBinding = binding.isConstant;
     global.constantLocation = binding.isConstant ? binding.constantLocation : undefined;
+    global.referentConstant = this.constantReferenceValue(binding, true);
     const initializers = binding.isConstant ? this.constantInitializers : this.dynamicInitializers;
     initializers.push(this.staticReferenceInitializer(global, binding, row, true));
   }

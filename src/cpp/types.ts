@@ -91,6 +91,7 @@ export interface GlobalInfo {
   row: number;
   isDefined: boolean;
   hasStaticReferenceBinding?: boolean;
+  referentConstant?: number | bigint;
   isConstexprPointer?: boolean;
   hasConstantObjectValue?: boolean;
   constantLocation?: ConstantLocation;

@@ -301,6 +301,19 @@ test.each([
 });
 
 test.each([
+  [
+    'int count = 3;\nstruct Holder { inline static constexpr const int& value = count; };\nconstexpr int copied = Holder::value;\nint main() {}',
+    2,
+  ],
+  ['int main() { const int& value = 3;\nconstexpr int copied = value; }', 1],
+])('a reference must designate a readable constant for constexpr initialization', (source, row) => {
+  expect(executeProgram('cpp', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row, message: expect.stringContaining('定数式') }],
+  });
+});
+
+test.each([
   ['for_each', 'void callback(bool&) {}', 'callback'],
   ['transform', 'int callback(bool&) { return 1; }', 'out, callback'],
 ])('std::%s rejects bool lvalue references for bit proxy callbacks', (name, callback, argumentsAfterRange) => {

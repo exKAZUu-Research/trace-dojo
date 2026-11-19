@@ -275,7 +275,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         const { slot, type } = entity.local;
         const constant = entity.constant;
         if (entity.isReference) {
-          return { type: nonReference(type), isLvalue: true, row, run: (frame) => frame.slots[slot] as Ptr };
+          return {
+            type: nonReference(type),
+            isLvalue: true,
+            row,
+            constant,
+            run: (frame) => frame.slots[slot] as Ptr,
+          };
         }
         return {
           type,
@@ -497,6 +503,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   ): Expr {
     const { type, index, constantLocation } = global;
     const isReference = type.kind === 'reference';
+    const known = isReference ? global.referentConstant : constant;
     const evaluateObject = object ? this.materialize(object).run : undefined;
     const locate = (frame: Frame): Ptr => {
       evaluateObject?.(frame);
@@ -507,7 +514,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       type: nonReference(type),
       isLvalue: true,
       row,
-      constant: evaluateObject ? undefined : constant,
+      constant: evaluateObject ? undefined : known,
       staticAddress: !evaluateObject && (!isReference || global.hasStaticReferenceBinding),
       constantInitialization:
         !evaluateObject && (isReference ? hasConstantObject(constantLocation) : global.hasConstantObjectValue),
@@ -515,10 +522,10 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       constantPointerValue: !evaluateObject && global.isConstexprPointer,
       constantPointee: evaluateObject ? undefined : global.constantPointee,
       readConstant:
-        evaluateObject && constant !== undefined
+        evaluateObject && known !== undefined
           ? (frame) => {
               evaluateObject(frame);
-              return constant;
+              return known;
             }
           : undefined,
       get run() {

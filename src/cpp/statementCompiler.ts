@@ -514,7 +514,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const { type } = binding;
     const deduced = hasAuto(declared.to) ? { name, type: deducedType(declared, type) } : undefined;
     const local = this.context.declareLocal(name, type, false);
-    this.context.scope.names.set(name, { kind: 'local', local, isReference: true });
+    this.context.scope.names.set(name, {
+      kind: 'local',
+      local,
+      isReference: true,
+      constant: this.constantReferenceValue(binding, false),
+    });
     const { slot } = local;
     if ('lifetime' in binding) {
       return { ...this.extendedReference(slot, name, binding.lifetime), deduced };
@@ -590,10 +595,15 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return {
       type,
       isConstant: isDirect && target.staticAddress,
-      memberConstant: isDirect ? target.memberConstant : undefined,
+      memberConstant: isDirect ? memberConstantOf(target) : undefined,
       constantLocation: isDirect ? constantLocationOf(target) : undefined,
       loc: this.convert(target, type, row).run as Eval<Ptr>,
     };
+  }
+
+  protected constantReferenceValue(binding: ReferenceBinding, isStatic: boolean): number | bigint | undefined {
+    if (!isArithmetic(binding.type.to) || !binding.isConstant || (!isStatic && 'lifetime' in binding)) return;
+    return binding.memberConstant?.(NO_CONSTANT_MEMBERS);
   }
 
   private extendedReference(
@@ -637,8 +647,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const global = this.declareStaticStorage(name, type, row, false);
     const local = this.context.declareLocal(name, type, false);
     const direct = !hasToken(declarator, '=');
-    const constant =
-      !reference && this.isConstexpr(declaration)
+    const constant = reference
+      ? this.constantReferenceValue(reference, true)
+      : this.isConstexpr(declaration)
         ? this.requireConstantInitializer(type, value, row, direct)
         : undefined;
     const entity: Extract<Entity, { kind: 'local' }> = {
