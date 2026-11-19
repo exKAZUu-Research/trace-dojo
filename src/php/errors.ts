@@ -231,13 +231,13 @@ export function isCleanupException(error: unknown): error is CleanupException {
 // code-gauge-allow functionCognitiveComplexity 19 -- Captures cleanup failures and their ownership in propagation order.
 export function withCleanupExceptions(
   runtime: Runtime,
-  cleanup: (capture: (error: CleanupException) => void) => void,
+  cleanup: (capture: (error: CleanupException, forceLatest?: boolean) => void) => void,
   order: 'prefer-exit' | 'latest' = 'prefer-exit'
 ): void {
   const heldMark = runtime.held.length;
   let failure: CleanupException | undefined;
-  const capture = (error: CleanupException): void => {
-    if (failure instanceof ExitSignal && order === 'prefer-exit') {
+  const capture = (error: CleanupException, forceLatest = false): void => {
+    if (failure instanceof ExitSignal && order === 'prefer-exit' && !forceLatest) {
       if (error instanceof PhpThrow && runtime.thrown === error.object) runtime.thrown = undefined;
       return;
     }
@@ -272,7 +272,8 @@ export function invalidObjectDimension(object: PhpObject, previous?: PhpThrow | 
 export type UpdateWarning = (emit: () => void, whilePending?: () => void) => boolean;
 
 export function withOperandWarnings(
-  update: (warning: UpdateWarning, pending: () => PhpThrow | undefined) => Value
+  update: (warning: UpdateWarning, pending: () => PhpThrow | undefined) => Value,
+  order: 'prefer-exit' | 'latest' = 'prefer-exit'
 ): Value {
   // oxlint-disable-next-line unicorn/no-null -- PHP operators can return a null zval.
   let result: Value = null;
@@ -282,12 +283,12 @@ export function withOperandWarnings(
       const state = createOperandWarningState(capture);
       result = update(state.warning, state.pendingThrow);
     },
-    'latest'
+    order
   );
   return result;
 }
 
-function createOperandWarningState(capture: (error: CleanupException) => void): {
+function createOperandWarningState(capture: (error: CleanupException, forceLatest?: boolean) => void): {
   warning: UpdateWarning;
   pendingThrow: () => PhpThrow | undefined;
 } {
@@ -301,7 +302,7 @@ function createOperandWarningState(capture: (error: CleanupException) => void): 
       return !hadPending;
     } catch (error) {
       if (!isCleanupException(error)) throw error;
-      capture(error);
+      capture(error, hadPending);
       if (!(pending instanceof ExitSignal)) pending = error;
       return false;
     }

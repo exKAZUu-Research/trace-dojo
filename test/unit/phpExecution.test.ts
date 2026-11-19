@@ -3442,4 +3442,10 @@ try { $a->x--; } catch (Throwable $e) { echo 'caught:' . $e->getMessage() . ';';
     stdout:
       'get;h:Decrement on type null has no effect, this will change in the next major version of PHP;h:second;caught:first;',
   });
+
+  const operandExitPrecedence = run(String.raw`<?php
+set_error_handler(function () { echo 'handler;'; exit('exit;'); });
+try { $missing / 0; echo 'after;'; } catch (Throwable $e) { echo 'caught:' . $e->getMessage() . ';'; }
+`);
+  expect(operandExitPrecedence).toMatchObject({ kind: 'executed', stdout: 'handler;exit;' });
 });

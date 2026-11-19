@@ -1281,7 +1281,7 @@ export function applyOperator(op: string, left: Value, right: Value, pending?: P
 const INTERRUPTED_NULL = Symbol('interrupted null decrement');
 
 export function incDec(e: Extract<Expr, { k: 'incdec' }>): Value {
-  return withOperandWarnings((warning) => incrementPlace(e, warning));
+  return withOperandWarnings((warning) => incrementPlace(e, warning), 'latest');
 }
 
 function incrementPlace(e: Extract<Expr, { k: 'incdec' }>, warning: UpdateWarning): Value {
