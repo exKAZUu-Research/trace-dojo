@@ -935,8 +935,6 @@ test.each([
   '<?php preg_match("/(?:|a){0,3}/","aa");',
   '<?php preg_match("/(?:a*?)*/","aa");',
   '<?php preg_match("/(?:x*|a)+/","aa");',
-  '<?php preg_match("/^(?:a+)+$/",str_repeat("a", 30)."b");',
-  '<?php preg_match("/^(?:a|aa)+$/",str_repeat("a", 30)."b");',
 ])('rejects regex semantics the host cannot preserve: %s', (source) => {
   expect(run(source)).toMatchObject({
     kind: 'executed',
@@ -945,18 +943,38 @@ test.each([
 });
 
 test.each([
-  'a*a*a*a*',
-  'a+a?a+a+',
-  '[a-c]+b[a-d]+',
-  '(?:a*)(a*)(?:a*)',
-  '(?i:a*)A*a*',
-  '(?i:z)(a+|b)(a+|b)(a+|b)',
-  '(?i:z)(a*|b)(a*|b)(a*|b)',
-])('bounds overlapping repeated atoms: %s', (pattern) => {
-  expect(run(`<?php preg_match('/^${pattern}x$/', str_repeat('a', 22).'!');`)).toMatchObject({
+  [String.raw`/(\w+\s*)+/`, 'this is a typical sentence', 1],
+  [String.raw`/(\d+)+/`, '12345678901234567', 1],
+  [String.raw`/^(?:(?:north|northbound)\s*)+$/`, 'northbound northbound north', 1],
+  [String.raw`/^(?:\p{L}+\s*)+$/u`, 'este es un café típico', 1],
+  [String.raw`/^(?:hello\s*|hello world\s*)+$/`, 'hello world hello world hello', 1],
+  [String.raw`/(\d+)+/`, 'this subject contains no numbers', 0],
+  [String.raw`/\[(\d+)+\]/`, 'serial [12345678901234567] ready', 1],
+])('matches ordinary subjects with possible repetition overlap: %s', (pattern, subject, count) => {
+  const expression = JSON.stringify(pattern);
+  expect(run(`<?php var_dump(preg_match(${expression}, ${JSON.stringify(subject)}));`)).toMatchObject({
     kind: 'executed',
-    uncaughtException: expect.stringContaining('この採点環境では使えません。'),
+    stdout: `int(${count})\n`,
   });
+});
+
+test('preserves captures from repeated patterns used in multiple matches', () => {
+  expect(
+    run(String.raw`<?php
+preg_match_all('/\[(\d+)+\]/', 'serial [12345678901234567] and [900]', $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
+echo json_encode($matches);
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '[[["[12345678901234567]",7],["12345678901234567",8]],[["[900]",31],["900",32]]]',
+  });
+});
+
+test('reports a regex deadline and runs the next program', () => {
+  vi.spyOn(Atomics, 'wait').mockReturnValueOnce('timed-out');
+  const source = String.raw`<?php echo preg_match('/(\w+\s*)+/', 'this is a typical sentence');`;
+  expect(run(source)).toEqual({ kind: 'limitExceeded', limit: 'time' });
+  expect(run(source)).toMatchObject({ kind: 'executed', stdout: '1' });
 });
 
 test('allows case-sensitive disjoint repetitions and small bounded repetitions on long subjects', () => {

@@ -11,6 +11,7 @@ import { E_DEPRECATED, E_ERROR, E_WARNING, emitError, throwableLocation } from '
 import { throwableText, traceText } from './exceptions';
 import { holderCounts, releaseDropped, releaseGlobalObject } from './garbage';
 import { type ParsedProgram, parsePhp } from './parse';
+import { releaseBoundedRegexSubject } from './regexExecution';
 import { ExitSignal, FatalError, type Frame, PhpThrow, Runtime, SCRIPT_PATH, withRuntime } from './runtime';
 import { runStatements } from './statements';
 import { UnsupportedFeatureError } from './unsupported';
@@ -51,6 +52,7 @@ export function runProgram(runtime: Runtime, parsed: ParsedProgram, onEnd?: (fra
       runtime.world.recordFinalTurtles();
       uncaughtException = shutdown(runtime) ?? uncaughtException;
     } finally {
+      releaseBoundedRegexSubject();
       runtime.flush();
     }
     const stdoutBytes = runtime.stdoutBytes;

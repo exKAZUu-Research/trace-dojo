@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 418 -- The regex functions share matching, offsets, capture handling, and error state.
+// code-gauge-allow-file fileNcss 426 -- The regex functions share matching, offsets, capture handling, and error state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { dec, enc } from './bytes';
 import { callCallback, consumeInvokedResult } from './callables';
@@ -7,6 +7,7 @@ import { isCallable } from './libCore';
 import { defineConstant, defineFunction } from './native';
 import { toStr } from './operators';
 import { type Compiled, groupName, PatternError, translate } from './pcrePattern';
+import { boundedRegexMatch, type MatchOffsets } from './regexExecution';
 import { ExitSignal, PhpThrow, rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 import { copyValueSlot, deref, PhpArray, PhpObject, type Ref, type Value } from './values';
@@ -43,7 +44,6 @@ defineConstant('PCRE_JIT_SUPPORT', REFERENCE_PCRE.jitSupport);
  */
 const cache = new Map<string, Compiled | string>();
 const CACHE_LIMIT = 256;
-const MAX_AMBIGUOUS_SUBJECT_LENGTH = 16;
 
 /** Compiles a PCRE pattern with delimiters, warning and returning undefined as PHP does for a bad pattern. */
 function compile(name: string, pattern: string): Compiled | undefined {
@@ -91,7 +91,8 @@ function* scanMatches<T>(
   offset: number,
   project: (
     compiled: Compiled,
-    result: RegExpExecArray & { indices: RegExpIndicesArray },
+    result: MatchOffsets,
+    text: string,
     bounds: [number, number],
     byteOffset: (index: number) => number
   ) => T,
@@ -108,10 +109,12 @@ function* scanMatches<T>(
   while (position <= text.length) {
     rt().spend();
     const emptyRegex = text === '' ? compiled.emptyRegex : undefined;
+    const input = emptyRegex && !retry ? '\0' : text;
     const result = executeMatch(
       retry ? compiled.retry : (emptyRegex ?? compiled.regex),
-      emptyRegex && !retry ? '\0' : text,
-      position
+      input,
+      position,
+      compiled.ambiguousRepetition
     );
     if (!result) {
       if (!retry || position >= text.length) return;
@@ -119,26 +122,38 @@ function* scanMatches<T>(
       position += compiled.utf8 && (text.codePointAt(position) ?? 0) > 0xff_ff ? 2 : 1;
       continue;
     }
-    if ([...compiled.byteCaselessReferences].some((name) => /[\u0080-\u00FF]/.test(result.groups?.[name] ?? '')))
-      throw new UnsupportedFeatureError('非 ASCII バイトを大文字・小文字を区別せずに後方参照する正規表現');
+    checkByteCaselessReferences(compiled, result, input);
     const [matchStart, matchEnd] = matchBounds(compiled, result);
-    yield project(compiled, result, [matchStart, matchEnd], byteOffset);
+    yield project(compiled, result, input, [matchStart, matchEnd], byteOffset);
     position = matchEnd;
     retry = matchStart === matchEnd;
   }
 }
 
-function executeMatch(
-  regex: RegExp,
-  text: string,
-  position: number
-): (RegExpExecArray & { indices: RegExpIndicesArray }) | null {
+function checkByteCaselessReferences(
+  { byteCaselessReferences }: Compiled,
+  { groups }: MatchOffsets,
+  text: string
+): void {
+  for (const name of byteCaselessReferences) {
+    const range = groups?.[name];
+    if (range && /[\u0080-\u00FF]/.test(text.slice(...range)))
+      throw new UnsupportedFeatureError('非 ASCII バイトを大文字・小文字を区別せずに後方参照する正規表現');
+  }
+}
+
+function executeMatch(regex: RegExp, text: string, position: number, bounded: boolean): MatchOffsets | null {
+  const budget = rt().budget;
+  if (bounded) {
+    const result = boundedRegexMatch(regex, text, position, budget);
+    budget.checkClock();
+    return result;
+  }
   regex.lastIndex = position;
   try {
-    const result = regex.exec(text) as (RegExpExecArray & { indices: RegExpIndicesArray }) | null;
-    // The host's engine cannot be interrupted and may backtrack for seconds before giving up.
-    rt().budget.checkClock();
-    return result;
+    const indices = regex.exec(text)?.indices;
+    budget.checkClock();
+    return indices?.[0] ? { range: indices[0], groups: indices.groups } : null;
   } catch (error) {
     if (error instanceof SyntaxError) throw new UnsupportedFeatureError('ホストエンジンの制限を超える正規表現');
     throw error;
@@ -158,8 +173,6 @@ function prepareSubject(
   const text = compiled.utf8 ? dec(subject) : subject;
   rt().lastPregError = subjectError(compiled, subject, text, start);
   if (rt().lastPregError !== 0) return undefined;
-  if (compiled.ambiguousRepetition && text.length > MAX_AMBIGUOUS_SUBJECT_LENGTH)
-    throw new UnsupportedFeatureError('長い入力に対する曖昧な繰り返しを含む正規表現');
   if (!compiled.utf8) return { text, position: start, byteOffset: (index) => index };
   return { text, position: charIndexOf(text, start), byteOffset: byteIndexer(text) };
 }
@@ -173,10 +186,10 @@ function subjectError(compiled: Compiled, subject: string, text: string, start: 
 }
 
 /** Where the reported match starts and ends: after the last `\K` passed, if any. */
-function matchBounds(compiled: Compiled, result: RegExpExecArray & { indices: RegExpIndicesArray }): [number, number] {
-  let [start, end] = result.indices[0] as [number, number];
+function matchBounds(compiled: Compiled, result: MatchOffsets): [number, number] {
+  let [start, end] = result.range;
   for (const name of compiled.keeps) {
-    const keep = result.indices.groups?.[name];
+    const keep = result.groups?.[name];
     if (keep) start = Math.max(start, keep[0]);
   }
   return [start, end];
@@ -184,17 +197,18 @@ function matchBounds(compiled: Compiled, result: RegExpExecArray & { indices: Re
 
 function toMatch(
   compiled: Compiled,
-  result: RegExpExecArray & { indices: RegExpIndicesArray },
+  result: MatchOffsets,
+  input: string,
   bounds: [number, number],
   byteOffset: (index: number) => number
 ): Match {
   const pairs = [bounds];
   for (let group = 1; group <= compiled.groupCount; group++) {
-    pairs.push(result.indices.groups?.[groupName(group)] ?? [-1, -1]);
+    pairs.push(result.groups?.[groupName(group)] ?? [-1, -1]);
   }
   const text = (start: number, end: number): string | undefined => {
     if (start === -1) return undefined;
-    const value = result.input.slice(start, end);
+    const value = input.slice(start, end);
     return compiled.utf8 ? enc(value) : value;
   };
   return {
