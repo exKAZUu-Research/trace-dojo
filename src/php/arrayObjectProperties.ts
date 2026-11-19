@@ -143,7 +143,9 @@ class ArrayObjectProperty implements Place {
   }
 
   private element(): ElementPlace {
-    return new ElementPlace(this.storage.writable(), this.key, this.unbound, true);
+    return new ElementPlace(this.storage.writable(), this.key, this.unbound, (array, key, warning) =>
+      this.storage.resetFetchedBucket(array, key, warning)
+    );
   }
 
   private readReference(): Ref {

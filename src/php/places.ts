@@ -289,13 +289,17 @@ export class RefPlace implements Place {
   }
 }
 
+export type BucketReset = (array: PhpArray, key: Key, warning?: UpdateWarning) => (value: Value) => Value;
+
 export class ElementPlace implements Place {
+  private bucketWrite?: (value: Value) => Value;
+
   constructor(
     readonly array: PhpArray,
     /** The key, or undefined to append. */
     public key: Key | undefined,
     readonly unbound = false,
-    private readonly objectBacked = false
+    private readonly objectBacked: boolean | BucketReset = false
   ) {}
 
   get(): Value | undefined {
@@ -309,12 +313,7 @@ export class ElementPlace implements Place {
   }
 
   warnMissingUpdate(warning?: UpdateWarning): boolean {
-    if (this.objectBacked) {
-      if (warning) warning(() => this.warnUndefined());
-      else this.warnUndefined();
-      this.resetNull(warning);
-      return true;
-    }
+    if (this.objectBacked) return this.warnObjectBacked(warning);
     if (this.unbound || !sharingCheck(this.array, 1)) {
       this.warnUndefined();
       return this.get() === undefined;
@@ -353,7 +352,18 @@ export class ElementPlace implements Place {
     else reset();
   }
 
+  private warnObjectBacked(warning?: UpdateWarning): boolean {
+    if (warning) warning(() => this.warnUndefined());
+    else this.warnUndefined();
+    if (typeof this.objectBacked === 'function' && this.key !== undefined) {
+      this.bucketWrite = this.objectBacked(this.array, this.key, warning);
+      this.bucketWrite(null);
+    } else this.resetNull(warning);
+    return true;
+  }
+
   set(value: Value): Value {
+    if (this.bucketWrite) return this.bucketWrite(value);
     if (this.key === undefined) {
       const key = this.array.appendKey;
       if (!this.array.append(value)) {

@@ -3262,4 +3262,24 @@ set_error_handler(function () use ($a) { $a['x'] = new ReuseBucket(); return tru
 $a->x .= 'b';
 `);
   expect(reuseResult).toMatchObject({ kind: 'executed', stdout: '{"y":"b"}' });
+
+  const reuseExitInc = run(String.raw`<?php
+class ReuseExit { function __destruct() { global $a; unset($a['x']); $a['y'] = 9; exit('exit;'); } }
+class Observer { function __destruct() { global $a; echo json_encode($a->getArrayCopy()); } }
+$a = new ArrayObject([], ArrayObject::ARRAY_AS_PROPS);
+$obs = new Observer();
+set_error_handler(function () use ($a) { $a['x'] = new ReuseExit(); return true; });
+$a->x++;
+`);
+  expect(reuseExitInc).toMatchObject({ kind: 'executed', stdout: 'exit;{"y":1}' });
+
+  const reuseExitDec = run(String.raw`<?php
+class ReuseExit { function __destruct() { global $a; unset($a['x']); $a[10] = 9; exit('exit;'); } }
+class Observer { function __destruct() { global $a; echo json_encode($a->getArrayCopy()); } }
+$a = new ArrayIterator([], ArrayObject::ARRAY_AS_PROPS);
+$obs = new Observer();
+set_error_handler(function () use ($a) { $a['x'] = new ReuseExit(); return true; });
+--$a->x;
+`);
+  expect(reuseExitDec).toMatchObject({ kind: 'executed', stdout: 'exit;{"10":null}' });
 });
