@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 565 -- The memberBinder module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 589 -- The memberBinder module keeps one stage of the C# interpreter together.
 import type { Argument, Expression, Initializer, MemberInitializer, Position, TypeNode } from './ast';
 import type { TypeContext } from './binderBase';
 import type { BoundArgument, BoundExpression, BoundInitializerEntry, BoundLValue, BoundMemberInit } from './bound';
@@ -423,9 +423,9 @@ export abstract class MemberBinder extends CallBinder {
     this.error(position, 'CS0122', `'${name}' はアクセスできない保護レベルになっています`);
   }
 
-  // code-gauge-allow functionNcss 31 -- Each kind of target of a member access.
+  // code-gauge-allow functionNcss 33 -- Each kind of target of a member access.
   /** Binds `target.name`, on a namespace, a type, or a value. */
-  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Each branch handles one case of the C# rule that the function applies.
   bindMemberAccess(node: Extract<Expression, { kind: 'memberAccess' }>, context: BindContext): BindResult {
     const position = { row: node.nameRow, column: node.column };
     const typeArgs = node.typeArgs?.map((arg) => this.resolveType(arg, context.fn.typeContext));
@@ -723,6 +723,7 @@ export abstract class MemberBinder extends CallBinder {
         refKind: undefined,
         row: arg.row,
         target: undefined,
+        text: arg.text,
       };
     });
   }

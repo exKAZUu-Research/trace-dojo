@@ -161,7 +161,7 @@ const SHOWN_LIBRARY_TYPES = new Set(['valueTuple', 'KeyValuePair`2']);
 
 const NOT_SCALAR = Symbol('notScalar');
 
-// code-gauge-allow functionNcss 41 -- One case per kind of type.
+// code-gauge-allow functionNcss 43 -- One case per kind of type.
 // code-gauge-allow functionCognitiveComplexity 18 -- Each branch handles one case of the C# rule that the function applies.
 function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[string] | typeof NOT_SCALAR {
   const underlying = nullableUnderlying(type) ?? type;

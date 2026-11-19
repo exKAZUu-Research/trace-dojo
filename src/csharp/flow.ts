@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 492 -- The flow module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 526 -- The flow module keeps one stage of the C# interpreter together.
 import type {
   BoundArgument,
   BoundBlock,

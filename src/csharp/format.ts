@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 506 -- The format module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 520 -- The format module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { CsDecimal } from './decimal';
 import { PendingException } from './numeric';
@@ -317,6 +317,8 @@ function generalStandardText(
   letter: 'E' | 'e',
   mode: 'even' | 'away'
 ): string {
+  // `G0` of a decimal drops its trailing zeros, which `G` keeps, by taking all 29 of its digits as the precision.
+  if (precision === 0 && kind === 'decimal') precision = 29;
   if (precision === undefined || precision === 0) return roundTripText(value, kind);
   return generalText(roundDigits(digitsOf(value, kind), precision, mode), precision, letter);
 }
@@ -364,17 +366,23 @@ function formatCustom(value: number | bigint | CsDecimal, kind: NumericKind, for
   }
   const pattern = section.pattern;
   const { integer: integerPart, fraction: fractionPart } = fixedParts(number, scan.fractionDigits);
-  const integerDigitsText = integerPart === '0' && number.exponent <= 0 ? '' : integerPart;
   const isZero = number.digits === '';
+  const integerDigitsText = customIntegerText(integerPart, number, scan);
   // A section of the negative pattern supplies its own sign; the first section prints the sign of a negative value.
   const needsSign =
     (number.isNegative && sections.length === 1) ||
     (number.isNegative && section === sections[0] && sections.length > 1 && !isZero);
   const result = renderCustom(pattern, scan, integerDigitsText, fractionPart, exponent);
   // A pattern that prints no digit, such as `#` for a value that rounds to zero, prints no sign either.
-  if (needsSign && (!isZero || kind === 'double' || kind === 'float') && /\d/.test(result))
+  if (needsSign && (!isZero || ((kind === 'double' || kind === 'float') && /\d/.test(result))))
     return `${CULTURE.negativeSign}${result}`;
   return result;
+}
+
+/** The integer digits a custom pattern prints before padding: none for a zero below one, but one in scientific notation, even for `#E+0`. */
+function customIntegerText(integerPart: string, number: Digits, scan: PatternScan): string {
+  if (number.digits === '') return scan.scientific ? '0' : '';
+  return integerPart === '0' && number.exponent <= 0 ? '' : integerPart;
 }
 
 function customDigits(value: number | bigint | CsDecimal, kind: NumericKind): Digits {
@@ -386,14 +394,22 @@ function customDigits(value: number | bigint | CsDecimal, kind: NumericKind): Di
 /** The section of a format for a value: positive, negative, then zero. */
 function sectionFor(sections: Section[], number: Digits): Section {
   if (sections.length === 1) return sections[0];
-  if (number.digits === '') return sections.length > 2 ? sections[2] : sections[0];
-  return number.isNegative ? sections[1] : sections[0];
+  // A negative zero, which only a double has, takes the negative section unless the format has a zero section.
+  const chosen =
+    number.digits === '' && (sections.length > 2 || !number.isNegative)
+      ? (sections[2] ?? sections[0])
+      : number.isNegative
+        ? sections[1]
+        : sections[0];
+  // An empty section stands for the first one, as in `0.0;;` for zero.
+  return chosen.pattern === '' ? sections[0] : chosen;
 }
 
 /** Scales and rounds a value as a pattern's placeholders, percent signs, scaling commas, and exponent ask. */
 function roundCustom(initial: Digits, scan: PatternScan): { number: Digits; exponent: number } {
   let number = initial;
   if (scan.percent) number = { ...number, exponent: number.exponent + 2 * scan.percent };
+  if (scan.permille) number = { ...number, exponent: number.exponent + 3 * scan.permille };
   if (scan.scaleDown) number = { ...number, exponent: number.exponent - 3 * scan.scaleDown };
   if (!scan.scientific) return { number: roundToDecimals(number, scan.fractionDigits, 'away'), exponent: 0 };
   number = roundDigits(number, scan.integerDigits + scan.fractionDigits, 'away');
@@ -438,6 +454,7 @@ interface PatternScan {
   fractionZeros: number;
   hasGrouping: boolean;
   percent: number;
+  permille: number;
   scaleDown: number;
   scientific: { letter: string; sign: boolean; digits: number } | undefined;
 }
@@ -450,6 +467,7 @@ function scanPattern(pattern: string): PatternScan {
     fractionZeros: 0,
     hasGrouping: false,
     percent: 0,
+    permille: 0,
     scaleDown: 0,
     scientific: undefined,
   };
@@ -489,6 +507,8 @@ function scanCharacter(pattern: string, index: number, scan: PatternScan, state:
     if (!state.inFraction) scanComma(pattern, index, scan, state);
   } else if (char === '%') {
     scan.percent++;
+  } else if (char === '‰') {
+    scan.permille++;
   } else if (char === 'E' || char === 'e') {
     const match = /^[+-]?(0+)/.exec(pattern.slice(index + 1));
     if (!match) return index;
@@ -523,17 +543,18 @@ function renderCustom(
   fractionText: string,
   exponent: number
 ): string {
-  let integer = integerText.padStart(scan.integerZeros, '0');
-  if (scan.hasGrouping) integer = group(integer);
+  const integer = integerText.padStart(scan.integerZeros, '0');
   // Trailing `#` placeholders drop zeros that no `0` placeholder requires.
   let fraction = fractionText;
   while (fraction.length > scan.fractionZeros && fraction.endsWith('0')) fraction = fraction.slice(0, -1);
   const state: RenderState = {
     integer,
+    hasGrouping: scan.hasGrouping,
     fraction,
     result: '',
     inFraction: false,
-    integerWritten: false,
+    integerSlots: scan.integerDigits,
+    integerIndex: 0,
     fractionIndex: 0,
     pointWritten: false,
   };
@@ -543,10 +564,14 @@ function renderCustom(
 
 interface RenderState {
   integer: string;
+  hasGrouping: boolean;
   fraction: string;
   result: string;
   inFraction: boolean;
-  integerWritten: boolean;
+  /** The integer placeholders not yet rendered. */
+  integerSlots: number;
+  /** The index in `integer` of the next digit to write. */
+  integerIndex: number;
   fractionIndex: number;
   pointWritten: boolean;
 }
@@ -573,7 +598,7 @@ function renderCharacter(
     renderDigit(state);
   } else if (char === '.') {
     if (!state.inFraction) {
-      writeInteger(state);
+      writeIntegerDigits(state, state.integer.length);
       state.inFraction = true;
     }
   } else if ((char === 'E' || char === 'e') && scan.scientific) {
@@ -604,7 +629,10 @@ function renderExponent(
 
 function renderDigit(state: RenderState): void {
   if (!state.inFraction) {
-    writeInteger(state);
+    // The integer's digits fill the placeholders from the right, and the first placeholder takes any extra digits,
+    // so literals between placeholders, as in `(###) ###-####`, fall between the digits.
+    const remaining = state.integerSlots--;
+    writeIntegerDigits(state, Math.max(state.integerIndex, state.integer.length - (remaining - 1)));
     return;
   }
   if (state.fractionIndex >= state.fraction.length) return;
@@ -615,10 +643,13 @@ function renderDigit(state: RenderState): void {
   state.result += state.fraction[state.fractionIndex++];
 }
 
-function writeInteger(state: RenderState): void {
-  if (state.integerWritten) return;
-  state.result += state.integer;
-  state.integerWritten = true;
+function writeIntegerDigits(state: RenderState, end: number): void {
+  const { integer } = state;
+  for (; state.integerIndex < end; state.integerIndex++) {
+    state.result += integer[state.integerIndex];
+    const position = integer.length - 1 - state.integerIndex;
+    if (state.hasGrouping && position > 0 && position % 3 === 0) state.result += CULTURE.groupSeparator;
+  }
 }
 
 // ---- Composite formats ----

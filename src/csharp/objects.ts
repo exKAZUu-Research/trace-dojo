@@ -1,4 +1,5 @@
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
+// code-gauge-allow-file fileNcss 402 -- The module keeps the runtime behavior of .NET's base objects together.
 import { CsDecimal } from './decimal';
 import type { Evaluator } from './evaluator';
 import { formatFloat } from './format';

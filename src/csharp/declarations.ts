@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 789 -- The declarations module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 832 -- The declarations module keeps one stage of the C# interpreter together.
 import type {
   Accessor,
   CompilationUnit,
@@ -57,7 +57,8 @@ export class DeclarationBinder extends BinderBase {
   protected isLibraryUnit = false;
 
   /** Declares every type of a unit and its members, in the order that inheritance needs. */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss 32 -- Each branch handles one case of the C# rule that the function applies.
   declareUnit(unit: CompilationUnit, root: NamespaceSymbol, isLibrary: boolean): DeclaredType[] {
     this.isLibraryUnit = isLibrary;
     const start = this.declaredTypes.length;
@@ -90,6 +91,7 @@ export class DeclarationBinder extends BinderBase {
     return ordered;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
   /** Checks that each member's types are at least as accessible as the member, as CS0050 to CS0061 require. */
   private checkAccessibility(symbol: TypeSymbol): void {
     const display = displayTypeSymbol(symbol);
@@ -998,7 +1000,7 @@ export class DeclarationBinder extends BinderBase {
     method.native = nativeOf(method);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 21 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity 26 -- Each branch handles one case of the C# rule that the function applies.
   resolveParameters(
     parameters: Parameter[],
     context: TypeContext,

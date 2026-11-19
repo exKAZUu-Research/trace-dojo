@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 434 -- The nativesSorted module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 439 -- The nativesSorted module keeps one stage of the C# interpreter together.
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import type { NativeState } from '../runtime';
@@ -249,6 +249,13 @@ defineNatives(sortedDictionaryNatives('System.Collections.Generic.SortedList`2')
 
 const SORTED_SET = 'System.Collections.Generic.SortedSet`1';
 
+const sortedSetFromCollection: NativeMethod = (call, receiver, [source, comparer]) => {
+  if (source === undefined) failNull('collection');
+  const state = newSorted(call, comparer as Value, typeArgument(call), undefined);
+  for (const item of iterate(call, source as Value, 'collection')) state.insert(item, undefined, false);
+  return setNative(receiver, state);
+};
+
 function setElements(call: NativeCall, other: Value): Value[] {
   if (other === undefined) failNull('other');
   return [...iterate(call, other, 'other')];
@@ -259,11 +266,8 @@ defineNatives({
     setNative(receiver, newSorted(call, undefined, typeArgument(call), undefined)),
   [`${SORTED_SET}..ctor(IComparer<T>?)`]: (call, receiver, [comparer]) =>
     setNative(receiver, newSorted(call, comparer as Value, typeArgument(call), undefined)),
-  [`${SORTED_SET}..ctor(IEnumerable<T>)`]: (call, receiver, [source]) => {
-    const state = newSorted(call, undefined, typeArgument(call), undefined);
-    for (const item of iterate(call, source as Value, 'collection')) state.insert(item, undefined, false);
-    return setNative(receiver, state);
-  },
+  [`${SORTED_SET}..ctor(IEnumerable<T>)`]: sortedSetFromCollection,
+  [`${SORTED_SET}..ctor(IEnumerable<T>, IComparer<T>?)`]: sortedSetFromCollection,
   [`${SORTED_SET}.get_Count`]: (_call, receiver) => sortedOf(receiver).keys.length,
   [`${SORTED_SET}.get_IsReadOnly`]: () => false,
   [`${SORTED_SET}.get_Min`]: (call, receiver) =>

@@ -214,7 +214,7 @@ export abstract class EvaluatorBase {
     }
   }
 
-  private box(value: Value, from: Type): Value {
+  protected box(value: Value, from: Type): Value {
     if (value === undefined) return undefined;
     if (!this.isValueTypeValue(value, from)) return value;
     const underlying = nullableUnderlying(from);

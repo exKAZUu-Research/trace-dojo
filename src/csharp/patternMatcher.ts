@@ -137,6 +137,18 @@ export abstract class PatternMatcher extends EvaluatorBase {
     frame: Frame
   ): boolean {
     if (pattern.positional.length === 0) return true;
+    if (pattern.isITuple) {
+      const tuple = target instanceof CsBox ? target.value : target;
+      if (
+        !(tuple instanceof CsStruct) ||
+        tuple.type.symbol.special !== 'valueTuple' ||
+        tuple.fields.length !== pattern.positional.length
+      )
+        return false;
+      return pattern.positional.every((sub, index) =>
+        this.matches(sub, this.box(tuple.fields[index], tuple.type.args[index]), frame)
+      );
+    }
     const elements = pattern.isTuple
       ? (target as CsStruct).fields
       : this.deconstructedElements(pattern.deconstruct as MethodSymbol, target, pattern.positional.length, frame);

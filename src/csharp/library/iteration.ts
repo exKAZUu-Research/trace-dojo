@@ -3,7 +3,7 @@ import type { NativeCall } from '../natives';
 import { PendingException } from '../numeric';
 import { environmentOf } from '../objects';
 import type { NativeState } from '../runtime';
-import type { MethodSymbol, Type } from '../types';
+import { type MethodSymbol, substitute, substitutionOf, type Type } from '../types';
 import { CsArray, CsObject, CsStruct, type Value } from '../values';
 import { evaluatorOf, fail, failNull } from './support';
 
@@ -143,8 +143,10 @@ export class LibraryEnumerator implements NativeState {
   }
 
   /** The current element, which .NET's library enumerators return as the default before starting and after ending. */
-  currentValue(): Value {
-    return this.current;
+  currentValue(call: NativeCall): Value {
+    if (this.state === 'running') return this.current;
+    const type = call.owner ? substitute(call.method.returnType, substitutionOf(call.owner)) : call.method.returnType;
+    return evaluatorOf(call).defaultOf(call.frame.resolve(type));
   }
 
   *remaining(): Generator<Value> {

@@ -212,7 +212,7 @@ function customDate(parts: DateParts, pattern: string): string {
 
 /** The text of a run of `count` copies of a custom date format specifier, or undefined for a literal character. */
 // code-gauge-allow functionCognitiveComplexity 21 -- One case per custom date format specifier.
-// code-gauge-allow functionNcss 33 -- One case per custom date format specifier.
+// code-gauge-allow functionNcss 35 -- One case per custom date format specifier.
 function dateField(parts: DateParts, char: string, count: number): string | undefined {
   switch (char) {
     case 'y': {
@@ -249,6 +249,9 @@ function dateField(parts: DateParts, char: string, count: number): string | unde
     case 'K': {
       return '';
     }
+    case 'g': {
+      return '西暦';
+    }
     case 'z': {
       if (count === 1) return '+9';
       return count === 2 ? '+09' : '+09:00';
@@ -269,6 +272,8 @@ function dateLiteral(pattern: string, index: number, count: number): { text: str
     return { text: pattern.slice(index + 1, close), length: close - index + 1 };
   }
   if (char === '\\') return { text: pattern[index + 1] ?? '', length: 2 };
+  // `%` marks the next character as a custom specifier, as in `%d`, which would otherwise be a standard format.
+  if (char === '%') return { text: '', length: 1 };
   return { text: char.repeat(count), length: count };
 }
 
@@ -322,6 +327,8 @@ function customTimeSpan(span: TimeSpanParts, format: string): string {
     } else if (char === '\\') {
       result += format[index + 1] ?? '';
       index++;
+    } else if (char === '%' && index + 1 < format.length) {
+      // `%` marks the next character as a custom specifier, as in `%d`.
     } else if (char === "'") {
       const end = format.indexOf("'", index + 1);
       result += format.slice(index + 1, end);
@@ -546,7 +553,15 @@ function addMonths(call: NativeCall, receiver: Value, months: number): Value {
 
 /** Parses the dates of the forms programs write: `2024/3/5`, `2024-03-05`, with an optional `H:mm[:ss]`. */
 function parseDate(text: string): bigint | undefined {
-  const match = /^\s*(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?\s*$/.exec(text);
+  // ja-JP also reads the long date, as `2024年3月5日 10時20分`.
+  const normalized = text
+    .replace(/^(\s*\d{4})年(\d{1,2})月(\d{1,2})日/, '$1/$2/$3')
+    .replace(
+      /(\d{1,2})時(\d{1,2})分(?:(\d{1,2})秒)?(\s*)$/,
+      (_match, hour: string, minute: string, second: string | undefined, rest: string) =>
+        `${hour}:${minute.padStart(2, '0')}${second === undefined ? '' : `:${second.padStart(2, '0')}`}${rest}`
+    );
+  const match = /^\s*(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?\s*$/.exec(normalized);
   if (!match) return undefined;
   const [, year, month, day, hour = '0', minute = '0', second = '0'] = match;
   try {

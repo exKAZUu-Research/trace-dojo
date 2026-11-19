@@ -55,7 +55,10 @@ export interface ExceptionState {
   message: string | undefined;
   inner: CsObject | undefined;
   paramName?: string | undefined;
+  /** The text of `ArgumentOutOfRangeException`'s actual value, which its message shows. */
   actualValue?: Value;
+  /** The actual value itself, which `ActualValue` returns. */
+  actualObject?: Value;
   /** Whether a `throw` threw the exception, after which `ToString()` would print a stack trace. */
   wasThrown: boolean;
   data?: undefined;
@@ -268,6 +271,7 @@ export class Runtime {
     return found;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
   private findImplementation(type: NamedType, method: MethodSymbol, face?: NamedType): MethodSymbol | undefined {
     const isInterface = method.owner.kind === 'interface';
     const exact = face && isInterface ? this.findExactImplementation(type, method, face) : undefined;

@@ -216,6 +216,8 @@ export type BoundPattern =
       deconstruct: MethodSymbol | undefined;
       /** Whether the positional subpatterns read a tuple's elements. */
       isTuple: boolean;
+      /** Whether the positional subpatterns read the elements of an `object` through `ITuple`, if it is a tuple. */
+      isITuple?: boolean;
       positional: BoundPattern[];
       properties: { members: (FieldSymbol | PropertySymbol)[]; owners: NamedType[]; pattern: BoundPattern }[];
       local: LocalSymbol | undefined;

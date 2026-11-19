@@ -52,6 +52,8 @@ export interface Argument extends Position {
   name: string | undefined;
   modifier: 'ref' | 'out' | 'in' | undefined;
   value: Expression;
+  /** The value's source text, which a `[CallerArgumentExpression]` parameter receives. */
+  text?: string;
 }
 
 export type LiteralValue =

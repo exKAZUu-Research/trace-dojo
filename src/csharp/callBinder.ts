@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 567 -- The callBinder module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 596 -- The callBinder module keeps one stage of the C# interpreter together.
 import type { BoundArgument, BoundArguments, BoundExpression, BoundLValue } from './bound';
 import { displayMethodIn } from './declarations';
 import type { MethodCandidate } from './lookup';
@@ -13,6 +13,7 @@ import {
   type MethodSymbol,
   type NamedType,
   nullableUnderlying,
+  type ParameterSymbol,
   sameType,
   specialOf,
   substitute,
@@ -33,6 +34,8 @@ export interface ArgumentInfo {
   declareOut?: (type: Type) => BoundLValue;
   /** Whether an `out var` declaration needs its parameter's type. */
   isOutVar?: boolean;
+  /** The argument's source text. */
+  text?: string;
 }
 
 /** A candidate that the arguments fit, with how each argument maps to its parameters. */
@@ -769,12 +772,7 @@ export abstract class CallBinder extends OperatorBinder {
       const parameter = method.parameters[parameterIndex];
       const type = applicable.argumentTypes[index];
       if (parameter.refKind === 'ref' || parameter.refKind === 'out') {
-        const target =
-          arg.isOutVar && arg.declareOut
-            ? arg.declareOut(type)
-            : arg.declareOut
-              ? arg.declareOut(type)
-              : (arg.target as BoundLValue);
+        const target = arg.declareOut ? arg.declareOut(type) : (arg.target as BoundLValue);
         result[parameterIndex] = { kind: 'refArgument', target, refKind: parameter.refKind, type, row: arg.row };
         continue;
       }
@@ -796,15 +794,40 @@ export abstract class CallBinder extends OperatorBinder {
       }
     }
     for (const [index, parameter] of method.parameters.entries()) {
-      if (result[index] !== undefined) continue;
-      const type = substitute(parameter.type, substitution);
-      result[index] = this.defaultArgument(parameter, type, row);
+      result[index] ??= this.omittedArgument(method, parameter, substitution, args, applicable.parameterOf, row);
     }
-    const sourceOrder = [...new Set(args.map((_arg, index) => applicable.parameterOf[index]))];
-    const isReordered = sourceOrder.some(
-      (parameterIndex, index) => index > 0 && parameterIndex < sourceOrder[index - 1]
-    );
-    return isReordered ? Object.assign(result as BoundArgument[], { sourceOrder }) : (result as BoundArgument[]);
+    return withSourceOrder(result as BoundArgument[], applicable.parameterOf);
+  }
+
+  /** The value of an omitted optional argument, or the source text of another argument that it names. */
+  private omittedArgument(
+    method: MethodSymbol,
+    parameter: ParameterSymbol,
+    substitution: Map<TypeParameterSymbol, Type>,
+    args: ArgumentInfo[],
+    parameterOf: number[],
+    row: number
+  ): BoundExpression {
+    const type = substitute(parameter.type, substitution);
+    const callerArgument = this.callerArgumentExpression(method, parameter, args, parameterOf);
+    return callerArgument === undefined
+      ? this.defaultArgument(parameter, type, row)
+      : this.constant(callerArgument, type, row);
+  }
+
+  /**
+   * The source text of the argument that an omitted `paramName` of .NET's `ThrowIf...` guards receives through its
+   * `[CallerArgumentExpression]` attribute, which the library here does not declare.
+   */
+  private callerArgumentExpression(
+    method: MethodSymbol,
+    parameter: ParameterSymbol,
+    args: ArgumentInfo[],
+    parameterOf: number[]
+  ): string | undefined {
+    if (!method.owner.isLibrary || !method.name.startsWith('ThrowIf') || parameter.name !== 'paramName')
+      return undefined;
+    return args[parameterOf.indexOf(0)]?.text;
   }
 
   /** The value of an omitted optional argument. */
@@ -814,7 +837,6 @@ export abstract class CallBinder extends OperatorBinder {
     row: number
   ): BoundExpression;
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Roslyn reports a different error for each way a call fails.
   /** Reports a call whose type arguments no candidate takes as many of, as Roslyn does before matching arguments. */
   private reportTypeArgumentCount(candidates: MethodCandidate[], count: number, row: number): boolean {
     if (candidates.some((candidate) => candidate.method.typeParameters.length === count)) return false;
@@ -831,6 +853,7 @@ export abstract class CallBinder extends OperatorBinder {
     return true;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 18 -- Roslyn reports a different error for each way a call fails.
   private reportInapplicable(
     candidates: MethodCandidate[],
     args: ArgumentInfo[],
@@ -1029,4 +1052,11 @@ export abstract class CallBinder extends OperatorBinder {
 
 function currentSubstitution(inference: Inference): Map<TypeParameterSymbol, Type> {
   return new Map([...inference.ownerSubstitution, ...inference.fixed]);
+}
+
+/** Arguments in parameter order, marked with the order the source writes them in when named arguments reorder them. */
+function withSourceOrder(args: BoundArgument[], parameterOf: number[]): BoundArguments {
+  const sourceOrder = [...new Set(parameterOf)];
+  const isReordered = sourceOrder.some((parameterIndex, index) => index > 0 && parameterIndex < sourceOrder[index - 1]);
+  return isReordered ? Object.assign(args, { sourceOrder }) : args;
 }

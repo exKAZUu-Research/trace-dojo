@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 641 -- The nativesCore module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 647 -- The nativesCore module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { TURTLE_METHOD_NAMES } from '../../interpreter/turtleWorld';
 import { CsDecimal } from '../decimal';
@@ -696,7 +696,9 @@ defineNatives({
       fail('System.ArithmeticException', 'Function does not accept floating point Not-a-Number values.');
     return Math.sign(Number(value));
   }),
-  'System.Math.Pow': (_call, _receiver, [a, b]) => Math.pow(a as number, b as number),
+  // IEEE 754's pow, which .NET follows, gives 1 for a base of 1 and for -1 to an infinite power, where JavaScript gives NaN.
+  'System.Math.Pow': (_call, _receiver, [a, b]) =>
+    a === 1 || (a === -1 && !Number.isFinite(b as number) && !Number.isNaN(b)) ? 1 : Math.pow(a as number, b as number),
   'System.Math.Sqrt': (_call, _receiver, [value]) => Math.sqrt(value as number),
   'System.Math.Cbrt': (_call, _receiver, [value]) => Math.cbrt(value as number),
   'System.Math.Exp': (_call, _receiver, [value]) => Math.exp(value as number),
@@ -1033,8 +1035,10 @@ const exceptionConstructor: NativeMethod = (call, receiver, args) => {
     if (name === 'message') state.message = (value as string | undefined) ?? undefined;
     if (name === 'innerException') state.inner = value as CsObject | undefined;
     if (name === 'paramName') state.paramName = (value as string | undefined) ?? undefined;
-    if (name === 'actualValue')
+    if (name === 'actualValue') {
+      state.actualObject = value;
       state.actualValue = value === undefined ? undefined : textOf(call, value, libraryType(call, 'System.Object'));
+    }
   }
   if (state.message === undefined && parameters.includes('paramName') && !parameters.includes('message')) {
     state.message = defaultMessage(
@@ -1050,6 +1054,10 @@ const exceptionConstructor: NativeMethod = (call, receiver, args) => {
 defineNatives({
   'System.Exception..ctor': exceptionConstructor,
   'System.Exception.get_Message': (_call, receiver) => exceptionMessage(receiver as CsObject),
+  'System.ArgumentOutOfRangeException.get_ActualValue': (_call, receiver) => {
+    const state = (receiver as CsObject).native as ExceptionState;
+    return state.actualObject ?? state.actualValue;
+  },
   'System.Exception.get_InnerException': (_call, receiver) => ((receiver as CsObject).native as ExceptionState).inner,
   'System.Exception.ToString': (call, receiver) => exceptionText(evaluatorOf(call), receiver as CsObject),
   'System.Exception.GetBaseException': (_call, receiver) => {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 496 -- The nativesString module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 515 -- The nativesString module keeps one stage of the C# interpreter together.
 // oxlint-disable unicorn/prefer-code-point -- C# characters are UTF-16 code units, which code points would merge.
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { compareCulture, primitiveHash, unboxed } from '../objects';
@@ -864,6 +864,20 @@ defineNatives({
     state.text = state.text.replaceAll(from as string, (to as string | undefined) ?? '');
     return receiver;
   },
+  [`${BUILDER}.Replace(char, char, int, int)`]: (call, receiver, [from, to, start, count]) => {
+    const state = builder(receiver);
+    const [before, middle, after] = builderRange(call, state.text, start as number, count as number);
+    state.text = `${before}${middle.replaceAll(String.fromCodePoint(from as number), String.fromCodePoint(to as number))}${after}`;
+    return receiver;
+  },
+  [`${BUILDER}.Replace(string, string?, int, int)`]: (call, receiver, [from, to, start, count]) => {
+    const state = builder(receiver);
+    const [before, middle, after] = builderRange(call, state.text, start as number, count as number);
+    if (from === undefined) failNull('oldValue');
+    if (from === '') fail('System.ArgumentException', 'The value cannot be an empty string.', 'oldValue');
+    state.text = `${before}${middle.replaceAll(from as string, (to as string | undefined) ?? '')}${after}`;
+    return receiver;
+  },
   [`${BUILDER}.ToString()`]: (_call, receiver) => builder(receiver).text,
   [`${BUILDER}.ToString(int, int)`]: (call, receiver, [start, length]) => {
     const { text } = builder(receiver);
@@ -881,3 +895,11 @@ function setBuilder(receiver: Value, text: string): Value {
 }
 
 export { evaluatorOf };
+
+/** The text before, inside, and after the range of `StringBuilder.Replace`, whose occurrences must lie inside it. */
+function builderRange(call: NativeCall, text: string, start: number, count: number): [string, string, string] {
+  const message = 'Index was out of range. Must be non-negative and less than or equal to the size of the collection.';
+  if (start < 0 || start > text.length) failOutOfRange(call, 'startIndex', message);
+  if (count < 0 || start + count > text.length) failOutOfRange(call, 'count', message);
+  return [text.slice(0, start), text.slice(start, start + count), text.slice(start + count)];
+}

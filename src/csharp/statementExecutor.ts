@@ -3,7 +3,7 @@ import type { BoundBlock, BoundCatch, BoundExpression, BoundStatement, BoundSwit
 import { NULL_REFERENCE } from './evaluatorBase';
 import { PendingException } from './numeric';
 import { PatternMatcher } from './patternMatcher';
-import { CsThrow, type ExceptionState, type Frame } from './runtime';
+import { CsThrow, type ExceptionState, type Frame, ProgramExit } from './runtime';
 import type { MethodSymbol, Type } from './types';
 import { Cell, copyValue, type CsArray, CsObject, UNASSIGNED, type Value } from './values';
 
@@ -48,7 +48,7 @@ export abstract class StatementExecutor extends PatternMatcher {
     }
   }
 
-  // code-gauge-allow functionNcss 39 -- One case per kind of statement.
+  // code-gauge-allow functionNcss 42 -- One case per kind of statement.
   execute(statement: BoundStatement, frame: Frame): Completion {
     this.runtime.spend();
     switch (statement.kind) {
@@ -303,8 +303,10 @@ export abstract class StatementExecutor extends PatternMatcher {
     throw this.throwValue(this.evaluate(statement.value, frame));
   }
 
+  // code-gauge-allow functionNcss 31 -- Each branch handles one case of the C# rule that the function applies.
   private executeTry(statement: Extract<BoundStatement, { kind: 'try' }>, frame: Frame): Completion {
     let completion: Completion;
+    let isExiting = false;
     try {
       const hasCatches = statement.catches.length > 0;
       if (hasCatches) this.handlers.push({ statement, frame });
@@ -324,8 +326,12 @@ export abstract class StatementExecutor extends PatternMatcher {
         if (handled === 'unhandled') throw thrown;
         completion = handled;
       }
+    } catch (error) {
+      // `Environment.Exit` ends the process without running finally blocks.
+      isExiting = error instanceof ProgramExit;
+      throw error;
     } finally {
-      if (statement.finally) {
+      if (statement.finally && !isExiting) {
         const finallyCompletion = this.runFinally(statement.finally, frame);
         if (finallyCompletion !== undefined) completion = finallyCompletion;
       }

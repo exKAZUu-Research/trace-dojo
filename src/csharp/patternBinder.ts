@@ -258,7 +258,11 @@ export abstract class PatternBinder extends ExpressionBinder {
     let positional: BoundPattern[] = [];
     let deconstruct: MethodSymbol | undefined;
     let isTuple = false;
-    if (pattern.positional) {
+    // An `object` has no Deconstruct, so C# matches its positional pattern through ITuple, which tuples implement.
+    const isITuple = pattern.positional !== undefined && specialOf(narrowed) === 'object';
+    if (isITuple) {
+      positional = (pattern.positional ?? []).map((sub) => this.bindPattern(sub.pattern, narrowed, context));
+    } else if (pattern.positional) {
       const result = this.deconstructionOf(narrowed, pattern.positional.length, undefined, pattern);
       deconstruct = result.deconstruct;
       isTuple = deconstruct === undefined;
@@ -275,6 +279,7 @@ export abstract class PatternBinder extends ExpressionBinder {
       narrowedType: narrowed,
       deconstruct,
       isTuple,
+      isITuple,
       positional,
       properties,
       local,

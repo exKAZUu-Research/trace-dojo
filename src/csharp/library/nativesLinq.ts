@@ -1150,8 +1150,8 @@ defineNatives({
   },
   'System.Linq.Internal.Enumerator`1.MoveNext': (_call, receiver) =>
     ((receiver as CsObject).native as LibraryEnumerator).next(),
-  'System.Linq.Internal.Enumerator`1.get_Current': (_call, receiver) =>
-    ((receiver as CsObject).native as LibraryEnumerator).currentValue(),
+  'System.Linq.Internal.Enumerator`1.get_Current': (call, receiver) =>
+    ((receiver as CsObject).native as LibraryEnumerator).currentValue(call),
   'System.Linq.Internal.Enumerator`1.Reset': () =>
     fail('System.NotSupportedException', 'Specified method is not supported.'),
   'System.Linq.Internal.Enumerator`1.Dispose': () => {},

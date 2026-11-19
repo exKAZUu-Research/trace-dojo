@@ -98,6 +98,7 @@ export abstract class StatementBinder extends PatternBinder {
   }
 
   // code-gauge-allow functionNcss 35 -- Each kind of storage has its own rule for assignment.
+  // code-gauge-allow functionCognitiveComplexity 16 -- Each branch handles one case of the C# rule that the function applies.
   checkAssignable(
     target: BoundExpression,
     position: Position,

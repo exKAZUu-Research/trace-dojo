@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 714 -- The evaluator module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 719 -- The evaluator module keeps one stage of the C# interpreter together.
 import type {
   BoundArguments,
   BoundBlock,
@@ -919,7 +919,7 @@ export class Evaluator extends StatementExecutor {
     };
   }
 
-  // code-gauge-allow functionNcss 34 -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionNcss 35 -- One case per kind of syntax or value that the function handles.
   // code-gauge-allow functionCognitiveComplexity 28 -- Each branch handles one case of the C# rule that the function applies.
   private propertyPlace(target: Extract<BoundExpression, { kind: 'property' }>, frame: Frame): Place {
     const { property } = target;

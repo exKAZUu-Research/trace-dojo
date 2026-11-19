@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 830 -- The nativesCollections module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 888 -- The nativesCollections module keeps one stage of the C# interpreter together.
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import { defaultCompare, environmentOf, hashOf, stringOf, valuesEqual } from '../objects';
@@ -193,7 +193,8 @@ function enumeratorStruct(
 
 const enumeratorNatives = (typeName: string): Record<string, NativeMethod> => ({
   [`${typeName}.MoveNext`]: (_call, receiver) => ((receiver as CsStruct).native as LibraryEnumerator).next(),
-  [`${typeName}.get_Current`]: (_call, receiver) => ((receiver as CsStruct).native as LibraryEnumerator).currentValue(),
+  [`${typeName}.get_Current`]: (call, receiver) =>
+    ((receiver as CsStruct).native as LibraryEnumerator).currentValue(call),
   [`${typeName}.Dispose`]: () => {},
 });
 
@@ -226,6 +227,22 @@ function indexOfValue(call: NativeCall, items: Value[], value: Value, start = 0,
   }
   for (let index = start; index < items.length; index++) if (equality.equals(items[index], value)) return index;
   return -1;
+}
+
+/** `List.LastIndexOf` over the `count` items that end at `start`, searching backward. */
+function lastIndexOfRange(call: NativeCall, items: Value[], value: Value, start: number, count: number): number {
+  if (items.length === 0) return -1;
+  if (start < 0) failOutOfRange(call, 'index', 'Non-negative number required.');
+  if (start >= items.length)
+    failOutOfRange(
+      call,
+      'index',
+      'Index was out of range. Must be non-negative and less than the size of the collection.'
+    );
+  if (count < 0) failOutOfRange(call, 'count', 'Non-negative number required.');
+  if (count > start + 1) failOutOfRange(call, 'count', 'Larger than collection size.');
+  const found = indexOfValue(call, items.slice(start - count + 1, start + 1), value, 0, true);
+  return found < 0 ? -1 : found + start - count + 1;
 }
 
 function sortItems(call: NativeCall, items: Value[], start: number, length: number, comparer: Value): void {
@@ -322,6 +339,33 @@ const listNatives: Record<string, NativeMethod> = {
         'destinationArray'
       );
     for (const [offset, item] of items.entries()) target.values[(index as number) + offset] = item;
+    return;
+  },
+  [`${LIST}.CopyTo(int, T[], int, int)`]: (call, receiver, [index, array, arrayIndex, count]) => {
+    const items = listOf(receiver).items;
+    const [from, to, length] = [index, arrayIndex, count] as number[];
+    if (array === undefined) failNull('destinationArray');
+    const target = array as CsArray;
+    if (from < 0)
+      failOutOfRange(
+        call,
+        'sourceIndex',
+        `sourceIndex ('${from}') must be greater than or equal to '0'.`,
+        String(from)
+      );
+    if (length < 0) failNegative(call, 'length', length);
+    if (from + length > items.length)
+      fail(
+        'System.ArgumentException',
+        'Offset and length were out of bounds for the array or count is greater than the number of elements from index to the end of the source collection.'
+      );
+    if (to + length > target.values.length)
+      fail(
+        'System.ArgumentException',
+        "Destination array was not long enough. Check the destination index, length, and the array's lower bounds.",
+        'destinationArray'
+      );
+    for (let offset = 0; offset < length; offset++) target.values[to + offset] = items[from + offset];
     return;
   },
   [`${LIST}.Exists`]: (call, receiver, [match]) => listOf(receiver).items.some(predicateOf(call, match as Value)),
@@ -427,8 +471,28 @@ const listNatives: Record<string, NativeMethod> = {
     list.version++;
     return;
   },
-  [`${LIST}.LastIndexOf`]: (call, receiver, [value]) =>
+  [`${LIST}.IndexOf(T, int, int)`]: (call, receiver, [value, start, count]) => {
+    const items = listOf(receiver).items;
+    const [from, length] = [start, count] as number[];
+    const message =
+      'Index was out of range. Must be non-negative and less than or equal to the size of the collection.';
+    if (from > items.length) failOutOfRange(call, 'index', message);
+    if (from < 0) failOutOfRange(call, 'startIndex', message);
+    if (length < 0 || from + length > items.length)
+      failOutOfRange(
+        call,
+        'count',
+        'Count must be positive and count must refer to a location within the string/array/collection.'
+      );
+    const index = indexOfValue(call, items.slice(0, from + length), value as Value, from);
+    return index;
+  },
+  [`${LIST}.LastIndexOf(T)`]: (call, receiver, [value]) =>
     indexOfValue(call, listOf(receiver).items, value as Value, 0, true),
+  [`${LIST}.LastIndexOf(T, int)`]: (call, receiver, [value, start]) =>
+    lastIndexOfRange(call, listOf(receiver).items, value as Value, start as number, (start as number) + 1),
+  [`${LIST}.LastIndexOf(T, int, int)`]: (call, receiver, [value, start, count]) =>
+    lastIndexOfRange(call, listOf(receiver).items, value as Value, start as number, count as number),
   [`${LIST}.Remove`]: (call, receiver, [value]) => {
     const list = listOf(receiver);
     const index = indexOfValue(call, list.items, value as Value);

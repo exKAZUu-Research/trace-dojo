@@ -463,12 +463,24 @@ export class ExpressionConverter {
   protected convertArgument(node: Node): Argument {
     if (node.type !== 'argument') {
       if (node.type === 'preproc_if') unsupported(node, 'プリプロセッサ ディレクティブ（`#if` など）');
-      return { name: undefined, modifier: undefined, value: this.convertExpression(node), ...positionOf(node) };
+      return {
+        name: undefined,
+        modifier: undefined,
+        value: this.convertExpression(node),
+        text: node.text,
+        ...positionOf(node),
+      };
     }
     const nameNode = field(node, 'name');
     const valueNode = namedChildren(node).find((child) => !sameNode(child, nameNode)) as Node;
     const modifier = (['ref', 'out', 'in'] as const).find((token) => hasToken(node, token));
-    return { name: nameNode?.text, modifier, value: this.convertExpression(valueNode), ...positionOf(node) };
+    return {
+      name: nameNode?.text,
+      modifier,
+      value: this.convertExpression(valueNode),
+      text: valueNode.text,
+      ...positionOf(node),
+    };
   }
 
   private convertArrayCreation(node: Node): Expression {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 510 -- The convert module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 512 -- The convert module keeps one stage of the C# interpreter together.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';

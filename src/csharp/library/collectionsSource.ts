@@ -104,6 +104,7 @@ namespace System.Collections.Generic {
     public List<TOutput> ConvertAll<TOutput>(Converter<T, TOutput> converter);
     public void CopyTo(T[] array);
     public void CopyTo(T[] array, int arrayIndex);
+    public void CopyTo(int index, T[] array, int arrayIndex, int count);
     public bool Exists(Predicate<T> match);
     public T? Find(Predicate<T> match);
     public List<T> FindAll(Predicate<T> match);
@@ -117,9 +118,12 @@ namespace System.Collections.Generic {
     public List<T> Slice(int start, int length);
     public int IndexOf(T item);
     public int IndexOf(T item, int index);
+    public int IndexOf(T item, int index, int count);
     public void Insert(int index, T item);
     public void InsertRange(int index, IEnumerable<T> collection);
     public int LastIndexOf(T item);
+    public int LastIndexOf(T item, int index);
+    public int LastIndexOf(T item, int index, int count);
     public bool Remove(T item);
     public int RemoveAll(Predicate<T> match);
     public void RemoveAt(int index);
@@ -266,6 +270,7 @@ namespace System.Collections.Generic {
     public SortedSet();
     public SortedSet(IEnumerable<T> collection);
     public SortedSet(IComparer<T>? comparer);
+    public SortedSet(IEnumerable<T> collection, IComparer<T>? comparer);
     public int Count { get; }
     public bool IsReadOnly { get; }
     public T? Min { get; }
@@ -646,7 +651,9 @@ namespace System.Text {
     public StringBuilder Insert(int index, string? value, int count);
     public StringBuilder Remove(int startIndex, int length);
     public StringBuilder Replace(char oldChar, char newChar);
+    public StringBuilder Replace(char oldChar, char newChar, int startIndex, int count);
     public StringBuilder Replace(string oldValue, string? newValue);
+    public StringBuilder Replace(string oldValue, string? newValue, int startIndex, int count);
     public override string ToString();
     public string ToString(int startIndex, int length);
   }

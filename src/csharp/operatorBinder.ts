@@ -123,7 +123,7 @@ export abstract class OperatorBinder extends ConversionBinder {
 
   /** Binds a binary operator other than `&&`, `||`, and `??`. */
   /** @param shownOperator The operator that an error names, such as `-=` for a compound assignment's `-`. */
-  // code-gauge-allow functionNcss 35 -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionNcss 37 -- One case per kind of syntax or value that the function handles.
   // code-gauge-allow functionCognitiveComplexity 25 -- Each branch handles one case of the C# rule that the function applies.
   bindBinary(
     operator: string,
@@ -172,12 +172,11 @@ export abstract class OperatorBinder extends ConversionBinder {
     ) {
       return this.finishBinary(operator, left, right, 'bool', this.specialType('bool'), isLifted, row);
     }
-    // A non-negative int constant converts to uint or ulong, so `u - 1` takes the unsigned operator.
-    const leftOperandType = asUnsigned(left, leftType, rightType);
-    const rightOperandType = asUnsigned(right, rightType, leftType);
+    // A non-negative int constant converts to uint or ulong, so `u - 1` takes the unsigned operator; a shift's count
+    // stays an int.
     const kind = SHIFTS.has(operator)
-      ? this.shiftKind(leftOperandType, rightOperandType)
-      : this.promotedKind(leftOperandType, rightOperandType);
+      ? this.shiftKind(leftType, rightType)
+      : this.promotedKind(asUnsigned(left, leftType, rightType), asUnsigned(right, rightType, leftType));
     if (kind === 'ambiguous') {
       this.error(
         row,
