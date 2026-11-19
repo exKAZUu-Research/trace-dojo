@@ -323,7 +323,7 @@ export class BinderBase {
           const found = namespace.findType(node.name, args.length);
           if (found) return this.construct(node, found, args);
         }
-        const unavailable = unavailableTypeOf([...path, node.name].join('.'), node.name);
+        const unavailable = this.unavailableType([...path, node.name].join('.'), node.name);
         if (unavailable) this.unsupported(node, unavailable);
         this.error(
           node,
@@ -373,7 +373,7 @@ export class BinderBase {
         );
       return ERROR_TYPE;
     }
-    const unavailable = unavailableTypeOf(name, name);
+    const unavailable = this.unavailableType(name, name);
     if (unavailable) this.unsupported(position, unavailable);
     this.error(
       position,
@@ -381,6 +381,14 @@ export class BinderBase {
       `型または名前空間の名前 '${name}' が見つかりませんでした (using ディレクティブまたはアセンブリ参照が指定されていることを確認してください)`
     );
     return ERROR_TYPE;
+  }
+
+  /** Describes a .NET type that the library lacks, or undefined for one it has or a name .NET lacks too. */
+  protected unavailableType(name: string, simpleName: string): string | undefined {
+    return unavailableTypeOf(name, simpleName, (fullName) => {
+      const parts = fullName.split('.');
+      return this.library.root.resolve(parts.slice(0, -1), false)?.types.has(parts.at(-1) as string) ?? false;
+    });
   }
 
   /** Finds a type in the namespaces around a declaration and its usings; an arity of -1 matches any arity. */

@@ -499,7 +499,7 @@ function recordText(evaluator: Evaluator, frame: Frame, value: CsObject | CsStru
       : member.read(value);
     return `${member.name} = ${memberValue === undefined ? '' : stringOf(evaluator, memberValue, member.type, frame)}`;
   });
-  const isAnonymous = (value.type.symbol as { anonymousDisplay?: string }).anonymousDisplay !== undefined;
+  const isAnonymous = value.type.symbol.anonymousDisplay !== undefined;
   const body = members.length > 0 ? ` ${members.join(', ')} ` : ' ';
   return isAnonymous ? `{${body}}` : `${value.type.symbol.name}${body === ' ' ? ' { }' : ` {${body}}`}`;
 }

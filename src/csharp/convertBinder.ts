@@ -119,7 +119,14 @@ export abstract class ConversionBinder extends LookupBinder {
     // Roslyn's conversion errors name the types with their namespaces.
     const fromQualified = displayType(expression.type, true);
     const toQualified = displayType(target, true);
-    if (expression.type.kind === 'null') {
+    if (expression.type.kind === 'null' && target.kind === 'typeParameter') {
+      this.error(
+        row,
+        'CS0403',
+        `Null 非許容の値型である可能性があるため、Null を型パラメーター '${to}' に変換できません。'default(${to})' を使用してください。`
+      );
+      return;
+    } else if (expression.type.kind === 'null') {
       this.error(row, 'CS0037', `Null 非許容の値型であるため、Null を '${to}' に変換できません`);
       return;
     }

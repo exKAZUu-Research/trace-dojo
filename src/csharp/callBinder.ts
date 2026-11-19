@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 596 -- The callBinder module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 608 -- The callBinder module keeps one stage of the C# interpreter together.
 import type { BoundArgument, BoundArguments, BoundExpression, BoundLValue } from './bound';
 import { displayMethodIn } from './declarations';
 import type { MethodCandidate } from './lookup';
@@ -106,6 +106,13 @@ export abstract class CallBinder extends OperatorBinder {
     row: number,
     description: CallDescription
   ): ResolvedCall | undefined {
+    const repeated = args.find(
+      (arg, index) => arg.name !== undefined && args.slice(0, index).some((other) => other.name === arg.name)
+    );
+    if (repeated) {
+      this.error(repeated.row, 'CS1740', `'${repeated.name}' という名前付き引数が複数指定されました`);
+      return undefined;
+    }
     const applicable: Applicable[] = [];
     for (const candidate of candidates) {
       const result = this.applicability(candidate, args, explicitTypeArgs);
@@ -852,7 +859,8 @@ export abstract class CallBinder extends OperatorBinder {
     return true;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Roslyn reports a different error for each way a call fails.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Roslyn reports a different error for each way a call fails.
+  // code-gauge-allow functionNcss 35 -- Each branch handles one case of the C# rule that the function applies.
   private reportInapplicable(
     candidates: MethodCandidate[],
     args: ArgumentInfo[],
@@ -881,16 +889,21 @@ export abstract class CallBinder extends OperatorBinder {
         ? []
         : this.reportedTypeArguments(candidate, args, explicitTypeArgs, mapping.parameterOf, expanded);
     const substitution = this.callSubstitution(candidate, typeArgs);
+    // Roslyn reports each argument that does not fit, but only the receiver of an extension method that does not.
+    let hasBadArgument = false;
     for (const [index, arg] of args.entries()) {
       const parameter = method.parameters[mapping.parameterOf[index]];
       const type = this.parameterType(method, mapping.parameterOf[index], expanded, substitution);
       const position = description.isExtension ? index : index + 1;
-      if (this.reportRefKindMismatch(arg, parameter, position)) return;
-      if (!this.argumentFits(arg, type, parameter.refKind)) {
+      if (this.reportRefKindMismatch(arg, parameter, position)) {
+        hasBadArgument = true;
+      } else if (!this.argumentFits(arg, type, parameter.refKind)) {
         this.reportInconvertible(candidate, arg, position, type, row, description);
-        return;
+        if (description.isExtension && position === 0) return;
+        hasBadArgument = true;
       }
     }
+    if (hasBadArgument) return;
     for (const [index, typeArg] of typeArgs.entries()) {
       if (!this.satisfiesConstraints(typeArg, method.typeParameters[index], substitution, row, displayMethod(method)))
         return;
@@ -1030,8 +1043,14 @@ export abstract class CallBinder extends OperatorBinder {
     row: number,
     description: CallDescription
   ): void {
-    if (arg.expression.kind === 'unbound') {
-      // Converting reports why the lambda or method group does not fit, as Roslyn reports the body's errors.
+    if (arg.expression.kind === 'unbound' && arg.expression.methodGroup) {
+      this.error(
+        arg.row,
+        'CS1503',
+        `引数 ${position}: は 'メソッド グループ' から '${displayType(type, true)}' へ変換することはできません`
+      );
+    } else if (arg.expression.kind === 'unbound') {
+      // Converting reports why the lambda does not fit, as Roslyn reports the body's errors.
       this.convert(arg.expression, type, arg.row);
     } else if (description.isExtension && position === 0) {
       this.error(
@@ -1043,7 +1062,7 @@ export abstract class CallBinder extends OperatorBinder {
       this.error(
         arg.row,
         'CS1503',
-        `引数 ${position}: は '${displayType(arg.expression.type)}' から '${displayType(type)}' へ変換することはできません`
+        `引数 ${position}: は '${displayType(arg.expression.type, true)}' から '${displayType(type, true)}' へ変換することはできません`
       );
     }
   }

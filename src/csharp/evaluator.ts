@@ -622,7 +622,9 @@ export class Evaluator extends StatementExecutor {
   private evaluateWith(expression: Extract<BoundExpression, { kind: 'with' }>, frame: Frame): Value {
     const source = this.evaluate(expression.value, frame);
     if (source === undefined) throw NULL_REFERENCE();
-    const copy = source instanceof CsStruct ? source.clone() : this.cloneObject(source as CsObject);
+    // A primitive struct, as in `5 with { }`, is its own copy.
+    const copy =
+      source instanceof CsStruct ? source.clone() : source instanceof CsObject ? this.cloneObject(source) : source;
     this.storeLocal(frame, expression.temporary, copy);
     for (const assignment of expression.assignments) {
       if (assignment.target.kind === 'discard' || !assignment.value) continue;

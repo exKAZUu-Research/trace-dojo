@@ -213,22 +213,24 @@ export class Compiler extends StatementBinder {
 
   /** Finds the static `Main` method that the program starts from. */
   private findMain(declared: DeclaredType[]): MethodSymbol | undefined {
+    // A method of a generic type, or of a type nested in one, is no entry point.
     const candidates = declared.flatMap((type) =>
-      type.symbol.methods.filter(
-        (method) =>
-          method.name === 'Main' &&
-          method.isStatic &&
-          method.typeParameters.length === 0 &&
-          this.isEntrySignature(method)
-      )
+      type.symbol.allTypeParameters.length > 0
+        ? []
+        : type.symbol.methods.filter(
+            (method) =>
+              method.name === 'Main' &&
+              method.isStatic &&
+              method.typeParameters.length === 0 &&
+              this.isEntrySignature(method)
+          )
     );
     if (candidates.length > 1) {
-      for (const candidate of candidates)
-        this.error(
-          candidate.row,
-          'CS0017',
-          `プログラムで複数のエントリ ポイントが定義されています。エントリ ポイントを含む型を指定するには、/main でコンパイルしてください。`
-        );
+      this.error(
+        candidates[0].row,
+        'CS0017',
+        `プログラムで複数のエントリ ポイントが定義されています。エントリ ポイントを含む型を指定するには、/main でコンパイルしてください。`
+      );
       return undefined;
     }
     return candidates[0];

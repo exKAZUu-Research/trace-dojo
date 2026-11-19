@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 659 -- The statementBinder module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 666 -- The statementBinder module keeps one stage of the C# interpreter together.
 import type {
   Block,
   Expression,
@@ -50,7 +50,6 @@ import {
   type TypeSymbol,
   VOID_TYPE,
 } from './types';
-import { unavailableTypeOf } from './unavailable';
 
 /** What the earlier labels of a switch have covered. */
 interface SwitchLabelsSeen {
@@ -72,7 +71,7 @@ export abstract class StatementBinder extends PatternBinder {
 
   protected rejectUnavailableName(name: string, position: Position): void {
     const simple = name.slice(name.lastIndexOf('.') + 1);
-    const unavailable = unavailableTypeOf(name, simple);
+    const unavailable = this.unavailableType(name, simple);
     if (unavailable) this.unsupported(position, unavailable);
   }
 
@@ -1023,7 +1022,7 @@ export abstract class StatementBinder extends PatternBinder {
         this.error(
           label,
           'CS0152',
-          `switch ステートメントに、ラベル値が '${constantText(constantValue)}' の case が複数含まれています`
+          `switch ステートメントに、ラベル値が '${labelText(constantValue, constant.type)}' の case が複数含まれています`
         );
       seen.constants.push(key);
     }
@@ -1273,4 +1272,13 @@ export function isObjectCreation(expression: BoundExpression): boolean {
 function constantKey(value: unknown): unknown {
   if (value !== undefined && typeof value === 'object') return String(value);
   return value;
+}
+
+/** A case label's constant as Roslyn shows it: a string quoted, a char as itself, `True`, and `null`. */
+function labelText(value: unknown, type: Type): string {
+  if (value === undefined) return 'null';
+  if (typeof value === 'string') return `"${value}"`;
+  if (typeof value === 'boolean') return value ? 'True' : 'False';
+  if (specialOf(type) === 'char') return String.fromCodePoint(value as number);
+  return constantText(value);
 }

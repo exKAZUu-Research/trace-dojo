@@ -14,6 +14,8 @@ import type { ArgumentInfo } from './callBinder';
 import { isEnum, isNumeric } from './conversions';
 import type { BindContext, ConversionMode } from './convertBinder';
 import { CsDecimal } from './decimal';
+import { isDelegateType } from './declarations';
+import { missingDeconstruct } from './deconstructionErrors';
 import { type BindResult, isNonValue, MemberBinder, type NonValue } from './memberBinder';
 import type { Space } from './patternSpace';
 import { desugarQuery, TRANSPARENT_PREFIX } from './queries';
@@ -21,7 +23,6 @@ import { FunctionScope, LocalScope } from './scopes';
 import {
   arrayType,
   displayType,
-  displayTypeSymbol,
   ERROR_TYPE,
   FieldSymbol,
   isReferenceType,
@@ -418,7 +419,7 @@ export abstract class ExpressionBinder extends MemberBinder {
     return result;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Each branch handles one case of the C# rule that the function applies.
   private bindInterpolated(node: Extract<Expression, { kind: 'interpolated' }>, context: BindContext): BoundExpression {
     const parts: Extract<BoundExpression, { kind: 'interpolated' }>['parts'] = [];
     for (const part of node.parts) {
@@ -427,7 +428,10 @@ export abstract class ExpressionBinder extends MemberBinder {
         continue;
       }
       const hole = part.hole as NonNullable<typeof part.hole>;
-      const value = this.bindValue(hole.expression, context);
+      let value = this.bindValue(hole.expression, context);
+      // A method group or a lambda with a natural type formats as its delegate.
+      if (value.kind === 'unbound' && this.naturalTypeOf(value))
+        value = this.convert(value, this.objectType, hole.expression);
       if (value.kind === 'unbound' || value.type.kind === 'void') {
         this.error(
           hole.expression,
@@ -1136,6 +1140,14 @@ export abstract class ExpressionBinder extends MemberBinder {
   ): BoundExpression | undefined {
     const node = expression.node;
     const context = expression.context as BindContext;
+    // A method group or a lambda converts to `object` or `Delegate` through its natural type (C# 10).
+    if ((expression.methodGroup || node.kind === 'lambda') && !isDelegateType(target) && target.kind !== 'error') {
+      const natural = this.naturalTypeOf(expression);
+      if (natural && this.conversions.implicit(natural, target) === 'reference') {
+        const bound = this.bindUnbound(expression, natural, mode, report);
+        return bound && this.convert(bound, target, expression.row);
+      }
+    }
     if (expression.methodGroup)
       return this.bindMethodGroupConversion(
         expression.methodGroup as Extract<NonValue, { kind: 'methodGroup' }>,
@@ -1328,100 +1340,6 @@ export abstract class ExpressionBinder extends MemberBinder {
     );
   }
 
-  /** Converts a method group to a delegate type, choosing the overload that its parameters select. */
-  // code-gauge-allow functionNcss 32 -- One case per kind of syntax or value that the function handles.
-  // code-gauge-allow functionCognitiveComplexity 26 -- Each branch handles one case of the C# rule that the function applies.
-  private bindMethodGroupConversion(
-    group: Extract<NonValue, { kind: 'methodGroup' }>,
-    target: Type,
-    report: boolean,
-    row: number
-  ): BoundExpression | undefined {
-    const invoke = this.delegateInvokeOf(target);
-    if (!invoke) {
-      if (report && target.kind !== 'error')
-        this.error(
-          row,
-          'CS0428',
-          `メソッド グループ '${group.name}' を非デリゲート型 '${displayType(target)}' に変換することはできません。このメソッドを呼び出しますか?`
-        );
-      return undefined;
-    }
-    const args: ArgumentInfo[] = invoke.parameterTypes.map((type, index) => ({
-      expression: { kind: 'default', type, row },
-      name: undefined,
-      refKind: invoke.refKinds[index],
-      row,
-      target: undefined,
-    }));
-    const saved = this.diagnostics.length;
-    let resolved =
-      group.candidates.length > 0
-        ? this.resolveCall(group.candidates, args, group.typeArgs, row, { name: group.name, kind: 'method' })
-        : undefined;
-    let receiver = group.receiver;
-    if (!resolved && group.extensions.length > 0 && group.receiver) {
-      this.diagnostics.length = saved;
-      resolved = this.resolveCall(
-        group.extensions,
-        [{ expression: group.receiver, name: undefined, refKind: undefined, row, target: undefined }, ...args],
-        group.typeArgs,
-        row,
-        { name: group.name, kind: 'method', isExtension: true }
-      );
-      receiver = group.receiver;
-    }
-    this.diagnostics.length = saved;
-    if (!resolved) {
-      if (report)
-        this.error(
-          row,
-          'CS0123',
-          `デリゲート '${displayType(target)}' に一致する '${group.name}' のオーバーロードはありません`
-        );
-      return undefined;
-    }
-    const method = resolved.candidate.method;
-    const returnType = substitute(method.returnType, this.callSubstitution(resolved.candidate, resolved.typeArgs));
-    const returnsMatch =
-      (returnType.kind === 'void' && invoke.returnType.kind === 'void') ||
-      (returnType.kind !== 'void' &&
-        invoke.returnType.kind !== 'void' &&
-        (sameType(returnType, invoke.returnType) ||
-          (isReferenceType(returnType) && this.conversions.isReferenceConvertible(returnType, invoke.returnType))));
-    if (!returnsMatch) {
-      if (report)
-        this.error(
-          row,
-          'CS0407',
-          `'${displayType(returnType)} ${displayTypeSymbol(method.owner)}.${method.name}(${method.parameters.map((parameter) => displayType(parameter.type)).join(', ')})' には、不適切な戻り値の型が指定されています`
-        );
-      return undefined;
-    }
-    if (!method.isStatic && !receiver && method.kind !== 'localFunction') {
-      if (report)
-        this.error(
-          row,
-          'CS0120',
-          `静的でないフィールド、メソッド、またはプロパティ '${displayTypeSymbol(method.owner)}.${method.name}' で、オブジェクト参照が必要です`
-        );
-      return undefined;
-    }
-    const isVirtual =
-      !group.isBaseAccess &&
-      (method.isVirtual || method.isAbstract || method.isOverride || method.owner.kind === 'interface');
-    return {
-      kind: 'newDelegate',
-      method,
-      receiver: method.isStatic && !method.isExtension ? undefined : receiver,
-      typeArgs: resolved.typeArgs,
-      owner: resolved.candidate.owner,
-      isVirtual,
-      type: target,
-      row,
-    };
-  }
-
   /** The default value of a type: null for references and nullables, zero for numbers, an empty struct. */
   // code-gauge-allow functionCognitiveComplexity 20 -- Each branch handles one case of the C# rule that the function applies.
   defaultValue(type: Type, row: number): BoundExpression {
@@ -1592,8 +1510,7 @@ export abstract class ExpressionBinder extends MemberBinder {
     symbol.access = 'internal';
     symbol.baseType = this.objectType;
     symbol.runtimeNameOverride = `<>f__AnonymousType${this.anonymousTypes.size}\`${members.length}`;
-    (symbol as { anonymousDisplay?: string }).anonymousDisplay =
-      `<anonymous type: ${members.map((member) => `${displayType(member.type)} ${member.name}`).join(', ')}>`;
+    symbol.anonymousDisplay = `<anonymous type: ${members.map((member) => `${displayType(member.type)} ${member.name}`).join(', ')}>`;
     const constructor = new MethodSymbol('.ctor', symbol, 'constructor');
     constructor.access = 'public';
     constructor.parameters = members.map((member): ParameterSymbol => ({
@@ -1649,9 +1566,7 @@ export abstract class ExpressionBinder extends MemberBinder {
     if (type.kind === 'error') return { kind: 'default', type: ERROR_TYPE, row: node.row };
     const isRecord =
       type.kind === 'named' &&
-      (type.symbol.isRecord ||
-        type.symbol.kind === 'struct' ||
-        (type.symbol as { anonymousDisplay?: string }).anonymousDisplay !== undefined);
+      (type.symbol.isRecord || type.symbol.kind === 'struct' || type.symbol.anonymousDisplay !== undefined);
     if (!isRecord) {
       this.error(
         node,
@@ -1748,6 +1663,11 @@ export abstract class ExpressionBinder extends MemberBinder {
         ['<<', '>>', '>>>'].includes((operation as { operator?: string }).operator ?? ''))
     ) {
       return this.convert(operation, type, node, 'explicit');
+    }
+    // A constant that the target cannot hold, as in `s += 70000` for a short, is what Roslyn reports (CS0031).
+    if (value.kind === 'constant' && this.conversions.explicit(operation.type, type)) {
+      this.convert(value, type, node);
+      return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
     return this.convert(operation, type, node);
   }
@@ -1881,11 +1801,11 @@ export abstract class ExpressionBinder extends MemberBinder {
       return {
         kind: 'nested',
         elements: designation.elements.map((element, index) => {
-          const elementType = elementTypes[index];
-          if (!elementType && elementTypes.length > 0 && !declaredType && element.kind === 'single' && !element.type) {
+          const inner = elementTypes[index];
+          if (!inner && elementType.kind !== 'error' && !declaredType && element.kind === 'single' && !element.type) {
             this.error(element, 'CS8130', `暗黙的に型指定された分解変数 '${element.name}' の型を推論できません。`);
           }
-          return this.declareDeconstructed(element, declaredType, elementType ?? ERROR_TYPE, context);
+          return this.declareDeconstructed(element, declaredType, inner ?? ERROR_TYPE, context);
         }),
         deconstruct,
         elementTypes,
@@ -1941,11 +1861,8 @@ export abstract class ExpressionBinder extends MemberBinder {
           )
         : undefined;
     if (!candidate) {
-      this.error(
-        position,
-        'CS1061',
-        `'${displayType(type)}' に 'Deconstruct' の定義が含まれておらず、型 '${displayType(type)}' の最初の引数を受け付けるアクセス可能な拡張メソッド 'Deconstruct' が見つかりませんでした。using ディレクティブまたはアセンブリ参照が不足していないことを確認してください`
-      );
+      const missing = missingDeconstruct(displayType(type), count, found?.kind === 'methods');
+      this.error(position, missing.code, missing.message);
       this.error(
         position,
         'CS8129',

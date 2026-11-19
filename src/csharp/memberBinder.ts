@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 589 -- The memberBinder module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 628 -- The memberBinder module keeps one stage of the C# interpreter together.
 import type { Argument, Expression, Initializer, MemberInitializer, Position, TypeNode } from './ast';
 import type { TypeContext } from './binderBase';
 import type { BoundArgument, BoundExpression, BoundInitializerEntry, BoundLValue, BoundMemberInit } from './bound';
@@ -13,6 +13,7 @@ import {
   displayTypeSymbol,
   ERROR_TYPE,
   FieldSymbol,
+  isReferenceType,
   LocalSymbol,
   type MethodSymbol,
   type NamedType,
@@ -533,6 +534,9 @@ export abstract class MemberBinder extends CallBinder {
         this.reportInaccessible(inaccessible, position);
         return { kind: 'default', type: ERROR_TYPE, row: position.row };
       }
+      if (isCallee && this.reportNonInvocable(type, name, position, context)) {
+        return { kind: 'default', type: ERROR_TYPE, row: position.row };
+      }
       this.rejectUnknownLibraryMember(type, name, position);
       this.error(position, 'CS0117', `'${displayType(type)}' に '${name}' の定義がありません`);
       return { kind: 'default', type: ERROR_TYPE, row: position.row };
@@ -569,6 +573,21 @@ export abstract class MemberBinder extends CallBinder {
     return this.memberAccessOn(undefined, found, position, context);
   }
 
+  /**
+   * Reports a call of a field or a property, such as `s.Length()`, which the invoked lookup leaves out, naming the
+   * member by the type that declares it, as `Array.Length`.
+   */
+  private reportNonInvocable(type: Type, name: string, position: Position, context: BindContext): boolean {
+    const found = this.lookupMember(type, name, context.fn.typeContext).found;
+    if (found?.kind !== 'field' && found?.kind !== 'property') return false;
+    this.error(
+      position,
+      'CS1955',
+      `実行不可能なメンバー '${displayTypeSymbol(found.owner.symbol, found.owner.args)}.${name}' をメソッドのように使用することはできません。`
+    );
+    return true;
+  }
+
   /** Rejects a member that .NET's library type has but this grader's does not. */
   protected rejectUnknownLibraryMember(type: Type, name: string, position: Position): void {
     const symbol =
@@ -593,8 +612,6 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** Binds an instance member of a value, or an extension method that takes it. */
-  // code-gauge-allow functionNcss 32 -- One case per kind of syntax or value that the function handles.
-  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
   bindInstanceMember(
     receiver: BoundExpression,
     name: string,
@@ -630,16 +647,8 @@ export abstract class MemberBinder extends CallBinder {
         this.reportInaccessible(inaccessible, position, type, context.fn.typeContext.type);
         return { kind: 'default', type: ERROR_TYPE, row: position.row };
       }
-      // A call of a field or a property, such as `s.Length()`, which the invoked lookup leaves out.
-      const nonInvocable = isCallee ? this.lookupMember(type, name, context.fn.typeContext).found : undefined;
-      if (nonInvocable?.kind === 'field' || nonInvocable?.kind === 'property') {
-        this.error(
-          position,
-          'CS1955',
-          `実行不可能なメンバー '${displayType(type)}.${name}' をメソッドのように使用することはできません。`
-        );
+      if (isCallee && this.reportNonInvocable(type, name, position, context))
         return this.failedAccess(receiver, position);
-      }
       this.rejectUnknownLibraryMember(type, name, position);
       this.error(
         position,
@@ -657,22 +666,14 @@ export abstract class MemberBinder extends CallBinder {
       return { kind: 'default', type: ERROR_TYPE, row: position.row };
     }
     if (found.kind === 'methods') {
-      const instance = found.candidates.filter((candidate) => !candidate.method.isStatic);
       // Static methods do not apply to an instance, which then calls an extension method of the name, as
-      // `array.Reverse()` calls Enumerable.Reverse rather than Array.Reverse.
-      if (instance.length === 0 && extensions.length === 0) {
-        const [first] = found.candidates;
-        this.error(
-          position,
-          'CS0176',
-          `インスタンス参照でメンバー '${displayMethodIn(first.method, first.owner).replace(/\(.*$/, '')}' にアクセスできません。代わりに型名を使用してください`
-        );
-        return { kind: 'default', type: ERROR_TYPE, row: position.row };
-      }
+      // `array.Reverse()` calls Enumerable.Reverse rather than Array.Reverse; with none, the call or the conversion
+      // reports the static method it chose.
+      const instance = found.candidates.filter((candidate) => !candidate.method.isStatic);
       return {
         kind: 'methodGroup',
         name,
-        candidates: instance,
+        candidates: instance.length === 0 && extensions.length === 0 ? found.candidates : instance,
         receiver,
         isSimpleName: false,
         typeArgs,
@@ -768,7 +769,111 @@ export abstract class MemberBinder extends CallBinder {
   /** Binds an expression as storage that an assignment or a `ref` argument writes. */
   abstract bindLValue(node: Expression, context: BindContext, use: 'assign' | 'ref' | 'out' | 'compound'): BoundLValue;
 
+  /** Converts a method group to a delegate type, choosing the overload that its parameters select. */
+  // code-gauge-allow functionNcss 36 -- One case per kind of syntax or value that the function handles.
+  // code-gauge-allow functionCognitiveComplexity 30 -- Each branch handles one case of the C# rule that the function applies.
+  protected bindMethodGroupConversion(
+    group: Extract<NonValue, { kind: 'methodGroup' }>,
+    target: Type,
+    report: boolean,
+    row: number
+  ): BoundExpression | undefined {
+    const invoke = this.delegateInvokeOf(target);
+    if (!invoke) {
+      if (report && target.kind !== 'error')
+        this.error(
+          row,
+          'CS0428',
+          `メソッド グループ '${group.name}' を非デリゲート型 '${displayType(target)}' に変換することはできません。このメソッドを呼び出しますか?`
+        );
+      return undefined;
+    }
+    const args: ArgumentInfo[] = invoke.parameterTypes.map((type, index) => ({
+      expression: { kind: 'default', type, row },
+      name: undefined,
+      refKind: invoke.refKinds[index],
+      row,
+      target: undefined,
+    }));
+    const saved = this.diagnostics.length;
+    let resolved =
+      group.candidates.length > 0
+        ? this.resolveCall(group.candidates, args, group.typeArgs, row, { name: group.name, kind: 'method' })
+        : undefined;
+    let receiver = group.receiver;
+    if (!resolved && group.extensions.length > 0 && group.receiver) {
+      this.diagnostics.length = saved;
+      resolved = this.resolveCall(
+        group.extensions,
+        [{ expression: group.receiver, name: undefined, refKind: undefined, row, target: undefined }, ...args],
+        group.typeArgs,
+        row,
+        { name: group.name, kind: 'method', isExtension: true }
+      );
+      receiver = group.receiver;
+    }
+    this.diagnostics.length = saved;
+    if (!resolved) {
+      if (report)
+        this.error(
+          row,
+          'CS0123',
+          `デリゲート '${displayType(target)}' に一致する '${group.name}' のオーバーロードはありません`
+        );
+      return undefined;
+    }
+    const method = resolved.candidate.method;
+    const returnType = substitute(method.returnType, this.callSubstitution(resolved.candidate, resolved.typeArgs));
+    const returnsMatch =
+      (returnType.kind === 'void' && invoke.returnType.kind === 'void') ||
+      (returnType.kind !== 'void' &&
+        invoke.returnType.kind !== 'void' &&
+        (sameType(returnType, invoke.returnType) ||
+          (isReferenceType(returnType) && this.conversions.isReferenceConvertible(returnType, invoke.returnType))));
+    if (!returnsMatch) {
+      if (report)
+        this.error(
+          row,
+          'CS0407',
+          `'${displayType(returnType)} ${displayTypeSymbol(method.owner)}.${method.name}(${method.parameters.map((parameter) => displayType(parameter.type)).join(', ')})' には、不適切な戻り値の型が指定されています`
+        );
+      return undefined;
+    }
+    if (!method.isStatic && !receiver && method.kind !== 'localFunction') {
+      if (report)
+        this.error(
+          row,
+          'CS0120',
+          `静的でないフィールド、メソッド、またはプロパティ '${displayTypeSymbol(method.owner)}.${method.name}' で、オブジェクト参照が必要です`
+        );
+      return undefined;
+    }
+    if (method.isStatic && receiver && !group.isSimpleName && !method.isExtension && method.kind !== 'localFunction') {
+      if (report)
+        this.error(
+          row,
+          'CS0176',
+          `インスタンス参照でメンバー '${displayMethodIn(method, resolved.candidate.owner)}' にアクセスできません。代わりに型名を使用してください`
+        );
+      return undefined;
+    }
+    const isVirtual =
+      !group.isBaseAccess &&
+      (method.isVirtual || method.isAbstract || method.isOverride || method.owner.kind === 'interface');
+    return {
+      kind: 'newDelegate',
+      method,
+      receiver: method.isStatic && !method.isExtension ? undefined : receiver,
+      typeArgs: resolved.typeArgs,
+      owner: resolved.candidate.owner,
+      isVirtual,
+      type: target,
+      row,
+    };
+  }
+
   /** Binds a call: of a method group, a delegate, or `nameof`. */
+  // code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one case of the C# rule that the function applies.
   bindInvocation(node: Extract<Expression, { kind: 'invocation' }>, context: BindContext): BoundExpression {
     if (node.target.kind === 'name' && node.target.name === 'nameof' && !context.scope.lookup('nameof'))
       return this.bindNameof(node, context);
@@ -779,10 +884,12 @@ export abstract class MemberBinder extends CallBinder {
     if (target.kind === 'methodGroup') return this.invokeMethodGroup(target, args, node);
     if (target.kind === 'typeRef' || target.kind === 'namespaceRef' || target.kind === 'discard') {
       if (target.kind === 'typeRef') {
+        // Roslyn names the type by its definition, as `List<T>`.
+        const shown = target.type.kind === 'named' ? displayTypeSymbol(target.type.symbol) : displayType(target.type);
         this.error(
           node.target,
           'CS1955',
-          `実行不可能なメンバー '${displayType(target.type)}' をメソッドのように使用することはできません。`
+          `実行不可能なメンバー '${shown}' をメソッドのように使用することはできません。`
         );
         return { kind: 'default', type: ERROR_TYPE, row: node.row };
       }
@@ -922,7 +1029,7 @@ export abstract class MemberBinder extends CallBinder {
       this.error(
         node,
         'CS0176',
-        `インスタンス参照でメンバー '${displayMethodIn(method, resolved.candidate.owner).replace(/\(.*$/, '')}' にアクセスできません。代わりに型名を使用してください`
+        `インスタンス参照でメンバー '${displayMethodIn(method, resolved.candidate.owner)}' にアクセスできません。代わりに型名を使用してください`
       );
     }
     if (method.isAbstract && group.isBaseAccess) {

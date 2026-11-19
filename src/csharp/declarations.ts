@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 832 -- The declarations module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 870 -- The declarations module keeps one stage of the C# interpreter together.
 import type {
   Accessor,
   CompilationUnit,
@@ -58,7 +58,7 @@ export class DeclarationBinder extends BinderBase {
 
   /** Declares every type of a unit and its members, in the order that inheritance needs. */
   // code-gauge-allow functionCognitiveComplexity 21 -- Each branch handles one case of the C# rule that the function applies.
-  // code-gauge-allow functionNcss 32 -- Each branch handles one case of the C# rule that the function applies.
+  // code-gauge-allow functionNcss 33 -- Each branch handles one case of the C# rule that the function applies.
   declareUnit(unit: CompilationUnit, root: NamespaceSymbol, isLibrary: boolean): DeclaredType[] {
     this.isLibraryUnit = isLibrary;
     const start = this.declaredTypes.length;
@@ -75,6 +75,7 @@ export class DeclarationBinder extends BinderBase {
       ];
     }
     for (const type of declared) this.resolveBases(type);
+    this.breakInheritanceCycles(declared);
     const ordered = this.orderByInheritance(declared);
     for (const type of ordered) this.resolveConstraints(type);
     for (const type of ordered) this.declareMembers(type);
@@ -397,6 +398,38 @@ export class DeclarationBinder extends BinderBase {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Reports each class whose base class leads back to it (CS0146) and each interface that one of its base interfaces
+   * leads back to (CS0529), as Roslyn does for every type in the cycle, and then cuts the cycles.
+   */
+  private breakInheritanceCycles(types: DeclaredType[]): void {
+    const cyclicClasses: TypeSymbol[] = [];
+    const cyclicInterfaces: [TypeSymbol, NamedType][] = [];
+    for (const { symbol, declaration } of types) {
+      if (symbol.kind === 'interface') {
+        for (const face of symbol.interfaces) {
+          if (!reachesInterface(face.symbol, symbol)) continue;
+          this.error(
+            declaration,
+            'CS0529',
+            `継承インターフェイス '${displayType(face)}' により、'${displayTypeSymbol(symbol)}' のインターフェイス階層内で循環参照が発生します`
+          );
+          cyclicInterfaces.push([symbol, face]);
+        }
+      } else if (symbol.baseType && reachesBase(symbol.baseType.symbol, symbol)) {
+        this.error(
+          declaration,
+          'CS0146',
+          `'${displayType(symbol.baseType)}' と '${displayTypeSymbol(symbol)}' を含む、循環する基本データ型の依存関係です`
+        );
+        cyclicClasses.push(symbol);
+      }
+    }
+    for (const symbol of cyclicClasses) symbol.baseType = this.objectType;
+    for (const [symbol, face] of cyclicInterfaces)
+      symbol.interfaces = symbol.interfaces.filter((other) => other !== face);
   }
 
   /** Orders types so that every type follows its base class and its containing type, reporting cycles. */
@@ -1399,8 +1432,8 @@ export class DeclarationBinder extends BinderBase {
     const missing: string[] = [];
     const implemented = new Set<MethodSymbol | PropertySymbol>();
     for (let current: NamedType | undefined = symbol.declaredType; current; current = baseTypeOf(current)) {
-      // The class's own abstract members are CS0513 instead.
-      const isOwn = current.symbol === symbol;
+      // The class's own abstract members are CS0513 instead, as are those of a base class that is not abstract.
+      const isOwn = current.symbol === symbol || !current.symbol.isAbstract;
       for (const method of current.symbol.methods) {
         if (method.isAbstract && !isOwn && !implemented.has(method)) missing.push(displayMethodIn(method, current));
         addOverriddenChain(method, implemented);
@@ -1590,4 +1623,28 @@ function typeRank(type: Type): number {
   if (type.kind !== 'named' || type.symbol.isLibrary)
     return type.kind === 'named' ? Math.min(4, ...type.args.map(typeRank)) : 4;
   return Math.min(effectiveRank(type.symbol.access, type.symbol.containing), ...type.args.map(typeRank));
+}
+
+/** Whether a class's chain of base classes from a type reaches a type. */
+function reachesBase(start: TypeSymbol, target: TypeSymbol): boolean {
+  const seen = new Set<TypeSymbol>();
+  for (let current: TypeSymbol | undefined = start; current && !seen.has(current); current = current.baseType?.symbol) {
+    if (current === target) return true;
+    seen.add(current);
+  }
+  return false;
+}
+
+/** Whether an interface's base interfaces, directly or through others, reach an interface. */
+function reachesInterface(start: TypeSymbol, target: TypeSymbol): boolean {
+  const seen = new Set<TypeSymbol>();
+  const pending = [start];
+  while (pending.length > 0) {
+    const current = pending.pop() as TypeSymbol;
+    if (current === target) return true;
+    if (seen.has(current)) continue;
+    seen.add(current);
+    pending.push(...current.interfaces.map((face) => face.symbol));
+  }
+  return false;
 }

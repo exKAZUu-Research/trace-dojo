@@ -287,6 +287,8 @@ export class TypeSymbol {
   staticFieldCount = 0;
   /** The name that .NET's `Type.FullName` gives, which `ToString()` prints for objects. */
   runtimeNameOverride: string | undefined;
+  /** How Roslyn shows an anonymous type, such as `<anonymous type: int X>`. */
+  anonymousDisplay: string | undefined;
   row = 0;
 
   constructor(
@@ -555,6 +557,7 @@ export function displayTypeSymbol(
 ): string {
   const keyword = symbol.special ? KEYWORD_NAMES[symbol.special] : undefined;
   if (keyword) return keyword;
+  if (symbol.anonymousDisplay) return symbol.anonymousDisplay;
   const ownCount = symbol.typeParameters.length;
   const ownArgs = args.slice(args.length - ownCount);
   const outerArgs = args.slice(0, args.length - ownCount);

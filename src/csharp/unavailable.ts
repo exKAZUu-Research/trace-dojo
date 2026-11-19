@@ -20,13 +20,17 @@ for (const fullName of DOTNET_TYPES) {
 
 /**
  * Describes a .NET library type that this grader lacks, by its dotted or simple name, or returns undefined for a name
- * .NET does not have either, which is an ordinary error.
+ * .NET does not have either, or a type the grader has that the program did not import, which are ordinary errors.
  */
-export function unavailableTypeOf(name: string, simpleName: string): string | undefined {
+export function unavailableTypeOf(
+  name: string,
+  simpleName: string,
+  isAvailable: (fullName: string) => boolean
+): string | undefined {
   const fullName = name.includes('.')
     ? DOTNET_TYPES.find((type) => type.replace(/`\d+$/, '') === name)
     : TYPES_BY_NAME.get(simpleName);
-  if (!fullName) return undefined;
+  if (!fullName || isAvailable(fullName.replace(/`\d+$/, ''))) return undefined;
   const namespace = fullName.slice(0, fullName.lastIndexOf('.'));
   const display = fullName.replace(/`\d+$/, '');
   const feature = FEATURES_BY_NAMESPACE[namespace];
