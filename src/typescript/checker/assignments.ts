@@ -147,10 +147,7 @@ export class AssignmentChecker {
     const value = declaration.childForFieldName('value');
     if (!value) return true;
     const initializer = skipParentheses(value);
-    if (initializer.type === 'null') return true;
-    if (initializer.text !== 'undefined') return false;
-    const binding = this.c.scopeOf(initializer).lookupValue('undefined');
-    return !binding?.valueDeclaration || this.c.isLibrary(binding.valueDeclaration);
+    return initializer.type === 'null' || this.c.isGlobalUndefined(initializer);
   }
 
   destructuringAssignment(pattern: TreeNode, type: Type): void {

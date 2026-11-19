@@ -2,6 +2,12 @@ try {
   console.table({}, "x" as any);
 } catch (error: any) {
   console.log(error instanceof TypeError, error.name, error.code);
+  const wrapper = Object.getPrototypeOf(error);
+  const formatter = Object.getPrototypeOf(wrapper);
+  console.log(Object.hasOwn(wrapper, "toString"), Object.getOwnPropertyDescriptor(wrapper, "toString")?.enumerable);
+  console.log(Object.getOwnPropertyNames(wrapper), Object.getOwnPropertyNames(formatter));
+  console.log(Object.getPrototypeOf(formatter) === TypeError.prototype, error.constructor === TypeError);
+  console.log(Object.getOwnPropertySymbols(formatter)[0].description);
   console.log(String(error));
   error.code = "custom";
   console.log(String(error));
@@ -10,4 +16,9 @@ try {
 const ordinary = new TypeError("message") as TypeError & { code: string };
 ordinary.code = "ERR_INVALID_ARG_TYPE";
 console.log(String(ordinary));
-console.table({}, null as any);
+try {
+  console.table({}, null as any);
+} catch (error: any) {
+  error.code = "custom-headline";
+  throw error;
+}

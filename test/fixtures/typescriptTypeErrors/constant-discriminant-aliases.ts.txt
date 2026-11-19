@@ -1,0 +1,23 @@
+type Choice = { kind: "a"; a: number } | { kind: "b"; b: string };
+function mutable(value: Choice) {
+  let kind = value.kind;
+  if (kind === "a") return value.a;
+  return value.b;
+}
+function annotated(value: Choice) {
+  const kind: Choice["kind"] = value.kind;
+  if (kind === "a") return value.a;
+  return value.b;
+}
+function chained(value: Choice) {
+  const kind = value.kind;
+  const alias = kind;
+  if (alias === "a") return value.a;
+  return value.b;
+}
+function reassigned(value: Choice) {
+  const kind = value.kind;
+  value = { kind: "b", b: "after" };
+  if (kind === "a") return value.a;
+  return value.b;
+}

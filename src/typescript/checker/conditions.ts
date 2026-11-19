@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 421 -- Builds and checks conditional flow for each expression form.
+// code-gauge-allow-file fileNcss 433 -- Builds and checks conditional flow for each expression form.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -220,8 +220,7 @@ export class ConditionChecker {
         const value = numberValue(expression.text);
         return value === 0 || value === 1 ? 'sometimes' : 'always';
       }
-      case 'null':
-      case 'undefined': {
+      case 'null': {
         return 'never';
       }
       case 'unary_expression': {
@@ -239,10 +238,9 @@ export class ConditionChecker {
         const b = this.syntacticTruthiness(expression.childForFieldName('alternative') as TreeNode);
         return a === b ? a : 'sometimes';
       }
-      case 'identifier': {
-        return expression.text === 'undefined' && !this.c.scopeOf(expression).lookupValue('undefined')?.valueDeclaration
-          ? 'never'
-          : 'sometimes';
+      case 'identifier':
+      case 'undefined': {
+        return this.c.isGlobalUndefined(expression) ? 'never' : 'sometimes';
       }
       default: {
         return 'sometimes';
@@ -439,9 +437,11 @@ export class ConditionChecker {
   ): void {
     const expression = skipParentheses(reference);
     const source = this.destructuredFrom(expression);
-    const { object, name } = this.discriminantReference(expression) ?? source ?? {};
+    const access = this.aliasedDiscriminantAccess(expression) ?? expression;
+    const { object, name } = this.discriminantReference(access) ?? source ?? {};
     if (name === undefined || (!object && !source?.type)) return;
-    const objectType = source?.type ?? this.c.expressions.checkReferenceSilently(object!);
+    if (!source && object && !this.c.flow.referenceKey(object)) return;
+    const objectType = source?.type ?? this.c.flow.probe(() => this.c.expressions.checkReferenceSilently(object!));
     const nonNull = this.c.relations.removeNullish(this.c.baseConstraint(objectType));
     // As in TypeScript, the declared type decides whether the property is a discriminant, so testing the last
     // remaining member of a union still narrows it.
@@ -469,6 +469,21 @@ export class ConditionChecker {
     };
     apply(whenTrue, true);
     apply(whenFalse, false);
+  }
+
+  private aliasedDiscriminantAccess(node: TreeNode): TreeNode | undefined {
+    if (node.type !== 'identifier') return undefined;
+    const symbol = this.c.scopeOf(node).lookupValue(node.text);
+    const declaration = symbol?.valueDeclaration;
+    if (
+      symbol?.valueKind !== 'const' ||
+      declaration?.type !== 'variable_declarator' ||
+      declaration.childForFieldName('name')?.type !== 'identifier' ||
+      declaration.childForFieldName('type')
+    )
+      return undefined;
+    const value = declaration.childForFieldName('value');
+    return value ? skipParentheses(value) : undefined;
   }
 
   private discriminantReference(expression: TreeNode): { object: TreeNode; name: string } | undefined {

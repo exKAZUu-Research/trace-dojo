@@ -2,7 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
 import { nonNullableType, nullishConstraint } from './nullishConstraints';
-import { isConstAssertion, named, numberValue, skipParentheses } from './syntax';
+import { isConstAssertion, named, numberValue, skipParentheses, withoutAssertions } from './syntax';
 import {
   anyType,
   bigintType,
@@ -380,7 +380,7 @@ export class OperatorChecker {
 
   private logical(operator: string, left: TreeNode, right: TreeNode, contextual?: Type): Type {
     if (operator === '??') {
-      const nullishness = syntacticNullishness(left);
+      const nullishness = syntacticNullishness(this.c, left);
       if (nullishness === 'never')
         this.c.error(
           left,
@@ -545,20 +545,9 @@ function isNullishIntrinsic(type: Type): boolean {
 }
 
 /** Whether an expression can be `null` or `undefined` by its syntax alone, as TypeScript decides for `??`. */
-// code-gauge-allow functionNcss 34 -- One case per kind of expression TypeScript's getSyntacticNullishnessSemantics tells apart.
-function syntacticNullishness(node: TreeNode): 'always' | 'never' | 'sometimes' {
-  let expression = node;
-  while (
-    [
-      'parenthesized_expression',
-      'as_expression',
-      'satisfies_expression',
-      'non_null_expression',
-      'type_assertion',
-    ].includes(expression.type)
-  ) {
-    expression = (expression.type === 'type_assertion' ? named(expression).at(-1) : named(expression)[0]) as TreeNode;
-  }
+// code-gauge-allow functionNcss 32 -- Distinguishes syntactic operand kinds for nullish coalescing.
+function syntacticNullishness(c: Checker, node: TreeNode): 'always' | 'never' | 'sometimes' {
+  const expression = withoutAssertions(node);
   switch (expression.type) {
     case 'call_expression':
     case 'subscript_expression':
@@ -581,19 +570,19 @@ function syntacticNullishness(node: TreeNode): 'always' | 'never' | 'sometimes' 
       return ['=', '??=', '||=', '&&='].includes(operator) ? 'sometimes' : 'never';
     }
     case 'sequence_expression': {
-      return syntacticNullishness(named(expression).at(-1) as TreeNode);
+      return syntacticNullishness(c, named(expression).at(-1) as TreeNode);
     }
     case 'ternary_expression': {
-      const a = syntacticNullishness(expression.childForFieldName('consequence') as TreeNode);
-      const b = syntacticNullishness(expression.childForFieldName('alternative') as TreeNode);
+      const a = syntacticNullishness(c, expression.childForFieldName('consequence') as TreeNode);
+      const b = syntacticNullishness(c, expression.childForFieldName('alternative') as TreeNode);
       return a === b ? a : 'sometimes';
     }
-    case 'null':
-    case 'undefined': {
+    case 'null': {
       return 'always';
     }
-    case 'identifier': {
-      return expression.text === 'undefined' ? 'always' : 'sometimes';
+    case 'identifier':
+    case 'undefined': {
+      return c.isGlobalUndefined(expression) ? 'always' : 'sometimes';
     }
     default: {
       return 'never';

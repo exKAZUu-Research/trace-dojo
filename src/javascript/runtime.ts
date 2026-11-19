@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 799 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 813 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -95,10 +95,15 @@ export class Runtime {
   readonly evaluator: Evaluator;
   private allocatedSlots = 0;
   private readonly nodeErrorPrototypes = new Map<string, JsObject>();
+  private readonly nodeErrorBrand = Symbol('kIsNodeError');
+  private readonly errorConstructors: Map<string, Value>;
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
     this.realm = createRealm(this);
+    this.errorConstructors = new Map(
+      Object.entries(this.realm.errorPrototypes).map(([name, prototype]) => [name, this.get(prototype, 'constructor')])
+    );
     this.functionConstructor = this.realm.globals.lookup('Function')?.value;
     this.functionToString = this.get(this.realm.functionPrototype, 'toString');
     this.functionHasInstance = this.get(this.realm.functionPrototype, WELL_KNOWN_SYMBOLS.hasInstance);
@@ -173,23 +178,51 @@ export class Runtime {
     const key = `${name}:${code}`;
     let prototype = this.nodeErrorPrototypes.get(key);
     if (!prototype) {
-      prototype = this.newObject(this.realm.errorPrototypes[name]);
-      const toString = this.newNativeFunction('toString', 0, ({ runtime, thisValue }) =>
-        runtime.nodeErrorText(thisValue, code)
-      );
-      defineHidden(prototype, 'toString', toString);
+      prototype = this.createNodeErrorPrototype(name, code);
       this.nodeErrorPrototypes.set(key, prototype);
     }
     const error = this.newObject(prototype);
     this.markError(error);
-    error.nodeErrorCode = code;
     this.createDataProperty(error, 'code', code);
     defineHidden(error, 'message', message);
     return error;
   }
 
-  nodeErrorText(error: Value, code: string): string {
-    return `${this.toString(this.get(error, 'name'))} [${code}]: ${this.toString(this.get(error, 'message'))}`;
+  private createNodeErrorPrototype(name: ErrorName, code: string): JsObject {
+    const formatter = this.newObject(this.realm.errorPrototypes[name]);
+    const wrapper = this.newObject(formatter);
+    const constructor = this.errorConstructors.get(name);
+    for (const prototype of [formatter, wrapper]) {
+      prototype.properties.set('constructor', {
+        get: this.newNativeFunction('get constructor', 0, () => constructor),
+        set: undefined,
+        enumerable: false,
+        configurable: true,
+      });
+    }
+    defineHidden(
+      formatter,
+      'toString',
+      this.newNativeFunction('toString', 0, ({ runtime, thisValue }) => runtime.nodeErrorText(thisValue, code))
+    );
+    formatter.properties.set(this.nodeErrorBrand, {
+      get: this.newNativeFunction('get [kIsNodeError]', 0, () => true),
+      set: undefined,
+      enumerable: false,
+      configurable: true,
+    });
+    return wrapper;
+  }
+
+  nodeErrorHeadline(error: JsObject): string | undefined {
+    return this.hasProperty(error, this.nodeErrorBrand) ? this.nodeErrorText(error) : undefined;
+  }
+
+  private nodeErrorText(error: Value, code?: string): string {
+    const name = this.toString(this.get(error, 'name'));
+    const displayedCode = code ?? this.toString(this.get(error, 'code'));
+    const message = this.toString(this.get(error, 'message'));
+    return `${name} [${displayedCode}]: ${message}`;
   }
 
   markError(error: JsObject): void {

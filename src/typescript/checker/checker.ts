@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 576 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
+// code-gauge-allow-file fileNcss 581 -- Holds shared type construction, bounded instantiation, structure lookup, and type constraints used by all checker components.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { type SourceDiagnostic, sourceDiagnostic } from '../../interpreter/diagnostics';
@@ -194,6 +194,12 @@ export class Checker {
     if (node.tree === localeOptionsTree) return this.localeOptionsBinder.scopeOf(node);
     if (node.tree === nativeOverloadTree) return this.nativeOverloadBinder.scopeOf(node);
     return node.tree === libraryTree ? this.libraryBinder.scopeOf(node) : this.binder.scopeOf(node);
+  }
+
+  isGlobalUndefined(node: TreeNode): boolean {
+    if (node.text !== 'undefined') return false;
+    const declaration = this.scopeOf(node).lookupValue('undefined')?.valueDeclaration;
+    return !declaration || this.isLibrary(declaration);
   }
 
   ownScope(node: TreeNode): Scope | undefined {

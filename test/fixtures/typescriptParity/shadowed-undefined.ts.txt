@@ -27,3 +27,12 @@ function escaped(\u0075ndefined: number) {
   return \u0075ndefined;
 }
 console.log(escaped(5));
+function fallback(undefined?: number) {
+  return (undefined) ?? 9;
+}
+console.log(fallback(2), fallback());
+{
+  const undefined = 3;
+  console.log((undefined as number) ?? 1);
+  if (undefined) console.log("bound");
+}

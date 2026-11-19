@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 595 -- One port of Node.js's util.inspect, whose formatters share its context.
+// code-gauge-allow-file fileNcss 596 -- One port of Node.js's util.inspect, whose formatters share its context.
 import { inspect as hostInspect, type InspectStyle, stripVTControlCharacters } from 'node:util';
 
 import { eastAsianWidthType } from 'get-east-asian-width';
@@ -642,7 +642,8 @@ function tryOrUndefined<T>(run: () => T): T | undefined {
 }
 
 function v8Headline(runtime: Runtime, error: JsObject): string {
-  if (error.nodeErrorCode !== undefined) return runtime.nodeErrorText(error, error.nodeErrorCode);
+  const coded = runtime.nodeErrorHeadline(error);
+  if (coded !== undefined) return coded;
   const name = runtime.get(error, 'name');
   const message = runtime.get(error, 'message');
   const nameText = name === undefined ? 'Error' : runtime.toString(name);
