@@ -25,3 +25,7 @@ let body: string | number = 0;
 console.log(((ignored) => body.toUpperCase())(body = "after"));
 ((ignored) => { body = 0; })(body = "new");
 console.log(body.toFixed(1));
+let spreadState: string | number = "before";
+console.log(((first, second) => second.toFixed(1))(...([spreadState = 3] as [number]), spreadState));
+spreadState = 4;
+console.log(((first, second) => second.toUpperCase())(...([spreadState = "after"] as [string]), spreadState));

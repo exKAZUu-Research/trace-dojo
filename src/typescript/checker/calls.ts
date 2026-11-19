@@ -138,15 +138,14 @@ export class Calls {
     const expression = skipParentheses(callee);
     if (!functionExpressionTypes.has(expression.type) || !isContextSensitiveFunction(expression)) return undefined;
     const first = parameterNodes(expression)[0];
-    const effective = this.expandedArguments(args);
-    const parameters = this.c.flow.probe(() =>
-      (first && isThisParameter(first) ? effective.slice(1) : effective).map(({ node, spread }, index) => ({
-        name: `arg${index}`,
-        type: spread?.type ?? this.c.widenLiteral(this.c.silently(() => this.c.expressions.check(node))),
-        optional: spread?.optional ?? false,
-        rest: spread?.rest ?? false,
-      }))
-    );
+    const effective = this.c.flow.probe(() => this.c.silently(() => this.argumentElements(args)));
+    const offset = first && isThisParameter(first) ? 1 : 0;
+    const parameters = effective.slice(offset).map(({ type, optional, rest }, index) => ({
+      name: `arg${index}`,
+      type: this.c.widenLiteral(type),
+      optional,
+      rest,
+    }));
     return functionType({
       typeParameters: [],
       parameters,
@@ -892,7 +891,11 @@ export class Calls {
 
   /** The tuple of what arguments pass, a spread one passing its tuple's elements or, for an array, a rest element. */
   private argumentTuple(args: TreeNode[], contexts: (Type | undefined)[] = []): Type {
-    const elements = args.flatMap((arg, index): TupleElement[] => {
+    return this.c.tupleType(this.argumentElements(args, contexts));
+  }
+
+  private argumentElements(args: TreeNode[], contexts: (Type | undefined)[] = []): TupleElement[] {
+    return args.flatMap((arg, index): TupleElement[] => {
       if (arg.type !== 'spread_element') {
         const type = this.c.expressions.check(arg, contexts[index]);
         return [{ type, optional: false, rest: false }];
@@ -901,7 +904,6 @@ export class Calls {
       if (this.c.relations.isGenericRestType(spreadType)) return [{ type: spreadType, optional: false, rest: true }];
       return this.c.silently(() => this.spreadElements(arg, spreadType));
     });
-    return this.c.tupleType(elements);
   }
 
   /** Where a rest parameter typed by one of the signature's own type parameters starts, as in `...args: T`. */

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 788 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
+// code-gauge-allow-file fileNcss 799 -- One runtime of the JavaScript interpreter, whose state its builtins and evaluator share.
 import { CompileError } from '../interpreter/diagnostics';
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
 import { type ProgramInput, ProgramIO } from '../interpreter/programIo';
@@ -94,6 +94,7 @@ export class Runtime {
   readonly steps = new StepTracker();
   readonly evaluator: Evaluator;
   private allocatedSlots = 0;
+  private readonly nodeErrorPrototypes = new Map<string, JsObject>();
 
   constructor(input?: ProgramInput) {
     this.io = new ProgramIO(this.budget, input);
@@ -166,6 +167,29 @@ export class Runtime {
     this.markError(error);
     defineHidden(error, 'message', message);
     return error;
+  }
+
+  newNodeError(name: ErrorName, code: string, message: string): JsObject {
+    const key = `${name}:${code}`;
+    let prototype = this.nodeErrorPrototypes.get(key);
+    if (!prototype) {
+      prototype = this.newObject(this.realm.errorPrototypes[name]);
+      const toString = this.newNativeFunction('toString', 0, ({ runtime, thisValue }) =>
+        runtime.nodeErrorText(thisValue, code)
+      );
+      defineHidden(prototype, 'toString', toString);
+      this.nodeErrorPrototypes.set(key, prototype);
+    }
+    const error = this.newObject(prototype);
+    this.markError(error);
+    error.nodeErrorCode = code;
+    this.createDataProperty(error, 'code', code);
+    defineHidden(error, 'message', message);
+    return error;
+  }
+
+  nodeErrorText(error: Value, code: string): string {
+    return `${this.toString(this.get(error, 'name'))} [${code}]: ${this.toString(this.get(error, 'message'))}`;
   }
 
   markError(error: JsObject): void {

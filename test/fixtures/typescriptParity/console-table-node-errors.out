@@ -1,0 +1,6 @@
+true TypeError ERR_INVALID_ARG_TYPE
+TypeError [ERR_INVALID_ARG_TYPE]: The "properties" argument must be an instance of Array. Received type string ('x')
+TypeError [ERR_INVALID_ARG_TYPE]: The "properties" argument must be an instance of Array. Received type string ('x')
+TypeError: The "properties" argument must be an instance of Array. Received type string ('x')
+TypeError: message
+[uncaught] TypeError [ERR_INVALID_ARG_TYPE]: The "properties" argument must be an instance of Array. Received null

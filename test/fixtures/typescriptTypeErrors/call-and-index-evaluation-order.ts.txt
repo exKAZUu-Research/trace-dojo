@@ -20,3 +20,5 @@ receiver.toUpperCase();
 let body: string | number = "text";
 ((ignored) => { body = 0; })(body = "new");
 body.toUpperCase();
+let spreadState: string | number = "before";
+((first, second) => second.toUpperCase())(...([spreadState = 3] as [number]), spreadState);

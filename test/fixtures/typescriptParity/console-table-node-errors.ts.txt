@@ -1,0 +1,13 @@
+try {
+  console.table({}, "x" as any);
+} catch (error: any) {
+  console.log(error instanceof TypeError, error.name, error.code);
+  console.log(String(error));
+  error.code = "custom";
+  console.log(String(error));
+  console.log(Error.prototype.toString.call(error));
+}
+const ordinary = new TypeError("message") as TypeError & { code: string };
+ordinary.code = "ERR_INVALID_ARG_TYPE";
+console.log(String(ordinary));
+console.table({}, null as any);

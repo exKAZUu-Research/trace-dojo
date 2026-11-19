@@ -40,11 +40,11 @@ export function formatTable(runtime: Runtime, data: Value, properties: Value): s
 
 function invalidProperties(runtime: Runtime, value: Value): never {
   const received = receivedArgument(runtime, value);
-  const error = runtime.newError(
+  const error = runtime.newNodeError(
     'TypeError',
+    'ERR_INVALID_ARG_TYPE',
     `The "properties" argument must be an instance of Array. Received ${received}`
   );
-  runtime.createDataProperty(error, 'code', 'ERR_INVALID_ARG_TYPE');
   throw new JsThrow(error);
 }
 

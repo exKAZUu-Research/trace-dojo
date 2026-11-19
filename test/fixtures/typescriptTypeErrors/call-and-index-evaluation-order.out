@@ -5,3 +5,4 @@
 (15,9): error TS2339: Property 'toUpperCase' does not exist on type '{ p?: number | undefined; }'.
 (19,10): error TS2339: Property 'toUpperCase' does not exist on type '{ m(): void; }'.
 (22,6): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+(24,28): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
