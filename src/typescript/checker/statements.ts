@@ -402,7 +402,7 @@ export class StatementChecker {
     const isConst = declaration.parent?.childForFieldName('kind')?.text === 'const';
     if (nameNode.type === 'identifier') {
       if (annotation) return annotation;
-      if (!value || this.c.assignments.isAutoTyped(symbol)) return anyType;
+      if (!value || this.c.assignments.isAutoTyped(symbol, declaration)) return anyType;
       if (this.isEmptyArrayLiteral(value)) return this.c.arrayType(anyType);
       const flow = this.c.flow.current;
       this.c.flow.current = new FlowState();

@@ -100,13 +100,37 @@ export class Calls {
       for (const arg of args) this.c.expressions.check(arg);
       return callable.untyped ? this.untypedCall(node, [], typeArguments) : this.uncallableType(callee, calleeType);
     }
-    const resolution = this.resolve(node, callee, signatures, args, typeArguments, contextual, access?.receiver);
+    const resolution = this.resolveWithTextConversions(node, callee, signatures, args, {
+      typeArguments,
+      contextual,
+      receiver: access?.receiver,
+    });
     if (!resolution) return errorType;
     this.resolved.set(node.id, resolution.signature);
     this.checkThisContext(callee, resolution.signature, access?.receiver);
-    this.checkTextConversions(callee, args);
     const result = resolution.returnType;
     return shortCircuits ? this.c.members.chainResult(node, result) : result;
+  }
+
+  private resolveWithTextConversions(
+    node: TreeNode,
+    callee: TreeNode,
+    signatures: Signature[],
+    args: TreeNode[],
+    { typeArguments, contextual, receiver }: { typeArguments?: Type[]; contextual?: Type; receiver?: Type }
+  ): Resolution | undefined {
+    const conversions = this.textConversionArguments(callee, args);
+    if (conversions.length === 0)
+      return this.resolve(node, callee, signatures, args, typeArguments, contextual, receiver);
+    const types = new Map<number, Type | undefined>(conversions.map((arg) => [arg.id, undefined]));
+    const result = this.c.expressions.observeTypes(types, () =>
+      this.resolve(node, callee, signatures, args, typeArguments, contextual, receiver)
+    );
+    for (const arg of conversions) {
+      const type = types.get(arg.id);
+      if (type) this.c.expressions.checkFunctionText(arg, type);
+    }
+    return result;
   }
 
   /** For a function called where it is written, as `((x) => x * 2)(3)`, a context giving its parameters the arguments' types. */
@@ -339,26 +363,27 @@ export class Calls {
     return this.resolve(node, callee, signatures, args, undefined, undefined)?.returnType ?? errorType;
   }
 
-  /** Reports the functions `String(...)` and a `%s` of `console` turn into text. */
-  private checkTextConversions(callee: TreeNode, args: TreeNode[]): void {
-    const typeOf = (arg: TreeNode): Type =>
-      this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(arg)));
+  // code-gauge-allow functionCognitiveComplexity 16 -- Matches the direct String argument and literal console placeholders in order.
+
+  private textConversionArguments(callee: TreeNode, args: TreeNode[]): TreeNode[] {
+    if (this.c.silent > 0 || args.length === 0) return [];
     const symbol = callee.type === 'identifier' ? this.c.scopeOf(callee).lookupValue(callee.text) : undefined;
     const declaration = symbol?.valueDeclaration;
-    if (callee.text === 'String' && declaration && this.c.isLibrary(declaration) && args[0]) {
-      this.c.expressions.checkFunctionText(args[0], typeOf(args[0]));
-      return;
-    }
+    if (callee.text === 'String' && declaration && this.c.isLibrary(declaration))
+      return args[0].type === 'spread_element' ? [] : [args[0]];
     const formatted = this.consoleFormatArguments(callee, args);
     const format = formatted[0];
-    if (format?.type !== 'string') return;
+    if (format?.type !== 'string') return [];
+    const conversions: TreeNode[] = [];
     let index = 1;
     for (const placeholder of stringValue(format).matchAll(/%([%sdifjoOc])/g)) {
       const kind = placeholder[1];
       if (kind === '%') continue;
       const arg = formatted[index++];
-      if (kind === 's' && arg) this.c.expressions.checkFunctionText(arg, typeOf(arg));
+      if (!arg || arg.type === 'spread_element') break;
+      if (kind === 's') conversions.push(arg);
     }
+    return conversions;
   }
 
   private consoleFormatArguments(callee: TreeNode, args: TreeNode[]): TreeNode[] {

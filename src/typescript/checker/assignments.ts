@@ -54,6 +54,7 @@ export class AssignmentChecker {
     }
     const targetType = this.targetType(left, false);
     const valueType = this.c.expressions.check(right, targetType === errorType ? undefined : targetType);
+    this.c.expressions.expandos.recordAssignment(node, valueType);
     if (targetType !== errorType) this.c.expressions.checkAssignable(leftExpression, valueType, targetType, right);
     this.assignReference(leftExpression, targetType, valueType);
     return valueType;
@@ -134,11 +135,11 @@ export class AssignmentChecker {
     return unionOf(properties.map((property) => property?.type() ?? anyType));
   }
 
-  isAutoTyped(symbol: Sym): boolean {
-    const declaration = symbol.valueDeclaration;
+  isAutoTyped(symbol: Sym, declaration = symbol.valueDeclaration): boolean {
     if (
-      (symbol.valueKind !== 'let' && symbol.valueKind !== 'var') ||
       declaration?.type !== 'variable_declarator' ||
+      (declaration.parent?.type !== 'variable_declaration' &&
+        declaration.parent?.childForFieldName('kind')?.text !== 'let') ||
       declaration.childForFieldName('name')?.type !== 'identifier' ||
       declaration.childForFieldName('type')
     )

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 403 -- Keeps flow state, joins, and reference narrowing together.
+// code-gauge-allow-file fileNcss 407 -- Keeps flow state, joins, and reference narrowing together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -83,6 +83,7 @@ export type State = FlowState | undefined;
 /** The flow of a program's control, which narrows its references and tracks its assignments. */
 export class Flow {
   current: State = new FlowState();
+  probing = false;
   readonly exceptions: ExceptionFlow;
   /** While set, only the references it accepts narrow, and their keys are collected, as for an aliased condition. */
   narrowingScope?: { accepts: (node: TreeNode) => boolean; keys: Set<string>; reuseCallPredicates: boolean };
@@ -169,11 +170,14 @@ export class Flow {
 
   probe<T>(run: () => T, state = this.current): T {
     const outer = this.current;
+    const probing = this.probing;
     this.current = state?.clone();
+    this.probing = true;
     try {
       return this.exceptions.isolate(run);
     } finally {
       this.current = outer;
+      this.probing = probing;
     }
   }
 

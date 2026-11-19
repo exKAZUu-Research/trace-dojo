@@ -14,6 +14,14 @@ test.each([
   });
 });
 
+test('a later console argument cannot hide an earlier function-to-string conversion', () => {
+  const source = 'let value: number | (() => void) = () => {}; console.log("%s", value, value = 1);';
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: '関数やクラスの文字列への変換は、この採点環境では使えません。' }],
+  });
+});
+
 const caughtFunctionError = `'use strict';
 const fn=()=>{};
 Object.freeze(fn);

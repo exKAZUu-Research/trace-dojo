@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 413 -- Builds and checks conditional flow for each expression form.
+// code-gauge-allow-file fileNcss 421 -- Builds and checks conditional flow for each expression form.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -29,6 +29,7 @@ import {
   type Type,
   undefinedType,
   unionOf,
+  unknownType,
 } from './types';
 
 /** The flow states where a condition is true and where it is false, with the condition's type. */
@@ -486,14 +487,10 @@ export class ConditionChecker {
   /** The type of a reference without its own narrowing in the current flow. */
   private unnarrowedType(reference: TreeNode): Type {
     const key = this.c.flow.referenceKey(reference);
-    const state = this.c.flow.current?.clone();
-    if (!key || !state) return this.c.expressions.checkReferenceSilently(reference);
-    state.entries.delete(key);
-    let type: Type = anyType;
-    this.c.flow.from(state, () => {
-      type = this.c.expressions.checkReferenceSilently(reference);
+    return this.c.flow.probe(() => {
+      if (key) this.c.flow.current?.entries.delete(key);
+      return this.c.expressions.checkReferenceSilently(reference);
     });
-    return type;
   }
 
   private narrowDestructuredSiblings(reference: TreeNode, objectType: Type): void {
@@ -547,8 +544,10 @@ export class ConditionChecker {
   ): { whenTrue: State; whenFalse: State } {
     const equal = operator === '===' || operator === '==';
     const loose = operator === '==' || operator === '!=';
-    const leftExpression = skipParentheses(left);
-    const rightExpression = skipParentheses(right);
+    const leftOperand = this.comparisonOperand(left, leftType);
+    const rightOperand = this.comparisonOperand(right, rightType);
+    const leftExpression = leftOperand.reference;
+    const rightExpression = rightOperand.reference;
     // `typeof x === "string"`
     for (const [typeofSide, other] of [
       [leftExpression, rightExpression],
@@ -571,18 +570,18 @@ export class ConditionChecker {
       }
     }
     const base = this.c.flow.current;
-    let { whenTrue, whenFalse } = this.inlined.booleanComparison(leftExpression, rightExpression, equal) ?? {
+    let { whenTrue, whenFalse } = this.inlined.booleanComparison(
+      skipParentheses(left),
+      skipParentheses(right),
+      equal
+    ) ?? {
       whenTrue: base?.clone(),
       whenFalse: base?.clone(),
     };
-    // Each side that is a reference narrows by the other's type.
-    for (const [side, otherType] of [
-      [leftExpression, rightType],
-      [rightExpression, leftType],
+    for (const [reference, otherType] of [
+      [leftExpression, rightOperand.type],
+      [rightExpression, leftOperand.type],
     ] as const) {
-      // `(m = re.exec(s)) !== null` narrows what it assigned.
-      const reference =
-        side.type === 'assignment_expression' ? skipParentheses(side.childForFieldName('left') as TreeNode) : side;
       if (!this.c.flow.referenceKey(reference)) continue;
       const narrow = (current: Type, assumeTrue: boolean): Type =>
         this.c.flow.narrowByEquality(current, regularOf(otherType), assumeTrue === equal, loose);
@@ -592,8 +591,18 @@ export class ConditionChecker {
       );
       this.narrowDiscriminantParent(reference, narrow, whenTrue, whenFalse);
     }
-    const states = this.chainCompared({ whenTrue, whenFalse }, leftExpression, rightType, equal, loose);
-    return this.chainCompared(states, rightExpression, leftType, equal, loose);
+    const states = this.chainCompared({ whenTrue, whenFalse }, leftExpression, rightOperand.type, equal, loose);
+    return this.chainCompared(states, rightExpression, leftOperand.type, equal, loose);
+  }
+
+  private comparisonOperand(node: TreeNode, evaluated: Type): { reference: TreeNode; type: Type } {
+    const expression = skipParentheses(node);
+    const reference = comparisonReference(expression);
+    if (reference.id === expression.id) return { reference, type: evaluated };
+    return {
+      reference,
+      type: this.c.flow.referenceKey(reference) ? this.unnarrowedType(reference) : unknownType,
+    };
   }
 
   /**
@@ -655,6 +664,17 @@ export class ConditionChecker {
 function logicalOperator(node: TreeNode | null | undefined): '&&' | '||' | '??' | undefined {
   const operator = node?.type === 'binary_expression' ? node.childForFieldName('operator')?.text : undefined;
   return operator === '&&' || operator === '||' || operator === '??' ? operator : undefined;
+}
+
+function comparisonReference(node: TreeNode): TreeNode {
+  let reference = node;
+  while (
+    reference.type === 'assignment_expression' ||
+    (reference.type === 'augmented_assignment_expression' &&
+      ['&&=', '||=', '??='].includes(reference.childForFieldName('operator')?.text ?? ''))
+  )
+    reference = skipParentheses(reference.childForFieldName('left') as TreeNode);
+  return reference;
 }
 
 /** The object or array pattern that a constant or a parameter destructures its value with directly. */

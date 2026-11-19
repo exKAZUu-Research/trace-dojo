@@ -54,6 +54,7 @@ import { UniqueSymbols } from './uniqueSymbols';
 
 /** Checks expressions, computing their types and narrowing the references their conditions test. */
 export class ExpressionChecker {
+  private observedTypes?: Map<number, Type | undefined>;
   readonly calls: Calls;
   readonly expandos: Expandos;
   readonly elaboration: Elaboration;
@@ -116,8 +117,21 @@ export class ExpressionChecker {
 
   check(node: TreeNode, contextual?: Type): Type {
     this.c.budget.spend();
-    if (this.c.silent === 0) return this.compute(node, contextual);
-    return this.silentTypes.check(node, contextual, () => this.compute(node, contextual));
+    if (this.c.silent > 0) return this.silentTypes.check(node, contextual, () => this.compute(node, contextual));
+    const type = this.compute(node, contextual);
+    if (!this.c.flow.probing && this.observedTypes?.has(node.id)) this.observedTypes.set(node.id, type);
+    return type;
+  }
+
+  observeTypes<T>(types: Map<number, Type | undefined>, run: () => T): T {
+    if (types.size === 0) return run();
+    const outer = this.observedTypes;
+    this.observedTypes = types;
+    try {
+      return run();
+    } finally {
+      this.observedTypes = outer;
+    }
   }
 
   private compute(node: TreeNode, contextual?: Type): Type {

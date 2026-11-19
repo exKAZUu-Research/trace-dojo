@@ -15,10 +15,17 @@ export const laterRunningTypes = new Set([
   'method_definition',
 ]);
 
+interface ExpandoAssignments {
+  nodes: TreeNode[];
+  types: Map<number, Type>;
+  resolved?: Type;
+}
+
 /** The properties a program adds to a function it declares, as `f.description = "..."`, which TypeScript types. */
 export class Expandos {
   /** The statements that add a property to a function, by the first of them, which the property names as its declaration. */
   private readonly assignmentsByFirst = new Map<number, TreeNode[]>();
+  private readonly byAssignment = new Map<number, ExpandoAssignments>();
   private readonly typesBySymbol = new Map<number, Type>();
 
   constructor(private readonly c: Checker) {}
@@ -44,9 +51,11 @@ export class Expandos {
               const structure = { ...emptyStructure(), callSignatures };
               for (const [property, assignments] of expandos) {
                 this.assignmentsByFirst.set(assignments[0].id, assignments);
+                const group: ExpandoAssignments = { nodes: assignments, types: new Map() };
+                for (const assignment of assignments) this.byAssignment.set(assignment.id, group);
                 structure.properties.set(property, {
                   ...this.c.literals.literalProperty(property, anyType, false, assignments[0]),
-                  type: this.propertyType(property, assignments),
+                  type: this.propertyType(property, group),
                 });
               }
               return structure;
@@ -57,26 +66,38 @@ export class Expandos {
     return result;
   }
 
+  recordAssignment(assignment: TreeNode, value: Type): void {
+    if (this.c.silent || this.c.flow.probing) return;
+    const group = this.byAssignment.get(assignment.id);
+    if (!group) return;
+    const type = this.c.widen(value);
+    if (group.types.get(assignment.id) === type) return;
+    group.types.set(assignment.id, type);
+    group.resolved = undefined;
+  }
+
   /**
    * The type of an added property, the union of the values assigned to it, resolved when first read; a property read
    * in its own assignments is `any`, as TypeScript reports.
    */
-  private propertyType(property: string, assignments: TreeNode[]): () => Type {
-    let resolved: Type | undefined;
+  private propertyType(property: string, assignments: ExpandoAssignments): () => Type {
     let resolving = false;
     return () => {
-      if (resolved) return resolved;
+      if (assignments.resolved) return assignments.resolved;
       if (resolving) {
-        const left = assignments[0].childForFieldName('left') ?? assignments[0];
+        const first = assignments.nodes[0];
+        const left = first.childForFieldName('left') ?? first;
         this.c.errorWhileResolving(left, `${property} の型が、自分自身を参照しているため暗黙に any になります。`);
-        resolved = anyType;
-        return resolved;
+        assignments.resolved = anyType;
+        return anyType;
       }
       resolving = true;
       try {
-        const type = this.c.silently(() => unionOf(assignments.map((assignment) => this.assignmentType(assignment))));
-        resolved ??= type;
-        return resolved;
+        const type = this.c.silently(() =>
+          unionOf(assignments.nodes.map((node) => assignments.types.get(node.id) ?? this.assignmentType(node)))
+        );
+        assignments.resolved ??= type;
+        return assignments.resolved;
       } finally {
         resolving = false;
       }
