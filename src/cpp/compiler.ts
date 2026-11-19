@@ -61,7 +61,8 @@ export class Compiler extends StatementCompiler {
   /** The functions the program calls, which it must define, with the row of a call. */
   private readonly usedFunctions = new Map<FunctionInfo, number>();
   private readonly usedStaticMembers = new Map<GlobalInfo, number>();
-  private readonly aggregateDefaults = new WeakMap<FieldInfo, Eval<Value>>();
+  private readonly aggregateDefaults = new WeakMap<FieldInfo, () => Eval<Value>>();
+  private readonly implicitDefaults = new WeakMap<ClassInfo, () => FunctionInfo | undefined>();
   private defaultDependencies?: { functions: Map<FunctionInfo, number>; staticMembers: Map<GlobalInfo, number> };
 
   constructor(library: Library, options: CompileOptions = {}) {
@@ -238,7 +239,10 @@ export class Compiler extends StatementCompiler {
       }
       if (!cls.base && this.isAggregate(cls)) {
         for (const field of cls.ownFields) {
-          if (field.initializer) this.aggregateDefaults.set(field, this.bindAggregateDefault(field, field.row));
+          if (field.initializer) {
+            const bound = this.bindDependencies(() => this.bindAggregateDefault(field, field.row));
+            this.aggregateDefaults.set(field, bound);
+          }
         }
       }
       for (const { fn, node: definition } of definitions) this.compileFunction(fn, definition);
@@ -572,7 +576,12 @@ export class Compiler extends StatementCompiler {
       cls.isDefaultConstructorDeleted =
         cls.base?.isDefaultConstructorDeleted === true ||
         cls.ownFields.some((field) => !field.initializer && !isDefaultInitializable(field.type));
-      if (!cls.isDefaultConstructorDeleted) cls.implicitDefault = this.implicitDefaultConstructor(cls);
+      if (!cls.isDefaultConstructorDeleted) {
+        this.implicitDefaults.set(
+          cls,
+          this.bindDependencies(() => this.implicitDefaultConstructor(cls))
+        );
+      }
     }
     cls.operations = this.classOperations(cls, userCopy);
   }
@@ -773,7 +782,7 @@ export class Compiler extends StatementCompiler {
     if (base.constructors.length === 0) {
       if (args.length > 0) this.error(row, `${base.name} には引数をとるコンストラクタがありません。`);
       if (base.isDefaultConstructorDeleted) this.error(row, deletedDefaultMessage(base));
-      const implicit = base.implicitDefault;
+      const implicit = this.implicitDefaults.get(base)?.();
       return (frame) => {
         (frame.self?.read() as CObject).cls = base;
         if (implicit) invoke(frame, implicit, [], frame.self, row);
@@ -1500,7 +1509,7 @@ export class Compiler extends StatementCompiler {
     }
     this.requireVirtualDefinitions(cls, row);
     if (cls.isDefaultConstructorDeleted) return this.error(row, deletedDefaultMessage(cls));
-    const implicit = cls.implicitDefault;
+    const implicit = this.implicitDefaults.get(cls)?.();
     const zeroed = isValueInitialized;
     const zeroFields = cls.fields.map((field) =>
       field.type.kind === 'class' || field.type.kind === 'array' ? UNINIT : zeroOf(field.type)
@@ -1721,7 +1730,7 @@ export class Compiler extends StatementCompiler {
   private initializeAggregate(cls: ClassInfo, supplied: (Eval<Value> | undefined)[], row: number): Eval<Value> {
     const fields = cls.ownFields;
     const defaults = fields.map((field, index) =>
-      supplied[index] ? undefined : (this.aggregateDefaults.get(field) ?? this.bindAggregateDefault(field, row))
+      supplied[index] ? undefined : (this.aggregateDefaults.get(field)?.() ?? this.bindAggregateDefault(field, row))
     );
     const destroyers = fields.map((field) => this.destroyerOf(field.type));
     return (frame) => {
@@ -1795,20 +1804,26 @@ export class Compiler extends StatementCompiler {
     for (const param of fn.params) {
       const value = param.defaultValue;
       if (!value || value.use) continue;
-      const dependencies = { functions: new Map<FunctionInfo, number>(), staticMembers: new Map<GlobalInfo, number>() };
-      const previousDependencies = this.defaultDependencies;
-      this.defaultDependencies = dependencies;
-      try {
+      value.use = this.bindDependencies(() => {
         const expr = this.argument(value.node);
-        const { run } = this.convert(expr, param.type, value.node.row, '引数の既定値');
-        value.use = () => {
-          for (const [used, row] of dependencies.functions) this.checkDefined(used, row);
-          for (const [member, row] of dependencies.staticMembers) this.requireStaticDefinition(member, row);
-          return run;
-        };
-      } finally {
-        this.defaultDependencies = previousDependencies;
-      }
+        return this.convert(expr, param.type, value.node.row, '引数の既定値').run;
+      });
+    }
+  }
+
+  private bindDependencies<T>(compile: () => T): () => T {
+    const dependencies = { functions: new Map<FunctionInfo, number>(), staticMembers: new Map<GlobalInfo, number>() };
+    const previous = this.defaultDependencies;
+    this.defaultDependencies = dependencies;
+    try {
+      const bound = compile();
+      return () => {
+        for (const [fn, row] of dependencies.functions) this.checkDefined(fn, row);
+        for (const [member, row] of dependencies.staticMembers) this.requireStaticDefinition(member, row);
+        return bound;
+      };
+    } finally {
+      this.defaultDependencies = previous;
     }
   }
 

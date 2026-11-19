@@ -12,13 +12,14 @@ import {
   isCharType,
   isConstType,
   LONG,
+  pointerTo,
   referenceTo,
   type Type,
   typeName,
   UINT,
   VOID,
 } from '../types';
-import { Ptr, Store, type Value } from '../values';
+import { NULL_PTR, Ptr, Store, type Value } from '../values';
 import { formatFloat, pointerText } from './formatting';
 import type { Library } from './registry';
 import { StringValue } from './string';
@@ -72,6 +73,7 @@ export class StreamValue extends Store {
   writePosition = 0;
   failed = false;
   atEnd = false;
+  tied = NULL_PTR;
 
   constructor(
     readonly target: 'stdout' | 'stderr' | 'buffer',
@@ -251,6 +253,13 @@ export class Streams {
         native(name, params, ret, (args, { self: object, frame }) => run(self(object), args, frame), options)
       );
     };
+    const ostreamPointer = pointerTo(classType(this.ostream ?? cls));
+    method('tie', [], ostreamPointer, (stream) => stream.tied, { isConst: true });
+    method('tie', [ostreamPointer], ostreamPointer, (stream, [next]) => {
+      const previous = stream.tied;
+      stream.tied = next as Ptr;
+      return previous;
+    });
     method('width', [], LONG, (stream) => BigInt(stream.width), { isConst: true });
     method('width', [LONG], LONG, (stream, [width]) => {
       const old = stream.width;

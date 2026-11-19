@@ -96,7 +96,7 @@ class Range {
   }
 
   location(position: number): Ptr {
-    return new Ptr(this.store, this.index(position));
+    return this.store.location(this.index(position));
   }
 
   set(position: number, value: Value): void {
@@ -111,7 +111,7 @@ class Range {
 
   /** The iterator at a position, which may be one past the last element. */
   iterator(position: number): Ptr {
-    return new Ptr(this.store, this.isReverse ? this.first.index - position : this.first.index + position);
+    return this.store.location(this.isReverse ? this.first.index - position : this.first.index + position);
   }
 }
 
@@ -135,16 +135,13 @@ class Output {
       return;
     }
     const index = this.info.isReverse ? this.start.index - 1 - this.position : this.start.index + this.position;
-    assignElement(this.frame, new Ptr(this.start.target(), index), this.operations, value);
+    assignElement(this.frame, this.start.target().location(index), this.operations, value);
     this.position++;
   }
 
   get end(): Ptr {
-    if (this.info.isOutput) return this.start;
-    return new Ptr(
-      this.start.store,
-      this.info.isReverse ? this.start.index - this.position : this.start.index + this.position
-    );
+    if (this.info.isOutput || this.position === 0) return this.start;
+    return this.start.offset(this.info.isReverse ? -this.position : this.position);
   }
 }
 

@@ -8,6 +8,7 @@ import { MATH_CONSTANTS } from './constants';
  */
 const VISIBLE_GROUPS: Record<string, readonly string[]> = {
   iostream: [
+    'new',
     'iostream',
     'string',
     'vector',
@@ -31,6 +32,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'cstdio',
   ],
   iomanip: [
+    'new',
     'iomanip',
     'string',
     'vector',
@@ -54,6 +56,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'cstdio',
   ],
   ios: [
+    'new',
     'string',
     'utility',
     'algorithm',
@@ -69,6 +72,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'cstdio',
   ],
   ostream: [
+    'new',
     'string',
     'vector',
     'unordered_map',
@@ -91,6 +95,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'cstdio',
   ],
   istream: [
+    'new',
     'string',
     'vector',
     'unordered_map',
@@ -113,6 +118,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'cstdio',
   ],
   string: [
+    'new',
     'string',
     'utility',
     'algorithm',
@@ -128,6 +134,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'cstdio',
   ],
   vector: [
+    'new',
     'string',
     'vector',
     'array',
@@ -146,6 +153,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'cstdio',
   ],
   map: [
+    'new',
     'string',
     'vector',
     'map',
@@ -166,6 +174,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'cstdio',
   ],
   set: [
+    'new',
     'string',
     'vector',
     'set',
@@ -186,6 +195,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'cstdio',
   ],
   unordered_map: [
+    'new',
     'unordered_map',
     'utility',
     'algorithm',
@@ -201,6 +211,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'cstdio',
   ],
   unordered_set: [
+    'new',
     'string',
     'vector',
     'unordered_map',
@@ -221,6 +232,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'cstdio',
   ],
   deque: [
+    'new',
     'string',
     'vector',
     'unordered_map',
@@ -241,6 +253,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'cstdio',
   ],
   list: [
+    'new',
     'string',
     'vector',
     'unordered_map',
@@ -261,6 +274,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'cstdio',
   ],
   stack: [
+    'new',
     'string',
     'vector',
     'unordered_map',
@@ -282,6 +296,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'cstdio',
   ],
   queue: [
+    'new',
     'string',
     'vector',
     'unordered_map',
@@ -303,6 +318,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'cstdio',
   ],
   array: [
+    'new',
     'array',
     'utility',
     'algorithm',
@@ -319,6 +335,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
   ],
   utility: ['utility', 'cmath', 'cstdlib', 'limits'],
   algorithm: [
+    'new',
     'utility',
     'algorithm',
     'functional',
@@ -333,6 +350,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'cstdio',
   ],
   numeric: [
+    'new',
     'string',
     'vector',
     'unordered_map',
@@ -353,6 +371,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'cstdio',
   ],
   functional: [
+    'new',
     'string',
     'vector',
     'unordered_map',
@@ -371,8 +390,9 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'limits',
     'cstdio',
   ],
-  iterator: ['utility', 'functional', 'exception', 'cmath', 'cstdlib', 'cctype', 'cstring', 'limits', 'cstdio'],
+  iterator: ['new', 'utility', 'functional', 'exception', 'cmath', 'cstdlib', 'cctype', 'cstring', 'limits', 'cstdio'],
   sstream: [
+    'new',
     'string',
     'vector',
     'unordered_map',
@@ -395,8 +415,8 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
     'limits',
     'cstdio',
   ],
-  stdexcept: ['stdexcept', 'exception', 'cstdlib'],
-  exception: ['exception', 'cstdlib'],
+  stdexcept: ['new', 'stdexcept', 'exception', 'cstdlib'],
+  exception: ['new', 'exception', 'cstdlib'],
   new: ['new', 'exception', 'cstdlib'],
   cmath: ['cmath', 'limits'],
   cstdlib: ['cstdlib'],
@@ -405,6 +425,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
   climits: ['climits'],
   limits: ['limits'],
   random: [
+    'new',
     'string',
     'vector',
     'unordered_map',

@@ -144,10 +144,11 @@ export class Runtime implements TracedRuntime<Frame> {
   private readonly streams = new Map<string, StreamValue>();
 
   /** `std::cout` or `std::cerr` of this run, whose formatting state persists across the run. */
-  standardStream(target: 'stdout' | 'stderr'): StreamValue {
+  standardStream(target: 'stdout' | 'stderr' | 'clog'): StreamValue {
     let stream = this.streams.get(target);
     if (!stream) {
-      stream = new StreamValue(target);
+      stream = new StreamValue(target === 'clog' ? 'stderr' : target);
+      if (target === 'stderr') stream.tied = new Ptr(this.standardStream('stdout'), 0);
       this.streams.set(target, stream);
     }
     return stream;

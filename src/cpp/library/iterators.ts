@@ -3,7 +3,7 @@ import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import type { Eval } from '../runtime';
 import { BOOL, ClassInfo, classType, isInteger, LONG, PTRDIFF_T, type Type, typeName, withConst } from '../types';
-import type { Ptr } from '../values';
+import { NULL_PTR, type Ptr } from '../values';
 import type { IteratorCategory } from './libraryClass';
 import { nativeConstructor } from './support';
 
@@ -54,9 +54,10 @@ export function randomAccessIterator(
         : undefined,
   };
   cls.operations = { copy: (_frame, value) => value, assign: (_frame, _target, source) => source };
+  cls.constructors = [nativeConstructor(cls, [], () => NULL_PTR)];
   if (isConst) {
     const mutable = randomAccessIterator(cache, container, element, false, isReverse, category);
-    cls.constructors = [nativeConstructor(cls, [classType(mutable)], ([value]) => value)];
+    cls.constructors.push(nativeConstructor(cls, [classType(mutable)], ([value]) => value));
   }
   return cls;
 }

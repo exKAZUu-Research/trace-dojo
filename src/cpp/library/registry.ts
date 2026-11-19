@@ -269,7 +269,7 @@ export class Library {
     for (const [name, target] of [
       ['cout', 'stdout'],
       ['cerr', 'stderr'],
-      ['clog', 'stderr'],
+      ['clog', 'clog'],
     ] as const) {
       // Each run has its own standard streams, whose formatting state the program may change.
       this.addStd(name, {

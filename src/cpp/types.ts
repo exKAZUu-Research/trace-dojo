@@ -191,7 +191,6 @@ export class ClassInfo {
   /** Whether the class is `final`, which no class may derive from. */
   isFinal = false;
   /** The constructor a class without user-declared ones has, when it has anything to initialize. */
-  implicitDefault?: FunctionInfo;
   row = -1;
 
   constructor(

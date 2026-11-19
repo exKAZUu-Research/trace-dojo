@@ -10,6 +10,9 @@ struct Aggregate {
   int y = x + f();
 };
 int f() { return 2; }
+int missing();
+struct Replacement { int n = missing(); };
+struct Unused { int n = missing(); };
 
 int copies;
 struct Item {
@@ -25,7 +28,8 @@ struct Box { Item entries[2]; };
 
 int main() {
   Aggregate a{};
-  std::cout << a.y << ' ';
+  Replacement replaced{8};
+  std::cout << a.y << replaced.n << ' ';
   std::map<int, int> map({{1, 2}, {3, 4}});
   std::set<int> set({3, 1});
   std::vector<int> vector({1, 2});

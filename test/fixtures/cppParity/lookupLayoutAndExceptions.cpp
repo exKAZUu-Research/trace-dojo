@@ -19,7 +19,7 @@ int max(int a, int b) { return a + b; }
 
 int main() {
   bool previous = std::ios::sync_with_stdio(false);
-  std::cout << previous << ' ';
+  std::cout << previous << (std::cout.tie(nullptr) == nullptr) << (std::cerr.tie() == &std::cout) << ' ';
   Derived d;
   std::cout << static_cast<Base&>(d).get() << ((Base&)d).get()
             << static_cast<Derived&>(static_cast<Base&>(d)).get() << select(&d) << ' ';
