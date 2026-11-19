@@ -36,9 +36,11 @@ export function compareNumbers(a: bigint | number, b: bigint | number): number {
 export function numberHash(value: bigint | number): bigint {
   if (typeof value === 'number') {
     if (Number.isInteger(value) && Math.abs(value) < 2 ** 63) return intHash(BigInt(value));
-    const bits = new DataView(new ArrayBuffer(8));
-    bits.setFloat64(0, value);
-    return bits.getBigInt64(0);
+    // The VM folds the bits of a double that is not an int and keeps them in its small-integer range.
+    const view = new DataView(new ArrayBuffer(8));
+    view.setFloat64(0, value);
+    const bits = view.getBigUint64(0);
+    return (bits ^ (bits >> 32n)) & 0x3f_ff_ff_ff_ff_ff_ff_ffn;
   }
   return intHash(value);
 }

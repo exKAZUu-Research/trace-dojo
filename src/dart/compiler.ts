@@ -1827,8 +1827,16 @@ export class Compiler extends AssignmentCompiler {
           );
           const { run } = value;
           const fieldSlot = field.slot;
+          // Each entry of the initializer list is a step, as each assignment of a Java constructor is.
+          const stepped = this.withStep(
+            initializer,
+            (frame) => {
+              (frame.receiver as DartObject).fields[fieldSlot] = run(frame);
+            },
+            value.creates === true
+          );
           steps.push((frame) => {
-            (frame.receiver as DartObject).fields[fieldSlot] = run(frame);
+            stepped(frame);
           });
           break;
         }
@@ -1842,16 +1850,24 @@ export class Compiler extends AssignmentCompiler {
             this.error(initializer, `${initializer.kind}(...) は、初期化子の最後に書いてください。`);
           }
           superCall = true;
-          steps.push(
-            this.compileDelegation(
-              cls,
-              declaration,
-              initializer.kind,
-              initializer.name,
-              initializer.arguments,
-              initializer
-            )
+          const delegation = this.compileDelegation(
+            cls,
+            declaration,
+            initializer.kind,
+            initializer.name,
+            initializer.arguments,
+            initializer
           );
+          const stepped = this.withStep(
+            initializer,
+            (frame) => {
+              delegation(frame);
+            },
+            true
+          );
+          steps.push((frame) => {
+            stepped(frame);
+          });
           break;
         }
       }

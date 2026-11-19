@@ -44,7 +44,10 @@ function locateDartErrors(root: Node, errors: SourceDiagnostic[]): SourceDiagnos
       moved.set(node.startPosition.row, previous.endPosition.row);
     }
   }
-  return errors.map((error) => ({ ...error, row: moved.get(error.row) ?? error.row }));
+  return errors.map((error) => {
+    const row = moved.get(error.row);
+    return row === undefined ? error : { row, message: '「;」が足りません。' };
+  });
 }
 
 const CLOSERS: Record<string, string> = { '{': '}', '${': '}', '(': ')', '[': ']', '?[': ']' };
