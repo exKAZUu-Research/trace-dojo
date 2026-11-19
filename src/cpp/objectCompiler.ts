@@ -10,7 +10,13 @@ import {
   Rank,
 } from './conversions';
 import { CppException, CppRuntimeError } from './errors';
-import { type Expr, hasConstantObject, mapMemberConstants, type TemporaryBinding } from './expr';
+import {
+  type Expr,
+  hasConstantObject,
+  type InitializerTarget,
+  mapMemberConstants,
+  type TemporaryBinding,
+} from './expr';
 import { constructElementFromRvalue, moveConstruction } from './library/elements';
 import { type Eval, type Frame, holdAll, type Temporary } from './runtime';
 import type { Syntax } from './syntax';
@@ -208,6 +214,48 @@ export function makeEach(
   } finally {
     frame.pending.length = mark;
   }
+}
+
+export function constructArray(
+  frame: Frame,
+  length: number,
+  element: Type,
+  initialize: (frame: Frame, target: InitializerTarget | undefined, index: number) => Value,
+  destroy: ((frame: Frame, value: Value) => void) | undefined,
+  target?: ArrayStore
+): ArrayStore {
+  if (!target) frame.runtime.reserve(length);
+  const store = target ?? new ArrayStore(Array.from({ length }, (): Value => UNINIT));
+  return holdValues(frame, [store], () => {
+    try {
+      makeEach(
+        frame,
+        length,
+        (index) => {
+          let value = store.values[index];
+          if (element.kind === 'class' && !element.cls.library) {
+            const object = value instanceof CObject ? value : newObject(frame, element.cls);
+            if (object !== value) {
+              object.needsConstruction = true;
+              store.values[index] = object;
+            }
+            object.arrayAddress = store.location(index);
+            value = object;
+          }
+          const destination = value instanceof CObject || value instanceof ArrayStore ? value : undefined;
+          const initialized = initialize(frame, destination, index);
+          if (initialized instanceof CObject) initialized.arrayAddress ??= store.location(index);
+          return initialized;
+        },
+        () => destroy,
+        store.values
+      );
+      return store;
+    } catch (error) {
+      endLifetime(store);
+      throw error;
+    }
+  });
 }
 
 /** A zero of a scalar type, as static storage and value-initialization start with. */
@@ -762,7 +810,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       : (frame, zeroInitialize, destination) =>
           holdAll(frame, argRuns, (values) => {
             const object = newObject(frame, cls, zeroInitialize, destination);
-            invoke(frame, fn, values, new Ptr(new Box(object), 0), row, true);
+            invoke(frame, fn, values, object.receiver(), row, true);
             object.needsConstruction = false;
             return object;
           });
@@ -920,7 +968,12 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
 
 /** A new object of a class, whose members its constructor initializes. */
 export function newObject(frame: Frame, cls: ClassInfo, zeroInitialize = false, destination?: CObject): CObject {
-  return destination?.liveness === Liveness.Alive ? destination : allocateObject(frame.runtime, cls, zeroInitialize);
+  if (destination?.liveness !== Liveness.Alive) return allocateObject(frame.runtime, cls, zeroInitialize);
+  if (zeroInitialize && destination.needsConstruction && !destination.zeroInitialized) {
+    for (const field of cls.fields) destination.values[field.index] = staticZero(frame.runtime, field.type);
+    destination.zeroInitialized = true;
+  }
+  return destination;
 }
 
 export function installBaseValue(base: ClassInfo, target: CObject, initialized: CObject): void {

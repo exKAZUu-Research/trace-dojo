@@ -3,7 +3,7 @@ import type { ExpressionCompiler } from '../expressionCompiler';
 import type { Frame } from '../runtime';
 import type { Syntax } from '../syntax';
 import type { ArithmeticType, ArrayType, ClassInfo, FunctionInfo, Type } from '../types';
-import type { CObject, Value } from '../values';
+import type { ArrayStore, CObject, Value } from '../values';
 
 export type IteratorCategory = 'forward' | 'bidirectional' | 'randomAccess';
 
@@ -16,7 +16,7 @@ export interface LibraryClass {
   readonly elementUseOnAssignment?: 'copy' | 'assign-and-copy';
   readonly allowsConstantCopy?: boolean;
   readonly scalarValue?: { type: ArithmeticType; read: (value: Value) => number | bigint };
-  readonly aggregateArray?: { type: ArrayType; make: (items: Value[]) => Value };
+  readonly aggregateArray?: { type: ArrayType; make: (storage: ArrayStore) => Value };
   readonly additionalPublicBases?: readonly ClassInfo[];
   /** `sizeof` of the class in libc++ on arm64. */
   readonly size: number;

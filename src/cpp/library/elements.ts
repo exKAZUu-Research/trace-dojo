@@ -2,7 +2,15 @@ import { implicitConversion } from '../conversions';
 import { CppException, CppRuntimeError } from '../errors';
 import type { Expr, FunctionCandidates } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { installBaseValue, invoke, makeEach, newObject, withTemporaries, zeroOf } from '../objectCompiler';
+import {
+  constructArray,
+  installBaseValue,
+  invoke,
+  makeEach,
+  newObject,
+  withTemporaries,
+  zeroOf,
+} from '../objectCompiler';
 import type { Eval, Frame } from '../runtime';
 import {
   type ClassInfo,
@@ -38,7 +46,7 @@ export interface ElementOperations {
   make: (frame: Frame) => Value;
   /** Whether the type has a default constructor, which `make` needs. */
   isDefaultConstructible: boolean;
-  copy: (frame: Frame, value: Value) => Value;
+  copy: (frame: Frame, value: Value, destination?: CObject) => Value;
   /** Assigns `source` to the element `target`, giving the element's new value (the same object for a class). */
   assign: (frame: Frame, target: Value, source: Value) => Value;
   destroy?: (frame: Frame, value: Value) => void;
@@ -191,7 +199,7 @@ function canCopyWithoutThrow(type: Type): boolean {
 export function constructElementFromRvalue(frame: Frame, type: Type, source: Value, target?: CObject): Value {
   if (source === UNINIT) return UNINIT;
   if (type.kind === 'array' && source instanceof ArrayStore) {
-    return new ArrayStore(transferElements(frame, type.of, source.values));
+    return transferElements(frame, type.of, source.values);
   }
   if (type.kind !== 'class') return source;
   const { cls } = type;
@@ -216,13 +224,14 @@ function constructMovedArray(frame: Frame, array: NonNullable<LibraryClass['aggr
   return canTransferElementStorage(array.type) ? frame.runtime.withoutOuterHandlers(move) : move();
 }
 
-function transferElements(frame: Frame, type: Type, values: Value[]): Value[] {
-  frame.runtime.reserve(values.length);
-  return makeEach(
+function transferElements(frame: Frame, type: Type, values: Value[]): ArrayStore {
+  return constructArray(
     frame,
     values.length,
-    (index) => constructElementFromRvalue(frame, type, values[index]),
-    () => (current, value) => destroyMovedPart(current, type, value)
+    type,
+    (current, target, index) =>
+      constructElementFromRvalue(current, type, values[index], target instanceof CObject ? target : undefined),
+    (current, value) => destroyMovedPart(current, type, value)
   );
 }
 
@@ -306,9 +315,9 @@ export function elementOperations(
       get isDefaultConstructible() {
         return findDefault() !== undefined;
       },
-      copy: (frame, value) => {
+      copy: (frame, value, destination) => {
         if (cls.isNoncopyable) throw new CppRuntimeError('custom', `${cls.name} のオブジェクトはコピーできません。`);
-        return operations?.copy(frame, value) ?? value;
+        return operations?.copy(frame, value, destination) ?? value;
       },
       assign: (frame, target, source) => operations?.assign(frame, target, source) ?? target,
       destroy: (frame, value) => {

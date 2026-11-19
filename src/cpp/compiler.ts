@@ -18,6 +18,7 @@ import {
 import type { Library } from './library/registry';
 import {
   bindRetainedTemporary,
+  constructArray,
   installBaseValue,
   invoke,
   makeEach,
@@ -1094,7 +1095,7 @@ export class Compiler extends StatementCompiler {
       if (hasUserCopy) {
         const copy = sourceIsConst ? constCopy : mutableCopy;
         if (!copy) throw new CppRuntimeError('custom', `${cls.name} のオブジェクトはコピーできません。`);
-        this.invokeStoredCopy(frame, copy, new Ptr(new Box(source), 0), new Ptr(new Box(target), 0));
+        this.invokeStoredCopy(frame, copy, source.receiver(), target.receiver());
         return;
       }
       const mark = frame.pending.length;
@@ -1165,9 +1166,10 @@ export class Compiler extends StatementCompiler {
     if (type.kind !== 'array') return value;
     const fields = (value as ArrayStore).values;
     const destroy = this.destroyerOf(type.of);
-    return this.fillArray(
+    return constructArray(
       frame,
       fields.length,
+      type.of,
       (f, target, index) => this.copyMember(f, type.of, fields[index], target, sourceIsConst),
       destroy,
       arrayStorage(destination)
@@ -1188,8 +1190,7 @@ export class Compiler extends StatementCompiler {
       const object = value as CObject;
       if (object.liveness !== Liveness.Alive || object.needsConstruction) return;
       object.cls = cls;
-      if (destructor?.compiled)
-        invoke(frame, destructor, [], new Ptr(new Box(object), 0), undefined as unknown as number);
+      if (destructor?.compiled) invoke(frame, destructor, [], object.receiver(), undefined as unknown as number);
       for (const { index, destroy } of members) {
         const member = object.values[index];
         if (member !== UNINIT) destroy?.(frame, member);
@@ -1855,11 +1856,12 @@ export class Compiler extends StatementCompiler {
       if (type.of.kind !== 'array' && type.of.kind !== 'class')
         return (frame, target, zeroInitialize) =>
           arrayStorage(target) ??
-          this.fillArray(frame, length, (f) => element(f, undefined, zeroInitialize), destroy, undefined);
+          constructArray(frame, length, type.of, (f) => element(f, undefined, zeroInitialize), destroy);
       return (frame, target, zeroInitialize, referenceLifetime) =>
-        this.fillArray(
+        constructArray(
           frame,
           length,
+          type.of,
           (f, storage) => element(f, storage, zeroInitialize, referenceLifetime),
           destroy,
           arrayStorage(target)
@@ -1904,7 +1906,7 @@ export class Compiler extends StatementCompiler {
       onlyCalls: true,
       run: (frame, zeroInitialize, destination) => {
         const object = newObject(frame, cls, isValueInitialized || zeroInitialize, destination);
-        if (implicit) invoke(frame, implicit, [], new Ptr(new Box(object), 0), row);
+        if (implicit) invoke(frame, implicit, [], object.receiver(), row);
         else object.cls = cls;
         object.needsConstruction = false;
         return object;
@@ -2154,7 +2156,7 @@ export class Compiler extends StatementCompiler {
       const initialize = take();
       return initializerWithConstancy(
         (frame, _target, zeroInitialize, referenceLifetime) =>
-          array.make((initialize(frame, undefined, zeroInitialize, referenceLifetime) as ArrayStore).values),
+          array.make(initialize(frame, undefined, zeroInitialize, referenceLifetime) as ArrayStore),
         initialize.isConstant === true
       );
     };
@@ -2183,9 +2185,10 @@ export class Compiler extends StatementCompiler {
       const destroy = this.destroyerOf(elementType);
       return initializerWithConstancy(
         (frame, target, zeroInitialize, referenceLifetime) =>
-          this.fillArray(
+          constructArray(
             frame,
             length,
+            elementType,
             (f, storage, index) => {
               const init = inits[index];
               return init
@@ -2200,24 +2203,6 @@ export class Compiler extends StatementCompiler {
         inits.every((init) => init.isConstant) && (!rest || rest.isConstant === true)
       );
     };
-  }
-
-  private fillArray(
-    frame: Frame,
-    length: number,
-    initialize: (frame: Frame, target: InitializerTarget | undefined, index: number) => Value,
-    destroy: ((frame: Frame, value: Value) => void) | undefined,
-    target: ArrayStore | undefined
-  ): ArrayStore {
-    if (!target) frame.runtime.reserve(length);
-    const values = makeEach(
-      frame,
-      length,
-      (index) => initialize(frame, initializerTarget(target?.values[index]), index),
-      () => destroy,
-      target?.values
-    );
-    return target ?? new ArrayStore(values);
   }
 
   private takeMemberClauses(cls: ClassInfo, clauses: Clauses, row: number): () => Initializer {
@@ -2247,7 +2232,7 @@ export class Compiler extends StatementCompiler {
     return initializerWithConstancy((frame, target, zeroInitialize, referenceLifetime) => {
       const object = newObject(frame, cls, zeroInitialize, asObject(target));
       const owner = referenceLifetime === 'full-expression' ? referenceLifetime : object;
-      const receiver = new Ptr(new Box(object, false), 0);
+      const receiver = object.receiver();
       const mark = frame.pending.length;
       frame.pending.push(object);
       let baseComplete = false;

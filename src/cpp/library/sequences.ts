@@ -1,9 +1,9 @@
 import { CompileError } from '../../interpreter/diagnostics';
 import { implicitConversion } from '../conversions';
 import { CppRuntimeError, NarrowingConversionError } from '../errors';
-import { type ConstantLocation, type Expr, hasConstantObject, offsetConstantLocation } from '../expr';
+import { type ConstantLocation, type Expr, hasConstantObject, type Initializer, offsetConstantLocation } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { makeEach } from '../objectCompiler';
+import { constructArray } from '../objectCompiler';
 import { type Eval, type Frame, holdAll } from '../runtime';
 import type { Syntax } from '../syntax';
 import {
@@ -27,7 +27,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { NULL_PTR, type Ptr, type Value } from '../values';
+import { ArrayStore, CObject, NULL_PTR, type Ptr, type Value } from '../values';
 import { bitReferences } from './bitReference';
 import { SequenceValue } from './containerValues';
 import {
@@ -112,34 +112,27 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   cls.memberTypes.set('const_reverse_iterator', classType(constReverseIterator));
   const outOfRange = (frame: Frame): never =>
     throwLibrary(frame, library.exception('out_of_range'), kind === 'array' ? 'array::at' : kind);
-  const make = (items: Value[]): SequenceValue => {
-    const value = new SequenceValue(items, element, kind !== 'list', kind === 'array' ? undefined : kind);
+  const make = (storage: Value[] | ArrayStore): SequenceValue => {
+    const fixed = storage instanceof ArrayStore ? storage : undefined;
+    const items = storage instanceof ArrayStore ? storage.values : storage;
+    const value = new SequenceValue(items, element, kind !== 'list', kind === 'array' ? undefined : kind, fixed);
     value.capacity = items.length;
     return value;
   };
   // std::array destroys its elements as a built-in array does, from the last.
   const editor = new SequenceEditor(kind === 'array' ? 'vector' : kind, ops);
   const arrayDefault = (compiler: ExpressionCompiler, row: number, valueInitialize: boolean): Expr['run'] => {
-    if (fixedLength === 0) return () => make([]);
-    const defaultInitialize = valueInitialize
-      ? undefined
-      : compiler.withLibraryAccess(() => compiler.defaultInitializer(element, row));
-    const initialize = defaultInitialize
-      ? (frame: Frame, zeroInitialize?: boolean) => defaultInitialize(frame, undefined, zeroInitialize)
-      : compiler.withLibraryAccess(() => compiler.valueInitialized(element, row).run);
+    if (fixedLength === 0) return () => make(new ArrayStore([]));
+    const initialize = compiler.withLibraryAccess<Initializer>(() => {
+      if (!valueInitialize) return compiler.defaultInitializer(element, row);
+      const { run } = compiler.valueInitialized(element, row);
+      return (frame, target, zeroInitialize) =>
+        run(frame, zeroInitialize, target instanceof CObject ? target : undefined);
+    });
     const destroy = compiler.withLibraryAccess(() => compiler.destroyerOf(element, row));
     const length = fixedLength ?? 0;
-    return (frame, zeroInitialize) => {
-      frame.runtime.reserve(length);
-      return make(
-        makeEach(
-          frame,
-          length,
-          () => initialize(frame, zeroInitialize) as Value,
-          () => destroy
-        )
-      );
-    };
+    return (frame, zeroInitialize) =>
+      make(constructArray(frame, length, element, (f, target) => initialize(f, target, zeroInitialize), destroy));
   };
   cls.library = {
     kind,
@@ -177,6 +170,18 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   cls.operations = {
     copy: (frame, source) => {
       const items = (source as SequenceValue).items;
+      if (kind === 'array') {
+        const operations = ops();
+        return make(
+          constructArray(
+            frame,
+            items.length,
+            element,
+            (f, target, index) => operations.copy(f, items[index], target instanceof CObject ? target : undefined),
+            operations.destroy
+          )
+        );
+      }
       reserve(frame, items.length);
       return make(editor.construct(frame, items.length, (index) => ops().copy(frame, items[index])));
     },
@@ -185,7 +190,9 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
       const from = source as SequenceValue;
       if (to === from) return;
       if (kind === 'array') {
-        to.items = to.items.map((item, index) => ops().assign(frame, item, from.items[index]));
+        for (let index = 0; index < to.items.length; index++) {
+          to.items[index] = ops().assign(frame, to.items[index], from.items[index]);
+        }
         return;
       }
       reserve(frame, Math.max(0, from.items.length - to.items.length));
@@ -525,7 +532,10 @@ function sequenceMethods(
   if (kind === 'array') {
     method('fill', [constRef(element)], VOID, (self, [value], frame) => {
       const source = (value as Ptr).read();
-      self.items = self.items.map((item) => ops().assign(frame, item, source));
+      const { assign } = ops();
+      for (const [index, item] of self.items.entries()) {
+        self.items[index] = assign(frame, item, source);
+      }
     });
     return;
   }

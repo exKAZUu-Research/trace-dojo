@@ -146,6 +146,7 @@ export class CObject extends Store {
   private exceptionMessage?: ExceptionMessage;
   referenceTemporaries?: Temporary[];
   needsConstruction = false;
+  arrayAddress?: Ptr;
   private memberStorage?: Map<number, MemberStorage>;
 
   /**
@@ -162,6 +163,10 @@ export class CObject extends Store {
 
   get length(): number {
     return this.values.length;
+  }
+
+  receiver(): Ptr {
+    return this.arrayAddress ?? new Ptr(new Box(this, false), 0);
   }
 
   get message(): string | undefined {

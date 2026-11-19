@@ -1,7 +1,7 @@
 import type { DisplayNode } from '../../problems/trace';
 import { CppRuntimeError } from '../errors';
 import type { Type } from '../types';
-import { Ptr, Store, UNINIT, type Value } from '../values';
+import { type ArrayStore, Ptr, Store, UNINIT, type Value } from '../values';
 
 interface IndexedValue {
   index: number;
@@ -137,7 +137,8 @@ export class SequenceValue extends Store {
     readonly elementType: Type,
     /** Whether the trace shows the container as an array, as it shows a Java array. */
     public isArrayLike: boolean,
-    private readonly storageKind?: 'list' | 'deque' | 'vector'
+    private readonly storageKind?: 'list' | 'deque' | 'vector',
+    private readonly fixedStorage?: ArrayStore
   ) {
     super();
     this.nodes = storageKind ? new NodePositions(this) : undefined;
@@ -148,7 +149,7 @@ export class SequenceValue extends Store {
   private dequeEpoch?: { all: number; end: number };
 
   override location(index: number): Ptr {
-    return this.nodes?.at(index) ?? super.location(index);
+    return this.fixedStorage?.location(index) ?? this.nodes?.at(index) ?? super.location(index);
   }
 
   override iteratorLocation(index: number): Ptr {
@@ -273,7 +274,7 @@ export class SequenceValue extends Store {
   }
 
   children(): Iterable<Value> {
-    return this.items;
+    return this.fixedStorage ? [this.fixedStorage] : this.items;
   }
 }
 

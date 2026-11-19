@@ -29,7 +29,7 @@ import {
 } from './expr';
 import { throwLibrary } from './library/support';
 import { checkLiteralPrefix, literalBytes, numberLiteral } from './literals';
-import { makeEach, ObjectCompiler, zeroOf } from './objectCompiler';
+import { constructArray, ObjectCompiler, zeroOf } from './objectCompiler';
 import { erasePointee, recoverPointee } from './pointerCasts';
 import { type Eval, type Frame, holdAll } from './runtime';
 import type { Entity } from './scopes';
@@ -1809,24 +1809,21 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (type.kind === 'reference') return this.error(row, '参照には初期値を書いてください。');
     if (type.kind === 'class') return this.defaultConstructed(type.cls, row, true);
     if (type.kind === 'array') {
-      const initialize = this.valueInitialized(type.of, row).run as Eval<Value>;
+      const initialize = this.valueInitialized(type.of, row).run;
       const destroy = this.destroyerOf(type.of);
       const count = type.length ?? 0;
       return {
         type,
         isLvalue: false,
         row,
-        run: (frame) => {
-          frame.runtime.reserve(count);
-          return new ArrayStore(
-            makeEach(
-              frame,
-              count,
-              () => initialize(frame),
-              () => destroy
-            )
-          );
-        },
+        run: (frame) =>
+          constructArray(
+            frame,
+            count,
+            type.of,
+            (elementFrame, target) => initialize(elementFrame, false, target instanceof CObject ? target : undefined),
+            destroy
+          ),
       };
     }
     if (type.kind === 'void') return { type, isLvalue: false, row, run: () => {} };
@@ -1918,11 +1915,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const badAlloc = this.library.exception('bad_alloc');
     // The elements without initializers need a default constructor only when some may exist.
     const hasRest = lengthExpr.constant === undefined || Number(lengthExpr.constant) > initial.length;
-    const rest = hasRest
+    const valueInitialize =
+      hasRest && argsNode?.type === 'argument_list' ? this.valueInitialized(elementType, row).run : undefined;
+    const rest: Initializer | undefined = hasRest
       ? argsNode?.type === 'initializer_list'
         ? this.initializeList(elementType, [], row)
-        : argsNode
-          ? (this.valueInitialized(elementType, row).run as Eval<Value>)
+        : valueInitialize
+          ? (frame, target) => valueInitialize(frame, false, target instanceof CObject ? target : undefined)
           : this.defaultInitializer(elementType, row)
       : undefined;
     const destroy = this.destroyerOf(elementType);
@@ -1933,12 +1932,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       run: (frame) => {
         const count = Number(length(frame));
         if (count < initial.length) return throwLibrary(frame, badAlloc, 'std::bad_alloc');
-        frame.runtime.reserve(count);
-        const make = (index: number): Value =>
-          index < initial.length
-            ? initial[index](frame, undefined, false, 'full-expression')
-            : (rest as Initializer)(frame, undefined, false, 'full-expression');
-        const store = new ArrayStore(makeEach(frame, count, make, () => destroy));
+        const store = constructArray(
+          frame,
+          count,
+          elementType,
+          (elementFrame, target, index) =>
+            (initial[index] ?? (rest as Initializer))(elementFrame, target, false, 'full-expression'),
+          destroy
+        );
         store.allocation = 'newArray';
         store.allocatedElementType = elementType;
         return new Ptr(store, 0);
