@@ -26,10 +26,12 @@ import {
   elementOperations,
   equalTo,
   requireDefaultConstruction,
+  requireElementUse,
 } from './elements';
 import {
   addRangeMembers,
   associativeInitializerList,
+  constructPair,
   copyEntries,
   emplacementCall,
   type EntryTable,
@@ -680,10 +682,12 @@ export function unorderedClass(
           if (!node) {
             [node] = self.insert(
               frame,
-              new CObject((entryType as Extract<Type, { kind: 'class' }>).cls, [
-                keyOps.copy(frame, keyValue),
-                mappedOps.make(frame),
-              ])
+              constructPair(
+                frame,
+                (entryType as Extract<Type, { kind: 'class' }>).cls,
+                [(f, target) => keyOps.copy(f, keyValue, target), (f, target) => mappedOps.make(f, target)],
+                (index) => (index === 0 ? keyOps.destroy : mappedOps.destroy)
+              )
             );
           }
           return new Ptr(node.value as CObject, 1);
@@ -789,8 +793,18 @@ export function unorderedClass(
   method('cend', [], constIterator, (self) => self.iterator(undefined), true);
   method('count', [constRef(keyType)], SIZE_T, (self, [k]) => (self.lookup(keyArg(k)) ? 1n : 0n), true);
   method('contains', [constRef(keyType)], BOOL, (self, [k]) => (self.lookup(keyArg(k)) ? 1 : 0), true);
-  method('insert', [constRef(unqualified(entryType))], classType(insertResult), (self, [entry], frame) =>
-    insertionResult(self, ...insertCopy(table, frame, self, (entry as Ptr).read()))
+  addMethod(
+    cls,
+    native(
+      'insert',
+      [constRef(unqualified(entryType))],
+      classType(insertResult),
+      ([entry], { self, frame }) => {
+        const hash = self as HashValue;
+        return insertionResult(hash, ...insertCopy(table, frame, hash, (entry as Ptr).read()));
+      },
+      { uses: (row) => requireElementUse(compiler, entryType, row, 'copy') }
+    )
   );
   method('erase', [constRef(keyType)], SIZE_T, (self, [k], frame) => {
     const node = self.lookup(keyArg(k));

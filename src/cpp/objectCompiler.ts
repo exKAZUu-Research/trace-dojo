@@ -235,16 +235,34 @@ export function constructArray(
       Array.from({ length }, (): Value => UNINIT),
       element
     );
+  return constructCells(
+    frame,
+    store,
+    length,
+    () => element,
+    initialize,
+    () => destroy
+  );
+}
+
+export function constructCells<S extends ArrayStore | CObject>(
+  frame: Frame,
+  store: S,
+  count: number,
+  typeAt: (index: number) => Type,
+  initialize: (frame: Frame, target: InitializerTarget | undefined, index: number) => Value,
+  destroyAt: (index: number) => ((frame: Frame, value: Value) => void) | undefined
+): S {
   return holdValues(frame, [store], () => {
     try {
       makeEach(
         frame,
-        length,
+        count,
         (index) =>
-          initializeAt(frame, element, store.location(index), store.values[index], (destination) =>
+          initializeAt(frame, typeAt(index), store.location(index), store.values[index], (destination) =>
             initialize(frame, destination, index)
           ),
-        () => destroy,
+        destroyAt,
         store.values
       );
       return store;
@@ -628,7 +646,6 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       if (!param) {
         conversions.push({
           rank: Rank.UserDefined + 1,
-          addsQualification: false,
           isBoolean: false,
           baseDistance: 0,
           apply: (e) => this.variadicArgument(e),
@@ -671,7 +688,6 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     if (isConstType(object.type) && !fn.isConst) return undefined;
     return {
       rank: Rank.Exact,
-      addsQualification: false,
       isBoolean: false,
       baseDistance: 0,
       reference: { toConst: fn.isConst },

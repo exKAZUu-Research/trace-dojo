@@ -4,7 +4,7 @@ import { CompileError } from '../../interpreter/diagnostics';
 import { CppRuntimeError, overflowError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { makeEach, withTemporaries } from '../objectCompiler';
+import { withTemporaries } from '../objectCompiler';
 import { type Frame, holdAll } from '../runtime';
 import {
   BOOL,
@@ -49,6 +49,7 @@ import {
   swapElements,
   truthy,
 } from './elements';
+import { constructPair } from './emplacement';
 import { elementLocation } from './iterators';
 import type { IteratorCategory } from './libraryClass';
 import type { EngineValue } from './random';
@@ -1559,15 +1560,11 @@ function listExtremum(
         const compare = less(frame);
         if (result) {
           const [low, high] = minmaxPositions(items, compare);
-          const selected: Value[] = [items[low], items[high]];
-          return new CObject(
+          return constructPair(
+            frame,
             result,
-            makeEach(
-              frame,
-              selected.length,
-              (index) => ops.copy(frame, selected[index]),
-              () => destroy
-            )
+            [(f, target) => ops.copy(f, items[low], target), (f, target) => ops.copy(f, items[high], target)],
+            () => destroy
           );
         }
         let best = 0;

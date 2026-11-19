@@ -27,8 +27,8 @@ export const enum Rank {
 /** An implicit conversion sequence, with what the rules for choosing among overloads compare. */
 export interface ConversionSequence {
   rank: Rank;
-  /** Whether a standard conversion adds `const` to the target of a pointer. */
-  addsQualification: boolean;
+  /** The qualified pointee type when a standard conversion adds `const`. */
+  qualificationTarget?: Type;
   /** Whether the sequence converts a pointer to `bool`, which is worse than other conversions of the same rank. */
   isBoolean: boolean;
   /** How many classes up the hierarchy a derived-to-base conversion goes, or 0. */
@@ -69,7 +69,7 @@ export function sequence(
   apply: (expr: Expr) => Expr,
   extra: Partial<ConversionSequence> = {}
 ): ConversionSequence {
-  return { rank, addsQualification: false, isBoolean: false, baseDistance: 0, apply, ...extra };
+  return { rank, isBoolean: false, baseDistance: 0, apply, ...extra };
 }
 
 /**
@@ -273,9 +273,9 @@ function pointerConversion(
     return sequence(Rank.UserDefined + 2, apply);
   }
   if (isConstType(fromTarget) && !isConstType(to.to)) return undefined;
-  const addsQualification = !isConstType(fromTarget) && isConstType(to.to);
+  const qualificationTarget = !isConstType(fromTarget) && isConstType(to.to) ? to.to : undefined;
   if (permitsQualificationConversion(fromTarget, to.to)) {
-    return sequence(Rank.Exact, apply, { addsQualification: !sameType(fromTarget, to.to) });
+    return sequence(Rank.Exact, apply, { qualificationTarget: sameType(fromTarget, to.to) ? undefined : to.to });
   }
   if (to.to.kind === 'void') {
     return sequence(
@@ -285,14 +285,14 @@ function pointerConversion(
         const run = value.run;
         return { ...value, run: (frame) => erasePointee(run(frame) as Ptr, fromTarget) };
       },
-      { addsQualification, convertsToVoidPointer: true }
+      { qualificationTarget, convertsToVoidPointer: true }
     );
   }
   const distance = baseDistance(fromTarget, to.to);
   if (distance > 0) {
     return sequence(Rank.Conversion, (e) => apply(toBase(host, e, to.to)), {
       baseDistance: distance,
-      addsQualification,
+      qualificationTarget,
     });
   }
   return undefined;
@@ -354,9 +354,19 @@ export function compareSequences(a: ConversionSequence, b: ConversionSequence): 
   if (a.baseDistance !== b.baseDistance && a.baseDistance > 0 && b.baseDistance > 0) {
     return b.baseDistance - a.baseDistance;
   }
-  if (a.addsQualification !== b.addsQualification) return a.addsQualification ? -1 : 1;
+  const qualification = compareQualificationTargets(a.qualificationTarget, b.qualificationTarget);
+  if (qualification) return qualification;
   if (a.reference && b.reference && a.reference.toConst !== b.reference.toConst) return a.reference.toConst ? -1 : 1;
   return 0;
+}
+
+function compareQualificationTargets(first: Type | undefined, second: Type | undefined): number {
+  if (!first) return second ? 1 : 0;
+  if (!second) return -1;
+  const firstToSecond = permitsQualificationConversion(first, second);
+  const secondToFirst = permitsQualificationConversion(second, first);
+  if (firstToSecond === secondToFirst) return 0;
+  return firstToSecond ? 1 : -1;
 }
 
 /** The candidate better than every other, or undefined when none or several are best. */

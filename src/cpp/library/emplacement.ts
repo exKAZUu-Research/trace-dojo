@@ -2,11 +2,11 @@ import { CompileError } from '../../interpreter/diagnostics';
 import { CppException } from '../errors';
 import type { Expr, Initializer } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { makeEach } from '../objectCompiler';
+import { constructCells, makeEach } from '../objectCompiler';
 import { type Eval, type Frame, holdAll } from '../runtime';
 import type { Syntax } from '../syntax';
 import { type ClassInfo, isConstType, type Type, typeName, unqualified, VOID, withConst } from '../types';
-import { CObject, endLifetime, type Ptr, type Store, type Value } from '../values';
+import { CObject, endLifetime, type Ptr, type Store, UNINIT, type Value } from '../values';
 import { type ElementOperations, requireElementUse } from './elements';
 import type { Source } from './sequenceEdits';
 import { constructElement, initializerList, iteratorRange, listElementsOf } from './sequences';
@@ -66,7 +66,8 @@ export function emplacementCall<T, Position>(
     args.length === 1 &&
     arg.type.kind === 'class' &&
     arg.type.cls.library?.kind === 'pair' &&
-    arg.type.cls !== (entryType as Extract<Type, { kind: 'class' }>).cls;
+    (arg.type.cls !== (entryType as Extract<Type, { kind: 'class' }>).cls ||
+      ((!arg.isLvalue || arg.isXvalue) && !isConstType(arg.type)));
   if (member !== 'emplace' && member !== 'try_emplace' && !isPairInsert) return;
   if (isConstType(object.type)) return compiler.error(row, `const のオブジェクトには ${member} を使えません。`);
   const self = compiler.objectOf(object);
@@ -226,15 +227,22 @@ export function insertRange<T, Position>(table: EntryTable<T, Position>, frame: 
   }
 }
 
+export type PairMemberInitializer = (frame: Frame, destination?: CObject) => Value;
+
 export function constructPair(
   frame: Frame,
   cls: ClassInfo,
-  members: readonly [Eval<Value>, Eval<Value>],
+  members: readonly [PairMemberInitializer, PairMemberInitializer],
   destroyAt: (index: number) => ElementOperations['destroy']
 ): CObject {
-  return new CObject(
-    cls,
-    makeEach(frame, members.length, (index) => members[index](frame), destroyAt)
+  const pair = new CObject(cls, [UNINIT, UNINIT]);
+  return constructCells(
+    frame,
+    pair,
+    members.length,
+    (index) => cls.fields[index].type,
+    (current, target, index) => members[index](current, target instanceof CObject ? target : undefined),
+    destroyAt
   );
 }
 

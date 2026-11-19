@@ -16,7 +16,6 @@ import { Runtime as CppRuntime } from './runtime';
 import { CHAR, type ClassInfo, pointerTo, type Type, typeName } from './types';
 import { ArrayStore, Box, CObject, Ptr } from './values';
 
-// code-gauge-allow duplicateLines 15 -- Each language's runner wraps its own parser and runtime.
 export function executeCppProgram(source: string, input?: ProgramInput): ProgramExecution {
   let program: CompiledProgram;
   try {

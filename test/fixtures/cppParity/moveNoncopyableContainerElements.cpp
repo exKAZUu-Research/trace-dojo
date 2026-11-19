@@ -163,4 +163,13 @@ int main() {
   std::vector<Wrapper> appended;
   std::transform(lengths, lengths + 2, std::back_inserter(appended), sized);
   std::cout << appended[0].items.size() << ' ' << appended[1].items.size() << '\n';
+
+  std::map<int, Wrapper> replacements;
+  replacements.insert_or_assign(1, sized(2));
+  replacements.insert_or_assign(1, sized(4));
+  replacements.insert(std::pair<const int, Wrapper>{2, sized(3)});
+  std::unordered_map<int, Wrapper> incoming;
+  incoming.insert(std::pair<const int, Wrapper>{3, sized(5)});
+  std::cout << replacements.at(1).items.size() << replacements.at(2).items.size()
+            << incoming.at(3).items.size() << '\n';
 }

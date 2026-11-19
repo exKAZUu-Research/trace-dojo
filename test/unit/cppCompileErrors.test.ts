@@ -845,6 +845,11 @@ test.each([
   ],
   ['a static local variable of type void', 'int main() { static void v; }', 0],
   [
+    'pointer overloads with competing qualification conversions',
+    'void f(int* const*, const int* const*);\nvoid f(const int* const*, int* const*);\nint main() { int value; int* p = &value; f(&p, &p); }',
+    2,
+  ],
+  [
     'vector erase requiring deleted element assignment',
     '#include <vector>\nstruct X { const int n; };\nint main() { std::vector<X> v{{1}, {2}}; v.erase(v.begin()); }',
     2,
@@ -852,6 +857,21 @@ test.each([
   [
     'vector copy assignment requiring deleted element assignment',
     '#include <vector>\nstruct X { const int n; };\nint main() { std::vector<X> a{{1}}, b{{2}}; a = b; }',
+    2,
+  ],
+  [
+    'map insert_or_assign requiring deleted mapped assignment',
+    '#include <map>\nstruct X { const int n; };\nint main() { std::map<int, X> m; m.insert_or_assign(1, X{2}); }',
+    2,
+  ],
+  [
+    'map insertion invoking a private mapped copy constructor',
+    '#include <map>\nclass X { X(const X&) {} public: X() {} };\nint main() { std::pair<const int, X> p; std::map<int, X> m; m.insert(p); }',
+    2,
+  ],
+  [
+    'unordered map insertion invoking a private mapped copy constructor',
+    '#include <unordered_map>\nclass X { X(const X&) {} public: X() {} };\nint main() { std::pair<const int, X> p; std::unordered_map<int, X> m; m.insert(p); }',
     2,
   ],
   [

@@ -2,6 +2,9 @@
 #include <deque>
 #include <iostream>
 #include <list>
+#include <map>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 struct Cell {
@@ -52,7 +55,7 @@ struct Probe {
 struct SelfBound {
   SelfBound* self;
   SelfBound* end;
-  SelfBound() : self(this), end(this + 1) {}
+  SelfBound(int = 0) : self(this), end(this + 1) {}
   SelfBound(const SelfBound&) noexcept : self(this), end(this + 1) {}
 };
 struct Holder {
@@ -162,4 +165,13 @@ int main() {
   range.reserve(4);
   range.insert(range.end(), input, input + 2);
   std::cout << ' ' << (firstInserted == &range.front()) << '\n';
+
+  std::pair<SelfBound, int> pair{7, 0};
+  std::pair<SelfBound, int> pairCopy(pair);
+  std::map<int, SelfBound> tree;
+  tree.try_emplace(1, 2);
+  std::unordered_map<int, SelfBound> hash;
+  std::cout << (pair.first.self == &pair.first) << (pairCopy.first.self == &pairCopy.first)
+            << (tree.at(1).self == &tree.at(1)) << (tree[2].self == &tree[2])
+            << (hash[1].self == &hash[1]) << '\n';
 }

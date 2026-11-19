@@ -4,7 +4,7 @@ import { implicitConversion } from '../conversions';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import type { Eval, Frame } from '../runtime';
+import type { Frame } from '../runtime';
 import {
   alignOf,
   allowsConstantCopy,
@@ -31,13 +31,17 @@ import { CObject, Ptr, type Value } from '../values';
 import { MapValue, NodePositions } from './containerValues';
 import {
   assignElement,
+  constructElementFromRvalue,
   destroyElements,
   type ElementOperations,
   elementOperations,
   equalTo,
   lessThan,
+  movedArgument,
+  moveValue,
   requireDefaultConstruction,
   requireElementUse,
+  requireMoveConstruction,
   swapElements,
 } from './elements';
 import {
@@ -48,6 +52,7 @@ import {
   emplacementCall,
   type EntryTable,
   insertCopy,
+  type PairMemberInitializer,
 } from './emplacement';
 import { positionOf, randomAccessIterator, rangePositions } from './iterators';
 import type { Library } from './registry';
@@ -109,12 +114,12 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
       return { type: BOOL, isLvalue: false, row, run: (frame) => (test(a(frame) as Value, b(frame) as Value) ? 1 : 0) };
     },
   };
-  const construct = (frame: Frame, initialize: [(frame: Frame) => Value, (frame: Frame) => Value]): CObject =>
+  const construct = (frame: Frame, initialize: [PairMemberInitializer, PairMemberInitializer]): CObject =>
     constructPair(frame, cls, initialize, (index) => ops()[index].destroy);
   cls.operations = {
     copy: (frame, source) => {
       const [a, b] = (source as CObject).values;
-      return construct(frame, [(f) => ops()[0].copy(f, a), (f) => ops()[1].copy(f, b)]);
+      return construct(frame, [(f, target) => ops()[0].copy(f, a, target), (f, target) => ops()[1].copy(f, b, target)]);
     },
     assign: (frame, target, source) => {
       const to = target as CObject;
@@ -137,7 +142,8 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
     nativeConstructor(
       cls,
       [],
-      (_args, { frame }) => construct(frame, [(f) => ops()[0].make(f), (f) => ops()[1].make(f)]),
+      (_args, { frame }) =>
+        construct(frame, [(f, target) => ops()[0].make(f, target), (f, target) => ops()[1].make(f, target)]),
       {
         libraryConstant: () => (constantMembers ? true : undefined),
         uses: (row) => {
@@ -185,11 +191,14 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
               ([pair], { frame }) => {
                 const object = (pair as Ptr).read() as CObject;
                 const member =
-                  (index: number): Eval<Value> =>
-                  (f) =>
+                  (index: number): PairMemberInitializer =>
+                  (f, target) =>
                     initialize[index].make(
                       f,
-                      incoming[index].type.kind === 'reference' ? (object.values[index] as Ptr) : new Ptr(object, index)
+                      incoming[index].type.kind === 'reference'
+                        ? (object.values[index] as Ptr)
+                        : new Ptr(object, index),
+                      target
                     );
                 return construct(frame, [member(0), member(1)]);
               },
@@ -255,7 +264,7 @@ export function makePair(library: Library): FunctionInfo {
 }
 
 interface PairMemberBinding {
-  make: (frame: Frame, loc: Ptr) => Value;
+  make: (frame: Frame, loc: Ptr, destination?: CObject) => Value;
   isImplicit: boolean;
   isConstant: boolean;
 }
@@ -300,7 +309,7 @@ function pairForwarding(
     constructPair(
       frame,
       cls,
-      [(f) => initialize[0].make(f, a as Ptr), (f) => initialize[1].make(f, b as Ptr)],
+      [(f, target) => initialize[0].make(f, a as Ptr, target), (f, target) => initialize[1].make(f, b as Ptr, target)],
       (index) => ops()[index].destroy
     );
   return { params, run, options: pairConstructionOptions(compiler, cls, initialize) };
@@ -328,10 +337,10 @@ function pairMemberBinding(
   const construct =
     type.kind === 'reference' ? compiler.convert(slot, type, row) : elementConstruction(compiler, target, [slot], row);
   return {
-    make: (frame: Frame, loc: Ptr): Value => {
+    make: (frame: Frame, loc: Ptr, destination?: CObject): Value => {
       frame.pending.push(loc);
       try {
-        return construct.run(frame) as Value;
+        return construct.run(frame, undefined, destination) as Value;
       } finally {
         frame.pending.pop();
       }
@@ -645,11 +654,16 @@ export function orderedClass(
             const keyValue = (keyRun(frame) as Ptr).read();
             let at = find(self, keyValue);
             if (at < 0) {
-              const keyCopy = elementOperations(compiler, unqualified(keyType), row).copy(frame, keyValue);
+              const keyOps = elementOperations(compiler, unqualified(keyType), row);
               [at] = insert(
                 frame,
                 self,
-                new CObject(entryType.kind === 'class' ? entryType.cls : cls, [keyCopy, mapped().make(frame)])
+                constructPair(
+                  frame,
+                  (entryType as Extract<Type, { kind: 'class' }>).cls,
+                  [(f, target) => keyOps.copy(f, keyValue, target), (f, target) => mapped().make(f, target)],
+                  (index) => (index === 0 ? keyOps.destroy : mapped().destroy)
+                )
               );
             }
             return new Ptr(self.entries[at] as CObject, 1);
@@ -724,7 +738,7 @@ export function orderedClass(
     params: Type[],
     ret: Type,
     run: (self: OrderedValue, args: unknown[], frame: Frame) => unknown,
-    options: { isConst?: boolean; optional?: number } = {}
+    options: NativeOptions = {}
   ): void => {
     addMethod(
       cls,
@@ -802,34 +816,72 @@ export function orderedClass(
     { isConst: true }
   );
   method('contains', [constRef(keyType)], BOOL, (self, [k]) => (find(self, keyArg(k)) >= 0 ? 1 : 0), { isConst: true });
+  const copyEntry = { uses: (row: number) => requireElementUse(compiler, entryType, row, 'copy') };
   method(
     'insert',
     [constRef(unqualified(entryType))],
     isMulti ? types.iterator : classType(insertResult),
-    (self, [entry], frame) => insertionResult(self, ...insertCopy(table, frame, self, (entry as Ptr).read()))
+    (self, [entry], frame) => insertionResult(self, ...insertCopy(table, frame, self, (entry as Ptr).read())),
+    copyEntry
   );
   if (valueType && !isMulti) {
-    method(
-      'insert_or_assign',
-      [constRef(keyType), constRef(valueType)],
-      classType(insertResult),
-      (self, [key, value], frame) => {
-        const keyValue = keyArg(key);
-        const source = (value as Ptr).read();
-        const at = find(self, keyValue);
-        if (at >= 0) {
-          const entry = self.entries[at] as CObject;
-          entry.values[1] = mapped().assign(frame, entry.values[1], source);
-          return insertionResult(self, at, false);
-        }
-        const keyOps = elementOperations(compiler, unqualified(keyType), 0);
-        const entry = new CObject((entryType as Extract<Type, { kind: 'class' }>).cls, [
-          keyOps.copy(frame, keyValue),
-          mapped().copy(frame, source),
-        ]);
-        return insertionResult(self, ...insert(frame, self, entry));
-      }
-    );
+    addMethod(cls, {
+      ...native('insert_or_assign', [], VOID, () => {}),
+      isTemplate: true,
+      instantiate: (args) => {
+        if (args.length !== 2) return;
+        const row = args[0].row;
+        const keyMoves = movedArgument(compiler, keyType, args[0]) !== undefined;
+        const valueMoves = movedArgument(compiler, valueType, args[1]) !== undefined;
+        const keyOps = elementOperations(compiler, unqualified(keyType), row);
+        const requireTransfer = (type: Type, moves: boolean, callRow: number): void => {
+          if (moves) requireMoveConstruction(compiler, type, callRow);
+          else requireElementUse(compiler, type, callRow, 'copy');
+        };
+        return native(
+          'insert_or_assign',
+          [constRef(keyType), constRef(valueType)],
+          classType(insertResult),
+          ([key, value], { frame, self: receiver }) => {
+            const self = receiver as OrderedValue;
+            const keyValue = keyArg(key);
+            const source = (value as Ptr).read();
+            const at = find(self, keyValue);
+            if (at >= 0) {
+              const entry = self.entries[at] as CObject;
+              entry.values[1] = valueMoves
+                ? moveValue(frame, valueType, entry.values[1], source)
+                : mapped().assign(frame, entry.values[1], source);
+              return insertionResult(self, at, false);
+            }
+            const entry = constructPair(
+              frame,
+              (entryType as Extract<Type, { kind: 'class' }>).cls,
+              [
+                (f, target) =>
+                  keyMoves
+                    ? constructElementFromRvalue(f, keyType, keyValue, target)
+                    : keyOps.copy(f, keyValue, target),
+                (f, target) =>
+                  valueMoves
+                    ? constructElementFromRvalue(f, valueType, source, target)
+                    : mapped().copy(f, source, target),
+              ],
+              (index) => (index === 0 ? keyOps.destroy : mapped().destroy)
+            );
+            return insertionResult(self, ...insert(frame, self, entry));
+          },
+          {
+            owner: cls,
+            uses: (callRow) => {
+              requireTransfer(keyType, keyMoves, callRow);
+              requireTransfer(valueType, valueMoves, callRow);
+              compiler.requireLibraryObjectUse(valueType, valueMoves ? 'move-assign' : 'assign', callRow);
+            },
+          }
+        );
+      },
+    });
   }
   method(
     'insert',
@@ -838,7 +890,8 @@ export function orderedClass(
     (self, [hint, entry], frame) => {
       positionOf(self, hint);
       return self.location(insertCopy(table, frame, self, (entry as Ptr).read())[0]);
-    }
+    },
+    copyEntry
   );
   method('erase', [constRef(keyType)], SIZE_T, (self, [k], frame) => {
     const keyValue = keyArg(k);
