@@ -732,7 +732,7 @@ const EXTRACT_MODES: ((key: string, prefixed: () => string | undefined, exists: 
   (key, prefixed, exists) => {
     if (key !== '') return exists || key === 'this' ? prefixed() : validName(key);
   },
-  (_key, prefixed) => prefixed(),
+  (key, prefixed) => (key === '' ? undefined : prefixed()),
   (key, prefixed) => (key !== 'this' && isVariableName(key) ? key : prefixed()),
   (_key, prefixed, exists) => (exists ? prefixed() : undefined),
   (key, _prefixed, exists) => (exists && key !== 'GLOBALS' ? validName(key) : undefined),

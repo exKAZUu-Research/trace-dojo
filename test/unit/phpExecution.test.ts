@@ -3843,4 +3843,17 @@ echo '|', gc_collect_cycles();
 `)
     ).toMatchObject({ kind: 'executed', stdout: expected });
   }
+
+  const extractEmptyKeys = run(String.raw`<?php
+$input = ['' => 'wrong', 'name' => 'Ada', 0 => 'zero'];
+echo extract($input, EXTR_PREFIX_ALL, 'row'), '|', $row_name, '|', $row_0, '|', isset($row_) ? $row_ : 'absent', ';';
+$input2 = ['' => 'wrong', 'name' => 'Ada'];
+echo extract($input2, EXTR_PREFIX_ALL | EXTR_REFS, 'ref'), '|', $ref_name, '|', isset($ref_) ? $ref_ : 'absent', ';';
+$input3 = ['' => 'empty', 'ok' => 'good'];
+echo extract($input3, EXTR_PREFIX_INVALID, 'inv'), '|', $inv_, '|', $ok;
+`);
+  expect(extractEmptyKeys).toMatchObject({
+    kind: 'executed',
+    stdout: '2|Ada|zero|absent;1|Ada|absent;2|empty|good',
+  });
 });
