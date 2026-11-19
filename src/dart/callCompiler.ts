@@ -720,7 +720,12 @@ export abstract class CallCompiler extends OperatorCompiler {
             (closurePass || !isTop(contextual))
               ? contextual
               : undefined;
-          map.set(param, usable ?? (closurePass ? solution.get(param) : undefined) ?? INFERENCE_HOLE);
+          // A context beyond the bound is clamped to it, as `print(pick([1], (x) => x.isEven))` types x as num.
+          const clamped =
+            closurePass && contextual && !usable && param.bound && !mentionsTypeParams(param.bound, params)
+              ? param.bound
+              : undefined;
+          map.set(param, usable ?? clamped ?? (closurePass ? solution.get(param) : undefined) ?? INFERENCE_HOLE);
         }
         const result = this.compileExpression(argument, substitute(parameterType, map));
         inferFromSubtype(result.type, parameterType, params, solution, upperBound);

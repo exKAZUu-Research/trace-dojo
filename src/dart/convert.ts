@@ -42,7 +42,7 @@ import {
   syntaxError,
   unsupported,
 } from './convertBase';
-import { ExpressionConverter } from './convertExpression';
+import { ExpressionConverter, VAR_WITH_TYPE } from './convertExpression';
 
 /** Converts a tree-sitter tree of a Dart library into the AST, rejecting syntax the interpreter does not run. */
 export class Converter extends ExpressionConverter {
@@ -455,6 +455,7 @@ export class Converter extends ExpressionConverter {
     if (signature) return [this.convertSignature(inner, children, undefined, annotations)];
     // Fields.
     const typeNode = children.find((child) => child.type === 'type');
+    if (typeNode && children.some((child) => child.type === 'var')) return syntaxError(inner, VAR_WITH_TYPE);
     const list = children.find((child) =>
       ['initialized_identifier_list', 'static_final_declaration_list', 'identifier_list'].includes(child.type)
     );
@@ -761,6 +762,7 @@ export class Converter extends ExpressionConverter {
     const children = childrenOf(node);
     const tokens = new Set(children.filter((child) => !child.isNamed).map((child) => child.type));
     const typeNode = children.find((child) => child.type === 'type');
+    if (typeNode && tokens.has('var')) return syntaxError(node, VAR_WITH_TYPE);
     const list = requireNode(
       children.find(
         (child) => child.type === 'initialized_identifier_list' || child.type === 'static_final_declaration_list'
@@ -1033,6 +1035,7 @@ export class Converter extends ExpressionConverter {
     const children = childrenOf(definition);
     const tokens = new Set(children.filter((child) => !child.isNamed).map((child) => child.type));
     const typeNode = children.find((child) => child.type === 'type');
+    if (typeNode && tokens.has('var')) return syntaxError(definition, VAR_WITH_TYPE);
     const variables: VariableDeclarator[] = [];
     const nameNode = requireNode(fieldOf(definition, 'name'), definition);
     const values = fieldsOf(definition, 'value');

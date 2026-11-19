@@ -1409,6 +1409,9 @@ export abstract class ExpressionConverter {
       return { kind: 'pattern', isFinal, pattern: this.convertPattern(patternNode, 'declaration'), ...span };
     }
     const typeNode = rest.find((child) => child.type === 'type');
+    if (typeNode && parts.some((child) => child.type === 'var')) {
+      return syntaxError(typeNode, VAR_WITH_TYPE);
+    }
     const nameNode = rest.find((child) => child.type === 'identifier');
     if (!nameNode) return syntaxError(node, '書き方に誤りがあります。');
     if (!keyword && !typeNode) return { kind: 'identifier', name: nameNode.text, ...span };
@@ -1495,3 +1498,5 @@ export type { Span };
 function operandsOf(node: Node): Node[] {
   return childrenOf(node).filter((child) => child.isNamed || child.type === 'this' || child.type === 'super');
 }
+
+export const VAR_WITH_TYPE = 'var と型の名前は、一緒には書けません。どちらか一方にしてください。';

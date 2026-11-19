@@ -176,7 +176,10 @@ export class Compiler extends ConstructorCompiler {
     const existing = this.library.declarations.get(name);
     if (existing) {
       if (existing.kind === 'accessor' && declaration.kind === 'accessor') return;
-      this.error(span, `${name} という名前は、既に宣言されています。`);
+      // The SDK reports the later of the two declarations, whichever this compiler declared first.
+      const existingRow = declarationRow(existing);
+      const row = existingRow !== undefined && existingRow > span.row ? existingRow : span.row;
+      this.error({ row }, `${name} という名前は、既に宣言されています。`);
     }
     this.library.declarations.set(name, declaration);
   }
@@ -677,13 +680,13 @@ export class Compiler extends ConstructorCompiler {
       const { name } = variable;
       if (cls.members.has(name) || cls.staticMembers.has(name))
         this.error(variable, `${name} という名前は、このクラスで既に宣言されています。`);
-      let type = declaredType ?? this.inheritedFieldType(cls, name);
       const { initializer } = variable;
-      if (!type && initializer) {
-        // The initializer may use classes declared later, so its type is inferred once every member is declared.
+      if (!declaredType) {
+        // The initializer may use classes declared later, and the overridden field may itself be inferred, so the
+        // type is found once every member is declared, superclasses first.
         this.fieldInferences.push(() => this.inferFieldType(cls, name, initializer, declaration.isStatic));
       }
-      type ??= DYNAMIC;
+      const type = declaredType ?? DYNAMIC;
       if (declaration.isStatic) {
         this.declareStaticField(cls, declaration, variable, type);
         continue;
@@ -744,12 +747,16 @@ export class Compiler extends ConstructorCompiler {
   /** Infers the types of fields declared without one, once every class's members are declared. */
   private readonly fieldInferences: (() => void)[] = [];
 
-  private inferFieldType(cls: ClassInfo, name: string, initializer: Expression, isStatic: boolean): void {
+  private inferFieldType(cls: ClassInfo, name: string, initializer: Expression | undefined, isStatic: boolean): void {
+    const inherited = isStatic ? undefined : this.inheritedFieldType(cls, name);
+    if (!inherited && !initializer) return;
     const savedClass = this.currentClass;
     this.currentClass = cls;
     let type: DartType;
     try {
-      type = this.withTypeParams(cls.typeParams, () => this.inferInitializerType(initializer, isStatic, cls));
+      type =
+        inherited ??
+        this.withTypeParams(cls.typeParams, () => this.inferInitializerType(initializer as Expression, isStatic, cls));
     } finally {
       this.currentClass = savedClass;
     }
@@ -1811,6 +1818,23 @@ export class Compiler extends ConstructorCompiler {
   }
 
   static readonly unused = [NEVER, nonNullable, isTop, NO_ARGUMENTS, SHORTED] as const;
+}
+
+function declarationRow(declaration: Declaration): number | undefined {
+  switch (declaration.kind) {
+    case 'class': {
+      return declaration.cls.declaration?.row;
+    }
+    case 'function': {
+      return declaration.fn.row;
+    }
+    case 'variable': {
+      return declaration.global.row;
+    }
+    default: {
+      return undefined;
+    }
+  }
 }
 
 /**
