@@ -1,0 +1,2 @@
+(4,17): error TS2551: Property 'toFixed' does not exist on type 'string'. Did you mean 'fixed'?
+(9,18): error TS2339: Property 'toUpperCase' does not exist on type 'number'.

@@ -2,6 +2,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { mayBeUnassignedAt } from './assignmentFlow';
 import type { Checker } from './checker';
+import { FlowState } from './flow';
 import type { Sym } from './scopes';
 import { isImmediatelyInvoked, named, stringValue } from './syntax';
 import { anonymousObject, anyType, emptyStructure, type Property, type Signature, type Type, unionOf } from './types';
@@ -72,17 +73,21 @@ export class Expandos {
         return resolved;
       }
       resolving = true;
-      const type = this.c.silently(() =>
-        unionOf(
-          assignments.map((assignment) =>
-            this.c.widen(this.c.expressions.check(assignment.childForFieldName('right') as TreeNode))
-          )
-        )
-      );
-      resolving = false;
-      resolved ??= type;
-      return resolved;
+      try {
+        const type = this.c.silently(() => unionOf(assignments.map((assignment) => this.assignmentType(assignment))));
+        resolved ??= type;
+        return resolved;
+      } finally {
+        resolving = false;
+      }
     };
+  }
+
+  private assignmentType(assignment: TreeNode): Type {
+    return this.c.flow.probe(
+      () => this.c.widen(this.c.expressions.check(assignment.childForFieldName('right') as TreeNode)),
+      new FlowState()
+    );
   }
 
   /** Collects assignments that add function properties in the same execution scope. */

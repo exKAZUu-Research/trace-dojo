@@ -47,9 +47,9 @@ export class AssignmentChecker {
       return valueType;
     }
     if (this.isEvolvingArrayAssignment(leftExpression)) {
+      this.c.expressions.check(leftExpression.childForFieldName('index') as TreeNode);
       const valueType = this.c.expressions.checkWidened(right);
       this.evolve(leftExpression.childForFieldName('object') as TreeNode, valueType);
-      this.c.expressions.check(leftExpression.childForFieldName('index') as TreeNode);
       return valueType;
     }
     const targetType = this.targetType(left, false);
@@ -68,10 +68,10 @@ export class AssignmentChecker {
   }
 
   private isEvolvingArrayAssignment(target: TreeNode): boolean {
-    if (target.type !== 'subscript_expression' || !this.isElementWrite(target)) return false;
+    if (target.type !== 'subscript_expression') return false;
     const object = target.childForFieldName('object');
     const key = object ? this.c.flow.referenceKey(object) : undefined;
-    return key !== undefined && this.c.flow.entry(key)?.evolving === true;
+    return key !== undefined && this.c.flow.entry(key)?.evolving === true && this.isElementWrite(target);
   }
 
   /** Whether `x[i] = …` writes an element, with a numeric index, which adds to the element type of an evolving array. */
@@ -80,7 +80,9 @@ export class AssignmentChecker {
     if (assignment?.type !== 'assignment_expression' || assignment.childForFieldName('left')?.id !== subscript.id)
       return false;
     const index = subscript.childForFieldName('index') as TreeNode;
-    return this.c.operators.isNumberLike(this.c.silently(() => this.c.expressions.check(index)));
+    return this.c.flow.probe(() =>
+      this.c.operators.isNumberLike(this.c.silently(() => this.c.expressions.check(index)))
+    );
   }
 
   /** Adds an element type to an evolving array, as `push` does to one declared as `[]`. */
@@ -132,14 +134,22 @@ export class AssignmentChecker {
     return unionOf(properties.map((property) => property?.type() ?? anyType));
   }
 
-  /** Whether a variable has no annotation nor initializer, so that its type follows what is assigned to it. */
   isAutoTyped(symbol: Sym): boolean {
     const declaration = symbol.valueDeclaration;
-    return (
-      declaration?.type === 'variable_declarator' &&
-      !declaration.childForFieldName('type') &&
-      !declaration.childForFieldName('value')
-    );
+    if (
+      (symbol.valueKind !== 'let' && symbol.valueKind !== 'var') ||
+      declaration?.type !== 'variable_declarator' ||
+      declaration.childForFieldName('name')?.type !== 'identifier' ||
+      declaration.childForFieldName('type')
+    )
+      return false;
+    const value = declaration.childForFieldName('value');
+    if (!value) return true;
+    const initializer = skipParentheses(value);
+    if (initializer.type === 'null') return true;
+    if (initializer.text !== 'undefined') return false;
+    const binding = this.c.scopeOf(initializer).lookupValue('undefined');
+    return !binding?.valueDeclaration || this.c.isLibrary(binding.valueDeclaration);
   }
 
   destructuringAssignment(pattern: TreeNode, type: Type): void {

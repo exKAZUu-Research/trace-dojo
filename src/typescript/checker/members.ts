@@ -9,6 +9,7 @@ import { unsupportedMessage } from '../unsupported';
 import type { Checker } from './checker';
 import type { State } from './flow';
 import { applicableIndex } from './indexInfos';
+import { nonNullableType, nullishConstraint } from './nullishConstraints';
 import { printedPropertyName } from './print';
 import { spellingSuggestion } from './spelling';
 import { chainObject, isOptionalChain, skipParentheses } from './syntax';
@@ -24,6 +25,7 @@ import {
   neverType,
   numberType,
   type Property,
+  propertyAccessType,
   regularOf,
   stringType,
   symbolType,
@@ -40,6 +42,13 @@ interface IndexAccess {
   indexNode: TreeNode;
 }
 
+interface CheckedAccess {
+  type: Type;
+  receiver?: Type;
+  index?: Type;
+  continued?: Type;
+}
+
 /** Checks property and element accesses. */
 export class MemberChecker {
   /**
@@ -54,7 +63,7 @@ export class MemberChecker {
   constructor(private readonly c: Checker) {}
 
   /** Checks a link of a chain, which joins where the chain's `?.` links stop it when it is the chain's end. */
-  chainLink(node: TreeNode, check: () => Type): Type {
+  chainLink<T>(node: TreeNode, check: () => T): T {
     if (this.chainFrames.at(-1)?.end.id === node.id) return check();
     const start = this.c.flow.current;
     const { result, stops } = this.stoppingChain(node, check);
@@ -110,15 +119,37 @@ export class MemberChecker {
     return this.continuedTypes.get(objectNode.id) ?? checked;
   }
 
-  memberAccess(node: TreeNode): Type {
+  checkAccess(node: TreeNode): CheckedAccess {
+    return this.chainLink(node, () => this.evaluateAccess(node));
+  }
+
+  private evaluateAccess(node: TreeNode): CheckedAccess {
     const objectNode = node.childForFieldName('object') as TreeNode;
+    if (node.type === 'subscript_expression') return this.elementAccess(node, objectNode);
     const propertyNode = node.childForFieldName('property') as TreeNode;
     const name = propertyNode.text;
-    if (objectNode.type === 'super') return this.c.classes.superProperty(node, propertyNode);
+    if (objectNode.type === 'super') {
+      return {
+        type: this.c.classes.superProperty(node, propertyNode),
+        receiver: this.c.classes.thisTypeOfExpression(objectNode),
+      };
+    }
     const { type: receiver, shortCircuits } = this.readReceiver(node, objectNode);
     const declared = this.propertyAccess(node, objectNode, propertyNode, receiver, name);
     const type = this.narrowedReference(node, declared);
-    return shortCircuits ? this.chainResult(node, type) : type;
+    return this.checkedAccess(node, type, receiver, shortCircuits);
+  }
+
+  private checkedAccess(
+    node: TreeNode,
+    type: Type,
+    receiver: Type,
+    shortCircuits: boolean,
+    index?: Type
+  ): CheckedAccess {
+    return shortCircuits
+      ? { type: this.chainResult(node, type), receiver, index, continued: type }
+      : { type, receiver, index };
   }
 
   private readReceiver(node: TreeNode, object: TreeNode): { type: Type; shortCircuits: boolean } {
@@ -127,9 +158,10 @@ export class MemberChecker {
     if (optional) this.continueChain(object);
     const continued = this.continuedObjectType(object, checked);
     const receiver = continued ?? checked;
+    const type = optional ? nonNullableType(this.c, receiver) : this.checkNonNullable(object, receiver);
     return {
-      type: optional ? this.c.relations.removeNullish(receiver) : this.checkNonNullable(object, receiver),
-      shortCircuits: continued !== undefined || (optional && this.c.relations.isNullable(receiver)),
+      type,
+      shortCircuits: continued !== undefined || (optional && type !== receiver),
     };
   }
 
@@ -139,26 +171,6 @@ export class MemberChecker {
     if (entry && !this.c.expressions.isAssignmentTarget(node))
       return flowReferenceType(this.c, node, entry.type, declared);
     return typeof declared === 'function' ? declared() : declared;
-  }
-
-  /**
-   * For `a?.b` or `a?.[k]` called as `a?.b()` or `a?.[k]()`, the type of the member itself, which the call reaches only
-   * when the chain does not short-circuit.
-   */
-  chainedCalleeType(callee: TreeNode): Type | undefined {
-    const isElement = callee.type === 'subscript_expression';
-    if ((callee.type !== 'member_expression' && !isElement) || !this.isInOptionalChain(callee)) return undefined;
-    const objectNode = callee.childForFieldName('object') as TreeNode;
-    const { type: nonNull } = this.readReceiver(callee, objectNode);
-    if (isAnyLike(nonNull)) return anyType;
-    if (isElement) {
-      const indexNode = callee.childForFieldName('index') as TreeNode;
-      const indexType = this.indexTypeOf(indexNode);
-      return this.narrowedReference(callee, () => this.indexedType(callee, objectNode, indexNode, nonNull, indexType));
-    }
-    const propertyNode = callee.childForFieldName('property') as TreeNode;
-    const declared = this.propertyAccess(callee, objectNode, propertyNode, nonNull, propertyNode.text);
-    return this.narrowedReference(callee, declared);
   }
 
   private isInOptionalChain(node: TreeNode): boolean {
@@ -175,7 +187,7 @@ export class MemberChecker {
   }
 
   /** Reports an object that may be `null`, `undefined`, or `unknown` where a member is used, returning the rest. */
-  // code-gauge-allow functionCognitiveComplexity 19 -- Reports each nullish case with the message TypeScript gives it.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Reports each nullish case with the message TypeScript gives it.
   checkNonNullable(node: TreeNode, type: Type): Type {
     if (isIntrinsic(type, 'unknown')) {
       this.c.error(
@@ -185,13 +197,17 @@ export class MemberChecker {
       return errorType;
     }
     if (isAnyLike(type)) return type;
-    const members = type.kind === 'union' ? type.types : [type];
+    const bound = type.kind === 'typeParameter' ? nullishConstraint(this.c, type) : type;
+    const members = bound.kind === 'union' ? bound.types : [bound];
     const hasNull = members.some((member) => isIntrinsic(member, 'null'));
     const hasUndefined = members.some((member) => isIntrinsic(member, 'undefined'));
     // TypeScript reports a member of `void` as missing on the type, which the member's own check does.
     if (!hasNull && !hasUndefined) return type;
     // `void` stays, as in TypeScript, whose operators then reject it.
-    const rest = filterType(type, (member) => !isIntrinsic(member, 'null') && !isIntrinsic(member, 'undefined'));
+    const rest =
+      type.kind === 'typeParameter'
+        ? nonNullableType(this.c, type)
+        : filterType(type, (member) => !isIntrinsic(member, 'null') && !isIntrinsic(member, 'undefined'));
     const literal = skipParentheses(node).type;
     if (isIntrinsic(rest, 'never') && (literal === 'null' || literal === 'undefined')) {
       this.c.error(node, `値 '${hasNull ? 'null' : 'undefined'}' はここでは使えません。`);
@@ -247,15 +263,16 @@ export class MemberChecker {
       );
     }
     const property = this.c.propertyOf(objectType, name);
+    this.c.conditions.recordPropertyDeclaration(node, property?.declaration);
     if (!property) {
       const index = this.indexSignatureType(objectType, name);
       if (index) return index;
       this.reportMissingProperty(propertyNode, name, objectType);
       return errorType;
     }
-    this.checkPropertyUse(node, objectNode, propertyNode, objectType, property, isWrite);
-    const type = property.type();
-    return property.optional ? unionOf([type, undefinedType]) : type;
+    return this.checkPropertyUse(node, objectNode, propertyNode, objectType, property, isWrite)
+      ? propertyAccessType(property)
+      : errorType;
   }
 
   checkPropertyUse(
@@ -265,18 +282,19 @@ export class MemberChecker {
     objectType: Type,
     property: Property,
     isWrite = false
-  ): void {
+  ): boolean {
     this.c.classes.checkPropertyAccessibility(node, propertyNode, objectNode, property, isWrite);
     this.c.classes.checkInitializedBefore(node, objectNode, property);
     this.c.expressions.expandos.checkAssignedBefore(node, propertyNode, property);
-    this.checkPropertyAvailability(propertyNode, objectType, property);
+    return this.checkPropertyAvailability(propertyNode, objectType, property);
   }
 
-  private checkPropertyAvailability(propertyNode: TreeNode, objectType: Type, property: Property): void {
+  private checkPropertyAvailability(propertyNode: TreeNode, objectType: Type, property: Property): boolean {
     const unsupported = [property, ...this.propertyOrigins(objectType, property.name)]
       .map((origin) => this.unsupportedLibraryMember(propertyNode, origin))
       .find((feature) => feature !== undefined);
     if (unsupported) this.c.error(propertyNode, unsupportedMessage(unsupported));
+    return unsupported === undefined;
   }
 
   /**
@@ -385,15 +403,14 @@ export class MemberChecker {
     return spellingSuggestion(name, candidates, this.c.budget);
   }
 
-  elementAccess(node: TreeNode): Type {
-    const objectNode = node.childForFieldName('object') as TreeNode;
+  private elementAccess(node: TreeNode, objectNode: TreeNode): CheckedAccess {
     const indexNode = node.childForFieldName('index') as TreeNode;
     const { type: objectType, shortCircuits } = this.readReceiver(node, objectNode);
     const indexType = this.indexTypeOf(indexNode);
     const result = this.narrowedReference(node, () =>
       this.indexedType(node, objectNode, indexNode, objectType, indexType)
     );
-    return shortCircuits ? this.chainResult(node, result) : result;
+    return this.checkedAccess(node, result, objectType, shortCircuits, indexType);
   }
 
   /** The type an element access's index selects by, which is `number` for a `for...in` variable over an array. */
@@ -440,6 +457,7 @@ export class MemberChecker {
   }
 
   private indexedTypeAt(access: IndexAccess, objectType: Type, indexType: Type): Type {
+    if (indexType === errorType || objectType === errorType) return errorType;
     if (isAnyLike(objectType)) return anyType;
     const index = regularOf(indexType);
     // As TypeScript's `getPropertyTypeForIndexType`, any key reads `never` from `never`.
@@ -506,10 +524,10 @@ export class MemberChecker {
         ? this.c.structureOf(objectType).symbolIndex?.type
         : (tupleElementBeyond(this.c, objectType, name, access.indexNode) ??
             applicableIndex(this.c, this.c.structureOf(objectType), literalType(value))?.type);
-    this.checkPropertyAvailability(access.indexNode, objectType, property);
+    if (!this.checkPropertyAvailability(access.indexNode, objectType, property)) return errorType;
     this.c.expressions.expandos.checkAssignedBefore(access.node, access.indexNode, property);
     // `o["secret"]` reads a private or protected member, which TypeScript leaves as a way around its access checks.
-    return property.optional ? unionOf([property.type(), undefinedType]) : property.type();
+    return propertyAccessType(property);
   }
 
   private computedIndexedType(access: IndexAccess, objectType: Type, index: Type): Type {

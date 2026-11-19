@@ -410,7 +410,7 @@ function isAllowedRedeclaration(members: TreeNode[]): boolean {
 }
 
 /** A member's property name, with a computed name resolved as the member's type resolves it. */
-function memberName(c: Checker, member: TreeNode): string | undefined {
+export function memberName(c: Checker, member: TreeNode): string | undefined {
   // An index signature's `name` is its parameter's, which names no member.
   if (member.type === 'index_signature') return undefined;
   const nameNode = member.childForFieldName('name') ?? member.childForFieldName('pattern');
@@ -429,13 +429,13 @@ function declaredPropertyType(c: Checker, declaration: TreeNode, name: string): 
     const signature = c.signatures.signatureOf(declaration);
     return hasToken(declaration, 'get') ? signature.returnType() : signature.parameters[0]?.type;
   }
-  if (declaration.type === 'field_definition')
-    return c.classes.fieldType(declaration, declaration.childForFieldName('name') as TreeNode);
   const annotated = c.typeNodes.annotationType(declaration.childForFieldName('type'));
   const classNode = declaringClassNode(declaration);
   const type =
-    annotated ??
-    (classNode ? c.propertyOf(c.classes.classInfoOfNode(classNode).instanceType, name)?.type() : undefined);
+    declaration.type === 'field_definition'
+      ? c.classes.fieldType(declaration, memberNameNode(declaration))
+      : (annotated ??
+        (classNode ? c.propertyOf(c.classes.classInfoOfNode(classNode).instanceType, name)?.type() : undefined));
   return type && hasToken(declaration, '?') ? unionOf([type, undefinedType]) : type;
 }
 

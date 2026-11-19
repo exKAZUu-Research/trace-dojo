@@ -663,6 +663,7 @@ interface WeakSetConstructor {
 declare var WeakSet: WeakSetConstructor;
 interface SymbolConstructor {
     readonly iterator: unique symbol;
+    readonly asyncIterator: unique symbol;
 }
 interface IteratorYieldResult<TYield> {
     done?: false;

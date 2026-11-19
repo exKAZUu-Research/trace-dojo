@@ -36,7 +36,7 @@ export class CallArity {
 
   /** How many elements a spread tuple with a rest element passes before its rest, as `[number, ...string[]]`. */
   private leadingLength(arg: TreeNode): number {
-    const type = this.c.silently(() => this.c.expressions.check(named(arg)[0]));
+    const type = spreadOperandType(this.c, arg);
     const elements = type.kind === 'object' && type.objectKind === 'tuple' ? (type.tuple?.elements ?? []) : [];
     const restIndex = elements.findIndex((element) => element.rest);
     return restIndex === -1 ? 0 : restIndex;
@@ -144,7 +144,7 @@ function offsets(lengths: (number | undefined)[]): (number | undefined)[] {
 
 export function spreadLength(c: Checker, arg: TreeNode): number | undefined {
   if (arg.type !== 'spread_element') return 1;
-  const type = c.silently(() => c.expressions.check(named(arg)[0]));
+  const type = spreadOperandType(c, arg);
   if (
     type.kind === 'object' &&
     type.objectKind === 'tuple' &&
@@ -152,4 +152,8 @@ export function spreadLength(c: Checker, arg: TreeNode): number | undefined {
   )
     return type.tuple?.elements.length;
   return undefined;
+}
+
+function spreadOperandType(c: Checker, arg: TreeNode): Type {
+  return c.flow.probe(() => c.silently(() => c.expressions.check(named(arg)[0])));
 }

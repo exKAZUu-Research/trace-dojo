@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 633 -- Follows the flow of control through each kind of statement.
+// code-gauge-allow-file fileNcss 638 -- Follows the flow of control through each kind of statement.
 import assert from 'node:assert/strict';
 
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
@@ -18,9 +18,11 @@ import { arrayLiteralLength, hasToken, named, skipParentheses } from './syntax';
 import {
   anyType,
   errorType,
+  filterType,
   isAnyLike,
   isIntrinsic,
   neverType,
+  propertyAccessType,
   regularOf,
   stringType,
   type Structure,
@@ -277,7 +279,7 @@ export class StatementChecker {
       if (
         baseProperty &&
         ((property.optional && !baseProperty.optional) ||
-          !this.c.relations.isAssignable(property.type(), baseProperty.type()))
+          !this.c.relations.isAssignable(propertyAccessType(property), propertyAccessType(baseProperty)))
       )
         return `プロパティ '${property.name}' の型が合いません。`;
     }
@@ -326,16 +328,9 @@ export class StatementChecker {
     }
     const isConst = kind === 'const';
     const declared = this.c.literals.widenDeclared(valueType, isConst);
-    const widened =
-      isIntrinsic(declared, 'null') || isIntrinsic(declared, 'undefined')
-        ? isConst
-          ? declared
-          : anyType
-        : isConst
-          ? this.c.expressions.expandos.constType(declarator, symbol, declared)
-          : declared;
-    this.c.expressions.setVariableType(symbol, widened);
-    this.c.flow.set(key, { type: isConst ? widened : widened === anyType ? declared : widened, assigned: true });
+    const type = isConst ? this.c.expressions.expandos.constType(declarator, symbol, declared) : declared;
+    this.c.expressions.setVariableType(symbol, this.c.assignments.isAutoTyped(symbol) ? anyType : type);
+    this.c.flow.set(key, { type, assigned: true });
   }
 
   /** A variable declared again, which keeps the type its first declaration gives, as TypeScript's merged symbol does. */
@@ -351,10 +346,7 @@ export class StatementChecker {
         value
       );
     const declared = this.c.expressions.valueTypeOf(symbol);
-    this.c.flow.set(`s${symbol.id}`, {
-      type: this.c.flow.assignmentReduced(declared, regularOf(valueType)),
-      assigned: true,
-    });
+    this.c.assignments.assignReference(declarator.childForFieldName('name') as TreeNode, declared, valueType);
   }
 
   private uninitializedVariable(declarator: TreeNode, symbol: Sym, kind: string, annotation: Type | undefined): void {
@@ -410,7 +402,7 @@ export class StatementChecker {
     const isConst = declaration.parent?.childForFieldName('kind')?.text === 'const';
     if (nameNode.type === 'identifier') {
       if (annotation) return annotation;
-      if (!value) return anyType;
+      if (!value || this.c.assignments.isAutoTyped(symbol)) return anyType;
       if (this.isEmptyArrayLiteral(value)) return this.c.arrayType(anyType);
       const flow = this.c.flow.current;
       this.c.flow.current = new FlowState();
@@ -443,9 +435,8 @@ export class StatementChecker {
 
   private ifStatement(node: TreeNode): void {
     const condition = node.childForFieldName('condition') as TreeNode;
-    const { whenTrue, whenFalse } = this.c.conditions.checkCondition(condition);
     const consequence = node.childForFieldName('consequence') as TreeNode;
-    this.c.conditions.checkUncalledFunction(condition, consequence);
+    const { whenTrue, whenFalse } = this.c.conditions.checkCondition(condition, consequence);
     const alternative = node.childForFieldName('alternative');
     const afterTrue = this.c.flow.from(whenTrue, () => this.checkSubstatement(consequence));
     const afterFalse = this.c.flow.from(whenFalse, () => {
@@ -667,17 +658,17 @@ export class StatementChecker {
    * for a generic object `T`, as it can index `T`, and `string` otherwise.
    */
   private forInKeyType(right: TreeNode, rightType: Type): Type {
-    const object = regularOf(rightType);
-    if (
-      !isAnyLike(object) &&
-      (object.kind === 'literal' || (object.kind === 'intrinsic' && object.name !== 'object'))
-    ) {
+    const object = filterType(
+      regularOf(rightType),
+      (member) => !isIntrinsic(member, 'null') && !isIntrinsic(member, 'undefined')
+    );
+    if (isIntrinsic(object, 'never') || !canEnumerateKeys(object)) {
       this.c.error(
         right,
         'for...in 文の右辺は、any 型、オブジェクト型、型パラメーターのいずれかでなければいけません。'
       );
     }
-    const keys = this.genericKeys(this.c.relations.removeNullish(object));
+    const keys = this.genericKeys(object);
     if (!keys) return stringType;
     const extract = this.c.libraryBinder.moduleScope.lookupType('Extract') as Sym;
     const [type, union] = this.c.signatures.typeParametersOfSymbol(extract);
@@ -955,5 +946,15 @@ function holdsTypeParameter(base: Type): boolean {
   return (
     base.kind === 'typeParameter' ||
     (base.kind === 'intersection' && base.types.some((member) => member.kind === 'typeParameter'))
+  );
+}
+
+function canEnumerateKeys(type: Type): boolean {
+  if (type.kind === 'union') return type.types.every(canEnumerateKeys);
+  if (type.kind === 'intersection') return type.types.some(canEnumerateKeys);
+  return (
+    isAnyLike(type) ||
+    isIntrinsic(type, 'object') ||
+    ['object', 'typeParameter', 'indexedAccess', 'conditional'].includes(type.kind)
   );
 }

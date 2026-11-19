@@ -1,0 +1,15 @@
+function mixed(input: string | { a: number }) {
+  for (const key in input) console.log(key);
+}
+function numeric(input: number | { a: number }) {
+  for (const key in input) console.log(key);
+}
+function nullable(input: null | undefined) {
+  for (const key in input) console.log(key);
+}
+function voidMember(input: void | { a: number }) {
+  for (const key in input) console.log(key);
+}
+function genericKey<T>(input: keyof T) {
+  for (const key in input) console.log(key);
+}

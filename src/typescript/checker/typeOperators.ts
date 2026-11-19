@@ -66,9 +66,9 @@ export class TypeOperators {
   }
 
   /** The type parameter of a mapped type or an `infer` that `name` refers to at `node`, if any. */
-  mappedOrInferParameter(node: TreeNode, name: string): TypeParameter | undefined {
+  mappedOrInferParameter(node: TreeNode, name: string, lexicalScope?: TreeNode): TypeParameter | undefined {
     let child: TreeNode = node;
-    for (let current = node.parent; current; current = current.parent) {
+    for (let current = node.parent; current && current.id !== lexicalScope?.id; current = current.parent) {
       const parameter = this.localParameterAt(current, child, name);
       if (parameter) return parameter;
       child = current;

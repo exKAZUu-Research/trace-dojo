@@ -1,0 +1,14 @@
+let first = null;
+first = String(1);
+console.log(first.toFixed(1));
+let second = (undefined);
+second = Number(1);
+console.log(second.toUpperCase());
+let annotated = null as null;
+annotated = 3;
+let asserted = undefined as undefined;
+asserted = 3;
+function shadow(undefined: undefined) {
+  let value = undefined;
+  value = 1;
+}

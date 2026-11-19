@@ -1,0 +1,27 @@
+function takeText(a: string, b: number) { console.log(a, b); }
+function generic<T>(a: string, b: T) { console.log(a, b); }
+let plain: string | number = "plain";
+takeText(plain, plain = 1);
+let inferred: string | number = "inferred";
+generic(inferred, inferred = 2);
+let immediate: string | number = "immediate";
+((a: string, b: number) => console.log(a, b))(immediate, immediate = 3);
+let spread: string | number = "spread";
+takeText(spread.toUpperCase(), ...([spread = 4] as [number]));
+let deleted: { p?: number } | string;
+let deleteSelector: { p?: number } | string = { p: 1 };
+delete (deleted = deleteSelector)[deleteSelector = "p"];
+console.log(deleted.p);
+type Method = { label: string; m(this: Method): void };
+let receiver: Method | string;
+let selected: Method | string = { label: "method", m() { console.log(this.label); } };
+(receiver = selected)[selected = "m"]();
+receiver.m();
+function values(message: string): number[] { console.log(message); return []; }
+let index: string | number = "indexed";
+values(index.toUpperCase())[index = 5] = 1;
+console.log(index.toFixed(1));
+let body: string | number = 0;
+console.log(((ignored) => body.toUpperCase())(body = "after"));
+((ignored) => { body = 0; })(body = "new");
+console.log(body.toFixed(1));

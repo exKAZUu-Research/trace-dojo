@@ -104,6 +104,8 @@ export interface Parameter {
 export interface Signature {
   typeParameters: TypeParameter[];
   parameters: Parameter[];
+  immediateArgumentCount?: number;
+  checkImmediateBody?: () => void;
   thisType?: Type;
   returnType: () => Type;
   /** A type predicate `x is T`, by the index of the parameter it narrows (-1 for `this`). */

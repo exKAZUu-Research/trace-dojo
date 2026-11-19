@@ -135,7 +135,7 @@ export class ClassChecker {
   }
 
   /** The interfaces of the class's name, which merge their members into its instances. */
-  private mergedInterfaces(node: TreeNode): TreeNode[] {
+  mergedInterfaces(node: TreeNode): TreeNode[] {
     const name = node.type === 'class' ? undefined : node.childForFieldName('name')?.text;
     const declarations = name ? this.c.scopeOf(node).lookupType(name)?.typeDeclarations : undefined;
     return declarations?.filter((declaration) => declaration.type === 'interface_declaration') ?? [];

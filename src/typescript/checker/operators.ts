@@ -109,22 +109,19 @@ export class OperatorChecker {
 
   private checkDelete(argument: TreeNode): void {
     const expression = skipParentheses(argument);
-    this.c.expressions.check(expression);
     if (expression.type !== 'member_expression' && expression.type !== 'subscript_expression') {
+      this.c.expressions.check(expression);
       this.c.error(argument, 'delete 演算子のオペランドは、プロパティへの参照でなければいけません。');
       return;
     }
-    const objectNode = expression.childForFieldName('object') as TreeNode;
-    const objectType = this.c.silently(() => this.c.expressions.check(objectNode));
-    const index = expression.type === 'subscript_expression' ? expression.childForFieldName('index') : undefined;
-    const indexType = index ? this.c.silently(() => this.c.expressions.check(index)) : undefined;
+    const { receiver: objectType, index: indexType } = this.c.members.checkAccess(expression);
     const name =
       expression.type === 'member_expression'
         ? expression.childForFieldName('property')?.text
         : indexType?.kind === 'literal'
           ? String(indexType.value)
           : undefined;
-    if (isAnyLike(objectType)) return;
+    if (!objectType || isAnyLike(objectType)) return;
     const members = objectType.kind === 'union' ? objectType.types : [objectType];
     if (members.some((member) => this.readonlyDeleteTarget(member, name, indexType))) {
       this.c.error(argument, 'delete 演算子のオペランドは、読み取り専用のプロパティにはできません。');
@@ -178,21 +175,27 @@ export class OperatorChecker {
       case '??': {
         return this.logical(operator, left, right, contextual);
       }
-      case 'instanceof': {
-        return this.instanceofExpression(left, right);
-      }
-      case 'in': {
-        return this.inExpression(left, right);
-      }
       default: {
         break;
       }
     }
-    const leftType = this.c.expressions.check(left);
-    const rightType = this.c.expressions.check(right);
-    return this.binaryOperatorType(node, operator, left, right, leftType, rightType);
+    return this.checkBinaryOperands(node, operator, left, right).type;
   }
 
+  checkBinaryOperands(
+    node: TreeNode,
+    operator: string,
+    left: TreeNode,
+    right: TreeNode
+  ): { type: Type; leftType: Type; rightType: Type } {
+    const leftType =
+      operator === 'in' && left.type === 'private_property_identifier' ? stringType : this.c.expressions.check(left);
+    const rightType = this.c.expressions.check(right);
+    const type = this.binaryOperatorType(node, operator, left, right, leftType, rightType);
+    return { type, leftType, rightType };
+  }
+
+  // code-gauge-allow functionNcss 31 -- Routes each nonlogical operator to its operand checks.
   binaryOperatorType(
     node: TreeNode,
     operator: string,
@@ -203,6 +206,12 @@ export class OperatorChecker {
   ): Type {
     if (leftType === errorType || rightType === errorType) return errorType;
     switch (operator) {
+      case 'instanceof': {
+        return this.instanceofExpression(left, right, leftType, rightType);
+      }
+      case 'in': {
+        return this.inExpression(left, right, leftType, rightType);
+      }
       case '===':
       case '!==':
       case '==':
@@ -388,6 +397,7 @@ export class OperatorChecker {
       const after = this.c.flow.from(this.c.flow.merge([nullish, ...stops]), () => {
         rightType = this.c.expressions.check(right, contextual);
       });
+      this.c.conditions.checkLogicalOperands(left, leftType, right, rightType);
       this.c.flow.current = this.c.flow.merge([skipped, after]);
       return this.coalescingType(leftType, rightType);
     }
@@ -397,6 +407,7 @@ export class OperatorChecker {
     const after = this.c.flow.from(rightState, () => {
       rightType = this.c.expressions.check(right, contextual ?? leftType);
     });
+    this.c.conditions.checkLogicalOperands(left, leftType, right, rightType);
     this.c.flow.current = this.c.flow.merge([operator === '&&' ? whenFalse : whenTrue, after]);
     if (operator === '&&')
       return unionOf([falsyValuesOf(this.c.flow.narrowByTruthiness(leftType, false)), rightType], true);
@@ -417,9 +428,7 @@ export class OperatorChecker {
     return this.c.literals.subtypeReduced([nonNullableType(this.c, left), right]);
   }
 
-  private instanceofExpression(left: TreeNode, right: TreeNode): Type {
-    const leftType = this.c.expressions.check(left);
-    const rightType = this.c.expressions.check(right);
+  private instanceofExpression(left: TreeNode, right: TreeNode, leftType: Type, rightType: Type): Type {
     if (isInvalidInstanceofLeft(regularOf(leftType))) {
       this.c.error(left, 'instanceof の左辺は、any 型、オブジェクト型、型パラメーターのいずれかでなければいけません。');
     }
@@ -435,9 +444,7 @@ export class OperatorChecker {
   }
 
   // code-gauge-allow functionCognitiveComplexity 17 -- Follows TypeScript's checks of both operands of `in`.
-  private inExpression(left: TreeNode, right: TreeNode): Type {
-    const leftType = left.type === 'private_property_identifier' ? stringType : this.c.expressions.check(left);
-    const rightType = this.c.expressions.check(right);
+  private inExpression(left: TreeNode, right: TreeNode, leftType: Type, rightType: Type): Type {
     if (
       !isAnyLike(leftType) &&
       !this.c.relations.isAssignable(leftType, unionOf([stringType, numberType, this.c.globalType('Symbol')])) &&
@@ -477,8 +484,8 @@ export class OperatorChecker {
     const condition = node.childForFieldName('condition') as TreeNode;
     const consequence = node.childForFieldName('consequence') as TreeNode;
     const alternative = node.childForFieldName('alternative') as TreeNode;
-    const { whenTrue, whenFalse } = this.c.conditions.condition(condition);
-    this.c.conditions.checkUncalledFunction(condition, consequence);
+    const { whenTrue, whenFalse, type } = this.c.conditions.condition(condition);
+    this.c.conditions.checkUncalledFunction(condition, type, consequence);
     let trueType: Type = neverType;
     let falseType: Type = neverType;
     const afterTrue = this.c.flow.from(whenTrue, () => {

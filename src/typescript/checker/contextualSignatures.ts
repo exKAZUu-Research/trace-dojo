@@ -31,7 +31,12 @@ function contextualCallSignature(c: Checker, type: Type, node: TreeNode): Signat
   const requiredCount = requiredParameterCount(node);
   const signatures = c
     .signaturesOf(type, 'call')
-    .filter((signature) => hasRestParameter(signature) || signature.parameters.length >= requiredCount);
+    .filter(
+      (signature) =>
+        signature.immediateArgumentCount !== undefined ||
+        hasRestParameter(signature) ||
+        signature.parameters.length >= requiredCount
+    );
   if (signatures.length < 2) return signatures[0];
   let combined: Signature | undefined = signatures[0];
   for (const signature of signatures.slice(1)) {

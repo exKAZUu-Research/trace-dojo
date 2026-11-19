@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 408 -- Keeps function signatures, body checking, and parameter flow together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -71,6 +72,7 @@ export class FunctionChecker {
     return this.contexts.findLast((context) => !context.inlined)?.node;
   }
 
+  // code-gauge-allow functionNcss 31 -- Builds an expression signature and schedules its body where its call executes.
   functionExpression(node: TreeNode, contextual?: Type): Type {
     contextual = this.c.overloadContexts.contextOf(node, contextual);
     const preview = this.c.overloadContexts.previewType(node, contextual);
@@ -85,20 +87,31 @@ export class FunctionChecker {
     this.bindParameters(node, signature);
     const contextualReturn = contextualSignature ? contextualSignature.returnType() : undefined;
     const declaredReturn = this.declaredReturnType(node);
-    let returnType: Type | undefined;
+    const immediate = isInlinedInvocation(node);
+    let returnType = declaredReturn;
     const typed: Signature = {
       ...signature,
       returnType: () => {
-        returnType ??= declaredReturn ?? this.checkFunctionBody(node, signature, contextualReturn, true);
+        if (!returnType && immediate)
+          return this.c.flow.probe(() =>
+            this.c.silently(() => this.checkFunctionBody(node, signature, contextualReturn, false))
+          );
+        returnType ??= this.checkFunctionBody(node, signature, contextualReturn, true);
         return returnType;
       },
+      checkImmediateBody: immediate
+        ? () => {
+            const checked = this.checkFunctionLike(node, signature, contextualSignature);
+            returnType = declaredReturn ?? checked;
+          }
+        : undefined,
     };
     if (!declaredReturn && !signature.predicate) this.addInferredPredicate(node, typed);
     const type = functionType(typed);
     const ownName = node.childForFieldName('name');
     const self = ownName ? this.c.ownScope(node)?.lookupValue(ownName.text) : undefined;
     if (self?.valueDeclaration?.id === node.id) self.valueType = type;
-    if (!this.c.silent) this.c.functions.deferFunctionBody(node, signature, contextualReturn);
+    if (!immediate) this.checkFunctionLike(node, signature, contextualSignature);
     return type;
   }
 
@@ -496,14 +509,20 @@ export class FunctionChecker {
   }
 
   private checkOverloads(symbol: Sym, implementation: TreeNode, signature: Signature): void {
-    const overloads = symbol.valueDeclarations.filter((declaration) => declaration.type === 'function_signature');
+    const overloads = symbol.valueDeclarations
+      .filter((declaration) => declaration.type === 'function_signature')
+      .map((overload) => this.c.signatures.signatureOf(this.c.nativeOverload(overload)));
+    this.checkOverloadCompatibility(signature, overloads, implementation);
+  }
+
+  checkOverloadCompatibility(signature: Signature, overloads: Signature[], implementation: TreeNode): void {
     for (const overload of overloads) {
-      const overloadSignature = this.c.signatures.signatureOf(this.c.nativeOverload(overload));
-      if (!this.c.relations.isImplementationCompatibleWithOverload(signature, overloadSignature)) {
+      const declaration = overload.declaration;
+      if (declaration?.id === implementation.id) continue;
+      if (!this.c.relations.isImplementationCompatibleWithOverload(signature, overload)) {
+        const target = declaration && !this.c.isLibrary(declaration) ? declaration : implementation;
         this.c.error(
-          this.c.isLibrary(overload)
-            ? (implementation.childForFieldName('name') ?? implementation)
-            : (overload.childForFieldName('name') ?? overload),
+          target.childForFieldName('name') ?? target,
           'このオーバーロードのシグネチャは、実装のシグネチャと合いません。'
         );
         // TypeScript reports only the first overload that does not fit.
@@ -512,48 +531,64 @@ export class FunctionChecker {
     }
   }
 
-  /** Checks a function's body loudly, when its expression or declaration is checked. */
-  deferFunctionBody(node: TreeNode, signature: Signature, contextualReturn: Type | undefined): void {
-    this.checkFunctionLike(node, signature, contextualReturn);
-  }
-
-  checkFunctionLike(node: TreeNode, signature: Signature, contextualReturn: Type | undefined): void {
-    if (this.c.silent > 0) return;
+  checkFunctionLike(node: TreeNode, signature: Signature, contextual?: Signature): Type | undefined {
+    if (this.c.silent > 0) return undefined;
     const parameters = node.childForFieldName('parameters');
-    this.checkParameterInitializers(parameters ? named(parameters) : [], signature);
-    if (!node.childForFieldName('body')) return;
-    this.checkFunctionBody(node, signature, contextualReturn, false);
+    this.checkParameterInitializers(parameters ? named(parameters) : [], signature, contextual);
+    return node.childForFieldName('body')
+      ? this.checkFunctionBody(node, signature, contextual?.returnType(), false)
+      : undefined;
   }
 
-  private checkParameterInitializers(parameters: TreeNode[], signature: Signature): void {
+  private checkParameterInitializers(parameters: TreeNode[], signature: Signature, contextual?: Signature): void {
     this.c.flow.from(new FlowState(), () => {
       const sourceParameters = argumentParameters(parameters);
       for (const [index, parameter] of sourceParameters.entries()) {
-        this.checkParameterDefault(parameter);
+        const defaultType = this.checkParameterDefault(parameter, contextual, index);
         const pattern = parameter.childForFieldName('pattern') ?? parameter;
         const type = this.sourceParameterType(parameter, pattern, signature, index) ?? anyType;
-        this.c.patterns.bindPattern(
-          pattern.type === 'rest_pattern' ? named(pattern)[0] : pattern,
-          type,
-          (identifier, bound) => {
-            const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
-            if (symbol) this.c.flow.set(`s${symbol.id}`, { type: bound, assigned: true });
-          },
-          parameter.childForFieldName('type') !== null
-        );
+        this.recordParameterInitialization(parameter, type, defaultType);
       }
     });
   }
 
-  private checkParameterDefault(parameter: TreeNode): void {
-    const value = parameter.childForFieldName('value');
-    const annotation = this.c.typeNodes.annotationType(parameter.childForFieldName('type'));
-    if (!value) return;
+  recordParameterInitialization(parameter: TreeNode, type: Type, initializer?: Type): void {
     const pattern = parameter.childForFieldName('pattern') ?? parameter;
-    const implied = annotation ? undefined : this.c.patterns.impliedType(pattern);
-    const valueType = this.c.expressions.check(value, annotation ?? implied);
-    if (annotation) this.c.expressions.checkAssignable(pattern, valueType, annotation, value);
+    const value = parameter.childForFieldName('value');
+    const defaultType =
+      initializer ??
+      (value && mayBeUndefined(type) ? this.c.silently(() => this.c.expressions.check(value, type)) : undefined);
+    const boundType =
+      defaultType && !this.c.patterns.defaultMayBeUndefined(defaultType)
+        ? this.c.relations.removeUndefined(type)
+        : type;
+    this.c.patterns.bindPattern(
+      pattern.type === 'rest_pattern' ? named(pattern)[0] : pattern,
+      boundType,
+      (identifier, bound) => {
+        const symbol = this.c.scopeOf(identifier).lookupValue(identifier.text);
+        if (symbol) this.c.flow.current?.entries.set(`s${symbol.id}`, { type: bound, assigned: true });
+      },
+      parameter.childForFieldName('type') !== null
+    );
+  }
+
+  private checkParameterDefault(
+    parameter: TreeNode,
+    contextual: Signature | undefined,
+    index: number
+  ): Type | undefined {
+    const value = parameter.childForFieldName('value');
+    if (!value) return undefined;
+    const expected =
+      this.c.typeNodes.annotationType(parameter.childForFieldName('type')) ??
+      (contextual && this.c.signatures.contextualParameterType(contextual, index, false));
+    const pattern = parameter.childForFieldName('pattern') ?? parameter;
+    const implied = expected ? undefined : this.c.patterns.impliedType(pattern);
+    const valueType = this.c.expressions.check(value, expected ?? implied);
+    if (expected) this.c.expressions.checkAssignable(pattern, valueType, expected, value);
     else this.c.patterns.checkInitializer(pattern, value, valueType, implied);
+    return valueType;
   }
 
   /**

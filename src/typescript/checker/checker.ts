@@ -741,7 +741,7 @@ export class Checker {
       }
       case 'typeParameter': {
         const constraint = this.constraintOf(type);
-        return constraint ? this.apparentType(constraint) : this.globalType('Object');
+        return constraint ? this.apparentType(constraint) : unknownType;
       }
       case 'indexedAccess':
       case 'keyof':

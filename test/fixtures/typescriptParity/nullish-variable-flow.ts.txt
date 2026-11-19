@@ -1,0 +1,13 @@
+let first = null;
+console.log(first);
+first = String(1);
+console.log(first.toUpperCase());
+var second = undefined;
+second = Number(2);
+console.log(second.toFixed(1));
+function capture() {
+  let value = null;
+  value = "done";
+  return () => value.toUpperCase();
+}
+console.log(capture()());

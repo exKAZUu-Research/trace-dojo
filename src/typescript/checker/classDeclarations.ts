@@ -1,7 +1,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
-import { checkDuplicateMembers, checkOverloadOptionality } from './declarations';
+import { checkDuplicateMembers, checkOverloadOptionality, memberName } from './declarations';
 import { FlowState, propertyReferenceKey, type State } from './flow';
 import { checkIndexConformance } from './indexConformance';
 import { hasToken, isClassConstructor, isWithin, named } from './syntax';
@@ -13,6 +13,7 @@ import {
   isIntrinsic,
   type Property,
   propertyAccessType,
+  type Signature,
   type Type,
   undefinedType,
   unionOf,
@@ -42,6 +43,7 @@ export class ClassDeclarationChecker {
     this.resolveMemberTypes(node, info);
     const ctor = this.c.classes.constructorNode(node);
     for (const member of members) this.checkMember(node, member, info, ctor);
+    this.checkMethodOverloads(node, members, info);
     if (!ctor) this.checkPropertyInitialization(node, undefined, new FlowState(), []);
     else if (clause) this.checkSuperCallPresence(node, ctor);
     this.checkImplements(node, info);
@@ -189,6 +191,32 @@ export class ClassDeclarationChecker {
       default: {
         break;
       }
+    }
+  }
+
+  private checkMethodOverloads(node: TreeNode, members: TreeNode[], info: ClassInfo): void {
+    const merged = this.c.typeNodes.interfaceOwnMembers(this.c.classes.mergedInterfaces(node)).properties;
+    const instance = this.c.classes.membersOf(node, info, false).properties;
+    const statics = this.c.classes.membersOf(node, info, true).properties;
+    const methodSignatures = (property: Property | undefined): Signature[] =>
+      property?.isMethod ? this.c.signaturesOf(property.type(), 'call') : [];
+    for (const member of members) {
+      if (
+        member.type !== 'method_definition' ||
+        isClassConstructor(member) ||
+        hasToken(member, 'get') ||
+        hasToken(member, 'set')
+      )
+        continue;
+      const name = memberName(this.c, member);
+      if (name === undefined) continue;
+      const overloads = hasToken(member, 'static')
+        ? methodSignatures(statics.get(name))
+        : [...methodSignatures(instance.get(name)), ...methodSignatures(merged.get(name))];
+      const ordered = overloads.toSorted(
+        (left, right) => (left.declaration?.startIndex ?? 0) - (right.declaration?.startIndex ?? 0)
+      );
+      this.c.functions.checkOverloadCompatibility(this.c.signatures.signatureOf(member), ordered, member);
     }
   }
 

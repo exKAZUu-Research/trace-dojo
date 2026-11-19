@@ -262,7 +262,7 @@ export class TypeNodes {
           current.childForFieldName('left') as TreeNode,
           current.childForFieldName('right') as TreeNode
         );
-        const extendsType = check.text === parameter.name ? this.typeFromNode(extendsNode) : undefined;
+        const extendsType = this.typeFromNode(check).id === parameter.id ? this.typeFromNode(extendsNode) : undefined;
         if (extendsType && !isIntrinsic(extendsType, 'any') && !isIntrinsic(extendsType, 'unknown'))
           types.push(extendsType);
       }
@@ -390,18 +390,14 @@ export class TypeNodes {
   // code-gauge-allow functionCognitiveComplexity 20 -- Resolves type names, rejects unavailable library types, and checks their type arguments.
   private typeReference(node: TreeNode, nameNode: TreeNode, typeArguments: Type[]): Type {
     const name = nameNode.text;
-    const local = this.c.typeOperators.mappedOrInferParameter(nameNode, name);
+    const symbol = this.c.scopeOf(nameNode).lookupType(name);
+    const local = this.c.typeOperators.mappedOrInferParameter(nameNode, name, symbol?.scope.node);
     if (local) {
       if (typeArguments.length > 0) this.c.error(node, `型 ${name} は型引数をとりません。`);
       return local;
     }
-    if (
-      stringMappings.has(name) &&
-      typeArguments.length === 1 &&
-      !this.c.scopeOf(nameNode).lookupType(name)?.typeDeclarations.length
-    )
+    if (stringMappings.has(name) && typeArguments.length === 1 && !symbol?.typeDeclarations.length)
       return this.c.typeOperators.stringMappingFromNode(node, name as 'Uppercase', typeArguments[0]);
-    const symbol = this.c.scopeOf(nameNode).lookupType(name);
     if (!symbol) {
       const value = this.c.scopeOf(nameNode).lookupValue(name);
       this.c.error(

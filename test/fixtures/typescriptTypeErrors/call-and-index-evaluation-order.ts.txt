@@ -1,0 +1,22 @@
+function takeNumber(a: number, b: number) {}
+function generic<T>(a: number, b: T) {}
+function takeText(a: string, b: number) {}
+let plain: string | number = "text";
+takeNumber(plain, plain = 1);
+let inferred: string | number = "text";
+generic(inferred, inferred = 2);
+let immediate: string | number = "text";
+((a: number, b: number) => a.toFixed())(immediate, immediate = 3);
+let spread: string | number = "text";
+takeText(spread.toFixed(), ...([spread = 4] as [number]));
+let deleted: { p?: number } | string;
+let deleteSelector: { p?: number } | string = { p: 1 };
+delete (deleted = deleteSelector)[deleteSelector = "p"];
+deleted.toUpperCase();
+let receiver: { m(): void } | string;
+let selected: { m(): void } | string = { m() {} };
+(receiver = selected)[selected = "m"]();
+receiver.toUpperCase();
+let body: string | number = "text";
+((ignored) => { body = 0; })(body = "new");
+body.toUpperCase();

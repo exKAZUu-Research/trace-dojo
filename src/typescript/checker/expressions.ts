@@ -80,8 +80,8 @@ export class ExpressionChecker {
     ['function_expression', (node, contextual) => this.c.functions.functionExpression(node, contextual)],
     ['arrow_function', (node, contextual) => this.c.functions.functionExpression(node, contextual)],
     ['class', (node) => this.c.classes.classExpression(node)],
-    ['member_expression', (node) => this.c.members.chainLink(node, () => this.c.members.memberAccess(node))],
-    ['subscript_expression', (node) => this.c.members.chainLink(node, () => this.c.members.elementAccess(node))],
+    ['member_expression', (node) => this.c.members.checkAccess(node).type],
+    ['subscript_expression', (node) => this.c.members.checkAccess(node).type],
     [
       'call_expression',
       (node, contextual) =>

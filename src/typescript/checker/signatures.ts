@@ -1,8 +1,9 @@
-// code-gauge-allow-file fileNcss 420 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
+// code-gauge-allow-file fileNcss 432 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { erasedStatementTypes } from '../erasedSyntax';
 import type { Checker } from './checker';
+import { FlowState } from './flow';
 import type { Scope, Sym } from './scopes';
 import {
   argumentParameters,
@@ -214,10 +215,27 @@ export class Signatures {
     const argumentNodes = argumentParameters(nodes);
     const thisNode = argumentNodes.length < nodes.length ? nodes[0] : undefined;
     const parameters: Parameter[] = [];
-    for (const parameterNode of argumentNodes)
-      parameters.push(this.declaredParameter(node, parameterNode, contextual, parameters.length));
+    const lastDefault =
+      contextual?.immediateArgumentCount === undefined
+        ? -1
+        : argumentNodes.findLastIndex((parameter) => parameter.childForFieldName('value') !== null);
+    const collect = (): void => {
+      for (const [index, parameterNode] of argumentNodes.entries()) {
+        const parameter = this.declaredParameter(node, parameterNode, contextual, index);
+        parameters.push(parameter);
+        if (index < lastDefault) {
+          const possibleOmission = parameter.optional && !parameterNode.childForFieldName('value');
+          this.c.functions.recordParameterInitialization(
+            parameterNode,
+            possibleOmission ? unionOf([parameter.type, undefinedType]) : parameter.type
+          );
+        }
+      }
+    };
+    if (lastDefault > 0) this.c.flow.from(this.c.flow.current ?? new FlowState(), collect);
+    else collect();
     return {
-      parameters: withRequiredPrefix(parameters, argumentNodes),
+      parameters: withRequiredPrefix(parameters),
       thisType: thisNode && this.c.typeNodes.annotationType(thisNode.childForFieldName('type')),
     };
   }
@@ -232,11 +250,14 @@ export class Signatures {
     const annotation = this.c.typeNodes.annotationType(parameterNode.childForFieldName('type'));
     const rest = pattern.type === 'rest_pattern';
     if (rest && annotation) this.checkRestParameterType(parameterNode, pattern, annotation);
-    const contextualParameter = contextual ? this.contextualParameterType(contextual, index, rest) : undefined;
     const value = parameterNode.childForFieldName('value');
+    const contextualParameter = contextual ? this.contextualParameterType(contextual, index, rest) : undefined;
+    const immediateArgumentCount = contextual?.immediateArgumentCount;
+    const omitted = immediateArgumentCount !== undefined && index >= immediateArgumentCount;
     const type =
       annotation ??
       contextualParameter ??
+      (immediateArgumentCount !== undefined && !value ? undefinedType : undefined) ??
       this.setterParameterType(node) ??
       (value
         ? this.c.silently(() =>
@@ -250,7 +271,7 @@ export class Signatures {
           ? pattern.text
           : `__${index}`,
       type,
-      optional: parameterNode.type === 'optional_parameter' || value !== null,
+      optional: parameterNode.type === 'optional_parameter' || value !== null || (omitted && !annotation && !rest),
       rest,
     };
   }
@@ -384,7 +405,7 @@ export class Signatures {
     }
   }
 
-  private contextualParameterType(signature: Signature, index: number, rest: boolean): Type | undefined {
+  contextualParameterType(signature: Signature, index: number, rest: boolean): Type | undefined {
     const { parameters } = signature;
     if (rest) {
       const remaining = parameters.slice(index);
@@ -624,14 +645,8 @@ export function isContextSensitiveFunction(node: TreeNode): boolean {
  * Parameters where one with a default value, or marked `?`, before a required one is required too, as callers must pass
  * it to reach the later one; its type takes `undefined` instead, which makes the default apply.
  */
-function withRequiredPrefix(parameters: Parameter[], nodes: TreeNode[]): Parameter[] {
-  const minArgumentCount =
-    nodes.findLastIndex(
-      (parameterNode) =>
-        parameterNode.type !== 'optional_parameter' &&
-        parameterNode.childForFieldName('value') === null &&
-        patternOf(parameterNode).type !== 'rest_pattern'
-    ) + 1;
+function withRequiredPrefix(parameters: Parameter[]): Parameter[] {
+  const minArgumentCount = parameters.findLastIndex((parameter) => !parameter.optional && !parameter.rest) + 1;
   return parameters.map((parameter, index) =>
     index < minArgumentCount && parameter.optional
       ? { ...parameter, optional: false, type: unionOf([parameter.type, undefinedType]) }

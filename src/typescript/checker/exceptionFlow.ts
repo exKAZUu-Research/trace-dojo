@@ -12,13 +12,23 @@ interface ExceptionAssignments {
 }
 
 export class ExceptionFlow {
-  private readonly collectors: ExceptionAssignments[] = [];
+  private collectors: ExceptionAssignments[] = [];
 
   constructor(
     private readonly c: Checker,
     private readonly flow: Flow,
     private readonly joinTypes: (types: Type[]) => Type
   ) {}
+
+  isolate<T>(run: () => T): T {
+    const outer = this.collectors;
+    this.collectors = [];
+    try {
+      return run();
+    } finally {
+      this.collectors = outer;
+    }
+  }
 
   collect(body: TreeNode, run: () => void): State {
     const assignments: ExceptionAssignments = {

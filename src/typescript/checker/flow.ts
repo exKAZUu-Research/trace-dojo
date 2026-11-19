@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 403 -- Keeps flow state, joins, and reference narrowing together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -161,6 +162,16 @@ export class Flow {
     try {
       run();
       return this.current;
+    } finally {
+      this.current = outer;
+    }
+  }
+
+  probe<T>(run: () => T, state = this.current): T {
+    const outer = this.current;
+    this.current = state?.clone();
+    try {
+      return this.exceptions.isolate(run);
     } finally {
       this.current = outer;
     }

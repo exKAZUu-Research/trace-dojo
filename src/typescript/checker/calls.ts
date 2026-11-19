@@ -7,7 +7,7 @@ import type { Checker, Mapper } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
 import { InferencePriority, type InferenceRun, newInferenceRun } from './inference';
 import { isContextSensitiveFunction, parameterNodes } from './signatures';
-import { argumentParameters, named, skipParentheses, stringValue, withoutAssertions } from './syntax';
+import { argumentParameters, isThisParameter, named, skipParentheses, stringValue, withoutAssertions } from './syntax';
 import {
   anyType,
   errorType,
@@ -59,8 +59,8 @@ export class Calls {
     this.unionSignatures = new UnionSignatures(c);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
-  // code-gauge-allow functionNcss 43 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
+  // code-gauge-allow functionCognitiveComplexity 25 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
+  // code-gauge-allow functionNcss 45 -- Follows TypeScript's checks of a call's callee in order, each with its own error.
   call(node: TreeNode, contextual?: Type): Type {
     const callee = node.childForFieldName('function') as TreeNode;
     const argumentsNode = node.childForFieldName('arguments');
@@ -74,8 +74,14 @@ export class Calls {
       if (typeArguments) this.c.error(node, '型引数は 0 個にしてください。');
       return this.evolvingPush(callee, args);
     }
-    const chained = this.c.members.chainedCalleeType(callee);
-    const checkedCallee = chained ?? this.c.expressions.check(callee, this.immediateCallContext(callee, args));
+    const expression = skipParentheses(callee);
+    const access =
+      expression.type === 'member_expression' || expression.type === 'subscript_expression'
+        ? this.c.members.checkAccess(expression)
+        : undefined;
+    const chained = callee.id === expression.id ? access?.continued : undefined;
+    const checkedCallee =
+      chained ?? access?.type ?? this.c.expressions.check(callee, this.immediateCallContext(callee, args));
     if (optional) this.c.members.continueChain(callee);
     if (checkedCallee === errorType) return this.checkArgumentsOnly(args, errorType);
     const shortCircuits = chained !== undefined || (optional && this.c.relations.isNullable(checkedCallee));
@@ -89,23 +95,15 @@ export class Calls {
       return this.checkArgumentsOnly(args, errorType);
     }
     const callable = this.callShape(calleeType);
-    const signatures = this.withImmediateCallOptionals(callee, args, callable.signatures);
+    const { signatures } = callable;
     if (signatures.length === 0) {
       for (const arg of args) this.c.expressions.check(arg);
       return callable.untyped ? this.untypedCall(node, [], typeArguments) : this.uncallableType(callee, calleeType);
     }
-    const resolution = this.resolve(
-      node,
-      callee,
-      signatures,
-      args,
-      typeArguments,
-      contextual,
-      this.receiverType(callee)
-    );
+    const resolution = this.resolve(node, callee, signatures, args, typeArguments, contextual, access?.receiver);
     if (!resolution) return errorType;
     this.resolved.set(node.id, resolution.signature);
-    this.checkThisContext(callee, resolution.signature);
+    this.checkThisContext(callee, resolution.signature, access?.receiver);
     this.checkTextConversions(callee, args);
     const result = resolution.returnType;
     return shortCircuits ? this.c.members.chainResult(node, result) : result;
@@ -114,37 +112,23 @@ export class Calls {
   /** For a function called where it is written, as `((x) => x * 2)(3)`, a context giving its parameters the arguments' types. */
   private immediateCallContext(callee: TreeNode, args: TreeNode[]): Type | undefined {
     const expression = skipParentheses(callee);
-    if (expression.type !== 'arrow_function' && expression.type !== 'function_expression') return undefined;
-    if (args.some((arg) => arg.type === 'spread_element')) return undefined;
-    const parametersNode = expression.childForFieldName('parameters');
-    const count = Math.max(args.length, parametersNode ? named(parametersNode).length : 1);
-    // A parameter without an argument is optional, holding `undefined`.
-    const parameters = Array.from({ length: count }, (_, index) => ({
-      name: `arg${index}`,
-      type:
-        index < args.length
-          ? this.c.widenLiteral(this.c.silently(() => this.c.expressions.check(args[index])))
-          : undefinedType,
-      optional: index >= args.length,
-      rest: false,
-    }));
-    return functionType({ typeParameters: [], parameters, returnType: () => unknownType });
-  }
-
-  /** For a function called where it is written, its parameters without arguments or annotations are optional. */
-  private withImmediateCallOptionals(callee: TreeNode, args: TreeNode[], signatures: Signature[]): Signature[] {
-    const expression = skipParentheses(callee);
-    if (expression.type !== 'arrow_function' && expression.type !== 'function_expression') return signatures;
-    const parametersNode = expression.childForFieldName('parameters');
-    const parameterNodes = parametersNode ? named(parametersNode) : [];
-    return signatures.map((signature) => ({
-      ...signature,
-      parameters: signature.parameters.map((parameter, index) =>
-        index >= args.length && !parameterNodes[index]?.childForFieldName('type') && !parameter.rest
-          ? { ...parameter, optional: true }
-          : parameter
-      ),
-    }));
+    if (!functionExpressionTypes.has(expression.type) || !isContextSensitiveFunction(expression)) return undefined;
+    const first = parameterNodes(expression)[0];
+    const effective = this.expandedArguments(args);
+    const parameters = this.c.flow.probe(() =>
+      (first && isThisParameter(first) ? effective.slice(1) : effective).map(({ node, spread }, index) => ({
+        name: `arg${index}`,
+        type: spread?.type ?? this.c.widenLiteral(this.c.silently(() => this.c.expressions.check(node))),
+        optional: spread?.optional ?? false,
+        rest: spread?.rest ?? false,
+      }))
+    );
+    return functionType({
+      typeParameters: [],
+      parameters,
+      immediateArgumentCount: args.length,
+      returnType: () => unknownType,
+    });
   }
 
   private checkArgumentsOnly(args: TreeNode[], result: Type): Type {
@@ -186,13 +170,6 @@ export class Calls {
       );
     }
     return errorType;
-  }
-
-  /** The object a method is called on, which its `this` parameter infers from. */
-  private receiverType(callee: TreeNode): Type | undefined {
-    const object = receiverObject(callee);
-    if (!object || object.type === 'super') return undefined;
-    return this.c.silently(() => this.c.relations.removeNullish(this.c.expressions.check(object)));
   }
 
   private isName(node: TreeNode): boolean {
@@ -241,6 +218,10 @@ export class Calls {
     } finally {
       seen.delete(type.id);
     }
+  }
+
+  hasCallableSignatures(type: Type): boolean {
+    return this.callShape(type).signatures.length > 0;
   }
 
   private unionCallShape(members: Type[], seen: Set<number>): CallableShape {
@@ -318,26 +299,14 @@ export class Calls {
   }
 
   /** Reports a call whose `this`, the object it is called on (or `void`), does not fit the `this` parameter. */
-  private checkThisContext(callee: TreeNode, signature: Signature): void {
+  private checkThisContext(callee: TreeNode, signature: Signature, context: Type = voidType): void {
     const { thisType } = signature;
     if (!thisType || isAnyLike(thisType)) return;
-    const object = receiverObject(callee);
-    const checked = object ? this.c.silently(() => this.chainedReceiverType(object)) : voidType;
-    // An optional call runs only when its object is not nullish.
-    const context = skipParentheses(callee).childForFieldName('optional_chain')
-      ? this.c.relations.removeNullish(checked)
-      : checked;
     if (this.c.relations.isAssignable(context, thisType)) return;
     this.c.error(
       callee,
       `'this' の型 '${this.c.print(context)}' は、このメソッドの 'this' の型 '${this.c.print(thisType)}' に代入できません。`
     );
-  }
-
-  /** The type of a call's object where the call runs, which is past any earlier short circuit of its optional chain. */
-  private chainedReceiverType(object: TreeNode): Type {
-    const checked = this.c.expressions.check(object);
-    return this.c.members.continuedObjectType(object, checked) ?? checked;
   }
 
   /** A tagged template, `String.raw\`...\``, which calls the tag with the template's strings and substitutions. */
@@ -372,7 +341,8 @@ export class Calls {
 
   /** Reports the functions `String(...)` and a `%s` of `console` turn into text. */
   private checkTextConversions(callee: TreeNode, args: TreeNode[]): void {
-    const typeOf = (arg: TreeNode): Type => this.c.silently(() => this.c.expressions.check(arg));
+    const typeOf = (arg: TreeNode): Type =>
+      this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(arg)));
     const symbol = callee.type === 'identifier' ? this.c.scopeOf(callee).lookupValue(callee.text) : undefined;
     const declaration = symbol?.valueDeclaration;
     if (callee.text === 'String' && declaration && this.c.isLibrary(declaration) && args[0]) {
@@ -464,7 +434,7 @@ export class Calls {
       return undefined;
     }
     const instantiate = (candidate: Signature): Signature =>
-      this.instantiateFor(candidate, args, typeArguments, contextual, receiver);
+      this.c.flow.probe(() => this.instantiateFor(candidate, args, typeArguments, contextual, receiver));
     const callbacks = candidates.length > 1 ? this.c.overloadContexts.callbacksOf(args) : undefined;
     const choose = (): Resolution => {
       for (const candidate of candidates) {
@@ -473,7 +443,7 @@ export class Calls {
         if (!this.arity.instanceArityMatches(instantiated, candidate, args)) continue;
         if (callbacks?.nodes.size)
           this.c.overloadContexts.capture(callbacks, () => this.previewArguments(instantiated, args));
-        if (this.c.silently(() => this.argumentsMatch(instantiated, args)))
+        if (this.c.flow.probe(() => this.c.silently(() => this.checkArguments(instantiated, args, false))))
           return this.finishOverload(node, candidate, args, { typeArguments, contextual, receiver });
       }
       return this.reportUnresolved(node, callee, candidates, args, instantiate);
@@ -491,8 +461,11 @@ export class Calls {
       candidate.typeParameters.length > 0 && !typeArguments
         ? this.c.expressions.deferredContexts.typeOf(node)
         : undefined;
-    const final = this.instantiateFor(candidate, args, typeArguments, deferred ?? contextual, receiver);
+    const final = this.c.flow.probe(() =>
+      this.instantiateFor(candidate, args, typeArguments, deferred ?? contextual, receiver)
+    );
     this.checkArguments(final, args, true, node);
+    this.checkImmediateBody(node, final);
     if (typeArguments)
       this.c.typeNodes.checkTypeArgumentConstraints(
         node,
@@ -502,12 +475,14 @@ export class Calls {
     return { signature: final, returnType: final.returnType() };
   }
 
+  private checkImmediateBody(node: TreeNode, signature: Signature): void {
+    if (!signature.checkImmediateBody) return;
+    const callee = node.childForFieldName('function');
+    if (callee && skipParentheses(callee).id === signature.declaration?.id) signature.checkImmediateBody();
+  }
+
   private previewArguments(signature: Signature, args: TreeNode[]): boolean {
-    let fits = false;
-    this.c.flow.from(this.c.flow.current, () => {
-      fits = this.c.silently(() => this.checkExpandedArguments(signature, args));
-    });
-    return fits;
+    return this.c.flow.probe(() => this.c.silently(() => this.checkExpandedArguments(signature, args)));
   }
 
   private checkExpandedArguments(signature: Signature, args: TreeNode[]): boolean {
@@ -571,7 +546,7 @@ export class Calls {
   ): { row: number; index: number } | undefined {
     if (this.c.silent > 0) return undefined;
     const start = this.c.diagnostics.length;
-    this.reportSignature(node, callee, candidates.at(-1) as Signature, args, instantiate);
+    this.c.flow.probe(() => this.reportSignature(node, callee, candidates.at(-1) as Signature, args, instantiate));
     const [first] = this.c.diagnostics.splice(start);
     return first && { row: first.row, index: first.index };
   }
@@ -587,10 +562,12 @@ export class Calls {
     const instantiated = this.arity.arityMatches(candidate, args) ? instantiate(candidate) : undefined;
     if (instantiated && this.arity.instanceArityMatches(instantiated, candidate, args)) {
       this.checkArguments(instantiated, args, true, node);
+      this.checkImmediateBody(node, instantiated);
       return { signature: instantiated, returnType: instantiated.returnType() };
     }
     this.arity.reportArity(node, callee, instantiated ?? candidate, args);
     for (const arg of args) this.c.expressions.check(arg);
+    this.checkImmediateBody(node, instantiated ?? candidate);
     return {
       signature: instantiated ?? candidate,
       returnType: (instantiated ?? this.c.silently(() => instantiate(candidate))).returnType(),
@@ -616,10 +593,6 @@ export class Calls {
     }
     const last = parameters.at(-1);
     return last?.rest ? this.c.restElementType(last.type) : undefined;
-  }
-
-  private argumentsMatch(signature: Signature, args: TreeNode[]): boolean {
-    return this.checkArguments(signature, args, false);
   }
 
   /** Checks each argument against its parameter, reporting mismatches when `report`. */
@@ -700,13 +673,9 @@ export class Calls {
     at: TreeNode | undefined
   ): boolean {
     const contexts = restTupleContexts(this.c, restType, args, (arg) => this.arity.spreadLength(arg));
-    // The tuple is built silently, so the arguments' own errors are reported here.
-    if (report)
-      for (const [index, arg] of args.entries())
-        this.c.expressions.check(arg.type === 'spread_element' ? named(arg)[0] : arg, contexts[index]);
     const tuple =
       args.length === 1 && args[0].type === 'spread_element'
-        ? this.c.silently(() => this.c.expressions.check(named(args[0])[0]))
+        ? this.c.expressions.check(named(args[0])[0])
         : this.argumentTuple(args, contexts);
     if (this.c.relations.isAssignable(tuple, restType)) return true;
     if (report && at) this.c.error(at, this.c.expressions.elaboration.typeRelationMessage(tuple, restType, 'argument'));
@@ -850,7 +819,7 @@ export class Calls {
   private expandedArguments(args: TreeNode[]): ExpandedArgument[] {
     return args.flatMap((node): ExpandedArgument[] => {
       if (node.type !== 'spread_element') return [{ node }];
-      const type = this.c.silently(() => this.c.expressions.check(named(node)[0]));
+      const type = this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(named(node)[0])));
       return this.c.silently(() => this.spreadElements(node, type)).map((spread) => ({ node, spread }));
     });
   }
@@ -899,14 +868,12 @@ export class Calls {
 
   /** The tuple of what arguments pass, a spread one passing its tuple's elements or, for an array, a rest element. */
   private argumentTuple(args: TreeNode[], contexts: (Type | undefined)[] = []): Type {
-    const check = (node: TreeNode, context?: Type): Type =>
-      this.c.silently(() => this.c.expressions.check(node, context));
     const elements = args.flatMap((arg, index): TupleElement[] => {
       if (arg.type !== 'spread_element') {
-        const type = check(arg, contexts[index]);
+        const type = this.c.expressions.check(arg, contexts[index]);
         return [{ type, optional: false, rest: false }];
       }
-      const spreadType = check(named(arg)[0]);
+      const spreadType = this.c.expressions.check(named(arg)[0]);
       if (this.c.relations.isGenericRestType(spreadType)) return [{ type: spreadType, optional: false, rest: true }];
       return this.c.silently(() => this.spreadElements(arg, spreadType));
     });
@@ -988,12 +955,6 @@ function isDottedName(node: TreeNode): boolean {
 }
 
 /** The object a call through a property or an element, as `o.f()` or `o["f"]()`, passes as `this`. */
-function receiverObject(callee: TreeNode): TreeNode | undefined {
-  const expression = skipParentheses(callee);
-  if (expression.type !== 'member_expression' && expression.type !== 'subscript_expression') return undefined;
-  return expression.childForFieldName('object') ?? undefined;
-}
-
 /** Whether a signature's rest parameter is a tuple with elements after its rest element, as `[...string[], number]`. */
 function isTrailingRestTuple(signature: Signature): boolean {
   const last = signature.parameters.at(-1);

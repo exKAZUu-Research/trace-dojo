@@ -3,6 +3,17 @@ import { expect, test } from 'vitest';
 import { CompileError } from '../../src/interpreter/diagnostics';
 import { executeProgram, traceProgram } from '../../src/interpreter/program';
 
+test.each([
+  ['asyncIterator', 'console.log(Symbol.asyncIterator);'],
+  ['iterator', 'const iterator = [1][Symbol.iterator](); console.log(iterator.next());'],
+  ['iterator', 'const iterator = new Map<string, number>()[Symbol.iterator](); console.log(iterator.next());'],
+])('reports an unavailable Symbol.%s without cascading errors', (name, source) => {
+  expect(executeProgram('typescript', source)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ message: `Symbol.${name} などの well-known シンボルは、この採点環境では使えません。` }],
+  });
+});
+
 const caughtFunctionError = `'use strict';
 const fn=()=>{};
 Object.freeze(fn);

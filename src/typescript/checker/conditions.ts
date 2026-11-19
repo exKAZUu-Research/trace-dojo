@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 413 -- Builds and checks conditional flow for each expression form.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -45,19 +46,22 @@ const alwaysTruthyTypes = new Set(['array', 'arrow_function', 'class', 'function
 /** Checks conditions, computing the flow states where they are true and false. */
 export class ConditionChecker {
   private readonly inlined: InlinedConditions;
+  private readonly logicalRightTypes = new Map<number, Type>();
+  private readonly propertyDeclarations = new Map<number, number>();
 
   constructor(private readonly c: Checker) {
     this.inlined = new InlinedConditions(c);
   }
 
   /** Checks a condition, returning the flow states where it is true and where it is false. */
-  checkCondition(node: TreeNode): { whenTrue: State; whenFalse: State } {
+  checkCondition(node: TreeNode, body?: TreeNode): { whenTrue: State; whenFalse: State } {
     // Tree-sitter includes the statement's required parentheses, while tsc's condition starts inside them.
     const expression =
       node.type === 'parenthesized_expression' && parenthesizedConditionStatements.has(node.parent?.type ?? '')
         ? named(node)[0]
         : node;
-    const { whenTrue, whenFalse } = this.condition(expression);
+    const { type, whenTrue, whenFalse } = this.condition(expression);
+    if (body) this.checkUncalledFunction(expression, type, body);
     return { whenTrue, whenFalse };
   }
 
@@ -118,27 +122,24 @@ export class ConditionChecker {
     const left = expression.childForFieldName('left') as TreeNode;
     const right = expression.childForFieldName('right') as TreeNode;
     if (operator === '&&' || operator === '||') return this.logicalCondition(operator, left, right);
-    if (['===', '!==', '==', '!='].includes(operator)) {
-      const type = this.c.expressions.check(expression);
-      return { ...this.narrowEquality(left, right, operator), type };
-    }
+    if (!['===', '!==', '==', '!=', 'instanceof', 'in'].includes(operator)) return undefined;
+    const { type, leftType, rightType } = this.c.operators.checkBinaryOperands(expression, operator, left, right);
     if (operator === 'instanceof') {
-      const type = this.c.expressions.check(expression);
-      const instance = this.c.silently(() => this.instanceTypeOfConstructor(this.c.expressions.check(right)));
+      const instance = this.instanceTypeOfConstructor(rightType);
       const { whenTrue, whenFalse } = this.narrowed(left, (current, assumeTrue) =>
         this.c.flow.narrowByInstanceof(current, instance, assumeTrue)
       );
       return { whenTrue: this.chainEvaluated(whenTrue, left), whenFalse, type };
     }
-    const key = operator === 'in' ? this.c.silently(() => this.c.expressions.check(left)) : undefined;
-    if (key && isPropertyKeyLiteral(key)) {
-      const type = this.c.expressions.check(expression);
+    if (operator === 'in') {
       return {
-        ...this.narrowed(right, (current, assumeTrue) => this.c.flow.narrowByIn(current, key, assumeTrue)),
+        ...(isPropertyKeyLiteral(leftType)
+          ? this.narrowed(right, (current, assumeTrue) => this.c.flow.narrowByIn(current, leftType, assumeTrue))
+          : this.truthiness(expression)),
         type,
       };
     }
-    return undefined;
+    return { ...this.narrowEquality(left, right, operator, leftType, rightType), type };
   }
 
   private logicalCondition(operator: '&&' | '||', left: TreeNode, right: TreeNode): Condition {
@@ -148,6 +149,7 @@ export class ConditionChecker {
     this.c.flow.from(rightState, () => {
       rightResult = this.condition(right, false);
     });
+    this.checkLogicalOperands(left, leftResult.type, right, rightResult.type);
     const merged =
       operator === '&&'
         ? {
@@ -247,30 +249,83 @@ export class ConditionChecker {
     }
   }
 
-  /** Reports `if (obj.method)` where the method is always defined and the body never calls it. */
-  checkUncalledFunction(condition: TreeNode, body: TreeNode | null): void {
-    const tested = skipParentheses(condition);
-    const candidates =
-      tested.type === 'binary_expression' && tested.childForFieldName('operator')?.text === '&&'
-        ? [tested.childForFieldName('left') as TreeNode, tested.childForFieldName('right') as TreeNode]
-        : [tested];
-    for (const candidate of candidates) {
-      const expression = skipParentheses(candidate);
-      if (!this.isAlwaysDefinedFunction(expression)) continue;
-      // A function the body or the rest of the condition uses was tested on purpose, as `if (p.run) queue.push(p.run)`.
-      const usedElsewhere = [body, tested].some((scope) => scope && this.refersTo(scope, expression));
-      if (usedElsewhere) continue;
-      this.c.error(
-        expression,
-        'この関数は常に定義されているので、この条件は常に真になります。呼び出すつもりでしたか？'
-      );
+  checkLogicalOperands(left: TreeNode, leftType: Type, right: TreeNode, rightType: Type): void {
+    if (this.c.silent) return;
+    this.logicalRightTypes.set(right.id, rightType);
+    let outer = left.parent?.parent;
+    while (outer && (outer.type === 'parenthesized_expression' || logicalOperator(outer))) {
+      this.c.budget.spend();
+      outer = outer.parent;
+    }
+    const body = outer?.type === 'if_statement' ? outer.childForFieldName('consequence') : undefined;
+    if (logicalOperator(left.parent) === '&&' || body) this.checkUncalledFunction(left, leftType, body);
+  }
+
+  recordPropertyDeclaration(node: TreeNode, declaration: TreeNode | undefined): void {
+    if (this.c.silent || node.type !== 'member_expression') return;
+    if (declaration) this.propertyDeclarations.set(node.id, declaration.id);
+    else this.propertyDeclarations.delete(node.id);
+  }
+
+  checkUncalledFunction(condition: TreeNode, type: Type, body?: TreeNode | null): void {
+    if (this.c.silent) return;
+    const pending = [skipParentheses(condition)];
+    while (pending.length > 0) {
+      this.c.budget.spend();
+      const tested = pending.pop() as TreeNode;
+      const operator = logicalOperator(tested);
+      if (!operator) {
+        this.reportUncalledFunction(tested, type, body);
+        continue;
+      }
+      const right = tested.childForFieldName('right') as TreeNode;
+      const rightExpression = skipParentheses(right);
+      if (operator !== '&&') pending.push(skipParentheses(tested.childForFieldName('left') as TreeNode));
+      if (logicalOperator(rightExpression)) pending.push(rightExpression);
+      else this.reportUncalledFunction(rightExpression, this.logicalRightTypes.get(right.id) ?? type, body, tested);
     }
   }
 
-  /** Whether a node contains a reference, other than `reference` itself, to what `reference` refers to. */
-  private refersTo(scope: TreeNode, reference: TreeNode): boolean {
-    if (scope.id !== reference.id && this.isSameReference(scope, reference)) return true;
-    return named(scope).some((child) => this.refersTo(child, reference));
+  private reportUncalledFunction(
+    tested: TreeNode,
+    type: Type,
+    body: TreeNode | null | undefined,
+    chainNode: TreeNode = tested
+  ): void {
+    if (!this.isAlwaysDefinedFunction(tested, type)) return;
+    if (this.usedInConjunction(chainNode, tested) || (body && this.refersTo(named(body), tested))) return;
+    this.c.error(tested, 'この関数は常に定義されているので、この条件は常に真になります。呼び出すつもりでしたか？');
+  }
+
+  private usedInConjunction(node: TreeNode, reference: TreeNode): boolean {
+    const propertyDeclaration = this.propertyDeclarations.get(reference.id);
+    let chain = node.parent;
+    while (chain && logicalOperator(chain) === '&&') {
+      this.c.budget.spend();
+      const right = chain.childForFieldName('right') as TreeNode;
+      if (
+        (reference.type === 'member_expression' && this.isSameReference(right, reference)) ||
+        this.refersTo(reference.type === 'member_expression' ? [right] : named(right), reference, propertyDeclaration)
+      )
+        return true;
+      chain = chain.parent;
+    }
+    return false;
+  }
+
+  private refersTo(pending: TreeNode[], reference: TreeNode, propertyDeclaration?: number): boolean {
+    while (pending.length > 0) {
+      this.c.budget.spend();
+      const node = pending.pop() as TreeNode;
+      if (
+        node.id !== reference.id &&
+        (this.isSameReference(node, reference) ||
+          (propertyDeclaration !== undefined && this.propertyDeclarations.get(node.id) === propertyDeclaration))
+      )
+        return true;
+      for (const child of named(node)) pending.push(child);
+    }
+    return false;
   }
 
   private isSameReference(a: TreeNode, b: TreeNode): boolean {
@@ -290,19 +345,16 @@ export class ConditionChecker {
     );
   }
 
-  /** Whether a reference is a function that is always defined: neither nullable nor an optional property. */
-  private isAlwaysDefinedFunction(expression: TreeNode): boolean {
-    if (expression.type !== 'identifier' && expression.type !== 'member_expression') return false;
-    const type = this.c.expressions.checkReferenceSilently(expression);
-    if (isAnyLike(type) || this.c.relations.isNullable(type) || type.kind !== 'object') return false;
-    if (this.c.signaturesOf(type, 'call').length === 0) return false;
-    if (expression.type !== 'member_expression') return true;
-    const objectType = this.c.expressions.checkReferenceSilently(expression.childForFieldName('object') as TreeNode);
-    const property = this.c.propertyOf(
-      this.c.relations.removeNullish(objectType),
-      expression.childForFieldName('property')?.text ?? ''
+  private isAlwaysDefinedFunction(expression: TreeNode, type: Type): boolean {
+    if (expression.type === 'identifier') {
+      if (!this.c.scopeOf(expression).lookupValue(expression.text)) return false;
+    } else if (expression.type === 'member_expression') {
+      const receiver = skipParentheses(expression.childForFieldName('object') as TreeNode);
+      if (receiver.type === 'as_expression' || receiver.type === 'type_assertion') return false;
+    } else return false;
+    return (
+      !isAnyLike(type) && !this.c.relations.isNullable(type) && this.c.expressions.calls.hasCallableSignatures(type)
     );
-    return property !== undefined && !property.optional;
   }
 
   /** The instance type a constructor creates, for `instanceof`. */
@@ -389,11 +441,13 @@ export class ConditionChecker {
     const { object, name } = this.discriminantReference(expression) ?? source ?? {};
     if (name === undefined || (!object && !source?.type)) return;
     const objectType = source?.type ?? this.c.expressions.checkReferenceSilently(object!);
-    const nonNull = this.c.relations.removeNullish(objectType);
+    const nonNull = this.c.relations.removeNullish(this.c.baseConstraint(objectType));
     // As in TypeScript, the declared type decides whether the property is a discriminant, so testing the last
     // remaining member of a union still narrows it.
-    const declared = source ? nonNull : this.c.relations.removeNullish(this.unnarrowedType(object!));
-    const discriminantSource = declared.kind === 'union' || nonNull.kind === 'union' ? declared : nonNull;
+    const declared = source
+      ? nonNull
+      : this.c.relations.removeNullish(this.c.baseConstraint(this.unnarrowedType(object!)));
+    const discriminantSource = declared.kind === 'union' ? declared : nonNull;
     if (!this.c.flow.isDiscriminant(discriminantSource, name)) return;
     const apply = (state: State, assumeTrue: boolean): void => {
       if (!state) return;
@@ -484,7 +538,13 @@ export class ConditionChecker {
     return undefined;
   }
 
-  private narrowEquality(left: TreeNode, right: TreeNode, operator: string): { whenTrue: State; whenFalse: State } {
+  private narrowEquality(
+    left: TreeNode,
+    right: TreeNode,
+    operator: string,
+    leftType: Type,
+    rightType: Type
+  ): { whenTrue: State; whenFalse: State } {
     const equal = operator === '===' || operator === '==';
     const loose = operator === '==' || operator === '!=';
     const leftExpression = skipParentheses(left);
@@ -510,8 +570,6 @@ export class ConditionChecker {
           : { whenTrue, whenFalse: this.chainEvaluated(whenFalse, target) };
       }
     }
-    const leftType = this.c.expressions.checkReferenceSilently(left);
-    const rightType = this.c.expressions.checkReferenceSilently(right);
     const base = this.c.flow.current;
     let { whenTrue, whenFalse } = this.inlined.booleanComparison(leftExpression, rightExpression, equal) ?? {
       whenTrue: base?.clone(),
@@ -592,6 +650,11 @@ export class ConditionChecker {
       this.c.flow.current = outer;
     }
   }
+}
+
+function logicalOperator(node: TreeNode | null | undefined): '&&' | '||' | '??' | undefined {
+  const operator = node?.type === 'binary_expression' ? node.childForFieldName('operator')?.text : undefined;
+  return operator === '&&' || operator === '||' || operator === '??' ? operator : undefined;
 }
 
 /** The object or array pattern that a constant or a parameter destructures its value with directly. */

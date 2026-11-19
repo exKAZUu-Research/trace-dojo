@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 731 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 732 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -25,6 +25,7 @@ import {
   isAnyLike,
   isIntrinsic,
   literalType,
+  nonPrimitiveType,
   nullType,
   numberType,
   type ObjectType,
@@ -488,9 +489,7 @@ export class Relations {
       case 'object': {
         if (s.kind === 'object') return true;
         if (s.kind === 'intersection')
-          return s.types.some((member) =>
-            this.isRelated(member, { ...s, kind: 'intrinsic', name: 'object' } as Type, relation)
-          );
+          return s.types.some((member) => this.isRelated(member, nonPrimitiveType, relation));
         return false;
       }
       case 'string':
@@ -511,13 +510,10 @@ export class Relations {
   private matchesTemplate(value: string, target: Type): boolean {
     if (target.kind === 'stringMapping') {
       const inner = target.type;
-      const mapped = this.c.typeOperators.stringMapping(target.mapping, {
-        kind: 'literal',
-        value,
-        fresh: false,
-      } as Type);
+      const literal = literalType(value);
+      const mapped = this.c.typeOperators.stringMapping(target.mapping, literal);
       if (mapped.kind !== 'literal' || mapped.value !== value) return false;
-      return isIntrinsic(inner, 'string') || this.isAssignable({ kind: 'literal', value } as Type, inner);
+      return isIntrinsic(inner, 'string') || this.isAssignable(literal, inner);
     }
     if (target.kind !== 'templateLiteral') return false;
     const parts = templatePlaceholderTexts(value, target.texts);

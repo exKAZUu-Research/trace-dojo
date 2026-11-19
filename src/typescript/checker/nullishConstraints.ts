@@ -21,6 +21,7 @@ import {
  */
 export function nonNullableType(c: Checker, type: Type): Type {
   return mapType(type, (member): Type => {
+    if (isIntrinsic(member, 'unknown')) return emptyObjectType;
     if (isNullishLike(member, nullType) || isNullishLike(member, undefinedType)) return neverType;
     if (!isGenericMember(member)) return c.relations.removeNullish(member);
     const bound = nullishConstraint(c, member);
