@@ -1,5 +1,5 @@
 import type { Annotations, LocalVar } from './annotations';
-import type { Block, Expr, FormatArgs, Pattern } from './ast';
+import type { Block, Expr, MacroCall, Pattern } from './ast';
 import { normalize } from './infer';
 import { shallow } from './types';
 
@@ -35,6 +35,24 @@ export function forEachDirect(expr: Expr, visit: (expr: Expr) => void): void {
       visit(expr.target);
       return;
     }
+    case 'index': {
+      visit(expr.operand);
+      visit(expr.index);
+      return;
+    }
+    case 'macro': {
+      forEachMacroArg(expr.macro, visit);
+      return;
+    }
+    default: {
+      forEachDirectInCompound(expr, visit);
+    }
+  }
+}
+
+// code-gauge-allow functionNcss 35 -- One case per kind of expression.
+function forEachDirectInCompound(expr: Expr, visit: (expr: Expr) => void): void {
+  switch (expr.kind) {
     case 'call': {
       visit(expr.callee);
       for (const arg of expr.args) visit(arg);
@@ -43,11 +61,6 @@ export function forEachDirect(expr: Expr, visit: (expr: Expr) => void): void {
     case 'methodCall': {
       visit(expr.receiver);
       for (const arg of expr.args) visit(arg);
-      return;
-    }
-    case 'index': {
-      visit(expr.operand);
-      visit(expr.index);
       return;
     }
     case 'range': {
@@ -70,6 +83,15 @@ export function forEachDirect(expr: Expr, visit: (expr: Expr) => void): void {
       if (expr.base) visit(expr.base);
       return;
     }
+    default: {
+      forEachDirectInControlFlow(expr, visit);
+    }
+  }
+}
+
+// code-gauge-allow functionNcss 37 -- One case per kind of expression.
+function forEachDirectInControlFlow(expr: Expr, visit: (expr: Expr) => void): void {
+  switch (expr.kind) {
     case 'block': {
       walkBlock(expr, visit);
       return;
@@ -108,58 +130,46 @@ export function forEachDirect(expr: Expr, visit: (expr: Expr) => void): void {
       visit(expr.body);
       return;
     }
-    case 'macro': {
-      const { macro } = expr;
-      const format = (f: FormatArgs | undefined): void => {
-        for (const arg of f?.args ?? []) visit(arg);
-      };
-      switch (macro.kind) {
-        case 'print':
-        case 'panic':
-        case 'format': {
-          format(macro.format);
-          return;
-        }
-        case 'write': {
-          visit(macro.target);
-          format(macro.format);
-          return;
-        }
-        case 'assert': {
-          visit(macro.cond);
-          format(macro.format);
-          return;
-        }
-        case 'assertEq': {
-          visit(macro.left);
-          visit(macro.right);
-          format(macro.format);
-          return;
-        }
-        case 'vec': {
-          for (const elem of macro.elems) visit(elem);
-          return;
-        }
-        case 'vecRepeat': {
-          visit(macro.value);
-          visit(macro.count);
-          return;
-        }
-        case 'matches': {
-          visit(macro.value);
-          return;
-        }
-        case 'dbg': {
-          for (const arg of macro.args) visit(arg);
-          return;
-        }
-      }
-      return;
-    }
     default: {
       return;
     }
   }
+}
+
+function forEachMacroArg(macro: MacroCall, visit: (expr: Expr) => void): void {
+  switch (macro.kind) {
+    case 'write': {
+      visit(macro.target);
+      break;
+    }
+    case 'assert': {
+      visit(macro.cond);
+      break;
+    }
+    case 'assertEq': {
+      visit(macro.left);
+      visit(macro.right);
+      break;
+    }
+    case 'vec': {
+      for (const elem of macro.elems) visit(elem);
+      return;
+    }
+    case 'vecRepeat': {
+      visit(macro.value);
+      visit(macro.count);
+      return;
+    }
+    case 'matches': {
+      visit(macro.value);
+      return;
+    }
+    case 'dbg': {
+      for (const arg of macro.args) visit(arg);
+      return;
+    }
+  }
+  for (const arg of macro.format?.args ?? []) visit(arg);
 }
 
 /** The variables a pattern binds, in order, each once (or-patterns bind the same variables in each alternative). */

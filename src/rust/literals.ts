@@ -76,60 +76,42 @@ function unescape(body: string, isChar: boolean): string | undefined {
       result += char;
       continue;
     }
-    const next = body[++index];
-    switch (next) {
-      case 'n': {
-        result += '\n';
-        break;
-      }
-      case 'r': {
-        result += '\r';
-        break;
-      }
-      case 't': {
-        result += '\t';
-        break;
-      }
-      case '\\':
-      case "'":
-      case '"': {
-        result += next;
-        break;
-      }
-      case '0': {
-        result += '\0';
-        break;
-      }
-      case 'x': {
-        const hex = body.slice(index + 1, index + 3);
-        if (!/^[0-7][\da-f]$/i.test(hex)) return undefined;
-        result += String.fromCodePoint(Number.parseInt(hex, 16));
-        index += 2;
-        break;
-      }
-      case 'u': {
-        const match = /^\{([\da-f_]{1,8})\}/i.exec(body.slice(index + 1));
-        if (!match) return undefined;
-        const code = Number.parseInt(match[1].replaceAll('_', ''), 16);
-        if (code > 0x10_ff_ff || (code >= 0xd8_00 && code <= 0xdf_ff)) return undefined;
-        result += String.fromCodePoint(code);
-        index += match[0].length;
-        break;
-      }
-      case '\n': {
-        if (isChar) return undefined;
-        while (index + 1 < body.length && /\s/.test(body[index + 1])) index++;
-        break;
-      }
-      case '\r': {
-        if (isChar) return undefined;
-        while (index + 1 < body.length && /\s/.test(body[index + 1])) index++;
-        break;
-      }
-      default: {
-        return undefined;
-      }
-    }
+    const escape = readEscape(body, index + 1, isChar);
+    if (!escape) return undefined;
+    result += escape.text;
+    index = escape.last;
   }
   return result;
+}
+
+const SIMPLE_ESCAPES: Record<string, string> = { n: '\n', r: '\r', t: '\t', '\\': '\\', "'": "'", '"': '"', '0': '\0' };
+
+/** The text of the escape whose letter is at `index`, and the index of its last character. */
+function readEscape(body: string, index: number, isChar: boolean): { text: string; last: number } | undefined {
+  const next = body[index];
+  if (Object.hasOwn(SIMPLE_ESCAPES, next)) return { text: SIMPLE_ESCAPES[next], last: index };
+  switch (next) {
+    case 'x': {
+      const hex = body.slice(index + 1, index + 3);
+      if (!/^[0-7][\da-f]$/i.test(hex)) return undefined;
+      return { text: String.fromCodePoint(Number.parseInt(hex, 16)), last: index + 2 };
+    }
+    case 'u': {
+      const match = /^\{([\da-f_]{1,8})\}/i.exec(body.slice(index + 1));
+      if (!match) return undefined;
+      const code = Number.parseInt(match[1].replaceAll('_', ''), 16);
+      if (code > 0x10_ff_ff || (code >= 0xd8_00 && code <= 0xdf_ff)) return undefined;
+      return { text: String.fromCodePoint(code), last: index + match[0].length };
+    }
+    case '\n':
+    case '\r': {
+      if (isChar) return undefined;
+      let last = index;
+      while (last + 1 < body.length && /\s/.test(body[last + 1])) last++;
+      return { text: '', last };
+    }
+    default: {
+      return undefined;
+    }
+  }
 }

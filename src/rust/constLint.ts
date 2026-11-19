@@ -95,54 +95,30 @@ export class ConstLint {
   private expr(expr: Expr): Known | undefined {
     switch (expr.kind) {
       case 'int': {
-        const type = intTypeOf(expr.ty);
-        return type ? expr.value : undefined;
+        return intTypeOf(expr.ty) ? expr.value : undefined;
       }
       case 'bool':
       case 'char': {
         return expr.value;
       }
       case 'path': {
-        const res = this.annotations.paths.get(expr);
-        if (res?.kind === 'local') return this.known.get(res.local);
-        if (res?.kind === 'const') {
-          const ast = res.def.ast as { value?: Expr };
-          // A constant's initializer may not be checked yet, so its value counts by the constant's type.
-          if (ast.value && intTypeOf(res.def.type)) return constInteger(ast.value, this.module);
-          return ast.value ? this.constValue(ast.value) : undefined;
-        }
-        if (res?.kind === 'builtinConst') return integerConst(res.name);
-        return undefined;
+        return this.path(expr);
       }
       case 'unary': {
-        const operand = this.expr(expr.operand);
-        if (expr.op !== '-' || typeof operand !== 'bigint') return undefined;
-        const name = intTypeOf(expr.ty);
-        if (!name) return undefined;
-        const negated = this.checked(-operand, name, expr);
-        this.endBlock();
-        return negated;
+        return this.unary(expr);
       }
       case 'binary': {
-        if (['==', '!=', '<', '<=', '>', '>='].includes(expr.op)) return this.comparison(expr);
-        const result = this.binary(expr);
-        this.endBlock();
-        return result;
+        return this.binaryExpr(expr);
       }
       case 'cast': {
-        const operand = this.expr(expr.operand);
-        if (operand === undefined || typeof operand === 'object' || !intTypeOf(expr.ty)) return undefined;
-        return castValue(operand, resolve(expr.operand.ty!, true), resolve(expr.ty!, true)) as Known;
+        return this.cast(expr);
       }
       case 'index': {
         return this.index(expr);
       }
       case 'tuple':
       case 'array': {
-        const elems = expr.elems.map((elem, index) => [String(index), this.expr(elem)] as const);
-        // rustc does not follow a tuple that holds an array, whose value is no immediate.
-        const holdsArray = expr.kind === 'tuple' && expr.elems.some((elem) => isArrayType(elem.ty));
-        return holdsArray ? undefined : aggregate(elems);
+        return this.tupleOrArray(expr);
       }
       case 'call':
       case 'methodCall':
@@ -150,66 +126,134 @@ export class ConstLint {
       case 'try': {
         return this.call(expr);
       }
+      default: {
+        return this.compoundExpr(expr);
+      }
+    }
+  }
+
+  private compoundExpr(expr: Expr): Known | undefined {
+    switch (expr.kind) {
       case 'struct': {
-        const fields = expr.fields.map(({ name, value }) => [name, this.expr(value)] as const);
-        if (!expr.base) return aggregate(fields);
-        this.expr(expr.base);
-        return undefined;
+        return this.struct(expr);
       }
       case 'field': {
         const operand = this.expr(expr.operand);
         return typeof operand === 'object' ? operand.fields.get(expr.name) : undefined;
       }
+      case 'block': {
+        return this.block(expr);
+      }
+      default: {
+        this.controlFlow(expr);
+        return undefined;
+      }
+    }
+  }
+
+  // code-gauge-allow functionNcss 38 -- One case per kind of expression.
+  private controlFlow(expr: Expr): void {
+    switch (expr.kind) {
       case 'assign': {
         const value = this.expr(expr.value);
         if (expr.target.kind !== 'path') this.expr(expr.target);
         this.assign(expr.target, value);
-        return undefined;
+        return;
       }
       case 'return':
       case 'break':
       case 'continue': {
         if (expr.kind !== 'continue' && expr.value) this.expr(expr.value);
         this.diverged = true;
-        return undefined;
+        return;
       }
       case 'while': {
         const cond = this.condition(expr.cond);
         if (cond !== false) this.branch(() => this.block(expr.body));
-        return undefined;
+        return;
       }
       case 'loop':
       case 'for': {
         if (expr.kind === 'for') this.expr(expr.iterable);
         this.branch(() => this.block(expr.body));
-        return undefined;
+        return;
       }
       case 'match': {
         this.match(this.expr(expr.scrutinee), expr.arms);
-        return undefined;
+        return;
       }
       case 'closure': {
-        const lint = new ConstLint(this.annotations, this.module);
-        lint.modes = this.modes;
-        for (const [local, value] of this.known) lint.known.set(local, value);
-        if (expr.body.kind === 'block') lint.block(expr.body);
-        else lint.expr(expr.body);
-        return undefined;
-      }
-      case 'block': {
-        return this.block(expr);
+        this.closure(expr);
+        return;
       }
       case 'if': {
         this.ifExpr(expr);
-        return undefined;
+        return;
       }
       default: {
         forEachDirect(expr, (child) => {
           this.expr(child);
         });
-        return undefined;
       }
     }
+  }
+
+  private path(expr: Extract<Expr, { kind: 'path' }>): Known | undefined {
+    const res = this.annotations.paths.get(expr);
+    if (res?.kind === 'local') return this.known.get(res.local);
+    if (res?.kind === 'const') {
+      const ast = res.def.ast as { value?: Expr };
+      // A constant's initializer may not be checked yet, so its value counts by the constant's type.
+      if (ast.value && intTypeOf(res.def.type)) return constInteger(ast.value, this.module);
+      return ast.value ? this.constValue(ast.value) : undefined;
+    }
+    if (res?.kind === 'builtinConst') return integerConst(res.name);
+    return undefined;
+  }
+
+  private unary(expr: Extract<Expr, { kind: 'unary' }>): Known | undefined {
+    const operand = this.expr(expr.operand);
+    if (expr.op !== '-' || typeof operand !== 'bigint') return undefined;
+    const name = intTypeOf(expr.ty);
+    if (!name) return undefined;
+    const negated = this.checked(-operand, name, expr);
+    this.endBlock();
+    return negated;
+  }
+
+  private binaryExpr(expr: Extract<Expr, { kind: 'binary' }>): Known | undefined {
+    if (['==', '!=', '<', '<=', '>', '>='].includes(expr.op)) return this.comparison(expr);
+    const result = this.binary(expr);
+    this.endBlock();
+    return result;
+  }
+
+  private cast(expr: Extract<Expr, { kind: 'cast' }>): Known | undefined {
+    const operand = this.expr(expr.operand);
+    if (operand === undefined || typeof operand === 'object' || !intTypeOf(expr.ty)) return undefined;
+    return castValue(operand, resolve(expr.operand.ty!, true), resolve(expr.ty!, true)) as Known;
+  }
+
+  private tupleOrArray(expr: Extract<Expr, { kind: 'tuple' | 'array' }>): Known | undefined {
+    const elems = expr.elems.map((elem, index) => [String(index), this.expr(elem)] as const);
+    // rustc does not follow a tuple that holds an array, whose value is no immediate.
+    const holdsArray = expr.kind === 'tuple' && expr.elems.some((elem) => isArrayType(elem.ty));
+    return holdsArray ? undefined : aggregate(elems);
+  }
+
+  private struct(expr: Extract<Expr, { kind: 'struct' }>): Known | undefined {
+    const fields = expr.fields.map(({ name, value }) => [name, this.expr(value)] as const);
+    if (!expr.base) return aggregate(fields);
+    this.expr(expr.base);
+    return undefined;
+  }
+
+  private closure(expr: Extract<Expr, { kind: 'closure' }>): void {
+    const lint = new ConstLint(this.annotations, this.module);
+    lint.modes = this.modes;
+    for (const [local, value] of this.known) lint.known.set(local, value);
+    if (expr.body.kind === 'block') lint.block(expr.body);
+    else lint.expr(expr.body);
   }
 
   /** An element of an array at an index, whose bound rustc checks from the array's type. */
