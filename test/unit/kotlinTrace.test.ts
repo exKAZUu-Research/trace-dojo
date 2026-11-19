@@ -1,0 +1,211 @@
+import { expect, test } from 'vitest';
+
+import { traceProgram } from '../../src/interpreter/program';
+import type { TraceItem } from '../../src/problems/trace';
+
+/** The programs of the two languages place their statements on different lines, so their steps compare without them. */
+const withoutLines = (items: TraceItem[]): unknown[] =>
+  items.map(({ line, callLines, ...item }) => ({ ...item, callDepth: callLines.length }));
+
+/** Curriculum-style programs that behave alike in both languages, so Kotlin must reproduce the Java interpreter's trace. */
+test.each([
+  {
+    name: 'moves, turns, loops, and conditions',
+    java: `public class Main {
+  public static void main(String[] args) {
+    Turtle t = new Turtle(2, 1, "R");
+    int n = 0;
+    while (t.前に進めるか() && n < 3) {
+      if (n % 2 == 0) {
+        t.前に進む();
+      } else {
+        t.右を向く();
+      }
+      n++;
+    }
+    int[] commands = { 1, 0, 1 };
+    for (int command : commands) {
+      if (command == 1) t.forward();
+      else t.turnLeft();
+    }
+  }
+}`,
+    kotlin: `fun main() {
+    val t = Turtle(2, 1, "R")
+    var n = 0
+    while (t.前に進めるか() && n < 3) {
+        if (n % 2 == 0) {
+            t.前に進む()
+        } else {
+            t.右を向く()
+        }
+        n++
+    }
+    val commands = intArrayOf(1, 0, 1)
+    for (command in commands) {
+        if (command == 1) t.forward()
+        else t.turnLeft()
+    }
+}`,
+  },
+  {
+    name: 'fields assigned in a constructor, which show their defaults before the assignments',
+    java: `public class Main {
+  public static void main(String[] args) {
+    MyTurtle m = new MyTurtle(1, 2);
+    m.moveForward();
+  }
+}
+class MyTurtle {
+  Turtle t;
+  int speed;
+  boolean moved = false;
+  MyTurtle(int x, int speed) {
+    this.t = new Turtle(x, 0);
+    this.speed = speed;
+  }
+  void moveForward() {
+    int i = 0;
+    while (i < this.speed) {
+      this.t.前に進む();
+      i++;
+    }
+    this.moved = true;
+  }
+}`,
+    kotlin: `fun main() {
+    val m = MyTurtle(1, 2)
+    m.moveForward()
+}
+class MyTurtle(x: Int, speed: Int) {
+    var t: Turtle
+    var speed: Int
+    var moved = false
+    init {
+        this.t = Turtle(x, 0)
+        this.speed = speed
+    }
+    fun moveForward() {
+        var i = 0
+        while (i < this.speed) {
+            this.t.前に進む()
+            i++
+        }
+        this.moved = true
+    }
+}`,
+  },
+  {
+    name: 'a static field, as an object property',
+    java: `public class Main {
+  public static void main(String[] args) {
+    Turtle t = new Turtle();
+    Controller.step(t);
+    Controller.step(t);
+  }
+}
+class Controller {
+  static int stepCount = 0;
+  static void step(Turtle t) {
+    t.前に進む();
+    stepCount++;
+  }
+}`,
+    kotlin: `fun main() {
+    val t = Turtle()
+    Controller.step(t)
+    Controller.step(t)
+}
+object Controller {
+    var stepCount = 0
+    fun step(t: Turtle) {
+        t.前に進む()
+        stepCount++
+    }
+}`,
+  },
+  {
+    name: 'inheritance, overriding, and calls of super',
+    java: `public class Main {
+  public static void main(String[] args) {
+    FastTurtle f = new FastTurtle();
+    f.move();
+  }
+}
+class MyTurtle {
+  Turtle t = new Turtle();
+  void move() {
+    t.前に進む();
+  }
+}
+class FastTurtle extends MyTurtle {
+  @Override
+  void move() {
+    super.move();
+    super.move();
+  }
+}`,
+    kotlin: `fun main() {
+    val f = FastTurtle()
+    f.move()
+}
+open class MyTurtle {
+    var t = Turtle()
+    open fun move() {
+        t.前に進む()
+    }
+}
+class FastTurtle : MyTurtle() {
+    override fun move() {
+        super.move()
+        super.move()
+    }
+}`,
+  },
+  {
+    name: 'arrays of turtles and exceptions',
+    java: `public class Main {
+  public static void main(String[] args) {
+    Turtle[] turtles = new Turtle[2];
+    turtles[0] = new Turtle(0, 0);
+    turtles[1] = new Turtle(2, 0);
+    for (Turtle t : turtles) {
+      try {
+        move(t);
+      } catch (RuntimeException e) {
+        t.右を向く();
+      }
+    }
+  }
+  static void move(Turtle t) {
+    if (!t.前に進めるか()) {
+      throw new RuntimeException("前に進めない！");
+    }
+    t.前に進む();
+  }
+}`,
+    kotlin: `fun main() {
+    val turtles = arrayOfNulls<Turtle>(2)
+    turtles[0] = Turtle(0, 0)
+    turtles[1] = Turtle(2, 0)
+    for (t in turtles) {
+        try {
+            move(t!!)
+        } catch (e: RuntimeException) {
+            t!!.右を向く()
+        }
+    }
+}
+fun move(t: Turtle) {
+    if (!t.前に進めるか()) {
+        throw RuntimeException("前に進めない！")
+    }
+    t.前に進む()
+}`,
+  },
+])('traces $name as Java does', ({ java, kotlin }) => {
+  const javaTrace = traceProgram('java', java, java);
+  const kotlinTrace = traceProgram('kotlin', kotlin, kotlin);
+  expect(withoutLines(kotlinTrace.traceItems)).toEqual(withoutLines(javaTrace.traceItems));
+  expect(kotlinTrace.finalBoard).toBe(javaTrace.finalBoard);
+});

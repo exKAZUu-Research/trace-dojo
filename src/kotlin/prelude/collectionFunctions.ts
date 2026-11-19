@@ -1127,6 +1127,34 @@ operator fun <T> Iterable<T>.minus(elements: Iterable<T>): List<T> {
 
 fun <T> Collection<T>.plusElement(element: T): List<T> = plus(element)
 
+operator fun <T> Set<T>.plus(element: T): Set<T> {
+    val result = LinkedHashSet<T>(this)
+    result.add(element)
+    return result
+}
+
+operator fun <T> Set<T>.plus(elements: Iterable<T>): Set<T> {
+    val result = LinkedHashSet<T>(this)
+    result.addAll(elements)
+    return result
+}
+
+operator fun <T> Set<T>.minus(element: T): Set<T> {
+    val result = LinkedHashSet<T>()
+    var removed = false
+    for (item in this) {
+        if (!removed && item == element) removed = true else result.add(item)
+    }
+    return result
+}
+
+operator fun <T> Set<T>.minus(elements: Iterable<T>): Set<T> {
+    val other = elements.toList()
+    val result = LinkedHashSet<T>()
+    for (item in this) if (item !in other) result.add(item)
+    return result
+}
+
 infix fun <T> Iterable<T>.union(other: Iterable<T>): Set<T> {
     val set = this.toMutableSet()
     set.addAll(other.toList())

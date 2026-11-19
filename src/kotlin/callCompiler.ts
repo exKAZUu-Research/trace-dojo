@@ -381,7 +381,20 @@ export abstract class CallCompiler extends CompilerCore {
       const param = attempt.candidate.symbol.params[paramIndex];
       return param ? param.type : undefined;
     };
+    // As Kotlin compares overloads, `a`'s type parameters stay as they are and `b`'s become fresh variables, which
+    // keeps the comparison from constraining the variables the call infers.
+    const rigid = (attempt: Attempt): Substitution => attempt.candidate.substitution;
+    const fresh = (attempt: Attempt): Substitution => {
+      const substitution = new Map(attempt.candidate.substitution);
+      for (const param of this.inferredTypeParameters(attempt.candidate)) {
+        const variable: InferenceVariable = { param, lower: [], upper: [], fixed: undefined };
+        substitution.set(param, { kind: 'variable', variable, nullable: false });
+      }
+      return substitution;
+    };
     const isAsSpecific = (a: Attempt, b: Attempt): boolean => {
+      const aSubstitution = rigid(a);
+      const bSubstitution = fresh(b);
       for (const [index] of args.entries()) {
         const aType = paramTypeOf(a, index);
         const bType = paramTypeOf(b, index);
@@ -397,14 +410,14 @@ export abstract class CallCompiler extends CompilerCore {
             continue;
           }
         }
-        if (!isSubtype(substitute(aType, a.substitution), substitute(bType, b.substitution))) return false;
+        if (!isSubtype(substitute(aType, aSubstitution), substitute(bType, bSubstitution))) return false;
       }
       const aReceiver = a.candidate.symbol.extensionReceiver;
       const bReceiver = b.candidate.symbol.extensionReceiver;
       return (
         !aReceiver ||
         !bReceiver ||
-        isSubtype(substitute(aReceiver, a.substitution), substitute(bReceiver, b.substitution))
+        isSubtype(substitute(aReceiver, aSubstitution), substitute(bReceiver, bSubstitution))
       );
     };
     let best = attempts.filter((attempt) =>

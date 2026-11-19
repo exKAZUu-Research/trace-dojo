@@ -225,7 +225,8 @@ function defineMath(): void {
     ['exp', Math.exp],
     ['ln', Math.log],
     ['log10', Math.log10],
-    ['log2', Math.log2],
+    // oxlint-disable-next-line unicorn/prefer-modern-math-apis -- Kotlin computes `log2` as `ln(x) / ln(2)`, whose last digit differs from `Math.log2`'s for some arguments.
+    ['log2', (x) => Math.log(x) / Math.LN2],
     ['floor', Math.floor],
     ['ceil', Math.ceil],
     ['round', roundHalfEven],
