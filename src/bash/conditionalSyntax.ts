@@ -1,3 +1,4 @@
+import { charactersOf } from './characters';
 import {
   type BashSyntaxError,
   skipBalanced,
@@ -30,7 +31,7 @@ interface ConditionalToken {
   row: number;
 }
 
-const UNARY_OPERATORS = new Set([...'abcdefghknoprstuvwxzGLNORS'].map((letter) => `-${letter}`));
+const UNARY_OPERATORS = new Set(charactersOf('abcdefghknoprstuvwxzGLNORS').map((letter) => `-${letter}`));
 const BINARY_OPERATORS = new Set(['=', '==', '!=', '-eq', '-ne', '-lt', '-le', '-gt', '-ge', '-nt', '-ot', '-ef']);
 const PATTERN_OPERATORS = new Set(['=', '==', '!=']);
 const CONDITIONAL_OPERATORS = [
