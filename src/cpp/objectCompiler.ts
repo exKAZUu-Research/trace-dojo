@@ -19,6 +19,7 @@ import {
 } from './expr';
 import { SequenceValue } from './library/containerValues';
 import { constructElementFromRvalue, moveConstruction } from './library/elements';
+import { StringValue } from './library/string';
 import { type Eval, type Frame, holdAll, type Temporary } from './runtime';
 import type { Syntax } from './syntax';
 import {
@@ -311,6 +312,7 @@ function bindPlacedValue(type: Type, value: Value, location: Ptr): void {
   if (type.kind === 'class' && value instanceof CObject) value.completeLocation = location;
   if (type.kind === 'array' && value instanceof ArrayStore) value.bindLocation(type.of, location);
   if (value instanceof SequenceValue) value.bindInlineStorage(location);
+  if (value instanceof StringValue) value.bindLocation(location);
 }
 
 /** A zero of a scalar type, as static storage and value-initialization start with. */

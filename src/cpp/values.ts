@@ -65,6 +65,10 @@ export abstract class Store {
     return undefined;
   }
 
+  get containingLocation(): Ptr | undefined {
+    return undefined;
+  }
+
   projectAddress(_index: number, _byteOffset: number): Address | undefined {
     return undefined;
   }
@@ -153,7 +157,7 @@ export class ArrayStore extends Store {
     this.enclosingLocation = location;
   }
 
-  get containingLocation(): Ptr | undefined {
+  override get containingLocation(): Ptr | undefined {
     return this.enclosingLocation;
   }
 
@@ -216,6 +220,10 @@ export class CObject extends Store {
 
   set completeLocation(location: Ptr | undefined) {
     this.receiverLocation.location = location;
+  }
+
+  override get containingLocation(): Ptr | undefined {
+    return this.completeLocation;
   }
 
   bindContainerCell(location: Ptr): void {

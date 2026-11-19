@@ -57,6 +57,7 @@ export class StringValue extends Store {
   private room: number;
   private stored: string;
   private buffer?: StringBuffer;
+  private objectLocation?: Ptr;
 
   constructor(bytes: string) {
     super();
@@ -107,6 +108,14 @@ export class StringValue extends Store {
     return (this.buffer ??= new StringBuffer(this));
   }
 
+  bindLocation(location: Ptr): void {
+    this.objectLocation = location;
+  }
+
+  override get containingLocation(): Ptr | undefined {
+    if (this.capacity <= SHORT_CAPACITY) return this.objectLocation;
+  }
+
   private invalidateBuffer(): void {
     endLifetime(this.buffer);
     this.buffer = undefined;
@@ -141,6 +150,10 @@ export class StringValue extends Store {
 class StringBuffer extends Store {
   constructor(public owner: StringValue) {
     super();
+  }
+
+  override get containingLocation(): Ptr | undefined {
+    return this.owner.containingLocation;
   }
 
   get length(): number {

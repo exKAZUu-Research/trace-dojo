@@ -8,7 +8,7 @@ import { byteAt } from './bytes';
 import { type CppException, CppRuntimeError, ProgramAbort } from './errors';
 import { StreamValue } from './library/iostream';
 import type { FunctionInfo, Type } from './types';
-import { ArrayStore, Box, childValues, CObject, endLifetime, Liveness, Ptr, Store, type Value } from './values';
+import { Box, childValues, CObject, endLifetime, Liveness, Ptr, Store, type Value } from './values';
 
 /** How a statement ended: normally (undefined), or by `break`, `continue`, or `return`. */
 export const BREAK = 1;
@@ -280,10 +280,8 @@ export class Runtime implements TracedRuntime<Frame> {
       const store = pending.pop() as Store;
       scanned++;
       if (store.liveness !== Liveness.Alive) continue;
-      if (store instanceof CObject) {
-        if (store.turtle) turtles.add(store.turtle);
-        visit(store.completeLocation);
-      } else if (store instanceof ArrayStore) visit(store.containingLocation);
+      if (store instanceof CObject && store.turtle) turtles.add(store.turtle);
+      visit(store.containingLocation);
       for (const value of childValues(store)) visit(value);
     }
     this.spend(Math.ceil(scanned / 64));
