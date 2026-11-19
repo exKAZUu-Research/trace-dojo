@@ -2,7 +2,7 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
-import { ArrayTable } from './arrayTable';
+import { ArrayTable, detachArrayTable } from './arrayTable';
 import type { ClassDecl, Expr, FunctionDecl, PropertyDeclAst } from './ast';
 import { lower } from './bytes';
 import { OwnerLinks } from './ownerLinks';
@@ -497,15 +497,15 @@ export class PhpArray {
   }
 
   retire(): (Value | Ref)[] {
-    const slots = this.detachSlots();
+    const slots = this.detachSlots(true);
     this.mutationVersion++;
     invalidateOwner(this);
     return slots;
   }
 
-  private detachSlots(): (Value | Ref)[] {
+  private detachSlots(retiring = false): (Value | Ref)[] {
     const slots = [...this.map.ownedSlots()];
-    this.map.clear();
+    this.map = detachArrayTable(this, retiring, () => this.table());
     this.composite = false;
     for (const slot of slots) if (slot instanceof Ref) slot.rc--;
     return slots;

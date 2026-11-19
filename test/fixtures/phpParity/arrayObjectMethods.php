@@ -89,3 +89,19 @@ $table = new ArrayObject([1 => 4]);
 set_error_handler(function () use ($table) { $table[1] = 20; return true; });
 var_dump($table[1.5]);
 restore_error_handler();
+
+class OffsetReadNeighbor {
+    function __destruct() { echo 'drop;'; }
+}
+foreach (['ArrayObject', 'ArrayIterator'] as $storageClass) {
+    $table = new $storageClass([1 => 1, 'other' => new OffsetReadNeighbor]);
+    set_error_handler(function () use ($table) {
+        if ($table instanceof ArrayObject) $table->exchangeArray([1 => 2]);
+        else $table->__construct([1 => 2]);
+        gc_collect_cycles();
+        echo 'handler;';
+        return true;
+    });
+    var_dump($table->offsetExists(1.5));
+    restore_error_handler();
+}

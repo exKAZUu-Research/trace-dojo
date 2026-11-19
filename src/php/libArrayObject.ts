@@ -1,5 +1,6 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { ArrayCursor } from './arrayOrder';
+import { withArrayReadView } from './arrayTable';
 import { setNativeArrayStorage } from './assignment';
 import { callMethod } from './callables';
 import { invoke } from './calls';
@@ -100,16 +101,22 @@ export class ArrayStorage {
     return copy;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Uses the fetched table and preserves key diagnostic ordering together.
   offsetValue(key: Value, className: string, warning?: UpdateWarning, hasPendingWarning = false): Value {
     const array = this.array;
-    return rt().withBorrowedArray(array, () => {
+    return withArrayReadView(array, (view) => {
       let completed = true;
       const report: UpdateWarning | undefined =
         warning && !hasPendingWarning ? (emit) => (completed = warning(emit)) : warning;
       const offset = toKey(key, 'access', className, report);
       if (!completed) return null;
-      const value = array.get(offset);
-      if (value !== undefined) return value;
+      const slot = view.get(offset);
+      const value = slot instanceof Ref ? slot.v : slot;
+      if (
+        value !== undefined &&
+        (!view.detached() || !(value instanceof PhpObject) || rt().objects.get(value.id) === value)
+      )
+        return value;
       const message = `Undefined array key ${typeof offset === 'bigint' ? offset : `"${offset}"`}`;
       if (warning)
         warning(
@@ -122,8 +129,7 @@ export class ArrayStorage {
   }
 
   offsetExists(key: Value, className: string): boolean {
-    const array = this.array;
-    return rt().withBorrowedArray(array, () => array.has(toKey(key, 'isset', className)));
+    return this.array.has(toKey(key, 'isset', className));
   }
 
   setOffset(key: Value, value: Value, className: string, warning?: UpdateWarning): void {

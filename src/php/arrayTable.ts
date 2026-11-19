@@ -1,5 +1,5 @@
 import { replaceWatchedSlot, replaceWatchedSlots } from './slotWatch';
-import { type Key, type Ref, UNDEFINED_RESULT, type Value } from './values';
+import { type Key, type PhpArray, type Ref, UNDEFINED_RESULT, type Value } from './values';
 
 type Slot = Value | Ref;
 
@@ -210,4 +210,40 @@ export class ArrayTable extends Map<Key, Slot> {
   override forEach(callback: (value: Slot, key: Key, map: Map<Key, Slot>) => void, thisArg?: unknown): void {
     for (const [key, value] of this) callback.call(thisArg, value, key, this);
   }
+}
+
+export interface ArrayReadView {
+  get(key: Key): Value | Ref | undefined;
+  detached(): boolean;
+}
+
+interface ReadState {
+  borrowers: number;
+  detachedTable?: ArrayTable;
+}
+
+const reads = new WeakMap<PhpArray, ReadState>();
+
+export function withArrayReadView<T>(array: PhpArray, use: (view: ArrayReadView) => T): T {
+  const state = reads.get(array) ?? { borrowers: 0 };
+  reads.set(array, state);
+  state.borrowers++;
+  try {
+    return use({
+      get: (key) => (state.detachedTable ? state.detachedTable.get(key) : array.getSlot(key)),
+      detached: () => state.detachedTable !== undefined,
+    });
+  } finally {
+    if (--state.borrowers === 0) reads.delete(array);
+  }
+}
+
+export function detachArrayTable(array: PhpArray, retiring: boolean, createTable: () => ArrayTable): ArrayTable {
+  const state = retiring ? reads.get(array) : undefined;
+  if (state) {
+    state.detachedTable = array.map;
+    return createTable();
+  }
+  array.map.clear();
+  return array.map;
 }

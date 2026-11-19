@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 988 -- Holds assignment and offset access modes with their shared helpers.
+// code-gauge-allow-file fileNcss 999 -- Holds assignment and offset access modes with their shared helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
+import { withArrayReadView } from './arrayTable';
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
 import { callMethod, callOffsetExists, discardInvokedResult, readOffset } from './callables';
@@ -757,7 +758,7 @@ function arrayAccessNestedPlace(
   return new RefPlace(Ref.temporary(value));
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Shares mode, key conversion and storage lifetime across nested offset access.
+// code-gauge-allow functionCognitiveComplexity 20 -- Shares mode, key conversion and storage lifetime across nested offset access.
 function nativeArrayNestedPlace(
   object: PhpObject,
   storage: NativeArrayStorage,
@@ -773,20 +774,32 @@ function nativeArrayNestedPlace(
     notice(`Indirect modification of overloaded element of ${object.cls.name} has no effect`);
     return new RefPlace(Ref.temporary(null));
   }
-  let place!: ElementPlace;
+  let place!: Place;
   const array = storage.writable();
-  rt().withBorrowedArray(array, () =>
+  withArrayReadView(array, (view) =>
     withOperandWarnings((warning) => {
       const index = toKey(key, 'access', object.cls.name, warning);
-      place = new ElementPlace(array, index, unbound);
-      if (place.get() === undefined) {
-        if (mode === 'update') warning(() => place.warnUndefined());
-        if (place.get() === undefined) place.set(null);
+      if (view.detached()) {
+        place = detachedArrayOffset(view.get(index));
+        return null;
+      }
+      const element = new ElementPlace(array, index, unbound);
+      place = element;
+      if (element.get() === undefined) {
+        if (mode === 'update') warning(() => element.warnUndefined());
+        if (element.get() === undefined) element.set(null);
       }
       return null;
     })
   );
   return place;
+}
+
+function detachedArrayOffset(slot: Value | Ref | undefined): RefPlace {
+  if (slot instanceof Ref && slot.rc > 0) return new RefPlace(slot);
+  const value = slot instanceof Ref ? slot.v : slot;
+  const live = value instanceof PhpObject && rt().objects.get(value.id) !== value ? null : value;
+  return new RefPlace(Ref.temporary(live ?? null));
 }
 
 function stringOffsetPlace(parent: Place, text: string, key: Value | undefined, row: number): Place {

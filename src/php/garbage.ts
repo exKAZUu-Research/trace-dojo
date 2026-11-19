@@ -1186,13 +1186,7 @@ function ownershipRootSlots(runtime: Runtime, includeTemporaries = true): unknow
     for (const method of cls.methods.values())
       if (method.fn.kind === 'user') appendValues(roots, [...method.fn.statics.values()]);
   }
-  roots.push(
-    ...runtime.declarationRoots,
-    ...runtime.held,
-    ...runtime.borrowedArrays,
-    ...persistentNativeRoots(runtime),
-    runtime.thrown
-  );
+  roots.push(...runtime.declarationRoots, ...runtime.held, ...persistentNativeRoots(runtime), runtime.thrown);
   for (const held of runtime.nativeHeld) appendValues(roots, [...held]);
   return roots;
 }

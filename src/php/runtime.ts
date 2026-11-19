@@ -189,7 +189,6 @@ export class Runtime {
   readonly mt = new MersenneTwister();
   /** Values held by native code (such as the array a sort is sorting), which garbage collection must keep. */
   readonly held: Value[] = [];
-  readonly borrowedArrays: PhpArray[] = [];
   program?: Program;
   private mainVariableNames?: ReadonlySet<string>;
   notices: CompileNotice[] = [];
@@ -334,16 +333,6 @@ export class Runtime {
 
   /** The values the callbacks of each running native function returned, which it holds until it returns. */
   nativeHeld: unknown[][] = [];
-
-  withBorrowedArray<T>(array: PhpArray, use: () => T): T {
-    this.borrowedArrays.push(array);
-    try {
-      return use();
-    } finally {
-      this.borrowedArrays.pop();
-      this.pendingReleases.push(array);
-    }
-  }
 
   /** Frees what letting go of some values frees, as {@link releaseDropped} describes, when that is safe now. */
   release(dropped: unknown[], durable = false, fromNative = false): void {
