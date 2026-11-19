@@ -448,7 +448,23 @@ export abstract class MemberBinder extends CallBinder {
       );
       return { kind: 'default', type: ERROR_TYPE, row: node.row };
     }
+    if (this.namesItsType(node.target, receiver, node.name, context))
+      return this.bindStaticMember(receiver.type as NamedType, node.name, typeArgs, position, context, isCallee);
     return this.bindInstanceMember(receiver, node.name, typeArgs, position, context, isCallee);
+  }
+
+  /**
+   * Whether `Color.Red` names a static member of the type `Color` though `Color` is also a property or variable of
+   * that type, as C# allows (spec §12.8.7.2, "Color Color").
+   */
+  private namesItsType(target: Expression, receiver: BoundExpression, name: string, context: BindContext): boolean {
+    if (target.kind !== 'name' || receiver.type.kind !== 'named' || receiver.type.symbol.name !== target.name)
+      return false;
+    const { found } = this.lookupMember(receiver.type, name, context.fn.typeContext);
+    if (found?.kind === 'field') return found.field.isStatic || found.field.isConst;
+    if (found?.kind === 'property') return found.property.isStatic;
+    if (found?.kind === 'methods') return found.candidates.every((candidate) => candidate.method.isStatic);
+    return found?.kind === 'type';
   }
 
   private bindBaseAccess(

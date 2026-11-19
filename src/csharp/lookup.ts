@@ -9,6 +9,8 @@ import {
   type NamedType,
   PropertySymbol,
   sameType,
+  substitute,
+  substitutionOf,
   type Type,
   type TypeSymbol,
 } from './types';
@@ -83,7 +85,7 @@ export class LookupBinder extends DeclarationBinder {
       return this.lookupMember(type, `Item${element + 1}`, context, arity, isInvoked);
     for (const owner of this.searchChain(type)) {
       const symbol = owner.symbol;
-      const member = memberNamed(symbol, name, isInvoked);
+      const member = memberNamed(owner, name, isInvoked);
       const isAccessibleMember = member !== undefined && this.isAccessible(member.access, symbol, context, type);
       if (isAccessibleMember && candidates.length > 0) break;
       if (isAccessibleMember) return { found: memberLookupOf(member, owner), inaccessible };
@@ -221,11 +223,13 @@ export class LookupBinder extends DeclarationBinder {
 }
 
 /** The field or property of a name that a type declares, leaving out one that a call cannot invoke. */
-function memberNamed(symbol: TypeSymbol, name: string, isInvoked: boolean): FieldSymbol | PropertySymbol | undefined {
+function memberNamed(owner: NamedType, name: string, isInvoked: boolean): FieldSymbol | PropertySymbol | undefined {
+  const { symbol } = owner;
   const found =
     symbol.fields.find((candidate) => candidate.name === name && !candidate.property) ??
     symbol.properties.find((candidate) => candidate.name === name && !candidate.isIndexer);
-  return found && isInvoked && !isInvocable(found.type) ? undefined : found;
+  // A member's type in its owner's type arguments, as `Func<int, int>` for KeyValuePair's `Value`, tells if it can be called.
+  return found && isInvoked && !isInvocable(substitute(found.type, substitutionOf(owner))) ? undefined : found;
 }
 
 function memberLookupOf(member: FieldSymbol | PropertySymbol, owner: NamedType): MemberLookup {
