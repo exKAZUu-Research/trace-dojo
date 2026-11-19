@@ -67,61 +67,76 @@ function charsOf(value: Value): string[] {
   return (value as CsArray).values.map((code) => String.fromCodePoint(code as number));
 }
 
-// code-gauge-allow functionNcss 60 -- String.Split's overloads share separators, counts, and options.
 function split(call: NativeCall, text: string, args: Value[]): CsArray {
-  const parameters = call.method.parameters;
+  const { separators, count, options } = splitArguments(call, args);
+  if (count < 0) failOutOfRange(call, 'count', 'Count cannot be less than zero.');
+  const isWhitespaceSplit =
+    separators.length === 0 &&
+    !(call.method.parameters.some((parameter) => specialOf(parameter.type) === 'string') && args[0] === '');
+  if (count === 0) return newArray(call, libraryType(call, STRING), []);
+  if (separators.length === 0 && !isWhitespaceSplit) return newArray(call, libraryType(call, STRING), [text]);
+  const separatorLengthAt = (index: number): number => {
+    if (isWhitespaceSplit) return WHITESPACE.test(text[index] ?? '') ? 1 : 0;
+    return separators.find((separator) => separator !== '' && text.startsWith(separator, index))?.length ?? 0;
+  };
+  return newArray(call, libraryType(call, STRING), splitParts(text, count, options, separatorLengthAt));
+}
+
+function splitArguments(call: NativeCall, args: Value[]): { separators: string[]; count: number; options: number } {
   let separators: string[] = [];
   let count = Number.MAX_SAFE_INTEGER;
   let options = 0;
-  for (const [index, parameter] of parameters.entries()) {
+  for (const [index, parameter] of call.method.parameters.entries()) {
     const value = args[index];
-    const type = parameter.type;
     if (parameter.name === 'count') count = value as number;
     else if (parameter.name === 'options') options = value as number;
-    else if (type.kind === 'array')
-      separators =
-        value === undefined
-          ? []
-          : (value as CsArray).values.map((item) =>
-              typeof item === 'number' ? String.fromCodePoint(item) : (item as string)
-            );
-    else if (specialOf(type) === 'char') separators = [String.fromCodePoint(value as number)];
-    else if (specialOf(type) === 'string') separators = value === undefined || value === '' ? [] : [value as string];
+    else separators = separatorsOf(value, parameter.type) ?? separators;
   }
-  if (count < 0) failOutOfRange(call, 'count', 'Count cannot be less than zero.');
+  return { separators, count, options };
+}
+
+function separatorsOf(value: Value, type: Type): string[] | undefined {
+  if (type.kind === 'array') {
+    if (value === undefined) return [];
+    return (value as CsArray).values.map((item) =>
+      typeof item === 'number' ? String.fromCodePoint(item) : (item as string)
+    );
+  }
+  const special = specialOf(type);
+  if (special === 'char') return [String.fromCodePoint(value as number)];
+  if (special === 'string') return value === undefined || value === '' ? [] : [value as string];
+  return undefined;
+}
+
+/** Splits a text at its separators into at most `count` parts, as `StringSplitOptions` filter and trim them. */
+function splitParts(
+  text: string,
+  count: number,
+  options: number,
+  separatorLengthAt: (index: number) => number
+): string[] {
   const removeEmpty = (options & 1) !== 0;
   const trimEntries = (options & 2) !== 0;
-  const isWhitespaceSplit =
-    separators.length === 0 &&
-    !(parameters.some((parameter) => specialOf(parameter.type) === 'string') && args[0] === '');
   const parts: string[] = [];
-  if (count === 0) return newArray(call, libraryType(call, STRING), []);
-  let start = 0;
-  let index = 0;
   const push = (part: string): void => {
     const piece = trimEntries ? part.trim() : part;
     if (removeEmpty && piece === '') return;
     parts.push(piece);
   };
-  while (index <= text.length) {
-    if (parts.length === count - 1) break;
-    const match = isWhitespaceSplit
-      ? WHITESPACE.test(text[index] ?? '')
-        ? 1
-        : 0
-      : (separators.find((separator) => separator !== '' && text.startsWith(separator, index))?.length ?? 0);
-    if (match > 0) {
-      push(text.slice(start, index));
-      index += match;
-      start = index;
-    } else {
+  let start = 0;
+  let index = 0;
+  while (index <= text.length && parts.length !== count - 1) {
+    const length = separatorLengthAt(index);
+    if (length === 0) {
       index++;
+      continue;
     }
+    push(text.slice(start, index));
+    index += length;
+    start = index;
   }
-  const rest = text.slice(start);
-  if (!(removeEmpty && (trimEntries ? rest.trim() : rest) === '')) parts.push(trimEntries ? rest.trim() : rest);
-  if (separators.length === 0 && !isWhitespaceSplit) return newArray(call, libraryType(call, STRING), [text]);
-  return newArray(call, libraryType(call, STRING), parts);
+  push(text.slice(start));
+  return parts;
 }
 
 function joinValues(call: NativeCall, separator: string, args: Value[], startIndex = 1): string {
@@ -425,36 +440,14 @@ export function formatCall(call: NativeCall, args: Value[]): string {
   return text;
 }
 
-// code-gauge-allow functionNcss 40 -- IndexOf's overloads share their start and count checks.
 function indexOf(call: NativeCall, text: string, args: Value[], fromEnd: boolean): number {
-  const parameters = call.method.parameters;
   const value = args[0];
   if (value === undefined) failNull('value');
   const needle = typeof value === 'number' ? String.fromCodePoint(value) : (value as string);
-  let start = fromEnd ? text.length - 1 : 0;
-  let count: number | undefined;
-  let ignoreCase = false;
-  for (const [index, parameter] of parameters.entries()) {
-    if (index === 0) continue;
-    if (parameter.name === 'startIndex') start = args[index] as number;
-    else if (parameter.name === 'count') count = args[index] as number;
-    else if (parameter.name === 'comparisonType') ignoreCase = (args[index] as number) % 2 === 1;
-  }
+  const { start, count, ignoreCase } = searchArguments(call, args, fromEnd ? text.length - 1 : 0);
   const haystack = ignoreCase ? text.toUpperCase() : text;
   const target = ignoreCase ? needle.toUpperCase() : needle;
-  if (fromEnd) {
-    if (text.length === 0) return target === '' ? 0 : -1;
-    if (start < 0 || start >= text.length)
-      failOutOfRange(
-        call,
-        'startIndex',
-        'Index was out of range. Must be non-negative and less than the size of the collection.'
-      );
-    return haystack.lastIndexOf(
-      target,
-      start - target.length + 1 < 0 ? (target === '' ? start : -1) : start - target.length + 1
-    );
-  }
+  if (fromEnd) return lastIndexFrom(call, text, haystack, target, start);
   if (start < 0 || start > text.length)
     failOutOfRange(
       call,
@@ -470,6 +463,36 @@ function indexOf(call: NativeCall, text: string, args: Value[], fromEnd: boolean
   const found = haystack.indexOf(target, start);
   if (found === -1 || (count !== undefined && found + target.length > start + count)) return -1;
   return found;
+}
+
+function searchArguments(
+  call: NativeCall,
+  args: Value[],
+  defaultStart: number
+): { start: number; count: number | undefined; ignoreCase: boolean } {
+  let start = defaultStart;
+  let count: number | undefined;
+  let ignoreCase = false;
+  for (const [index, parameter] of call.method.parameters.entries()) {
+    if (index === 0) continue;
+    if (parameter.name === 'startIndex') start = args[index] as number;
+    else if (parameter.name === 'count') count = args[index] as number;
+    else if (parameter.name === 'comparisonType') ignoreCase = (args[index] as number) % 2 === 1;
+  }
+  return { start, count, ignoreCase };
+}
+
+function lastIndexFrom(call: NativeCall, text: string, haystack: string, target: string, start: number): number {
+  if (text.length === 0) return target === '' ? 0 : -1;
+  if (start < 0 || start >= text.length)
+    failOutOfRange(
+      call,
+      'startIndex',
+      'Index was out of range. Must be non-negative and less than the size of the collection.'
+    );
+  const last = start - target.length + 1;
+  if (last >= 0) return haystack.lastIndexOf(target, last);
+  return haystack.lastIndexOf(target, target === '' ? start : -1);
 }
 
 /** `CharEnumerator`'s state: the text and the position before the current character. */

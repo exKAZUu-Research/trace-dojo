@@ -767,99 +767,84 @@ function radixText(value: bigint, base: number, bits: number): string {
   return BigInt.asUintN(bits, value).toString(base);
 }
 
-// code-gauge-allow functionNcss 40 -- Convert's rules for each source type.
 function convertTo(call: NativeCall, args: (Value | VariableReference)[], target: SpecialType): Value {
   const [value, fromBase] = args as Value[];
-  const sourceType = parameterType(call, 0);
-  let source = specialOf(sourceType);
-  let inner = value;
-  if (source === 'object' || source === undefined) {
-    if (value === undefined) return target === 'decimal' ? CsDecimal.ZERO : target === 'long' ? 0n : 0;
-    if (value instanceof CsBox) {
-      inner = value.value;
-      source = specialOf(value.type) ?? 'int';
-    } else if (typeof value === 'string') {
-      source = 'string';
-    } else {
-      fail(
-        'System.InvalidCastException',
-        `Unable to cast object of type '${runtimeTypeName(call.frame.runtime.runtimeTypeOf(value) ?? libraryType(call, 'System.Object'))}' to type 'System.IConvertible'.`
-      );
-    }
+  const declared = specialOf(parameterType(call, 0));
+  const isUntyped = declared === 'object' || declared === undefined;
+  if (isUntyped && value === undefined) return zeroOf(target);
+  const { source, inner } = isUntyped ? convertibleOf(call, value) : { source: declared, inner: value };
+  if (source === 'string') return convertString(inner as string | undefined, fromBase, target);
+  if (source === 'bool') return boolNumber(inner as boolean, target);
+  if (isIntegral(target)) {
+    if (source === 'double' || source === 'float') return floatToInteger(inner as number, target);
+    if (source === 'decimal') return convertNumeric((inner as CsDecimal).round(0, 'even'), 'decimal', target);
+    checkIntegerRange(BigInt(inner as number | bigint), target);
   }
-  if (source === 'string') {
-    if (inner === undefined)
-      return target === 'decimal'
-        ? CsDecimal.ZERO
-        : target === 'long'
-          ? 0n
-          : target === 'char'
-            ? fail('System.ArgumentNullException', 'Value cannot be null.', 'value')
-            : 0;
-    const text = inner as string;
-    if (fromBase !== undefined) return parseRadix(text, fromBase as number, target);
-    if (target === 'double' || target === 'float') {
-      const parsed = parseNumber(text);
-      if (parsed === undefined)
-        fail('System.FormatException', `The input string '${text}' was not in a correct format.`);
-      return target === 'float' ? Math.fround(parsed) : parsed;
-    }
-    if (target === 'decimal') {
-      const parsed = CsDecimal.parse(text.trim());
-      if (!parsed) fail('System.FormatException', `The input string '${text}' was not in a correct format.`);
-      return parsed;
-    }
-    if (target === 'char') {
-      if (text.length !== 1) fail('System.FormatException', 'String must be exactly one character long.');
-      return text.charCodeAt(0);
-    }
-    const [min, max] = integerRange(target);
-    const parsed = parseInteger(text, min, max, NET_NAMES[target] ?? 'Int32', true) as bigint;
-    return isBigIntKind(target) ? parsed : Number(parsed);
+  return convertNumeric(inner as NumericValue, source, target);
+}
+
+/** Whether `Convert` rounds a value to the type, which every target but the floating ones and decimal needs. */
+function isIntegral(type: SpecialType): boolean {
+  return type !== 'double' && type !== 'float' && type !== 'decimal';
+}
+
+function zeroOf(target: SpecialType): Value {
+  if (target === 'decimal') return CsDecimal.ZERO;
+  return target === 'long' ? 0n : 0;
+}
+
+/** The value inside an `object` argument and its type, which must implement `IConvertible`. */
+function convertibleOf(call: NativeCall, value: Value): { source: SpecialType; inner: Value } {
+  if (value instanceof CsBox) return { source: specialOf(value.type) ?? 'int', inner: value.value };
+  if (typeof value === 'string') return { source: 'string', inner: value };
+  return fail(
+    'System.InvalidCastException',
+    `Unable to cast object of type '${runtimeTypeName(call.frame.runtime.runtimeTypeOf(value) ?? libraryType(call, 'System.Object'))}' to type 'System.IConvertible'.`
+  );
+}
+
+function convertString(text: string | undefined, fromBase: Value, target: SpecialType): Value {
+  if (text === undefined) {
+    if (target === 'char') fail('System.ArgumentNullException', 'Value cannot be null.', 'value');
+    return zeroOf(target);
   }
-  if (source === 'bool')
-    return target === 'decimal'
-      ? inner
-        ? CsDecimal.ONE
-        : CsDecimal.ZERO
-      : target === 'long'
-        ? inner
-          ? 1n
-          : 0n
-        : inner
-          ? 1
-          : 0;
-  if (
-    (source === 'double' || source === 'float') &&
-    target !== 'double' &&
-    target !== 'float' &&
-    target !== 'decimal'
-  ) {
-    const number = inner as number;
-    const rounded = roundEven(number);
-    const [min, max] = integerRange(target);
-    if (Number.isNaN(number) || rounded < Number(min) || rounded > Number(max))
-      fail('System.OverflowException', `Value was either too large or too small for ${OVERFLOW_ARTICLES[target]}.`);
-    return isBigIntKind(target) ? BigInt(rounded) : rounded;
+  if (fromBase !== undefined) return parseRadix(text, fromBase as number, target);
+  if (!isIntegral(target)) return parseNonIntegral(text, target);
+  if (target === 'char') {
+    if (text.length !== 1) fail('System.FormatException', 'String must be exactly one character long.');
+    return text.charCodeAt(0);
   }
-  if (source === 'decimal' && target !== 'double' && target !== 'float' && target !== 'decimal') {
-    const rounded = (inner as CsDecimal).round(0, 'even');
-    return convertNumeric(rounded, 'decimal', target);
-  }
-  if (
-    target !== 'double' &&
-    target !== 'float' &&
-    target !== 'decimal' &&
-    source !== 'decimal' &&
-    source !== 'double' &&
-    source !== 'float'
-  ) {
-    const integer = BigInt(inner as number | bigint);
-    const [min, max] = integerRange(target);
-    if (integer < min || integer > max)
-      fail('System.OverflowException', `Value was either too large or too small for ${OVERFLOW_ARTICLES[target]}.`);
-  }
-  return convertNumeric(inner as NumericValue, source as SpecialType, target);
+  const [min, max] = integerRange(target);
+  const parsed = parseInteger(text, min, max, NET_NAMES[target] ?? 'Int32', true) as bigint;
+  return isBigIntKind(target) ? parsed : Number(parsed);
+}
+
+function parseNonIntegral(text: string, target: SpecialType): Value {
+  const parsed = target === 'decimal' ? CsDecimal.parse(text.trim()) : parseNumber(text);
+  if (parsed === undefined) fail('System.FormatException', `The input string '${text}' was not in a correct format.`);
+  return target === 'float' ? Math.fround(parsed as number) : parsed;
+}
+
+function boolNumber(value: boolean, target: SpecialType): Value {
+  if (target === 'decimal') return value ? CsDecimal.ONE : CsDecimal.ZERO;
+  if (target === 'long') return value ? 1n : 0n;
+  return value ? 1 : 0;
+}
+
+function floatToInteger(number: number, target: SpecialType): Value {
+  const rounded = roundEven(number);
+  const [min, max] = integerRange(target);
+  if (Number.isNaN(number) || rounded < Number(min) || rounded > Number(max)) overflowFor(target);
+  return isBigIntKind(target) ? BigInt(rounded) : rounded;
+}
+
+function checkIntegerRange(integer: bigint, target: SpecialType): void {
+  const [min, max] = integerRange(target);
+  if (integer < min || integer > max) overflowFor(target);
+}
+
+function overflowFor(target: SpecialType): never {
+  return fail('System.OverflowException', `Value was either too large or too small for ${OVERFLOW_ARTICLES[target]}.`);
 }
 
 const NET_NAMES: Partial<Record<SpecialType, string>> = {

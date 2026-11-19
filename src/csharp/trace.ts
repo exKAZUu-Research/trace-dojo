@@ -35,7 +35,7 @@ import {
   type VariableReference,
 } from './values';
 
-// code-gauge-allow duplicateLines 15 -- Each language wires its own runtime into the shared TraceRecorder alike.
+// code-gauge-allow duplicateLines 16 -- Each language wires its own runtime into the shared TraceRecorder alike.
 export function traceCSharpProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileProgram(parseCSharp(program), { trace });
   const runtime = new Runtime(compiled.library, input);
@@ -159,7 +159,7 @@ const SHOWN_LIBRARY_TYPES = new Set(['valueTuple', 'KeyValuePair`2']);
 
 const NOT_SCALAR = Symbol('notScalar');
 
-// code-gauge-allow functionNcss 40 -- One case per kind of type.
+// code-gauge-allow functionNcss 41 -- One case per kind of type.
 function scalarOf(value: Value, type: Type): TraceScalar | TraceItemVariable[string] | typeof NOT_SCALAR {
   const underlying = nullableUnderlying(type) ?? type;
   if (value instanceof CsBox) return scalarOf(value.value, value.type);

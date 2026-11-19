@@ -189,7 +189,6 @@ export function formatDateTime(value: CsStruct, format: string | undefined): str
   return customDate(parts, pattern);
 }
 
-// code-gauge-allow functionNcss 80 -- One case per custom date format specifier.
 function customDate(parts: DateParts, pattern: string): string {
   let result = '';
   let index = 0;
@@ -197,81 +196,79 @@ function customDate(parts: DateParts, pattern: string): string {
     const char = pattern[index];
     let count = 1;
     while (pattern[index + count] === char) count++;
-    switch (char) {
-      case 'y': {
-        result += count <= 2 ? pad(parts.year % 100, count) : pad(parts.year, count);
-        break;
-      }
-      case 'M': {
-        result += count <= 2 ? pad(parts.month, count) : `${parts.month}月`;
-        break;
-      }
-      case 'd': {
-        result +=
-          count <= 2
-            ? pad(parts.day, count)
-            : count === 3
-              ? SHORT_DAY_NAMES[parts.dayOfWeek]
-              : DAY_NAMES[parts.dayOfWeek];
-        break;
-      }
-      case 'H': {
-        result += pad(parts.hour, Math.min(count, 2));
-        break;
-      }
-      case 'h': {
-        result += pad(parts.hour % 12 === 0 ? 12 : parts.hour % 12, Math.min(count, 2));
-        break;
-      }
-      case 'm': {
-        result += pad(parts.minute, Math.min(count, 2));
-        break;
-      }
-      case 's': {
-        result += pad(parts.second, Math.min(count, 2));
-        break;
-      }
-      case 'f':
-      case 'F': {
-        const digits = parts.fraction.toString().padStart(7, '0').slice(0, count);
-        result += char === 'F' ? digits.replace(/0+$/, '') : digits;
-        break;
-      }
-      case 't': {
-        const designator = parts.hour < 12 ? '午前' : '午後';
-        result += count === 1 ? designator.charAt(0) : designator;
-        break;
-      }
-      case 'K':
-      case 'z': {
-        result += char === 'z' ? (count === 1 ? '+9' : count === 2 ? '+09' : '+09:00') : '';
-        break;
-      }
-      case '/':
-      case ':': {
-        result += char;
-        count = 1;
-        break;
-      }
-      case "'":
-      case '"': {
-        const end = pattern.indexOf(char, index + 1);
-        result += pattern.slice(index + 1, end === -1 ? pattern.length : end);
-        count = (end === -1 ? pattern.length : end) - index + 1;
-        break;
-      }
-      case '\\': {
-        result += pattern[index + 1] ?? '';
-        count = 2;
-        break;
-      }
-      default: {
-        result += char.repeat(count);
-      }
+    const field = dateField(parts, char, count);
+    if (field === undefined) {
+      const literal = dateLiteral(pattern, index, count);
+      result += literal.text;
+      index += literal.length;
+    } else {
+      result += field;
+      index += count;
     }
-    index += count;
   }
   return result;
+}
+
+/** The text of a run of `count` copies of a custom date format specifier, or undefined for a literal character. */
+// code-gauge-allow functionCognitiveComplexity 21 -- One case per custom date format specifier.
+// code-gauge-allow functionNcss 33 -- One case per custom date format specifier.
+function dateField(parts: DateParts, char: string, count: number): string | undefined {
+  switch (char) {
+    case 'y': {
+      return count <= 2 ? pad(parts.year % 100, count) : pad(parts.year, count);
+    }
+    case 'M': {
+      return count <= 2 ? pad(parts.month, count) : `${parts.month}月`;
+    }
+    case 'd': {
+      if (count <= 2) return pad(parts.day, count);
+      return count === 3 ? SHORT_DAY_NAMES[parts.dayOfWeek] : DAY_NAMES[parts.dayOfWeek];
+    }
+    case 'H': {
+      return pad(parts.hour, Math.min(count, 2));
+    }
+    case 'h': {
+      return pad(parts.hour % 12 === 0 ? 12 : parts.hour % 12, Math.min(count, 2));
+    }
+    case 'm': {
+      return pad(parts.minute, Math.min(count, 2));
+    }
+    case 's': {
+      return pad(parts.second, Math.min(count, 2));
+    }
+    case 'f':
+    case 'F': {
+      const digits = parts.fraction.toString().padStart(7, '0').slice(0, count);
+      return char === 'F' ? digits.replace(/0+$/, '') : digits;
+    }
+    case 't': {
+      const designator = parts.hour < 12 ? '午前' : '午後';
+      return count === 1 ? designator.charAt(0) : designator;
+    }
+    case 'K': {
+      return '';
+    }
+    case 'z': {
+      if (count === 1) return '+9';
+      return count === 2 ? '+09' : '+09:00';
+    }
+    default: {
+      return undefined;
+    }
+  }
+}
+
+/** The text of the literal at an index of a custom date format and the length of the pattern it takes. */
+function dateLiteral(pattern: string, index: number, count: number): { text: string; length: number } {
+  const char = pattern[index];
+  if (char === '/' || char === ':') return { text: char, length: 1 };
+  if (char === "'" || char === '"') {
+    const end = pattern.indexOf(char, index + 1);
+    const close = end === -1 ? pattern.length : end;
+    return { text: pattern.slice(index + 1, close), length: close - index + 1 };
+  }
+  if (char === '\\') return { text: pattern[index + 1] ?? '', length: 2 };
+  return { text: char.repeat(count), length: count };
 }
 
 /** Formats a TimeSpan: `[-][d.]hh:mm:ss[.fffffff]`, or with a custom format. */
@@ -279,35 +276,49 @@ export function formatTimeSpan(value: CsStruct, format: string | undefined): str
   const ticks = ticksOf(value);
   const negative = ticks < 0n;
   const magnitude = negative ? -ticks : ticks;
-  const days = magnitude / TICKS_PER_DAY;
-  const hours = Number((magnitude % TICKS_PER_DAY) / TICKS_PER_HOUR);
-  const minutes = Number((magnitude % TICKS_PER_HOUR) / TICKS_PER_MINUTE);
-  const seconds = Number((magnitude % TICKS_PER_MINUTE) / TICKS_PER_SECOND);
-  const fraction = magnitude % TICKS_PER_SECOND;
+  const span: TimeSpanParts = {
+    sign: negative ? '-' : '',
+    days: magnitude / TICKS_PER_DAY,
+    hours: Number((magnitude % TICKS_PER_DAY) / TICKS_PER_HOUR),
+    minutes: Number((magnitude % TICKS_PER_HOUR) / TICKS_PER_MINUTE),
+    seconds: Number((magnitude % TICKS_PER_MINUTE) / TICKS_PER_SECOND),
+    fraction: magnitude % TICKS_PER_SECOND,
+  };
   if (format === undefined || format === '' || format === 'c' || format === 't' || format === 'T') {
-    return `${negative ? '-' : ''}${days > 0n ? `${days}.` : ''}${pad(hours, 2)}:${pad(minutes, 2)}:${pad(seconds, 2)}${fraction > 0n ? `.${fraction.toString().padStart(7, '0')}` : ''}`;
+    const { sign, days, hours, minutes, seconds, fraction } = span;
+    return `${sign}${days > 0n ? `${days}.` : ''}${pad(hours, 2)}:${pad(minutes, 2)}:${pad(seconds, 2)}${fraction > 0n ? `.${fraction.toString().padStart(7, '0')}` : ''}`;
   }
   if (format === 'g') {
-    return `${negative ? '-' : ''}${days > 0n ? `${days}:` : ''}${hours}:${pad(minutes, 2)}:${pad(seconds, 2)}${fraction > 0n ? `.${fraction.toString().padStart(7, '0').replace(/0+$/, '')}` : ''}`;
+    const { sign, days, hours, minutes, seconds, fraction } = span;
+    return `${sign}${days > 0n ? `${days}:` : ''}${hours}:${pad(minutes, 2)}:${pad(seconds, 2)}${fraction > 0n ? `.${fraction.toString().padStart(7, '0').replace(/0+$/, '')}` : ''}`;
   }
   if (format === 'G') {
-    return `${negative ? '-' : ''}${days}:${pad(hours, 2)}:${pad(minutes, 2)}:${pad(seconds, 2)}.${fraction.toString().padStart(7, '0')}`;
+    const { sign, days, hours, minutes, seconds, fraction } = span;
+    return `${sign}${days}:${pad(hours, 2)}:${pad(minutes, 2)}:${pad(seconds, 2)}.${fraction.toString().padStart(7, '0')}`;
   }
+  return customTimeSpan(span, format);
+}
+
+interface TimeSpanParts {
+  sign: string;
+  days: bigint;
+  hours: number;
+  minutes: number;
+  seconds: number;
+  fraction: bigint;
+}
+
+function customTimeSpan(span: TimeSpanParts, format: string): string {
   let result = '';
   for (let index = 0; index < format.length; index++) {
     const char = format[index];
     let count = 1;
     while (format[index + count] === char) count++;
-    const take = (text: string): void => {
-      result += text;
+    const field = timeSpanField(span, char, count);
+    if (field !== undefined) {
+      result += field;
       index += count - 1;
-    };
-    if (char === 'd') take(days.toString().padStart(count, '0'));
-    else if (char === 'h') take(pad(hours, count));
-    else if (char === 'm') take(pad(minutes, count));
-    else if (char === 's') take(pad(seconds, count));
-    else if (char === 'f') take(fraction.toString().padStart(7, '0').slice(0, count));
-    else if (char === '\\') {
+    } else if (char === '\\') {
       result += format[index + 1] ?? '';
       index++;
     } else if (char === "'") {
@@ -317,6 +328,15 @@ export function formatTimeSpan(value: CsStruct, format: string | undefined): str
     } else throw new PendingException('System.FormatException', 'Input string was not in a correct format.');
   }
   return result;
+}
+
+function timeSpanField(span: TimeSpanParts, char: string, count: number): string | undefined {
+  if (char === 'd') return span.days.toString().padStart(count, '0');
+  if (char === 'h') return pad(span.hours, count);
+  if (char === 'm') return pad(span.minutes, count);
+  if (char === 's') return pad(span.seconds, count);
+  if (char === 'f') return span.fraction.toString().padStart(7, '0').slice(0, count);
+  return undefined;
 }
 
 // ---- Natives ----

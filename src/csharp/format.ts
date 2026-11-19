@@ -223,7 +223,7 @@ function digitsOf(value: number | bigint | CsDecimal, kind: NumericKind): Digits
   return exactDigits(value);
 }
 
-// code-gauge-allow functionNcss 80 -- One case per standard format specifier.
+// code-gauge-allow functionNcss 40 -- One case per standard format specifier.
 function formatStandard(
   value: number | bigint | CsDecimal,
   kind: NumericKind,
@@ -232,42 +232,29 @@ function formatStandard(
 ): string {
   const upper = specifier.toUpperCase();
   const mode = kind === 'decimal' || kind === 'integer' ? 'away' : 'even';
-  const isInteger = kind === 'integer';
   switch (upper) {
     case 'D': {
-      if (!isInteger) throw invalidFormat();
+      if (kind !== 'integer') throw invalidFormat();
       const number = digitsOf(value, kind);
       const { integer } = fixedParts(number, 0);
       return withSign(integer.padStart(precision ?? 0, '0'), number);
     }
     case 'X': {
-      if (!isInteger) throw invalidFormat();
+      if (kind !== 'integer') throw invalidFormat();
       return hexText(value as number | bigint, specifier === 'x', precision ?? 0);
     }
     case 'F':
     case 'N': {
-      const decimals = precision ?? CULTURE.numberDecimalDigits;
-      const number = roundToDecimals(digitsOf(value, kind), decimals, mode);
-      const { integer, fraction } = fixedParts(number, decimals);
-      const integerText = upper === 'N' ? group(integer) : integer;
-      const text = decimals > 0 ? `${integerText}${CULTURE.decimalSeparator}${fraction}` : integerText;
-      return number.digits === '' && !number.isNegative ? text : withSignKeepingZero(text, number, kind);
+      return fixedText(value, kind, upper === 'N', precision ?? CULTURE.numberDecimalDigits, mode);
     }
     case 'P': {
-      const decimals = precision ?? CULTURE.percentDecimalDigits;
-      const base = digitsOf(value, kind);
-      const scaled = base.digits === '' ? base : { ...base, exponent: base.exponent + 2 };
-      const number = roundToDecimals(scaled, decimals, mode);
-      const { integer, fraction } = fixedParts(number, decimals);
-      const text = `${group(integer)}${decimals > 0 ? `${CULTURE.decimalSeparator}${fraction}` : ''}%`;
-      return withSignKeepingZero(text, number, kind);
+      return percentText(value, kind, precision ?? CULTURE.percentDecimalDigits, mode);
     }
     case 'C': {
       const decimals = precision ?? CULTURE.currencyDecimalDigits;
       const number = roundToDecimals(digitsOf(value, kind), decimals, mode);
       const { integer, fraction } = fixedParts(number, decimals);
-      const text = `${CULTURE.currencySymbol}${group(integer)}${decimals > 0 ? `${CULTURE.decimalSeparator}${fraction}` : ''}`;
-      return withSign(text, number);
+      return withSign(`${CULTURE.currencySymbol}${group(integer)}${fractionSuffix(decimals, fraction)}`, number);
     }
     case 'E': {
       const decimals = precision ?? 6;
@@ -275,22 +262,62 @@ function formatStandard(
       return withSignKeepingZero(scientific(number, decimals, specifier === 'e' ? 'e' : 'E', 3, false), number, kind);
     }
     case 'G': {
-      if (precision === undefined || precision === 0) {
-        if (kind === 'double' || kind === 'float') return formatFloat(value as number, kind === 'float');
-        return defaultText(value, kind);
-      }
-      const number = roundDigits(digitsOf(value, kind), precision, mode);
-      return generalText(number, precision, specifier === 'g' ? 'e' : 'E');
+      return generalStandardText(value, kind, precision, specifier === 'g' ? 'e' : 'E', mode);
     }
     case 'R': {
-      if (kind === 'double' || kind === 'float') return formatFloat(value as number, kind === 'float');
-      if (kind === 'integer') return String(value);
-      throw invalidFormat();
+      if (kind === 'decimal') throw invalidFormat();
+      return roundTripText(value, kind);
     }
     default: {
       throw invalidFormat();
     }
   }
+}
+
+function fixedText(
+  value: number | bigint | CsDecimal,
+  kind: NumericKind,
+  isGrouped: boolean,
+  decimals: number,
+  mode: 'even' | 'away'
+): string {
+  const number = roundToDecimals(digitsOf(value, kind), decimals, mode);
+  const { integer, fraction } = fixedParts(number, decimals);
+  const text = `${isGrouped ? group(integer) : integer}${fractionSuffix(decimals, fraction)}`;
+  return number.digits === '' && !number.isNegative ? text : withSignKeepingZero(text, number, kind);
+}
+
+function percentText(
+  value: number | bigint | CsDecimal,
+  kind: NumericKind,
+  decimals: number,
+  mode: 'even' | 'away'
+): string {
+  const base = digitsOf(value, kind);
+  const scaled = base.digits === '' ? base : { ...base, exponent: base.exponent + 2 };
+  const number = roundToDecimals(scaled, decimals, mode);
+  const { integer, fraction } = fixedParts(number, decimals);
+  return withSignKeepingZero(`${group(integer)}${fractionSuffix(decimals, fraction)}%`, number, kind);
+}
+
+function generalStandardText(
+  value: number | bigint | CsDecimal,
+  kind: NumericKind,
+  precision: number | undefined,
+  letter: 'E' | 'e',
+  mode: 'even' | 'away'
+): string {
+  if (precision === undefined || precision === 0) return roundTripText(value, kind);
+  return generalText(roundDigits(digitsOf(value, kind), precision, mode), precision, letter);
+}
+
+function fractionSuffix(decimals: number, fraction: string): string {
+  return decimals > 0 ? `${CULTURE.decimalSeparator}${fraction}` : '';
+}
+
+function roundTripText(value: number | bigint | CsDecimal, kind: NumericKind): string {
+  if (kind === 'double' || kind === 'float') return formatFloat(value as number, kind === 'float');
+  return defaultText(value, kind);
 }
 
 /** Fixed-point formats keep the sign of a negative value that rounds to zero, as .NET Core 3.0 and later do. */
@@ -313,45 +340,50 @@ interface Section {
   pattern: string;
 }
 
-// code-gauge-allow functionNcss 90 -- .NET's custom numeric format, transcribed from its scanning of the format.
 function formatCustom(value: number | bigint | CsDecimal, kind: NumericKind, format: string): string {
   const sections = splitSections(format);
-  let number: Digits =
-    kind === 'double'
-      ? roundDigits(exactDigits(value as number), 15, 'even')
-      : kind === 'float'
-        ? roundDigits(exactDigits(value as number), 7, 'even')
-        : digitsOf(value, kind);
-  let section = sections[0];
-  if (sections.length > 1) {
-    if (number.isNegative && number.digits !== '') section = sections[1];
-    if (number.digits === '' && sections.length > 2) section = sections[2];
-  }
+  const initial = customDigits(value, kind);
+  const section = sectionFor(sections, initial);
   const pattern = section.pattern;
   const scan = scanPattern(pattern);
-  if (scan.percent) number = { ...number, exponent: number.exponent + 2 * scan.percent };
-  if (scan.scaleDown) number = { ...number, exponent: number.exponent - 3 * scan.scaleDown };
-  let exponentValue = 0;
-  if (scan.scientific) {
-    const significant = scan.integerDigits + scan.fractionDigits;
-    number = roundDigits(number, significant, 'away');
-    if (number.digits !== '') {
-      exponentValue = number.exponent - scan.integerDigits;
-      number = { ...number, exponent: scan.integerDigits };
-    }
-  } else {
-    number = roundToDecimals(number, scan.fractionDigits, 'away');
-  }
+  const { number, exponent } = roundCustom(initial, scan);
   const { integer: integerPart, fraction: fractionPart } = fixedParts(number, scan.fractionDigits);
   const integerDigitsText = integerPart === '0' && number.exponent <= 0 ? '' : integerPart;
   const isZero = number.digits === '';
   // A section of the negative pattern supplies its own sign; the first section prints the sign of a negative value.
   const needsSign =
     (number.isNegative && sections.length === 1) ||
-    (number.isNegative && section === sections[0] && sections.length > 1 && !(number.digits === ''));
-  const result = renderCustom(pattern, scan, integerDigitsText, fractionPart, exponentValue);
+    (number.isNegative && section === sections[0] && sections.length > 1 && !isZero);
+  const result = renderCustom(pattern, scan, integerDigitsText, fractionPart, exponent);
   if (needsSign && (!isZero || kind === 'double' || kind === 'float')) return `${CULTURE.negativeSign}${result}`;
   return result;
+}
+
+function customDigits(value: number | bigint | CsDecimal, kind: NumericKind): Digits {
+  if (kind === 'double') return roundDigits(exactDigits(value as number), 15, 'even');
+  if (kind === 'float') return roundDigits(exactDigits(value as number), 7, 'even');
+  return digitsOf(value, kind);
+}
+
+/** The section of a format for a value: positive, negative, then zero. */
+function sectionFor(sections: Section[], number: Digits): Section {
+  if (sections.length === 1) return sections[0];
+  if (number.digits === '') return sections.length > 2 ? sections[2] : sections[0];
+  return number.isNegative ? sections[1] : sections[0];
+}
+
+/** Scales and rounds a value as a pattern's placeholders, percent signs, scaling commas, and exponent ask. */
+function roundCustom(initial: Digits, scan: PatternScan): { number: Digits; exponent: number } {
+  let number = initial;
+  if (scan.percent) number = { ...number, exponent: number.exponent + 2 * scan.percent };
+  if (scan.scaleDown) number = { ...number, exponent: number.exponent - 3 * scan.scaleDown };
+  if (!scan.scientific) return { number: roundToDecimals(number, scan.fractionDigits, 'away'), exponent: 0 };
+  number = roundDigits(number, scan.integerDigits + scan.fractionDigits, 'away');
+  if (number.digits === '') return { number, exponent: 0 };
+  return {
+    number: { ...number, exponent: scan.integerDigits },
+    exponent: number.exponent - scan.integerDigits,
+  };
 }
 
 function splitSections(format: string): Section[] {
@@ -403,52 +435,68 @@ function scanPattern(pattern: string): PatternScan {
     scaleDown: 0,
     scientific: undefined,
   };
-  let inFraction = false;
-  let firstZero = -1;
-  let lastDigitBeforePoint = -1;
+  const state: ScanState = { inFraction: false, firstZero: -1, lastDigitBeforePoint: -1 };
   for (let index = 0; index < pattern.length; index++) {
-    const char = pattern[index];
-    if (char === "'" || char === '"') {
-      const end = pattern.indexOf(char, index + 1);
-      index = end === -1 ? pattern.length : end;
-      continue;
-    }
-    if (char === '\\') {
-      index++;
-      continue;
-    }
-    if (scan.scientific) continue;
-    if (char === '0' || char === '#') {
-      if (inFraction) {
-        scan.fractionDigits++;
-        if (char === '0') scan.fractionZeros = scan.fractionDigits;
-      } else {
-        scan.integerDigits++;
-        if (char === '0' && firstZero < 0) firstZero = scan.integerDigits;
-        lastDigitBeforePoint = index;
-      }
-    } else if (char === '.' && !inFraction) {
-      inFraction = true;
-    } else if (char === ',') {
-      if (!inFraction) {
-        const next = pattern[index + 1];
-        if (next === undefined || next === '.' || next === ';') scan.scaleDown++;
-        else if (lastDigitBeforePoint >= 0) scan.hasGrouping = true;
-      }
-    } else if (char === '%') {
-      scan.percent++;
-    } else if ((char === 'E' || char === 'e') && /^[+-]?0/.test(pattern.slice(index + 1))) {
-      const sign = pattern[index + 1] === '+';
-      const match = /^[+-]?(0+)/.exec(pattern.slice(index + 1)) as RegExpExecArray;
-      scan.scientific = { letter: char, sign, digits: match[1].length };
-      index += match[0].length;
-    }
+    const literalEnd = literalEndOf(pattern, index);
+    if (literalEnd !== undefined) index = literalEnd;
+    else if (!scan.scientific) index = scanCharacter(pattern, index, scan, state);
   }
-  scan.integerZeros = firstZero < 0 ? 0 : scan.integerDigits - firstZero + 1;
+  scan.integerZeros = state.firstZero < 0 ? 0 : scan.integerDigits - state.firstZero + 1;
   return scan;
 }
 
-// code-gauge-allow functionNcss 60 -- Rendering each placeholder of a custom format.
+interface ScanState {
+  inFraction: boolean;
+  firstZero: number;
+  lastDigitBeforePoint: number;
+}
+
+/** The index of the last character of a quoted string or an escaped character that starts at an index. */
+function literalEndOf(pattern: string, index: number): number | undefined {
+  const char = pattern[index];
+  if (char === '\\') return index + 1;
+  if (char !== "'" && char !== '"') return undefined;
+  const end = pattern.indexOf(char, index + 1);
+  return end === -1 ? pattern.length : end;
+}
+
+/** Records one character of a custom pattern, returning the index of the last character it consumed. */
+function scanCharacter(pattern: string, index: number, scan: PatternScan, state: ScanState): number {
+  const char = pattern[index];
+  if (char === '0' || char === '#') {
+    scanDigit(char, index, scan, state);
+  } else if (char === '.') {
+    state.inFraction = true;
+  } else if (char === ',') {
+    if (!state.inFraction) scanComma(pattern, index, scan, state);
+  } else if (char === '%') {
+    scan.percent++;
+  } else if (char === 'E' || char === 'e') {
+    const match = /^[+-]?(0+)/.exec(pattern.slice(index + 1));
+    if (!match) return index;
+    scan.scientific = { letter: char, sign: pattern[index + 1] === '+', digits: match[1].length };
+    return index + match[0].length;
+  }
+  return index;
+}
+
+function scanDigit(char: string, index: number, scan: PatternScan, state: ScanState): void {
+  if (state.inFraction) {
+    scan.fractionDigits++;
+    if (char === '0') scan.fractionZeros = scan.fractionDigits;
+    return;
+  }
+  scan.integerDigits++;
+  if (char === '0' && state.firstZero < 0) state.firstZero = scan.integerDigits;
+  state.lastDigitBeforePoint = index;
+}
+
+function scanComma(pattern: string, index: number, scan: PatternScan, state: ScanState): void {
+  const next = pattern[index + 1];
+  if (next === undefined || next === '.' || next === ';') scan.scaleDown++;
+  else if (state.lastDigitBeforePoint >= 0) scan.hasGrouping = true;
+}
+
 function renderCustom(
   pattern: string,
   scan: PatternScan,
@@ -461,64 +509,97 @@ function renderCustom(
   // Trailing `#` placeholders drop zeros that no `0` placeholder requires.
   let fraction = fractionText;
   while (fraction.length > scan.fractionZeros && fraction.endsWith('0')) fraction = fraction.slice(0, -1);
-  let result = '';
-  let inFraction = false;
-  let integerWritten = false;
-  let fractionIndex = 0;
-  let pointWritten = false;
-  for (let index = 0; index < pattern.length; index++) {
-    const char = pattern[index];
-    if (char === "'" || char === '"') {
-      const end = pattern.indexOf(char, index + 1);
-      result += pattern.slice(index + 1, end === -1 ? pattern.length : end);
-      index = end === -1 ? pattern.length : end;
-      continue;
-    }
-    if (char === '\\') {
-      result += pattern[index + 1] ?? '';
-      index++;
-      continue;
-    }
-    if (char === '0' || char === '#') {
-      if (!inFraction) {
-        if (!integerWritten) {
-          result += integer;
-          integerWritten = true;
-        }
-      } else if (fractionIndex < fraction.length) {
-        if (!pointWritten) {
-          result += CULTURE.decimalSeparator;
-          pointWritten = true;
-        }
-        result += fraction[fractionIndex++];
-      }
-      continue;
-    }
-    if (char === '.') {
-      if (!inFraction) {
-        if (!integerWritten) {
-          result += integer;
-          integerWritten = true;
-        }
-        inFraction = true;
-      }
-      continue;
-    }
-    if (char === ',') continue;
-    if (char === '%') {
-      result += '%';
-      continue;
-    }
-    if ((char === 'E' || char === 'e') && scan.scientific && /^[+-]?0/.test(pattern.slice(index + 1))) {
-      const match = /^[+-]?(0+)/.exec(pattern.slice(index + 1)) as RegExpExecArray;
-      const sign = exponent < 0 ? '-' : scan.scientific.sign ? '+' : '';
-      result += `${char}${sign}${String(Math.abs(exponent)).padStart(match[1].length, '0')}`;
-      index += match[0].length;
-      continue;
-    }
-    result += char;
+  const state: RenderState = {
+    integer,
+    fraction,
+    result: '',
+    inFraction: false,
+    integerWritten: false,
+    fractionIndex: 0,
+    pointWritten: false,
+  };
+  for (let index = 0; index < pattern.length; index++) index = renderCharacter(pattern, index, scan, exponent, state);
+  return state.result;
+}
+
+interface RenderState {
+  integer: string;
+  fraction: string;
+  result: string;
+  inFraction: boolean;
+  integerWritten: boolean;
+  fractionIndex: number;
+  pointWritten: boolean;
+}
+
+/** Renders one character of a custom pattern, returning the index of the last character it consumed. */
+function renderCharacter(
+  pattern: string,
+  index: number,
+  scan: PatternScan,
+  exponent: number,
+  state: RenderState
+): number {
+  const char = pattern[index];
+  if (char === "'" || char === '"') {
+    const end = literalEndOf(pattern, index) as number;
+    state.result += pattern.slice(index + 1, end);
+    return end;
   }
-  return result;
+  if (char === '\\') {
+    state.result += pattern[index + 1] ?? '';
+    return index + 1;
+  }
+  if (char === '0' || char === '#') {
+    renderDigit(state);
+  } else if (char === '.') {
+    if (!state.inFraction) {
+      writeInteger(state);
+      state.inFraction = true;
+    }
+  } else if ((char === 'E' || char === 'e') && scan.scientific) {
+    return renderExponent(pattern, index, scan.scientific.sign, exponent, state);
+  } else if (char !== ',') {
+    state.result += char;
+  }
+  return index;
+}
+
+function renderExponent(
+  pattern: string,
+  index: number,
+  showsPlus: boolean,
+  exponent: number,
+  state: RenderState
+): number {
+  const char = pattern[index];
+  const match = /^[+-]?(0+)/.exec(pattern.slice(index + 1));
+  if (!match) {
+    state.result += char;
+    return index;
+  }
+  const sign = exponent < 0 ? '-' : showsPlus ? '+' : '';
+  state.result += `${char}${sign}${String(Math.abs(exponent)).padStart(match[1].length, '0')}`;
+  return index + match[0].length;
+}
+
+function renderDigit(state: RenderState): void {
+  if (!state.inFraction) {
+    writeInteger(state);
+    return;
+  }
+  if (state.fractionIndex >= state.fraction.length) return;
+  if (!state.pointWritten) {
+    state.result += CULTURE.decimalSeparator;
+    state.pointWritten = true;
+  }
+  state.result += state.fraction[state.fractionIndex++];
+}
+
+function writeInteger(state: RenderState): void {
+  if (state.integerWritten) return;
+  state.result += state.integer;
+  state.integerWritten = true;
 }
 
 // ---- Composite formats ----
@@ -536,61 +617,64 @@ export function parseCompositeFormat(format: string): (string | FormatItem)[] {
   let index = 0;
   while (index < format.length) {
     const char = format[index];
-    if (char === '}') {
-      if (format[index + 1] === '}') {
-        text += '}';
-        index += 2;
-        continue;
-      }
+    const isDoubled = format[index + 1] === char;
+    if (char === '}' && !isDoubled)
       throw fail(index, 'Unexpected closing brace without a corresponding opening brace.');
-    }
-    if (char !== '{') {
+    if (char !== '{' || isDoubled) {
       text += char;
-      index++;
+      index += char === '{' || char === '}' ? 2 : 1;
       continue;
     }
-    if (format[index + 1] === '{') {
-      text += '{';
-      index += 2;
-      continue;
-    }
-    index++;
-    let digits = '';
-    while (index < format.length && /\d/.test(format[index])) digits += format[index++];
-    if (digits === '')
-      throw fail(index, index >= format.length ? 'Format item ends prematurely.' : 'Expected an ASCII digit.');
-    while (format[index] === ' ') index++;
-    let alignment: number | undefined;
-    if (format[index] === ',') {
-      index++;
-      while (format[index] === ' ') index++;
-      let alignmentText = '';
-      if (format[index] === '-') alignmentText += format[index++];
-      while (index < format.length && /\d/.test(format[index])) alignmentText += format[index++];
-      if (alignmentText === '' || alignmentText === '-')
-        throw fail(index, index >= format.length ? 'Format item ends prematurely.' : 'Expected an ASCII digit.');
-      alignment = Number(alignmentText);
-      while (format[index] === ' ') index++;
-    }
-    let itemFormat: string | undefined;
-    if (format[index] === ':') {
-      index++;
-      let formatText = '';
-      while (index < format.length && format[index] !== '}') {
-        if (format[index] === '{') throw fail(index, 'Unexpected opening brace inside a format item.');
-        formatText += format[index++];
-      }
-      itemFormat = formatText;
-    }
-    if (index >= format.length) throw fail(index, 'Format item ends prematurely.');
-    if (format[index] !== '}') throw fail(index, 'Expected an ASCII digit.');
-    index++;
+    const { item, end } = parseFormatItem(format, index + 1);
     if (text !== '') parts.push(text);
     text = '';
-    parts.push({ index: Number(digits), alignment, format: itemFormat });
+    parts.push(item);
+    index = end;
   }
   if (text !== '') parts.push(text);
   return parts;
+}
+
+/** Parses a format item after its opening brace, returning the index after its closing brace. */
+function parseFormatItem(format: string, start: number): { item: FormatItem; end: number } {
+  const digits = leadingMatch(/^\d*/, format, start);
+  let index = start + digits.length;
+  if (digits === '') throw digitExpected(format, index);
+  index = skipSpaces(format, index);
+  let alignment: number | undefined;
+  if (format[index] === ',') {
+    index = skipSpaces(format, index + 1);
+    const alignmentText = leadingMatch(/^-?\d*/, format, index);
+    index += alignmentText.length;
+    if (alignmentText === '' || alignmentText === '-') throw digitExpected(format, index);
+    alignment = Number(alignmentText);
+    index = skipSpaces(format, index);
+  }
+  let itemFormat: string | undefined;
+  if (format[index] === ':') {
+    const formatStart = index + 1;
+    for (index = formatStart; index < format.length && format[index] !== '}'; index++) {
+      if (format[index] === '{') throw fail(index, 'Unexpected opening brace inside a format item.');
+    }
+    itemFormat = format.slice(formatStart, index);
+  }
+  if (index >= format.length) throw fail(index, 'Format item ends prematurely.');
+  if (format[index] !== '}') throw fail(index, 'Expected an ASCII digit.');
+  return { item: { index: Number(digits), alignment, format: itemFormat }, end: index + 1 };
+}
+
+function leadingMatch(pattern: RegExp, format: string, index: number): string {
+  return (pattern.exec(format.slice(index)) as RegExpExecArray)[0];
+}
+
+function skipSpaces(format: string, index: number): number {
+  let next = index;
+  while (format[next] === ' ') next++;
+  return next;
+}
+
+function digitExpected(format: string, index: number): PendingException {
+  return fail(index, index >= format.length ? 'Format item ends prematurely.' : 'Expected an ASCII digit.');
 }
 
 function fail(offset: number, reason: string): PendingException {

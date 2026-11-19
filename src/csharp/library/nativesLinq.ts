@@ -387,7 +387,6 @@ function tuple(call: NativeCall, types: Type[], values: Value[]): CsStruct {
   return new CsStruct(libraryType(call, 'System.ValueTuple', types), values);
 }
 
-// code-gauge-allow functionNcss 300 -- One entry per LINQ operator.
 const linq: Record<string, NativeMethod> = {
   [`${ENUMERABLE}.Aggregate`]: (call, _receiver, args) => {
     const items = source(call, args[0] as Value);

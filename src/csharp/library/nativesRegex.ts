@@ -43,91 +43,9 @@ class UnsupportedPattern extends Error {}
  */
 function compilePattern(pattern: string, options: number): CompiledPattern {
   if (options & (OPTION.rightToLeft | OPTION.ecmaScript | OPTION.nonBacktracking)) throw new UnsupportedPattern();
-  const ignoreWhitespace = (options & OPTION.ignorePatternWhitespace) !== 0;
-  const multiline = (options & OPTION.multiline) !== 0;
-  const groups: { name: string | undefined }[] = [];
-  let output = '';
-  let inClass = false;
-  let index = 0;
-  const next = (): string => pattern[index++] ?? '';
-  while (index < pattern.length) {
-    const char = next();
-    if (inClass) {
-      if (char === ']') inClass = false;
-      if (char === '[' && pattern[index] === ':') throw new UnsupportedPattern();
-      if (char === '-' && pattern[index] === '[') throw new UnsupportedPattern();
-      output +=
-        char === '\\'
-          ? escapeOf(
-              next(),
-              true,
-              pattern,
-              () => index,
-              (value) => (index = value)
-            )
-          : char;
-      continue;
-    }
-    if (ignoreWhitespace && /\s/.test(char)) continue;
-    if (ignoreWhitespace && char === '#') {
-      while (index < pattern.length && pattern[index] !== '\n') index++;
-      continue;
-    }
-    switch (char) {
-      case '\\': {
-        output += escapeOf(
-          next(),
-          false,
-          pattern,
-          () => index,
-          (value) => (index = value)
-        );
-        break;
-      }
-      case '[': {
-        inClass = true;
-        output += '[';
-        if (pattern[index] === '^') output += next();
-        // A `]` that opens a class is a member of it in .NET.
-        if (pattern[index] === ']') {
-          next();
-          output += String.raw`\]`;
-        }
-        break;
-      }
-      case '.': {
-        output += options & OPTION.singleline ? String.raw`[\s\S]` : String.raw`[^\n]`;
-        break;
-      }
-      case '^': {
-        output += multiline ? String.raw`(?:${START}|(?<=\n))` : START;
-        break;
-      }
-      case '$': {
-        output += multiline ? String.raw`(?=\n|${END})` : String.raw`(?=\n?${END})`;
-        break;
-      }
-      case '(': {
-        output += groupOpening();
-        break;
-      }
-      case '{': {
-        const quantifier = /^\d+(?:,\d*)?\}/.exec(pattern.slice(index));
-        output += quantifier ? `{${quantifier[0]}` : String.raw`\{`;
-        if (quantifier) index += quantifier[0].length;
-        break;
-      }
-      case '}':
-      case ']': {
-        output += `\\${char}`;
-        break;
-      }
-      default: {
-        output += char;
-      }
-    }
-  }
-  const numbered = numberGroups(groups);
+  const translator = new PatternTranslator(pattern, options);
+  const output = translator.translate();
+  const numbered = numberGroups(translator.groups);
   const finalPattern = output.replaceAll(/(\d+)/g, (_match, number: string) => {
     const jsIndex = numbered.numberOfIndex.indexOf(Number(number));
     if (jsIndex === -1) throw new UnsupportedPattern();
@@ -140,36 +58,142 @@ function compilePattern(pattern: string, options: number): CompiledPattern {
     throw new UnsupportedPattern();
   }
   return { pattern, options, regex, ...numbered };
+}
 
-  function groupOpening(): string {
-    if (pattern[index] !== '?') {
-      if (options & OPTION.explicitCapture) return '(?:';
-      groups.push({ name: undefined });
+/** Translates a .NET pattern into JavaScript's syntax one construct at a time, recording its capture groups. */
+class PatternTranslator {
+  readonly groups: { name: string | undefined }[] = [];
+  private index = 0;
+  private inClass = false;
+
+  constructor(
+    private readonly pattern: string,
+    private readonly options: number
+  ) {}
+
+  translate(): string {
+    let output = '';
+    while (this.index < this.pattern.length) output += this.translateNext();
+    return output;
+  }
+
+  private translateNext(): string {
+    const char = this.next();
+    if (this.inClass) return this.translateInClass(char);
+    if (this.options & OPTION.ignorePatternWhitespace) {
+      if (/\s/.test(char)) return '';
+      if (char === '#') {
+        while (this.index < this.pattern.length && this.pattern[this.index] !== '\n') this.index++;
+        return '';
+      }
+    }
+    return this.translateOutsideClass(char);
+  }
+
+  private translateInClass(char: string): string {
+    if (char === ']') this.inClass = false;
+    if (char === '[' && this.pattern[this.index] === ':') throw new UnsupportedPattern();
+    if (char === '-' && this.pattern[this.index] === '[') throw new UnsupportedPattern();
+    return char === '\\' ? this.escape(true) : char;
+  }
+
+  private escape(inClass: boolean): string {
+    return escapeOf(
+      this.next(),
+      inClass,
+      this.pattern,
+      () => this.index,
+      (value) => (this.index = value)
+    );
+  }
+
+  private translateOutsideClass(char: string): string {
+    const multiline = (this.options & OPTION.multiline) !== 0;
+    switch (char) {
+      case '\\': {
+        return this.escape(false);
+      }
+      case '[': {
+        return this.openClass();
+      }
+      case '.': {
+        return this.options & OPTION.singleline ? String.raw`[\s\S]` : String.raw`[^\n]`;
+      }
+      case '^': {
+        return multiline ? String.raw`(?:${START}|(?<=\n))` : START;
+      }
+      case '$': {
+        return multiline ? String.raw`(?=\n|${END})` : String.raw`(?=\n?${END})`;
+      }
+      case '(': {
+        return this.groupOpening();
+      }
+      case '{': {
+        return this.quantifierOpening();
+      }
+      case '}':
+      case ']': {
+        return `\\${char}`;
+      }
+      default: {
+        return char;
+      }
+    }
+  }
+
+  private openClass(): string {
+    this.inClass = true;
+    let output = '[';
+    if (this.pattern[this.index] === '^') output += this.next();
+    // A `]` that opens a class is a member of it in .NET.
+    if (this.pattern[this.index] === ']') {
+      this.next();
+      output += String.raw`\]`;
+    }
+    return output;
+  }
+
+  private groupOpening(): string {
+    const { pattern } = this;
+    if (pattern[this.index] !== '?') {
+      if (this.options & OPTION.explicitCapture) return '(?:';
+      this.groups.push({ name: undefined });
       return '(';
     }
-    const rest = pattern.slice(index + 1);
+    const rest = pattern.slice(this.index + 1);
     const named = /^(?:<([A-Za-z_]\w*)>|'([A-Za-z_]\w*)')/.exec(rest);
     if (named) {
       const name = named[1] ?? named[2];
-      if (groups.some((group) => group.name === name)) throw new UnsupportedPattern();
-      groups.push({ name });
-      index += 1 + named[0].length;
+      if (this.groups.some((group) => group.name === name)) throw new UnsupportedPattern();
+      this.groups.push({ name });
+      this.index += 1 + named[0].length;
       return `(?<${name}>`;
     }
     for (const opening of ['?:', '?=', '?!', '?<=', '?<!']) {
-      if (pattern.startsWith(opening, index)) {
-        index += opening.length;
+      if (pattern.startsWith(opening, this.index)) {
+        this.index += opening.length;
         return `(${opening}`;
       }
     }
-    if (pattern.startsWith('?#', index)) {
-      const close = pattern.indexOf(')', index);
+    if (pattern.startsWith('?#', this.index)) {
+      const close = pattern.indexOf(')', this.index);
       if (close === -1) throw new UnsupportedPattern();
-      index = close + 1;
+      this.index = close + 1;
       return '';
     }
     // Atomic groups, conditionals, balancing groups, and inline options have no JavaScript equivalent.
     throw new UnsupportedPattern();
+  }
+
+  private quantifierOpening(): string {
+    const quantifier = /^\d+(?:,\d*)?\}/.exec(this.pattern.slice(this.index));
+    if (!quantifier) return String.raw`\{`;
+    this.index += quantifier[0].length;
+    return `{${quantifier[0]}`;
+  }
+
+  private next(): string {
+    return this.pattern[this.index++] ?? '';
   }
 }
 
@@ -192,6 +216,18 @@ function numberGroups(groups: { name: string | undefined }[]): Pick<CompiledPatt
   return { numberOfIndex, names };
 }
 
+/** The escapes that mean the same inside and outside a character class. */
+const FIXED_ESCAPES = new Map<string, string>([
+  ['d', String.raw`\p{Nd}`],
+  ['D', String.raw`\P{Nd}`],
+  ['B', `(?:(?<=[${WORD}])(?=[${WORD}])|(?<![${WORD}])(?![${WORD}]))`],
+  ['A', START],
+  ['z', END],
+  ['Z', String.raw`(?=\n?${END})`],
+  ['e', String.raw`\x1B`],
+  ...[...'xuctnrfv'].map((letter): [string, string] => [letter, `\\${letter}`]),
+]);
+
 function escapeOf(
   char: string,
   inClass: boolean,
@@ -199,13 +235,37 @@ function escapeOf(
   position: () => number,
   move: (index: number) => void
 ): string {
+  const fixed = FIXED_ESCAPES.get(char) ?? classDependentEscapeOf(char, inClass);
+  if (fixed !== undefined) return fixed;
   switch (char) {
-    case 'd': {
-      return String.raw`\p{Nd}`;
+    case 'k': {
+      const name = /^<([A-Za-z_]\w*)>/.exec(pattern.slice(position()));
+      if (!name) throw new UnsupportedPattern();
+      move(position() + name[0].length);
+      return String.raw`\k${name[0]}`;
     }
-    case 'D': {
-      return String.raw`\P{Nd}`;
+    case 'p':
+    case 'P': {
+      const category = /^\{([A-Z][a-z]?)\}/.exec(pattern.slice(position()));
+      if (!category) throw new UnsupportedPattern();
+      move(position() + category[0].length);
+      return `\\${char}${category[0]}`;
     }
+    default: {
+      if (/\d/.test(char) && !inClass && char !== '0') {
+        const digits = /^\d*/.exec(pattern.slice(position()))?.[0] ?? '';
+        move(position() + digits.length);
+        return `${char}${digits}`;
+      }
+      if (/[A-Za-z\d]/.test(char) || char === '') throw new UnsupportedPattern();
+      return String.raw`\u{${char.charCodeAt(0).toString(16)}}`;
+    }
+  }
+}
+
+/** The escapes whose meaning inside a character class differs from outside. */
+function classDependentEscapeOf(char: string, inClass: boolean): string | undefined {
+  switch (char) {
     case 'w': {
       return inClass ? WORD : `[${WORD}]`;
     }
@@ -224,52 +284,8 @@ function escapeOf(
       if (inClass) return String.raw`\x08`;
       return `(?:(?<=[${WORD}])(?![${WORD}])|(?<![${WORD}])(?=[${WORD}]))`;
     }
-    case 'B': {
-      return `(?:(?<=[${WORD}])(?=[${WORD}])|(?<![${WORD}])(?![${WORD}]))`;
-    }
-    case 'A': {
-      return START;
-    }
-    case 'z': {
-      return END;
-    }
-    case 'Z': {
-      return String.raw`(?=\n?${END})`;
-    }
-    case 'e': {
-      return String.raw`\x1B`;
-    }
-    case 'k': {
-      const name = /^<([A-Za-z_]\w*)>/.exec(pattern.slice(position()));
-      if (!name) throw new UnsupportedPattern();
-      move(position() + name[0].length);
-      return String.raw`\k${name[0]}`;
-    }
-    case 'p':
-    case 'P': {
-      const category = /^\{([A-Z][a-z]?)\}/.exec(pattern.slice(position()));
-      if (!category) throw new UnsupportedPattern();
-      move(position() + category[0].length);
-      return `\\${char}${category[0]}`;
-    }
-    case 'x':
-    case 'u':
-    case 'c':
-    case 't':
-    case 'n':
-    case 'r':
-    case 'f':
-    case 'v': {
-      return `\\${char}`;
-    }
     default: {
-      if (/\d/.test(char) && !inClass && char !== '0') {
-        const digits = /^\d*/.exec(pattern.slice(position()))?.[0] ?? '';
-        move(position() + digits.length);
-        return `${char}${digits}`;
-      }
-      if (/[A-Za-z\d]/.test(char) || char === '') throw new UnsupportedPattern();
-      return String.raw`\u{${char.charCodeAt(0).toString(16)}}`;
+      return undefined;
     }
   }
 }

@@ -211,7 +211,6 @@ function sortItems(call: NativeCall, items: Value[], start: number, length: numb
   introSort(items, start, length, guardedComparison(call, comparisonOf(call, comparer)));
 }
 
-// code-gauge-allow functionNcss 140 -- One entry per member of List<T>.
 const listNatives: Record<string, NativeMethod> = {
   [`${LIST}..ctor()`]: (call, receiver) => setNative(receiver, new ListState([], typeArgument(call))),
   [`${LIST}..ctor(int)`]: (call, receiver, [capacity]) => {
@@ -652,7 +651,6 @@ function checkKey(key: Value): void {
   if (key === undefined) failNull('key');
 }
 
-// code-gauge-allow functionNcss 100 -- One entry per member of Dictionary<TKey, TValue>.
 const dictionaryNatives: Record<string, NativeMethod> = {
   [`${DICTIONARY}..ctor()`]: (call, receiver) =>
     setNative(receiver, newHashState(call, undefined, typeArgument(call, 0), typeArgument(call, 1))),
@@ -881,7 +879,6 @@ function otherElements(call: NativeCall, other: Value): Value[] {
   return [...iterate(call, other, 'other')];
 }
 
-// code-gauge-allow functionNcss 80 -- One entry per member of HashSet<T>.
 defineNatives({
   [`${HASH_SET}..ctor()`]: (call, receiver) =>
     setNative(receiver, newHashState(call, undefined, typeArgument(call), undefined)),
@@ -1179,7 +1176,6 @@ function elementTypeOf(array: CsArray): Type {
   return array.type.element;
 }
 
-// code-gauge-allow functionNcss 100 -- One entry per member of System.Array.
 defineNatives({
   [`${ARRAY}.get_Length`]: (_call, receiver) => arrayOf(receiver).values.length,
   [`${ARRAY}.get_LongLength`]: (_call, receiver) => BigInt(arrayOf(receiver).values.length),
