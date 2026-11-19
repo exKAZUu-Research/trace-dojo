@@ -86,6 +86,11 @@ export class SequenceEditor {
     destroyElements(frame, values, this.ops.destroy, this.kind === 'vector' ? 'reverse' : 'forward');
   }
 
+  clear(frame: Frame, self: SequenceValue): void {
+    if (this.kind === 'list') self.eraseNodes(frame, 0, self.length, 'all', this.ops.destroy);
+    else this.truncate(frame, self, 0);
+  }
+
   /** Destroys the elements from `length` on, as `__destruct_at_end` and `__erase_to_end` do. */
   truncate(frame: Frame, self: SequenceValue, length: number): void {
     const count = self.length - length;
@@ -98,7 +103,7 @@ export class SequenceEditor {
 
   private destroyRange(frame: Frame, self: SequenceValue, from: number, count: number, dequeEraseAt = from): void {
     if (this.kind === 'list') {
-      self.eraseNodes(from, count, (values) => this.destroy(frame, values));
+      self.eraseNodes(frame, from, count, 'per-element', this.ops.destroy);
       return;
     }
     this.destroy(frame, self.items.slice(from, from + count));
@@ -270,7 +275,7 @@ export class SequenceEditor {
 
   /** Move assignment, which destroys the elements and takes the other container's storage. */
   moveAssign(frame: Frame, self: SequenceValue, other: SequenceValue): void {
-    this.truncate(frame, self, 0);
+    this.clear(frame, self);
     self.takeItems(other);
   }
 

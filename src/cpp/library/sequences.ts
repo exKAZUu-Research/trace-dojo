@@ -215,7 +215,11 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
         isSameType: true,
       });
     },
-    destroy: (frame, value) => editor.destroy(frame, (value as SequenceValue).items),
+    destroy: (frame, value) => {
+      const self = value as SequenceValue;
+      if (kind === 'list') editor.clear(frame, self);
+      else editor.destroy(frame, self.items);
+    },
   };
   if (kind === 'array') {
     cls.memberTypes.set('size_type', SIZE_T);
@@ -452,11 +456,11 @@ function sequenceMethods(
   const begin = (self: SequenceValue): Ptr => iteratorAt(self, 0);
   const end = (self: SequenceValue): Ptr => iteratorAt(self, self.items.length);
   const endConstant = (object: Expr): ConstantLocation | undefined => constantArrayLocation(object, fixedLength);
-  method('size', [], SIZE_T, (self) => BigInt(self.items.length), { isConst: true });
+  method('size', [], SIZE_T, (self) => BigInt(self.size), { isConst: true });
   method('max_size', [], SIZE_T, () => (kind === 'array' ? BigInt(fixedLength ?? 0) : maxSizeOf(kind, element)), {
     isConst: true,
   });
-  method('empty', [], BOOL, (self) => (self.items.length === 0 ? 1 : 0), { isConst: true });
+  method('empty', [], BOOL, (self) => (self.size === 0 ? 1 : 0), { isConst: true });
   const bitProxy = cls.memberTypes.get('reference');
   if (bitProxy) {
     method('flip', [], VOID, (self, _args, frame) => {
@@ -574,7 +578,7 @@ function sequenceMethods(
     );
     return;
   }
-  method('clear', [], VOID, (self, _args, frame) => editor.truncate(frame, self, 0));
+  method('clear', [], VOID, (self, _args, frame) => editor.clear(frame, self));
   method('push_back', [constRef(element)], VOID, (self, [value], frame) => {
     reserve(frame, 1);
     editor.append(frame, self, 1, (target) => ops().copy(frame, (value as Ptr).read(), target));
@@ -843,7 +847,7 @@ function removeListRuns(
     frame.temporaries.push({
       object: removed,
       destroy: (current) => {
-        editor.destroy(current, removed.items);
+        editor.clear(current, removed);
         endLifetime(removed);
       },
     });

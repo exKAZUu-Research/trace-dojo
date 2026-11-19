@@ -1,7 +1,8 @@
 import type { DisplayNode } from '../../problems/trace';
 import { CppRuntimeError } from '../errors';
+import type { Frame } from '../runtime';
 import type { Type } from '../types';
-import { type ArrayStore, Box, CObject, Ptr, Store, UNINIT, type Value } from '../values';
+import { type ArrayStore, Box, CObject, holdValues, Ptr, Store, UNINIT, type Value } from '../values';
 
 interface IndexedValue {
   index: number;
@@ -207,6 +208,7 @@ export class SequenceValue extends Store {
   private readonly nodes?: NodePositions;
   private dequeEpoch?: { all: number; end: number };
   private constructingEnd?: { location: NodePosition; value: Value };
+  private pendingListDestructions = 0;
 
   get items(): Value[] {
     return this.cells;
@@ -334,13 +336,29 @@ export class SequenceValue extends Store {
     for (const value of this.splice(from, count)) destination.items.push(value);
   }
 
-  eraseNodes(from: number, count: number, destroy: (values: Value[]) => void): void {
+  eraseNodes(
+    frame: Frame,
+    from: number,
+    count: number,
+    publishSize: 'per-element' | 'all',
+    destroy: ((frame: Frame, value: Value) => void) | undefined
+  ): void {
     const removed = this.items.slice(from, from + count);
     const nodes = removed.map((value, offset) => this.nodes?.detach(from + offset, value));
+    const pending = this.pendingListDestructions;
+    this.splice(from, count);
+    if (publishSize === 'per-element') this.pendingListDestructions += removed.length;
     try {
-      this.splice(from, count);
-      destroy(removed);
+      holdValues(frame, removed, () => {
+        for (const [index, value] of removed.entries()) {
+          if (publishSize === 'per-element') this.pendingListDestructions--;
+          destroy?.(frame, value);
+          const node = nodes[index];
+          if (node) node.position = -1;
+        }
+      });
     } finally {
+      this.pendingListDestructions = pending;
       for (const node of nodes) {
         if (node) node.position = -1;
       }
@@ -392,6 +410,10 @@ export class SequenceValue extends Store {
 
   get length(): number {
     return this.items.length;
+  }
+
+  get size(): number {
+    return this.length + this.pendingListDestructions;
   }
 
   override get pointerLength(): number {

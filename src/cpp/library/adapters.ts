@@ -245,8 +245,8 @@ export function adapterClass(
       native(memberName, params, ret, (args, { self, frame }) => run(self as SequenceValue, args, frame), { isConst })
     );
   };
-  method('size', [], SIZE_T, (self) => BigInt(self.items.length), true);
-  method('empty', [], BOOL, (self) => (self.items.length === 0 ? 1 : 0), true);
+  method('size', [], SIZE_T, (self) => BigInt(self.size), true);
+  method('empty', [], BOOL, (self) => (self.size === 0 ? 1 : 0), true);
   method('push', [constRef(element)], VOID, (self, [value], frame) =>
     push(frame, self, (target) => ops().copy(frame, (value as Ptr).read(), target))
   );
