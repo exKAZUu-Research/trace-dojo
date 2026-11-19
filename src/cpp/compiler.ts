@@ -1529,7 +1529,7 @@ export class Compiler extends StatementCompiler {
     const info = scope.cls.staticFields.get(name);
     if (!info)
       return this.error(declarator.row, `${scope.cls.name} に static のメンバ変数 ${name} は宣言されていません。`);
-    if (!sameType(unqualified(info.type), unqualified(type), false)) {
+    if (!sameType(info.type, type)) {
       return this.error(declarator.row, `${scope.cls.name}::${name} の型が宣言と違います。`);
     }
     const global = info.global as GlobalInfo;

@@ -50,6 +50,8 @@ test.each([
   ['struct S { static const int count{2.5}; };', 0, '縮小変換'],
   ['struct S { static const int count{3}; };\nint main() { const int* p = &S::count; }', 1, '定義'],
   ['struct S { static const int count{3}; };\nconst int S::count{4};', 1, 'すでに指定'],
+  ['struct S { static const int count; };\nint S::count = 3;', 1, '型が宣言と違います'],
+  ['struct S { static int count; };\nconst int S::count = 3;', 1, '型が宣言と違います'],
 ])('validates a braced static member and its definition: %s', (source, row, message) => {
   const program = source.includes('int main') ? source : `${source}\nint main() {}`;
   expect(executeProgram('cpp', program)).toMatchObject({
@@ -678,6 +680,17 @@ test.each([
     'fill with an element type that has a deleted assignment operator',
     '#include <algorithm>\nstruct X { const int n; };\nint main() { X a[] = {{1}}; std::fill(a, a + 1, X{2}); }',
     2,
+  ],
+  [
+    'array fill with a deleted element assignment',
+    '#include <array>\nstruct X { const int n; };\nint main() { std::array<X, 1> a{{{1}}}; a.fill(X{2}); }',
+    2,
+  ],
+  ['array fill with const elements', '#include <array>\nint main() { std::array<const int, 1> a{1}; a.fill(2); }', 1],
+  [
+    'empty array fill with a const element type',
+    '#include <array>\nint main() { std::array<const int, 0> a{}; a.fill(2); }',
+    1,
   ],
   [
     'remove_if with an element type that has a deleted assignment operator',

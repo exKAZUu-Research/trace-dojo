@@ -538,13 +538,24 @@ function sequenceMethods(
     }
   );
   if (kind === 'array') {
-    method('fill', [constRef(element)], VOID, (self, [value], frame) => {
-      const source = (value as Ptr).read();
-      const { assign } = ops();
-      for (const [index, item] of self.items.entries()) {
-        self.items[index] = assign(frame, item, source);
+    method(
+      'fill',
+      [constRef(element)],
+      VOID,
+      (self, [value], frame) => {
+        const source = (value as Ptr).read();
+        const { assign } = ops();
+        for (const [index, item] of self.items.entries()) {
+          self.items[index] = assign(frame, item, source);
+        }
+      },
+      {
+        uses:
+          fixedLength !== 0 || isConstType(element)
+            ? (row) => requireElementUse(library.compiler, element, row, 'assign')
+            : undefined,
       }
-    });
+    );
     return;
   }
   method('clear', [], VOID, (self, _args, frame) => editor.truncate(frame, self, 0));
