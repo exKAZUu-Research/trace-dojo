@@ -21,7 +21,7 @@ import {
   withConst,
 } from '../types';
 import { CObject, Ptr, type Value } from '../values';
-import { MapValue } from './containerValues';
+import { MapValue, NodePositions } from './containerValues';
 import { type ElementOperations, elementOperations, equalTo, lessThan } from './elements';
 import { addRangeMembers, emplacementCall, type EntryTable, insertCopy } from './emplacement';
 import { randomAccessIterator } from './iterators';
@@ -215,6 +215,29 @@ export class OrderedValue extends MapValue {
     super();
   }
 
+  private readonly nodes = new NodePositions(this);
+
+  override location(index: number): Ptr {
+    return this.nodes.at(index);
+  }
+
+  splice(from: number, remove: number, ...entries: Value[]): Value[] {
+    this.nodes.splice(from, remove, entries.length);
+    return this.entries.splice(from, remove, ...entries);
+  }
+
+  replace(entries: Value[]): Value[] {
+    const previous = this.entries;
+    this.nodes.splice(0, previous.length, entries.length);
+    this.entries = entries;
+    return previous;
+  }
+
+  swap(other: OrderedValue): void {
+    this.nodes.swap(other.nodes);
+    [this.entries, other.entries] = [other.entries, this.entries];
+  }
+
   get length(): number {
     return this.entries.length;
   }
@@ -388,7 +411,7 @@ export function orderedClass(
     frame.runtime.reserve(isMap ? 3 : 1);
     // A multimap inserts after the entries with an equal key, keeping the order of insertion among them.
     const at = bound(self, key, true);
-    self.entries.splice(at, 0, entry);
+    self.splice(at, 0, entry);
     return [at, true];
   };
   const destroyAll = (frame: Frame, entries: Value[]): void => {
@@ -397,13 +420,16 @@ export function orderedClass(
   };
   const table: EntryTable<OrderedValue> = {
     keyOf,
-    lookup: (self, key) => (isMulti ? -1 : find(self, key)),
+    lookup: (self, key) => {
+      const at = isMulti ? -1 : find(self, key);
+      return at >= 0 ? at : undefined;
+    },
     insert,
     ops,
   };
   const insertResult = pairClass(library, types.iterator, BOOL);
   const insertionResult = (self: OrderedValue, at: number, inserted: boolean): Value => {
-    const position = new Ptr(self, at);
+    const position = self.location(at);
     return isMulti ? position : new CObject(insertResult, [position, inserted ? 1 : 0]);
   };
   cls.library = {
@@ -512,7 +538,7 @@ export function orderedClass(
       const from = source as OrderedValue;
       if (to === from) return;
       const old = to.entries;
-      to.entries = from.entries.map((entry) => ops().copy(frame, entry));
+      to.replace(from.entries.map((entry) => ops().copy(frame, entry)));
       destroyAll(frame, old);
     },
     destroy: (frame, value) => destroyAll(frame, (value as OrderedValue).entries),
@@ -541,31 +567,41 @@ export function orderedClass(
   method('max_size', [], SIZE_T, () => 0x0c_cc_cc_cc_cc_cc_cc_ccn, { isConst: true });
   method('empty', [], BOOL, (self) => (self.entries.length === 0 ? 1 : 0), { isConst: true });
   method('clear', [], VOID, (self, _args, frame) => {
-    const old = self.entries;
-    self.entries = [];
+    const old = self.replace([]);
     destroyAll(frame, old);
   });
   for (const isConst of [false, true]) {
     const it = isConst ? types.constIterator : types.iterator;
     const rit = isConst ? types.constReverseIterator : types.reverseIterator;
-    method('begin', [], it, (self) => new Ptr(self, 0), { isConst });
-    method('end', [], it, (self) => new Ptr(self, self.entries.length), { isConst });
-    method('rbegin', [], rit, (self) => new Ptr(self, self.entries.length), { isConst });
-    method('rend', [], rit, (self) => new Ptr(self, 0), { isConst });
+    method('begin', [], it, (self) => self.location(0), { isConst });
+    method('end', [], it, (self) => self.location(self.entries.length), { isConst });
+    const range = pairClass(library, it, it);
+    method(
+      'equal_range',
+      [constRef(keyType)],
+      classType(range),
+      (self, [key]) => {
+        const value = keyArg(key);
+        return new CObject(range, [self.location(bound(self, value, false)), self.location(bound(self, value, true))]);
+      },
+      { isConst }
+    );
+    method('rbegin', [], rit, (self) => self.location(self.entries.length), { isConst });
+    method('rend', [], rit, (self) => self.location(0), { isConst });
     method(
       'find',
       [constRef(keyType)],
       it,
       (self, [k]) => {
         const at = find(self, keyArg(k));
-        return new Ptr(self, at < 0 ? self.entries.length : at);
+        return self.location(at < 0 ? self.entries.length : at);
       },
       { isConst }
     );
-    method('lower_bound', [constRef(keyType)], it, (self, [k]) => new Ptr(self, bound(self, keyArg(k), false)), {
+    method('lower_bound', [constRef(keyType)], it, (self, [k]) => self.location(bound(self, keyArg(k), false)), {
       isConst,
     });
-    method('upper_bound', [constRef(keyType)], it, (self, [k]) => new Ptr(self, bound(self, keyArg(k), true)), {
+    method('upper_bound', [constRef(keyType)], it, (self, [k]) => self.location(bound(self, keyArg(k), true)), {
       isConst,
     });
     if (isMap && !isMulti) {
@@ -582,8 +618,8 @@ export function orderedClass(
       );
     }
   }
-  method('cbegin', [], types.constIterator, (self) => new Ptr(self, 0), { isConst: true });
-  method('cend', [], types.constIterator, (self) => new Ptr(self, self.entries.length), { isConst: true });
+  method('cbegin', [], types.constIterator, (self) => self.location(0), { isConst: true });
+  method('cend', [], types.constIterator, (self) => self.location(self.entries.length), { isConst: true });
   method(
     'count',
     [constRef(keyType)],
@@ -598,37 +634,57 @@ export function orderedClass(
     isMulti ? types.iterator : classType(insertResult),
     (self, [entry], frame) => insertionResult(self, ...insertCopy(table, frame, self, (entry as Ptr).read()))
   );
-  method(
-    'insert',
-    [types.constIterator, constRef(unqualified(entryType))],
-    types.iterator,
-    (self, [, entry], frame) => new Ptr(self, insertCopy(table, frame, self, (entry as Ptr).read())[0])
+  if (valueType && !isMulti) {
+    method(
+      'insert_or_assign',
+      [constRef(keyType), constRef(valueType)],
+      classType(insertResult),
+      (self, [key, value], frame) => {
+        const keyValue = keyArg(key);
+        const source = (value as Ptr).read();
+        const at = find(self, keyValue);
+        if (at >= 0) {
+          const entry = self.entries[at] as CObject;
+          entry.values[1] = mapped().assign(frame, entry.values[1], source);
+          return insertionResult(self, at, false);
+        }
+        const keyOps = elementOperations(compiler, unqualified(keyType), 0);
+        const entry = new CObject((entryType as Extract<Type, { kind: 'class' }>).cls, [
+          keyOps.copy(frame, keyValue),
+          mapped().copy(frame, source),
+        ]);
+        return insertionResult(self, ...insert(frame, self, entry));
+      }
+    );
+  }
+  method('insert', [types.constIterator, constRef(unqualified(entryType))], types.iterator, (self, [, entry], frame) =>
+    self.location(insertCopy(table, frame, self, (entry as Ptr).read())[0])
   );
   method('erase', [constRef(keyType)], SIZE_T, (self, [k], frame) => {
     const keyValue = keyArg(k);
     const from = bound(self, keyValue, false);
     const to = bound(self, keyValue, true);
-    const removed = self.entries.splice(from, to - from);
+    const removed = self.splice(from, to - from);
     destroyAll(frame, removed);
     return BigInt(removed.length);
   });
   method('erase', [types.constIterator], types.iterator, (self, [at], frame) => {
     const index = (at as Ptr).index;
     if ((at as Ptr).store !== self || index >= self.entries.length) throw new CppRuntimeError('invalidIterator');
-    const [removed] = self.entries.splice(index, 1);
+    const [removed] = self.splice(index, 1);
     ops().destroy?.(frame, removed);
-    return new Ptr(self, index);
+    return self.location(index);
   });
   method('erase', [types.constIterator, types.constIterator], types.iterator, (self, [first, last], frame) => {
     const from = (first as Ptr).index;
     const to = (last as Ptr).index;
     if (from > to) throw new CppRuntimeError('invalidRange');
-    destroyAll(frame, self.entries.splice(from, to - from));
-    return new Ptr(self, from);
+    destroyAll(frame, self.splice(from, to - from));
+    return self.location(from);
   });
   method('swap', [referenceTo(classType(cls))], VOID, (self, [other]) => {
     const target = (other as Ptr).read() as OrderedValue;
-    [self.entries, target.entries] = [target.entries, self.entries];
+    self.swap(target);
   });
   return cls;
 }

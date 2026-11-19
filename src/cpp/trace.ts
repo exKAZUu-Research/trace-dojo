@@ -67,7 +67,13 @@ class Snapshotter {
     for (const global of this.program.shownGlobals) {
       if (global.name in variables.vars || global.name in variables.referenceVars) continue;
       const store = runtime.globals[global.index] as Box | undefined;
-      if (store) addVariable(variables, global.name, store.value, global.type);
+      if (!store) continue;
+      if (global.type.kind === 'reference') {
+        const value = store.value instanceof Ptr ? readLocation(store.value) : UNINIT;
+        addVariable(variables, global.name, value, global.type.to);
+      } else {
+        addVariable(variables, global.name, store.value, global.type);
+      }
     }
     return variables;
   }

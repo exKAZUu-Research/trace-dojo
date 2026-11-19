@@ -108,23 +108,26 @@ export function makeEach(
   frame: Frame,
   count: number,
   make: (index: number) => Value,
-  destroyerAt: (index: number) => ((frame: Frame, value: Value) => void) | undefined
+  destroyerAt: (index: number) => ((frame: Frame, value: Value) => void) | undefined,
+  existing?: Value[]
 ): Value[] {
-  const values: Value[] = [];
+  const values = existing ?? [];
   const mark = frame.pending.length;
+  let index = 0;
   try {
-    for (let index = 0; index < count; index++) {
+    for (; index < count; index++) {
       const value = make(index);
-      values.push(value);
-      frame.pending.push(value);
+      values[index] = value;
+      if (!existing) frame.pending.push(value);
     }
     return values;
   } catch (error) {
     if (error instanceof CppException) {
-      for (let index = values.length - 1; index >= 0; index--) {
+      for (index--; index >= 0; index--) {
         const value = values[index];
         destroyerAt(index)?.(frame, value);
         endLifetime(value);
+        values[index] = UNINIT;
       }
     }
     throw error;

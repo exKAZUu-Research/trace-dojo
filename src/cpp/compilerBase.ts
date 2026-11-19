@@ -205,10 +205,17 @@ export abstract class CompilerBase {
     const type = this.resolveTypeSpecifier(typeNode, allowAuto);
     const isConst =
       this.hasSpecifier(declaration, 'const') ||
-      this.hasSpecifier(declaration, 'constexpr') ||
-      (typeNode.type === 'sized_type_specifier' &&
-        (this.hasSpecifier(typeNode, 'const') || this.hasSpecifier(typeNode, 'constexpr')));
+      this.isConstexpr(declaration) ||
+      (typeNode.type === 'sized_type_specifier' && this.hasSpecifier(typeNode, 'const'));
     return isConst ? withConst(type) : type;
+  }
+
+  protected isConstexpr(declaration: Syntax): boolean {
+    const type = fieldOf(declaration, 'type');
+    return (
+      this.hasSpecifier(declaration, 'constexpr') ||
+      (type?.type === 'sized_type_specifier' && this.hasSpecifier(type, 'constexpr'))
+    );
   }
 
   /** Whether a declaration's specifiers include a word, such as `static` or `virtual`. */

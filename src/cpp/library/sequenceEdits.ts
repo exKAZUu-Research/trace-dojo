@@ -37,7 +37,7 @@ export class SequenceEditor {
 
   /** Destroys the elements from `length` on, as `__destruct_at_end` and `__erase_to_end` do. */
   truncate(frame: Frame, self: SequenceValue, length: number): void {
-    if (length < self.items.length) this.destroy(frame, self.items.splice(length));
+    if (length < self.items.length) this.destroy(frame, self.splice(length, self.items.length - length));
   }
 
   /** Constructs `count` elements at the end, reallocating a vector first if needed, as `resize` does. */
@@ -58,7 +58,7 @@ export class SequenceEditor {
   emplace(frame: Frame, self: SequenceValue, at: number, make: () => Value): void {
     const items = self.items;
     const length = items.length;
-    if (this.kind === 'list') items.splice(at, 0, make());
+    if (this.kind === 'list') self.splice(at, 0, make());
     else if (this.kind === 'deque') this.dequeEmplace(frame, self, at, make);
     else if (length >= self.capacity) this.reallocate(frame, self, recommend(self, length + 1), at, [make()]);
     else if (at === length) items.push(make());
@@ -93,7 +93,7 @@ export class SequenceEditor {
     if (count === 0) return;
     if (this.kind === 'list') {
       const made = Array.from({ length: count }, () => this.ops.copy(frame, value.read()));
-      self.items.splice(at, 0, ...made);
+      self.splice(at, 0, ...made);
     } else if (this.kind === 'deque') this.dequeInsertCopies(frame, self, at, count, value);
     else this.vectorInsertCopies(frame, self, at, count, value);
   }
@@ -102,7 +102,7 @@ export class SequenceEditor {
   insertRange(frame: Frame, self: SequenceValue, at: number, source: Source, isForwardOnly: boolean): void {
     if (source.values.length === 0) return;
     if (this.kind === 'list') {
-      self.items.splice(at, 0, ...source.values.map((value) => source.construct(frame, value)));
+      self.splice(at, 0, ...source.values.map((value) => source.construct(frame, value)));
     } else if (this.kind === 'vector') this.vectorInsertRange(frame, self, at, source);
     else if (isForwardOnly) {
       // A deque copies a forward-only range into a buffer first, and moves the buffer's elements in.
@@ -123,7 +123,7 @@ export class SequenceEditor {
     if (count === 0) return;
     const items = self.items;
     if (this.kind === 'list') {
-      this.destroy(frame, items.splice(from, count));
+      this.destroy(frame, self.splice(from, count));
     } else if (this.kind === 'deque' && from <= Math.floor((items.length - count) / 2)) {
       // A deque shifts the elements before the erased ones when they are fewer.
       for (let index = from - 1; index >= 0; index--) this.assignAt(frame, items, index + count, items[index]);
@@ -166,10 +166,7 @@ export class SequenceEditor {
   /** Move assignment, which destroys the elements and takes the other container's storage. */
   moveAssign(frame: Frame, self: SequenceValue, other: SequenceValue): void {
     this.truncate(frame, self, 0);
-    self.items = other.items;
-    self.capacity = other.capacity;
-    other.items = [];
-    other.capacity = 0;
+    self.takeItems(other);
   }
 
   private assignAt(frame: Frame, items: Value[], index: number, value: Value): void {
@@ -193,7 +190,7 @@ export class SequenceEditor {
   private reallocate(frame: Frame, self: SequenceValue, capacity: number, at: number, made: Value[]): void {
     self.capacity = capacity;
     if (!this.ops.hasEffects) {
-      self.items.splice(at, 0, ...made);
+      self.splice(at, 0, ...made);
       return;
     }
     const back = this.relocate(frame, self.items.slice(at));
@@ -409,13 +406,13 @@ class Followed {
  * libc++'s `list::__sort`, a merge sort that compares the elements in the same order, which a comparator with
  * effects shows.
  */
-export function listSort(items: Value[], less: (a: Value, b: Value) => boolean): Value[] {
+export function listSort<T>(items: T[], less: (a: T, b: T) => boolean): T[] {
   if (items.length < 2) return items;
   if (items.length === 2) return less(items[1], items[0]) ? [items[1], items[0]] : items;
   const half = Math.floor(items.length / 2);
   const left = listSort(items.slice(0, half), less);
   const right = listSort(items.slice(half), less);
-  const merged: Value[] = [];
+  const merged: T[] = [];
   let i = 0;
   let j = 0;
   while (i < left.length && j < right.length) {

@@ -32,6 +32,7 @@ export interface ConversionSequence {
   /** How many classes up the hierarchy a derived-to-base conversion goes, or 0. */
   baseDistance: number;
   convertsToVoidPointer?: boolean;
+  isInitializerList?: boolean;
   /** How the sequence binds a reference, when the target is one. */
   reference?: { toConst: boolean };
   /** The converting constructor of a user-defined conversion. */
@@ -78,7 +79,7 @@ export function implicitConversion(
   allowUser = true
 ): ConversionSequence | undefined {
   // The library's pseudo-parameter of a callable or a braced list takes the argument as it is.
-  if (expr.braced && to.kind === 'function') return sequence(Rank.Exact, (e) => e);
+  if (expr.braced && to.kind === 'function') return sequence(Rank.Exact, (e) => e, { isInitializerList: true });
   if (expr.braced) return host.bracedConversion(expr.braced, to);
   // A function's name converts only to a parameter that takes a callable, as the library's algorithms have.
   if (to.kind === 'function' || expr.functions) {
@@ -290,6 +291,7 @@ function baseDistance(from: Type, to: Type): number {
  * when neither is (C++20 [over.ics.rank]).
  */
 export function compareSequences(a: ConversionSequence, b: ConversionSequence): number {
+  if (a.isInitializerList !== b.isInitializerList) return a.isInitializerList ? 1 : -1;
   if (a.rank !== b.rank) return b.rank - a.rank;
   if (a.rank === Rank.UserDefined) return 0;
   if (a.baseDistance > 0 && b.convertsToVoidPointer) return 1;

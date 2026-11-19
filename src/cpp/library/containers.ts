@@ -60,7 +60,7 @@ export function containerTemplates(library: Library): LibraryTemplate[] {
       instantiate: (args, row) => {
         arity(kind, args, 1, 2, row);
         checkContainer(kind, args[0], args[1], kind === 'stack' ? ['deque', 'vector', 'list'] : ['deque', 'list'], row);
-        return classType(adapterClass(library, kind, args[0], undefined));
+        return classType(adapterClass(library, kind, args[0], args[1], undefined));
       },
     });
   }
@@ -69,7 +69,7 @@ export function containerTemplates(library: Library): LibraryTemplate[] {
     instantiate: (args, row) => {
       arity('priority_queue', args, 1, 3, row);
       checkContainer('priority_queue', args[0], args[1], ['vector', 'deque'], row);
-      return classType(adapterClass(library, 'priority_queue', args[0], args[2]));
+      return classType(adapterClass(library, 'priority_queue', args[0], args[1], args[2]));
     },
   });
   for (const kind of ['map', 'multimap'] as const) {

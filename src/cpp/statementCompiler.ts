@@ -4,7 +4,7 @@ import { permitsQualificationConversion } from './conversions';
 import { CppException, ProgramAbort } from './errors';
 import type { Expr } from './expr';
 import { ExpressionCompiler } from './expressionCompiler';
-import { destroyTemporaries } from './objectCompiler';
+import { destroyTemporaries, zeroOf } from './objectCompiler';
 import { BREAK, type Completion, CONTINUE, type Eval, type Exec, type Frame, type LocalInfo, RETURN } from './runtime';
 import { type Entity, Scope } from './scopes';
 import { isObjectCreation, onlyCalls } from './stepRules';
@@ -26,6 +26,11 @@ import {
 import { Box, type CObject, endLifetime, Liveness, Ptr, type Store, UNINIT, type Value } from './values';
 
 /** The type an `auto` declarator deduced, which the declaration's other declarators must agree with. */
+type ReferenceBinding = { type: Extract<Type, { kind: 'reference' }> } & (
+  | { loc: Eval<Ptr> }
+  | { lifetime: { type: Type; make: Eval<Value | Ptr>; locate: (box: Box) => Ptr } }
+);
+
 export interface AutoDeduction {
   name: string;
   type: Type;
@@ -256,6 +261,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       entity.constant = compiled.constant;
       createsObject = compiled.createsObject;
     }
+    if (this.isConstexpr(declaration)) entity.constant = this.requireConstantInitializer(type, value, declarator.row);
     if (this.isClassLike(type) && !value) createsObject = true;
     const { local } = entity;
     const destroy = this.destroyerOf(type, declarator.row);
@@ -410,6 +416,22 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
   }
 
+  protected requireConstantInitializer(
+    type: Type,
+    value: Syntax | undefined,
+    row: number
+  ): number | bigint | undefined {
+    if (!value) return this.error(row, 'constexpr の変数には初期値を書いてください。');
+    if (!isArithmetic(type)) return undefined;
+    const isList = value.type === 'initializer_list';
+    const args =
+      isList || value.type === 'argument_list' ? value.children.filter((child) => child.type !== 'comment') : [value];
+    if (args.length === 0 && isList) return zeroOf(type) as number | bigint;
+    const constant = args.length === 1 ? this.constantOf(this.compileExpression(args[0]), type) : undefined;
+    if (constant === undefined) return this.error(row, 'constexpr の変数の初期値には定数式を書いてください。');
+    return constant;
+  }
+
   /** The length of an array declared without one, which its initializer decides. */
   completeArrayType(type: Extract<Type, { kind: 'array' }>, value: Syntax): Type {
     if (value.type === 'initializer_list') return { ...type, length: this.bracedArrayLength(type, value) };
@@ -429,6 +451,33 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     value: Syntax | undefined,
     row: number
   ): { exec: Exec; hasInitializer: boolean; createsObject: boolean; deduced?: AutoDeduction } {
+    const binding = this.bindReference(name, declared, value, row);
+    const { type } = binding;
+    const deduced = hasAuto(declared.to) ? { name, type: deducedType(declared, type) } : undefined;
+    const local = this.context.declareLocal(name, type, false);
+    this.context.scope.names.set(name, { kind: 'local', local, isReference: true });
+    const { slot } = local;
+    if ('lifetime' in binding) {
+      const { type: held, make, locate } = binding.lifetime;
+      return { ...this.extendedReference(slot, name, held, make, locate), deduced };
+    }
+    return {
+      exec: this.fullExpression<undefined>((frame) => {
+        frame.slots[slot] = binding.loc(frame);
+        return;
+      }),
+      hasInitializer: true,
+      createsObject: false,
+      deduced,
+    };
+  }
+
+  protected bindReference(
+    name: string,
+    declared: Extract<Type, { kind: 'reference' }>,
+    value: Syntax | undefined,
+    row: number
+  ): ReferenceBinding {
     if (!value) return this.error(row, `参照 ${name} には初期値が要ります。`);
     let target: Expr;
     if (value.type === 'initializer_list' || value.type === 'argument_list') {
@@ -439,7 +488,6 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }
     const isDeduced = hasAuto(declared.to);
     const type = isDeduced ? referenceTo(this.deduceAutoReference(declared.to, target)) : declared;
-    const deduced = isDeduced ? { name, type: deducedType(declared, type) } : undefined;
     // A const reference bound to a temporary extends the temporary's lifetime to the reference's, whether the
     // temporary is the initializer's object or a converted value (C++20 [class.temporary]).
     const isDirect = target.isLvalue && bindsDirectly(target.type, type.to);
@@ -448,43 +496,16 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       target.type.kind === 'class' &&
       type.to.kind === 'class' &&
       target.type.cls.isDerivedFrom(type.to.cls);
-    let bound: Expr;
-    let heldType: Type = type.to;
-    let extends_ = false;
     if (!isDirect && isConstType(type.to) && !target.functions && target.type.kind !== 'void') {
-      extends_ = true;
-      if (isTemporaryClass) {
-        bound = target;
-        heldType = target.type;
-      } else {
-        bound = this.convert(target, unqualified(type.to), row);
-        heldType = unqualified(type.to);
-      }
-    } else {
-      bound = this.convert(target, type, row);
+      const heldType = isTemporaryClass ? target.type : unqualified(type.to);
+      const bound = isTemporaryClass ? target : this.convert(target, heldType, row);
+      return { type, lifetime: { type: heldType, make: bound.run, locate: (box) => new Ptr(box, 0) } };
     }
-    const local = this.context.declareLocal(name, type, false);
-    this.context.scope.names.set(name, { kind: 'local', local, isReference: true });
-    const { slot } = local;
-    // A reference bound to a member of a temporary extends the whole temporary's lifetime.
     const member = isDirect ? target.temporaryMember : undefined;
-    if (member)
-      return {
-        ...this.extendedReference(slot, name, member.object.type, member.object.run, memberAt(member.path)),
-        deduced,
-      };
-    if (extends_)
-      return { ...this.extendedReference(slot, name, heldType, bound.run, (box) => new Ptr(box, 0)), deduced };
-    const locate = bound.run;
-    return {
-      exec: this.fullExpression<undefined>((frame) => {
-        frame.slots[slot] = locate(frame) as Ptr;
-        return;
-      }),
-      hasInitializer: true,
-      createsObject: false,
-      deduced,
-    };
+    if (member) {
+      return { type, lifetime: { type: member.object.type, make: member.object.run, locate: memberAt(member.path) } };
+    }
+    return { type, loc: this.convert(target, type, row).run as Eval<Ptr> };
   }
 
   /**
@@ -541,7 +562,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         return this.error(declarator.row, `配列 ${name} の大きさを書いてください。`);
       const global = this.declareStaticStorage(name, type, declarator.row, false);
       const local = this.context.declareLocal(name, type, false);
-      this.context.scope.names.set(name, { kind: 'local', local, isReference: false, constant: undefined });
+      const constant = this.isConstexpr(node)
+        ? this.requireConstantInitializer(type, value, declarator.row)
+        : undefined;
+      this.context.scope.names.set(name, { kind: 'local', local, isReference: false, constant });
       const { slot } = local;
       const { index } = global;
       const initialize = this.staticInitializer(global, type, value, declarator.row);

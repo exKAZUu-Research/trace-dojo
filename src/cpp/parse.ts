@@ -1,3 +1,6 @@
+import type { Node } from '@willbooster/web-tree-sitter';
+
+import type { SourceDiagnostic } from '../interpreter/diagnostics';
 import { type TraceAnnotation, traceAnnotationsIn } from '../interpreter/traceAnnotations';
 import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitter';
 import { rejectUnsupportedSyntax } from './stages';
@@ -16,11 +19,45 @@ const MISSING_TOKEN_NAMES: Record<string, string> = {
 
 /** Parses a translation unit, throwing a `CompileError` for invalid syntax or syntax the interpreter leaves out. */
 export function parseCpp(source: string): Syntax {
-  return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) => {
-    const syntax = copySyntax(root);
-    rejectUnsupportedSyntax(syntax);
-    return syntax;
-  });
+  return parseSource(
+    parser,
+    source,
+    MISSING_TOKEN_NAMES,
+    (root) => {
+      const syntax = copySyntax(root);
+      rejectUnsupportedSyntax(syntax);
+      return syntax;
+    },
+    { locateErrors: (root, errors) => locateErrors(root, errors, source) }
+  );
+}
+
+function locateErrors(root: Node, errors: SourceDiagnostic[], source: string): SourceDiagnostic[] {
+  if (errors.length === 0) return errors;
+  const strayElse = root
+    .descendantsOfType('compound_literal_expression')
+    .find(
+      (node) =>
+        node.hasError === false &&
+        node.startPosition.row <= errors[0].row &&
+        node.childForFieldName('type')?.text === 'else'
+    );
+  if (strayElse) return [{ row: strayElse.startPosition.row, message: '対応する if のない else は書けません。' }];
+  const failure = root.descendantsOfType('ERROR')[0];
+  const previous = failure?.previousNamedSibling;
+  if (
+    !previous ||
+    !['class_specifier', 'struct_specifier', 'union_specifier', 'update_expression'].includes(previous.type)
+  )
+    return errors;
+  const patched = parser.parse(source.slice(0, previous.endIndex) + ';' + source.slice(previous.endIndex));
+  try {
+    if (patched && !patched.rootNode.hasError)
+      return [{ row: previous.endPosition.row, message: '「;」が足りません。' }];
+  } finally {
+    patched?.delete();
+  }
+  return errors;
 }
 
 /** The `// atomic` annotations of a program, read from its line comments. */

@@ -41,7 +41,7 @@ import { randomEngines } from './random';
 import { stringClass, stringFunctions } from './string';
 import { asNumber, generic, native } from './support';
 import { turtleClass } from './turtle';
-import { headerOf, isVisible } from './visibility';
+import { hasLocaleCtypeOverload, headerOf, isVisible } from './visibility';
 
 /** Looks a name up in namespace `std`. */
 export function lookupStd(library: Library, name: string): Entity | undefined {
@@ -61,6 +61,15 @@ const UNSUPPORTED_STD_NAMES: Record<string, string> = {
   ifstream: 'ファイルの読み書き（std::ifstream）',
   ofstream: 'ファイルの読み書き（std::ofstream）',
   fstream: 'ファイルの読み書き（std::fstream）',
+  nothrow: '例外を投げない割り当て（std::nothrow）',
+  nothrow_t: '例外を投げない割り当て（std::nothrow_t）',
+  new_handler: 'メモリ不足時のハンドラ（std::new_handler）',
+  set_new_handler: 'メモリ不足時のハンドラ（std::set_new_handler）',
+  get_new_handler: 'メモリ不足時のハンドラ（std::get_new_handler）',
+  exception_ptr: '例外へのポインタ（std::exception_ptr）',
+  current_exception: '例外へのポインタ（std::current_exception）',
+  make_exception_ptr: '例外へのポインタ（std::make_exception_ptr）',
+  rethrow_exception: '例外へのポインタ（std::rethrow_exception）',
   filesystem: 'ファイルシステム（std::filesystem）',
   thread: 'スレッド（std::thread）',
   jthread: 'スレッド（std::jthread）',
@@ -155,6 +164,7 @@ export class Library {
   readonly streams: Streams;
   private readonly exceptions: Map<string, ClassInfo>;
   private readonly stdNames = new Map<string, Entity>();
+  private readonly localeCtypeOverloads = new Map<string, FunctionInfo>();
   private readonly globalNames = new Map<string, Entity>();
   private readonly headers = new Set<string>();
   /** `FILE`, which only `stdout` and `stderr` point to. */
@@ -202,8 +212,17 @@ export class Library {
 
   std(name: string): Entity | undefined {
     if (!isVisible(name, this.headers)) return undefined;
+    const entity = this.stdNames.get(name);
+    if (entity?.kind === 'functions' && hasLocaleCtypeOverload(name, this.headers)) {
+      let overload = this.localeCtypeOverloads.get(name);
+      if (!overload) {
+        overload = generic(name, () => {});
+        this.localeCtypeOverloads.set(name, overload);
+      }
+      return { kind: 'functions', functions: [...entity.functions, overload] };
+    }
     return (
-      this.stdNames.get(name) ??
+      entity ??
       (UNSUPPORTED_STD_NAMES[name] ? { kind: 'unsupported', feature: UNSUPPORTED_STD_NAMES[name] } : undefined)
     );
   }

@@ -3,7 +3,7 @@ import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import type { Eval } from '../runtime';
 import { BOOL, ClassInfo, classType, isInteger, LONG, PTRDIFF_T, type Type, typeName, withConst } from '../types';
-import { Ptr } from '../values';
+import type { Ptr } from '../values';
 import type { IteratorCategory } from './libraryClass';
 import { nativeConstructor } from './support';
 
@@ -80,18 +80,18 @@ function withTemporaryTarget(compiler: ExpressionCompiler, operator: string, ope
 
 /** The element a sequence iterator designates, checking that it is one. */
 export function elementLocation(pointer: Ptr, isReverse: boolean): Ptr {
-  const store = pointer.target();
-  const index = isReverse ? pointer.index - 1 : pointer.index;
-  if (index < 0 || index >= store.length) throw new CppRuntimeError('invalidIterator');
-  return new Ptr(store, index);
+  return pointer.element(isReverse);
 }
 
 /** Moves an iterator by `delta` elements, within the sequence and one past its end. */
 export function moveIterator(pointer: Ptr, delta: number, isReverse: boolean): Ptr {
-  const store = pointer.target();
-  const index = pointer.index + (isReverse ? -delta : delta);
-  if (index < 0 || index > store.length) throw new CppRuntimeError('invalidIterator');
-  return new Ptr(store, index);
+  try {
+    return pointer.offset(isReverse ? -delta : delta);
+  } catch (error) {
+    if (error instanceof CppRuntimeError && error.kind === 'pointerOutOfRange')
+      throw new CppRuntimeError('invalidIterator');
+    throw error;
+  }
 }
 
 // code-gauge-allow functionCognitiveComplexity 30 -- One case per iterator operator.
@@ -239,8 +239,8 @@ function sameIteratorFamily(a: ClassInfo, b: ClassInfo): boolean {
 }
 
 function compareIterators(operator: string, a: Ptr, b: Ptr, isReverse: boolean): number {
-  if (operator === '==') return a.store === b.store && a.index === b.index ? 1 : 0;
-  if (operator === '!=') return a.store === b.store && a.index === b.index ? 0 : 1;
+  if (operator === '==') return a.store === b.store && a.equals(b) ? 1 : 0;
+  if (operator === '!=') return a.store === b.store && a.equals(b) ? 0 : 1;
   if (a.store !== b.store) throw new CppRuntimeError('invalidIterator');
   const difference = isReverse ? b.index - a.index : a.index - b.index;
   switch (operator) {

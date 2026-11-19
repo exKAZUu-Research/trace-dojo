@@ -16,7 +16,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { CObject, Ptr, type Value } from '../values';
+import { CObject, Ptr, Store, type Value } from '../values';
 import { keyText, mappedNotDefaultConstructible, pairClass } from './associative';
 import { MapValue } from './containerValues';
 import { type ElementOperations, elementOperations, equalTo } from './elements';
@@ -169,6 +169,60 @@ interface HashNode {
   next: HashNode | undefined;
   hash: bigint;
   value: Value;
+  owner?: HashValue;
+}
+
+class HashPosition extends Ptr {
+  constructor(
+    private readonly table: HashValue,
+    readonly node: HashNode | undefined
+  ) {
+    super(undefined, 0);
+  }
+
+  override get store(): HashValue {
+    return this.node?.owner ?? this.table;
+  }
+
+  override get index(): number {
+    return this.node ? this.store.positionOf(this.entry()) : this.store.length;
+  }
+
+  override equals(other: Ptr): boolean {
+    if (other instanceof HashPosition) return this.store === other.store && this.node === other.node;
+    return super.equals(other);
+  }
+
+  override offset(delta: number): Ptr {
+    if (delta === 1) return this.store.iterator(this.entry().next);
+    return super.offset(delta);
+  }
+
+  override element(isReverse: boolean): Ptr {
+    if (isReverse) return super.element(true);
+    this.entry();
+    return this;
+  }
+
+  override readRaw(): Value {
+    return this.entry().value;
+  }
+
+  override read(): Value {
+    const value = this.readRaw();
+    if (value instanceof Store) value.checkAlive();
+    return value;
+  }
+
+  override write(value: Value): void {
+    this.entry().value = value;
+  }
+
+  entry(): HashNode {
+    this.target();
+    if (!this.node?.owner) throw new CppRuntimeError('invalidIterator');
+    return this.node;
+  }
 }
 
 function isPowerOfTwo(count: number): boolean {
@@ -202,6 +256,7 @@ export class HashValue extends MapValue {
   size = 0;
   maxLoadFactor = 1;
   private ordered: HashNode[] | undefined;
+  private readonly positions = new Map<HashNode, number>();
 
   constructor(
     readonly hash: (value: Value) => bigint,
@@ -222,11 +277,33 @@ export class HashValue extends MapValue {
     return this.size;
   }
 
+  iterator(node: HashNode | undefined): Ptr {
+    return new HashPosition(this, node);
+  }
+
+  first(): Ptr {
+    return this.iterator(this.head.next);
+  }
+
+  override location(index: number): Ptr {
+    if (index < 0 || index > this.size) throw new CppRuntimeError('invalidIterator');
+    return this.iterator(index === this.size ? undefined : this.nodes()[index]);
+  }
+
+  positionOf(node: HashNode): number {
+    this.nodes();
+    return this.positions.get(node) as number;
+  }
+
   /** The nodes in iteration order, which iterators address by position. */
   nodes(): HashNode[] {
     if (!this.ordered) {
       const nodes: HashNode[] = [];
-      for (let node = this.head.next; node; node = node.next) nodes.push(node);
+      this.positions.clear();
+      for (let node = this.head.next; node; node = node.next) {
+        this.positions.set(node, nodes.length);
+        nodes.push(node);
+      }
       this.ordered = nodes;
     }
     return this.ordered;
@@ -249,23 +326,22 @@ export class HashValue extends MapValue {
     return this.nodes().map((node) => node.value);
   }
 
-  find(key: Value): number {
+  lookup(key: Value): HashNode | undefined {
     const hash = this.hash(key);
     const count = this.buckets.length;
-    if (count === 0) return -1;
+    if (count === 0) return;
     const index = constrain(hash, count);
     let node = this.buckets[index]?.next;
     for (; node && (node.hash === hash || constrain(node.hash, count) === index); node = node.next) {
-      if (node.hash === hash && this.equal(this.keyOf(node.value), key)) return this.nodes().indexOf(node);
+      if (node.hash === hash && this.equal(this.keyOf(node.value), key)) return node;
     }
-    return -1;
   }
 
   /** Inserts an entry as `__emplace_unique_key_args` does, giving its position and whether it was inserted. */
-  insert(entry: Value): [number, boolean] {
+  insert(entry: Value): [HashNode, boolean] {
     const key = this.keyOf(entry);
-    const existing = this.find(key);
-    if (existing >= 0) return [existing, false];
+    const existing = this.lookup(key);
+    if (existing) return [existing, false];
     const hash = this.hash(key);
     let count = this.buckets.length;
     if (this.size + 1 > count * this.maxLoadFactor || count === 0) {
@@ -278,7 +354,7 @@ export class HashValue extends MapValue {
       count = this.buckets.length;
     }
     const index = constrain(hash, count);
-    const node: HashNode = { next: undefined, hash, value: entry };
+    const node: HashNode = { next: undefined, hash, value: entry, owner: this };
     const before = this.buckets[index];
     if (before) {
       node.next = before.next;
@@ -291,12 +367,11 @@ export class HashValue extends MapValue {
     }
     this.size++;
     this.ordered = undefined;
-    return [this.nodes().indexOf(node), true];
+    return [node, true];
   }
 
   /** Removes the node at a position, as `erase(iterator)` does. */
-  removeAt(position: number): Value {
-    const node = this.nodes()[position];
+  remove(node: HashNode): Value {
     const count = this.buckets.length;
     const index = constrain(node.hash, count);
     let before = this.buckets[index] as HashNode;
@@ -313,6 +388,7 @@ export class HashValue extends MapValue {
       if (nextIndex !== index) this.buckets[nextIndex] = before;
     }
     before.next = next;
+    node.owner = undefined;
     this.size--;
     this.ordered = undefined;
     return node.value;
@@ -323,6 +399,7 @@ export class HashValue extends MapValue {
    * order, as libc++'s copy constructor and copy assignment make.
    */
   copyStructure(other: HashValue, values: Value[]): void {
+    for (let node = this.head.next; node; node = node.next) node.owner = undefined;
     const count = other.size === 0 ? 0 : other.bucketCount;
     this.maxLoadFactor = other.maxLoadFactor;
     this.buckets = Array.from({ length: count });
@@ -330,7 +407,7 @@ export class HashValue extends MapValue {
     let own = this.head;
     let current = -1;
     for (const [index, node] of other.nodes().entries()) {
-      const copy: HashNode = { next: undefined, hash: node.hash, value: values[index] };
+      const copy: HashNode = { next: undefined, hash: node.hash, value: values[index], owner: this };
       const bucket = constrain(node.hash, count);
       if (bucket !== current) {
         this.buckets[bucket] = own;
@@ -351,6 +428,8 @@ export class HashValue extends MapValue {
     const next = this.head.next;
     this.head.next = other.head.next;
     other.head.next = next;
+    for (let node = this.head.next; node; node = node.next) node.owner = this;
+    for (let node = other.head.next; node; node = node.next) node.owner = other;
     [this.buckets, other.buckets] = [other.buckets, this.buckets];
     for (const index of ownHeads) other.buckets[index] = other.head;
     for (const index of otherHeads) this.buckets[index] = this.head;
@@ -361,7 +440,10 @@ export class HashValue extends MapValue {
   }
 
   clear(): Value[] {
-    const values = this.nodes().map((node) => node.value);
+    const values = this.nodes().map((node) => {
+      node.owner = undefined;
+      return node.value;
+    });
     this.head.next = undefined;
     this.buckets = Array.from<HashNode | undefined>({ length: this.buckets.length });
     this.size = 0;
@@ -473,17 +555,17 @@ export function unorderedClass(
     if (destroy) for (const entry of entries) destroy(frame, entry);
   };
   const insertResult = pairClass(library, iterator, BOOL);
-  const table: EntryTable<HashValue> = {
+  const table: EntryTable<HashValue, HashNode> = {
     keyOf,
-    lookup: (self, key) => self.find(key),
+    lookup: (self, key) => self.lookup(key),
     insert: (frame, self, entry) => {
       frame.runtime.reserve(3);
       return self.insert(entry);
     },
     ops,
   };
-  const insertionResult = (self: HashValue, at: number, inserted: boolean): Value =>
-    new CObject(insertResult, [new Ptr(self, at), inserted ? 1 : 0]);
+  const insertionResult = (self: HashValue, node: HashNode, inserted: boolean): Value =>
+    new CObject(insertResult, [self.iterator(node), inserted ? 1 : 0]);
   cls.library = {
     kind,
     args,
@@ -508,6 +590,37 @@ export function unorderedClass(
     },
     operator: (compiler_, operator, operands, row) => {
       const [left, right] = operands;
+      if (
+        (operator === '==' || operator === '!=') &&
+        left.type.kind === 'class' &&
+        left.type.cls === cls &&
+        right?.type.kind === 'class' &&
+        right.type.cls === cls
+      ) {
+        const valuesEqual = valueType ? equalTo(valueType) : undefined;
+        if (valueType && !valuesEqual) return compiler_.error(row, `${typeName(valueType)} は == で比べられません。`);
+        const a = compiler_.rvalue(left).run;
+        const b = compiler_.rvalue(right).run;
+        return {
+          type: BOOL,
+          isLvalue: false,
+          row,
+          run: (frame) => {
+            const first = a(frame) as HashValue;
+            const second = b(frame) as HashValue;
+            const same =
+              first.size === second.size &&
+              first.nodes().every((node) => {
+                const found = second.lookup(keyOf(node.value));
+                return (
+                  found !== undefined &&
+                  (!valuesEqual || valuesEqual((node.value as CObject).values[1], (found.value as CObject).values[1]))
+                );
+              });
+            return same === (operator === '==') ? 1 : 0;
+          },
+        };
+      }
       if (operator !== '[]' || !isMap || left.type.kind !== 'class' || left.type.cls !== cls) return;
       if (isConstType(left.type))
         return compiler_.error(row, `const の ${cls.name} には [] を使えません（at を使ってください）。`);
@@ -523,17 +636,17 @@ export function unorderedClass(
         run: (frame) => {
           const self = (object(frame) as Ptr).read() as HashValue;
           const keyValue = (keyRun(frame) as Ptr).read();
-          let at = self.find(keyValue);
-          if (at < 0) {
+          let node = self.lookup(keyValue);
+          if (!node) {
             frame.runtime.reserve(3);
-            [at] = self.insert(
+            [node] = self.insert(
               new CObject((entryType as Extract<Type, { kind: 'class' }>).cls, [
                 keyOps.copy(frame, keyValue),
                 mappedOps.make(frame),
               ])
             );
           }
-          return new Ptr(self.get(at) as CObject, 1);
+          return new Ptr(node.value as CObject, 1);
         },
       };
     },
@@ -615,53 +728,44 @@ export function unorderedClass(
   method('clear', [], VOID, (self, _callArgs, frame) => destroyAll(frame, self.clear()));
   for (const isConst of [false, true]) {
     const it = isConst ? constIterator : iterator;
-    method('begin', [], it, (self) => new Ptr(self, 0), isConst);
-    method('end', [], it, (self) => new Ptr(self, self.size), isConst);
-    method(
-      'find',
-      [constRef(keyType)],
-      it,
-      (self, [k]) => {
-        const at = self.find(keyArg(k));
-        return new Ptr(self, at < 0 ? self.size : at);
-      },
-      isConst
-    );
+    method('begin', [], it, (self) => self.first(), isConst);
+    method('end', [], it, (self) => self.iterator(undefined), isConst);
+    method('find', [constRef(keyType)], it, (self, [k]) => self.iterator(self.lookup(keyArg(k))), isConst);
     if (isMap) {
       method(
         'at',
         [constRef(keyType)],
         referenceTo(isConst ? withConst(valueType as Type) : (valueType as Type)),
         (self, [k], frame) => {
-          const at = self.find(keyArg(k));
-          if (at < 0) return throwLibrary(frame, library.exception('out_of_range'), 'unordered_map::at: key not found');
-          return new Ptr(self.get(at) as CObject, 1);
+          const node = self.lookup(keyArg(k));
+          if (!node) return throwLibrary(frame, library.exception('out_of_range'), 'unordered_map::at: key not found');
+          return new Ptr(node.value as CObject, 1);
         },
         isConst
       );
     }
   }
-  method('cbegin', [], constIterator, (self) => new Ptr(self, 0), true);
-  method('cend', [], constIterator, (self) => new Ptr(self, self.size), true);
-  method('count', [constRef(keyType)], SIZE_T, (self, [k]) => (self.find(keyArg(k)) >= 0 ? 1n : 0n), true);
-  method('contains', [constRef(keyType)], BOOL, (self, [k]) => (self.find(keyArg(k)) >= 0 ? 1 : 0), true);
+  method('cbegin', [], constIterator, (self) => self.first(), true);
+  method('cend', [], constIterator, (self) => self.iterator(undefined), true);
+  method('count', [constRef(keyType)], SIZE_T, (self, [k]) => (self.lookup(keyArg(k)) ? 1n : 0n), true);
+  method('contains', [constRef(keyType)], BOOL, (self, [k]) => (self.lookup(keyArg(k)) ? 1 : 0), true);
   method('insert', [constRef(unqualified(entryType))], classType(insertResult), (self, [entry], frame) =>
     insertionResult(self, ...insertCopy(table, frame, self, (entry as Ptr).read()))
   );
   method('erase', [constRef(keyType)], SIZE_T, (self, [k], frame) => {
-    const at = self.find(keyArg(k));
-    if (at < 0) return 0n;
-    // The removal must run even when destroying an element does nothing (`?.` would skip its argument).
-    const removed = self.removeAt(at);
+    const node = self.lookup(keyArg(k));
+    if (!node) return 0n;
+    const removed = self.remove(node);
     ops().destroy?.(frame, removed);
     return 1n;
   });
   method('erase', [constIterator], iterator, (self, [position], frame) => {
-    const at = (position as Ptr).index;
-    if ((position as Ptr).store !== self || at >= self.size) throw new CppRuntimeError('invalidIterator');
-    const removed = self.removeAt(at);
+    if (!(position instanceof HashPosition) || position.store !== self) throw new CppRuntimeError('invalidIterator');
+    const node = position.entry();
+    const next = node.next;
+    const removed = self.remove(node);
     ops().destroy?.(frame, removed);
-    return new Ptr(self, at);
+    return self.iterator(next);
   });
   method('swap', [referenceTo(classType(cls))], VOID, (self, [other]) => self.swap((other as Ptr).read() as HashValue));
   return cls;

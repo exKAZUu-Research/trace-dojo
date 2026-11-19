@@ -5,7 +5,12 @@ import { addMethod, CONST_CHAR_PTR, constRef, cStringStore, native, nativeConstr
 /** The standard exception classes of `<exception>` and `<stdexcept>`, by name without `std::`. */
 export function exceptionClasses(stringType: () => Type): Map<string, ClassInfo> {
   const classes = new Map<string, ClassInfo>();
-  const define = (name: string, base: ClassInfo | undefined, hasMessage: boolean): ClassInfo => {
+  const define = (
+    name: string,
+    base: ClassInfo | undefined,
+    hasMessage: boolean,
+    defaultMessage = `std::${name}`
+  ): ClassInfo => {
     const cls = new ClassInfo(`std::${name}`, 'class');
     cls.base = base;
     cls.baseAccess = 'public';
@@ -14,7 +19,7 @@ export function exceptionClasses(stringType: () => Type): Map<string, ClassInfo>
     if (base) for (const [key, fn] of base.virtuals) cls.virtuals.set(key, fn);
     const construct = (message: string | undefined) => (_args: unknown[], context: NativeContext) => {
       const self = context.self instanceof CObject ? context.self : new CObject(cls, []);
-      self.message = message ?? cls.name;
+      self.message = message ?? defaultMessage;
       return context.self instanceof CObject ? undefined : self;
     };
     cls.constructors = hasMessage
@@ -32,7 +37,7 @@ export function exceptionClasses(stringType: () => Type): Map<string, ClassInfo>
         const object = source as CObject;
         const copy = new CObject(cls, [...object.values]);
         // Copying as `std::exception` slices the message off, as its copy constructor keeps none.
-        copy.message = hasMessage ? object.message : cls.name;
+        copy.message = hasMessage ? object.message : defaultMessage;
         return copy;
       },
       assign: (_frame, target, source) => {
@@ -57,6 +62,9 @@ export function exceptionClasses(stringType: () => Type): Map<string, ClassInfo>
   exception.virtuals.set('what()const', what);
   const logic = define('logic_error', exception, true);
   const runtime = define('runtime_error', exception, true);
+  const badAlloc = define('bad_alloc', exception, false);
+  define('bad_array_new_length', badAlloc, false, 'bad_array_new_length');
+  define('bad_exception', exception, false);
   for (const name of ['invalid_argument', 'domain_error', 'length_error', 'out_of_range']) define(name, logic, true);
   for (const name of ['range_error', 'overflow_error', 'underflow_error']) define(name, runtime, true);
   return classes;

@@ -4,6 +4,7 @@ import { CompileError } from '../../interpreter/diagnostics';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
+import { destroyTemporaries, makeEach } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import {
   BOOL,
@@ -170,14 +171,15 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     name: string,
     instantiate: (args: Expr[], templateArgs: Type[] | undefined) => FunctionInfo | undefined
   ): void => {
-    const overload = generic(name, (args, templateArgs) =>
-      instantiate(
+    const overload = generic(name, (args, templateArgs) => {
+      if (args.some((arg) => arg.functions && arg.functions.candidates.length !== 1)) return;
+      return instantiate(
         ARRAY_REFERENCE_FUNCTIONS.has(name)
           ? args
           : args.map((arg) => (arg.type.kind === 'array' ? compiler().rvalue(arg) : arg)),
         templateArgs
-      )
-    );
+      );
+    });
     functions.set(name, [...(functions.get(name) ?? []), overload]);
   };
   /** The comparison an algorithm uses: the argument at `index`, or `<`. */
@@ -456,15 +458,32 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('fill', (args) => {
     const info = writableRangeAt(args, 0);
     if (!info || args.length !== 3) return;
-    const itemType = constRef(unqualified(info.element));
-    const value = tryCompile(() => compiler().convert(args[2], itemType, args[2].row));
-    if (!value) return;
+    const itemType = constRef(unqualified(args[2].type));
+    const source: Ptr[] = [];
+    const argument: Expr = {
+      type: itemType.kind === 'reference' ? itemType.to : itemType,
+      isLvalue: true,
+      row: args[2].row,
+      run: () => source.at(-1),
+    };
+    const convert = tryCompile(() => compiler().convert(argument, constRef(unqualified(info.element)), argument.row));
+    if (!convert) return;
     const ops = elementOperations(compiler(), unqualified(info.element), args[0].row);
     return native('fill', [...params(args).slice(0, 2), itemType], VOID, ([first, last, item], { frame }) => {
       const values = range(first, last, info);
-      const source = (item as Ptr).read();
-      for (let index = 0; index < values.length; index++) assignElement(frame, values.location(index), ops, source);
-      return;
+      source.push(item as Ptr);
+      try {
+        for (let index = 0; index < values.length; index++) {
+          const mark = frame.temporaries.length;
+          try {
+            assignElement(frame, values.location(index), ops, (convert.run(frame) as Ptr).read());
+          } finally {
+            destroyTemporaries(frame, mark);
+          }
+        }
+      } finally {
+        source.pop();
+      }
     });
   });
   define('iota', (args) => {
@@ -1073,7 +1092,16 @@ function listExtremum(
     const compare = less(frame);
     if (result) {
       const [low, high] = minmaxPositions(items, compare);
-      return new CObject(result, [ops.copy(frame, items[low]), ops.copy(frame, items[high])]);
+      const selected: Value[] = [items[low], items[high]];
+      return new CObject(
+        result,
+        makeEach(
+          frame,
+          selected.length,
+          (index) => ops.copy(frame, selected[index]),
+          () => destroy
+        )
+      );
     }
     let best = 0;
     for (let index = 1; index < items.length; index++) {

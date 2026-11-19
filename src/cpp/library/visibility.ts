@@ -397,6 +397,7 @@ const VISIBLE_GROUPS: Record<string, readonly string[]> = {
   ],
   stdexcept: ['stdexcept', 'exception', 'cstdlib'],
   exception: ['exception', 'cstdlib'],
+  new: ['new', 'exception', 'cstdlib'],
   cmath: ['cmath', 'limits'],
   cstdlib: ['cstdlib'],
   cctype: ['cctype'],
@@ -524,7 +525,23 @@ for (const [group, names] of Object.entries({
     'overflow_error',
     'underflow_error',
   ],
-  exception: ['exception'],
+  exception: [
+    'exception',
+    'bad_exception',
+    'exception_ptr',
+    'current_exception',
+    'make_exception_ptr',
+    'rethrow_exception',
+  ],
+  new: [
+    'bad_alloc',
+    'bad_array_new_length',
+    'nothrow',
+    'nothrow_t',
+    'new_handler',
+    'set_new_handler',
+    'get_new_handler',
+  ],
   limits: ['numeric_limits'],
   random: ['mt19937', 'mt19937_64', 'random_device', 'uniform_int_distribution', 'uniform_real_distribution'],
   cstdlib: [
@@ -624,4 +641,11 @@ export function isVisible(name: string, headers: ReadonlySet<string>): boolean {
 /** The header that declares a library name, for the message that asks to include it. */
 export function headerOf(name: string): string | undefined {
   return NAME_GROUPS[name]?.[0];
+}
+
+export function hasLocaleCtypeOverload(name: string, headers: ReadonlySet<string>): boolean {
+  if (!NAME_GROUPS[name]?.includes('cctype') || name === 'isblank') return false;
+  return ['locale', 'ios', 'istream', 'ostream', 'iostream', 'sstream', 'iomanip'].some((header) =>
+    headers.has(header)
+  );
 }

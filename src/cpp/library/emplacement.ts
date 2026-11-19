@@ -1,3 +1,4 @@
+import { CompileError } from '../../interpreter/diagnostics';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { type Eval, type Frame, holdAll } from '../runtime';
@@ -5,7 +6,7 @@ import { type ClassInfo, type Type, typeName, unqualified, VOID, withConst } fro
 import { CObject, type Ptr, type Value } from '../values';
 import type { ElementOperations } from './elements';
 import type { Source } from './sequenceEdits';
-import { constructElement, iteratorRange } from './sequences';
+import { constructElement, initializerList, iteratorRange } from './sequences';
 import { addMethod, constRef, native, nativeConstructor } from './support';
 
 /** The types of an associative container's entries: the key, the entry, and the mapped value of a map. */
@@ -16,22 +17,22 @@ export interface EntryTypes {
 }
 
 /** What the insertions of an associative container need: looking a key up and inserting an entry it made. */
-export interface EntryTable<T> {
+export interface EntryTable<T, Position = number> {
   keyOf: (entry: Value) => Value;
-  /** The position of an entry with the key, or -1 when there is none or the container takes equal keys. */
-  lookup: (self: T, key: Value) => number;
-  insert: (frame: Frame, self: T, entry: Value) => [number, boolean];
+  /** The position of an entry with the key, or undefined when there is none or the container takes equal keys. */
+  lookup: (self: T, key: Value) => Position | undefined;
+  insert: (frame: Frame, self: T, entry: Value) => [Position, boolean];
   ops: () => ElementOperations;
 }
 
 /** How an associative container compiles `emplace`, `try_emplace`, and `insert` of a pair of another type. */
-export interface EmplacementCall<T> {
+export interface EmplacementCall<T, Position> {
   types: EntryTypes;
-  table: EntryTable<T>;
+  table: EntryTable<T, Position>;
   resultType: Type;
   isTemporaryObject: boolean;
   /** The call's result for the entry at a position, which it inserted or found. */
-  result: (self: T, at: number, inserted: boolean) => Value;
+  result: (self: T, at: Position, inserted: boolean) => Value;
 }
 
 /** The arguments of an emplacement: the key they give directly, if any, and how to construct the entry from them. */
@@ -44,13 +45,13 @@ interface Emplacing {
  * Compiles `emplace(args...)`, `try_emplace(key, args...)`, and `insert(pair)` with a pair of another type than the
  * entries, or gives undefined for another member function.
  */
-export function emplacementCall<T>(
+export function emplacementCall<T, Position>(
   compiler: ExpressionCompiler,
   object: Expr,
   member: string,
   args: Expr[],
   row: number,
-  call: EmplacementCall<T>
+  call: EmplacementCall<T, Position>
 ): Expr | undefined {
   const { entryType, valueType } = call.types;
   if (member === 'try_emplace' && !valueType) return;
@@ -84,11 +85,11 @@ export function emplacementCall<T>(
  * Adds the range constructor and `insert(first, last)` of an associative container, which take iterators of any
  * container or pointers whose elements construct entries.
  */
-export function addRangeMembers<T>(
+export function addRangeMembers<T, Position>(
   compiler: ExpressionCompiler,
   cls: ClassInfo,
   entryType: Type,
-  table: EntryTable<T>,
+  table: EntryTable<T, Position>,
   make: () => T
 ): void {
   const rangeOf = (args: Expr[]): ReturnType<typeof iteratorRange> =>
@@ -121,10 +122,39 @@ export function addRangeMembers<T>(
     },
     isTemplate: true,
   });
+  addMethod(cls, {
+    ...native('insert', [], VOID, () => {}),
+    instantiate: (args) => {
+      const braced = args.length === 1 ? args[0].braced : undefined;
+      if (!braced) return;
+      let list: ReturnType<typeof initializerList>;
+      try {
+        list = initializerList(compiler, unqualified(entryType), braced, table.ops);
+      } catch (error) {
+        if (error instanceof CompileError) return;
+        throw error;
+      }
+      return native(
+        'insert',
+        [{ kind: 'function', ret: VOID, params: [] }],
+        VOID,
+        (_args, { self, frame }) => {
+          list(frame, (source) => insertRange(table, frame, self as T, source));
+        },
+        { owner: cls }
+      );
+    },
+    isTemplate: true,
+  });
 }
 
 /** Inserts a copy of an entry unless its key is there already, which libc++ looks up before it copies. */
-export function insertCopy<T>(table: EntryTable<T>, frame: Frame, self: T, entry: Value): [number, boolean] {
+export function insertCopy<T, Position>(
+  table: EntryTable<T, Position>,
+  frame: Frame,
+  self: T,
+  entry: Value
+): [Position, boolean] {
   return emplaceEntry(table, frame, self, {
     key: table.keyOf(entry),
     make: () => table.ops().copy(frame, entry),
@@ -132,7 +162,7 @@ export function insertCopy<T>(table: EntryTable<T>, frame: Frame, self: T, entry
 }
 
 /** Inserts the elements of an iterator range, as the range constructor and `insert(first, last)` do. */
-export function insertRange<T>(table: EntryTable<T>, frame: Frame, self: T, source: Source): void {
+export function insertRange<T, Position>(table: EntryTable<T, Position>, frame: Frame, self: T, source: Source): void {
   for (const value of source.values) {
     if (source.isSameType) insertCopy(table, frame, self, value);
     else emplaceEntry(table, frame, self, { key: undefined, make: () => source.construct(frame, value) });
@@ -143,9 +173,14 @@ export function insertRange<T>(table: EntryTable<T>, frame: Frame, self: T, sour
  * Inserts the entry an emplacement makes: when it gives the key, only after looking the key up, and otherwise by
  * making the entry and destroying it again when its key is there already.
  */
-function emplaceEntry<T>(table: EntryTable<T>, frame: Frame, self: T, { key, make }: Emplacing): [number, boolean] {
-  const existing = key === undefined ? -1 : table.lookup(self, key);
-  if (existing >= 0) return [existing, false];
+function emplaceEntry<T, Position>(
+  table: EntryTable<T, Position>,
+  frame: Frame,
+  self: T,
+  { key, make }: Emplacing
+): [Position, boolean] {
+  const existing = key === undefined ? undefined : table.lookup(self, key);
+  if (existing !== undefined) return [existing, false];
   const entry = make();
   const [at, inserted] = table.insert(frame, self, entry);
   if (!inserted) table.ops().destroy?.(frame, entry);

@@ -17,21 +17,29 @@ import { comparatorOrder } from './associative';
 import { SequenceValue } from './containerValues';
 import { type ElementOperations, elementOperations } from './elements';
 import type { Library } from './registry';
-import { constructElement } from './sequences';
+import { constructElement, iteratorRange, sequenceClass } from './sequences';
 import { addMethod, constRef, native, nativeConstructor } from './support';
 import { typeKey } from './templates';
+import { functorClass } from './utility';
 
 /** `std::stack<T>`, `std::queue<T>`, or `std::priority_queue<T, Container, Compare>`, over a `SequenceValue`. */
 export function adapterClass(
   library: Library,
   kind: 'stack' | 'queue' | 'priority_queue',
   element: Type,
+  container: Type | undefined,
   comparator: Type | undefined
 ): ClassInfo {
-  const key = `${kind}<${typeKey(element)},${comparator ? typeKey(comparator) : ''}>`;
+  const storage =
+    container?.kind === 'class'
+      ? container
+      : classType(sequenceClass(library, kind === 'priority_queue' ? 'vector' : 'deque', element));
+  const compareType =
+    kind === 'priority_queue' ? (comparator ?? classType(functorClass(library, 'less', element))) : undefined;
+  const key = `${kind}<${typeKey(element)},${typeKey(storage)},${compareType ? typeKey(compareType) : ''}>`;
   const cached = library.instances.get(key);
   if (cached) return cached;
-  const name = `std::${kind}<${typeName(element)}${comparator ? `, std::vector<${typeName(element)}>, ${typeName(comparator)}` : ''}>`;
+  const name = `std::${kind}<${typeName(element)}${container || comparator ? `, ${typeName(storage)}` : ''}${comparator ? `, ${typeName(comparator)}` : ''}>`;
   const cls = new ClassInfo(name, 'class');
   library.instances.set(key, cls);
   cls.isComplete = true;
@@ -51,11 +59,23 @@ export function adapterClass(
   };
   cls.memberTypes.set('value_type', element);
   cls.memberTypes.set('size_type', SIZE_T);
+  cls.memberTypes.set('container_type', storage);
+  if (compareType) cls.memberTypes.set('value_compare', compareType);
   cls.library = {
     kind,
     args: [element],
     size: kind === 'priority_queue' ? 32 : 48,
     align: 8,
+    operator: (compiler_, operator, operands, row) => {
+      if (kind === 'priority_queue' || !['==', '!=', '<', '<=', '>', '>='].includes(operator)) return;
+      if (operands.length !== 2 || operands.some(({ type }) => type.kind !== 'class' || type.cls !== cls)) return;
+      return storage.cls.library?.operator?.(
+        compiler_,
+        operator,
+        operands.map((operand) => ({ ...operand, type: storage })),
+        row
+      );
+    },
     memberCall: (compiler_, object, member, args, row) => {
       if (member !== 'emplace') return;
       if (isConstType(object.type)) return compiler_.error(row, `const の ${cls.name} には emplace を使えません。`);
@@ -84,6 +104,43 @@ export function adapterClass(
     },
   };
   cls.constructors = [nativeConstructor(cls, [], () => make([]))];
+  const copyItems = (frame: Frame, from: unknown): Value[] => {
+    const { items } = (from as Ptr).read() as SequenceValue;
+    frame.runtime.reserve(items.length);
+    return items.map((item) => ops().copy(frame, item));
+  };
+  if (compareType) {
+    const fromItems = (items: Value[]): SequenceValue => {
+      makeHeap(items, less);
+      return make(items);
+    };
+    cls.constructors.push(
+      nativeConstructor(cls, [constRef(compareType)], () => make([]), { isExplicit: true }),
+      nativeConstructor(cls, [constRef(compareType), constRef(storage)], ([, from], { frame }) =>
+        fromItems(copyItems(frame, from))
+      ),
+      {
+        ...nativeConstructor(cls, [], () => make([])),
+        instantiate: (args) => {
+          if (args.length !== 2 && args.length !== 3) return;
+          const range = iteratorRange(compiler, args.slice(0, 2), element, ops);
+          if (!range) return;
+          const params = args.length === 3 ? [...range.params, constRef(compareType)] : range.params;
+          return nativeConstructor(cls, params, ([first, last], { frame }) => {
+            const source = range.read(first, last);
+            frame.runtime.reserve(source.values.length);
+            return fromItems(source.values.map((item) => source.construct(frame, item)));
+          });
+        },
+      }
+    );
+  } else {
+    cls.constructors.push(
+      nativeConstructor(cls, [constRef(storage)], ([from], { frame }) => make(copyItems(frame, from)), {
+        isExplicit: true,
+      })
+    );
+  }
   const method = (
     memberName: string,
     params: Type[],
@@ -137,6 +194,20 @@ export function adapterClass(
     [self.items, target.items] = [target.items, self.items];
   });
   return cls;
+}
+
+function makeHeap(items: Value[], less: (a: Value, b: Value) => boolean): void {
+  for (let parent = Math.floor((items.length - 2) / 2); parent >= 0; parent--) {
+    const value = items[parent];
+    let hole = parent;
+    for (let child = 2 * hole + 1; child < items.length; child = 2 * hole + 1) {
+      if (child + 1 < items.length && less(items[child], items[child + 1])) child++;
+      if (less(items[child], value)) break;
+      items[hole] = items[child];
+      hole = child;
+    }
+    items[hole] = value;
+  }
 }
 
 const nonEmpty = (self: SequenceValue): void => {

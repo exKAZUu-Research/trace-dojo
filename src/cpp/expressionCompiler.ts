@@ -1466,6 +1466,12 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** A prvalue object of a class made from constructor arguments, or by aggregate initialization when braced. */
   constructObject(cls: ClassInfo, args: Expr[], row: number, isBraced: boolean): Expr {
+    const list = args.length === 1 ? args[0].braced : undefined;
+    if (list && cls.library?.listInitializer) {
+      const elements = list.children.filter((child) => child.type !== 'comment');
+      const run = cls.library.listInitializer(this, elements, row);
+      if (run) return { type: classType(cls), isLvalue: false, isTemporaryObject: true, row, run };
+    }
     if (args.length === 1 && args[0].type.kind === 'class' && args[0].type.cls.isDerivedFrom(cls) && !isBraced) {
       const source = args[0];
       if (source.type.kind === 'class' && source.type.cls === cls && source.isTemporaryObject) return source;
@@ -1613,6 +1619,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
           index < initial.length ? initial[index](frame) : (rest as Eval<Value>)(frame);
         const store = new ArrayStore(makeEach(frame, count, make, () => destroy));
         store.allocation = 'newArray';
+        store.allocatedElementType = elementType;
         return new Ptr(store, 0);
       },
     };
@@ -1649,7 +1656,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       if (store.allocation !== (isArray ? 'newArray' : 'new') || pointer.index !== 0)
         throw new CppRuntimeError('invalidDelete');
       if (isArray) {
-        const values = (store as ArrayStore).values;
+        const { allocatedElementType, values } = store as ArrayStore;
+        if (!allocatedElementType || !combinedPointee(allocatedElementType, pointee))
+          throw new CppRuntimeError('invalidDelete');
         if (destroyStatic) for (let index = values.length - 1; index >= 0; index--) destroyStatic(frame, values[index]);
       } else {
         const object = (store as Box).value;
@@ -1699,11 +1708,22 @@ function commonConditionalPointer(left: Expr, right: Expr): Type | undefined {
   const x = a.to;
   const y = b.to;
   const isConst = isConstType(x) || isConstType(y);
-  if (sameType(x, y, false) || x.kind === 'void') return pointerTo(withConst(x, isConst));
+  const combined = combinedPointee(x, y);
+  if (combined) return pointerTo(combined);
+  if (x.kind === 'void') return pointerTo(withConst(x, isConst));
   if (y.kind === 'void') return pointerTo(withConst(y, isConst));
   if (x.kind === 'class' && y.kind === 'class') {
     if (y.cls.isDerivedFrom(x.cls)) return pointerTo(withConst(x, isConst));
     if (x.cls.isDerivedFrom(y.cls)) return pointerTo(withConst(y, isConst));
+  }
+}
+
+function combinedPointee(left: Type, right: Type): Type | undefined {
+  const isConst = isConstType(left) || isConstType(right);
+  if (sameType(left, right, false)) return withConst(left, isConst);
+  if (left.kind === 'pointer' && right.kind === 'pointer') {
+    const target = combinedPointee(left.to, right.to);
+    if (target) return pointerTo(target, true);
   }
 }
 

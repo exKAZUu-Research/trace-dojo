@@ -23,7 +23,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { Ptr, type Value } from '../values';
+import { type Ptr, type Value } from '../values';
 import { SequenceValue } from './containerValues';
 import {
   comparatorOf,
@@ -357,7 +357,7 @@ function sequenceMethods(
         (self, [index], frame) => {
           const at = BigInt(index as bigint);
           if (at >= BigInt(self.items.length)) return outOfRange(frame);
-          return new Ptr(self, Number(at));
+          return self.location(Number(at));
         },
         { isConst }
       );
@@ -368,7 +368,7 @@ function sequenceMethods(
       ref,
       (self) => {
         nonEmpty(self);
-        return new Ptr(self, 0);
+        return self.location(0);
       },
       { isConst }
     );
@@ -378,36 +378,35 @@ function sequenceMethods(
       ref,
       (self) => {
         nonEmpty(self);
-        return new Ptr(self, self.items.length - 1);
+        return self.location(self.items.length - 1);
       },
       { isConst }
     );
-    method('begin', [], isConst ? types.constIterator : types.iterator, (self) => new Ptr(self, 0), { isConst });
-    method('end', [], isConst ? types.constIterator : types.iterator, (self) => new Ptr(self, self.items.length), {
+    method('begin', [], isConst ? types.constIterator : types.iterator, (self) => self.location(0), { isConst });
+    method('end', [], isConst ? types.constIterator : types.iterator, (self) => self.location(self.items.length), {
       isConst,
     });
     method(
       'rbegin',
       [],
       isConst ? types.constReverseIterator : types.reverseIterator,
-      (self) => new Ptr(self, self.items.length),
+      (self) => self.location(self.items.length),
       { isConst }
     );
-    method('rend', [], isConst ? types.constReverseIterator : types.reverseIterator, (self) => new Ptr(self, 0), {
+    method('rend', [], isConst ? types.constReverseIterator : types.reverseIterator, (self) => self.location(0), {
       isConst,
     });
     if (kind === 'vector' || kind === 'array') {
-      method('data', [], pointerTo(isConst ? withConst(element) : element), (self) => new Ptr(self, 0), { isConst });
+      method('data', [], pointerTo(isConst ? withConst(element) : element), (self) => self.location(0), { isConst });
     }
   }
-  method('cbegin', [], types.constIterator, (self) => new Ptr(self, 0), { isConst: true });
-  method('cend', [], types.constIterator, (self) => new Ptr(self, self.items.length), { isConst: true });
-  method('crbegin', [], types.constReverseIterator, (self) => new Ptr(self, self.items.length), { isConst: true });
-  method('crend', [], types.constReverseIterator, (self) => new Ptr(self, 0), { isConst: true });
+  method('cbegin', [], types.constIterator, (self) => self.location(0), { isConst: true });
+  method('cend', [], types.constIterator, (self) => self.location(self.items.length), { isConst: true });
+  method('crbegin', [], types.constReverseIterator, (self) => self.location(self.items.length), { isConst: true });
+  method('crend', [], types.constReverseIterator, (self) => self.location(0), { isConst: true });
   method('swap', [referenceTo(type)], VOID, (self, [other]) => {
     const target = (other as Ptr).read() as SequenceValue;
-    [self.items, target.items] = [target.items, self.items];
-    [self.capacity, target.capacity] = [target.capacity, self.capacity];
+    self.swapItems(target);
   });
   if (kind === 'array') {
     method('fill', [constRef(element)], VOID, (self, [value], frame) => {
@@ -428,11 +427,11 @@ function sequenceMethods(
   if (kind === 'deque' || kind === 'list') {
     method('push_front', [constRef(element)], VOID, (self, [value], frame) => {
       reserve(frame, 1);
-      self.items.unshift(ops().copy(frame, (value as Ptr).read()));
+      self.splice(0, 0, ops().copy(frame, (value as Ptr).read()));
     });
     method('pop_front', [], VOID, (self, _args, frame) => {
       nonEmpty(self);
-      const removed = self.items.shift() as Value;
+      const removed = self.splice(0, 1)[0];
       ops().destroy?.(frame, removed);
     });
   }
@@ -459,7 +458,7 @@ function sequenceMethods(
     const index = positionOf(self, at);
     reserve(frame, 1);
     editor.insert(frame, self, index, value as Ptr);
-    return new Ptr(self, index);
+    return self.location(index);
   });
   method(
     'insert',
@@ -471,7 +470,7 @@ function sequenceMethods(
       const n = asNumber(count);
       reserve(frame, n);
       editor.insertCopies(frame, self, index, n, value as Ptr);
-      return new Ptr(self, index);
+      return self.location(index);
     }
   );
   addTemplateMethod(cls, 'insert', (args) => {
@@ -483,7 +482,7 @@ function sequenceMethods(
           reserve(frame, source.values.length);
           editor.insertRange(frame, self, index, source, false);
         });
-        return new Ptr(self, index);
+        return self.location(index);
       });
     }
     const range = args.length === 3 ? iteratorRange(library.compiler, args.slice(1), element, ops) : undefined;
@@ -497,7 +496,7 @@ function sequenceMethods(
         const source = range.read(first, last);
         reserve(frame, source.values.length);
         editor.insertRange(frame, self, index, source, range.isForwardOnly);
-        return new Ptr(self, index);
+        return self.location(index);
       }
     );
   });
@@ -505,14 +504,14 @@ function sequenceMethods(
     const index = positionOf(self, at);
     if (index >= self.items.length) throw new CppRuntimeError('invalidIterator');
     editor.erase(frame, self, index, index + 1);
-    return new Ptr(self, index);
+    return self.location(index);
   });
   method('erase', [types.constIterator, types.constIterator], types.iterator, (self, [first, last], frame) => {
     const from = positionOf(self, first);
     const to = positionOf(self, last);
     if (from > to) throw new CppRuntimeError('invalidRange');
     editor.erase(frame, self, from, to);
-    return new Ptr(self, from);
+    return self.location(from);
   });
   method('resize', [SIZE_T], VOID, (self, [count], frame) => {
     checkVectorLength(frame, library, kind, element, count);
@@ -557,7 +556,7 @@ function sequenceMethods(
  * The elements of a braced list argument, such as the `{1, 2}` of `v.insert(p, {1, 2})`, which `use` gets as the
  * elements of an `std::initializer_list`: temporaries that end their lifetime afterward, the last first.
  */
-function initializerList(
+export function initializerList(
   compiler: ExpressionCompiler,
   element: Type,
   list: Syntax,
@@ -612,31 +611,37 @@ function listMethods(
   method('remove', [constRef(element)], SIZE_T, (self, [value], frame) => {
     if (!equal) throw new CppRuntimeError('custom', `${typeName(element)} の値は == で比べられません。`);
     const target = (value as Ptr).read();
-    const kept = self.items.filter((item) => !equal(item, target));
-    const removed = self.items.filter((item) => equal(item, target));
-    self.items = kept;
+    const removed: Value[] = [];
+    self.reorder((items) =>
+      items.filter(({ value: item }) => {
+        if (!equal(item, target)) return true;
+        removed.push(item);
+        return false;
+      })
+    );
     editor.destroy(frame, removed);
     return BigInt(removed.length);
   });
   method('reverse', [], VOID, (self) => {
-    self.items.reverse();
+    self.reorder((items) => items.toReversed());
   });
   method('sort', [], VOID, (self) => {
     if (!less) throw new CppRuntimeError('custom', `${typeName(element)} の値は < で比べられません。`);
-    self.items = listSort(self.items, (a, b) => less(a, b) < 0);
+    self.reorder((items) => listSort(items, (a, b) => less(a.value, b.value) < 0));
   });
   const unique = (self: SequenceValue, frame: Frame, same: (a: Value, b: Value) => boolean): bigint => {
-    const kept: Value[] = [];
     const removed: Value[] = [];
     let first: Value;
-    for (const item of self.items) {
-      if (kept.length > 0 && same(first, item)) removed.push(item);
-      else {
-        kept.push(item);
-        first = item;
-      }
-    }
-    self.items = kept;
+    self.reorder((items) =>
+      items.filter(({ value }, index) => {
+        if (index > 0 && same(first, value)) {
+          removed.push(value);
+          return false;
+        }
+        first = value;
+        return true;
+      })
+    );
     editor.destroy(frame, removed);
     return BigInt(removed.length);
   };
@@ -666,7 +671,7 @@ function listMethods(
       VOID,
       (_args, { self, frame }) => {
         const list = self as SequenceValue;
-        list.items = listSort(list.items, (a, b) => compare(frame, a, b));
+        list.reorder((items) => listSort(items, (a, b) => compare(frame, a.value, b.value)));
       },
       { owner: cls }
     );
@@ -737,7 +742,7 @@ function sequenceOperator(
         const target = (object(frame) as Ptr).read() as SequenceValue;
         const at = Number(index(frame) as bigint);
         if (at < 0 || at >= target.items.length) throw new CppRuntimeError('outOfBounds');
-        return new Ptr(target, at);
+        return target.location(at);
       },
     };
   }
@@ -940,16 +945,16 @@ function emplacement(
       const sequence = (self(frame) as Ptr).read() as SequenceValue;
       frame.runtime.reserve(1);
       if (member === 'emplace_front') {
-        sequence.items.unshift(value(frame));
-        return new Ptr(sequence, 0);
+        sequence.splice(0, 0, value(frame));
+        return sequence.location(0);
       }
       if (member === 'emplace_back') {
         editor.append(frame, sequence, 1, () => value(frame));
-        return new Ptr(sequence, sequence.items.length - 1);
+        return sequence.location(sequence.items.length - 1);
       }
       const at = positionOf(sequence, (position as Eval)(frame));
       editor.emplace(frame, sequence, at, () => value(frame));
-      return new Ptr(sequence, at);
+      return sequence.location(at);
     },
   };
 }

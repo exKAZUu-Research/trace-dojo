@@ -1,6 +1,6 @@
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { CppRuntimeError } from './errors';
-import type { ClassInfo, FunctionInfo } from './types';
+import type { ClassInfo, FunctionInfo, Type } from './types';
 
 /** The value of a variable or an element that the program has not written yet. */
 export const UNINIT = Symbol('uninitialized');
@@ -32,6 +32,10 @@ export abstract class Store {
   /** Reads an element, which must exist and have a value. */
   abstract get(index: number): Value;
   abstract set(index: number, value: Value): void;
+
+  location(index: number): Ptr {
+    return new Ptr(this, index);
+  }
 
   /** Stops at a use of storage whose lifetime ended. */
   checkAlive(): void {
@@ -70,6 +74,7 @@ export class Box extends Store {
 
 /** A built-in array, whose elements may be arrays or objects. */
 export class ArrayStore extends Store {
+  allocatedElementType?: Type;
   /** Whether the array is a string literal, which the program must not write. */
   isLiteral = false;
 
@@ -150,9 +155,17 @@ export function childValues(store: Store): Iterable<Value> {
 /** A pointer, an iterator into a sequence, or the location an lvalue or a reference designates. */
 export class Ptr {
   constructor(
-    readonly store: Store | undefined,
-    readonly index: number
+    private readonly initialStore: Store | undefined,
+    private readonly initialIndex: number
   ) {}
+
+  get store(): Store | undefined {
+    return this.initialStore;
+  }
+
+  get index(): number {
+    return this.initialIndex;
+  }
 
   get isNull(): boolean {
     return this.store === undefined;
@@ -188,7 +201,14 @@ export class Ptr {
     const store = this.target();
     const index = this.index + delta;
     if (index < 0 || index > store.length) throw new CppRuntimeError('pointerOutOfRange');
-    return new Ptr(store, index);
+    return store.location(index);
+  }
+
+  element(isReverse: boolean): Ptr {
+    const store = this.target();
+    const index = this.index - (isReverse ? 1 : 0);
+    if (index < 0 || index >= store.length) throw new CppRuntimeError('invalidIterator');
+    return store.location(index);
   }
 
   equals(other: Ptr): boolean {

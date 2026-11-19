@@ -78,10 +78,7 @@ export function moveValue(frame: Frame, type: Type, target: Value, source: Value
   } else if ((kind === 'vector' || kind === 'deque' || kind === 'list') && target instanceof SequenceValue) {
     const from = source as SequenceValue;
     cls.operations?.destroy?.(frame, target);
-    target.items = from.items;
-    target.capacity = from.capacity;
-    from.items = [];
-    from.capacity = 0;
+    target.takeItems(from);
   } else if (!cls.library && !declaresCopyOrDestructor(cls)) {
     const to = target as CObject;
     const from = source as CObject;
