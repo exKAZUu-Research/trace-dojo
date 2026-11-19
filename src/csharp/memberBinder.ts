@@ -638,7 +638,8 @@ export abstract class MemberBinder extends CallBinder {
         const info: ArgumentInfo = { expression, name: arg.name, refKind: arg.modifier, row: arg.row, target };
         return info;
       }
-      if (arg.modifier === 'in') this.unsupported(arg, '`in` 引数');
+      // An `in` argument passes its variable by reference, which this grader passes by value: the callee cannot assign
+      // it, so only the caller's variable changing during the call, through a lambda, could tell the two apart.
       return {
         expression: this.bindValue(arg.value, context),
         name: arg.name,

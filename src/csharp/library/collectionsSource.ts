@@ -548,6 +548,7 @@ namespace System.Linq {
 }
 
 namespace System.Linq.Internal {
+  public static class CollectionBuilder { public static void AddAll<T>(ICollection<T> target, IEnumerable<T> items); }
   public sealed class Iterator<T> : IOrderedEnumerable<T> { public IEnumerator<T> GetEnumerator(); }
   public sealed class Enumerator<T> : IEnumerator<T> { public T Current { get; } public bool MoveNext(); public void Reset(); public void Dispose(); }
   public sealed class Grouping<TKey, TElement> : IGrouping<TKey, TElement> { public TKey Key { get; } public IEnumerator<TElement> GetEnumerator(); }

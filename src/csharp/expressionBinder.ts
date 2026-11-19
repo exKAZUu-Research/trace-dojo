@@ -1252,19 +1252,14 @@ export abstract class ExpressionBinder extends MemberBinder {
     const sideEffects: BoundExpression[] = [];
     const created = this.bindCreation(createType, [], undefined, node, context);
     sideEffects.push({ kind: 'assign', target: receiver as BoundLValue, value: created, type: createType, row });
+    const isList = sameType(createType, listType);
     for (const element of elements) {
-      const name = element.spread ? 'AddRange' : 'Add';
-      const group = this.bindInstanceMember(
-        receiver,
-        element.spread && createType !== listType ? 'Add' : name,
-        undefined,
-        node,
-        context
-      );
-      if (group.kind !== 'methodGroup') return { kind: 'default', type: ERROR_TYPE, row };
-      if (element.spread && createType !== listType) {
-        this.unsupported(node, 'リスト以外のコレクションへの展開（`..`）');
+      if (element.spread && !isList) {
+        sideEffects.push(this.addAll(receiver, element.value, elementType, node));
+        continue;
       }
+      const group = this.bindInstanceMember(receiver, element.spread ? 'AddRange' : 'Add', undefined, node, context);
+      if (group.kind !== 'methodGroup') return { kind: 'default', type: ERROR_TYPE, row };
       sideEffects.push(
         this.invokeMethodGroup(
           group,
@@ -1281,6 +1276,30 @@ export abstract class ExpressionBinder extends MemberBinder {
       value = this.convert(receiver, target, node);
     }
     return { kind: 'sequence', locals: [temporary], sideEffects, value, type: target, row };
+  }
+
+  /** Adds a spread's elements to a collection other than a list one by one, as Roslyn's `foreach` with `Add` does. */
+  private addAll(
+    collection: BoundExpression,
+    items: BoundExpression,
+    elementType: Type,
+    position: Position
+  ): BoundExpression {
+    const builder = this.library.typeNamed('System.Linq.Internal.CollectionBuilder');
+    const method = builder.methods.find((candidate) => candidate.name === 'AddAll') as MethodSymbol;
+    const enumerable = namedType(this.library.typeNamed('System.Collections.Generic.IEnumerable', 1), [elementType]);
+    const target = namedType(this.library.typeNamed('System.Collections.Generic.ICollection', 1), [elementType]);
+    return {
+      kind: 'call',
+      method,
+      receiver: undefined,
+      args: [this.convert(collection, target, position), this.convert(items, enumerable, position)],
+      typeArgs: [elementType],
+      owner: builder.declaredType,
+      isVirtual: false,
+      type: VOID_TYPE,
+      row: position.row,
+    };
   }
 
   /** The element type of a collection expression's target: an array's, or a generic collection's type argument. */

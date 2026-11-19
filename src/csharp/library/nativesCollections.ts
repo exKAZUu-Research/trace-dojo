@@ -1449,4 +1449,24 @@ defineNatives({
   },
 });
 
+defineNatives({
+  'System.Linq.Internal.CollectionBuilder.AddAll': (call, _receiver, [target, items]) => {
+    const evaluator = evaluatorOf(call);
+    const collection = evaluator.runtime.library.typeNamed('System.Collections.Generic.ICollection', 1);
+    const add = collection.methods.find((method) => method.name === 'Add') as MethodSymbol;
+    const implementation = evaluator.runtime.dispatch(add, target as Value);
+    for (const item of iterate(call, items as Value)) {
+      evaluator.invoke(
+        call.frame,
+        implementation,
+        target as Value,
+        [item],
+        call.row,
+        environmentOf(evaluator, implementation, target as Value)
+      );
+    }
+    return;
+  },
+});
+
 export { stringOf };
