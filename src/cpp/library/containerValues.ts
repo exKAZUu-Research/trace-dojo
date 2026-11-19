@@ -34,8 +34,8 @@ class NodePosition extends Ptr {
     return this.cell;
   }
 
-  dequeLocation(type: Type): Ptr {
-    this.dequeCell ??= new DequeElementPointer(this, sizeOf(type));
+  dequeLocation(storage: DequeStorage): Ptr {
+    this.dequeCell ??= new DequeElementPointer(storage, this);
     return this.dequeCell;
   }
 }
@@ -101,27 +101,33 @@ class DequeIterator extends Ptr {
   }
 }
 
+interface DequeAddress {
+  store: Store;
+  index: number;
+  block: number;
+}
+
 class DequeElementPointer extends Ptr {
   constructor(
-    private readonly node: NodePosition,
-    private readonly elementSize: number,
-    private readonly displacement = 0
+    private readonly storage: DequeStorage,
+    private readonly position: NodePosition | DequeAddress
   ) {
     super(undefined, 0);
   }
 
   override get store(): Store {
-    return this.node.store;
+    return this.storage.owner;
   }
 
   override get index(): number {
-    return this.node.index + this.displacement;
+    const { position } = this;
+    return position instanceof NodePosition ? position.index : this.storage.cellIndex(position);
   }
 
-  override embeddedAddress(byteOffset: number): Ptr['address'] {
-    const address = this.node.store.projectAddress(this.node.index, this.displacement * this.elementSize + byteOffset);
-    if (!address) throw new Error('Deque element has no block storage');
-    return address;
+  override embeddedAddress(byteOffset: number): DequeAddress {
+    const { position } = this;
+    if (position instanceof NodePosition) return this.storage.address(position.index, byteOffset);
+    return { ...position, index: position.index + byteOffset };
   }
 
   override sharesRange(other: Ptr): boolean {
@@ -129,14 +135,18 @@ class DequeElementPointer extends Ptr {
   }
 
   override offset(delta: number): Ptr {
+    const store = this.target();
     const index = this.index + delta;
-    if (index < 0 || index > this.target().pointerLength) throw new CppRuntimeError('pointerOutOfRange');
-    if (delta === 0) return this;
-    const next = new DequeElementPointer(this.node, this.elementSize, this.displacement + delta);
-    const offset = next.address.index;
-    if (offset < 0 || offset > dequeBlockElements(this.elementSize) * this.elementSize)
+    const address = this.embeddedAddress(delta * this.storage.elementSize);
+    const { blockBytes } = this.storage;
+    if (index < 0 || index > store.pointerLength || address.index < 0 || address.index > blockBytes)
       throw new CppRuntimeError('pointerOutOfRange');
-    return next;
+    if (delta === 0) return this;
+    if (address.index === blockBytes || index === store.pointerLength)
+      return new DequeElementPointer(this.storage, address);
+    const target = store.location(index);
+    if (target.address.store !== address.store) throw new CppRuntimeError('invalidIterator');
+    return target;
   }
 
   override read(): Value {
@@ -155,8 +165,7 @@ class DequeElementPointer extends Ptr {
   }
 
   private checkElement(): void {
-    if (this.address.index === dequeBlockElements(this.elementSize) * this.elementSize)
-      throw new CppRuntimeError('outOfBounds');
+    if (!(this.position instanceof NodePosition)) throw new CppRuntimeError('outOfBounds');
   }
 }
 
@@ -170,14 +179,23 @@ class DequeStorage {
   private readonly width: number;
 
   constructor(
-    private readonly elementSize: number,
+    public owner: SequenceValue,
+    readonly elementSize: number,
     length: number
   ) {
     this.width = dequeBlockElements(elementSize);
     this.extend(length);
   }
 
-  address(index: number, byteOffset: number): { store: Store; index: number } {
+  get blockBytes(): number {
+    return this.width * this.elementSize;
+  }
+
+  cellIndex(address: DequeAddress): number {
+    return address.block * this.width + address.index / this.elementSize - this.start;
+  }
+
+  address(index: number, byteOffset: number): DequeAddress {
     const slot = this.start + index;
     const block = Math.floor(slot / this.width);
     let storage = this.blocks.get(block);
@@ -185,7 +203,7 @@ class DequeStorage {
       storage = new Box();
       this.blocks.set(block, storage);
     }
-    return { store: storage, index: (slot - block * this.width) * this.elementSize + byteOffset };
+    return { store: storage, index: (slot - block * this.width) * this.elementSize + byteOffset, block };
   }
 
   extend(length: number): void {
@@ -367,7 +385,7 @@ export class SequenceValue extends Store {
   ) {
     super();
     this.nodes = storageKind ? new NodePositions(this) : undefined;
-    if (storageKind === 'deque') this.deque = new DequeStorage(sizeOf(elementType), cells.length);
+    if (storageKind === 'deque') this.deque = new DequeStorage(this, sizeOf(elementType), cells.length);
   }
 
   private readonly nodes?: NodePositions;
@@ -391,7 +409,7 @@ export class SequenceValue extends Store {
     const node = this.nodes?.at(index);
     if (!node) return super.location(index);
     if (this.storageKind === 'list' && index !== this.length) return node.cellLocation(this.elementType);
-    return this.deque ? node.dequeLocation(this.elementType) : node;
+    return this.deque ? node.dequeLocation(this.deque) : node;
   }
 
   override iteratorLocation(index: number): Ptr {
@@ -425,7 +443,7 @@ export class SequenceValue extends Store {
     this.constructingEnd = { location, value: UNINIT };
     try {
       const receiver = this.deque
-        ? location.dequeLocation(this.elementType)
+        ? location.dequeLocation(this.deque)
         : this.storageKind === 'list'
           ? location.cellLocation(this.elementType)
           : location;
@@ -574,7 +592,8 @@ export class SequenceValue extends Store {
     if (this.deque && other.deque) {
       this.deque.all++;
       this.deque = other.deque;
-      other.deque = new DequeStorage(sizeOf(other.elementType), 0);
+      this.deque.owner = this;
+      other.deque = new DequeStorage(other, sizeOf(other.elementType), 0);
     }
     if (this.nodes && other.nodes) this.nodes.take(other.nodes);
     this.items = other.items;
@@ -594,6 +613,8 @@ export class SequenceValue extends Store {
       this.deque.end++;
       other.deque.end++;
       [this.deque, other.deque] = [other.deque, this.deque];
+      this.deque.owner = this;
+      other.deque.owner = other;
     }
     if (this.nodes && other.nodes) this.nodes.swap(other.nodes);
     [this.cells, other.cells] = [other.cells, this.cells];
