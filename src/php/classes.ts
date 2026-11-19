@@ -1842,7 +1842,7 @@ export function staticPropRef(cls: PhpClass, name: string, scope: PhpClass | und
       `Accessing static trait property ${cls.name}::$${name} is deprecated, it should only be accessed on a class using the trait`
     );
   initializeClassDefaults(cls);
-  const ref = resolveStatic(found.ref);
+  const ref = resolveStatic((cls.findStatic(name) ?? found).ref);
   if (found.decl.type) ref.addTypeOwner(found.decl);
   return ref;
 }
@@ -1911,14 +1911,15 @@ export function readStaticProp(cls: PhpClass, name: string, scope: PhpClass | un
   return value;
 }
 
-export function objectToArray(object: PhpObject): PhpArray {
+export function objectToArray(object: PhpObject, indexed?: Iterable<[bigint, Value]>): PhpArray {
   const array = new PhpArray();
+  for (const [key, value] of indexed ?? []) array.set(key, share(value));
   for (const [key, slot] of object.props) {
     if (slot === UNINIT) continue;
     const decl = declForKey(object.cls, key);
     let arrayKey = key;
     if (decl?.visibility === 'protected') arrayKey = `\0*\0${decl.name}`;
-    array.setSlot(normalizeKeyString(arrayKey), copyValueSlot(slot));
+    array.setSlot(normalizeKeyString(arrayKey), copyValueSlot(slot, indexed !== undefined));
   }
   return array;
 }

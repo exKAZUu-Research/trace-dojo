@@ -309,6 +309,12 @@ test.each([
   const program = `<?php
 $a = ${value};
 echo count($a);
+function update() {
+    global $a;
+    $recorded = 1;
+    return $a[0] = 42;
+}
+update();
 `;
   const recording = traceProgram('php', program, program);
   expect(recording.stdout).toBe(count);
@@ -316,6 +322,10 @@ echo count($a);
   expect(step?.vars).not.toHaveProperty('$a');
   const preview = step?.referenceVars?.$a;
   expect(preview).toMatchObject({ kind: 'array', entries: { 0: expect.any(Object) } });
+  expect(recording.traceItems.at(-1)).toMatchObject({
+    line: 9,
+    referenceVars: { $a: { kind: 'array', entries: { 0: { value: 42 } } } },
+  });
 });
 
 test('records a turtle subclass field during movement', () => {

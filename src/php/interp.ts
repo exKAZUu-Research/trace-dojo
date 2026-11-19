@@ -1337,9 +1337,11 @@ export function cast(type: string, value: Value): Value {
 function objectToArrayCast(object: PhpObject): PhpArray {
   if (isClosure(object)) return PhpArray.list([object]);
   // ArrayObject and ArrayIterator cast to the array they hold.
-  const storage = (object.internal as { properties?: () => PhpArray } | undefined)?.properties;
-  if (typeof storage === 'function') return storage.call(object.internal).copy();
-  return classesModule.objectToArray(object);
+  const storage = object.internal as
+    | { properties?: () => PhpArray; indexedProperties?: () => [bigint, Value][] }
+    | undefined;
+  if (storage?.properties) return storage.properties().copy();
+  return classesModule.objectToArray(object, storage?.indexedProperties?.());
 }
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.

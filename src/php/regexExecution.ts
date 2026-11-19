@@ -3,12 +3,23 @@ import { MessageChannel, type MessagePort, receiveMessageOnPort, Worker } from '
 import { z } from 'zod';
 
 import { type ExecutionBudget, ExecutionLimitError } from '../interpreter/limits';
+import { PCRE_WORKER_SOURCE } from './pcreWorker';
 import { UnsupportedFeatureError } from './unsupported';
 
 const range = z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()]);
 const matchOffsets = z.object({ range, groups: z.record(z.string(), range.optional()).optional() });
-const response = z.union([matchOffsets, z.null(), z.enum(['unsupported', 'limit'])]);
+const response = z.union([
+  matchOffsets,
+  z.object({ pregError: z.number().int().min(1).max(6) }),
+  z.null(),
+  z.literal('unsupported'),
+]);
 export type MatchOffsets = z.infer<typeof matchOffsets>;
+export interface PcrePattern {
+  source: string;
+  options: number;
+  restrictCaseless: boolean;
+}
 
 interface RegexWorker {
   worker: Worker;
@@ -21,18 +32,19 @@ const stoppingWorkers = new Set<Worker>();
 const MAX_STOPPING_WORKERS = 2;
 
 export function boundedRegexMatch(
-  regex: RegExp,
+  pattern: PcrePattern,
   text: string,
   position: number,
+  retry: boolean,
   budget: ExecutionBudget
-): MatchOffsets | null {
+): MatchOffsets | { pregError: number } | null {
   if (budget.remainingMilliseconds === 0) throw new ExecutionLimitError('time');
   const state = active ?? startWorker();
   const signal = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
   state.port.postMessage({
-    source: regex.source,
-    flags: regex.flags,
+    pattern,
     position,
+    retry,
     subject: state.subject === text ? undefined : text,
     signal,
   });
@@ -46,8 +58,8 @@ export function boundedRegexMatch(
     stopWorker(state);
     throw new Error('Regex worker returned invalid offsets');
   }
+  budget.checkClock();
   if (result.data === 'unsupported') throw new UnsupportedFeatureError('ホストエンジンの制限を超える正規表現');
-  if (result.data === 'limit') throw new ExecutionLimitError('operations');
   return result.data;
 }
 
@@ -62,8 +74,8 @@ function stopWorker(state: RegexWorker): void {
   if (stoppingWorkers.has(state.worker)) return;
   if (active === state) active = undefined;
   stoppingWorkers.add(state.worker);
+  state.port.postMessage({ stop: true });
   state.port.close();
-  void state.worker.terminate();
 }
 
 function startWorker(): RegexWorker {
@@ -99,29 +111,22 @@ function startWorker(): RegexWorker {
 
 const WORKER_SOURCE = `
 const { workerData: port } = require('node:worker_threads');
-const patterns = new Map();
-let text = '';
-port.on('message', ({ source, flags, position, subject, signal, reset }) => {
-  if (reset) {
-    text = '';
+${PCRE_WORKER_SOURCE}
+let text = Buffer.alloc(0);
+port.on('message', ({ pattern, position, retry, subject, signal, reset, stop }) => {
+  if (stop) {
+    port.close();
     return;
   }
-  if (subject !== undefined) text = subject;
+  if (reset) {
+    text = Buffer.alloc(0);
+    return;
+  }
+  if (subject !== undefined) text = Buffer.from(subject, 'latin1');
   try {
-    const key = flags + ':' + source;
-    let pattern = patterns.get(key);
-    if (!pattern) {
-      if (patterns.size === 8) patterns.delete(patterns.keys().next().value);
-      pattern = new RegExp(source, flags);
-      patterns.set(key, pattern);
-    }
-    pattern.lastIndex = position;
-    const indices = pattern.exec(text)?.indices;
-    port.postMessage(indices ? { range: indices[0], groups: indices.groups } : null);
-  } catch (error) {
-    if (error instanceof SyntaxError) port.postMessage('unsupported');
-    else if (error instanceof RangeError) port.postMessage('limit');
-    else port.postMessage(undefined);
+    port.postMessage(matchPcre(pattern, text, position, retry));
+  } catch {
+    port.postMessage(undefined);
   } finally {
     Atomics.store(signal, 0, 1);
     Atomics.notify(signal, 0);

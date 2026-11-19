@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 995 -- Keeps class defaults with PHP value storage and ownership helpers.
+// code-gauge-allow-file fileNcss 1000 -- Keeps class defaults with PHP value storage and ownership helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
@@ -6,6 +6,7 @@ import { ArrayTable } from './arrayTable';
 import type { ClassDecl, Expr, FunctionDecl, PropertyDeclAst } from './ast';
 import { lower } from './bytes';
 import { OwnerLinks } from './ownerLinks';
+import { replaceWatchedSlot, replaceWatchedSlots } from './slotWatch';
 
 export const UNDEFINED_RESULT = Symbol('undefined native result');
 
@@ -91,6 +92,7 @@ export class Ref {
   assign(value: Value): Value {
     const old = this.value;
     const assigned = this.typedBy ? referenceTypeCheck(this, value) : value;
+    replaceWatchedSlot(this, '');
     this.value = assigned;
     trackOwner(assigned, this);
     dropped(old);
@@ -1162,6 +1164,7 @@ class PropertyMap extends Map<string, Slot> {
     if (old === undefined && !this.owner.cls.hasReservedProperty(key)) allocationHandler(1, this.size + 1);
     if (value === UNINIT) this.advancePointerOnRemoval(key);
     else if (old === undefined && this.pointer === undefined) this.pointer = key;
+    replaceWatchedSlot(this, key);
     super.set(key, value);
     if (value !== UNINIT) this.owner.unsetProperties?.delete(key);
     trackOwner(value, this.owner, key);
@@ -1169,12 +1172,14 @@ class PropertyMap extends Map<string, Slot> {
     return this;
   }
   override clear(): void {
+    replaceWatchedSlots(this);
     invalidateOwner(this.owner);
     this.owner.unsetProperties?.clear();
     this.pointer = null;
     super.clear();
   }
   override delete(key: string): boolean {
+    replaceWatchedSlot(this, key);
     const old = this.get(key);
     this.advancePointerOnRemoval(key);
     invalidateOwner(this.owner);

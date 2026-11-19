@@ -16,6 +16,7 @@ export function tracePhpProgram(program: string, trace: TraceOptions, input?: Pr
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.isAtomic,
     variablesOf: (frame) => variablesOf(runtime, frame, true),
+    stateVariables,
   });
   runtime.steps.recorder = recorder;
   let finalVars: TraceItemVariable = {};
@@ -24,6 +25,13 @@ export function tracePhpProgram(program: string, trace: TraceOptions, input?: Pr
     finalVars = variablesOf(runtime, frame, false).vars;
   });
   return { traceItems: recorder.traceItems, finalVars, ...run };
+}
+
+function stateVariables({ vars, referenceVars }: TraceVariables): Record<string, unknown> {
+  const previews = Object.entries(referenceVars).filter(
+    ([name, node]) => node.kind === 'array' && !Object.hasOwn(vars, name)
+  );
+  return previews.length > 0 ? { ...vars, ...Object.fromEntries(previews) } : vars;
 }
 
 /**

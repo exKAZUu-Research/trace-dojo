@@ -1,9 +1,10 @@
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { deprecated, E_WARNING, emitError, throwError, type UpdateWarning, warn } from './errors';
 import { type Frame, type PhpThrow, rt } from './runtime';
+import { watchSlot } from './slotWatch';
 import { describePropertyType } from './types';
 import { checkedDynamicVariable } from './unsupported';
-import { dropped, type Key, PhpArray, PhpObject, type PropDecl, Ref, type Value } from './values';
+import { dropped, type Key, PhpArray, PhpObject, type PropDecl, Ref, type Slot, type Value } from './values';
 import { isSubtype } from './variance';
 
 export type PlaceOperation = 'assignOp' | 'incdec' | 'nested' | 'nestedUpdate' | 'receiver' | 'receiverUpdate';
@@ -19,6 +20,12 @@ export interface CompoundRead {
   sources?: Ref['typedBy'];
 }
 
+interface StringStorage {
+  current(): boolean;
+  write(value: string): void;
+  close(): void;
+}
+
 /** A location a program writes to: a variable, an element, a property, or a static property. */
 export interface Place {
   readonly unbound?: boolean;
@@ -27,6 +34,7 @@ export interface Place {
   readCompoundName?(warning: UpdateWarning): void;
   fetchCompound?(warning: UpdateWarning, beforeOffsetGet?: BeforeOffsetGet): CompoundRead | typeof SKIP_COMPOUND;
   set(value: Value, operation?: 'assignOp'): Value;
+  stringStorage?(): StringStorage;
   assign?(value: () => Value): Value;
   /** The location as a reference, which `=&`, by-reference arguments, and `global` share. */
   ref(): Ref;
@@ -45,6 +53,26 @@ export interface Place {
   warnUndefined?(warning?: UpdateWarning): void;
   /** The value as `isset` and `??` read it, asking `__isset` or `offsetExists` first; undefined when unset. */
   getForIsset?(): Value | undefined;
+}
+
+export function watchStringSlot(
+  owner: object,
+  key: Key,
+  read: () => Slot | undefined,
+  write: (value: string) => void
+): StringStorage {
+  const slot = read();
+  if (slot instanceof Ref) {
+    const watch = watchSlot(slot, '');
+    const aliased = slot.isRef;
+    return {
+      current: () => watch.current() && (aliased ? slot.rc > 0 : read() === slot),
+      write: (value) => slot.assign(value),
+      close: () => watch.close(),
+    };
+  }
+  const watch = watchSlot(owner, key);
+  return { current: () => watch.current() && read() === slot, write, close: () => watch.close() };
 }
 
 export function readCompound(
@@ -83,6 +111,15 @@ export class VarPlace implements Place {
   getForIsset(): Value | undefined {
     if (this.kind === 'global' && this.name === 'this') return rt().frame.thisObj;
     return this.get();
+  }
+
+  stringStorage(): StringStorage {
+    return watchStringSlot(
+      this.frame.vars,
+      this.name,
+      () => this.frame.vars.get(this.name),
+      (value) => this.set(value)
+    );
   }
 
   warnUndefined(): void {
@@ -162,6 +199,15 @@ export class RefPlace implements Place {
     return this.target.v;
   }
 
+  stringStorage(): StringStorage {
+    return watchStringSlot(
+      this.target,
+      '',
+      () => this.target,
+      (value) => this.set(value)
+    );
+  }
+
   set(value: Value): Value {
     return this.target.assign(value);
   }
@@ -225,6 +271,17 @@ export class ElementPlace implements Place {
   typeSources(): Ref['typedBy'] {
     const ref = this.key === undefined ? undefined : this.array.map.get(this.key);
     return ref instanceof Ref ? ref.typeOwners() : undefined;
+  }
+
+  stringStorage(): StringStorage {
+    const key = this.key!;
+    const table = this.array.map;
+    return watchStringSlot(
+      table,
+      key,
+      () => (this.array.map === table ? table.get(key) : undefined),
+      (value) => this.set(value)
+    );
   }
 
   reference(): Ref | undefined {

@@ -1,3 +1,4 @@
+import { replaceWatchedSlot, replaceWatchedSlots } from './slotWatch';
 import { type Key, type Ref, UNDEFINED_RESULT, type Value } from './values';
 
 type Slot = Value | Ref;
@@ -33,6 +34,7 @@ export class ArrayTable extends Map<Key, Slot> {
 
   spliceList(start: number, count: number, replacement: Slot[]): Slot[] | undefined {
     if (!this.pack()) return;
+    replaceWatchedSlots(this, BigInt(start));
     const values = this.packed as Slot[];
     const removed = values.splice(start, count);
     for (let index = 0; index < replacement.length; index += 4096)
@@ -44,6 +46,7 @@ export class ArrayTable extends Map<Key, Slot> {
 
   shiftList(): { slot: Slot } | undefined {
     if (!this.pack() || this.size === 0) return;
+    replaceWatchedSlots(this);
     const slot = (this.packed as Slot[]).shift() as Slot;
     this.count(slot, -1);
     return { slot };
@@ -51,6 +54,7 @@ export class ArrayTable extends Map<Key, Slot> {
 
   prependList(values: Slot[]): boolean {
     if (!this.pack()) return false;
+    if (values.length > 0) replaceWatchedSlots(this);
     for (let end = values.length; end > 0; end -= 4096)
       (this.packed as Slot[]).unshift(...values.slice(Math.max(0, end - 4096), end));
     for (const value of values) this.count(value, 1);
@@ -118,6 +122,7 @@ export class ArrayTable extends Map<Key, Slot> {
   }
 
   override set(key: Key, value: Slot): this {
+    replaceWatchedSlot(this, key);
     this.releasedKeys?.delete(key);
     if (value === UNDEFINED_RESULT) this.mayHaveUndefinedSlots = true;
     if (this.packed && typeof key === 'bigint' && key >= 0n && key <= BigInt(this.packed.length)) {
@@ -134,6 +139,7 @@ export class ArrayTable extends Map<Key, Slot> {
   }
 
   override delete(key: Key): boolean {
+    replaceWatchedSlot(this, key);
     this.releasedKeys?.delete(key);
     if (this.packed && this.packed.length > 0 && key === BigInt(this.packed.length - 1)) {
       this.count(this.packed.pop() as Slot, -1);
@@ -146,6 +152,7 @@ export class ArrayTable extends Map<Key, Slot> {
   }
 
   override clear(): void {
+    replaceWatchedSlots(this);
     this.releasedKeys = undefined;
     this.packed = undefined;
     this.holders.clear();

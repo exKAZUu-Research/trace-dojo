@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 958 -- Holds assignment and offset access modes with their shared helpers.
+// code-gauge-allow-file fileNcss 975 -- Holds assignment and offset access modes with their shared helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -47,6 +47,7 @@ import {
   SKIP_COMPOUND,
   ValuePlace,
   VarPlace,
+  watchStringSlot,
   writableContainer,
 } from './places';
 import { FatalError, PhpThrow, rt } from './runtime';
@@ -397,6 +398,15 @@ class StaticPlace implements Place {
     return this.write(this.target, value, operation);
   }
 
+  stringStorage(): ReturnType<typeof watchStringSlot> {
+    return watchStringSlot(
+      this.cls,
+      this.name,
+      () => this.target,
+      (value) => this.set(value)
+    );
+  }
+
   assign(read: () => Value): Value {
     const target = this.target;
     return this.write(target, read());
@@ -414,7 +424,7 @@ class StaticPlace implements Place {
   }
 }
 
-// code-gauge-allow functionNcss 32 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
+// code-gauge-allow functionNcss 35 -- Keeps the ordered PHP cases together because each branch shares the same dispatch state.
 function propPlace(object: PhpObject, name: string, unbound = false): Place {
   const scope = rt().frame.scope;
   let reportedStaticAccess = false;
@@ -439,6 +449,15 @@ function propPlace(object: PhpObject, name: string, unbound = false): Place {
       return fetchCompoundProperty(this, object, name, scope, lookup(true), warning);
     },
     set: (value, operation) => writeProp(object, name, value, scope, { fetched: reportedStaticAccess, operation }),
+    stringStorage() {
+      const key = lookup(false)?.key ?? name;
+      return watchStringSlot(
+        object.props,
+        key,
+        () => object.props.get(key),
+        (value) => this.set(value)
+      );
+    },
     ref: () => propRef(object, name, scope),
     unset: () => unsetProp(object, name, scope),
     declaration: () => lookup(false),
@@ -748,34 +767,8 @@ function nativeArrayNestedPlace(
   return place;
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 32 -- Keeps each string offset operation with its shared receiver, index and diagnostic row.
 function stringOffsetPlace(parent: Place, text: string, key: Value | undefined, row: number): Place {
-  const assign = (value: () => Value): Value => {
-    if (key === undefined) throwError('Error', '[] operator not supported for strings');
-    const index = stringOffsetIndex(key)!;
-    const position = index < 0n ? BigInt(text.length) + index : index;
-    if (position < 0n) {
-      warn(`Illegal string offset ${index}`);
-      return null;
-    }
-    const offset = Number(position);
-    let character = toStr(value());
-    if (character === '') throwError('Error', 'Cannot assign an empty string to a string offset');
-    if (character.length > 1) {
-      warn('Only the first byte will be assigned to the string offset');
-      character = character[0];
-    }
-    const length = Math.max(text.length, offset + 1);
-    rt().ensureStringFits(length);
-    rt().spend(Math.ceil(length / 64));
-    const updated =
-      offset >= text.length
-        ? text + ' '.repeat(offset - text.length) + character
-        : text.slice(0, offset) + character + text.slice(offset + 1);
-    parent.set(updated);
-    return character;
-  };
+  const assign = (value: () => Value): Value => assignStringOffset(parent, text, key, value);
   return {
     get: (operation) => {
       rt().row = row;
@@ -800,6 +793,42 @@ function stringOffsetPlace(parent: Place, text: string, key: Value | undefined, 
       throwError('Error', 'Cannot unset string offsets');
     },
   };
+}
+
+function assignStringOffset(parent: Place, text: string, key: Value | undefined, value: () => Value): Value {
+  if (key === undefined) throwError('Error', '[] operator not supported for strings');
+  const storage = parent.stringStorage?.();
+  try {
+    const index = stringOffsetIndex(key)!;
+    if (storage?.current() === false) return null;
+    const position = index < 0n ? BigInt(text.length) + index : index;
+    if (position < 0n) {
+      warn(`Illegal string offset ${index}`);
+      return null;
+    }
+    const character = toStr(value());
+    if (storage?.current() === false) return null;
+    if (character === '') throwError('Error', 'Cannot assign an empty string to a string offset');
+    if (character.length > 1) {
+      warn('Only the first byte will be assigned to the string offset');
+      if (storage?.current() === false) return null;
+    }
+    const updated = replaceStringByte(text, Number(position), character[0]);
+    if (storage) storage.write(updated);
+    else parent.set(updated);
+    return character[0];
+  } finally {
+    storage?.close();
+  }
+}
+
+function replaceStringByte(text: string, offset: number, character: string): string {
+  const length = Math.max(text.length, offset + 1);
+  rt().ensureStringFits(length);
+  rt().spend(Math.ceil(length / 64));
+  return offset >= text.length
+    ? text + ' '.repeat(offset - text.length) + character
+    : text.slice(0, offset) + character + text.slice(offset + 1);
 }
 
 function rejectStringReference(key: Value | undefined): never {

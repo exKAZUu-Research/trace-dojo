@@ -9,3 +9,11 @@ foreach (['0', '9223372036854775807', '-9223372036854775808', '92233720368547758
     try { $fixed[$key] = 'updated'; }
     catch (Throwable $error) { echo get_class($error), "\n"; }
 }
+
+class NamedFixedArray extends SplFixedArray {
+    public $label = 'fixed';
+    protected $hidden = 3;
+}
+$named = new NamedFixedArray(2);
+$named[0] = 7;
+var_dump((array) $named);

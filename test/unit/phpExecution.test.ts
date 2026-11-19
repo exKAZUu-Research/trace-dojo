@@ -977,6 +977,24 @@ test('reports a regex deadline and runs the next program', () => {
   expect(run(source)).toMatchObject({ kind: 'executed', stdout: '1' });
 });
 
+test('reports exhausted PCRE match limits independently of the execution deadline', () => {
+  expect(
+    run(`<?php
+$pattern = '/(*LIMIT_MATCH=0)(cat|dog)/';
+$subject = 'a cat and a dog';
+var_dump(preg_match($pattern, $subject), preg_last_error(), preg_last_error_msg());
+var_dump(preg_match_all($pattern, $subject), preg_last_error());
+var_dump(preg_replace($pattern, 'pet', $subject, -1, $count), $count, preg_last_error());
+var_dump(preg_split($pattern, $subject), preg_last_error());
+var_dump(preg_match('/cat/', 'cat'), preg_last_error());
+`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'bool(false)\nint(2)\nstring(25) "Backtrack limit exhausted"\nbool(false)\nint(2)\nNULL\nint(0)\nint(2)\nbool(false)\nint(2)\nint(1)\nint(0)\n',
+  });
+});
+
 test('allows case-sensitive disjoint repetitions and small bounded repetitions on long subjects', () => {
   expect(
     run(String.raw`<?php

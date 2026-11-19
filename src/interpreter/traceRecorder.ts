@@ -24,6 +24,7 @@ export interface TracedFrame {
 export interface FrameReader<F extends TracedFrame> {
   isAtomic(frame: F): boolean;
   variablesOf(frame: F): TraceVariables;
+  stateVariables?(variables: TraceVariables): Record<string, unknown>;
   recordItem?(item: TraceItem): TraceItem;
 }
 
@@ -31,7 +32,7 @@ export interface FrameReader<F extends TracedFrame> {
 export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
   readonly traceItems: TraceItem[];
   /** The variables each frame on the stack showed when the last step was recorded. */
-  private readonly varsAtLastStep = new WeakMap<F, TraceItem['vars']>();
+  private readonly varsAtLastStep = new WeakMap<F, Record<string, unknown>>();
 
   constructor(
     private readonly runtime: TracedRuntime<F>,
@@ -48,15 +49,19 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     if (frames.some((frame) => this.frames.isAtomic(frame))) return false;
     if (this.traceItems.length >= MAX_TRACE_ITEMS) throw new ExecutionLimitError('trace');
     this.runtime.collectGarbage();
+    const current = frames.at(-1) as F;
     const item: TraceItem = {
       line: row + 1,
       callLines: frames.slice(1).flatMap(({ callRow }) => (callRow === undefined ? [] : [callRow + 1])),
-      ...this.frames.variablesOf(frames.at(-1) as F),
+      ...this.frames.variablesOf(current),
       turtles: world.turtleTraces(),
       board: world.boardText(),
     };
     this.traceItems.push(this.frames.recordItem?.(item) ?? item);
-    for (const frame of frames) this.varsAtLastStep.set(frame, this.frames.variablesOf(frame).vars);
+    for (const frame of frames) {
+      const variables = frame === current ? item : this.frames.variablesOf(frame);
+      this.varsAtLastStep.set(frame, this.stateVariables(variables));
+    }
     return true;
   }
 
@@ -73,12 +78,16 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     return (
       last.board === world.boardText() &&
       fastDeepEqual(last.turtles, world.turtleTraces()) &&
-      (shownVars === undefined || sameVariables(shownVars, this.frames.variablesOf(frame).vars))
+      (shownVars === undefined || sameVariables(shownVars, this.stateVariables(this.frames.variablesOf(frame))))
     );
+  }
+
+  private stateVariables(variables: TraceVariables): Record<string, unknown> {
+    return this.frames.stateVariables?.(variables) ?? variables.vars;
   }
 }
 
-function sameVariables(a: TraceItem['vars'], b: TraceItem['vars']): boolean {
+function sameVariables(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
   const names = Object.keys(a);
   return (
     names.length === Object.keys(b).length &&

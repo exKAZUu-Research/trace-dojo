@@ -128,3 +128,7 @@ Warning: String offset cast occurred in /main.php on line 16
 
 Warning: Illegal string offset -5076964154930102272 in /main.php on line 16
 Ybc
+NULL
+string(11) "replacement"
+NULL
+string(3) "abc"

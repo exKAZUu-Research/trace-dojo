@@ -3,6 +3,7 @@ import propertyAliases from 'unicode-property-value-aliases-ecmascript';
 
 import { dec, enc, utf8Length } from './bytes';
 import { analyzeRegex } from './regexAnalysis';
+import type { PcrePattern } from './regexExecution';
 import { rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
 
@@ -22,7 +23,7 @@ export interface Compiled {
   /** The capture names of the `\K` points, the last passed of which starts the reported match. */
   keeps: string[];
   byteCaselessReferences: Set<string>;
-  ambiguousRepetition: boolean;
+  boundedPattern?: PcrePattern;
 }
 
 export class PatternError extends Error {}
@@ -63,7 +64,8 @@ const MODIFIERS = new Map<string, PatternOption | undefined>([
   [' ', undefined],
 ]);
 
-// code-gauge-allow functionCognitiveComplexity 19 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 22 -- Threads pattern options, byte offsets and captures through both parsing passes.
+// code-gauge-allow functionNcss 32 -- Keeps validation and selection of the bounded PCRE2 path with pattern compilation.
 export function translate(pattern: string): Compiled {
   if (pattern.length > 32_768) throw new UnsupportedFeatureError('大きすぎる正規表現');
   const { body, modifiers } = splitDelimiters(pattern);
@@ -84,13 +86,15 @@ export function translate(pattern: string): Compiled {
   for (const modifier of modifiers) applyModifier(options, modifier);
   if (options.utf8) validatePatternUtf8(body);
   let source = options.utf8 ? dec(body) : body;
+  const matchLimit = /^\(\*LIMIT_MATCH=\d{1,10}\)/.exec(source)?.[0];
+  if (matchLimit) source = source.slice(matchLimit.length);
   const leadingFlags = /^\(\?([imsxU]+)\)/.exec(source);
   if (leadingFlags) {
     for (const flag of leadingFlags[1]) applyModifier(options, flag);
     options.extendedClass = leadingFlags[1].includes('xx');
     source = source.slice(leadingFlags[0].length);
   }
-  const offsetBase = leadingFlags?.[0].length ?? 0;
+  const offsetBase = (matchLimit?.length ?? 0) + (leadingFlags?.[0].length ?? 0);
   const layout = new PatternConverter(source, options, offsetBase).layout();
   if (layout.names.length > 256) throw new UnsupportedFeatureError('キャプチャが多すぎる正規表現');
   const converter = new PatternConverter(source, options, offsetBase, layout);
@@ -115,8 +119,27 @@ export function translate(pattern: string): Compiled {
     groupCount: converter.names.length - 1,
     keeps: converter.keeps,
     byteCaselessReferences,
-    ambiguousRepetition,
+    boundedPattern: ambiguousRepetition || matchLimit ? pcrePattern(body, modifiers) : undefined,
   };
+}
+
+const PCRE_COMPILE_OPTIONS: Record<string, number> = {
+  A: 0x80_00_00_00, // PCRE2_ANCHORED
+  D: 0x00_00_00_10, // PCRE2_DOLLAR_ENDONLY
+  i: 0x00_00_00_08, // PCRE2_CASELESS
+  J: 0x00_00_00_40, // PCRE2_DUPNAMES
+  m: 0x00_00_04_00, // PCRE2_MULTILINE
+  n: 0x00_00_20_00, // PCRE2_NO_AUTO_CAPTURE
+  s: 0x00_00_00_20, // PCRE2_DOTALL
+  U: 0x00_04_00_00, // PCRE2_UNGREEDY
+  u: 0x00_1a_00_00, // PCRE2_UTF | PCRE2_UCP | PCRE2_NEVER_BACKSLASH_C
+  x: 0x00_00_00_80, // PCRE2_EXTENDED
+};
+
+function pcrePattern(source: string, modifiers: string): PcrePattern {
+  let options = 0;
+  for (const modifier of modifiers) options |= PCRE_COMPILE_OPTIONS[modifier] ?? 0;
+  return { source, options: options >>> 0, restrictCaseless: modifiers.includes('r') };
 }
 
 /** The name under which the regexes capture a group of the pattern. */

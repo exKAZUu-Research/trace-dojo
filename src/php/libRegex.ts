@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 426 -- The regex functions share matching, offsets, capture handling, and error state.
+// code-gauge-allow-file fileNcss 455 -- The regex functions share matching, offsets, capture handling, and error state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { dec, enc } from './bytes';
 import { callCallback, consumeInvokedResult } from './callables';
@@ -84,18 +84,34 @@ function matchesOf(compiled: Compiled, subject: string, offset = 0, status?: { e
   return scanMatches(compiled, subject, offset, toMatch, status);
 }
 
-// code-gauge-allow functionCognitiveComplexity 23 -- Empty matches retry at the same position before advancing by a code point.
+type ProjectMatch<T> = (
+  compiled: Compiled,
+  result: MatchOffsets,
+  text: string,
+  bounds: [number, number],
+  byteOffset: (index: number) => number
+) => T;
+
+interface PreparedSubject {
+  text: string;
+  position: number;
+  byteOffset(index: number): number;
+}
+
+interface ScanPlan<T> {
+  length: number;
+  position: number;
+  advance(position: number): number;
+  match(position: number, retry: boolean): MatchOffsets | { pregError: number } | null;
+  value(result: MatchOffsets, retry: boolean): T;
+}
+
+// code-gauge-allow functionCognitiveComplexity 16 -- Shares retry, offset advancement and PHP error state across both matching engines.
 function* scanMatches<T>(
   compiled: Compiled,
   subject: string,
   offset: number,
-  project: (
-    compiled: Compiled,
-    result: MatchOffsets,
-    text: string,
-    bounds: [number, number],
-    byteOffset: (index: number) => number
-  ) => T,
+  project: ProjectMatch<T>,
   status?: { error: number }
 ): Generator<T> {
   const prepared = prepareSubject(compiled, subject, offset);
@@ -103,31 +119,72 @@ function* scanMatches<T>(
     if (status) status.error = rt().lastPregError;
     return;
   }
-  const { text, byteOffset } = prepared;
-  let { position } = prepared;
+  const plan = scanPlan(compiled, subject, prepared, project);
+  let position: number = plan.position;
   let retry = false;
-  while (position <= text.length) {
+  while (position <= plan.length) {
     rt().spend();
-    const emptyRegex = text === '' ? compiled.emptyRegex : undefined;
-    const input = emptyRegex && !retry ? '\0' : text;
-    const result = executeMatch(
-      retry ? compiled.retry : (emptyRegex ?? compiled.regex),
-      input,
-      position,
-      compiled.ambiguousRepetition
-    );
+    const result: MatchOffsets | { pregError: number } | null = plan.match(position, retry);
+    if (result && 'pregError' in result) {
+      rt().lastPregError = result.pregError;
+      if (status) status.error = result.pregError;
+      return;
+    }
     if (!result) {
-      if (!retry || position >= text.length) return;
+      if (!retry || position >= plan.length) return;
       retry = false;
-      position += compiled.utf8 && (text.codePointAt(position) ?? 0) > 0xff_ff ? 2 : 1;
+      position = plan.advance(position);
       continue;
     }
-    checkByteCaselessReferences(compiled, result, input);
-    const [matchStart, matchEnd] = matchBounds(compiled, result);
-    yield project(compiled, result, input, [matchStart, matchEnd], byteOffset);
-    position = matchEnd;
-    retry = matchStart === matchEnd;
+    yield plan.value(result, retry);
+    const [start, end] = result.range;
+    position = end;
+    retry = start === end;
   }
+}
+
+function scanPlan<T>(
+  compiled: Compiled,
+  subject: string,
+  prepared: PreparedSubject,
+  project: ProjectMatch<T>
+): ScanPlan<T> {
+  const native = compiled.boundedPattern;
+  if (native) {
+    const projection = { ...compiled, utf8: false };
+    return {
+      length: subject.length,
+      position: prepared.byteOffset(prepared.position),
+      advance: (position) => (compiled.utf8 ? nextUtf8Byte(subject, position) : position + 1),
+      match: (position, retry) => boundedRegexMatch(native, subject, position, retry, rt().budget),
+      value: (result) => project(projection, result, subject, result.range, (index) => index),
+    };
+  }
+  const { text, byteOffset, position } = prepared;
+  const emptyRegex = text === '' ? compiled.emptyRegex : undefined;
+  const inputAt = (retry: boolean): string => (emptyRegex && !retry ? '\0' : text);
+  return {
+    length: text.length,
+    position,
+    advance: (position) => position + (compiled.utf8 && (text.codePointAt(position) ?? 0) > 0xff_ff ? 2 : 1),
+    match(position, retry) {
+      const input = inputAt(retry);
+      const result = executeMatch(retry ? compiled.retry : (emptyRegex ?? compiled.regex), input, position);
+      if (result) {
+        checkByteCaselessReferences(compiled, result, input);
+        result.range = matchBounds(compiled, result);
+      }
+      return result;
+    },
+    value: (result, retry) => project(compiled, result, inputAt(retry), result.range, byteOffset),
+  };
+}
+
+function nextUtf8Byte(text: string, position: number): number {
+  do {
+    position++;
+  } while (((text.codePointAt(position) ?? 0) & 0xc0) === 0x80);
+  return position;
 }
 
 function checkByteCaselessReferences(
@@ -142,13 +199,8 @@ function checkByteCaselessReferences(
   }
 }
 
-function executeMatch(regex: RegExp, text: string, position: number, bounded: boolean): MatchOffsets | null {
+function executeMatch(regex: RegExp, text: string, position: number): MatchOffsets | null {
   const budget = rt().budget;
-  if (bounded) {
-    const result = boundedRegexMatch(regex, text, position, budget);
-    budget.checkClock();
-    return result;
-  }
   regex.lastIndex = position;
   try {
     const indices = regex.exec(text)?.indices;
@@ -164,11 +216,7 @@ function executeMatch(regex: RegExp, text: string, position: number, bounded: bo
  * The text to match a subject as and where to start, from byte `offset` (counted from the end if negative), or
  * undefined after setting the PCRE error for a bad subject or offset.
  */
-function prepareSubject(
-  compiled: Compiled,
-  subject: string,
-  offset: number
-): { text: string; position: number; byteOffset: (index: number) => number } | undefined {
+function prepareSubject(compiled: Compiled, subject: string, offset: number): PreparedSubject | undefined {
   const start = offset < 0 ? Math.max(subject.length + offset, 0) : offset;
   const text = compiled.utf8 ? dec(subject) : subject;
   rt().lastPregError = subjectError(compiled, subject, text, start);
