@@ -85,8 +85,75 @@ export class DeclarationBinder extends BinderBase {
         for (const property of type.symbol.properties) this.resolvePropertyOverride(property, type.symbol);
     } else {
       for (const type of ordered) this.checkInheritance(type);
+      for (const type of ordered) this.checkAccessibility(type.symbol);
     }
     return ordered;
+  }
+
+  /** Checks that each member's types are at least as accessible as the member, as CS0050 to CS0061 require. */
+  private checkAccessibility(symbol: TypeSymbol): void {
+    const display = displayTypeSymbol(symbol);
+    const check = (
+      types: Type[],
+      member: Accessibility,
+      row: number,
+      code: string,
+      message: (type: string) => string
+    ): void => {
+      const limit = effectiveRank(member, symbol);
+      const narrower = types.find((type) => typeRank(type) < limit);
+      if (narrower) this.error(row, code, `アクセシビリティに一貫性がありません。${message(displayType(narrower))}`);
+    };
+    if (symbol.baseType && symbol.kind === 'class') {
+      check(
+        [symbol.baseType],
+        symbol.access,
+        symbol.row,
+        'CS0060',
+        (type) => `基底クラス '${type}' のアクセシビリティはクラス '${display}' よりも低く設定されています`
+      );
+    }
+    for (const field of symbol.fields) {
+      if (field.property || field.isEvent || field.name.startsWith('<')) continue;
+      check(
+        [field.type],
+        field.access,
+        field.row,
+        'CS0052',
+        (type) =>
+          `フィールド型 '${type}' のアクセシビリティはフィールド '${display}.${field.name}' よりも低く設定されています`
+      );
+    }
+    for (const property of symbol.properties) {
+      if (property.isIndexer) continue;
+      check(
+        [property.type],
+        property.access,
+        property.row,
+        'CS0053',
+        (type) =>
+          `プロパティ型 '${type}' のアクセシビリティはプロパティ '${display}.${property.name}' よりも低く設定されています`
+      );
+    }
+    for (const method of [...symbol.methods, ...symbol.constructors]) {
+      if (method.kind !== 'method' && method.kind !== 'constructor') continue;
+      const name = displayMethodIn(method, symbol.declaredType);
+      if (method.kind === 'method')
+        check(
+          [method.returnType],
+          method.access,
+          method.row,
+          'CS0050',
+          (type) => `戻り値の型 '${type}' のアクセシビリティはメソッド '${name}' よりも低く設定されています`
+        );
+      check(
+        method.parameters.map((parameter) => parameter.type),
+        method.access,
+        method.row,
+        'CS0051',
+        (type) => `パラメーター型 '${type}' のアクセシビリティはメソッド '${name}' よりも低く設定されています`
+      );
+    }
   }
 
   /** The `using` directives of the namespaces around each type, outermost first. */
@@ -1480,4 +1547,28 @@ function displayAccessorsIn(property: PropertySymbol, owner: NamedType): string[
       (accessor) =>
         `${displayTypeSymbol(owner.symbol, owner.args)}.${property.name}.${accessor === property.getter ? 'get' : 'set'}`
     );
+}
+
+const ACCESS_RANKS: Record<Accessibility, number> = {
+  private: 0,
+  'private protected': 1,
+  protected: 2,
+  internal: 2,
+  'protected internal': 3,
+  public: 4,
+};
+
+/** How widely code can reach a member of a type: no wider than the type and the types around it. */
+function effectiveRank(access: Accessibility, owner: TypeSymbol | undefined): number {
+  let rank = ACCESS_RANKS[access];
+  for (let current = owner; current; current = current.containing) rank = Math.min(rank, ACCESS_RANKS[current.access]);
+  return rank;
+}
+
+/** How widely code can reach a type, through its own accessibility and its type arguments' and elements'. */
+function typeRank(type: Type): number {
+  if (type.kind === 'array') return typeRank(type.element);
+  if (type.kind !== 'named' || type.symbol.isLibrary)
+    return type.kind === 'named' ? Math.min(4, ...type.args.map(typeRank)) : 4;
+  return Math.min(effectiveRank(type.symbol.access, type.symbol.containing), ...type.args.map(typeRank));
 }
