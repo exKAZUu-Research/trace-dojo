@@ -97,6 +97,7 @@ export function holdAll<T>(frame: Frame, runs: readonly Eval<unknown>[], use: (v
 
 /** The state of one run: the call stack, the static storage, the turtles, and the output. */
 export class Runtime implements TracedRuntime<Frame> {
+  isStdioSynchronized = true;
   readonly world = new TurtleWorld();
   readonly frames: Frame[] = [];
   readonly budget = new ExecutionBudget();

@@ -208,7 +208,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     }
     const type = unqualified(arg.type);
     if (type.kind === 'class' && type.cls.library?.kind === 'functor') {
-      const operation = type.cls.library.apply?.(types[0]);
+      const operation = types.length === 2 ? type.cls.library.apply?.(types[0], types[1]) : undefined;
       return operation ? (_frame, a, b) => operation(a, b) : undefined;
     }
     return undefined;
@@ -319,7 +319,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('find', (args) => {
     const info = rangeAt(args, 0);
     if (!info || args.length !== 3) return;
-    const equal = valueEquality(compiler(), info.element, args[2]);
+    const equal = valueEquality(info.element, args[2]);
     if (!equal) return;
     return native('find', params(args), unqualified(args[0].type), ([first, last, value]) => {
       const values = range(first, last, info);
@@ -347,7 +347,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('count', (args) => {
     const info = rangeAt(args, 0);
     if (!info || args.length !== 3) return;
-    const equal = valueEquality(compiler(), info.element, args[2]);
+    const equal = valueEquality(info.element, args[2]);
     if (!equal) return;
     return native('count', params(args), PTRDIFF_T, ([first, last, value]) => {
       const values = range(first, last, info);
@@ -491,7 +491,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const info = writableRangeAt(args, 0);
       if (!info || args.length !== 4) return;
       const predicate = name === 'replace_if' ? predicateOf(args[2], info.element) : undefined;
-      const equal = name === 'replace' ? valueEquality(compiler(), info.element, args[2]) : undefined;
+      const equal = name === 'replace' ? valueEquality(info.element, args[2]) : undefined;
       if (!predicate && !equal) return;
       const ops = elementOperations(compiler(), unqualified(info.element), args[0].row);
       const types = params(args);
@@ -515,7 +515,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       if (name === 'unique' ? args.length > 3 : args.length !== 3) return;
       let keep: (frame: Frame, item: Value, previous: Value | undefined) => boolean;
       if (name === 'remove') {
-        const equal = valueEquality(compiler(), info.element, args[2]);
+        const equal = valueEquality(info.element, args[2]);
         if (!equal) return;
         const types = params(args);
         keep = (frame, item) => !equal(item, readArg(frame.pending.at(-1) as Ptr, types[2]));
@@ -636,7 +636,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const output = outputOf(args[isBinary ? 3 : 2]);
     const second = isBinary ? iteratorInfo(unqualified(args[2].type)) : undefined;
     if (!output || (isBinary && !second)) return;
-    const operation = predicateOf(args[isBinary ? 4 : 3], info.element, isBinary ? 2 : 1);
+    const operation = predicateOf(args[isBinary ? 4 : 3], second ? [info.element, second.element] : info.element);
     if (!operation) return;
     const ops = elementOperations(compiler(), unqualified(output.element), args[0].row);
     return native('transform', params(args), unqualified(args[isBinary ? 3 : 2].type), (values, { frame }) => {
@@ -983,11 +983,7 @@ function commonDeduced(a: Expr, b: Expr): Type | undefined {
 }
 
 /** How `==` compares an element with an argument, after converting the argument to the element's type. */
-function valueEquality(
-  compiler: ExpressionCompiler,
-  element: Type,
-  arg: Expr
-): ((a: Value, b: Value) => boolean) | undefined {
+function valueEquality(element: Type, arg: Expr): ((a: Value, b: Value) => boolean) | undefined {
   const type = unqualified(element);
   const argType = unqualified(arg.type);
   if (isArithmetic(type) && isArithmetic(argType)) {
@@ -998,7 +994,6 @@ function valueEquality(
     return (a, b) => (a as unknown as { bytes: string }).bytes === readBytes(b as Ptr);
   }
   if (typeName(type) !== typeName(argType)) return undefined;
-  void compiler;
   return equalTo(type);
 }
 
@@ -1064,12 +1059,17 @@ function listExtremum(
   comparatorParams: Type[],
   result: ClassInfo | undefined
 ): FunctionInfo {
-  const values = elements.map((element) => compiler.convert(element, type, element.row).run);
+  const values = elements.map((element) => compiler.copyInitializer(type, element, element.row, true));
   const ops = elementOperations(compiler, type, elements[0].row);
   // The list itself is the argument, which the function evaluates element by element.
   const listParam: Type = { kind: 'function', ret: VOID, params: [] };
   return native(name, [listParam, ...comparatorParams], result ? classType(result) : type, (_args, { frame }) => {
-    const items = values.map((value) => value(frame) as Value);
+    const destroy = ops.destroy;
+    const items = values.map((value) => {
+      const object = value(frame);
+      if (destroy) frame.temporaries.push({ object, destroy });
+      return object;
+    });
     const compare = less(frame);
     if (result) {
       const [low, high] = minmaxPositions(items, compare);
@@ -1079,7 +1079,7 @@ function listExtremum(
     for (let index = 1; index < items.length; index++) {
       if (name === 'min' ? compare(items[index], items[best]) : compare(items[best], items[index])) best = index;
     }
-    return items[best];
+    return ops.copy(frame, items[best]);
   });
 }
 

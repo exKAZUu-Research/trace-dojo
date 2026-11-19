@@ -214,7 +214,7 @@ function canonical(engine: EngineValue, digits: number, isFloat: boolean): numbe
 }
 
 /** The engines of `<random>`, by name: `std::mt19937`, `std::mt19937_64`, and `std::random_device`. */
-export function randomEngines(library: Library): Map<string, ClassInfo> {
+export function randomEngines(): Map<string, ClassInfo> {
   const engines = new Map<string, ClassInfo>();
   for (const [name, parameters, resultType] of [
     ['mt19937', MT19937, UINT],
@@ -291,7 +291,6 @@ export function randomEngines(library: Library): Map<string, ClassInfo> {
     }
     engines.set(name, cls);
   }
-  void library;
   return engines;
 }
 
@@ -406,8 +405,6 @@ export function randomClasses(library: Library): LibraryTemplate[] {
         native(name, [], type, (_args, { self }) => pick(self as DistributionValue), { isConst: true })
       );
     }
-    void DOUBLE;
-    void INT;
     return classType(cls);
   };
   return (['uniform_int_distribution', 'uniform_real_distribution'] as const).map((name) => ({

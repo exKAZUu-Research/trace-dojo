@@ -542,7 +542,7 @@ for (const [group, names] of Object.entries({
   ],
   cmath: [
     ...Object.keys(UNARY).flatMap((name) => [name, `${name}f`, `${name}l`]),
-    ...Object.keys(BINARY),
+    ...Object.keys(BINARY).flatMap((name) => [name, `${name}f`, `${name}l`]),
     'fma',
     'abs',
     'isnan',

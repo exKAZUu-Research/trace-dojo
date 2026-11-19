@@ -31,6 +31,7 @@ export interface ConversionSequence {
   isBoolean: boolean;
   /** How many classes up the hierarchy a derived-to-base conversion goes, or 0. */
   baseDistance: number;
+  convertsToVoidPointer?: boolean;
   /** How the sequence binds a reference, when the target is one. */
   reference?: { toConst: boolean };
   /** The converting constructor of a user-defined conversion. */
@@ -237,7 +238,8 @@ function pointerConversion(
   if (permitsQualificationConversion(fromTarget, to.to)) {
     return sequence(Rank.Exact, apply, { addsQualification: !sameType(fromTarget, to.to) });
   }
-  if (to.to.kind === 'void') return sequence(Rank.Conversion, apply, { addsQualification });
+  if (to.to.kind === 'void')
+    return sequence(Rank.Conversion, apply, { addsQualification, convertsToVoidPointer: true });
   const distance = baseDistance(fromTarget, to.to);
   if (distance > 0) {
     return sequence(Rank.Conversion, (e) => apply(toBase(host, e, to.to)), {
@@ -290,11 +292,13 @@ function baseDistance(from: Type, to: Type): number {
 export function compareSequences(a: ConversionSequence, b: ConversionSequence): number {
   if (a.rank !== b.rank) return b.rank - a.rank;
   if (a.rank === Rank.UserDefined) return 0;
-  if (a.addsQualification !== b.addsQualification) return a.addsQualification ? -1 : 1;
-  if (a.reference && b.reference && a.reference.toConst !== b.reference.toConst) return a.reference.toConst ? -1 : 1;
+  if (a.baseDistance > 0 && b.convertsToVoidPointer) return 1;
+  if (b.baseDistance > 0 && a.convertsToVoidPointer) return -1;
   if (a.baseDistance !== b.baseDistance && a.baseDistance > 0 && b.baseDistance > 0) {
     return b.baseDistance - a.baseDistance;
   }
+  if (a.addsQualification !== b.addsQualification) return a.addsQualification ? -1 : 1;
+  if (a.reference && b.reference && a.reference.toConst !== b.reference.toConst) return a.reference.toConst ? -1 : 1;
   if (a.isBoolean !== b.isBoolean) return a.isBoolean ? -1 : 1;
   return 0;
 }

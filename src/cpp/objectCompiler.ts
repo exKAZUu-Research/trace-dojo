@@ -268,7 +268,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
 
   /** Converts an expression to a type as initialization does, or stops with a message naming `what`. */
   convert(expr: Expr, to: Type, row: number, what = '値'): Expr {
-    if (expr.type.kind === 'void') this.error(row, '値を返さない関数（void）の結果は使えません。');
+    if (expr.type.kind === 'void' && !expr.braced) this.error(row, '値を返さない関数（void）の結果は使えません。');
     const conversion = implicitConversion(this, expr, to);
     if (!conversion) return this.error(row, this.conversionMessage(expr, to, what));
     return conversion.apply(expr);
@@ -304,7 +304,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   ): Resolved {
     const viable: (Resolved & { objectConversion?: ConversionSequence })[] = [];
     for (const candidate of candidates) {
-      const fn = candidate.instantiate ? candidate.instantiate(args, templateArgs) : candidate;
+      const instantiated = candidate.instantiate?.(args, templateArgs);
+      const fn = candidate.instantiate ? instantiated && { ...instantiated, isTemplate: true } : candidate;
       if (!fn || (templateArgs && !candidate.instantiate)) continue;
       const conversions = this.argumentConversions(fn, args);
       if (!conversions) continue;

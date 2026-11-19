@@ -1,6 +1,6 @@
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import type { Eval, Frame } from '../runtime';
+import { type Eval, type Frame, holdAll } from '../runtime';
 import { type ClassInfo, type Type, typeName, unqualified, VOID, withConst } from '../types';
 import { CObject, type Ptr, type Value } from '../values';
 import type { ElementOperations } from './elements';
@@ -166,6 +166,8 @@ function compileEmplacing(
 ): <R>(frame: Frame, use: (emplacing: Emplacing) => R) => R {
   const key = unqualified(keyType);
   const count = args.length;
+  if (isTry && count === 0) return compiler.error(row, 'try_emplace にはキーを書いてください。');
+  const positions = new WeakMap<Frame, number>();
   // Each argument is evaluated once, into a location the construction then reads, as perfect forwarding passes it.
   const locations = args.map((arg, index) =>
     isTry && index === 0
@@ -178,42 +180,42 @@ function compileEmplacing(
     type: isTry && index === 0 ? withConst(key) : arg.type,
     isLvalue: true,
     row: arg.row,
-    run: (frame) => frame.pending.at(index - count) as Ptr,
+    run: (frame) => frame.pending[(positions.get(frame) as number) + index] as Ptr,
   }));
-  const keyOf = isTry ? (frame: Frame) => (frame.pending.at(-count) as Ptr).read() : keyExtraction(args, key);
+  const keyOf = isTry ? (location: Ptr) => location.read() : keyExtraction(args, key);
   let make: Eval<Value>;
   if (valueType && (isTry || count === 2)) {
     const keyValue = constructElement(compiler, key, [slots[0]], row);
     const mappedValue = constructElement(compiler, valueType, slots.slice(1), row);
     const cls = (entryType as Extract<Type, { kind: 'class' }>).cls;
-    make = (frame) => new CObject(cls, [keyValue(frame), mappedValue(frame)]);
+    make = (frame) => holdAll(frame, [keyValue, mappedValue], (values) => new CObject(cls, values as Value[]));
   } else {
     make = constructElement(compiler, unqualified(entryType), slots, row);
   }
   return (frame, use) => {
-    const values = locations.map((location) => location(frame) as Ptr);
-    frame.pending.push(...values);
+    const previous = positions.get(frame);
+    positions.set(frame, frame.pending.length);
     try {
-      return use({ key: keyOf?.(frame), make: () => make(frame) });
+      return holdAll(frame, locations, (values) => use({ key: keyOf?.(values[0] as Ptr), make: () => make(frame) }));
     } finally {
-      frame.pending.length -= count;
+      if (previous === undefined) positions.delete(frame);
+      else positions.set(frame, previous);
     }
   };
 }
 
 /** Where the arguments of `emplace`, held at the end of `frame.pending`, give the key, if they do. */
-function keyExtraction(args: Expr[], key: Type): ((frame: Frame) => Value) | undefined {
+function keyExtraction(args: Expr[], key: Type): ((location: Ptr) => Value) | undefined {
   const isKey = (type: Type): boolean =>
     typeName(unqualified(type.kind === 'array' ? { kind: 'pointer', to: type.of } : type)) === typeName(key);
   const [first] = args;
-  if ((args.length === 1 || args.length === 2) && isKey(first.type))
-    return (frame) => (frame.pending.at(-args.length) as Ptr).read();
+  if ((args.length === 1 || args.length === 2) && isKey(first.type)) return (location) => location.read();
   if (
     args.length === 1 &&
     first.type.kind === 'class' &&
     first.type.cls.library?.kind === 'pair' &&
     isKey(first.type.cls.fields[0].type)
   )
-    return (frame) => ((frame.pending.at(-1) as Ptr).read() as CObject).values[0];
+    return (location) => (location.read() as CObject).values[0];
   return undefined;
 }

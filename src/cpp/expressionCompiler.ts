@@ -1043,7 +1043,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const type = unqualified(target.type);
     if (type.kind === 'array') return this.error(list.row, '配列にはまとめて代入できません。');
     const value = this.listInitializer(type, list, list.row);
-    const source: Expr = { type, isLvalue: false, row: list.row, run: value, isTemporaryObject: type.kind === 'class' };
+    const source: Expr = {
+      type,
+      isLvalue: false,
+      row: list.row,
+      run: value,
+      isTemporaryObject: type.kind === 'class',
+      isAssignmentList: true,
+    };
     return this.assign(operator, target, source, list.row);
   }
 
@@ -1078,8 +1085,9 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     b: Expr,
     row: number
   ): { left: Expr; right: Expr; type: Type; isLvalue: boolean } {
-    if (a.isLvalue && b.isLvalue && sameType(a.type, b.type))
-      return { left: a, right: b, type: a.type, isLvalue: true };
+    if (a.isLvalue && b.isLvalue && sameType(a.type, b.type, false)) {
+      return { left: a, right: b, type: isConstType(b.type) ? withConst(a.type) : a.type, isLvalue: true };
+    }
     if (a.type.kind === 'void' && b.type.kind === 'void') return { left: a, right: b, type: a.type, isLvalue: false };
     const av = this.rvalue(a);
     const bv = this.rvalue(b);
@@ -1099,19 +1107,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const type = classType(av.type.cls);
       return { left: this.convert(a, type, row), right: this.convert(b, type, row), type, isLvalue: false };
     }
-    for (const [x, y] of [
-      [av, bv],
-      [bv, av],
-    ] as const) {
-      if (x.type.kind === 'pointer' && (y.isNullConstant || y.type.kind === 'pointer')) {
-        const type = x.type;
-        const ok = y.isNullConstant || sameType(unqualified((y.type as typeof type).to), unqualified(type.to), false);
-        if (ok) {
-          const left = x === av ? av : this.convert(av, type, row);
-          const right = x === bv ? bv : this.convert(bv, type, row);
-          return { left, right, type, isLvalue: false };
-        }
-      }
+    const pointer = commonConditionalPointer(av, bv);
+    if (pointer) {
+      return {
+        left: this.convert(av, pointer, row),
+        right: this.convert(bv, pointer, row),
+        type: pointer,
+        isLvalue: false,
+      };
     }
     if (av.type.kind === 'class' || bv.type.kind === 'class') {
       for (const target of [av.type, bv.type]) {
@@ -1143,14 +1146,14 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     const array = this.compileExpression(fieldOf(node, 'argument') as Syntax);
     const indices = (fieldOf(node, 'indices') as Syntax).children;
     if (indices.length !== 1) return this.error(node.row, '[] の中には式を1つだけ書いてください。');
-    if (indices[0].type === 'initializer_list') return this.error(node.row, '[] の中に {...} は書けません。');
-    const index = this.compileExpression(indices[0]);
+    const index = this.argument(indices[0]);
     return this.subscript(array, index, node.row);
   }
 
   subscript(array: Expr, index: Expr, row: number): Expr {
     const libraryResult = this.libraryOperator('[]', [array, index], row);
     if (libraryResult) return libraryResult;
+    if (index.braced) return this.error(row, 'この型の [] の中に {...} は書けません。');
     let pointer = this.rvalue(array);
     let offset = this.rvalue(index);
     if (isInteger(pointer.type) && offset.type.kind === 'pointer') [pointer, offset] = [offset, pointer];
@@ -1212,7 +1215,22 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const run = expr.run;
       return { type, isLvalue: false, row, run: (frame) => (run(frame), undefined), onlyCalls: expr.onlyCalls };
     }
-    if (type.kind === 'reference') return this.convert(expr, type, row);
+    if (type.kind === 'reference') {
+      const from = expr.type;
+      const to = type.to;
+      if (
+        expr.isLvalue &&
+        from.kind === 'class' &&
+        to.kind === 'class' &&
+        to.cls.isDerivedFrom(from.cls) &&
+        (!isConstType(from) || isConstType(to))
+      ) {
+        this.checkBaseConversion(to.cls, from.cls, row);
+        return { ...expr, type: to };
+      }
+      const converted = this.convert(expr, type, row);
+      return { ...converted, type: to, isLvalue: true };
+    }
     const explicitBool = this.libraryBool(expr, row, type);
     if (explicitBool) return explicitBool;
     const value = this.rvalue(expr);
@@ -1341,9 +1359,19 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const args = argNodes.map((arg) => this.argument(arg));
       return this.constructObject(typeTarget.cls, args, node.row, false);
     }
+    const isUnqualified = functionNode.type === 'identifier';
+    if (isUnqualified && !this.findName(functionNode.text)) {
+      const args = argNodes.map((arg) => this.argument(arg));
+      const functions = this.withArgumentDependentLookup(functionNode.text, [], args);
+      if (functions.length > 0) {
+        const callee = this.entityExpr({ kind: 'functions', functions }, functionNode, false);
+        return this.callWith(callee, args, node.row);
+      }
+      this.lookupName(functionNode.text, functionNode.row);
+    }
     const callee = this.compileExpression(functionNode);
     const args = argNodes.map((arg) => this.argument(arg));
-    return this.callWith(callee, args, node.row, functionNode.type === 'identifier');
+    return this.callWith(callee, args, node.row, isUnqualified);
   }
 
   /** The type a call's function names, when the call is a functional cast `T(...)` rather than a function call. */
@@ -1659,6 +1687,23 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (actual.kind !== 'pointer')
       return this.error(row, `auto* の初期値にポインタを書いてください（${typeName(actual)}）。`);
     return pointerTo(this.deduceAutoPattern(declared.to, actual.to, row), isConst);
+  }
+}
+
+function commonConditionalPointer(left: Expr, right: Expr): Type | undefined {
+  const a = left.type;
+  const b = right.type;
+  if (a.kind === 'pointer' && right.isNullConstant) return a;
+  if (b.kind === 'pointer' && left.isNullConstant) return b;
+  if (a.kind !== 'pointer' || b.kind !== 'pointer') return;
+  const x = a.to;
+  const y = b.to;
+  const isConst = isConstType(x) || isConstType(y);
+  if (sameType(x, y, false) || x.kind === 'void') return pointerTo(withConst(x, isConst));
+  if (y.kind === 'void') return pointerTo(withConst(y, isConst));
+  if (x.kind === 'class' && y.kind === 'class') {
+    if (y.cls.isDerivedFrom(x.cls)) return pointerTo(withConst(x, isConst));
+    if (x.cls.isDerivedFrom(y.cls)) return pointerTo(withConst(y, isConst));
   }
 }
 

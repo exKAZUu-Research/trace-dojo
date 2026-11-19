@@ -2,16 +2,18 @@ import type { DisplayNode } from '../../problems/trace';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { invoke } from '../objectCompiler';
 import type { Eval, Frame } from '../runtime';
 import {
+  alignOf,
   BOOL,
   ClassInfo,
   classType,
   type FunctionInfo,
   isConstType,
+  pointerTo,
   referenceTo,
   SIZE_T,
+  sizeOf,
   type Type,
   typeName,
   unqualified,
@@ -51,11 +53,16 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
     return operations;
   };
   const make = (a: Value, b: Value): CObject => new CObject(cls, [a, b]);
+  const firstStorage = first.kind === 'reference' ? pointerTo(first.to) : first;
+  const secondStorage = second.kind === 'reference' ? pointerTo(second.to) : second;
+  const secondAlign = alignOf(secondStorage);
+  const align = Math.max(alignOf(firstStorage), secondAlign);
+  const secondOffset = Math.ceil(sizeOf(firstStorage) / secondAlign) * secondAlign;
   cls.library = {
     kind: 'pair',
     args: [first, second],
-    size: 16,
-    align: 8,
+    size: Math.ceil((secondOffset + sizeOf(secondStorage)) / align) * align,
+    align,
     operator: (compiler, operator, operands, row) => {
       const [left, right] = operands;
       const isSelf = (expr: Expr | undefined): boolean => expr?.type.kind === 'class' && expr.type.cls === cls;
@@ -623,7 +630,6 @@ export function orderedClass(
     const target = (other as Ptr).read() as OrderedValue;
     [self.entries, target.entries] = [target.entries, self.entries];
   });
-  void invoke;
   return cls;
 }
 

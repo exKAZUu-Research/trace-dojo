@@ -285,12 +285,11 @@ export class Compiler extends StatementCompiler {
     const isStatic = this.hasSpecifier(node, 'static');
     const isInline = this.hasSpecifier(node, 'inline') || this.hasSpecifier(node, 'constexpr');
     const base = this.specifiedType(node);
-    const defaults = fieldsOf(node, 'default_value');
-    for (const [position, declarator] of declarators.entries()) {
+    for (const declarator of declarators) {
       const declared = this.applyDeclarator(base, declarator);
       const name = declared.name as string;
       if (this.memberEntity(cls, name)) this.error(declarator.row, `メンバ ${name} はすでに宣言されています。`);
-      const initializer = this.defaultValueOf(node, declarator, defaults, position);
+      const initializer = this.defaultValueOf(node, declarator);
       if (isStatic) {
         this.staticMember(cls, name, declared.type, access, declarator.row, initializer, isInline);
         continue;
@@ -315,9 +314,7 @@ export class Compiler extends StatementCompiler {
     }
   }
 
-  /** The default member initializer of the `position`th declarator of a member declaration. */
-  private defaultValueOf(node: Syntax, declarator: Syntax, defaults: Syntax[], position: number): Syntax | undefined {
-    void position;
+  private defaultValueOf(node: Syntax, declarator: Syntax): Syntax | undefined {
     const index = node.all.indexOf(declarator);
     const next = node.all
       .slice(index + 1)
@@ -351,14 +348,7 @@ export class Compiler extends StatementCompiler {
         `static のメンバ変数 ${name} の初期値は、クラスの外の定義に書いてください（または inline static にしてください）。`
       );
     }
-    const global = this.declareStaticStorage(
-      `${cls.name}::${name}`,
-      type,
-      row,
-      initializer,
-      undefined,
-      !isConstType(type)
-    );
+    const global = this.declareStaticStorage(`${cls.name}::${name}`, type, row, !isConstType(type));
     info.global = global;
     global.isDefined = isInline;
     if (initializer || (isInline && this.isClassType(type)))
@@ -874,6 +864,7 @@ export class Compiler extends StatementCompiler {
       }
       if (base) {
         const baseCopy = base.operations?.copy(frame, source) as CObject;
+        target.message = baseCopy.message;
         for (let index = 0; index < base.fields.length; index++) target.values[index] = baseCopy.values[index];
       }
       for (const field of ownFields)
@@ -1086,7 +1077,7 @@ export class Compiler extends StatementCompiler {
       const statements = this.compileStatements(body.children);
       context.endBody();
       const undo = fn.isConstructor && cls ? this.constructorBodyFailure(cls, initializerList) : undefined;
-      fn.compiled = this.functionBody(fn, context, memberInit, statements, body.endRow, undo);
+      fn.compiled = this.functionBody(fn, context, memberInit, statements, undo);
     } finally {
       this.context = saved;
     }
@@ -1110,14 +1101,12 @@ export class Compiler extends StatementCompiler {
     context: FunctionContext,
     memberInit: Exec | undefined,
     statements: Exec,
-    endRow: number,
     undoConstruction: ((frame: Frame) => void) | undefined
   ): CompiledFunction {
     const scope = context.scope;
     const { slots, destructibles } = scope;
     const isMain = fn.name === 'main' && !fn.owner;
     const isVoid = fn.ret.kind === 'void' || fn.isConstructor || fn.isDestructor;
-    void endRow;
     const body = (frame: Frame): void => {
       let completion;
       let isInitialized = false;
@@ -1238,7 +1227,7 @@ export class Compiler extends StatementCompiler {
       return this.error(declarator.row, `配列 ${name} の大きさを書いてください。`);
     if (type.kind === 'void') return this.error(declarator.row, `void 型の変数 ${name} は作れません。`);
     const isConstant = isConstType(type) && isArithmetic(type);
-    const global = this.declareStaticStorage(name, type, declarator.row, value, declarator, !isConstant);
+    const global = this.declareStaticStorage(name, type, declarator.row, !isConstant);
     global.isDefined = true;
     let constant: number | bigint | undefined;
     if (isConstant && value && value.type !== 'initializer_list' && value.type !== 'argument_list') {
@@ -1249,16 +1238,7 @@ export class Compiler extends StatementCompiler {
     return type;
   }
 
-  declareStaticStorage(
-    name: string,
-    type: Type,
-    row: number,
-    value: Syntax | undefined,
-    declarator: Syntax | undefined,
-    isShown: boolean
-  ): GlobalInfo {
-    void value;
-    void declarator;
+  declareStaticStorage(name: string, type: Type, row: number, isShown: boolean): GlobalInfo {
     const global: GlobalInfo = { name, type, index: this.globals.length, row, isDefined: false, isShown };
     this.globals.push(global);
     this.globalTypes.push(type);
@@ -1332,15 +1312,8 @@ export class Compiler extends StatementCompiler {
     return { run, isConstant, isCreation: value.type === 'new_expression' };
   }
 
-  staticInitializer(
-    global: GlobalInfo,
-    type: Type,
-    value: Syntax | undefined,
-    declarator: Syntax,
-    name: string
-  ): (frame: Frame) => void {
-    void name;
-    const init = this.staticInitialization(type, value, declarator.row);
+  staticInitializer(global: GlobalInfo, type: Type, value: Syntax | undefined, row: number): (frame: Frame) => void {
+    const init = this.staticInitialization(type, value, row);
     const { index } = global;
     if (!init) return () => {};
     if (init.isConstant) {
@@ -1355,7 +1328,7 @@ export class Compiler extends StatementCompiler {
     }
     const initialized = new WeakSet<Box>();
     const run = this.fullExpression(init.run);
-    const store = this.staticStore(type, declarator.row);
+    const store = this.staticStore(type, row);
     return (frame) => {
       const box = frame.runtime.globals[index] as Box;
       if (initialized.has(box)) return;

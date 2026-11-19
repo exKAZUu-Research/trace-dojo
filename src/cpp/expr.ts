@@ -8,6 +8,7 @@ import type { Ptr, Value } from './values';
  * value. The type is never a reference type: a reference denotes the object it refers to, as an lvalue.
  */
 export interface Expr {
+  isAssignmentList?: boolean;
   type: Type;
   isLvalue: boolean;
   run: Eval<Value | Ptr>;

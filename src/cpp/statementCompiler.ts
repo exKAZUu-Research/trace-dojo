@@ -336,10 +336,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         parameter.children.length !== 1
       )
         return undefined;
-      if (type?.type !== 'type_identifier') return undefined;
-      const entity = this.findName(type.text);
+      if (type?.type !== 'type_identifier' && type?.type !== 'qualified_identifier') return undefined;
+      const entity = type.type === 'qualified_identifier' ? this.lookupQualified(type) : this.findName(type.text);
       if (!entity || entity.kind === 'class' || entity.kind === 'type' || entity.kind === 'template') return undefined;
-      args.push({ ...type, type: 'identifier', isNamed: true, field: undefined });
+      args.push({ ...type, type: type.type === 'type_identifier' ? 'identifier' : type.type, field: undefined });
     }
     const argumentList: Syntax = { ...parameters, type: 'argument_list', children: args, all: args, field: 'value' };
     const variable: Syntax = { ...name, field: 'declarator' };
@@ -539,12 +539,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       if (type.kind === 'array' && type.length === undefined && value) type = this.completeArrayType(type, value);
       if (type.kind === 'array' && type.length === undefined)
         return this.error(declarator.row, `配列 ${name} の大きさを書いてください。`);
-      const global = this.declareStaticStorage(name, type, declarator.row, value, declarator, false);
+      const global = this.declareStaticStorage(name, type, declarator.row, false);
       const local = this.context.declareLocal(name, type, false);
       this.context.scope.names.set(name, { kind: 'local', local, isReference: false, constant: undefined });
       const { slot } = local;
       const { index } = global;
-      const initialize = this.staticInitializer(global, type, value, declarator, name);
+      const initialize = this.staticInitializer(global, type, value, declarator.row);
       this.context.scope.slots.splice(this.context.scope.slots.indexOf(slot), 1);
       this.context.scope.returnSlots.delete(local);
       this.context.scope.statics.push(slot);
@@ -560,22 +560,14 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   /** Declares a variable with static storage duration, which the program's start creates. */
-  abstract declareStaticStorage(
-    name: string,
-    type: Type,
-    row: number,
-    value: Syntax | undefined,
-    declarator: Syntax,
-    isShown: boolean
-  ): GlobalInfo;
+  abstract declareStaticStorage(name: string, type: Type, row: number, isShown: boolean): GlobalInfo;
 
   /** Initializes a function's static variable the first time its declaration runs. */
   abstract staticInitializer(
     global: GlobalInfo,
     type: Type,
     value: Syntax | undefined,
-    declarator: Syntax,
-    name: string
+    row: number
   ): (frame: Frame) => void;
 
   checkRedeclaration(name: string, row: number): void {
@@ -826,8 +818,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     }, bodyScope);
     const beginRun = begin.run;
     const endRun = end.run;
+    const initializeRange = range.isLvalue ? keepRange : this.fullExpression(keepRange);
     return this.fullExpression((frame) => {
-      keepRange(frame);
+      initializeRange(frame);
       frame.slots[iteratorLocal.slot] = new Box(beginRun(frame) as Value);
       frame.slots[endLocal.slot] = new Box(endRun(frame) as Value);
       while (notDone(frame)) {

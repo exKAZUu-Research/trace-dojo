@@ -2,6 +2,7 @@ import { CompileError } from '../../interpreter/diagnostics';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
+import { makeEach } from '../objectCompiler';
 import { type Eval, type Frame, holdAll } from '../runtime';
 import type { Syntax } from '../syntax';
 import {
@@ -94,8 +95,8 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   cls.library = {
     kind,
     args: [element],
-    size: kind === 'array' ? 0 : kind === 'deque' ? 48 : 24,
-    align: 8,
+    size: kind === 'array' ? Math.max(1, fixedLength ?? 0) * sizeOf(element) : kind === 'deque' ? 48 : 24,
+    align: kind === 'array' ? alignOf(element) : 8,
     operator: (compiler, operator, operands, row) =>
       sequenceOperator(compiler, cls, element, kind, operator, operands, row, editor, ops),
     listInitializer: (compiler, elements, row) =>
@@ -778,7 +779,7 @@ function assignment(
   editor: SequenceEditor,
   ops: () => ElementOperations
 ): Expr | undefined {
-  const listInits = listElements.get(right.run);
+  const listInits = right.isAssignmentList ? listElements.get(right.run) : undefined;
   if (!listInits && !(isSameClass && right.isTemporaryObject)) return undefined;
   compiler.checkAssignable(left, row, '=');
   const target = left.run;
@@ -874,16 +875,23 @@ function sequenceList(
     if (elements.length > 0 && elements.length <= 2) return undefined;
     throw error;
   }
-  const run: Eval<Value> = (frame) =>
-    holdAll(frame, inits, (values) => {
-      const temporaries = values as Value[];
-      const { hasEffects, copy, destroy } = ops();
-      if (!hasEffects) return make(temporaries);
-      // The container copies the initializer list's elements, which then end their lifetime.
-      const result = make(temporaries.map((item) => copy(frame, item)));
-      if (destroy) for (let index = temporaries.length - 1; index >= 0; index--) destroy(frame, temporaries[index]);
-      return result;
+  const run: Eval<Value> = (frame) => {
+    const { hasEffects, copy, destroy } = ops();
+    if (!hasEffects) return holdAll(frame, inits, (values) => make(values as Value[]));
+    const temporaries = inits.map((init) => {
+      const object = init(frame);
+      if (destroy) frame.temporaries.push({ object, destroy });
+      return object;
     });
+    return make(
+      makeEach(
+        frame,
+        temporaries.length,
+        (index) => copy(frame, temporaries[index]),
+        () => destroy
+      )
+    );
+  };
   listElements.set(run, inits);
   return run;
 }
@@ -903,6 +911,7 @@ function emplacement(
   if (isConstType(object.type))
     return compiler.error(row, `const の ${typeName(object.type)} には ${member} を使えません。`);
   const positionArg = member === 'emplace' ? args[0] : undefined;
+  if (member === 'emplace' && !positionArg) return compiler.error(row, 'emplace には挿入位置を書いてください。');
   const elementArgs = member === 'emplace' ? args.slice(1) : args;
   const value = constructElement(compiler, element, elementArgs, row);
   const self = compiler.objectOf(object);

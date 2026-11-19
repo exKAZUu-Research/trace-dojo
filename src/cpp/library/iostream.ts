@@ -164,6 +164,20 @@ export class Streams {
     }
     cls.memberTypes.set('fmtflags', UINT);
     cls.memberTypes.set('openmode', UINT);
+    addMethod(
+      cls,
+      native(
+        'sync_with_stdio',
+        [BOOL],
+        BOOL,
+        ([synchronize], { frame }) => {
+          const previous = frame.runtime.isStdioSynchronized;
+          frame.runtime.isStdioSynchronized = synchronize === undefined || synchronize !== 0;
+          return previous ? 1 : 0;
+        },
+        { owner: cls, isStatic: true, optional: 1 }
+      )
+    );
     return cls;
   }
 

@@ -218,7 +218,7 @@ export function comparatorOf(
     return (frame, _callee, ...values) => call(frame, ...values.map(locationOf));
   }
   if (argumentType.kind === 'class' && argumentType.cls.library?.kind === 'functor') {
-    const operation = argumentType.cls.library.apply?.(types[0]);
+    const operation = types.length === 2 ? argumentType.cls.library.apply?.(types[0], types[1]) : undefined;
     if (!operation) {
       return compiler.error(row, `${argumentType.cls.name} では ${typeName(types[0])} を比べられません。`);
     }

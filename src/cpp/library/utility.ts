@@ -1,7 +1,7 @@
-import { binaryOperation } from '../../c/arith';
-import { CppRuntimeError } from '../errors';
+import { binaryOperation, convertScalar, type Scalar } from '../../c/arith';
+import { commonType } from '../../c/types';
 import type { Expr } from '../expr';
-import { BOOL, ClassInfo, classType, isArithmetic, type Type, typeName, unqualified } from '../types';
+import { BOOL, ClassInfo, isArithmetic, sameType, type Type, typeName, unqualified } from '../types';
 import { CObject, type Value } from '../values';
 import { equalTo, lessThan } from './elements';
 import type { Library } from './registry';
@@ -37,8 +37,21 @@ export function functorClass(library: Library, name: string, argument: Type | un
   library.instances.set(key, cls);
   cls.isComplete = true;
   const { isComparison, operator } = FUNCTORS[name];
-  const apply = (type: Type): ((a: Value, b: Value) => Value) | undefined => {
-    const operand = unqualified(argument ?? type);
+  const apply = (left: Type, right: Type): ((a: Value, b: Value) => Value) | undefined => {
+    if (isArithmetic(left) && isArithmetic(right) && (!argument || isArithmetic(argument))) {
+      const operand = commonType(argument ?? left, argument ?? right);
+      const operation = binaryOperation(operator as never, operand);
+      const convert = (value: Scalar, type: typeof left): Scalar =>
+        argument
+          ? convertScalar(convertScalar(value, type, argument), argument, operand)
+          : convertScalar(value, type, operand);
+      return (a, b) => {
+        const result = operation(convert(a as Scalar, left), convert(b as Scalar, right));
+        return argument && !isComparison ? convertScalar(result, operand, argument) : result;
+      };
+    }
+    const operand = unqualified(argument ?? left);
+    if (!sameType(operand, right, false)) return undefined;
     if (isComparison) {
       if (operator === '==' || operator === '!=') {
         const equal = equalTo(operand);
@@ -57,9 +70,7 @@ export function functorClass(library: Library, name: string, argument: Type | un
     if (operator === '+' && operand.kind === 'class' && operand.cls.library?.kind === 'string') {
       return (a, b) => new StringValue((a as StringValue).bytes + (b as StringValue).bytes);
     }
-    if (!isArithmetic(operand)) return undefined;
-    const run = binaryOperation(operator as never, operand as never);
-    return (a, b) => run(a as number, b as number);
+    return undefined;
   };
   cls.library = {
     kind: 'functor',
@@ -69,8 +80,12 @@ export function functorClass(library: Library, name: string, argument: Type | un
     apply,
     call: (compiler, object, args, row) => {
       if (args.length !== 2) return;
-      const type = argument ?? unqualified(compiler.rvalue(args[0]).type);
-      const operation = apply(type);
+      if (!argument) {
+        const result = compiler.binary(operator, args[0], args[1], row);
+        return { ...result, run: (frame) => (object.run(frame), result.run(frame)) };
+      }
+      const type = unqualified(argument);
+      const operation = apply(type, type);
       if (!operation) return compiler.error(row, `${cls.name} は ${typeName(type)} の値に使えません。`);
       const values = args.map((arg) => compiler.convert(arg, unqualified(type), row).run);
       const objectRun = object.run;
@@ -191,8 +206,6 @@ export function numericLimitsClass(library: Library, type: Type): ClassInfo {
     )
   );
   cls.constants.set('is_integer', constant(target.kind === 'int' ? 1 : 0, BOOL));
-  void classType;
-  void CppRuntimeError;
   return cls;
 }
 

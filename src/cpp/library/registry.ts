@@ -17,6 +17,7 @@ import {
   LDOUBLE,
   LLONG,
   LONG,
+  nonReference,
   SCHAR,
   SHORT,
   type Type,
@@ -322,7 +323,7 @@ export class Library {
       else this.globalNames.set(name, entity);
     }
     for (const template of containerTemplates(this)) this.addStd(template.name, { kind: 'template', template });
-    for (const [name, cls] of randomEngines(this)) this.addStd(name, { kind: 'class', cls });
+    for (const [name, cls] of randomEngines()) this.addStd(name, { kind: 'class', cls });
     this.addFunctions(algorithmFunctions(this), this.stdNames);
     this.addFunctions(new Map([['make_pair', [makePair(this)]]]), this.stdNames);
     const exit = native('exit', [INT], VOID, ([status]) => {
@@ -398,7 +399,7 @@ function mathFunctions(): Map<string, FunctionInfo[]> {
       native(name, [FLOAT], FLOAT, ([x]) => Math.fround(fn(x as number))),
       native(name, [DOUBLE], DOUBLE, ([x]) => fn(x as number)),
       native(name, [LDOUBLE], LDOUBLE, ([x]) => fn(x as number)),
-      integerVersion(name, 1, ([x]) => fn(x)),
+      promotedMath(name, 1, ([x]) => fn(x)),
     ];
     functions.set(name, overloads);
     functions.set(`${name}f`, [native(`${name}f`, [FLOAT], FLOAT, ([x]) => Math.fround(fn(x as number)))]);
@@ -409,13 +410,20 @@ function mathFunctions(): Map<string, FunctionInfo[]> {
       native(name, [FLOAT, FLOAT], FLOAT, ([x, y]) => Math.fround(fn(x as number, y as number))),
       native(name, [DOUBLE, DOUBLE], DOUBLE, ([x, y]) => fn(x as number, y as number)),
       native(name, [LDOUBLE, LDOUBLE], LDOUBLE, ([x, y]) => fn(x as number, y as number)),
-      integerVersion(name, 2, ([x, y]) => fn(x, y)),
+      promotedMath(name, 2, ([x, y]) => fn(x, y)),
+    ]);
+    functions.set(`${name}f`, [
+      native(`${name}f`, [FLOAT, FLOAT], FLOAT, ([x, y]) => Math.fround(fn(x as number, y as number))),
+    ]);
+    functions.set(`${name}l`, [
+      native(`${name}l`, [LDOUBLE, LDOUBLE], LDOUBLE, ([x, y]) => fn(x as number, y as number)),
     ]);
   }
   functions.set('fma', [
     native('fma', [FLOAT, FLOAT, FLOAT], FLOAT, ([x, y, z]) => fma(x as number, y as number, z as number, true)),
     native('fma', [DOUBLE, DOUBLE, DOUBLE], DOUBLE, ([x, y, z]) => fma(x as number, y as number, z as number)),
     native('fma', [LDOUBLE, LDOUBLE, LDOUBLE], LDOUBLE, ([x, y, z]) => fma(x as number, y as number, z as number)),
+    promotedMath('fma', 3, ([x, y, z]) => fma(x, y, z)),
   ]);
   functions.set('abs', [
     native('abs', [INT], INT, ([x]) => abs(x)),
@@ -452,14 +460,15 @@ function classification(name: string, test: (x: number) => boolean): FunctionInf
   ];
 }
 
-const integerVersion = (name: string, arity: number, run: (args: number[]) => number): FunctionInfo =>
+const promotedMath = (name: string, arity: number, run: (args: number[]) => number): FunctionInfo =>
   generic(name, (args) => {
     if (args.length !== arity) return;
-    const types = args.map((arg) => unqualified(arg.type.kind === 'reference' ? arg.type.to : arg.type));
-    if (!types.every((type) => isArithmetic(type)) || types.every((type) => type.kind === 'float')) return;
-    // An integer argument converts to double, as the templates of <cmath> do (C++20 [cmath.syn]).
-    const params = types.map((type) => (type.kind === 'int' ? type : type));
-    return native(name, params, DOUBLE, (values) => run(values.map((value) => asNumber(value))));
+    const types = args.map((arg) => unqualified(nonReference(arg.type)));
+    if (!types.every(isArithmetic)) return;
+    if (types[0].kind === 'float' && types.every((type) => type.kind === 'float' && type.name === types[0].name))
+      return;
+    const result = types.some((type) => type.kind === 'float' && type.name === 'ldouble') ? LDOUBLE : DOUBLE;
+    return native(name, types, result, (values) => run(values.map((value) => asNumber(value))));
   });
 
 const abs = (x: unknown): unknown => (typeof x === 'bigint' ? (x < 0n ? -x : x) : Math.abs(x as number));
