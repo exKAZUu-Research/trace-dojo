@@ -21,7 +21,7 @@ const MATH_CONSTANTS: [string, number][] = [
   ['M_PI_4', Math.PI / 4],
   ['M_1_PI', 1 / Math.PI],
   ['M_2_PI', 2 / Math.PI],
-  ['M_SQRTPI', Math.sqrt(Math.PI)],
+  ['M_SQRTPI', 1.772453850905516],
   ['M_2_SQRTPI', 2 / Math.sqrt(Math.PI)],
   ['M_SQRT2', Math.SQRT2],
   ['M_SQRT3', Math.sqrt(3)],
