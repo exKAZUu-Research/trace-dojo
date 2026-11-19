@@ -4,6 +4,14 @@
  * lists where Kotlin's are the same.
  */
 
+/** The arrays of unsigned numbers, with their elements' type, which `@OptIn(ExperimentalUnsignedTypes::class)` allows. */
+export const UNSIGNED_ARRAYS = [
+  ['UByteArray', 'UByte'],
+  ['UShortArray', 'UShort'],
+  ['UIntArray', 'UInt'],
+  ['ULongArray', 'ULong'],
+] as const;
+
 interface ArrayKind {
   /** The receiver as a function declares it, such as `Array<out T>` or `IntArray`. */
   receiver: string;
@@ -22,8 +30,8 @@ const KINDS: ArrayKind[] = [
   { receiver: 'LongArray', typeParameters: '', element: 'Long', sum: 'Long', isComparable: true, zero: '0L' },
   { receiver: 'DoubleArray', typeParameters: '', element: 'Double', sum: 'Double', isComparable: true, zero: '0.0' },
   { receiver: 'FloatArray', typeParameters: '', element: 'Float', sum: 'Float', isComparable: true, zero: '0.0f' },
-  { receiver: 'ShortArray', typeParameters: '', element: 'Short', sum: undefined, isComparable: true, zero: '0' },
-  { receiver: 'ByteArray', typeParameters: '', element: 'Byte', sum: undefined, isComparable: true, zero: '0' },
+  { receiver: 'ShortArray', typeParameters: '', element: 'Short', sum: 'Int', isComparable: true, zero: '0' },
+  { receiver: 'ByteArray', typeParameters: '', element: 'Byte', sum: 'Int', isComparable: true, zero: '0' },
   {
     receiver: 'CharArray',
     typeParameters: '',
@@ -40,7 +48,14 @@ const KINDS: ArrayKind[] = [
     isComparable: false,
     zero: 'false',
   },
-  { receiver: 'UIntArray', typeParameters: '', element: 'UInt', sum: undefined, isComparable: true, zero: '0u' },
+  ...UNSIGNED_ARRAYS.map(([receiver, element]): ArrayKind => ({
+    receiver,
+    typeParameters: '',
+    element,
+    sum: element === 'ULong' ? 'ULong' : 'UInt',
+    isComparable: true,
+    zero: element === 'ULong' ? '0uL' : '0u',
+  })),
 ];
 
 /** The generic part of a function's type parameters, such as `<T, R>`, or nothing. */
@@ -136,10 +151,32 @@ function functionsOf(kind: ArrayKind): string {
     `external fun ${g()}${r}.fill(element: ${e}, fromIndex: Int = 0, toIndex: Int = size)`,
     `external fun ${g()}${r}.reverse()`,
     `fun ${g()}${r}.toTypedArray(): Array<${e}> = asList().toTypedArray()`,
+    `inline fun ${g()}${r}.single(predicate: (${e}) -> Boolean): ${e} = asList().single(predicate)`,
+    `inline fun ${g()}${r}.singleOrNull(predicate: (${e}) -> Boolean): ${e}? = asList().singleOrNull(predicate)`,
+    `fun ${g()}${r}.singleOrNull(): ${e}? = if (size == 1) this[0] else null`,
+    `inline fun ${g()}${r}.reduce(operation: (acc: ${e}, ${e}) -> ${e}): ${e} { if (isEmpty()) throw UnsupportedOperationException("Empty array can't be reduced."); var accumulator = this[0]; for (index in 1..lastIndex) accumulator = operation(accumulator, this[index]); return accumulator }`,
+    `inline fun ${g()}${r}.reduceOrNull(operation: (acc: ${e}, ${e}) -> ${e}): ${e}? = if (isEmpty()) null else reduce(operation)`,
+    `inline fun ${g('R')}${r}.scan(initial: R, operation: (acc: R, ${e}) -> R): List<R> = asList().scan(initial, operation)`,
+    `inline fun ${g('R')}${r}.runningFold(initial: R, operation: (acc: R, ${e}) -> R): List<R> = asList().runningFold(initial, operation)`,
+    `inline fun ${g()}${r}.onEach(action: (${e}) -> Unit): ${r.replace('out ', '')} { for (element in this) action(element); return this as ${r.replace('out ', '')} }`,
+    `inline fun ${g('V')}${r}.associateWith(valueSelector: (${e}) -> V): Map<${e}, V> = asList().associateWith(valueSelector)`,
+    `fun ${g()}${r}.elementAtOrNull(index: Int): ${e}? = getOrNull(index)`,
+    `infix fun ${g('R')}${r}.zip(other: Array<out R>): List<Pair<${e}, R>> = asList().zip(other.asList())`,
+    ...(kind.typeParameters
+      ? []
+      : [`infix fun ${r}.zip(other: ${r}): List<Pair<${e}, ${e}>> = asList().zip(other.asList())`]),
+    `fun ${g()}${r}.reversedArray(): ${r.replace('out ', '')} = copyOf().also { it.reverse() }`,
+    `fun ${g()}${r}.sliceArray(indices: IntRange): ${r.replace('out ', '')} = copyOfRange(indices.first, indices.last + 1)`,
+    ...[1, 2, 3, 4, 5].map((n) => `operator fun ${g()}${r}.component${n}(): ${e} = get(${n - 1})`),
   ];
   if (kind.sum) {
     lines.push(
-      `fun ${r}.sum(): ${kind.sum} { var sum: ${kind.sum} = ${kind.zero}; for (element in this) sum += element; return sum }`,
+      `fun ${r}.sum(): ${kind.sum} { var sum: ${kind.sum} = ${kind.zero}; for (element in this) sum += element; return sum }`
+    );
+  }
+  // Arrays of unsigned numbers have no average in Kotlin.
+  if (kind.sum && !kind.element.startsWith('U')) {
+    lines.push(
       `fun ${r}.average(): Double { var sum = 0.0; var count = 0; for (element in this) { sum += element; ++count }; return if (count == 0) Double.NaN else sum / count }`
     );
   }
@@ -151,6 +188,8 @@ function functionsOf(kind: ArrayKind): string {
       `fun ${r}.minOrNull(): ${e}? = if (isEmpty()) null else min()`,
       `external fun ${r}.sort()`,
       `fun ${r}.sortDescending() { if (size > 1) { sort(); reverse() } }`,
+      `fun ${r}.sortedArray(): ${r} = copyOf().also { it.sort() }`,
+      `fun ${r}.sortedArrayDescending(): ${r} = copyOf().also { it.sortDescending() }`,
       `fun ${r}.sorted(): List<${e}> = asList().sorted()`,
       `fun ${r}.sortedDescending(): List<${e}> = asList().sortedDescending()`
     );
@@ -172,6 +211,24 @@ fun <T> Array<out T>.sortWith(comparator: Comparator<in T>) = asList().toMutable
 inline fun <T, R : Comparable<R>> Array<out T>.sortBy(crossinline selector: (T) -> R?) = sortWith(compareBy(selector))
 fun Array<out Int>.sum(): Int = asList().sum()
 fun Array<out Double>.sum(): Double = asList().sum()
+@JvmName("averageOfInt") fun Array<out Int>.average(): Double = asList().average()
+fun Array<out Double>.average(): Double = asList().average()
+fun <T : Comparable<T>> Array<out T>.sortDescending() = sortWith(reverseOrder())
+fun <T : Comparable<T>> Array<T>.sortedArray(): Array<T> = copyOf().also { it.sort() }
+fun <T : Comparable<T>> Array<T>.sortedArrayDescending(): Array<T> = copyOf().also { it.sortDescending() }
+fun <T> Array<out T>.contentDeepToString(): String = joinToString(", ", "[", "]") { deepString(it) }
+private fun deepString(element: Any?): String = when (element) {
+    is Array<*> -> element.contentDeepToString()
+    is IntArray -> element.contentToString()
+    is LongArray -> element.contentToString()
+    is DoubleArray -> element.contentToString()
+    is FloatArray -> element.contentToString()
+    is ShortArray -> element.contentToString()
+    is ByteArray -> element.contentToString()
+    is CharArray -> element.contentToString()
+    is BooleanArray -> element.contentToString()
+    else -> element.toString()
+}
 operator fun <T> Array<T>.plus(element: T): Array<T> = (asList() + element).toTypedArray()
 
 external fun <T> arrayOf(vararg elements: T): Array<T>
@@ -237,10 +294,17 @@ external fun shortArrayOf(vararg elements: Short): ShortArray
 external fun byteArrayOf(vararg elements: Byte): ByteArray
 external fun charArrayOf(vararg elements: Char): CharArray
 external fun booleanArrayOf(vararg elements: Boolean): BooleanArray
-external fun uintArrayOf(vararg elements: UInt): UIntArray
+${UNSIGNED_ARRAYS.map(([name, element]) => `external fun ${arrayFactoryName(name)}(vararg elements: ${element}): ${name}`).join('\n')}
 `;
 
 /** The prelude's functions of arrays, in package `kotlin.collections`. */
 export function arraysSource(): string {
   return `package kotlin.collections\n\n${KINDS.map(functionsOf).join('\n\n')}\n${GENERIC_ARRAY_SOURCE}`;
+}
+
+/** The function that makes an array of its arguments, such as `intArrayOf` for `IntArray` and `ubyteArrayOf`. */
+export function arrayFactoryName(arrayName: string): string {
+  return arrayName.startsWith('U')
+    ? `u${arrayName.charAt(1).toLowerCase()}${arrayName.slice(2)}Of`
+    : `${arrayName.charAt(0).toLowerCase()}${arrayName.slice(1)}Of`;
 }

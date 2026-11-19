@@ -73,3 +73,29 @@ export function decodeEscape(text: string, fail: Fail): string {
   if (text.length !== 2 || escaped === undefined) throw fail(`${text} というエスケープはありません。`);
   return escaped;
 }
+
+/** The value of an integer literal, which may also stand for a `Long`, `Short`, `Byte`, or unsigned value. */
+export interface IntegerLiteral {
+  value: bigint;
+  isUnsigned: boolean;
+  isLong: boolean;
+}
+
+/** Whether an integer literal's value fits the integer class `className`, to which it may convert. */
+export function literalFits(literal: IntegerLiteral, className: string): boolean {
+  const { value, isUnsigned, isLong } = literal;
+  const ranges: Record<string, [bigint, bigint, boolean]> = {
+    Byte: [-128n, 127n, false],
+    Short: [-32_768n, 32_767n, false],
+    Int: [-(2n ** 31n), 2n ** 31n - 1n, false],
+    Long: [-(2n ** 63n), 2n ** 63n - 1n, false],
+    UByte: [0n, 255n, true],
+    UShort: [0n, 65_535n, true],
+    UInt: [0n, 2n ** 32n - 1n, true],
+    ULong: [0n, 2n ** 64n - 1n, true],
+  };
+  const range = ranges[className];
+  if (!range || range[2] !== isUnsigned) return false;
+  if (isLong && className !== 'Long' && className !== 'ULong') return false;
+  return value >= range[0] && value <= range[1];
+}

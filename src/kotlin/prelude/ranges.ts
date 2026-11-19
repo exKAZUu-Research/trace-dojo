@@ -228,6 +228,15 @@ infix fun CharProgression.step(step: Int): CharProgression {
     return CharProgression.fromClosedRange(first, last, if (this.step > 0) step else -step)
 }
 
+fun IntProgression.first(): Int = if (isEmpty()) throw NoSuchElementException("Progression $this is empty.") else first
+fun IntProgression.last(): Int = if (isEmpty()) throw NoSuchElementException("Progression $this is empty.") else last
+fun IntProgression.firstOrNull(): Int? = if (isEmpty()) null else first
+fun IntProgression.lastOrNull(): Int? = if (isEmpty()) null else last
+fun LongProgression.first(): Long = if (isEmpty()) throw NoSuchElementException("Progression $this is empty.") else first
+fun LongProgression.last(): Long = if (isEmpty()) throw NoSuchElementException("Progression $this is empty.") else last
+fun CharProgression.first(): Char = if (isEmpty()) throw NoSuchElementException("Progression $this is empty.") else first
+fun CharProgression.last(): Char = if (isEmpty()) throw NoSuchElementException("Progression $this is empty.") else last
+
 fun IntProgression.reversed(): IntProgression = IntProgression.fromClosedRange(last, first, -step)
 fun LongProgression.reversed(): LongProgression = LongProgression.fromClosedRange(last, first, -step)
 fun CharProgression.reversed(): CharProgression = CharProgression.fromClosedRange(last, first, -step)

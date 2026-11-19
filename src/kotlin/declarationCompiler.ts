@@ -381,7 +381,8 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       if (
         spec.kind === 'type' &&
         !symbol.isInterface &&
-        parent.constructors.length > 0 &&
+        // A class of the program has its primary constructor, which phase 2 declares only after the supertypes.
+        (parent.constructors.length > 0 || !parent.isLibrary) &&
         !this.hasSecondaryConstructors(decl)
       ) {
         this.error(spec.row, `${parent.name} の後に、コンストラクタを呼ぶ () を書いてください。`);
@@ -721,15 +722,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (isInterface && !decl.getter?.body) symbol.isAbstract = true;
     if (symbol.isAbstract && decl.initializer)
       this.error(decl.row, `abstract なプロパティ ${decl.name} には初期値を書けません。`);
-    if (
-      !symbol.isAbstract &&
-      !cls &&
-      !decl.initializer &&
-      !decl.getter?.body &&
-      !decl.delegate &&
-      !decl.receiver &&
-      !decl.modifiers.keywords.has('external')
-    ) {
+    if (!cls && !decl.initializer && !decl.delegate && this.hasBackingField(decl, symbol)) {
       this.error(decl.row, `プロパティ ${decl.name} には初期値を書いてください。`);
     }
     if (decl.modifiers.keywords.has('external')) this.bindNativeProperty(symbol, decl, cls?.symbol, file);
@@ -951,14 +944,10 @@ export abstract class DeclarationCompiler extends StatementCompiler {
   /** Whether a property stores a value: unless it is abstract, external, or has accessors that never use `field`. */
   private hasBackingField(decl: PropertyDecl, symbol: PropertySymbol): boolean {
     if (symbol.isAbstract || decl.modifiers.keywords.has('external') || decl.receiver) return false;
+    // An accessor left to its default, or one that reads or writes `field`, keeps the value in a backing field.
     const getterUses = !decl.getter?.body || usesField(decl.getter.body);
-    const setterUses = !decl.isVar || !decl.setter?.body || usesField(decl.setter.body);
-    return (
-      decl.initializer !== undefined ||
-      (getterUses &&
-        (decl.isVar ? setterUses || !decl.setter?.body : true) &&
-        (!decl.getter?.body || usesField(decl.getter.body)))
-    );
+    const setterUses = decl.isVar && (!decl.setter?.body || usesField(decl.setter.body));
+    return decl.initializer !== undefined || getterUses || setterUses;
   }
 
   /** Reads and writes a property's backing field directly, as its default accessors do. */
@@ -1352,19 +1341,17 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         const scope = this.initializerScope(entry, context);
         const compiled = this.compileExpression(scope, context, decl.initializer);
         const type = resolved(compiled.type);
-        if (type.kind === 'nothing' && type.nullable)
-          this.error(decl.row, `プロパティ ${decl.name} の型を決められません。型を書いてください。`);
         symbol.type = compiled.integerLiteral ? this.primitiveType(this.primitiveOf(type) ?? 'Int') : type;
       }
       if (decl.delegate) this.compileMemberDelegate(entry);
       else if (!symbol.type && decl.getter?.body) {
         symbol.type = this.compileAccessorType(entry);
       }
+      const isPlainTopLevel = !entry.cls && !decl.delegate;
+      // The global comes first, as the accessors' `field` is the global and the accessors replace its plain ones.
+      if (isPlainTopLevel && this.hasBackingField(decl, symbol)) this.bindGlobal(entry);
       if (decl.getter?.body) this.compileGetter(entry);
       if (decl.setter?.body) this.compileSetter(entry);
-      const isPlainTopLevel =
-        !entry.cls && !decl.receiver && !decl.delegate && !decl.modifiers.keywords.has('external');
-      if (isPlainTopLevel && (!decl.getter?.body || decl.initializer)) this.bindGlobal(entry);
       entry.state = 'done';
     });
   }
@@ -1447,7 +1434,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     const scope = new Scope(entry.scope, context);
     this.addReceivers(scope, context, entry.cls, entry.symbol.extensionReceiver);
     const { slot } = entry.symbol;
-    if (slot !== undefined && entry.cls) {
+    if (slot !== undefined) {
       const field = new VariableSymbol(
         'field',
         entry.symbol.type ?? anyType(true),
@@ -1457,10 +1444,12 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         entry.decl.row
       );
       field.owner = context;
-      field.delegateRead = (frame) => (frame.thisValue as KObject).fields[slot];
+      const storage = (frame: Frame): Value[] =>
+        entry.cls ? (frame.thisValue as KObject).fields : frame.runtime.globals;
+      field.delegateRead = (frame) => storage(frame)[slot];
       if (entry.symbol.isVar) {
         field.delegateWrite = (frame, value) => {
-          (frame.thisValue as KObject).fields[slot] = value;
+          storage(frame)[slot] = value;
         };
       }
       scope.variables.set('field', field);
@@ -1629,9 +1618,16 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         (frame.thisValue as KObject).fields[slot] = frame.locals[index] as Value;
       });
     }
+    const uninitialized = new Set(
+      decl.members.flatMap((member) =>
+        member.kind === 'property' && member.initializer ? [this.findOwnProperty(symbol, member.name)] : []
+      )
+    );
+    this.uninitializedProperties = { context, properties: uninitialized };
     for (const member of decl.members) {
       if (member.kind === 'property') {
         const property = this.findOwnProperty(symbol, member.name);
+        uninitialized.delete(property);
         const propertyEntry = this.entryOfProperty.get(property) as PropertyEntry;
         if (member.delegate) {
           const delegate = propertyEntry.initializer as Compiled;
@@ -1665,7 +1661,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         // shows the constant from the start.
         const isQuiet = symbol.isObject && compiled.constant !== undefined;
         steps.push(isQuiet ? store : this.withStep(member.row, store, compiled.isCreation === true));
-        this.markInitialized(property);
       } else if (member.kind === 'init') {
         const compiled = this.compileBlockValue(scope, context, member.block, undefined, true);
         const evaluate = compiled.eval;
@@ -1674,6 +1669,7 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         });
       }
     }
+    this.uninitializedProperties = undefined;
     this.checkValsInitialized(entry);
     if (symbol.kind === 'enum') this.compileEnumArguments(entry);
     const { info } = context;
@@ -1714,15 +1710,11 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     (caller: Frame, instance: Value, args: Value[], callRow: number | undefined) => void
   >();
 
-  /** Notes that a `val` property has its value from its initializer. */
-  private markInitialized(property: PropertySymbol): void {
-    void property;
-  }
-
   /** Rejects a `val` property that neither an initializer nor an `init` block gives a value. */
   private checkValsInitialized(entry: ClassEntry): void {
     for (const member of entry.decl.members) {
-      if (member.kind !== 'property' || member.initializer || member.delegate || member.getter?.body) continue;
+      // A property with accessors needs a value only when they use its backing field, which then has a slot.
+      if (member.kind !== 'property' || member.initializer || member.delegate) continue;
       const property = this.findOwnProperty(entry.symbol, member.name);
       if (property.isAbstract || property.slot === undefined || property.isLateinit) continue;
       if (!this.assignedInInit(entry.decl, member.name)) {

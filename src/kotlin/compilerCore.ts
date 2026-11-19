@@ -143,6 +143,7 @@ export abstract class CompilerCore {
     for (const part of ref.parts.slice(consumed)) {
       const nested: ClassSymbol | undefined = cls.nested.get(part.name);
       if (!nested) this.error(ref.row, `型 ${cls.name}.${part.name} が見つかりません。`);
+      this.checkNestedAccessible(scope, nested, ref.row);
       cls = nested;
       args =
         allowsBareClass && part.args.length === 0
@@ -391,6 +392,16 @@ export abstract class CompilerCore {
     const variable = this.newVariable(scope, context, name, type, false, row, name !== '_');
     variable.isParameter = true;
     return variable;
+  }
+
+  /** Rejects a use of a private nested class outside its outer class, as kotlinc does. */
+  protected checkNestedAccessible(scope: Scope, nested: ClassSymbol, row: number): void {
+    const { outer } = nested;
+    if (nested.visibility !== 'private' || !outer) return;
+    for (let current: Scope | undefined = scope; current; current = current.parent) {
+      for (let cls = current.receiver?.cls ?? current.staticClass; cls; cls = cls.outer) if (cls === outer) return;
+    }
+    this.error(row, `${nested.name} は private なので、${outer.name} の外からは使えません。`);
   }
 
   protected compiledConstant(compiled: Compiled): Value | undefined {

@@ -14,7 +14,20 @@ const MISSING_TOKEN_NAMES = { identifier: '名前' };
  * interpreter implements.
  */
 export function parseKotlin(source: string, isLibrary = false): KotlinFile {
-  return parseSource(parser, source, MISSING_TOKEN_NAMES, (root) => new Converter(isLibrary).convertFile(root));
+  return parseSource(parser, withoutAccessorSemicolons(source), MISSING_TOKEN_NAMES, (root) =>
+    new Converter(isLibrary).convertFile(root)
+  );
+}
+
+/**
+ * Blanks out a `;` between a getter and a setter, as in `var x get() = f; set(v) { f = v }`, which kotlinc accepts and
+ * the grammar reads as the end of the property. A space keeps every row and column where it was.
+ */
+function withoutAccessorSemicolons(source: string): string {
+  return source.replaceAll(
+    /(^|[\s;])(get\s*\(\s*\)[^\n;]*?);(\s*(?:(?:private|protected|public|internal)\s+)?set\b)/gm,
+    '$1$2 $3'
+  );
 }
 
 /** The `// atomic` annotations of a file, read from its line comments. */

@@ -104,6 +104,79 @@ fun main() {
 }`,
     stdout: 'ok\n1\n',
   },
+  {
+    name: 'numbers: receivers of lambdas, mixed operands, constants, boxes, and rounding',
+    source: `fun main() {
+    println(5.run { this * 2 })
+    println(1.5.run { this * 2 })
+    println(10.0.div(4))
+    println(3.times(2.5))
+    val l: Long = 2147483647 + 1
+    println(l)
+    val a: Int? = 127; val b: Int? = 127; val c: Int? = 1000; val d: Int? = 1000
+    println("\${a === b} \${c === d}")
+    println(-9223372036854775807 - 1)
+    println(kotlin.math.round(-0.5))
+    println(listOf(3.0, Double.NaN, 1.0).min())
+    println('٣'.digitToInt())
+    println("a\\u0041b")
+}`,
+    stdout: '10\n3.0\n2.5\n7.5\n-2147483648\ntrue false\n-9223372036854775808\n-0.0\nNaN\n3\naAb\n',
+  },
+  {
+    name: 'inference, smart casts of safe calls, and calls of function values',
+    source: `val sq: Int.() -> Int = { this * this }
+var hits = 0
+    set(value) { field = value * 2 }
+class Box(val v: Int) { infix fun plusB(o: Box) = Box(v + o.v) }
+class B { var c = 1 }
+fun main() {
+    println(square(3) + 1)
+    val m = mutableMapOf<String, MutableList<Int>>()
+    m.getOrPut("a") { mutableListOf() }.add(1)
+    println(m)
+    val fs: List<(Int) -> Int> = listOf({ it + 1 })
+    println(fs[0](1))
+    val longs: List<Long> = listOf(1, 2)
+    println(longs.sum())
+    println(maxOf(1, 2L))
+    val s: String? = "abc"
+    if (s?.length != null) println(s.length)
+    val n: String? = null
+    println(n + "x")
+    println('a' + "bc")
+    println(5.sq())
+    hits = 3
+    println(hits)
+    println((Box(1) plusB Box(2)).v)
+    val b: B? = B()
+    b?.c = 5
+    println(b?.c)
+    println(1 + listOf<Int>().size)
+    println(if (s != null) listOf(1) else emptyList())
+}
+fun square(x: Int) = x * x`,
+    stdout: '10\n{a=[1]}\n2\n3\n2\n3\nnullx\nabc\n25\n6\n3\n5\n1\n[1]\n',
+  },
+  {
+    name: 'the standard library, with the JDK 25 wording of its exceptions',
+    source: `fun main() {
+    println(HashMap(mapOf(20 to 1, 10 to 2, 1000 to 3, 17 to 4)))
+    println("abcabc".lastIndexOf("b", 3))
+    println("a,b,c".split(",", limit = 2))
+    println("xxaxx".trim('x'))
+    println(arrayOf(1, 2, 3).reduce { a, b -> a + b })
+    println(setOf(1).single())
+    println(5 in 10 downTo 1)
+    println(listOf("bb", "a").sortedWith(Comparator { x, y -> x.length - y.length }))
+    println(StringBuilder().append(charArrayOf('a', 'b')))
+    try { "%,x".format(1) } catch (e: Exception) { println(e) }
+    try { "abc".substring(2, 1) } catch (e: Exception) { println(e) }
+    try { (1..0).first() } catch (e: Exception) { println(e) }
+}`,
+    stdout:
+      '{1000=3, 17=4, 10=2, 20=1}\n1\n[a, b,c]\na\n6\n1\ntrue\n[a, bb]\nab\njava.util.FormatFlagsConversionMismatchException: Conversion = x, Flags = ,\njava.lang.StringIndexOutOfBoundsException: Range [2, 1) out of bounds for length 3\njava.util.NoSuchElementException: Progression 1..0 is empty.\n',
+  },
 ])('runs $name as Kotlin does', ({ source, stdout }) => {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException: undefined });
 });
@@ -126,6 +199,18 @@ test.each([
     source: 'fun f(n: Int): Int = f(n + 1) + 1\nfun main() {\n    println(f(0))\n}',
     stdout: '',
     uncaughtException: 'java.lang.StackOverflowError',
+  },
+  {
+    name: 'a format conversion that does not fit its argument',
+    source: 'fun main() {\n    println("before")\n    println("%d".format(1.5))\n}',
+    stdout: 'before\n',
+    uncaughtException: 'java.util.IllegalFormatConversionException: d != java.lang.Double',
+  },
+  {
+    name: 'an array of a negative size',
+    source: 'fun main() {\n    val a = IntArray(-1)\n    println(a.size)\n}',
+    stdout: '',
+    uncaughtException: 'java.lang.NegativeArraySizeException: -1',
   },
 ])('stops at $name as Kotlin does', ({ source, stdout, uncaughtException }) => {
   expect(executeProgram('kotlin', source)).toMatchObject({ kind: 'executed', stdout, uncaughtException });
@@ -159,6 +244,62 @@ test.each([
     'class A {\n    private val q = 2\n    companion object {\n        private val secret = 3\n        fun peek(a: A) = a.q\n    }\n    fun useSecret() = secret\n    class Nested {\n        fun look(a: A) = a.q + secret\n    }\n}\nfun main() {\n    println(A.peek(A()) + A().useSecret() + A.Nested().look(A()))\n}',
   ],
   ['an instance of a sealed class', false, 'sealed class Shape\nfun main() {\n    println(Shape())\n}'],
+  ['an assignment to a parameter', false, 'fun f(x: Int) {\n    x = 2\n    println(x)\n}\nfun main() { f(1) }'],
+  ['a local declared twice', false, 'fun main() {\n    val a = 1\n    val a = 2\n    println(a)\n}'],
+  [
+    'a local that hides a parameter',
+    true,
+    'fun f(a: Int): Int {\n    val a = 2\n    return a\n}\nfun main() { println(f(1)) }',
+  ],
+  [
+    'an override of another type',
+    false,
+    'open class A { open fun f(): Int = 1 }\nclass B : A() { override fun f(): String = "a" }\nfun main() { println(B().f()) }',
+  ],
+  [
+    'a protected member through a receiver of the superclass',
+    false,
+    'open class A { protected fun f() = 1 }\nclass B : A() { fun g(a: A) = a.f() }\nfun main() { println(B().g(A())) }',
+  ],
+  [
+    'a protected member through a receiver of the subclass',
+    true,
+    'open class A { protected fun f() = 1 }\nclass B : A() { fun g(b: B) = b.f() + f() }\nfun main() { println(B().g(B())) }',
+  ],
+  ['an is check that can never hold', false, 'fun main() {\n    val s = "x"\n    if (s is Int) println(1)\n}'],
+  [
+    'else before another branch of when',
+    false,
+    'fun main() {\n    val x = 1\n    when (x) {\n        else -> println(1)\n        1 -> println(2)\n    }\n}',
+  ],
+  [
+    'an Int literal among the branches of a Long subject',
+    false,
+    'fun main() {\n    val l: Long = 5\n    println(when (l) { 5L -> "five"; 6 -> "six"; else -> "?" })\n}',
+  ],
+  ['a private nested class from outside', false, 'class O { private class N }\nfun main() { println(O.N()) }'],
+  [
+    'a property read before its initializer',
+    false,
+    'class A {\n    val y = x + 1\n    val x = 1\n}\nfun main() { println(A().y) }',
+  ],
+  [
+    'a smart cast by require',
+    true,
+    'fun main() {\n    val x: String? = "a"\n    require(x != null)\n    println(x.length)\n}',
+  ],
+  ['a conversion of a Byte to a Char', false, 'fun main() {\n    val b: Byte = 1\n    println(b.toChar())\n}'],
+  ['a superclass without a constructor call', false, 'open class A\nclass B : A\nfun main() { println(1) }'],
+  ['a data class parameter without val', false, 'data class D(x: Int)\nfun main() { println(D(1)) }'],
+  ['an assignment to a loop variable', false, 'fun main() {\n    for (i in 0..3) {\n        i = 5\n    }\n}'],
+  ['open at the top level', false, 'open fun f() = 1\nfun main() { println(f()) }'],
+  [
+    'an is check of a function type',
+    false,
+    'fun main() {\n    val f: Any = { x: Int -> x }\n    println(f is (Int) -> Int)\n}',
+  ],
+  ['an unknown escape', false, 'fun main() {\n    println("\\q")\n}'],
+  ['a variable of the type Nothing?', true, 'fun main() {\n    val n = null\n    println(n)\n}'],
 ])('decides whether %s compiles as kotlinc does', (_name, compiles, source) => {
   expect(executeProgram('kotlin', source).kind === 'compileError').toBe(!compiles);
 });

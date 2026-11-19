@@ -247,6 +247,23 @@ fun <T> List<T>.single(): T = when (size) {
     else -> throw IllegalArgumentException("List has more than one element.")
 }
 
+fun <T> Iterable<T>.single(): T {
+    if (this is List) return single()
+    val iterator = iterator()
+    if (!iterator.hasNext()) throw NoSuchElementException("Collection is empty.")
+    val single = iterator.next()
+    if (iterator.hasNext()) throw IllegalArgumentException("Collection has more than one element.")
+    return single
+}
+
+fun <T> Iterable<T>.singleOrNull(): T? {
+    if (this is List) return if (size == 1) this[0] else null
+    val iterator = iterator()
+    if (!iterator.hasNext()) return null
+    val single = iterator.next()
+    return if (iterator.hasNext()) null else single
+}
+
 inline fun <T> Iterable<T>.single(predicate: (T) -> Boolean): T {
     var single: T? = null
     var found = false
@@ -319,7 +336,7 @@ operator fun <T> List<T>.component3(): T = get(2)
 operator fun <T> List<T>.component4(): T = get(3)
 operator fun <T> List<T>.component5(): T = get(4)
 
-fun <T> Iterable<T>.contains(element: T): Boolean {
+operator fun <T> Iterable<T>.contains(element: T): Boolean {
     if (this is Collection) return contains(element)
     return indexOf(element) >= 0
 }
@@ -1244,8 +1261,9 @@ private fun <T> MutableIterable<T>.filterInPlace(predicate: (T) -> Boolean, pred
     return result
 }
 
-fun <T> MutableList<T>.removeFirst(): T = if (isEmpty()) throw NoSuchElementException("List is empty.") else removeAt(0)
-fun <T> MutableList<T>.removeLast(): T = if (isEmpty()) throw NoSuchElementException("List is empty.") else removeAt(lastIndex)
+// These are the JDK's List.removeFirst and removeLast, which Kotlin calls on the JVM since JDK 21 and which throw no message.
+fun <T> MutableList<T>.removeFirst(): T = if (isEmpty()) throw NoSuchElementException() else removeAt(0)
+fun <T> MutableList<T>.removeLast(): T = if (isEmpty()) throw NoSuchElementException() else removeAt(lastIndex)
 fun <T> MutableList<T>.removeFirstOrNull(): T? = if (isEmpty()) null else removeAt(0)
 fun <T> MutableList<T>.removeLastOrNull(): T? = if (isEmpty()) null else removeAt(lastIndex)
 
@@ -1290,6 +1308,11 @@ fun Collection<Double>.toDoubleArray(): DoubleArray {
 fun <T> List<T>.asReversed(): List<T> = reversed()
 
 fun <T : Comparable<T>> List<T?>.binarySearch(element: T?, fromIndex: Int = 0, toIndex: Int = size): Int {
+    when {
+        fromIndex > toIndex -> throw IllegalArgumentException("fromIndex ($fromIndex) is greater than toIndex ($toIndex).")
+        fromIndex < 0 -> throw IndexOutOfBoundsException("fromIndex ($fromIndex) is less than zero.")
+        toIndex > size -> throw IndexOutOfBoundsException("toIndex ($toIndex) is greater than size ($size).")
+    }
     var low = fromIndex
     var high = toIndex - 1
     while (low <= high) {

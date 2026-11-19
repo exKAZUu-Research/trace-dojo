@@ -61,7 +61,10 @@ export function box(kind: PrimitiveKind, value: number | bigint): Boxed {
 export type HashEntry = SharedHashEntry<Value>;
 
 /** The entries of a hash, linked, or sorted map or set, which iterate as Java's do. */
-export class KStore extends HashStore<Value, Frame> {}
+export class KStore extends HashStore<Value, Frame> {
+  /** Whether the program gave the initial capacity, which `HashMap()` leaves to its first insertion. */
+  isSized = false;
+}
 
 let nextIdentity = 1;
 

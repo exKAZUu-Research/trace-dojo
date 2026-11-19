@@ -328,7 +328,7 @@ export function substring(frame: Frame, text: string, start: number, end: number
     return throwError(
       frame,
       'java.lang.StringIndexOutOfBoundsException',
-      `begin ${start}, end ${end}, length ${text.length}`
+      `Range [${start}, ${end}) out of bounds for length ${text.length}`
     );
   }
   frame.runtime.allocateString(frame, end - start);

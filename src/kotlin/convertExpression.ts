@@ -86,7 +86,7 @@ export abstract class ExpressionConverter {
       }
       case 'multiline_string_literal': {
         this.requireLibrary(node, '複数行の文字列リテラル（"""）');
-        return this.convertString(node);
+        return this.convertString(node, true);
       }
       case 'identifier': {
         return this.convertIdentifier(node);
@@ -254,25 +254,31 @@ export abstract class ExpressionConverter {
     }
   }
 
-  private convertString(node: Node): Expression {
+  private convertString(node: Node, isRaw = false): Expression {
     const parts: (string | Expression)[] = [];
     const append = (text: string): void => {
       if (typeof parts.at(-1) === 'string') parts[parts.length - 1] = `${parts.at(-1) as string}${text}`;
       else parts.push(text);
     };
-    for (const child of named(node)) {
+    const nodes = named(node);
+    let skipped = 0;
+    for (const [index, child] of nodes.entries()) {
       switch (child.type) {
         case 'string_content': {
-          append(child.text);
+          const content = isRaw ? { text: child.text, consumed: 0 } : decodeContent(child, nodes[index + 1]);
+          append(content.text.slice(skipped));
+          skipped = content.consumed;
           break;
         }
         case 'escape_sequence': {
           append(decodeEscape(child.text, (message) => syntaxError(child, message)));
+          skipped = 0;
           break;
         }
         case 'interpolation': {
           const inner = named(child)[0];
           parts.push(this.convertExpression(inner));
+          skipped = 0;
           break;
         }
         default: {
@@ -288,13 +294,13 @@ export abstract class ExpressionConverter {
     const operator = children(node).find((child) => !child.isNamed && ['.', '?.', '::'].includes(child.type));
     if (operator?.type === '::' || !nameNode) throw unavailable(node, '関数や型の参照（::）');
     if (nameNode.type !== 'identifier') throw syntaxError(nameNode, '書き方に誤りがあります。');
-    return {
+    return intoRightOperand(this.convertExpression(receiverNode), (receiver) => ({
       kind: 'member',
       row: rowOf(nameNode),
-      receiver: this.convertExpression(receiverNode),
+      receiver,
       name: identifierName(nameNode),
       isSafe: operator?.type === '?.',
-    };
+    }));
   }
 
   private convertCall(node: Node): CallExpression {
@@ -329,7 +335,14 @@ export abstract class ExpressionConverter {
         }
       }
     }
-    return { kind: 'call', row: rowOf(node), callee, typeArgs, args, trailingLambda };
+    return intoRightOperand(callee, (operand) => ({
+      kind: 'call',
+      row: rowOf(node),
+      callee: operand,
+      typeArgs,
+      args,
+      trailingLambda,
+    })) as CallExpression;
   }
 
   protected convertArgument(node: Node): Argument {
@@ -562,6 +575,29 @@ export abstract class ExpressionConverter {
     if (!this.isLibrary && !LEARNER_ANNOTATIONS.has(name)) throw unavailable(node, `アノテーション @${name}`);
     return { row: rowOf(node), name };
   }
+}
+
+/**
+ * A string's content, where the grammar reads `\\uXXXX` as the content `\\u` before the content of the digits, and an
+ * unknown escape as content too. `consumed` counts the digits taken from the next content.
+ */
+function decodeContent(node: Node, next: Node | undefined): { text: string; consumed: number } {
+  if (!node.text.startsWith('\\')) return { text: node.text, consumed: 0 };
+  const digits = node.text === String.raw`\u` && next?.type === 'string_content' ? next.text.slice(0, 4) : '';
+  return {
+    text: decodeEscape(`${node.text}${digits}`, (message) => syntaxError(node, message)),
+    consumed: digits.length,
+  };
+}
+
+/**
+ * Applies a call or member access to the right operand of a binary expression in its place. The grammar reads
+ * `1 + listOf<Int>()` as a call of `1 + listOf`, which only this misreading puts there, since a binary expression
+ * written as a callee or receiver is in parentheses.
+ */
+function intoRightOperand(target: Expression, apply: (operand: Expression) => Expression): Expression {
+  if (target.kind !== 'binary') return apply(target);
+  return { ...target, right: intoRightOperand(target.right, apply) };
 }
 
 /** The annotations of the Kotlin tour, which change nothing a program prints. */

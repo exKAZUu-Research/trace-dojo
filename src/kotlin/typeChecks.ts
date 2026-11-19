@@ -34,8 +34,8 @@ export function instanceTest(core: Core, type: KType): (value: Value) => boolean
   }
 }
 
-/** The binary names the JVM gives the standard library's classes, which a `ClassCastException` names. */
-const JAVA_BASE_PREFIXES = ['java.'];
+/** The binary names of the JDK's classes, which a `ClassCastException` names; arrays, as `[I`, are the JDK's too. */
+const JAVA_BASE_PREFIXES = ['java.', '['];
 
 function moduleOf(cls: ClassSymbol): string {
   return JAVA_BASE_PREFIXES.some((prefix) => cls.qualifiedName.startsWith(prefix))

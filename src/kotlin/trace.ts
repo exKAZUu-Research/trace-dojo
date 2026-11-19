@@ -10,6 +10,7 @@ import { runProgram } from './execute';
 import { charToString } from './format';
 import { compileKotlin, getLibrary, libraryExceptions } from './library';
 import { parseKotlin } from './parse';
+import { UNSIGNED_ARRAYS } from './prelude/arrays';
 import { type Frame, Runtime, UNASSIGNED } from './runtime';
 import type { ClassSymbol, PropertySymbol } from './symbols';
 import { type KType, resolved } from './types';
@@ -175,7 +176,7 @@ const ARRAY_CLASSES = new Set([
   'ByteArray',
   'CharArray',
   'BooleanArray',
-  'UIntArray',
+  ...UNSIGNED_ARRAYS.map(([name]) => name),
 ]);
 
 function isArray(value: Value): value is KObject {

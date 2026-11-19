@@ -76,7 +76,6 @@ ${numberOperators('Byte')}
     external override fun toInt(): Int
     external override fun toShort(): Short
     external override fun toByte(): Byte
-    external fun toChar(): Char
     external fun toUByte(): UByte
     external fun toUInt(): UInt
     external override fun equals(other: Any?): Boolean
@@ -99,7 +98,6 @@ ${numberOperators('Short')}
     external override fun toInt(): Int
     external override fun toShort(): Short
     external override fun toByte(): Byte
-    external fun toChar(): Char
     external fun toUShort(): UShort
     external fun toUInt(): UInt
     external override fun equals(other: Any?): Boolean
@@ -157,7 +155,6 @@ ${numberOperators('Long')}
     external override fun toInt(): Int
     external override fun toShort(): Short
     external override fun toByte(): Byte
-    external fun toChar(): Char
     external fun toULong(): ULong
     external fun toUInt(): UInt
     external infix fun and(other: Long): Long

@@ -1,11 +1,13 @@
-// code-gauge-allow-file fileNcss 457 -- the compiler of one area of Kotlin, whose parts call each other closely.
+// code-gauge-allow-file fileNcss 469 -- the compiler of one area of Kotlin, whose parts call each other closely.
+import { expectedArgumentType, firstAttempts } from './argumentTypes';
 import type { Expression, LambdaExpression } from './ast';
 import { type Compiled, type Eval, FunctionContext, reprOf, type Scope, typeMismatchMessage } from './compilerBase';
 import { CompilerCore } from './compilerCore';
 import { callFunction, parameterReprs, receiverRepr, returnRepr } from './dispatch';
+import { literalFits } from './literals';
 import { type Frame, MISSING } from './runtime';
 import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
-import { checkVariableBounds, fixVariable, isSubtype } from './typeRelations';
+import { checkVariableBounds, determinedType, fixVariable, isSubtype } from './typeRelations';
 import {
   type FunctionType,
   hasOpenVariables,
@@ -57,6 +59,8 @@ export interface ResolvedCall {
   typeArguments: Map<TypeParameterSymbol, KType>;
   /** Whether every argument creates an object, which makes `arrayOf(A(), B())` a creation, as Java's `{ new A(), new B() }` is. */
   argumentsCreateObjects: boolean;
+  /** The compiled arguments in the order they are written, whose smart casts the library's contracts carry on. */
+  compiledArgs: (Compiled | undefined)[];
 }
 
 interface Attempt {
@@ -135,29 +139,13 @@ export abstract class CallCompiler extends CompilerCore {
   /** Whether an argument's value may be passed where `type` is expected, counting integer literals' other types. */
   protected acceptsArgument(compiled: Compiled, type: KType): boolean {
     if (compiled.integerLiteral) {
-      const target = resolved(type);
-      if (target.kind === 'class' && this.literalFits(compiled.integerLiteral, target.cls.name)) return true;
+      // A variable that the receiver already determines, as `T` of `plusAssign` on a `MutableList<Long>`, takes the
+      // literal as the type it requires.
+      const target = determinedType(resolved(type)) ?? resolved(type);
+      if (target.kind === 'class' && literalFits(compiled.integerLiteral, target.cls.name))
+        return isSubtype(target, type);
     }
     return isSubtype(compiled.type, type);
-  }
-
-  /** Whether an integer literal's value fits the integer class `className`, to which it may convert. */
-  protected literalFits(literal: NonNullable<Compiled['integerLiteral']>, className: string): boolean {
-    const { value, isUnsigned, isLong } = literal;
-    const ranges: Record<string, [bigint, bigint, boolean]> = {
-      Byte: [-128n, 127n, false],
-      Short: [-32_768n, 32_767n, false],
-      Int: [-(2n ** 31n), 2n ** 31n - 1n, false],
-      Long: [-(2n ** 63n), 2n ** 63n - 1n, false],
-      UByte: [0n, 255n, true],
-      UShort: [0n, 65_535n, true],
-      UInt: [0n, 2n ** 32n - 1n, true],
-      ULong: [0n, 2n ** 64n - 1n, true],
-    };
-    const range = ranges[className];
-    if (!range || range[2] !== isUnsigned) return false;
-    if (isLong && className !== 'Long' && className !== 'ULong') return false;
-    return value >= range[0] && value <= range[1];
   }
 
   /**
@@ -184,31 +172,36 @@ export abstract class CallCompiler extends CompilerCore {
     const lone = all.length === 1 ? all[0] : undefined;
     let loneAttempt: Attempt | undefined;
     if (lone) {
-      loneAttempt = this.startAttempt(lone, args, hasTrailingLambda, explicitTypeArgs, row);
-      if (!loneAttempt) this.reportUnmappable(lone, args, hasTrailingLambda, row, name);
-      // The receiver constrains the variables first, so that the arguments see the types it gives them.
+      loneAttempt = this.startAttempt(lone, args, hasTrailingLambda, explicitTypeArgs);
+      if (!loneAttempt) this.reportUnmappable(lone, args, hasTrailingLambda, explicitTypeArgs, row, name);
+      // The receiver and the expected type constrain the variables first, so that the arguments see the types they
+      // give them, as `List<Long>` does to the literals of `listOf(1, 2)`.
       const loneReceiver = receiverOf(lone);
       if (lone.symbol.extensionReceiver && loneReceiver) {
         isSubtype(loneReceiver.type, substitute(lone.symbol.extensionReceiver, loneAttempt.substitution));
       }
+      this.constrainByKnownExpected(loneAttempt, expected, row);
     }
-    const compiledArgs = args.map((argument, index): Compiled | undefined => {
-      if (isLambdaArgument(argument.value)) return undefined;
-      let expectedType: KType | undefined;
-      if (loneAttempt) {
-        const paramIndex = loneAttempt.mapping.findIndex((indexes) => indexes.includes(index));
-        const param = loneAttempt.candidate.symbol.params[paramIndex];
-        if (param) expectedType = substitute(param.type, loneAttempt.substitution);
+    // The candidates of the first level that take the arguments, or the lone one, give an argument the type they agree
+    // on, as members come before extensions.
+    const attempts = loneAttempt
+      ? [loneAttempt]
+      : firstAttempts(levels, (candidate) => this.startAttempt(candidate, args, hasTrailingLambda, explicitTypeArgs));
+    if (!loneAttempt) for (const attempt of attempts) this.constrainByKnownExpected(attempt, expected, row);
+    const compiledArgs: (Compiled | undefined)[] = [];
+    for (const [index, argument] of args.entries()) {
+      if (isLambdaArgument(argument.value)) {
+        compiledArgs.push(undefined);
+        continue;
       }
-      return this.compileExpression(scope, context, argument.value, expectedType);
-    });
+      const expectedType = expectedArgumentType(attempts, compiledArgs, index, argument.value, !lone);
+      compiledArgs.push(this.compileExpression(scope, context, argument.value, expectedType));
+    }
     let chosen: Attempt | undefined;
     for (const level of levels) {
       const applicable = level.flatMap((candidate) => {
         const attempt =
-          candidate === lone
-            ? loneAttempt
-            : this.startAttempt(candidate, args, hasTrailingLambda, explicitTypeArgs, row);
+          candidate === lone ? loneAttempt : this.startAttempt(candidate, args, hasTrailingLambda, explicitTypeArgs);
         if (!attempt) return [];
         return this.isApplicable(attempt, args, compiledArgs, receiverOf(candidate)) ? [attempt] : [];
       });
@@ -239,8 +232,7 @@ export abstract class CallCompiler extends CompilerCore {
     candidate: Candidate,
     args: ArgumentSyntax[],
     hasTrailingLambda: boolean,
-    explicitTypeArgs: KType[],
-    row: number
+    explicitTypeArgs: KType[]
   ): Attempt | undefined {
     const { symbol } = candidate;
     const mapping = mapArguments(symbol.params, args, hasTrailingLambda);
@@ -249,9 +241,8 @@ export abstract class CallCompiler extends CompilerCore {
     const typeParameters = this.inferredTypeParameters(candidate);
     const variables: InferenceVariable[] = [];
     if (explicitTypeArgs.length > 0) {
-      if (explicitTypeArgs.length !== typeParameters.length) {
-        this.error(row, `${symbol.name} の型引数の数が違います。`);
-      }
+      // A candidate with another number of type parameters does not apply, as maxOf(Int, Int) to maxOf<Int>(...).
+      if (explicitTypeArgs.length !== typeParameters.length) return undefined;
       for (const [index, param] of typeParameters.entries()) substitution.set(param, explicitTypeArgs[index]);
     } else {
       for (const param of typeParameters) {
@@ -405,8 +396,9 @@ export abstract class CallCompiler extends CompilerCore {
         const bType = paramTypeOf(b, index);
         const compiled = compiledArgs[index];
         if (!aType || !bType || !compiled) continue;
-        // An integer literal is an Int unless only another integer type fits, as `1..4` calls `rangeTo(Int)`.
-        if (compiled.integerLiteral) {
+        // An integer literal is an Int unless only another integer type fits, as `1..4` calls `rangeTo(Int)`; a type
+        // parameter fits any, so `maxOf(Long, Long)` is as specific as `maxOf(T, T)` for `maxOf(1, 2L)`.
+        if (compiled.integerLiteral && aType.kind !== 'param' && bType.kind !== 'param') {
           const literalType = compiled.type;
           const aIsLiteral = isSubtype(literalType, substitute(aType, a.substitution));
           const bIsLiteral = isSubtype(literalType, substitute(bType, b.substitution));
@@ -515,6 +507,35 @@ export abstract class CallCompiler extends CompilerCore {
     return classes;
   }
 
+  /** A call's result type: for a constructor its class with the type parameters, which the expected type may infer. */
+  private declaredReturnOf(candidate: Candidate, row: number): KType {
+    const { symbol } = candidate;
+    return candidate.kind === 'constructor' && symbol.owner
+      ? symbol.owner.selfType
+      : this.ensureReturnType(symbol, row);
+  }
+
+  /**
+   * Constrains the variables by an expected type before the arguments compile, unless the expected type is itself still
+   * being inferred, as `B` of `"a" to listOf(...)` is, whose bounds would then name variables of a discarded attempt.
+   */
+  private constrainByKnownExpected(attempt: Attempt, expected: KType | undefined, row: number): void {
+    if (expected && !hasOpenVariables(expected)) this.constrainByExpected(attempt, expected, row);
+  }
+
+  /** The expected type constrains the variables, where the result's type mentions them and it can hold. */
+  private constrainByExpected(attempt: Attempt, expected: KType | undefined, row: number): void {
+    const { candidate, substitution, variables } = attempt;
+    const declaredReturn = this.declaredReturnOf(candidate, row);
+    if (!expected || !hasOpenVariables(substitute(declaredReturn, substitution))) return;
+    const saved = variables.map((variable) => ({ lower: [...variable.lower], upper: [...variable.upper] }));
+    if (isSubtype(substitute(declaredReturn, substitution), expected)) return;
+    for (const [index, variable] of variables.entries()) {
+      variable.lower = saved[index].lower;
+      variable.upper = saved[index].upper;
+    }
+  }
+
   private completeCall(
     scope: Scope,
     context: FunctionContext,
@@ -526,19 +547,7 @@ export abstract class CallCompiler extends CompilerCore {
   ): ResolvedCall {
     const { candidate, substitution, variables, mapping } = attempt;
     const { symbol } = candidate;
-    // A constructor's result is its class with the class's type parameters, which the expected type may infer.
-    const declaredReturn =
-      candidate.kind === 'constructor' && symbol.owner ? symbol.owner.selfType : this.ensureReturnType(symbol, row);
-    // The expected type constrains the variables only where the result's type mentions them.
-    if (expected && hasOpenVariables(substitute(declaredReturn, substitution))) {
-      const saved = variables.map((variable) => ({ lower: [...variable.lower], upper: [...variable.upper] }));
-      if (!isSubtype(substitute(declaredReturn, substitution), expected)) {
-        for (const [index, variable] of variables.entries()) {
-          variable.lower = saved[index].lower;
-          variable.upper = saved[index].upper;
-        }
-      }
-    }
+    this.constrainByExpected(attempt, expected, row);
     const argumentEvals: { index: number; paramIndex: number; eval: Eval }[] = [];
     for (const [paramIndex, indexes] of mapping.entries()) {
       const param = symbol.params[paramIndex];
@@ -567,6 +576,8 @@ export abstract class CallCompiler extends CompilerCore {
             }
           }
           if (sam) compiled = this.samWrap(compiled, sam, resolved(elementType));
+          // A lambda for a type variable, as each of `listOf({ 1 }, { 2 })`, gives the variable its type.
+          else if (!lambdaType) isSubtype(compiled.type, elementType);
           compiledArgs[index] = compiled;
         }
         argumentEvals.push({ index, paramIndex, eval: (frame) => compiled.eval(frame) });
@@ -653,7 +664,7 @@ export abstract class CallCompiler extends CompilerCore {
         temporaries.length = mark;
       }
     };
-    const type = resolved(substitute(declaredReturn, substitution));
+    const type = resolved(substitute(this.declaredReturnOf(candidate, row), substitution));
     const typeArguments = new Map<TypeParameterSymbol, KType>();
     for (const param of this.inferredTypeParameters(candidate))
       typeArguments.set(param, resolved(substitution.get(param) as KType));
@@ -677,6 +688,7 @@ export abstract class CallCompiler extends CompilerCore {
       evaluateArgs,
       callRow,
       argumentsCreateObjects: args.length > 0 && compiledArgs.every((compiled) => compiled?.isCreation === true),
+      compiledArgs,
       receiverRepr: receiverRepr(symbol),
       typeArguments,
     };
@@ -692,8 +704,8 @@ export abstract class CallCompiler extends CompilerCore {
 
   /** The function type a lambda argument is checked against, fixing the variables its parameters need. */
   private lambdaTypeFor(type: KType, variables: InferenceVariable[]): FunctionType | undefined {
-    const actual = resolved(type);
-    if (actual.kind !== 'function') return undefined;
+    const actual = determinedType(resolved(type));
+    if (actual?.kind !== 'function') return undefined;
     const inputs = actual.receiver ? [actual.receiver, ...actual.params] : actual.params;
     for (const input of inputs) {
       for (const variable of variables) {
@@ -707,9 +719,12 @@ export abstract class CallCompiler extends CompilerCore {
     candidate: Candidate,
     args: ArgumentSyntax[],
     hasTrailingLambda: boolean,
+    explicitTypeArgs: KType[],
     row: number,
     name: string
   ): never {
+    if (explicitTypeArgs.length > 0 && explicitTypeArgs.length !== this.inferredTypeParameters(candidate).length)
+      this.error(row, `${name} の型引数の数が違います。`);
     const { params } = candidate.symbol;
     const positional = args.filter((argument) => argument.name === undefined).length;
     const named = args.find(
@@ -744,8 +759,8 @@ export abstract class CallCompiler extends CompilerCore {
     name: string
   ): never {
     if (all.length === 1) {
-      const attempt = this.startAttempt(all[0], args, hasTrailingLambda, explicitTypeArgs, row);
-      if (!attempt) return this.reportUnmappable(all[0], args, hasTrailingLambda, row, name);
+      const attempt = this.startAttempt(all[0], args, hasTrailingLambda, explicitTypeArgs);
+      if (!attempt) return this.reportUnmappable(all[0], args, hasTrailingLambda, explicitTypeArgs, row, name);
       const { symbol } = all[0];
       if (symbol.extensionReceiver && receiver) {
         const receiverType = substitute(symbol.extensionReceiver, attempt.substitution);

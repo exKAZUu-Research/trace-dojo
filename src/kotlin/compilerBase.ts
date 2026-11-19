@@ -1,5 +1,6 @@
 import { CompileError } from '../interpreter/diagnostics';
-import type { TypeRef } from './ast';
+import type { Block, Expression, TypeRef } from './ast';
+import type { IntegerLiteral } from './literals';
 import type { Frame, FunctionInfo, LocalInfo } from './runtime';
 import { UNASSIGNED } from './runtime';
 import {
@@ -36,11 +37,13 @@ export interface Compiled {
   isCall?: boolean;
   isCreation?: boolean;
   /** The value of an integer literal, which may also stand for a `Long`, `Short`, `Byte`, or unsigned value. */
-  integerLiteral?: { value: bigint; isUnsigned: boolean; isLong: boolean };
+  integerLiteral?: IntegerLiteral;
   /** The value of an expression made only of literals, which never changes. */
   constant?: Value;
   /** The key of the variable or property the expression reads, which smart casts narrow. */
   stableKey?: string;
+  /** For a safe call such as `s?.length`, the smart casts of its receivers that hold when its value is not null. */
+  whenNonNull?: Map<string, KType>;
   /** For a condition, the smart casts that hold when it is true and when it is false. */
   narrowing?: { whenTrue: Map<string, KType>; whenFalse: Map<string, KType> };
 }
@@ -350,3 +353,19 @@ export function findClassInScope(scope: Scope | undefined, name: string): ClassS
 }
 
 export { ClassSymbol };
+
+/** Whether a block's value is a call of a function by its name without arguments or type arguments, as `emptyList()`. */
+export function isBareCall(block: Block): boolean {
+  const last = block.statements.at(-1);
+  return last?.kind === 'expressionStatement' && isBareCallExpression(last.expression);
+}
+
+export function isBareCallExpression(expression: Expression): boolean {
+  return (
+    expression.kind === 'call' &&
+    expression.callee.kind === 'name' &&
+    expression.args.length === 0 &&
+    !expression.trailingLambda &&
+    expression.typeArgs.length === 0
+  );
+}

@@ -3,8 +3,9 @@ import { runtimeClassOf } from '../dispatch';
 import { hashOf, stringOf, valueEquals } from '../format';
 import { toInt32 } from '../operators';
 import type { Frame } from '../runtime';
-import { type HashEntry, KObject, KStore, UNIT, type Value } from '../values';
+import { type HashEntry, KObject, type KStore, UNIT, type Value } from '../values';
 import { arrayIterator } from './core';
+import { mapCapacity, newStore, reserveForCopy } from './hashTables';
 import { defineNative, defineNativeProperty, libraryClass, throwError } from './registry';
 
 /**
@@ -39,7 +40,9 @@ function requireMutable(frame: Frame, list: Value): void {
 function checkIndex(frame: Frame, list: Value, index: number): void {
   const size = items(list).length;
   if (index >= 0 && index < size) return;
-  switch (className(list)) {
+  // A sublist of any list is AbstractList's SubList on the JVM, which checks indexes with Objects.checkIndex.
+  const isSublist = (list as KObject).native?.parent !== undefined;
+  switch (isSublist ? 'SubList' : className(list)) {
     case 'ArraysList': {
       throwError(frame, 'java.lang.ArrayIndexOutOfBoundsException', `Index ${index} out of bounds for length ${size}`);
       break;
@@ -428,28 +431,6 @@ export function putEntry(frame: Frame, store: KStore, key: Value, value: Value):
   return undefined;
 }
 
-/** The capacity `HashMap(initialCapacity)` starts with: the next power of two, as `tableSizeFor` computes. */
-export function tableSizeFor(capacity: number): number {
-  let size = 1;
-  while (size < capacity) size *= 2;
-  return Math.max(size, 1);
-}
-
-/** Kotlin's `mapCapacity`, the initial capacity that `hashMapOf` and `toHashSet` give a map of `expectedSize` entries. */
-export function mapCapacity(expectedSize: number): number {
-  if (expectedSize < 0) return expectedSize;
-  if (expectedSize < 3) return expectedSize + 1;
-  if (expectedSize < 2 ** 30) return Math.trunc(Math.fround(Math.fround(expectedSize / 0.75) + 1));
-  return 2_147_483_647;
-}
-
-export function newStore(order: KStore['order'], capacity = 16): KStore {
-  const store = new KStore();
-  store.order = order;
-  store.capacity = tableSizeFor(capacity === 0 ? 1 : capacity);
-  return store;
-}
-
 export function newMap(frame: Frame, className: string, store: KStore): KObject {
   frame.runtime.allocate(frame, 1);
   const map = new KObject(libraryClass(`kotlin.collections.${className}`), 0);
@@ -465,8 +446,7 @@ function requireMutableMap(frame: Frame, map: Value): void {
   }
 }
 
-// code-gauge-allow functionNcss 54 -- registers the natives of one class together, in the order the prelude declares them.
-function defineMaps(): void {
+function defineMapConstructors(): void {
   const mapConstructors: [string, KStore['order']][] = [
     ['HashMap', 'hash'],
     ['LinkedHashMap', 'insertion'],
@@ -487,13 +467,18 @@ function defineMaps(): void {
     });
     defineNative(`${key}(Map<out K, V>)`, (frame, instance, [source]) => {
       const entries = mapEntriesOf(frame, source);
-      const store = newStore(order, Math.max(Math.trunc(entries.length / 0.75) + 1, 16));
+      const store = newStore(order);
+      reserveForCopy(store, entries.length);
       for (const [entryKey, value] of entries) putEntry(frame, store, entryKey, value);
       (instance as KObject).store = store;
       (instance as KObject).modCount = 0;
       return UNIT;
     });
   }
+}
+
+// code-gauge-allow functionNcss 54 -- registers the natives of one class together, in the order the prelude declares them.
+function defineMaps(): void {
   defineNativeProperty(`${MAP}.size`, (_frame, map) => storeOf(map).entries.length);
   const natives: Record<string, (frame: Frame, map: Value, args: Value[]) => Value> = {
     'isEmpty()': (_frame, map) => storeOf(map).entries.length === 0,
@@ -523,7 +508,9 @@ function defineMaps(): void {
     },
     'putAll(Map<out K, V>)': (frame, map, [source]) => {
       requireMutableMap(frame, map);
-      for (const [key, value] of mapEntriesOf(frame, source)) putEntry(frame, storeOf(map), key, value);
+      const entries = mapEntriesOf(frame, source);
+      reserveForCopy(storeOf(map), entries.length);
+      for (const [key, value] of entries) putEntry(frame, storeOf(map), key, value);
       touch(map as KObject);
       return UNIT;
     },
@@ -953,6 +940,7 @@ function defineFactories(): void {
 defineLists();
 defineFactories();
 defineIterators();
+defineMapConstructors();
 defineMaps();
 defineSets();
 defineViews();

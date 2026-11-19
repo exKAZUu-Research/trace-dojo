@@ -29,6 +29,10 @@ export class HashStore<V, F> {
   /** The entries by hash, which finds a key among the entries of its hash only; built when first needed. */
   private byHash: Map<number, HashEntry<V>[]> | undefined;
   capacity = 16;
+  /** Whether an entry was ever added, after which a Java `HashMap` has allocated its table. */
+  get isAllocated(): boolean {
+    return this.lastOrder > 0 || this.firstOrder < 0;
+  }
   /**
    * How iteration orders the entries: by hash bucket as a `HashMap`, by insertion as a `LinkedHashMap`, or sorted by
    * `compare` as a `TreeMap`, whose entries stay sorted as they are added.

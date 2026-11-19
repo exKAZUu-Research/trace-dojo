@@ -79,22 +79,44 @@ function trimWith(value: string, start: boolean, end: boolean): string {
 }
 
 /** `String.toInt()`, whose errors are `NumberFormatException`s worded as Java's `Integer.parseInt` words them. */
-function parseInteger(frame: Frame, value: string, radix: number, bits: 32 | 64): bigint | undefined {
-  const digits = /^[+-]?[\dA-Za-z]+$/.test(value) ? value : undefined;
+function parseInteger(frame: Frame, value: string, radix: number, bits: 8 | 16 | 32 | 64): bigint | undefined {
+  checkRadix(frame, radix);
+  const digits = /^[+-]?[\p{Nd}A-Za-z]+$/u.test(value) ? value : undefined;
   if (!digits) return undefined;
   const negative = digits.startsWith('-');
   const body = digits.replace(/^[+-]/, '');
   let parsed = 0n;
-  for (const char of body) {
-    const digit = Number.parseInt(char, 36);
+  for (const char of codeUnits(body)) {
+    const digit = digitOf(char) ?? Number.parseInt(charToString(char), 36);
     if (Number.isNaN(digit) || digit >= radix) return undefined;
     parsed = parsed * BigInt(radix) + BigInt(digit);
   }
   const signed = negative ? -parsed : parsed;
   const limit = 2n ** BigInt(bits - 1);
   if (signed < -limit || signed >= limit) return undefined;
-  void frame;
   return signed;
+}
+
+/** `Short.parseShort` and `Byte.parseByte`, which name a number out of their range differently from a malformed one. */
+function parseNarrow(frame: Frame, value: string, bits: 8 | 16): number {
+  const parsed = parseInteger(frame, value, 10, 32);
+  if (parsed === undefined) return numberFormatError(frame, value);
+  if (BigInt.asIntN(bits, parsed) !== parsed)
+    throwError(frame, 'java.lang.NumberFormatException', `Value out of range. Value:"${value}" Radix:10`);
+  return Number(parsed);
+}
+
+/** Finds a string in a text, ignoring case as Kotlin's `ignoreCase` does when asked, by comparing lowercased copies. */
+function search(
+  value: string,
+  target: string,
+  ignoreCase: boolean
+): { indexOf: (start: number) => number; lastIndexOf: (start: number) => number } {
+  const [haystack, needle] = ignoreCase ? [value.toLowerCase(), target.toLowerCase()] : [value, target];
+  return {
+    indexOf: (start) => haystack.indexOf(needle, start),
+    lastIndexOf: (start) => (start < 0 ? -1 : haystack.lastIndexOf(needle, start)),
+  };
 }
 
 function numberFormatError(frame: Frame, value: string, radix = 10): never {
@@ -102,13 +124,36 @@ function numberFormatError(frame: Frame, value: string, radix = 10): never {
   return throwError(frame, 'java.lang.NumberFormatException', `For input string: "${value}"${suffix}`);
 }
 
+/** The error of Java's `Double.parseDouble`, which names an empty string and a second decimal point. */
+function doubleFormatError(frame: Frame, value: string): never {
+  const trimmed = trimControls(value);
+  if (trimmed === '') return throwError(frame, 'java.lang.NumberFormatException', 'empty String');
+  if (/^[+-]?\d*\.\d*\./.test(trimmed)) return throwError(frame, 'java.lang.NumberFormatException', 'multiple points');
+  return numberFormatError(frame, value);
+}
+
 /** `String.toDouble()`, which accepts Java's floating-point syntax, such as `1e3`, `1.5f`, and surrounding blanks. */
 function parseDouble(value: string): number | undefined {
   const trimmed = trimControls(value);
   if (/^[+-]?(NaN|Infinity)$/.test(trimmed)) return Number(trimmed.replace('NaN', 'NaN'));
+  const hex = /^([+-]?)0[xX]([\dA-Fa-f]*)\.?([\dA-Fa-f]*)[pP]([+-]?\d+)[fFdD]?$/.exec(trimmed);
+  if (hex && (hex[2] || hex[3])) {
+    const [, sign, whole, fraction, exponent] = hex;
+    const magnitude = Number.parseInt(`${whole}${fraction}` || '0', 16) * 2 ** (Number(exponent) - 4 * fraction.length);
+    return sign === '-' ? -magnitude : magnitude;
+  }
   if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?[fFdD]?$/.test(trimmed)) return undefined;
   return Number(trimmed.replace(/[fFdD]$/, ''));
 }
+
+/** The digraphs whose title case differs from their upper case, which JavaScript has no function for. */
+const TITLECASE_DIGRAPHS = new Map(
+  ['ǅǄǆ', 'ǈǇǉ', 'ǋǊǌ', 'ǲǱǳ'].flatMap(([title, upper, lower]) => [
+    [title, title],
+    [upper, title],
+    [lower, title],
+  ])
+);
 
 function defineStrings(): void {
   const natives: Record<string, (frame: Frame, receiver: Value, args: Value[]) => Value> = {
@@ -134,14 +179,18 @@ function defineStrings(): void {
         : text(receiver).endsWith(text(suffix)),
     'CharSequence.contains(CharSequence)': (frame, receiver, [other]) =>
       sequenceText(frame, receiver).includes(sequenceText(frame, other)),
-    'CharSequence.indexOf(String, Int)': (frame, receiver, [other, start]) =>
-      sequenceText(frame, receiver).indexOf(text(other), Math.max(0, start as number)),
-    'CharSequence.indexOf(Char, Int)': (frame, receiver, [char, start]) =>
-      sequenceText(frame, receiver).indexOf(charToString(char as number), Math.max(0, start as number)),
-    'CharSequence.lastIndexOf(String)': (frame, receiver, [other]) =>
-      sequenceText(frame, receiver).lastIndexOf(text(other)),
-    'CharSequence.lastIndexOf(Char)': (frame, receiver, [char]) =>
-      sequenceText(frame, receiver).lastIndexOf(charToString(char as number)),
+    'CharSequence.indexOf(String, Int, Boolean)': (frame, receiver, [other, start, ignoreCase]) =>
+      search(sequenceText(frame, receiver), text(other), ignoreCase === true).indexOf(Math.max(0, start as number)),
+    'CharSequence.indexOf(Char, Int, Boolean)': (frame, receiver, [char, start, ignoreCase]) =>
+      search(sequenceText(frame, receiver), charToString(char as number), ignoreCase === true).indexOf(
+        Math.max(0, start as number)
+      ),
+    'CharSequence.lastIndexOf(String, Int, Boolean)': (frame, receiver, [other, start, ignoreCase]) =>
+      search(sequenceText(frame, receiver), text(other), ignoreCase === true).lastIndexOf(start as number),
+    'CharSequence.lastIndexOf(Char, Int, Boolean)': (frame, receiver, [char, start, ignoreCase]) =>
+      search(sequenceText(frame, receiver), charToString(char as number), ignoreCase === true).lastIndexOf(
+        start as number
+      ),
     'String.replace(String, String, Boolean)': (frame, receiver, [oldValue, newValue, ignoreCase]) =>
       result(frame, replaceAll(text(receiver), text(oldValue), text(newValue), ignoreCase === true)),
     'String.replace(Char, Char)': (frame, receiver, [oldChar, newChar]) =>
@@ -158,13 +207,17 @@ function defineStrings(): void {
       frame.runtime.allocateString(frame, text(receiver).length * times);
       return text(receiver).repeat(times);
     },
-    'CharSequence.split(vararg String)': (frame, receiver, [delimiters]) =>
-      splitText(frame, sequenceText(frame, receiver), ((delimiters as KObject).items as Value[]).map(text)),
-    'CharSequence.split(vararg Char)': (frame, receiver, [delimiters]) =>
+    'CharSequence.split(vararg String, Boolean, Int)': (frame, receiver, [delimiters, ignoreCase, limit]) =>
+      splitText(frame, sequenceText(frame, receiver), ((delimiters as KObject).items as Value[]).map(text), {
+        ignoreCase: ignoreCase === true,
+        limit: limit as number,
+      }),
+    'CharSequence.split(vararg Char, Boolean, Int)': (frame, receiver, [delimiters, ignoreCase, limit]) =>
       splitText(
         frame,
         sequenceText(frame, receiver),
-        ((delimiters as KObject).items as Value[]).map((char) => charToString(char as number))
+        ((delimiters as KObject).items as Value[]).map((char) => charToString(char as number)),
+        { ignoreCase: ignoreCase === true, limit: limit as number }
       ),
     'CharSequence.lines()': (frame, receiver) =>
       newList(frame, 'ArrayList', sequenceText(frame, receiver).split(/\r\n|\n|\r/)),
@@ -249,13 +302,34 @@ function defineStrings(): void {
       const parsed = parseInteger(frame, text(receiver), 10, 32);
       return parsed === undefined ? undefined : new Boxed('Int', Number(parsed));
     },
+    'String.toIntOrNull(Int)': (frame, receiver, [radix]) => {
+      const parsed = parseInteger(frame, text(receiver), radix as number, 32);
+      return parsed === undefined ? undefined : new Boxed('Int', Number(parsed));
+    },
     'String.toLong()': (frame, receiver) =>
       parseInteger(frame, text(receiver), 10, 64) ?? numberFormatError(frame, text(receiver)),
+    'String.toLong(Int)': (frame, receiver, [radix]) =>
+      parseInteger(frame, text(receiver), radix as number, 64) ??
+      numberFormatError(frame, text(receiver), radix as number),
+    'String.toLongOrNull(Int)': (frame, receiver, [radix]) => {
+      const parsed = parseInteger(frame, text(receiver), radix as number, 64);
+      return parsed === undefined ? undefined : new Boxed('Long', parsed);
+    },
+    'String.toShort()': (frame, receiver) => parseNarrow(frame, text(receiver), 16),
+    'String.toShortOrNull()': (frame, receiver) => {
+      const parsed = parseInteger(frame, text(receiver), 10, 16);
+      return parsed === undefined ? undefined : new Boxed('Short', Number(parsed));
+    },
+    'String.toByte()': (frame, receiver) => parseNarrow(frame, text(receiver), 8),
+    'String.toByteOrNull()': (frame, receiver) => {
+      const parsed = parseInteger(frame, text(receiver), 10, 8);
+      return parsed === undefined ? undefined : new Boxed('Byte', Number(parsed));
+    },
     'String.toLongOrNull()': (frame, receiver) => {
       const parsed = parseInteger(frame, text(receiver), 10, 64);
       return parsed === undefined ? undefined : new Boxed('Long', parsed);
     },
-    'String.toDouble()': (frame, receiver) => parseDouble(text(receiver)) ?? numberFormatError(frame, text(receiver)),
+    'String.toDouble()': (frame, receiver) => parseDouble(text(receiver)) ?? doubleFormatError(frame, text(receiver)),
     'String.toDoubleOrNull()': (_frame, receiver) => {
       const parsed = parseDouble(text(receiver));
       return parsed === undefined ? undefined : new Boxed('Double', parsed);
@@ -288,7 +362,10 @@ function defineStrings(): void {
     'Char.toLowerCase()': (_frame, receiver) => lowerChar(receiver as number),
     'Char.uppercase()': (_frame, receiver) => charToString(receiver as number).toUpperCase(),
     'Char.lowercase()': (_frame, receiver) => charToString(receiver as number).toLowerCase(),
-    'Char.titlecase()': (_frame, receiver) => charToString(receiver as number).toUpperCase(),
+    'Char.titlecase()': (_frame, receiver) => {
+      const char = charToString(receiver as number);
+      return TITLECASE_DIGRAPHS.get(char) ?? char.toUpperCase();
+    },
     'Char.digitToInt()': (frame, receiver) => {
       const digit = digitOf(receiver as number);
       return (
@@ -326,9 +403,19 @@ function checkRadix(frame: Frame, radix: number): number {
   return radix;
 }
 
+/**
+ * The value of a decimal digit of any script, as Java's `Character.digit` gives it: Unicode puts each script's digits
+ * zero to nine in a row, so a digit's value is its distance from the start of its row, modulo ten for adjacent rows.
+ */
 function digitOf(code: number): number | undefined {
-  const char = charToString(code);
-  return /^\d$/.test(char) ? Number(char) : undefined;
+  if (!isDecimalDigit(code)) return undefined;
+  let start = code;
+  while (start > 0 && isDecimalDigit(start - 1)) start--;
+  return (code - start) % 10;
+}
+
+function isDecimalDigit(code: number): boolean {
+  return /^\p{Nd}$/u.test(charToString(code));
 }
 
 function upperChar(code: number): number {
@@ -363,13 +450,24 @@ function replaceAll(value: string, oldValue: string, newValue: string, ignoreCas
 }
 
 /** `split`, which splits at the first delimiter that matches at each position, keeping empty parts. */
-function splitText(frame: Frame, value: string, delimiters: string[]): KObject {
-  if (delimiters.length === 1 && delimiters[0] !== '') return newList(frame, 'ArrayList', value.split(delimiters[0]));
+function splitText(
+  frame: Frame,
+  value: string,
+  delimiters: string[],
+  { ignoreCase, limit }: { ignoreCase: boolean; limit: number }
+): KObject {
+  if (limit < 0)
+    throwError(frame, 'java.lang.IllegalArgumentException', `Limit must be non-negative, but was ${limit}`);
+  if (delimiters.length === 1 && delimiters[0] !== '' && !ignoreCase && limit === 0)
+    return newList(frame, 'ArrayList', value.split(delimiters[0]));
+  const [haystack, needles] = ignoreCase
+    ? [value.toLowerCase(), delimiters.map((delimiter) => delimiter.toLowerCase())]
+    : [value, delimiters];
   const parts: string[] = [];
   let start = 0;
   let index = 0;
-  while (index <= value.length) {
-    const delimiter = delimiters.find((candidate) => candidate !== '' && value.startsWith(candidate, index));
+  while (index <= value.length && (limit === 0 || parts.length < limit - 1)) {
+    const delimiter = needles.find((candidate) => candidate !== '' && haystack.startsWith(candidate, index));
     if (delimiter === undefined) {
       if (delimiters.includes('') && index > start && index < value.length) {
         parts.push(value.slice(start, index));
@@ -478,9 +576,7 @@ function defineBuilder(): void {
   defineNative(`${BUILDER}.get(Int)`, (frame, receiver, [index]) => {
     const value = builder(receiver).builder as string;
     const position = index as number;
-    if (position < 0 || position >= value.length) {
-      throwError(frame, 'java.lang.StringIndexOutOfBoundsException', `index ${position},length ${value.length}`);
-    }
+    checkIndex(frame, position, value.length);
     // oxlint-disable-next-line unicorn/prefer-code-point -- Kotlin chars are UTF-16 code units.
     return value.charCodeAt(position);
   });
@@ -511,12 +607,13 @@ function defineBuilder(): void {
   defineNative(`${BUILDER}.append(Boolean)`, (frame, receiver, [value]) =>
     appendText(frame, receiver, String(value as boolean))
   );
+  defineNative(`${BUILDER}.append(CharArray)`, (frame, receiver, [value]) =>
+    appendText(frame, receiver, ((value as KObject).items as number[]).map(charToString).join(''))
+  );
   defineNative(`${BUILDER}.insert(Int, Any?)`, (frame, receiver, [index, value]) => {
     const current = builder(receiver).builder as string;
     const position = index as number;
-    if (position < 0 || position > current.length) {
-      throwError(frame, 'java.lang.StringIndexOutOfBoundsException', `offset ${position}, length ${current.length}`);
-    }
+    if (position < 0 || position > current.length) rangeError(frame, position, current.length, current.length);
     return setBuilder(frame, receiver, current.slice(0, position) + stringOf(frame, value) + current.slice(position));
   });
   defineNative(`${BUILDER}.reverse()`, (frame, receiver) =>
@@ -525,22 +622,14 @@ function defineBuilder(): void {
   defineNative(`${BUILDER}.deleteCharAt(Int)`, (frame, receiver, [index]) => {
     const current = builder(receiver).builder as string;
     const position = index as number;
-    if (position < 0 || position >= current.length) {
-      throwError(frame, 'java.lang.StringIndexOutOfBoundsException', `index ${position},length ${current.length}`);
-    }
+    checkIndex(frame, position, current.length);
     return setBuilder(frame, receiver, current.slice(0, position) + current.slice(position + 1));
   });
   defineNative(`${BUILDER}.delete(Int, Int)`, (frame, receiver, [start, end]) => {
     const current = builder(receiver).builder as string;
     const from = start as number;
     const to = Math.min(end as number, current.length);
-    if (from < 0 || from > to) {
-      throwError(
-        frame,
-        'java.lang.StringIndexOutOfBoundsException',
-        `start ${from}, end ${end as number}, length ${current.length}`
-      );
-    }
+    if (from < 0 || from > to) rangeError(frame, from, to, current.length);
     return setBuilder(frame, receiver, current.slice(0, from) + current.slice(to));
   });
   defineNative(`${BUILDER}.setLength(Int)`, (frame, receiver, [length]) => {
@@ -553,9 +642,7 @@ function defineBuilder(): void {
   defineNative(`${BUILDER}.setCharAt(Int, Char)`, (frame, receiver, [index, char]) => {
     const current = builder(receiver).builder as string;
     const position = index as number;
-    if (position < 0 || position >= current.length) {
-      throwError(frame, 'java.lang.StringIndexOutOfBoundsException', `index ${position},length ${current.length}`);
-    }
+    checkIndex(frame, position, current.length);
     setBuilder(
       frame,
       receiver,
@@ -580,19 +667,32 @@ function defineBuilder(): void {
     const current = builder(receiver).builder as string;
     const from = start as number;
     const to = Math.min(end as number, current.length);
-    if (from < 0 || from > current.length || from > to) {
-      throwError(
-        frame,
-        'java.lang.StringIndexOutOfBoundsException',
-        `start ${from}, end ${end as number}, length ${current.length}`
-      );
-    }
+    if (from < 0 || from > current.length || from > to) rangeError(frame, from, to, current.length);
     return setBuilder(frame, receiver, current.slice(0, from) + text(value) + current.slice(to));
   });
   defineNative(`${BUILDER}.compareTo(StringBuilder)`, (_frame, receiver, [other]) =>
     compareStrings(builder(receiver).builder as string, builder(other).builder as string)
   );
   defineNative(`${BUILDER}.toString()`, (frame, receiver) => result(frame, builder(receiver).builder as string));
+}
+
+/** The check of `StringBuilder`'s indexes in the JDK, worded as its `Preconditions.checkIndex` words it. */
+function checkIndex(frame: Frame, position: number, length: number): void {
+  if (position < 0 || position >= length) {
+    throwError(
+      frame,
+      'java.lang.StringIndexOutOfBoundsException',
+      `Index ${position} out of bounds for length ${length}`
+    );
+  }
+}
+
+function rangeError(frame: Frame, start: number, end: number, length: number): never {
+  return throwError(
+    frame,
+    'java.lang.StringIndexOutOfBoundsException',
+    `Range [${start}, ${end}) out of bounds for length ${length}`
+  );
 }
 
 defineStrings();

@@ -80,10 +80,28 @@ function checkSpecifier<V>(
   if (!width && (flags.includes('-') || (isNumeric && flags.includes('0')))) {
     values.fail('MissingFormatWidthException', specifier);
   }
-  if ('sbhc'.includes(lower) && flags.includes('0')) {
-    values.fail('FormatFlagsConversionMismatchException', `Conversion = ${conversion}, Flags = 0`);
-  }
+  const bad = [...(BAD_FLAGS[lower] ?? '')].find((flag) => flags.includes(flag));
+  if (bad) values.fail('FormatFlagsConversionMismatchException', `Conversion = ${lower}, Flags = ${bad}`);
 }
+
+/**
+ * The flags each conversion rejects, in the order Formatter checks them, which decides the flag its exception names.
+ * `#` of the general, character, and decimal conversions is checked as the argument is formatted.
+ */
+const BAD_FLAGS: Record<string, string> = {
+  s: '+ 0,(',
+  b: '+ 0,(',
+  h: '+ 0,(',
+  c: '+ 0,(',
+  d: '',
+  o: ',',
+  x: ',',
+  e: ',',
+  g: '#',
+};
+
+/** The flags that octal and hexadecimal reject for the argument types this formatter takes, which are not BigInteger. */
+const SIGN_FLAGS = '( +';
 
 function pad(text: string, flags: string, width: string | undefined): string {
   if (!width) return text;
@@ -151,7 +169,15 @@ function formatLower<V>(
   }
   const { kind, value: boxed } = number;
   if (lower === 'c') checkCodePoint(values, boxed as number);
+  checkSignFlags(values, flags, lower);
   return formatNumber(boxed, kind, flags, precision, lower);
+}
+
+/** Rejects the flags of a sign for octal and hexadecimal, which only a BigInteger takes. */
+function checkSignFlags<V>(values: FormatValues<V>, flags: string, conversion: string): void {
+  if (conversion !== 'o' && conversion !== 'x') return;
+  const sign = [...SIGN_FLAGS].find((flag) => flags.includes(flag));
+  if (sign) values.fail('FormatFlagsConversionMismatchException', `Conversion = ${conversion}, Flags = ${sign}`);
 }
 
 /** Rejects a `%c` argument that is no Unicode code point, as `IllegalFormatCodePointException`. */

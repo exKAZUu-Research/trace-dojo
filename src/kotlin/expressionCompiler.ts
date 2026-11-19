@@ -6,6 +6,7 @@ import {
   type Eval,
   Flow,
   FunctionContext,
+  isBareCallExpression,
   type PackageScope,
   ReceiverSymbol,
   type Repr,
@@ -17,6 +18,7 @@ import type { MemberRef } from './compilerCore';
 import { unavailableMessage } from './convertSupport';
 import { getPropertyValue, propertyRepr, receiverRepr } from './dispatch';
 import { formatPrimitive, stringOf, valueEquals } from './format';
+import { literalFits } from './literals';
 import {
   arithmeticOperation,
   type ArithmeticOperator,
@@ -37,7 +39,7 @@ import {
   VariableSymbol,
 } from './symbols';
 import { instanceTest, throwCastFailure } from './typeChecks';
-import { anyType, commonSupertype, isSubtype } from './typeRelations';
+import { anyType, branchHint, commonSupertype, determinedType, fixVariable, isSubtype } from './typeRelations';
 import {
   type ClassType,
   classType,
@@ -71,7 +73,11 @@ export function keyOf(item: object): string {
 export interface BoundPlace {
   get(): Value;
   set(value: Value): void;
+  /** For `a?.b = c` with a null `a`, which skips the assignment and the evaluation of `c`. */
+  isSkipped?: true;
 }
+
+const SKIPPED_PLACE: BoundPlace = { get: () => NULL, set: () => {}, isSkipped: true };
 
 export interface Place {
   type: KType;
@@ -80,7 +86,6 @@ export interface Place {
 }
 
 const INTEGER_KINDS = new Set<PrimitiveKind>(['Int', 'Long', 'Short', 'Byte']);
-const NUMERIC_KINDS = new Set<PrimitiveKind>(['Int', 'Long', 'Short', 'Byte', 'Double', 'Float']);
 
 export abstract class ExpressionCompiler extends CallCompiler {
   /** Compiles a block, whose last expression gives its value, or `Unit` when it has none. */
@@ -94,6 +99,19 @@ export abstract class ExpressionCompiler extends CallCompiler {
 
   /** Makes sure a property without a declared type has its type inferred from its initializer. */
   protected abstract ensurePropertyType(property: PropertySymbol, row: number): KType;
+
+  /**
+   * While a class's initializer compiles, the properties whose initializers come later, which kotlinc does not let it
+   * read by their simple names.
+   */
+  protected uninitializedProperties: { context: FunctionContext; properties: Set<PropertySymbol> } | undefined;
+
+  /** Rejects reading a property in its class's initializer before its own initializer has run, as kotlinc does. */
+  private checkInitialized(context: FunctionContext, property: PropertySymbol, name: string, row: number): void {
+    const pending = this.uninitializedProperties;
+    if (pending?.context === context && pending.properties.has(property))
+      this.error(row, `プロパティ ${name} には、まだ値が入っていません。`);
+  }
 
   /** The instance of an object or companion object, created on first use. */
   protected abstract objectInstance(cls: ClassSymbol): (frame: Frame) => Value;
@@ -146,7 +164,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const literal = compiled.integerLiteral;
     if (literal && target.kind === 'class') {
       const kind = this.core.primitives.get(target.cls);
-      if (kind && kind !== this.primitiveOf(compiled.type) && this.literalFits(literal, kind)) {
+      if (kind && kind !== this.primitiveOf(compiled.type) && literalFits(literal, kind)) {
         const value = kind === 'Long' || kind === 'ULong' ? literal.value : Number(literal.value);
         const constant = target.nullable ? box(kind, value) : value;
         return () => constant;
@@ -245,7 +263,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
         return this.compileBinary(scope, context, expression, expected);
       }
       case 'infix': {
-        return this.compileInfix(scope, context, expression);
+        return this.compileInfix(scope, context, expression, expected);
       }
       case 'in': {
         return this.compileIn(scope, context, expression.left, expression.right, expression.negated, expression.row);
@@ -293,7 +311,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const target = expected ? resolved(expected) : undefined;
     const expectedKind = target?.kind === 'class' ? this.core.primitives.get(target.cls) : undefined;
     let kind: PrimitiveKind;
-    if (expectedKind && this.literalFits(literal, expectedKind)) kind = expectedKind;
+    if (expectedKind && literalFits(literal, expectedKind)) kind = expectedKind;
     else if (suffix === 'L') kind = 'Long';
     else if (suffix === 'uL') kind = 'ULong';
     else if (isUnsigned) kind = value <= 0xff_ff_ff_ffn ? 'UInt' : 'ULong';
@@ -368,6 +386,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     for (const receiver of this.receiversOf(scope)) {
       const property = this.findProperty(scope, this.receiverTypeOf(receiver), name);
       if (property) {
+        this.checkInitialized(context, property.symbol, name, row);
         const receiverCompiled: Compiled = {
           type: this.receiverTypeOf(receiver),
           repr: reprOf(this.core, receiver.type),
@@ -405,6 +424,14 @@ export abstract class ExpressionCompiler extends CallCompiler {
         const property = companion ? this.findProperty(scope, companion.type, name) : undefined;
         if (companion && property) return { holder: companion, property };
       }
+    }
+    return undefined;
+  }
+
+  /** The enum class whose body, or whose nested declarations, hold the code of a scope. */
+  private enclosingEnum(scope: Scope): ClassSymbol | undefined {
+    for (let current: Scope | undefined = scope; current; current = current.parent) {
+      for (let cls = current.staticClass; cls; cls = cls.outer) if (cls.kind === 'enum') return cls;
     }
     return undefined;
   }
@@ -530,6 +557,15 @@ export abstract class ExpressionCompiler extends CallCompiler {
       variable.fixed = lower.length > 0 ? commonSupertype(lower) : (variable.upper[0] ?? anyType(true));
       substitution.set(variable.param, variable.fixed);
     }
+    // A receiver must meet the bounds of the type parameter it gives, as `C : Collection<*>` of a collection's ifEmpty.
+    for (const variable of variables) {
+      const fixed = variable.fixed as KType;
+      if (
+        variable.lower.length > 0 &&
+        variable.param.bounds.some((bound) => !isSubtype(fixed, substitute(bound, substitution)))
+      )
+        return undefined;
+    }
     return substitution;
   }
 
@@ -628,6 +664,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
         extensionReceiver !== undefined && isNullable(resolved(extensionReceiver))
       );
       this.checkAccessible(scope, property.symbol, row, target.type);
+      if (expression.receiver.kind === 'this' && !expression.receiver.label)
+        this.checkInitialized(context, property.symbol, name, row);
       return this.readProperty(property, target, row);
     });
   }
@@ -657,6 +695,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       if (!outer) return undefined;
       if (outer.kind === 'class') {
         const nested = outer.cls.nested.get(expression.name);
+        if (nested) this.checkNestedAccessible(scope, nested, expression.row);
         return nested ? { kind: 'class', cls: nested } : undefined;
       }
       const path = this.packagePathOf(expression);
@@ -680,19 +719,31 @@ export abstract class ExpressionCompiler extends CallCompiler {
   }
 
   /** Evaluates a receiver once and, for `?.`, gives `null` without evaluating the rest when it is `null`. */
+  /** The place of `a?.b`, which binds to nothing when `a` is null. */
+  protected safePlace(receiver: Compiled, place: (holder: Compiled) => Place): Place {
+    let held: Value;
+    const holder: Compiled = { type: nonNull(receiver.type), repr: 'ref', eval: () => held };
+    const inner = place(holder);
+    const receiverEval = convertRepr(receiver.eval, receiver.repr, 'ref');
+    return {
+      ...inner,
+      bind: (frame) => {
+        const value = receiverEval(frame);
+        if (value === NULL) return SKIPPED_PLACE;
+        held = value;
+        return inner.bind(frame);
+      },
+    };
+  }
+
   protected withSafeReceiver(
     receiver: Compiled,
     isSafe: boolean,
     row: number,
     build: (target: Compiled) => Compiled
   ): Compiled {
-    if (!isSafe) {
-      if (isNullable(resolved(receiver.type))) {
-        // Members of `Any?`, such as `toString()`, and extensions of nullable types accept it; `build` checks them.
-        return build(receiver);
-      }
-      return build(receiver);
-    }
+    // Members of `Any?`, such as `toString()`, and extensions of nullable types accept a nullable receiver; `build` checks them.
+    if (!isSafe) return build(receiver);
     let held: Value;
     const target: Compiled = {
       type: nonNull(receiver.type),
@@ -712,9 +763,12 @@ export abstract class ExpressionCompiler extends CallCompiler {
     void row;
     const resultEval = convertRepr(result.eval, result.repr, 'ref');
     const receiverEval = receiver.eval;
+    const whenNonNull = new Map(receiver.whenNonNull);
+    if (receiver.stableKey) whenNonNull.set(receiver.stableKey, nonNull(receiver.type));
     return {
       type: nullable(result.type),
       repr: 'ref',
+      whenNonNull,
       eval: (frame) => {
         const value = receiverEval(frame);
         if (value === undefined) return;
@@ -827,6 +881,22 @@ export abstract class ExpressionCompiler extends CallCompiler {
     expected: KType | undefined,
     row: number
   ): Compiled {
+    // The reified enumValues<E>() and enumValueOf<E>(name) are the enum's own values() and valueOf(name).
+    const enumArgument = typeArgs.length === 1 ? resolved(typeArgs[0]) : undefined;
+    if (
+      (name === 'enumValues' || name === 'enumValueOf') &&
+      enumArgument?.kind === 'class' &&
+      enumArgument.cls.kind === 'enum'
+    ) {
+      return this.compileEnumFunction(
+        scope,
+        context,
+        enumArgument.cls,
+        name === 'enumValues' ? 'values' : 'valueOf',
+        args,
+        row
+      );
+    }
     const variable = this.findVariable(scope, name);
     if (variable && resolved(variable.type).kind === 'function') {
       return this.compileInvoke(
@@ -921,6 +991,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
         );
       }
       if (variable) this.error(row, `${name} は関数ではないので、呼び出せません。`);
+      const enumClass = this.enclosingEnum(scope);
+      if (enumClass && (name === 'values' || name === 'valueOf'))
+        return this.compileEnumFunction(scope, context, enumClass, name, args, row);
       this.reportUnknownFunction(name, row);
     }
     return this.resolveInLevels(scope, context, levels, args, hasTrailingLambda, typeArgs, expected, row, name);
@@ -952,6 +1025,11 @@ export abstract class ExpressionCompiler extends CallCompiler {
         )
       );
     const sam = this.samOf(type) as NonNullable<ReturnType<ExpressionCompiler['samOf']>>;
+    // The lambda's parameters need their types, which variables of an expected type such as `Comparator<in T>` give.
+    for (const param of sam.functionType.params) {
+      const actual = resolved(param);
+      if (actual.kind === 'variable' && !actual.variable.fixed) fixVariable(actual.variable);
+    }
     const compiled = this.compileLambda(scope, context, lambda, resolved(sam.functionType) as FunctionType, false);
     const bodyType = (resolved(compiled.type) as FunctionType).returnType;
     if (
@@ -1056,11 +1134,12 @@ export abstract class ExpressionCompiler extends CallCompiler {
     const invoke = call.call;
     const returnsNothing = resolved(call.type).kind === 'nothing' && !resolved(call.type).nullable;
     if (returnsNothing) this.flow.isDead = true;
-    this.ensureContracts(call, row);
+    this.applyContracts(call);
     return {
       type: call.type,
       repr: call.repr,
       eval: (frame) => invoke(frame, receiverEval(frame)),
+      narrowing: nullOrEmptyNarrowing(call, receiver),
       isCall: true,
       isCreation:
         call.candidate.kind === 'constructor' ||
@@ -1069,14 +1148,41 @@ export abstract class ExpressionCompiler extends CallCompiler {
     };
   }
 
-  /** Applies what the standard library's contracts promise after a call, such as `require` and `check`. */
-  protected ensureContracts(call: ResolvedCall, row: number): void {
-    void call;
-    void row;
+  /**
+   * Applies the smart casts that the standard library's contracts promise after a call returns: the condition of
+   * `require` and `check` holds, and the argument of `requireNotNull` and `checkNotNull` is not null.
+   */
+  private applyContracts(call: ResolvedCall): void {
+    const { symbol, compiledArgs } = call;
+    if (!symbol.isLibrary || symbol.packageName !== 'kotlin' || symbol.extensionReceiver) return;
+    const [first] = compiledArgs;
+    if (symbol.name === 'require' || symbol.name === 'check') {
+      for (const [key, type] of first?.narrowing?.whenTrue ?? []) this.flow.narrowed.set(key, type);
+    }
+    if ((symbol.name === 'requireNotNull' || symbol.name === 'checkNotNull') && first?.stableKey) {
+      this.flow.narrowed.set(first.stableKey, nonNull(first.type));
+    }
+  }
+
+  /** A local or top-level value of a function type with a receiver, which `x.name()` calls as an extension. */
+  private extensionFunctionValue(
+    context: FunctionContext,
+    scope: Scope,
+    name: string,
+    row: number
+  ): Compiled | undefined {
+    const variable = this.findVariable(scope, name);
+    if (variable) {
+      const type = resolved(variable.type);
+      return type.kind === 'function' && type.receiver ? this.readVariable(context, variable, row) : undefined;
+    }
+    const property = this.topLevelProperties(name)[0]?.find((candidate) => !candidate.extensionReceiver);
+    if (!property) return undefined;
+    const type = resolved(this.ensurePropertyType(property, row));
+    return type.kind === 'function' && type.receiver ? this.readTopLevelProperty(property, row) : undefined;
   }
 
   // code-gauge-allow functionParameterCount 9 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
-  // code-gauge-allow functionCognitiveComplexity 21 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileMethodCall(
     scope: Scope,
     context: FunctionContext,
@@ -1096,38 +1202,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (receiverMayBeNull && extensions.length > 0) levels.push({ candidates: extensions, receiver });
     if (members.length > 0) levels.push({ candidates: members, receiver });
     if (!receiverMayBeNull && extensions.length > 0) levels.push({ candidates: extensions, receiver });
-    if (levels.length === 0) {
-      const variable = this.findVariable(scope, name);
-      const variableType = variable ? resolved(variable.type) : undefined;
-      if (variable && variableType?.kind === 'function' && variableType.receiver) {
-        return this.compileInvoke(
-          scope,
-          context,
-          this.readVariable(context, variable, row),
-          args,
-          hasTrailingLambda,
-          row,
-          receiver
-        );
-      }
-      const property = this.findProperty(scope, receiver.type, name);
-      if (property && resolved(this.ensurePropertyType(property.symbol, row)).kind === 'function') {
-        return this.compileInvoke(
-          scope,
-          context,
-          this.readProperty(property, receiver, row),
-          args,
-          hasTrailingLambda,
-          row
-        );
-      }
-      if (isNullable(resolved(receiver.type)) && this.extensionCandidates(nonNull(receiver.type), name).length > 0) {
-        this.requireNonNullReceiver(receiver, row, false);
-      }
-      const what = UNAVAILABLE_MEMBER_FUNCTIONS[name];
-      if (what) this.error(row, unavailableMessage(what));
-      this.error(row, `${typeToString(resolved(receiver.type))} には ${name} がありません。`);
-    }
+    if (levels.length === 0)
+      return this.compileFunctionValueCall(scope, context, receiver, name, args, hasTrailingLambda, row);
     const memberOnly = members.length > 0 && extensions.length === 0;
     if (memberOnly) this.requireNonNullReceiver(receiver, row, false);
     const resolvedCall = this.resolveCall(
@@ -1145,9 +1221,50 @@ export abstract class ExpressionCompiler extends CallCompiler {
     return this.finishCall(resolvedCall, receiver, row);
   }
 
+  /**
+   * `x.name(...)` without a function `name` for `x`: `invoke` of a function value, a value of a function type with a
+   * receiver, or a property of a function type; anything else is an error.
+   */
+  // code-gauge-allow functionParameterCount 7 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
+  private compileFunctionValueCall(
+    scope: Scope,
+    context: FunctionContext,
+    receiver: Compiled,
+    name: string,
+    args: ArgumentSyntax[],
+    hasTrailingLambda: boolean,
+    row: number
+  ): Compiled {
+    if (name === 'invoke' && resolved(receiver.type).kind === 'function') {
+      this.requireNonNullReceiver(receiver, row, false);
+      return this.compileInvoke(scope, context, receiver, args, hasTrailingLambda, row);
+    }
+    const extensionValue = this.extensionFunctionValue(context, scope, name, row);
+    if (extensionValue)
+      return this.compileInvoke(scope, context, extensionValue, args, hasTrailingLambda, row, receiver);
+    const property = this.findProperty(scope, receiver.type, name);
+    const propertyType = property && substitute(this.ensurePropertyType(property.symbol, row), property.substitution);
+    if (property && propertyType && resolved(propertyType).kind === 'function') {
+      return this.compileInvoke(
+        scope,
+        context,
+        this.readProperty(property, receiver, row),
+        args,
+        hasTrailingLambda,
+        row
+      );
+    }
+    if (isNullable(resolved(receiver.type)) && this.extensionCandidates(nonNull(receiver.type), name).length > 0) {
+      this.requireNonNullReceiver(receiver, row, false);
+    }
+    if (Object.hasOwn(UNAVAILABLE_MEMBER_FUNCTIONS, name))
+      this.error(row, unavailableMessage(UNAVAILABLE_MEMBER_FUNCTIONS[name]));
+    return this.error(row, `${typeToString(resolved(receiver.type))} には ${name} がありません。`);
+  }
+
   // code-gauge-allow functionParameterCount 9 -- the scope, the function context, and the parts of the call are each needed, and bundling them would only rename them.
-  // code-gauge-allow functionNcss 31 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
-  // code-gauge-allow functionCognitiveComplexity 20 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionNcss 33 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
+  // code-gauge-allow functionCognitiveComplexity 21 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileQualifiedCall(
     scope: Scope,
     context: FunctionContext,
@@ -1183,6 +1300,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }
     const { cls } = qualified;
     const nested = cls.nested.get(name);
+    if (nested) this.checkNestedAccessible(scope, nested, row);
     const levels: { candidates: Candidate[]; receiver: Compiled | undefined }[] = [];
     const holder = cls.isObject ? cls : cls.companion;
     if (holder) {
@@ -1380,11 +1498,14 @@ export abstract class ExpressionCompiler extends CallCompiler {
       (candidate) => candidate.symbol.isOperator
     );
     const extensions = this.extensionCandidates(receiver.type, name).filter((candidate) => candidate.symbol.isOperator);
-    const levels = [members, extensions].filter((level) => level.length > 0);
+    // On a nullable receiver, only extensions that take one apply, as String?.plus does to `s + "x"`.
+    const isNullableReceiver = isNullable(resolved(receiver.type));
+    const levels = [isNullableReceiver ? [] : members, extensions].filter((level) => level.length > 0);
+    if (isNullableReceiver && extensions.length === 0 && members.length > 0)
+      this.requireNonNullReceiver(receiver, row, false);
     if (levels.length === 0) {
       this.error(row, `${typeToString(resolved(receiver.type))} には ${shown} を使えません。`);
     }
-    if (extensions.length === 0 || members.length > 0) this.requireNonNullReceiver(receiver, row, false);
     const call = this.resolveCall(scope, context, levels, args, false, [], undefined, receiver, row, shown);
     return { ...this.finishCall(call, receiver, row), isCall: false };
   }
@@ -1434,6 +1555,9 @@ export abstract class ExpressionCompiler extends CallCompiler {
       const value = -expression.operand.value;
       const kind = expression.operand.isFloat ? 'Float' : 'Double';
       return { type: this.primitiveType(kind), repr: kind, eval: () => value, constant: value };
+    }
+    if (this.isLongConstant(expression, expected)) {
+      return this.toLongConstant(this.compilePrefix(scope, context, expression, undefined));
     }
     const operand = this.compileExpression(scope, context, expression.operand);
     if (operator === '!') {
@@ -1506,6 +1630,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     isPrefix: boolean,
     row: number
   ): Compiled {
+    if (target.kind === 'member' && target.isSafe) this.unavailable(row, '?. を使った ++・--');
     const place = this.compilePlace(scope, context, target, row, true);
     const kind = this.primitiveOf(place.type);
     if (!kind)
@@ -1578,21 +1703,33 @@ export abstract class ExpressionCompiler extends CallCompiler {
         return this.compileComparison(scope, context, expression);
       }
       default: {
-        return this.compileArithmetic(scope, context, operator, expression.left, expression.right, row);
+        const left = this.compileExpression(scope, context, expression.left);
+        const compiled = this.compileArithmeticWith(scope, context, operator, left, expression.right, row);
+        return this.isLongConstant(expression, expected) ? this.toLongConstant(compiled) : compiled;
       }
     }
   }
 
-  protected compileArithmetic(
-    scope: Scope,
-    context: FunctionContext,
-    operator: ArithmeticOperator,
-    leftExpression: Expression,
-    rightExpression: Expression,
-    row: number
-  ): Compiled {
-    const left = this.compileExpression(scope, context, leftExpression);
-    return this.compileArithmeticWith(scope, context, operator, left, rightExpression, row);
+  /**
+   * A constant of integer literals where a Long is expected, as `val x: Long = 1 + 2`: Kotlin computes it as an Int, so
+   * that `2147483647 + 1` overflows, and converts the result.
+   */
+  private toLongConstant(compiled: Compiled): Compiled {
+    if (compiled.repr !== 'Int') return compiled;
+    const evaluate = compiled.eval;
+    return {
+      ...compiled,
+      type: this.primitiveType('Long'),
+      repr: 'Long',
+      eval: (frame) => BigInt(evaluate(frame) as number),
+      constant: compiled.constant === undefined ? undefined : BigInt(compiled.constant as number),
+      integerLiteral: undefined,
+    };
+  }
+
+  /** Whether an expression is made only of integer literals and arithmetic, where a `Long` is expected. */
+  private isLongConstant(expression: Expression, expected: KType | undefined): boolean {
+    return expected !== undefined && this.primitiveOf(nonNull(expected)) === 'Long' && isIntegerConstant(expression);
   }
 
   // code-gauge-allow functionCognitiveComplexity 29 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
@@ -1652,7 +1789,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
             ),
         };
       }
-      if (rightKind || !NUMERIC_KINDS.has(leftKind)) {
+      // Other operands go to the operator functions, as Char.plus(String) and Int.times(Duration).
+      if (rightKind) {
         this.error(
           row,
           `演算子 ${operator} は ${typeToString(resolved(left.type))} と ${typeToString(resolved(right.type))} には使えません。`
@@ -1730,7 +1868,12 @@ export abstract class ExpressionCompiler extends CallCompiler {
   ): Compiled {
     const left = this.compileExpression(scope, context, expression.left, expected ? nullable(expected) : undefined);
     const before = this.flow.copy();
-    const right = this.compileExpression(scope, context, expression.right, expected);
+    const right = this.compileExpression(
+      scope,
+      context,
+      expression.right,
+      branchHint(nonNull(left.type), expected, isBareCallExpression(expression.right))
+    );
     const rightIsNothing = resolved(right.type).kind === 'nothing' && !resolved(right.type).nullable;
     this.flow = rightIsNothing ? before : Flow_merge([before, this.flow]);
     if (rightIsNothing && left.stableKey) this.flow.narrowed.set(left.stableKey, nonNull(left.type));
@@ -1784,28 +1927,44 @@ export abstract class ExpressionCompiler extends CallCompiler {
     } else {
       const leftEval = convertRepr(left.eval, left.repr, 'ref');
       const rightEval = convertRepr(this.convertTo(right, right.type, row), reprOf(this.core, right.type), 'ref');
+      const isPrimitiveIdentity = isIdentity && left.repr !== 'ref' && right.repr !== 'ref';
       test = isIdentity
         ? (frame) => {
-            const a = leftEval(frame);
-            const b = rightEval(frame);
-            return a === b;
+            const a = isPrimitiveIdentity ? left.eval(frame) : leftEval(frame);
+            const b = isPrimitiveIdentity ? right.eval(frame) : rightEval(frame);
+            return a === b || isSameCachedBox(a, b);
           }
         : (frame) => valueEquals(frame, leftEval(frame), rightEval(frame));
     }
-    // `x != null` and `x == null` narrow a stable `x`.
-    const whenNonNull = new Map<string, KType>();
-    if (resolved(right.type).kind === 'nothing' && left.stableKey) whenNonNull.set(left.stableKey, nonNull(left.type));
-    if (resolved(left.type).kind === 'nothing' && right.stableKey)
-      whenNonNull.set(right.stableKey, nonNull(right.type));
-    const narrowing = negated
-      ? { whenTrue: whenNonNull, whenFalse: new Map<string, KType>() }
-      : { whenTrue: new Map<string, KType>(), whenFalse: whenNonNull };
+    const narrowing = this.equalityNarrowing(left, right, negated);
     return {
       type: this.booleanType,
       repr: 'ref',
       eval: negated ? (frame) => !test(frame) : test,
       narrowing,
     };
+  }
+
+  /**
+   * The smart casts of `x != null` and `x == null` for a stable `x`, and of a safe call's receivers, which are not null
+   * when the call's value is not null, as in `s?.length != null` and `s?.length == 3`.
+   */
+  private equalityNarrowing(left: Compiled, right: Compiled, negated: boolean): NonNullable<Compiled['narrowing']> {
+    const whenEqual = new Map<string, KType>();
+    const whenUnequal = new Map<string, KType>();
+    for (const [operand, other] of [
+      [left, right],
+      [right, left],
+    ]) {
+      const otherType = resolved(other.type);
+      const isNull = otherType.kind === 'nothing';
+      const nonNullWhen = isNull ? whenUnequal : isNullable(otherType) ? undefined : whenEqual;
+      if (!nonNullWhen) continue;
+      if (operand.stableKey && isNullable(resolved(operand.type)))
+        nonNullWhen.set(operand.stableKey, nonNull(operand.type));
+      for (const [key, type] of operand.whenNonNull ?? []) nonNullWhen.set(key, type);
+    }
+    return negated ? { whenTrue: whenUnequal, whenFalse: whenEqual } : { whenTrue: whenEqual, whenFalse: whenUnequal };
   }
 
   /** Rejects `==` between types that can never be equal, as Kotlin's compiler does. */
@@ -1877,7 +2036,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
   private compileInfix(
     scope: Scope,
     context: FunctionContext,
-    expression: Extract<Expression, { kind: 'infix' }>
+    expression: Extract<Expression, { kind: 'infix' }>,
+    expected: KType | undefined
   ): Compiled {
     const { name, row } = expression;
     const left = this.compileExpression(scope, context, expression.left);
@@ -1887,7 +2047,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
     if (levels.length === 0) this.error(row, `${typeToString(resolved(left.type))} には ${name} を使えません。`);
     if (extensions.length === 0) this.requireNonNullReceiver(left, row, false);
     const args: ArgumentSyntax[] = [{ row: expression.right.row, name: undefined, value: expression.right }];
-    const call = this.resolveCall(scope, context, levels, args, false, [], undefined, left, row, name);
+    const call = this.resolveCall(scope, context, levels, args, false, [], expected, left, row, name);
     return { ...this.finishCall(call, left, row), isCall: false };
   }
 
@@ -1930,6 +2090,11 @@ export abstract class ExpressionCompiler extends CallCompiler {
     }
     if (actual.kind === 'param' && !actual.param.isReified)
       this.error(row, `型引数 ${actual.param.name} かどうかは調べられません。`);
+    if (actual.kind === 'function') this.error(row, `関数の型 ${typeToString(actual)} かどうかは調べられません。`);
+    const subject = resolved(subjectType);
+    if (subject.kind === 'class' && actual.kind === 'class' && !canShareInstances(subject.cls, actual.cls)) {
+      this.error(row, `${typeToString(nonNull(subject))} の値が ${typeToString(actual)} であることはありません。`);
+    }
     return type;
   }
 
@@ -2146,7 +2311,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       lambdaScope,
       lambdaContext,
       bodyBlock,
-      expectedReturn && expectedReturn.kind !== 'variable' && !returnsUnit ? expectedReturn : undefined,
+      returnsUnit ? undefined : determinedType(expectedReturn),
       returnsUnit
     );
     this.markCapturedAssignments(lambdaContext, outerFlow);
@@ -2317,4 +2482,59 @@ function Flow_merge(flows: Flow[]): Flow {
 /** Function values receive their arguments boxed, while a parameter of a primitive type holds the bare value. */
 function unboxedIf(unboxed: boolean, value: Value): Value {
   return unboxed && value instanceof Boxed ? value.value : value;
+}
+
+/**
+ * Whether a value can be an instance of both classes, which kotlinc requires of an `is` check: one class extends the
+ * other, or a class that may have subclasses meets an interface, since a class extends at most one class.
+ */
+function canShareInstances(a: ClassSymbol, b: ClassSymbol): boolean {
+  if (a.isSubclassOf(b) || b.isSubclassOf(a)) return true;
+  if (!a.isInterface && !b.isInterface) return false;
+  if (a.isInterface && b.isInterface) return true;
+  const cls = a.isInterface ? b : a;
+  return cls.isInheritable;
+}
+
+/**
+ * Whether two boxes are the same object on the JVM, whose `valueOf` caches the boxes of small integers and characters,
+ * so that `===` of two `Int?` holding 127 is true and of two holding 1000 is false.
+ */
+function isSameCachedBox(a: Value, b: Value): boolean {
+  if (!(a instanceof Boxed) || !(b instanceof Boxed) || a.kind !== b.kind || a.value !== b.value) return false;
+  const value = Number(a.value);
+  if (a.kind === 'Char') return value <= 127;
+  return ['Int', 'Long', 'Short', 'Byte'].includes(a.kind) && value >= -128 && value <= 127;
+}
+
+function isIntegerConstant(expression: Expression): boolean {
+  switch (expression.kind) {
+    case 'integer': {
+      return expression.suffix === '' || expression.suffix === 'L';
+    }
+    case 'parenthesized': {
+      return isIntegerConstant(expression.expression);
+    }
+    case 'prefix': {
+      return (expression.operator === '-' || expression.operator === '+') && isIntegerConstant(expression.operand);
+    }
+    case 'binary': {
+      return (
+        expression.operator in NUMBER_OPERATOR_NAMES &&
+        isIntegerConstant(expression.left) &&
+        isIntegerConstant(expression.right)
+      );
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
+/** `s.isNullOrEmpty()` and `s.isNullOrBlank()` are false only for a receiver that is not null, as their contracts say. */
+function nullOrEmptyNarrowing(call: ResolvedCall, receiver: Compiled | undefined): Compiled['narrowing'] {
+  const { symbol } = call;
+  const isNullCheck = symbol.isLibrary && (symbol.name === 'isNullOrEmpty' || symbol.name === 'isNullOrBlank');
+  if (!isNullCheck || !receiver?.stableKey) return undefined;
+  return { whenTrue: new Map(), whenFalse: new Map([[receiver.stableKey, nonNull(receiver.type)]]) };
 }

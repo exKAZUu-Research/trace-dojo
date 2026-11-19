@@ -14,8 +14,9 @@ import {
 } from '../../interpreter/fdlibm';
 import { fdlibmPow } from '../../interpreter/fdlibmPow';
 import { callFunction } from '../dispatch';
-import { stringOf, valueEquals } from '../format';
+import { formatPrimitive, stringOf, valueEquals } from '../format';
 import { compareDoubles, compareNumbers, toInt32 } from '../operators';
+import { arrayFactoryName, UNSIGNED_ARRAYS } from '../prelude/arrays';
 import type { Frame } from '../runtime';
 import type { FunctionSymbol } from '../symbols';
 import { box, KObject, NULL, type PrimitiveKind, UNIT, type Value } from '../values';
@@ -33,7 +34,7 @@ const PRIMITIVE_ARRAYS: [name: string, kind: PrimitiveKind | 'Boolean', zero: Va
   ['ByteArray', 'Byte', 0],
   ['CharArray', 'Char', 0],
   ['BooleanArray', 'Boolean', false],
-  ['UIntArray', 'UInt', 0],
+  ...UNSIGNED_ARRAYS.map(([name, kind]): [string, PrimitiveKind, Value] => [name, kind, kind === 'ULong' ? 0n : 0]),
 ];
 
 function checkSize(frame: Frame, size: number): void {
@@ -77,12 +78,6 @@ function defineArrays(): void {
     });
     defineNative(`${prefix}.iterator()`, (_frame, receiver) => boxingIterator(receiver as KObject, kind));
   }
-  defineNative('kotlin.UIntArray.toString()', (frame, receiver) => {
-    const values = ((receiver as KObject).items as number[]).map((value) => String(value >>> 0));
-    const text = `[${values.join(', ')}]`;
-    frame.runtime.allocateString(frame, text.length);
-    return text;
-  });
   defineNative('kotlin.collections.NativeLists.of(Collection<T>)', (frame, _receiver, [elements]) =>
     newList(frame, 'ArraysList', elementsOf(frame, elements))
   );
@@ -370,6 +365,18 @@ const fromVararg =
     return array;
   };
 
+/** Kotlin's unsigned arrays are value classes, whose `toString` shows their storage, as `UIntArray(storage=[1, 2])`. */
+function defineUnsignedArrayStrings(): void {
+  for (const [name, kind] of UNSIGNED_ARRAYS) {
+    defineNative(`kotlin.${name}.toString()`, (frame, receiver) => {
+      const values = ((receiver as KObject).items as (number | bigint)[]).map((value) => formatPrimitive(kind, value));
+      const text = `${name}(storage=[${values.join(', ')}])`;
+      frame.runtime.allocateString(frame, text.length);
+      return text;
+    });
+  }
+}
+
 // code-gauge-allow functionNcss 60 -- One native per function of arrays that the prelude declares.
 function defineArrayFunctions(): void {
   for (const [receiver, kind] of ARRAY_RECEIVERS) {
@@ -404,12 +411,7 @@ function defineArrayFunctions(): void {
           'java.lang.IndexOutOfBoundsException',
           `toIndex (${end}) is greater than size (${items.length}).`
         );
-      if (start > end)
-        frame.runtime.throwError(
-          frame,
-          'java.lang.IllegalArgumentException',
-          `fromIndex (${start}) is greater than toIndex (${end}).`
-        );
+      if (start > end) frame.runtime.throwError(frame, 'java.lang.IllegalArgumentException', `${start} > ${end}`);
       return copyArray(frame, array, items.slice(start, end));
     });
     defineNative(`${prefix}.contentEquals(${receiver})`, (frame, array, [other]) => {
@@ -461,11 +463,11 @@ function defineArrayFunctions(): void {
     return array;
   });
   for (const [name, kind] of PRIMITIVE_ARRAYS) {
-    const factory = name === 'UIntArray' ? 'uintArrayOf' : `${name.charAt(0).toLowerCase()}${name.slice(1)}Of`;
-    defineNative(`kotlin.collections.${factory}(vararg ${kind})`, fromVararg(name));
+    defineNative(`kotlin.collections.${arrayFactoryName(name)}(vararg ${kind})`, fromVararg(name));
   }
 }
 
 defineArrays();
+defineUnsignedArrayStrings();
 defineArrayFunctions();
 defineMath();

@@ -2,6 +2,7 @@ import type { ClassSymbol, TypeParameterSymbol } from './symbols';
 import {
   type ClassType,
   type FunctionType,
+  hasOpenVariables,
   type InferenceVariable,
   isNothing,
   isNullable,
@@ -171,7 +172,9 @@ export function commonSupertype(types: KType[]): KType {
 function nonNullCommonSupertype(types: KType[]): KType {
   const [first] = types;
   if (types.every((type) => isSubtype(type, first))) return first;
-  for (const candidate of supertypesInOrder(first)) {
+  // The first type itself merges its arguments first, as `Pair<Int, String>` and `Pair<Int, Nothing?>` make a
+  // `Pair<Int, String?>`.
+  for (const candidate of [first, ...supertypesInOrder(first)]) {
     if (types.every((type) => isSubtype(type, candidate))) return candidate;
     // Type arguments that differ between the types become their common supertype, as for `List<Int>` and `List<String>`.
     if (candidate.kind === 'class' && candidate.args.length > 0) {
@@ -253,4 +256,58 @@ export function checkVariableBounds(variable: InferenceVariable): boolean {
   return (
     variable.lower.every((bound) => isSubtype(bound, fixed)) && variable.upper.every((bound) => isSubtype(fixed, bound))
   );
+}
+
+/**
+ * A type, or for a variable still being inferred the type its upper bounds require, as `V` of `getOrPut` has from the
+ * map's type, so that the lambda `{ mutableListOf() }` infers its element type.
+ */
+export function determinedType(type: KType | undefined): KType | undefined {
+  if (type?.kind !== 'variable') return type;
+  const [upper, ...others] = type.variable.upper;
+  if (!upper || hasOpenVariables(upper) || others.some((other) => !isSameType(other, upper))) return undefined;
+  return upper;
+}
+
+/**
+ * The expected type of a later branch of an `if`, `when`, or `?:` whose value is a call without arguments, such as
+ * `emptyList()`: an earlier branch's generic type, which gives the call its type arguments, where it fits the expected
+ * type of the whole. A call with arguments infers its own, so that `listOf("a")` still meets `listOf(1)` as a List<Any>.
+ */
+export function branchHint(earlier: KType, expected: KType | undefined, isBareCall: boolean): KType | undefined {
+  const actual = resolved(earlier);
+  const isHint = isBareCall && actual.kind === 'class' && actual.args.length > 0 && !hasOpenVariables(actual);
+  if (!isHint || (expected && (hasOpenVariables(expected) || !isSubtype(actual, expected)))) return expected;
+  // The earlier branch's type may still hold fixed variables, which the later call should see as their types.
+  return withDeterminedVariables(actual);
+}
+
+/** A type with each variable that its upper bounds already determine replaced by the type they require. */
+export function withDeterminedVariables(type: KType): KType {
+  switch (type.kind) {
+    case 'variable': {
+      if (type.variable.fixed) return withDeterminedVariables(resolved(type));
+      const determined = determinedType(type);
+      return determined ? withNullability(determined, type.nullable || isNullable(determined)) : type;
+    }
+    case 'class': {
+      return {
+        ...type,
+        args: type.args.map((argument) =>
+          argument.variance === 'star' ? argument : { ...argument, type: withDeterminedVariables(argument.type) }
+        ),
+      };
+    }
+    case 'function': {
+      return {
+        ...type,
+        receiver: type.receiver && withDeterminedVariables(type.receiver),
+        params: type.params.map(withDeterminedVariables),
+        returnType: withDeterminedVariables(type.returnType),
+      };
+    }
+    default: {
+      return type;
+    }
+  }
 }

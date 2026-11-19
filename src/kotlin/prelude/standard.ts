@@ -1,3 +1,4 @@
+import { UNSIGNED_ARRAYS } from './arrays';
 import { kotlin } from './source';
 
 /** The general functions and classes of `kotlin`: pairs, scope functions, preconditions, lazy values, and arrays. */
@@ -204,12 +205,14 @@ class BooleanArray private constructor() {
     external operator fun iterator(): Iterator<Boolean>
 }
 
-class UIntArray private constructor() {
+${UNSIGNED_ARRAYS.map(
+  ([name, element]) => `class ${name} private constructor() {
     external constructor(size: Int)
     external val size: Int
-    external operator fun get(index: Int): UInt
-    external operator fun set(index: Int, value: UInt)
-    external operator fun iterator(): Iterator<UInt>
+    external operator fun get(index: Int): ${element}
+    external operator fun set(index: Int, value: ${element})
+    external operator fun iterator(): Iterator<${element}>
     external override fun toString(): String
-}
+}`
+).join('\n\n')}
 `;

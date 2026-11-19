@@ -19,6 +19,7 @@ import {
   Flow,
   type FunctionContext,
   Handoff,
+  isBareCall,
   type LoopContext,
   type Repr,
   reprOf,
@@ -32,7 +33,7 @@ import { NUMBER_OPERATOR_NAMES } from './operators';
 import { type Frame, KotlinThrow, LoopSignal, UNASSIGNED } from './runtime';
 import { type ClassSymbol, type PropertySymbol, type TypeParameterSymbol, VariableSymbol } from './symbols';
 import { instanceTest } from './typeChecks';
-import { commonSupertype, isSubtype } from './typeRelations';
+import { branchHint, commonSupertype, isSubtype } from './typeRelations';
 import { type ClassType, type KType, nonNull, NOTHING, resolved, substitute, typeToString } from './types';
 import { Boxed, type KObject, NULL, UNIT, type Value } from './values';
 
@@ -210,7 +211,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       return () => {};
     }
     const initializer = this.compileExpression(scope, context, statement.initializer, declared);
-    const type = declared ?? this.inferredVariableType(initializer, row, name);
+    const type = declared ?? this.inferredVariableType(initializer);
     const value = this.expectType(initializer, type, statement.initializer.row);
     const variable = this.newVariable(scope, context, name, type, statement.isVar, row);
     this.flow.assigned.add(variable);
@@ -226,10 +227,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   /** The type of a variable declared without one, which `null` alone cannot give. */
-  private inferredVariableType(initializer: Compiled, row: number, name: string): KType {
+  private inferredVariableType(initializer: Compiled): KType {
     const type = resolved(initializer.type);
-    if (type.kind === 'nothing' && type.nullable)
-      this.error(row, `変数 ${name} の型を決められません。型を書いてください。`);
     if (initializer.integerLiteral) return this.primitiveType(this.primitiveOf(type) ?? 'Int');
     return type;
   }
@@ -351,7 +350,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         row,
         (frame) => {
           const bound = place.bind(frame);
-          bound.set(toPlace(frame));
+          if (!bound.isSkipped) bound.set(toPlace(frame));
         },
         value.isCreation === true
       );
@@ -396,6 +395,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const toPlace = convertRepr(converted, reprOf(this.core, place.type), place.repr);
     return (frame) => {
       const bound = place.bind(frame);
+      if (bound.isSkipped) return;
       const value = current.run(frame, bound, () => toPlace(frame));
       bound.set(value);
     };
@@ -494,12 +494,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
           scope
         );
       }
-      if (target.isSafe) this.unavailable(row, '?. を使った代入');
       const receiver = this.compileExpression(scope, context, target.receiver);
-      this.requireNonNullReceiver(receiver, row, false);
-      const property = this.findProperty(scope, receiver.type, target.name);
+      if (!target.isSafe) this.requireNonNullReceiver(receiver, row, false);
+      const property = this.findProperty(scope, nonNull(receiver.type), target.name);
       if (!property)
         return this.error(row, `${typeToString(resolved(receiver.type))} には ${target.name} がありません。`);
+      if (target.isSafe) return this.safePlace(receiver, (holder) => this.propertyPlace(property, holder, row, scope));
       return this.propertyPlace(property, receiver, row, scope);
     }
     if (target.kind === 'index') return this.indexPlace(scope, context, target, row, isCompound);
@@ -986,8 +986,15 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const thenCompiled = this.compileBlockValue(scope, context, expression.thenBranch, expected, asStatement);
     const afterThen = this.flow;
     this.flow = this.withNarrowing(before, condition.whenFalse);
-    const elseCompiled = expression.elseBranch
-      ? this.compileBlockValue(scope, context, expression.elseBranch, expected, asStatement)
+    const { elseBranch } = expression;
+    const elseCompiled = elseBranch
+      ? this.compileBlockValue(
+          scope,
+          context,
+          elseBranch,
+          laterBranchExpected(thenCompiled, elseBranch, expected, asStatement),
+          asStatement
+        )
       : undefined;
     const afterElse = this.flow;
     this.flow = Flow.merge([afterThen, afterElse]);
@@ -1053,6 +1060,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const covered = new Set<string>();
     let hasElse = false;
     for (const entry of expression.entries) {
+      if (hasElse) this.error(entry.row, 'else は、when の最後に書いてください。');
       if (entry.conditions.length === 0) {
         hasElse = true;
         const body = this.compileBlockValue(scope, context, entry.body, expected, asStatement);
@@ -1116,8 +1124,6 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 25 -- One case per kind of when condition.
-  // code-gauge-allow functionNcss 47 -- each branch is one case of the Kotlin rule this function implements, and they read best side by side.
   private compileWhenCondition(
     scope: Scope,
     context: FunctionContext,
@@ -1149,37 +1155,64 @@ export abstract class StatementCompiler extends ExpressionCompiler {
         ? { test: (frame) => !test(evaluate(frame)), whenTrue: new Map(), whenFalse: narrowing }
         : { test: (frame) => test(evaluate(frame)), whenTrue: narrowing, whenFalse: new Map() };
     }
-    if (condition.kind === 'in') {
-      const subjectName = '\0whenSubject';
-      const conditionScope = new Scope(scope, context);
-      const variable = new VariableSymbol(subjectName, subject.type, false, 0, -1, condition.row);
-      variable.owner = context;
-      variable.delegateRead = convertRepr(subject.eval, subject.repr, reprOf(this.core, subject.type));
-      conditionScope.variables.set(subjectName, variable);
-      this.flow.assigned.add(variable);
-      const compiled = this.compileIn(
-        conditionScope,
-        context,
-        { kind: 'name', row: condition.row, name: subjectName },
-        condition.expression,
-        condition.negated,
-        condition.row
-      );
-      const evaluate = compiled.eval;
-      return { test: (frame) => evaluate(frame) as boolean, whenTrue: new Map(), whenFalse: new Map() };
-    }
-    const value = this.compileExpression(scope, context, condition.expression, nonNull(subject.type));
-    this.recordCovered(value, condition.expression, covered);
+    if (condition.kind === 'in') return this.compileWhenIn(scope, context, subject, condition);
+    return this.compileWhenValue(scope, context, subject, condition.expression, condition.row, covered);
+  }
+
+  /** A `when` branch's `in` or `!in` condition, which tests the subject. */
+  private compileWhenIn(
+    scope: Scope,
+    context: FunctionContext,
+    subject: Compiled,
+    condition: Extract<WhenCondition, { kind: 'in' }>
+  ): { test: (frame: Frame) => boolean; whenTrue: Map<string, KType>; whenFalse: Map<string, KType> } {
+    const subjectName = '\0whenSubject';
+    const conditionScope = new Scope(scope, context);
+    const variable = new VariableSymbol(subjectName, subject.type, false, 0, -1, condition.row);
+    variable.owner = context;
+    variable.delegateRead = convertRepr(subject.eval, subject.repr, reprOf(this.core, subject.type));
+    conditionScope.variables.set(subjectName, variable);
+    this.flow.assigned.add(variable);
+    const compiled = this.compileIn(
+      conditionScope,
+      context,
+      { kind: 'name', row: condition.row, name: subjectName },
+      condition.expression,
+      condition.negated,
+      condition.row
+    );
+    const evaluate = compiled.eval;
+    return { test: (frame) => evaluate(frame) as boolean, whenTrue: new Map(), whenFalse: new Map() };
+  }
+
+  /** A `when` branch's value, which the subject equals for the branch to run. */
+  private compileWhenValue(
+    scope: Scope,
+    context: FunctionContext,
+    subject: Compiled,
+    expression: Expression,
+    row: number,
+    covered: Set<string>
+  ): { test: (frame: Frame) => boolean; whenTrue: Map<string, KType>; whenFalse: Map<string, KType> } {
+    // An Int literal does not become a Long here, as kotlinc rejects `6` among the branches of a Long subject.
+    const isLongSubject = this.primitiveOf(nonNull(subject.type)) === 'Long';
+    const value = this.compileExpression(scope, context, expression, isLongSubject ? undefined : nonNull(subject.type));
+    this.recordCovered(value, expression, covered);
     const subjectEval = convertRepr(subject.eval, subject.repr, 'ref');
     const valueEval = convertRepr(
-      this.convertTo(value, value.integerLiteral ? nonNull(subject.type) : value.type, condition.row),
+      this.convertTo(value, value.integerLiteral ? nonNull(subject.type) : value.type, row),
       reprOf(this.core, value.integerLiteral ? nonNull(subject.type) : value.type),
       'ref'
     );
     const subjectKind = this.primitiveOf(nonNull(subject.type));
-    if (subjectKind && !this.acceptsArgument(value, nonNull(subject.type)) && resolved(value.type).kind !== 'nothing') {
+    const isIntLiteralForLong = isLongSubject && value.integerLiteral !== undefined && !value.integerLiteral.isLong;
+    if (
+      subjectKind &&
+      (isIntLiteralForLong || !this.acceptsArgument(value, nonNull(subject.type))) &&
+      resolved(value.type).kind !== 'nothing'
+    ) {
       this.error(
-        condition.row,
+        row,
         `演算子 == は ${typeToString(resolved(subject.type))} と ${typeToString(resolved(value.type))} には使えません。`
       );
     }
@@ -1360,3 +1393,13 @@ function assignedNames(node: unknown): Set<string> {
 }
 
 export type { ClassType };
+
+/** The expected type of a later branch of an `if` used as an expression, which an earlier branch may guide. */
+function laterBranchExpected(
+  earlier: Compiled,
+  later: Block,
+  expected: KType | undefined,
+  asStatement: boolean
+): KType | undefined {
+  return asStatement ? expected : branchHint(earlier.type, expected, isBareCall(later));
+}

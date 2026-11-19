@@ -68,22 +68,7 @@ fun <T : Comparable<T>> maxOf(a: T, b: T): T = if (a >= b) a else b
 fun <T : Comparable<T>> minOf(a: T, b: T): T = if (a <= b) a else b
 fun <T : Comparable<T>> maxOf(a: T, b: T, c: T): T = maxOf(a, maxOf(b, c))
 fun <T : Comparable<T>> minOf(a: T, b: T, c: T): T = minOf(a, minOf(b, c))
-fun maxOf(a: Int, b: Int): Int = if (a >= b) a else b
-fun minOf(a: Int, b: Int): Int = if (a <= b) a else b
-fun maxOf(a: Long, b: Long): Long = if (a >= b) a else b
-fun minOf(a: Long, b: Long): Long = if (a <= b) a else b
-fun maxOf(a: Double, b: Double): Double = kotlin.math.max(a, b)
-fun minOf(a: Double, b: Double): Double = kotlin.math.min(a, b)
-fun maxOf(a: Int, vararg other: Int): Int {
-    var max = a
-    for (e in other) max = maxOf(max, e)
-    return max
-}
-fun minOf(a: Int, vararg other: Int): Int {
-    var min = a
-    for (e in other) min = minOf(min, e)
-    return min
-}
+${numericExtremes()}
 `;
 
 /** `kotlin.random`, with Kotlin's XorWow generator, whose seeded sequences match the JVM's. */
@@ -337,3 +322,24 @@ val Int.sign: Int get() = when {
 
 fun Double.withSign(sign: Double): Double = if ((this < 0.0 || 1.0 / this < 0.0) != (sign < 0.0 || 1.0 / sign < 0.0)) -this else this
 `;
+
+/** The overloads of `maxOf` and `minOf` that `kotlin.comparisons` declares for each number type: of two, three, and more. */
+function numericExtremes(): string {
+  return ['Int', 'Long', 'Float', 'Double']
+    .flatMap((type) =>
+      (
+        [
+          ['maxOf', '>=', 'max'],
+          ['minOf', '<=', 'min'],
+        ] as const
+      ).flatMap(([name, operator, math]) => [
+        // Floating-point values compare as kotlin.math does, where NaN wins and -0.0 is less than 0.0.
+        type === 'Float' || type === 'Double'
+          ? `fun ${name}(a: ${type}, b: ${type}): ${type} = kotlin.math.${math}(a, b)`
+          : `fun ${name}(a: ${type}, b: ${type}): ${type} = if (a ${operator} b) a else b`,
+        `fun ${name}(a: ${type}, b: ${type}, c: ${type}): ${type} = ${name}(a, ${name}(b, c))`,
+        `fun ${name}(a: ${type}, vararg other: ${type}): ${type} {\n    var result = a\n    for (e in other) result = ${name}(result, e)\n    return result\n}`,
+      ])
+    )
+    .join('\n');
+}
