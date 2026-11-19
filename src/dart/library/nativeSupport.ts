@@ -92,6 +92,23 @@ export function iterableValues(runtime: Runtime, iterable: Value): Value[] {
   return values;
 }
 
+/** Runs `body` on each element as a `for-in` loop reaches it, so that the iterable's code and `body` interleave. */
+export function forEachValue(runtime: Runtime, iterable: Value, body: (value: Value) => void): void {
+  if (iterable instanceof DartList) {
+    const { length } = iterable.elements;
+    for (let position = 0; position < length; position++) {
+      body(iterable.elements[position]);
+      if (iterable.elements.length !== length) runtime.throwError('ConcurrentModificationError', '', [iterable]);
+    }
+    return;
+  }
+  const iterator = runtime.getProperty(iterable, 'iterator', undefined);
+  while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
+    body(runtime.getProperty(iterator, 'current', undefined));
+    runtime.spend();
+  }
+}
+
 /** Checks a value against an element type, as a list's or map's methods do for covariant parameters. */
 export function checkElement(runtime: Runtime, value: Value, type: DartType, name: string): void {
   if (type.kind === 'dynamic') return;

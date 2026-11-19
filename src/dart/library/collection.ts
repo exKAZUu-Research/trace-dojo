@@ -780,15 +780,7 @@ abstract mixin class MapMixin<K, V> implements Map<K, V> {
 }
 
 abstract class MapBase<K, V> with MapMixin<K, V> {
-  static String mapToString(Map<Object?, Object?> m) => m.isEmpty ? '{}' : _mapToStringOf(m);
-}
-
-String _mapToStringOf(Map<Object?, Object?> m) {
-  var parts = <String>[];
-  m.forEach((k, v) {
-    parts.add(k.toString() + ': ' + v.toString());
-  });
-  return '{' + parts.join(', ') + '}';
+  static String mapToString(Map<Object?, Object?> m) => _mapToString(m);
 }
 
 class UnmodifiableMapView<K, V> extends MapBase<K, V> {

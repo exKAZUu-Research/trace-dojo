@@ -1927,18 +1927,11 @@ abstract interface class Map<K, V> {
     }
   }
   external void removeWhere(bool Function(K key, V value) test);
-  V putIfAbsent(K key, V Function() ifAbsent) {
-    if (containsKey(key)) return this[key] as V;
-    return this[key] = ifAbsent();
-  }
+  external V putIfAbsent(K key, V Function() ifAbsent);
   external void addAll(Map<K, V> other);
   external V? remove(Object? key);
   external void clear();
-  void forEach(void Function(K key, V value) action) {
-    for (var key in this.keys) {
-      action(key, this[key] as V);
-    }
-  }
+  external void forEach(void Function(K key, V value) action);
   external Iterable<K> get keys;
   external Iterable<V> get values;
   external int get length;

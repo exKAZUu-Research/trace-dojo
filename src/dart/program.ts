@@ -6,7 +6,7 @@ import { valueIs } from './compilerBase';
 import { type GlobalVariable, LibraryEnv, type TopLevelFunction } from './environment';
 import { stringOf } from './format';
 import { CORE_SOURCE } from './library/core';
-import { listIterator, newMap, newSet, syncStarIterable } from './library/nativeCollections';
+import { addAllToMap, listIterator, newMap, newSet, quickCopySet, syncStarIterable } from './library/nativeCollections';
 import { COLLECTION_SOURCE, CONVERT_SOURCE, IO_SOURCE, MATH_SOURCE } from './library/others';
 import './library/nativeCore';
 import './library/nativeNumbers';
@@ -270,6 +270,8 @@ function classNamed(name: string): ClassInfo {
 }
 
 export const LINKS: LibraryLinks = {
+  addAllToMap,
+  quickCopySet,
   classNamed,
   construct(runtime, className, constructorName, args, named, typeArgs) {
     const cls = classNamed(className);

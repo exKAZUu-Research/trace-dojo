@@ -119,6 +119,10 @@ export interface LibraryLinks {
     named?: Record<string, Value>,
     typeArgs?: readonly DartType[]
   ): DartObject;
+  /** `map.addAll(other)` of the VM's maps, by which a map literal adds a spread map. */
+  addAllToMap(runtime: Runtime, map: DartObject, other: Value): void;
+  /** The table copy of `set.addAll(other)` into an empty set, by which a set literal may add a spread set. */
+  quickCopySet(runtime: Runtime, set: DartObject, other: Value): boolean;
   /** The value `toString` gives, or a fallback when the object's own `toString` fails. */
   stringify(runtime: Runtime, value: Value): string;
 }

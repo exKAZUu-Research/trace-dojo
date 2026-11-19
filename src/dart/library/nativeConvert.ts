@@ -1,10 +1,10 @@
-// code-gauge-allow-file fileNcss 411 -- dart:convert's JSON, UTF-8, and Base64 codecs, each transcribed from the SDK.
+// code-gauge-allow-file fileNcss 424 -- dart:convert's JSON, UTF-8, and Base64 codecs, each transcribed from the SDK.
 import { formatDouble } from '../format';
 import { HashStore } from '../hashStore';
 import { DartThrow, type Runtime } from '../runtime';
 import { coreTypes, DYNAMIC, interfaceType } from '../types';
 import { DartList, DartObject, type Value } from '../values';
-import { mapEntries, newMap } from './nativeCollections';
+import { forEachEntry, newMap } from './nativeCollections';
 import { define, intArg, newList, stringArg } from './nativeSupport';
 
 /** A string as Dart's JSON encoder writes it: quotes, backslashes, control characters, and lone surrogates escaped. */
@@ -120,8 +120,12 @@ class JsonStringifier {
   }
 
   private writeMap(map: Value, depth: number): string | undefined {
-    const entries = mapEntries(this.runtime, map);
-    if (entries.length === 0) return '{}';
+    const { runtime } = this;
+    // As the SDK's writeMap: isEmpty, then length, then the entries through forEach.
+    if (runtime.getProperty(map, 'isEmpty', undefined) === true) return '{}';
+    runtime.getProperty(map, 'length', undefined);
+    const entries: [Value, Value][] = [];
+    forEachEntry(runtime, map, (key, value) => entries.push([key, value]));
     if (entries.some(([key]) => typeof key !== 'string')) return undefined;
     this.visiting.push(map);
     const parts: string[] = [];

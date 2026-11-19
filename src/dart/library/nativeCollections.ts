@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 838 -- The natives of List, Set, Map, and their iterators share the helpers of this file.
+// code-gauge-allow-file fileNcss 901 -- The natives of List, Set, Map, and their iterators share the helpers of this file.
 import { stringOf } from '../format';
 import { HashStore } from '../hashStore';
 import { type Frame, Frame as FrameClass, type Runtime } from '../runtime';
@@ -11,6 +11,7 @@ import {
   define,
   defineConstructor,
   elementTypeOf,
+  forEachValue,
   implicitCast,
   index,
   intArg,
@@ -779,9 +780,14 @@ function setFrom(
   isConst = false
 ): DartObject {
   const set = newSet(runtime, elementType, false);
-  for (const value of iterableValues(runtime, elements)) {
-    if (check) castTo(runtime, value, elementType);
-    store(set).set(value, undefined);
+  // Set.from adds each element as it iterates; Set.of is addAll, which may copy another set's table outright.
+  if (check) {
+    forEachValue(runtime, elements, (value) => {
+      castTo(runtime, value, elementType);
+      store(set).set(value, undefined);
+    });
+  } else {
+    addAllToSet(runtime, set, elements);
   }
   (set as DartObject & { unmodifiable?: boolean }).unmodifiable = isConst;
   return set;
@@ -883,12 +889,27 @@ define('Set.add', (runtime, receiver, [value]) => {
 });
 define('Set.addAll', (runtime, receiver, [elements]) => {
   checkSetModifiable(runtime, receiver);
-  for (const value of iterableValues(runtime, elements)) {
-    checkElement(runtime, value, elementTypeOf(receiver as DartObject), 'value');
-    store(receiver).set(value, undefined);
-  }
+  addAllToSet(runtime, receiver as DartObject, elements);
   return;
 });
+
+/** The VM's `_Set.addAll`: an empty set copies another `_Set` without deleted entries, and otherwise adds each. */
+function addAllToSet(runtime: Runtime, set: DartObject, elements: Value): void {
+  if (isPlainHashObject(runtime, elements, '_Set') && store(set).quickCopy(store(elements))) return;
+  forEachValue(runtime, elements, (value) => {
+    checkElement(runtime, value, elementTypeOf(set), 'value');
+    store(set).set(value, undefined);
+  });
+}
+
+/** Whether a value is an instance of the VM's own `_Map` or `_Set`, whose tables `_quickCopy` reads. */
+function isPlainHashObject(runtime: Runtime, value: Value, className: '_Map' | '_Set'): value is DartObject {
+  return (
+    value instanceof DartObject &&
+    value.cls === runtime.links.classNamed(className) &&
+    value.native instanceof HashStore
+  );
+}
 define('Set.remove', (runtime, receiver, [value]) => {
   checkSetModifiable(runtime, receiver);
   return store(receiver).delete(value).found;
@@ -899,47 +920,71 @@ define('Set.lookup', (_runtime, receiver, [value]) => {
 });
 define('Set.removeAll', (runtime, receiver, [elements]) => {
   checkSetModifiable(runtime, receiver);
-  for (const value of iterableValues(runtime, elements)) store(receiver).delete(value);
+  forEachValue(runtime, elements, (value) => store(receiver).delete(value));
   return;
 });
 define('Set.retainAll', (runtime, receiver, [elements]) => {
   checkSetModifiable(runtime, receiver);
-  const keep = newSet(runtime, DYNAMIC);
-  for (const value of iterableValues(runtime, elements)) store(keep).set(value, undefined);
-  // The keys are copied, since deleting them changes the store being walked.
-  const keys = [...store(receiver).values()];
-  for (const key of keys) if (!store(keep).has(key)) store(receiver).delete(key);
+  // As SetMixin.retainAll: copy the set, remove the elements from the copy, and remove what is left from the set.
+  const toRemove = copySet(runtime, receiver as DartObject);
+  forEachValue(runtime, elements, (value) => store(toRemove).delete(value));
+  forEachValue(runtime, toRemove, (value) => store(receiver).delete(value));
   return;
 });
+/** The VM's `_Set._filter`: tests each element in place and marks the removed ones without hashing them. */
 function filterSet(runtime: Runtime, receiver: Value, test: Value, keep: boolean): Value {
   checkSetModifiable(runtime, receiver);
-  const removed: Value[] = [];
-  const keys = [...store(receiver).values()];
-  for (const key of keys) if ((callFunction(runtime, test, key) === true) !== keep) removed.push(key);
-  for (const key of removed) store(receiver).delete(key);
+  const source = store(receiver);
+  const used = source.keys.length;
+  let modifications = source.modifications;
+  for (let position = 0; position < used; position++) {
+    if (!source.isLive(position)) continue;
+    const result = callFunction(runtime, test, source.keyAt(position)) === true;
+    if (source.modifications !== modifications) runtime.throwError('ConcurrentModificationError', '', [receiver]);
+    if (result !== keep) {
+      source.deleteAt(position);
+      modifications = source.modifications;
+    }
+  }
   return undefined;
 }
 define('Set.removeWhere', (runtime, receiver, [test]) => filterSet(runtime, receiver, test, false));
 define('Set.retainWhere', (runtime, receiver, [test]) => filterSet(runtime, receiver, test, true));
-define('Set.containsAll', (runtime, receiver, [other]) =>
-  iterableValues(runtime, other).every((value) => store(receiver).has(value))
-);
+define('Set.containsAll', (runtime, receiver, [other]) => {
+  // SetMixin.containsAll stops at the first element the set lacks.
+  const iterator = runtime.getProperty(other, 'iterator', undefined);
+  while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
+    if (!store(receiver).has(runtime.getProperty(iterator, 'current', undefined))) return false;
+  }
+  return true;
+});
+// As SetMixin: a copy of the set (`toSet`), then the elements the other set decides about removed from it.
 define('Set.intersection', (runtime, receiver, [other]) => {
-  const result = newSet(runtime, elementTypeOf(receiver as DartObject));
-  for (const key of store(receiver).values()) if (setContains(runtime, other, key)) store(result).set(key, undefined);
+  const result = copySet(runtime, receiver as DartObject);
+  forEachValue(runtime, receiver, (key) => {
+    if (!setContains(runtime, other, key)) store(result).delete(key);
+  });
   return result;
 });
 define('Set.union', (runtime, receiver, [other]) => {
-  const result = newSet(runtime, elementTypeOf(receiver as DartObject));
-  for (const key of store(receiver).values()) store(result).set(key, undefined);
-  for (const key of iterableValues(runtime, other)) store(result).set(key, undefined);
+  const result = copySet(runtime, receiver as DartObject);
+  addAllToSet(runtime, result, other);
   return result;
 });
 define('Set.difference', (runtime, receiver, [other]) => {
-  const result = newSet(runtime, elementTypeOf(receiver as DartObject));
-  for (const key of store(receiver).values()) if (!setContains(runtime, other, key)) store(result).set(key, undefined);
+  const result = copySet(runtime, receiver as DartObject);
+  forEachValue(runtime, receiver, (key) => {
+    if (setContains(runtime, other, key)) store(result).delete(key);
+  });
   return result;
 });
+
+/** `_Set<E>()..addAll(this)`, the VM's `toSet`. */
+function copySet(runtime: Runtime, set: DartObject): DartObject {
+  const copy = newSet(runtime, elementTypeOf(set));
+  addAllToSet(runtime, copy, set);
+  return copy;
+}
 define('Set.clear', (runtime, receiver) => {
   checkSetModifiable(runtime, receiver);
   store(receiver).clear();
@@ -964,7 +1009,7 @@ define('Set.last', (runtime, receiver) => {
   if (keys.length === 0) runtime.throwError('StateError', '', ['No element']);
   return keys.at(-1);
 });
-define('Set.toSet', (runtime, receiver) => setFrom(runtime, receiver, elementTypeOf(receiver as DartObject), false));
+define('Set.toSet', (runtime, receiver) => copySet(runtime, receiver as DartObject));
 define('Set.toString', (runtime, receiver) =>
   iterableToFullString(runtime, receiver, store(receiver).values(), '{', '}')
 );
@@ -985,12 +1030,15 @@ function mapFrom(
   isConst = false
 ): DartObject {
   const map = newMap(runtime, typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC);
-  for (const [key, value] of mapEntries(runtime, other)) {
-    if (check) {
-      castTo(runtime, key, typeArgs[0] ?? DYNAMIC);
-      castTo(runtime, value, typeArgs[1] ?? DYNAMIC);
-    }
-    store(map).set(key, value);
+  // Map.from sets each entry as forEach gives it; Map.of is addAll, which may copy another map's table outright.
+  if (check || !(isPlainHashObject(runtime, other, '_Map') && store(map).quickCopy(store(other)))) {
+    forEachEntry(runtime, other, (key, value) => {
+      if (check) {
+        castTo(runtime, key, typeArgs[0] ?? DYNAMIC);
+        castTo(runtime, value, typeArgs[1] ?? DYNAMIC);
+      }
+      store(map).set(key, value);
+    });
   }
   (map as DartObject & { unmodifiable?: boolean }).unmodifiable = isConst;
   return map;
@@ -1010,26 +1058,36 @@ defineConstructor('Map.fromIterable', (runtime, _instance, args, typeArgs) => {
   const map = newMap(runtime, typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC);
   const keyOf = named(args.named, 'key', undefined);
   const valueOf = named(args.named, 'value', undefined);
-  for (const element of iterableValues(runtime, args.positional[0])) {
+  forEachValue(runtime, args.positional[0], (element) => {
     const key = keyOf === undefined ? element : callFunction(runtime, keyOf, element);
     const value = valueOf === undefined ? element : callFunction(runtime, valueOf, element);
     store(map).set(key, value);
-  }
+  });
   return map;
 });
 defineConstructor('Map.fromIterables', (runtime, _instance, args, typeArgs) => {
   const map = newMap(runtime, typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC);
-  const keys = iterableValues(runtime, args.positional[0]);
-  const values = iterableValues(runtime, args.positional[1]);
-  if (keys.length !== values.length) runtime.throwError('ArgumentError', '', ['Iterables do not have same length.']);
-  for (const [position, key] of keys.entries()) store(map).set(key, values[position]);
+  // As the SDK's _fillMapWithIterables: both iterators in step, each pair set as it is read.
+  const keys = runtime.getProperty(args.positional[0], 'iterator', undefined);
+  const values = runtime.getProperty(args.positional[1], 'iterator', undefined);
+  const moveNext = (iterator: Value): boolean =>
+    runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true;
+  let hasNextKey = moveNext(keys);
+  let hasNextValue = moveNext(values);
+  while (hasNextKey && hasNextValue) {
+    store(map).set(runtime.getProperty(keys, 'current', undefined), runtime.getProperty(values, 'current', undefined));
+    hasNextKey = moveNext(keys);
+    hasNextValue = moveNext(values);
+    runtime.spend();
+  }
+  if (hasNextKey || hasNextValue) runtime.throwError('ArgumentError', '', ['Iterables do not have same length.']);
   return map;
 });
 defineConstructor('Map.fromEntries', (runtime, _instance, args, typeArgs) => {
   const map = newMap(runtime, typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC);
-  for (const entry of iterableValues(runtime, args.positional[0])) {
+  forEachValue(runtime, args.positional[0], (entry) => {
     store(map).set(runtime.getProperty(entry, 'key', undefined), runtime.getProperty(entry, 'value', undefined));
-  }
+  });
   return map;
 });
 define('Map.cast', (runtime, receiver, _args, _named, typeArgs) =>
@@ -1095,26 +1153,31 @@ define('_MapIterator.moveNext', (runtime, receiver) => moveStoreIterator(runtime
 define('_MapIterator.current', (runtime, receiver) => storeCurrent(runtime, receiver));
 define('Map.addEntries', (runtime, receiver, [entries]) => {
   checkMapModifiable(runtime, receiver);
-  for (const entry of iterableValues(runtime, entries)) {
+  forEachValue(runtime, entries, (entry) => {
     store(receiver).set(runtime.getProperty(entry, 'key', undefined), runtime.getProperty(entry, 'value', undefined));
-  }
+  });
   return;
 });
 define('Map.removeWhere', (runtime, receiver, [test]) => {
   checkMapModifiable(runtime, receiver);
+  // As the VM's removeWhere: test each entry in place and mark the removed ones without hashing their keys.
   const source = store(receiver);
-  const removed: Value[] = [];
-  const positions = [...source.positions()];
-  for (const position of positions) {
-    const key = source.keyAt(position);
-    if (callFunction(runtime, test, key, source.entryValues[position]) === true) removed.push(key);
+  const used = source.keys.length;
+  let modifications = source.modifications;
+  for (let position = 0; position < used; position++) {
+    if (!source.isLive(position)) continue;
+    const remove = callFunction(runtime, test, source.keyAt(position), source.entryValues[position]) === true;
+    if (source.modifications !== modifications) runtime.throwError('ConcurrentModificationError', '', [receiver]);
+    if (remove) {
+      source.deleteAt(position);
+      modifications = source.modifications;
+    }
   }
-  for (const key of removed) source.delete(key);
   return;
 });
 define('Map.addAll', (runtime, receiver, [other]) => {
   checkMapModifiable(runtime, receiver);
-  for (const [key, value] of mapEntries(runtime, other)) store(receiver).set(key, value);
+  addAllToMap(runtime, receiver as DartObject, other);
   return;
 });
 define('Map.remove', (runtime, receiver, [key]) => {
@@ -1242,17 +1305,47 @@ function setContains(runtime: Runtime, set: Value, key: Value): boolean {
   return runtime.invoke(set, 'contains', { positional: [key], named: undefined }, [], undefined) === true;
 }
 
-/** A map's entries in order: read directly from the interpreter's maps, and through `forEach` from the program's. */
-export function mapEntries(runtime: Runtime, map: Value): [Value, Value][] {
+/** `map.forEach(body)`: the interpreter's maps run it directly, checking for modification after each entry. */
+export function forEachEntry(runtime: Runtime, map: Value, body: (key: Value, value: Value) => void): void {
   if (map instanceof DartObject && map.native instanceof HashStore) {
     const source = map.native;
-    return [...source.positions()].map((position) => [source.keyAt(position), source.entryValues[position]]);
+    const used = source.keys.length;
+    const modifications = source.modifications;
+    for (let position = 0; position < used; position++) {
+      if (!source.isLive(position)) continue;
+      body(source.keyAt(position), source.entryValues[position]);
+      if (source.modifications !== modifications) runtime.throwError('ConcurrentModificationError', '', [map]);
+    }
+    return;
   }
-  const entries: [Value, Value][] = [];
-  const collect = nativeFunction(2, (args) => {
-    entries.push([args[0], args[1]]);
+  const callback = nativeFunction(2, (args) => {
+    body(args[0], args[1]);
     return;
   });
-  runtime.invoke(map, 'forEach', { positional: [collect], named: undefined }, [], undefined);
-  return entries;
+  runtime.invoke(map, 'forEach', { positional: [callback], named: undefined }, [], undefined);
+}
+
+define('Map.forEach', (runtime, receiver, [action]) => {
+  forEachEntry(runtime, receiver, (key, value) => callFunction(runtime, action, key, value));
+  return;
+});
+define('Map.putIfAbsent', (runtime, receiver, [key, ifAbsent]) => {
+  checkMapModifiable(runtime, receiver);
+  checkElement(runtime, key, elementTypeOf(receiver as DartObject, 0), 'key');
+  return store(receiver).putIfAbsent(key, () => {
+    const value = callFunction(runtime, ifAbsent);
+    checkElement(runtime, value, elementTypeOf(receiver as DartObject, 1), 'value');
+    return value;
+  });
+});
+
+/** The VM's `_Map.addAll`: an empty map copies another `_Map` without deleted entries, and otherwise sets each. */
+export function addAllToMap(runtime: Runtime, map: DartObject, other: Value): void {
+  if (isPlainHashObject(runtime, other, '_Map') && store(map).quickCopy(store(other))) return;
+  forEachEntry(runtime, other, (key, value) => store(map).set(key, value));
+}
+
+/** The quick copy of `_Set.addAll` into an empty set, telling whether it applied. */
+export function quickCopySet(runtime: Runtime, set: DartObject, other: Value): boolean {
+  return isPlainHashObject(runtime, other, '_Set') && store(set).quickCopy(store(other));
 }

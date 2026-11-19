@@ -1,5 +1,5 @@
 import { CompileError } from '../interpreter/diagnostics';
-// code-gauge-allow-file fileNcss 901 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 909 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Arguments as ArgumentsSyntax,
   CascadeSelector,
@@ -776,37 +776,41 @@ export abstract class ExpressionCompiler extends CompilerBase {
     }
   }
 
-  /** Whether a spread names a map or another iterable, read from the type of a variable it names. */
-  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of spread operand whose type tells a set from a map.
+  /** Whether a spread names a map or another iterable, read from the static type of its value. */
   private spreadKind(value: Expression): 'set' | 'map' | undefined {
-    let type: DartType | undefined;
-    if (value.kind === 'identifier') {
-      const resolution = this.resolveName(value.name);
-      if (resolution?.kind === 'local') type = this.promotedType(resolution.variable);
-      else if (resolution?.kind === 'declaration' && resolution.declaration.kind === 'variable')
-        type = resolution.declaration.global.type;
-    } else if (value.kind === 'list') {
-      return 'set';
-    } else if (value.kind === 'setOrMap') {
+    if (value.kind === 'list') return 'set';
+    if (value.kind === 'setOrMap') {
       if (value.typeArguments) return value.typeArguments.length === 2 ? 'map' : 'set';
       return this.setOrMapFromElements(value.elements, undefined);
-    } else {
-      // The SDK decides by the spread value's static type; compiling it here for its type changes nothing else.
-      const savedFlow = this.flow;
-      try {
-        type = this.compileExpression(value).type;
-      } catch (error) {
-        if (!(error instanceof CompileError)) throw error;
-      } finally {
-        this.flow = savedFlow;
-      }
     }
+    const type = value.kind === 'identifier' ? this.declaredTypeOf(value.name) : this.speculativeTypeOf(value);
     if (!type) return undefined;
     const base = resolveBound(nonNullable(type));
     if (base.kind !== 'interface') return undefined;
     if (base.cls.isSubclassOf(coreTypes.map)) return 'map';
     if (base.cls.isSubclassOf(coreTypes.iterable)) return 'set';
     return undefined;
+  }
+
+  private declaredTypeOf(name: string): DartType | undefined {
+    const resolution = this.resolveName(name);
+    if (resolution?.kind === 'local') return this.promotedType(resolution.variable);
+    if (resolution?.kind === 'declaration' && resolution.declaration.kind === 'variable')
+      return resolution.declaration.global.type;
+    return undefined;
+  }
+
+  /** An expression's static type, compiling it without keeping its code, flow, or errors. */
+  private speculativeTypeOf(value: Expression): DartType | undefined {
+    const savedFlow = this.flow;
+    try {
+      return this.compileExpression(value).type;
+    } catch (error) {
+      if (!(error instanceof CompileError)) throw error;
+      return undefined;
+    } finally {
+      this.flow = savedFlow;
+    }
   }
 
   protected abstract buildSet(

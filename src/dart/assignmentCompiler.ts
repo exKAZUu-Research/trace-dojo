@@ -773,11 +773,11 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     return (frame, add) => {
       const map = run(frame);
       if (nullAware && map === undefined) return;
-      addMapEntries(frame, map, add);
+      // The VM adds a spread map by the literal's `addAll`.
+      frame.runtime.links.addAllToMap(frame.runtime, add.target as DartObject, map);
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 18 -- Each branch is one of the cases Dart distinguishes for this construct.
   private compileIterableSpread(
     element: Extract<CollectionElement, { kind: 'spread' }>,
     compiled: Compiled,
@@ -803,10 +803,6 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     return (frame, add) => {
       const iterable = run(frame);
       if (nullAware && iterable === undefined) return;
-      if (iterable instanceof DartList && !castElements) {
-        for (const value of iterable.elements) add(value);
-        return;
-      }
       addIterableElements(frame, iterable, castElements, add);
     };
   }
@@ -975,11 +971,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
   }
 
   // code-gauge-allow duplicateLines 18 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-  protected buildSet(
-    type: DartType,
-    run: (frame: Frame, add: (key: Value) => void) => void,
-    isConst: boolean
-  ): Compiled {
+  protected buildSet(type: DartType, run: (frame: Frame, add: AddElement) => void, isConst: boolean): Compiled {
     const elementType = (type as InterfaceType).args[0];
     const resolve = this.runtimeType(elementType);
     const build: Eval = (frame) => {
@@ -987,9 +979,10 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       frame.temporaries.push(set);
       try {
         const store = set.native as HashStore;
-        run(frame, (key) => {
-          store.set(key, undefined);
-        });
+        run(
+          frame,
+          Object.assign((key: Value) => store.set(key, undefined), { target: set })
+        );
       } finally {
         frame.temporaries.pop();
       }
@@ -999,11 +992,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
   }
 
   // code-gauge-allow duplicateLines 18 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-  protected buildMap(
-    type: DartType,
-    run: (frame: Frame, add: (key: Value, value?: Value) => void) => void,
-    isConst: boolean
-  ): Compiled {
+  protected buildMap(type: DartType, run: (frame: Frame, add: AddElement) => void, isConst: boolean): Compiled {
     const [keyType, valueType] = (type as InterfaceType).args;
     const resolveKey = this.runtimeType(keyType);
     const resolveValue = this.runtimeType(valueType);
@@ -1012,9 +1001,10 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       frame.temporaries.push(map);
       try {
         const store = map.native as HashStore;
-        run(frame, (key, value) => {
-          store.set(key, value);
-        });
+        run(
+          frame,
+          Object.assign((key: Value, value?: Value) => store.set(key, value), { target: map })
+        );
       } finally {
         frame.temporaries.pop();
       }
@@ -1158,7 +1148,8 @@ interface ElementTypes {
   key: DartType;
   value?: DartType;
 }
-type AddElement = (key: Value, value?: Value) => void;
+/** Adds an element to a collection literal being built; a set or map literal names itself as the target. */
+type AddElement = ((key: Value, value?: Value) => void) & { target?: DartObject };
 
 function collectionName(kind: 'list' | 'set' | 'map'): string {
   return kind === 'list' ? 'リスト' : kind === 'set' ? 'セット' : 'マップ';
@@ -1168,23 +1159,16 @@ function nullableContext(context: DartType | undefined): DartType | undefined {
   return context ? makeNullable(context) : undefined;
 }
 
-function addMapEntries(frame: Frame, map: Value, add: AddElement): void {
-  const { runtime } = frame;
-  const entries = runtime.getProperty(map, 'entries', undefined);
-  const iterator = runtime.getProperty(entries, 'iterator', undefined);
-  frame.temporaries.push(iterator);
-  try {
-    while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
-      const entry = runtime.getProperty(iterator, 'current', undefined);
-      add(runtime.getProperty(entry, 'key', undefined), runtime.getProperty(entry, 'value', undefined));
-    }
-  } finally {
-    frame.temporaries.pop();
-  }
-}
-
 function addIterableElements(frame: Frame, iterable: Value, castElements: Eval | undefined, add: AddElement): void {
   const { runtime } = frame;
+  if (!castElements) {
+    // A set literal adds a spread set by `addAll`, which copies a plain set's table into an empty literal.
+    if (add.target && runtime.links.quickCopySet(runtime, add.target, iterable)) return;
+    if (iterable instanceof DartList) {
+      for (const value of iterable.elements) add(value);
+      return;
+    }
+  }
   const iterator = runtime.getProperty(iterable, 'iterator', undefined);
   frame.temporaries.push(iterator);
   try {
