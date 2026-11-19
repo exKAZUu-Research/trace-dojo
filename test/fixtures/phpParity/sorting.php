@@ -73,3 +73,13 @@ unset($empty[4]);
 array_multisort($empty);
 $empty[] = 'appended';
 var_dump(array_keys($empty));
+
+foreach ([SORT_LOCALE_STRING, SORT_LOCALE_STRING | SORT_FLAG_CASE, SORT_STRING | SORT_FLAG_CASE] as $flags) {
+    $values = ['b', 'A', "A\0x", 'a', 'B'];
+    echo json_encode(array_unique($values, $flags)), "\n";
+    sort($values, $flags);
+    echo json_encode($values), "\n";
+    $keys = ['b' => 1, "A\0x" => 2, 'A' => 3, 'a' => 4, 'B' => 5];
+    krsort($keys, $flags);
+    echo json_encode(array_keys($keys)), "\n";
+}

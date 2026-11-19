@@ -152,16 +152,17 @@ defineFunction('nl_langinfo(int $item): string|false', ({ args }) => {
   return entry[1];
 });
 
-// The C library's strcoll, which compares as strcmp in the C locale: up to the first NUL byte, by byte difference.
-defineFunction('strcoll(string $string1, string $string2): int', ({ args }) => {
-  const a = s(args[0]);
-  const b = s(args[1]);
+defineFunction('strcoll(string $string1, string $string2): int', ({ args }) =>
+  BigInt(compareLocaleStrings(s(args[0]), s(args[1])))
+);
+
+export function compareLocaleStrings(a: string, b: string): number {
   for (let index = 0; ; index++) {
     const x = byteAt(a, index);
     const y = byteAt(b, index);
-    if (x !== y || x === 0) return BigInt(x - y);
+    if (x !== y || x === 0) return x - y;
   }
-});
+}
 
 /** Uppercases a byte as the C library's toupper does in the current LC_CTYPE locale. */
 export function ctypeUpper(char: string): string {

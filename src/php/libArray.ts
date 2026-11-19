@@ -18,6 +18,7 @@ import {
 } from './errors';
 import { releaseDropped } from './garbage';
 import { cast } from './interp';
+import { compareLocaleStrings } from './libLocale';
 import { naturalCompare } from './libString';
 import { defineAlias, defineConstant, defineFunction, markDirectOnly, markInlined } from './native';
 import {
@@ -1375,11 +1376,13 @@ function sortComparator(
     case 1n: {
       return (a, b) => compareNumbers(toFloat(deref(a), reportWarning), toFloat(deref(b), reportWarning));
     }
-    case 2n:
-    case 5n: {
+    case 2n: {
       return caseless
         ? (a, b) => compareBytes(lower(convert(deref(a))), lower(convert(deref(b))))
         : (a, b) => compareBytes(convert(deref(a)), convert(deref(b)));
+    }
+    case 5n: {
+      return (a, b) => compareLocaleStrings(convert(deref(a)), convert(deref(b)));
     }
     case 6n: {
       return (a, b) => naturalCompare(convert(deref(a)), convert(deref(b)), caseless);
