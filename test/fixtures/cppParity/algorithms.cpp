@@ -4,6 +4,7 @@
 #include <numeric>
 #include <string>
 #include <utility>
+using namespace std;
 bool byFirst(const std::pair<int,int>& a, const std::pair<int,int>& b) { return a.first < b.first; }
 bool isEven(int x) { return x % 2 == 0; }
 int twice(int x) { return x * 2; }
@@ -38,5 +39,5 @@ int main() {
   std::cout << (std::find(words.begin(), words.end(), "dog") - words.begin()) << ' '
             << std::count(words.begin(), words.end(), fox) << ' '
             << std::equal(words.begin(), words.end(), expected) << ' '
-            << (std::remove(words.begin(), words.end(), fox) - words.begin()) << '\n';
+            << (remove(words.begin(), words.end(), fox) - words.begin()) << '\n';
 }

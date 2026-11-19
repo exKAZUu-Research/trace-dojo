@@ -3,6 +3,22 @@ import { expect, test } from 'vitest';
 import { executeProgram } from '../../src/interpreter/program';
 
 test.each([
+  ['cstdio', 'int value; scanf("%d", &value);'],
+  ['cstdio', 'std::scanf("%*d");'],
+  ['stdio.h', 'getchar();'],
+  ['cstdio', 'FILE* file = fopen("example.txt", "r");'],
+  ['cstdio', 'char buffer[8]; fgets(buffer, 8, stdin);'],
+  ['cstdio', 'std::remove("example.txt");'],
+])('rejects unavailable C input and file access with an explicit diagnostic: %s %s', (header, body) => {
+  const program = `#include <${header}>
+int main() { ${body} }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: expect.stringContaining('この採点環境では使えません。') }],
+  });
+});
+
+test.each([
   ['reverse', 'v.begin(), v.end()'],
   ['rotate', 'v.begin(), v.begin() + 1, v.end()'],
   ['sort', 'v.begin(), v.end(), less'],

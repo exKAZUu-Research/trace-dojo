@@ -31,6 +31,13 @@ export function isLibcHeaderMacro(name: string, headers: ReadonlySet<string>): b
   return Object.hasOwn(macros, name) && visibleIn(macros[name], headers);
 }
 
+export function isLibcGlobalDeclared(name: string, headers: ReadonlySet<string>): boolean {
+  return (
+    Object.hasOwn(declarations, name) &&
+    declarations[name].some(([group]) => typeof group === 'number' && visibleIn(group, headers))
+  );
+}
+
 function visibleIn(group: number, headers: ReadonlySet<string>): boolean {
   return [...headers].some((header) => headerGroups[group].has(header));
 }

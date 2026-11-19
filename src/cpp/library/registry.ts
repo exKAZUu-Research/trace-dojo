@@ -40,10 +40,10 @@ import { constantsOf } from './constants';
 import { containerTemplates } from './containers';
 import { exceptionClasses } from './exceptions';
 import { FLAGS, ManipulatorValue, Streams, type StreamValue } from './iostream';
-import { conflictsWithLibcGlobal, isLibcHeaderMacro } from './libcGlobals';
+import { conflictsWithLibcGlobal, isLibcGlobalDeclared, isLibcHeaderMacro } from './libcGlobals';
 import { randomEngines } from './random';
 import { stringClass, stringFunctions } from './string';
-import { asNumber, generic, native } from './support';
+import { asNumber, CONST_CHAR_PTR, generic, native } from './support';
 import { turtleClass } from './turtle';
 import { hasLocaleCtypeOverload, headerOf, isVisible } from './visibility';
 
@@ -130,6 +130,11 @@ const UNSUPPORTED_STD_NAMES: Record<string, string> = {
   minstd_rand: 'std::minstd_rand',
   default_random_engine: 'std::default_random_engine',
   sample: 'std::sample',
+  terminate: 'std::terminate',
+  addressof: 'std::addressof',
+};
+
+const UNSUPPORTED_C_NAMES: Record<string, string> = {
   system: '外部のコマンドの実行（std::system）',
   getenv: '環境変数（std::getenv）',
   signal: 'シグナル（std::signal）',
@@ -137,16 +142,31 @@ const UNSUPPORTED_STD_NAMES: Record<string, string> = {
   setjmp: '大域的な脱出（setjmp）',
   longjmp: '大域的な脱出（longjmp）',
   scanf: '標準入力（scanf）',
+  vscanf: '標準入力（vscanf）',
   getchar: '標準入力（getchar）',
+  stdin: '標準入力（stdin）',
+  getc: '標準入力・ファイル（getc）',
+  fgetc: '標準入力・ファイル（fgetc）',
   fgets: '標準入力・ファイル（fgets）',
+  fscanf: '標準入力・ファイル（fscanf）',
+  vfscanf: '標準入力・ファイル（vfscanf）',
+  ungetc: '標準入力・ファイル（ungetc）',
   fopen: 'ファイルの読み書き（fopen）',
-  remove: 'ファイルの削除（std::remove）',
+  freopen: 'ファイルの読み書き（freopen）',
+  fclose: 'ファイルの読み書き（fclose）',
+  fread: 'ファイルの読み書き（fread）',
+  fwrite: 'ファイルの読み書き（fwrite）',
+  fseek: 'ファイルの読み書き（fseek）',
+  ftell: 'ファイルの読み書き（ftell）',
+  fgetpos: 'ファイルの読み書き（fgetpos）',
+  fsetpos: 'ファイルの読み書き（fsetpos）',
+  rewind: 'ファイルの読み書き（rewind）',
+  tmpfile: 'ファイルの読み書き（tmpfile）',
+  tmpnam: 'ファイルの読み書き（tmpnam）',
   rename: 'ファイルの名前の変更（std::rename）',
   abort: 'std::abort',
   atexit: 'std::atexit',
   quick_exit: 'std::quick_exit',
-  terminate: 'std::terminate',
-  addressof: 'std::addressof',
 };
 
 /** The library a program compiles against: what `#include` and `std::` give it, and `Turtle`. */
@@ -168,6 +188,9 @@ export class Library {
   /** `FILE`, which only `stdout` and `stderr` point to. */
   readonly fileClass: ClassInfo;
   private readonly files = new Map<'stdout' | 'stderr', Box>();
+  private readonly removeFile = native('remove', [CONST_CHAR_PTR], INT, () => {}, {
+    uses: (row) => this.compiler.unsupported(row, 'ファイルの削除（remove）'),
+  });
 
   constructor() {
     this.fileClass = new ClassInfo('FILE', 'struct');
@@ -209,8 +232,12 @@ export class Library {
   }
 
   std(name: string): Entity | undefined {
-    if (!isVisible(name, this.headers, 'std')) return undefined;
-    const entity = this.stdNames.get(name);
+    const visible = isVisible(name, this.headers, 'std');
+    const entity = visible ? this.stdNames.get(name) : undefined;
+    const cOverload = this.cOverload(name);
+    if (cOverload) {
+      return { kind: 'functions', functions: [...(entity?.kind === 'functions' ? entity.functions : []), cOverload] };
+    }
     if (entity?.kind === 'functions' && hasLocaleCtypeOverload(name, this.headers)) {
       let overload = this.localeCtypeOverloads.get(name);
       if (!overload) {
@@ -219,15 +246,28 @@ export class Library {
       }
       return { kind: 'functions', functions: [...entity.functions, overload] };
     }
-    return (
-      entity ??
-      (UNSUPPORTED_STD_NAMES[name] ? { kind: 'unsupported', feature: UNSUPPORTED_STD_NAMES[name] } : undefined)
-    );
+    const feature = visible && Object.hasOwn(UNSUPPORTED_STD_NAMES, name) ? UNSUPPORTED_STD_NAMES[name] : undefined;
+    return entity ?? (feature ? { kind: 'unsupported', feature } : this.unsupportedCName(name));
   }
 
   global(name: string): Entity | undefined {
-    if (name !== 'Turtle' && !isVisible(name, this.headers, 'global')) return undefined;
-    return this.globalNames.get(name);
+    const cOverload = this.cOverload(name);
+    if (cOverload) return { kind: 'functions', functions: [cOverload] };
+    const visible = name === 'Turtle' || isVisible(name, this.headers, 'global');
+    return (visible ? this.globalNames.get(name) : undefined) ?? this.unsupportedCName(name);
+  }
+
+  private cOverload(name: string): FunctionInfo | undefined {
+    if (name === 'remove' && isLibcGlobalDeclared(name, this.headers)) return this.removeFile;
+  }
+
+  private unsupportedCName(name: string): Entity | undefined {
+    if (
+      Object.hasOwn(UNSUPPORTED_C_NAMES, name) &&
+      (isLibcGlobalDeclared(name, this.headers) || isLibcHeaderMacro(name, this.headers))
+    ) {
+      return { kind: 'unsupported', feature: UNSUPPORTED_C_NAMES[name] };
+    }
   }
 
   conflictsWithGlobal(name: string, entity: Type | FunctionInfo): boolean {
@@ -273,6 +313,9 @@ export class Library {
 
   private populate(): void {
     this.globalNames.set('Turtle', { kind: 'class', cls: this.turtle });
+    const file: Entity = { kind: 'type', type: classType(this.fileClass) };
+    this.globalNames.set('FILE', file);
+    this.addStd('FILE', file);
     this.addStd('string', { kind: 'class', cls: this.stringClass });
     for (const [name, cls] of this.exceptions) this.addStd(name, { kind: 'class', cls });
     const { streams } = this;

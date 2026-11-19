@@ -854,6 +854,7 @@ for (const [group, names] of Object.entries({
   ],
   cstring: ['strlen', 'strcmp', 'strncmp', 'strcpy', 'strncpy', 'strcat', 'strchr', 'strstr'],
   cstdio: [
+    'FILE',
     'printf',
     'fprintf',
     'sprintf',
