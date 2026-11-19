@@ -169,6 +169,10 @@ interface ClassCharacter {
   value: number;
 }
 
+interface ClassLexicalState {
+  quoted: boolean;
+}
+
 interface ClassMembers {
   content: string;
   /** Regexes of the sets that a JavaScript class cannot nest, such as complements, which the class also matches. */
@@ -1120,58 +1124,56 @@ class PatternConverter {
       this.fail(reason, posix);
     }
     this.index++;
-    this.skipClassSpace();
-    const negated = this.source[this.index] === '^';
+    const state = { quoted: false };
+    this.seekClassToken(state);
+    const negated = !state.quoted && this.source[this.index] === '^';
     if (negated) this.index++;
     const members: ClassMembers = { content: '', alternatives: [] };
     let empty = true;
     for (;;) {
-      this.skipClassSpace();
-      if (!empty && this.source[this.index] === ']') break;
+      this.seekClassToken(state);
+      if (!empty && !state.quoted && this.source[this.index] === ']') break;
       if (this.index >= this.source.length) {
         this.fail('missing terminating ] for character class', this.source.length);
       }
-      if (this.classMember(members)) empty = false;
+      this.classMember(members, state);
+      empty = false;
     }
     this.index++;
     this.emit(classText(members, negated), true);
   }
 
-  /** Reads a member of a class, returning whether it added any character (`\E` and an empty `\Q\E` do not). */
-  private classMember(members: ClassMembers): boolean {
-    if (this.source.startsWith(String.raw`\Q`, this.index)) {
-      this.index += 2;
-      const before = members.content;
-      this.quoted((char) => (members.content += classLiteral(char)));
-      return members.content !== before;
-    }
-    if (this.source.startsWith(String.raw`\E`, this.index)) {
-      this.index += 2;
-      return false;
-    }
-    const start = this.classAtom();
-    this.skipClassSpace();
-    if (this.source[this.index] !== '-' || !this.startClassRange()) {
+  private classMember(members: ClassMembers, state: ClassLexicalState): void {
+    const start = this.classAtom(state);
+    this.seekClassToken(state);
+    if (state.quoted || this.source[this.index] !== '-' || !this.startClassRange(state)) {
       addClassAtom(members, start);
-      return true;
+      return;
     }
     if (!('value' in start)) this.fail('invalid range in character class', this.index);
-    const end = this.classAtom();
+    const end = this.classAtom(state);
     if (!('value' in end)) this.fail('invalid range in character class', this.index);
     if (end.value < start.value) this.fail('range out of order in character class', this.index);
     members.content += `${start.text}-${end.text}`;
-    return true;
   }
 
-  private skipClassSpace(): void {
-    if (this.options.extendedClass) this.readMatch(/^[ \t]*/);
+  private seekClassToken(state: ClassLexicalState): void {
+    for (;;) {
+      if (!state.quoted && this.options.extendedClass) this.readMatch(/^[ \t]*/);
+      if (this.source.startsWith(String.raw`\E`, this.index)) state.quoted = false;
+      else if (!state.quoted && this.source.startsWith(String.raw`\Q`, this.index)) state.quoted = true;
+      else return;
+      rt().spend();
+      this.index += 2;
+    }
   }
 
-  private startClassRange(): boolean {
+  private startClassRange(state: ClassLexicalState): boolean {
     const dash = this.index++;
-    this.skipClassSpace();
-    if (this.index < this.source.length && this.source[this.index] !== ']') return true;
+    this.seekClassToken(state);
+    if (this.index < this.source.length && (state.quoted || this.source[this.index] !== ']')) return true;
     this.index = dash;
+    state.quoted = false;
     return false;
   }
 
@@ -1191,10 +1193,12 @@ class PatternConverter {
     return undefined;
   }
 
-  private classAtom(): ClassCharacter | CharacterSet {
-    const posix = this.posixEnd();
-    if (posix !== undefined) return this.posixClass(posix);
-    if (this.source[this.index] === '\\') return this.classEscape();
+  private classAtom(state: ClassLexicalState): ClassCharacter | CharacterSet {
+    if (!state.quoted) {
+      const posix = this.posixEnd();
+      if (posix !== undefined) return this.posixClass(posix);
+      if (this.source[this.index] === '\\') return this.classEscape();
+    }
     const char = String.fromCodePoint(this.source.codePointAt(this.index) as number);
     this.index += char.length;
     return { text: classLiteral(char), value: char.codePointAt(0) as number };
