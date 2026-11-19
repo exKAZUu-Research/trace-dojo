@@ -3120,6 +3120,16 @@ try { $ao2->x--; } catch (Exception $e) {}
 try { $ao2->y++; } catch (Exception $e) {}
 restore_error_handler();
 echo 'aoThrow:' . json_encode($ao2->getArrayCopy()) . "\n";
+
+$ao3 = new ArrayObject([], ArrayObject::ARRAY_AS_PROPS);
+$ext = 5;
+set_error_handler(function () use ($ao3, &$ext) { $ao3['x'] = &$ext; return true; });
+$ao3['x']++;
+$ao4 = new ArrayObject([], ArrayObject::ARRAY_AS_PROPS);
+set_error_handler(function () use ($ao4, &$ext) { $ao4['y'] = &$ext; return true; });
+$ao4->y += 2;
+restore_error_handler();
+echo 'aoRef:' . json_encode([$ext, $ao3['x'], $ao4['y']]) . "\n";
 `);
   expect(result).toMatchObject({
     kind: 'executed',
@@ -3138,6 +3148,7 @@ echo 'aoThrow:' . json_encode($ao2->getArrayCopy()) . "\n";
       'warn;TypeError;unpack:set',
       'propThrow:{"x":5}',
       'aoThrow:{"x":null,"y":1}',
+      'aoRef:[5,1,2]',
       '',
     ].join('\n'),
   });

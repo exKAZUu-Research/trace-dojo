@@ -296,7 +296,7 @@ export class ElementPlace implements Place {
     if (this.objectBacked) {
       if (warning) warning(() => this.warnUndefined());
       else this.warnUndefined();
-      this.set(null);
+      this.resetNull();
       return true;
     }
     if (this.unbound || !sharingCheck(this.array, 1)) {
@@ -328,6 +328,10 @@ export class ElementPlace implements Place {
     if (!this.warnMissingUpdate()) return SKIP_COMPOUND;
     this.set(null);
     return { value: null };
+  }
+
+  resetNull(): void {
+    if (this.key !== undefined) this.array.setSlot(this.key, null);
   }
 
   set(value: Value): Value {
