@@ -151,6 +151,76 @@ void main() {
   });
 });
 
+// The interpreter matches regular expressions with its own engine, which must keep ECMAScript's backtracking order,
+// the groups each iteration of a loop clears, lookbehind's backward matching, and Unicode and case-insensitive modes.
+test("regular expressions match as the VM's Irregexp does", () => {
+  const program = String.raw`void main() {
+  String show(RegExpMatch m) => [for (var g = 0; g <= m.groupCount; g++) m[g]].toString();
+  print(show(RegExp(r'(z)((a+)?(b+)?(c))*').firstMatch('zaacbbbcac')!));
+  print(show(RegExp(r'(.*?)a(?!(a+)b\2c)\2(.*)').firstMatch('baaabaac')!));
+  print(show(RegExp(r'(?<=(\d+)(\d+))$').firstMatch('1053')!));
+  print(show(RegExp(r'(a*)*b').firstMatch('aaab')!));
+  print(RegExp(r'(?<q>["\x27]).*?\k<q>').allMatches('"a" \'b\'').map((m) => m.namedGroup('q')).toList());
+  print(RegExp(r'\bfoo\b').allMatches('foo foobar foo.').map((m) => m.start).toList());
+  print(RegExp(r'^\w+$', multiLine: true).allMatches('one\ntwo').map((m) => m[0]).toList());
+  print(RegExp(r'(?i:a)b').allMatches('aB Ab ab').map((m) => m.start).toList());
+  print([RegExp(r'ſ', caseSensitive: false).hasMatch('S'), RegExp(r'ſ', caseSensitive: false, unicode: true).hasMatch('S')]);
+  print('😀😀'.split(RegExp('', unicode: true)).length);
+  print('a1b22c333'.replaceAllMapped(RegExp(r'(\d)(\d*)'), (m) => '<' + m[1]! + '|' + m[2]! + '>'));
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: undefined,
+    stdout: [
+      '[zaacbbbcac, z, ac, a, null, c]',
+      '[baaabaac, ba, null, abaac]',
+      '[, 1, 053]',
+      '[aaab, aaa]',
+      '[", \']',
+      '[0, 11]',
+      '[one, two]',
+      '[3, 6]',
+      '[false, true]',
+      '2',
+      'a<1|>b<2|2>c<3|33>',
+      '',
+    ].join('\n'),
+  });
+});
+
+// Neither a host RegExp nor a host BigInt operation can be interrupted, so they must stop at the limits before they
+// hold the server's process.
+test.each([
+  {
+    name: 'a regular expression that backtracks exponentially',
+    body: "  print(RegExp(r'(x+x+)+y').hasMatch('x' * 40));",
+  },
+  {
+    name: 'a gcd of BigInts with millions of bits',
+    body: '  var a = (BigInt.one << 2000000) - BigInt.one;\n  print(a.gcd(a - BigInt.two));',
+  },
+])('$name stops at the operation limit', ({ body }) => {
+  expect(executeProgram('dart', `void main() {\n${body}\n}\n`)).toMatchObject({
+    kind: 'limitExceeded',
+    limit: 'operations',
+  });
+});
+
+test('a BigInt too large to compute runs out of memory before it is computed', () => {
+  const program = `void main() {
+  var x = BigInt.from(3);
+  try {
+    for (var i = 0; i < 40; i++) x = x * x;
+  } catch (e) {
+    print(e);
+  }
+  print(x.bitLength);
+}
+`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'Out of Memory\n3323908\n' });
+});
+
 test('stdout is shown, stderr is accepted without being shown, and exit stops the program', () => {
   const program = `import 'dart:io';
 
