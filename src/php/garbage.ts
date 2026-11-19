@@ -75,6 +75,7 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean, stopOnException: b
   const arrayCandidates = cycles ? [...runtime.arrayCycles].filter((array) => !reachedArrays.has(array)) : [];
   if (cycles) {
     runtime.gcRoots.clear();
+    runtime.pendingGcRoots.clear();
     runtime.arrayCycles.clear();
     runtime.objectCycles.clear();
     for (const array of arrayCandidates) runtime.collectingArrays.add(array);
@@ -99,9 +100,7 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean, stopOnException: b
   const collected = freed.length + arrayStorage.size;
   const destructible = freed.filter((object) => !object.destructed && object.cls.findMethod('__destruct'));
   if (destructible.length === 0 || runtime.shuttingDown) {
-    for (const object of handles) runtime.freeObject(object);
-    finishArrayCollection(runtime, arrayStorage);
-    retainTurtles(runtime, mark(runtime));
+    finishCollectedObjects(runtime, handles, arrayStorage);
     return collected;
   }
   return collectAfterDestruction(
@@ -115,8 +114,6 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean, stopOnException: b
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- Captures destructor exceptions while releasing the rest of the batch.
-// code-gauge-allow functionNcss 31 -- Destructor dispatch and cleanup use the same collection batch.
 // code-gauge-allow functionParameterCount 7 -- Uses the mark results, destructor order and shutdown policy for one collection batch.
 function collectAfterDestruction(
   runtime: Runtime,
@@ -152,16 +149,20 @@ function collectAfterDestruction(
     const after = mark(runtime, false, afterArrays);
     const remaining = handles.filter((object) => runtime.objects.get(object.id) === object && !after.has(object));
     count = countAfterDestruction(runtime, remaining, destructible, destructedInBuffer, arrayCandidates, afterArrays);
-    const children: unknown[] = [];
-    for (const object of remaining) {
-      pushObject(object, children);
-      runtime.freeObject(object);
-    }
-    finishArrayCollection(runtime, arrayStorage);
-    releaseDropped(runtime, children, true);
-    retainTurtles(runtime, mark(runtime));
+    finishCollectedObjects(runtime, remaining, arrayStorage);
   });
   return count;
+}
+
+function finishCollectedObjects(runtime: Runtime, objects: PhpObject[], arrayStorage: Set<PhpArray>): void {
+  const children: unknown[] = [];
+  for (const object of objects) {
+    pushObject(object, children);
+    runtime.freeObject(object);
+  }
+  finishArrayCollection(runtime, arrayStorage);
+  releaseDropped(runtime, children, true);
+  retainTurtles(runtime, mark(runtime));
 }
 
 function retainCollectionReceiver(runtime: Runtime, object: PhpObject): void {
@@ -227,12 +228,12 @@ export function releaseDropped(
         if (runtime.objects.get(object.id) === object) runtime.collectingObjects.add(object);
     }
   });
-  const candidates = runtime.collectingCycles ? [] : [...runtime.pendingGcRoots];
+  const candidates = [...runtime.pendingGcRoots];
   runtime.pendingGcRoots.clear();
   let roots: Set<unknown> | undefined;
   for (const value of candidates) {
     if (value instanceof PhpObject) {
-      if (value.isResource || runtime.collectingObjects.has(value) || runtime.objects.get(value.id) !== value) continue;
+      if (!runtime.isCollectableObject(value)) continue;
     } else if (value instanceof PhpArray) {
       if (value.uncollectable) continue;
       roots ??= ownershipRoots(runtime);
@@ -242,7 +243,7 @@ export function releaseDropped(
       }
     } else continue;
     if (runtime.gcRoots.has(value)) continue;
-    if (runtime.gcEnabled && runtime.gcRoots.size >= runtime.gcThreshold - 1) {
+    if (!runtime.collectingCycles && runtime.gcEnabled && runtime.gcRoots.size >= runtime.gcThreshold - 1) {
       const arrayCycle = value instanceof PhpArray && runtime.arrayCycles.has(value);
       const objectCycle = value instanceof PhpObject && runtime.objectCycles.has(value);
       runtime.held.push(value);

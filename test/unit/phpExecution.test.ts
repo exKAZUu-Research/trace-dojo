@@ -3775,4 +3775,34 @@ echo '|', gc_collect_cycles();
     kind: 'executed',
     stdout: 'b|cad3;b|cad5;b|dac3',
   });
+
+  const collectedCycleSurvivors = run(String.raw`<?php
+class N {
+  public $a; public $b;
+  function __construct(public $id) {}
+  function __destruct() { echo $this->id; }
+}
+foreach ([0, 1, 2] as $depth) {
+  $v1 = new N('1'); $v2 = new N('2'); $v3 = new N('3');
+  $v1->b = $v1; $v2->a = $v2; $v3->b = $v3;
+  $v2->b = $depth === 0 ? $v3 : ($depth === 1 ? [$v3] : [[$v3]]);
+  unset($v2);
+  echo '|', gc_collect_cycles(), ';';
+  unset($v1, $v3);
+  echo '|', gc_collect_cycles(), ',';
+}
+$v1 = new N('1'); $v2 = new stdClass(); $v3 = new N('3');
+$v1->b = $v1; $v2->a = $v2; $v2->b = $v3; $v3->b = $v3;
+unset($v2); echo '|', gc_collect_cycles(), ';';
+unset($v1, $v3); echo '|', gc_collect_cycles(), ',';
+$v1 = new N('1'); $v3 = new N('3');
+$v1->b = $v1; $v3->b = $v3;
+$a = []; $a[0] =& $a; $a[1] = $v3;
+unset($a); echo '|', gc_collect_cycles(), ';';
+unset($v1, $v3); echo '|', gc_collect_cycles();
+`);
+  expect(collectedCycleSurvivors).toMatchObject({
+    kind: 'executed',
+    stdout: '|21;|312,|22;|312,|23;|312,|1;|312,|1;|312',
+  });
 });

@@ -476,7 +476,7 @@ export class Runtime {
   }
 
   bufferRetiringSurvivor(value: PhpArray | PhpObject): void {
-    if (this.retiringObjects.size === 0 || this.collectingCycles || this.gcRoots.size >= this.gcThreshold - 1) return;
+    if (this.retiringObjects.size === 0 || this.gcRoots.size >= this.gcThreshold - 1) return;
     if (value instanceof PhpArray) {
       if (!value.uncollectable) this.gcRoots.add(value);
     } else if (this.isCollectableObject(value)) this.gcRoots.add(value);
