@@ -3805,4 +3805,22 @@ unset($v1, $v3); echo '|', gc_collect_cycles();
     kind: 'executed',
     stdout: '|21;|312,|22;|312,|23;|312,|1;|312,|1;|312',
   });
+
+  for (const [disable, stdout] of [
+    [true, 'b|dac3'],
+    [false, 'b|acd3'],
+  ] as const) {
+    expect(
+      run(String.raw`<?php
+${disable ? 'gc_disable();' : ''}
+class N { public $x; function __construct(public $id) {} function __destruct() { echo $this->id; } }
+$a = new N('a'); $b = new N('b'); $c = new N('c'); $d = new N('d');
+$a->x = $d; $b->x = [$a]; $c->x =& $a; $d->x = $c;
+unset($a); gc_collect_cycles();
+$keep = [];
+for ($i = 0; $i < 10000; $i++) { $o = new stdClass; $o->x = $o; $keep[] = $o; }
+unset($b, $c, $d); echo '|', gc_collect_cycles();
+`)
+    ).toMatchObject({ kind: 'executed', stdout });
+  }
 });

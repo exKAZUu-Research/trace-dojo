@@ -8,8 +8,8 @@ import type { Expr, FunctionDecl, Program } from './ast';
 import { collectScopeVars } from './astAnalysis';
 import { dec, enc, stringToBytes } from './bytes';
 import type { CompileNotice } from './converter';
-import { arrayHasHolders, collectGarbage, GC_THRESHOLD_DEFAULT, releaseDropped, type ReleaseMode } from './garbage';
-import { GcRoots } from './gcRoots';
+import { arrayHasHolders, collectGarbage, releaseDropped, type ReleaseMode } from './garbage';
+import { GC_THRESHOLD_DEFAULT, GcRoots } from './gcRoots';
 import { ObjectHeap } from './objectHeap';
 import { setArraySharingCheck } from './places';
 import { MersenneTwister } from './random';
@@ -473,13 +473,6 @@ export class Runtime {
 
   isCollectableObject(value: PhpObject): boolean {
     return !value.isResource && !this.collectingObjects.has(value) && this.objects.get(value.id) === value;
-  }
-
-  bufferRetiringSurvivor(value: PhpArray | PhpObject): void {
-    if (this.retiringObjects.size === 0 || this.gcRoots.size >= this.gcThreshold - 1) return;
-    if (value instanceof PhpArray) {
-      if (!value.uncollectable) this.gcRoots.add(value);
-    } else if (this.isCollectableObject(value)) this.gcRoots.add(value);
   }
 
   /** Writes bytes to standard output, decoding complete UTF-8 sequences as they arrive. */

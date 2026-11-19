@@ -1,6 +1,7 @@
 // code-gauge-allow-file fileNcss 999 -- Holds object ownership, reachability and release with their shared helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type CleanupException, withCleanupExceptions, withPendingException } from './errors';
+import { recordGcRoot } from './gcRoots';
 import { ExitSignal, type Frame, PhpThrow, type Runtime } from './runtime';
 import {
   arrayHolderCount,
@@ -16,10 +17,6 @@ import {
   rememberOwnership,
   valueOwners,
 } from './values';
-
-export const GC_THRESHOLD_DEFAULT = 10_001;
-const GC_THRESHOLD_STEP = 10_000;
-const GC_THRESHOLD_TRIGGER = 100;
 
 /** Runs the destructor of an object, which the interpreter provides. */
 let destruct: (object: PhpObject, row?: number) => void = () => {};
@@ -82,7 +79,8 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean, stopOnException: b
   }
   const arrayCount = heldArrayCount(arrayCandidates, reachedArrays);
   const garbage: PhpObject[] = [];
-  for (const object of runtime.objects.values()) if (!reached.has(object)) garbage.push(object);
+  for (const object of runtime.objects.values())
+    if (!reached.has(object) && !runtime.retiringObjects.has(object)) garbage.push(object);
   if (garbage.length === 0) {
     finishArrayCollection(runtime, arrayCandidates);
     retainTurtles(runtime, reached);
@@ -210,7 +208,7 @@ function countAfterDestruction(
  * destroyed from the dropped values outward: its destructor runs, then what it holds is released in order, then its
  * handle returns to the free list. Objects on a cycle stay, as reference counting cannot free them.
  */
-// code-gauge-allow functionNcss 48 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
+// code-gauge-allow functionCognitiveComplexity 21 -- Flushes pending GC root candidates after scoped release.
 export function releaseDropped(
   runtime: Runtime,
   dropped: unknown[],
@@ -242,24 +240,7 @@ export function releaseDropped(
         continue;
       }
     } else continue;
-    if (runtime.gcRoots.has(value)) continue;
-    if (!runtime.collectingCycles && runtime.gcEnabled && runtime.gcRoots.size >= runtime.gcThreshold - 1) {
-      const arrayCycle = value instanceof PhpArray && runtime.arrayCycles.has(value);
-      const objectCycle = value instanceof PhpObject && runtime.objectCycles.has(value);
-      runtime.held.push(value);
-      let count: number;
-      try {
-        count = collectGarbage(runtime, true);
-      } finally {
-        runtime.held.pop();
-      }
-      if (arrayCycle) runtime.arrayCycles.add(value as PhpArray);
-      if (objectCycle) runtime.objectCycles.add(value as PhpObject);
-      if (count < GC_THRESHOLD_TRIGGER || runtime.gcRoots.size >= runtime.gcThreshold)
-        runtime.gcThreshold += GC_THRESHOLD_STEP;
-      else runtime.gcThreshold = Math.max(GC_THRESHOLD_DEFAULT, runtime.gcThreshold - GC_THRESHOLD_STEP);
-    }
-    runtime.gcRoots.add(value);
+    recordGcRoot(runtime, value, () => collectGarbage(runtime, true));
   }
 }
 
@@ -418,7 +399,7 @@ class Release {
         return;
       }
       const finish = this.prepare(item, onFailure);
-      if (!finish) return this.visited.has(item) ? undefined : this.runtime.bufferRetiringSurvivor(item);
+      if (!finish) return this.visited.has(item) ? undefined : this.bufferSurvivor(item);
       if (item.internal !== undefined) this.releaseNative(item, onFailure);
       pending.push(finish);
       this.runtime.retiringObjects.add(item);
@@ -431,10 +412,19 @@ class Release {
   private releaseArray(item: PhpArray, pending: unknown[]): void {
     if (this.visitedArrays.has(item)) return;
     if (ownedReachable(item, this.roots, this.runtime, this.unreachable, this.retainedBefore))
-      return this.runtime.bufferRetiringSurvivor(item);
+      return this.bufferSurvivor(item);
     if (!item.composite) return;
     this.visitedArrays.add(item);
     this.enqueue(pending, [...item.map.ownedSlots()]);
+  }
+
+  private bufferSurvivor(value: PhpArray | PhpObject): void {
+    if (this.runtime.retiringObjects.size === 0) return;
+    if (value instanceof PhpArray ? value.uncollectable : !this.runtime.isCollectableObject(value)) return;
+    if (recordGcRoot(this.runtime, value, () => collectGarbage(this.runtime, true))) {
+      this.roots = ownershipRoots(this.runtime);
+      this.unreachable.clear();
+    }
   }
 
   private releaseNative(object: PhpObject, onFailure: (error: CleanupException) => void): void {
