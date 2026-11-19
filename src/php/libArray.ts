@@ -805,14 +805,20 @@ defineFunction('array_filter(array $array, ?callable $callback = null, int $mode
 });
 defineFunction('array_reduce(array $array, callable $callback, mixed $initial = null): mixed', ({ args }) => {
   const runtime = rt();
-  const start = runtime.nativeHeld.at(-1)?.length ?? 0;
+  const holders = runtime.nativeHeld.at(-1)!;
+  const slot = holders.length;
   let carry = args[2] ?? null;
-  let owned = false;
+  holders.push(null);
   for (const value of arr(args[0]).iterValues()) {
-    const previous = carry;
-    carry = callCallback(args[1], [carry, value]);
-    if (owned) runtime.discardNativeResult(previous, start);
-    owned = true;
+    carry = consumeCallbackResult(args[1], [carry, value], (next) => {
+      const previous = holders[slot];
+      holders[slot] = next;
+      if (previous !== next && (previous instanceof PhpObject || previous instanceof PhpArray)) {
+        runtime.release([previous], true);
+        runtime.flushReleases();
+      }
+      return next;
+    });
   }
   return carry;
 });

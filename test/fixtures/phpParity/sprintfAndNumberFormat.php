@@ -91,3 +91,8 @@ try { echo fprintf(STDOUT, '%s %s', 3); } catch (\Throwable $e) { echo get_class
 try { echo printf('%s %s', 3); } catch (\Throwable $e) { echo get_class($e), ': ', $e->getMessage(), "\n"; }
 fprintf(STDOUT, "%.60f\n", 1);
 
+
+foreach (['1e999', '-1e999 tail', '1e30', '-1e30'] as $numeric) {
+    printf("%1\$05d|%1\$u|%1\$x|%1\$o|%1\$b\n", $numeric);
+}
+echo vsprintf("[%05d]\n", ['9e999']);

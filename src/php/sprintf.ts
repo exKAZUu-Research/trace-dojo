@@ -281,12 +281,11 @@ function intArg(value: Value): bigint {
     warn(`The float ${formatFloatRepr(value)} is not representable as an int, cast occurred`);
     return Number.isFinite(value) ? BigInt.asIntN(64, BigInt(Math.trunc(value))) : 0n;
   }
-  if (typeof value === 'string') {
-    const number = numericPrefix(value)?.value;
-    if (typeof number === 'number' && !floatFitsInt(number))
-      return number > 0 ? 9_223_372_036_854_775_807n : -9_223_372_036_854_775_808n;
-  }
-  return toInt(value);
+  if (typeof value !== 'string') return toInt(value);
+  const number = numericPrefix(value)?.value;
+  if (typeof number !== 'number' || floatFitsInt(number)) return toInt(value);
+  if (!Number.isFinite(number)) return 0n;
+  return number > 0 ? 9_223_372_036_854_775_807n : -9_223_372_036_854_775_808n;
 }
 
 interface FieldOptions {
