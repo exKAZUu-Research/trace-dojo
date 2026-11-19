@@ -553,8 +553,8 @@ export class HashState implements EnumerableState {
     const existing = this.find(key);
     if (existing >= 0) {
       if (!replace) return false;
+      // Since .NET Core 3.0, only adding a key invalidates an enumeration; setting, removing, and clearing do not.
       this.entries[existing].value = value;
-      this.version++;
       return true;
     }
     const hash = this.equality.hash(key);
@@ -582,7 +582,6 @@ export class HashState implements EnumerableState {
     bucket.splice(bucket.indexOf(index), 1);
     this.entries[index] = { hash: 0, key: undefined, value: undefined, isFree: true };
     this.freeList.push(index);
-    this.version++;
     return entry;
   }
 
@@ -590,13 +589,14 @@ export class HashState implements EnumerableState {
     this.entries = [];
     this.freeList.length = 0;
     this.buckets.clear();
-    this.version++;
   }
 
   *live(): Generator<Entry> {
     const version = this.version;
-    for (const entry of this.entries) {
+    // Indexing the current entries lets a removal or a clear during the enumeration end it as .NET's does.
+    for (let index = 0; index < this.entries.length; index++) {
       if (this.version !== version) throw collectionModified();
+      const entry = this.entries[index];
       if (!entry.isFree) yield entry;
     }
     if (this.version !== version) throw collectionModified();
@@ -728,7 +728,7 @@ const dictionaryNatives: Record<string, NativeMethod> = {
     checkKey(key as Value);
     return hashOfState(receiver).remove(key as Value) !== undefined;
   },
-  [`${DICTIONARY}.Remove(TKey, out TValue)`]: (call, receiver, [key, value]) => {
+  [`${DICTIONARY}.Remove(TKey, TValue)`]: (call, receiver, [key, value]) => {
     checkKey(key as Value);
     const removed = hashOfState(receiver).remove(key as Value);
     refOf(value).set(removed ? removed.value : evaluatorOf(call).defaultOf(typeArgument(call, 1)));
@@ -1036,11 +1036,19 @@ class SequenceState implements EnumerableState {
   *enumerate(): Generator<Value> {
     const version = this.version;
     const order = this.isStack ? this.items.toReversed() : this.items;
+    // Stack's enumerator words the error differently from the other collections'.
+    const modified = (): PendingException =>
+      this.isStack
+        ? new PendingException(
+            'System.InvalidOperationException',
+            'Collection was modified after the enumerator was instantiated.'
+          )
+        : collectionModified();
     for (const item of order) {
-      if (this.version !== version) throw collectionModified();
+      if (this.version !== version) throw modified();
       yield item;
     }
-    if (this.version !== version) throw collectionModified();
+    if (this.version !== version) throw modified();
   }
 
   references(): Value[] {
