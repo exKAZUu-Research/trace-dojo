@@ -51,3 +51,18 @@ int(4)
 Notice: Only variables should be assigned by reference in /main.php on line 58
 int(5)
 int(9)
+
+Notice: Only variables should be assigned by reference in /main.php on line 77
+int(9)
+int(9)
+int(5)
+
+Notice: Only variables should be assigned by reference in /main.php on line 78
+int(9)
+int(9)
+int(5)
+
+Notice: Only variables should be assigned by reference in /main.php on line 79
+int(9)
+int(9)
+int(5)

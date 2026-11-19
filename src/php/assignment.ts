@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 956 -- Holds assignment and offset access modes with their shared helpers.
+// code-gauge-allow-file fileNcss 958 -- Holds assignment and offset access modes with their shared helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -877,7 +877,7 @@ export function assignTo(target: Expr, value: Value): void {
   placeOf(target).set(share(value));
 }
 
-export function bindRef(target: Expr, ref: Ref): void {
+export function bindRef(target: Expr, ref: Ref, valueFallback = false): void {
   if (target.k === 'var' || target.k === 'varvar') {
     const name = target.k === 'var' ? target.name : toStr(ev(target.name));
     new VarPlace(rt().frame, name, target.k === 'varvar' ? 'dynamic' : 'compiled').bind(ref);
@@ -892,7 +892,7 @@ export function bindRef(target: Expr, ref: Ref): void {
       return withPropertyName(name, (key) =>
         throwError('Error', `Attempt to modify property "${key}" on ${valueName(object)}`)
       );
-    classesModule.bindPropertyReference(object, toStr(name), ref, rt().frame.scope);
+    classesModule.bindPropertyReference(object, toStr(name), ref, rt().frame.scope, valueFallback);
     return;
   }
   if (target.k === 'sprop') {
@@ -900,7 +900,9 @@ export function bindRef(target: Expr, ref: Ref): void {
     const name = typeof target.name === 'string' ? target.name : prepareOperand(target.name)(target.row);
     const runtime = rt();
     runtime.row = target.row;
-    withPropertyName(name, (key) => classesModule.bindStaticPropertyReference(cls, key, runtime.frame.scope, ref));
+    withPropertyName(name, (key) =>
+      classesModule.bindStaticPropertyReference(cls, key, runtime.frame.scope, ref, valueFallback)
+    );
     return;
   }
   throwError('Error', 'Cannot assign reference to this expression');
@@ -937,6 +939,7 @@ function bindDimensionRef(target: Extract<Expr, { k: 'idx' }>, ref: Ref): void {
 export function assignReference(target: Expr, source: Expr): Value {
   const runtime = rt();
   let ref: Ref;
+  let valueFallback = false;
   if (source.k === 'call' || source.k === 'mcall' || source.k === 'scall') {
     runtime.lastReturnRef = undefined;
     const value = ev(source);
@@ -944,16 +947,17 @@ export function assignReference(target: Expr, source: Expr): Value {
     runtime.lastReturnRef = undefined;
     if (returned) ref = returned;
     else {
-      notice('Only variables should be assigned by reference');
       if (target.k !== 'prop' && target.k !== 'sprop') {
+        notice('Only variables should be assigned by reference');
         runtime.row = target.row;
         return placeOf(target).set(share(value));
       }
       ref = Ref.temporary(value);
+      valueFallback = true;
     }
   } else ref = placeOf(source, 'write', true).ref();
   runtime.row = target.row;
-  bindRef(target, ref);
+  bindRef(target, ref, valueFallback);
   return ref.v;
 }
 

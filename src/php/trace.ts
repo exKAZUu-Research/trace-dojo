@@ -1,4 +1,3 @@
-import { ExecutionLimitError } from '../interpreter/limits';
 import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
@@ -47,14 +46,13 @@ function variablesOf(runtime: Runtime, frame: Frame, withContext: boolean): Trac
 
 function contextProperties(variables: TraceVariables, frame: Frame): void {
   const self = frame.thisObj;
-  if (self && !self.turtle) {
-    for (const [key, slot] of self.props) {
-      if (slot === UNINIT) continue;
-      const name = propNameOf(key);
-      const decl = lookupProp(self.cls, name, frame.scope);
-      if (decl && (decl.key !== key || !canAccessProp(decl, frame.scope))) continue;
-      addVariable(variables, `$this->${dec(name)}`, slot instanceof Ref ? slot.v : slot);
-    }
+  if (!self) return;
+  for (const [key, slot] of self.props) {
+    if (slot === UNINIT) continue;
+    const name = propNameOf(key);
+    const decl = lookupProp(self.cls, name, frame.scope);
+    if (decl && (decl.key !== key || !canAccessProp(decl, frame.scope))) continue;
+    addVariable(variables, `$this->${dec(name)}`, slot instanceof Ref ? slot.v : slot);
   }
 }
 
@@ -98,7 +96,7 @@ const NOT_SCALAR = Symbol('notScalar');
 type Scalar = TraceItemVariable[string];
 
 function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }): Scalar | typeof NOT_SCALAR {
-  if (budget.remaining-- <= 0) throw new ExecutionLimitError('trace');
+  if (budget.remaining-- <= 0) return NOT_SCALAR;
   // oxlint-disable-next-line unicorn/no-null -- The trace format shows null as null.
   if (value === null) return null;
   switch (typeof value) {
@@ -113,11 +111,17 @@ function scalarOf(value: Value, seen: Set<object>, budget: { remaining: number }
       return dec(value);
     }
   }
-  if (!(value instanceof PhpArray) || !value.isList() || seen.has(value)) return NOT_SCALAR;
-  if (seen.size >= 256) throw new ExecutionLimitError('trace');
+  if (
+    !(value instanceof PhpArray) ||
+    value.size > budget.remaining ||
+    seen.size >= 256 ||
+    seen.has(value) ||
+    !value.isList()
+  )
+    return NOT_SCALAR;
   seen.add(value);
   const items: Scalar[] = [];
-  for (const item of value.values()) {
+  for (const item of value.iterValues()) {
     const scalar = scalarOf(item, seen, budget);
     if (scalar === NOT_SCALAR) return NOT_SCALAR;
     items.push(scalar);

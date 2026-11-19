@@ -300,3 +300,37 @@ for ($i = 0; $i < 800; $i++) {
   expect(result.traceItems).toHaveLength(1603);
   expect(result.finalVars.$values).toEqual(Array.from({ length: 800 }, (_, index) => index));
 });
+
+test.each([
+  ['range(1, 10000)', '10000'],
+  ['array_fill(0, 10000, 0)', '10000'],
+  ['array_fill(0, 100, range(1, 200))', '100'],
+])('keeps recording when a scalar array needs a bounded preview: %s', (value, count) => {
+  const program = `<?php
+$a = ${value};
+echo count($a);
+`;
+  const recording = traceProgram('php', program, program);
+  expect(recording.stdout).toBe(count);
+  const step = recording.traceItems.find(({ line }) => line === 2);
+  expect(step?.vars).not.toHaveProperty('$a');
+  const preview = step?.referenceVars?.$a;
+  expect(preview).toMatchObject({ kind: 'array', entries: { 0: expect.any(Object) } });
+});
+
+test('records a turtle subclass field during movement', () => {
+  const program = `<?php
+class Walker extends Turtle {
+    private int $steps = 0;
+    function walk() {
+        $this->steps++;
+        $this->forward();
+    }
+}
+$walker = new Walker();
+$walker->walk();
+`;
+  const moves = phpTrace(program).filter(({ callLines }) => callLines.length > 0);
+  expect(moves.map(({ vars }) => vars['$this->steps'])).toEqual([1, 1]);
+  expect(moves.at(-1)?.turtles).toEqual([{ x: 0, y: 1, color: '#', dir: 'N' }]);
+});

@@ -1564,8 +1564,14 @@ function overloadedPropertyReference(object: PhpObject, name: string, decl?: Pro
 }
 
 // code-gauge-allow functionCognitiveComplexity 26 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-// code-gauge-allow functionNcss 41 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-export function bindPropertyReference(object: PhpObject, name: string, ref: Ref, scope: PhpClass | undefined): void {
+// code-gauge-allow functionNcss 43 -- Shares property lookup and validation across reference binding and value fallback.
+export function bindPropertyReference(
+  object: PhpObject,
+  name: string,
+  ref: Ref,
+  scope: PhpClass | undefined,
+  valueFallback = false
+): void {
   if (object.isResource) throwError('Error', `Attempt to modify property "${name}" on resource`);
   const property = lookupProp(object.cls, name, scope);
   checkStaticInstanceAccess(object, name, scope, property, 'get');
@@ -1585,11 +1591,14 @@ export function bindPropertyReference(object: PhpObject, name: string, ref: Ref,
     }
     throwError('Error', 'Cannot assign by reference to overloaded object');
   }
-  if (decl) {
-    if (checkIndirectModification(object, name, scope))
-      throwError('Error', 'Cannot assign by reference to overloaded object');
-    if (decl.type) attachPropertyReference(ref, decl, object);
-  } else if (!object.props.has(name)) {
+  if (decl && checkIndirectModification(object, name, scope))
+    throwError('Error', 'Cannot assign by reference to overloaded object');
+  if (valueFallback) notice('Only variables should be assigned by reference');
+  const key = decl?.key ?? name;
+  const old = object.props.get(key);
+  if (valueFallback && old instanceof Ref) return writeFallbackReference(old, ref);
+  if (decl?.type) attachPropertyReference(ref, decl, object);
+  if (!decl && old === undefined) {
     ref.isRef = true;
     try {
       createDynamicProp(object, name, ref);
@@ -1598,14 +1607,17 @@ export function bindPropertyReference(object: PhpObject, name: string, ref: Ref,
     }
     return;
   }
-  const key = decl?.key ?? name;
-  const old = object.props.get(key);
   if (old === ref) return;
   if (old instanceof Ref) old.rc--;
   ref.isRef = true;
   ref.rc++;
   object.props.set(key, ref);
   dropped(old);
+}
+
+function writeFallbackReference(target: Ref, source: Ref): void {
+  target.assign(source.v);
+  source.v = target.v;
 }
 
 export function attachPropertyReference(ref: Ref, decl: PropDecl, object?: PhpObject): void {
@@ -1844,8 +1856,18 @@ function initializeClassDefaults(cls: PhpClass): void {
   }
 }
 
-export function bindStaticPropertyReference(cls: PhpClass, name: string, scope: PhpClass | undefined, ref: Ref): void {
+export function bindStaticPropertyReference(
+  cls: PhpClass,
+  name: string,
+  scope: PhpClass | undefined,
+  ref: Ref,
+  valueFallback = false
+): void {
   const old = staticPropRef(cls, name, scope);
+  if (valueFallback) {
+    notice('Only variables should be assigned by reference');
+    if (old.isRef) return writeFallbackReference(old, ref);
+  }
   const found = cls.findStatic(name);
   if (!found || old === ref) return;
   if (found.decl.type) attachPropertyReference(ref, found.decl);

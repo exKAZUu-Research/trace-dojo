@@ -64,3 +64,19 @@ class TemporaryMagicReference extends MagicReference {
 }
 $alias = &(new TemporaryMagicReference)->alias(...)();
 var_dump($alias);
+
+class PropertyCallbackAlias {
+    public int $value;
+    public static int $shared;
+}
+foreach (['dynamic', 'named', 'unpacked'] as $call) {
+    $box = new PropertyCallbackAlias;
+    $old = 3;
+    $box->value = &$old;
+    PropertyCallbackAlias::$shared = &$old;
+    if ($call === 'dynamic') $box->value = &$dynamic($fn);
+    if ($call === 'named') PropertyCallbackAlias::$shared = &call_user_func_array(callback: $fn, args: []);
+    if ($call === 'unpacked') $box->value = &call_user_func(...[$fn]);
+    $box->value = 9;
+    var_dump($old, PropertyCallbackAlias::$shared, MagicReference::$shared);
+}
