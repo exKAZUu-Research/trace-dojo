@@ -506,9 +506,8 @@ export abstract class StatementCompiler extends PatternCompiler {
         initializer,
         (from, to) => `${from} 型の値は、${to} 型の変数 ${declarator.name} に代入できません。`
       );
-    } else if (compiled.type.kind === 'void') {
-      this.error(initializer, 'void の値は変数に代入できません。');
     }
+    // `var x = f();` with a void `f` declares a void variable, which Dart rejects only where it is used.
     return compiled;
   }
 

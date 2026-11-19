@@ -59,9 +59,8 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     if (name && (cls.staticMembers.has(name) || cls.members.has(name)))
       this.error(declaration, `${name} という名前は、既に宣言されています。`);
     if (cls.kind === 'mixin') this.error(declaration, 'mixin にはコンストラクタを書けません。');
-    if (cls.kind === 'enum' && declaration.constructorKind === 'generative' && !declaration.isConst) {
-      this.error(declaration, '列挙型のコンストラクタは const にしてください。');
-    }
+    // An enum's generative constructors are constant whether or not they say so.
+    const isConst = declaration.isConst || (cls.kind === 'enum' && declaration.constructorKind === 'generative');
     const { positionalTypes, namedTypes } = this.constructorParameterTypes(cls, declaration.parameters, declaration);
     const type = functionType(positionalTypes, cls.thisType, {
       requiredCount: declaration.parameters.requiredCount,
@@ -77,7 +76,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       owner: cls,
       type,
       kind: declaration.constructorKind,
-      isConst: declaration.isConst,
+      isConst,
       row: declaration.row,
       impl: declaration.isExternal ? (this.native(nativeKey) as ConstructorImpl) : undefined,
     };
@@ -323,6 +322,15 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     positionalTypes: DartType[],
     namedTypes: Map<string, DartType>
   ): void {
+    if (constructor.isConst && !this.isLibraryCode) {
+      const mutable = cls.fields.find((field) => !field.isFinal);
+      if (mutable) {
+        this.error(
+          declaration,
+          `const のコンストラクタがあるので、フィールド ${mutable.name} も final にしてください。`
+        );
+      }
+    }
     const redirect = declaration.initializers.find((initializer) => initializer.kind === 'this');
     if (redirect && (declaration.initializers.length > 1 || declaration.body)) {
       this.error(redirect, 'this(...) にリダイレクトするコンストラクタには、ほかの初期化子や本体は書けません。');
@@ -621,6 +629,13 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
         span,
         `${targetType.cls.name}${name ? `.${name}` : ''} はファクトリコンストラクタなので、${kind}(...) では呼び出せません。`
       );
+    const callerIsConst = declaration.isConst || cls.kind === 'enum';
+    if (callerIsConst && !target.isConst && !this.isLibraryCode && !targetType.cls.isLibrary) {
+      this.error(
+        span,
+        `const のコンストラクタからは、const でないコンストラクタ ${targetType.cls.name}${name ? `.${name}` : ''} を呼び出せません。`
+      );
+    }
     const map = new Map(targetType.cls.typeParams.map((param, index) => [param, targetType.args[index] ?? DYNAMIC]));
     const signature = substitute({ ...target.type, typeParams: [] }, map) as FunctionType;
     // `super.x` parameters pass their arguments on: positional ones before the written arguments, named ones by name.

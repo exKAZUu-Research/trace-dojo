@@ -300,6 +300,12 @@ export abstract class ExpressionCompiler extends CompilerBase {
       expression.right,
       expression.right.kind === 'dotShorthand' ? nonNullable(left.type) : undefined
     );
+    for (const [operand, syntax] of [
+      [left, expression.left],
+      [right, expression.right],
+    ] as const) {
+      if (operand.type.kind === 'void') this.error(syntax, 'void の値は、式の中では使えません。');
+    }
     const negated = expression.operator === '!=';
     const nullVariable =
       right.type.kind === 'null' && left.variable
@@ -1288,6 +1294,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
     const { type: superclass, classAt } = this.superclassOf(span);
     const resolved = this.lookupMember(superclass, name, false);
     if (!resolved) return this.error(span, `スーパークラスに ${name} というメンバーがありません。`);
+    this.requireSuperImplementation(name, span);
     return {
       type: resolved.type,
       run: (frame) => {
@@ -1430,6 +1437,15 @@ export abstract class ExpressionCompiler extends CompilerBase {
    * The class `super` names: a class's superclass, or for a mixin, the superclass of the application of the mixin
    * that the receiver's class contains, which is known only at runtime.
    */
+  /** `super.m` needs a concrete `m` in the superclass chain; a mixin's superclass is known only at runtime. */
+  protected requireSuperImplementation(name: string, span: Span): void {
+    const cls = this.currentClass;
+    if (!cls || cls.kind === 'mixin' || this.isLibraryCode) return;
+    const member = cls.superclass?.cls.implementation(name);
+    if (!member || member.isAbstract)
+      this.error(span, `スーパークラスには ${name} の本体がないので、super.${name} は使えません。`);
+  }
+
   protected superclassOf(span: Span): { type: InterfaceType; classAt: (frame: Frame) => ClassInfo } {
     const cls = this.currentClass;
     if (cls?.kind === 'mixin') {

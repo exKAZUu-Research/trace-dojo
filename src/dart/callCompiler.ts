@@ -393,6 +393,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       return { type: returnType, run, isConst: false, completes };
     }
     if (isSuper) {
+      this.requireSuperImplementation(name, span);
       const run = superMethodCall(this.superclassOf(span).classAt, name, bound, row);
       return { type: returnType, run, isConst: false, completes };
     }

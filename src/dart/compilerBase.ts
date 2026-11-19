@@ -477,6 +477,7 @@ export abstract class CompilerBase {
    * is cast at runtime.
    */
   coerce(compiled: Compiled, target: DartType, span: Span, describe: (from: string, to: string) => string): Compiled {
+    if (compiled.type.kind === 'void' && target.kind !== 'void') this.error(span, 'void の値は、ここでは使えません。');
     if (isSubtype(compiled.type, target)) return compiled;
     const instantiated = this.instantiateGeneric(compiled, target);
     if (instantiated) return instantiated;

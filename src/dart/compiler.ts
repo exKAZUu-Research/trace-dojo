@@ -299,13 +299,18 @@ export class Compiler extends ConstructorCompiler {
           if (mixin.cls.kind !== 'mixin' && mixin.cls.kind !== 'mixinClass' && !this.isLibraryCode) {
             this.error(mixinSyntax, `${mixin.cls.name} は mixin ではないので、with には書けません。`);
           }
-          base = this.mixinApplication(base, mixin, cls);
+          base = this.mixinApplication(base, mixin, cls, mixinSyntax);
         }
         cls.superclass = base;
       }
       cls.interfaces = declaration.interfaces.map((type) =>
         this.resolveSupertype(cls, type, '実装するインターフェース')
       );
+      for (const [index, type] of cls.interfaces.entries()) {
+        if (cls.interfaces.slice(0, index).some((other) => other.cls === type.cls)) {
+          this.error(declaration.interfaces[index], `${type.cls.name} は、1 回しか implements に書けません。`);
+        }
+      }
       if (declaration.classKind === 'extensionType') {
         const parameter = declaration.primaryConstructor?.parameters.positional[0];
         if (!parameter?.type) this.error(declaration, '拡張型には、表す値の型を書いてください。');
@@ -381,7 +386,12 @@ export class Compiler extends ConstructorCompiler {
   }
 
   /** The class `superclass with mixin`, whose members are the mixin's. */
-  private mixinApplication(superclass: InterfaceType, mixin: InterfaceType, owner: ClassInfo): InterfaceType {
+  private mixinApplication(
+    superclass: InterfaceType,
+    mixin: InterfaceType,
+    owner: ClassInfo,
+    span: Span
+  ): InterfaceType {
     const application = new ClassInfo(`${superclass.cls.name} with ${mixin.cls.name}`, 'class', owner.library);
     application.typeParams.push(...owner.typeParams);
     application.superclass = superclass;
@@ -389,16 +399,28 @@ export class Compiler extends ConstructorCompiler {
     application.mixinOf = mixin.cls;
     application.modifiers = { isAbstract: true, isSealed: false, isBase: false, isFinal: false, isInterface: false };
     (application as ClassInfo & { mixinArgs?: readonly DartType[] }).mixinArgs = mixin.args;
-    this.pendingApplications.push({ application, mixin });
+    this.pendingApplications.push({ application, mixin, span });
     return interfaceType(
       application,
       owner.typeParams.map((param) => typeParamType(param))
     );
   }
 
-  private readonly pendingApplications: { application: ClassInfo; mixin: InterfaceType }[] = [];
+  private readonly pendingApplications: { application: ClassInfo; mixin: InterfaceType; span: Span }[] = [];
 
   private checkHierarchy(): void {
+    // A mixin with `on` types applies only on a superclass that has them.
+    for (const { application, mixin, span } of this.pendingApplications) {
+      const base = application.superclass?.cls;
+      for (const onType of mixin.cls.onTypes) {
+        if (base && !base.isSubclassOf(onType.cls) && !this.isLibraryCode) {
+          this.error(
+            span,
+            `${base.name} は ${onType.cls.name} を継承していないので、mixin ${mixin.cls.name} を使えません。`
+          );
+        }
+      }
+    }
     for (const { cls, declaration } of this.classWork) {
       const seen = new Set<ClassInfo>();
       let current: ClassInfo | undefined = cls;
@@ -671,7 +693,9 @@ export class Compiler extends ConstructorCompiler {
       if (cls.kind === 'extensionType' && !declaration.isAbstract && !declaration.isExternal) {
         this.error(variable, '拡張型には、インスタンスのフィールドを宣言できません。');
       }
-      if (cls.kind === 'enum' && !declaration.isFinal)
+      // With a constructor of its own, the constructor reports the field, as the SDK does.
+      const hasConstructor = cls.declaration?.members.some((member) => member.kind === 'constructor') === true;
+      if (cls.kind === 'enum' && !declaration.isFinal && !hasConstructor)
         this.error(variable, '列挙型のフィールドは final にしてください。');
       if (declaration.isAbstract || declaration.isExternal) {
         this.declareAbstractField(cls, name, type, declaration.isFinal, variable.row, declaration.isExternal);
