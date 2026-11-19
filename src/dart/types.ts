@@ -742,7 +742,7 @@ export function vmTypeString(type: DartType): string {
   switch (type.kind) {
     case 'interface': {
       const args = type.args.length > 0 ? `<${type.args.map(vmTypeString).join(', ')}>` : '';
-      return `${type.cls.name}${args}${type.nullable ? '?' : ''}`;
+      return `${type.cls.vmName ?? type.cls.name}${args}${type.nullable ? '?' : ''}`;
     }
     case 'function': {
       return type.typeParams.length > 0 ? vmGenericFunctionString(type) : vmFunctionString(type);

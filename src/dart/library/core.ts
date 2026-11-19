@@ -43,6 +43,12 @@ class Object {
 }
 
 abstract final class Invocation {
+  factory Invocation.method(Symbol memberName, Iterable<Object?>? positionalArguments, [Map<Symbol, Object?>? namedArguments]) =>
+      _Invocation.method(memberName, null, positionalArguments, namedArguments);
+  factory Invocation.genericMethod(Symbol memberName, Iterable<Type>? typeArguments, Iterable<Object?>? positionalArguments, [Map<Symbol, Object?>? namedArguments]) =>
+      _Invocation.method(memberName, typeArguments, positionalArguments, namedArguments);
+  factory Invocation.getter(Symbol name) = _Invocation.getter;
+  factory Invocation.setter(Symbol memberName, Object? argument) = _Invocation.setter;
   Symbol get memberName;
   List<Type> get typeArguments;
   List<dynamic> get positionalArguments;
@@ -55,6 +61,28 @@ abstract final class Invocation {
 
 /** The VM's class of String.codeUnits, which the list of code units shows as its runtimeType. */
 abstract final class CodeUnits implements List<int> {}
+
+class _Invocation implements Invocation {
+  final Symbol memberName;
+  final List<Type> typeArguments;
+  final List<Object?>? _positional;
+  final Map<Symbol, Object?>? _named;
+  _Invocation.method(this.memberName, Iterable<Type>? types, Iterable<Object?>? positional, Map<Symbol, Object?>? named)
+      : typeArguments = types == null ? const <Type>[] : List<Type>.unmodifiable(types),
+        _positional = positional == null ? const <Object?>[] : List<Object?>.unmodifiable(positional),
+        _named = (named == null || named.isEmpty) ? const <Symbol, Object?>{} : Map<Symbol, Object?>.unmodifiable(named);
+  _Invocation.getter(this.memberName) : typeArguments = const <Type>[], _positional = null, _named = null;
+  _Invocation.setter(this.memberName, Object? argument)
+      : typeArguments = const <Type>[],
+        _positional = List<Object?>.unmodifiable([argument]),
+        _named = null;
+  List<dynamic> get positionalArguments => _positional ?? const <Object>[];
+  Map<Symbol, dynamic> get namedArguments => _named ?? const <Symbol, Object>{};
+  bool get isMethod => _named != null;
+  bool get isGetter => _positional == null;
+  bool get isSetter => _positional != null && _named == null;
+  bool get isAccessor => _named == null;
+}
 
 final class _InvocationMirror implements Invocation {
   final String _name;
@@ -684,6 +712,43 @@ class NoSuchMethodError extends Error {
   NoSuchMethodError._withInvocation(Object? receiver, Invocation invocation) : _message = _describe(receiver, invocation, null);
   NoSuchMethodError._withFound(Object? receiver, Invocation invocation, String found) : _message = _describe(receiver, invocation, found);
   NoSuchMethodError._withMessage(this._message);
+  NoSuchMethodError.withInvocation(Object? receiver, Invocation invocation)
+      : _message = invocation is _InvocationMirror ? _describe(receiver, invocation, null) : _toStringPlain(receiver, invocation);
+  static String _toStringPlain(Object? receiver, Invocation invocation) {
+    var name = invocation.memberName._name;
+    var receiverType = receiver.runtimeType.toString();
+    if (invocation.isAccessor) {
+      return "NoSuchMethodError: " + receiverType + " has no " + name + " " + (invocation.isGetter ? "getter" : "setter");
+    }
+    var buffer = StringBuffer("NoSuchMethodError")..write(": ");
+    buffer.write(receiverType + " has no " + name + " method accepting arguments ");
+    var separator = "";
+    if (invocation.typeArguments.isNotEmpty) {
+      buffer.write("<");
+      for (var _ in invocation.typeArguments) {
+        buffer..write(separator)..write("_");
+        separator = ", ";
+      }
+      buffer.write(">");
+      separator = "";
+    }
+    buffer.write("(");
+    for (var _ in invocation.positionalArguments) {
+      buffer..write(separator)..write("_");
+      separator = ", ";
+    }
+    if (invocation.namedArguments.isNotEmpty) {
+      buffer..write(separator)..write("{");
+      separator = "";
+      for (var key in invocation.namedArguments.keys) {
+        buffer..write(separator)..write(key._name)..write(": _");
+        separator = ",";
+      }
+      buffer.write("}");
+    }
+    buffer.write(")");
+    return buffer.toString();
+  }
   external static String _describe(Object? receiver, Invocation invocation, String? found);
   String toString() => _message;
 }
@@ -835,12 +900,16 @@ abstract interface class Iterator<E> {
 abstract mixin class Iterable<E> {
   const Iterable();
   factory Iterable.generate(int count, [E Function(int index)? generator]) => _GeneratorIterable<E>(count, generator);
-  factory Iterable.empty() => _EmptyIterable<E>();
+  factory Iterable.empty() => EmptyIterable<E>();
   static Iterable<T> castFrom<S, T>(Iterable<S> source) => source.cast<T>();
   Iterator<E> get iterator;
   Iterable<R> cast<R>() => CastIterable<E, R>(this);
-  Iterable<E> followedBy(Iterable<E> other) => FollowedByIterable<E>(this, other);
-  Iterable<T> map<T>(T Function(E e) toElement) => MappedIterable<E, T>(this, toElement);
+  Iterable<E> followedBy(Iterable<E> other) =>
+      _hasEfficientLength(this) && _hasEfficientLength(other)
+          ? EfficientLengthFollowedByIterable<E>(this, other)
+          : FollowedByIterable<E>(this, other);
+  Iterable<T> map<T>(T Function(E e) toElement) =>
+      _hasEfficientLength(this) ? EfficientLengthMappedIterable<E, T>(this, toElement) : MappedIterable<E, T>(this, toElement);
   Iterable<E> where(bool Function(E element) test) => WhereIterable<E>(this, test);
   Iterable<T> whereType<T>() => WhereTypeIterable<T>(this);
   Iterable<T> expand<T>(Iterable<T> Function(E element) toElements) => ExpandIterable<E, T>(this, toElements);
@@ -912,11 +981,13 @@ abstract mixin class Iterable<E> {
   bool get isNotEmpty => !isEmpty;
   Iterable<E> take(int count) {
     RangeError.checkNotNegative(count, "takeCount");
+    if (_hasEfficientLength(this)) return EfficientLengthTakeIterable<E>(this, count);
     return TakeIterable<E>(this, count);
   }
   Iterable<E> takeWhile(bool Function(E value) test) => TakeWhileIterable<E>(this, test);
   Iterable<E> skip(int count) {
     RangeError.checkNotNegative(count, "skipCount");
+    if (_hasEfficientLength(this)) return EfficientLengthSkipIterable<E>(this, count);
     return SkipIterable<E>(this, count);
   }
   Iterable<E> skipWhile(bool Function(E value) test) => SkipWhileIterable<E>(this, test);
@@ -1099,8 +1170,8 @@ void _iterablePartsToStrings(Iterable<Object?> iterable, List<Object> parts) {
   parts.add(ultimateString);
 }
 
-class _EmptyIterable<E> extends Iterable<E> {
-  const _EmptyIterable();
+class EmptyIterable<E> extends Iterable<E> {
+  const EmptyIterable();
   Iterator<E> get iterator => _EmptyIterator<E>();
   int get length => 0;
 }
@@ -1127,24 +1198,6 @@ class _GeneratorIterable<E> extends ListIterable<E> {
     if (generator == null) return index as E;
     return generator(index);
   }
-  Iterator<E> get iterator => _GeneratorIterator<E>(this);
-}
-
-class _GeneratorIterator<E> implements Iterator<E> {
-  final _GeneratorIterable<E> _iterable;
-  int _index = 0;
-  E? _current;
-  _GeneratorIterator(this._iterable);
-  bool moveNext() {
-    if (_index < _iterable._count) {
-      _current = _iterable._generate(_index);
-      _index++;
-      return true;
-    }
-    _current = null;
-    return false;
-  }
-  E get current => _current as E;
 }
 
 class MappedIterable<S, T> extends Iterable<T> {
@@ -1340,6 +1393,54 @@ class FollowedByIterable<E> extends Iterable<E> {
   final Iterable<E> _second;
   FollowedByIterable(this._first, this._second);
   Iterator<E> get iterator => FollowedByIterator<E>(_first, _second);
+}
+
+/**
+ * The VM's variants of the lazy iterables for a source whose length is known without iterating (a Set, a List, a
+ * map's keys), which give their length the same way.
+ */
+bool _hasEfficientLength(Iterable<Object?> iterable) =>
+    iterable is List ||
+    iterable is Set ||
+    iterable is ListIterable ||
+    iterable is EmptyIterable ||
+    iterable is _CompactKeysIterable ||
+    iterable is _CompactValuesIterable ||
+    iterable is _CompactEntriesIterable ||
+    iterable is EfficientLengthMappedIterable ||
+    iterable is EfficientLengthTakeIterable ||
+    iterable is EfficientLengthSkipIterable ||
+    iterable is EfficientLengthFollowedByIterable;
+
+class EfficientLengthMappedIterable<S, T> extends MappedIterable<S, T> {
+  EfficientLengthMappedIterable(Iterable<S> iterable, T Function(S) f) : super(iterable, f);
+}
+
+class EfficientLengthTakeIterable<E> extends TakeIterable<E> {
+  EfficientLengthTakeIterable(Iterable<E> iterable, int takeCount) : super(iterable, takeCount);
+  int get length {
+    int iterableLength = _iterable.length;
+    if (iterableLength > _takeCount) return _takeCount;
+    return iterableLength;
+  }
+}
+
+class EfficientLengthSkipIterable<E> extends SkipIterable<E> {
+  EfficientLengthSkipIterable(Iterable<E> iterable, int skipCount) : super(iterable, skipCount);
+  int get length {
+    int length = _iterable.length - _skipCount;
+    if (length >= 0) return length;
+    return 0;
+  }
+  Iterable<E> skip(int count) {
+    RangeError.checkNotNegative(count, "count");
+    return EfficientLengthSkipIterable<E>(_iterable, _skipCount + count);
+  }
+}
+
+class EfficientLengthFollowedByIterable<E> extends FollowedByIterable<E> {
+  EfficientLengthFollowedByIterable(Iterable<E> first, Iterable<E> second) : super(first, second);
+  int get length => _first.length + _second.length;
 }
 
 class FollowedByIterator<E> implements Iterator<E> {
@@ -1623,7 +1724,8 @@ abstract interface class List<E> extends Iterable<E> {
   Iterable<E> where(bool Function(E element) test) => WhereIterable<E>(this, test);
   Iterable<T> whereType<T>() => WhereTypeIterable<T>(this);
   Iterable<T> expand<T>(Iterable<T> Function(E element) toElements) => ExpandIterable<E, T>(this, toElements);
-  Iterable<E> followedBy(Iterable<E> other) => FollowedByIterable<E>(this, other);
+  Iterable<E> followedBy(Iterable<E> other) =>
+      _hasEfficientLength(other) ? EfficientLengthFollowedByIterable<E>(this, other) : FollowedByIterable<E>(this, other);
   E reduce(E Function(E value, E element) combine) {
     int length = this.length;
     if (length == 0) throw StateError("No element");

@@ -339,7 +339,7 @@ export class Runtime implements TracedRuntime<Frame> {
 
   private newTearOff(receiver: Value, member: Member & { kind: 'method' }): DartClosure {
     const impl = member.impl as NonNullable<typeof member.impl>;
-    const type = this.memberTypeFor(receiver, member);
+    const type = member.isStatic ? member.type : covariantErased(member, this.memberTypeFor(receiver, member));
     return new DartClosure(
       coreTypes.function,
       type,
@@ -573,4 +573,24 @@ function describeArguments(runtime: Runtime, args: Arguments): string {
   const named = [...(args.named ?? new Map<string, Value>())].toSorted(([a], [b]) => (a < b ? -1 : 1));
   for (const [key, value] of named) parts.push(`${key}: ${runtime.links.stringify(runtime, value)}`);
   return parts.join(', ');
+}
+
+/**
+ * The type of an instance method's tear-off: parameters typed by the class's type parameters are checked when called,
+ * so the VM gives them the type Object?, as `[].add` shows `(Object?) => void`.
+ */
+function covariantErased(member: Member & { kind: 'method' }, type: FunctionType): FunctionType {
+  const params = new Set(member.owner.typeParams);
+  if (params.size === 0) return type;
+  const objectQ = interfaceType(coreTypes.object, [], true);
+  const erase = (declared: DartType | undefined, actual: DartType): DartType =>
+    declared && mentionsTypeParams(declared, params) ? objectQ : actual;
+  return {
+    ...type,
+    positional: type.positional.map((actual, index) => erase(member.type.positional[index], actual)),
+    named: type.named.map((named) => ({
+      ...named,
+      type: erase(member.type.named.find((other) => other.name === named.name)?.type, named.type),
+    })),
+  };
 }

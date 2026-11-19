@@ -291,7 +291,12 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     constructor: ConstructorInfo,
     declaration: ConstructorDeclaration
   ): void {
-    const target = declaration.redirectTarget as NonNullable<ConstructorDeclaration['redirectTarget']>;
+    let target = declaration.redirectTarget as NonNullable<ConstructorDeclaration['redirectTarget']>;
+    // `= B.named` reads like a type with the library prefix B unless B is a class.
+    const syntax = target.type;
+    if (syntax.kind === 'named' && syntax.prefix && target.name === undefined && this.isClassName(syntax.prefix)) {
+      target = { type: { ...syntax, prefix: undefined, name: syntax.prefix }, name: syntax.name };
+    }
     const type = this.resolveType(target.type, { allowRaw: true });
     if (type.kind !== 'interface') return this.error(declaration, 'リダイレクト先には、クラスを書いてください。');
     const targetConstructor = type.cls.constructors.get(target.name ?? '');
@@ -313,6 +318,11 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
       const resolvedArgs = targetArgs.length > 0 ? targetArgs.map((arg) => substitute(arg, env)) : [...typeArgs];
       return this.instantiate(runtime, type.cls, targetConstructor, resolvedArgs, args, callRow);
     };
+  }
+
+  private isClassName(name: string): boolean {
+    const resolution = this.resolveName(name);
+    return resolution?.kind === 'declaration' && resolution.declaration.kind === 'class';
   }
 
   private compileGenerative(

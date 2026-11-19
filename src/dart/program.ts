@@ -121,10 +121,23 @@ export function libraries(): Libraries {
           'CastIterator',
           'LateError',
           'CodeUnits',
+          'EmptyIterable',
+          'EfficientLengthMappedIterable',
+          'EfficientLengthTakeIterable',
+          'EfficientLengthSkipIterable',
+          'EfficientLengthFollowedByIterable',
           'UnmodifiableMapView',
           'UnmodifiableSetView',
         ]) {
           core.hiddenNames.add(name);
+        }
+        // The natives' iterators stand for the VM's classes of these names.
+        for (const [name, vmName] of [
+          ['_ListIterator', 'ListIterator'],
+          ['_SetIterator', '_CompactIterator'],
+          ['_MapIterator', '_CompactIterator'],
+        ]) {
+          (core.declarations.get(name) as { cls: { vmName: string | undefined } }).cls.vmName = vmName;
         }
         // The VM's view of List.asMap is internal to the SDK, not part of dart:collection's API.
         for (const name of ['ListMapView', 'CastList'])
