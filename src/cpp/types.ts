@@ -275,7 +275,7 @@ export function allowsConstantCopy(type: Type): boolean {
     );
   }
   if (type.kind === 'array') return allowsConstantCopy(type.of);
-  return isArithmetic(type) || type.kind === 'pointer' || type.kind === 'nullptr';
+  return isArithmetic(type) || type.kind === 'pointer' || type.kind === 'nullptr' || type.kind === 'reference';
 }
 
 export function isConstType(type: Type): boolean {

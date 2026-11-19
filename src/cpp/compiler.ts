@@ -623,9 +623,10 @@ export class Compiler extends StatementCompiler {
     const { cls } = type;
     if (cls.isDefaultConstructorDeleted || (isConstType(type) && !isConstDefaultConstructible(type))) return false;
     const fixed = cls.library?.aggregateArray;
-    if (fixed) return this.isDefaultInitializable(fixed.type, owner);
-    if (cls.library) return true;
+    if (fixed) return this.isDefaultInitializable(fixed.type, cls);
     if (cls.destructor && !isMemberAccessible(cls.destructor.access, cls, cls, owner)) return false;
+    const members = cls.library?.valueInitializedMembers;
+    if (members?.some((member) => !this.isDefaultInitializable(unqualified(member), cls))) return false;
     if (cls.constructors.length === 0) return true;
     try {
       const viable = this.matchingOverloads(cls.constructors, []);
@@ -1492,7 +1493,8 @@ export class Compiler extends StatementCompiler {
     try {
       const init = this.staticInitialization(type, value, row);
       if (!init) return;
-      if (type.kind === 'class' && isConstType(type)) global.hasConstantObjectValue = init.isConstant;
+      if ((type.kind === 'class' || type.kind === 'array') && isConstType(type))
+        global.hasConstantObjectValue = init.isConstant;
       if (global.isConstexprPointer && !init.isConstant)
         this.error(row, 'constexpr の変数の初期値には定数式を書いてください。');
       const { index } = global;

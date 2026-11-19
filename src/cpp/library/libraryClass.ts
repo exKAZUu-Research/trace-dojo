@@ -55,6 +55,7 @@ export interface LibraryClass {
   /** The category of an iterator, which decides its operators and the algorithms that accept it. */
   iteratorCategory?: IteratorCategory;
   readonly iteratorReference?: Type;
+  readonly valueInitializedMembers?: readonly Type[];
   appendMethod?: FunctionInfo;
   /** Whether a program's class may derive from this one, as from the exception classes. */
   isInheritable?: boolean;

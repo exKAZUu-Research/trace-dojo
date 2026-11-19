@@ -1,5 +1,6 @@
 #include <array>
 #include <iostream>
+#include <stdexcept>
 
 struct DefaultRef { const int& value{7}; };
 
@@ -43,6 +44,11 @@ struct Enclosed {
   std::array<PrivateDefault, 1> first;
   std::array<ProtectedDefault, 1> second;
   AmbiguousDefault third[1];
+};
+struct LibraryArrays {
+  std::array<std::runtime_error, 1> errors;
+  std::array<std::pair<Item, int>, 1> values;
+  std::array<std::runtime_error, 0> empty;
 };
 struct DefaultBase { const Base& value{Derived{}}; };
 struct DefaultDerived { const Derived& value{Derived{}}; };
@@ -109,4 +115,7 @@ int main() {
   std::cout << withItems.nonempty[0].number << withItems.empty.size();
   Enclosed enclosed{{PrivateDefault(7)}, {ProtectedDefault(8)}, {AmbiguousDefault(9)}};
   std::cout << enclosed.first[0].number << enclosed.second[0].number << enclosed.third[0].number;
+  LibraryArrays library{{std::runtime_error("message")}, {std::pair<Item, int>{Item(7), 8}}, {}};
+  std::cout << library.errors[0].what() << library.values[0].first.number
+            << library.values[0].second << library.empty.size();
 }

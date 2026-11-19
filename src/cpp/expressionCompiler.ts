@@ -532,6 +532,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         type,
         isLvalue: true,
         staticAddress: object.staticAddress,
+        constantInitialization: object.constantInitialization,
         memberConstant: object.isThis && isArithmetic(type) ? (members) => members.get(field) : undefined,
         row,
         run: (frame) => {
@@ -1258,14 +1259,22 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (!isInteger(offset.type))
       return this.error(row, `配列の添字には整数を書いてください（${typeName(offset.type)}）。`);
     const p = pointer.run;
-    const n = convertArithmetic(offset, LONG).run;
+    const n = convertArithmetic(offset, LONG);
     const type = (pointer.type as Extract<Type, { kind: 'pointer' }>).to;
+    const container = array.type.kind === 'array' ? array : index;
+    const at = n.constant;
     return {
       type,
       isLvalue: true,
       staticAddress: pointer.staticAddress && offset.constant !== undefined,
+      constantInitialization:
+        container.constantInitialization === true &&
+        container.type.kind === 'array' &&
+        at !== undefined &&
+        at >= 0 &&
+        at < (container.type.length ?? 0),
       row,
-      run: (frame) => (p(frame) as Ptr).offset(Number(n(frame))),
+      run: (frame) => (p(frame) as Ptr).offset(Number(n.run(frame))),
     };
   }
 
@@ -1637,6 +1646,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** A value-initialized prvalue of a type, as `T()` makes. */
   valueInitialized(type: Type, row: number): Expr {
+    if (type.kind === 'reference') return this.error(row, '参照には初期値を書いてください。');
     if (type.kind === 'class') return this.defaultConstructed(type.cls, row, true);
     if (type.kind === 'array') {
       const initialize = this.valueInitialized(type.of, row).run as Eval<Value>;

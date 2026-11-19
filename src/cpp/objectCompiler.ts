@@ -620,13 +620,10 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
    */
   destroyerOf(type: Type, row?: number): ((frame: Frame, value: Value) => void) | undefined {
     if (type.kind === 'class') {
-      const { destructor } = type.cls;
-      if (row !== undefined && destructor && !destructor.native)
-        this.checkAccess(destructor.access, type.cls, type.cls, row, `${type.cls.name} のデストラクタ`);
       if (row !== undefined) this.requireObjectUse(type, 'destroy', row);
       return type.cls.operations?.destroy;
     }
-    if (type.kind === 'array') {
+    if (type.kind === 'array' && (type.length ?? 1) > 0) {
       const element = this.destroyerOf(type.of, row);
       if (!element) return undefined;
       return (frame, value) => {
@@ -638,18 +635,32 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     return undefined;
   }
 
-  requireObjectUse(
+  requireObjectUse(type: Type, operation: 'copy' | 'assign' | 'destroy', row: number): void {
+    this.checkObjectUse(type, operation, row, this.enclosingClass, new Set());
+  }
+
+  private checkObjectUse(
     type: Type,
     operation: 'copy' | 'assign' | 'destroy',
     row: number,
-    seen = new Set<ClassInfo>()
+    accessContext: ClassInfo | undefined,
+    seen: Set<ClassInfo>
   ): void {
     if (type.kind === 'array') {
-      this.requireObjectUse(type.of, operation, row, seen);
+      if ((type.length ?? 1) > 0) this.checkObjectUse(type.of, operation, row, accessContext, seen);
       return;
     }
     if (type.kind !== 'class') return;
     const { cls } = type;
+    const destructor = cls.destructor;
+    if (
+      operation === 'destroy' &&
+      destructor &&
+      !destructor.native &&
+      !isMemberAccessible(destructor.access, cls, cls, accessContext)
+    ) {
+      this.error(row, `${cls.name} のデストラクタは ${destructor.access} なので、ここでは使えません。`);
+    }
     if (seen.has(cls)) return;
     seen.add(cls);
 
@@ -661,12 +672,13 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
         return;
       }
     }
-    if (operation === 'destroy' && cls.destructor) this.checkDefined(cls.destructor, row);
-    if (cls.base) this.requireObjectUse(classType(cls.base), operation, row, seen);
-    for (const field of cls.ownFields) this.requireObjectUse(field.type, operation, row, seen);
+    if (operation === 'destroy' && destructor) this.checkDefined(destructor, row);
+    if (cls.base) this.checkObjectUse(classType(cls.base), operation, row, cls, seen);
+    for (const field of cls.ownFields) this.checkObjectUse(field.type, operation, row, cls, seen);
     for (const owned of cls.library?.ownedTypes ?? []) {
-      this.requireObjectUse(owned, operation, row, seen);
-      if (operation === 'assign' && cls.library?.assignmentCopies) this.requireObjectUse(owned, 'copy', row);
+      this.checkObjectUse(owned, operation, row, cls, seen);
+      if (operation === 'assign' && cls.library?.assignmentCopies)
+        this.checkObjectUse(owned, 'copy', row, cls, new Set());
     }
   }
 }

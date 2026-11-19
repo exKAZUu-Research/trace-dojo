@@ -2,6 +2,31 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
+test.each(['private', 'protected'])('an array may not destroy an element with a %s destructor', (access) => {
+  const program = `#include <array>
+struct Item { Item(int) {} ${access}: ~Item() {} };
+int main() { std::array<Item, 1> items{Item(7)}; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: expect.stringContaining('デストラクタ') }],
+  });
+});
+
+test.each([
+  'std::pair<const int, int> a{1, 2}, b{3, 4}; a = b;',
+  'std::map<int, int> m{{1, 2}, {3, 4}}; auto a = *m.begin(); auto b = a; a = b;',
+  'std::pair<Item, int> a{{1}, 2}, b{{3}, 4}; a = b;',
+])('a pair may not assign a nonassignable member: %s', (body) => {
+  const program = `#include <map>
+#include <utility>
+struct Item { const int value; };
+int main() { ${body} }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 3, message: expect.stringContaining('代入演算子が削除') }],
+  });
+});
+
 test.each(['values.data();', 'bool& bit = values[0];', 'for (auto& bit : values) bit = false;'])(
   'vector<bool> does not expose bit addresses: %s',
   (body) => {

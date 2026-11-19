@@ -80,7 +80,8 @@ export function implicitConversion(
   allowUser = true
 ): ConversionSequence | undefined {
   // The library's pseudo-parameter of a callable or a braced list takes the argument as it is.
-  if (expr.braced && to.kind === 'function') return sequence(Rank.Exact, (e) => e, { isInitializerList: true });
+  if (expr.braced && to.kind === 'function')
+    return sequence(Rank.Exact, (e) => ({ ...e, constantInitialization: true }), { isInitializerList: true });
   if (expr.braced) return host.bracedConversion(expr.braced, to);
   // A function's name converts only to a parameter that takes a callable, as the library's algorithms have.
   if (to.kind === 'function' || expr.functions) {

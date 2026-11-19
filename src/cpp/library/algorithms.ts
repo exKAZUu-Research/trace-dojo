@@ -5,7 +5,7 @@ import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import { destroyTemporaries, invoke, makeEach, withTemporaries } from '../objectCompiler';
-import type { Frame } from '../runtime';
+import { type Frame, holdAll } from '../runtime';
 import {
   BOOL,
   ClassInfo,
@@ -873,7 +873,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         fn.evaluateConstant = ([a, b]) => ((name === 'min' ? b < a : a < b) ? b : a);
       }
       if (args.length === 2 && supportsConstantOrder(type)) {
-        fn.libraryConstant = (operands) => (operands.every((operand) => !operand.isLvalue) ? true : undefined);
+        fn.libraryConstant = () => true;
       }
       return fn;
     });
@@ -1340,33 +1340,43 @@ function listExtremum(
   const ops = elementOperations(compiler, type, elements[0].row);
   // The list itself is the argument, which the function evaluates element by element.
   const listParam: Type = { kind: 'function', ret: VOID, params: [] };
-  return native(name, [listParam, ...comparatorParams], result ? classType(result) : type, (_args, { frame }) => {
-    const destroy = ops.destroy;
-    const items = values.map((value) => {
-      const object = value(frame);
-      if (destroy) frame.temporaries.push({ object, destroy });
-      return object;
-    });
-    const compare = less(frame);
-    if (result) {
-      const [low, high] = minmaxPositions(items, compare);
-      const selected: Value[] = [items[low], items[high]];
-      return new CObject(
-        result,
-        makeEach(
-          frame,
-          selected.length,
-          (index) => ops.copy(frame, selected[index]),
-          () => destroy
-        )
-      );
-    }
-    let best = 0;
-    for (let index = 1; index < items.length; index++) {
-      if (name === 'min' ? compare(items[index], items[best]) : compare(items[best], items[index])) best = index;
-    }
-    return ops.copy(frame, items[best]);
+  const destroy = ops.destroy;
+  const runs = values.map((initialize) => (frame: Frame) => {
+    const object = initialize(frame);
+    if (destroy) frame.temporaries.push({ object, destroy });
+    return object;
   });
+  const isConstant =
+    comparatorParams.length === 0 && supportsConstantOrder(type) && values.every((value) => value.isConstant);
+  return native(
+    name,
+    [listParam, ...comparatorParams],
+    result ? classType(result) : type,
+    (_args, { frame }) =>
+      holdAll(frame, runs, (values) => {
+        const items = values as Value[];
+        const compare = less(frame);
+        if (result) {
+          const [low, high] = minmaxPositions(items, compare);
+          const selected: Value[] = [items[low], items[high]];
+          return new CObject(
+            result,
+            makeEach(
+              frame,
+              selected.length,
+              (index) => ops.copy(frame, selected[index]),
+              () => destroy
+            )
+          );
+        }
+        let best = 0;
+        for (let index = 1; index < items.length; index++) {
+          if (name === 'min' ? compare(items[index], items[best]) : compare(items[best], items[index])) best = index;
+        }
+        return ops.copy(frame, items[best]);
+      }),
+    { libraryConstant: () => (isConstant ? true : undefined) }
+  );
 }
 
 /** libc++'s `__minmax_element_impl`: the first least and the last greatest, comparing the values in pairs. */

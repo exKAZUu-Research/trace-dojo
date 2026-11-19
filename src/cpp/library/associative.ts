@@ -27,6 +27,7 @@ import {
 import { CObject, Ptr, type Value } from '../values';
 import { MapValue, NodePositions } from './containerValues';
 import {
+  assignElement,
   type ElementOperations,
   elementOperations,
   equalTo,
@@ -55,6 +56,10 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
   ];
   cls.memberTypes.set('first_type', first);
   cls.memberTypes.set('second_type', second);
+  cls.isAssignmentDeleted = [first, second].some((member) => {
+    const type = nonReference(member);
+    return isConstType(type) || type.kind === 'array' || (type.kind === 'class' && type.cls.isAssignmentDeleted);
+  });
   let operations: [ElementOperations, ElementOperations] | undefined;
   const ops = (): [ElementOperations, ElementOperations] => {
     operations ??= [
@@ -73,6 +78,7 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
   cls.library = {
     kind: 'pair',
     allowsConstantCopy: constantMembers,
+    valueInitializedMembers: [first, second],
     args: [first, second],
     size: Math.ceil((secondOffset + sizeOf(secondStorage)) / align) * align,
     align,
@@ -118,8 +124,13 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
     assign: (frame, target, source) => {
       const to = target as CObject;
       const from = source as CObject;
-      to.values[0] = ops()[0].assign(frame, to.values[0], from.values[0]);
-      to.values[1] = ops()[1].assign(frame, to.values[1], from.values[1]);
+      for (const [index, member] of [first, second].entries()) {
+        if (member.kind === 'reference') {
+          const value = (from.values[index] as Ptr).read();
+          const assignment = elementOperations(library.compiler, unqualified(member.to), 0);
+          assignElement(frame, to.values[index] as Ptr, assignment, value);
+        } else to.values[index] = ops()[index].assign(frame, to.values[index], from.values[index]);
+      }
     },
     destroy: (frame, value) => {
       const [a, b] = (value as CObject).values;
@@ -142,9 +153,12 @@ export function pairClass(library: Library, first: Type, second: Type): ClassInf
     ),
     nativeConstructor(
       cls,
-      [constRef(first), constRef(second)],
+      [first, second].map((type) => (type.kind === 'reference' ? type : constRef(type))),
       ([a, b], { frame }) =>
-        construct(frame, [(f) => ops()[0].copy(f, (a as Ptr).read()), (f) => ops()[1].copy(f, (b as Ptr).read())]),
+        construct(frame, [
+          (f) => (first.kind === 'reference' ? (a as Ptr) : ops()[0].copy(f, (a as Ptr).read())),
+          (f) => (second.kind === 'reference' ? (b as Ptr) : ops()[1].copy(f, (b as Ptr).read())),
+        ]),
       {
         libraryConstant: () => (constantMembers ? true : undefined),
         uses: (row) => {

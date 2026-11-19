@@ -824,7 +824,7 @@ function sequenceOperator(
   const [left, right] = operands;
   const isSelf = (expr: Expr | undefined): boolean => expr?.type.kind === 'class' && expr.type.cls === cls;
   if (operator === '[]' && isSelf(left) && kind !== 'list') {
-    const index = compiler.convert(right, SIZE_T, row).run;
+    const index = compiler.convert(right, SIZE_T, row);
     const object = left.isLvalue ? left.run : compiler.materialize(left).run;
     const isConst = isConstType(left.type);
     const proxy = cls.memberTypes.get(isConst ? 'const_reference' : 'reference');
@@ -832,10 +832,15 @@ function sequenceOperator(
     return {
       type,
       isLvalue: !proxy,
+      constantInitialization:
+        kind === 'array' &&
+        left.constantInitialization === true &&
+        index.constant !== undefined &&
+        index.constant < (cls.library?.aggregateArray?.type.length ?? 0),
       row,
       run: (frame) => {
         const target = (object(frame) as Ptr).read() as SequenceValue;
-        const at = Number(index(frame) as bigint);
+        const at = Number(index.run(frame));
         if (at < 0 || at >= target.items.length) throw new CppRuntimeError('outOfBounds');
         return target.location(at);
       },
