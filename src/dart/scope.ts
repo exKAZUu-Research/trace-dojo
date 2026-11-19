@@ -1,0 +1,176 @@
+import type { ClassInfo } from './classes';
+import type { FunctionInfo, TypeEnv } from './runtime';
+import type { DartType, FunctionType, InterfaceType, TypeParam } from './types';
+import type { Value } from './values';
+
+let nextLocalId = 0;
+
+/** A local variable or parameter. */
+export class LocalVar {
+  readonly id = nextLocalId++;
+  /** Assigned inside a closure, which stops Dart from promoting it. */
+  isWriteCaptured = false;
+  /** Read inside a closure. */
+  isCaptured = false;
+  /** A primitive value a `const` local holds. */
+  constant: Value | undefined;
+  hasConstant = false;
+
+  constructor(
+    readonly name: string,
+    readonly type: DartType,
+    readonly slot: number,
+    readonly owner: FunctionContext,
+    readonly options: {
+      isFinal: boolean;
+      isLate: boolean;
+      isConst: boolean;
+      isParameter: boolean;
+      hasInitializer: boolean;
+    }
+  ) {}
+}
+
+/** A function being compiled: its slots, the variables it captures, and what `return` and `this` mean in it. */
+export class FunctionContext {
+  slotCount = 0;
+  /** The outer variables the function captures, in the order of its captured cells. */
+  readonly captures: LocalVar[] = [];
+  readonly scopes: Map<string, LocalVar>[] = [new Map()];
+  /** The labels in scope, innermost last, with whether each names a loop or switch that `continue` may target. */
+  readonly labels: { name: string; isLoop: boolean; isSwitchCase: boolean }[] = [];
+  loopDepth = 0;
+  switchDepth = 0;
+  /** The variables assigned anywhere in the function's body other than their declarations, by name. */
+  assignedNames: ReadonlySet<string> = new Set();
+  /** The names assigned inside closures nested in the function. */
+  closureAssignedNames: ReadonlySet<string> = new Set();
+  /** The type of the value each `return` gives, collected to infer a closure's return type. */
+  returnTypes: DartType[] | undefined;
+  /** For `sync*` functions, the type of the elements `yield` gives. */
+  yieldTypes: DartType[] | undefined;
+  /** The catch clause's exception variables in scope, which `rethrow` needs. */
+  catchDepth = 0;
+  /** The return type a closure's context expects, which its `return` statements are checked against. */
+  contextReturn: DartType | undefined;
+  /** The element type a `sync*` function's return type gives its `yield` statements. */
+  yieldElement: DartType | undefined;
+
+  constructor(
+    readonly parent: FunctionContext | undefined,
+    readonly info: FunctionInfo,
+    readonly kind: {
+      /** The declared or contextual return type, or undefined for a closure whose return type is inferred. */
+      returnType: DartType | undefined;
+      isGenerator: boolean;
+      /** The class whose members `this` reaches, for methods, constructors, and closures inside them. */
+      thisClass: ClassInfo | undefined;
+      thisType: InterfaceType | undefined;
+      /** Whether `this` is available (instance members and generative constructors). */
+      hasThis: boolean;
+      /** The extension a member belongs to, whose `this` is the extended value. */
+      extensionOn: DartType | undefined;
+      /** In a constructor's initializer list, where `this` is unavailable. */
+      isInitializer: boolean;
+      isConstructor: boolean;
+    }
+  ) {}
+
+  allocateSlot(): number {
+    return this.slotCount++;
+  }
+}
+
+/** What flow analysis knows at a point of a function: reachability, promotions, and definite assignment. */
+export class Flow {
+  constructor(
+    readonly reachable: boolean,
+    readonly promotions: ReadonlyMap<LocalVar, DartType>,
+    /** Variables definitely assigned. */
+    readonly assigned: ReadonlySet<LocalVar>,
+    /** Variables possibly assigned, for `final` and `late final` checks. */
+    readonly maybeAssigned: ReadonlySet<LocalVar>
+  ) {}
+
+  static start(): Flow {
+    return new Flow(true, new Map(), new Set(), new Set());
+  }
+
+  get unreachable(): Flow {
+    return new Flow(false, this.promotions, this.assigned, this.maybeAssigned);
+  }
+
+  promote(variable: LocalVar, type: DartType): Flow {
+    return new Flow(this.reachable, new Map([...this.promotions, [variable, type]]), this.assigned, this.maybeAssigned);
+  }
+
+  demote(variable: LocalVar): Flow {
+    if (!this.promotions.has(variable)) return this;
+    const promotions = new Map(this.promotions);
+    promotions.delete(variable);
+    return new Flow(this.reachable, promotions, this.assigned, this.maybeAssigned);
+  }
+
+  assign(variable: LocalVar): Flow {
+    return new Flow(
+      this.reachable,
+      this.promotions,
+      new Set([...this.assigned, variable]),
+      new Set([...this.maybeAssigned, variable])
+    );
+  }
+
+  /** Forgets what `variables` held, as a loop that may assign them does at its start. */
+  forget(variables: Iterable<LocalVar>): Flow {
+    const promotions = new Map(this.promotions);
+    const maybeAssigned = new Set(this.maybeAssigned);
+    for (const variable of variables) {
+      promotions.delete(variable);
+      maybeAssigned.add(variable);
+    }
+    return new Flow(this.reachable, promotions, this.assigned, maybeAssigned);
+  }
+
+  /** What is known after two paths meet. */
+  static join(a: Flow, b: Flow): Flow {
+    if (!a.reachable)
+      return b.reachable
+        ? b
+        : new Flow(false, b.promotions, intersect(a.assigned, b.assigned), union(a.maybeAssigned, b.maybeAssigned));
+    if (!b.reachable) return a;
+    const promotions = new Map<LocalVar, DartType>();
+    for (const [variable, type] of a.promotions) {
+      const other = b.promotions.get(variable);
+      if (!other) continue;
+      promotions.set(variable, joinPromotion(type, other));
+    }
+    return new Flow(true, promotions, intersect(a.assigned, b.assigned), union(a.maybeAssigned, b.maybeAssigned));
+  }
+}
+
+let joinPromotion: (a: DartType, b: DartType) => DartType = (a) => a;
+
+/** Sets how two promotions of a variable join, which needs the subtype rules (set by the compiler to avoid a cycle). */
+export function setPromotionJoin(join: (a: DartType, b: DartType) => DartType): void {
+  joinPromotion = join;
+}
+
+function intersect<T>(a: ReadonlySet<T>, b: ReadonlySet<T>): Set<T> {
+  const result = new Set<T>();
+  for (const item of a) if (b.has(item)) result.add(item);
+  return result;
+}
+
+function union<T>(a: ReadonlySet<T>, b: ReadonlySet<T>): Set<T> {
+  const result = new Set(a);
+  for (const item of b) result.add(item);
+  return result;
+}
+
+/** A condition's flow when it is true and when it is false. */
+export interface ConditionFlow {
+  whenTrue: Flow;
+  whenFalse: Flow;
+}
+
+export type { FunctionType, TypeEnv, TypeParam };

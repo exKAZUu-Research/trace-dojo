@@ -1,0 +1,103 @@
+import type { ConstructorImpl } from '../classes';
+import type { Runtime } from '../runtime';
+import { coreTypes, type DartType, DYNAMIC, typeToString } from '../types';
+import { type Arguments, type Callable, DartList, type DartObject, type Value } from '../values';
+
+/** The natives of the interpreter's libraries, by `Class.member`, `Class.member=`, `Class.new`, or a function's name. */
+export const NATIVES = new Map<string, Callable | ConstructorImpl>();
+
+export type NativeMethod = (
+  runtime: Runtime,
+  self: Value,
+  args: Value[],
+  named: ReadonlyMap<string, Value> | undefined,
+  typeArgs: readonly DartType[]
+) => Value;
+
+/** Registers a method, getter, setter, static member, or top-level function. */
+export function define(key: string, run: NativeMethod): void {
+  const native: Callable = (runtime, receiver, args, typeArgs) =>
+    run(runtime, receiver, args.positional, args.named, typeArgs);
+  NATIVES.set(key, native);
+}
+
+/** Registers the same native under several keys. */
+export function defineAll(keys: string[], run: NativeMethod): void {
+  for (const key of keys) define(key, run);
+}
+
+export function defineConstructor(key: string, run: ConstructorImpl): void {
+  NATIVES.set(key, run);
+}
+
+/** A named argument, or its default. */
+export function named(args: ReadonlyMap<string, Value> | undefined, name: string, fallback: Value): Value {
+  return args?.has(name) ? args.get(name) : fallback;
+}
+
+export function intArg(runtime: Runtime, value: Value, name: string): bigint {
+  if (typeof value !== 'bigint') {
+    runtime.throwTypeError(
+      `type '${typeToString(runtime.runtimeTypeOf(value))}' is not a subtype of type 'int' of '${name}'`
+    );
+  }
+  return value;
+}
+
+export function numArg(runtime: Runtime, value: Value, name: string): bigint | number {
+  if (typeof value !== 'bigint' && typeof value !== 'number') {
+    runtime.throwTypeError(
+      `type '${typeToString(runtime.runtimeTypeOf(value))}' is not a subtype of type 'num' of '${name}'`
+    );
+  }
+  return value;
+}
+
+export function stringArg(runtime: Runtime, value: Value, name: string): string {
+  if (typeof value !== 'string') {
+    runtime.throwTypeError(
+      `type '${typeToString(runtime.runtimeTypeOf(value))}' is not a subtype of type 'String' of '${name}'`
+    );
+  }
+  return value;
+}
+
+/** Converts an int that indexes a JavaScript array or string, which is safe within the limits of a run. */
+export const index: (value: bigint) => number = Number;
+
+export function newList(runtime: Runtime, elementType: DartType, elements: Value[], growable = true): DartList {
+  runtime.allocate(elements.length + 1);
+  return new DartList(coreTypes.list, elementType, elements, growable);
+}
+
+export function elementTypeOf(object: DartObject, position = 0): DartType {
+  return object.typeArgs[position] ?? DYNAMIC;
+}
+
+/** Calls a Dart function value with positional arguments. */
+export function callFunction(runtime: Runtime, fn: Value, ...args: Value[]): Value {
+  const evaluated: Arguments = { positional: args, named: undefined };
+  return runtime.callValue(fn, evaluated, [], runtime.userCallRow);
+}
+
+/** The values of an iterable, through its iterator unless it is a list. */
+export function iterableValues(runtime: Runtime, iterable: Value): Value[] {
+  if (iterable instanceof DartList) return [...iterable.elements];
+  const values: Value[] = [];
+  const iterator = runtime.getProperty(iterable, 'iterator', undefined);
+  while (runtime.invoke(iterator, 'moveNext', { positional: [], named: undefined }, [], undefined) === true) {
+    values.push(runtime.getProperty(iterator, 'current', undefined));
+    runtime.spend();
+  }
+  return values;
+}
+
+/** Checks a value against an element type, as a list's or map's methods do for covariant parameters. */
+export function checkElement(runtime: Runtime, value: Value, type: DartType, name: string): void {
+  if (type.kind === 'dynamic') return;
+  if (!runtime.links.isValueOf(runtime, value, type)) {
+    runtime.throwTypeError(
+      `type '${typeToString(runtime.runtimeTypeOf(value))}' is not a subtype of type '${typeToString(type)}' of '${name}'`
+    );
+  }
+}

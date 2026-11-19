@@ -1,0 +1,1994 @@
+import type {
+  Arguments as ArgumentsSyntax,
+  CascadeSection,
+  CascadeSelector,
+  CollectionElement,
+  Expression,
+  Pattern,
+  Span,
+  StringPart,
+  SwitchExpressionCase,
+  TypeSyntax,
+} from './ast';
+import type { ClassInfo, Member } from './classes';
+import { at, type Compiled, CompilerBase, type Eval, type ResolvedMember, typeName } from './compilerBase';
+import type { Declaration, ExtensionInfo, GlobalVariable, TopLevelFunction } from './environment';
+import { formatDouble, stringOf } from './format';
+import {
+  concatenate,
+  doubleModulo,
+  doubleTruncatingDivide,
+  dynamicBinary,
+  intModulo,
+  intTruncatingDivide,
+  numericBinary,
+  shiftLeft,
+  shiftRight,
+  shiftRightUnsigned,
+  wrap,
+} from './operators';
+import type { Frame, Runtime } from './runtime';
+import { type ConditionFlow, Flow, type LocalVar } from './scope';
+import {
+  coreTypes,
+  type DartType,
+  DYNAMIC,
+  type FunctionType,
+  interfaceType,
+  isNonNullable,
+  isNullable,
+  isPotentiallyNullable,
+  isSubtype,
+  isTop,
+  makeNullable,
+  NEVER,
+  nonNullable,
+  NULL,
+  numericClassOf,
+  objectType,
+  resolveBound,
+  sameType,
+  typeParamType,
+  typeToString,
+  upperBound,
+} from './types';
+import {
+  type Arguments,
+  type Callable,
+  Cell,
+  DartList,
+  DartRecord,
+  DartTypeValue,
+  LateInitializer,
+  UNASSIGNED,
+  UNINITIALIZED,
+  type Value,
+} from './values';
+
+/** The value a null-aware member access gives when its receiver is null, which the rest of its chain passes on. */
+export const SHORTED = Symbol('shorted') as unknown as Value;
+
+/** What a name means where it is read. */
+export type NameResolution =
+  | { kind: 'local'; variable: LocalVar }
+  | { kind: 'thisMember'; resolved: ResolvedMember; name: string }
+  | { kind: 'staticMember'; member: Member; cls: ClassInfo }
+  | { kind: 'extensionMember'; resolved: ResolvedMember; name: string }
+  | { kind: 'declaration'; declaration: Declaration }
+  | { kind: 'prefix'; prefix: string };
+
+const ARITHMETIC = new Set(['+', '-', '*', '%', 'remainder']);
+
+/** The operators whose method `x op= y` calls, by assignment operator. */
+const COMPOUND_OPERATORS: Record<string, string> = {
+  '+=': '+',
+  '-=': '-',
+  '*=': '*',
+  '/=': '/',
+  '~/=': '~/',
+  '%=': '%',
+  '&=': '&',
+  '|=': '|',
+  '^=': '^',
+  '<<=': '<<',
+  '>>=': '>>',
+  '>>>=': '>>>',
+};
+
+export abstract class ExpressionCompiler extends CompilerBase {
+  // Implemented by the subclasses that compile calls, closures, patterns, and declarations.
+  abstract compileCall(expression: Extract<Expression, { kind: 'call' }>, context: DartType | undefined): Compiled;
+  abstract compileNew(expression: Extract<Expression, { kind: 'new' }>, context: DartType | undefined): Compiled;
+  abstract compileFunctionExpression(
+    expression: Extract<Expression, { kind: 'function' }>,
+    context: DartType | undefined
+  ): Compiled;
+  abstract compileSwitchExpression(
+    subject: Expression,
+    cases: SwitchExpressionCase[],
+    span: Span,
+    context: DartType | undefined
+  ): Compiled;
+  abstract compilePatternAssignment(pattern: Pattern, value: Expression, span: Span): Compiled;
+  abstract compileCollectionElements(
+    elements: CollectionElement[],
+    kind: 'list' | 'set' | 'map',
+    elementContext: DartType | undefined,
+    valueContext: DartType | undefined
+  ): {
+    types: { key: DartType; value?: DartType }[];
+    run: (frame: Frame, add: (key: Value, value?: Value) => void) => void;
+    isConst: boolean;
+    creates: boolean;
+  };
+  abstract compileMethodCall(
+    receiver: Compiled,
+    receiverSyntax: Expression,
+    name: string,
+    args: ArgumentsSyntax,
+    typeArguments: TypeSyntax[] | undefined,
+    span: Span,
+    context: DartType | undefined,
+    nullAware: boolean
+  ): Compiled;
+  abstract compileConstructorTearoff(type: TypeSyntax, name: string | undefined, span: Span): Compiled;
+  abstract compileDotShorthand(
+    expression: Extract<Expression, { kind: 'dotShorthand' }>,
+    context: DartType | undefined
+  ): Compiled;
+  abstract constructSymbol(frame: Frame, name: string): Value;
+  abstract readGlobal(global: GlobalVariable): Eval;
+  abstract tearOffFunction(fn: TopLevelFunction): Eval;
+  abstract typeLiteralValue(cls: ClassInfo, span: Span): Compiled;
+
+  /** Compiles an expression whose value is used, ending a null-aware chain. */
+  compileExpression(expression: Expression, context?: DartType): Compiled {
+    const compiled = this.compileChainPart(expression, context);
+    if (!this.isShorting(expression)) return compiled;
+    const { run } = compiled;
+    return {
+      ...compiled,
+      run: (frame) => {
+        const value = run(frame);
+        return value === SHORTED ? undefined : value;
+      },
+    };
+  }
+
+  /** Whether a null-aware access appears in the selector chain of an expression, so that it may give `SHORTED`. */
+  protected isShorting(expression: Expression): boolean {
+    switch (expression.kind) {
+      case 'member':
+      case 'index': {
+        return expression.nullAware || this.isShorting(expression.object);
+      }
+      case 'call': {
+        return this.isShorting(expression.callee);
+      }
+      case 'nullAssert': {
+        return this.isShorting(expression.operand);
+      }
+      default: {
+        return false;
+      }
+    }
+  }
+
+  /** Compiles a condition, which must be a `bool`, and the flow when it is true and when it is false. */
+  compileCondition(expression: Expression): { compiled: Compiled; flow: ConditionFlow } {
+    const before = this.flow;
+    const { compiled, flow } = this.compileConditionInner(expression);
+    this.checkBool(compiled, expression);
+    void before;
+    return { compiled, flow };
+  }
+
+  protected checkBool(compiled: Compiled, span: Span): void {
+    if (compiled.type.kind === 'dynamic') return;
+    if (!isSubtype(compiled.type, interfaceType(coreTypes.bool))) {
+      this.error(span, `条件には bool 型の値が必要ですが、${typeName(compiled.type)} 型の値が書かれています。`);
+    }
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of condition that flow analysis understands.
+  private compileConditionInner(expression: Expression): { compiled: Compiled; flow: ConditionFlow } {
+    switch (expression.kind) {
+      case 'parenthesized': {
+        return this.compileConditionInner(expression.expression);
+      }
+      case 'bool': {
+        const compiled = this.compileExpression(expression);
+        return {
+          compiled,
+          flow: expression.value
+            ? { whenTrue: this.flow, whenFalse: this.flow.unreachable }
+            : { whenTrue: this.flow.unreachable, whenFalse: this.flow },
+        };
+      }
+      case 'prefix': {
+        if (expression.operator !== '!') break;
+        const inner = this.compileConditionInner(expression.operand);
+        this.checkBool(inner.compiled, expression.operand);
+        const { run } = inner.compiled;
+        return {
+          compiled: {
+            type: interfaceType(coreTypes.bool),
+            run: (frame) => !(run(frame) as boolean),
+            isConst: inner.compiled.isConst,
+            constValue: inner.compiled.constValue ? { value: !inner.compiled.constValue.value } : undefined,
+          },
+          flow: { whenTrue: inner.flow.whenFalse, whenFalse: inner.flow.whenTrue },
+        };
+      }
+      case 'binary': {
+        if (expression.operator === '&&' || expression.operator === '||') return this.compileLogical(expression);
+        if (expression.operator === '==' || expression.operator === '!=') {
+          const result = this.compileEquality(expression);
+          return result;
+        }
+        break;
+      }
+      case 'is': {
+        return this.compileIs(expression);
+      }
+      default: {
+        break;
+      }
+    }
+    const compiled = this.compileExpression(expression);
+    return { compiled, flow: { whenTrue: this.flow, whenFalse: this.flow } };
+  }
+
+  private compileLogical(expression: Extract<Expression, { kind: 'binary' }>): {
+    compiled: Compiled;
+    flow: ConditionFlow;
+  } {
+    const isAnd = expression.operator === '&&';
+    const left = this.compileConditionInner(expression.left);
+    this.checkBool(left.compiled, expression.left);
+    this.flow = isAnd ? left.flow.whenTrue : left.flow.whenFalse;
+    const right = this.compileConditionInner(expression.right);
+    this.checkBool(right.compiled, expression.right);
+    const leftRun = left.compiled.run;
+    const rightRun = right.compiled.run;
+    const flow: ConditionFlow = isAnd
+      ? { whenTrue: right.flow.whenTrue, whenFalse: Flow.join(left.flow.whenFalse, right.flow.whenFalse) }
+      : { whenTrue: Flow.join(left.flow.whenTrue, right.flow.whenTrue), whenFalse: right.flow.whenFalse };
+    this.flow = Flow.join(flow.whenTrue, flow.whenFalse);
+    const isConst = left.compiled.isConst && right.compiled.isConst;
+    return {
+      compiled: {
+        type: interfaceType(coreTypes.bool),
+        run: isAnd
+          ? (frame) => (leftRun(frame) as boolean) && (rightRun(frame) as boolean)
+          : (frame) => (leftRun(frame) as boolean) || (rightRun(frame) as boolean),
+        isConst,
+        constValue:
+          left.compiled.constValue && right.compiled.constValue
+            ? {
+                value: isAnd
+                  ? (left.compiled.constValue.value as boolean) && (right.compiled.constValue.value as boolean)
+                  : (left.compiled.constValue.value as boolean) || (right.compiled.constValue.value as boolean),
+              }
+            : undefined,
+      },
+      flow,
+    };
+  }
+
+  private compileEquality(expression: Extract<Expression, { kind: 'binary' }>): {
+    compiled: Compiled;
+    flow: ConditionFlow;
+  } {
+    const left = this.compileExpression(expression.left);
+    const right = this.compileExpression(expression.right);
+    const negated = expression.operator === '!=';
+    const nullVariable =
+      right.type.kind === 'null' && left.variable
+        ? left.variable
+        : left.type.kind === 'null' && right.variable
+          ? right.variable
+          : undefined;
+    let whenEqual = this.flow;
+    let whenNotEqual = this.flow;
+    if (nullVariable && this.isPromotable(nullVariable)) {
+      const current = this.promotedType(nullVariable);
+      const nonNull = nonNullable(current);
+      if (!sameType(nonNull, current)) whenNotEqual = this.flow.promote(nullVariable, nonNull);
+    }
+    const compiled = this.equalityOf(left, right, negated, expression);
+    return {
+      compiled,
+      flow: negated
+        ? { whenTrue: whenNotEqual, whenFalse: whenEqual }
+        : { whenTrue: whenEqual, whenFalse: whenNotEqual },
+    };
+  }
+
+  private equalityOf(left: Compiled, right: Compiled, negated: boolean, span: Span): Compiled {
+    if (left.type.kind !== 'dynamic' && left.type.kind !== 'null' && !isNullable(left.type)) {
+      const equals = this.lookupMember(left.type, '==', false);
+      if (equals?.member.kind === 'method') {
+        const parameter = (equals.type as FunctionType).positional[0];
+        if (
+          parameter &&
+          !isSubtype(nonNullable(right.type), parameter) &&
+          right.type.kind !== 'dynamic' &&
+          right.type.kind !== 'null'
+        ) {
+          this.error(span, `${typeName(right.type)} 型の値は、== の右辺 ${typeName(parameter)} に合いません。`);
+        }
+      }
+    }
+    const leftRun = left.run;
+    const rightRun = right.run;
+    const constValue =
+      left.constValue && right.constValue && isPrimitive(left.constValue.value) && isPrimitive(right.constValue.value)
+        ? { value: primitiveEquals(left.constValue.value, right.constValue.value) !== negated }
+        : undefined;
+    return {
+      type: interfaceType(coreTypes.bool),
+      run: (frame) => {
+        const a = leftRun(frame);
+        frame.temporaries.push(a);
+        let b: Value;
+        try {
+          b = rightRun(frame);
+        } finally {
+          frame.temporaries.pop();
+        }
+        return frame.runtime.equals(a, b) !== negated;
+      },
+      isConst: left.isConst && right.isConst,
+      constValue,
+    };
+  }
+
+  private compileIs(expression: Extract<Expression, { kind: 'is' }>): { compiled: Compiled; flow: ConditionFlow } {
+    const value = this.compileExpression(expression.value);
+    const type = this.resolveType(expression.type);
+    const resolve = this.runtimeType(type);
+    const { run } = value;
+    let promoted = this.flow;
+    const { variable } = value;
+    if (variable && this.isPromotable(variable)) {
+      const current = this.promotedType(variable);
+      const narrowed = promotionTarget(current, type);
+      if (narrowed) promoted = this.flow.promote(variable, narrowed);
+    }
+    const { negated } = expression;
+    return {
+      compiled: {
+        type: interfaceType(coreTypes.bool),
+        run: (frame) => {
+          const result = this.valueIsAt(frame, run(frame), resolve(frame));
+          return result !== negated;
+        },
+        isConst: false,
+      },
+      flow: negated ? { whenTrue: this.flow, whenFalse: promoted } : { whenTrue: promoted, whenFalse: this.flow },
+    };
+  }
+
+  protected valueIsAt(frame: Frame, value: Value, type: DartType): boolean {
+    if (isTop(type)) return true;
+    if (value === undefined) return isNullable(type);
+    return isSubtype(frame.runtime.runtimeTypeOf(value), type);
+  }
+
+  // code-gauge-allow functionNcss 150 -- One case per kind of expression.
+  protected compileChainPart(expression: Expression, context: DartType | undefined): Compiled {
+    switch (expression.kind) {
+      case 'int': {
+        return this.compileInt(expression, context, false);
+      }
+      case 'double': {
+        const { value } = expression;
+        return { type: interfaceType(coreTypes.double), run: () => value, isConst: true, constValue: { value } };
+      }
+      case 'bool': {
+        const { value } = expression;
+        return { type: interfaceType(coreTypes.bool), run: () => value, isConst: true, constValue: { value } };
+      }
+      case 'null': {
+        return { type: NULL, run: () => {}, isConst: true, constValue: { value: undefined } };
+      }
+      case 'string': {
+        return this.compileString(expression.parts);
+      }
+      case 'symbol': {
+        const { name } = expression;
+        return {
+          type: interfaceType(coreTypes.symbol),
+          run: (frame) => this.constructSymbol(frame, name),
+          isConst: true,
+        };
+      }
+      case 'list': {
+        return this.compileListLiteral(expression, context);
+      }
+      case 'setOrMap': {
+        return this.compileSetOrMapLiteral(expression, context);
+      }
+      case 'record': {
+        return this.compileRecordLiteral(expression, context);
+      }
+      case 'identifier': {
+        return this.compileIdentifier(expression);
+      }
+      case 'this': {
+        return this.compileThis(expression);
+      }
+      case 'super': {
+        return this.error(expression, 'super はメンバーの呼び出しにしか使えません。');
+      }
+      case 'parenthesized': {
+        const inner = this.compileExpression(expression.expression, context);
+        return { ...inner, variable: inner.variable };
+      }
+      case 'member': {
+        return this.compileMember(expression, context);
+      }
+      case 'index': {
+        return this.compileIndex(expression);
+      }
+      case 'call': {
+        return this.compileCall(expression, context);
+      }
+      case 'new': {
+        return this.compileNew(expression, context);
+      }
+      case 'assign': {
+        return this.compileAssignment(expression, context);
+      }
+      case 'patternAssign': {
+        return this.compilePatternAssignment(expression.pattern, expression.value, expression);
+      }
+      case 'prefix': {
+        return this.compilePrefix(expression, context);
+      }
+      case 'postfix': {
+        return this.compileIncrement(expression.operand, expression.operator === '++' ? '+' : '-', false, expression);
+      }
+      case 'nullAssert': {
+        return this.compileNullAssert(expression);
+      }
+      case 'binary': {
+        return this.compileBinary(expression, context);
+      }
+      case 'conditional': {
+        return this.compileConditional(expression, context);
+      }
+      case 'is': {
+        return this.compileIs(expression).compiled;
+      }
+      case 'as': {
+        return this.compileAs(expression);
+      }
+      case 'throw': {
+        return this.compileThrow(expression);
+      }
+      case 'function': {
+        return this.compileFunctionExpression(expression, context);
+      }
+      case 'cascade': {
+        return this.compileCascade(expression, context);
+      }
+      case 'switch': {
+        return this.compileSwitchExpression(expression.subject, expression.cases, expression, context);
+      }
+      case 'dotShorthand': {
+        return this.compileDotShorthand(expression, context);
+      }
+      case 'instantiation': {
+        return this.compileInstantiation(expression);
+      }
+      case 'constructorTearoff': {
+        return this.compileConstructorTearoff(expression.type, expression.name, expression);
+      }
+      case 'await': {
+        return this.unsupported(expression, 'await（非同期処理）');
+      }
+    }
+  }
+
+  // Literals
+
+  protected compileInt(
+    expression: Extract<Expression, { kind: 'int' }>,
+    context: DartType | undefined,
+    negated: boolean
+  ): Compiled {
+    const exact = negated ? -expression.value : expression.value;
+    if (context && isDoubleContext(context)) {
+      const value = Number(exact);
+      if (BigInt(value) !== exact) {
+        this.error(expression, `整数リテラル ${expression.text} は、double として正確に表せません。`);
+      }
+      return { type: interfaceType(coreTypes.double), run: () => value, isConst: true, constValue: { value } };
+    }
+    const isHex = /^0[xX]/.test(expression.text);
+    const limit = isHex && !negated ? 1n << 64n : negated ? 1n << 63n : (1n << 63n) - 1n;
+    if ((negated ? -exact : exact) > (isHex && !negated ? limit - 1n : limit)) {
+      this.error(expression, `整数リテラル ${negated ? '-' : ''}${expression.text} は、64 ビットの int で表せません。`);
+    }
+    const value = BigInt.asIntN(64, exact);
+    return { type: interfaceType(coreTypes.int), run: () => value, isConst: true, constValue: { value } };
+  }
+
+  private compileString(parts: StringPart[]): Compiled {
+    const pieces: (string | Eval)[] = [];
+    let isConst = true;
+    let constText: string | undefined = '';
+    for (const part of parts) {
+      if (typeof part === 'string') {
+        pieces.push(part);
+        if (constText !== undefined) constText += part;
+        continue;
+      }
+      const compiled = this.compileExpression(part);
+      if (compiled.type.kind === 'void') this.error(part, 'void の値は文字列に埋め込めません。');
+      const constant = compiled.constValue?.value;
+      if (compiled.isConst && compiled.constValue && isPrimitive(constant)) {
+        const text = primitiveText(constant);
+        pieces.push(text);
+        if (constText !== undefined) constText += text;
+        continue;
+      }
+      isConst = false;
+      constText = undefined;
+      pieces.push(compiled.run);
+    }
+    const type = interfaceType(coreTypes.string);
+    if (constText !== undefined) {
+      const text = constText;
+      return { type, run: () => text, isConst: true, constValue: { value: text } };
+    }
+    return {
+      type,
+      run: (frame) => {
+        let text = '';
+        for (const piece of pieces) {
+          if (typeof piece === 'string') {
+            text += piece;
+            continue;
+          }
+          const value = piece(frame);
+          frame.temporaries.push(value);
+          try {
+            text = concatenate(frame.runtime, text, stringOf(frame.runtime, value));
+          } finally {
+            frame.temporaries.pop();
+          }
+        }
+        return text;
+      },
+      isConst,
+    };
+  }
+
+  private compileListLiteral(
+    expression: Extract<Expression, { kind: 'list' }>,
+    context: DartType | undefined
+  ): Compiled {
+    let elementType: DartType | undefined;
+    if (expression.typeArguments) {
+      if (expression.typeArguments.length !== 1) this.error(expression, 'リストのリテラルの型引数は 1 つです。');
+      elementType = this.resolveType(expression.typeArguments[0]);
+    }
+    const contextElement = elementType ?? elementTypeOfContext(context, coreTypes.list);
+    const elements = this.withConstContext(expression.isConst, () =>
+      this.compileCollectionElements(expression.elements, 'list', contextElement, undefined)
+    );
+    if (expression.isConst && !elements.isConst)
+      this.error(expression, 'const のリストの要素は、定数でなければなりません。');
+    elementType ??=
+      contextElement && !isInferenceHole(contextElement)
+        ? contextElement
+        : inferElementType(elements.types.map((type) => type.key));
+    const type = interfaceType(coreTypes.list, [elementType]);
+    const resolve = this.runtimeType(elementType);
+    const { isConst } = expression;
+    const build: Eval = (frame) => {
+      const list = new DartList(coreTypes.list, resolve(frame), [], !isConst, isConst);
+      // The elements built so far stay reachable while later ones are evaluated.
+      frame.temporaries.push(list);
+      try {
+        elements.run(frame, (value) => {
+          list.elements.push(value);
+        });
+      } finally {
+        frame.temporaries.pop();
+      }
+      frame.runtime.allocate(list.elements.length);
+      return list;
+    };
+    return { type, run: isConst ? this.canonicalized(build) : build, isConst, creates: elements.creates };
+  }
+
+  private compileSetOrMapLiteral(
+    expression: Extract<Expression, { kind: 'setOrMap' }>,
+    context: DartType | undefined
+  ): Compiled {
+    const { typeArguments, elements: syntax } = expression;
+    let kind: 'set' | 'map' | undefined;
+    if (typeArguments?.length === 1) kind = 'set';
+    else if (typeArguments?.length === 2) kind = 'map';
+    else if (typeArguments) this.error(expression, 'セットやマップのリテラルの型引数は、1 つか 2 つです。');
+    kind ??= this.setOrMapFromElements(syntax, context);
+    const types = typeArguments?.map((argument) => this.resolveType(argument));
+    if (kind === 'set') {
+      const contextElement = types?.[0] ?? elementTypeOfContext(context, coreTypes.set);
+      const compiled = this.withConstContext(expression.isConst, () =>
+        this.compileCollectionElements(syntax, 'set', contextElement, undefined)
+      );
+      if (expression.isConst && !compiled.isConst)
+        this.error(expression, 'const のセットの要素は、定数でなければなりません。');
+      const elementType =
+        types?.[0] ??
+        (contextElement && !isInferenceHole(contextElement)
+          ? contextElement
+          : inferElementType(compiled.types.map((type) => type.key)));
+      return this.buildSet(interfaceType(coreTypes.set, [elementType]), compiled.run, expression.isConst);
+    }
+    const contextMap = mapTypesOfContext(context);
+    const keyContext = types?.[0] ?? contextMap?.[0];
+    const valueContext = types?.[1] ?? contextMap?.[1];
+    const compiled = this.withConstContext(expression.isConst, () =>
+      this.compileCollectionElements(syntax, 'map', keyContext, valueContext)
+    );
+    if (expression.isConst && !compiled.isConst)
+      this.error(expression, 'const のマップの要素は、定数でなければなりません。');
+    const keyType =
+      types?.[0] ??
+      (keyContext && !isInferenceHole(keyContext)
+        ? keyContext
+        : inferElementType(compiled.types.map((type) => type.key)));
+    const valueType =
+      types?.[1] ??
+      (valueContext && !isInferenceHole(valueContext)
+        ? valueContext
+        : inferElementType(compiled.types.map((type) => type.value ?? DYNAMIC)));
+    return this.buildMap(interfaceType(coreTypes.map, [keyType, valueType]), compiled.run, expression.isConst);
+  }
+
+  /** Whether braces without type arguments make a set or a map, from the elements and then the context. */
+  private setOrMapFromElements(elements: CollectionElement[], context: DartType | undefined): 'set' | 'map' {
+    const kinds = new Set(elements.map((element) => this.elementKind(element)).filter((kind) => kind !== undefined));
+    if (kinds.size === 2)
+      this.error(elements[0], 'セットの要素とマップの要素を、1 つのリテラルに混ぜることはできません。');
+    const [kind] = kinds;
+    if (kind) return kind;
+    if (context) {
+      const base = resolveBound(context);
+      if (base.kind === 'interface') {
+        if (base.cls.isSubclassOf(coreTypes.map)) return 'map';
+        if (base.cls.isSubclassOf(coreTypes.set) || base.cls === coreTypes.iterable) return 'set';
+      }
+    }
+    return 'map';
+  }
+
+  private elementKind(element: CollectionElement): 'set' | 'map' | undefined {
+    switch (element.kind) {
+      case 'mapEntry': {
+        return 'map';
+      }
+      case 'spread': {
+        return undefined;
+      }
+      case 'ifElement': {
+        return (
+          this.elementKind(element.consequent) ??
+          (element.alternative ? this.elementKind(element.alternative) : undefined)
+        );
+      }
+      case 'forElement':
+      case 'forInElement': {
+        return this.elementKind(element.body);
+      }
+      case 'nullAwareElement': {
+        return 'set';
+      }
+      default: {
+        return 'set';
+      }
+    }
+  }
+
+  protected abstract buildSet(
+    type: DartType,
+    run: (frame: Frame, add: (key: Value) => void) => void,
+    isConst: boolean
+  ): Compiled;
+  protected abstract buildMap(
+    type: DartType,
+    run: (frame: Frame, add: (key: Value, value?: Value) => void) => void,
+    isConst: boolean
+  ): Compiled;
+
+  private compileRecordLiteral(
+    expression: Extract<Expression, { kind: 'record' }>,
+    context: DartType | undefined
+  ): Compiled {
+    const base = context ? resolveBound(context) : undefined;
+    const recordContext = base?.kind === 'record' ? base : undefined;
+    const names = new Set<string>();
+    for (const field of expression.named) {
+      if (names.has(field.name)) this.error(field, `レコードのフィールド ${field.name} が重複しています。`);
+      if (
+        /^\$\d+$/.test(field.name) ||
+        field.name === 'hashCode' ||
+        field.name === 'runtimeType' ||
+        field.name === 'toString' ||
+        field.name === 'noSuchMethod'
+      ) {
+        this.error(field, `レコードのフィールドに ${field.name} という名前は付けられません。`);
+      }
+      names.add(field.name);
+    }
+    const positional = expression.positional.map((field, index) =>
+      this.compileExpression(
+        field,
+        recordContext?.positional.length === expression.positional.length ? recordContext.positional[index] : undefined
+      )
+    );
+    const named = expression.named
+      .map((field) => ({
+        name: field.name,
+        compiled: this.compileExpression(
+          field.value,
+          recordContext?.named.find((other) => other.name === field.name)?.type
+        ),
+        order: expression.named.indexOf(field),
+      }))
+      .toSorted((a, b) => (a.name < b.name ? -1 : 1));
+    for (const field of [...positional, ...named.map((entry) => entry.compiled)]) {
+      if (field.type.kind === 'void') this.error(expression, 'void の値はレコードに入れられません。');
+    }
+    const type: DartType = {
+      kind: 'record',
+      positional: positional.map((field) => field.type),
+      named: named.map((field) => ({ name: field.name, type: field.compiled.type })),
+      nullable: false,
+    };
+    const isConst =
+      expression.isConst ||
+      (positional.every((field) => field.isConst) &&
+        named.every((field) => field.compiled.isConst) &&
+        this.inConstContext);
+    if (
+      expression.isConst &&
+      !(positional.every((field) => field.isConst) && named.every((field) => field.compiled.isConst))
+    ) {
+      this.error(expression, 'const のレコードのフィールドは、定数でなければなりません。');
+    }
+    // Fields evaluate in source order, whatever their names.
+    const order = expression.positional.length;
+    const evaluators: { run: Eval; slot: number }[] = [];
+    for (const [index, field] of positional.entries()) evaluators.push({ run: field.run, slot: index });
+    const sourceOrder = named.toSorted((a, b) => a.order - b.order);
+    for (const field of sourceOrder) evaluators.push({ run: field.compiled.run, slot: order + named.indexOf(field) });
+    const names2 = named.map((field) => field.name);
+    const build: Eval = (frame) => {
+      const values: Value[] = Array.from({ length: evaluators.length });
+      const mark = frame.temporaries.length;
+      try {
+        for (const evaluator of evaluators) {
+          values[evaluator.slot] = evaluator.run(frame);
+          frame.temporaries.push(values[evaluator.slot]);
+        }
+      } finally {
+        frame.temporaries.length = mark;
+      }
+      return new DartRecord(
+        coreTypes.record,
+        values.slice(0, order),
+        names2.map((name, index) => [name, values[order + index]])
+      );
+    };
+    return { type, run: isConst ? this.canonicalized(build) : build, isConst };
+  }
+
+  /** Whether the expression being compiled is in a constant context (`const` literals and constructors). */
+  protected inConstContext = false;
+
+  protected withConstContext<T>(isConst: boolean, run: () => T): T {
+    if (!isConst) return run();
+    const previous = this.inConstContext;
+    this.inConstContext = true;
+    try {
+      return run();
+    } finally {
+      this.inConstContext = previous;
+    }
+  }
+
+  /** Evaluates a constant once per run and canonicalizes it, so that equal constants are identical. */
+  protected abstract canonicalized(build: Eval): Eval;
+
+  // Names
+
+  /** What a name means: a local, a member of the enclosing class or extension, or a top-level declaration. */
+  resolveName(name: string): NameResolution | undefined {
+    const local = this.findLocal(name);
+    if (local) return { kind: 'local', variable: local };
+    const cls = this.currentClass;
+    if (cls) {
+      const own = cls.members.get(name) ?? cls.setters.get(name);
+      if (own && !own.isStatic) {
+        const resolved = this.lookupMember(cls.thisType, name, cls.members.get(name) === undefined);
+        if (resolved) return { kind: 'thisMember', resolved, name };
+      }
+      const staticMember = cls.staticMembers.get(name) ?? cls.staticSetters.get(name);
+      if (staticMember) return { kind: 'staticMember', member: staticMember, cls };
+    }
+    const ext = this.currentExtension;
+    if (ext) {
+      const own = ext.members.get(name) ?? ext.setters.get(name);
+      if (own) {
+        const resolved = this.lookupMember(ext.onType, name, ext.members.get(name) === undefined);
+        if (resolved) return { kind: 'extensionMember', resolved, name };
+      }
+      const staticMember = ext.staticMembers.get(name) ?? ext.staticSetters.get(name);
+      if (staticMember) return { kind: 'staticMember', member: staticMember, cls: coreTypes.object };
+    }
+    const declaration = this.library.lookup(name);
+    if (declaration) return { kind: 'declaration', declaration };
+    if (this.library.hasPrefix(name)) return { kind: 'prefix', prefix: name };
+    if (cls && this.fn.kind.hasThis) {
+      const resolved = this.lookupMember(cls.thisType, name, false) ?? this.lookupMember(cls.thisType, name, true);
+      if (resolved && !resolved.member.isStatic) return { kind: 'thisMember', resolved, name };
+    }
+    if (ext) {
+      const resolved = this.lookupMember(ext.onType, name, false);
+      if (resolved) return { kind: 'extensionMember', resolved, name };
+    }
+    return undefined;
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 40 -- One case per kind of name.
+  protected compileIdentifier(expression: Extract<Expression, { kind: 'identifier' }>): Compiled {
+    const { name } = expression;
+    if (name === '_') return this.error(expression, '_ は値として使えません。');
+    const resolution = this.resolveName(name);
+    if (!resolution) return this.error(expression, `${name} という名前は定義されていません。`);
+    switch (resolution.kind) {
+      case 'local': {
+        return this.readLocal(resolution.variable, expression);
+      }
+      case 'thisMember':
+      case 'extensionMember': {
+        this.requireThis(expression, name);
+        const receiver = this.thisReceiver(expression);
+        return this.readMember(receiver, resolution.resolved, name, expression, false);
+      }
+      case 'staticMember': {
+        return this.readStatic(resolution.member, expression);
+      }
+      case 'declaration': {
+        return this.readDeclaration(resolution.declaration, expression);
+      }
+      case 'prefix': {
+        return this.error(expression, `ライブラリの接頭辞 ${name} は、それだけでは値として使えません。`);
+      }
+    }
+  }
+
+  protected readDeclaration(declaration: Declaration, span: Span): Compiled {
+    switch (declaration.kind) {
+      case 'variable': {
+        const { global } = declaration;
+        const constant = global.initialValue && global.isConst ? global.initialValue : undefined;
+        return { type: global.type, run: this.readGlobal(global), isConst: global.isConst, constValue: constant };
+      }
+      case 'function': {
+        return { type: declaration.fn.type, run: this.tearOffFunction(declaration.fn), isConst: true };
+      }
+      case 'accessor': {
+        const { getter } = declaration;
+        if (!getter)
+          return this.error(span, `${declaration.setter?.name ?? ''} には getter がないので、値を読めません。`);
+        return {
+          type: getter.type.returnType,
+          run: (frame) =>
+            (getter.impl as NonNullable<typeof getter.impl>)(
+              frame.runtime,
+              undefined,
+              { positional: [], named: undefined },
+              [],
+              span.row
+            ),
+          isConst: false,
+        };
+      }
+      case 'class': {
+        return this.typeLiteralValue(declaration.cls, span);
+      }
+      case 'alias': {
+        const { alias } = declaration;
+        const type = alias.aliased ?? DYNAMIC;
+        return {
+          type: interfaceType(coreTypes.type),
+          run: () => new DartTypeValue(coreTypes.type, type) as Value,
+          isConst: true,
+        };
+      }
+      case 'extension': {
+        return this.error(span, `拡張 ${declaration.ext.name ?? ''} は値として使えません。`);
+      }
+    }
+  }
+
+  protected readLocal(variable: LocalVar, span: Span): Compiled {
+    this.checkDefinitelyAssigned(variable, span);
+    if (variable.hasConstant) {
+      const value = variable.constant;
+      return { type: variable.type, run: () => value, isConst: true, constValue: { value }, variable };
+    }
+    const cell = this.cellAccess(variable);
+    const type = this.isPromotable(variable) ? this.promotedType(variable) : variable.type;
+    const { name } = variable;
+    const isLate = variable.options.isLate;
+    const mayBeUnassigned = !variable.options.hasInitializer && !variable.options.isParameter;
+    let run: Eval;
+    if (isLate) {
+      run = (frame) => {
+        const target = cell(frame);
+        const value = target.v;
+        if (value === UNINITIALIZED)
+          frame.runtime.throwError('LateInitializationError', '', [`Local '${name}' has not been initialized.`]);
+        if (value instanceof LateInitializer) {
+          target.v = UNINITIALIZED;
+          const computed = value.run();
+          target.v = computed;
+          return computed;
+        }
+        return value;
+      };
+    } else if (mayBeUnassigned) {
+      run = (frame) => {
+        const value = cell(frame).v;
+        return value === UNASSIGNED ? undefined : value;
+      };
+    } else {
+      run = (frame) => cell(frame).v;
+    }
+    return { type, run, isConst: false, variable };
+  }
+
+  /** Rejects reading a local that flow analysis cannot prove assigned, as Dart does for non-nullable and final ones. */
+  protected checkDefinitelyAssigned(variable: LocalVar, span: Span): void {
+    const { options } = variable;
+    if (options.hasInitializer || options.isParameter || options.isLate || this.flow.assigned.has(variable)) return;
+    if (!this.flow.reachable) return;
+    // A closure may run after the variable is assigned; Dart still rejects definitely unassigned ones.
+    if (
+      variable.owner !== this.fn &&
+      (this.flow.maybeAssigned.has(variable) || variable.owner.assignedNames.has(variable.name))
+    ) {
+      return;
+    }
+    if (options.isFinal) {
+      this.error(span, `final の変数 ${variable.name} は、値を代入する前には使えません。`);
+    }
+    if (isPotentiallyNullable(variable.type) && variable.type.kind !== 'typeParam') return;
+    if (isNullable(variable.type)) return;
+    this.error(span, `null にならない変数 ${variable.name} は、値を代入する前には使えません。`);
+  }
+
+  protected requireThis(span: Span, name: string): void {
+    if (!this.fn.kind.hasThis) {
+      if (this.fn.kind.isInitializer) {
+        this.error(span, `初期化子の中では、インスタンスのメンバー ${name} は使えません。`);
+      }
+      this.error(span, `static なメンバーの中では、インスタンスのメンバー ${name} は使えません。`);
+    }
+  }
+
+  protected thisReceiver(span: Span): Compiled {
+    return this.compileThis(span);
+  }
+
+  private compileThis(span: Span): Compiled {
+    if (!this.fn.kind.hasThis) {
+      if (this.fn.kind.isInitializer) return this.error(span, '初期化子の中では this は使えません。');
+      return this.error(span, 'this は、インスタンスのメンバーの中でしか使えません。');
+    }
+    const type = this.fn.kind.extensionOn ?? this.fn.kind.thisType ?? DYNAMIC;
+    return { type, run: (frame) => frame.receiver, isConst: false };
+  }
+
+  protected readStatic(member: Member, span: Span): Compiled {
+    switch (member.kind) {
+      case 'field': {
+        const global = this.globals[member.slot];
+        const constant = global.initialValue && global.isConst ? global.initialValue : undefined;
+        return { type: member.type, run: this.readGlobal(global), isConst: global.isConst, constValue: constant };
+      }
+      case 'getter': {
+        const impl = member;
+        return {
+          type: member.type,
+          run: (frame) =>
+            (impl.impl as NonNullable<typeof impl.impl>)(
+              frame.runtime,
+              undefined,
+              { positional: [], named: undefined },
+              [],
+              span.row
+            ),
+          isConst: false,
+        };
+      }
+      case 'method': {
+        const method = member;
+        return {
+          type: member.type,
+          run: (frame) => frame.runtime.tearOff(undefined, method),
+          isConst: true,
+        };
+      }
+      default: {
+        return this.error(span, `${member.name} には getter がないので、値を読めません。`);
+      }
+    }
+  }
+
+  // Members
+
+  // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of receiver.
+  private compileMember(expression: Extract<Expression, { kind: 'member' }>, context: DartType | undefined): Compiled {
+    const { object, name } = expression;
+    const target = this.staticTarget(object);
+    if (target) return this.readStaticTarget(target, name, expression, context);
+    if (object.kind === 'super') return this.readSuperMember(name, expression);
+    const receiver = this.compileChainPart(object, undefined);
+    const shorting = this.isShorting(object);
+    const compiled = this.readMemberOf(receiver, name, expression, expression.nullAware);
+    if (!shorting && !expression.nullAware) return compiled;
+    const { run } = compiled;
+    const receiverRun = receiver.run;
+    void receiverRun;
+    return { ...compiled, run };
+  }
+
+  /** What a member access on a value of the receiver's static type reads, checking nullability. */
+  protected readMemberOf(receiver: Compiled, name: string, span: Span, nullAware: boolean): Compiled {
+    const receiverType = receiver.type;
+    if (receiverType.kind === 'void') this.error(span, 'void の値のメンバーは使えません。');
+    if (receiverType.kind === 'dynamic' || (receiverType.kind === 'never' && !receiverType.nullable)) {
+      const { run } = receiver;
+      return {
+        type: receiverType.kind === 'never' ? NEVER : DYNAMIC,
+        run: (frame) => {
+          const value = run(frame);
+          if (value === SHORTED) return SHORTED;
+          if (nullAware && value === undefined) return SHORTED;
+          return frame.runtime.getProperty(value, name, span.row);
+        },
+        isConst: false,
+      };
+    }
+    const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
+    const resolved = this.lookupMember(lookupType, name, false);
+    if (!resolved) {
+      if (this.lookupMember(lookupType, name, true))
+        this.error(span, `${name} には getter がないので、値を読めません。`);
+      return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${name} というメンバーがありません。`);
+    }
+    if (!nullAware && isNullable(receiverType) && !isObjectMember(resolved.member) && receiverType.kind !== 'null') {
+      this.error(
+        span,
+        `${typeName(receiverType)} 型の値は null かもしれないので、${name} を直接は使えません。?. を使うか、null でないことを確かめてください。`
+      );
+    }
+    const compiled = this.readMember(receiver, resolved, name, span, nullAware);
+    return compiled;
+  }
+
+  /** Reads a member found statically: a field or getter through dynamic dispatch, a method as a tear-off. */
+  protected readMember(
+    receiver: Compiled,
+    resolved: ResolvedMember,
+    name: string,
+    span: Span,
+    nullAware: boolean
+  ): Compiled {
+    const receiverRun = receiver.run;
+    const { member } = resolved;
+    let type = resolved.type;
+    if (nullAware) type = makeNullable(type);
+    if (resolved.extension) {
+      const extensionMember = member;
+      const typeArgs = resolved.extension.typeArgs;
+      return {
+        type,
+        run: (frame) => {
+          const value = receiverRun(frame);
+          if (value === SHORTED || (nullAware && value === undefined)) return SHORTED;
+          if (extensionMember.kind === 'method') {
+            const impl = extensionMember.impl as NonNullable<typeof extensionMember.impl>;
+            return frame.runtime.tearOff(value, {
+              ...extensionMember,
+              impl: (runtime, _receiver, args, methodTypeArgs, callRow) =>
+                impl(runtime, value, args, [...typeArgs, ...methodTypeArgs], callRow),
+            });
+          }
+          return (extensionMember.impl as unknown as Callable)(
+            frame.runtime,
+            value,
+            { positional: [], named: undefined },
+            typeArgs,
+            span.row
+          );
+        },
+        isConst: false,
+      };
+    }
+    if (member.owner === coreTypes.record && member.kind === 'getter') {
+      const impl = member.impl as NonNullable<typeof member.impl>;
+      return {
+        type,
+        run: (frame) => {
+          const value = receiverRun(frame);
+          if (value === SHORTED || (nullAware && value === undefined)) return SHORTED;
+          return impl(frame.runtime, value, { positional: [], named: undefined }, [], span.row);
+        },
+        isConst: false,
+      };
+    }
+    const isStringLength =
+      name === 'length' && receiver.type.kind === 'interface' && receiver.type.cls === coreTypes.string;
+    return {
+      type,
+      run: (frame) => {
+        const value = receiverRun(frame);
+        if (value === SHORTED || (nullAware && value === undefined)) return SHORTED;
+        if (isStringLength && typeof value === 'string') return BigInt(value.length);
+        return frame.runtime.getProperty(value, name, span.row);
+      },
+      isConst: isStringLength && receiver.isConst,
+      constValue:
+        isStringLength && receiver.constValue && typeof receiver.constValue.value === 'string'
+          ? { value: BigInt(receiver.constValue.value.length) }
+          : undefined,
+    };
+  }
+
+  private readSuperMember(name: string, span: Span): Compiled {
+    this.requireThis(span, name);
+    const superclass = this.currentClass?.superclass;
+    if (!superclass) return this.error(span, 'このクラスにはスーパークラスがありません。');
+    const resolved = this.lookupMember(superclass, name, false);
+    if (!resolved) return this.error(span, `スーパークラスに ${name} というメンバーがありません。`);
+    const owner = superclass.cls;
+    return {
+      type: resolved.type,
+      run: (frame) => {
+        const member = owner.implementation(name);
+        if (!member)
+          return frame.runtime.noSuchMethod(frame.receiver, name, 'getter', { positional: [], named: undefined });
+        return frame.runtime.readMember(frame.receiver, member, span.row);
+      },
+      isConst: false,
+    };
+  }
+
+  /** A class, import prefix, or extension that a member access names instead of a value. */
+  protected staticTarget(
+    object: Expression
+  ):
+    | { kind: 'class'; cls: ClassInfo; typeArgs: DartType[] | undefined }
+    | { kind: 'prefix'; prefix: string }
+    | { kind: 'extension'; ext: ExtensionInfo }
+    | undefined {
+    if (object.kind === 'instantiation' && object.target.kind === 'identifier') {
+      const target = this.staticTarget(object.target);
+      if (target?.kind === 'class') {
+        const typeArgs = this.typeArgumentsFor(
+          target.cls.typeParams,
+          {
+            row: object.row,
+            column: object.column,
+            start: object.start,
+            end: object.end,
+            kind: 'named',
+            prefix: undefined,
+            name: target.cls.name,
+            args: object.typeArguments,
+            nullable: false,
+          },
+          target.cls.name
+        );
+        return { kind: 'class', cls: target.cls, typeArgs };
+      }
+      return undefined;
+    }
+    if (object.kind === 'member' && object.object.kind === 'identifier' && !object.nullAware) {
+      const prefix = object.object.name;
+      if (!this.findLocal(prefix) && this.library.hasPrefix(prefix) && !this.resolveNameIsValue(prefix)) {
+        const declaration = this.library.lookupPrefixed(prefix, object.name);
+        if (declaration?.kind === 'class') return { kind: 'class', cls: declaration.cls, typeArgs: undefined };
+        if (declaration?.kind === 'extension') return { kind: 'extension', ext: declaration.ext };
+      }
+      return undefined;
+    }
+    if (object.kind !== 'identifier') return undefined;
+    const resolution = this.resolveName(object.name);
+    if (resolution?.kind === 'declaration') {
+      const { declaration } = resolution;
+      if (declaration.kind === 'class') return { kind: 'class', cls: declaration.cls, typeArgs: undefined };
+      if (declaration.kind === 'extension') return { kind: 'extension', ext: declaration.ext };
+      if (declaration.kind === 'alias' && declaration.alias.aliased?.kind === 'interface') {
+        const aliased = declaration.alias.aliased;
+        return {
+          kind: 'class',
+          cls: aliased.cls,
+          typeArgs: declaration.alias.typeParams.length === 0 ? [...aliased.args] : undefined,
+        };
+      }
+    }
+    if (resolution?.kind === 'prefix') return { kind: 'prefix', prefix: resolution.prefix };
+    return undefined;
+  }
+
+  private resolveNameIsValue(name: string): boolean {
+    const resolution = this.resolveName(name);
+    return resolution !== undefined && resolution.kind !== 'prefix';
+  }
+
+  protected readStaticTarget(
+    target: NonNullable<ReturnType<ExpressionCompiler['staticTarget']>>,
+    name: string,
+    span: Span,
+    context: DartType | undefined
+  ): Compiled {
+    void context;
+    if (target.kind === 'prefix') {
+      const declaration = this.library.lookupPrefixed(target.prefix, name);
+      if (!declaration) return this.error(span, `${target.prefix}.${name} は定義されていません。`);
+      return this.readDeclaration(declaration, span);
+    }
+    if (target.kind === 'extension') {
+      const member = target.ext.staticMembers.get(name);
+      if (!member) return this.error(span, `拡張 ${target.ext.name ?? ''} に static なメンバー ${name} がありません。`);
+      return this.readStatic(member, span);
+    }
+    const member = target.cls.staticMembers.get(name);
+    if (member) return this.readStatic(member, span);
+    if (target.cls.constructors.has(name))
+      return this.compileConstructorTearoff(
+        { ...at(span), kind: 'named', prefix: undefined, name: target.cls.name, args: [], nullable: false },
+        name,
+        span
+      );
+    if (target.cls.staticSetters.has(name)) return this.error(span, `${name} には getter がないので、値を読めません。`);
+    return this.error(span, `クラス ${target.cls.name} に static なメンバー ${name} がありません。`);
+  }
+
+  private compileIndex(expression: Extract<Expression, { kind: 'index' }>): Compiled {
+    if (expression.object.kind === 'super') {
+      return this.compileMethodCall(
+        this.superReceiver(expression),
+        expression.object,
+        '[]',
+        singleArgument(expression.index),
+        undefined,
+        expression,
+        undefined,
+        false
+      );
+    }
+    const receiver = this.compileChainPart(expression.object, undefined);
+    return this.compileMethodCall(
+      receiver,
+      expression.object,
+      '[]',
+      singleArgument(expression.index),
+      undefined,
+      expression,
+      undefined,
+      expression.nullAware
+    );
+  }
+
+  protected superReceiver(span: Span): Compiled {
+    this.requireThis(span, 'super');
+    const superclass = this.currentClass?.superclass;
+    if (!superclass) return this.error(span, 'このクラスにはスーパークラスがありません。');
+    return { type: superclass, run: (frame) => frame.receiver, isConst: false, ...({ isSuper: true } as object) };
+  }
+
+  // Operators
+
+  private compilePrefix(expression: Extract<Expression, { kind: 'prefix' }>, context: DartType | undefined): Compiled {
+    const { operator, operand } = expression;
+    if (operator === '++' || operator === '--')
+      return this.compileIncrement(operand, operator === '++' ? '+' : '-', true, expression);
+    if (operator === '!') return this.compileConditionInner(expression).compiled;
+    if (operator === '-' && operand.kind === 'int') return this.compileInt(operand, context, true);
+    const methodName = operator === '-' ? 'unary-' : '~';
+    const value = operand.kind === 'super' ? this.superReceiver(operand) : this.compileExpression(operand);
+    const numeric = numericClassOf(value.type);
+    if (numeric) {
+      const { run } = value;
+      if (operator === '~' && numeric !== 'int')
+        this.error(expression, `${typeName(value.type)} 型には ~ 演算子がありません。`);
+      const constValue = value.constValue ? { value: negate(value.constValue.value, operator) } : undefined;
+      return {
+        type:
+          value.type.kind === 'typeParam'
+            ? value.type
+            : interfaceType(
+                numeric === 'int' ? coreTypes.int : numeric === 'double' ? coreTypes.double : coreTypes.num
+              ),
+        run: (frame) => negate(run(frame), operator),
+        isConst: value.isConst,
+        constValue,
+      };
+    }
+    return this.compileOperatorCall(value, methodName, [], expression);
+  }
+
+  private compileNullAssert(expression: Extract<Expression, { kind: 'nullAssert' }>): Compiled {
+    const value = this.compileChainPart(expression.operand, undefined);
+    const { run } = value;
+    return {
+      type: value.type.kind === 'dynamic' ? DYNAMIC : nonNullable(value.type),
+      run: (frame) => {
+        const result = run(frame);
+        if (result === SHORTED) return SHORTED;
+        if (result === undefined) frame.runtime.throwTypeError('Null check operator used on a null value');
+        return result;
+      },
+      isConst: false,
+    };
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 30 -- The operators share their typing rules case by case.
+  private compileBinary(expression: Extract<Expression, { kind: 'binary' }>, context: DartType | undefined): Compiled {
+    const { operator } = expression;
+    if (operator === '&&' || operator === '||') {
+      const result = this.compileLogical(expression);
+      return result.compiled;
+    }
+    if (operator === '==' || operator === '!=') {
+      const result = this.compileEquality(expression);
+      this.flow = Flow.join(result.flow.whenTrue, result.flow.whenFalse);
+      return result.compiled;
+    }
+    if (operator === '??') return this.compileIfNull(expression, context);
+    const left =
+      expression.left.kind === 'super' ? this.superReceiver(expression.left) : this.compileExpression(expression.left);
+    return this.compileBinaryWithLeft(left, operator, expression.right, expression, context);
+  }
+
+  /** Compiles `left op right` once the left operand is compiled, as compound assignments need. */
+  // code-gauge-allow functionCognitiveComplexity 30 -- The typing rules of numbers, strings, dynamic, and operator methods.
+  protected compileBinaryWithLeft(
+    left: Compiled,
+    operator: string,
+    rightSyntax: Expression,
+    span: Span,
+    context: DartType | undefined
+  ): Compiled {
+    const expression = { ...at(span), right: rightSyntax };
+    if (left.type.kind === 'void') this.error(expression, 'void の値には演算子を使えません。');
+    const leftNumeric = numericClassOf(left.type);
+    if (leftNumeric) {
+      const parameterContext = leftNumeric === 'double' ? interfaceType(coreTypes.num) : undefined;
+      const right = this.compileExpression(
+        expression.right,
+        context && leftNumeric === 'int' && isDoubleContext(context) ? undefined : parameterContext
+      );
+      return this.numericOperator(operator, left, right, leftNumeric, span);
+    }
+    if (left.type.kind === 'dynamic') {
+      const right = this.compileExpression(expression.right);
+      const leftRun = left.run;
+      const rightRun = right.run;
+      return {
+        type: ['<', '<=', '>', '>='].includes(operator) ? DYNAMIC : DYNAMIC,
+        run: (frame) => {
+          const a = leftRun(frame);
+          frame.temporaries.push(a);
+          try {
+            return dynamicBinary(frame.runtime, operator, a, rightRun(frame), expression.row);
+          } finally {
+            frame.temporaries.pop();
+          }
+        },
+        isConst: false,
+      };
+    }
+    if (
+      left.type.kind === 'interface' &&
+      left.type.cls === coreTypes.string &&
+      !left.type.nullable &&
+      operator === '+'
+    ) {
+      const right = this.compileExpression(expression.right, interfaceType(coreTypes.string));
+      if (!isSubtype(right.type, interfaceType(coreTypes.string)) && right.type.kind !== 'dynamic') {
+        this.error(expression.right, `${typeName(right.type)} 型の値は、String の + に渡せません。`);
+      }
+      const leftRun = left.run;
+      const rightRun = right.run;
+      const constValue =
+        left.constValue && right.constValue
+          ? { value: (left.constValue.value as string) + (right.constValue.value as string) }
+          : undefined;
+      return {
+        type: interfaceType(coreTypes.string),
+        run: (frame) => {
+          const a = leftRun(frame) as string;
+          const b = rightRun(frame);
+          if (typeof b !== 'string')
+            return frame.runtime.throwTypeError(
+              `type '${typeToString(frame.runtime.runtimeTypeOf(b))}' is not a subtype of type 'String' of 'other'`
+            );
+          return concatenate(frame.runtime, a, b);
+        },
+        isConst: left.isConst && right.isConst,
+        constValue,
+      };
+    }
+    return this.compileOperatorCall(left, operator, [expression.right], span);
+  }
+
+  /** Calls an operator method of the left operand's class, checking the operand against its parameter. */
+  protected compileOperatorCall(left: Compiled, operator: string, rightSyntax: Expression[], span: Span): Compiled {
+    if (isNullable(left.type) && left.type.kind !== 'dynamic') {
+      this.error(
+        span,
+        `${typeName(left.type)} 型の値は null かもしれないので、演算子 ${operator === 'unary-' ? '-' : operator} を直接は使えません。`
+      );
+    }
+    const resolved = this.lookupMember(left.type, operator, false);
+    if (!resolved || resolved.member.kind !== 'method') {
+      return this.error(
+        span,
+        `${typeName(left.type)} 型には演算子 ${operator === 'unary-' ? '-' : operator} がありません。`
+      );
+    }
+    const args: ArgumentsSyntax = {
+      positional: rightSyntax,
+      named: [],
+      order: rightSyntax.map((_, index) => ({ kind: 'positional' as const, index })),
+      ...at(span),
+    };
+    return this.compileMethodCall(
+      left,
+      { ...at(span), kind: 'this' },
+      operator,
+      args,
+      undefined,
+      span,
+      undefined,
+      false
+    );
+  }
+
+  // code-gauge-allow functionCognitiveComplexity 40 -- The typing rules of num's operators.
+  private numericOperator(
+    operator: string,
+    left: Compiled,
+    right: Compiled,
+    leftNumeric: 'int' | 'double' | 'num',
+    span: Span
+  ): Compiled {
+    const rightNumeric = numericClassOf(right.type);
+    const isComparison = ['<', '<=', '>', '>='].includes(operator);
+    const isBitwise = ['&', '|', '^', '<<', '>>', '>>>'].includes(operator);
+    if (!['+', '-', '*', '/', '~/', '%', '<', '<=', '>', '>=', '&', '|', '^', '<<', '>>', '>>>'].includes(operator)) {
+      return this.error(span, `${typeName(left.type)} 型には演算子 ${operator} がありません。`);
+    }
+    if (isBitwise && leftNumeric !== 'int')
+      return this.error(span, `${typeName(left.type)} 型には演算子 ${operator} がありません。`);
+    const parameterType = isBitwise ? interfaceType(coreTypes.int) : interfaceType(coreTypes.num);
+    if (right.type.kind !== 'dynamic' && !isSubtype(right.type, parameterType)) {
+      this.error(
+        span,
+        `${typeName(right.type)} 型の値は、演算子 ${operator} の右辺 ${typeName(parameterType)} に合いません。`
+      );
+    }
+    let resultType: DartType;
+    if (isComparison) resultType = interfaceType(coreTypes.bool);
+    else if (operator === '/') resultType = interfaceType(coreTypes.double);
+    else if (operator === '~/' || isBitwise) resultType = interfaceType(coreTypes.int);
+    else if (leftNumeric === 'double') resultType = interfaceType(coreTypes.double);
+    else if (leftNumeric === 'int' && rightNumeric === 'int') resultType = interfaceType(coreTypes.int);
+    else if (leftNumeric === 'int' && rightNumeric === 'double') resultType = interfaceType(coreTypes.double);
+    else resultType = interfaceType(coreTypes.num);
+    if (
+      ARITHMETIC.has(operator) &&
+      left.type.kind === 'typeParam' &&
+      sameType(left.type, right.type) &&
+      leftNumeric !== 'num'
+    ) {
+      resultType = left.type;
+    }
+    const leftRun = left.run;
+    const rightRun = right.run;
+    const constValue =
+      left.constValue && right.constValue && isNumber(left.constValue.value) && isNumber(right.constValue.value)
+        ? safeConstant(() =>
+            numericBinaryConstant(
+              operator,
+              left.constValue?.value as bigint | number,
+              right.constValue?.value as bigint | number
+            )
+          )
+        : undefined;
+    const isConst = left.isConst && right.isConst;
+    if (leftNumeric === 'int' && rightNumeric === 'int') {
+      const op = intOperation(operator);
+      return {
+        type: resultType,
+        run: (frame) => {
+          const a = leftRun(frame) as bigint;
+          return op(frame, a, rightRun(frame) as bigint);
+        },
+        isConst,
+        constValue,
+      };
+    }
+    if (leftNumeric === 'double' && rightNumeric === 'double') {
+      const op = doubleOperation(operator);
+      return {
+        type: resultType,
+        run: (frame) => {
+          const a = leftRun(frame) as number;
+          return op(frame, a, rightRun(frame) as number);
+        },
+        isConst,
+        constValue,
+      };
+    }
+    return {
+      type: resultType,
+      run: (frame) => {
+        const a = leftRun(frame) as bigint | number;
+        const b = rightRun(frame);
+        if (typeof b !== 'bigint' && typeof b !== 'number') {
+          return dynamicBinary(frame.runtime, operator, a, b, span.row);
+        }
+        return numericBinary(frame.runtime, operator, a, b);
+      },
+      isConst,
+      constValue,
+    };
+  }
+
+  private compileIfNull(expression: Extract<Expression, { kind: 'binary' }>, context: DartType | undefined): Compiled {
+    const left = this.compileExpression(expression.left, context ? makeNullable(context) : undefined);
+    const before = this.flow;
+    const right = this.compileExpression(expression.right, context ?? nonNullable(left.type));
+    this.flow = Flow.join(before, this.flow);
+    const leftRun = left.run;
+    const rightRun = right.run;
+    const type = upperBound(left.type.kind === 'dynamic' ? DYNAMIC : nonNullable(left.type), right.type);
+    return {
+      type,
+      run: (frame) => {
+        return leftRun(frame) ?? rightRun(frame);
+      },
+      isConst: left.isConst && right.isConst,
+      constValue:
+        left.constValue && right.constValue
+          ? left.constValue.value === undefined
+            ? right.constValue
+            : left.constValue
+          : undefined,
+    };
+  }
+
+  private compileConditional(
+    expression: Extract<Expression, { kind: 'conditional' }>,
+    context: DartType | undefined
+  ): Compiled {
+    const { compiled: condition, flow } = this.compileCondition(expression.condition);
+    this.flow = flow.whenTrue;
+    const then = this.compileExpression(expression.consequent, context);
+    const afterThen = this.flow;
+    this.flow = flow.whenFalse;
+    const otherwise = this.compileExpression(expression.alternative, context);
+    this.flow = Flow.join(afterThen, this.flow);
+    const type =
+      then.type.kind === 'never' && !then.type.nullable
+        ? otherwise.type
+        : otherwise.type.kind === 'never' && !otherwise.type.nullable
+          ? then.type
+          : upperBound(then.type, otherwise.type);
+    const conditionRun = condition.run;
+    const thenRun = then.run;
+    const otherwiseRun = otherwise.run;
+    const constValue =
+      condition.constValue && then.constValue && otherwise.constValue
+        ? condition.constValue.value
+          ? then.constValue
+          : otherwise.constValue
+        : undefined;
+    return {
+      type,
+      run: (frame) => (conditionRun(frame) ? thenRun(frame) : otherwiseRun(frame)),
+      isConst: condition.isConst && then.isConst && otherwise.isConst,
+      constValue,
+    };
+  }
+
+  private compileAs(expression: Extract<Expression, { kind: 'as' }>): Compiled {
+    const value = this.compileExpression(expression.value);
+    const type = this.resolveType(expression.type);
+    let { flow } = this;
+    const { variable } = value;
+    if (variable && this.isPromotable(variable)) {
+      const narrowed = promotionTarget(this.promotedType(variable), type);
+      if (narrowed) flow = flow.promote(variable, narrowed);
+    }
+    this.flow = flow;
+    return { type, run: this.runtimeCast(value.run, type, true), isConst: false };
+  }
+
+  private compileThrow(expression: Extract<Expression, { kind: 'throw' }>): Compiled {
+    const value = this.compileExpression(expression.value);
+    if (isNullable(value.type) && value.type.kind !== 'dynamic') {
+      this.error(expression, `null かもしれない ${typeName(value.type)} 型の値は throw できません。`);
+    }
+    if (value.type.kind === 'void') this.error(expression, 'void の値は throw できません。');
+    const { run } = value;
+    this.flow = this.flow.unreachable;
+    return {
+      type: NEVER,
+      run: (frame) => {
+        const thrown = run(frame);
+        if (thrown === undefined) frame.runtime.throwTypeError('Throw of null.');
+        throw this.newThrow(frame, thrown);
+      },
+      isConst: false,
+      completes: false,
+    };
+  }
+
+  /** The exception that a `throw` of a value raises, recording the stack trace an `Error` keeps. */
+  protected abstract newThrow(frame: Frame, value: Value): unknown;
+
+  private compileCascade(
+    expression: Extract<Expression, { kind: 'cascade' }>,
+    context: DartType | undefined
+  ): Compiled {
+    const target = this.compileExpression(expression.target, context);
+    const slot = this.fn.allocateSlot();
+    this.fn.info.locals[slot] = { name: '\0', type: target.type };
+    const temporary = new Cell(undefined);
+    void temporary;
+    const variableType = target.type;
+    const sections = expression.sections.map((section) => {
+      const receiver: Compiled = {
+        type: section.nullAware ? nonNullable(variableType) : variableType,
+        run: (frame) => (frame.locals[slot] as Cell).v,
+        isConst: false,
+      };
+      return this.compileCascadeSection(receiver, section);
+    });
+    const targetRun = target.run;
+    const nullAware = expression.sections[0]?.nullAware ?? false;
+    return {
+      type: target.type,
+      run: (frame) => {
+        const value = targetRun(frame);
+        if (nullAware && value === undefined) return;
+        const previous = frame.locals[slot];
+        frame.locals[slot] = new Cell(value);
+        try {
+          for (const section of sections) section(frame);
+        } finally {
+          frame.locals[slot] = previous;
+        }
+        return value;
+      },
+      isConst: false,
+    };
+  }
+
+  private compileCascadeSection(receiver: Compiled, section: CascadeSection): Eval {
+    const span = section;
+    let current: Compiled = receiver;
+    const { selectors, assignment } = section;
+    const last = assignment ? selectors.at(-1) : undefined;
+    const reading = assignment ? selectors.slice(0, -1) : selectors;
+    for (const [index, selector] of reading.entries()) {
+      switch (selector.kind) {
+        case 'member': {
+          const next = reading[index + 1];
+          if (next?.kind === 'call') continue;
+          current = this.readMemberOf(current, selector.name, selector, selector.nullAware);
+          break;
+        }
+        case 'call': {
+          const previous = reading[index - 1];
+          const isMethod = previous?.kind === 'member';
+          current = this.compileMethodCall(
+            current,
+            { ...at(span), kind: 'this' },
+            isMethod ? previous.name : 'call',
+            selector.arguments,
+            selector.typeArguments,
+            selector,
+            undefined,
+            isMethod ? previous.nullAware : false
+          );
+          break;
+        }
+        case 'index': {
+          current = this.compileMethodCall(
+            current,
+            { ...at(span), kind: 'this' },
+            '[]',
+            singleArgument(selector.index),
+            undefined,
+            selector,
+            undefined,
+            selector.nullAware
+          );
+          break;
+        }
+        case 'nullAssert': {
+          const { run } = current;
+          current = {
+            type: nonNullable(current.type),
+            run: (frame) => {
+              const value = run(frame);
+              if (value === undefined) frame.runtime.throwTypeError('Null check operator used on a null value');
+              return value;
+            },
+            isConst: false,
+          };
+          break;
+        }
+      }
+    }
+    if (assignment && last) {
+      const compiled = this.compileAssignmentTo(current, last, assignment.operator, assignment.value, span);
+      return compiled.run;
+    }
+    return current.run;
+  }
+
+  /** Assigns through the last selector of a cascade section, whose receiver is already compiled. */
+  protected abstract compileAssignmentTo(
+    receiver: Compiled,
+    selector: CascadeSelector,
+    operator: string,
+    value: Expression,
+    span: Span
+  ): Compiled;
+
+  private compileInstantiation(expression: Extract<Expression, { kind: 'instantiation' }>): Compiled {
+    const target = this.staticTarget(expression.target);
+    if (target?.kind === 'class') {
+      const type = interfaceType(target.cls, target.typeArgs ?? []);
+      return { type: interfaceType(coreTypes.type), run: () => new DartTypeValue(coreTypes.type, type), isConst: true };
+    }
+    return this.unsupported(expression, '型引数を指定した関数の取り出し（f<int> の形）');
+  }
+
+  // Assignment
+
+  /** Compiles an assignment `target op= value`. */
+  protected abstract compileAssignment(
+    expression: Extract<Expression, { kind: 'assign' }>,
+    context: DartType | undefined
+  ): Compiled;
+
+  /** Compiles `++x`, `x--`, and the like, which assign `x + 1` or `x - 1`. */
+  protected abstract compileIncrement(
+    operand: Expression,
+    operator: '+' | '-',
+    isPrefix: boolean,
+    span: Span
+  ): Compiled;
+
+  static readonly COMPOUND_OPERATORS = COMPOUND_OPERATORS;
+}
+
+// Helpers
+
+export function isPrimitive(value: Value): value is undefined | boolean | bigint | number | string {
+  return value === undefined || typeof value !== 'object';
+}
+
+function isNumber(value: Value): value is bigint | number {
+  return typeof value === 'bigint' || typeof value === 'number';
+}
+
+function primitiveEquals(a: Value, b: Value): boolean {
+  if (typeof a === 'bigint' && typeof b === 'number') return Number(a) === b;
+  if (typeof a === 'number' && typeof b === 'bigint') return a === Number(b);
+  return a === b;
+}
+
+export function primitiveText(value: undefined | boolean | bigint | number | string): string {
+  if (value === undefined) return 'null';
+  if (typeof value === 'number') return formatDouble(value);
+  return String(value);
+}
+
+function negate(value: Value, operator: '-' | '~'): Value {
+  if (operator === '~') return ~(value as bigint);
+  return typeof value === 'bigint' ? wrap(-value) : -(value as number);
+}
+
+function isDoubleContext(context: DartType): boolean {
+  const base = context.kind === 'interface' ? context : undefined;
+  return base?.cls === coreTypes.double;
+}
+
+/** A type parameter of a context that inference has not solved yet, which literals infer for themselves. */
+export const INFERENCE_HOLE: DartType = { kind: 'dynamic' };
+
+export function isInferenceHole(type: DartType): boolean {
+  return type === INFERENCE_HOLE;
+}
+
+/** The element type a context gives a collection literal, as `List<int>` gives `int` to `[...]`. */
+export function elementTypeOfContext(context: DartType | undefined, cls: ClassInfo): DartType | undefined {
+  if (!context) return undefined;
+  const base = resolveBound(context);
+  if (base.kind !== 'interface') return undefined;
+  const target = cls === coreTypes.list && base.cls === coreTypes.iterable ? coreTypes.iterable : cls;
+  if (base.cls === coreTypes.iterable || base.cls === coreTypes.object) {
+    return base.cls === coreTypes.iterable ? base.args[0] : undefined;
+  }
+  if (base.cls !== target && !target.isSubclassOf(base.cls)) return undefined;
+  return base.args[0];
+}
+
+function mapTypesOfContext(context: DartType | undefined): [DartType, DartType] | undefined {
+  if (!context) return undefined;
+  const base = resolveBound(context);
+  if (base.kind !== 'interface' || base.cls !== coreTypes.map) return undefined;
+  return [base.args[0] ?? DYNAMIC, base.args[1] ?? DYNAMIC];
+}
+
+/** The element type of a literal without type arguments: the least upper bound of its elements' types. */
+export function inferElementType(types: DartType[]): DartType {
+  if (types.length === 0) return DYNAMIC;
+  let result = types[0];
+  for (const type of types.slice(1)) result = upperBound(result, type);
+  return result;
+}
+
+/** The type an `is` test or a cast promotes a variable of type `current` to, if it promotes it. */
+export function promotionTarget(current: DartType, tested: DartType): DartType | undefined {
+  if (sameType(current, tested)) return undefined;
+  if (isSubtype(tested, current)) {
+    if (current.kind === 'typeParam' && !current.promoted) return { ...current, promoted: tested, nullable: false };
+    return tested;
+  }
+  if (current.kind === 'typeParam' && isSubtype(tested, resolveBound(current))) {
+    return { ...current, nullable: isNullable(tested) && current.nullable, promoted: tested };
+  }
+  return undefined;
+}
+
+function isObjectMember(member: Member): boolean {
+  return member.owner === coreTypes.object;
+}
+
+function singleArgument(index: Expression): ArgumentsSyntax {
+  return { ...at(index), positional: [index], named: [], order: [{ kind: 'positional', index: 0 }] };
+}
+
+function intOperation(operator: string): (frame: Frame, a: bigint, b: bigint) => Value {
+  switch (operator) {
+    case '+': {
+      return (_frame, a, b) => wrap(a + b);
+    }
+    case '-': {
+      return (_frame, a, b) => wrap(a - b);
+    }
+    case '*': {
+      return (_frame, a, b) => wrap(a * b);
+    }
+    case '/': {
+      return (_frame, a, b) => Number(a) / Number(b);
+    }
+    case '~/': {
+      return (frame, a, b) => intTruncatingDivide(frame.runtime, a, b);
+    }
+    case '%': {
+      return (frame, a, b) => intModulo(frame.runtime, a, b);
+    }
+    case '<': {
+      return (_frame, a, b) => a < b;
+    }
+    case '<=': {
+      return (_frame, a, b) => a <= b;
+    }
+    case '>': {
+      return (_frame, a, b) => a > b;
+    }
+    case '>=': {
+      return (_frame, a, b) => a >= b;
+    }
+    case '&': {
+      return (_frame, a, b) => a & b;
+    }
+    case '|': {
+      return (_frame, a, b) => a | b;
+    }
+    case '^': {
+      return (_frame, a, b) => a ^ b;
+    }
+    case '<<': {
+      return (frame, a, b) => shiftLeft(frame.runtime, a, b);
+    }
+    case '>>': {
+      return (frame, a, b) => shiftRight(frame.runtime, a, b);
+    }
+    default: {
+      return (frame, a, b) => shiftRightUnsigned(frame.runtime, a, b);
+    }
+  }
+}
+
+function doubleOperation(operator: string): (frame: Frame, a: number, b: number) => Value {
+  switch (operator) {
+    case '+': {
+      return (_frame, a, b) => a + b;
+    }
+    case '-': {
+      return (_frame, a, b) => a - b;
+    }
+    case '*': {
+      return (_frame, a, b) => a * b;
+    }
+    case '/': {
+      return (_frame, a, b) => a / b;
+    }
+    case '~/': {
+      return (frame, a, b) => doubleTruncatingDivide(frame.runtime, a, b);
+    }
+    case '%': {
+      return (_frame, a, b) => doubleModulo(a, b);
+    }
+    case '<': {
+      return (_frame, a, b) => a < b;
+    }
+    case '<=': {
+      return (_frame, a, b) => a <= b;
+    }
+    case '>': {
+      return (_frame, a, b) => a > b;
+    }
+    default: {
+      return (_frame, a, b) => a >= b;
+    }
+  }
+}
+
+/** Folds an operator on numeric constants, which a constant expression needs while compiling. */
+function numericBinaryConstant(operator: string, a: bigint | number, b: bigint | number): { value: Value } | undefined {
+  if (typeof a === 'bigint' && typeof b === 'bigint' && (operator === '~/' || operator === '%') && b === 0n)
+    return undefined;
+  const fakeRuntime = {
+    throwError: () => {
+      throw new Error('constant');
+    },
+    throwTypeError: () => {
+      throw new Error('constant');
+    },
+  } as unknown as Runtime;
+  return { value: numericBinary(fakeRuntime, operator, a, b) };
+}
+
+function safeConstant(compute: () => { value: Value } | undefined): { value: Value } | undefined {
+  try {
+    return compute();
+  } catch {
+    return undefined;
+  }
+}
+
+export { isNonNullable, objectType, typeParamType, type Arguments };
