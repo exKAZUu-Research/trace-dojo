@@ -27,10 +27,11 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { ArrayStore, CObject, NULL_PTR, type Ptr, type Value } from '../values';
+import { ArrayStore, CObject, holdValues, NULL_PTR, type Ptr, type Value } from '../values';
 import { bitReferences } from './bitReference';
 import { SequenceValue } from './containerValues';
 import {
+  callbackOperands,
   comparatorOf,
   constructElementFromRvalue,
   type ElementOperations,
@@ -326,9 +327,11 @@ export function iteratorRange(
   const params = [first, last].map((arg) =>
     arg.type.kind === 'array' ? pointerTo(arg.type.of) : unqualified(arg.type)
   );
-  const [from, to] = params.map((type) => iteratorElement(type));
-  if (!from || !to || !sameType(params[0], params[1])) return;
+  const [input, end] = params.map((type) => iteratorElement(type));
+  if (!input || !end || !sameType(params[0], params[1])) return;
   const type = params[0];
+  const proxy = type.kind === 'class' ? type.cls.library?.iteratorReference : undefined;
+  const from = proxy ?? input;
   const isReverse = type.kind === 'class' && type.cls.library?.isReverse === true;
   const target = unqualified(element);
   const isSameType =
@@ -337,7 +340,9 @@ export function iteratorRange(
   let construct: Source['construct'] = (frame, value, destination) => ops().copy(frame, value, destination);
   if (isSameType) requireElementUse(compiler, element, first.row, 'copy');
   if (!isSameType) {
-    const slot: Expr = { type: from, isLvalue: true, row: first.row, run: (frame) => frame.pending.at(-1) as Ptr };
+    const [slot] = callbackOperands([{ type: from, category: proxy ? 'prvalue' : undefined }], first.row, (frame) =>
+      frame.pending.at(-1)
+    );
     let run: ReturnType<typeof constructElement>;
     try {
       run =
@@ -348,19 +353,17 @@ export function iteratorRange(
       if (error instanceof CompileError) return;
       throw error;
     }
-    construct = (frame, value, destination) => {
-      frame.pending.push(locationOf(value));
-      try {
-        return run(frame, destination);
-      } finally {
-        frame.pending.pop();
-      }
-    };
+    construct = (frame, value, destination) =>
+      holdValues(frame, [proxy ? value : locationOf(value)], () => run(frame, destination));
   }
   return {
     params,
     isForwardOnly: type.kind === 'class' && type.cls.name.startsWith('std::unordered_'),
-    read: (a, b) => ({ values: rangeValues(a as Ptr, b as Ptr, isReverse), construct, isSameType }),
+    read: (a, b) => ({
+      values: rangeValues(a as Ptr, b as Ptr, isReverse, proxy !== undefined),
+      construct,
+      isSameType,
+    }),
   };
 }
 
@@ -371,12 +374,15 @@ function iteratorElement(type: Type): Type | undefined {
 }
 
 /** The values between two iterators of a sequence, a container, or an array. */
-function rangeValues(first: Ptr, last: Ptr, isReverse: boolean): Value[] {
+function rangeValues(first: Ptr, last: Ptr, isReverse: boolean, keepsLocations: boolean): Value[] {
   const length = first.rangeLength(last, isReverse);
   if (length === 0) return [];
   const store = first.target();
   const start = first.index - (isReverse ? 1 : 0);
-  return Array.from({ length }, (_, offset) => store.get(start + (isReverse ? -offset : offset)));
+  return Array.from({ length }, (_, offset) => {
+    const index = start + (isReverse ? -offset : offset);
+    return keepsLocations ? store.location(index) : store.get(index);
+  });
 }
 
 /** A member function template, such as `insert(position, first, last)`, whose instance the call's arguments decide. */

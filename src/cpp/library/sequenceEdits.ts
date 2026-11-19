@@ -154,10 +154,10 @@ export class SequenceEditor {
     else if (at === length) this.appendElement(frame, self, make);
     else {
       this.withTemporaryElement(frame, make(), (temporary) => {
-        this.moveRange(frame, items, at, length, at + 1);
+        this.moveRange(frame, self, at, length, at + 1);
         this.moveAt(frame, items, at, temporary);
       });
-      self.finishVectorEdit(at);
+      self.finishVectorEdit(at, length);
     }
   }
 
@@ -178,11 +178,11 @@ export class SequenceEditor {
       });
     } else if (at === length) this.appendElement(frame, self, construct);
     else {
-      this.moveRange(frame, items, at, length, at + 1);
+      this.moveRange(frame, self, at, length, at + 1);
       const argument = shifted(value, self, at, 1).read();
       if (move) this.moveAt(frame, items, at, argument);
       else this.assignAt(frame, items, at, argument);
-      self.finishVectorEdit(at);
+      self.finishVectorEdit(at, length);
     }
   }
 
@@ -372,9 +372,11 @@ export class SequenceEditor {
   }
 
   /** `__move_range(from, fromEnd, to)`: constructs the elements that pass the end, then assigns the rest backward. */
-  private moveRange(frame: Frame, items: Value[], from: number, fromEnd: number, to: number): void {
+  private moveRange(frame: Frame, self: SequenceValue, from: number, fromEnd: number, to: number): void {
+    const items = self.items;
     const assigned = items.length - to;
-    for (let index = from + assigned; index < fromEnd; index++) items.push(this.moveConstruct(frame, items[index]));
+    for (let index = from + assigned; index < fromEnd; index++)
+      this.appendElement(frame, self, (target) => this.moveConstruct(frame, items[index], target));
     for (let index = assigned - 1; index >= 0; index--) this.moveAt(frame, items, to + index, items[from + index]);
   }
 
@@ -392,17 +394,18 @@ export class SequenceEditor {
     let remaining = count;
     if (remaining > length - at) {
       const constructed = remaining - (length - at);
-      for (let index = 0; index < constructed; index++) items.push(this.ops.copy(frame, value.read()));
+      for (let index = 0; index < constructed; index++)
+        this.appendElement(frame, self, (target) => this.ops.copy(frame, value.read(), target));
       remaining -= constructed;
     }
     if (remaining === 0) {
-      self.finishVectorEdit(at);
+      self.finishVectorEdit(at, length);
       return;
     }
-    this.moveRange(frame, items, at, length, at + count);
+    this.moveRange(frame, self, at, length, at + count);
     const source = shifted(value, self, at, count);
     for (let index = 0; index < remaining; index++) this.assignAt(frame, items, at + index, source.read());
-    self.finishVectorEdit(at);
+    self.finishVectorEdit(at, length);
   }
 
   private vectorInsertRange(frame: Frame, self: SequenceValue, at: number, source: Source): void {
@@ -421,16 +424,17 @@ export class SequenceEditor {
     const after = length - at;
     let assigned = count;
     if (count > after) {
-      for (let index = after; index < count; index++) items.push(source.construct(frame, values[index]));
+      for (let index = after; index < count; index++)
+        this.appendElement(frame, self, (target) => source.construct(frame, values[index], target));
       assigned = after;
     }
     if (assigned === 0) {
-      self.finishVectorEdit(at);
+      self.finishVectorEdit(at, length);
       return;
     }
-    this.moveRange(frame, items, at, length, at + count);
+    this.moveRange(frame, self, at, length, at + count);
     for (let index = 0; index < assigned; index++) this.assignFrom(frame, items, at + index, source, values[index]);
-    self.finishVectorEdit(at);
+    self.finishVectorEdit(at, length);
   }
 
   // std::deque -------------------------------------------------------------------------------------------------------

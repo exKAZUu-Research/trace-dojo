@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <deque>
 #include <iostream>
+#include <list>
 #include <numeric>
 #include <vector>
 
@@ -18,6 +20,11 @@ struct Flag {
   bool value = false;
   Flag() {}
   Flag(std::vector<bool>::reference bit) : value(bit) {}
+};
+
+struct ClearingFlag {
+  bool value;
+  ClearingFlag(std::vector<bool>::reference bit) : value(bit) { bit = false; }
 };
 
 int main() {
@@ -51,4 +58,20 @@ int main() {
   int values[] = {1, 2};
   std::for_each(values, values + 2, increment);
   std::cout << values[0] << values[1] << '\n';
+
+  std::vector<bool> source{true};
+  std::vector<ClearingFlag> vector(source.begin(), source.end());
+  std::cout << vector.front().value << source[0] << ' ';
+  source[0] = true;
+  std::deque<ClearingFlag> deque(source.begin(), source.end());
+  std::cout << deque.front().value << source[0] << ' ';
+  source[0] = true;
+  std::list<ClearingFlag> list(source.begin(), source.end());
+  std::cout << list.front().value << source[0] << ' ';
+  source[0] = true;
+  list.insert(list.end(), source.rbegin(), source.rend());
+  std::cout << list.back().value << source[0] << ' ';
+  source[0] = true;
+  vector.assign(source.begin(), source.end());
+  std::cout << vector.front().value << source[0] << '\n';
 }

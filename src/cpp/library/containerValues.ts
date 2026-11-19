@@ -125,10 +125,10 @@ export class NodePositions {
     return node;
   }
 
-  invalidateFrom(index: number): void {
+  invalidateFrom(index: number, until = Infinity): void {
     this.invalidateEnd();
     for (const [position, node] of this.positions) {
-      if (position < index) continue;
+      if (position < index || position >= until) continue;
       node.position = -1;
       this.positions.delete(position);
     }
@@ -282,9 +282,9 @@ export class SequenceValue extends Store {
     if (this.storageKind === 'vector') this.nodes?.invalidateFrom(from);
   }
 
-  finishVectorEdit(from: number): void {
-    this.invalidateVectorSuffix(from);
-    this.bindElements(from, this.length);
+  finishVectorEdit(from: number, oldLength = this.length): void {
+    this.nodes?.invalidateFrom(from, oldLength);
+    this.bindElements(from, oldLength);
   }
 
   bindElements(from: number, to: number): void {

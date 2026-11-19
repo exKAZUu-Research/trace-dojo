@@ -28,6 +28,16 @@ struct Relocated {
   Relocated(const Relocated&) { std::cout << this - newest << '\n'; }
 };
 
+struct Inserted;
+Inserted* firstInserted = nullptr;
+struct Inserted {
+  Inserted() {}
+  Inserted(const Inserted&) {
+    if (firstInserted == nullptr) firstInserted = this;
+    std::cout << this - firstInserted;
+  }
+};
+
 struct Probe;
 Probe* observed = nullptr;
 struct Probe {
@@ -38,6 +48,26 @@ struct Probe {
     }
   }
 };
+
+struct SelfBound {
+  SelfBound* self;
+  SelfBound* end;
+  SelfBound() : self(this), end(this + 1) {}
+  SelfBound(const SelfBound&) noexcept : self(this), end(this + 1) {}
+};
+struct Holder {
+  SelfBound member;
+  SelfBound matrix[2][2];
+};
+struct DerivedHolder : Holder {};
+Holder returned(Holder input) { return input; }
+
+void showMoved(Holder& holder) {
+  auto& last = holder.matrix[1][1];
+  std::cout << (holder.member.self - &holder.member) << ' '
+            << (holder.member.end == &holder.member + 1) << ' '
+            << (last.self - &last) << ' ' << (last.end == &last + 1) << '\n';
+}
 
 void show(Cell& cell, char separator = ' ') {
   std::cout << cell.self - &cell << ':' << cell.value << separator;
@@ -112,4 +142,24 @@ int main() {
   observed = &listProbe.front();
   listProbe.clear();
   std::cout << '\n';
+
+  Holder sliced = DerivedHolder{};
+  Holder result = returned(Holder{});
+  std::vector<Holder> holders(1);
+  holders.reserve(4);
+  showMoved(sliced);
+  showMoved(result);
+  showMoved(holders.front());
+
+  Inserted seed;
+  std::vector<Inserted> counted;
+  counted.reserve(4);
+  counted.insert(counted.end(), 2, seed);
+  std::cout << ' ' << (firstInserted == &counted.front()) << '\n';
+  Inserted input[2];
+  firstInserted = nullptr;
+  std::vector<Inserted> range;
+  range.reserve(4);
+  range.insert(range.end(), input, input + 2);
+  std::cout << ' ' << (firstInserted == &range.front()) << '\n';
 }

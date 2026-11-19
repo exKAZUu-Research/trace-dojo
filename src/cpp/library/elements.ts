@@ -1,9 +1,10 @@
 import { implicitConversion } from '../conversions';
 import { CppException, CppRuntimeError } from '../errors';
-import type { Expr, FunctionCandidates } from '../expr';
+import type { Expr, FunctionCandidates, InitializerTarget } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import {
   constructArray,
+  initializeAt,
   installBaseValue,
   invoke,
   makeEach,
@@ -201,10 +202,10 @@ function canCopyWithoutThrow(type: Type): boolean {
   );
 }
 
-export function constructElementFromRvalue(frame: Frame, type: Type, source: Value, target?: CObject): Value {
+export function constructElementFromRvalue(frame: Frame, type: Type, source: Value, target?: InitializerTarget): Value {
   if (source === UNINIT) return UNINIT;
   if (type.kind === 'array' && source instanceof ArrayStore) {
-    return transferElements(frame, type.of, source.values);
+    return transferElements(frame, type.of, source.values, target instanceof ArrayStore ? target : undefined);
   }
   if (type.kind !== 'class') return source;
   const { cls } = type;
@@ -217,11 +218,12 @@ export function constructElementFromRvalue(frame: Frame, type: Type, source: Val
   if (construction.kind === 'sequence') return (source as SequenceValue).moveStorage();
   if (construction.kind === 'array')
     return constructMovedArray(frame, construction.array, (source as SequenceValue).items);
+  const destination = target instanceof CObject ? target : undefined;
   if (construction.kind === 'members') {
-    const move = (): Value => transferSubobjects(frame, cls, source as CObject, target);
+    const move = (): Value => transferSubobjects(frame, cls, source as CObject, destination);
     return canTransferElementStorage(type) ? frame.runtime.withoutOuterHandlers(move) : move();
   }
-  return cls.operations?.copy(frame, source, target) ?? source;
+  return cls.operations?.copy(frame, source, destination) ?? source;
 }
 
 function constructMovedArray(frame: Frame, array: NonNullable<LibraryClass['aggregateArray']>, values: Value[]): Value {
@@ -229,14 +231,14 @@ function constructMovedArray(frame: Frame, array: NonNullable<LibraryClass['aggr
   return canTransferElementStorage(array.type) ? frame.runtime.withoutOuterHandlers(move) : move();
 }
 
-function transferElements(frame: Frame, type: Type, values: Value[]): ArrayStore {
+function transferElements(frame: Frame, type: Type, values: Value[], destination?: ArrayStore): ArrayStore {
   return constructArray(
     frame,
     values.length,
     type,
-    (current, target, index) =>
-      constructElementFromRvalue(current, type, values[index], target instanceof CObject ? target : undefined),
-    (current, value) => destroyMovedPart(current, type, value)
+    (current, target, index) => constructElementFromRvalue(current, type, values[index], target),
+    (current, value) => destroyMovedPart(current, type, value),
+    destination
   );
 }
 
@@ -258,9 +260,13 @@ function transferSubobjects(frame: Frame, cls: ClassInfo, source: CObject, targe
         cls.ownFields.length,
         (index) => {
           const field = cls.ownFields[index];
-          const value = constructElementFromRvalue(frame, field.type, source.values[field.index]);
-          destination.values[field.index] = value;
-          return value;
+          return initializeAt(
+            frame,
+            field.type,
+            destination.location(field.index),
+            destination.values[field.index],
+            (target) => constructElementFromRvalue(frame, field.type, source.values[field.index], target)
+          );
         },
         (index) => (current, value) => destroyMovedPart(current, cls.ownFields[index].type, value)
       );
