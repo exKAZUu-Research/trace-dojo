@@ -13,6 +13,9 @@ const JIS_0212 = 5;
 const MS_USER = 6;
 const JIS_0213_PLANE_1 = 7;
 const JIS_0213_PLANE_2 = 8;
+const JIS_0213_SECOND_PLANE_ROWS = [
+  0, 7, 2, 3, 4, 11, 12, 13, 14, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93,
+];
 const JIS_0213_TABLES = new Map<number, LegacyDetectionTable>([
   [JIS_0213_PLANE_1, 'jis0213Plane1'],
   [JIS_0213_PLANE_2, 'jis0213Plane2'],
@@ -85,6 +88,40 @@ export function readExtendedJisEncoding(bytes: string, kind: keyof typeof EXTEND
     codes.push(kind === '2004' && lead >= 0x80 ? BAD : directCode(state, lead));
   }
   return codes;
+}
+
+export function readSjis2004(bytes: string): number[] {
+  const codes: number[] = [];
+  rt().spend(Math.ceil(bytes.length / 64));
+  for (let index = 0; index < bytes.length;) {
+    const lead = bytes.charCodeAt(index++);
+    const double = (lead >= 0x81 && lead <= 0x9f) || (lead >= 0xe0 && lead <= 0xfc);
+    if (!double) {
+      codes.push(directCode(ROMAN, lead));
+      continue;
+    }
+    pushSjis2004Pair(codes, lead, bytes.charCodeAt(index++));
+  }
+  return codes;
+}
+
+function pushSjis2004Pair(codes: number[], lead: number, trail: number): void {
+  if (!(trail >= 0x40 && trail <= 0xfc) || trail === 0x7f) {
+    codes.push(BAD);
+    return;
+  }
+  const column = trail - (trail < 0x7f ? 0x40 : 0x41);
+  const rowPair = lead <= 0x9f ? lead - 0x81 : lead - 0xe0 + 31;
+  const row = rowPair * 2 + Math.floor(column / 94);
+  const second = row >= 94;
+  const graphicRow = second ? JIS_0213_SECOND_PLANE_ROWS[row - 94] : row;
+  pushExtendedPair(
+    codes,
+    second ? JIS_0213_PLANE_2 : JIS_0213_PLANE_1,
+    undefined,
+    graphicRow + 0x21,
+    (column % 94) + 0x21
+  );
 }
 
 function pushExtendedPair(

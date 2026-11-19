@@ -25,3 +25,17 @@ foreach ([
     mb_detect_encoding($bytes, ['EUC-KR', 'CP950', $encoding]),
   ]), "\n";
 }
+
+foreach ([
+  ["\x80", 'Shift_JIS-2004'],
+  ["\xEF\xBF\xBD", 'SJIS-2004'],
+  ["\xF0\x40", 'SJIS2004'],
+  ["\x8e\xa1\xa1\xa1", 'BIG5'],
+  ["\xc8\x40a", 'BIG-5'],
+  ["\xa1\x45", 'BIG5'],
+] as [$bytes, $encoding]) {
+  echo bin2hex($bytes), " ", json_encode([
+    mb_detect_encoding($bytes, $encoding, true),
+    mb_detect_encoding($bytes, [$encoding, 'CP950', 'UTF-8'], true),
+  ]), "\n";
+}

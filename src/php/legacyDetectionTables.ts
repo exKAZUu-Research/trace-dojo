@@ -1,4 +1,4 @@
-// PHP 8.5.12 mb_convert_encoding mappings to UTF-32BE. A zero in a JIS delta keeps the JIS X 0208 mapping.
+// PHP 8.5.12 mb_convert_encoding mappings to UTF-32BE. Zero entries in the BIG-5 and JIS deltas keep the CP950 and JIS X 0208 mappings.
 import { inflateRawSync } from 'node:zlib';
 
 export type LegacyDetectionTable = keyof typeof data;
@@ -621,6 +621,14 @@ const data = {
     'YhM24yxswVZsw3b8FyaxA2djJ87BS/EyTGEXprEbMzgXs9iD87AX+3A+9uMCzGEeB3AhFnAQh7CIJRzGAMtYwcvxCrwSr8Kr8Rq8Fq/D6/EGvBFvwpvxFrwV',
     'b8Pb8Q68E+/Cu/EevBcX4X14Pz6AD+JD+DA+go/iY/g4PoFP4lP4ND6Dz+K/8Tl8Hl/AF/El/A++jK/gq/ga/hdfxzfwTXwL38Z38F18D9/HD3AxfoghRhjj',
     'EvwIP8ZP8FP8DD/HL/BL/Aq/xm/wW/wOv8cf8Ef8Cf+HP+Mv+Cv+hr/jH/gn/oV/4z8lpUpKl5QpKVtSrqR8SYWSiiWVSiqXVCmJKKlaUq2kekmNkpr/Dw==',
+  ].join(''),
+  big5: [
+    '7do1bBdgEMbhP8kxMLHgMDTlozj8cCuFenGKO3XBpS64u8yQ0OLu7u7u7u62QZGEhRAGugB5n3e8XHK54abzeH7w8vb8JC/G80t5nzx/DS+/b9PkZyJv399V',
+    'ffx9Cv16B19TOO9Hb44n1/MfyO8uRUREREREREREREREREREREREREREJD/4zBzmUhB/AggkiGBCCCWMZjSnBS1pRWva0JZw2tGeDnSkE53pQle60Z0e9KQX',
+    'vYkgkiiiiSGWOOJJIJE+9KUf/RnAQAYxmCEMJYlkUkgljXQyyCSLbIYxnBGMZBSjGcNYxjGeCUxkEpOZwlSmMZ0ZzGQWs5lHDrnMZwELWcRilrCUZSxnBStZ',
+    'xWrWsJZ1rGcDG9nEZrawlW1sZwc72cVu9rCXfeznAAc5xGGOcJRjHOcEJznFac5wlnOc5wIXucRlrnCVa1znBje5xW3ucJd73OcBD3nEY57wlGc85wUvecVr',
+    '3vCWd7znAx+tiBW1AlbMilsJK2mlrLSVsbLmrJz5WHmrYBWtklW2KlbVqll1w2pYTatlta2OhVtdq2f1rYE1tEbma43Nz5pYU/O3AAu0IAu2EAu1MGtmza2F',
+    'tbRW1trauAgX6aJctItxsS7OxbsEl+iSXLJLcakuzaW7DJfpslz298905Q+jiyEiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIi8i/4Ag==',
   ].join(''),
   cp5022x: [
     '7dzVd9VHu8Dx4O7u7LBxz8bdHWJASCElWIIFEhLcWpzgO7jTooUWKRQr1lKkLV7cHv+1RUopUNhQOO+5ODdnvfdH1u/zD8zFzKw1z/digoJcLpfL5XK5/m/z',

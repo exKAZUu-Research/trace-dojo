@@ -1,7 +1,7 @@
 // oxlint-disable unicorn/prefer-code-point -- Each code unit is one PHP byte.
 import { detectionCodePoint, mobileDetectionTable } from './detectionDecodeTables';
 import { decodeEucCn, decodeGb18030 } from './gb18030Detection';
-import { readExtendedJisEncoding, readJisEncoding } from './jisDetectionReader';
+import { readExtendedJisEncoding, readJisEncoding, readSjis2004 } from './jisDetectionReader';
 import { legacyDetectionCodePoint } from './legacyDetectionTables';
 import { rt } from './runtime';
 
@@ -25,8 +25,10 @@ const FIXED_READERS = new Map<string, Decode>([
   ['CP50222', readCp5022x],
   ['ISO-2022-JP-MS', (bytes) => readExtendedJisEncoding(bytes, 'ms')],
   ['ISO-2022-JP-2004', (bytes) => readExtendedJisEncoding(bytes, '2004')],
-  ['EUC-KR', (bytes) => decodeMappedPairs(bytes, false)],
-  ['CP950', (bytes) => decodeMappedPairs(bytes, true)],
+  ['SJIS-2004', readSjis2004],
+  ['EUC-KR', (bytes) => decodeMappedPairs(bytes, 'eucKr')],
+  ['CP950', (bytes) => decodeMappedPairs(bytes, 'cp950')],
+  ['BIG-5', (bytes) => decodeMappedPairs(bytes, 'big5')],
   ['EUC-TW', decodeEucTw],
 ]);
 
@@ -81,12 +83,20 @@ function readCp5022x(bytes: string): number[] {
   return readExtendedJisEncoding(bytes, 'cp5022x');
 }
 
-function decodeMappedPairs(bytes: string, cp950: boolean): number[] {
+const PAIR_LEAD_RANGES = {
+  big5: [0xa1, 0xf9],
+  cp950: [0x81, 0xfe],
+  eucKr: [0xa1, 0xfd],
+} as const;
+type PairEncoding = keyof typeof PAIR_LEAD_RANGES;
+
+// code-gauge-allow functionCognitiveComplexity 16 -- The lead, trail and BIG-5 retry share one input cursor.
+function decodeMappedPairs(bytes: string, encoding: PairEncoding): number[] {
   const result: number[] = [];
-  const validLead = cp950 ? (lead: number) => lead >= 0x81 && lead <= 0xfe : isEucKrLead;
-  const table = cp950 ? 'cp950' : 'eucKr';
-  const width = cp950 ? 157 : PLANE_WIDTH;
-  const firstLead = cp950 ? 0x81 : 0xa1;
+  const traditionalChinese = encoding !== 'eucKr';
+  const [firstLead, lastLead] = PAIR_LEAD_RANGES[encoding];
+  const width = traditionalChinese ? 157 : PLANE_WIDTH;
+  const validLead = traditionalChinese ? (lead: number) => lead >= firstLead && lead <= lastLead : isEucKrLead;
   rt().spend(Math.ceil(bytes.length / 64));
   for (let at = 0; at < bytes.length;) {
     const lead = bytes.charCodeAt(at++);
@@ -99,20 +109,26 @@ function decodeMappedPairs(bytes: string, cp950: boolean): number[] {
       continue;
     }
     const trail = bytes.charCodeAt(at++);
-    const column = mappedPairColumn(trail, cp950);
-    const code = column < 0 ? TABLE_REPLACEMENT : legacyDetectionCodePoint(table, (lead - firstLead) * width + column);
+    const column = mappedPairColumn(trail, traditionalChinese);
+    const code = column < 0 ? TABLE_REPLACEMENT : mappedPairCode(encoding, lead, column, (lead - firstLead) * width);
+    if (encoding === 'big5' && lead === 0xc8 && column >= 0 && code === TABLE_REPLACEMENT) at--;
     result.push(code === TABLE_REPLACEMENT ? BAD : code);
   }
   return result;
+}
+
+function mappedPairCode(encoding: PairEncoding, lead: number, column: number, rowStart: number): number {
+  const code = legacyDetectionCodePoint(encoding, rowStart + column);
+  return encoding === 'big5' && code === 0 ? legacyDetectionCodePoint('cp950', (lead - 0x81) * 157 + column) : code;
 }
 
 function isEucKrLead(lead: number): boolean {
   return (lead >= 0xa1 && lead <= 0xac) || (lead >= 0xb0 && lead <= 0xfd && lead !== 0xc9);
 }
 
-function mappedPairColumn(trail: number, cp950: boolean): number {
-  if (cp950 && trail >= 0x40 && trail <= 0x7e) return trail - 0x40;
-  if (trail >= 0xa1 && trail <= 0xfe) return trail - 0xa1 + (cp950 ? 63 : 0);
+function mappedPairColumn(trail: number, traditionalChinese: boolean): number {
+  if (traditionalChinese && trail >= 0x40 && trail <= 0x7e) return trail - 0x40;
+  if (trail >= 0xa1 && trail <= 0xfe) return trail - 0xa1 + (traditionalChinese ? 63 : 0);
   return -1;
 }
 
