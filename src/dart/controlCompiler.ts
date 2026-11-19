@@ -11,29 +11,49 @@ import { Cell, type Value } from './values';
 
 /** Switch, try, and the bodies of sync* generators. */
 export abstract class ControlCompiler extends StatementCompiler {
-  // code-gauge-allow functionCognitiveComplexity 40 -- Cases with patterns, guards, labels, and exhaustiveness.
   protected compileSwitch(statement: Extract<Statement, { kind: 'switch' }>): Exec {
     const labels = this.takeLoopLabels();
     const subject = this.compileExpression(statement.subject);
     const before = this.flow;
+    this.breakFlows.push(undefined);
+    const { groups, after: afterCases } = this.compileSwitchGroups(statement, subject.type, before, labels);
+    let after = afterCases;
+    const breakFlow = this.breakFlows.pop();
+    if (!this.isSwitchExhaustive(statement, subject.type)) after = after ? Flow.join(after, before) : before;
+    if (statement.cases.length === 0) after = before;
+    this.flow = breakFlow ? Flow.join(after ?? before.unreachable, breakFlow) : (after ?? before);
+    const test = subject.run;
+    return (frame) => {
+      const value = test(frame);
+      frame.temporaries.push(value);
+      let index: number;
+      try {
+        index = selectSwitchGroup(frame, value, groups);
+      } finally {
+        frame.temporaries.pop();
+      }
+      return runSwitchFrom(frame, index, groups, labels);
+    };
+  }
+
+  /** The groups of cases that share a body, each in a scope of its own, with the labels the switch declares. */
+  private compileSwitchGroups(
+    statement: Extract<Statement, { kind: 'switch' }>,
+    subjectType: DartType,
+    before: Flow,
+    labels: string[]
+  ): { groups: SwitchGroup[]; after: Flow | undefined } {
     this.fn.switchDepth++;
     for (const label of labels) this.fn.labels.push({ name: label, isLoop: false, isSwitchCase: false });
     const caseLabels = statement.cases.flatMap((switchCase) => switchCase.labels);
     for (const label of caseLabels) this.fn.labels.push({ name: label, isLoop: false, isSwitchCase: true });
-    this.breakFlows.push(undefined);
-    const groups = groupCases(statement.cases);
     let after: Flow | undefined;
-    const compiledGroups: {
-      matchers: { pattern: CompiledPattern | undefined; guard: Eval | undefined }[];
-      body: Exec;
-      slots: number[];
-      labels: string[];
-    }[] = [];
+    const groups: SwitchGroup[] = [];
     try {
-      for (const group of groups) {
+      for (const group of groupCases(statement.cases)) {
         this.flow = before;
         const { result, slots } = this.withScope(() => {
-          const matchers = group.cases.map((switchCase) => this.compileCaseHead(switchCase, subject.type, before));
+          const matchers = group.cases.map((switchCase) => this.compileCaseHead(switchCase, subjectType, before));
           let joined = matchers[0].flow;
           for (const matcher of matchers.slice(1)) joined = Flow.join(joined, matcher.flow);
           this.flow = joined;
@@ -42,14 +62,12 @@ export abstract class ControlCompiler extends StatementCompiler {
               group.cases,
               matchers.map((matcher) => matcher.pattern)
             );
+          // A case body may end without `break`; Dart then leaves the switch.
           const body = this.compileStatements(group.statements);
-          if (this.flow.reachable && group !== groups.at(-1) && group.statements.length > 0) {
-            // A case body may end without `break`; Dart then leaves the switch.
-          }
           return { matchers: matchers.map(({ pattern, guard }) => ({ pattern, guard })), body };
         });
         after = after ? Flow.join(after, this.flow) : this.flow;
-        compiledGroups.push({ ...result, slots, labels: group.labels });
+        groups.push({ ...result, slots, labels: group.labels });
       }
     } finally {
       this.fn.switchDepth--;
@@ -58,67 +76,20 @@ export abstract class ControlCompiler extends StatementCompiler {
         labels.length + caseLabels.length
       );
     }
-    const breakFlow = this.breakFlows.pop();
-    const hasDefault = statement.cases.some((switchCase) => switchCase.pattern === undefined);
-    const exhaustive =
-      hasDefault ||
-      checkExhaustive(
-        this,
-        subject.type,
-        statement.cases
-          .filter((switchCase) => switchCase.guard === undefined)
-          .map((switchCase) => switchCase.pattern as Pattern),
-        statement,
-        true
-      );
-    if (!exhaustive) after = after ? Flow.join(after, before) : before;
-    if (statement.cases.length === 0) after = before;
-    this.flow = breakFlow ? Flow.join(after ?? before.unreachable, breakFlow) : (after ?? before);
-    const test = subject.run;
-    return (frame) => {
-      const value = test(frame);
-      frame.temporaries.push(value);
-      let index = -1;
-      try {
-        for (const [groupIndex, group] of compiledGroups.entries()) {
-          for (const matcher of group.matchers) {
-            if (!matcher.pattern) {
-              index = groupIndex;
-              break;
-            }
-            if (matcher.pattern.match(frame, value) && (!matcher.guard || matcher.guard(frame) === true)) {
-              index = groupIndex;
-              break;
-            }
-          }
-          if (index >= 0) break;
-          for (const slot of group.slots) frame.locals[slot] = undefined;
-        }
-      } finally {
-        frame.temporaries.pop();
-      }
-      while (index >= 0) {
-        const group = compiledGroups[index];
-        let completion: Completion | undefined;
-        try {
-          completion = group.body(frame);
-        } finally {
-          for (const slot of group.slots) frame.locals[slot] = undefined;
-        }
-        if (!completion) return;
-        if (completion.kind === 'break' && (completion.label === undefined || labels.includes(completion.label)))
-          return;
-        if (completion.kind === 'continue' && completion.label !== undefined) {
-          const target = compiledGroups.findIndex((other) => other.labels.includes(completion.label as string));
-          if (target !== -1) {
-            index = target;
-            continue;
-          }
-        }
-        return completion;
-      }
-      return;
-    };
+    return { groups, after };
+  }
+
+  private isSwitchExhaustive(statement: Extract<Statement, { kind: 'switch' }>, subjectType: DartType): boolean {
+    if (statement.cases.some((switchCase) => switchCase.pattern === undefined)) return true;
+    return checkExhaustive(
+      this,
+      subjectType,
+      statement.cases
+        .filter((switchCase) => switchCase.guard === undefined)
+        .map((switchCase) => switchCase.pattern as Pattern),
+      statement,
+      true
+    );
   }
 
   private compileCaseHead(
@@ -291,17 +262,9 @@ export abstract class ControlCompiler extends StatementCompiler {
         return undefined;
       };
     });
-    if (slots.length === 0) return result;
-    return function* (frame) {
-      try {
-        return yield* result(frame);
-      } finally {
-        for (const slot of slots) frame.locals[slot] = undefined;
-      }
-    };
+    return clearingSlots(result, slots);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 40 -- The statements that may contain yield, each as a generator.
   private compileGenStatement(statement: Statement): GenExec {
     switch (statement.kind) {
       case 'yield': {
@@ -312,45 +275,11 @@ export abstract class ControlCompiler extends StatementCompiler {
       }
       case 'if': {
         if (statement.casePattern || !containsYield(statement)) break;
-        const { compiled: condition, flow } = this.compileCondition(statement.condition);
-        this.flow = flow.whenTrue;
-        const consequence = this.compileGenScoped(statement.consequence);
-        const afterThen = this.flow;
-        this.flow = flow.whenFalse;
-        const { alternative } = statement;
-        const otherwise = alternative ? this.compileGenScoped(alternative) : undefined;
-        this.flow = Flow.join(afterThen, this.flow);
-        const test = condition.run;
-        return function* (frame) {
-          if (test(frame)) return yield* consequence(frame);
-          if (otherwise) return yield* otherwise(frame);
-          return;
-        };
+        return this.compileGenIf(statement);
       }
       case 'while': {
         if (!containsYield(statement)) break;
-        const labels = this.takeLoopLabels();
-        this.enterLoop(statement);
-        const { compiled: condition, flow } = this.compileCondition(statement.condition);
-        this.flow = flow.whenTrue;
-        this.fn.loopDepth++;
-        this.breakFlows.push(undefined);
-        const body = this.compileGenScoped(statement.body);
-        this.fn.loopDepth--;
-        this.breakFlows.pop();
-        this.flow = flow.whenFalse;
-        const test = condition.run;
-        return function* (frame) {
-          while (test(frame)) {
-            const completion = yield* body(frame);
-            if (completion) {
-              const outcome = loopCompletion(completion, labels);
-              if (outcome !== 'continue') return outcome;
-            }
-            frame.runtime.spend();
-          }
-          return;
-        };
+        return this.compileGenWhile(statement);
       }
       case 'for': {
         if (!containsYield(statement)) break;
@@ -378,32 +307,58 @@ export abstract class ControlCompiler extends StatementCompiler {
     };
   }
 
+  private compileGenIf(statement: Extract<Statement, { kind: 'if' }>): GenExec {
+    const { compiled: condition, flow } = this.compileCondition(statement.condition);
+    this.flow = flow.whenTrue;
+    const consequence = this.compileGenScoped(statement.consequence);
+    const afterThen = this.flow;
+    this.flow = flow.whenFalse;
+    const { alternative } = statement;
+    const otherwise = alternative ? this.compileGenScoped(alternative) : undefined;
+    this.flow = Flow.join(afterThen, this.flow);
+    const test = condition.run;
+    return function* (frame) {
+      if (test(frame)) return yield* consequence(frame);
+      if (otherwise) return yield* otherwise(frame);
+      return;
+    };
+  }
+
+  private compileGenWhile(statement: Extract<Statement, { kind: 'while' }>): GenExec {
+    const labels = this.takeLoopLabels();
+    this.enterLoop(statement);
+    const { compiled: condition, flow } = this.compileCondition(statement.condition);
+    this.flow = flow.whenTrue;
+    this.fn.loopDepth++;
+    this.breakFlows.push(undefined);
+    const body = this.compileGenScoped(statement.body);
+    this.fn.loopDepth--;
+    this.breakFlows.pop();
+    this.flow = flow.whenFalse;
+    const test = condition.run;
+    return function* (frame) {
+      while (test(frame)) {
+        const completion = yield* body(frame);
+        if (completion) {
+          const outcome = loopCompletion(completion, labels);
+          if (outcome !== 'continue') return outcome;
+        }
+        frame.runtime.spend();
+      }
+      return;
+    };
+  }
+
   private compileGenScoped(statement: Statement): GenExec {
     if (statement.kind === 'block') return this.compileGenBlock(statement);
     const { result, slots } = this.withScope(() => this.compileGenStatement(statement));
-    if (slots.length === 0) return result;
-    return function* (frame) {
-      try {
-        return yield* result(frame);
-      } finally {
-        for (const slot of slots) frame.locals[slot] = undefined;
-      }
-    };
+    return clearingSlots(result, slots);
   }
 
   private compileGenFor(statement: Extract<Statement, { kind: 'for' }>): GenExec {
     const labels = this.takeLoopLabels();
     const { result, slots } = this.withScope(() => {
-      const { init } = statement;
-      let initExec: Exec | undefined;
-      if (init && !Array.isArray(init)) initExec = this.compileLocalDeclaration(init, false);
-      else if (init) {
-        const runs = init.map((expression) => this.compileExpression(expression).run);
-        initExec = (frame) => {
-          for (const run of runs) run(frame);
-          return;
-        };
-      }
+      const initExec = this.compileGenForInit(statement);
       this.enterLoop(statement);
       const condition = statement.condition ? this.compileCondition(statement.condition) : undefined;
       if (condition) this.flow = condition.flow.whenTrue;
@@ -414,28 +369,19 @@ export abstract class ControlCompiler extends StatementCompiler {
       this.breakFlows.pop();
       const updates = statement.updates.map((update) => this.compileExpression(update).run);
       if (condition) this.flow = condition.flow.whenFalse;
-      const test = condition?.compiled.run;
-      return function* (frame: Frame): Generator<Value, Completion | undefined, undefined> {
-        initExec?.(frame);
-        for (;;) {
-          if (test && !test(frame)) return undefined;
-          const completion = yield* body(frame);
-          if (completion) {
-            const outcome = loopCompletion(completion, labels);
-            if (outcome !== 'continue') return outcome;
-          }
-          for (const update of updates) update(frame);
-          frame.runtime.spend();
-        }
-      };
+      return genForLoop(initExec, condition?.compiled.run, body, updates, labels);
     });
-    if (slots.length === 0) return result;
-    return function* (frame) {
-      try {
-        return yield* result(frame);
-      } finally {
-        for (const slot of slots) frame.locals[slot] = undefined;
-      }
+    return clearingSlots(result, slots);
+  }
+
+  private compileGenForInit(statement: Extract<Statement, { kind: 'for' }>): Exec | undefined {
+    const { init } = statement;
+    if (init && !Array.isArray(init)) return this.compileLocalDeclaration(init, false);
+    if (!init) return undefined;
+    const runs = init.map((expression) => this.compileExpression(expression).run);
+    return (frame) => {
+      for (const run of runs) run(frame);
+      return;
     };
   }
 
@@ -474,14 +420,7 @@ export abstract class ControlCompiler extends StatementCompiler {
         }
       };
     });
-    if (slots.length === 0) return result;
-    return function* (frame) {
-      try {
-        return yield* result(frame);
-      } finally {
-        for (const slot of slots) frame.locals[slot] = undefined;
-      }
-    };
+    return clearingSlots(result, slots);
   }
 
   private compileYield(statement: Extract<Statement, { kind: 'yield' }>): GenExec {
@@ -536,6 +475,88 @@ export abstract class ControlCompiler extends StatementCompiler {
 }
 
 /** Groups the cases of a switch statement: empty cases share the body of the next case. */
+function genForLoop(
+  initExec: Exec | undefined,
+  test: Eval | undefined,
+  body: GenExec,
+  updates: Eval[],
+  labels: string[]
+): GenExec {
+  return function* (frame: Frame): Generator<Value, Completion | undefined, undefined> {
+    initExec?.(frame);
+    for (;;) {
+      if (test && !test(frame)) return undefined;
+      const completion = yield* body(frame);
+      if (completion) {
+        const outcome = loopCompletion(completion, labels);
+        if (outcome !== 'continue') return outcome;
+      }
+      for (const update of updates) update(frame);
+      frame.runtime.spend();
+    }
+  };
+}
+
+/** Clears the slots of a scope's variables once its statements finish, so that traces stop showing them. */
+function clearingSlots(result: GenExec, slots: number[]): GenExec {
+  if (slots.length === 0) return result;
+  return function* (frame) {
+    try {
+      return yield* result(frame);
+    } finally {
+      for (const slot of slots) frame.locals[slot] = undefined;
+    }
+  };
+}
+
+interface SwitchGroup {
+  matchers: { pattern: CompiledPattern | undefined; guard: Eval | undefined }[];
+  body: Exec;
+  slots: number[];
+  labels: string[];
+}
+
+/** The index of the first group with a case that matches, clearing the variables of the groups that do not. */
+function selectSwitchGroup(frame: Frame, value: Value, groups: readonly SwitchGroup[]): number {
+  for (const [index, group] of groups.entries()) {
+    const matches = group.matchers.some(
+      (matcher) =>
+        !matcher.pattern || (matcher.pattern.match(frame, value) && (!matcher.guard || matcher.guard(frame) === true))
+    );
+    if (matches) return index;
+    for (const slot of group.slots) frame.locals[slot] = undefined;
+  }
+  return -1;
+}
+
+/** Runs a group's body, and the bodies that `continue label;` jumps to. */
+function runSwitchFrom(
+  frame: Frame,
+  start: number,
+  groups: readonly SwitchGroup[],
+  labels: readonly string[]
+): Completion | undefined {
+  let index = start;
+  while (index >= 0) {
+    const group = groups[index];
+    let completion: Completion | undefined;
+    try {
+      completion = group.body(frame);
+    } finally {
+      for (const slot of group.slots) frame.locals[slot] = undefined;
+    }
+    if (!completion) return undefined;
+    if (completion.kind === 'break' && (completion.label === undefined || labels.includes(completion.label)))
+      return undefined;
+    if (completion.kind !== 'continue' || completion.label === undefined) return completion;
+    const label = completion.label;
+    const target = groups.findIndex((other) => other.labels.includes(label));
+    if (target === -1) return completion;
+    index = target;
+  }
+  return undefined;
+}
+
 function groupCases(cases: SwitchCase[]): { cases: SwitchCase[]; statements: Statement[]; labels: string[] }[] {
   const groups: { cases: SwitchCase[]; statements: Statement[]; labels: string[] }[] = [];
   let pending: SwitchCase[] = [];

@@ -348,10 +348,7 @@ function topBottomSubtype(s: DartType, t: DartType): boolean | undefined {
   if (s === t) return true;
   if (isTop(t)) return true;
   if (s.kind === 'never' && !s.nullable) return true;
-  if (isObject(t)) {
-    if (s.kind === 'typeParam') return s.promoted ? isSubtype(s.promoted, t) : isSubtype(boundOf(s.param), t);
-    return !isNullable(s) && s.kind !== 'dynamic';
-  }
+  if (isObject(t)) return isSubtypeOfObject(s, t);
   if (s.kind === 'null' || (s.kind === 'never' && s.nullable)) {
     if (t.kind === 'typeParam') return t.nullable || (t.promoted === undefined && false);
     return isNullable(t);
@@ -366,6 +363,11 @@ function topBottomSubtype(s: DartType, t: DartType): boolean | undefined {
     return isSubtype({ ...s, nullable: false, promoted: undefined }, t);
   }
   return undefined;
+}
+
+function isSubtypeOfObject(s: DartType, t: DartType): boolean {
+  if (s.kind === 'typeParam') return s.promoted ? isSubtype(s.promoted, t) : isSubtype(boundOf(s.param), t);
+  return !isNullable(s) && s.kind !== 'dynamic';
 }
 
 /** The rules for type parameters and a nullable right side; undefined when none applies. */
@@ -476,14 +478,16 @@ function specialUpperBound(a: DartType, b: DartType): DartType | undefined {
   if (b.kind === 'null' || (b.kind === 'never' && b.nullable)) return makeNullable(a);
   if (isNullable(a) || isNullable(b)) return makeNullable(upperBound(nonNullable(a), nonNullable(b)));
   if (isObject(a) || isObject(b)) return objectType();
-  if (a.kind === 'typeParam' || b.kind === 'typeParam') {
-    if (isSubtype(a, b)) return b;
-    if (isSubtype(b, a)) return a;
-    const left = a.kind === 'typeParam' ? (a.promoted ?? boundOf(a.param)) : a;
-    const right = b.kind === 'typeParam' ? (b.promoted ?? boundOf(b.param)) : b;
-    return upperBound(left, right);
-  }
+  if (a.kind === 'typeParam' || b.kind === 'typeParam') return typeParamUpperBound(a, b);
   return undefined;
+}
+
+function typeParamUpperBound(a: DartType, b: DartType): DartType {
+  if (isSubtype(a, b)) return b;
+  if (isSubtype(b, a)) return a;
+  const left = a.kind === 'typeParam' ? (a.promoted ?? boundOf(a.param)) : a;
+  const right = b.kind === 'typeParam' ? (b.promoted ?? boundOf(b.param)) : b;
+  return upperBound(left, right);
 }
 
 function structuralUpperBound(a: DartType, b: DartType): DartType {

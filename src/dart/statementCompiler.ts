@@ -13,7 +13,7 @@ import type { CompiledFunction, FunctionSpec } from './callCompiler';
 import { type Compiled, type Eval, typeName } from './compilerBase';
 import { SHORTED } from './expressionCompiler';
 import { type CompiledPattern, isRefutableSyntax, PatternCompiler } from './patternCompiler';
-import { type DartThrow,type Frame } from './runtime';
+import { type DartThrow, type Frame } from './runtime';
 import { type ConditionFlow, Flow, FunctionContext, type LocalVar } from './scope';
 import {
   coreTypes,
@@ -201,66 +201,14 @@ export abstract class StatementCompiler extends PatternCompiler {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Positional, optional, and named parameters with defaults.
   private compileParameters(spec: FunctionSpec): (frame: Frame, args: Arguments) => void {
     const { parameters } = spec;
     const binders: ((frame: Frame, args: Arguments) => void)[] = [];
-    const declare = (
-      parameter: FormalParameter,
-      type: DartType,
-      isOptional: boolean
-    ): { variable: LocalVar; defaultValue: Eval | undefined } => {
-      let defaultValue: Eval | undefined;
-      if (parameter.defaultValue) {
-        const compiled = this.withConstContext(true, () =>
-          this.compileExpression(parameter.defaultValue as Expression, type)
-        );
-        if (!compiled.isConst) this.error(parameter.defaultValue, '引数の既定値には、定数を書いてください。');
-        defaultValue = this.coerce(
-          compiled,
-          type,
-          parameter.defaultValue,
-          (from, to) => `${from} 型の既定値は、${to} 型の引数 ${parameter.name} に合いません。`
-        ).run;
-      } else if (
-        isOptional &&
-        !parameter.isRequired &&
-        !isNullable(type) &&
-        type.kind !== 'dynamic' &&
-        !this.isLibraryCode
-      ) {
-        this.error(
-          parameter,
-          `引数 ${parameter.name} の型 ${typeName(type)} は null にならないので、既定値を書くか、required を付けてください。`
-        );
-      }
-      const variable = this.declareLocal(parameter, parameter.name, type, {
-        isFinal: parameter.isFinal,
-        isLate: false,
-        isConst: false,
-        isParameter: true,
-        hasInitializer: true,
-      });
-      return { variable, defaultValue };
-    };
-    const checkFor = (type: DartType, name: string): ((frame: Frame, value: Value) => void) | undefined => {
-      if (isTop(type)) return undefined;
-      const resolve = this.runtimeType(type);
-      return (frame, value) => {
-        const expected = resolve(frame);
-        if (!this.valueIsAt(frame, value, expected)) {
-          frame.runtime.throwTypeError(
-            `type '${typeToStringOf(frame.runtime.runtimeTypeOf(value))}' is not a subtype of type '${typeToStringOf(expected)}' of '${name}'`
-          );
-        }
-      };
-    };
     for (const [index, parameter] of parameters.positional.entries()) {
       const type = spec.positionalTypes[index] ?? DYNAMIC;
-      const isOptional = index >= parameters.requiredCount;
-      const { variable, defaultValue } = declare(parameter, type, isOptional);
+      const { variable, defaultValue } = this.declareParameter(parameter, type, index >= parameters.requiredCount);
       const { slot } = variable;
-      const check = checkFor(type, parameter.name);
+      const check = this.parameterCheck(type, parameter.name);
       binders.push((frame, args) => {
         let value: Value;
         if (index < args.positional.length) {
@@ -274,10 +222,10 @@ export abstract class StatementCompiler extends PatternCompiler {
     }
     for (const parameter of parameters.named) {
       const type = spec.namedTypes.get(parameter.name) ?? DYNAMIC;
-      const { variable, defaultValue } = declare(parameter, type, true);
+      const { variable, defaultValue } = this.declareParameter(parameter, type, true);
       const { slot } = variable;
       const { name } = parameter;
-      const check = checkFor(type, name);
+      const check = this.parameterCheck(type, name);
       binders.push((frame, args) => {
         let value: Value;
         if (args.named?.has(name)) {
@@ -289,6 +237,70 @@ export abstract class StatementCompiler extends PatternCompiler {
         frame.locals[slot] = new Cell(value);
       });
     }
+    const checkArity = this.arityCheck(spec);
+    return (frame, args) => {
+      if (args.isDynamic) checkArity(frame, args);
+      for (const bind of binders) bind(frame, args);
+    };
+  }
+
+  /** Declares a parameter as a local, compiling its default value, which must be a constant. */
+  private declareParameter(
+    parameter: FormalParameter,
+    type: DartType,
+    isOptional: boolean
+  ): { variable: LocalVar; defaultValue: Eval | undefined } {
+    let defaultValue: Eval | undefined;
+    if (parameter.defaultValue) {
+      const compiled = this.withConstContext(true, () =>
+        this.compileExpression(parameter.defaultValue as Expression, type)
+      );
+      if (!compiled.isConst) this.error(parameter.defaultValue, '引数の既定値には、定数を書いてください。');
+      defaultValue = this.coerce(
+        compiled,
+        type,
+        parameter.defaultValue,
+        (from, to) => `${from} 型の既定値は、${to} 型の引数 ${parameter.name} に合いません。`
+      ).run;
+    } else if (
+      isOptional &&
+      !parameter.isRequired &&
+      !isNullable(type) &&
+      type.kind !== 'dynamic' &&
+      !this.isLibraryCode
+    ) {
+      this.error(
+        parameter,
+        `引数 ${parameter.name} の型 ${typeName(type)} は null にならないので、既定値を書くか、required を付けてください。`
+      );
+    }
+    const variable = this.declareLocal(parameter, parameter.name, type, {
+      isFinal: parameter.isFinal,
+      isLate: false,
+      isConst: false,
+      isParameter: true,
+      hasInitializer: true,
+    });
+    return { variable, defaultValue };
+  }
+
+  /** The check of an argument a dynamic call passes, which the call site could not check statically. */
+  private parameterCheck(type: DartType, name: string): ((frame: Frame, value: Value) => void) | undefined {
+    if (isTop(type)) return undefined;
+    const resolve = this.runtimeType(type);
+    return (frame, value) => {
+      const expected = resolve(frame);
+      if (!this.valueIsAt(frame, value, expected)) {
+        frame.runtime.throwTypeError(
+          `type '${typeToStringOf(frame.runtime.runtimeTypeOf(value))}' is not a subtype of type '${typeToStringOf(expected)}' of '${name}'`
+        );
+      }
+    };
+  }
+
+  /** A dynamic call with arguments the function does not take fails as `noSuchMethod`. */
+  private arityCheck(spec: FunctionSpec): (frame: Frame, args: Arguments) => void {
+    const { parameters } = spec;
     const count = parameters.positional.length;
     const required = parameters.requiredCount;
     const namedNames = new Set(parameters.named.map((parameter) => parameter.name));
@@ -296,15 +308,12 @@ export abstract class StatementCompiler extends PatternCompiler {
       .filter((parameter) => parameter.isRequired)
       .map((parameter) => parameter.name);
     return (frame, args) => {
-      if (args.isDynamic) {
-        const positional = args.positional.length;
-        const unknown = [...(args.named?.keys() ?? [])].some((name) => !namedNames.has(name));
-        const missing = requiredNamed.some((name) => !args.named?.has(name));
-        if (positional < required || positional > count || unknown || missing) {
-          frame.runtime.noSuchMethod(frame.receiver, spec.name, 'method', args);
-        }
+      const positional = args.positional.length;
+      const unknown = [...(args.named?.keys() ?? [])].some((name) => !namedNames.has(name));
+      const missing = requiredNamed.some((name) => !args.named?.has(name));
+      if (positional < required || positional > count || unknown || missing) {
+        frame.runtime.noSuchMethod(frame.receiver, spec.name, 'method', args);
       }
-      for (const bind of binders) bind(frame, args);
     };
   }
 
@@ -433,38 +442,13 @@ export abstract class StatementCompiler extends PatternCompiler {
     return this.withStep(statement, exec, this.onlyCalls(expression, compiled));
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- Each kind of local declaration differs in what it checks.
   protected compileLocalDeclaration(declaration: VariableDeclaration, recordStep = true): Exec {
     const declaredType = declaration.type ? this.resolveType(declaration.type) : undefined;
     const parts: { slot: number; run: Eval | undefined; isLate: boolean }[] = [];
-    const initialized: { compiled: Compiled; expression: Expression }[] = [];
+    const initialized: Compiled[] = [];
     for (const declarator of declaration.variables) {
-      const { initializer } = declarator;
-      if (declaration.isConst && !initializer)
-        this.error(declarator, `const の変数 ${declarator.name} には、初期値が必要です。`);
-      if (declaration.isFinal && !initializer && !declaration.isLate && !declaredType && !this.isLibraryCode) {
-        // `final x;` is allowed and assigned later, with the type inferred as dynamic.
-      }
-      let compiled: Compiled | undefined;
-      if (initializer) {
-        const isLateInitializer = declaration.isLate;
-        const savedFlow = this.flow;
-        compiled = this.withConstContext(declaration.isConst, () => this.compileExpression(initializer, declaredType));
-        if (isLateInitializer) this.flow = savedFlow;
-        if (declaration.isConst && !compiled.isConst)
-          this.error(initializer, `const の変数 ${declarator.name} の初期値は、定数でなければなりません。`);
-        if (declaredType) {
-          compiled = this.coerce(
-            compiled,
-            declaredType,
-            initializer,
-            (from, to) => `${from} 型の値は、${to} 型の変数 ${declarator.name} に代入できません。`
-          );
-        } else if (compiled.type.kind === 'void') {
-          this.error(initializer, 'void の値は変数に代入できません。');
-        }
-        initialized.push({ compiled, expression: initializer });
-      }
+      const compiled = this.compileLocalInitializer(declaration, declarator, declaredType);
+      if (compiled) initialized.push(compiled);
       let type = declaredType ?? (compiled ? widenInferred(compiled.type) : DYNAMIC);
       if (!declaredType && compiled?.type.kind === 'null') type = DYNAMIC;
       const variable = this.declareLocal(declarator, declarator.name, type, {
@@ -472,42 +456,68 @@ export abstract class StatementCompiler extends PatternCompiler {
         isLate: declaration.isLate,
         isConst: declaration.isConst,
         isParameter: false,
-        hasInitializer: initializer !== undefined,
+        hasInitializer: declarator.initializer !== undefined,
       });
       if (declaration.isConst && compiled?.constValue) {
         variable.constant = compiled.constValue.value;
         variable.hasConstant = true;
       }
-      if (compiled && !declaration.isLate) {
-        this.flow = this.flow.assign(variable);
-        if (
-          declaredType &&
-          compiled.type.kind !== 'dynamic' &&
-          !isSubtypeOfSame(compiled.type, declaredType) &&
-          this.isPromotable(variable)
-        ) {
-          const promoted = nonNullable(declaredType);
-          if (isNullable(declaredType) && isSubtype(compiled.type, promoted))
-            this.flow = this.flow.promote(variable, promoted);
-        }
-      }
+      if (compiled && !declaration.isLate) this.flowAfterInitializer(variable, compiled, declaredType);
       parts.push({ slot: variable.slot, run: compiled?.run, isLate: declaration.isLate });
     }
     const exec: Exec = (frame) => {
-      for (const { slot, run, isLate } of parts) {
-        let value: Value;
-        if (isLate) value = run ? (new LateInitializer(() => run(frame)) as unknown as Value) : UNINITIALIZED;
-        else value = run ? run(frame) : UNASSIGNED;
-        frame.locals[slot] = new Cell(value);
-      }
+      for (const { slot, run, isLate } of parts) frame.locals[slot] = new Cell(initialLocalValue(frame, run, isLate));
       return;
     };
     if (initialized.length === 0 || !recordStep || declaration.isLate) return exec;
     return this.withStep(
       declaration,
       exec,
-      initialized.every(({ compiled }) => isCreation(compiled))
+      initialized.every((compiled) => isCreation(compiled))
     );
+  }
+
+  /** A declarator's initializer, checked against the declared type; a late one leaves the flow as it was. */
+  private compileLocalInitializer(
+    declaration: VariableDeclaration,
+    declarator: VariableDeclaration['variables'][number],
+    declaredType: DartType | undefined
+  ): Compiled | undefined {
+    const { initializer } = declarator;
+    if (declaration.isConst && !initializer)
+      this.error(declarator, `const の変数 ${declarator.name} には、初期値が必要です。`);
+    if (!initializer) return undefined;
+    const savedFlow = this.flow;
+    let compiled = this.withConstContext(declaration.isConst, () => this.compileExpression(initializer, declaredType));
+    if (declaration.isLate) this.flow = savedFlow;
+    if (declaration.isConst && !compiled.isConst)
+      this.error(initializer, `const の変数 ${declarator.name} の初期値は、定数でなければなりません。`);
+    if (declaredType) {
+      compiled = this.coerce(
+        compiled,
+        declaredType,
+        initializer,
+        (from, to) => `${from} 型の値は、${to} 型の変数 ${declarator.name} に代入できません。`
+      );
+    } else if (compiled.type.kind === 'void') {
+      this.error(initializer, 'void の値は変数に代入できません。');
+    }
+    return compiled;
+  }
+
+  /** An initialized local is assigned, and a nullable one initialized with a non-null value is promoted. */
+  private flowAfterInitializer(variable: LocalVar, compiled: Compiled, declaredType: DartType | undefined): void {
+    this.flow = this.flow.assign(variable);
+    if (
+      !declaredType ||
+      compiled.type.kind === 'dynamic' ||
+      isSubtypeOfSame(compiled.type, declaredType) ||
+      !this.isPromotable(variable)
+    )
+      return;
+    const promoted = nonNullable(declaredType);
+    if (isNullable(declaredType) && isSubtype(compiled.type, promoted))
+      this.flow = this.flow.promote(variable, promoted);
   }
 
   private compilePatternDeclaration(statement: Extract<Statement, { kind: 'patternDeclaration' }>): Exec {
@@ -729,29 +739,10 @@ export abstract class StatementCompiler extends PatternCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 30 -- The parts of a for loop each record steps differently.
   private compileFor(statement: Extract<Statement, { kind: 'for' }>): Exec {
     const labels = this.takeLoopLabels();
     const { result, slots } = this.withScope(() => {
-      const { init } = statement;
-      let initExec: Exec | undefined;
-      const loopVariables: LocalVar[] = [];
-      if (init && !Array.isArray(init)) {
-        const before = new Set(this.fn.scopes.at(-1)?.values());
-        initExec = this.compileLocalDeclaration(init, false);
-        for (const variable of this.fn.scopes.at(-1)?.values() ?? [])
-          if (!before.has(variable)) loopVariables.push(variable);
-      } else if (init) {
-        const runs = init.map((expression) => this.compileExpression(expression).run);
-        initExec = (frame) => {
-          for (const run of runs) run(frame);
-          return;
-        };
-      }
-      const initRecords =
-        init !== undefined &&
-        (Array.isArray(init) ? init.length > 0 : init.variables.some((variable) => variable.initializer));
-      const initRow = initRecords ? this.stepRowOf(statement) : undefined;
+      const { initExec, loopVariables, initRow } = this.compileForInit(statement);
       this.enterLoop(statement);
       const { compiled: condition, flow } = statement.condition
         ? this.compileCondition(statement.condition)
@@ -763,25 +754,16 @@ export abstract class StatementCompiler extends PatternCompiler {
       const updates = statement.updates.map((update) => this.compileExpression(update).run);
       const updateRow = updates.length > 0 ? this.stepRowOf(statement) : undefined;
       this.flow = breakFlow ? Flow.join(flow.whenFalse, breakFlow) : flow.whenFalse;
-      const test = condition?.run;
-      const capturedLoopVariables = loopVariables.map((variable) => variable.slot);
-      return (frame: Frame): Completion | undefined => {
-        if (initExec) initExec(frame);
-        if (initRow !== undefined) frame.runtime.steps.step(initRow);
-        for (;;) {
-          if (test && !test(frame)) return undefined;
-          const completion = body(frame);
-          if (completion) {
-            const outcome = loopCompletion(completion, labels);
-            if (outcome !== 'continue') return outcome;
-          }
-          // Each iteration has its own loop variables, which closures created in the body keep.
-          for (const slot of capturedLoopVariables) frame.locals[slot] = new Cell((frame.locals[slot] as Cell).v);
-          for (const update of updates) update(frame);
-          if (updateRow !== undefined) frame.runtime.steps.step(updateRow);
-          frame.runtime.spend();
-        }
-      };
+      return forLoop({
+        initExec,
+        initRow,
+        test: condition?.run,
+        body,
+        labels,
+        loopSlots: loopVariables.map((variable) => variable.slot),
+        updates,
+        updateRow,
+      });
     });
     if (slots.length === 0) return result;
     return (frame) => {
@@ -791,6 +773,33 @@ export abstract class StatementCompiler extends PatternCompiler {
         for (const slot of slots) frame.locals[slot] = undefined;
       }
     };
+  }
+
+  /** The initializer of a for loop: its variables, which each iteration copies, and the row of its step. */
+  private compileForInit(statement: Extract<Statement, { kind: 'for' }>): {
+    initExec: Exec | undefined;
+    loopVariables: LocalVar[];
+    initRow: number | undefined;
+  } {
+    const { init } = statement;
+    let initExec: Exec | undefined;
+    const loopVariables: LocalVar[] = [];
+    if (init && !Array.isArray(init)) {
+      const before = new Set(this.fn.scopes.at(-1)?.values());
+      initExec = this.compileLocalDeclaration(init, false);
+      for (const variable of this.fn.scopes.at(-1)?.values() ?? [])
+        if (!before.has(variable)) loopVariables.push(variable);
+    } else if (init) {
+      const runs = init.map((expression) => this.compileExpression(expression).run);
+      initExec = (frame) => {
+        for (const run of runs) run(frame);
+        return;
+      };
+    }
+    const initRecords =
+      init !== undefined &&
+      (Array.isArray(init) ? init.length > 0 : init.variables.some((variable) => variable.initializer));
+    return { initExec, loopVariables, initRow: initRecords ? this.stepRowOf(statement) : undefined };
   }
 
   private compileForIn(statement: Extract<Statement, { kind: 'forIn' }>): Exec {
@@ -1061,6 +1070,36 @@ export abstract class StatementCompiler extends PatternCompiler {
   static readonly SHORTED = SHORTED;
 }
 
+function forLoop(loop: {
+  initExec: Exec | undefined;
+  initRow: number | undefined;
+  test: Eval | undefined;
+  body: Exec;
+  labels: string[];
+  loopSlots: number[];
+  updates: Eval[];
+  updateRow: number | undefined;
+}): Exec {
+  const { initExec, initRow, test, body, labels, loopSlots, updates, updateRow } = loop;
+  return (frame) => {
+    if (initExec) initExec(frame);
+    if (initRow !== undefined) frame.runtime.steps.step(initRow);
+    for (;;) {
+      if (test && !test(frame)) return;
+      const completion = body(frame);
+      if (completion) {
+        const outcome = loopCompletion(completion, labels);
+        if (outcome !== 'continue') return outcome;
+      }
+      // Each iteration has its own loop variables, which closures created in the body keep.
+      for (const slot of loopSlots) frame.locals[slot] = new Cell((frame.locals[slot] as Cell).v);
+      for (const update of updates) update(frame);
+      if (updateRow !== undefined) frame.runtime.steps.step(updateRow);
+      frame.runtime.spend();
+    }
+  };
+}
+
 export function loopCompletion(completion: Completion, labels: readonly string[]): Completion | undefined | 'continue' {
   if (completion.kind === 'break') {
     if (completion.label === undefined || labels.includes(completion.label)) return undefined;
@@ -1078,6 +1117,11 @@ function widenInferred(type: DartType): DartType {
   if (type.kind === 'null') return DYNAMIC;
   if (type.kind === 'typeParam' && type.promoted) return { ...type, promoted: undefined };
   return type;
+}
+
+function initialLocalValue(frame: Frame, run: Eval | undefined, isLate: boolean): Value {
+  if (isLate) return run ? (new LateInitializer(() => run(frame)) as unknown as Value) : UNINITIALIZED;
+  return run ? run(frame) : UNASSIGNED;
 }
 
 function isSubtypeOfSame(a: DartType, b: DartType): boolean {
