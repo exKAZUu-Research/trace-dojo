@@ -150,7 +150,7 @@ export class Evaluator {
     this.runtime.pushFrame(frame);
     try {
       if (method.kind === 'constructor') this.runConstructorPrologue(frame, method);
-      const completion = this.executeBlock(body, frame);
+      const completion = this.executeBlock(body, frame, true);
       return completion !== undefined && typeof completion === 'object' ? completion.value : undefined;
     } finally {
       this.runtime.popFrame();
@@ -172,7 +172,7 @@ export class Evaluator {
   /** Runs a constructor's field initializers and its call of another constructor, before its body. */
   private runConstructorPrologue(frame: Frame, constructor: MethodSymbol): void {
     const initializer = constructor.constructorInitializer;
-    const isThisChain = (initializer as { isThisInitializer?: boolean } | undefined)?.isThisInitializer === true;
+    const isThisChain = initializer?.kind === 'call' && initializer.isThisInitializer === true;
     const owner = constructor.owner;
     if (!isThisChain && owner.instanceInitializer) {
       const primaryArguments =
@@ -230,8 +230,6 @@ export class Evaluator {
       }
       return;
     }
-    const slots = caller.slots;
-    void slots;
     this.executeInitializerStatements(block, caller, frame);
   }
 
@@ -351,7 +349,11 @@ export class Evaluator {
     return this.runtime.steps.runStatement(row, step === 'callsOnly', run);
   }
 
-  executeBlock(block: BoundBlock, frame: Frame): Completion {
+  /**
+   * Runs a block. Its locals go out of scope when it ends, so the trace stops showing them, except those of a method's
+   * body (`isBody`), which the frame holds until the method exits, where the end of the program reads its locals.
+   */
+  executeBlock(block: BoundBlock, frame: Frame, isBody = false): Completion {
     for (const local of block.capturedLocals) frame.slots[local.slot] = new Cell(UNASSIGNED);
     try {
       for (const statement of block.statements) {
@@ -360,8 +362,7 @@ export class Evaluator {
       }
       return undefined;
     } finally {
-      // Locals go out of scope when their block ends, so the trace stops showing them.
-      for (const local of block.locals) if (!local.isCaptured) frame.slots[local.slot] = UNASSIGNED;
+      if (!isBody) for (const local of block.locals) if (!local.isCaptured) frame.slots[local.slot] = UNASSIGNED;
     }
   }
 
@@ -1013,7 +1014,7 @@ export class Evaluator {
         method,
         receiver,
         args,
-        expression.row,
+        expression.isImplicit ? undefined : expression.row,
         this.environmentOf(method, owner, typeArgs),
         this.localFunctionCells(frame, method)
       );

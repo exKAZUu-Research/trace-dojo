@@ -437,7 +437,9 @@ export class Compiler extends StatementBinder {
       !declaration && symbol.primaryParameters !== undefined && constructor.parameters === symbol.primaryParameters;
     const args = declaration?.initializer?.args ?? (isPrimary ? (symbol.declaration?.baseArguments ?? []) : []);
     const position = declaration?.initializer ?? declaration ?? { row: symbol.row, column: 0 };
-    return this.bindChainedConstructor(baseType, args, position, context, false);
+    const call = this.bindChainedConstructor(baseType, args, position, context, false);
+    if (call?.kind === 'call' && !declaration?.initializer && !isPrimary) call.isImplicit = true;
+    return call;
   }
 
   private bindChainedConstructor(
@@ -483,7 +485,7 @@ export class Compiler extends StatementBinder {
       type: VOID_TYPE,
       row: position.row,
       isThisInitializer: isThis,
-    } as BoundExpression;
+    };
   }
 
   /** Binds a method's body with its parameters in scope, then checks its flow. */

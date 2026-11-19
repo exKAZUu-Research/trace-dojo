@@ -75,6 +75,13 @@ export type BoundExpression =
       owner: NamedType | undefined;
       /** Whether the call dispatches on the receiver's runtime type, which `base.M()` does not. */
       isVirtual: boolean;
+      /** A constructor's call of another, which `: this(...)` makes, rather than `: base(...)`. */
+      isThisInitializer?: boolean;
+      /**
+       * A call the program does not write, such as the base constructor call of a constructor without `: base(...)`,
+       * which traces leave out of the calls in progress as the Java interpreter leaves out its implicit `super()`.
+       */
+      isImplicit?: boolean;
     } & Base)
   | ({
       kind: 'property';
