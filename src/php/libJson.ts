@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 440 -- Keeps one PHP runtime concern and its shared helpers in one module.
+// code-gauge-allow-file fileNcss 487 -- Keeps PHP's encoder and parser with their shared flag and error definitions.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { codePointBytes, enc, utf8Length } from './bytes';
@@ -10,15 +10,16 @@ import {
   nativePropertySlot,
   objectPropertyKeys,
   propNameOf,
+  readProp,
   snapshotDynamicProperties,
 } from './classes';
 import * as conversionsModule from './conversions';
 import { formatFloatRepr } from './conversions';
-import { newThrowable, throwError } from './errors';
+import { type CleanupException, isCleanupException, newThrowable, throwError, withCleanupExceptions } from './errors';
 import { nextChar } from './htmlEntities';
 import { defineConstant, defineFunction } from './native';
 import { PhpThrow, rt } from './runtime';
-import { PhpArray, type PhpClass, PhpObject, Ref, UNDEFINED_RESULT, type Value } from './values';
+import { PhpArray, type PhpClass, PhpObject, type PropDecl, Ref, UNDEFINED_RESULT, type Value } from './values';
 
 const FLAGS: [string, bigint][] = [
   ['JSON_HEX_TAG', 1n],
@@ -78,35 +79,52 @@ const has = (flags: bigint, flag: bigint): boolean => (flags & flag) !== 0n;
 
 defineFunction('json_encode(mixed $value, int $flags = 0, int $depth = 512): string|false', ({ args }) => {
   const flags = (args[1] as bigint | undefined) ?? 0n;
-  const encoder = new JsonEncoder(flags, Number((args[2] as bigint | undefined) ?? 512n));
-  let text: string | undefined;
-  try {
-    text = encoder.encode(args[0], 0);
-  } catch (error) {
-    if (!(error instanceof JsonError)) throw error;
-  }
-  const partial = has(flags, PARTIAL_OUTPUT_ON_ERROR);
-  if (!has(flags, THROW_ON_ERROR) || partial) {
-    rt().lastJsonError = encoder.error;
-    return encoder.error !== 0 && !partial ? false : (text as string);
-  }
-  if (encoder.error !== 0)
-    throw new PhpThrow(newThrowable('JsonException', MESSAGES[encoder.error], BigInt(encoder.error)));
-  return text as string;
+  return encodeJson(args[0], flags, Number((args[2] as bigint | undefined) ?? 512n));
 });
+
+function encodeJson(value: Value, flags: bigint, depth: number): string | false {
+  const runtime = rt();
+  const partial = has(flags, PARTIAL_OUTPUT_ON_ERROR);
+  let result: string | false = false;
+  withCleanupExceptions(runtime, (capture) => {
+    const encoder = new JsonEncoder(flags, depth, capture);
+    const text = encoder.document(value);
+    const code = encoder.error;
+    if (!has(flags, THROW_ON_ERROR) || partial) runtime.lastJsonError = code;
+    else if (code !== 0) throw new PhpThrow(newThrowable('JsonException', MESSAGES[code], BigInt(code)));
+    if (code === 0 || partial) result = text as string;
+  });
+  return result;
+}
 
 /** Transcribes ext/json/json_encoder.c: an error sets `error`, and without JSON_PARTIAL_OUTPUT_ON_ERROR aborts the encoding where PHP returns FAILURE. */
 class JsonEncoder {
   error = 0;
   private readonly active = new Set<object>();
+  private interrupted = false;
 
   constructor(
     private readonly flags: bigint,
-    private readonly maxDepth: number
+    private readonly maxDepth: number,
+    private readonly capture: (error: CleanupException) => void
   ) {}
 
+  document(value: Value): string | undefined {
+    try {
+      return this.encode(value, 0);
+    } catch (error) {
+      if (!(error instanceof JsonError)) this.interrupt(error);
+    }
+  }
+
+  private interrupt(error: unknown): void {
+    if (!isCleanupException(error)) throw error;
+    this.interrupted = true;
+    this.capture(error);
+  }
+
   // code-gauge-allow functionCognitiveComplexity 22 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
-  encode(value: Value, level: number): string {
+  private encode(value: Value, level: number): string {
     rt().spend();
     if (value === null) return 'null';
     if (value === UNDEFINED_RESULT) return this.fail(8);
@@ -141,27 +159,52 @@ class JsonEncoder {
 
   private encodeSerializable(value: PhpObject, level: number): string {
     if (this.active.has(value)) return this.fail(6);
+    if (this.interrupted) return this.serializerFailure();
     this.active.add(value);
     try {
-      const encoded = consumeInvokedResult(
+      const encoded = this.encodeUserResult(
         () => callMethod(value, 'jsonSerialize', []),
         (result) => {
           try {
             if (result !== value) return this.encode(result, level);
             this.active.delete(value);
             return this.encodeContainer(value, level);
+          } finally {
+            this.active.delete(value);
+          }
+        }
+      );
+      return encoded ?? this.serializerFailure();
+    } finally {
+      this.active.delete(value);
+    }
+  }
+
+  private serializerFailure(): string {
+    if (has(this.flags, PARTIAL_OUTPUT_ON_ERROR)) return 'null';
+    throw new JsonError(this.error);
+  }
+
+  private encodeUserResult(call: () => Value, encode: (value: Value) => string): string | undefined {
+    let encoded: string | JsonError | undefined;
+    try {
+      consumeInvokedResult(
+        call,
+        (value) => {
+          try {
+            encoded = encode(value);
           } catch (error) {
             if (!(error instanceof JsonError)) throw error;
-            return error;
+            encoded = error;
           }
         },
         true
       );
-      if (encoded instanceof JsonError) throw encoded;
-      return encoded;
-    } finally {
-      this.active.delete(value);
+    } catch (error) {
+      this.interrupt(error);
     }
+    if (encoded instanceof JsonError) throw encoded;
+    return encoded;
   }
 
   private encodeFloat(value: number): string {
@@ -180,6 +223,9 @@ class JsonEncoder {
     let text: string;
     try {
       text = value instanceof PhpArray ? this.encodeArray(value, level) : this.encodeObject(value, level);
+    } catch (error) {
+      if (!(error instanceof JsonError) || !has(this.flags, PARTIAL_OUTPUT_ON_ERROR)) throw error;
+      return 'null';
     } finally {
       this.active.delete(value);
     }
@@ -207,7 +253,6 @@ class JsonEncoder {
     return wrap(this.objectMembers(object, level), '{', '}', this.flags, level);
   }
 
-  // code-gauge-allow functionCognitiveComplexity 24 -- Keeps the ordered PHP cases together; splitting them would only move the same dispatch into helpers.
   private *objectMembers(object: PhpObject, level: number): Generator<string> {
     const table = (object.internal as { properties?: () => PhpArray } | undefined)?.properties?.();
     if (table) {
@@ -217,22 +262,41 @@ class JsonEncoder {
       }
       return;
     }
+    yield* this.declaredAndDynamicMembers(object, level);
+  }
+
+  private *declaredAndDynamicMembers(object: PhpObject, level: number): Generator<string> {
     const keys = objectPropertyKeys(object);
     const dynamic = snapshotDynamicProperties(object);
     const runtime = rt();
+    const dynamicRoot = runtime.held.length;
     runtime.held.push(dynamic);
     try {
       for (const key of keys) {
         const decl = declForKey(object.cls, key);
         if (decl && !canAccessProp(decl, undefined)) continue;
+        if (decl?.hooks?.get) {
+          yield this.hookedMember(object, decl, level);
+          continue;
+        }
         const slot = decl ? nativePropertySlot(object, key, decl) : dynamic.map.get(key);
         if (slot === undefined) continue;
         yield this.member(propNameOf(key), slot instanceof Ref ? slot.v : slot, level);
       }
     } finally {
-      runtime.held.pop();
+      runtime.held.splice(dynamicRoot, 1);
       runtime.release([dynamic]);
     }
+  }
+
+  private hookedMember(object: PhpObject, decl: PropDecl, level: number): string {
+    if (this.interrupted) throw new JsonError(this.error);
+    const member = this.encodeUserResult(
+      () => readProp(object, decl.name, decl.cls, 'native'),
+      (item) => this.member(decl.name, item, level)
+    );
+    if (member === undefined) throw new JsonError(this.error);
+    return member;
   }
 
   private member(key: string, item: Value, level: number): string {
