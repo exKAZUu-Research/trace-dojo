@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 878 -- Bash's execution, variables, and scopes share the shell state that subshells copy, so they stay in one class.
+// code-gauge-allow-file fileNcss 895 -- Bash's execution, variables, and scopes share the shell state that subshells copy, so they stay in one class.
 import { ExecutionLimitError, LIMITS } from '../interpreter/limits';
 import { ArithmeticError, type ArithmeticHost, evaluateArithmetic, skipSubscript } from './arithmetic';
 import type { ArithmeticSource, Assignment, Program, Redirect, Statement, Word } from './ast';
@@ -224,7 +224,7 @@ export class Shell implements ArithmeticHost {
   // code-gauge-allow functionNcss 54 -- One case per statement kind, each delegating to its own runner.
   execute(statement: Statement): number {
     this.runtime.spend();
-    this.currentRow = statement.row;
+    this.currentRow = statement.lineRow;
     let status: number;
     switch (statement.kind) {
       case 'command':
@@ -836,10 +836,10 @@ export class Shell implements ArithmeticHost {
   dynamicArray(name: string): string[] | undefined {
     if (!this.isDynamic(name)) return undefined;
     const calls = this.state.calls.toReversed();
-    if (calls.length === 0) return name === 'FUNCNAME' ? undefined : [];
     switch (name) {
       case 'FUNCNAME': {
-        return [...calls.map((call) => call.name), 'main'];
+        // Outside every function, `FUNCNAME` is declared without elements, while the others describe the script.
+        return calls.length === 0 ? undefined : [...calls.map((call) => call.name), 'main'];
       }
       case 'BASH_LINENO': {
         return [...calls.map((call) => String(call.line)), '0'];
@@ -853,7 +853,36 @@ export class Shell implements ArithmeticHost {
     }
   }
 
-  private isDynamic(name: string): boolean {
+  /**
+   * Assigns a dynamic variable as Bash does, telling whether the name is one: `RANDOM` takes a seed, `BASH_SUBSHELL` a
+   * new level, and the others ignore the value, since Bash computes them when they are read.
+   */
+  assignDynamic(name: string, value: string): boolean {
+    if (!this.isDynamic(name)) return false;
+    if (name === 'RANDOM') this.seedRandom(value);
+    if (name === 'BASH_SUBSHELL') this.state.subshellLevel = /^\s*[-+]?\d+\s*$/.test(value) ? Number(value) : 0;
+    return true;
+  }
+
+  /** A dynamic variable as `declare -p` shows it, whose value is computed as reading it computes it. */
+  dynamicDeclaration(name: string): Variable | undefined {
+    if (!this.isDynamic(name)) return undefined;
+    if (name === 'RANDOM' || name === 'LINENO' || name === 'BASH_SUBSHELL') {
+      const attributes = new Set<Attribute>(name === 'RANDOM' ? ['i'] : []);
+      return { name, attributes, value: { kind: 'scalar', value: this.dynamicValue(name) as string } };
+    }
+    const elements = this.dynamicArray(name);
+    return {
+      name,
+      attributes: new Set(['a']),
+      value: elements && {
+        kind: 'indexed',
+        elements: new Map(elements.map((element, index) => [BigInt(index), element])),
+      },
+    };
+  }
+
+  isDynamic(name: string): boolean {
     return DYNAMIC_VARIABLES.has(name) && !this.state.unsetDynamic.has(name) && !this.findOwnVariable(name);
   }
 
@@ -974,10 +1003,7 @@ export class Shell implements ArithmeticHost {
     const resolved = this.resolveName(name);
     const open = resolved.indexOf('[');
     if (open !== -1) return this.assignElement(resolved.slice(0, open), resolved.slice(open + 1, -1), value, append);
-    if (resolved === 'RANDOM' && this.isDynamic('RANDOM')) {
-      this.seedRandom(value);
-      return true;
-    }
+    if (this.assignDynamic(resolved, value)) return true;
     let variable = this.findVariable(resolved, false);
     if (variable?.attributes.has('r')) {
       this.reportError(`${resolved}: readonly variable`);
@@ -1021,9 +1047,10 @@ export class Shell implements ArithmeticHost {
    * Assigns `name[subscript]=value`, making `name` an indexed array unless it is an associative one. The subscript
    * is expanded text, which an indexed array evaluates as arithmetic.
    */
-  // code-gauge-allow functionCognitiveComplexity 17 -- Bash's element assignments for associative and indexed arrays, with their subscript errors.
-  // code-gauge-allow functionNcss 38 -- Bash's element assignments for associative and indexed arrays, with their subscript errors.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Bash's element assignments for associative and indexed arrays, with their subscript errors.
+  // code-gauge-allow functionNcss 40 -- Bash's element assignments for associative and indexed arrays, with their subscript errors.
   assignElement(name: string, subscript: string, value: string, append: boolean, evaluated = false): boolean {
+    if (this.isDynamic(name)) return this.assignDynamic(name, value);
     let variable = this.findVariable(name);
     if (variable?.attributes.has('r')) {
       this.reportError(`${name}: readonly variable`);
@@ -1084,9 +1111,10 @@ export class Shell implements ArithmeticHost {
   }
 
   /** Assigns the words of `name=(...)` or `name+=(...)`, already expanded into keyed and plain elements. */
-  // code-gauge-allow functionCognitiveComplexity 23 -- Bash's compound assignments for associative and indexed arrays, keyed and plain elements.
-  // code-gauge-allow functionNcss 33 -- Bash's compound assignments for associative and indexed arrays, keyed and plain elements.
+  // code-gauge-allow functionCognitiveComplexity 24 -- Bash's compound assignments for associative and indexed arrays, keyed and plain elements.
+  // code-gauge-allow functionNcss 35 -- Bash's compound assignments for associative and indexed arrays, keyed and plain elements.
   assignCompound(name: string, elements: CompoundElement[], append: boolean): boolean {
+    if (this.isDynamic(name)) return true;
     let variable = this.findVariable(name);
     if (variable?.attributes.has('r')) {
       this.reportError(`${name}: readonly variable`);

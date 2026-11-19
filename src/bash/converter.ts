@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 440 -- Converts every node kind of the grammar in one converter, which shares the source and annotations.
+// code-gauge-allow-file fileNcss 446 -- Converts every node kind of the grammar in one converter, which shares the source and annotations.
 import type { Node } from '@willbooster/web-tree-sitter';
 
 import { CompileError } from '../interpreter/diagnostics';
@@ -103,7 +103,7 @@ export class Converter {
   // code-gauge-allow functionNcss 56 -- One case per statement node of the grammar, each delegating to its own converter.
   private statement(node: Node): Statement {
     const row = node.startPosition.row;
-    const base = { row, lineRow: row };
+    const base = { row, lineRow: lineRowOf(node) };
     switch (node.type) {
       case 'command': {
         return this.command(node);
@@ -227,7 +227,7 @@ export class Converter {
     for (const argument of this.fieldNodes(node, 'argument')) words.push(this.word(argument));
     return {
       row,
-      lineRow: row,
+      lineRow: lineRowOf(node),
       kind: 'command',
       assignments: this.fieldNodes(node, 'assignment').map((assignment) => this.assignment(assignment)),
       words,
@@ -242,7 +242,7 @@ export class Converter {
     );
     return {
       row,
-      lineRow: row,
+      lineRow: lineRowOf(node),
       kind: 'declaration',
       name: node.childForFieldName('name')?.text ?? '',
       assignments: this.fieldNodes(node, 'assignment').map((assignment) => this.assignment(assignment)),
@@ -590,6 +590,31 @@ export class Converter {
 
 function thenWord(owner: Node): Node {
   return owner.children.find((child) => child.type === 'then') as Node;
+}
+
+/**
+ * The row Bash reports for a statement's errors and `LINENO`: the line its parser was on when it made the command.
+ * That is where the first word of a simple command ends, where `))` ends, and where the last operand of `[[` ends, or
+ * its `]]` when `&&` or `||` joins the operands; a compound command keeps the row of its first word.
+ */
+function lineRowOf(node: Node): number {
+  switch (node.type) {
+    case 'command':
+    case 'declaration_command': {
+      return (node.namedChildren.find((child) => child?.type !== 'comment') ?? node).endPosition.row;
+    }
+    case 'variable_assignment':
+    case 'arithmetic_command': {
+      return node.endPosition.row;
+    }
+    case 'test_command': {
+      const inner = node.namedChildren.find((child) => child && child.type !== 'comment');
+      return inner && inner.type !== 'logical_test' ? inner.endPosition.row : node.endPosition.row;
+    }
+    default: {
+      return node.startPosition.row;
+    }
+  }
 }
 
 /** The word after `after` that starts the next clause of an `if` or ends it: `elif`, `else`, or `fi`. */

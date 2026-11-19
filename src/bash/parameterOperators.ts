@@ -40,7 +40,9 @@ export function applyOperator(
       const isUnset = value.kind === 'scalar' ? value.value === undefined : value.values.length === 0;
       const isNull = isUnset || (colon && joined(value) === '');
       const kind = operator.at(-1) as string;
-      if (kind === '+') return isNull ? [] : expandArgument(expander, argument, inDouble, false);
+      if (kind === '+') {
+        return isNull ? [] : expander.withSpacedStar(() => expandArgument(expander, argument, inDouble, false));
+      }
       if (!isNull) return expander.valuePieces(value, inDouble);
       return defaultValue(expander, shell, expansion, kind, colon, name, subscript, inDouble);
     }
@@ -113,8 +115,8 @@ function defaultValue(
   subscript: string | undefined,
   inDouble: boolean
 ): Piece[] {
+  if (kind === '-') return expander.withSpacedStar(() => expandArgument(expander, expansion.argument, inDouble, false));
   const word = expandArgument(expander, expansion.argument, inDouble, false);
-  if (kind === '-') return word;
   const text = expander.joinPieces(word);
   if (kind === '?') {
     const message = text === '' ? (colon ? 'parameter null or not set' : 'parameter not set') : text;

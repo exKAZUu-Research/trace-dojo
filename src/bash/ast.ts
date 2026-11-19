@@ -83,9 +83,9 @@ export interface CaseItem {
 }
 
 interface StatementBase {
-  /** The 0-based row where the statement starts, which its step and its error messages report. */
+  /** The 0-based row where the statement starts, which its step shows. */
   row: number;
-  /** The row that `LINENO` and error messages report while the statement runs, which Bash takes from its end. */
+  /** The row that `LINENO` and error messages report while the statement runs, as Bash's parser numbers it. */
   lineRow: number;
 }
 

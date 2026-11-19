@@ -17,7 +17,7 @@ const QUOTED_EMPTY: Fragment = { text: '', quoted: true, split: false };
 /** A parameter's value before its operator: one string, or the elements of `$@`, `$*`, or `${a[@]}`. */
 export type ParameterValue =
   | { kind: 'scalar'; value: string | undefined }
-  | { kind: 'list'; values: string[]; star: boolean };
+  | { kind: 'list'; values: string[]; star: boolean; positional?: boolean };
 
 /** The characters that make a word a pathname pattern, whose expansion would read the file system. */
 const SPECIAL_PARAMETERS = new Set(['@', '*', '#', '?', '-', '$', '!', '0', '_']);
@@ -26,6 +26,7 @@ const SPECIAL_PARAMETERS = new Set(['@', '*', '#', '?', '-', '$', '!', '0', '_']
 export class Expander {
   /** The status of the last command substitution, which a command of assignments alone returns. */
   lastSubstitutionStatus = 0;
+  private spacedStar = false;
 
   constructor(private readonly shell: Shell) {}
 
@@ -236,7 +237,7 @@ export class Expander {
     switch (name) {
       case '@':
       case '*': {
-        return { kind: 'list', values: [...positional], star: name === '*' };
+        return { kind: 'list', values: [...positional], star: name === '*', positional: true };
       }
       case '#': {
         return { kind: 'scalar', value: String(positional.length) };
@@ -370,7 +371,7 @@ export class Expander {
         : [{ text: value.values.join(this.ifsJoiner()), quoted: true, split: false }];
     }
     const pieces: Piece[] = [];
-    const separator = value.star ? STAR_BREAK : FIELD_BREAK;
+    const separator = this.separatorOf(value);
     for (const [index, element] of value.values.entries()) {
       if (index > 0) pieces.push(separator);
       if (element !== '') pieces.push({ text: element, quoted: inDouble, split: !inDouble });
@@ -378,6 +379,26 @@ export class Expander {
     }
     if (inDouble && value.values.length > 0) pieces.unshift(QUOTED_EMPTY);
     return pieces;
+  }
+
+  /** What separates a list's elements: one that joins as `"$*"` does where words are not split, or a plain break. */
+  private separatorOf(value: Extract<ParameterValue, { kind: 'list' }>): Piece {
+    if (!value.star) return FIELD_BREAK;
+    return value.positional && this.spacedStar && this.ifsJoiner() === '' ? FIELD_BREAK : STAR_BREAK;
+  }
+
+  /**
+   * Runs an expansion in which an unquoted `$*` joins with spaces when `IFS` is empty, as Bash 5.3 joins it in the
+   * word of `${x:-word}` and `${x:+word}` and in a declaration builtin's assignment, though not `${a[*]}`.
+   */
+  withSpacedStar<T>(run: () => T): T {
+    const saved = this.spacedStar;
+    this.spacedStar = true;
+    try {
+      return run();
+    } finally {
+      this.spacedStar = saved;
+    }
   }
 
   /** The first character of `IFS`, which joins the elements of `"$*"`: a space when unset, nothing when empty. */

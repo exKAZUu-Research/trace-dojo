@@ -1,4 +1,4 @@
-import type { Assignment } from './ast';
+import type { Assignment, Word } from './ast';
 import { ansicQuote, ansicShouldQuote, containsShellMetas, doubleQuote } from './quoting';
 import type { Shell } from './shell';
 import { UnsupportedFeatureError } from './unsupported';
@@ -113,6 +113,7 @@ function parseWordOperand(word: string): { name: string; subscript?: string; app
   };
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Bash's declaration of one operand: its name, a dynamic variable, its attributes, and its value.
 function declareOne(
   shell: Shell,
   builtin: string,
@@ -126,6 +127,7 @@ function declareOne(
     shell.reportError(`${builtin}: \`${typeof operand === 'string' ? operand : operand.text}': not a valid identifier`);
     return false;
   }
+  if (!isLocal && shell.isDynamic(name)) return declareDynamic(shell, operand, parsed);
   const variable = declaredVariable(shell, builtin, name, options, isLocal, hasValue(operand, parsed));
   if (
     !variable ||
@@ -146,6 +148,19 @@ function declareOne(
   }
   if (options.set.has('r')) variable.attributes.add('r');
   return ok;
+}
+
+/** A global declaration of a dynamic variable, which assigns it as an assignment word does and keeps it dynamic. */
+function declareDynamic(
+  shell: Shell,
+  operand: DeclarationArgument,
+  parsed: { name: string; value?: string } | undefined
+): boolean {
+  const name = typeof operand === 'string' ? (parsed as { name: string }).name : operand.name;
+  const value =
+    typeof operand === 'string' ? parsed?.value : operand.value && shell.expander.expandAssignmentValue(operand.value);
+  if (value !== undefined) shell.assignDynamic(name, value);
+  return true;
 }
 
 /** The variable a declaration declares: a new local, an existing global, or the variable the name finds. */
@@ -247,7 +262,7 @@ function conversionError(variable: Variable, set: Set<string>, unset: Set<string
 /** `declare -n ref=name`, which stores the name a reference refers to, after checking that it can name a variable. */
 function assignReference(shell: Shell, builtin: string, variable: Variable, assignment: Assignment): boolean {
   if (assignment.value === undefined || assignment.array) return assignLocally(shell, variable, assignment);
-  const target = shell.expander.expandAssignmentValue(assignment.value);
+  const target = shell.expander.withSpacedStar(() => shell.expander.expandAssignmentValue(assignment.value as Word));
   if (target !== '' && !isIdentifier(target) && !shell.splitSubscript(target)) {
     shell.reportError(`${builtin}: \`${target}': invalid variable name for name reference`);
     variable.attributes.delete('n');
@@ -290,7 +305,9 @@ function assignLocally(shell: Shell, variable: Variable, assignment: Assignment)
     if (error) shell.discard(error);
     return ok;
   }
-  const value = shell.expander.expandAssignmentValue(assignment.value as NonNullable<Assignment['value']>);
+  const value = shell.expander.withSpacedStar(() =>
+    shell.expander.expandAssignmentValue(assignment.value as NonNullable<Assignment['value']>)
+  );
   if (assignment.subscript) {
     const subscript = variable.attributes.has('A')
       ? shell.expander.expandString(assignment.subscript)
@@ -312,12 +329,7 @@ function printDeclarations(shell: Shell, builtin: string, names: DeclarationArgu
   let status = 0;
   for (const operand of names) {
     const name = typeof operand === 'string' ? operand : operand.name;
-    const found = shell.findVariable(name, false);
-    // `local -p` shows only the current function's own variables.
-    const variable =
-      builtin !== 'local' || shell.state.scopes[shell.state.functionScopes.at(-1) as number].get(name) === found
-        ? found
-        : undefined;
+    const variable = declarationToShow(shell, builtin, name);
     if (!variable || variable.isSystem) {
       if (variable?.isSystem) throw new UnsupportedFeatureError(`シェルの変数の表示（${builtin} -p ${name}）`);
       shell.reportError(`${builtin}: ${name}: not found`);
@@ -327,6 +339,14 @@ function printDeclarations(shell: Shell, builtin: string, names: DeclarationArgu
     shell.state.fd1.write(`${declarationText(variable)}\n`);
   }
   return status;
+}
+
+/** The variable `declare -p name` shows; `local -p` shows only the current function's own variables. */
+function declarationToShow(shell: Shell, builtin: string, name: string): Variable | undefined {
+  const found = shell.findVariable(name, false);
+  if (builtin !== 'local') return found ?? shell.dynamicDeclaration(name);
+  const { scopes, functionScopes } = shell.state;
+  return scopes[functionScopes.at(-1) as number].get(name) === found ? found : undefined;
 }
 
 export function declarationText(variable: Variable): string {
