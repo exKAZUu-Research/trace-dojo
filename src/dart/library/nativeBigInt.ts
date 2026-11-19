@@ -1,3 +1,4 @@
+import { LIMITS } from '../../interpreter/limits';
 import { formatDouble } from '../format';
 import type { Runtime } from '../runtime';
 import { DartObject, type Value } from '../values';
@@ -22,8 +23,26 @@ function valueOf(runtime: Runtime, value: Value, name = 'other'): bigint {
   return (state as BigIntState).value;
 }
 
+/**
+ * The most bits a BigInt of a run may have, as many as a string of the longest length in hexadecimal digits holds.
+ * Host BigInt operations cannot be interrupted, so a result beyond it fails before it is computed, as the VM runs out
+ * of memory, and each operation charges operations for the 32-bit digits it works through, at rates measured on the
+ * hosts' subquadratic multiplication, division, and conversion.
+ */
+const MAX_BITS = 4 * LIMITS.maxStringLength;
+
+function reserve(runtime: Runtime, resultBits: number, operations: number): void {
+  if (resultBits > MAX_BITS) runtime.throwError('OutOfMemoryError', '', []);
+  runtime.spend(1 + operations);
+}
+
+/** An upper bound of a value's bits, read in linear time. */
+function bitsOf(value: bigint): number {
+  return value === 0n ? 0 : (value < 0n ? -value : value).toString(16).length * 4;
+}
+
 // code-gauge-allow duplicateLines 22 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
-function parseBigInt(text: string, radix: number | undefined): bigint | undefined {
+function parseBigInt(runtime: Runtime, text: string, radix: number | undefined): bigint | undefined {
   let rest = text.trim();
   let negative = false;
   if (rest.startsWith('-') || rest.startsWith('+')) {
@@ -37,14 +56,26 @@ function parseBigInt(text: string, radix: number | undefined): bigint | undefine
   }
   if (rest.length === 0) return undefined;
   const digits = '0123456789abcdefghijklmnopqrstuvwxyz'.slice(0, base);
+  const lower = rest.toLowerCase();
+  for (const char of lower) if (!digits.includes(char)) return undefined;
+  const bits = Math.ceil(lower.length * Math.log2(base));
+  reserve(runtime, bits, bits / 128);
+  const prefix = HOST_PREFIXES.get(base);
   let result = 0n;
-  for (const char of rest.toLowerCase()) {
-    const digit = digits.indexOf(char);
-    if (digit === -1) return undefined;
-    result = result * BigInt(base) + BigInt(digit);
+  if (prefix === undefined) {
+    for (const char of lower) result = result * BigInt(base) + BigInt(digits.indexOf(char));
+  } else {
+    result = BigInt(`${prefix}${lower}`);
   }
   return negative ? -result : result;
 }
+
+const HOST_PREFIXES = new Map([
+  [2, '0b'],
+  [8, '0o'],
+  [10, ''],
+  [16, '0x'],
+]);
 
 function radixOf(runtime: Runtime, radix: Value): number | undefined {
   if (radix === undefined) return undefined;
@@ -73,12 +104,13 @@ define('BigInt.one', (runtime) => constant(runtime, 1n));
 define('BigInt.two', (runtime) => constant(runtime, 2n));
 define('BigInt.parse', (runtime, _receiver, [source], namedArgs) => {
   const text = stringArg(runtime, source, 'source');
-  const value = parseBigInt(text, radixOf(runtime, named(namedArgs, 'radix', undefined)));
+  const value = parseBigInt(runtime, text, radixOf(runtime, named(namedArgs, 'radix', undefined)));
   if (value === undefined) return runtime.throwError('FormatException', '', ['Could not parse BigInt', text]);
   return newBigInt(runtime, value);
 });
 define('BigInt.tryParse', (runtime, _receiver, [source], namedArgs) => {
   const value = parseBigInt(
+    runtime,
     stringArg(runtime, source, 'source'),
     radixOf(runtime, named(namedArgs, 'radix', undefined))
   );
@@ -92,43 +124,64 @@ defineConstructor('BigInt.from', (runtime, _instance, args) => {
   return newBigInt(runtime, BigInt(Math.trunc(value)));
 });
 
-function binary(name: string, run: (runtime: Runtime, a: bigint, b: bigint) => bigint): void {
-  define(`BigInt.${name}`, (runtime, receiver, [other]) =>
-    newBigInt(runtime, run(runtime, valueOf(runtime, receiver), valueOf(runtime, other)))
-  );
+/** A binary operation, whose result size and digit work `cost` bounds from the operands' sizes in bits. */
+function binary(
+  name: string,
+  cost: (a: number, b: number) => { bits: number; work: number },
+  run: (runtime: Runtime, a: bigint, b: bigint) => bigint
+): void {
+  define(`BigInt.${name}`, (runtime, receiver, [other]) => {
+    const a = valueOf(runtime, receiver);
+    const b = valueOf(runtime, other);
+    const { bits, work } = cost(bitsOf(a), bitsOf(b));
+    reserve(runtime, bits, work);
+    return newBigInt(runtime, run(runtime, a, b));
+  });
 }
+
+const linear = (a: number, b: number): { bits: number; work: number } => ({
+  bits: Math.max(a, b) + 1,
+  work: (a + b) / 2048,
+});
+const product = (a: number, b: number): { bits: number; work: number } => ({ bits: a + b, work: (a + b) / 512 });
+const quotient = (a: number, b: number): { bits: number; work: number } => ({ bits: a, work: (a + b) / 512 });
+/** Euclid's algorithm takes up to a step per bit, each a division through the digits. */
+const euclid = (a: number, b: number): { bits: number; work: number } => ({
+  bits: Math.max(a, b),
+  work: (Math.max(a, b) * Math.max(a, b)) / 131_072,
+});
 
 function checkDivisor(runtime: Runtime, b: bigint): void {
   if (b === 0n) runtime.throwError('IntegerDivisionByZeroException', '', []);
 }
 
-binary('+', (_runtime, a, b) => a + b);
-binary('-', (_runtime, a, b) => a - b);
-binary('*', (_runtime, a, b) => a * b);
-binary('~/', (runtime, a, b) => {
+binary('+', linear, (_runtime, a, b) => a + b);
+binary('-', linear, (_runtime, a, b) => a - b);
+binary('*', product, (_runtime, a, b) => a * b);
+binary('~/', quotient, (runtime, a, b) => {
   checkDivisor(runtime, b);
   return a / b;
 });
-binary('%', (runtime, a, b) => {
+binary('%', quotient, (runtime, a, b) => {
   checkDivisor(runtime, b);
   const remainder = a % b;
   if (remainder >= 0n) return remainder;
   return b < 0n ? remainder - b : remainder + b;
 });
-binary('remainder', (runtime, a, b) => {
+binary('remainder', quotient, (runtime, a, b) => {
   checkDivisor(runtime, b);
   return a % b;
 });
-binary('&', (_runtime, a, b) => a & b);
-binary('|', (_runtime, a, b) => a | b);
-binary('^', (_runtime, a, b) => a ^ b);
-binary('gcd', (_runtime, a, b) => {
+binary('&', linear, (_runtime, a, b) => a & b);
+binary('|', linear, (_runtime, a, b) => a | b);
+binary('^', linear, (_runtime, a, b) => a ^ b);
+binary('gcd', euclid, (_runtime, a, b) => {
   let x = a < 0n ? -a : a;
   let y = b < 0n ? -b : b;
   while (y !== 0n) [x, y] = [y, x % y];
   return x;
 });
-binary('modInverse', (runtime, a, b) => modInverse(runtime, a, b));
+binary('modInverse', euclid, (runtime, a, b) => modInverse(runtime, a, b));
 define(
   'BigInt./',
   (runtime, receiver, [other]) => Number(valueOf(runtime, receiver)) / Number(valueOf(runtime, other))
@@ -139,9 +192,13 @@ define('BigInt.abs', (runtime, receiver) => {
   const value = valueOf(runtime, receiver);
   return newBigInt(runtime, value < 0n ? -value : value);
 });
-define('BigInt.<<', (runtime, receiver, [shift]) =>
-  newBigInt(runtime, valueOf(runtime, receiver) << intArg(runtime, shift, 'shiftAmount'))
-);
+define('BigInt.<<', (runtime, receiver, [shift]) => {
+  const value = valueOf(runtime, receiver);
+  const amount = intArg(runtime, shift, 'shiftAmount');
+  const bits = bitsOf(value) + Number(amount);
+  if (value !== 0n && amount > 0n) reserve(runtime, bits, bits / 2048);
+  return newBigInt(runtime, value << amount);
+});
 define('BigInt.>>', (runtime, receiver, [shift]) =>
   newBigInt(runtime, valueOf(runtime, receiver) >> intArg(runtime, shift, 'shiftAmount'))
 );
@@ -193,14 +250,21 @@ function compareDigits(a: bigint, b: bigint): bigint {
   }
   return 0n;
 }
+/** The 32-bit digits of a magnitude from the least significant, read from its hexadecimal text in linear time. */
 function digitsOf(value: bigint): bigint[] {
+  if (value === 0n) return [];
+  const hex = value.toString(16);
   const digits: bigint[] = [];
-  for (let rest = value; rest > 0n; rest >>= 32n) digits.push(rest & 0xff_ff_ff_ffn);
+  for (let end = hex.length; end > 0; end -= 8) digits.push(BigInt(`0x${hex.slice(Math.max(0, end - 8), end)}`));
   return digits;
 }
-define('BigInt.toUnsigned', (runtime, receiver, [width]) =>
-  newBigInt(runtime, BigInt.asUintN(Number(intArg(runtime, width, 'width')), valueOf(runtime, receiver)))
-);
+define('BigInt.toUnsigned', (runtime, receiver, [width]) => {
+  const bits = Number(intArg(runtime, width, 'width'));
+  const value = valueOf(runtime, receiver);
+  // A negative value fills every bit of the width.
+  if (value < 0n) reserve(runtime, bits, bits / 2048);
+  return newBigInt(runtime, BigInt.asUintN(bits, value));
+});
 define('BigInt.toSigned', (runtime, receiver, [width]) =>
   newBigInt(runtime, BigInt.asIntN(Number(intArg(runtime, width, 'width')), valueOf(runtime, receiver)))
 );
@@ -216,7 +280,10 @@ define('BigInt.pow', (runtime, receiver, [exponent]) => {
   const power = intArg(runtime, exponent, 'exponent');
   if (power < 0n) runtime.throwError('ArgumentError', '', [`Exponent must not be negative: ${power}`]);
   const base = valueOf(runtime, receiver);
-  runtime.spend(Number(power) / 64 + 1);
+  if (base !== 0n && base !== 1n && base !== -1n) {
+    const bits = bitLength(base < 0n ? -base : base) * Number(power);
+    reserve(runtime, bits, bits / 512);
+  }
   return newBigInt(runtime, base ** power);
 });
 define('BigInt.modPow', (runtime, receiver, [exponent, modulus]) => {
@@ -224,6 +291,8 @@ define('BigInt.modPow', (runtime, receiver, [exponent, modulus]) => {
   const m = valueOf(runtime, modulus, 'modulus');
   if (power < 0n) runtime.throwError('ArgumentError', '', [`Exponent must not be negative: ${power}`]);
   if (m <= 0n) runtime.throwError('ArgumentError', '', [`Modulus must be strictly positive: ${m}`]);
+  // A squaring and a reduction modulo `m` per bit of the exponent.
+  reserve(runtime, bitsOf(m), (bitsOf(power) * bitsOf(m)) / 512);
   let result = 1n % m;
   let base = ((valueOf(runtime, receiver) % m) + m) % m;
   while (power > 0n) {
@@ -245,7 +314,12 @@ define('BigInt.toInt', (runtime, receiver) => {
   return value;
 });
 define('BigInt.toDouble', (runtime, receiver) => Number(valueOf(runtime, receiver)));
-define('BigInt.toString', (runtime, receiver) => valueOf(runtime, receiver).toString());
+define('BigInt.toString', (runtime, receiver) => digitsText(runtime, valueOf(runtime, receiver), 10));
 define('BigInt.toRadixString', (runtime, receiver, [radix]) =>
-  valueOf(runtime, receiver).toString(radixOf(runtime, radix) ?? 10)
+  digitsText(runtime, valueOf(runtime, receiver), radixOf(runtime, radix) ?? 10)
 );
+
+function digitsText(runtime: Runtime, value: bigint, radix: number): string {
+  reserve(runtime, 0, bitsOf(value) / 128);
+  return value.toString(radix);
+}
