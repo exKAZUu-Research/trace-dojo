@@ -1598,7 +1598,9 @@ export class Compiler extends StatementCompiler {
     if (isConstexpr && !binding.isConstant) this.error(row, 'constexpr の変数の初期値には定数式を書いてください。');
     global.hasStaticReferenceBinding = binding.isConstant;
     global.constantLocation = binding.isConstant ? binding.constantLocation : undefined;
-    global.referentConstant = this.constantReference(binding, true)?.value;
+    const reference = this.constantReference(binding, true);
+    global.referentConstant = reference?.value;
+    global.foldedValue = reference?.foldedValue;
     const initializers = binding.isConstant ? this.constantInitializers : this.dynamicInitializers;
     initializers.push(this.staticReferenceInitializer(global, binding, row, true));
   }
@@ -1671,6 +1673,7 @@ export class Compiler extends StatementCompiler {
       }
       const init = this.staticInitialization(type, value, row, direct);
       if (!init) return;
+      global.foldedValue = this.initializerFoldedValue(type, init.run);
       if ((type.kind === 'class' || type.kind === 'array') && isConstType(type))
         global.hasConstantObjectValue = init.isConstant;
       if (global.isConstexprPointer && init.isConstant) global.constantPointee = init.run.constantPointee;
@@ -1748,6 +1751,7 @@ export class Compiler extends StatementCompiler {
     const init = this.staticInitialization(type, value, row, direct);
     const { index } = global;
     if (!init) return { run: () => {}, isCreation: false };
+    global.foldedValue = this.initializerFoldedValue(type, init.run);
     if ((type.kind === 'class' || type.kind === 'array') && isConstType(type))
       global.hasConstantObjectValue = init.isConstant;
     const register = this.staticRegistration(type, row);
@@ -1804,6 +1808,7 @@ export class Compiler extends StatementCompiler {
       ? this.objectInitializer(converted)
       : initializerWithConstancy(converted.run as Eval<Value>, this.isConstantInitializer(converted), {
           memberConstant: memberConstantOf(converted),
+          foldedValue: converted.foldedValue,
           constantPointee: converted.constantPointee,
         });
   }

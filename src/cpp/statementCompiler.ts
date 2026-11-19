@@ -59,8 +59,8 @@ import {
 export type ReferenceBinding = {
   type: Extract<Type, { kind: 'reference' }>;
   isConstant?: boolean;
-  locatesBeforeEntry?: boolean;
   memberConstant?: MemberConstant;
+  foldedValue?: number | bigint;
   constantLocation?: ConstantLocation;
 } & ({ loc: Eval<Ptr> } | { lifetime: TemporaryBinding });
 
@@ -273,7 +273,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     let type = declared.type;
     if (type.kind === 'reference') return this.referenceDeclarator(name, type, declarator);
     if (type.kind === 'void') return this.error(declarator.row, `void 型の変数 ${name} は作れません。`);
-    let init: Eval<Value>;
+    let init: Initializer;
     let createsObject = false;
     let entity: Extract<Entity, { kind: 'local' }>;
     let deduced: AutoDeduction | undefined;
@@ -302,6 +302,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       createsObject = compiled.createsObject;
     }
     entity.isConstexpr = this.isConstexpr(declaration);
+    entity.foldedValue = this.initializerFoldedValue(type, init);
     if (entity.isConstexpr)
       entity.constant = this.requireConstantInitializer(type, value, declarator.row, !hasToken(declarator, '='));
     if (this.isClassLike(type) && !value) createsObject = true;
@@ -413,7 +414,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     value: Syntax | undefined,
     declarator: Syntax,
     name: string
-  ): { init: Eval<Value>; constant?: number | bigint; createsObject: boolean } {
+  ): { init: Initializer; constant?: number | bigint; createsObject: boolean } {
     const { row } = declarator;
     if (!value) return { init: this.defaultInitializer(type, row), createsObject: this.isClassLike(type) };
     if (value.type === 'initializer_list') {
@@ -465,6 +466,10 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   protected initializerConstant(type: Type, init: Initializer): number | bigint | undefined {
     if (init.isConstant && isArithmetic(type) && isConstType(type)) return init.memberConstant?.(NO_CONSTANT_MEMBERS);
+  }
+
+  protected initializerFoldedValue(type: Type, init: Initializer): number | bigint | undefined {
+    if (isArithmetic(type) && isConstType(type)) return init.foldedValue;
   }
 
   protected requireConstantInitializer(
@@ -597,8 +602,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     return {
       type,
       isConstant: isDirect && (target.staticAddress || target.constantReferenceBinding),
-      locatesBeforeEntry: isDirect && target.staticAddress,
       memberConstant: isDirect ? memberConstantOf(target) : undefined,
+      foldedValue: isDirect ? target.foldedValue : undefined,
       constantLocation: isDirect ? constantLocationOf(target) : undefined,
       loc: this.convert(target, type, row).run as Eval<Ptr>,
     };
@@ -606,10 +611,11 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   protected constantReference(binding: ReferenceBinding, isStatic: boolean): ConstantReference | undefined {
     if (!binding.isConstant || (!isStatic && 'lifetime' in binding)) return;
+    const isScalar = isArithmetic(binding.type.to);
     return {
-      value: isArithmetic(binding.type.to) ? binding.memberConstant?.(NO_CONSTANT_MEMBERS) : undefined,
+      value: isScalar ? binding.memberConstant?.(NO_CONSTANT_MEMBERS) : undefined,
+      foldedValue: isScalar ? binding.foldedValue : undefined,
       constantLocation: binding.constantLocation,
-      locateBeforeEntry: 'loc' in binding && binding.locatesBeforeEntry ? binding.loc : undefined,
     };
   }
 

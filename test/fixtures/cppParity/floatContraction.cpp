@@ -5,6 +5,8 @@
 #include <random>
 double A = 0.1, B = 10.0, C = 1.0, D = 0.3, E = 3.0;
 const double K = 0.1 * 10.0 - 1.0;
+const double fixedSource = 0.1, fixedCopy = fixedSource, fixedTen = 10.0;
+const double& fixedAlias = fixedSource;
 double printed(char name, double value) { std::cout << name; return value; }
 double& destination(double& value) { std::cout << 't'; return value; }
 int main() {
@@ -42,4 +44,11 @@ int main() {
   int values[]{9, 0}, index = 0;
   values[index++] += index;
   std::cout << values[0] << ' ' << index << '\n';
+  const double localSource = 0.1, localCopy = localSource;
+  static const double storedCopy = fixedSource;
+  const double& localAlias = localSource;
+  const double& aliasToStatic = fixedAlias;
+  printf("%a %a %a %a %a %a\n", fixedCopy * fixedTen - c, fixedAlias * fixedTen - c,
+         localCopy * fixedTen - c, storedCopy * fixedTen - c,
+         aliasToStatic * fixedTen - c, localAlias * fixedTen - c);
 }

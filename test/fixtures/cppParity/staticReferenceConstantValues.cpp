@@ -33,6 +33,17 @@ int main() {
   static const int* scopedAddress = &fromLiteral;
   std::cout << sizeof(values) << ' ' << local << ' '
             << *earlyAddress << ' ' << *scopedAddress << '\n';
+  const int ignored = 1;
+  const bool ignoredBool = true;
+  const int& commaAlias = (ignored, count);
+  const int& boolAlias = (ignoredBool, count);
+  static const int* fromComma = &commaAlias;
+  static const int* fromBool = &boolAlias;
+  static const int* directComma = &(ignored, count);
+  int visits = 0;
+  const int& runtimeAlias = (++visits, count);
+  static const int* fromRuntime = &runtimeAlias;
+  std::cout << *fromComma << *fromBool << *directComma << *fromRuntime << ' ' << visits << '\n';
   std::cout << receiver().retained << '\n';
   std::cout << totalRate << '\n';
 }

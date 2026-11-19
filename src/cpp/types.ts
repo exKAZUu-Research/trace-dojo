@@ -93,6 +93,7 @@ export interface GlobalInfo {
   isConstexpr?: boolean;
   hasStaticReferenceBinding?: boolean;
   referentConstant?: number | bigint;
+  foldedValue?: number | bigint;
   isConstexprPointer?: boolean;
   hasConstantObjectValue?: boolean;
   constantLocation?: ConstantLocation;

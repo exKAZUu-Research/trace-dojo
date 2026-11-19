@@ -1,13 +1,13 @@
 import type { ConstantLocation, Expr } from './expr';
 import type { LibraryTemplate } from './library/registry';
-import type { Eval, Frame, LocalInfo } from './runtime';
+import type { Frame, LocalInfo } from './runtime';
 import type { ClassInfo, FieldInfo, FunctionInfo, GlobalInfo, StaticFieldInfo, Type } from './types';
-import type { Ptr, Value } from './values';
+import type { Value } from './values';
 
 export interface ConstantReference {
   value?: number | bigint;
+  foldedValue?: number | bigint;
   constantLocation?: ConstantLocation;
-  locateBeforeEntry?: Eval<Ptr>;
 }
 
 /** What a name denotes. */
@@ -18,6 +18,7 @@ export type Entity =
       isReference: boolean;
       isConstexpr?: boolean;
       constant?: number | bigint;
+      foldedValue?: number | bigint;
       constantReference?: ConstantReference;
       staticStorage?: GlobalInfo;
     }

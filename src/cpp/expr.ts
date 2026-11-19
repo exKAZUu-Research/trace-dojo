@@ -16,6 +16,8 @@ export interface ConstantLocation {
 }
 interface ConstantValue {
   memberConstant?: MemberConstant;
+  /** A value clang++ folds when generating code but which C++ constant expressions cannot read. */
+  foldedValue?: number | bigint;
   constantStringLength?: number;
   constantPointee?: ConstantLocation;
 }
@@ -30,6 +32,7 @@ export type Initializer = ((
 export function initializerWithConstancy(run: Initializer, isConstant: boolean, value?: ConstantValue): Initializer {
   if (isConstant) run.isConstant = true;
   if (value?.memberConstant) run.memberConstant = value.memberConstant;
+  if (value?.foldedValue !== undefined) run.foldedValue = value.foldedValue;
   if (value?.constantStringLength !== undefined) run.constantStringLength = value.constantStringLength;
   if (value?.constantPointee) run.constantPointee = value.constantPointee;
   return run;
@@ -53,8 +56,6 @@ export interface Expr extends ConstantValue {
   row: number;
   /** The value of a constant expression of arithmetic type, which array lengths and `case` labels need. */
   constant?: number | bigint;
-  /** A value clang++ folds when generating code but which C++ constant expressions cannot read. */
-  foldedValue?: number | bigint;
   isThis?: boolean;
   /** Reads a static member's integral constant without requiring its addressable definition. */
   readConstant?: Eval<Value>;
