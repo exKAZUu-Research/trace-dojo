@@ -199,6 +199,15 @@ export class Runtime implements TracedRuntime<Frame> {
     this.writers.stderr.flush();
   }
 
+  withReceiver<T>(self: Ptr, evaluate: (frame: Frame) => T): T {
+    const frame = this.pushFrame(undefined, undefined, undefined, self);
+    try {
+      return evaluate(frame);
+    } finally {
+      this.popFrame();
+    }
+  }
+
   pushFrame(
     fn: FunctionInfo | undefined,
     callRow: number | undefined,

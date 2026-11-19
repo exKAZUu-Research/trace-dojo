@@ -4,7 +4,7 @@ import type { Library } from './library/registry';
 import { type Entity, FunctionContext, Scope } from './scopes';
 import { fieldOf, hasToken, type Syntax } from './syntax';
 import {
-  type ClassInfo,
+  ClassInfo,
   classType,
   type GlobalInfo,
   type IntName,
@@ -199,10 +199,10 @@ export abstract class CompilerBase {
   // Types ----------------------------------------------------------------------------------------------------------
 
   /** The type a declaration's specifiers name: its type specifier and its `const`. */
-  specifiedType(declaration: Syntax): Type {
+  specifiedType(declaration: Syntax, allowAuto = false): Type {
     const typeNode = fieldOf(declaration, 'type');
     if (!typeNode) return this.error(declaration.row, '型を書いてください。');
-    const type = this.resolveTypeSpecifier(typeNode);
+    const type = this.resolveTypeSpecifier(typeNode, allowAuto);
     const isConst =
       this.hasSpecifier(declaration, 'const') ||
       this.hasSpecifier(declaration, 'constexpr') ||
@@ -220,7 +220,7 @@ export abstract class CompilerBase {
     );
   }
 
-  resolveTypeSpecifier(node: Syntax): Type {
+  resolveTypeSpecifier(node: Syntax, allowAuto = false): Type {
     switch (node.type) {
       case 'primitive_type': {
         if (WIDE_CHARACTER_TYPES.has(node.text)) return this.unsupported(node.row, `ワイド文字の型（${node.text}）`);
@@ -232,6 +232,7 @@ export abstract class CompilerBase {
       case 'placeholder_type_specifier': {
         if (fieldOf(node, 'constraint')) return this.unsupported(node.row, 'コンセプトで制約した auto');
         if (node.children.some((child) => child.type === 'decltype')) return this.unsupported(node.row, 'decltype');
+        if (!allowAuto) return this.error(node.row, 'auto は、この場所では型として使えません。');
         return AUTO;
       }
       case 'type_identifier':
@@ -386,6 +387,9 @@ export abstract class CompilerBase {
       case 'abstract_array_declarator': {
         if (base.kind === 'reference') return this.error(declarator.row, '参照の配列は作れません。');
         if (base.kind === 'void') return this.error(declarator.row, 'void の配列は作れません。');
+        if (base.kind === 'array' && base.length === undefined)
+          return this.error(declarator.row, '多次元配列の内側の大きさを書いてください。');
+        if (hasAuto(base)) return this.error(declarator.row, '配列の要素の型を auto で書くことはできません。');
         const size = fieldOf(declarator, 'size');
         const length = size ? this.arrayLength(size) : undefined;
         return this.applyInner({ kind: 'array', of: base, length }, declarator);
@@ -437,10 +441,15 @@ export abstract class CompilerBase {
 }
 
 /** The type that `auto` stands for until an initializer decides it. */
-export const AUTO: Type = { kind: 'class', cls: { name: 'auto' } as ClassInfo };
+export const AUTO: Extract<Type, { kind: 'class' }> = classType(new ClassInfo('auto', 'class'));
 
 export function isAuto(type: Type): boolean {
-  return type.kind === 'class' && type.cls === (AUTO as Extract<Type, { kind: 'class' }>).cls;
+  return type.kind === 'class' && type.cls === AUTO.cls;
+}
+
+export function hasAuto(type: Type): boolean {
+  if (type.kind === 'pointer' || type.kind === 'reference') return hasAuto(type.to);
+  return isAuto(type);
 }
 
 const WIDE_CHARACTER_TYPES = new Set(['wchar_t', 'char8_t', 'char16_t', 'char32_t']);

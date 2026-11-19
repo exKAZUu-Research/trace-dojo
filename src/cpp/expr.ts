@@ -14,6 +14,8 @@ export interface Expr {
   row: number;
   /** The value of a constant expression of arithmetic type, which array lengths and `case` labels need. */
   constant?: number | bigint;
+  /** Reads a static member's integral constant without requiring its addressable definition. */
+  readConstant?: Eval<Value>;
   /** The factors of a floating-point product, which an addition or subtraction using it fuses (`a * b + c`). */
   product?: { left: Eval<number>; right: Eval<number> };
   /** Whether the expression is a null pointer constant: `nullptr`, or an integer literal whose value is zero. */

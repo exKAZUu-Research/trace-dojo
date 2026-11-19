@@ -1,7 +1,7 @@
 import { type FloatName, INT_PROPERTIES, type IntName } from '../c/types';
 import type { Expr } from './expr';
 import type { ClassOperations, LibraryClass } from './library/libraryClass';
-import type { CompiledFunction, Frame } from './runtime';
+import type { CompiledFunction, Eval, Frame } from './runtime';
 import type { Syntax } from './syntax';
 
 export type { FloatName, IntName } from '../c/types';
@@ -95,8 +95,10 @@ export interface GlobalInfo {
 export interface ParamInfo {
   name: string | undefined;
   type: Type;
-  /** The syntax of the default argument, compiled where a call leaves the argument out. */
-  defaultValue?: Syntax;
+  defaultValue?: {
+    node: Syntax;
+    use?: () => Eval<unknown>;
+  };
   /** Whether a call to a library function may leave the argument out, which the library then supplies. */
   isOptional?: boolean;
   row: number;

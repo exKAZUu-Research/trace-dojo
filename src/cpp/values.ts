@@ -192,7 +192,28 @@ export class Ptr {
   }
 
   equals(other: Ptr): boolean {
-    return this.store === other.store && this.index === other.index;
+    if (this.store === other.store && this.index === other.index) return true;
+    const a = this.address;
+    const b = other.address;
+    return a.store === b.store && a.index === b.index;
+  }
+
+  /** Constructor and destructor receivers can wrap the same object in different storage cells. */
+  get address(): { store: Store | undefined; index: number } {
+    const { store, index } = this;
+    const object = this.addressedObject();
+    return object ? { store: object, index: 0 } : { store, index };
+  }
+
+  private addressedObject(): CObject | undefined {
+    const { store, index } = this;
+    if (!store || index < 0 || index >= store.length || store.liveness !== Liveness.Alive) return;
+    try {
+      const value = this.readRaw();
+      return value instanceof CObject ? value : undefined;
+    } catch (error) {
+      if (!(error instanceof CppRuntimeError)) throw error;
+    }
   }
 }
 

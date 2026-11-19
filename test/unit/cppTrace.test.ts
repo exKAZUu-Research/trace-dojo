@@ -138,6 +138,15 @@ int main() { (new Walker)->go(probe()); }`;
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '0' });
 });
 
+test('an uncaught exception preserves the turtles reached from main before unwinding', () => {
+  const program = `int main() {
+  Turtle t(3, 5);
+  throw 1;
+}`;
+  const trace = traceProgram('cpp', program, program);
+  expect(trace.finalTurtles.map(({ x, y }) => [x, y])).toEqual([[3, 5]]);
+});
+
 test('the interpreter rejects the syntax it leaves out with a message naming it', () => {
   const execution = executeProgram('cpp', 'int main() {\n  auto f = [](int x) { return x; };\n}');
   expect(execution).toEqual({

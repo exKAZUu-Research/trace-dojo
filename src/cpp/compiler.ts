@@ -1,13 +1,14 @@
+import { ExecutionLimitError } from '../interpreter/limits';
 import { misplacedAtomicMessage, type TraceOptions } from '../interpreter/traceAnnotations';
 import { byteAt } from './bytes';
-import { isAuto } from './compilerBase';
+import { hasAuto } from './compilerBase';
 import { CppException, CppRuntimeError } from './errors';
 import type { Expr } from './expr';
 import type { Library } from './library/registry';
 import { invoke, makeEach, newObject, virtualKey, zeroOf } from './objectCompiler';
 import { type CompiledFunction, type Eval, type Exec, type Frame, RETURN, type Runtime } from './runtime';
 import { type Entity, FunctionContext } from './scopes';
-import { type AutoDeduction, bindsDirectly, endScope, StatementCompiler } from './statementCompiler';
+import { type AutoDeduction, bindsDirectly, deducedType, endScope, StatementCompiler } from './statementCompiler';
 import { fieldOf, fieldsOf, hasToken, type Syntax } from './syntax';
 import {
   type Access,
@@ -59,6 +60,8 @@ export class Compiler extends StatementCompiler {
   private readonly globalTypes: Type[] = [];
   /** The functions the program calls, which it must define, with the row of a call. */
   private readonly usedFunctions = new Map<FunctionInfo, number>();
+  private readonly usedStaticMembers = new Map<GlobalInfo, number>();
+  private defaultDependencies?: { functions: Map<FunctionInfo, number>; staticMembers: Map<GlobalInfo, number> };
 
   constructor(library: Library, options: CompileOptions = {}) {
     super(library);
@@ -79,6 +82,9 @@ export class Compiler extends StatementCompiler {
       if (!fn.isDefined && !fn.native) {
         this.error(row, `関数 ${fn.displayName} は宣言だけで、定義（本体）がありません。`);
       }
+    }
+    for (const [member, row] of this.usedStaticMembers) {
+      if (!member.isDefined) this.error(row, `static のメンバ変数 ${member.name} は宣言だけで、定義がありません。`);
     }
     for (const row of this.atomicRows.keys()) {
       if (!this.usedAtomicRows.has(row)) this.error(row, misplacedAtomicMessage);
@@ -225,6 +231,10 @@ export class Compiler extends StatementCompiler {
         }
       }
       this.completeClass(cls, isFinalClass);
+      for (const fn of cls.constructors) this.bindDefaultArguments(fn);
+      for (const methods of cls.methods.values()) {
+        for (const fn of methods) this.bindDefaultArguments(fn);
+      }
       for (const { fn, node: definition } of definitions) this.compileFunction(fn, definition);
       for (const fn of [...cls.constructors, ...(cls.destructor ? [cls.destructor] : [])]) {
         if (fn.isDefined && !fn.compiled && fn.definition) this.compileFunction(fn, fn.definition);
@@ -273,7 +283,7 @@ export class Compiler extends StatementCompiler {
     }
     if (hasToken(node, 'virtual')) this.error(node.row, 'virtual はメンバ関数にしか付けられません。');
     const isStatic = this.hasSpecifier(node, 'static');
-    const isInline = this.hasSpecifier(node, 'inline');
+    const isInline = this.hasSpecifier(node, 'inline') || this.hasSpecifier(node, 'constexpr');
     const base = this.specifiedType(node);
     const defaults = fieldsOf(node, 'default_value');
     for (const [position, declarator] of declarators.entries()) {
@@ -285,7 +295,6 @@ export class Compiler extends StatementCompiler {
         this.staticMember(cls, name, declared.type, access, declarator.row, initializer, isInline);
         continue;
       }
-      if (isAuto(declared.type)) this.error(declarator.row, 'メンバ変数には auto を使えません。');
       if (declared.type.kind === 'class' && !declared.type.cls.isComplete) {
         this.error(declarator.row, `クラス ${declared.type.cls.name} はまだ定義されていないので、メンバにできません。`);
       }
@@ -336,7 +345,7 @@ export class Compiler extends StatementCompiler {
     };
     cls.staticFields.set(name, info);
     const isConstIntegral = isConstType(type) && isInteger(type);
-    if (initializer && !isInline && !isConstIntegral && !this.hasConstexpr(type)) {
+    if (initializer && !isInline && !isConstIntegral) {
       this.error(
         row,
         `static のメンバ変数 ${name} の初期値は、クラスの外の定義に書いてください（または inline static にしてください）。`
@@ -351,17 +360,14 @@ export class Compiler extends StatementCompiler {
       !isConstType(type)
     );
     info.global = global;
-    if (initializer || isInline) {
-      global.isDefined = true;
-      if (initializer) this.initializeGlobal(global, type, initializer, row, true);
-      if (isConstType(type) && initializer && initializer.type !== 'initializer_list') {
-        info.constant = this.constantOf(this.compileExpression(initializer), type);
-      }
+    global.isDefined = isInline;
+    if (initializer || (isInline && this.isClassType(type)))
+      this.initializeGlobal(global, type, initializer, row, true);
+    if (isConstType(type) && initializer && initializer.type !== 'initializer_list') {
+      info.constant = this.constantOf(this.compileExpression(initializer), type);
+      if (!isInline && info.constant === undefined)
+        this.error(row, 'クラスの中で初期化する static const の整数には定数を書いてください。');
     }
-  }
-
-  private hasConstexpr(type: Type): boolean {
-    return isConstType(type);
   }
 
   private isFunctionDeclarator(declarator: Syntax): boolean {
@@ -378,7 +384,7 @@ export class Compiler extends StatementCompiler {
   private memberFunction(cls: ClassInfo, node: Syntax, access: Access, isDefinition: boolean): FunctionInfo {
     const declarator = fieldOf(node, 'declarator') as Syntax;
     const typeNode = fieldOf(node, 'type');
-    const declared = this.applyDeclarator(typeNode ? this.specifiedType(node) : VOID, declarator);
+    const declared = this.applyDeclarator(typeNode ? this.specifiedType(node, true) : VOID, declarator);
     const functionDeclarator = declared.function as Syntax;
     const rawName = declared.name ?? '';
     const isDestructor = rawName.startsWith('~');
@@ -386,7 +392,7 @@ export class Compiler extends StatementCompiler {
     if (isConstructor && rawName !== cls.name) return this.error(node.row, `${rawName} の戻り値の型を書いてください。`);
     if (isDestructor && rawName !== `~${cls.name}`)
       return this.error(node.row, `デストラクタの名前は ~${cls.name} です。`);
-    if ((isConstructor || isDestructor) && typeNode)
+    if ((rawName === cls.name || isDestructor) && typeNode)
       return this.error(node.row, 'コンストラクタとデストラクタには戻り値の型を書けません。');
     const fn = this.functionInfo(rawName, declared.type, functionDeclarator, node, cls);
     fn.access = access;
@@ -399,6 +405,16 @@ export class Compiler extends StatementCompiler {
     if (fn.isStatic && fn.isConst) this.error(node.row, 'static のメンバ関数は const にできません。');
     if (fn.isStatic && fn.isVirtual) this.error(node.row, 'static のメンバ関数は virtual にできません。');
     if (isConstructor && fn.isVirtual) this.error(node.row, 'コンストラクタは virtual にできません。');
+    if ((isConstructor || isDestructor) && fn.isConst)
+      this.error(node.row, 'コンストラクタとデストラクタは const にできません。');
+    const [first, ...rest] = fn.params;
+    if (
+      isConstructor &&
+      first?.type.kind === 'class' &&
+      first.type.cls === cls &&
+      rest.every((param) => param.defaultValue !== undefined)
+    )
+      this.error(node.row, 'コピーコンストラクタの引数には参照を使ってください。');
     const defaultValue = fieldOf(node, 'default_value');
     if (defaultValue) {
       if (defaultValue.text !== '0' || !fn.isVirtual)
@@ -450,7 +466,7 @@ export class Compiler extends StatementCompiler {
       .map((child) => child.text);
     if (qualifiers.has('volatile')) this.unsupported(node.row, 'volatile');
     if (this.hasSpecifier(node, 'constexpr') && !this.context.fn) this.unsupported(node.row, 'constexpr の関数');
-    if (isAuto(ret)) this.unsupported(node.row, '戻り値の型の auto');
+    if (hasAuto(ret)) this.unsupported(node.row, '戻り値の型の auto');
     if (ret.kind === 'array') this.error(node.row, '関数は配列を返せません。');
     const params = this.parameters(fieldOf(declarator, 'parameters') as Syntax);
     const displayName = owner ? `${owner.name}::${name}` : name;
@@ -484,26 +500,30 @@ export class Compiler extends StatementCompiler {
   private parameters(list: Syntax): ParamInfo[] {
     const params: ParamInfo[] = [];
     let seenDefault = false;
-    for (const param of list.children) {
-      if (param.type === 'comment') continue;
+    const declarations = list.children.filter((param) => param.type !== 'comment');
+    for (const param of declarations) {
       if (param.type === 'variadic_parameter') return this.unsupported(param.row, '可変長引数（...）');
-      const base = this.specifiedType(param);
+      const base = this.specifiedType(param, true);
       const declarator = fieldOf(param, 'declarator');
       const declared = declarator ? this.applyDeclarator(base, declarator) : { name: undefined, type: base };
       let type = declared.type;
-      if (type.kind === 'void' && !declarator) {
-        if (list.children.length === 1) return [];
+      if (type.kind === 'void') {
+        if (!declarator && !isConstType(type) && declarations.length === 1) return [];
         this.error(param.row, '引数の型に void は書けません。');
       }
-      if (isAuto(type) || (type.kind === 'reference' && isAuto(type.to)))
-        this.unsupported(param.row, '引数の型の auto（省略形の関数テンプレート）');
+      if (hasAuto(type)) this.unsupported(param.row, '引数の型の auto（省略形の関数テンプレート）');
       // An array parameter is a pointer (C++20 [dcl.fct]).
       if (type.kind === 'array') type = { kind: 'pointer', to: type.of };
       const defaultValue =
         param.type === 'optional_parameter_declaration' ? fieldOf(param, 'default_value') : undefined;
       if (defaultValue) seenDefault = true;
       else if (seenDefault) this.error(param.row, '引数の既定値は、後ろの引数から順に付けてください。');
-      params.push({ name: declared.name, type, defaultValue, row: param.row });
+      params.push({
+        name: declared.name,
+        type,
+        defaultValue: defaultValue ? { node: defaultValue } : undefined,
+        row: param.row,
+      });
     }
     return params;
   }
@@ -731,6 +751,7 @@ export class Compiler extends StatementCompiler {
   private delegation(cls: ClassInfo, initializer: Syntax): Exec {
     const args = this.initializerArguments(initializer);
     const resolved = this.resolve(`${cls.name} のコンストラクタ`, cls.constructors, args, undefined, initializer.row);
+    this.checkDefined(resolved.fn, initializer.row);
     const runs = this.callArguments(resolved, args, initializer.row);
     const { row } = initializer;
     return this.fullExpression<undefined>((frame) => {
@@ -749,6 +770,7 @@ export class Compiler extends StatementCompiler {
 
   private baseInitialization(cls: ClassInfo, base: ClassInfo, initializer: Syntax | undefined): Exec {
     const row = initializer?.row ?? cls.row;
+    this.requireVirtualDefinitions(base, row);
     const args = initializer ? this.initializerArguments(initializer) : [];
     if (base.constructors.length === 0) {
       if (args.length > 0) this.error(row, `${base.name} には引数をとるコンストラクタがありません。`);
@@ -761,6 +783,7 @@ export class Compiler extends StatementCompiler {
       };
     }
     const resolved = this.resolve(`${base.name} のコンストラクタ`, base.constructors, args, undefined, row);
+    this.checkDefined(resolved.fn, row);
     if (!resolved.fn.native && resolved.fn.access === 'private')
       this.error(row, `${base.name} のコンストラクタは private です。`);
     const runs = this.callArguments(resolved, args, row);
@@ -887,7 +910,7 @@ export class Compiler extends StatementCompiler {
       .map((field) => ({ index: field.index, destroy: this.destroyerOf(field.type) }))
       .toReversed();
     const baseDestroy = cls.base?.operations?.destroy;
-    const destructor = cls.destructor?.compiled || cls.destructor?.definition ? cls.destructor : undefined;
+    const destructor = cls.destructor;
     if (!destructor && !members.some((member) => member.destroy) && !baseDestroy) return undefined;
     return (frame, value) => {
       const object = value as CObject;
@@ -924,9 +947,10 @@ export class Compiler extends StatementCompiler {
     if (!typeNode) return this.error(node.row, '関数の戻り値の型を書いてください。');
     if (this.hasSpecifier(node, 'virtual') || hasToken(node, 'virtual'))
       this.error(node.row, 'virtual はメンバ関数にしか付けられません。');
-    const declared = this.applyDeclarator(this.specifiedType(node), fieldOf(node, 'declarator') as Syntax);
+    const declared = this.applyDeclarator(this.specifiedType(node, true), fieldOf(node, 'declarator') as Syntax);
     const name = declared.name as string;
     const fn = this.functionInfo(name, declared.type, declarator, node, undefined);
+    this.bindDefaultArguments(fn);
     if (name === 'main') {
       if (!sameType(unqualified(fn.ret), INT)) this.error(node.row, 'main 関数の戻り値の型は int にしてください。');
       this.checkMainParameters(fn);
@@ -943,9 +967,9 @@ export class Compiler extends StatementCompiler {
       if (isDefinition) {
         same.isDefined = true;
         same.definition = node;
-        same.params = mergeDefaults(same.params, fn.params, node.row, (row, message) => this.error(row, message));
         this.claimAtomic(same, node);
       }
+      same.params = mergeDefaults(same.params, fn.params, node.row, (row, message) => this.error(row, message));
       return same;
     }
     if (name === 'main' && overloads.length > 0) this.error(node.row, 'main 関数はオーバーロードできません。');
@@ -984,7 +1008,7 @@ export class Compiler extends StatementCompiler {
       const declarator = fieldOf(node, 'declarator') as Syntax;
       const nameNode = fieldOf(qualified, 'name') as Syntax;
       const typeNode = fieldOf(node, 'type');
-      const ret = typeNode ? this.specifiedType(node) : VOID;
+      const ret = typeNode ? this.specifiedType(node, true) : VOID;
       const declared = this.applyDeclarator(ret, declarator);
       const probe = this.functionInfo(declared.name ?? '', declared.type, declared.function as Syntax, node, cls);
       let candidates: FunctionInfo[];
@@ -1101,14 +1125,15 @@ export class Compiler extends StatementCompiler {
         if (memberInit) memberInit(frame);
         isInitialized = true;
         completion = statements(frame);
-        if (isMain) frame.runtime.onMainEnd?.(frame);
       } catch (error) {
+        if (isMain && !(error instanceof ExecutionLimitError)) frame.runtime.onMainEnd?.(frame);
         if (error instanceof CppException) {
           endScope(frame, slots, destructibles);
           if (isInitialized) undoConstruction?.(frame);
         }
         throw error;
       }
+      if (isMain) frame.runtime.onMainEnd?.(frame);
       endScope(frame, slots, destructibles);
       if (completion !== RETURN) {
         if (isMain) frame.returnValue = 0;
@@ -1131,7 +1156,7 @@ export class Compiler extends StatementCompiler {
       return this.error(node.row, '宣言する名前を書いてください。');
     }
     // The specified type defines the class of `struct P { ... } origin;`.
-    const base = this.specifiedType(node);
+    const base = this.specifiedType(node, true);
     let firstDeduced: AutoDeduction | undefined;
     for (const written of declarators) {
       const declarator = this.variableOrFunctionDeclarator(base, written);
@@ -1148,7 +1173,7 @@ export class Compiler extends StatementCompiler {
       const type = this.globalVariable(declarator, name, declared.type);
       firstDeduced = this.checkAutoDeduction(
         firstDeduced,
-        isAuto(declared.type) ? { name, type } : undefined,
+        hasAuto(declared.type) ? { name, type: deducedType(declared.type, type) } : undefined,
         declarator.row
       );
     }
@@ -1202,14 +1227,15 @@ export class Compiler extends StatementCompiler {
     const value = declarator.type === 'init_declarator' ? fieldOf(declarator, 'value') : undefined;
     let type = declaredType;
     if (type.kind === 'reference') return this.unsupported(declarator.row, '関数の外の参照の変数');
-    if (isAuto(type)) {
-      if (!value || value.type === 'initializer_list' || value.type === 'argument_list') {
-        this.rejectInitializerListDeduction(declarator, value);
-        return this.error(declarator.row, `auto の変数 ${name} には、= のあとに初期値を書いてください。`);
-      }
-      type = this.deduceAuto(type, this.compileExpression(value), declarator.row);
-    }
+    if (hasAuto(type))
+      type = this.deduceAuto(
+        type,
+        this.compileExpression(this.autoInitializer(declarator, value, name)),
+        declarator.row
+      );
     if (type.kind === 'array' && type.length === undefined && value) type = this.completeArrayType(type, value);
+    if (type.kind === 'array' && type.length === undefined)
+      return this.error(declarator.row, `配列 ${name} の大きさを書いてください。`);
     if (type.kind === 'void') return this.error(declarator.row, `void 型の変数 ${name} は作れません。`);
     const isConstant = isConstType(type) && isArithmetic(type);
     const global = this.declareStaticStorage(name, type, declarator.row, value, declarator, !isConstant);
@@ -1435,6 +1461,7 @@ export class Compiler extends StatementCompiler {
       const resolved = this.resolve(`${cls.name} のコンストラクタ`, cls.constructors, [], undefined, row);
       return this.constructWith(cls, resolved, [], row);
     }
+    this.requireVirtualDefinitions(cls, row);
     if (cls.isDefaultConstructorDeleted) return this.error(row, deletedDefaultMessage(cls));
     const implicit = cls.implicitDefault;
     const zeroed = isValueInitialized;
@@ -1452,7 +1479,7 @@ export class Compiler extends StatementCompiler {
         if (zeroed) for (const [index, zero] of zeroFields.entries()) object.values[index] = zero;
         if (implicit) invoke(frame, implicit, [], new Ptr(new Box(object), 0), row);
         else object.cls = cls;
-        return object;
+        return zeroed ? zeroFilled(object, classType(cls)) : object;
       },
     };
   }
@@ -1504,6 +1531,20 @@ export class Compiler extends StatementCompiler {
     const run = this.takeMemberClauses(cls, clauses, row)();
     if (clauses.next < elements.length) return this.error(row, `${cls.name} を初期化する {...} の値が多すぎます。`);
     return run;
+  }
+
+  protected parenthesizedAggregate(cls: ClassInfo, args: Expr[], row: number): Expr | undefined {
+    if (!this.isAggregate(cls)) return;
+    const fields = cls.ownFields;
+    if (args.length > fields.length) return this.error(row, `${cls.name} を初期化する値が多すぎます。`);
+    const initializers = args.map((arg, index) => this.copyInitializer(fields[index].type, arg, row, false));
+    return {
+      type: classType(cls),
+      isLvalue: false,
+      isTemporaryObject: true,
+      row,
+      run: this.initializeAggregate(cls, initializers, row),
+    };
   }
 
   private arrayInitializer(type: Extract<Type, { kind: 'array' }>, elements: Syntax[], row: number): Eval<Value> {
@@ -1608,37 +1649,65 @@ export class Compiler extends StatementCompiler {
   }
 
   private takeMemberClauses(cls: ClassInfo, clauses: Clauses, row: number): () => Eval<Value> {
-    const fields = cls.ownFields;
-    const taken = fields.map((field) =>
+    const taken = cls.ownFields.map((field) =>
       clauses.next < clauses.nodes.length ? this.takeClauses(field.type, clauses, row) : undefined
     );
-    return () => {
-      const inits = fields.map((field, index) => {
-        const take = taken[index];
-        if (take) return take();
-        if (field.initializer) {
-          const node = field.initializer;
-          return node.type === 'initializer_list'
-            ? this.listInitializer(field.type, node, row)
-            : this.copyInitializer(field.type, this.compileExpression(node), row, false);
-        }
-        if (field.type.kind === 'reference')
-          return this.error(row, `参照のメンバ ${field.name} に初期値がありません。`);
-        return this.valueInitialized(field.type, row).run as Eval<Value>;
-      });
-      const destroyers = fields.map((field) => this.destroyerOf(field.type));
-      return (frame) => {
-        const object = newObject(cls);
-        const values = makeEach(
+    return () =>
+      this.initializeAggregate(
+        cls,
+        taken.map((take) => take?.()),
+        row
+      );
+  }
+
+  private initializeAggregate(cls: ClassInfo, supplied: (Eval<Value> | undefined)[], row: number): Eval<Value> {
+    const fields = cls.ownFields;
+    const defaults = fields.map((field, index) => (supplied[index] ? undefined : this.aggregateDefault(field, row)));
+    const destroyers = fields.map((field) => this.destroyerOf(field.type));
+    return (frame) => {
+      const object = newObject(cls);
+      const receiver = new Ptr(new Box(object, false), 0);
+      const mark = frame.pending.length;
+      frame.pending.push(object);
+      try {
+        makeEach(
           frame,
-          inits.length,
-          (index) => inits[index](frame),
+          fields.length,
+          (index) => {
+            const init = supplied[index];
+            const value = init ? init(frame) : frame.runtime.withReceiver(receiver, defaults[index] as Eval<Value>);
+            object.values[fields[index].index] = value;
+            return value;
+          },
           (index) => destroyers[index]
         );
-        for (const [index, value] of values.entries()) object.values[fields[index].index] = value;
         return object;
-      };
+      } catch (error) {
+        endLifetime(object);
+        throw error;
+      } finally {
+        frame.pending.length = mark;
+      }
     };
+  }
+
+  private aggregateDefault(field: FieldInfo, row: number): Eval<Value> {
+    const node = field.initializer;
+    if (!node) {
+      if (field.type.kind === 'reference') return this.error(row, `参照のメンバ ${field.name} に初期値がありません。`);
+      return this.valueInitialized(field.type, row).run as Eval<Value>;
+    }
+    const previous = this.context;
+    this.context = new FunctionContext(undefined, field.owner, VOID);
+    try {
+      const initialize =
+        node.type === 'initializer_list'
+          ? this.listInitializer(field.type, node, node.row)
+          : this.copyInitializer(field.type, this.compileExpression(node), node.row, false);
+      return this.fullExpression(initialize);
+    } finally {
+      this.context = previous;
+    }
   }
 
   // Names -------------------------------------------------------------------------------------------------------------
@@ -1651,7 +1720,36 @@ export class Compiler extends StatementCompiler {
   }
 
   protected checkDefined(fn: FunctionInfo, row: number): void {
-    if (!fn.native && !this.usedFunctions.has(fn)) this.usedFunctions.set(fn, row);
+    if (this.isUnevaluated || fn.native) return;
+    const functions = this.defaultDependencies?.functions ?? this.usedFunctions;
+    if (!functions.has(fn)) functions.set(fn, row);
+  }
+
+  protected requireStaticDefinition(global: GlobalInfo, row: number): void {
+    if (this.isUnevaluated) return;
+    const members = this.defaultDependencies?.staticMembers ?? this.usedStaticMembers;
+    if (!members.has(global)) members.set(global, row);
+  }
+
+  private bindDefaultArguments(fn: FunctionInfo): void {
+    for (const param of fn.params) {
+      const value = param.defaultValue;
+      if (!value || value.use) continue;
+      const dependencies = { functions: new Map<FunctionInfo, number>(), staticMembers: new Map<GlobalInfo, number>() };
+      const previousDependencies = this.defaultDependencies;
+      this.defaultDependencies = dependencies;
+      try {
+        const expr = this.argument(value.node);
+        const { run } = this.convert(expr, param.type, value.node.row, '引数の既定値');
+        value.use = () => {
+          for (const [used, row] of dependencies.functions) this.checkDefined(used, row);
+          for (const [member, row] of dependencies.staticMembers) this.requireStaticDefinition(member, row);
+          return run;
+        };
+      } finally {
+        this.defaultDependencies = previousDependencies;
+      }
+    }
   }
 
   protected constantArgument(node: Syntax): number {

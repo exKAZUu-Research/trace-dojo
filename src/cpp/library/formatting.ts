@@ -213,8 +213,9 @@ function writeCount(arg: PrintfArgument, length: string, count: number): void {
  */
 export function pointerText(pointer: Ptr | undefined): string {
   if (!pointer || pointer.isNull) return '0x0';
-  const base = 0x6_00_00_00_00 + (pointer.store?.id ?? 0) * 0x1_00;
-  return `0x${(base + pointer.index * 4).toString(16)}`;
+  const { store, index } = pointer.address;
+  const base = 0x6_00_00_00_00 + (store?.id ?? 0) * 0x1_00;
+  return `0x${(base + index * 4).toString(16)}`;
 }
 
 function signOf(spec: Spec): string {

@@ -12,7 +12,6 @@ import {
 import { CppException, CppRuntimeError } from './errors';
 import type { Expr } from './expr';
 import { type Eval, type Frame, holdAll } from './runtime';
-import { FunctionContext } from './scopes';
 import type { Syntax } from './syntax';
 import {
   type Access,
@@ -154,6 +153,17 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
 
   rvalue(expr: Expr): Expr {
     if (!expr.isLvalue) return expr;
+    if (expr.constant !== undefined || expr.readConstant) {
+      const constant = expr.constant;
+      return {
+        type: unqualified(expr.type),
+        isLvalue: false,
+        row: expr.row,
+        constant,
+        onlyCalls: expr.onlyCalls,
+        run: expr.readConstant ?? (() => constant),
+      };
+    }
     const { type, run } = expr;
     if (type.kind === 'array') {
       return {
@@ -162,10 +172,6 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
         row: expr.row,
         run: (frame) => new Ptr((run(frame) as Ptr).read() as ArrayStore, 0),
       };
-    }
-    if (expr.constant !== undefined) {
-      const constant = expr.constant;
-      return { ...expr, type: unqualified(type), isLvalue: false, run: () => constant };
     }
     return {
       type: type.kind === 'class' ? type : unqualified(type),
@@ -201,12 +207,16 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   }
 
   copyObject(expr: Expr, cls: ClassInfo): Expr {
+    this.requireVirtualDefinitions(cls, expr.row);
     if (cls.isNoncopyable) {
       this.error(expr.row, `${cls.name} のオブジェクトはコピーできません（コピーコンストラクタが削除されています）。`);
     }
     if (expr.type.kind === 'class') this.checkBaseConversion(expr.type.cls, cls, expr.row);
     const copyConstructor = cls.constructors.find((ctor) => !ctor.native && isCopyConstructor(ctor, cls));
-    if (copyConstructor) this.checkAccess(copyConstructor.access, cls, cls, expr.row, `${cls.name} のコンストラクタ`);
+    if (copyConstructor) {
+      this.checkAccess(copyConstructor.access, cls, cls, expr.row, `${cls.name} のコンストラクタ`);
+      this.checkDefined(copyConstructor, expr.row);
+    }
     const source = this.rvalue(expr);
     return {
       type: classType(cls),
@@ -243,6 +253,14 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
   }
 
   abstract bracedConversion(list: Syntax, to: Type): ConversionSequence | undefined;
+
+  protected abstract checkDefined(fn: FunctionInfo, row: number): void;
+
+  protected requireVirtualDefinitions(cls: ClassInfo, row: number): void {
+    for (const fn of cls.virtuals.values()) {
+      if (!fn.isPure) this.checkDefined(fn, row);
+    }
+  }
 
   isViableConstructor(constructor: FunctionInfo): boolean {
     return !constructor.isExplicit;
@@ -398,11 +416,13 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
    */
   callArguments(resolved: Resolved, args: Expr[], row: number): Eval<unknown>[] {
     const { fn, conversions } = resolved;
-    const runs = args.map((arg, index) => conversions[index].apply(arg).run);
+    const runs: Eval<unknown>[] = args.map((arg, index) => conversions[index].apply(arg).run);
     // The library's functions take the arguments a call leaves out as missing.
     if (fn.native) return runs;
     for (const param of fn.params.slice(args.length)) {
-      runs.push(this.defaultArgument(fn, param.defaultValue as Syntax, param.type, row).run);
+      const useDefault = param.defaultValue?.use;
+      if (!useDefault) return this.error(row, `引数の既定値を解決できません（${fn.displayName}）。`);
+      runs.push(useDefault());
     }
     return runs.map((run, index) => {
       const type = fn.params[index]?.type;
@@ -414,17 +434,6 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
         return value;
       };
     });
-  }
-
-  /** Compiles a default argument where a call uses it, in the scope of the function's declaration. */
-  private defaultArgument(fn: FunctionInfo, syntax: Syntax, type: Type, row: number): Expr {
-    const saved = this.context;
-    this.context = new FunctionContext(undefined, fn.owner, type);
-    try {
-      return this.convert(this.compileExpression(syntax), type, row, '引数の既定値');
-    } finally {
-      this.context = saved;
-    }
   }
 
   /**
@@ -482,6 +491,8 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       this.error(row, `${cls.name} は抽象クラス（純粋仮想関数があるクラス）なので、オブジェクトを作れません。`);
     const { fn } = resolved;
     if (!fn.native) this.checkAccess(fn.access, cls, cls, row, `${cls.name} のコンストラクタ`);
+    this.checkDefined(fn, row);
+    this.requireVirtualDefinitions(cls, row);
     const argRuns = this.callArguments(resolved, args, row);
     const run: Eval<Value> = fn.native
       ? (frame) => holdAll(frame, argRuns, (values) => invoke(frame, fn, values, undefined, row, true) as Value)
@@ -503,6 +514,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       const { destructor } = type.cls;
       if (row !== undefined && destructor && !destructor.native)
         this.checkAccess(destructor.access, type.cls, type.cls, row, `${type.cls.name} のデストラクタ`);
+      if (row !== undefined) this.requireDestructorDefinitions(type.cls, row, new Set());
       return type.cls.operations?.destroy;
     }
     if (type.kind === 'array') {
@@ -515,6 +527,18 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
       };
     }
     return undefined;
+  }
+
+  private requireDestructorDefinitions(cls: ClassInfo, row: number, seen: Set<ClassInfo>): void {
+    if (seen.has(cls)) return;
+    seen.add(cls);
+    if (cls.destructor) this.checkDefined(cls.destructor, row);
+    if (cls.base) this.requireDestructorDefinitions(cls.base, row, seen);
+    for (const field of cls.ownFields) {
+      let type = field.type;
+      while (type.kind === 'array') type = type.of;
+      if (type.kind === 'class') this.requireDestructorDefinitions(type.cls, row, seen);
+    }
   }
 }
 

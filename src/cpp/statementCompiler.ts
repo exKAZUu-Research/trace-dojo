@@ -1,5 +1,5 @@
 import { isBaseAccessible } from './access';
-import { AUTO, isAuto } from './compilerBase';
+import { AUTO, hasAuto } from './compilerBase';
 import { permitsQualificationConversion } from './conversions';
 import { CppException, ProgramAbort } from './errors';
 import type { Expr } from './expr';
@@ -186,7 +186,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   private localDeclaration(node: Syntax): Exec {
     if (this.hasSpecifier(node, 'static')) return this.staticLocal(node);
-    const base = this.specifiedType(node);
+    const base = this.specifiedType(node, true);
     const declarators = fieldsOf(node, 'declarator');
     if (declarators.length === 0) return this.error(node.row, '変数の名前を書いてください。');
     let recordsStep = false;
@@ -232,31 +232,19 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     let createsObject = false;
     let entity: Extract<Entity, { kind: 'local' }>;
     let deduced: AutoDeduction | undefined;
-    if (isAuto(type)) {
-      let constant: number | bigint | undefined;
-      if (!value || value.type === 'initializer_list' || value.type === 'argument_list') {
-        if (value?.type === 'argument_list' && value.children.length === 1) {
-          const expr = this.compileExpression(value.children[0]);
-          type = this.deduceAuto(type, expr, declarator.row);
-          init = this.copyInitializer(type, expr, declarator.row, false);
-        } else if (value?.type === 'initializer_list' && value.children.length === 1 && !hasToken(declarator, '=')) {
-          const expr = this.compileExpression(value.children[0]);
-          type = this.deduceAuto(type, expr, declarator.row);
-          init = this.copyInitializer(type, expr, declarator.row, true);
-        } else {
-          this.rejectInitializerListDeduction(declarator, value);
-          return this.error(declarator.row, `auto の変数 ${name} には、= のあとに初期値を1つ書いてください。`);
-        }
-      } else {
-        const expr = this.compileExpression(value);
-        type = this.deduceAuto(type, expr, declarator.row);
-        createsObject = type.kind === 'class' && expr.isTemporaryObject === true && value.type !== 'call_expression';
-        init = this.copyInitializer(type, expr, declarator.row, false);
-        constant = isConstType(type) ? this.rvalue(expr).constant : undefined;
-      }
+    if (hasAuto(type)) {
+      const source = this.autoInitializer(declarator, value, name);
+      const expr = this.compileExpression(source);
+      type = this.deduceAuto(type, expr, declarator.row);
+      createsObject =
+        type.kind === 'class' &&
+        expr.isTemporaryObject === true &&
+        source === value &&
+        value.type !== 'call_expression';
+      init = this.copyInitializer(type, expr, declarator.row, value?.type === 'initializer_list');
       entity = this.declareVariable(name, type);
-      entity.constant = constant;
-      deduced = { name, type };
+      entity.constant = isConstType(type) ? this.rvalue(expr).constant : undefined;
+      deduced = { name, type: deducedType(declared.type, type) };
     } else {
       if (type.kind === 'array' && type.length === undefined && value) type = this.completeArrayType(type, value);
       if (type.kind === 'array' && type.length === undefined)
@@ -309,6 +297,13 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     if (value?.type === 'initializer_list' && value.children.length > 0 && hasToken(declarator, '=')) {
       this.unsupported(declarator.row, 'std::initializer_list（auto x = {1, 2}; など）');
     }
+  }
+
+  protected autoInitializer(declarator: Syntax, value: Syntax | undefined, name: string): Syntax {
+    if (value && value.type !== 'initializer_list' && value.type !== 'argument_list') return value;
+    this.rejectInitializerListDeduction(declarator, value);
+    if (value?.children.length === 1) return value.children[0];
+    return this.error(declarator.row, `auto の変数 ${name} には初期値を1つ書いてください。`);
   }
 
   private declareVariable(name: string, type: Type): Extract<Entity, { kind: 'local' }> {
@@ -433,7 +428,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     declared: Extract<Type, { kind: 'reference' }>,
     value: Syntax | undefined,
     row: number
-  ): { exec: Exec; hasInitializer: boolean; createsObject: boolean } {
+  ): { exec: Exec; hasInitializer: boolean; createsObject: boolean; deduced?: AutoDeduction } {
     if (!value) return this.error(row, `参照 ${name} には初期値が要ります。`);
     let target: Expr;
     if (value.type === 'initializer_list' || value.type === 'argument_list') {
@@ -442,7 +437,9 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     } else {
       target = this.compileExpression(value);
     }
-    const type = isAuto(declared.to) ? referenceTo(this.deduceAutoReference(declared.to, target)) : declared;
+    const isDeduced = hasAuto(declared.to);
+    const type = isDeduced ? referenceTo(this.deduceAutoReference(declared.to, target)) : declared;
+    const deduced = isDeduced ? { name, type: deducedType(declared, type) } : undefined;
     // A const reference bound to a temporary extends the temporary's lifetime to the reference's, whether the
     // temporary is the initializer's object or a converted value (C++20 [class.temporary]).
     const isDirect = target.isLvalue && bindsDirectly(target.type, type.to);
@@ -471,8 +468,13 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const { slot } = local;
     // A reference bound to a member of a temporary extends the whole temporary's lifetime.
     const member = isDirect ? target.temporaryMember : undefined;
-    if (member) return this.extendedReference(slot, name, member.object.type, member.object.run, memberAt(member.path));
-    if (extends_) return this.extendedReference(slot, name, heldType, bound.run, (box) => new Ptr(box, 0));
+    if (member)
+      return {
+        ...this.extendedReference(slot, name, member.object.type, member.object.run, memberAt(member.path)),
+        deduced,
+      };
+    if (extends_)
+      return { ...this.extendedReference(slot, name, heldType, bound.run, (box) => new Ptr(box, 0)), deduced };
     const locate = bound.run;
     return {
       exec: this.fullExpression<undefined>((frame) => {
@@ -481,6 +483,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       }),
       hasInitializer: true,
       createsObject: false,
+      deduced,
     };
   }
 
@@ -511,7 +514,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   }
 
   private staticLocal(node: Syntax): Exec {
-    const base = this.specifiedType(node);
+    const base = this.specifiedType(node, true);
+    let firstDeduced: AutoDeduction | undefined;
     const initializers = fieldsOf(node, 'declarator').map((written) => {
       const declarator = this.variableOrFunctionDeclarator(base, written);
       const declared = this.applyDeclarator(base, declarator);
@@ -520,8 +524,22 @@ export abstract class StatementCompiler extends ExpressionCompiler {
       if (declared.type.kind === 'reference') return this.unsupported(declarator.row, 'static の参照');
       const value = declarator.type === 'init_declarator' ? fieldOf(declarator, 'value') : undefined;
       let type: Type = declared.type;
+      if (hasAuto(type)) {
+        type = this.deduceAuto(
+          type,
+          this.compileExpression(this.autoInitializer(declarator, value, name)),
+          declarator.row
+        );
+        firstDeduced = this.checkAutoDeduction(
+          firstDeduced,
+          { name, type: deducedType(declared.type, type) },
+          declarator.row
+        );
+      }
       if (type.kind === 'array' && type.length === undefined && value) type = this.completeArrayType(type, value);
-      const global = this.declareStaticStorage(`${name}`, type, declarator.row, value, declarator, false);
+      if (type.kind === 'array' && type.length === undefined)
+        return this.error(declarator.row, `配列 ${name} の大きさを書いてください。`);
+      const global = this.declareStaticStorage(name, type, declarator.row, value, declarator, false);
       const local = this.context.declareLocal(name, type, false);
       this.context.scope.names.set(name, { kind: 'local', local, isReference: false, constant: undefined });
       const { slot } = local;
@@ -835,12 +853,12 @@ export abstract class StatementCompiler extends ExpressionCompiler {
 
   /** Declares the variable of a range-based for loop, which each iteration binds to an element. */
   private rangeVariable(node: Syntax, element: Expr): { bind: Exec; type: Type } {
-    const base = this.specifiedType(node);
+    const base = this.specifiedType(node, true);
     const declarator = fieldOf(node, 'declarator') as Syntax;
     const declared = this.applyDeclarator(base, declarator);
     const name = declared.name as string;
     if (declared.type.kind === 'reference') {
-      const type = isAuto(declared.type.to)
+      const type = hasAuto(declared.type.to)
         ? referenceTo(this.deduceAutoReference(declared.type.to, element))
         : declared.type;
       const location = this.convert(element, type, node.row).run;
@@ -1138,6 +1156,15 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   needsDestruction(type: Type): boolean {
     return this.destroyerOf(type) !== undefined;
   }
+}
+
+export function deducedType(pattern: Type, type: Type): Type {
+  if (
+    (pattern.kind === 'pointer' || pattern.kind === 'reference') &&
+    (type.kind === 'pointer' || type.kind === 'reference')
+  )
+    return deducedType(pattern.to, type.to);
+  return isConstType(pattern) ? withConst(type, false) : type;
 }
 
 function catchesAll(clause: Syntax): boolean {

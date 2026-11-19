@@ -32,6 +32,12 @@ test.each([
   ],
   ['a default-initialized class with a const member', 'struct D { const int c; };\nint main() {\n  D d; }', 2],
   ['a const variable without an initializer', 'int main() {\n  const int x; }', 1],
+  ['an auto array', 'int main() {\n  auto a[2] = {1, 2}; }', 1],
+  ['an auto size operand', 'int main() {\n  return sizeof(auto); }', 1],
+  ['a used static member lacking a definition', 'struct A { static int n; };\nint main() {\n  return A::n; }', 2],
+  ['an undefined constructor', 'struct A { A(); };\nint main() {\n  A a; }', 2],
+  ['an undefined destructor', 'struct A { ~A(); };\nint main() {\n  A a; }', 2],
+  ['a const constructor', 'struct A {\n  A() const; };', 1],
   [
     'an assignment to a const object allocated with an interleaved sized type',
     'int main() { auto p = new unsigned const int{7};\n  *p = 8; }',

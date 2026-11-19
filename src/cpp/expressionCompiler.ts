@@ -4,7 +4,7 @@ import { fma } from '../c/library/binaryFloat';
 import { commonType, promote } from '../c/types';
 import { CompileError } from '../interpreter/diagnostics';
 import { byteAt } from './bytes';
-import { isAuto } from './compilerBase';
+import { hasAuto, isAuto } from './compilerBase';
 import { type ConversionSequence, convertArithmetic, implicitConversion, Rank, sequence } from './conversions';
 import { CppRuntimeError } from './errors';
 import { constantExpr, type Expr, type FunctionCandidates } from './expr';
@@ -21,6 +21,7 @@ import {
   classType,
   type FieldInfo,
   type FunctionInfo,
+  type GlobalInfo,
   INT,
   isArithmetic,
   isConstType,
@@ -35,6 +36,7 @@ import {
   sameType,
   SIZE_T,
   sizeOf,
+  type StaticFieldInfo,
   type Type,
   typeName,
   unqualified,
@@ -59,6 +61,7 @@ const ARITHMETIC_OPERATORS = new Set(['+', '-', '*', '/', '%', '&', '|', '^', '<
 
 /** Compiles expressions to closures that evaluate them. */
 export abstract class ExpressionCompiler extends ObjectCompiler {
+  protected isUnevaluated = false;
   /** The storage of the string literals by their bytes, which identical literals share as clang++ merges them. */
   private readonly literalStores = new Map<string, Box>();
 
@@ -282,9 +285,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       case 'staticField': {
         const { field } = entity;
         this.checkAccess(field.access, field.owner, this.namingClass(node, field.owner), row, name);
-        const global = field.global;
-        if (!global) return this.error(row, `static のメンバ変数 ${field.owner.name}::${name} が定義されていません。`);
-        return this.entityExpr({ kind: 'global', global, isReference: false, constant: field.constant }, node, true);
+        return this.staticMemberExpr(field, row);
       }
       case 'functions': {
         const members = entity.functions.filter((fn) => fn.owner && !fn.isStatic);
@@ -444,19 +445,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       const staticField = owner.staticFields.get(name);
       if (staticField) {
         this.checkAccess(staticField.access, owner, cls, row, name);
-        if (!staticField.global)
-          return this.error(row, `static のメンバ変数 ${owner.name}::${name} が定義されていません。`);
-        const index = staticField.global.index;
-        const evaluateObject = this.materialize(object).run;
-        return {
-          type: staticField.type,
-          isLvalue: true,
-          row,
-          run: (frame) => {
-            evaluateObject(frame);
-            return new Ptr(frame.runtime.globals[index], 0);
-          },
-        };
+        return this.staticMemberExpr(staticField, row, object);
       }
     }
     if (cls.library?.constructingMembers?.includes(name)) {
@@ -470,6 +459,37 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     return this.error(row, `${cls.name} に ${name} というメンバはありません。`);
   }
+
+  private staticMemberExpr(field: StaticFieldInfo, row: number, object?: Expr): Expr {
+    const { global, constant, type } = field;
+    if (!global)
+      return this.error(row, `static のメンバ変数 ${field.owner.name}::${field.name} が定義されていません。`);
+    const evaluateObject = object ? this.materialize(object).run : undefined;
+    const requireDefinition = (): void => this.requireStaticDefinition(global, row);
+    const locate = (frame: Frame): Ptr => {
+      evaluateObject?.(frame);
+      return new Ptr(frame.runtime.globals[global.index], 0);
+    };
+    return {
+      type,
+      isLvalue: true,
+      row,
+      constant: evaluateObject ? undefined : constant,
+      readConstant:
+        evaluateObject && constant !== undefined
+          ? (frame) => {
+              evaluateObject(frame);
+              return constant;
+            }
+          : undefined,
+      get run() {
+        requireDefinition();
+        return locate;
+      },
+    };
+  }
+
+  protected abstract requireStaticDefinition(global: GlobalInfo, row: number): void;
 
   /** The data member of an object, as an lvalue that is const when the object is. */
   fieldAccess(object: Expr, field: FieldInfo, row: number): Expr {
@@ -1249,8 +1269,17 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     if (node.all.some((child) => child.type === '...')) return this.unsupported(node.row, 'sizeof...');
     const typeNode = fieldOf(node, 'type');
     let type: Type;
-    if (typeNode) type = this.typeDescriptor(typeNode);
-    else {
+    if (typeNode) {
+      const named = fieldOf(typeNode, 'type');
+      const entity =
+        named?.type === 'qualified_identifier' && !fieldOf(typeNode, 'declarator')
+          ? this.lookupQualified(named)
+          : undefined;
+      type =
+        entity && entity.kind !== 'type' && entity.kind !== 'class' && entity.kind !== 'template'
+          ? this.entityExpr(entity, named as Syntax, true).type
+          : this.typeDescriptor(typeNode);
+    } else {
       const value = fieldOf(node, 'value') as Syntax;
       type = this.typeOfUnevaluated(value);
     }
@@ -1269,7 +1298,13 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
       if (entity?.kind === 'class') return classType(entity.cls);
       if (entity?.kind === 'type') return entity.type;
     }
-    return this.compileExpression(node).type;
+    const previous = this.isUnevaluated;
+    this.isUnevaluated = true;
+    try {
+      return this.compileExpression(node).type;
+    } finally {
+      this.isUnevaluated = previous;
+    }
   }
 
   /** `T{...}`, a braced functional cast, which list-initializes a prvalue. */
@@ -1383,8 +1418,6 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
   protected abstract withArgumentDependentLookup(name: string, functions: FunctionInfo[], args: Expr[]): FunctionInfo[];
 
   /** Records that a call uses a function, which the program must define (else the linker rejects it). */
-  protected abstract checkDefined(fn: FunctionInfo, row: number): void;
-
   bracedConversion(list: Syntax, to: Type): ConversionSequence | undefined {
     if (to.kind === 'reference' && !isConstType(to.to)) return undefined;
     const type = unqualified(nonReference(to));
@@ -1413,6 +1446,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     }
     if (cls.constructors.length === 0 && !cls.library) {
       if (args.length === 0) return this.defaultConstructed(cls, row, true);
+      const aggregate = this.parenthesizedAggregate(cls, args, row);
+      if (aggregate) return aggregate;
       return this.error(
         row,
         `${cls.name} には、引数（${args.map((arg) => typeName(arg.type)).join(', ')}）をとるコンストラクタがありません。`
@@ -1424,6 +1459,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** A default-initialized object of a class: its default constructor's, or an implicit one's. */
   abstract defaultConstructed(cls: ClassInfo, row: number, isValueInitialized: boolean): Expr;
+
+  protected abstract parenthesizedAggregate(cls: ClassInfo, args: Expr[], row: number): Expr | undefined;
 
   /** A value-initialized prvalue of a type, as `T()` makes. */
   valueInitialized(type: Type, row: number): Expr {
@@ -1467,11 +1504,16 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   private newExpression(node: Syntax): Expr {
     if (fieldOf(node, 'placement')) return this.unsupported(node.row, '配置 new（new (場所) 型）');
-    let baseType = this.specifiedType(node);
+    let baseType = this.specifiedType(node, true);
     let declarator = fieldOf(node, 'declarator');
     for (; declarator?.type === 'abstract_pointer_declarator'; declarator = fieldOf(declarator, 'declarator'))
       baseType = pointerTo(baseType, this.hasSpecifier(declarator, 'const'));
     const argsNode = fieldOf(node, 'arguments');
+    if (hasAuto(baseType)) {
+      if (declarator || argsNode?.children.length !== 1)
+        return this.error(node.row, 'new の auto 型には、初期値を1つ書いてください。');
+      baseType = this.deduceAuto(baseType, this.compileExpression(argsNode.children[0]), node.row);
+    }
     if (declarator) {
       const lengths: Syntax[] = [];
       for (
@@ -1597,18 +1639,26 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** The type of an `auto` variable, deduced from its initializer as a function template parameter would be. */
   deduceAuto(declared: Type, init: Expr, row: number): Type {
-    if (!isAuto(declared)) return declared;
+    if (!hasAuto(declared)) return declared;
     if (init.functions) return this.unsupported(row, '関数ポインタ');
     if (init.type.kind === 'void')
       return this.error(row, 'auto の変数の初期値に、値を返さない関数（void）の結果は使えません。');
     const decayed = init.type.kind === 'array' ? pointerTo(init.type.of) : unqualified(init.type);
-    return isConstType(declared) ? withConst(decayed) : decayed;
+    return this.deduceAutoPattern(declared, decayed, row);
   }
 
   /** The type `auto&` or `const auto&` refers to. */
   deduceAutoReference(declared: Type, init: Expr): Type {
-    if (!isAuto(declared)) return declared;
-    return isConstType(declared) ? withConst(unqualified(init.type)) : init.type;
+    return this.deduceAutoPattern(declared, init.type, init.row);
+  }
+
+  private deduceAutoPattern(declared: Type, actual: Type, row: number): Type {
+    const isConst = isConstType(declared) || isConstType(actual);
+    if (isAuto(declared)) return withConst(actual, isConst);
+    if (declared.kind !== 'pointer') return declared;
+    if (actual.kind !== 'pointer')
+      return this.error(row, `auto* の初期値にポインタを書いてください（${typeName(actual)}）。`);
+    return pointerTo(this.deduceAutoPattern(declared.to, actual.to, row), isConst);
   }
 }
 
