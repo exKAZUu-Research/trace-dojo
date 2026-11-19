@@ -29,12 +29,20 @@ export abstract class Store {
 
   abstract get length(): number;
 
+  get iteratorLength(): number {
+    return this.length;
+  }
+
   /** Reads an element, which must exist and have a value. */
   abstract get(index: number): Value;
   abstract set(index: number, value: Value): void;
 
   location(index: number): Ptr {
     return new Ptr(this, index);
+  }
+
+  iteratorLocation(index: number): Ptr {
+    return this.location(index);
   }
 
   /** Stops at a use of storage whose lifetime ended. */
@@ -197,17 +205,18 @@ export class Ptr {
     return store.get(this.index);
   }
 
-  offset(delta: number): Ptr {
+  offset(delta: number, asIterator = false): Ptr {
     const store = this.target();
     const index = this.index + delta;
-    if (index < 0 || index > store.length) throw new CppRuntimeError('pointerOutOfRange');
-    return store.location(index);
+    if (index < 0 || index > (asIterator ? store.iteratorLength : store.length))
+      throw new CppRuntimeError('pointerOutOfRange');
+    return asIterator ? store.iteratorLocation(index) : store.location(index);
   }
 
   element(isReverse: boolean): Ptr {
     const store = this.target();
     const index = this.index - (isReverse ? 1 : 0);
-    if (index < 0 || index >= store.length) throw new CppRuntimeError('invalidIterator');
+    if (index < 0 || index >= store.iteratorLength) throw new CppRuntimeError('invalidIterator');
     return store.location(index);
   }
 

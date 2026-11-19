@@ -1175,7 +1175,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         const store = base.target();
         // `&a[n]` may form the address one past the end, which only reading or writing through rejects.
         if (at < 0 || at > store.length) throw new CppRuntimeError('outOfBounds');
-        return new Ptr(store, at);
+        return store.location(at);
       },
     };
   }

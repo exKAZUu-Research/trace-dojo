@@ -60,6 +60,7 @@ export class Compiler extends StatementCompiler {
   private readonly globalTypes: Type[] = [];
   /** The functions the program calls, which it must define, with the row of a call. */
   private readonly usedFunctions = new Map<FunctionInfo, number>();
+  private readonly inlineDependencies = new WeakMap<FunctionInfo, () => void>();
   private readonly usedStaticMembers = new Map<GlobalInfo, number>();
   private readonly aggregateDefaults = new WeakMap<FieldInfo, () => Eval<Value>>();
   private readonly implicitDefaults = new WeakMap<ClassInfo, () => FunctionInfo | undefined>();
@@ -84,6 +85,7 @@ export class Compiler extends StatementCompiler {
       if (!fn.isDefined && !fn.native) {
         this.error(row, `関数 ${fn.displayName} は宣言だけで、定義（本体）がありません。`);
       }
+      this.inlineDependencies.get(fn)?.();
     }
     for (const [member, row] of this.usedStaticMembers) {
       if (!member.isDefined) this.error(row, `static のメンバ変数 ${member.name} は宣言だけで、定義がありません。`);
@@ -394,7 +396,10 @@ export class Compiler extends StatementCompiler {
     if (isConstructor && rawName !== cls.name) return this.error(node.row, `${rawName} の戻り値の型を書いてください。`);
     if (isDestructor && rawName !== `~${cls.name}`)
       return this.error(node.row, `デストラクタの名前は ~${cls.name} です。`);
-    if ((rawName === cls.name || isDestructor) && typeNode)
+    if (
+      (rawName === cls.name || isDestructor) &&
+      (typeNode || node.children.some((child) => child.type === 'type_qualifier'))
+    )
       return this.error(node.row, 'コンストラクタとデストラクタには戻り値の型を書けません。');
     const fn = this.functionInfo(rawName, declared.type, functionDeclarator, node, cls);
     fn.access = access;
@@ -402,6 +407,7 @@ export class Compiler extends StatementCompiler {
     fn.isDestructor = isDestructor;
     fn.isStatic = this.hasSpecifier(node, 'static');
     fn.isVirtual = hasToken(node, 'virtual');
+    fn.isInline = isDefinition || this.hasSpecifier(node, 'inline');
     if ((isConstructor || isDestructor) && fn.isStatic)
       this.error(node.row, 'コンストラクタとデストラクタは static にできません。');
     if (fn.isStatic && fn.isConst) this.error(node.row, 'static のメンバ関数は const にできません。');
@@ -486,6 +492,7 @@ export class Compiler extends StatementCompiler {
       owner,
       isStatic: false,
       isVirtual: false,
+      isInline: this.hasSpecifier(node, 'inline'),
       isConst: qualifiers.has('const'),
       isPure: false,
       isConstructor: false,
@@ -998,6 +1005,7 @@ export class Compiler extends StatementCompiler {
       if (!sameType(same.ret, fn.ret))
         this.error(node.row, `関数 ${name} は、戻り値の型だけが違う宣言をすでにされています。`);
       if (isDefinition && same.isDefined) this.error(node.row, `関数 ${name} はすでに定義されています。`);
+      if (fn.isInline) same.isInline = true;
       if (isDefinition) {
         same.isDefined = true;
         same.definition = node;
@@ -1066,6 +1074,7 @@ export class Compiler extends StatementCompiler {
       fn.isDefined = true;
       fn.definition = node;
       fn.params = fn.params.map((param, index) => ({ ...param, name: probe.params[index].name }));
+      if (probe.isInline) fn.isInline = true;
       this.claimAtomic(fn, node);
       if (cls === fn.owner && fn.isDestructor) {
         cls.operations = {
@@ -1081,6 +1090,17 @@ export class Compiler extends StatementCompiler {
 
   /** Compiles a function's body, binding its parameters to the first slots of its frame. */
   private compileFunction(fn: FunctionInfo, node: Syntax): void {
+    if (fn.isInline && fn.name !== 'main' && !fn.isConstructor && !fn.isDestructor && !fn.isVirtual) {
+      this.inlineDependencies.set(
+        fn,
+        this.bindDependencies(() => this.compileFunctionBody(fn, node))
+      );
+      return;
+    }
+    this.compileFunctionBody(fn, node);
+  }
+
+  private compileFunctionBody(fn: FunctionInfo, node: Syntax): void {
     const cls = fn.owner;
     const context = new FunctionContext(fn, cls, fn.isConstructor || fn.isDestructor ? VOID : fn.ret);
     const saved = this.context;
@@ -1583,7 +1603,10 @@ export class Compiler extends StatementCompiler {
     if (!this.isAggregate(cls)) return;
     const fields = cls.ownFields;
     if (args.length > fields.length) return this.error(row, `${cls.name} を初期化する値が多すぎます。`);
-    const initializers = args.map((arg, index) => this.copyInitializer(fields[index].type, arg, row, false));
+    const initializers = args.map((arg, index) => {
+      const type = fields[index].type;
+      return arg.braced ? this.listInitializer(type, arg.braced, arg.row) : this.copyInitializer(type, arg, row, false);
+    });
     return {
       type: classType(cls),
       isLvalue: false,

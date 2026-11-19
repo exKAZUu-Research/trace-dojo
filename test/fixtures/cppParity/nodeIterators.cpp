@@ -23,7 +23,7 @@ int main() {
   ++second;
   std::cout << *second << ' ' << (last == values.end()) << ' ';
   std::list<int> other{9};
-  values.swap(other);
+  std::swap(values, other);
   std::cout << *first << ' ' << (&*first == saved) << ' ';
   for (auto it = other.begin(); it != other.end();) {
     if (*it == 2) other.erase(it++);
@@ -49,6 +49,6 @@ int main() {
   numbers[1] = 5;
   numbers.erase(3);
   std::map<int, int> more;
-  numbers.swap(more);
+  std::swap(numbers, more);
   std::cout << entry->first << entry->second;
 }

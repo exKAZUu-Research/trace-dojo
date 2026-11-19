@@ -114,6 +114,7 @@ export interface FunctionInfo {
   owner?: ClassInfo;
   isStatic: boolean;
   isVirtual: boolean;
+  isInline?: boolean;
   isConst: boolean;
   isPure: boolean;
   isConstructor: boolean;
@@ -458,17 +459,34 @@ export function alignOf(type: Type): number {
   }
 }
 
+interface ClassLayout {
+  size: number;
+  align: number;
+  dataSize: number;
+  atOrigin: ReadonlySet<ClassInfo>;
+}
+
+const completedLayouts = new WeakMap<ClassInfo, ClassLayout>();
+
 /** The size and alignment of a class's objects, laid out as the Itanium C++ ABI lays them out. */
-function classLayout(cls: ClassInfo): { size: number; align: number; dataSize: number } {
-  if (cls.library) return { size: cls.library.size, align: cls.library.align, dataSize: cls.library.size };
+function classLayout(cls: ClassInfo): ClassLayout {
+  const cached = completedLayouts.get(cls);
+  if (cached) return cached;
+  const atOrigin = new Set([cls]);
+  if (cls.library) return { size: cls.library.size, align: cls.library.align, dataSize: cls.library.size, atOrigin };
   let offset = cls.isPolymorphic && !cls.base?.isPolymorphic ? 8 : 0;
   let align = offset > 0 ? 8 : 1;
+  let emptyBase: ReadonlySet<ClassInfo> | undefined;
   if (cls.base) {
     const base = classLayout(cls.base);
     // An empty base takes no room (the empty base optimization).
-    if (cls.base.fields.length > 0 || cls.base.isPolymorphic) {
+    if (base.dataSize > 0) {
       // The members of a derived class reuse the tail padding of a base that is not POD.
+      if (offset === 0) for (const type of base.atOrigin) atOrigin.add(type);
       offset = Math.ceil(offset / base.align) * base.align + (isPodForLayout(cls.base) ? base.size : base.dataSize);
+    } else {
+      emptyBase = base.atOrigin;
+      for (const type of emptyBase) atOrigin.add(type);
     }
     align = Math.max(align, base.align);
   }
@@ -476,11 +494,22 @@ function classLayout(cls: ClassInfo): { size: number; align: number; dataSize: n
     // A reference member takes the room of a pointer, though `sizeof` of a reference type is that of its referent.
     const type = field.type.kind === 'reference' ? pointerTo(field.type.to) : field.type;
     const fieldAlign = alignOf(type);
-    offset = Math.ceil(offset / fieldAlign) * fieldAlign + sizeOf(type);
+    const at = Math.ceil(offset / fieldAlign) * fieldAlign;
+    const members = at === 0 ? typesAtOrigin(type) : undefined;
+    const hasConflict = members && emptyBase && [...members].some((member) => emptyBase.has(member));
+    if (members && !hasConflict) for (const member of members) atOrigin.add(member);
+    offset = at + (hasConflict ? fieldAlign : 0) + sizeOf(type);
     align = Math.max(align, fieldAlign);
   }
   const size = Math.ceil(offset / align) * align;
-  return { size: size === 0 ? 1 : size, align, dataSize: offset };
+  const layout = { size: size === 0 ? 1 : size, align, dataSize: offset, atOrigin };
+  if (cls.isComplete) completedLayouts.set(cls, layout);
+  return layout;
+}
+
+function typesAtOrigin(type: Type): ReadonlySet<ClassInfo> | undefined {
+  if (type.kind === 'class') return classLayout(type.cls).atOrigin;
+  if (type.kind === 'array' && (type.length ?? 0) > 0) return typesAtOrigin(type.of);
 }
 
 /** Whether the ABI lays out a class as POD, which arm64 macOS decides by the C++11 definition ([class]p10). */

@@ -2,7 +2,7 @@ import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import type { Eval, Frame } from '../runtime';
 import type { Syntax } from '../syntax';
-import type { Type } from '../types';
+import type { FunctionInfo, Type } from '../types';
 import type { Value } from '../values';
 
 export type IteratorCategory = 'forward' | 'bidirectional' | 'randomAccess';
@@ -47,6 +47,7 @@ export interface LibraryClass {
   isReverse?: boolean;
   /** The category of an iterator, which decides its operators and the algorithms that accept it. */
   iteratorCategory?: IteratorCategory;
+  appendMethod?: FunctionInfo;
   /** Whether a program's class may derive from this one, as from the exception classes. */
   isInheritable?: boolean;
 }

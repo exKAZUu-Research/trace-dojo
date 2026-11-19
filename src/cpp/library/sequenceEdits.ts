@@ -46,7 +46,7 @@ export class SequenceEditor {
     if (this.kind === 'vector' && length + count > self.capacity) {
       const made = Array.from({ length: count }, make);
       this.reallocate(frame, self, recommend(self, length + count), length, made);
-    } else for (let index = 0; index < count; index++) self.items.push(make());
+    } else for (let index = 0; index < count; index++) self.append(make());
   }
 
   resize(frame: Frame, self: SequenceValue, length: number, make: () => Value): void {
@@ -127,9 +127,12 @@ export class SequenceEditor {
     } else if (this.kind === 'deque' && from <= Math.floor((items.length - count) / 2)) {
       // A deque shifts the elements before the erased ones when they are fewer.
       for (let index = from - 1; index >= 0; index--) this.assignAt(frame, items, index + count, items[index]);
-      this.destroy(frame, items.splice(0, count));
+      if (from !== 0) self.editPositions(from, count, 0);
+      if (from === 0) this.destroy(frame, self.splice(0, count));
+      else this.destroy(frame, items.splice(0, count));
     } else {
       for (let index = to; index < items.length; index++) this.assignAt(frame, items, index - count, items[index]);
+      if (this.kind === 'deque' && to < items.length) self.editPositions(from, count, 0);
       this.truncate(frame, self, items.length - count);
     }
   }
@@ -140,12 +143,12 @@ export class SequenceEditor {
     if (this.kind === 'vector' && values.length > self.capacity) {
       this.truncate(frame, self, 0);
       self.capacity = values.length;
-      for (const value of values) self.items.push(source.construct(frame, value));
+      for (const value of values) self.append(source.construct(frame, value));
       return;
     }
     const assigned = Math.min(values.length, self.items.length);
     for (let index = 0; index < assigned; index++) this.assignFrom(frame, self.items, index, source, values[index]);
-    for (let index = assigned; index < values.length; index++) self.items.push(source.construct(frame, values[index]));
+    for (let index = assigned; index < values.length; index++) self.append(source.construct(frame, values[index]));
     this.truncate(frame, self, values.length);
   }
 
@@ -154,12 +157,12 @@ export class SequenceEditor {
     if (this.kind === 'vector' && count > self.capacity) {
       this.truncate(frame, self, 0);
       self.capacity = count;
-      for (let index = 0; index < count; index++) self.items.push(this.ops.copy(frame, value.read()));
+      for (let index = 0; index < count; index++) self.append(this.ops.copy(frame, value.read()));
       return;
     }
     const assigned = Math.min(count, self.items.length);
     for (let index = 0; index < assigned; index++) this.assignAt(frame, self.items, index, value.read());
-    for (let index = assigned; index < count; index++) self.items.push(this.ops.copy(frame, value.read()));
+    for (let index = assigned; index < count; index++) self.append(this.ops.copy(frame, value.read()));
     this.truncate(frame, self, count);
   }
 
@@ -263,10 +266,11 @@ export class SequenceEditor {
     const length = items.length;
     if (at < length - at) {
       if (at === 0) {
-        items.unshift(make());
+        self.splice(0, 0, make());
         return;
       }
       const temporary = make();
+      self.editPositions(at, 0, 1);
       items.unshift(this.ops.copy(frame, items[0]));
       for (let index = 1; index < at; index++) this.assignAt(frame, items, index, items[index + 1]);
       this.assignAt(frame, items, at, temporary);
@@ -274,10 +278,11 @@ export class SequenceEditor {
       return;
     }
     if (at === length) {
-      items.push(make());
+      self.append(make());
       return;
     }
     const temporary = make();
+    self.editPositions(at, 0, 1);
     items.push(this.ops.copy(frame, items[length - 1]));
     for (let index = length - 2; index >= at; index--) this.assignAt(frame, items, index + 1, items[index]);
     this.assignAt(frame, items, at, temporary);
@@ -309,6 +314,7 @@ export class SequenceEditor {
       for (let index = moved; index < oldBegin + at; index++) this.assignAt(frame, cells, begin++, cells[index]);
       for (let index = 0; index < remaining; index++) this.assignAt(frame, cells, begin + index, followed.read());
     }
+    self.editPositions(at, 0, count);
     self.items = cells.slice(first);
   }
 
@@ -334,6 +340,7 @@ export class SequenceEditor {
       for (let index = 0; index < remaining; index++)
         this.assignAt(frame, cells, end - remaining + index, followed.read());
     }
+    self.editPositions(at, 0, count);
     self.items = cells;
   }
 
@@ -360,6 +367,7 @@ export class SequenceEditor {
       for (let index = moved; index < oldBegin + at; index++) this.assignAt(frame, cells, begin++, cells[index]);
       for (let index = middle; index < count; index++) this.assignFrom(frame, cells, begin++, source, values[index]);
     }
+    self.editPositions(at, 0, count);
     self.items = cells.slice(first);
   }
 
@@ -380,6 +388,7 @@ export class SequenceEditor {
       for (let index = moved; index > at;) this.assignAt(frame, cells, --end, cells[--index]);
       for (let index = middle; index > 0;) this.assignFrom(frame, cells, --end, source, values[--index]);
     }
+    self.editPositions(at, 0, count);
     self.items = cells;
   }
 }

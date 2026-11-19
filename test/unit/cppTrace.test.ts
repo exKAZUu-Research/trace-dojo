@@ -161,8 +161,14 @@ test.each([
   ['a temporary object', 'int* p = A{}.data(); return *p;', '有効期間'],
   ['a by-value parameter', 'save(A{}); return *saved;', '有効期間'],
   ['a string buffer', 'const char* p; { std::string s = "c"; p = s.c_str(); } return *p;', '有効期間'],
+  [
+    'a removed vector element',
+    'std::vector<A> values(1); int* p = values[0].cells; values.pop_back(); return *p;',
+    '有効期間',
+  ],
 ])('rejects a pointer into %s after its lifetime ends', (_, body, message) => {
   const program = `#include <string>
+#include <vector>
 struct A {
   int cells[1] = {5};
   int* data() { return cells; }

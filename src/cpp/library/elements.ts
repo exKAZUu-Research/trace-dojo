@@ -3,7 +3,7 @@ import type { ExpressionCompiler } from '../expressionCompiler';
 import { destroyTemporaries, zeroOf } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import { type ClassInfo, type FunctionInfo, isArithmetic, type Type, typeName } from '../types';
-import { type ArrayStore, Box, CObject, FunctionRef, Ptr, Store, UNINIT, type Value } from '../values';
+import { type ArrayStore, Box, CObject, endLifetime, FunctionRef, Ptr, Store, UNINIT, type Value } from '../values';
 import { SequenceValue } from './containerValues';
 import { StringValue } from './string';
 
@@ -41,7 +41,10 @@ export function elementOperations(compiler: ExpressionCompiler, type: Type, row:
         return operations?.copy(frame, value) ?? value;
       },
       assign: (frame, target, source) => operations?.assign(frame, target, source) ?? target,
-      destroy: operations?.destroy,
+      destroy: (frame, value) => {
+        operations?.destroy?.(frame, value);
+        endLifetime(value);
+      },
       hasEffects:
         !cls.library && (operations?.destroy !== undefined || cls.constructors.some((ctor) => isUserCopy(ctor, cls))),
     };

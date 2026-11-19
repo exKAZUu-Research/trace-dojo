@@ -193,9 +193,9 @@ class HashPosition extends Ptr {
     return super.equals(other);
   }
 
-  override offset(delta: number): Ptr {
+  override offset(delta: number, asIterator = false): Ptr {
     if (delta === 1) return this.store.iterator(this.entry().next);
-    return super.offset(delta);
+    return super.offset(delta, asIterator);
   }
 
   override element(isReverse: boolean): Ptr {

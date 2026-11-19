@@ -4,7 +4,7 @@ import { CompileError } from '../../interpreter/diagnostics';
 import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
-import { destroyTemporaries, makeEach } from '../objectCompiler';
+import { destroyTemporaries, invoke, makeEach } from '../objectCompiler';
 import type { Frame } from '../runtime';
 import {
   BOOL,
@@ -15,8 +15,10 @@ import {
   isConstType,
   isInteger,
   LONG,
+  nonReference,
   PTRDIFF_T,
   referenceTo,
+  sameType,
   SIZE_T,
   type Type,
   typeName,
@@ -26,7 +28,6 @@ import {
 } from '../types';
 import { CObject, Ptr, type Store, type Value } from '../values';
 import { pairClass } from './associative';
-import type { SequenceValue } from './containerValues';
 import {
   comparatorOf,
   type ElementOperations,
@@ -34,6 +35,7 @@ import {
   equalTo,
   functionCallback,
   lessThan,
+  locationOf,
   moveValue,
   truthy,
 } from './elements';
@@ -42,7 +44,6 @@ import type { IteratorCategory } from './libraryClass';
 import type { EngineValue } from './random';
 import { uniformInteger } from './random';
 import type { Library } from './registry';
-import { StringValue } from './string';
 import { constRef, generic, native } from './support';
 
 /** What an argument's type tells of an iterator: the element it designates, its category, and whether it goes backward. */
@@ -51,6 +52,7 @@ interface IteratorInfo {
   category: IteratorCategory;
   isReverse: boolean;
   isOutput?: boolean;
+  appendMethod?: FunctionInfo;
 }
 
 function iteratorInfo(type: Type): IteratorInfo | undefined {
@@ -64,7 +66,13 @@ function iteratorInfo(type: Type): IteratorInfo | undefined {
     };
   }
   if (type.kind === 'class' && type.cls.library?.kind === 'back_insert_iterator') {
-    return { element: type.cls.library.args[0], category: 'forward', isReverse: false, isOutput: true };
+    return {
+      element: type.cls.library.args[0],
+      category: 'forward',
+      isReverse: false,
+      isOutput: true,
+      appendMethod: type.cls.library.appendMethod,
+    };
   }
   return undefined;
 }
@@ -77,7 +85,8 @@ class Range {
   constructor(
     readonly first: Ptr,
     last: Ptr,
-    readonly isReverse: boolean
+    readonly isReverse: boolean,
+    private readonly write?: { frame: Frame; ops: ElementOperations }
   ) {
     const store = first.target();
     if (last.store !== store) throw new CppRuntimeError('invalidRange');
@@ -100,18 +109,33 @@ class Range {
   }
 
   set(position: number, value: Value): void {
-    this.store.set(this.index(position), value);
+    if (this.write) assignElement(this.write.frame, this.location(position), this.write.ops, value);
+    else this.store.set(this.index(position), value);
+  }
+
+  take(position: number): Value {
+    const value = this.get(position);
+    if (!this.write) return value;
+    const { frame, ops } = this.write;
+    const object = ops.copy(frame, value);
+    if (ops.destroy) frame.temporaries.push({ object, destroy: ops.destroy });
+    return object;
   }
 
   swap(a: number, b: number): void {
-    const value = this.get(a);
-    this.set(a, this.get(b));
-    this.set(b, value);
+    if (a === b) return;
+    if (this.write) {
+      swapElements(this.write.frame, this.location(a), this.location(b), this.write.ops);
+    } else {
+      const value = this.get(a);
+      this.set(a, this.get(b));
+      this.set(b, value);
+    }
   }
 
   /** The iterator at a position, which may be one past the last element. */
   iterator(position: number): Ptr {
-    return this.store.location(this.isReverse ? this.first.index - position : this.first.index + position);
+    return this.store.iteratorLocation(this.isReverse ? this.first.index - position : this.first.index + position);
   }
 }
 
@@ -123,15 +147,23 @@ class Output {
     private readonly start: Ptr,
     private readonly info: IteratorInfo,
     private readonly frame: Frame,
-    private readonly operations: ElementOperations
+    private readonly operations: ElementOperations,
+    private readonly prepare?: ReturnType<typeof assignmentSource>
   ) {}
 
   write(value: Value): void {
-    if (this.info.isOutput) {
-      const target = this.start.read();
-      this.frame.runtime.reserve(1);
-      if (target instanceof StringValue) target.bytes += String.fromCodePoint(Number(value) & 0xff);
-      else (target as SequenceValue).items.push(this.operations.copy(this.frame, value));
+    if (this.prepare) {
+      this.prepare(this.frame, value, (converted) => this.writeConverted(converted));
+      return;
+    }
+    this.writeConverted(value);
+  }
+
+  private writeConverted(value: Value): void {
+    const append = this.info.appendMethod;
+    if (append) {
+      const argument = append.params[0].type.kind === 'reference' ? locationOf(value) : value;
+      invoke(this.frame, append, [argument], this.start, append.row);
       return;
     }
     const index = this.info.isReverse ? this.start.index - 1 - this.position : this.start.index + this.position;
@@ -236,8 +268,9 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
           args[0].row,
           `${typeName(info.element)} の値は < で比べられません。比べ方を表す関数を渡してください。`
         );
+      const ops = elementOperations(compiler(), unqualified(info.element), args[0].row);
       return native(name, params(args), VOID, ([first, last], { frame }) => {
-        const values = range(first, last, info);
+        const values = mutableRange(first, last, info, frame, ops);
         frame.runtime.spend(values.length);
         if (name === 'sort') introsort(values, less(frame));
         else stableSort(values, less(frame));
@@ -249,8 +282,9 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const info = writableRangeAt(args, 0);
     if (!info || args.length !== 2) return;
     checkCategory('reverse', info, 'bidirectional', args[0].row);
-    return native('reverse', params(args), VOID, ([first, last]) => {
-      const values = range(first, last, info);
+    const ops = elementOperations(compiler(), unqualified(info.element), args[0].row);
+    return native('reverse', params(args), VOID, ([first, last], { frame }) => {
+      const values = mutableRange(first, last, info, frame, ops);
       for (let i = 0, j = values.length - 1; i < j; i++, j--) values.swap(i, j);
       return;
     });
@@ -262,8 +296,9 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       checkCategory(name, info, 'bidirectional', args[0].row);
       const less = lessOf(args, 2, info.element);
       if (!less) return;
+      const ops = elementOperations(compiler(), unqualified(info.element), args[0].row);
       return native(name, params(args), BOOL, ([first, last], { frame }) => {
-        const values = range(first, last, info);
+        const values = mutableRange(first, last, info, frame, ops);
         const compare = less(frame);
         const ordered = name === 'next_permutation' ? compare : (a: Value, b: Value): boolean => compare(b, a);
         return permute(values, ordered) ? 1 : 0;
@@ -275,21 +310,18 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     if (!info || args.length !== 3 || args[2].type.kind !== 'class' || args[2].type.cls.library?.kind !== 'engine')
       return;
     checkCategory('shuffle', info, 'randomAccess', args[0].row);
-    return native(
-      'shuffle',
-      [...params(args).slice(0, 2), referenceTo(args[2].type)],
-      VOID,
-      ([first, last, engine]) => {
-        const values = range(first, last, info);
-        const generator = (engine as Ptr).read() as EngineValue;
-        // libc++'s shuffle draws with uniform_int_distribution<ptrdiff_t>.
-        for (let at = 0, remaining = values.length - 1; at < values.length - 1; at++, remaining--) {
-          const offset = Number(uniformInteger(generator, 0n, BigInt(remaining), 64));
-          if (offset !== 0) values.swap(at, at + offset);
-        }
-        return;
+    const engineType = args[2].isLvalue ? referenceTo(args[2].type) : args[2].type;
+    const ops = elementOperations(compiler(), unqualified(info.element), args[0].row);
+    return native('shuffle', [...params(args).slice(0, 2), engineType], VOID, ([first, last, engine], { frame }) => {
+      const values = mutableRange(first, last, info, frame, ops);
+      const generator = readArg(engine, engineType) as EngineValue;
+      // libc++'s shuffle draws with uniform_int_distribution<ptrdiff_t>.
+      for (let at = 0, remaining = values.length - 1; at < values.length - 1; at++, remaining--) {
+        const offset = Number(uniformInteger(generator, 0n, BigInt(remaining), 64));
+        if (offset !== 0) values.swap(at, at + offset);
       }
-    );
+      return;
+    });
   });
 
   // Searching and counting ------------------------------------------------------------------------------------------
@@ -318,7 +350,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('find', (args) => {
     const info = rangeAt(args, 0);
     if (!info || args.length !== 3) return;
-    const equal = valueEquality(info.element, args[2]);
+    const equal = valueEquality(info.element, args[2].type);
     if (!equal) return;
     return native('find', params(args), unqualified(args[0].type), ([first, last, value]) => {
       const values = range(first, last, info);
@@ -346,7 +378,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('count', (args) => {
     const info = rangeAt(args, 0);
     if (!info || args.length !== 3) return;
-    const equal = valueEquality(info.element, args[2]);
+    const equal = valueEquality(info.element, args[2].type);
     if (!equal) return;
     return native('count', params(args), PTRDIFF_T, ([first, last, value]) => {
       const values = range(first, last, info);
@@ -433,8 +465,8 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     // equal(first1, last1, first2[, last2][, pred]): a fourth argument is the end of the second range or a predicate.
     const hasEnd = args.length === 5 || (args.length === 4 && rangeAt(args, 2) !== undefined);
     const predicateArg = args[hasEnd ? 4 : 3];
-    const predicate = predicateArg ? predicateOf(predicateArg, info.element, 2) : undefined;
-    const equal = equalTo(unqualified(info.element));
+    const predicate = predicateArg ? predicateOf(predicateArg, [info.element, other.element]) : undefined;
+    const equal = valueEquality(info.element, other.element);
     if (predicateArg ? !predicate : !equal) return;
     const same = (frame: Frame, a: Value, b: Value): boolean =>
       predicate ? truthy(predicate(frame, a, b)) : (equal as (x: Value, y: Value) => boolean)(a, b);
@@ -507,10 +539,11 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const info = writableRangeAt(args, 0);
       if (!info || args.length !== 4) return;
       const predicate = name === 'replace_if' ? predicateOf(args[2], info.element) : undefined;
-      const equal = name === 'replace' ? valueEquality(info.element, args[2]) : undefined;
+      const equal = name === 'replace' ? valueEquality(info.element, args[2].type) : undefined;
       if (!predicate && !equal) return;
       const ops = elementOperations(compiler(), unqualified(info.element), args[0].row);
       const types = params(args);
+      const convert = assignmentSource(compiler(), nonReference(types[3]), info.element, args[3].row);
       return native(name, types, VOID, ([first, last, old, replacement], { frame }) => {
         const values = range(first, last, info);
         const target = name === 'replace' ? readArg(old, types[2]) : undefined;
@@ -518,7 +551,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         for (let index = 0; index < values.length; index++) {
           const item = values.get(index);
           if (predicate ? truthy(predicate(frame, item)) : (equal as (a: Value, b: Value) => boolean)(item, target))
-            assignElement(frame, values.location(index), ops, value);
+            convert(frame, value, (converted) => assignElement(frame, values.location(index), ops, converted));
         }
         return;
       });
@@ -531,7 +564,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       if (name === 'unique' ? args.length > 3 : args.length !== 3) return;
       let keep: (frame: Frame, item: Value, previous: Value | undefined) => boolean;
       if (name === 'remove') {
-        const equal = valueEquality(info.element, args[2]);
+        const equal = valueEquality(info.element, args[2].type);
         if (!equal) return;
         const types = params(args);
         keep = (frame, item) => !equal(item, readArg(frame.pending.at(-1) as Ptr, types[2]));
@@ -573,10 +606,11 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('rotate', (args) => {
     const info = writableRangeAt(args, 0);
     if (!info || args.length !== 3) return;
-    return native('rotate', params(args), unqualified(args[0].type), ([first, middle, last]) => {
-      const values = range(first, last, info);
+    const ops = elementOperations(compiler(), unqualified(info.element), args[0].row);
+    return native('rotate', params(args), unqualified(args[0].type), ([first, middle, last], { frame }) => {
+      const values = mutableRange(first, last, info, frame, ops);
       const split = range(first, middle, info).length;
-      const items = Array.from({ length: values.length }, (_, index) => values.get(index));
+      const items = Array.from({ length: values.length }, (_, index) => values.take(index));
       const rotated = [...items.slice(split), ...items.slice(0, split)];
       for (const [index, item] of rotated.entries()) values.set(index, item);
       return values.iterator(values.length - split);
@@ -592,10 +626,13 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     )
       return;
     if (type.kind === 'class' && type.cls.isNoncopyable) return;
+    const member = type.kind === 'class' && type.cls.library ? type.cls.methods.get('swap')?.[0] : undefined;
     return native('swap', [referenceTo(type), referenceTo(type)], VOID, ([a, b], { frame }) => {
       const x = a as Ptr;
       const y = b as Ptr;
-      if (type.kind === 'class') {
+      if (member) {
+        invoke(frame, member, [y], x, args[0].row);
+      } else if (type.kind === 'class') {
         const ops = type.cls.operations;
         const copy = ops?.copy(frame, x.read()) as Value;
         const first = ops?.assign(frame, x.read(), y.read());
@@ -614,14 +651,10 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
   define('iter_swap', (args) => {
     const a = outputOf(args[0]);
     const b = outputOf(args[1]);
-    if (!a || !b || a.isOutput || b.isOutput || args.length !== 2) return;
-    return native('iter_swap', params(args), VOID, ([x, y]) => {
-      const p = elementLocation(x as Ptr, a.isReverse);
-      const q = elementLocation(y as Ptr, b.isReverse);
-      const value = p.read();
-      p.write(q.read());
-      q.write(value);
-      return;
+    if (!a || !b || a.isOutput || b.isOutput || args.length !== 2 || !sameType(a.element, b.element)) return;
+    const ops = elementOperations(compiler(), a.element, args[0].row);
+    return native('iter_swap', params(args), VOID, ([x, y], { frame }) => {
+      swapElements(frame, elementLocation(x as Ptr, a.isReverse), elementLocation(y as Ptr, b.isReverse), ops);
     });
   });
 
@@ -634,9 +667,10 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const predicate = name === 'copy_if' ? predicateOf(args[3], info.element) : undefined;
       if (name === 'copy_if' && !predicate) return;
       const ops = elementOperations(compiler(), unqualified(output.element), args[2].row);
+      const convert = assignmentSource(compiler(), info.element, output.element, args[2].row);
       return native(name, params(args), unqualified(args[2].type), ([first, last, start], { frame }) => {
         const values = range(first, last, info);
-        const out = new Output(start as Ptr, output, frame, ops);
+        const out = new Output(start as Ptr, output, frame, ops, convert);
         for (let index = 0; index < values.length; index++) {
           const item = values.get(index);
           if (!predicate || truthy(predicate(frame, item))) out.write(item);
@@ -652,7 +686,12 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const output = outputOf(args[isBinary ? 3 : 2]);
     const second = isBinary ? iteratorInfo(unqualified(args[2].type)) : undefined;
     if (!output || (isBinary && !second)) return;
-    const operation = predicateOf(args[isBinary ? 4 : 3], second ? [info.element, second.element] : info.element);
+    const operation = compileOperation(
+      compiler(),
+      args[isBinary ? 4 : 3],
+      second ? [info.element, second.element] : [info.element],
+      unqualified(output.element)
+    )?.run;
     if (!operation) return;
     const ops = elementOperations(compiler(), unqualified(output.element), args[0].row);
     return native('transform', params(args), unqualified(args[isBinary ? 3 : 2].type), (values, { frame }) => {
@@ -696,7 +735,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       initial.type.kind === 'array' ? { kind: 'pointer', to: initial.type.of } : initial.type
     );
     const combine = args[3]
-      ? predicateOf(args[3], [sumType, info.element])
+      ? compileOperation(compiler(), args[3], [sumType, info.element], sumType)?.run
       : accumulateStep(compiler(), sumType, info.element, initial.row);
     if (!combine) return;
     return native(
@@ -717,13 +756,15 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     if (!info || !other || (args.length !== 4 && args.length !== 6)) return;
     const sumType = unqualified(args[3].type);
     // inner_product(first1, last1, first2, init, op1, op2) sums with op1 the products op2 makes.
+    const explicitProduct =
+      args.length === 6 ? compileOperation(compiler(), args[5], [info.element, other.element]) : undefined;
     const product =
       args.length === 6
-        ? predicateOf(args[5], [info.element, other.element])
+        ? explicitProduct?.run
         : accumulateStep(compiler(), unqualified(info.element), other.element, args[0].row, '*');
     const add =
       args.length === 6
-        ? predicateOf(args[4], [sumType, sumType])
+        ? explicitProduct && compileOperation(compiler(), args[4], [sumType, explicitProduct.type], sumType)?.run
         : product && accumulateStep(compiler(), sumType, unqualified(info.element), args[0].row);
     if (!product || !add) return;
     return native(
@@ -745,13 +786,14 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     const output = outputOf(args[2]);
     if (!info || !output || (args.length !== 3 && args.length !== 4)) return;
     const add = args[3]
-      ? predicateOf(args[3], info.element, 2)
+      ? compileOperation(compiler(), args[3], [info.element, info.element], unqualified(info.element))?.run
       : accumulateStep(compiler(), unqualified(info.element), info.element, args[0].row);
     if (!add) return;
     const ops = elementOperations(compiler(), unqualified(output.element), args[2].row);
+    const convert = assignmentSource(compiler(), info.element, output.element, args[2].row);
     return native('partial_sum', params(args), unqualified(args[2].type), ([first, last, start], { frame }) => {
       const values = range(first, last, info);
-      const out = new Output(start as Ptr, output, frame, ops);
+      const out = new Output(start as Ptr, output, frame, ops, convert);
       let sum: Value | undefined;
       for (let index = 0; index < values.length; index++) {
         sum = sum === undefined ? values.get(index) : (add(frame, sum, values.get(index)) as Value);
@@ -888,7 +930,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         ([it, count]) => {
           const steps = count === undefined ? 1 : Number(count);
           const delta = (name === 'next' ? steps : -steps) * (info.isReverse ? -1 : 1);
-          return (it as Ptr).offset(delta);
+          return (it as Ptr).offset(delta, true);
         },
         { optional: 1 }
       );
@@ -899,7 +941,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     if (!info || args.length !== 2 || !args[0].isLvalue) return;
     return native('advance', [referenceTo(unqualified(args[0].type)), LONG], VOID, ([it, count]) => {
       const location = it as Ptr;
-      location.write((location.read() as Ptr).offset(Number(count) * (info.isReverse ? -1 : 1)));
+      location.write((location.read() as Ptr).offset(Number(count) * (info.isReverse ? -1 : 1), true));
       return;
     });
   });
@@ -919,7 +961,9 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       return;
     const kind = container.type.cls.library?.kind;
     if (kind !== 'vector' && kind !== 'deque' && kind !== 'list' && kind !== 'string') return;
-    const cls = backInserter(library, container.type);
+    const append = container.type.cls.methods.get('push_back')?.[0];
+    if (!append) return;
+    const cls = backInserter(library, container.type, append);
     return native('back_inserter', [referenceTo(container.type)], classType(cls), ([location]) => location);
   });
   return functions;
@@ -955,6 +999,25 @@ const params = (args: Expr[]): Type[] =>
 const range = (first: unknown, last: unknown, info: IteratorInfo): Range =>
   new Range(first as Ptr, last as Ptr, info.isReverse);
 
+function mutableRange(first: unknown, last: unknown, info: IteratorInfo, frame: Frame, ops: ElementOperations): Range {
+  const write = info.element.kind === 'class' ? { frame, ops } : undefined;
+  return new Range(first as Ptr, last as Ptr, info.isReverse, write);
+}
+
+function swapElements(frame: Frame, a: Ptr, b: Ptr, ops: ElementOperations): void {
+  if (a.equals(b)) return;
+  const value = ops.copy(frame, a.read());
+  const mark = frame.pending.length;
+  frame.pending.push(value);
+  try {
+    assignElement(frame, a, ops, b.read());
+    assignElement(frame, b, ops, value);
+  } finally {
+    frame.pending.length = mark;
+    ops.destroy?.(frame, value);
+  }
+}
+
 const readArg = (arg: unknown, type: Type): Value => (type.kind === 'reference' ? (arg as Ptr).read() : (arg as Value));
 
 const tryCompile = <T>(make: () => T): T | undefined => {
@@ -972,14 +1035,14 @@ const outputOf = (arg: Expr | undefined): IteratorInfo | undefined => {
 };
 
 /** `std::back_insert_iterator<Container>`, an output iterator that appends what an algorithm writes. */
-function backInserter(library: Library, container: Type): ClassInfo {
+function backInserter(library: Library, container: Type, appendMethod: FunctionInfo): ClassInfo {
   const key = `back_insert_iterator<${typeName(container)}#${container.kind === 'class' ? container.cls.id : ''}>`;
   const cached = library.instances.get(key);
   if (cached) return cached;
   const cls = new ClassInfo(`std::back_insert_iterator<${typeName(container)}>`, 'class');
   cls.isComplete = true;
-  const element = container.kind === 'class' ? (container.cls.library?.args[0] ?? VOID) : VOID;
-  cls.library = { kind: 'back_insert_iterator', args: [element], size: 8, align: 8 };
+  const element = unqualified(nonReference(appendMethod.params[0].type));
+  cls.library = { kind: 'back_insert_iterator', args: [element], size: 8, align: 8, appendMethod };
   cls.operations = { copy: (_frame, value) => value, assign: (_frame, _target, source) => source };
   library.instances.set(key, cls);
   return cls;
@@ -999,9 +1062,9 @@ function commonDeduced(a: Expr, b: Expr): Type | undefined {
 }
 
 /** How `==` compares an element with an argument, after converting the argument to the element's type. */
-function valueEquality(element: Type, arg: Expr): ((a: Value, b: Value) => boolean) | undefined {
+function valueEquality(element: Type, compared: Type): ((a: Value, b: Value) => boolean) | undefined {
   const type = unqualified(element);
-  const argType = unqualified(arg.type);
+  const argType = unqualified(compared);
   if (isArithmetic(type) && isArithmetic(argType)) {
     const promoted = commonType(type, argType);
     return (a, b) => convertScalar(a as Scalar, type, promoted) === convertScalar(b as Scalar, argType, promoted);
@@ -1020,6 +1083,64 @@ function readBytes(pointer: Ptr): string {
     if (value === 0) return bytes;
     bytes += String.fromCodePoint(value & 0xff);
   }
+}
+
+function assignmentSource(
+  compiler: ExpressionCompiler,
+  source: Type,
+  destination: Type,
+  row: number
+): (frame: Frame, value: Value, use: (value: Value) => void) => void {
+  if (sameType(source, destination, false)) return (_frame, value, use) => use(value);
+  const active: Ptr[] = [];
+  const value: Expr = { type: source, isLvalue: true, row, run: () => active.at(-1) };
+  const convert = compiler.convert(value, constRef(destination), row).run;
+  return (frame, item, use) => {
+    const mark = frame.temporaries.length;
+    active.push(locationOf(item));
+    try {
+      use((convert(frame) as Ptr).read());
+    } finally {
+      active.pop();
+      destroyTemporaries(frame, mark);
+    }
+  };
+}
+
+function compileOperation(
+  compiler: ExpressionCompiler,
+  operation: Expr,
+  types: Type[],
+  resultType?: Type
+): { type: Type; run: (frame: Frame, ...values: Value[]) => Value } | undefined {
+  const type = operation.type;
+  if (!operation.functions && !(type.kind === 'class' && type.cls.library?.kind === 'functor')) return;
+  const calls: Ptr[][] = [];
+  const { row } = operation;
+  const args: Expr[] = types.map((arg, index) => ({
+    type: arg,
+    isLvalue: true,
+    row,
+    run: () => calls.at(-1)?.[index],
+  }));
+  const callee: Expr = operation.functions ? operation : { ...operation, run: () => {} };
+  const result = compiler.callWith(callee, args, row);
+  const evaluate = resultType
+    ? compiler.copyInitializer(resultType, result, row, false)
+    : (compiler.rvalue(result).run as (frame: Frame) => Value);
+  return {
+    type: resultType ?? result.type,
+    run: (frame, ...values) => {
+      const mark = frame.temporaries.length;
+      calls.push(values.map(locationOf));
+      try {
+        return evaluate(frame);
+      } finally {
+        calls.pop();
+        destroyTemporaries(frame, mark);
+      }
+    },
+  };
 }
 
 /** The step of `std::accumulate`: `sum + element` (or another operator) converted back to the sum's type. */
@@ -1182,7 +1303,7 @@ function insertionSort(values: Range, first: number, last: number, less: Less, g
   for (let i = first + 1; i !== last; i++) {
     let j = i - 1;
     if (less(values.get(i), values.get(j))) {
-      const value = values.get(i);
+      const value = values.take(i);
       let k = j;
       j = i;
       do {
@@ -1222,7 +1343,7 @@ function insertionSortIncomplete(values: Range, first: number, last: number, les
   let count = 0;
   for (let i = j + 1; i !== last; i++) {
     if (less(values.get(i), values.get(j))) {
-      const value = values.get(i);
+      const value = values.take(i);
       let k = j;
       j = i;
       do {
@@ -1241,7 +1362,7 @@ function partitionWithEqualsOnRight(values: Range, start: number, end: number, l
   const begin = start;
   let first = start;
   let last = end;
-  const pivot = values.get(first);
+  const pivot = values.take(first);
   do first++;
   while (less(values.get(first), pivot));
   if (begin === first - 1) {
@@ -1267,7 +1388,7 @@ function partitionWithEqualsOnLeft(values: Range, start: number, end: number, le
   const begin = start;
   let first = start;
   let last = end;
-  const pivot = values.get(first);
+  const pivot = values.take(first);
   if (less(pivot, values.get(last - 1))) {
     do first++;
     while (!less(pivot, values.get(first)));
@@ -1300,7 +1421,7 @@ function heapSort(values: Range, first: number, last: number, less: Less): void 
     child = 2 * child + 1;
     if (child + 1 < size && less(values.get(first + child), values.get(first + child + 1))) child++;
     if (less(values.get(first + child), values.get(first + start))) return;
-    const top = values.get(first + start);
+    const top = values.take(first + start);
     let hole = start;
     do {
       values.set(first + hole, values.get(first + child));
@@ -1408,7 +1529,7 @@ function sortPart(
 
 /** A stable merge sort, whose result `std::stable_sort` guarantees. */
 function stableSort(values: Range, less: Less): void {
-  const items = Array.from({ length: values.length }, (_, index) => values.get(index));
+  const items = Array.from({ length: values.length }, (_, index) => values.take(index));
   const merge = (list: Value[]): Value[] => {
     if (list.length <= 1) return list;
     const middle = list.length >> 1;

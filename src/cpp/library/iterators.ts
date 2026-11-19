@@ -87,7 +87,7 @@ export function elementLocation(pointer: Ptr, isReverse: boolean): Ptr {
 /** Moves an iterator by `delta` elements, within the sequence and one past its end. */
 export function moveIterator(pointer: Ptr, delta: number, isReverse: boolean): Ptr {
   try {
-    return pointer.offset(isReverse ? -delta : delta);
+    return pointer.offset(isReverse ? -delta : delta, true);
   } catch (error) {
     if (error instanceof CppRuntimeError && error.kind === 'pointerOutOfRange')
       throw new CppRuntimeError('invalidIterator');

@@ -86,7 +86,12 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
   const outOfRange = (frame: Frame): never =>
     throwLibrary(frame, library.exception('out_of_range'), kind === 'array' ? 'array::at' : kind);
   const make = (items: Value[]): SequenceValue => {
-    const value = new SequenceValue(items, element, kind !== 'list');
+    const value = new SequenceValue(
+      items,
+      element,
+      kind !== 'list',
+      kind === 'list' || kind === 'deque' ? kind : undefined
+    );
     value.capacity = items.length;
     return value;
   };
@@ -382,28 +387,44 @@ function sequenceMethods(
       },
       { isConst }
     );
-    method('begin', [], isConst ? types.constIterator : types.iterator, (self) => self.location(0), { isConst });
-    method('end', [], isConst ? types.constIterator : types.iterator, (self) => self.location(self.items.length), {
+    method('begin', [], isConst ? types.constIterator : types.iterator, (self) => self.iteratorLocation(0), {
       isConst,
     });
+    method(
+      'end',
+      [],
+      isConst ? types.constIterator : types.iterator,
+      (self) => self.iteratorLocation(self.items.length),
+      {
+        isConst,
+      }
+    );
     method(
       'rbegin',
       [],
       isConst ? types.constReverseIterator : types.reverseIterator,
-      (self) => self.location(self.items.length),
+      (self) => self.iteratorLocation(self.items.length),
       { isConst }
     );
-    method('rend', [], isConst ? types.constReverseIterator : types.reverseIterator, (self) => self.location(0), {
-      isConst,
-    });
+    method(
+      'rend',
+      [],
+      isConst ? types.constReverseIterator : types.reverseIterator,
+      (self) => self.iteratorLocation(0),
+      {
+        isConst,
+      }
+    );
     if (kind === 'vector' || kind === 'array') {
       method('data', [], pointerTo(isConst ? withConst(element) : element), (self) => self.location(0), { isConst });
     }
   }
-  method('cbegin', [], types.constIterator, (self) => self.location(0), { isConst: true });
-  method('cend', [], types.constIterator, (self) => self.location(self.items.length), { isConst: true });
-  method('crbegin', [], types.constReverseIterator, (self) => self.location(self.items.length), { isConst: true });
-  method('crend', [], types.constReverseIterator, (self) => self.location(0), { isConst: true });
+  method('cbegin', [], types.constIterator, (self) => self.iteratorLocation(0), { isConst: true });
+  method('cend', [], types.constIterator, (self) => self.iteratorLocation(self.items.length), { isConst: true });
+  method('crbegin', [], types.constReverseIterator, (self) => self.iteratorLocation(self.items.length), {
+    isConst: true,
+  });
+  method('crend', [], types.constReverseIterator, (self) => self.iteratorLocation(0), { isConst: true });
   method('swap', [referenceTo(type)], VOID, (self, [other]) => {
     const target = (other as Ptr).read() as SequenceValue;
     self.swapItems(target);
@@ -458,7 +479,7 @@ function sequenceMethods(
     const index = positionOf(self, at);
     reserve(frame, 1);
     editor.insert(frame, self, index, value as Ptr);
-    return self.location(index);
+    return self.iteratorLocation(index);
   });
   method(
     'insert',
@@ -470,7 +491,7 @@ function sequenceMethods(
       const n = asNumber(count);
       reserve(frame, n);
       editor.insertCopies(frame, self, index, n, value as Ptr);
-      return self.location(index);
+      return self.iteratorLocation(index);
     }
   );
   addTemplateMethod(cls, 'insert', (args) => {
@@ -482,7 +503,7 @@ function sequenceMethods(
           reserve(frame, source.values.length);
           editor.insertRange(frame, self, index, source, false);
         });
-        return self.location(index);
+        return self.iteratorLocation(index);
       });
     }
     const range = args.length === 3 ? iteratorRange(library.compiler, args.slice(1), element, ops) : undefined;
@@ -496,7 +517,7 @@ function sequenceMethods(
         const source = range.read(first, last);
         reserve(frame, source.values.length);
         editor.insertRange(frame, self, index, source, range.isForwardOnly);
-        return self.location(index);
+        return self.iteratorLocation(index);
       }
     );
   });
@@ -504,14 +525,14 @@ function sequenceMethods(
     const index = positionOf(self, at);
     if (index >= self.items.length) throw new CppRuntimeError('invalidIterator');
     editor.erase(frame, self, index, index + 1);
-    return self.location(index);
+    return self.iteratorLocation(index);
   });
   method('erase', [types.constIterator, types.constIterator], types.iterator, (self, [first, last], frame) => {
     const from = positionOf(self, first);
     const to = positionOf(self, last);
     if (from > to) throw new CppRuntimeError('invalidRange');
     editor.erase(frame, self, from, to);
-    return self.location(from);
+    return self.iteratorLocation(from);
   });
   method('resize', [SIZE_T], VOID, (self, [count], frame) => {
     checkVectorLength(frame, library, kind, element, count);
@@ -954,7 +975,7 @@ function emplacement(
       }
       const at = positionOf(sequence, (position as Eval)(frame));
       editor.emplace(frame, sequence, at, () => value(frame));
-      return sequence.location(at);
+      return sequence.iteratorLocation(at);
     },
   };
 }

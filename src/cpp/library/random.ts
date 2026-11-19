@@ -1,4 +1,5 @@
 import { fma } from '../../c/library/binaryFloat';
+import { CppRuntimeError } from '../errors';
 import type { Expr } from '../expr';
 import type { ExpressionCompiler } from '../expressionCompiler';
 import {
@@ -390,7 +391,12 @@ export function randomClasses(library: Library): LibraryTemplate[] {
       nativeConstructor(
         cls,
         [type, type],
-        ([a, b]) => new DistributionValue(a as Value, b === undefined ? max : (b as Value)),
+        ([a, b]) => {
+          const low = a as number | bigint;
+          const high = (b ?? max) as number | bigint;
+          if (!(low <= high)) throw new CppRuntimeError('custom', '乱数を作る範囲の下限は上限以下にしてください。');
+          return new DistributionValue(low, high);
+        },
         { optional: 1, isExplicit: false }
       ),
     ];

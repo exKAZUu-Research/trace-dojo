@@ -1108,6 +1108,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const handlerType = declared.type;
     const caught = unqualified(nonReference(handlerType));
     if (caught.kind === 'void') this.error(clause.row, 'catch の型に void は使えません。');
+    const incomplete = incompleteExceptionClass(caught);
+    if (incomplete) this.error(clause.row, `まだ定義されていないクラス ${incomplete} は catch できません。`);
     if (caught.kind === 'class' && caught.cls.isAbstract && handlerType.kind !== 'reference') {
       this.error(clause.row, `${caught.cls.name} は抽象クラスなので、値として catch できません。`);
     }
@@ -1161,6 +1163,8 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const expr = this.compileExpression(valueNode);
     if (expr.type.kind === 'void') return this.error(node.row, '値を返さない関数（void）の結果は投げられません。');
     const type = expr.type.kind === 'array' ? ({ kind: 'pointer', to: expr.type.of } as Type) : unqualified(expr.type);
+    const incomplete = incompleteExceptionClass(type);
+    if (incomplete) this.error(node.row, `まだ定義されていないクラス ${incomplete} は投げられません。`);
     if (type.kind === 'class' && type.cls.isAbstract)
       this.error(node.row, `${type.cls.name} は抽象クラスなので投げられません。`);
     const value = this.fullExpression(this.copyInitializer(type, expr, node.row, false));
@@ -1173,6 +1177,11 @@ export abstract class StatementCompiler extends ExpressionCompiler {
   needsDestruction(type: Type): boolean {
     return this.destroyerOf(type) !== undefined;
   }
+}
+
+function incompleteExceptionClass(type: Type): string | undefined {
+  const object = type.kind === 'pointer' ? type.to : type;
+  if (object.kind === 'class' && !object.cls.isComplete) return object.cls.name;
 }
 
 export function deducedType(pattern: Type, type: Type): Type {

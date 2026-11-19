@@ -26,6 +26,34 @@ class NodePosition extends Ptr {
   }
 }
 
+class DequeIterator extends Ptr {
+  private readonly generation: number;
+  private readonly endGeneration: number | undefined;
+
+  constructor(
+    private readonly location: Ptr,
+    private readonly epoch: { all: number; end: number },
+    isEnd: boolean
+  ) {
+    super(undefined, 0);
+    this.generation = epoch.all;
+    this.endGeneration = isEnd ? epoch.end : undefined;
+  }
+
+  override get store(): Store | undefined {
+    return this.location.store;
+  }
+
+  override get index(): number {
+    if (
+      this.epoch.all !== this.generation ||
+      (this.endGeneration !== undefined && this.epoch.end !== this.endGeneration)
+    )
+      throw new CppRuntimeError('invalidIterator');
+    return this.location.index;
+  }
+}
+
 /** Associates a node's address with its current position in a container's traversal order. */
 export class NodePositions {
   private positions = new Map<number, NodePosition>();
@@ -94,21 +122,51 @@ export class SequenceValue extends Store {
     public items: Value[],
     readonly elementType: Type,
     /** Whether the trace shows the container as an array, as it shows a Java array. */
-    readonly isArrayLike: boolean
+    readonly isArrayLike: boolean,
+    storageKind?: 'list' | 'deque'
   ) {
     super();
-    this.nodes = isArrayLike ? undefined : new NodePositions(this);
+    this.nodes = storageKind ? new NodePositions(this) : undefined;
+    this.dequeEpoch = storageKind === 'deque' ? { all: 0, end: 0 } : undefined;
   }
 
   private readonly nodes?: NodePositions;
+  private dequeEpoch?: { all: number; end: number };
 
   override location(index: number): Ptr {
     return this.nodes?.at(index) ?? super.location(index);
   }
 
+  override iteratorLocation(index: number): Ptr {
+    const location = this.location(index);
+    return this.dequeEpoch ? new DequeIterator(location, this.dequeEpoch, index === this.length) : location;
+  }
+
+  append(value: Value): void {
+    if (this.dequeEpoch) this.dequeEpoch.all++;
+    this.items.push(value);
+  }
+
   splice(from: number, remove: number, ...items: Value[]): Value[] {
-    this.nodes?.splice(from, remove, items.length);
+    this.editPositions(from, remove, items.length);
     return this.items.splice(from, remove, ...items);
+  }
+
+  replaceItems(items: Value[]): Value[] {
+    const previous = this.items;
+    this.editPositions(0, previous.length, items.length);
+    this.items = items;
+    return previous;
+  }
+
+  editPositions(from: number, remove: number, insert: number): void {
+    const atEnd = from + remove === this.length;
+    const changesMiddle = from > 0 && !atEnd;
+    const epoch = this.dequeEpoch;
+    if (epoch && changesMiddle) this.nodes?.splice(0, this.length, this.length - remove + insert);
+    else this.nodes?.splice(from, remove, insert);
+    if (epoch && (insert || changesMiddle)) epoch.all++;
+    else if (epoch && remove && atEnd) epoch.end++;
   }
 
   reorder(edit: (items: IndexedValue[]) => IndexedValue[]): void {
@@ -118,6 +176,10 @@ export class SequenceValue extends Store {
   }
 
   takeItems(other: SequenceValue): void {
+    if (this.dequeEpoch && other.dequeEpoch) {
+      this.dequeEpoch.all++;
+      [this.dequeEpoch, other.dequeEpoch] = [other.dequeEpoch, this.dequeEpoch];
+    }
     if (this.nodes && other.nodes) this.nodes.take(other.nodes);
     this.items = other.items;
     this.capacity = other.capacity;
@@ -126,6 +188,11 @@ export class SequenceValue extends Store {
   }
 
   swapItems(other: SequenceValue): void {
+    if (this.dequeEpoch && other.dequeEpoch) {
+      this.dequeEpoch.end++;
+      other.dequeEpoch.end++;
+      [this.dequeEpoch, other.dequeEpoch] = [other.dequeEpoch, this.dequeEpoch];
+    }
     if (this.nodes && other.nodes) this.nodes.swap(other.nodes);
     [this.items, other.items] = [other.items, this.items];
     [this.capacity, other.capacity] = [other.capacity, this.capacity];

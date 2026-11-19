@@ -43,21 +43,33 @@ function locateErrors(root: Node, errors: SourceDiagnostic[], source: string): S
         node.childForFieldName('type')?.text === 'else'
     );
   if (strayElse) return [{ row: strayElse.startPosition.row, message: '対応する if のない else は書けません。' }];
-  const failure = root.descendantsOfType('ERROR')[0];
-  const previous = failure?.previousNamedSibling;
-  if (
-    !previous ||
-    !['class_specifier', 'struct_specifier', 'union_specifier', 'update_expression'].includes(previous.type)
-  )
-    return errors;
-  const patched = parser.parse(source.slice(0, previous.endIndex) + ';' + source.slice(previous.endIndex));
-  try {
-    if (patched && !patched.rootNode.hasError)
-      return [{ row: previous.endPosition.row, message: '「;」が足りません。' }];
-  } finally {
-    patched?.delete();
+  const firstError = root.descendantsOfType('ERROR')[0];
+  const diagnosticRow = errors[0].row;
+  const sites = [
+    tokenBeforeRow(root, firstError?.startPosition.row ?? diagnosticRow),
+    tokenBeforeRow(root, diagnosticRow),
+  ];
+  for (const previous of new Set(sites)) {
+    if (!previous || previous.type === ';' || previous.type === '{') continue;
+    const patched = parser.parse(source.slice(0, previous.endIndex) + ';' + source.slice(previous.endIndex));
+    try {
+      if (patched && !patched.rootNode.hasError)
+        return [{ row: previous.endPosition.row, message: '「;」が足りません。' }];
+    } finally {
+      patched?.delete();
+    }
   }
   return errors;
+}
+
+function tokenBeforeRow(node: Node, row: number): Node | undefined {
+  if (node.startPosition.row >= row || node.type === 'comment' || node.isMissing) return;
+  const children = node.children;
+  if (children.length === 0) return node.endPosition.row < row ? node : undefined;
+  for (let index = children.length - 1; index >= 0; index--) {
+    const previous = tokenBeforeRow(children[index], row);
+    if (previous) return previous;
+  }
 }
 
 /** The `// atomic` annotations of a program, read from its line comments. */

@@ -145,6 +145,10 @@ class StringBuffer extends Store {
     return this.owner.length + 1;
   }
 
+  override get iteratorLength(): number {
+    return this.owner.length;
+  }
+
   get(index: number): Value {
     this.checkAlive();
     if (index === this.owner.length) return 0;
@@ -368,21 +372,37 @@ export function stringClass(library: Library): ClassInfo {
       },
       { isConst }
     );
-    method('begin', [], classType(isConst ? constIterator : iterator), (s) => new Ptr(s, 0), { isConst });
-    method('end', [], classType(isConst ? constIterator : iterator), (s) => new Ptr(s, s.bytes.length), { isConst });
+    method('begin', [], classType(isConst ? constIterator : iterator), (s) => s.characterBuffer().location(0), {
+      isConst,
+    });
+    method(
+      'end',
+      [],
+      classType(isConst ? constIterator : iterator),
+      (s) => s.characterBuffer().location(s.bytes.length),
+      { isConst }
+    );
     method(
       'rbegin',
       [],
       classType(isConst ? constReverseIterator : reverseIterator),
-      (s) => new Ptr(s, s.bytes.length),
+      (s) => s.characterBuffer().location(s.bytes.length),
       { isConst }
     );
-    method('rend', [], classType(isConst ? constReverseIterator : reverseIterator), (s) => new Ptr(s, 0), { isConst });
+    method(
+      'rend',
+      [],
+      classType(isConst ? constReverseIterator : reverseIterator),
+      (s) => s.characterBuffer().location(0),
+      { isConst }
+    );
   }
-  method('cbegin', [], classType(constIterator), (s) => new Ptr(s, 0), { isConst: true });
-  method('cend', [], classType(constIterator), (s) => new Ptr(s, s.bytes.length), { isConst: true });
-  method('crbegin', [], classType(constReverseIterator), (s) => new Ptr(s, s.bytes.length), { isConst: true });
-  method('crend', [], classType(constReverseIterator), (s) => new Ptr(s, 0), { isConst: true });
+  method('cbegin', [], classType(constIterator), (s) => s.characterBuffer().location(0), { isConst: true });
+  method('cend', [], classType(constIterator), (s) => s.characterBuffer().location(s.bytes.length), { isConst: true });
+  method('crbegin', [], classType(constReverseIterator), (s) => s.characterBuffer().location(s.bytes.length), {
+    isConst: true,
+  });
+  method('crend', [], classType(constReverseIterator), (s) => s.characterBuffer().location(0), { isConst: true });
   method('push_back', [CHAR], VOID, (s, [char], frame) => {
     s.bytes = checkLength(frame, s.bytes + charOf(char));
   });
@@ -555,14 +575,14 @@ export function stringClass(library: Library): ClassInfo {
     const index = iteratorIndex(s, at);
     if (index >= s.bytes.length) throw new CppRuntimeError('invalidIterator');
     s.bytes = s.bytes.slice(0, index) + s.bytes.slice(index + 1);
-    return new Ptr(s, index);
+    return s.characterBuffer().location(index);
   });
   method('erase', [constIteratorType, constIteratorType], iteratorType, (s, [first, last]) => {
     const from = iteratorIndex(s, first);
     const to = iteratorIndex(s, last);
     if (from > to) throw new CppRuntimeError('invalidRange');
     s.bytes = s.bytes.slice(0, from) + s.bytes.slice(to);
-    return new Ptr(s, from);
+    return s.characterBuffer().location(from);
   });
   method(
     'resize',
@@ -631,7 +651,7 @@ const isPlainChar = (type: Type): boolean => type.kind === 'int' && type.name ==
 const insertAt = (s: StringValue, at: unknown, bytes: string, frame: Frame): Ptr => {
   const index = iteratorIndex(s, at);
   s.bytes = checkLength(frame, s.bytes.slice(0, index) + bytes + s.bytes.slice(index));
-  return new Ptr(s, index);
+  return s.characterBuffer().location(index);
 };
 
 const firstOf =
@@ -727,7 +747,8 @@ function rangeBytes(first: Ptr, last: Ptr, isReverse: boolean): string {
 /** The position of an iterator into the string it belongs to. */
 function iteratorIndex(s: StringValue, iterator: unknown): number {
   const pointer = iterator as Ptr;
-  if (pointer.store !== s || pointer.index > s.bytes.length) throw new CppRuntimeError('invalidIterator');
+  if (pointer.store !== s.characterBuffer() || pointer.index > s.bytes.length)
+    throw new CppRuntimeError('invalidIterator');
   return pointer.index;
 }
 

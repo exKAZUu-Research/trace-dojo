@@ -12,7 +12,7 @@ import {
   VOID,
   withConst,
 } from '../types';
-import { Ptr, type Value } from '../values';
+import { type Ptr,type Value } from '../values';
 import { comparatorOrder } from './associative';
 import { SequenceValue } from './containerValues';
 import { type ElementOperations, elementOperations } from './elements';
@@ -51,10 +51,17 @@ export function adapterClass(
     elementOps ??= elementOperations(compiler, element, 0);
     return elementOps;
   };
-  const make = (items: Value[]): SequenceValue => new SequenceValue(items, element, kind !== 'priority_queue');
+  const storageKind = storage.cls.library?.kind;
+  const make = (items: Value[]): SequenceValue =>
+    new SequenceValue(
+      items,
+      element,
+      kind !== 'priority_queue',
+      storageKind === 'deque' || storageKind === 'list' ? storageKind : undefined
+    );
   const push = (frame: Frame, self: SequenceValue, value: Value): void => {
     frame.runtime.reserve(1);
-    self.items.push(value);
+    self.append(value);
     if (kind === 'priority_queue') siftUp(self.items, self.items.length, less);
   };
   cls.memberTypes.set('value_type', element);
@@ -96,7 +103,13 @@ export function adapterClass(
   cls.operations = {
     copy: (frame, source) => make((source as SequenceValue).items.map((item) => ops().copy(frame, item))),
     assign: (frame, target, source) => {
-      (target as SequenceValue).items = (source as SequenceValue).items.map((item) => ops().copy(frame, item));
+      const to = target as SequenceValue;
+      if (to !== source) {
+        const values = (source as SequenceValue).items.map((item) => ops().copy(frame, item));
+        const previous = to.replaceItems(values);
+        const destroy = ops().destroy;
+        if (destroy) for (const item of previous) destroy(frame, item);
+      }
     },
     destroy: (frame, value) => {
       const destroy = ops().destroy;
@@ -161,8 +174,8 @@ export function adapterClass(
   method('pop', [], VOID, (self, _args, frame) => {
     nonEmpty(self);
     let removed: Value;
-    if (kind === 'queue') removed = self.items.shift() as Value;
-    else if (kind === 'stack') removed = self.items.pop() as Value;
+    if (kind === 'queue') removed = self.splice(0, 1)[0];
+    else if (kind === 'stack') removed = self.splice(-1, 1)[0];
     else {
       popHeap(self.items, less);
       removed = self.items.pop() as Value;
@@ -177,7 +190,7 @@ export function adapterClass(
         referenceTo(isConst ? withConst(element) : element),
         (self) => {
           nonEmpty(self);
-          return new Ptr(self, at(self));
+          return self.location(at(self));
         },
         isConst
       );
@@ -191,7 +204,7 @@ export function adapterClass(
   }
   method('swap', [referenceTo(classType(cls))], VOID, (self, [other]) => {
     const target = (other as Ptr).read() as SequenceValue;
-    [self.items, target.items] = [target.items, self.items];
+    self.swapItems(target);
   });
   return cls;
 }

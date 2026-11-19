@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <functional>
 #include <iostream>
+#include <numeric>
 #include <vector>
 
 struct Item {
@@ -25,4 +26,6 @@ int main() {
   items.emplace_back(5);
   items = std::vector<Item>{6};
   std::cout << ' ' << items[0].n << ' ';
+  std::cout << std::accumulate(right, right + 2, 0, std::plus<double>())
+            << std::accumulate(right, right + 2, 1, std::multiplies<>());
 }
