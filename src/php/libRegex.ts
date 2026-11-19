@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 455 -- The regex functions share matching, offsets, capture handling, and error state.
+// code-gauge-allow-file fileNcss 459 -- The regex functions share matching, offsets, capture handling, and error state.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { dec, enc } from './bytes';
 import { callCallback, consumeInvokedResult } from './callables';
@@ -80,8 +80,24 @@ interface Match {
  * finds them: after an empty match, PCRE looks for a non-empty one at the same place before moving on. Sets the PCRE
  * error and yields nothing for a bad subject or offset.
  */
-function matchesOf(compiled: Compiled, subject: string, offset = 0, status?: { error: number }): Generator<Match> {
-  return scanMatches(compiled, subject, offset, toMatch, status);
+interface MatchScanOptions {
+  maxMatches?: number;
+  allowBatching?: boolean;
+}
+
+function splitScanOptions(limit: number, noEmpty: boolean): MatchScanOptions {
+  if (limit === -1) return {};
+  return noEmpty ? { allowBatching: false } : { maxMatches: Math.max(0, limit - 1) };
+}
+
+function matchesOf(
+  compiled: Compiled,
+  subject: string,
+  offset = 0,
+  status?: { error: number },
+  options?: MatchScanOptions
+): Generator<Match> {
+  return scanMatches(compiled, subject, offset, toMatch, status, options);
 }
 
 type ProjectMatch<T> = (
@@ -113,14 +129,15 @@ function* scanMatches<T>(
   subject: string,
   offset: number,
   project: ProjectMatch<T>,
-  status?: { error: number }
+  status?: { error: number },
+  options?: MatchScanOptions
 ): Generator<T> {
   const prepared = prepareSubject(compiled, subject, offset);
   if (!prepared) {
     if (status) status.error = rt().lastPregError;
     return;
   }
-  const plan = scanPlan(compiled, subject, prepared, project);
+  const plan = scanPlan(compiled, subject, prepared, project, options);
   let position: number = plan.position;
   let retry = false;
   while (position <= plan.length) {
@@ -148,13 +165,22 @@ function scanPlan<T>(
   compiled: Compiled,
   subject: string,
   prepared: PreparedSubject,
-  project: ProjectMatch<T>
+  project: ProjectMatch<T>,
+  options?: MatchScanOptions
 ): ScanPlan<T> {
   const native = compiled.boundedPattern;
   if (native) {
     const projection = { ...compiled, utf8: false };
     const startPosition = prepared.byteOffset(prepared.position);
-    const nextMatch = createBoundedRegexScanner(native, subject, startPosition, compiled.utf8, rt().budget);
+    const nextMatch = createBoundedRegexScanner({
+      pattern: native,
+      text: subject,
+      startPosition,
+      utf8: compiled.utf8,
+      budget: rt().budget,
+      maxMatches: options?.maxMatches,
+      allowBatching: options?.allowBatching,
+    });
     return {
       length: subject.length,
       position: startPosition,
@@ -320,7 +346,7 @@ defineFunction(
       throwError('ValueError', 'preg_match(): Argument #4 ($flags) must be a PREG_* constant');
     rt().lastPregError = 0;
     const offset = Number((args[4] as bigint | undefined) ?? 0n);
-    const first = matchesOf(compiled, args[1] as string, offset).next();
+    const first = matchesOf(compiled, args[1] as string, offset, undefined, { maxMatches: 1 }).next();
     if (refs[2]) {
       refs[2].v = first.done
         ? new PhpArray()
@@ -425,7 +451,10 @@ function replaceOne(
   if (!compiled) return undefined;
   if (limit === 0) return subject;
   const status = { error: 0 };
-  const matches = matchesOf(compiled, subject, 0, status);
+  const matches = matchesOf(compiled, subject, 0, status, {
+    maxMatches: limit < 0 ? Infinity : limit,
+    allowBatching: name === 'preg_replace' || name === 'preg_filter',
+  });
   let result = '';
   let last = 0;
   for (let done = 0; limit < 0 || done < limit; done++) {
@@ -631,7 +660,7 @@ defineFunction(
       result.append(offsetCapture ? PhpArray.list([text, BigInt(offset)]) : text);
     };
     let last = 0;
-    const matches = matchesOf(compiled, subject);
+    const matches = matchesOf(compiled, subject, 0, undefined, splitScanOptions(limit, noEmpty));
     while (limit === -1 || limit > 1) {
       const next = matches.next();
       if (next.done) break;
@@ -673,7 +702,7 @@ defineFunction('preg_grep(string $pattern, array $array, int $flags = 0): array|
   const result = new PhpArray();
   for (const [key, value] of (args[1] as PhpArray).entries()) {
     const status = { error: 0 };
-    const matched = !matchesOf(compiled, toStr(value), 0, status).next().done;
+    const matched = !matchesOf(compiled, toStr(value), 0, status, { maxMatches: 1 }).next().done;
     if (status.error !== 0) break;
     if (matched !== invert) result.setSlot(key, copyValueSlot((args[1] as PhpArray).map.get(key) as Value | Ref));
   }

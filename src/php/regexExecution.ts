@@ -40,13 +40,25 @@ let active: RegexWorker | undefined;
 const stoppingWorkers = new Set<Worker>();
 const MAX_STOPPING_WORKERS = 2;
 
-export function createBoundedRegexScanner(
-  pattern: PcrePattern,
-  text: string,
-  startPosition: number,
-  utf8: boolean,
-  budget: ExecutionBudget
-): () => MatchOffsets | { pregError: number } | undefined {
+export interface BoundedScanOptions {
+  pattern: PcrePattern;
+  text: string;
+  startPosition: number;
+  utf8: boolean;
+  budget: ExecutionBudget;
+  maxMatches?: number;
+  allowBatching?: boolean;
+}
+
+export function createBoundedRegexScanner({
+  pattern,
+  text,
+  startPosition,
+  utf8,
+  budget,
+  maxMatches = Infinity,
+  allowBatching = true,
+}: BoundedScanOptions): () => MatchOffsets | { pregError: number } | undefined {
   let offsets = new Int32Array(0);
   let cursor = 0;
   let position = startPosition;
@@ -54,17 +66,22 @@ export function createBoundedRegexScanner(
   let done = false;
   let pregError: number | undefined;
   let batchIndex = 0;
+  let remaining = maxMatches;
 
   return () => {
     for (;;) {
-      if (cursor < offsets.length) return decodeMatch(() => offsets[cursor++]);
+      if (cursor < offsets.length) {
+        remaining--;
+        return decodeMatch(() => offsets[cursor++]);
+      }
       if (pregError !== undefined) {
         const error = pregError;
         pregError = undefined;
         return { pregError: error };
       }
-      if (done) return;
-      const limit = BATCH_SIZES[Math.min(batchIndex++, BATCH_SIZES.length - 1)];
+      if (done || remaining <= 0) return;
+      const targetBatch = allowBatching ? BATCH_SIZES[Math.min(batchIndex++, BATCH_SIZES.length - 1)] : 1;
+      const limit = Math.min(targetBatch, remaining);
       const batch = boundedRegexBatch({ pattern, text, position, retry, utf8, limit, budget });
       offsets = batch.offsets;
       cursor = 0;

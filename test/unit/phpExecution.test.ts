@@ -695,6 +695,22 @@ test.each([
   expect(execution).toMatchObject({ kind: 'executed', stdout });
 });
 
+test.each([
+  [
+    'callback exit',
+    "preg_replace_callback('/(a+)+b|c/', function($m) use (&$i) { if (++$i === 578) exit('done;'); return 'x'; }, $s);",
+    'done;',
+  ],
+  ['replacement limit', "echo strlen(preg_replace('/(a+)+b|c/', 'x', $s, 578));", '38578'],
+  ['split limit', "echo count(preg_split('/(a+)+b|c/', $s, 579));", '579'],
+])('does not speculatively match past early stop in %s', (_label, action, stdout) => {
+  const execution = run(`<?php
+$s = str_repeat('c', 578) . str_repeat(str_repeat('a', 18) . 'c', 2000);
+$i = 0;
+${action}`);
+  expect(execution).toMatchObject({ kind: 'executed', stdout });
+});
+
 test.each(['<?php echo "hello"; declare(strict_types=1);', '<?php function f() {} declare(strict_types=1);'])(
   'rejects a late strict_types declaration before execution: %s',
   (source) => {
