@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 450 -- Keeps array bucket layout, mutations and their cursor positions together.
+// code-gauge-allow-file fileNcss 451 -- Keeps array bucket layout, mutations and their cursor positions together.
 import type { Key } from './values';
 
 class ArrayEntry {
@@ -371,7 +371,7 @@ export class ArrayOrder {
   private remapRebuild(rebuild: ArrayReindex, cursors: CursorPosition[]): void {
     if (rebuild === 'shift') {
       const positions = new Map([...this.orderedEntries()].map((entry, ordinal) => [entry.index, ordinal]));
-      positions.set(this.nextIndex, positions.size);
+      if (!this.packed) positions.set(this.nextIndex, positions.size);
       for (const state of cursors) {
         const index = state.index;
         if (index !== undefined) state.index = positions.get(index) ?? index;

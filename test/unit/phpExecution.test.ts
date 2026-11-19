@@ -3542,4 +3542,11 @@ foreach ($a as &$v) { echo "$v;"; if ($v === 3) { array_shift($a); $a[] = 9; } }
 unset($v);
 `);
   expect(mixedShiftCursor).toMatchObject({ kind: 'executed', stdout: '1;2;3;9;' });
+
+  const sparsePackedShiftCursor = run(String.raw`<?php
+$a = [0 => 1, 2 => 2];
+foreach ($a as &$v) { echo "$v;"; if ($v === 2) { array_shift($a); $a[] = 9; } }
+unset($v);
+`);
+  expect(sparsePackedShiftCursor).toMatchObject({ kind: 'executed', stdout: '1;2;' });
 });
