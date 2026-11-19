@@ -7,6 +7,7 @@ import {
   displayType,
   displayTypeSymbol,
   ERROR_TYPE,
+  MAX_TUPLE_ARITY,
   type NamedType,
   namedType,
   type SpecialType,
@@ -177,7 +178,7 @@ export class BinderBase {
 
   tupleType(elements: Type[], names?: (string | undefined)[]): NamedType {
     const symbol = this.library.valueTuples.get(elements.length);
-    if (!symbol) this.unsupported(0, '要素が17個以上のタプル');
+    if (!symbol) this.unsupported(0, `要素が${MAX_TUPLE_ARITY + 1}個以上のタプル`);
     const type = namedType(symbol, elements);
     if (names?.some((name) => name !== undefined)) type.tupleNames = names;
     return type;
@@ -308,7 +309,9 @@ export class BinderBase {
     if (inner.kind === 'named' && inner.symbol.isValueType && inner.symbol.special !== 'nullable')
       return this.nullableOf(inner);
     if (inner.kind === 'typeParameter' && inner.symbol.hasValueConstraint) return this.nullableOf(inner);
-    // A nullable reference type is the type itself to the runtime; nullability only produces warnings.
+    // A nullable reference type is the type itself to the runtime and to conversions, which only Roslyn's messages show.
+    if (inner.kind === 'named' || inner.kind === 'array' || inner.kind === 'typeParameter')
+      return { ...inner, isAnnotated: true };
     return inner;
   }
 

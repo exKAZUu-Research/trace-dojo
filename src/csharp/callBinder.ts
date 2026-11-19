@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 608 -- The callBinder module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 624 -- The callBinder module keeps one stage of the C# interpreter together.
 import type { BoundArgument, BoundArguments, BoundExpression, BoundLValue } from './bound';
 import { displayMethodIn } from './declarations';
 import type { MethodCandidate } from './lookup';
@@ -881,7 +881,7 @@ export abstract class CallBinder extends OperatorBinder {
     const candidate = byArity[0];
     const { method } = candidate;
     if (this.reportUninferable(candidate, args, explicitTypeArgs, row)) return;
-    const expanded = !this.mapArguments(method, args, false);
+    const expanded = this.reportedForm(candidate, args, explicitTypeArgs);
     const mapping = this.mapArguments(method, args, expanded);
     if (!mapping) return;
     const typeArgs =
@@ -908,6 +908,35 @@ export abstract class CallBinder extends OperatorBinder {
       if (!this.satisfiesConstraints(typeArg, method.typeParameters[index], substitution, row, displayMethod(method)))
         return;
     }
+  }
+
+  /**
+   * Whether Roslyn reports the arguments of a candidate against its expanded `params` form: when its normal form takes
+   * no such arguments, or more of them do not fit it than the expanded one.
+   */
+  private reportedForm(
+    candidate: MethodCandidate,
+    args: ArgumentInfo[],
+    explicitTypeArgs: Type[] | undefined
+  ): boolean {
+    const { method } = candidate;
+    const normal = this.mapArguments(method, args, false);
+    if (!normal) return true;
+    const expanded = method.parameters.at(-1)?.isParams ? this.mapArguments(method, args, true) : undefined;
+    if (!expanded) return false;
+    const badCount = (form: boolean, parameterOf: number[]): number => {
+      const typeArgs =
+        method.typeParameters.length === 0
+          ? []
+          : this.reportedTypeArguments(candidate, args, explicitTypeArgs, parameterOf, form);
+      const substitution = this.callSubstitution(candidate, typeArgs);
+      return args.filter((arg, index) => {
+        const parameter = method.parameters[parameterOf[index]];
+        const type = this.parameterType(method, parameterOf[index], form, substitution);
+        return !this.argumentFits(arg, type, parameter.refKind);
+      }).length;
+    };
+    return badCount(true, expanded.parameterOf) < badCount(false, normal.parameterOf);
   }
 
   /** The type arguments that an inapplicable generic candidate's arguments are checked against. */
@@ -1047,7 +1076,7 @@ export abstract class CallBinder extends OperatorBinder {
       this.error(
         arg.row,
         'CS1503',
-        `引数 ${position}: は 'メソッド グループ' から '${displayType(type, true)}' へ変換することはできません`
+        `引数 ${position}: は 'メソッド グループ' から '${displayType(type, true, true)}' へ変換することはできません`
       );
     } else if (arg.expression.kind === 'unbound') {
       // Converting reports why the lambda does not fit, as Roslyn reports the body's errors.
@@ -1062,7 +1091,7 @@ export abstract class CallBinder extends OperatorBinder {
       this.error(
         arg.row,
         'CS1503',
-        `引数 ${position}: は '${displayType(arg.expression.type, true)}' から '${displayType(type, true)}' へ変換することはできません`
+        `引数 ${position}: は '${displayType(arg.expression.type, true)}' から '${displayType(type, true, true)}' へ変換することはできません`
       );
     }
   }

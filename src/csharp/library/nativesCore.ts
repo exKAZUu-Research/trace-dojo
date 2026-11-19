@@ -32,7 +32,15 @@ import {
   valuesEqual,
 } from '../objects';
 import { CsThrow, type ExceptionState, ProgramExit } from '../runtime';
-import { type FieldSymbol, type NamedType, namedType, specialOf, type SpecialType, type Type } from '../types';
+import {
+  type FieldSymbol,
+  MAX_TUPLE_ARITY,
+  type NamedType,
+  namedType,
+  specialOf,
+  type SpecialType,
+  type Type,
+} from '../types';
 import {
   copyValue,
   type CsArray,
@@ -1243,7 +1251,7 @@ defineNatives({
 // ---- Tuples ----
 
 const tupleNatives: Record<string, NativeMethod> = {};
-for (let arity = 1; arity <= 16; arity++) {
+for (let arity = 1; arity <= MAX_TUPLE_ARITY; arity++) {
   const name = `System.ValueTuple\`${arity}`;
   tupleNatives[`${name}..ctor`] = (_call, receiver, args) => {
     const tuple = receiver as CsStruct;

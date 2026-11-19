@@ -1,3 +1,5 @@
+import { MAX_TUPLE_ARITY } from '../types';
+
 /**
  * The declarations of the `System` library types that programs use, in C#. Members without bodies are implemented
  * natively (see `natives*.ts`); their signatures follow .NET 10, so that overload resolution picks the same members.
@@ -62,8 +64,8 @@ namespace System {
     public bool Contains(char value);
     public bool Contains(string value, StringComparison comparisonType);
     public bool Contains(char value, StringComparison comparisonType);
-    public bool EndsWith(string value);
     public bool EndsWith(char value);
+    public bool EndsWith(string value);
     public bool EndsWith(string value, StringComparison comparisonType);
     public override bool Equals(object? obj);
     public bool Equals(string? value);
@@ -109,8 +111,8 @@ namespace System {
     public string[] Split(string? separator, int count, StringSplitOptions options = StringSplitOptions.None);
     public string[] Split(string[]? separator, StringSplitOptions options);
     public string[] Split(string[]? separator, int count, StringSplitOptions options);
-    public bool StartsWith(string value);
     public bool StartsWith(char value);
+    public bool StartsWith(string value);
     public bool StartsWith(string value, StringComparison comparisonType);
     public string Substring(int startIndex);
     public string Substring(int startIndex, int length);
@@ -1092,7 +1094,7 @@ namespace System.Text {
  */
 function longTupleDeclarations(): string {
   const declarations: string[] = [];
-  for (let arity = 8; arity <= 16; arity++) {
+  for (let arity = 8; arity <= MAX_TUPLE_ARITY; arity++) {
     const numbers = Array.from({ length: arity }, (_, index) => index + 1);
     const parameters = numbers.map((number) => `T${number}`).join(', ');
     const self = `ValueTuple<${parameters}>`;

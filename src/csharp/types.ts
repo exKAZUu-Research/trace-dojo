@@ -53,23 +53,33 @@ export interface NamedType {
   args: Type[];
   /** The element names of a tuple type, which only the compiler sees. */
   tupleNames?: (string | undefined)[];
+  /** Whether a reference type is written nullable, as `string?`, which only Roslyn's messages show. */
+  isAnnotated?: boolean;
 }
 
 export interface ArrayType {
   kind: 'array';
   element: Type;
   rank: number;
+  isAnnotated?: boolean;
 }
 
 export interface TypeParameterType {
   kind: 'typeParameter';
   symbol: TypeParameterSymbol;
+  isAnnotated?: boolean;
 }
 
 /** The types that only expressions have, never variables. */
 export type SpecialExpressionType = { kind: 'null' } | { kind: 'error' } | { kind: 'void' };
 
 export type Type = NamedType | ArrayType | TypeParameterType | SpecialExpressionType;
+
+/**
+ * The most elements of a tuple type that the library declares, each arity as one flat `ValueTuple`; .NET nests the
+ * elements after the seventh in a `TRest` tuple, which only the runtime type names show.
+ */
+export const MAX_TUPLE_ARITY = 64;
 
 export const NULL_TYPE: Type = { kind: 'null' };
 export const ERROR_TYPE: Type = { kind: 'error' };
@@ -406,14 +416,25 @@ export function sameType(a: Type, b: Type): boolean {
 
 export type Substitution = ReadonlyMap<TypeParameterSymbol, Type>;
 
+/** A type parameter's argument, where `T?` of a reference type argument is that type, annotated. */
+function substituteParameter(type: TypeParameterType, substitution: Substitution): Type {
+  const argument = substitution.get(type.symbol);
+  if (!argument) return type;
+  return type.isAnnotated && (argument.kind === 'named' || argument.kind === 'array') && !isValueType(argument)
+    ? { ...argument, isAnnotated: true }
+    : argument;
+}
+
 export function substitute(type: Type, substitution: Substitution): Type {
   if (substitution.size === 0) return type;
   switch (type.kind) {
     case 'typeParameter': {
-      return substitution.get(type.symbol) ?? type;
+      return substituteParameter(type, substitution);
     }
     case 'array': {
-      return { kind: 'array', element: substitute(type.element, substitution), rank: type.rank };
+      const result: ArrayType = { kind: 'array', element: substitute(type.element, substitution), rank: type.rank };
+      if (type.isAnnotated) result.isAnnotated = true;
+      return result;
     }
     case 'named': {
       if (type.args.length === 0) return type;
@@ -423,6 +444,7 @@ export function substitute(type: Type, substitution: Substitution): Type {
         args: type.args.map((arg) => substitute(arg, substitution)),
       };
       if (type.tupleNames) result.tupleNames = type.tupleNames;
+      if (type.isAnnotated) result.isAnnotated = true;
       return result;
     }
     default: {
@@ -509,22 +531,28 @@ const KEYWORD_NAMES: Partial<Record<SpecialType, string>> = {
  * A type as Roslyn's diagnostics show it. With `qualified`, as its conversion errors do, a type outside the global
  * namespace carries its namespace, such as `System.Collections.Generic.List<int>`.
  */
-// code-gauge-allow functionCognitiveComplexity 16 -- Each branch handles one case of the C# rule that the function applies.
-export function displayType(type: Type, qualified = false): string {
+// code-gauge-allow functionCognitiveComplexity 18 -- Each branch handles one case of the C# rule that the function applies.
+/**
+ * A type as Roslyn's messages show it; `qualified` adds the namespaces, and `annotated` the `?` of a nullable reference
+ * type, which Roslyn shows for the types that declarations write.
+ */
+export function displayType(type: Type, qualified = false, annotated = false): string {
+  const mark = annotated && 'isAnnotated' in type && type.isAnnotated ? '?' : '';
   switch (type.kind) {
     case 'named': {
       const keyword = type.symbol.special ? KEYWORD_NAMES[type.symbol.special] : undefined;
-      if (keyword) return keyword;
-      if (type.symbol.special === 'nullable') return `${displayType(type.args[0], qualified)}?`;
+      if (keyword) return `${keyword}${mark}`;
+      if (type.symbol.special === 'nullable') return `${displayType(type.args[0], qualified, annotated)}?`;
       if (type.symbol.special === 'valueTuple' && type.args.length > 1) {
         return `(${type.args
           .map((arg, index) => {
             const name = type.tupleNames?.[index];
-            return name ? `${displayType(arg, qualified)} ${name}` : displayType(arg, qualified);
+            const text = displayType(arg, qualified, annotated);
+            return name ? `${text} ${name}` : text;
           })
           .join(', ')})`;
       }
-      return displayTypeSymbol(type.symbol, type.args, qualified);
+      return `${displayTypeSymbol(type.symbol, type.args, qualified, annotated)}${mark}`;
     }
     case 'array': {
       let element: Type = type.element;
@@ -533,10 +561,10 @@ export function displayType(type: Type, qualified = false): string {
         ranks += `[${','.repeat(element.rank - 1)}]`;
         element = element.element;
       }
-      return `${displayType(element, qualified)}${ranks}`;
+      return `${displayType(element, qualified, annotated)}${ranks}${mark}`;
     }
     case 'typeParameter': {
-      return type.symbol.name;
+      return `${type.symbol.name}${mark}`;
     }
     case 'null': {
       return '<null>';
@@ -553,7 +581,8 @@ export function displayType(type: Type, qualified = false): string {
 export function displayTypeSymbol(
   symbol: TypeSymbol,
   args: Type[] = symbol.allTypeParameters.map((parameter) => parameter.type),
-  qualified = false
+  qualified = false,
+  annotated = false
 ): string {
   const keyword = symbol.special ? KEYWORD_NAMES[symbol.special] : undefined;
   if (keyword) return keyword;
@@ -562,8 +591,10 @@ export function displayTypeSymbol(
   const ownArgs = args.slice(args.length - ownCount);
   const outerArgs = args.slice(0, args.length - ownCount);
   const namespace = qualified && symbol.namespace ? `${symbol.namespace}.` : '';
-  const prefix = symbol.containing ? `${displayTypeSymbol(symbol.containing, outerArgs, qualified)}.` : namespace;
-  const suffix = ownCount > 0 ? `<${ownArgs.map((arg) => displayType(arg, qualified)).join(', ')}>` : '';
+  const prefix = symbol.containing
+    ? `${displayTypeSymbol(symbol.containing, outerArgs, qualified, annotated)}.`
+    : namespace;
+  const suffix = ownCount > 0 ? `<${ownArgs.map((arg) => displayType(arg, qualified, annotated)).join(', ')}>` : '';
   return `${prefix}${symbol.name}${suffix}`;
 }
 
