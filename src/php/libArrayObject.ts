@@ -174,6 +174,7 @@ export class ArrayStorage {
       return;
     }
     const runtime = rt();
+    const bucket = array.ordered().get(offset)?.index;
     runtime.held.push(replacement);
     try {
       withCleanupExceptions(runtime, (capture) => {
@@ -183,9 +184,11 @@ export class ArrayStorage {
           if (!isCleanupException(error)) throw error;
           capture(error);
         }
-        if (!arrayHasHolders(runtime, array, 1) || !array.has(offset)) return;
-        runtime.holdForShutdown(array.releaseSlot(offset));
-        array.setSlot(offset, replacement);
+        if (!arrayHasHolders(runtime, array, 1) || bucket === undefined) return;
+        const target = array.ordered().keyAtBucket(bucket);
+        if (target === undefined) return;
+        runtime.holdForShutdown(array.releaseSlot(target));
+        array.setSlot(target, replacement);
       });
     } finally {
       runtime.held.pop();

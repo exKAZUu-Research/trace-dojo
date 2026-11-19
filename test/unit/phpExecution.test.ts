@@ -663,6 +663,52 @@ ${write}`);
 );
 
 test.each([
+  ['ArrayObject', '$settings->item = 5;', "['item' => new A]", "'other'", "exit('exit;');", 'A;exit;{"other":5};B;'],
+  [
+    'ArrayIterator',
+    "$settings['item'] = 5;",
+    "['keep' => 1, 'item' => new A]",
+    '10',
+    "throw new Exception('stop');",
+    'A;caught;after;{"keep":1,"10":5};B;',
+  ],
+  [
+    'ArrayObject',
+    "$settings->offsetSet('item', 5);",
+    "['item' => new A]",
+    "'other'",
+    "exit('exit;');",
+    'A;exit;{"other":5};B;',
+  ],
+])(
+  'finishes pending %s write into reused physical bucket for %s (%s -> %s, %s)',
+  (name, write, seed, key, tail, stdout) => {
+    const execution = run(`<?php
+class B { function __destruct() { echo 'B;'; } }
+class A {
+    function __destruct() {
+        global $settings;
+        echo 'A;';
+        unset($settings['item']);
+        $settings[${key}] = new B;
+        ${tail}
+    }
+}
+class R {
+    function __destruct() {
+        global $settings;
+        echo json_encode($settings->getArrayCopy()), ';';
+    }
+}
+$settings = new ${name}(${seed}, ${name}::ARRAY_AS_PROPS);
+$reader = new R;
+try { ${write} } catch (Throwable $e) { echo 'caught;'; }
+echo 'after;';`);
+    expect(execution).toMatchObject({ kind: 'executed', stdout });
+  }
+);
+
+test.each([
   ['ArrayIterator', 'new ArrayIterator([])'],
   ['SplFixedArray', 'new SplFixedArray(1)'],
   ['Closure', 'function () {}'],

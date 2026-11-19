@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 424 -- Keeps array bucket layout, mutations and their cursor positions together.
+// code-gauge-allow-file fileNcss 431 -- Keeps array bucket layout, mutations and their cursor positions together.
 import type { Key } from './values';
 
 class ArrayEntry {
@@ -74,6 +74,14 @@ export class ArrayOrder {
 
   get(key: Key): ArrayEntry | undefined {
     return this.entries.get(typeof key === 'bigint' ? key + this.keyOffset : key);
+  }
+
+  keyAtBucket(index: number): Key | undefined {
+    for (const entry of this.orderedEntries()) {
+      if (entry.index === index) return entry.key;
+      if (entry.index > index) return undefined;
+    }
+    return undefined;
   }
 
   get isPacked(): boolean {

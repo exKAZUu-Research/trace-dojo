@@ -594,7 +594,7 @@ export class PhpArray {
     return entry?.key;
   }
 
-  private ordered(): ArrayOrder {
+  ordered(): ArrayOrder {
     this.order ??= new ArrayOrder(this.map.physicalKeys(), this.capacityHint, this.orderPacked === false);
     return this.order;
   }
