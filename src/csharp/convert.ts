@@ -836,6 +836,16 @@ export class Converter extends ExpressionConverter {
           elements: expression.args.map((arg) => argumentDesignation(arg)),
           ...positionOf(left),
         };
+      } else if (
+        expression.kind === 'tuple' &&
+        expression.elements.every((element) => element.value.kind === 'declaration')
+      ) {
+        type = { kind: 'varType', ...positionOf(left) };
+        variable = {
+          kind: 'parenthesized' as const,
+          elements: expression.elements.map((element) => typedDesignation(element.value)),
+          ...positionOf(left),
+        };
       } else {
         return unsupported(node, '既存の変数に代入する `foreach`');
       }
@@ -954,4 +964,11 @@ function argumentDesignation(arg: Argument): Designation {
       column: value.column,
     };
   throw new CompileError([{ row: arg.row, message: 'CS1001: 識別子がありません' }]);
+}
+
+/** The variable of a typed element of a deconstruction, which keeps its type unless it is `var`. */
+function typedDesignation(declaration: Expression): Designation {
+  const { type, designation } = declaration as Extract<Expression, { kind: 'declaration' }>;
+  if (designation.kind !== 'single' || type.kind === 'varType') return designation;
+  return { ...designation, type };
 }

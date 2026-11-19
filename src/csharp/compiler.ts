@@ -135,6 +135,9 @@ export class Compiler extends StatementBinder {
         entry = this.findMain(declared);
       }
       this.checkAtomicAnnotations();
+      // Binding the members adds the fields that capture primary constructors' parameters, which shift the slots of
+      // the fields of derived types.
+      for (const type of declared) this.assignSlots(type.symbol);
     });
     this.finishWithErrors();
     if (!entry)

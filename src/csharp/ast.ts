@@ -170,7 +170,8 @@ export type ArrayInitializer = { kind: 'arrayInitializer'; elements: (Expression
 
 /** What a deconstructing declaration or `out var` declares: one name, a discard, or a parenthesized list. */
 export type Designation =
-  | ({ kind: 'single'; name: string } & Position)
+  /** A variable, with its own type in a deconstruction such as `foreach ((int n, string s) in pairs)`. */
+  | ({ kind: 'single'; name: string; type?: TypeNode } & Position)
   | ({ kind: 'discard' } & Position)
   | ({ kind: 'parenthesized'; elements: Designation[] } & Position);
 

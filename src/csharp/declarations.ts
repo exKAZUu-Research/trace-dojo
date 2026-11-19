@@ -1138,7 +1138,7 @@ export class DeclarationBinder extends BinderBase {
   }
 
   /** Numbers the fields of each type after those of its bases, since an object keeps them in one array. */
-  private assignSlots(symbol: TypeSymbol): void {
+  protected assignSlots(symbol: TypeSymbol): void {
     let instance = symbol.baseType?.symbol.instanceFieldCount ?? 0;
     let statics = 0;
     for (const field of symbol.fields) {
@@ -1163,7 +1163,11 @@ export class DeclarationBinder extends BinderBase {
         );
       }
     }
+    // The library's classes implement their interfaces in .NET, which their declarations here do not all spell out.
+    const libraryBase = this.libraryBaseOf(symbol);
+    const inherited = libraryBase ? this.allInterfaces(libraryBase) : [];
     for (const face of this.allInterfaces(symbol.declaredType)) {
+      if (inherited.some((other) => sameType(other, face))) continue;
       for (const member of face.symbol.methods) {
         if (member.isStatic || member.property) continue;
         if (!this.findImplementation(symbol.declaredType, member, face)) {
@@ -1185,6 +1189,11 @@ export class DeclarationBinder extends BinderBase {
         }
       }
     }
+  }
+
+  private libraryBaseOf(symbol: TypeSymbol): NamedType | undefined {
+    for (let base = symbol.baseType; base; base = baseTypeOf(base)) if (base.symbol.isLibrary) return base;
+    return undefined;
   }
 
   protected allInterfaces(type: NamedType): NamedType[] {

@@ -134,10 +134,8 @@ export abstract class MemberBinder extends CallBinder {
 
   /** Binds a simple name: a local, a member of an enclosing type, a type, or a namespace. */
   bindSimpleName(name: string, typeArgs: TypeNode[] | undefined, position: Position, context: BindContext): BindResult {
-    if (!typeArgs) {
-      const local = this.bindLocalName(name, position, context);
-      if (local) return local;
-    }
+    const local = this.bindLocalName(name, typeArgs, position, context);
+    if (local) return local;
     const typeContext = context.fn.typeContext;
     const isCallee = this.takeCallee();
     const resolvedTypeArgs = typeArgs?.map((arg) => this.resolveType(arg, typeContext));
@@ -157,8 +155,15 @@ export abstract class MemberBinder extends CallBinder {
   }
 
   /** Binds a name that a local scope declares: a local, a local function, or a query's range variable. */
-  private bindLocalName(name: string, position: Position, context: BindContext): BindResult | undefined {
+  private bindLocalName(
+    name: string,
+    typeArgs: TypeNode[] | undefined,
+    position: Position,
+    context: BindContext
+  ): BindResult | undefined {
     const found = context.scope.lookup(name);
+    // Only a generic local function takes type arguments, as `Id<int>(3)` does.
+    if (typeArgs && !found?.localFunction) return undefined;
     if (found?.isDeclaredLater) {
       this.error(position, 'CS0841', `宣言する前にローカル変数 '${name}' を使用できません`);
       return { kind: 'default', type: ERROR_TYPE, row: position.row };
@@ -171,7 +176,7 @@ export abstract class MemberBinder extends CallBinder {
         candidates: [{ method: found.localFunction, owner: found.localFunction.owner.declaredType }],
         receiver: undefined,
         isSimpleName: true,
-        typeArgs: undefined,
+        typeArgs: typeArgs?.map((arg) => this.resolveType(arg, context.fn.typeContext)),
         extensions: [],
         isBaseAccess: false,
         row: position.row,
@@ -1030,7 +1035,7 @@ export abstract class MemberBinder extends CallBinder {
       return {
         kind: 'new',
         constructor: undefined,
-        objectType: type as never,
+        objectType: type,
         args: [],
         initializer: this.bindInitializer(initializer, type, context),
         type,

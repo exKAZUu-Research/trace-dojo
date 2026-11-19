@@ -94,7 +94,8 @@ export type BoundExpression =
   | ({
       kind: 'new';
       constructor: MethodSymbol | undefined;
-      objectType: NamedType;
+      /** A named type, or a type parameter with the `new()` constraint. */
+      objectType: NamedType | Extract<Type, { kind: 'typeParameter' }>;
       args: BoundArgument[];
       initializer: BoundInitializerEntry[] | undefined;
     } & Base)

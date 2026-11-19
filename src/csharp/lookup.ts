@@ -78,7 +78,8 @@ export class LookupBinder extends DeclarationBinder {
     let inaccessible: FieldSymbol | PropertySymbol | MethodSymbol | undefined;
     // A tuple's element names stand for its `Item1`, `Item2`, ... fields.
     const element = type.kind === 'named' ? (type.tupleNames?.indexOf(name) ?? -1) : -1;
-    if (element >= 0) return this.lookupMember(type, `Item${element + 1}`, context, arity, isInvoked);
+    if (element >= 0 && name !== `Item${element + 1}`)
+      return this.lookupMember(type, `Item${element + 1}`, context, arity, isInvoked);
     for (const owner of this.searchChain(type)) {
       const symbol = owner.symbol;
       const member = memberNamed(symbol, name, isInvoked);

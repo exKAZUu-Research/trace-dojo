@@ -964,31 +964,26 @@ export class Evaluator extends StatementExecutor {
 
   private evaluateNew(expression: Extract<BoundExpression, { kind: 'new' }>, frame: Frame): Value {
     const type = frame.resolve(expression.objectType);
+    // `new T()` runs the parameterless constructor of the class that the type argument gives.
+    const constructor =
+      expression.constructor ??
+      (expression.objectType.kind === 'typeParameter' && type.kind === 'named' && type.symbol.kind === 'class'
+        ? type.symbol.constructors.find((candidate) => candidate.parameters.length === 0)
+        : undefined);
     let created: Value;
-    if (
-      type.kind === 'typeParameter' ||
-      (type.kind === 'named' && !expression.constructor && type.symbol.isValueType)
-    ) {
+    if (type.kind === 'typeParameter' || (type.kind === 'named' && !constructor && type.symbol.isValueType)) {
       created = this.defaultOf(type);
-      if (type.kind === 'named' && type.symbol.kind === 'class') created = this.allocate(type);
     } else {
       const named = type as NamedType;
-      if (named.symbol.kind === 'class' || expression.constructor) this.runtime.ensureInitialized(named);
+      if (named.symbol.kind === 'class' || constructor) this.runtime.ensureInitialized(named);
       const object = named.symbol.isValueType ? (this.defaultOf(named) as CsStruct) : this.allocate(named);
       frame.temporaries.push(object);
       try {
         const args = this.evaluateArguments(expression.args, frame);
-        if (expression.constructor) {
-          const result = this.invoke(
-            frame,
-            expression.constructor,
-            object,
-            args,
-            expression.row,
-            substitutionOf(named)
-          );
+        if (constructor) {
+          const result = this.invoke(frame, constructor, object, args, expression.row, substitutionOf(named));
           // A library constructor of a primitive, such as `new string('a', 3)`, returns the value it creates.
-          if (expression.constructor.native && result !== undefined) return result;
+          if (constructor.native && result !== undefined) return result;
         }
       } finally {
         frame.temporaries.pop();

@@ -1840,7 +1840,9 @@ export abstract class ExpressionBinder extends MemberBinder {
         elementTypes,
       };
     }
-    const type = declaredType ?? elementType;
+    const type = designation.type
+      ? this.resolveType(designation.type, context.fn.typeContext)
+      : (declaredType ?? elementType);
     const local = this.declareLocal(designation.name, type, designation, context);
     const target: BoundLValue = { kind: 'local', local, type, row: designation.row };
     return {
