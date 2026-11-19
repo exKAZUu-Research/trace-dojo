@@ -1,6 +1,7 @@
 #include <cstddef>
 #include <deque>
 #include <iostream>
+#include <list>
 #include <stack>
 #include <vector>
 
@@ -51,6 +52,16 @@ int main() {
   flagsInOrder.emplace_front(nullptr);
   flagsOnStack.emplace(nullptr);
   std::cout << bits[0] << flagsInOrder.front() << flagsOnStack.top() << '\n';
+  std::nullptr_t nulls[] = {nullptr, nullptr};
+  std::deque<bool> directRange(nulls, nulls + 2);
+  std::list<bool> linkedRange(nulls, nulls + 1);
+  linkedRange.insert(linkedRange.end(), nulls, nulls + 2);
+  int numbers[] = {0, 8};
+  std::vector<bool> bitRange(numbers, numbers + 2);
+  bitRange.assign(numbers + 1, numbers + 2);
+  bitRange.insert(bitRange.end(), numbers, numbers + 1);
+  std::cout << directRange[0] << directRange[1] << linkedRange.size() << linkedRange.back()
+            << bitRange[0] << bitRange[1] << '\n';
   delete allocated;
   delete allocatedList;
 }

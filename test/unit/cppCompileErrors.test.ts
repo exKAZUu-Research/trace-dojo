@@ -533,6 +533,18 @@ test.each([
     '#include <vector>\nint main() { std::vector<bool> values; values.push_back(nullptr); }',
     1,
   ],
+  ...[
+    ['vector', 'std::vector<bool> values(source, source + 1);'],
+    ['vector', 'std::vector<bool> values; values.assign(source, source + 1);'],
+    ['vector', 'std::vector<bool> values; values.insert(values.begin(), source, source + 1);'],
+    ['deque', 'std::deque<bool> values; values.assign(source, source + 1);'],
+    ['deque', 'std::deque<bool> values; values.insert(values.begin(), source, source + 1);'],
+    ['list', 'std::list<bool> values; values.assign(source, source + 1);'],
+  ].map(([header, use]): [string, string, number] => [
+    `assigning a nullptr range to Boolean storage with ${use}`,
+    `#include <cstddef>\n#include <${header}>\nint main() { std::nullptr_t source[]{nullptr}; ${use} }`,
+    2,
+  ]),
   ['a default member initializer copy-initializing bool from nullptr', 'struct Flag { bool value = {nullptr}; };', 0],
   [
     'an empty aggregate missing explicit braces in a deduced array',

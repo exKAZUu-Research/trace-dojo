@@ -176,7 +176,8 @@ export function adapterClass(
         ...nativeConstructor(cls, [], () => make([])),
         instantiate: (args) => {
           if (args.length !== 2 && args.length !== 3) return;
-          const range = iteratorRange(compiler, args.slice(0, 2), element, ops);
+          const bitStorage = storageKind === 'vector' && reference.kind === 'class';
+          const range = iteratorRange(compiler, args.slice(0, 2), element, ops, bitStorage ? 'assign' : 'construct');
           if (!range) return;
           const params = args.length === 3 ? [...range.params, constRef(compareType)] : range.params;
           return nativeConstructor(

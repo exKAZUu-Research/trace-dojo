@@ -231,7 +231,10 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
       {
         ...nativeConstructor(cls, [], () => {}),
         instantiate: (args) => {
-          const range = args.length === 2 ? iteratorRange(library.compiler, args, element, ops) : undefined;
+          const range =
+            args.length === 2
+              ? iteratorRange(library.compiler, args, element, ops, bits ? 'assign' : 'construct')
+              : undefined;
           if (!range) return;
           return nativeConstructor(
             cls,
@@ -285,14 +288,15 @@ interface IteratorRange {
 }
 
 /**
- * The iterator pair of a range constructor, `assign`, or `insert`: pointers or iterators of any container whose
- * elements can construct the container's elements, or undefined when the arguments are not such a pair.
+ * Resolves a pair of iterators whose elements can initialize the destination. Range operations that write to live
+ * elements, including libc++'s bit-proxy range constructor, use implicit conversion.
  */
 export function iteratorRange(
   compiler: ExpressionCompiler,
   [first, last]: Expr[],
   element: Type,
-  ops: () => ElementOperations
+  ops: () => ElementOperations,
+  output: 'construct' | 'assign' = 'construct'
 ): IteratorRange | undefined {
   const params = [first, last].map((arg) =>
     arg.type.kind === 'array' ? pointerTo(arg.type.of) : unqualified(arg.type)
@@ -311,7 +315,10 @@ export function iteratorRange(
     const slot: Expr = { type: from, isLvalue: true, row: first.row, run: (frame) => frame.pending.at(-1) as Ptr };
     let run: Eval<Value>;
     try {
-      run = constructElement(compiler, target, [slot], first.row);
+      run =
+        output === 'assign'
+          ? compiler.withLibraryAccess(() => compiler.convert(slot, target, first.row).run as Eval<Value>)
+          : constructElement(compiler, target, [slot], first.row);
     } catch (error) {
       if (error instanceof CompileError) return;
       throw error;
@@ -578,7 +585,10 @@ function sequenceMethods(
         return self.iteratorLocation(index);
       });
     }
-    const range = args.length === 3 ? iteratorRange(library.compiler, args.slice(1), element, ops) : undefined;
+    const range =
+      args.length === 3
+        ? iteratorRange(library.compiler, args.slice(1), element, ops, kind === 'list' ? 'construct' : 'assign')
+        : undefined;
     if (!range) return;
     return instance(
       'insert',
@@ -631,7 +641,7 @@ function sequenceMethods(
         })
       );
     }
-    const range = args.length === 2 ? iteratorRange(library.compiler, args, element, ops) : undefined;
+    const range = args.length === 2 ? iteratorRange(library.compiler, args, element, ops, 'assign') : undefined;
     if (!range) return;
     return instance('assign', range.params, VOID, (self, [first, last], frame) => {
       const source = range.read(first, last);
