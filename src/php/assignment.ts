@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 975 -- Holds assignment and offset access modes with their shared helpers.
+// code-gauge-allow-file fileNcss 976 -- Holds assignment and offset access modes with their shared helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Expr, ListItem } from './ast';
 import { foreachSubjectWritable, hasReferenceItem } from './astAnalysis';
@@ -574,7 +574,7 @@ function issetPropExists(object: PhpObject, name: string, scope: PhpClass | unde
 interface NativeArrayStorage {
   writable(): PhpArray;
   readonly array: PhpArray;
-  offsetValue(key: Value, className: string, warning?: UpdateWarning): Value;
+  offsetValue(key: Value, className: string, warning?: UpdateWarning, hasPendingWarning?: boolean): Value;
   setOffset(key: Value, value: Value, className: string, warning?: UpdateWarning): void;
   cursor(): { readonly key: Key | undefined };
 }
@@ -670,7 +670,7 @@ function fetchCompoundDimension(
   if (nativeArray && getter?.fn.kind === 'native') {
     if (key !== undefined) {
       try {
-        value = storage.offsetValue(key, object.cls.name, warning);
+        value = storage.offsetValue(key, object.cls.name, warning, pending !== undefined);
       } catch (error) {
         if (!(error instanceof PhpThrow)) throw error;
         warning(() => {
@@ -739,6 +739,7 @@ function arrayAccessNestedPlace(
   return new RefPlace(Ref.temporary(value));
 }
 
+// code-gauge-allow functionCognitiveComplexity 17 -- Shares mode, key conversion and storage lifetime across nested offset access.
 function nativeArrayNestedPlace(
   object: PhpObject,
   storage: NativeArrayStorage,
@@ -755,15 +756,18 @@ function nativeArrayNestedPlace(
     return new RefPlace(Ref.temporary(null));
   }
   let place!: ElementPlace;
-  withOperandWarnings((warning) => {
-    const index = toKey(key, 'access', object.cls.name, warning);
-    place = new ElementPlace(storage.writable(), index, unbound);
-    if (place.get() === undefined) {
-      if (mode === 'update') warning(() => place.warnUndefined());
-      if (place.get() === undefined) place.set(null);
-    }
-    return null;
-  });
+  const array = storage.writable();
+  rt().withBorrowedArray(array, () =>
+    withOperandWarnings((warning) => {
+      const index = toKey(key, 'access', object.cls.name, warning);
+      place = new ElementPlace(array, index, unbound);
+      if (place.get() === undefined) {
+        if (mode === 'update') warning(() => place.warnUndefined());
+        if (place.get() === undefined) place.set(null);
+      }
+      return null;
+    })
+  );
   return place;
 }
 

@@ -4,7 +4,15 @@ import { setNativeArrayStorage } from './assignment';
 import { callMethod } from './callables';
 import { invoke } from './calls';
 import { createObject, findClass, objectToArray } from './classes';
-import { deprecated, isCleanupException, throwError, type UpdateWarning, warn, withCleanupExceptions } from './errors';
+import {
+  deprecated,
+  isCleanupException,
+  throwError,
+  type UpdateWarning,
+  warn,
+  withCleanupExceptions,
+  withOperandWarnings,
+} from './errors';
 import { defineClass, type NativeMethod } from './native';
 import { toKey } from './operators';
 import { arrayIsShared, share } from './places';
@@ -92,18 +100,30 @@ export class ArrayStorage {
     return copy;
   }
 
-  offsetValue(key: Value, className: string, warning?: UpdateWarning): Value {
-    const offset = toKey(key, 'access', className, warning);
-    const value = this.array.get(offset);
-    if (value !== undefined) return value;
-    const message = `Undefined array key ${typeof offset === 'bigint' ? offset : `"${offset}"`}`;
-    if (warning)
-      warning(
-        () => warn(message),
-        () => warn(message, true)
-      );
-    else warn(message);
-    return null;
+  offsetValue(key: Value, className: string, warning?: UpdateWarning, hasPendingWarning = false): Value {
+    const array = this.array;
+    return rt().withBorrowedArray(array, () => {
+      let completed = true;
+      const report: UpdateWarning | undefined =
+        warning && !hasPendingWarning ? (emit) => (completed = warning(emit)) : warning;
+      const offset = toKey(key, 'access', className, report);
+      if (!completed) return null;
+      const value = array.get(offset);
+      if (value !== undefined) return value;
+      const message = `Undefined array key ${typeof offset === 'bigint' ? offset : `"${offset}"`}`;
+      if (warning)
+        warning(
+          () => warn(message),
+          () => warn(message, true)
+        );
+      else warn(message);
+      return null;
+    });
+  }
+
+  offsetExists(key: Value, className: string): boolean {
+    const array = this.array;
+    return rt().withBorrowedArray(array, () => array.has(toKey(key, 'isset', className)));
   }
 
   setOffset(key: Value, value: Value, className: string, warning?: UpdateWarning): void {
@@ -111,9 +131,28 @@ export class ArrayStorage {
       this.writable().append(share(value));
       return;
     }
+    this.mutateOffset(key, 'access', className, (array, offset) => array.setSlot(offset, share(value)), warning);
+  }
+
+  deleteOffset(key: Value, className: string): void {
+    this.mutateOffset(key, 'unset', className, (array, offset) => array.delete(offset));
+  }
+
+  private mutateOffset(
+    key: Value,
+    use: 'access' | 'unset',
+    className: string,
+    mutate: (array: PhpArray, offset: Key) => void,
+    warning?: UpdateWarning
+  ): void {
     this.checkMutation();
-    const offset = toKey(key, 'access', className, warning);
-    this.writable().setSlot(offset, share(value));
+    const update = (report: UpdateWarning): Value => {
+      const offset = toKey(key, use, className, report);
+      mutate(this.writable(), offset);
+      return null;
+    };
+    if (warning) update(warning);
+    else withOperandWarnings(update);
   }
 
   writable(): PhpArray {
@@ -303,7 +342,7 @@ function arrayMethods(name: string): NativeMethod[] {
     },
     {
       signature: 'offsetExists(mixed $key): bool',
-      impl: ({ thisObj, args }) => storageOf(thisObj).array.has(toKey(args[0], 'isset', thisObj.cls.name)),
+      impl: ({ thisObj, args }) => storageOf(thisObj).offsetExists(args[0], thisObj.cls.name),
     },
     {
       signature: 'offsetGet(mixed $key): mixed',
@@ -319,10 +358,7 @@ function arrayMethods(name: string): NativeMethod[] {
     {
       signature: 'offsetUnset(mixed $key): void',
       impl: ({ thisObj, args }) => {
-        const storage = storageOf(thisObj);
-        storage.checkMutation();
-        const offset = toKey(args[0], 'unset', thisObj.cls.name);
-        storage.writable().delete(offset);
+        storageOf(thisObj).deleteOffset(args[0], thisObj.cls.name);
         return null;
       },
     },

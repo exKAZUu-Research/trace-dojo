@@ -139,3 +139,31 @@ string(3) "new"
 string(1) "K"
 string(3) "xyz"
 string(3) "aKc"
+int(4)
+array(1) {
+  [1]=>
+  int(20)
+}
+array(1) {
+  [1]=>
+  int(7)
+}
+int(5)
+array(1) {
+  [1]=>
+  int(20)
+}
+offset
+array(1) {
+  [1]=>
+  int(7)
+}
+offset
+array(0) {
+}
+offset
+array(1) {
+  [1]=>
+  int(3)
+}
+int(20)

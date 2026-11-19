@@ -64,3 +64,28 @@ set_error_handler(function () use ($container) { $container[0] = 'xyz'; return t
 $result = ($container[0][1] = 'KL');
 restore_error_handler();
 var_dump($result, $container[0], $alias);
+
+foreach (['read', 'add', 'increment', 'write after exception', 'unset after exception', 'add after exception'] as $action) {
+    $table = new ArrayObject([1 => 4]);
+    set_error_handler(function () use ($table, $action) {
+        $table->exchangeArray([1 => 20]);
+        if (str_ends_with($action, 'exception')) throw new Exception('offset');
+        return true;
+    });
+    try {
+        if ($action === 'read') var_dump($table[1.5]);
+        elseif ($action === 'increment') var_dump(++$table[1.5]);
+        elseif ($action === 'write after exception') $table[1.5] = 7;
+        elseif ($action === 'unset after exception') unset($table[1.5]);
+        else $table[1.5] += 3;
+    } catch (Exception $error) {
+        echo $error->getMessage(), "\n";
+    }
+    restore_error_handler();
+    var_dump($table->getArrayCopy());
+}
+
+$table = new ArrayObject([1 => 4]);
+set_error_handler(function () use ($table) { $table[1] = 20; return true; });
+var_dump($table[1.5]);
+restore_error_handler();
