@@ -17,6 +17,7 @@ import { arrayHasHolders } from './garbage';
 import { defineClass, type NativeMethod } from './native';
 import { setNativeArrayStorage } from './nativeArrayStorage';
 import { toKey } from './operators';
+import { nativeDebugInfoMethod } from './output';
 import { arrayIsShared, share } from './places';
 import './splInterfaces';
 import { rt, type Runtime } from './runtime';
@@ -602,7 +603,7 @@ defineClass({
   compare: compareArrayStorage,
   interfaces: ['SeekableIterator', 'Traversable', 'Iterator', 'ArrayAccess', 'Serializable', 'Countable'],
   consts: flagConstants,
-  methods: [...arrayMethods('ArrayIterator'), ...iteratorMethods],
+  methods: [...arrayMethods('ArrayIterator'), ...iteratorMethods, nativeDebugInfoMethod],
   createInternal: (object) => holdStorage(object, new ArrayStorage('ArrayIterator', new PhpArray())),
 });
 defineClass({
@@ -612,6 +613,7 @@ defineClass({
   consts: flagConstants,
   methods: [
     ...arrayMethods('ArrayObject'),
+    nativeDebugInfoMethod,
     {
       signature: 'getIterator(): Iterator',
       impl: ({ thisObj }) => {

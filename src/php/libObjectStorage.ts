@@ -7,6 +7,7 @@ import { releaseDropped } from './garbage';
 import { magicSerializationMethods, serializationMethods } from './libArrayObject';
 import { defineClass, type NativeMethod } from './native';
 import { strictEquals, toKey } from './operators';
+import { nativeDebugInfoMethod } from './output';
 import { share } from './places';
 import { ExitSignal, PhpThrow, rt } from './runtime';
 import { type Key, type NativeFunction, NativeValueIndex, PhpArray, PhpObject, type Value } from './values';
@@ -357,6 +358,7 @@ defineClass({
   compare: compareObjectStorage,
   interfaces: ['Countable', 'SeekableIterator', 'Traversable', 'Iterator', 'Serializable', 'ArrayAccess'],
   methods: [
+    nativeDebugInfoMethod,
     {
       signature: 'attach(object $object, mixed $info = null): void',
       impl: ({ thisObj, args }) => {
@@ -597,6 +599,6 @@ defineClass({
     MIT_KEYS_NUMERIC: 0n,
     MIT_KEYS_ASSOC,
   },
-  methods: multipleMethods,
+  methods: [...multipleMethods, nativeDebugInfoMethod],
   createInternal: (object) => new ObjectStorage(object),
 });

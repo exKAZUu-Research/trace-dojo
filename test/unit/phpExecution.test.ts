@@ -3337,3 +3337,28 @@ restore_error_handler();
 `);
   expect(overloadedGet).toMatchObject({ kind: 'executed', stdout: 'get;warn;set;' });
 });
+
+test('exposes SPL __debugInfo() as callable methods with tentative return-type contracts', () => {
+  const result = run(String.raw`<?php
+class SubAO extends ArrayObject { function __debugInfo(): ?array { return []; } }
+foreach (['ArrayObject', 'ArrayIterator', 'SplObjectStorage', 'SplStack', 'SplMinHeap', 'SplPriorityQueue', 'MultipleIterator'] as $cls) {
+  $x = new $cls();
+  echo $cls . ':' . count($x->__debugInfo()) . "\n";
+}
+`);
+  expect(result).toMatchObject({
+    kind: 'executed',
+    stdout: [
+      '',
+      String.raw`Deprecated: Return type of SubAO::__debugInfo(): ?array should either be compatible with ArrayObject::__debugInfo(): array, or the #[\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice in /main.php on line 2`,
+      'ArrayObject:1',
+      'ArrayIterator:1',
+      'SplObjectStorage:1',
+      'SplStack:2',
+      'SplMinHeap:3',
+      'SplPriorityQueue:3',
+      'MultipleIterator:1',
+      '',
+    ].join('\n'),
+  });
+});

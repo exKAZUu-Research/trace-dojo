@@ -66,9 +66,10 @@ function inspect<T>(run: (state: Inspection) => T): T {
 
 function withDebugEntries<T>(object: PhpObject, state: Inspection, use: (table: DebugTable) => T): T {
   const storage = object.internal as NativeDebugStorage | undefined;
-  if (storage?.indexedProperties) return use(nativeDebugTable(object, storage, state));
-  if (!object.cls.findMethod('__debuginfo'))
-    return use(storage?.debugEntries ? nativeDebugTable(object, storage, state) : debugEntries(object, state));
+  if (storage?.indexedProperties) return use(nativeDebugTable(object, state));
+  const debugMethod = object.cls.findMethod('__debuginfo');
+  if (!debugMethod || (debugMethod.fn.kind === 'native' && storage?.debugEntries))
+    return use(storage?.debugEntries ? nativeDebugTable(object, state) : debugEntries(object, state));
   let result: { value: T } | undefined;
   try {
     return consumeInvokedResult(
@@ -114,9 +115,10 @@ function debugInfoEntries(object: PhpObject, info: Value): DebugTable {
   return { entries, initialized: entries.length };
 }
 
-function nativeDebugTable(object: PhpObject, storage: NativeDebugStorage, state: Inspection): DebugTable {
+export function nativeDebugSnapshot(object: PhpObject): PhpArray {
+  const storage = object.internal as NativeDebugStorage | undefined;
   const snapshot = new PhpArray();
-  const indexed = storage.indexedProperties?.();
+  const indexed = storage?.indexedProperties?.();
   for (const [key, value] of indexed ?? []) snapshot.setSlot(key, copyValueSlot(value));
   for (const [key, slot] of object.props) {
     rt().spend();
@@ -125,7 +127,17 @@ function nativeDebugTable(object: PhpObject, storage: NativeDebugStorage, state:
     const name = decl?.visibility === 'protected' ? `\0*\0${decl.name}` : key;
     snapshot.setSlot(name, copyValueSlot(slot, indexed !== undefined));
   }
-  for (const [key, value] of storage.debugEntries?.() ?? []) snapshot.setSlot(key, copyValueSlot(value));
+  for (const [key, value] of storage?.debugEntries?.() ?? []) snapshot.setSlot(key, copyValueSlot(value));
+  return snapshot;
+}
+
+export const nativeDebugInfoMethod = {
+  signature: '__debugInfo(): array',
+  impl: ({ thisObj }: { thisObj: PhpObject }) => nativeDebugSnapshot(thisObj),
+};
+
+function nativeDebugTable(object: PhpObject, state: Inspection): DebugTable {
+  const snapshot = nativeDebugSnapshot(object);
   return { entries: inspectionSnapshot(snapshot, state, entries()), initialized: snapshot.size };
 
   function* entries(): Generator<DebugEntry> {

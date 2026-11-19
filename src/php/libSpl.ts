@@ -10,6 +10,7 @@ import './libRegexIterator';
 import './libRecursiveIterators';
 import { defineClass, type NativeMethod } from './native';
 import { compare, toInt, toKey } from './operators';
+import { nativeDebugInfoMethod } from './output';
 import { share } from './places';
 import { rt } from './runtime';
 import { UnsupportedFeatureError } from './unsupported';
@@ -238,7 +239,7 @@ const listMethods: NativeMethod[] = [
 defineClass({
   name: 'SplDoublyLinkedList',
   interfaces: ['Iterator', 'Traversable', 'Countable', 'ArrayAccess', 'Serializable'],
-  methods: [...listMethods, ...serializationMethods, ...magicSerializationMethods],
+  methods: [...listMethods, nativeDebugInfoMethod, ...serializationMethods, ...magicSerializationMethods],
   consts: { IT_MODE_LIFO: 2n, IT_MODE_FIFO: 0n, IT_MODE_DELETE: 1n, IT_MODE_KEEP: 0n },
   createInternal: () => new ListStorage(),
 });
@@ -478,6 +479,7 @@ defineClass({
   methods: inPhpOrder(
     [
       ...heapMethods(),
+      nativeDebugInfoMethod,
       ...magicSerializationMethods,
       {
         signature: 'insert(mixed $value): true',
@@ -495,7 +497,7 @@ defineClass({
         visibility: 'protected',
       },
     ],
-    'extract insert top count isEmpty rewind current key next valid recoverFromCorruption isCorrupted __serialize __unserialize compare'
+    'extract insert top count isEmpty rewind current key next valid recoverFromCorruption isCorrupted __debugInfo __serialize __unserialize compare'
   ),
   createInternal: (object) =>
     new HeapStorage('SplHeap', (a, b) => callMethod(object, 'compare', [a as Value, b as Value])),
@@ -534,6 +536,7 @@ defineClass({
   methods: inPhpOrder(
     [
       ...heapMethods(),
+      nativeDebugInfoMethod,
       ...magicSerializationMethods,
       {
         signature: 'insert(mixed $value, mixed $priority): true',
@@ -559,7 +562,7 @@ defineClass({
       },
       { signature: 'getExtractFlags(): int', impl: ({ thisObj }) => BigInt(heapOf(thisObj).flags) },
     ],
-    'compare insert setExtractFlags top extract count isEmpty rewind current key next valid recoverFromCorruption isCorrupted getExtractFlags __serialize __unserialize'
+    'compare insert setExtractFlags top extract count isEmpty rewind current key next valid recoverFromCorruption isCorrupted getExtractFlags __debugInfo __serialize __unserialize'
   ),
   createInternal: (object) =>
     new HeapStorage(
