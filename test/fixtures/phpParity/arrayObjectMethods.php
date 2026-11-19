@@ -39,3 +39,21 @@ $x->exchangeArray(new ArrayObject([5, 6]));
 var_dump($x->getArrayCopy(), $x->getFlags());
 var_dump(get_class_methods('ArrayObject') == get_class_methods($x));
 print_r(array_diff(get_class_methods("ArrayIterator"), ["__debugInfo"]));
+
+foreach (['write', 'unset', 'exists'] as $operation) {
+    $live = new ArrayObject(['old' => 1]);
+    set_error_handler(function () use ($live) { $live->exchangeArray([1 => 2]); return true; });
+    if ($operation === 'write') $live[1.5] = 7;
+    elseif ($operation === 'unset') unset($live[1.5]);
+    else var_dump($live->offsetExists(1.5));
+    restore_error_handler();
+    var_dump($live->getArrayCopy());
+}
+
+class ReusableArrayIterator extends ArrayIterator {
+    function replace(array $values): void { parent::__construct($values); }
+}
+$reusable = new ReusableArrayIterator(['old']);
+$reusable->next();
+$reusable->replace(['new']);
+var_dump($reusable->valid(), $reusable->key(), $reusable->current());

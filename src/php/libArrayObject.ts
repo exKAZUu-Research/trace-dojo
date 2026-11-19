@@ -67,6 +67,7 @@ export class ArrayStorage {
 
   replaceWith(storage: ArrayStorage): void {
     this.checkMutation();
+    this.close();
     this.own = storage.own;
     this.backing = storage.backing;
     this.flags = storage.flags;
@@ -106,9 +107,13 @@ export class ArrayStorage {
   }
 
   setOffset(key: Value, value: Value, className: string, warning?: UpdateWarning): void {
-    const array = this.writable();
-    if (key === null) array.append(share(value));
-    else array.set(toKey(key, 'access', className, warning), share(value));
+    if (key === null) {
+      this.writable().append(share(value));
+      return;
+    }
+    this.checkMutation();
+    const offset = toKey(key, 'access', className, warning);
+    this.writable().set(offset, share(value));
   }
 
   writable(): PhpArray {
@@ -139,6 +144,8 @@ export class ArrayStorage {
 
   close(): void {
     this.iteratorCursor?.close();
+    this.iteratorCursor = undefined;
+    this.cursorArray = undefined;
     for (const storage of this.watched) storage.watchers.delete(this.registration);
     this.watched.clear();
   }
@@ -312,9 +319,10 @@ function arrayMethods(name: string): NativeMethod[] {
     {
       signature: 'offsetUnset(mixed $key): void',
       impl: ({ thisObj, args }) => {
-        storageOf(thisObj)
-          .writable()
-          .delete(toKey(args[0], 'unset', thisObj.cls.name));
+        const storage = storageOf(thisObj);
+        storage.checkMutation();
+        const offset = toKey(args[0], 'unset', thisObj.cls.name);
+        storage.writable().delete(offset);
         return null;
       },
     },

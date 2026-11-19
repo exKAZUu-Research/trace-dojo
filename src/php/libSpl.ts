@@ -659,26 +659,30 @@ defineClass({
         signature: 'offsetExists($index): bool',
         impl: ({ thisObj, args }) => {
           const index = fixedOffset(args[0]);
-          return index >= 0 && index < fixedOf(thisObj).items.length && fixedOf(thisObj).items[index] !== null;
+          const items = fixedOf(thisObj).items;
+          return index >= 0 && index < items.length && items[index] !== null;
         },
       },
       {
         signature: 'offsetGet($index): mixed',
         impl: ({ thisObj, args }) => {
-          return fixedOf(thisObj).items[fixedIndex(thisObj, args[0])];
+          const index = fixedIndex(thisObj, args[0]);
+          return fixedOf(thisObj).items[index];
         },
       },
       {
         signature: 'offsetSet($index, mixed $value): void',
         impl: ({ thisObj, args }) => {
-          fixedOf(thisObj).set(fixedIndex(thisObj, args[0]), args[1]);
+          const index = fixedIndex(thisObj, args[0]);
+          fixedOf(thisObj).set(index, args[1]);
           return null;
         },
       },
       {
         signature: 'offsetUnset($index): void',
         impl: ({ thisObj, args }) => {
-          fixedOf(thisObj).set(fixedIndex(thisObj, args[0]), null);
+          const index = fixedIndex(thisObj, args[0]);
+          fixedOf(thisObj).set(index, null);
           return null;
         },
       },

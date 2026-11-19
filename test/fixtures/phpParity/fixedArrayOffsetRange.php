@@ -17,3 +17,8 @@ class NamedFixedArray extends SplFixedArray {
 $named = new NamedFixedArray(2);
 $named[0] = 7;
 var_dump((array) $named);
+
+$live = new SplFixedArray(1);
+set_error_handler(function () use ($live) { $live->setSize(2); $live[1] = 9; return true; });
+var_dump($live[1.5]);
+restore_error_handler();
