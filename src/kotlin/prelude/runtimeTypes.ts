@@ -9,6 +9,30 @@ external fun println()
 external fun print(message: Any?)
 `;
 
+/** `System.out` and `System.err`, which Kotlin programs reach through Java's `java.lang`. */
+export const SYSTEM_SOURCE = kotlin`
+package java.lang
+
+class PrintStream internal constructor(private val isError: Boolean) {
+    fun println(message: Any?) {
+        writeStream(isError, message.toString() + "\\n")
+    }
+    fun println() {
+        writeStream(isError, "\\n")
+    }
+    fun print(message: Any?) {
+        writeStream(isError, message.toString())
+    }
+}
+
+object System {
+    val out: PrintStream = PrintStream(false)
+    val err: PrintStream = PrintStream(true)
+}
+
+internal external fun writeStream(isError: Boolean, text: String)
+`;
+
 export const REFLECT_SOURCE = kotlin`
 package kotlin.reflect
 

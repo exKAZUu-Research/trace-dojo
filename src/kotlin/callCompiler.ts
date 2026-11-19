@@ -3,7 +3,7 @@ import { type Compiled, type Eval, FunctionContext, reprOf, type Scope, typeMism
 import { CompilerCore } from './compilerCore';
 import { callFunction, parameterReprs, receiverRepr, returnRepr } from './dispatch';
 import { type Frame, MISSING } from './runtime';
-import type { ClassSymbol, FunctionSymbol, ParameterSymbol, TypeParameterSymbol } from './symbols';
+import type { ClassSymbol, FunctionSymbol, ParameterSymbol, PropertySymbol, TypeParameterSymbol } from './symbols';
 import { checkVariableBounds, fixVariable, isSubtype } from './typeRelations';
 import {
   type FunctionType,
@@ -226,6 +226,7 @@ export abstract class CallCompiler extends CompilerCore {
         row,
         name
       );
+    this.checkAccessible(scope, chosen.candidate.symbol, row);
     return this.completeCall(scope, context, chosen, args, compiledArgs, expected, row);
   }
 
@@ -461,6 +462,31 @@ export abstract class CallCompiler extends CompilerCore {
 
   // code-gauge-allow functionNcss 80 -- Finishes inference and builds the evaluation of the arguments.
   // code-gauge-allow functionCognitiveComplexity 30 -- Finishes inference and builds the evaluation of the arguments.
+  /** Rejects a use of a `private` or `protected` member outside the code that may see it, as kotlinc does. */
+  protected checkAccessible(scope: Scope, member: FunctionSymbol | PropertySymbol, row: number): void {
+    const { owner, visibility } = member;
+    if (!owner || visibility === 'public' || visibility === 'internal') return;
+    const classes = this.enclosingClasses(scope);
+    if (visibility === 'private') {
+      // A class sees the private members of its companion object.
+      if (classes.includes(owner) || (owner.outer?.companion === owner && classes.includes(owner.outer))) return;
+      this.error(row, `${member.name} は private なので、${owner.name} の外からは使えません。`);
+    }
+    if (classes.some((cls) => cls.isSubclassOf(owner))) return;
+    this.error(row, `${member.name} は protected なので、${owner.name} とそのサブクラスの外からは使えません。`);
+  }
+
+  /** The classes whose declarations hold the code of a scope, nested classes' outer classes included. */
+  private enclosingClasses(scope: Scope): ClassSymbol[] {
+    const classes: ClassSymbol[] = [];
+    for (let current: Scope | undefined = scope; current; current = current.parent) {
+      for (let cls = current.receiver?.cls ?? current.staticClass; cls; cls = cls.outer) {
+        if (!classes.includes(cls)) classes.push(cls);
+      }
+    }
+    return classes;
+  }
+
   private completeCall(
     scope: Scope,
     context: FunctionContext,
@@ -520,11 +546,22 @@ export abstract class CallCompiler extends CompilerCore {
         argumentEvals.push({ index, paramIndex, eval: (frame) => compiled.eval(frame) });
       }
     }
-    for (const variable of variables) {
-      const fixed = fixVariable(variable);
-      if (!fixed) this.error(row, `型引数 ${variable.param.name} を推論できません。型を書いてください。`);
-      if (!checkVariableBounds(variable))
-        this.error(row, `${symbol.name} の型引数 ${variable.param.name} に合う型がありません。`);
+    // Checking a fixed variable's bounds constrains the variables they mention, as `C : Iterable<T>` in
+    // `onEach` gives `T` its type from `C`, so a variable nothing constrains yet waits for the others.
+    let pending = variables;
+    while (pending.length > 0) {
+      const waiting = pending.filter((variable) => !fixVariable(variable));
+      for (const variable of pending) {
+        if (!variable.fixed) continue;
+        if (!checkVariableBounds(variable))
+          this.error(row, `${symbol.name} の型引数 ${variable.param.name} に合う型がありません。`);
+        if (waiting.length > 0)
+          for (const bound of variable.param.bounds) isSubtype(variable.fixed, substitute(bound, substitution));
+      }
+      if (waiting.length === pending.length) {
+        this.error(row, `型引数 ${waiting[0].param.name} を推論できません。型を書いてください。`);
+      }
+      pending = waiting;
     }
     for (const param of this.inferredTypeParameters(candidate)) {
       const type = resolved(substitution.get(param) as KType);

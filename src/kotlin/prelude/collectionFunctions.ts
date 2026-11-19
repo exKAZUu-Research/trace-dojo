@@ -792,6 +792,21 @@ fun <T> MutableList<T>.shuffle(random: kotlin.random.Random) {
     }
 }
 
+fun <T> Collection<T>.random(): T = random(kotlin.random.Random)
+fun <T> Collection<T>.random(random: kotlin.random.Random): T {
+    if (isEmpty()) throw NoSuchElementException("Collection is empty.")
+    return elementAt(random.nextInt(size))
+}
+fun <T> Array<out T>.random(): T = random(kotlin.random.Random)
+fun <T> Array<out T>.random(random: kotlin.random.Random): T {
+    if (isEmpty()) throw NoSuchElementException("Array is empty.")
+    return get(random.nextInt(size))
+}
+fun IntArray.random(): Int = random(kotlin.random.Random)
+fun IntArray.random(random: kotlin.random.Random): Int {
+    if (isEmpty()) throw NoSuchElementException("Array is empty.")
+    return get(random.nextInt(size))
+}
 fun <T> Iterable<T>.shuffled(): List<T> = toMutableList().apply { shuffle() }
 fun <T> Iterable<T>.shuffled(random: kotlin.random.Random): List<T> = toMutableList().apply { shuffle(random) }
 
@@ -900,6 +915,9 @@ fun <T> List<T>.slice(indices: Iterable<Int>): List<T> {
 }
 
 fun <T> Iterable<T>.chunked(size: Int): List<List<T>> = windowed(size, size, partialWindows = true)
+fun <T, R> Iterable<T>.chunked(size: Int, transform: (List<T>) -> R): List<R> = chunked(size).map(transform)
+fun <T, R> Iterable<T>.windowed(size: Int, step: Int = 1, partialWindows: Boolean = false, transform: (List<T>) -> R): List<R> =
+    windowed(size, step, partialWindows).map(transform)
 
 fun <T> Iterable<T>.windowed(size: Int, step: Int = 1, partialWindows: Boolean = false): List<List<T>> {
     if (!(size > 0 && step > 0)) {

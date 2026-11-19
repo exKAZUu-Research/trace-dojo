@@ -260,4 +260,19 @@ fun Int.coerceIn(range: IntRange): Int {
     if (range.isEmpty()) throw IllegalArgumentException("Cannot coerce value to an empty range: $range.")
     return if (this < range.start) range.start else if (this > range.endInclusive) range.endInclusive else this
 }
+
+fun IntRange.random(): Int = random(kotlin.random.Random)
+fun IntRange.random(random: kotlin.random.Random): Int {
+    if (isEmpty()) throw NoSuchElementException("Cannot get random in empty range: $this")
+    return when {
+        last < Int.MAX_VALUE -> random.nextInt(first, last + 1)
+        first > Int.MIN_VALUE -> random.nextInt(first - 1, last) + 1
+        else -> random.nextInt()
+    }
+}
+fun CharRange.random(): Char = random(kotlin.random.Random)
+fun CharRange.random(random: kotlin.random.Random): Char {
+    if (isEmpty()) throw NoSuchElementException("Cannot get random in empty range: $this")
+    return random.nextInt(first.code, last.code + 1).toChar()
+}
 `;

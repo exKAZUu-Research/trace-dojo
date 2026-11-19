@@ -392,6 +392,10 @@ function defineOutput(): void {
     frame.runtime.io.stdout.write(stringOf(frame, message));
     return UNIT;
   });
+  defineNative('java.lang.writeStream(Boolean, String)', (frame, _receiver, [isError, text]) => {
+    (isError ? frame.runtime.io.stderr : frame.runtime.io.stdout).write(text as string);
+    return UNIT;
+  });
   defineNativeProperty(
     'kotlin.reflect.PropertyReference.name',
     (_frame, receiver) => (receiver as KObject).native?.name as string

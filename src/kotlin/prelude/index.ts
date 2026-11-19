@@ -6,9 +6,10 @@ import { COMPARISONS_SOURCE, MATH_SOURCE, RANDOM_SOURCE } from './comparisonsRan
 import { CORE_SOURCE } from './core';
 import { PROPERTIES_SOURCE } from './properties';
 import { RANGES_SOURCE } from './ranges';
-import { exceptionsSource, IO_SOURCE, REFLECT_SOURCE, TURTLE_SOURCE } from './runtimeTypes';
+import { exceptionsSource, IO_SOURCE, REFLECT_SOURCE, SYSTEM_SOURCE, TURTLE_SOURCE } from './runtimeTypes';
 import { STANDARD_SOURCE } from './standard';
 import { TEXT_SOURCE } from './text';
+import { TIME_SOURCE } from './time';
 
 /** The prelude of the standard library, in the order its files are compiled together. */
 export const PRELUDE_SOURCES = [
@@ -25,7 +26,9 @@ export const PRELUDE_SOURCES = [
   MATH_SOURCE,
   TEXT_SOURCE,
   PROPERTIES_SOURCE,
+  TIME_SOURCE,
   IO_SOURCE,
+  SYSTEM_SOURCE,
   REFLECT_SOURCE,
   TURTLE_SOURCE,
 ];

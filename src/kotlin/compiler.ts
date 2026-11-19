@@ -111,6 +111,11 @@ const UNAVAILABLE_FUNCTIONS: Record<string, string> = {
   delay: 'コルーチン（delay）',
   sequence: 'シーケンスを作る sequence { }',
   iterator: 'イテレータを作る iterator { }',
+  sequenceOf: 'シーケンス（sequenceOf）',
+  generateSequence: 'シーケンス（generateSequence）',
+  runCatching: '失敗を値として受け取る runCatching（Result）',
+  Regex: '正規表現（Regex）',
+  exitProcess: 'プログラムの終了（exitProcess）',
 };
 
 export class Compiler extends DeclarationCompiler {

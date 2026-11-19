@@ -558,6 +558,7 @@ export abstract class StatementCompiler extends ExpressionCompiler {
     const type = resolved(substitute(this.ensurePropertyType(symbol, row), member.substitution));
     if (!symbol.isVar && !this.mayInitializeVal(scope, symbol))
       this.error(row, `val で宣言した ${symbol.name} には、再び代入できません。`);
+    this.checkAccessible(scope, symbol, row);
     if (symbol.isVar && symbol.setterVisibility === 'private' && !this.isInsideClass(scope, symbol.owner)) {
       this.error(row, `${symbol.name} の set は private なので、クラスの外からは代入できません。`);
     }

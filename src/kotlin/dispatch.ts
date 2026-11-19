@@ -29,6 +29,9 @@ export function runtimeClassOf(value: Value): ClassSymbol {
 export function isVirtual(member: FunctionSymbol | PropertySymbol): boolean {
   const { owner } = member;
   if (!owner) return false;
+  // A final class's members have no overrides, and calling them directly works for an unboxed `Double` receiver,
+  // whose class a raw number does not tell.
+  if (!owner.isInheritable && owner.kind !== 'enum') return false;
   return member.isAbstract || member.isOpen || (member.isOverride && owner.isInheritable) || owner.isInterface;
 }
 

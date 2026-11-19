@@ -193,6 +193,13 @@ external fun <K, V> hashMapOf(): HashMap<K, V>
 external fun <K, V> hashMapOf(vararg pairs: Pair<K, V>): HashMap<K, V>
 external fun <K, V> linkedMapOf(vararg pairs: Pair<K, V>): LinkedHashMap<K, V>
 
+inline fun <T> List(size: Int, init: (Int) -> T): List<T> = MutableList(size, init)
+inline fun <T> MutableList(size: Int, init: (Int) -> T): MutableList<T> {
+    val list = ArrayList<T>(size)
+    for (index in 0 until size) list.add(init(index))
+    return list
+}
+
 fun <T : Any> listOfNotNull(element: T?): List<T> = if (element != null) listOf(element) else emptyList()
 fun <T : Any> listOfNotNull(vararg elements: T?): List<T> = elements.filterNotNull()
 `;

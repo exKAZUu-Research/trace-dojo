@@ -15,6 +15,7 @@ import {
   typeMismatchMessage,
 } from './compilerBase';
 import type { MemberRef } from './compilerCore';
+import { unavailableMessage } from './convertSupport';
 import { getPropertyValue, propertyRepr, receiverRepr } from './dispatch';
 import { formatPrimitive, stringOf, valueEquals } from './format';
 import {
@@ -418,6 +419,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
         if (cls.kind === 'enum' && cls.enumEntries.some((entry) => entry.name === name)) {
           return this.readEnumEntry(cls, name);
         }
+        if (cls.kind === 'enum' && name === 'entries') return this.compileEnumEntries(cls);
         const { companion } = cls;
         if (!companion) continue;
         const property = this.findProperty(scope, companion.type, name);
@@ -623,6 +625,13 @@ export abstract class ExpressionCompiler extends CallCompiler {
         }
         this.error(row, `${typeToString(resolved(target.type))} には ${name} がありません。`);
       }
+      const { extensionReceiver } = property.symbol;
+      this.requireNonNullReceiver(
+        target,
+        row,
+        extensionReceiver !== undefined && isNullable(resolved(extensionReceiver))
+      );
+      this.checkAccessible(scope, property.symbol, row);
       return this.readProperty(property, target, row);
     });
   }
@@ -652,11 +661,7 @@ export abstract class ExpressionCompiler extends CallCompiler {
       if (!outer) return undefined;
       if (outer.kind === 'class') {
         const nested = outer.cls.nested.get(expression.name);
-        return nested && !nested.isObject
-          ? { kind: 'class', cls: nested }
-          : nested
-            ? { kind: 'class', cls: nested }
-            : undefined;
+        return nested ? { kind: 'class', cls: nested } : undefined;
       }
       const path = this.packagePathOf(expression);
       if (path) {
@@ -1122,6 +1127,8 @@ export abstract class ExpressionCompiler extends CallCompiler {
       if (isNullable(resolved(receiver.type)) && this.extensionCandidates(nonNull(receiver.type), name).length > 0) {
         this.requireNonNullReceiver(receiver, row, false);
       }
+      const what = UNAVAILABLE_MEMBER_FUNCTIONS[name];
+      if (what) this.error(row, unavailableMessage(what));
       this.error(row, `${typeToString(resolved(receiver.type))} には ${name} がありません。`);
     }
     const memberOnly = members.length > 0 && extensions.length === 0;
@@ -1167,7 +1174,10 @@ export abstract class ExpressionCompiler extends CallCompiler {
         });
       }
       const cls = qualified.scope.classes.get(name);
-      if (cls) levels.push({ candidates: this.constructorCandidates(cls, row), receiver: undefined });
+      // `kotlin.random.Random(1)` calls the function, since the abstract class of the same name has no constructor to call.
+      if (cls && !(cls.isAbstract && functions.length > 0)) {
+        levels.push({ candidates: this.constructorCandidates(cls, row), receiver: undefined });
+      }
       if (levels.length === 0) this.error(row, `${name} が見つかりません。`);
       return this.resolveInLevels(scope, context, levels, args, hasTrailingLambda, typeArgs, expected, row, name);
     }
@@ -2256,6 +2266,14 @@ function unboxNumber(value: Value): number | bigint {
 function returnUnit(): Value {
   return UNIT;
 }
+
+/** Functions of the standard library's classes that this environment does not provide, by what they are for. */
+const UNAVAILABLE_MEMBER_FUNCTIONS: Record<string, string> = {
+  asSequence: 'シーケンス（asSequence）',
+  toRegex: '正規表現（toRegex）',
+  toSortedMap: '並べ替えた Map（toSortedMap）',
+  toSortedSet: '並べ替えた Set（toSortedSet）',
+};
 
 /** The library's functions that collect their arguments, which only create objects when every argument does. */
 const COLLECTION_FACTORIES = new Set(['arrayOf', 'listOf', 'mutableListOf', 'arrayListOf', 'setOf', 'mutableSetOf']);

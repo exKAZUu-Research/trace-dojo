@@ -40,6 +40,7 @@ const KINDS: ArrayKind[] = [
     isComparable: false,
     zero: 'false',
   },
+  { receiver: 'UIntArray', typeParameters: '', element: 'UInt', sum: undefined, isComparable: true, zero: '0u' },
 ];
 
 /** The generic part of a function's type parameters, such as `<T, R>`, or nothing. */
@@ -176,6 +177,58 @@ operator fun <T> Array<T>.plus(element: T): Array<T> = (asList() + element).toTy
 
 external fun <T> arrayOf(vararg elements: T): Array<T>
 external fun <T> arrayOfNulls(size: Int): Array<T?>
+
+@Suppress("UNCHECKED_CAST")
+inline fun <T> Array(size: Int, init: (Int) -> T): Array<T> {
+    val array = arrayOfNulls<T>(size)
+    for (index in 0 until size) array[index] = init(index)
+    return array as Array<T>
+}
+inline fun IntArray(size: Int, init: (Int) -> Int): IntArray {
+    val array = IntArray(size)
+    for (index in 0 until size) array[index] = init(index)
+    return array
+}
+inline fun LongArray(size: Int, init: (Int) -> Long): LongArray {
+    val array = LongArray(size)
+    for (index in 0 until size) array[index] = init(index)
+    return array
+}
+inline fun DoubleArray(size: Int, init: (Int) -> Double): DoubleArray {
+    val array = DoubleArray(size)
+    for (index in 0 until size) array[index] = init(index)
+    return array
+}
+inline fun FloatArray(size: Int, init: (Int) -> Float): FloatArray {
+    val array = FloatArray(size)
+    for (index in 0 until size) array[index] = init(index)
+    return array
+}
+inline fun ShortArray(size: Int, init: (Int) -> Short): ShortArray {
+    val array = ShortArray(size)
+    for (index in 0 until size) array[index] = init(index)
+    return array
+}
+inline fun ByteArray(size: Int, init: (Int) -> Byte): ByteArray {
+    val array = ByteArray(size)
+    for (index in 0 until size) array[index] = init(index)
+    return array
+}
+inline fun CharArray(size: Int, init: (Int) -> Char): CharArray {
+    val array = CharArray(size)
+    for (index in 0 until size) array[index] = init(index)
+    return array
+}
+inline fun BooleanArray(size: Int, init: (Int) -> Boolean): BooleanArray {
+    val array = BooleanArray(size)
+    for (index in 0 until size) array[index] = init(index)
+    return array
+}
+inline fun UIntArray(size: Int, init: (Int) -> UInt): UIntArray {
+    val array = UIntArray(size)
+    for (index in 0 until size) array[index] = init(index)
+    return array
+}
 external fun <T> emptyArray(): Array<T>
 external fun intArrayOf(vararg elements: Int): IntArray
 external fun longArrayOf(vararg elements: Long): LongArray

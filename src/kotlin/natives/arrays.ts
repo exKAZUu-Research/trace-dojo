@@ -1,3 +1,4 @@
+import { fdlibmPow } from '../../interpreter/fdlibmPow';
 import { callFunction } from '../dispatch';
 import { stringOf, valueEquals } from '../format';
 import { compareDoubles, compareNumbers, toInt32 } from '../operators';
@@ -236,7 +237,7 @@ function defineMath(): void {
     defineNative(`kotlin.math.${name}(Double)`, (_frame, _receiver, [x]) => operation(x as number));
   defineNative('kotlin.math.sqrt(Float)', (_frame, _receiver, [x]) => Math.fround(Math.sqrt(x as number)));
   defineNative('kotlin.math.abs(Float)', (_frame, _receiver, [x]) => Math.abs(x as number));
-  defineNative('kotlin.math.pow(Double, Double)', (_frame, _receiver, [x, y]) => javaPow(x as number, y as number));
+  defineNative('kotlin.math.pow(Double, Double)', (_frame, _receiver, [x, y]) => fdlibmPow(x as number, y as number));
   defineNative('kotlin.math.atan2(Double, Double)', (_frame, _receiver, [y, x]) =>
     Math.atan2(y as number, x as number)
   );
@@ -251,10 +252,10 @@ function defineMath(): void {
     defineNative(`kotlin.math.max(${type}, ${type})`, (_frame, _receiver, [a, b]) => javaMax(a as number, b as number));
     defineNative(`kotlin.math.min(${type}, ${type})`, (_frame, _receiver, [a, b]) => javaMin(a as number, b as number));
   }
-  defineNative('kotlin.math.Double.pow(Double)', (_frame, receiver, [x]) => javaPow(receiver as number, x as number));
-  defineNative('kotlin.math.Double.pow(Int)', (_frame, receiver, [n]) => javaPow(receiver as number, n as number));
+  defineNative('kotlin.math.Double.pow(Double)', (_frame, receiver, [x]) => fdlibmPow(receiver as number, x as number));
+  defineNative('kotlin.math.Double.pow(Int)', (_frame, receiver, [n]) => fdlibmPow(receiver as number, n as number));
   defineNative('kotlin.math.Float.pow(Float)', (_frame, receiver, [x]) =>
-    Math.fround(javaPow(receiver as number, x as number))
+    Math.fround(fdlibmPow(receiver as number, x as number))
   );
   defineNative('kotlin.math.Double.roundToInt()', (frame, receiver) => {
     const value = receiver as number;
@@ -278,6 +279,7 @@ function defineMath(): void {
   });
   defineNative('kotlin.Double.nextDown()', (_frame, receiver) => nextAfter(receiver as number, -1));
   defineNative('kotlin.Double.nextUp()', (_frame, receiver) => nextAfter(receiver as number, 1));
+  defineNative('kotlin.time.monotonicNanos()', () => BigInt(Math.round(performance.now() * 1_000_000)));
   defineNative('kotlin.random.platformSeed()', () => toInt32(Math.trunc(Math.random() * 2 ** 32)));
 }
 
@@ -303,14 +305,6 @@ function roundHalfEven(value: number): number {
   return floor % 2 === 0 ? floor : floor + 1;
 }
 
-/** `Math.pow`, which differs from JavaScript's `**` where the base is 1 or -1 and the exponent is infinite or NaN. */
-function javaPow(x: number, y: number): number {
-  if (Number.isNaN(y)) return Number.NaN;
-  if (y === 0) return 1;
-  if ((x === 1 || x === -1) && !Number.isFinite(y)) return Number.NaN;
-  return x ** y;
-}
-
 /** `Math.max`, where NaN wins and 0.0 is greater than -0.0. */
 function javaMax(a: number, b: number): number {
   if (Number.isNaN(a) || Number.isNaN(b)) return Number.NaN;
@@ -327,9 +321,7 @@ function javaMin(a: number, b: number): number {
 /** The receivers of the generated array functions, as the prelude writes them. */
 const ARRAY_RECEIVERS: [receiver: string, kind: PrimitiveKind | 'Boolean' | undefined][] = [
   ['Array<out T>', undefined],
-  ...PRIMITIVE_ARRAYS.filter(([name]) => name !== 'UIntArray').map(
-    ([name, kind]): [string, PrimitiveKind | 'Boolean'] => [name, kind]
-  ),
+  ...PRIMITIVE_ARRAYS.map(([name, kind]): [string, PrimitiveKind | 'Boolean'] => [name, kind]),
 ];
 
 function boxedItems(array: Value, kind: PrimitiveKind | 'Boolean' | undefined): Value[] {

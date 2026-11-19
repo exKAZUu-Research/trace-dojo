@@ -388,9 +388,11 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       constructorSymbol.isLibrary = entry.file.isLibrary;
       constructorSymbol.returnType = this.unitTypeOrUndefined();
       constructorSymbol.visibility =
-        symbol.kind === 'enum' || symbol.isSealed
+        symbol.kind === 'enum'
           ? 'private'
-          : visibilityOf(primary?.modifiers ?? { keywords: new Set(), annotations: [] });
+          : symbol.isSealed
+            ? 'protected'
+            : visibilityOf(primary?.modifiers ?? { keywords: new Set(), annotations: [] });
       const ctorScope = new Scope(scope, undefined);
       constructorSymbol.params = (primary?.params ?? []).map((param) => this.declareParameter(ctorScope, param));
       if (
@@ -444,10 +446,19 @@ export abstract class DeclarationCompiler extends StatementCompiler {
         break;
       }
       case 'property': {
-        if (entry.symbol.members.get(member.name)?.some((existing) => existing.kind === 'property')) {
-          this.error(member.row, `プロパティ ${member.name} が2回宣言されています。`);
-        }
         const propertyEntry = this.declareProperty(member, entry.scope, entry, entry.file);
+        const { extensionReceiver } = propertyEntry.symbol;
+        const isDuplicate = entry.symbol.members
+          .get(member.name)
+          ?.some(
+            (existing) =>
+              existing.kind === 'property' &&
+              (existing.extensionReceiver === undefined) === (extensionReceiver === undefined) &&
+              (!existing.extensionReceiver ||
+                !extensionReceiver ||
+                isSameType(existing.extensionReceiver, extensionReceiver))
+          );
+        if (isDuplicate) this.error(member.row, `プロパティ ${member.name} が2回宣言されています。`);
         entry.symbol.addMember(propertyEntry.symbol);
         break;
       }
@@ -1223,7 +1234,9 @@ export abstract class DeclarationCompiler extends StatementCompiler {
     if (cls) {
       thisType = this.thisTypeOf(cls.symbol);
       if (!extension) scope.receiver = new ReceiverSymbol(thisType, context, cls.symbol, cls.symbol.name);
-      else this.unavailable(cls.symbol.row, 'クラスの中での拡張関数・拡張プロパティの宣言');
+      // An extension declared in an object, as `Int.minutes` in `Duration.Companion`, needs no instance of it.
+      else if (!cls.symbol.isObject || !cls.file.isLibrary)
+        this.unavailable(cls.symbol.row, 'クラスの中での拡張関数・拡張プロパティの宣言');
     }
     if (extension) {
       scope.receiver = new ReceiverSymbol(extension, context, undefined, label);
@@ -1726,16 +1739,6 @@ export abstract class DeclarationCompiler extends StatementCompiler {
       superclass.cls.name
     );
     this.recordsSteps = savedRecords;
-    const target = call.symbol;
-    if (
-      target.visibility === 'private' &&
-      target.owner &&
-      !target.owner.isLibrary &&
-      target.owner !== symbol.outer &&
-      target.owner.outer !== symbol.outer
-    ) {
-      this.error(decl.row, `${superclass.cls.name} のコンストラクタは private なので呼べません。`);
-    }
     // A superclass constructor called without arguments, as in `: MyTurtle()`, is part of the step of the
     // constructor that calls it, as Java's implicit `super()` is.
     const isExplicit = spec?.kind === 'constructorCall' && spec.args.length > 0;
@@ -1971,6 +1974,6 @@ export function describeUnavailableImport(path: string): string | undefined {
     return 'コルーチン・スレッド';
   if (path.startsWith('kotlin.reflect') || path.startsWith('java.lang.reflect')) return 'リフレクション';
   if (path.startsWith('java.') || path.startsWith('javax.')) return `Java のクラスの直接の利用（${path}）`;
-  if (path.startsWith('kotlin.')) return `標準ライブラリの ${path}`;
+  if (path.startsWith('kotlin.')) return `標準ライブラリの ${path} `;
   return `標準ライブラリ以外のライブラリ（${path}）`;
 }

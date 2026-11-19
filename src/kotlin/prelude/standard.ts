@@ -107,6 +107,26 @@ fun <T> lazy(initializer: () -> T): Lazy<T> = SynchronizedLazyImpl(initializer)
 
 operator fun <T> Lazy<T>.getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>): T = value
 
+fun Int.mod(other: Int): Int {
+    val r = this % other
+    return if (r != 0 && (r xor other) < 0) r + other else r
+}
+fun Long.mod(other: Long): Long {
+    val r = this % other
+    return if (r != 0L && (r xor other) < 0L) r + other else r
+}
+fun Double.mod(other: Double): Double {
+    val r = this % other
+    return if (r != 0.0 && (r < 0.0) != (other < 0.0)) r + other else r
+}
+fun Int.floorDiv(other: Int): Int {
+    val q = this / other
+    return if ((this xor other) < 0 && q * other != this) q - 1 else q
+}
+fun Long.floorDiv(other: Long): Long {
+    val q = this / other
+    return if ((this xor other) < 0L && q * other != this) q - 1L else q
+}
 fun Double.isNaN(): Boolean = this != this
 fun Float.isNaN(): Boolean = this != this
 fun Double.isInfinite(): Boolean = this == Double.POSITIVE_INFINITY || this == Double.NEGATIVE_INFINITY

@@ -108,6 +108,7 @@ external fun String.padEnd(length: Int, padChar: Char = ' '): String
 external fun String.equals(other: String?, ignoreCase: Boolean): Boolean
 external fun String.compareTo(other: String, ignoreCase: Boolean): Int
 external fun String.format(vararg args: Any?): String
+fun String.Companion.format(format: String, vararg args: Any?): String = format.format(*args)
 external fun String.removePrefix(prefix: CharSequence): String
 external fun String.removeSuffix(suffix: CharSequence): String
 external fun String.removeSurrounding(delimiter: CharSequence): String
