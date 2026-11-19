@@ -31,8 +31,17 @@ import {
   valuesEqual,
 } from '../objects';
 import { CsThrow, type ExceptionState, ProgramExit } from '../runtime';
-import { type FieldSymbol, type NamedType, specialOf, type SpecialType, type Type } from '../types';
-import { type CsArray, CsBox, CsDelegate, CsObject, CsStruct, type Value, type VariableReference } from '../values';
+import { type FieldSymbol, type NamedType, namedType, specialOf, type SpecialType, type Type } from '../types';
+import {
+  copyValue,
+  type CsArray,
+  CsBox,
+  CsDelegate,
+  CsObject,
+  CsStruct,
+  type Value,
+  type VariableReference,
+} from '../values';
 import { formatValue, parseNumber } from './formatting';
 import { linqDisplayName } from './nativesLinq';
 import {
@@ -767,6 +776,7 @@ defineNatives({
   'System.Convert.ToInt64': (call, _receiver, args) => convertTo(call, args, 'long'),
   'System.Convert.ToInt16': (call, _receiver, args) => convertTo(call, args, 'short'),
   'System.Convert.ToByte': (call, _receiver, args) => convertTo(call, args, 'byte'),
+  'System.Convert.ToSByte': (call, _receiver, args) => convertTo(call, args, 'sbyte'),
   'System.Convert.ToDouble': (call, _receiver, args) => convertTo(call, args, 'double'),
   'System.Convert.ToSingle': (call, _receiver, args) => convertTo(call, args, 'float'),
   'System.Convert.ToDecimal': (call, _receiver, args) => convertTo(call, args, 'decimal'),
@@ -1122,7 +1132,21 @@ for (let arity = 1; arity <= 7; arity++) {
     structEquals(evaluatorOf(call), receiver as CsStruct, other as Value, call.frame);
   tupleNatives[`${name}.GetHashCode`] = (call, receiver) =>
     structHash(evaluatorOf(call), receiver as CsStruct, call.frame);
+  tupleNatives[`${name}.CompareTo`] = (call, receiver, [other]) => {
+    const evaluator = evaluatorOf(call);
+    const b = (other as CsStruct).fields;
+    for (const [index, value] of (receiver as CsStruct).fields.entries()) {
+      const order = defaultCompare(evaluator, value, b[index], call.frame);
+      if (order !== 0) return order;
+    }
+    return 0;
+  };
 }
+tupleNatives['System.ValueTuple.Create'] = (call, _receiver, args) =>
+  new CsStruct(
+    namedType((call.method.returnType as NamedType).symbol, call.typeArgs),
+    (args as Value[]).map((value) => copyValue(value))
+  );
 for (const arity of [2, 3]) {
   const name = `System.Tuple\`${arity}`;
   tupleNatives[`${name}..ctor`] = (_call, receiver, args) => {

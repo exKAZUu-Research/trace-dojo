@@ -683,6 +683,53 @@ const NUMERIC_RANGES: [number, number, number][] = [
   [0x27_76, 0x27_7f, 1],
 ];
 
+// ---- StringComparer ----
+
+const STRING_COMPARER = 'System.StringComparer';
+
+/** The StringComparer of each StringComparison, one object per kind as .NET's properties return. */
+const stringComparers = new WeakMap<object, Map<number, CsObject>>();
+
+function stringComparer(call: NativeCall, comparison: number): CsObject {
+  let byKind = stringComparers.get(call.frame.runtime);
+  if (!byKind) {
+    byKind = new Map();
+    stringComparers.set(call.frame.runtime, byKind);
+  }
+  let comparer = byKind.get(comparison);
+  if (!comparer) {
+    comparer = new CsObject(libraryType(call, STRING_COMPARER), []);
+    comparer.native = comparison;
+    byKind.set(comparison, comparer);
+  }
+  return comparer;
+}
+
+const comparisonOfComparer = (receiver: Value): number => (receiver as CsObject).native as number;
+
+defineNatives({
+  [`${STRING_COMPARER}.get_CurrentCulture`]: (call) => stringComparer(call, 0),
+  [`${STRING_COMPARER}.get_CurrentCultureIgnoreCase`]: (call) => stringComparer(call, 1),
+  [`${STRING_COMPARER}.get_InvariantCulture`]: (call) => stringComparer(call, 2),
+  [`${STRING_COMPARER}.get_InvariantCultureIgnoreCase`]: (call) => stringComparer(call, 3),
+  [`${STRING_COMPARER}.get_Ordinal`]: (call) => stringComparer(call, 4),
+  [`${STRING_COMPARER}.get_OrdinalIgnoreCase`]: (call) => stringComparer(call, 5),
+  [`${STRING_COMPARER}.Compare`]: (_call, receiver, [a, b]) => {
+    if (a === undefined) return b === undefined ? 0 : -1;
+    if (b === undefined) return 1;
+    return compareWith(a as string, b as string, comparisonOfComparer(receiver));
+  },
+  [`${STRING_COMPARER}.Equals`]: (_call, receiver, [a, b]) => {
+    if (a === undefined || b === undefined) return a === b;
+    return equalsWith(a as string, b as string, comparisonOfComparer(receiver));
+  },
+  [`${STRING_COMPARER}.GetHashCode`]: (_call, receiver, [text]) => {
+    if (text === undefined) failNull('obj');
+    const ignoresCase = comparisonOfComparer(receiver) % 2 === 1;
+    return primitiveHash(ignoresCase ? caseMappedText(text as string, true) : (text as string)) ?? 0;
+  },
+});
+
 // ---- StringBuilder ----
 
 const BUILDER = 'System.Text.StringBuilder';

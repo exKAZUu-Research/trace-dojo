@@ -3,7 +3,7 @@ import { defineNatives, type NativeCall } from '../natives';
 import type { NativeState } from '../runtime';
 import { CsObject, type Value } from '../values';
 import { type EnumerableState, LibraryEnumerator } from './iteration';
-import { evaluatorOf, failNull, failOutOfRange, libraryType, newArray, unsupportedCall } from './support';
+import { evaluatorOf, fail, failNull, failOutOfRange, libraryType, newArray, unsupportedCall } from './support';
 
 const NAMESPACE = 'System.Text.RegularExpressions';
 
@@ -338,11 +338,73 @@ class MatchListState implements EnumerableState {
 
 const compiledPatterns = new Map<string, CompiledPattern>();
 
+/** The first error that .NET's parser reports for the common mistakes in a pattern, with its offset. */
+function patternError(pattern: string): { offset: number; reason: string } | undefined {
+  let depth = 0;
+  let canQuantify = false;
+  let quantified = false;
+  for (let index = 0; index < pattern.length; index++) {
+    const char = pattern[index];
+    if (char === '\\') {
+      if (index + 1 >= pattern.length) return { offset: index + 1, reason: String.raw`Illegal \ at end of pattern.` };
+      const escaped = pattern[index + 1];
+      if (/[A-Za-z]/.test(escaped) && !/[dDwWsSbBAzZGntrfvaeuxcpPk]/.test(escaped))
+        return { offset: index + 2, reason: `Unrecognized escape sequence \\${escaped}.` };
+      index++;
+      canQuantify = true;
+      quantified = false;
+      continue;
+    }
+    if (char === '[') {
+      const close = pattern.indexOf(']', index + (pattern[index + 1] === ']' ? 2 : 1));
+      if (close === -1) return { offset: pattern.length, reason: 'Unterminated [] set.' };
+      index = close;
+      canQuantify = true;
+      quantified = false;
+      continue;
+    }
+    const quantifier = /^(?:[*+?]|\{(\d+)(?:,(\d*))?\})/.exec(pattern.slice(index));
+    if (quantifier && !(char === '?' && quantified)) {
+      const text = quantifier[0];
+      if (!canQuantify)
+        return { offset: index + 1, reason: `Quantifier '${text[0] === '{' ? text : char}' following nothing.` };
+      if (quantified) return { offset: index + 1, reason: `Nested quantifier '${text[0]}'.` };
+      const [, low, high] = quantifier;
+      if (high !== undefined && high !== '' && Number(low) > Number(high))
+        return { offset: index + text.length, reason: 'Illegal {x,y} with x > y.' };
+      index += text.length - 1;
+      quantified = true;
+      continue;
+    }
+    quantified = false;
+    if (char === '(') {
+      depth++;
+      canQuantify = false;
+      // `(?` starts a group construct, such as `(?:`, `(?<name>`, or `(?=`, whose `?` is no quantifier.
+      if (pattern[index + 1] === '?') index++;
+      continue;
+    }
+    if (char === ')') {
+      if (depth === 0) return { offset: index + 1, reason: "Too many )'s." };
+      depth--;
+    }
+    canQuantify = char !== '|';
+  }
+  return depth > 0 ? { offset: pattern.length, reason: "Not enough )'s." } : undefined;
+}
+
 function patternOf(call: NativeCall, pattern: Value, options: Value = 0): CompiledPattern {
   if (pattern === undefined) failNull('pattern');
   const key = `${options as number}:${pattern as string}`;
   let compiled = compiledPatterns.get(key);
   if (!compiled) {
+    const invalid = patternError(pattern as string);
+    if (invalid) {
+      fail(
+        'System.Text.RegularExpressions.RegexParseException',
+        `Invalid pattern '${pattern as string}' at offset ${invalid.offset}. ${invalid.reason}`
+      );
+    }
     try {
       compiled = compilePattern(pattern as string, options as number);
     } catch (error) {

@@ -682,6 +682,7 @@ namespace System.Text.RegularExpressions {
     public static string[] Split(string input, string pattern);
     public static string[] Split(string input, string pattern, RegexOptions options);
   }
+  public sealed class RegexParseException : ArgumentException { }
   public delegate string MatchEvaluator(Match match);
   public class Capture {
     public int Index { get; }

@@ -419,6 +419,17 @@ namespace System {
     public override string? ToString();
   }
 
+  public abstract class StringComparer : IComparer<string?>, IEqualityComparer<string?> {
+    public static StringComparer Ordinal { get; }
+    public static StringComparer OrdinalIgnoreCase { get; }
+    public static StringComparer CurrentCulture { get; }
+    public static StringComparer CurrentCultureIgnoreCase { get; }
+    public static StringComparer InvariantCulture { get; }
+    public static StringComparer InvariantCultureIgnoreCase { get; }
+    public int Compare(string? x, string? y);
+    public bool Equals(string? x, string? y);
+    public int GetHashCode(string obj);
+  }
   public enum StringComparison { CurrentCulture = 0, CurrentCultureIgnoreCase = 1, InvariantCulture = 2, InvariantCultureIgnoreCase = 3, Ordinal = 4, OrdinalIgnoreCase = 5 }
   public enum StringSplitOptions { None = 0, RemoveEmptyEntries = 1, TrimEntries = 2 }
   public enum MidpointRounding { ToEven = 0, AwayFromZero = 1, ToZero = 2, ToNegativeInfinity = 3, ToPositiveInfinity = 4 }
@@ -590,6 +601,10 @@ namespace System {
     public static byte ToByte(int value);
     public static byte ToByte(double value);
     public static byte ToByte(char value);
+    public static sbyte ToSByte(object? value);
+    public static sbyte ToSByte(string? value);
+    public static sbyte ToSByte(int value);
+    public static sbyte ToSByte(double value);
     public static short ToInt16(object? value);
     public static short ToInt16(string? value);
     public static short ToInt16(int value);
@@ -788,13 +803,22 @@ namespace System {
     public static void ThrowIfLessThan(int value, int other, string? paramName = null);
   }
 
-  public struct ValueTuple<T1> { public T1 Item1; public ValueTuple(T1 item1); public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); }
-  public struct ValueTuple<T1, T2> { public T1 Item1; public T2 Item2; public ValueTuple(T1 item1, T2 item2); public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); }
-  public struct ValueTuple<T1, T2, T3> { public T1 Item1; public T2 Item2; public T3 Item3; public ValueTuple(T1 item1, T2 item2, T3 item3); public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); }
-  public struct ValueTuple<T1, T2, T3, T4> { public T1 Item1; public T2 Item2; public T3 Item3; public T4 Item4; public ValueTuple(T1 item1, T2 item2, T3 item3, T4 item4); public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); }
-  public struct ValueTuple<T1, T2, T3, T4, T5> { public T1 Item1; public T2 Item2; public T3 Item3; public T4 Item4; public T5 Item5; public ValueTuple(T1 item1, T2 item2, T3 item3, T4 item4, T5 item5); public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); }
-  public struct ValueTuple<T1, T2, T3, T4, T5, T6> { public T1 Item1; public T2 Item2; public T3 Item3; public T4 Item4; public T5 Item5; public T6 Item6; public ValueTuple(T1 item1, T2 item2, T3 item3, T4 item4, T5 item5, T6 item6); public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); }
-  public struct ValueTuple<T1, T2, T3, T4, T5, T6, T7> { public T1 Item1; public T2 Item2; public T3 Item3; public T4 Item4; public T5 Item5; public T6 Item6; public T7 Item7; public ValueTuple(T1 item1, T2 item2, T3 item3, T4 item4, T5 item5, T6 item6, T7 item7); public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); }
+  public struct ValueTuple<T1> : IComparable<ValueTuple<T1>> { public T1 Item1; public ValueTuple(T1 item1); public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); public int CompareTo(ValueTuple<T1> other); }
+  public struct ValueTuple<T1, T2> : IComparable<ValueTuple<T1, T2>> { public T1 Item1; public T2 Item2; public ValueTuple(T1 item1, T2 item2); public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); public int CompareTo(ValueTuple<T1, T2> other); }
+  public struct ValueTuple<T1, T2, T3> : IComparable<ValueTuple<T1, T2, T3>> { public T1 Item1; public T2 Item2; public T3 Item3; public ValueTuple(T1 item1, T2 item2, T3 item3); public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); public int CompareTo(ValueTuple<T1, T2, T3> other); }
+  public struct ValueTuple<T1, T2, T3, T4> : IComparable<ValueTuple<T1, T2, T3, T4>> { public T1 Item1; public T2 Item2; public T3 Item3; public T4 Item4; public ValueTuple(T1 item1, T2 item2, T3 item3, T4 item4); public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); public int CompareTo(ValueTuple<T1, T2, T3, T4> other); }
+  public struct ValueTuple<T1, T2, T3, T4, T5> : IComparable<ValueTuple<T1, T2, T3, T4, T5>> { public T1 Item1; public T2 Item2; public T3 Item3; public T4 Item4; public T5 Item5; public ValueTuple(T1 item1, T2 item2, T3 item3, T4 item4, T5 item5); public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); public int CompareTo(ValueTuple<T1, T2, T3, T4, T5> other); }
+  public struct ValueTuple<T1, T2, T3, T4, T5, T6> : IComparable<ValueTuple<T1, T2, T3, T4, T5, T6>> { public T1 Item1; public T2 Item2; public T3 Item3; public T4 Item4; public T5 Item5; public T6 Item6; public ValueTuple(T1 item1, T2 item2, T3 item3, T4 item4, T5 item5, T6 item6); public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); public int CompareTo(ValueTuple<T1, T2, T3, T4, T5, T6> other); }
+  public struct ValueTuple<T1, T2, T3, T4, T5, T6, T7> : IComparable<ValueTuple<T1, T2, T3, T4, T5, T6, T7>> { public T1 Item1; public T2 Item2; public T3 Item3; public T4 Item4; public T5 Item5; public T6 Item6; public T7 Item7; public ValueTuple(T1 item1, T2 item2, T3 item3, T4 item4, T5 item5, T6 item6, T7 item7); public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); public int CompareTo(ValueTuple<T1, T2, T3, T4, T5, T6, T7> other); }
+  public struct ValueTuple {
+    public static ValueTuple<T1> Create<T1>(T1 item1);
+    public static ValueTuple<T1, T2> Create<T1, T2>(T1 item1, T2 item2);
+    public static ValueTuple<T1, T2, T3> Create<T1, T2, T3>(T1 item1, T2 item2, T3 item3);
+    public static ValueTuple<T1, T2, T3, T4> Create<T1, T2, T3, T4>(T1 item1, T2 item2, T3 item3, T4 item4);
+    public static ValueTuple<T1, T2, T3, T4, T5> Create<T1, T2, T3, T4, T5>(T1 item1, T2 item2, T3 item3, T4 item4, T5 item5);
+    public static ValueTuple<T1, T2, T3, T4, T5, T6> Create<T1, T2, T3, T4, T5, T6>(T1 item1, T2 item2, T3 item3, T4 item4, T5 item5, T6 item6);
+    public static ValueTuple<T1, T2, T3, T4, T5, T6, T7> Create<T1, T2, T3, T4, T5, T6, T7>(T1 item1, T2 item2, T3 item3, T4 item4, T5 item5, T6 item6, T7 item7);
+  }
   public class Tuple<T1, T2> { public Tuple(T1 item1, T2 item2); public T1 Item1 { get; } public T2 Item2 { get; } public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); }
   public class Tuple<T1, T2, T3> { public Tuple(T1 item1, T2 item2, T3 item3); public T1 Item1 { get; } public T2 Item2 { get; } public T3 Item3 { get; } public override string ToString(); public override bool Equals(object? obj); public override int GetHashCode(); }
   public static class Tuple {
