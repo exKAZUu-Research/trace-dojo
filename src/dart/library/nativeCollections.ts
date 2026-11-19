@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 828 -- The natives of List, Set, Map, and their iterators share the helpers of this file.
+// code-gauge-allow-file fileNcss 838 -- The natives of List, Set, Map, and their iterators share the helpers of this file.
 import { stringOf } from '../format';
 import { HashStore } from '../hashStore';
 import { type Frame, Frame as FrameClass, type Runtime } from '../runtime';

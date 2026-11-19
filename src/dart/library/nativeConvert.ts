@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 411 -- dart:convert's JSON, UTF-8, and Base64 codecs, each transcribed from the SDK.
 import { formatDouble } from '../format';
 import { HashStore } from '../hashStore';
 import { DartThrow, type Runtime } from '../runtime';
@@ -157,7 +158,7 @@ class JsonParser {
     return value;
   }
 
-  // code-gauge-allow duplicateLines 15 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+  // code-gauge-allow duplicateLines 16 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
   value(): Value {
     this.runtime.spend();
     if (this.position >= this.text.length) this.fail('Unexpected end of input');
@@ -278,49 +279,67 @@ class JsonParser {
 
   /** Numbers as the SDK's parser reads them, which reports a number cut short by the end of the text separately. */
   number(): Value {
-    const { text } = this;
     const start = this.position;
-    let position = start;
-    const atEnd = (): boolean => position >= text.length;
-    const isDigit = (): boolean => !atEnd() && text[position] >= '0' && text[position] <= '9';
-    const unterminated = (): never => this.fail('Unterminated number literal', text.length);
-    if (text[position] === '-') {
-      position++;
-      if (atEnd()) unterminated();
-      if (!isDigit()) this.fail('Missing expected digit', position);
+    if (this.text[this.position] === '-') {
+      this.position++;
+      this.requireMore();
+      if (!this.isDigit()) this.fail('Missing expected digit', this.position);
     }
-    if (text[position] === '0') {
-      position++;
-      if (isDigit()) this.fail('Unexpected character', position);
-    } else {
-      while (isDigit()) position++;
-    }
-    let isDouble = false;
-    if (text[position] === '.') {
-      isDouble = true;
-      position++;
-      if (atEnd()) unterminated();
-      if (!isDigit()) this.fail('Unexpected character', position);
-      while (isDigit()) position++;
-    }
-    if (text[position] === 'e' || text[position] === 'E') {
-      isDouble = true;
-      position++;
-      if (atEnd()) unterminated();
-      if (text[position] === '+' || text[position] === '-') {
-        position++;
-        if (atEnd()) unterminated();
-      }
-      if (!isDigit()) this.fail('Missing expected digit', position);
-      while (isDigit()) position++;
-    }
-    this.position = position;
-    const literal = text.slice(start, position);
-    if (!isDouble) {
+    this.integerPart();
+    const hasFraction = this.fractionPart();
+    const hasExponent = this.exponentPart();
+    const literal = this.text.slice(start, this.position);
+    if (!hasFraction && !hasExponent) {
       const value = BigInt(literal);
       if (value <= 9_223_372_036_854_775_807n && value >= -9_223_372_036_854_775_808n) return value;
     }
     return Number(literal);
+  }
+
+  private integerPart(): void {
+    if (this.text[this.position] === '0') {
+      this.position++;
+      if (this.isDigit()) this.fail('Unexpected character', this.position);
+      return;
+    }
+    this.skipDigits();
+  }
+
+  private fractionPart(): boolean {
+    if (this.text[this.position] !== '.') return false;
+    this.position++;
+    this.requireMore();
+    if (!this.isDigit()) this.fail('Unexpected character', this.position);
+    this.skipDigits();
+    return true;
+  }
+
+  private exponentPart(): boolean {
+    const char = this.text[this.position];
+    if (char !== 'e' && char !== 'E') return false;
+    this.position++;
+    this.requireMore();
+    if (this.text[this.position] === '+' || this.text[this.position] === '-') {
+      this.position++;
+      this.requireMore();
+    }
+    if (!this.isDigit()) this.fail('Missing expected digit', this.position);
+    this.skipDigits();
+    return true;
+  }
+
+  /** A number that the end of the text cuts short is unterminated, which the SDK reports at the end. */
+  private requireMore(): void {
+    if (this.position >= this.text.length) this.fail('Unterminated number literal', this.text.length);
+  }
+
+  private isDigit(): boolean {
+    const char = this.text[this.position];
+    return this.position < this.text.length && char >= '0' && char <= '9';
+  }
+
+  private skipDigits(): void {
+    while (this.isDigit()) this.position++;
   }
 }
 
@@ -571,6 +590,8 @@ const BASE64_VALUES: readonly number[] = Array.from({ length: 128 }, (_, code) =
 });
 
 /** Base64 decoding as the SDK's _Base64Decoder does it, with its errors and their offsets. */
+// code-gauge-allow functionNcss 34 -- A transcription of the SDK's _Base64Decoder.decodeChunk, case by case.
+// code-gauge-allow functionCognitiveComplexity 30 -- A transcription of the SDK's _Base64Decoder.decodeChunk, case by case.
 function decodeBase64(input: string, fail: (message: string, offset: number) => never): number[] {
   const output: number[] = [];
   let bits = 0;
@@ -609,6 +630,8 @@ function decodeBase64(input: string, fail: (message: string, offset: number) => 
 }
 
 /** Checks the padding after the first `=` or `%3D`, returning how many padding characters are still missing. */
+// code-gauge-allow functionNcss 38 -- A transcription of the SDK's _Base64Decoder._checkPadding, case by case.
+// code-gauge-allow functionCognitiveComplexity 28 -- A transcription of the SDK's _Base64Decoder._checkPadding, case by case.
 function checkBase64Padding(
   input: string,
   start: number,

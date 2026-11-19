@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 439 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 441 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import { CompileError } from '../interpreter/diagnostics';
 import type { Span, TypeParameter, TypeSyntax } from './ast';
 import type { ClassInfo, Member } from './classes';

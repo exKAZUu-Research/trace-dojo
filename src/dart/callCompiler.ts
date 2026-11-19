@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 577 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 587 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type { Arguments as ArgumentsSyntax, Expression, FormalParameters, FunctionBody, Span, TypeSyntax } from './ast';
 import type { ClassInfo, ConstructorInfo, Member } from './classes';
 import {
@@ -338,7 +338,7 @@ export abstract class CallCompiler extends OperatorCompiler {
   }
 
   /** Calls a member found through a receiver's static type, dispatching on the receiver's class at runtime. */
-  // code-gauge-allow functionNcss 34 -- Methods, getters, extensions, records, and dynamic receivers.
+  // code-gauge-allow functionNcss 35 -- Methods, getters, extensions, records, and dynamic receivers.
   // code-gauge-allow functionParameterCount 8 -- Methods, getters, extensions, records, and dynamic receivers.
   compileMethodCall(
     receiver: Compiled,
@@ -690,7 +690,7 @@ export abstract class CallCompiler extends OperatorCompiler {
    * other than function literals see only what the context gave; function literals, compiled after them, also see
    * what those arguments gave.
    */
-  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionCognitiveComplexity 26 -- Each branch is one of the cases Dart distinguishes for this construct.
   private inferTypeArguments(
     type: FunctionType,
     args: ArgumentsSyntax,

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 858 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 876 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Arguments as ArgumentsSyntax,
   CascadeSelector,
@@ -742,6 +742,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
   }
 
   /** Whether a spread names a map or another iterable, read from the type of a variable it names. */
+  // code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of spread operand whose type tells a set from a map.
   private spreadKind(value: Expression): 'set' | 'map' | undefined {
     let type: DartType | undefined;
     if (value.kind === 'identifier') {

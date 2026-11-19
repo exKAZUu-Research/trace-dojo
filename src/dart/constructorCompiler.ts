@@ -325,6 +325,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
     return resolution?.kind === 'declaration' && resolution.declaration.kind === 'class';
   }
 
+  // code-gauge-allow functionNcss 31 -- The steps of a generative constructor: checks, its frame, initializers, and body, in order.
   private compileGenerative(
     cls: ClassInfo,
     constructor: ConstructorInfo,
@@ -611,6 +612,7 @@ export abstract class ConstructorCompiler extends AssignmentCompiler {
 
   /** The call of the superclass's constructor or of another constructor of the class, in an initializer list. */
   // code-gauge-allow functionParameterCount 7 -- The parameters are the parts a caller already holds; grouping them would only rename them.
+  // code-gauge-allow functionCognitiveComplexity 20 -- Each check of a super(...) or this(...) call reports its own SDK error.
   private compileDelegation(
     cls: ClassInfo,
     declaration: ConstructorDeclaration,

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 737 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 741 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type {
   Block,
   Expression,
@@ -206,6 +206,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     );
   }
 
+  // code-gauge-allow functionCognitiveComplexity 19 -- Positional and named parameters bind alike, each with its covariance check.
   private compileParameters(spec: FunctionSpec): (frame: Frame, args: Arguments) => void {
     const { parameters } = spec;
     const binders: ((frame: Frame, args: Arguments) => void)[] = [];

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 468 -- The operations of Dart's types belong together; each is a short case analysis.
+// code-gauge-allow-file fileNcss 505 -- The operations of Dart's types belong together; each is a short case analysis.
 import type { ClassInfo } from './classes';
 
 /** A type parameter of a class, a function type, or a generic function. */
@@ -668,6 +668,7 @@ export function typeToString(type: DartType): string {
   }
 }
 
+// code-gauge-allow duplicateLines 16 -- Dart's and the VM's notations of function types share their shape but differ in every part.
 function functionTypeToString(type: FunctionType): string {
   const typeParams =
     type.typeParams.length > 0

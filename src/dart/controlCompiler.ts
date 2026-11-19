@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 450 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 504 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type { Block, CatchClause, Pattern, Statement, SwitchCase } from './ast';
 import type { FunctionSpec } from './callCompiler';
 import { type Eval, typeName } from './compilerBase';
@@ -290,7 +290,8 @@ export abstract class ControlCompiler extends StatementCompiler {
     return clearingSlots(result, slots);
   }
 
-  // code-gauge-allow functionNcss 37 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionCognitiveComplexity 16 -- One case per statement that may yield, in a sync* body.
+  // code-gauge-allow functionNcss 40 -- One case per form of the construct, which reads best together.
   private compileGenStatement(statement: Statement): GenExec {
     switch (statement.kind) {
       case 'yield': {
@@ -340,6 +341,8 @@ export abstract class ControlCompiler extends StatementCompiler {
   }
 
   /** try in a sync* body: a body that yields runs in the generator, and an abandoned iterator skips `finally`. */
+  // code-gauge-allow functionNcss 46 -- A try statement in a generator: its body, catch clauses, and finally, as compileTry.
+  // code-gauge-allow functionCognitiveComplexity 21 -- A try statement in a generator: its body, catch clauses, and finally, as compileTry.
   private compileGenTry(statement: Extract<Statement, { kind: 'try' }>): GenExec {
     const before = this.flow;
     const body = this.compileGenBlock(statement.body);

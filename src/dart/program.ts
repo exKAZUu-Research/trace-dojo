@@ -65,8 +65,8 @@ interface Libraries {
 let loaded: Libraries | undefined;
 
 /** Compiles the interpreter's own libraries once per process; programs share them. */
-// code-gauge-allow functionCognitiveComplexity 26 -- The libraries load in their dependency order, each with its own exports.
-// code-gauge-allow functionNcss 42 -- The libraries load in their dependency order, each with its own exports.
+// code-gauge-allow functionNcss 36 -- The libraries load in their dependency order, each in three phases.
+// code-gauge-allow functionCognitiveComplexity 20 -- The libraries load in their dependency order, each in three phases.
 export function libraries(): Libraries {
   if (loaded) return loaded;
   const globals: GlobalVariable[] = [];
@@ -90,63 +90,7 @@ export function libraries(): Libraries {
       for (const imported of imports) env.addImport(envs.get(imported) as LibraryEnv, undefined, undefined, []);
     }
     for (const phase of ['declare', 'resolve', 'compile'] as const) {
-      if (phase === 'resolve') {
-        const core = envs.get('dart:core') as LibraryEnv;
-        assignCoreTypes(core);
-        for (const name of [
-          'MappedIterable',
-          'MappedListIterable',
-          'WhereIterable',
-          'WhereTypeIterable',
-          'ExpandIterable',
-          'TakeIterable',
-          'TakeWhileIterable',
-          'SkipIterable',
-          'SkipWhileIterable',
-          'FollowedByIterable',
-          'CastIterable',
-          'ListIterable',
-          'ListIterator',
-          'ReversedListIterable',
-          'SubListIterable',
-          'MappedIterator',
-          'WhereIterator',
-          'WhereTypeIterator',
-          'ExpandIterator',
-          'TakeIterator',
-          'TakeWhileIterator',
-          'SkipIterator',
-          'SkipWhileIterator',
-          'FollowedByIterator',
-          'CastIterator',
-          'LateError',
-          'CodeUnits',
-          'EmptyIterable',
-          'EfficientLengthMappedIterable',
-          'EfficientLengthTakeIterable',
-          'EfficientLengthSkipIterable',
-          'EfficientLengthFollowedByIterable',
-          'UnmodifiableMapView',
-          'UnmodifiableSetView',
-        ]) {
-          core.hiddenNames.add(name);
-        }
-        // The natives' iterators stand for the VM's classes of these names.
-        for (const [name, vmName] of [
-          ['_ListIterator', 'ListIterator'],
-          ['_SetIterator', '_CompactIterator'],
-          ['_MapIterator', '_CompactIterator'],
-        ]) {
-          (core.declarations.get(name) as { cls: { vmName: string | undefined } }).cls.vmName = vmName;
-        }
-        // The VM's view of List.asMap is internal to the SDK, not part of dart:collection's API.
-        for (const name of ['ListMapView', 'CastList'])
-          (envs.get('dart:collection') as LibraryEnv).hiddenNames.add(name);
-        for (const name of ['LinkedHashMap', 'LinkedHashSet']) {
-          core.hiddenNames.add(name);
-          (envs.get('dart:collection') as LibraryEnv).reexports.set(name, core.declarations.get(name) as never);
-        }
-      }
+      if (phase === 'resolve') arrangeVisibility(envs);
       for (const { compiler, syntax, uri } of compilers) {
         current = uri;
         if (phase === 'declare') compiler.declareAll(syntax);
@@ -162,6 +106,64 @@ export function libraries(): Libraries {
   }
   loaded = { libraries: envs, globals };
   return loaded;
+}
+
+/** Hides the libraries' internal classes from programs and names the natives' classes as the VM does. */
+function arrangeVisibility(envs: ReadonlyMap<string, LibraryEnv>): void {
+  const core = envs.get('dart:core') as LibraryEnv;
+  assignCoreTypes(core);
+  for (const name of [
+    'MappedIterable',
+    'MappedListIterable',
+    'WhereIterable',
+    'WhereTypeIterable',
+    'ExpandIterable',
+    'TakeIterable',
+    'TakeWhileIterable',
+    'SkipIterable',
+    'SkipWhileIterable',
+    'FollowedByIterable',
+    'CastIterable',
+    'ListIterable',
+    'ListIterator',
+    'ReversedListIterable',
+    'SubListIterable',
+    'MappedIterator',
+    'WhereIterator',
+    'WhereTypeIterator',
+    'ExpandIterator',
+    'TakeIterator',
+    'TakeWhileIterator',
+    'SkipIterator',
+    'SkipWhileIterator',
+    'FollowedByIterator',
+    'CastIterator',
+    'LateError',
+    'CodeUnits',
+    'EmptyIterable',
+    'EfficientLengthMappedIterable',
+    'EfficientLengthTakeIterable',
+    'EfficientLengthSkipIterable',
+    'EfficientLengthFollowedByIterable',
+    'UnmodifiableMapView',
+    'UnmodifiableSetView',
+  ]) {
+    core.hiddenNames.add(name);
+  }
+  // The natives' iterators stand for the VM's classes of these names.
+  for (const [name, vmName] of [
+    ['_ListIterator', 'ListIterator'],
+    ['_SetIterator', '_CompactIterator'],
+    ['_MapIterator', '_CompactIterator'],
+  ]) {
+    (core.declarations.get(name) as { cls: { vmName: string | undefined } }).cls.vmName = vmName;
+  }
+  // The VM's view of List.asMap is internal to the SDK, not part of dart:collection's API.
+  for (const name of ['ListMapView', 'CastList']) (envs.get('dart:collection') as LibraryEnv).hiddenNames.add(name);
+  for (const name of ['LinkedHashMap', 'LinkedHashSet']) {
+    core.hiddenNames.add(name);
+    (envs.get('dart:collection') as LibraryEnv).reexports.set(name, core.declarations.get(name) as never);
+  }
 }
 
 function assignCoreTypes(core: LibraryEnv): void {

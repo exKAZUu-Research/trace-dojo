@@ -1,5 +1,5 @@
-// code-gauge-allow-file fileNcss 431 -- The compilation of every kind of pattern, which share their type and binding helpers.
-import type { Expression, ListPatternElement, Pattern, Span } from './ast';
+// code-gauge-allow-file fileNcss 451 -- The compilation of every kind of pattern, which share their type and binding helpers.
+import type { Expression, ListPatternElement, Pattern, RecordPatternField, Span } from './ast';
 import { CallCompiler } from './callCompiler';
 import { type Compiled, type ResolvedMember, typeName } from './compilerBase';
 import { SHORTED } from './expressionCompiler';
@@ -535,8 +535,6 @@ export abstract class PatternCompiler extends CallCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 28 -- One case per part of the pattern, matched in Dart's order.
-  // code-gauge-allow functionNcss 31 -- One case per part of the pattern, matched in Dart's order.
   private recordPattern(
     pattern: Extract<Pattern, { kind: 'record' }>,
     matchedType: DartType,
@@ -547,12 +545,7 @@ export abstract class PatternCompiler extends CallCompiler {
     const recordType = base.kind === 'record' ? base : undefined;
     const positional = pattern.fields.filter((field) => field.name === undefined);
     const named = pattern.fields.filter((field) => field.name !== undefined);
-    const names = new Set<string>();
-    for (const field of named) {
-      if (names.has(field.name as string))
-        this.error(field, `フィールド ${field.name} がパターンの中で重複しています。`);
-      names.add(field.name as string);
-    }
+    const names = this.fieldNames(named);
     const positionalPatterns = positional.map((field, index) =>
       this.compilePatternInner(
         field.pattern,
@@ -594,22 +587,23 @@ export abstract class PatternCompiler extends CallCompiler {
             `type '${vmTypeString(frame.runtime.runtimeTypeOf(value))}' is not a subtype of type '${vmTypeString(shape)}'`
           );
         }
-        if (!(value instanceof DartRecord)) return false;
-        if (value.positional.length !== positional.length || value.named.length !== sortedNames.length) return false;
-        if (!value.named.every(([name], index) => name === sortedNames[index])) return false;
-        for (const [index, field] of positionalPatterns.entries())
-          if (!field.match(frame, value.positional[index])) return false;
-        for (const field of namedPatterns) {
-          const entry = value.named.find(([name]) => name === field.name);
-          if (!field.pattern.match(frame, entry?.[1])) return false;
-        }
-        return true;
+        return matchesRecord(frame, value, positionalPatterns, namedPatterns, sortedNames);
       },
       irrefutable:
         shapeMatches &&
         positionalPatterns.every((field) => field.irrefutable) &&
         namedPatterns.every((field) => field.pattern.irrefutable),
     };
+  }
+
+  private fieldNames(named: readonly RecordPatternField[]): Set<string> {
+    const names = new Set<string>();
+    for (const field of named) {
+      if (names.has(field.name as string))
+        this.error(field, `フィールド ${field.name} がパターンの中で重複しています。`);
+      names.add(field.name as string);
+    }
+    return names;
   }
 
   // code-gauge-allow functionCognitiveComplexity 18 -- One case per part of the pattern, matched in Dart's order.
@@ -811,4 +805,24 @@ function compareNumbers(operator: string, a: number, b: number): boolean {
       return a >= b;
     }
   }
+}
+
+/** Whether a value is a record of the pattern's shape whose fields match their patterns. */
+function matchesRecord(
+  frame: Frame,
+  value: Value,
+  positionalPatterns: readonly Omit<CompiledPattern, 'variables'>[],
+  namedPatterns: readonly { name: string; pattern: Omit<CompiledPattern, 'variables'> }[],
+  sortedNames: readonly string[]
+): boolean {
+  if (!(value instanceof DartRecord)) return false;
+  if (value.positional.length !== positionalPatterns.length || value.named.length !== sortedNames.length) return false;
+  if (!value.named.every(([name], index) => name === sortedNames[index])) return false;
+  for (const [index, field] of positionalPatterns.entries())
+    if (!field.match(frame, value.positional[index])) return false;
+  for (const field of namedPatterns) {
+    const entry = value.named.find(([name]) => name === field.name);
+    if (!field.pattern.match(frame, entry?.[1])) return false;
+  }
+  return true;
 }

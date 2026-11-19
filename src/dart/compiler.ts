@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 927 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 959 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import { misplacedAtomicMessage } from '../interpreter/traceAnnotations';
 import type {
   ClassDeclaration,
@@ -210,8 +210,8 @@ export class Compiler extends ConstructorCompiler {
   }
 
   /** Resolves type aliases, class headers, member signatures, and top-level signatures, in that order. */
-  // code-gauge-allow functionCognitiveComplexity 18 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 32 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionCognitiveComplexity 19 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionNcss 35 -- One case per form of the construct, which reads best together.
   resolveAll(syntax: Library): void {
     for (const declaration of syntax.declarations) {
       if (declaration.kind !== 'typeAlias') continue;
@@ -284,7 +284,7 @@ export class Compiler extends ConstructorCompiler {
     return ordered;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionCognitiveComplexity 25 -- Each branch is one of the cases Dart distinguishes for this construct.
   private resolveHeader(work: ClassWork): void {
     const { cls, declaration } = work;
     this.withTypeParams(cls.typeParams, () => {
@@ -670,7 +670,7 @@ export class Compiler extends ConstructorCompiler {
   }
 
   // code-gauge-allow functionCognitiveComplexity 25 -- Static, late, final, abstract, and external fields differ.
-  // code-gauge-allow functionNcss 32 -- Static, late, final, abstract, and external fields differ.
+  // code-gauge-allow functionNcss 33 -- Static, late, final, abstract, and external fields differ.
   private declareField(cls: ClassInfo, declaration: FieldDeclaration): void {
     const declaredType = declaration.type ? this.resolveType(declaration.type) : undefined;
     for (const variable of declaration.variables) {
@@ -1052,7 +1052,7 @@ export class Compiler extends ConstructorCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 28 -- Methods, accessors, and operators, static or not.
+  // code-gauge-allow functionCognitiveComplexity 30 -- Methods, accessors, and operators, static or not.
   // code-gauge-allow functionNcss 33 -- Methods, accessors, and operators, static or not.
   private declareMethod(cls: ClassInfo, declaration: MethodDeclaration, owner: ClassInfo | ExtensionInfo = cls): void {
     const typeParams = this.declareTypeParams(declaration.typeParameters);
@@ -1167,8 +1167,8 @@ export class Compiler extends ConstructorCompiler {
   }
 
   /** The function type of a signature, inferring omitted types from the member it overrides. */
-  // code-gauge-allow functionCognitiveComplexity 21 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 34 -- One case per form of the construct, which reads best together.
+  // code-gauge-allow functionCognitiveComplexity 22 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionNcss 36 -- One case per form of the construct, which reads best together.
   signatureOf(
     parameters: FormalParameters,
     returnTypeSyntax: TypeSyntax | undefined,

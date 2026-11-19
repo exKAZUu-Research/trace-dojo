@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 639 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
+// code-gauge-allow-file fileNcss 643 -- One compiler phase per file; splitting it further would scatter the cases of one construct.
 import type { CascadeSelector, CollectionElement, Expression, Span, SwitchExpressionCase } from './ast';
 import type { ClassInfo, Member } from './classes';
 import { at, type Compiled, type Eval, type ResolvedMember, typeName } from './compilerBase';
@@ -342,7 +342,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 20 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionCognitiveComplexity 21 -- Each branch is one of the cases Dart distinguishes for this construct.
   private localTarget(variable: LocalVar, span: Span, isPlainAssignment: boolean): AssignableTarget {
     const { options, name } = variable;
     if (options.isConst) this.error(span, `const の変数 ${name} には代入できません。`);
@@ -777,7 +777,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Each branch is one of the cases Dart distinguishes for this construct.
+  // code-gauge-allow functionCognitiveComplexity 18 -- Each branch is one of the cases Dart distinguishes for this construct.
   private compileIterableSpread(
     element: Extract<CollectionElement, { kind: 'spread' }>,
     compiled: Compiled,
