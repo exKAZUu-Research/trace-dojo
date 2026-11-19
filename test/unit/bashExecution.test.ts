@@ -146,7 +146,7 @@ f() { break; echo after; }; for i in 1; do f; done
   });
 });
 
-test('a syntax error rejects the program before it runs', () => {
+test('a syntax error rejects the program before it runs, naming the token and line Bash reports', () => {
   expect(executeProgram('bash', 'echo a\nif then\n  echo b\nfi\n')).toEqual({
     kind: 'compileError',
     diagnostics: [{ row: 1, message: "構文エラーです（syntax error near unexpected token `then'）。" }],
@@ -154,7 +154,27 @@ test('a syntax error rejects the program before it runs', () => {
   expect(executeProgram('bash', 'echo a\nif true; then\n  echo b\n')).toEqual({
     kind: 'compileError',
     diagnostics: [
-      { row: 1, message: "構文エラーです（syntax error: unexpected end of file from `if' command on line 2）。" },
+      { row: 3, message: "構文エラーです（syntax error: unexpected end of file from `if' command on line 2）。" },
+    ],
+  });
+  // The grammar accepts some programs Bash rejects, and the token Bash stops at is not where the grammar fails.
+  expect(executeProgram('bash', 'for i in 1 2 3 do echo $i; done\n')).toMatchObject({
+    diagnostics: [{ row: 0, message: "構文エラーです（syntax error near unexpected token `done'）。" }],
+  });
+  expect(executeProgram('bash', 'echo a\nin\n')).toMatchObject({
+    diagnostics: [{ row: 1, message: "構文エラーです（syntax error near unexpected token `in'）。" }],
+  });
+  expect(executeProgram('bash', '[[ a b ]]\n')).toMatchObject({
+    diagnostics: [
+      { row: 0, message: "構文エラーです（unexpected token `b', conditional binary operator expected）。" },
+    ],
+  });
+  expect(executeProgram('bash', 'for (( i = $(echo 1); i < 2; i++ )); do echo $i; done\n')).toMatchObject({
+    stdout: '1\n',
+  });
+  expect(executeProgram('bash', 'x=$(\necho $(fi))\n')).toMatchObject({
+    diagnostics: [
+      { row: 1, message: "構文エラーです（syntax error near unexpected token `fi' while looking for matching `)'）。" },
     ],
   });
 });

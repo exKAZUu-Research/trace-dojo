@@ -6,7 +6,8 @@ import { commentTokens, loadParser, parseSource } from '../interpreter/treeSitte
 import { maskInvalidArithmetic } from './arithmeticMasking';
 import type { Program, Statement, WordPart } from './ast';
 import { Converter } from './converter';
-import { syntaxErrorsOf } from './syntaxErrors';
+import { findBashSyntaxError } from './syntaxCheck';
+import { syntaxErrorMessage, syntaxErrorsOf } from './syntaxErrors';
 
 const parser = await loadParser('@willbooster/tree-sitter-bash/tree-sitter-bash.wasm');
 
@@ -20,6 +21,10 @@ export const misplacedBashAtomicMessage =
  * @param trace Marks the functions whose headers hold `# atomic`, for a model program.
  */
 export function parseBash(source: string, trace?: TraceOptions): Program {
+  const syntaxError = findBashSyntaxError(source);
+  if (syntaxError && syntaxError !== 'unknown') {
+    throw new CompileError([{ row: syntaxError.row, message: syntaxErrorMessage(syntaxError.text) }]);
+  }
   return parseText(source, new Set(trace?.atomicAnnotations.keys()));
 }
 
