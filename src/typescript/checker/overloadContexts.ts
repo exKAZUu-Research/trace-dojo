@@ -3,7 +3,7 @@ import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 import type { Checker } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
 import { isContextSensitiveFunction } from './signatures';
-import { named, skipParentheses } from './syntax';
+import { named } from './syntax';
 import type { Type } from './types';
 
 interface Contexts {
@@ -29,11 +29,11 @@ export class OverloadContexts {
     const pending = [...args];
     while (pending.length > 0) {
       this.c.budget.spend();
-      const node = skipParentheses(pending.pop() as TreeNode);
+      const node = pending.pop() as TreeNode;
       if (functionKinds.has(node.type)) {
         if (isContextSensitiveFunction(node)) result.add(node.id);
       } else {
-        for (const child of contextualChildren(node)) pending.push(child);
+        for (const child of named(node)) pending.push(child);
       }
     }
     return result;
@@ -77,28 +77,5 @@ export class OverloadContexts {
 
   get cacheKey(): string {
     return `${this.preview?.id ?? 0}/${this.locked.map(({ id }) => id).join(',')}`;
-  }
-}
-
-function contextualChildren(node: TreeNode): TreeNode[] {
-  switch (node.type) {
-    case 'array':
-    case 'object': {
-      return named(node);
-    }
-    case 'pair': {
-      const value = node.childForFieldName('value');
-      return value ? [value] : [];
-    }
-    case 'ternary_expression': {
-      return named(node).slice(1);
-    }
-    case 'binary_expression': {
-      const operator = node.childForFieldName('operator')?.text;
-      return operator === '||' || operator === '??' ? named(node) : [];
-    }
-    default: {
-      return [];
-    }
   }
 }

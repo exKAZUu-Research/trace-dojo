@@ -42,3 +42,9 @@ function nested(value: { kind: 'text'; tuple: [(x: string) => void] }): void;
 function nested(value: { kind: 'number'; tuple: [(x: number, y: number) => void] }): void;
 function nested(value: any) { value.tuple[0](2, 3); }
 nested({ kind: 'number', tuple: [(x = 1, y: number) => console.log(x + y)] });
+
+function spreadCallback(value: { run: (text: string) => void }): void {
+  value.run('spread');
+}
+spreadCallback({ ...{ run: (x) => console.log(x.toUpperCase()) } });
+spreadCallback(true && { run: (x) => console.log(x.toUpperCase()) });

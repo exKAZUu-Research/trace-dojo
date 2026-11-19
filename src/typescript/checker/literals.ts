@@ -404,7 +404,9 @@ export class LiteralChecker {
     if (member.type === 'spread_element') {
       this.c.flow.from(this.c.flow.current, () =>
         this.c.silently(() => {
-          for (const [name, property] of this.spreadProperties(this.c.expressions.check(named(member)[0])))
+          for (const [name, property] of this.spreadProperties(
+            this.c.expressions.check(named(member)[0], literal.contextual)
+          ))
             literal.declarations.set(name, property);
         })
       );
@@ -663,7 +665,7 @@ export class LiteralChecker {
 
   private spreadMember(literal: ObjectLiteral, member: TreeNode): void {
     const operand = named(member)[0];
-    const spread = this.c.expressions.check(operand);
+    const spread = this.c.expressions.check(operand, literal.contextual);
     const objectPart = filterType(spread, (type) => !isDefinitelyFalsy(type));
     const members = objectPart.kind === 'union' ? objectPart.types : [objectPart];
     const isValid = this.c.patterns.isValidSpreadType(spread);

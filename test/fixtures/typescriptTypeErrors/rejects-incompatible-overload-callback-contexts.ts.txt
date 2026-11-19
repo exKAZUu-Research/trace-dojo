@@ -37,3 +37,7 @@ function tupleCall(value: [(x: string) => void]): void;
 function tupleCall(value: [(x: number, y: number) => void]): void;
 function tupleCall(value: any) { value[0](2, 3); }
 tupleCall([(x = 1, y: number) => console.log(x + y)]);
+
+objectCall(true && { run: (x = 1, y: number) => console.log(x + y) });
+objectCall({ ...{ run: (x = 1, y: number) => console.log(x + y) } });
+objectCall(({ ...{ ...{ run: (x = 1, y: number) => console.log(x + y) } } }));
