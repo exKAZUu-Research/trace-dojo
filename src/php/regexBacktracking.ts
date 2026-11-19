@@ -1,13 +1,22 @@
 import { type AST, RegExpParser, visitRegExpAST } from '@eslint-community/regexpp';
+import { CharSet } from 'refa';
 import { toUnicodeSet } from 'regexp-ast-analysis';
 import { analyse } from 'scslre';
+
+interface Alphabets {
+  readonly cache: WeakMap<AST.Element, CharSet>;
+  readonly empty: CharSet;
+  readonly any: CharSet;
+  readonly unicode: boolean;
+  readonly caseless: WeakSet<AST.Element>;
+}
 
 // code-gauge-allow functionNcss 36 -- Tracks scoped flags and repetition shapes in one AST traversal.
 export function hasAmbiguousRepetition(tree: AST.Pattern, unicode: boolean, ignoreCase: boolean): boolean {
   const baseIgnoreCase = ignoreCase;
   const cases: boolean[] = [];
   const caseless = new WeakSet<AST.Element>();
-  const alphabets = new WeakMap<AST.Element, bigint>();
+  const alphabets = createAlphabets(unicode, caseless);
   const ambiguousBodies = new WeakMap<AST.Element, boolean>();
   const choiceCounts = new WeakMap<AST.Element, number>();
   let changesCaseSensitivity = false;
@@ -33,7 +42,7 @@ export function hasAmbiguousRepetition(tree: AST.Pattern, unicode: boolean, igno
       if (ignoreCase) caseless.add(node);
     },
     onAlternativeLeave(node) {
-      ambiguous ||= overlapsInSequence(node, alphabets, caseless);
+      ambiguous ||= overlapsInSequence(node, alphabets);
     },
     onQuantifierLeave(node) {
       if (node.max === Infinity) unbounded++;
@@ -118,27 +127,26 @@ function escapeRange(min: number, max: number, unicode: boolean): string {
 const MAX_REPEAT_CHOICES = 1024;
 const UNBOUNDED_REPEAT_CHOICES = 64;
 
-const NON_ASCII = 1n << 128n;
-const ANY_CHARACTER = (NON_ASCII << 1n) - 1n;
+function createAlphabets(unicode: boolean, caseless: WeakSet<AST.Element>): Alphabets {
+  const maximum = unicode ? 0x10_ff_ff : 0xff_ff;
+  return { cache: new WeakMap(), empty: CharSet.empty(maximum), any: CharSet.all(maximum), unicode, caseless };
+}
 
 // code-gauge-allow functionCognitiveComplexity 18 -- Tracks the overlapping character set and choice count in one pass.
-function overlapsInSequence(
-  alternative: AST.Alternative,
-  alphabets: WeakMap<AST.Element, bigint>,
-  caseless: WeakSet<AST.Element>
-): boolean {
-  let repeated = 0n;
+function overlapsInSequence(alternative: AST.Alternative, alphabets: Alphabets): boolean {
+  let repeated = alphabets.empty;
   let choices = 1;
   for (const atom of sequenceAtoms(alternative.elements)) {
     if (atom.type === 'Assertion') continue;
-    const alphabet = possibleCharacters(atom, alphabets, caseless);
-    if (repeated !== 0n && alwaysConsumes(atom)) repeated &= alphabet;
-    if (repeated === 0n) choices = 1;
+    const alphabet = possibleCharacters(atom, alphabets);
+    if (!repeated.isEmpty && alwaysConsumes(atom)) repeated = repeated.intersect(alphabet);
+    if (repeated.isEmpty) choices = 1;
     if (atom.type !== 'Quantifier' || atom.min === atom.max) continue;
     const count = atom.max === Infinity ? UNBOUNDED_REPEAT_CHOICES : atom.max - atom.min + 1;
-    choices = (repeated & alphabet) === 0n ? Math.max(choices, count) : choices * count;
-    if ((repeated & alphabet) !== 0n && choices > MAX_REPEAT_CHOICES) return true;
-    repeated |= alphabet;
+    const overlaps = !repeated.isDisjointWith(alphabet);
+    choices = overlaps ? choices * count : Math.max(choices, count);
+    if (overlaps && choices > MAX_REPEAT_CHOICES) return true;
+    repeated = repeated.union(alphabet);
   }
   return false;
 }
@@ -170,61 +178,34 @@ function* sequenceAtoms(elements: readonly AST.Element[]): Generator<AST.Element
   }
 }
 
-function possibleCharacters(
-  atom: AST.Element,
-  cache: WeakMap<AST.Element, bigint>,
-  caseless: WeakSet<AST.Element>
-): bigint {
-  const known = cache.get(atom);
+function possibleCharacters(atom: AST.Element, alphabets: Alphabets): CharSet {
+  const known = alphabets.cache.get(atom);
   if (known !== undefined) return known;
-  let result = ANY_CHARACTER;
+  let result = alphabets.any;
   switch (atom.type) {
     case 'Assertion': {
-      result = 0n;
+      result = alphabets.empty;
       break;
     }
-    case 'Character': {
-      result = characterRange(atom.value, atom.value, caseless.has(atom));
-      break;
-    }
+    case 'Character':
+    case 'CharacterSet':
     case 'CharacterClass': {
-      result = classCharacters(atom, caseless.has(atom));
+      result = toUnicodeSet(atom, { unicode: alphabets.unicode, ignoreCase: alphabets.caseless.has(atom) }).chars;
       break;
     }
     case 'Group':
     case 'CapturingGroup': {
-      result = 0n;
+      result = alphabets.empty;
       for (const branch of atom.alternatives)
-        for (const element of branch.elements) result |= possibleCharacters(element, cache, caseless);
+        for (const element of branch.elements) result = result.union(possibleCharacters(element, alphabets));
       break;
     }
     case 'Quantifier': {
-      result = possibleCharacters(atom.element, cache, caseless);
+      result = possibleCharacters(atom.element, alphabets);
       break;
     }
   }
-  cache.set(atom, result);
-  return result;
-}
-
-function classCharacters(atom: AST.CharacterClass, caseless: boolean): bigint {
-  if (atom.negate) return ANY_CHARACTER;
-  let result = 0n;
-  for (const element of atom.elements) {
-    if (element.type === 'Character') result |= characterRange(element.value, element.value, caseless);
-    else if (element.type === 'CharacterClassRange')
-      result |= characterRange(element.min.value, element.max.value, caseless);
-    else return ANY_CHARACTER;
-  }
-  return result;
-}
-
-function characterRange(min: number, max: number, caseless: boolean): bigint {
-  let result = max >= 128 ? NON_ASCII : 0n;
-  for (let code = min; code <= Math.min(max, 127); code++) {
-    result |= 1n << BigInt(code);
-    if (caseless && ((code >= 65 && code <= 90) || (code >= 97 && code <= 122))) result |= 1n << BigInt(code ^ 32);
-  }
+  alphabets.cache.set(atom, result);
   return result;
 }
 

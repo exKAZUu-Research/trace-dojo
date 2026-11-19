@@ -175,9 +175,8 @@ export abstract class DeclarationConverter extends ConverterBase {
     };
     this.loop = { depth: 0, switches: [] };
     try {
-      const returnType = returnTypeNode ? this.typeDecl(returnTypeNode) : undefined;
+      const returnType = this.scopedTypeDecl(returnTypeNode);
       this.fn.returnType = returnType;
-      if (returnTypeNode && returnType) this.checkTypeScope(returnTypeNode, returnType);
       if (byRefReturn && returnType?.k === 'named' && returnType.name === 'void')
         this.notices.push({
           level: 'Deprecated',
@@ -255,10 +254,9 @@ export abstract class DeclarationConverter extends ConverterBase {
       const typeNode = child.childForFieldName('type');
       if (typeNode && lower(typeNode.text) === 'abstract')
         this.error(typeNode, 'Cannot use the abstract modifier on a parameter');
-      const type = typeNode ? this.typeDecl(typeNode, true) : undefined;
+      const type = this.scopedTypeDecl(typeNode, true);
       if (type?.k === 'named' && ['void', 'never'].includes(type.name))
         this.error(child, 'void and never cannot be parameter types');
-      if (typeNode && type) this.checkTypeScope(typeNode, type);
       const defaultNode = child.childForFieldName('default_value');
       const expression = defaultNode ? this.constantExpr(defaultNode, true, 'deferred') : undefined;
       const defaultExpr: Expr | undefined =
@@ -337,7 +335,14 @@ export abstract class DeclarationConverter extends ConverterBase {
     return lower(node.text.split('(')[0].trim()) as Visibility;
   }
 
-  protected typeDecl(node: Node, parameter = false): TypeDecl {
+  private scopedTypeDecl(node: Node | null, parameter = false): TypeDecl | undefined {
+    if (!node) return undefined;
+    const type = this.typeDecl(node, parameter);
+    this.checkTypeScope(node, type);
+    return type;
+  }
+
+  private typeDecl(node: Node, parameter: boolean): TypeDecl {
     const type = this.parseTypeDecl(node, parameter);
     if (type.k === 'named') {
       if (parameter && type.name === 'static') this.error(node, 'Cannot use the static modifier on a parameter');
@@ -1077,9 +1082,8 @@ export abstract class DeclarationConverter extends ConverterBase {
   }
 
   private classConstantType(typeNode: Node | null, element: Node, name: string): TypeDecl | undefined {
-    if (!typeNode) return undefined;
-    const type = this.typeDecl(typeNode);
-    if (!this.preserveSyntax && hasProhibitedMemberType(type))
+    const type = this.scopedTypeDecl(typeNode);
+    if (!this.preserveSyntax && type && hasProhibitedMemberType(type))
       this.error(element, `Class constant ${name} cannot have type ${this.typeMemberName(type, element)}`);
     return type;
   }
@@ -1117,9 +1121,7 @@ export abstract class DeclarationConverter extends ConverterBase {
     const modifiers = this.memberModifiers(member);
     if (kind === 'interface' && modifiers.visibility !== undefined && modifiers.visibility !== 'public')
       this.error(member, 'Property in interface cannot be protected or private');
-    const typeNode = member.childForFieldName('type');
-    const type = typeNode ? this.typeDecl(typeNode) : undefined;
-    if (typeNode && type) this.checkTypeScope(typeNode, type);
+    const type = this.scopedTypeDecl(member.childForFieldName('type'));
     const isReadonly = modifiers.isReadonly || decl.isReadonly;
     const hookList = member.namedChildren.find((child) => child.type === 'property_hook_list');
     if (hookList && isReadonly) this.error(hookList, 'Hooked properties cannot be readonly');

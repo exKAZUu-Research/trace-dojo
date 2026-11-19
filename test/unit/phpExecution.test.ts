@@ -741,6 +741,11 @@ test.each([
   ['interface D { const ?callable X = UNKNOWN; }', 'Class constant D::X cannot have type ?callable'],
   ['trait D { const never X = UNKNOWN; }', 'Class constant D::X cannot have type never'],
   ['class D { const void X = 1; }', 'Class constant D::X cannot have type void'],
+  ['class D { const ?parent X = null; }', 'Cannot use "parent" when current class scope has no parent'],
+  [
+    'interface P {} interface D extends P { const parent X = UNKNOWN; }',
+    'Cannot use "parent" when current class scope has no parent',
+  ],
   ['function f(int $n = __FUNCTION__) {}', 'Cannot use string as default value'],
   ['class D { function f(int $n = __METHOD__) {} }', 'Cannot use string as default value'],
   ['if (false) { $object = new class { public int $n = __CLASS__; }; }', 'Cannot use string as default value'],
@@ -935,6 +940,17 @@ test('retains short ambiguous repetitions and long unambiguous repetitions', () 
   expect(
     run('<?php var_dump(preg_match("/^(?:a|aa)+$/","aaaa"),preg_match("/^(?:ab|ac)+$/",str_repeat("ab", 30)));')
   ).toMatchObject({ kind: 'executed', stdout: 'int(1)\nint(1)\n' });
+});
+
+test('allows disjoint regex classes with negation, shorthand and scoped case flags', () => {
+  expect(
+    run(String.raw`<?php
+var_dump(preg_match('/^[^a]*a*$/', 'bbbbbbbbbbbbbbbbba'));
+var_dump(preg_match('/^\D*\d*$/', 'abcdefghijklmnopq1'));
+var_dump(preg_match('/^(?i:[^a]*)A*$/', 'bbbbbbbbbbbbbbbbbA'));
+var_dump(preg_match('/^[^\x{e9}]*\x{e9}*$/u', "aaaaaaaaaaaaaaaa\u{e9}"));
+`)
+  ).toMatchObject({ kind: 'executed', stdout: 'int(1)\nint(1)\nint(1)\nint(1)\n' });
 });
 
 test('retains bounded lookbehind and Unicode or ASCII case folding', () => {
