@@ -829,14 +829,19 @@ export abstract class ExpressionCompiler extends CompilerBase {
       }
       names.add(field.name);
     }
-    const positional = expression.positional.map((field, index) =>
-      this.compileExpression(
-        field,
-        recordContext?.positional.length === expression.positional.length ? recordContext.positional[index] : undefined
+    // Inside `const (...)`, the fields are constant contexts, as `const (1, [2])` makes the list constant.
+    const positional = this.withConstContext(expression.isConst, () =>
+      expression.positional.map((field, index) =>
+        this.compileExpression(
+          field,
+          recordContext?.positional.length === expression.positional.length
+            ? recordContext.positional[index]
+            : undefined
+        )
       )
     );
-    const named = expression.named
-      .map((field) => ({
+    const named = this.withConstContext(expression.isConst, () =>
+      expression.named.map((field) => ({
         name: field.name,
         compiled: this.compileExpression(
           field.value,
@@ -844,7 +849,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
         ),
         order: expression.named.indexOf(field),
       }))
-      .toSorted((a, b) => (a.name < b.name ? -1 : 1));
+    ).toSorted((a, b) => (a.name < b.name ? -1 : 1));
     for (const field of [...positional, ...named.map((entry) => entry.compiled)]) {
       if (field.type.kind === 'void') this.error(expression, 'void の値はレコードに入れられません。');
     }

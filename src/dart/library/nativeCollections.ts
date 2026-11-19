@@ -932,11 +932,13 @@ define('Set.clear', (runtime, receiver) => {
   store(receiver).clear();
   return;
 });
-define('Set.cast', (runtime, receiver, _args, _named, typeArgs) => {
-  const set = newSet(runtime, typeArgs[0] ?? DYNAMIC);
-  set.native = (receiver as DartObject).native;
-  return set;
-});
+// As the SDK's castFrom, views that cast what they read and write.
+define('Set.cast', (runtime, receiver, _args, _named, typeArgs) =>
+  runtime.links.construct(runtime, 'CastSet', '', [receiver], undefined, [
+    elementTypeOf(receiver as DartObject),
+    typeArgs[0] ?? DYNAMIC,
+  ])
+);
 define('Set.length', (_runtime, receiver) => BigInt(store(receiver).size));
 define('Set.isEmpty', (_runtime, receiver) => store(receiver).size === 0);
 define('Set.isNotEmpty', (_runtime, receiver) => store(receiver).size > 0);
@@ -1020,11 +1022,14 @@ defineConstructor('Map.fromEntries', (runtime, _instance, args, typeArgs) => {
   }
   return map;
 });
-define('Map.cast', (runtime, receiver, _args, _named, typeArgs) => {
-  const map = newMap(runtime, typeArgs[0] ?? DYNAMIC, typeArgs[1] ?? DYNAMIC);
-  map.native = (receiver as DartObject).native;
-  return map;
-});
+define('Map.cast', (runtime, receiver, _args, _named, typeArgs) =>
+  runtime.links.construct(runtime, 'CastMap', '', [receiver], undefined, [
+    elementTypeOf(receiver as DartObject, 0),
+    elementTypeOf(receiver as DartObject, 1),
+    typeArgs[0] ?? DYNAMIC,
+    typeArgs[1] ?? DYNAMIC,
+  ])
+);
 define('Map.containsValue', (runtime, receiver, [value]) => {
   const source = store(receiver);
   for (const position of source.positions()) if (runtime.equals(source.entryValues[position], value)) return true;

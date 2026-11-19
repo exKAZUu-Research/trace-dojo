@@ -903,7 +903,7 @@ abstract mixin class Iterable<E> {
   factory Iterable.empty() => EmptyIterable<E>();
   static Iterable<T> castFrom<S, T>(Iterable<S> source) => source.cast<T>();
   Iterator<E> get iterator;
-  Iterable<R> cast<R>() => CastIterable<E, R>(this);
+  Iterable<R> cast<R>() => _hasEfficientLength(this) ? _EfficientLengthCastIterable<E, R>(this) : CastIterable<E, R>(this);
   Iterable<E> followedBy(Iterable<E> other) =>
       _hasEfficientLength(this) && _hasEfficientLength(other)
           ? EfficientLengthFollowedByIterable<E>(this, other)
@@ -1463,6 +1463,11 @@ class CastIterable<S, T> extends Iterable<T> {
   final Iterable<S> _source;
   CastIterable(this._source);
   Iterator<T> get iterator => CastIterator<S, T>(_source.iterator);
+}
+
+class _EfficientLengthCastIterable<S, T> extends CastIterable<S, T> {
+  _EfficientLengthCastIterable(Iterable<S> source) : super(source);
+  int get length => _source.length;
 }
 
 class CastIterator<S, T> implements Iterator<T> {

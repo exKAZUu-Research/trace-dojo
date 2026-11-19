@@ -588,6 +588,69 @@ abstract mixin class ListMixin<E> implements List<E> {
 
 bool _isEfficientLength(Iterable<Object?> iterable) => iterable is List || iterable is Set || iterable is ListIterable;
 
+/** The view Set.cast returns, as the SDK's CastSet (internal/cast.dart). */
+class CastSet<S, T> extends SetBase<T> {
+  final Set<S> _source;
+  CastSet(this._source);
+  Set<R> cast<R>() => CastSet<S, R>(_source);
+  bool add(T value) => _source.add(value as S);
+  bool contains(Object? element) => _source.contains(element);
+  T? lookup(Object? key) => _source.lookup(key) as T?;
+  bool remove(Object? value) => _source.remove(value);
+  Iterator<T> get iterator => CastIterator<S, T>(_source.iterator);
+  int get length => _source.length;
+  bool get isEmpty => _source.isEmpty;
+  bool get isNotEmpty => _source.isNotEmpty;
+  void clear() {
+    _source.clear();
+  }
+  Set<T> toSet() {
+    var result = <T>{};
+    for (var element in _source) result.add(element as T);
+    return result;
+  }
+}
+
+/** The view Map.cast returns, as the SDK's CastMap (internal/cast.dart). */
+class CastMap<SK, SV, K, V> extends MapBase<K, V> {
+  final Map<SK, SV> _source;
+  CastMap(this._source);
+  Map<RK, RV> cast<RK, RV>() => CastMap<SK, SV, RK, RV>(_source);
+  bool containsValue(Object? value) => _source.containsValue(value);
+  bool containsKey(Object? key) => _source.containsKey(key);
+  V? operator [](Object? key) => _source[key] as V?;
+  void operator []=(K key, V value) {
+    _source[key as SK] = value as SV;
+  }
+  V putIfAbsent(K key, V Function() ifAbsent) => _source.putIfAbsent(key as SK, () => ifAbsent() as SV) as V;
+  V? remove(Object? key) => _source.remove(key) as V?;
+  void clear() {
+    _source.clear();
+  }
+  void forEach(void Function(K key, V value) f) {
+    _source.forEach((SK key, SV value) {
+      f(key as K, value as V);
+    });
+  }
+  Iterable<K> get keys => _source.keys.cast<K>();
+  Iterable<V> get values => _source.values.cast<V>();
+  int get length => _source.length;
+  bool get isEmpty => _source.isEmpty;
+  bool get isNotEmpty => _source.isNotEmpty;
+  V update(K key, V Function(V value) update, {V Function()? ifAbsent}) {
+    return _source.update(key as SK, (SV value) => update(value as V) as SV,
+        ifAbsent: (ifAbsent == null) ? null : () => ifAbsent() as SV) as V;
+  }
+  void updateAll(V Function(K key, V value) update) {
+    _source.updateAll((SK key, SV value) => update(key as K, value as V) as SV);
+  }
+  Iterable<MapEntry<K, V>> get entries =>
+      _source.entries.map<MapEntry<K, V>>((MapEntry<SK, SV> e) => MapEntry<K, V>(e.key as K, e.value as V));
+  void removeWhere(bool Function(K key, V value) test) {
+    _source.removeWhere((SK key, SV value) => test(key as K, value as V));
+  }
+}
+
 /** The view List.cast returns, as the SDK's CastList (internal/cast.dart). */
 class CastList<S, T> extends ListBase<T> {
   final List<S> _source;

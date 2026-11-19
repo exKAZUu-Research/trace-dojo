@@ -919,6 +919,12 @@ export class Converter extends ExpressionConverter {
         return this.convertBlock(node);
       }
       case 'expression_statement': {
+        // Dart reads a `{` that starts a statement as a block, so a statement cannot begin with a set or map literal.
+        if (node.text.startsWith('{'))
+          return syntaxError(
+            node,
+            '文の先頭の { はブロックになるので、集合やマップのリテラルは ( ) で囲んでください。'
+          );
         const children = childrenOf(node).filter((child) => child.type !== ';');
         return { kind: 'expression', expression: this.soleExpression(node, children), ...span };
       }
