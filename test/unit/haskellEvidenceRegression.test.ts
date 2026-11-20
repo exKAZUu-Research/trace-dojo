@@ -1,19 +1,12 @@
-import { execFileSync } from 'node:child_process';
-
 import { expect, test } from 'vitest';
 import { z } from 'zod';
 
+import { createNodeBundleRunner } from '../helpers/bundledNode';
+
+const runBundledNode = createNodeBundleRunner();
+
 test('deep superclass and instance evidence remains bounded under Node', { timeout: 30_000 }, () => {
-  const bundle = execFileSync(
-    'bun',
-    ['build', 'test/helpers/haskellEvidenceMemory.ts', '--target=node', '--packages=external'],
-    { encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }
-  );
-  const output = execFileSync('node', ['--max-old-space-size=512', '--input-type=module'], {
-    input: bundle,
-    encoding: 'utf8',
-    timeout: 30_000,
-  });
+  const output = runBundledNode('test/helpers/haskellEvidenceMemory.ts', { heap: 512 });
   const result = z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('executed'), stdout: z.string(), uncaughtException: z.undefined().optional() }),
     z.object({ kind: z.literal('limitExceeded'), limit: z.literal('operations') }),
