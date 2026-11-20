@@ -723,11 +723,7 @@ export function orderedClass(
         result: insertionResult,
       });
     },
-    constructingMembers: isMap
-      ? isMulti
-        ? ['emplace', 'try_emplace']
-        : ['emplace', 'try_emplace', 'insert_or_assign']
-      : ['emplace'],
+    constructingMembers: isMap && !isMulti ? ['emplace', 'try_emplace', 'insert_or_assign'] : ['emplace'],
     ownedTypes: [entryType],
     elementUseOnAssignment: 'copy',
   };

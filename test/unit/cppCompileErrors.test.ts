@@ -496,6 +496,11 @@ test.each([
   ['vector emplacement without a position', '#include <vector>\nint main() { std::vector<int> v;\n  v.emplace(); }', 2],
   ['map try_emplace without a key', '#include <map>\nint main() { std::map<int, int> m;\n  m.try_emplace(); }', 2],
   [
+    'try_emplace on std::multimap',
+    '#include <map>\nint main() { std::multimap<int, int> m;\n  m.try_emplace(1, 2); }',
+    2,
+  ],
+  [
     'an assignment to a const object allocated with an interleaved sized type',
     'int main() { auto p = new unsigned const int{7};\n  *p = 8; }',
     1,
