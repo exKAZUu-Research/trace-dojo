@@ -884,6 +884,7 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
 
   /** A prvalue object of a class made by the resolved constructor. */
   constructWith(cls: ClassInfo, resolved: Resolved, args: Expr[], row: number): Expr {
+    if (!cls.isComplete && cls.library) this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
     if (cls.isAbstract)
       this.error(row, `${cls.name} は抽象クラス（純粋仮想関数があるクラス）なので、オブジェクトを作れません。`);
     const { fn } = resolved;
@@ -1048,6 +1049,17 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     if (element) this.checkWhenUsed(() => this.checkStoredElement(element, row, new Set()));
   }
 
+  protected checkFixedArrayLayout(type: Type, row: number): void {
+    while (type.kind === 'array') type = type.of;
+    if (type.kind !== 'class') return;
+    const layout = type.cls.library?.aggregateArray?.type;
+    if (!layout) return;
+    let element = layout.of;
+    while (element.kind === 'array') element = element.of;
+    if (element.kind === 'class') this.requireConcreteElement(element.cls, row);
+    this.checkFixedArrayLayout(element, row);
+  }
+
   private checkStoredElement(type: Type, row: number, seen: Set<ClassInfo>): void {
     if (type.kind === 'array') {
       this.checkStoredElement(type.of, row, seen);
@@ -1056,13 +1068,19 @@ export abstract class ObjectCompiler extends CompilerBase implements ConversionH
     if (type.kind !== 'class') return;
     const { cls } = type;
     if (seen.has(cls)) return;
+    this.requireConcreteElement(cls, row);
+    seen.add(cls);
+    for (const field of cls.ownFields) this.checkStoredElement(field.type, row, seen);
+    const array = cls.library?.aggregateArray;
+    if (array) this.checkStoredElement(array.type.of, row, seen);
+    const element = cls.library?.inlineElementType;
+    if (element) this.checkStoredElement(element, row, seen);
+  }
+
+  private requireConcreteElement(cls: ClassInfo, row: number): void {
     if (!cls.isComplete) this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
     if (cls.isAbstract)
       this.error(row, `${cls.name} は抽象クラス（純粋仮想関数があるクラス）なので、要素として格納できません。`);
-    seen.add(cls);
-    for (const field of cls.ownFields) this.checkStoredElement(field.type, row, seen);
-    const element = cls.library?.inlineElementType;
-    if (element) this.checkStoredElement(element, row, seen);
   }
 
   private checkCompleteWhenUsed(cls: ClassInfo, row: number, check: () => void): void {

@@ -29,7 +29,7 @@ import {
 } from '../types';
 import { ArrayStore, CObject, endLifetime, holdValues, NULL_PTR, type Ptr, type Value } from '../values';
 import { bitReferences } from './bitReference';
-import { SequenceValue } from './containerValues';
+import { sequenceAddress, SequenceValue } from './containerValues';
 import {
   callbackOperands,
   checkContainerElement,
@@ -166,8 +166,12 @@ export function sequenceClass(library: Library, kind: SequenceKind, element: Typ
     ownedCopyFromConst,
     elementUseOnAssignment: kind === 'array' ? undefined : 'assign-and-copy',
     allowsConstantCopy: kind === 'array' && (fixedLength === 0 || allowsConstantCopy(element)),
-    size: kind === 'array' ? Math.max(1, fixedLength ?? 0) * sizeOf(element) : kind === 'deque' ? 48 : 24,
-    align: kind === 'array' ? alignOf(element) : 8,
+    get size() {
+      return kind === 'array' ? Math.max(1, fixedLength ?? 0) * sizeOf(element) : kind === 'deque' ? 48 : 24;
+    },
+    get align() {
+      return kind === 'array' ? alignOf(element) : 8;
+    },
     operator: (compiler, operator, operands, row) =>
       sequenceOperator(compiler, cls, element, kind, operator, operands, row, editor, ops),
     aggregateArray:
@@ -343,7 +347,7 @@ interface IteratorRange {
   params: Type[];
   /** Whether the iterators only go forward, as those of the unordered containers do. */
   isForwardOnly: boolean;
-  read: (first: unknown, last: unknown) => Source;
+  read: (first: unknown, last: unknown, destination?: SequenceValue) => Source;
 }
 
 /**
@@ -394,9 +398,15 @@ export function iteratorRange(
   return {
     params,
     isForwardOnly: type.kind === 'class' && type.cls.name.startsWith('std::unordered_'),
-    read: (a, b) => {
+    read: (a, b, destination) => {
       const first = a as Ptr;
-      const length = first.rangeLength(b as Ptr, isReverse);
+      const last = b as Ptr;
+      if (
+        destination &&
+        (sequenceAddress(first)?.store === destination || sequenceAddress(last)?.store === destination)
+      )
+        throw new CppRuntimeError('overlappingCopy');
+      const length = first.rangeLength(last, isReverse);
       const locate = (index: number): Ptr => first.offset(isReverse ? -index : index, true).element(isReverse);
       return {
         length,
@@ -667,7 +677,7 @@ function sequenceMethods(
       types.iterator,
       (self, [at, first, last], frame) => {
         const index = positionOf(self, at);
-        const source = range.read(first, last);
+        const source = range.read(first, last, self);
         reserve(frame, source.length);
         editor.insertRange(frame, self, index, source, range.isForwardOnly);
         return self.iteratorLocation(index);
@@ -701,6 +711,7 @@ function sequenceMethods(
     [SIZE_T, constRef(element)],
     VOID,
     (self, [count, value], frame) => {
+      if (sequenceAddress(value as Ptr)?.store === self) throw new CppRuntimeError('overlappingCopy');
       checkVectorLength(frame, library, kind, element, count);
       const n = asNumber(count);
       editor.assignCopies(frame, self, n, value as Ptr);
@@ -717,7 +728,7 @@ function sequenceMethods(
     const range = args.length === 2 ? iteratorRange(library.compiler, args, element, ops, 'assign') : undefined;
     if (!range) return;
     return instance('assign', range.params, VOID, (self, [first, last], frame) => {
-      const source = range.read(first, last);
+      const source = range.read(first, last, self);
       editor.assignRange(frame, self, source);
     });
   });

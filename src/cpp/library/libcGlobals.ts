@@ -6,6 +6,7 @@ const types: Readonly<Record<string, number>> = sdk.types;
 const macros: Readonly<Record<string, number>> = sdk.macros;
 const functionMacros: Readonly<Record<string, number>> = sdk.functionMacros;
 const standard: Readonly<Record<string, (number | string)[][]>> = sdk.standard;
+const stdDefinitions: Readonly<Record<string, number>> = sdk.stdDefinitions;
 type MathWrapper = 'integer' | 'float' | 'double' | 'ldouble';
 const mathCalls: Readonly<Record<string, Partial<Record<MathWrapper, string>>>> = sdk.mathCalls;
 const headerGroups = sdk.headers.map((group) => new Set(group));
@@ -80,6 +81,10 @@ export function isSdkStdDeclared(name: string, headers: ReadonlySet<string>, kin
       ([group, declared]) => typeof group === 'number' && (!kind || kind === declared) && visibleIn(group, headers)
     )
   );
+}
+
+export function isSdkStdForwardOnly(name: string, headers: ReadonlySet<string>): boolean {
+  return Object.hasOwn(stdDefinitions, name) && !visibleIn(stdDefinitions[name], headers);
 }
 
 export function mathWrapperCall(name: string, kind: MathWrapper): string | undefined {

@@ -21,6 +21,7 @@ STD_OTHER_NAMES = {
     "ClassTemplateDecl", "ConceptDecl", "CXXRecordDecl", "EnumDecl", "NamespaceAliasDecl",
     "NamespaceDecl", "TypeAliasDecl", "TypeAliasTemplateDecl", "TypedefDecl", "VarDecl", "VarTemplateDecl",
 }
+STD_ALIAS_TARGET = re.compile(r"(?:std::)?([A-Za-z_]\w*)(?:<|$)")
 
 
 def probe(header):
@@ -86,6 +87,8 @@ def other_global_symbol(category, syntax):
 
 def std_nodes(tree):
     ancestors = []
+    definitions = set()
+    aliases = {}
     for line in tree.splitlines():
         match = TREE_NODE.match(line)
         if not match:
@@ -94,24 +97,55 @@ def std_nodes(tree):
         depth = len(prefix) // 2
         del ancestors[depth:]
         name, is_inline = declaration_name(category, syntax)
-        in_std = (
-            bool(ancestors)
-            and ancestors[0] == ("NamespaceDecl", "std", False)
-            and not SEMANTIC_PARENT.match(syntax)
-            and all(node == "LinkageSpecDecl" or node == "NamespaceDecl" and inline for node, _, inline in ancestors[1:])
-        )
+        in_std = in_std_namespace(ancestors) and not SEMANTIC_PARENT.match(syntax)
+        if category == "CXXRecordDecl" and syntax.endswith(" definition"):
+            if in_std:
+                definitions.add(name)
+            elif ancestors and ancestors[-1][:2] == ("ClassTemplateDecl", name) and in_std_namespace(ancestors[:-1]):
+                definitions.add(name)
         ancestors.append((category, name, is_inline))
         if not in_std:
             continue
-        if category == "UsingShadowDecl":
-            imported = using_symbol(syntax)
-            if imported:
-                imported_name, kind, _ = imported
-                yield imported_name, f"std{kind.title()}" if kind in {"function", "template"} else "stdOther"
-        elif name and category in STD_FUNCTIONS:
-            yield name, STD_FUNCTIONS[category]
-        elif name and category in STD_OTHER_NAMES:
-            yield name, "stdOther"
+        symbol = std_symbol(category, name, syntax)
+        if symbol:
+            yield symbol
+        if category in {"TypeAliasDecl", "TypedefDecl"}:
+            target = STD_ALIAS_TARGET.match(syntax.partition(" '")[2].split("'", 1)[0])
+            if target and target[1] != name:
+                aliases[name] = target[1]
+    definitions.update(defined_std_aliases(aliases, definitions))
+    for name in definitions:
+        yield name, "stdDefinition"
+
+
+def std_symbol(category, name, syntax):
+    if category == "UsingShadowDecl":
+        imported = using_symbol(syntax)
+        if imported:
+            imported_name, kind, _ = imported
+            return imported_name, f"std{kind.title()}" if kind in {"function", "template"} else "stdOther"
+    if name and category in STD_FUNCTIONS:
+        return name, STD_FUNCTIONS[category]
+    if name and category in STD_OTHER_NAMES:
+        return name, "stdOther"
+
+
+def defined_std_aliases(aliases, definitions):
+    for name, target in aliases.items():
+        seen = {name}
+        while target in aliases and target not in seen:
+            seen.add(target)
+            target = aliases[target]
+        if target in definitions:
+            yield name
+
+
+def in_std_namespace(ancestors):
+    return (
+        bool(ancestors)
+        and ancestors[0] == ("NamespaceDecl", "std", False)
+        and all(node == "LinkageSpecDecl" or node == "NamespaceDecl" and inline for node, _, inline in ancestors[1:])
+    )
 
 
 def using_symbol(syntax):
@@ -225,6 +259,7 @@ def main():
     macros = {}
     function_macros = {}
     standard = defaultdict(list)
+    std_definitions = {}
     for (name, kind, signature), found in sorted(presence.items()):
         group = group_id[tuple(found)]
         if kind == "macro":
@@ -233,6 +268,8 @@ def main():
             function_macros[name] = group
         elif kind == "type":
             types[name] = group
+        elif kind == "stdDefinition":
+            std_definitions[name] = group
         elif kind.startswith("std"):
             standard[name].append([group, kind[3:].lower()])
         else:
@@ -245,6 +282,7 @@ def main():
         "macros": macros,
         "functionMacros": function_macros,
         "standard": standard,
+        "stdDefinitions": std_definitions,
         "mathCalls": math_wrapper_calls(),
     }, indent=2) + "\n")
     subprocess.run(["bun", "fmt", "--no-script", "--no-config", str(output)], check=True)

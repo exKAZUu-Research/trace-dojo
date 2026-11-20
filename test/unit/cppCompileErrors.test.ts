@@ -2,6 +2,21 @@ import { expect, test } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
 
+test.each([
+  'std::string value;',
+  'std::stringstream value{};',
+  'new std::string("value");',
+  'sizeof(std::string);',
+  'std::string* pointer = nullptr; pointer->size();',
+])('requires a definition beyond <iosfwd> for %s', (body) => {
+  const program = `#include <iosfwd>
+int main() { ${body} }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: expect.stringContaining('はまだ定義されていません') }],
+  });
+});
+
 test('a C header does not expose FILE in namespace std', () => {
   const program = `#include <stdio.h>
 int main() { std::FILE* stream = stdout; }`;
@@ -115,8 +130,13 @@ test.each([
   ['map', 'map<int, Item>'],
   ['unordered_map', 'unordered_map<int, Item>'],
   ['list', 'list<Item>'],
+  ['set', 'set<std::array<Item, 1>>'],
+  ['map', 'map<int, std::array<Item, 1>>'],
+  ['list', 'list<std::array<Item, 1>>'],
+  ['list', 'list<std::array<Item, 0>>'],
 ])('rejects abstract classes laid out as elements in <%s> std::%s', (header, container) => {
   const program = `#include <${header}>
+#include <array>
 struct Item;
 struct Owner { std::${container} items; };
 int main() { Owner owner; }
@@ -124,6 +144,18 @@ struct Item { virtual void f() = 0; };`;
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'compileError',
     diagnostics: [{ message: expect.stringContaining('Item は抽象クラス') }],
+  });
+});
+
+test('requires a complete std::array element even in a zero-length member layout', () => {
+  const program = `#include <array>
+struct Item;
+struct Owner { std::array<Item, 0> items; };
+struct Item {};
+int main() {}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: expect.stringContaining('クラス Item はまだ定義されていません') }],
   });
 });
 

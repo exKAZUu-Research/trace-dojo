@@ -452,6 +452,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         `${typeName(type)} 型の値にはメンバ ${name} がありません（. の左にはクラスのオブジェクトを書いてください）。`
       );
     }
+    if (!type.cls.isComplete && type.cls.library)
+      return this.error(row, `クラス ${type.cls.name} はまだ定義されていません。`);
     const cls = naming ?? type.cls;
     for (let owner: ClassInfo | undefined = cls; owner; owner = owner.base) {
       const field = owner.ownFields.find((candidate) => candidate.name === name);
@@ -1607,6 +1609,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
     while (element.kind === 'array') element = element.of;
     if (element.kind === 'class' && !element.cls.isComplete)
       return this.error(node.row, `クラス ${element.cls.name} はまだ定義されていません。`);
+    this.checkFixedArrayLayout(element, node.row);
     return constantExpr(SIZE_T, BigInt(sizeOf(type)), node.row);
   }
 
@@ -1810,6 +1813,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
 
   /** A prvalue object of a class made from constructor arguments, or by aggregate initialization when braced. */
   constructObject(cls: ClassInfo, args: Expr[], row: number, isBraced: boolean): Expr {
+    if (!cls.isComplete && cls.library) return this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
     if (args.length === 0 && cls.library?.defaultInitializer) return this.defaultConstructed(cls, row, true);
     const list = args.length === 1 ? args[0].braced : undefined;
     if (list && cls.library) {

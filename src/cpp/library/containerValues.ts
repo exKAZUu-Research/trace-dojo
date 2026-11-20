@@ -9,6 +9,12 @@ interface IndexedValue {
   value: Value;
 }
 
+export function sequenceAddress(pointer: Ptr): { store: SequenceValue; index: number } | undefined {
+  const { store, index } = pointer.storageAddress;
+  const address = store instanceof NodeCell ? store.sequenceAddress(index) : { store, index };
+  if (address.store instanceof SequenceValue) return { store: address.store, index: address.index };
+}
+
 class NodePosition extends Ptr {
   private cell?: Ptr;
   private dequeCell?: Ptr;
@@ -52,6 +58,11 @@ export class NodeCell extends Store {
 
   override checkAlive(): void {
     this.node.target();
+  }
+
+  sequenceAddress(offset: number): Ptr['storageAddress'] {
+    const { store, index } = this.node.storageAddress;
+    return { store, index: index + offset };
   }
 
   override projectAddress(index: number, byteOffset: number): { store: Store; index: number } {

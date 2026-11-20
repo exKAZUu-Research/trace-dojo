@@ -211,6 +211,7 @@ export abstract class CompilerBase {
   }
 
   private lookupInClass(cls: ClassInfo, nameNode: Syntax, row: number): Entity {
+    if (!cls.isComplete && cls.library) return this.error(row, `クラス ${cls.name} はまだ定義されていません。`);
     if (nameNode.type === 'qualified_identifier') {
       const inner = this.lookupInClass(cls, fieldOf(nameNode, 'scope') as Syntax, row);
       if (inner.kind !== 'class' && !(inner.kind === 'type' && inner.type.kind === 'class')) {
@@ -358,13 +359,17 @@ export abstract class CompilerBase {
   }
 
   protected instantiateTemplate(template: LibraryTemplate, list: Syntax, row: number): Type {
-    if (!template.takesArrayBound) return template.instantiate(this.templateArguments(list), row);
+    if (!template.takesArrayBound)
+      return this.library.trackDefinition(template.name, template.instantiate(this.templateArguments(list), row));
     const args = list.children;
     if (args.length !== 2) return this.error(row, `std::${template.name} のテンプレート引数は 2 個です。`);
     const [element, bound] = args;
     const expression =
       bound.type === 'type_descriptor' && !fieldOf(bound, 'declarator') ? (fieldOf(bound, 'type') ?? bound) : bound;
-    return template.instantiate(this.templateTypeArgument(element), this.arrayLength(expression));
+    return this.library.trackDefinition(
+      template.name,
+      template.instantiate(this.templateTypeArgument(element), this.arrayLength(expression))
+    );
   }
 
   protected templateArguments(list: Syntax): Type[] {

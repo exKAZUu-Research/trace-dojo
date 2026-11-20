@@ -36,6 +36,171 @@ int main() {
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '1', uncaughtException: undefined });
 });
 
+test('uses the full type after a defining header follows an SDK forward declaration', () => {
+  const program = `#include <iosfwd>
+std::string* seen;
+const std::stringstream& forward(const std::stringstream& input) { return input; }
+#include <sstream>
+#include <string>
+#include <iostream>
+int main() {
+  std::string value{"abc"};
+  seen = &value;
+  std::stringstream stream{"def"};
+  std::cout << seen->size() << forward(stream).str();
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '3def',
+    uncaughtException: undefined,
+  });
+});
+
+test('selects SDK signbit templates for floating and integer arguments', () => {
+  const program = `#include <cmath>
+#include <iostream>
+int main() {
+  std::cout << std::signbit(-0.0f) << std::signbit(-0.0) << std::signbit(-0.0L)
+            << std::signbit(-1L) << std::signbit(0.0);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '11110',
+    uncaughtException: undefined,
+  });
+});
+
+test('lays out a fixed array after its forward-declared element is complete', () => {
+  const program = `#include <array>
+#include <iostream>
+struct Item;
+std::array<Item, 2>* pointer;
+struct Item { long value; };
+struct Layout { char tag; std::array<Item, 2> values; };
+int main() { std::cout << sizeof(*pointer) << " " << sizeof(Layout); }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '16 24',
+    uncaughtException: undefined,
+  });
+});
+
+test.each([
+  'std::copy(a, a + 3, a + 1);',
+  'std::copy(a, a + 3, a);',
+  'std::copy_if(a + 1, a + 4, a, selected);',
+  'std::copy_if(a, a + 3, a + 1, selected);',
+  'std::copy(b.rbegin(), b.rbegin() + 3, b.rbegin() + 1);',
+  'std::copy(b.begin(), b.end(), b.rbegin());',
+  'std::copy(c.begin(), c.end(), std::next(c.begin()));',
+  'std::copy(c.begin(), std::next(c.begin()), &c.front());',
+  'std::copy(d.begin() + 1023, d.end(), d.begin() + 1024);',
+])('diagnoses overlap in %s', (body) => {
+  const program = `#include <algorithm>
+#include <deque>
+#include <iterator>
+#include <list>
+#include <vector>
+bool selected(int value) { return value == 3; }
+int main() {
+  int a[] = {1, 2, 3, 4};
+  std::vector<int> b{1, 2, 3, 4};
+  std::list<int> c{1, 2, 3, 4};
+  std::deque<int> d(2050, 1);
+  ${body}
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'コピー元とコピー先の領域が重なっています。',
+  });
+});
+
+test.each([
+  ['vector', 'values.insert(values.end(), values.begin(), values.end());'],
+  ['vector', 'values.assign(values.data(), values.data() + values.size());'],
+  ['deque', 'values.insert(values.end(), values.rbegin(), values.rend());'],
+  ['deque', 'values.assign(values.cbegin(), values.cend());'],
+  ['list', 'values.insert(values.end(), values.cbegin(), values.cbegin());'],
+  ['list', 'values.assign(values.rbegin(), values.rend());'],
+  ['list', 'values.assign(&values.front(), &values.front() + 1);'],
+  ['list', 'values.assign(2, values.front());'],
+])('rejects a reference or range into the destination %s in %s', (container, body) => {
+  const program = `#include <${container}>
+int main() {
+  std::${container}<int> values{1, 2, 3};
+  ${body}
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    uncaughtException: 'コピー元とコピー先の領域が重なっています。',
+  });
+});
+
+test('inserts and assigns ranges from other sequence containers', () => {
+  const program = `#include <deque>
+#include <iostream>
+#include <list>
+#include <vector>
+int main() {
+  std::list<int> source{1, 2};
+  std::vector<int> target{3};
+  target.insert(target.begin(), source.rbegin(), source.rend());
+  std::deque<int> result;
+  result.assign(target.data(), target.data() + target.size());
+  for (int value : result) std::cout << value;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '213',
+    uncaughtException: undefined,
+  });
+});
+
+test('allows std::copy toward the beginning of the same array', () => {
+  const program = `#include <algorithm>
+#include <iostream>
+int main() {
+  int values[] = {1, 2, 3, 4};
+  std::copy(values + 1, values + 4, values);
+  for (int value : values) std::cout << value;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '2344',
+    uncaughtException: undefined,
+  });
+});
+
+test.each(['std::advance(it, -1);', 'it = std::next(it, -1);'])(
+  'rejects negative forward iterator steps in %s',
+  (body) => {
+    const program = `#include <iterator>
+#include <unordered_set>
+int main() {
+  std::unordered_set<int> values{1, 2};
+  auto it = std::next(values.begin());
+  ${body}
+}`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('使えなくなったイテレータ'),
+    });
+  }
+);
+
+test('allows negative movement of bidirectional iterators', () => {
+  const program = `#include <iostream>
+#include <iterator>
+#include <list>
+int main() {
+  std::list<int> values{1, 2, 3};
+  auto it = std::next(values.end(), -1);
+  std::advance(it, -1);
+  std::cout << *it;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '2', uncaughtException: undefined });
+});
+
 test('binds every member in mixed C++ class declarations', () => {
   const program = `#include <iostream>
 struct Record {

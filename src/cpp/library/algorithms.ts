@@ -23,6 +23,7 @@ import {
   referenceTo,
   sameType,
   SIZE_T,
+  sizeOf,
   type Type,
   typeName,
   unqualified,
@@ -42,6 +43,7 @@ import {
   type Value,
 } from '../values';
 import { pairClass } from './associative';
+import { sequenceAddress } from './containerValues';
 import {
   assignElement,
   type CallbackOperand,
@@ -184,6 +186,27 @@ class Range {
     if (position === 0) return this.first;
     return this.first.offset(this.info.isReverse ? -position : position, true);
   }
+
+  checkCopyDestination(start: Ptr, output: IteratorInfo, wholeRange: boolean): void {
+    if (this.length === 0 || output.isOutput || start.isNull) return;
+    const inputWidth = sizeOf(this.info.element);
+    const outputWidth = sizeOf(output.element);
+    const input = copyAddress(this.first, inputWidth);
+    const destination = copyAddress(start, outputWidth);
+    if (input.store !== destination.store) return;
+    const inputLength = this.length * inputWidth;
+    const inputStart = input.index - (this.info.isReverse ? inputLength : 0);
+    const outputLength = (wholeRange ? this.length : 1) * outputWidth;
+    const outputStart = destination.index - (output.isReverse ? outputLength : 0);
+    if (outputStart < inputStart + inputLength && inputStart < outputStart + outputLength)
+      throw new CppRuntimeError('overlappingCopy');
+  }
+}
+
+function copyAddress(pointer: Ptr, width: number): Ptr['address'] {
+  const sequence = sequenceAddress(pointer);
+  if (sequence) return { store: sequence.store, index: sequence.index * sizeOf(sequence.store.elementType) };
+  return pointer.byteAddress(width);
 }
 
 /** Where an output iterator writes: into a range, or at the end of a container through `std::back_inserter`. */
@@ -731,6 +754,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       const assign = outputAssignment(compiler(), iteratorOperand(info), output, args[2].row);
       return native(name, params(args), unqualified(args[2].type), ([first, last, start], { frame }) => {
         const values = range(first, last, info);
+        values.checkCopyDestination(start as Ptr, output, predicate !== undefined);
         const out = new Output(start as Ptr, output, frame, assign);
         for (let index = 0; index < values.length; index++) {
           const value = values.location(index);
@@ -991,11 +1015,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
         name,
         [type, LONG],
         type,
-        ([it, count]) => {
-          const steps = count === undefined ? 1 : Number(count);
-          const delta = (name === 'next' ? steps : -steps) * (info.isReverse ? -1 : 1);
-          return (it as Ptr).offset(delta, true);
-        },
+        ([it, count]) => advanceIterator(it as Ptr, info, (name === 'next' ? 1 : -1) * Number(count ?? 1)),
         { optional: 1 }
       );
     });
@@ -1010,7 +1030,7 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
       VOID,
       ([it, count]) => {
         const location = it as Ptr;
-        location.write((location.read() as Ptr).offset(Number(count) * (info.isReverse ? -1 : 1), true));
+        location.write(advanceIterator(location.read() as Ptr, info, Number(count)));
         return;
       }
     );
@@ -1039,6 +1059,11 @@ export function algorithmFunctions(library: Library): Map<string, FunctionInfo[]
     return native('back_inserter', [referenceTo(container.type)], classType(cls), ([location]) => location);
   });
   return functions;
+}
+
+function advanceIterator(iterator: Ptr, info: IteratorInfo, steps: number): Ptr {
+  if (steps < 0 && info.category === 'forward') throw new CppRuntimeError('invalidIterator');
+  return iterator.offset(info.isReverse ? -steps : steps, true);
 }
 
 function explicitAlgorithmArguments(

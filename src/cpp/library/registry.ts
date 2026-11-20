@@ -52,6 +52,7 @@ import {
   isLibcHeaderMacro,
   isSdkGlobalType,
   isSdkStdDeclared,
+  isSdkStdForwardOnly,
   mathWrapperCall,
   redeclaresLibcFunction,
 } from './libcGlobals';
@@ -200,6 +201,7 @@ export class Library {
   private readonly localeCtypeOverloads = new Map<string, FunctionInfo>();
   private readonly globalNames = new Map<string, Entity>();
   private readonly headers = new Set<string>();
+  private readonly incomplete = new Map<ClassInfo, string>();
   /** `FILE`, which only `stdout` and `stderr` point to. */
   readonly fileClass: ClassInfo;
   private readonly files = new Map<'stdout' | 'stderr', Box>();
@@ -245,16 +247,30 @@ export class Library {
 
   include(header: string): void {
     this.headers.add(header);
+    for (const [cls, name] of this.incomplete) {
+      if (isSdkStdForwardOnly(name, this.headers)) continue;
+      cls.isComplete = true;
+      this.incomplete.delete(cls);
+    }
   }
 
   std(name: string): Entity | undefined {
     if (!isVisible(name, this.headers, 'std')) return undefined;
     const entity = this.stdNames.get(name);
+    if (entity?.kind === 'class') this.trackDefinition(name, classType(entity.cls));
     if (entity && entity.kind !== 'functions') return entity;
     const functions = this.stdFunctions(name, entity?.functions ?? []);
     if (functions.length > 0) return { kind: 'functions', functions };
     const feature = Object.hasOwn(UNSUPPORTED_STD_NAMES, name) ? UNSUPPORTED_STD_NAMES[name] : undefined;
     return feature ? { kind: 'unsupported', feature } : this.unsupportedCName(name);
+  }
+
+  trackDefinition(name: string, type: Type): Type {
+    if (type.kind === 'class' && isSdkStdForwardOnly(name, this.headers)) {
+      type.cls.isComplete = false;
+      this.incomplete.set(type.cls, name);
+    }
+    return type;
   }
 
   private stdFunctions(name: string, registered: FunctionInfo[]): FunctionInfo[] {
@@ -611,10 +627,19 @@ function mathFunctions(): Map<string, FunctionInfo[]> {
     ['isnan', (x: number) => Number.isNaN(x)],
     ['isinf', (x: number) => !Number.isFinite(x) && !Number.isNaN(x)],
     ['isfinite', (x: number) => Number.isFinite(x)],
-    ['signbit', (x: number) => x < 0 || Object.is(x, -0)],
   ] as const) {
     functions.set(name, classification(name, test));
   }
+  functions.set('signbit', [
+    generic('signbit', (args) => {
+      const type = args.length === 1 ? unqualified(args[0].type) : undefined;
+      if (!type || !isArithmetic(type)) return;
+      return native('signbit', [type], BOOL, ([x]) => {
+        const value = asNumber(x);
+        return value < 0 || Object.is(value, -0) ? 1 : 0;
+      });
+    }),
+  ]);
   return functions;
 }
 
