@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 594 -- Keeps core built-ins with their shared interpreter helpers.
+// code-gauge-allow-file fileNcss 596 -- Keeps core built-ins with their shared interpreter helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { arrayObjectProperty } from './arrayObjectProperties';
 import { byteAt, lower, untilNul } from './bytes';
@@ -782,6 +782,8 @@ defineFunction(
   'get_defined_vars(): array',
   () => {
     const runtime = rt();
+    if (runtime.frame === runtime.globalFrame)
+      throw new UnsupportedFeatureError('グローバルスコープでの get_defined_vars()');
     const array = new PhpArray();
     for (const [name, ref] of runtime.variableBindings()) {
       runtime.spend();

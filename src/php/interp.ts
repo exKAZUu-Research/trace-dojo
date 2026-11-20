@@ -607,10 +607,8 @@ function readVar(name: string, row: number): Value {
   return null;
 }
 
-function globalsArray(): PhpArray {
-  const array = new PhpArray();
-  for (const [name, ref] of rt().variableBindings(rt().globalFrame)) array.setSlot(toKey(name), copyValueSlot(ref));
-  return array;
+function globalsArray(): never {
+  throw new UnsupportedFeatureError('スーパーグローバル変数 $GLOBALS の参照');
 }
 
 type OffsetRead = 'read' | 'isset' | 'coalesce';

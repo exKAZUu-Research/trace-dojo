@@ -10,7 +10,7 @@ $x=3;var_dump($spliced,$zipped,$diff,$intersection,$shuffled,$union);
 $text='a';$a=[&$text];$grep=preg_grep('/a/',$a);$text='b';var_dump($grep);
 $o=(object)['value'=>[1]];$o->value[0]=2;$copy=get_object_vars($o);$copy['value'][0]=3;var_dump($o->value,$copy['value']);
 $value=1;$o=new stdClass;$o->value=&$value;$copy=get_object_vars($o);$value=4;var_dump($copy);
-$varsValue=1;$varsAlias=&$varsValue;$vars=get_defined_vars();$varsValue=5;var_dump($vars['varsValue'],$vars['varsAlias']);
+(function(){$varsValue=1;$varsAlias=&$varsValue;$vars=get_defined_vars();$varsValue=5;var_dump($vars['varsValue'],$vars['varsAlias']);})();
 function inspectArrays($arg) {
     $arg[0]=2;
     $vars=get_defined_vars();$vars['arg'][0]=3;var_dump($arg);

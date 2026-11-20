@@ -25,8 +25,10 @@ function readSentReference(&$value, $snapshot) {
     $value = 2;
     var_dump($snapshot['sent']);
 }
-$sent = 1;
-readSentReference($sent, get_defined_vars());
+(function () {
+    $sent = 1;
+    readSentReference($sent, get_defined_vars());
+})();
 function inspectLocalReference() {
     $sent = 1;
     readSentReference(value: $sent, snapshot: get_defined_vars());

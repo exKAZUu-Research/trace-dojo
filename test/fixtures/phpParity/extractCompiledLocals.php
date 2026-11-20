@@ -52,8 +52,10 @@ function releaseInSlotOrder() {
 }
 releaseInSlotOrder();
 echo "\n";
-$head = isset($tail);
-$middle = 2;
-$tail = 3;
-foreach ($GLOBALS as $key => $value)
-    if (in_array($key, ['head', 'middle', 'tail'], true)) echo $key, "\n";
+(function () {
+    $head = isset($tail);
+    $middle = 2;
+    $tail = 3;
+    foreach (get_defined_vars() as $key => $value)
+        if (in_array($key, ['head', 'middle', 'tail'], true)) echo $key, "\n";
+})();

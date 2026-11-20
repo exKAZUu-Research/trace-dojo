@@ -4986,4 +4986,24 @@ echo $r;
   expect(traced.finalVars.$big).toBe(9_223_372_036_854_775_807n);
   expect(traced.finalVars.$inf).toBe(Number.POSITIVE_INFINITY);
   expect(Number.isNaN(traced.finalVars.$nan)).toBe(true);
+
+  for (const snippet of [
+    'print_r($GLOBALS);',
+    'echo count($GLOBALS);',
+    'var_dump(array_key_exists("_SERVER", $GLOBALS));',
+    'foreach ($GLOBALS as $k => $v) {}',
+    'function f() { echo count($GLOBALS); } f();',
+    'print_r(array_keys(get_defined_vars()));',
+  ]) {
+    const result = run(`<?php $x = 1; ${snippet}`);
+    expect(result).toMatchObject({ kind: 'executed' });
+    expect(result.kind === 'executed' ? result.uncaughtException : '').toContain('は、この採点環境では使えません。');
+  }
+  expect(
+    run('<?php $x = 5; function f() { $a = 1; return $GLOBALS["x"] + count(get_defined_vars()); } echo f();')
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: '6',
+    uncaughtException: undefined,
+  });
 });
