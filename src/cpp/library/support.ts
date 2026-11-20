@@ -111,8 +111,15 @@ export function throwLibrary(frame: Frame, cls: ClassInfo, message: string): nev
   return frame.runtime.throwException(frame, new CppException(object, classType(cls)));
 }
 
+export type CStringReadObserver = (pointer: Ptr, length: number) => void;
+
 /** Reads up to `limit` bytes from a character buffer, stopping at a null byte. */
-export function readCString(pointer: Ptr, limit = Number.POSITIVE_INFINITY, runtime?: Runtime): string {
+export function readCString(
+  pointer: Ptr,
+  limit = Number.POSITIVE_INFINITY,
+  runtime?: Runtime,
+  observeRead?: CStringReadObserver
+): string {
   const store = pointer.target();
   const start = pointer.index;
   if (start < 0 || start >= store.length) throw new CppRuntimeError('unterminatedString');
@@ -122,9 +129,13 @@ export function readCString(pointer: Ptr, limit = Number.POSITIVE_INFINITY, runt
     if ((index - start) % 64 === 0) runtime?.spend();
     if (index >= store.length) throw new CppRuntimeError('unterminatedString');
     const value = store.get(index) as number;
-    if (value === 0) return bytes;
+    if (value === 0) {
+      observeRead?.(pointer, bytes.length + 1);
+      return bytes;
+    }
     bytes += String.fromCodePoint(value & 0xff);
   }
+  observeRead?.(pointer, bytes.length);
   return bytes;
 }
 

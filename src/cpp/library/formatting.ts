@@ -2,7 +2,7 @@ import { formatFixed, formatGeneral, formatHex, formatScientific } from '../../c
 import { CppRuntimeError } from '../errors';
 import { intMax, type IntName, intRank, isCharType, isWide, type Type } from '../types';
 import { Ptr, type Value } from '../values';
-import { readCString } from './support';
+import { type CStringReadObserver, readCString } from './support';
 
 /** A conversion of `printf`, or what a stream's flags ask of `num_put`. */
 export interface FloatFormat {
@@ -63,7 +63,12 @@ export interface PrintfArgument {
 /** Formats `printf`'s format string and arguments into bytes, as macOS's libc does. */
 // code-gauge-allow functionCognitiveComplexity 28 -- The parser advances a single cursor through flags, width, precision, and the conversion.
 // code-gauge-allow functionNcss 48 -- The parser and argument cursor share the loop that emits each formatted field.
-export function formatPrintf(format: string, args: PrintfArgument[], spend: (cost: number) => void): string {
+export function formatPrintf(
+  format: string,
+  args: PrintfArgument[],
+  spend: (cost: number) => void,
+  observeRead?: CStringReadObserver
+): string {
   let out = '';
   let next = 0;
   const take = (): PrintfArgument => {
@@ -110,7 +115,7 @@ export function formatPrintf(format: string, args: PrintfArgument[], spend: (cos
     if (index >= format.length) break;
     spec.conversion = format[index++];
     spend(Math.max(spec.width ?? 0, spec.precision ?? 0));
-    const field = convert(spec, take, out.length);
+    const field = convert(spec, take, out.length, observeRead);
     if (field !== undefined) out += pad(spec, field);
   }
   return out;
@@ -127,7 +132,12 @@ function integerOf(arg: PrintfArgument, expected: IntName, allowCorresponding = 
 }
 
 // code-gauge-allow functionNcss 44 -- A single dispatch shares conversion logic across specifiers with the same argument type.
-function convert(spec: Spec, take: () => PrintfArgument, count: number): string | undefined {
+function convert(
+  spec: Spec,
+  take: () => PrintfArgument,
+  count: number,
+  observeRead?: CStringReadObserver
+): string | undefined {
   const { conversion, length } = spec;
   switch (conversion) {
     case 'd':
@@ -150,7 +160,7 @@ function convert(spec: Spec, take: () => PrintfArgument, count: number): string 
       const arg = take();
       if (!(arg.value instanceof Ptr) || arg.type.kind !== 'pointer' || !isCharType(arg.type.to))
         throw new CppRuntimeError('formatArgumentType');
-      return readCString(arg.value, spec.precision);
+      return readCString(arg.value, spec.precision, undefined, observeRead);
     }
     case 'p': {
       const arg = take();

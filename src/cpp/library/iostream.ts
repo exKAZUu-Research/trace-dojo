@@ -60,6 +60,7 @@ export const FLAGS = {
 } as const;
 
 const OPEN_MODE = { app: 0x01, ate: 0x02, binary: 0x04, in: 0x08, out: 0x10, trunc: 0x20 } as const;
+const IO_STATE = { goodbit: 0, badbit: 1, eofbit: 2, failbit: 4 } as const;
 
 /** A stream: standard output or error, or a string stream, with its formatting state. */
 export class StreamValue extends Store {
@@ -73,8 +74,7 @@ export class StreamValue extends Store {
   position = 0;
   /** Where writing continues in the buffer, overwriting what is there, as `basic_stringbuf`'s put area does. */
   writePosition = 0;
-  failed = false;
-  atEnd = false;
+  state: number = IO_STATE.goodbit;
   tied = NULL_PTR;
 
   constructor(
@@ -97,15 +97,19 @@ export class StreamValue extends Store {
   }
 
   get isGood(): boolean {
-    return !this.failed && !this.atEnd;
+    return this.state === IO_STATE.goodbit;
+  }
+
+  get failed(): boolean {
+    return (this.state & (IO_STATE.failbit | IO_STATE.badbit)) !== 0;
   }
 
   /** Writes unless the stream has failed or reached its end, as an output `sentry` allows. */
-  write(frame: Frame, bytes: string): void {
-    if (!this.isGood) return;
+  write(frame: Frame, bytes: string, formatted = false): void {
+    if (!this.isGood || bytes.length === 0) return;
     if (this.target === 'buffer') {
       if (!(this.mode & OPEN_MODE.out)) {
-        this.failed = true;
+        this.state |= formatted ? IO_STATE.badbit | IO_STATE.failbit : IO_STATE.badbit;
         return;
       }
       const at = this.writePosition;
@@ -125,15 +129,16 @@ export class StreamValue extends Store {
     const width = this.width;
     this.width = 0;
     if (text.length >= width) {
-      this.write(frame, text);
+      this.write(frame, text, true);
       return;
     }
     this.checkFormattedSize(frame, width);
     const padding = this.fill.repeat(width - text.length);
     const adjust = this.flags & FLAGS.adjustfield;
-    if (adjust === FLAGS.left) this.write(frame, text + padding);
-    else if (adjust === FLAGS.internal) this.write(frame, text.slice(0, internalAt) + padding + text.slice(internalAt));
-    else this.write(frame, padding + text);
+    if (adjust === FLAGS.left) this.write(frame, text + padding, true);
+    else if (adjust === FLAGS.internal)
+      this.write(frame, text.slice(0, internalAt) + padding + text.slice(internalAt), true);
+    else this.write(frame, padding + text, true);
   }
   checkFormattedSize(frame: Frame, length: number): void {
     if (this.target === 'buffer') {
@@ -173,11 +178,12 @@ export class Streams {
     const cls = new ClassInfo('std::ios_base', 'class');
     cls.isComplete = true;
     cls.library = { kind: 'ios', args: [], size: 136, align: 8 };
-    for (const [name, value] of Object.entries({ ...FLAGS, ...OPEN_MODE })) {
+    for (const [name, value] of Object.entries({ ...FLAGS, ...OPEN_MODE, ...IO_STATE })) {
       cls.constants.set(name, (row) => ({ type: UINT, isLvalue: false, row, run: () => value, constant: value }));
     }
     cls.memberTypes.set('fmtflags', UINT);
     cls.memberTypes.set('openmode', UINT);
+    cls.memberTypes.set('iostate', UINT);
     addMethod(
       cls,
       native(
@@ -318,11 +324,20 @@ export class Streams {
     });
     method('good', [], BOOL, (stream) => (stream.isGood ? 1 : 0), { isConst: true });
     method('fail', [], BOOL, (stream) => (stream.failed ? 1 : 0), { isConst: true });
-    method('bad', [], BOOL, () => 0, { isConst: true });
-    method('eof', [], BOOL, (stream) => (stream.atEnd ? 1 : 0), { isConst: true });
-    method('clear', [], VOID, (stream) => {
-      stream.failed = false;
-      stream.atEnd = false;
+    method('bad', [], BOOL, (stream) => (stream.state & IO_STATE.badbit ? 1 : 0), { isConst: true });
+    method('eof', [], BOOL, (stream) => (stream.state & IO_STATE.eofbit ? 1 : 0), { isConst: true });
+    method('rdstate', [], UINT, (stream) => stream.state, { isConst: true });
+    method(
+      'clear',
+      [UINT],
+      VOID,
+      (stream, [state]) => {
+        stream.state = state === undefined ? IO_STATE.goodbit : asNumber(state);
+      },
+      { optional: 1 }
+    );
+    method('setstate', [UINT], VOID, (stream, [state]) => {
+      stream.state |= asNumber(state);
     });
     if (isOutput) this.addOutputMembers(cls);
   }
@@ -490,8 +505,7 @@ export class Streams {
           const byte = byteAt(stream.buffer, stream.position++);
           return type.name === 'uchar' ? byte : signedChar(byte);
         }
-        stream.failed = true;
-        stream.atEnd = true;
+        stream.state |= IO_STATE.failbit | IO_STATE.eofbit;
         return;
       };
     } else if (type.kind === 'int' && type.name === 'bool') {
@@ -574,17 +588,17 @@ const readLine = ([stream, text, delimiter]: unknown[]): Ptr => {
   const place = stream as Ptr;
   const source = place.read() as StreamValue;
   if (!source.isGood || !(source.mode & OPEN_MODE.in)) {
-    source.failed = true;
+    source.state |= IO_STATE.failbit;
     return place;
   }
   const separator = delimiter === undefined ? '\n' : String.fromCodePoint(asNumber(delimiter) & 0xff);
   const target = (text as Ptr).read() as StringValue;
   const end = source.buffer.indexOf(separator, source.position);
   if (end === -1) {
-    if (source.position >= source.buffer.length) source.failed = true;
+    if (source.position >= source.buffer.length) source.state |= IO_STATE.failbit;
     target.bytes = source.buffer.slice(source.position);
     source.position = source.buffer.length;
-    source.atEnd = true;
+    source.state |= IO_STATE.eofbit;
   } else {
     target.bytes = source.buffer.slice(source.position, end);
     source.position = end + 1;
@@ -638,7 +652,7 @@ const INTEGER_BITS: Record<string, number> = { short: 16, ushort: 16, long: 64, 
 
 /** libc++'s `num_put::do_put(bool)`, which copies a `boolalpha` word as is, so the width neither pads it nor resets. */
 function writeBool(frame: Frame, stream: StreamValue, flag: boolean): void {
-  if (stream.flags & FLAGS.boolalpha) stream.write(frame, flag ? 'true' : 'false');
+  if (stream.flags & FLAGS.boolalpha) stream.write(frame, flag ? 'true' : 'false', true);
   else writeInteger(frame, stream, flag ? 1n : 0n, false, 32);
 }
 
@@ -705,15 +719,14 @@ function paddingPoint(text: string): number {
 /** The input `sentry`: fails unless the stream is good, then skips whitespace, failing at the end of the text. */
 function inputSentry(stream: StreamValue): boolean {
   if (!stream.isGood || !(stream.mode & OPEN_MODE.in)) {
-    stream.failed = true;
+    stream.state |= IO_STATE.failbit;
     return false;
   }
   if (stream.flags & FLAGS.skipws) {
     while (stream.position < stream.buffer.length && isSpaceByte(byteAt(stream.buffer, stream.position)))
       stream.position++;
     if (stream.position >= stream.buffer.length) {
-      stream.failed = true;
-      stream.atEnd = true;
+      stream.state |= IO_STATE.failbit | IO_STATE.eofbit;
       return false;
     }
   }
@@ -727,13 +740,13 @@ function readWord(stream: StreamValue): string {
   const start = stream.position;
   while (stream.position - start < limit) {
     if (stream.position >= stream.buffer.length) {
-      stream.atEnd = true;
+      stream.state |= IO_STATE.eofbit;
       break;
     }
     if (isSpaceByte(byteAt(stream.buffer, stream.position))) break;
     stream.position++;
   }
-  if (stream.position === start) stream.failed = true;
+  if (stream.position === start) stream.state |= IO_STATE.failbit;
   return stream.buffer.slice(start, stream.position);
 }
 
@@ -767,10 +780,10 @@ function readInteger(stream: StreamValue, name: string): Value {
   const parsed = parseIntegerPrefix(byteArray(digits), base);
   let value: bigint;
   if (digits === '' || parsed.length !== digits.length) {
-    stream.failed = true;
+    stream.state |= IO_STATE.failbit;
     value = 0n;
   } else if (parsed.value < min || parsed.value > max) {
-    stream.failed = true;
+    stream.state |= IO_STATE.failbit;
     value = parsed.value > 0n ? max : min;
   } else {
     value = isNegated ? BigInt.asUintN(max.toString(2).length, -parsed.value) : parsed.value;
@@ -800,7 +813,7 @@ function gatherInteger(stream: StreamValue, base: number): string {
     if (base === 16 && atom >= 22 && !(text.length > 0 && text.length <= 2 && text.endsWith('0'))) break;
     text += char;
   }
-  if (stream.position >= stream.buffer.length) stream.atEnd = true;
+  if (stream.position >= stream.buffer.length) stream.state |= IO_STATE.eofbit;
   return text;
 }
 
@@ -808,14 +821,13 @@ function gatherInteger(stream: StreamValue, base: number): string {
 function readBool(stream: StreamValue): Value {
   if (stream.flags & FLAGS.boolalpha) {
     const index = scanKeyword(stream, ['true', 'false']);
-    if (index === -1) stream.failed = true;
+    if (index === -1) stream.state |= IO_STATE.failbit;
     return index === 0 ? 1 : 0;
   }
   const value = readInteger(stream, 'long') as bigint;
   if (value === 0n || value === 1n) return Number(value);
   // libc++ replaces the state with failbit alone, dropping an eofbit the number set.
-  stream.failed = true;
-  stream.atEnd = false;
+  stream.state = IO_STATE.failbit;
   return 1;
 }
 
@@ -841,7 +853,7 @@ function scanKeyword(stream: StreamValue, keywords: string[]): number {
       if (candidates > 1 && status[at] === 'matches' && keyword.length !== index + 1) status[at] = 'doesNotMatch';
     }
   }
-  if (stream.position >= stream.buffer.length) stream.atEnd = true;
+  if (stream.position >= stream.buffer.length) stream.state |= IO_STATE.eofbit;
   return status.indexOf('matches');
 }
 
@@ -852,13 +864,13 @@ function scanKeyword(stream: StreamValue, keywords: string[]): number {
 function readFloat(stream: StreamValue, isFloat: boolean): number {
   const text = gatherFloat(stream);
   const bytes = byteArray(text);
-  const parsed = parseFloatPrefix(bytes);
+  const parsed = parseFloatPrefix(bytes, undefined, isFloat);
   if (text === '' || parsed.length !== text.length) {
-    stream.failed = true;
+    stream.state |= IO_STATE.failbit;
     return 0;
   }
-  const value = isFloat ? Math.fround(parsed.value) : parsed.value;
-  if (!Number.isFinite(value) || isFloatUnderflow(bytes, parsed, value, isFloat)) stream.failed = true;
+  const { value } = parsed;
+  if (!Number.isFinite(value) || isFloatUnderflow(bytes, parsed, value, isFloat)) stream.state |= IO_STATE.failbit;
   return value;
 }
 
@@ -882,7 +894,7 @@ function gatherFloat(stream: StreamValue): string {
       }
     }
   }
-  if (stream.position >= stream.buffer.length) stream.atEnd = true;
+  if (stream.position >= stream.buffer.length) stream.state |= IO_STATE.eofbit;
   return text;
 }
 

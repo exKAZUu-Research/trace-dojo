@@ -22,4 +22,15 @@ int main() {
   char* match = std::strchr(buffer, 'a');
   *match = 'u';
   std::cout << buffer << ' ' << std::strstr("prefix", "fix") << '\n';
+
+  char bytes[8] = "a";
+  std::strncpy(bytes + 2, bytes, 4);
+  std::puts(bytes + 2);
+  char formatted[16] = "hi";
+  int full = std::snprintf(formatted + 2, 2, "%.2s", formatted);
+  int unchanged = std::snprintf(formatted, 0, "%s", formatted);
+  std::printf("%d %d %s\n", full, unchanged, formatted + 2);
+  char format[16] = "%d";
+  std::sprintf(format + 4, format, 7);
+  std::puts(format + 4);
 }

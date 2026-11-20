@@ -1,6 +1,4 @@
 #include <algorithm>
-#include <cstdio>
-#include <cstring>
 #include <iostream>
 #include <iterator>
 #include <list>
@@ -63,7 +61,4 @@ int main() {
   const auto& view = values;
   std::cout << (std::rbegin(values) == std::rbegin(view)) << ' ' << (std::rend(values) - std::rend(view)) << '\n';
   std::cout << std::clamp(5, 0, 10, loggingLess) << ' ' << std::clamp(-1, 0, 10, loggingLess) << '\n';
-  char bytes[8] = "a";
-  std::strncpy(bytes + 2, bytes, 4);
-  std::puts(bytes + 2);
 }

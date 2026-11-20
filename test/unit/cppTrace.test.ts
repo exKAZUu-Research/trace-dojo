@@ -1117,6 +1117,18 @@ int main() { char bytes[16] = "abcd"; std::${call}; }`;
   }
 );
 
+test.each(['sprintf(bytes, "%s!", bytes)', 'snprintf(bytes + 1, 2, "%s", bytes)', 'sprintf(bytes, bytes)'])(
+  'rejects overlapping formatted output in %s',
+  (call) => {
+    const program = `#include <cstdio>
+int main() { char bytes[16] = "hi"; std::${call}; }`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining('領域が重なっています'),
+    });
+  }
+);
+
 test.each(['strcpy(bytes, "abc")', 'strncpy(bytes, "ab", 4)', 'strcat(bytes, "c")'])(
   'reports a short destination buffer as an out-of-bounds write in %s',
   (call) => {

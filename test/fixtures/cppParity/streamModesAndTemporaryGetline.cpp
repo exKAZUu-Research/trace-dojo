@@ -34,4 +34,19 @@ int main() {
   std::istringstream ready("45");
   ready >> values[index++];
   std::cout << index << ' ' << values[2] << '\n';
+
+  std::stringstream inputOnly("1.5", std::ios::in);
+  inputOnly << "x";
+  std::cout << inputOnly.rdstate() << ' ' << inputOnly.bad() << inputOnly.fail() << inputOnly.eof() << '\n';
+  inputOnly.clear();
+  inputOnly.put('x');
+  std::cout << inputOnly.rdstate() << ' ' << inputOnly.bad() << !inputOnly << '\n';
+  inputOnly.clear();
+  double number = 0;
+  inputOnly >> number;
+  inputOnly << "x";
+  std::cout << number << ' ' << inputOnly.rdstate() << ' ' << inputOnly.bad() << inputOnly.fail() << inputOnly.eof() << '\n';
+  inputOnly.clear(std::ios::eofbit);
+  inputOnly.setstate(std::ios::failbit);
+  std::cout << inputOnly.rdstate() << ' ' << inputOnly.good() << '\n';
 }

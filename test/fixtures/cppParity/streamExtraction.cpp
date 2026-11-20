@@ -52,4 +52,10 @@ int main() {
     istringstream ns(" x"); ns.unsetf(ios::skipws); char c = 'q'; ns >> c; cout << '[' << c << ']'; int n = 5; ns >> n; cout << n << ns.fail() << '\n';
     istringstream es(""); es.unsetf(ios::skipws); int m = 5; es >> m; cout << m << es.fail() << es.eof() << '\n';
   }
+  {
+    istringstream input("0.5000000298023224 1.0000000596046448");
+    float first = 0, second = 0;
+    input >> first >> second;
+    cout << hexfloat << first << ' ' << second << ' ' << input.fail() << input.eof() << '\n';
+  }
 }

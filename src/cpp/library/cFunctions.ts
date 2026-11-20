@@ -24,6 +24,7 @@ import {
   asNumber,
   checkByteWrite,
   CONST_CHAR_PTR,
+  type CStringReadObserver,
   native,
   readCString,
   rejectOverlappingBytes,
@@ -62,7 +63,7 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
       [CONST_CHAR_PTR],
       INT,
       ([format, ...args], { frame }) => {
-        const text = printf(format, args, (cost) => frame.runtime.spend(cost));
+        const text = printf(frame, format as Ptr, args);
         frame.runtime.write('stdout', text);
         return text.length;
       },
@@ -76,7 +77,7 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
       [streamType, CONST_CHAR_PTR],
       INT,
       ([stream, format, ...args], { frame }) => {
-        const text = printf(format, args, (cost) => frame.runtime.spend(cost));
+        const text = printf(frame, format as Ptr, args);
         frame.runtime.write(library.fileTarget(stream as Ptr), text);
         return text.length;
       },
@@ -88,11 +89,7 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
       'sprintf',
       [CHAR_POINTER, CONST_CHAR_PTR],
       INT,
-      ([target, format, ...args], { frame }) => {
-        const text = printf(format, args, (cost) => frame.runtime.spend(cost));
-        writeBytes(target as Ptr, `${text}\0`);
-        return text.length;
-      },
+      ([target, format, ...args], { frame }) => printfToBuffer(frame, target as Ptr, format as Ptr, args),
       { isVariadic: true }
     )
   );
@@ -101,12 +98,8 @@ export function cFunctions(library: Library): Map<string, FunctionInfo[]> {
       'snprintf',
       [CHAR_POINTER, SIZE_T, CONST_CHAR_PTR],
       INT,
-      ([target, size, format, ...args], { frame }) => {
-        const text = printf(format, args, (cost) => frame.runtime.spend(cost));
-        const limit = asNumber(size);
-        if (limit > 0) writeBytes(target as Ptr, `${text.slice(0, limit - 1)}\0`);
-        return text.length;
-      },
+      ([target, size, format, ...args], { frame }) =>
+        printfToBuffer(frame, target as Ptr, format as Ptr, args, asNumber(size)),
       { isVariadic: true }
     )
   );
@@ -253,8 +246,27 @@ function copyCString(
   return target;
 }
 
-const printf = (format: unknown, args: unknown[], spend: (cost: number) => void): string =>
-  formatPrintf(readCString(format as Ptr), args as PrintfArgument[], spend);
+function printfToBuffer(
+  frame: Frame,
+  target: Ptr,
+  format: Ptr,
+  args: unknown[],
+  limit = Number.POSITIVE_INFINITY
+): number {
+  if (limit === 0) return printf(frame, format, args).length;
+  const reads: { pointer: Ptr; length: number }[] = [];
+  const text = printf(frame, format, args, (pointer, length) => reads.push({ pointer, length }));
+  const written = `${text.slice(0, limit - 1)}\0`;
+  for (const { pointer, length } of reads) rejectOverlappingBytes(target, written.length, pointer, length);
+  checkByteWrite(target, written.length);
+  writeBytes(target, written);
+  return text.length;
+}
+
+function printf(frame: Frame, format: Ptr, args: unknown[], observeRead?: CStringReadObserver): string {
+  const bytes = readCString(format, undefined, frame.runtime, observeRead);
+  return formatPrintf(bytes, args as PrintfArgument[], (cost) => frame.runtime.spend(cost), observeRead);
+}
 
 function parseDecimal(text: Ptr, type: IntType): bigint {
   const match = /^[\t\n\v\f\r ]*([+-]?\d+)/.exec(readCString(text));
