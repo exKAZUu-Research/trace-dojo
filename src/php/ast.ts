@@ -159,13 +159,6 @@ export interface FunctionDecl {
   isClosure: boolean;
 }
 
-export interface ParamDecl extends Param {
-  defaultExpr?: Expr;
-  defaultReportRow?: number;
-  promote?: { visibility: Visibility; isReadonly: boolean; isFinal: boolean; setVisibility?: Visibility };
-  row: number;
-}
-
 export interface PropertyDeclAst {
   name: string;
   visibility: Visibility;
@@ -191,6 +184,13 @@ export interface PropertyDeclAst {
   row: number;
   isAbstract: boolean;
   isFinal: boolean;
+}
+
+export interface ParamDecl extends Param {
+  defaultExpr?: Expr;
+  defaultReportRow?: number;
+  promote?: PropertyDeclAst;
+  row: number;
 }
 
 export interface MethodDeclAst {

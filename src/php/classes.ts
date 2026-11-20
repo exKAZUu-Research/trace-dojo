@@ -839,7 +839,7 @@ function missingPropertyHooks(cls: PhpClass, ancestors: PhpClass[], row: number)
       checkPropertyModifiers(cls, contract, property, row);
       checkHookSignatures(contract, property, property.cls, row);
       if (!propertyTypeCompatible(contract, property, property.cls))
-        propertyTypeError(contract, cls, property.name, row);
+        propertyTypeError(contract, property.cls, property.name, row);
     }
     for (const kind of ['get', 'set'] as const) {
       const required = kind === 'get' ? contract.hooks.abstractGet : contract.hooks.abstractSet;

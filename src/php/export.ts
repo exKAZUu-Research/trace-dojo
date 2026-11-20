@@ -372,7 +372,9 @@ function exportParameter(param: ParamDecl, depth: number): string {
   const modifiers = promote
     ? `${promote.visibility} ${promote.setVisibility ? `${promote.setVisibility}(set) ` : ''}${promote.isFinal ? 'final ' : ''}`
     : '';
-  return `${modifiers}${type}${reference}${variadic}$${param.name}${fallback}`;
+  const hooks = promote?.hooks?.syntax;
+  const suffix = hooks ? exportPropertyHooks(hooks, depth) : '';
+  return `${modifiers}${type}${reference}${variadic}$${param.name}${fallback}${suffix}`;
 }
 
 function exportBlock(statements: Stmt[], depth: number): string {

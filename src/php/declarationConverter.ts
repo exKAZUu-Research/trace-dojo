@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 951 -- Keeps declaration conversion with its shared parsing and validation rules.
+// code-gauge-allow-file fileNcss 959 -- Keeps declaration conversion with its shared parsing and validation rules.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { Node } from '@willbooster/web-tree-sitter';
 
@@ -281,7 +281,7 @@ export abstract class DeclarationConverter extends ConverterBase {
         row: child.startPosition.row,
       };
       if (child.type === 'property_promotion_parameter')
-        param.promote = this.parameterPromotion(child, functionName, className);
+        param.promote = this.parameterPromotion(child, param, functionName, className);
       else if (defaultExpr?.k === 'lit' && defaultExpr.v === null && type && !typeAllowsNull(type))
         param.implicitNullable = true;
       params.push(param);
@@ -313,7 +313,12 @@ export abstract class DeclarationConverter extends ConverterBase {
     }
   }
 
-  private parameterPromotion(node: Node, functionName: string, className?: string): NonNullable<ParamDecl['promote']> {
+  private parameterPromotion(
+    node: Node,
+    param: Pick<ParamDecl, 'name' | 'type' | 'row'>,
+    functionName: string,
+    className?: string
+  ): PropertyDeclAst {
     if (lower(functionName) !== '__construct' || className === undefined)
       this.error(
         node,
@@ -322,12 +327,25 @@ export abstract class DeclarationConverter extends ConverterBase {
     const modifiers = this.memberModifiers(node);
     if (modifiers.isStatic || modifiers.isAbstract)
       this.error(node, `Cannot use the ${modifiers.isStatic ? 'static' : 'abstract'} modifier on a parameter`);
-    return {
+    const property: PropertyDeclAst = {
+      name: param.name,
+      type: param.type,
+      row: param.row,
       visibility: modifiers.visibility ?? 'public',
-      isReadonly: modifiers.isReadonly,
+      isReadonly: modifiers.isReadonly || this.activeClass?.isReadonly === true,
       setVisibility: modifiers.setVisibility,
+      isStatic: false,
+      isAbstract: false,
       isFinal: modifiers.isFinal,
+      promoted: true,
     };
+    const hookList = node.namedChildren.find((child) => child.type === 'property_hook_list');
+    if (hookList) {
+      if (property.isReadonly) this.error(hookList, 'Hooked properties cannot be readonly');
+      this.checkPropertyType(node, className, property);
+      this.hooks(hookList, property, className);
+    }
+    return property;
   }
 
   protected setVisibilityOf(node: Node): Visibility | undefined {
@@ -826,26 +844,8 @@ export abstract class DeclarationConverter extends ConverterBase {
             param.row,
             '可変長引数はプロパティに昇格できません（Cannot declare variadic promoted property）。'
           );
-        this.checkPropertyType(param.row, decl.name, {
-          ...param.promote,
-          name: param.name,
-          type: param.type,
-          isReadonly: param.promote.isReadonly || decl.isReadonly,
-          isStatic: false,
-        });
-        decl.props.push({
-          name: param.name,
-          visibility: param.promote.visibility,
-          setVisibility: param.promote.setVisibility,
-          isStatic: false,
-          isReadonly: param.promote.isReadonly || decl.isReadonly,
-          type: param.type,
-          defaultExpr: undefined,
-          row: param.row,
-          isAbstract: false,
-          isFinal: param.promote.isFinal,
-          promoted: true,
-        });
+        if (!param.promote.hooks) this.checkPropertyType(param.row, decl.name, param.promote);
+        decl.props.push(param.promote);
       }
     }
   }

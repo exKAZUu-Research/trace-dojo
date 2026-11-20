@@ -2334,6 +2334,56 @@ test.each([
   });
 });
 
+test.each([
+  ['public int $x { set => $value * 2; }', 'echo (new A(2))->x;', '4'],
+  ['public int $x = 2 { set => $value * 2; }', 'echo (new A)->x;', '4'],
+  ['public int $x { get => $this->x + 1; }', 'echo (new A(2))->x;', '3'],
+  [
+    'public int $x { get => 1; set => throw new Exception("setter"); }',
+    'try { new A(1); } catch (Exception $e) { echo $e->getMessage(); }',
+    'setter',
+  ],
+  [
+    'public int $x { get => 1; }',
+    'try { new A(1); } catch (Error $e) { echo $e->getMessage(); }',
+    'Property A::$x is read-only',
+  ],
+])('executes hooks on promoted constructor parameters: %s', (param, source, stdout) => {
+  expect(run(`<?php class A { public function __construct(${param}) {} } ${source}`)).toMatchObject({
+    kind: 'executed',
+    stdout,
+  });
+});
+
+test.each([
+  ['public int $x { get; }', 'Non-abstract property hook must have a body'],
+  ['public int $x { get => 1; set; }', 'Non-abstract property hook must have a body'],
+  ['private int $x { final get => 1; }', 'Property hook cannot be both final and private'],
+  [
+    'public private(set) int $x { get => 1; }',
+    'Read-only virtual property A::$x must not specify asymmetric visibility',
+  ],
+  ['public readonly int $x { get => 1; }', 'Hooked properties cannot be readonly'],
+])('validates hooks on promoted constructor parameters: %s', (param, message) => {
+  expect(run(`<?php\nclass A { public function __construct(${param}) {} }\necho "unreachable";`)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message }],
+  });
+});
+
+test('names the declaring class for an inherited property that violates an interface contract', () => {
+  expect(
+    run(`<?php
+interface I { public int $x { get; } }
+class P { public string $x = ""; }
+class C extends P implements I {}`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout:
+      '\nFatal error: Type of P::$x must be subtype of int (as in class I) in /main.php on line 4\nStack trace:\n#0 {main}\n',
+  });
+});
+
 test('allows a concrete hook on an abstract property with another abstract hook', () => {
   expect(run('<?php abstract class A { abstract public int $x { get => 1; set; } } echo "accepted";')).toMatchObject({
     kind: 'executed',
