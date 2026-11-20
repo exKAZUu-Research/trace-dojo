@@ -200,7 +200,8 @@ export function nonNullable(type: DartType): DartType {
   }
 }
 
-// code-gauge-allow functionCognitiveComplexity 17 -- One case per kind of type, in the order of Dart's rules.
+// code-gauge-allow functionCognitiveComplexity 19 -- One case per kind of type, in the order of Dart's rules.
+// code-gauge-allow functionNcss 32 -- Each kind compares its own structure.
 export function sameType(a: DartType, b: DartType): boolean {
   if (a === b) return true;
   if (a.kind !== b.kind) return false;
@@ -239,14 +240,15 @@ export function sameType(a: DartType, b: DartType): boolean {
       const other = b as FunctionType;
       if (
         a.nullable !== other.nullable ||
-        a.typeParams.length !== other.typeParams.length ||
         a.positional.length !== other.positional.length ||
         a.requiredCount !== other.requiredCount ||
         a.named.length !== other.named.length
       ) {
         return false;
       }
-      const [left, right] = alignTypeParams(a, other);
+      const aligned = alignTypeParams(a, other, sameType);
+      if (!aligned) return false;
+      const [left, right] = aligned;
       return (
         sameType(left.returnType, right.returnType) &&
         left.positional.every((type, index) => sameType(type, right.positional[index])) &&
@@ -264,12 +266,18 @@ export function sameType(a: DartType, b: DartType): boolean {
   }
 }
 
-/** Renames the type parameters of `b` to those of `a`, so that their bodies can be compared. */
-function alignTypeParams(a: FunctionType, b: FunctionType): [FunctionType, FunctionType] {
+function alignTypeParams(
+  a: FunctionType,
+  b: FunctionType,
+  equalBounds: (left: DartType, right: DartType) => boolean
+): [FunctionType, FunctionType] | undefined {
+  if (a.typeParams.length !== b.typeParams.length) return undefined;
   if (a.typeParams.length === 0) return [a, b];
   const map = new Map<TypeParam, DartType>(
     b.typeParams.map((param, index) => [param, typeParamType(a.typeParams[index])])
   );
+  if (!a.typeParams.every((param, index) => equalBounds(boundOf(param), substitute(boundOf(b.typeParams[index]), map))))
+    return undefined;
   const renamed = substitute({ ...b, typeParams: [] }, map) as FunctionType;
   return [{ ...a, typeParams: [] }, renamed];
 }
@@ -430,22 +438,9 @@ function structuralSubtype(s: DartType, t: DartType): boolean {
 // code-gauge-allow functionCognitiveComplexity 27 -- One case per kind of type, in the order of Dart's rules.
 // code-gauge-allow functionNcss 32 -- One case per kind of type, in the order of Dart's rules.
 function isFunctionSubtype(s: FunctionType, t: FunctionType): boolean {
-  if (s.typeParams.length !== t.typeParams.length) return false;
-  let left = s;
-  let right = t;
-  if (s.typeParams.length > 0) {
-    // The bounds must be the same, then both are compared with the same type parameters.
-    [left, right] = alignTypeParams(s, t);
-    const map = new Map<TypeParam, DartType>(
-      t.typeParams.map((param, index) => [param, typeParamType(s.typeParams[index])])
-    );
-    for (const [index, param] of s.typeParams.entries()) {
-      const otherBound = t.typeParams[index].bound
-        ? substitute(t.typeParams[index].bound as DartType, map)
-        : objectType(true);
-      if (!mutualSubtypes(boundOf(param), otherBound)) return false;
-    }
-  }
+  const aligned = alignTypeParams(s, t, mutualSubtypes);
+  if (!aligned) return false;
+  const [left, right] = aligned;
   if (!isSubtype(left.returnType, right.returnType)) return false;
   if (left.requiredCount > right.requiredCount) return false;
   if (left.positional.length < right.positional.length) return false;

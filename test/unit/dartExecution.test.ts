@@ -273,11 +273,17 @@ test('setRange follows each list kind and copies overlapping ranges', () => {
     list.setRange(1, 3, list);
     print(list);
   }
+  growable.setRange(0, 1, [1, 2, 3].map((value) {
+    if (value == 1) throw 'skipped';
+    print(value);
+    return value;
+  }), 1);
+  print(growable);
 }
 `;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: '1\n[1, 1, 0]\n1\n2\n[1, 1, 0]\n',
+    stdout: '1\n[1, 1, 0]\n1\n2\n[1, 1, 0]\n2\n3\n[2, 1, 0]\n',
   });
 });
 
@@ -777,6 +783,18 @@ void main() {
   expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
 });
 
+test('implicit extension calls require a unique most-specific declaration', () => {
+  const declarations = `extension A on int { String get label => 'a'; }
+extension B on int { String get label => 'b'; }
+extension Generic<T> on T { String get kind => 'generic'; }
+extension Specific on String { String get kind => 'specific'; }`;
+  expect(executeProgram('dart', `${declarations} void main() { print(1.label); }`)).toMatchObject({
+    kind: 'compileError',
+  });
+  const program = `${declarations} void main() { print([A(1).label, B(1).label, 'x'.kind]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[a, b, specific]\n' });
+});
+
 // Each program is an error before it runs in the SDK, at the line given.
 test.each([
   { name: 'a type mismatch', body: '  int x = "a";', row: 1 },
@@ -1076,6 +1094,16 @@ void main() {
     kind: 'executed',
     stdout: '[false, true, true]\n[false, 2, true]\n',
   });
+});
+
+test('generic function Type equality includes bounds and ignores parameter names', () => {
+  const program = `typedef A = T Function<T extends num>(T);
+typedef B = T Function<T extends Object>(T);
+typedef C = U Function<U extends num>(U);
+typedef F = T Function<T extends Comparable<T>>(T);
+typedef G = V Function<V extends Comparable<V>>(V);
+void main() { print([A == B, A == C, F == G, <Type>{A, B, C}.length]); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '[false, true, true, 2]\n' });
 });
 
 test('joined branches retain only promotions shared by both paths', () => {

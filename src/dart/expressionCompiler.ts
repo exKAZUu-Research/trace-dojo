@@ -1275,7 +1275,7 @@ export abstract class ExpressionCompiler extends CompilerBase {
       };
     }
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
-    const resolved = this.memberFor(receiver, lookupType, name, false);
+    const resolved = this.memberFor(receiver, lookupType, name, span);
     if (!resolved) {
       this.checkUnavailableIoMember(lookupType, name, span);
       if (this.lookupMember(lookupType, name, true))

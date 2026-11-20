@@ -15,14 +15,15 @@ import type { Frame, Runtime } from './runtime';
 import { coreTypes, type DartType, DYNAMIC } from './types';
 import { DartList, DartObject, DartRecord, UNASSIGNED, UNINITIALIZED, type Value } from './values';
 
-// code-gauge-allow duplicateLines 15 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
+// code-gauge-allow duplicateLines 16 -- Each function handles its own construct; the shared shape reads better than a helper with flags.
 export function traceDartProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
   const compiled = compileProgram(parseDart(program), { atomicRows: new Set(trace.atomicAnnotations.keys()) });
   const runtime = newRuntime(input);
   const snapshotter = new Snapshotter(runtime, compiled);
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.info.isAtomic,
-    variablesOf: (frame) => snapshotter.variablesOf(frame, true),
+    variablesOf: (frame) => snapshotter.recordedVariablesOf(frame),
+    scalarVarsOf: (frame) => snapshotter.variablesOf(frame, true).vars,
   });
   runtime.steps.recorder = recorder;
   let finalVars: TraceItemVariable = {};
@@ -40,29 +41,34 @@ interface SnapshotBudget {
   path: Set<DartObject>;
 }
 
+interface SnapshotRoot {
+  name: string;
+  value: Value;
+  type: DartType;
+  mode?: 'scalar' | 'reference';
+}
+
 class Snapshotter {
-  private remainingNodes = LIMITS.maxSlots;
+  private remainingNodes = LIMITS.maxDartTraceNodes;
 
   constructor(
     private readonly runtime: Runtime,
     private readonly program: CompiledProgram
   ) {}
 
-  /**
-   * The variables a frame shows: its locals that hold values and the variables a closure captured, then, with the
-   * context, the program's top-level variables and static fields, and the fields of `this` as `this.x`.
-   */
-  variablesOf(frame: Frame, withContext: boolean): TraceVariables {
-    const budget = { remaining: MAX_SNAPSHOT_NODES, path: new Set<DartObject>() };
-    const variables = this.readVariables(frame, withContext, budget);
-    this.remainingNodes -= MAX_SNAPSHOT_NODES - budget.remaining;
+  recordedVariablesOf(frame: Frame): TraceVariables {
+    const { variables, cost } = snapshot(this.rootsOf(frame, true), true);
+    this.remainingNodes -= cost;
     if (this.remainingNodes < 0) throw new ExecutionLimitError('trace');
     return variables;
   }
 
+  variablesOf(frame: Frame, withContext: boolean): TraceVariables {
+    return snapshot(this.rootsOf(frame, withContext), false).variables;
+  }
+
   // code-gauge-allow functionCognitiveComplexity 23 -- One case per kind of value a trace shows.
-  private readVariables(frame: Frame, withContext: boolean, budget: SnapshotBudget): TraceVariables {
-    const variables: TraceVariables = { vars: {}, referenceVars: {} };
+  private *rootsOf(frame: Frame, withContext: boolean): Iterable<SnapshotRoot> {
     const shown = new Set<string>();
     const hidesArgs = frame.info.name === 'main' && this.program.mainTakesArguments;
     for (const [slot, local] of frame.info.locals.entries()) {
@@ -70,24 +76,52 @@ class Snapshotter {
       if (!cell || local.name.startsWith('\0') || (hidesArgs && slot === 0)) continue;
       if (cell.v === UNASSIGNED || cell.v === UNINITIALIZED || isLateInitializer(cell.v)) continue;
       shown.add(local.name);
-      addVariable(variables, local.name, cell.v, local.type, budget);
+      yield { name: local.name, value: cell.v, type: local.type };
     }
     for (const [position, capture] of frame.info.captures.entries()) {
       const cell = frame.captured[position];
       if (!cell || shown.has(capture.name) || cell.v === UNASSIGNED || cell.v === UNINITIALIZED) continue;
       shown.add(capture.name);
-      addVariable(variables, capture.name, cell.v, capture.type, budget);
+      yield { name: capture.name, value: cell.v, type: capture.type };
     }
-    if (!withContext) return variables;
+    if (!withContext) return;
     for (const global of this.program.programGlobals) {
       if (global.isConst || shown.has(global.displayName)) continue;
       const cell = this.runtime.globals[global.slot];
       if (!cell || cell.v === UNINITIALIZED || typeof cell.v === 'symbol') continue;
-      addVariable(variables, global.displayName, cell.v, global.type, budget);
+      yield { name: global.displayName, value: cell.v, type: global.type };
     }
-    if (frame.info.showsThis && frame.receiver instanceof DartObject) addThis(variables, frame.receiver, budget);
-    return variables;
+    if (frame.info.showsThis && frame.receiver instanceof DartObject) yield* thisRoots(frame.receiver);
   }
+}
+
+function snapshot(
+  roots: Iterable<SnapshotRoot>,
+  includeReferences: boolean
+): { variables: TraceVariables; cost: number } {
+  const variables: TraceVariables = { vars: {}, referenceVars: {} };
+  const visible = [...roots].filter(({ value }) => !(value instanceof DartObject && value.cls === coreTypes.function));
+  let objectRoots = visible.filter(({ value }) => value instanceof DartObject).length;
+  let scalarNodes = MAX_SNAPSHOT_NODES;
+  let referenceNodes = MAX_SNAPSHOT_NODES;
+  let cost = 0;
+  for (const root of visible) {
+    const object = root.value instanceof DartObject;
+    const scalarLimit = object ? Math.ceil(scalarNodes / objectRoots) : 1;
+    const refLimit = object ? Math.ceil(referenceNodes / objectRoots) : 1;
+    const scalar = { remaining: scalarLimit, path: new Set<DartObject>() };
+    const reference = includeReferences ? { remaining: refLimit, path: new Set<DartObject>() } : undefined;
+    addVariable(variables, root, scalar, reference);
+    const scalarUsed = scalarLimit - scalar.remaining;
+    const referenceUsed = reference ? refLimit - reference.remaining : 0;
+    cost += scalarUsed + referenceUsed;
+    if (object) {
+      scalarNodes -= scalarUsed;
+      referenceNodes -= referenceUsed;
+      objectRoots--;
+    }
+  }
+  return { variables, cost };
 }
 
 function isLateInitializer(value: Value): boolean {
@@ -99,29 +133,23 @@ type Scalar = TraceItemVariable[string];
 
 function addVariable(
   variables: TraceVariables,
-  name: string,
-  value: Value,
-  type: DartType,
-  budget: SnapshotBudget
+  { name, value, type, mode }: SnapshotRoot,
+  scalars: SnapshotBudget,
+  references: SnapshotBudget | undefined
 ): void {
-  if (value instanceof DartObject && value.cls === coreTypes.function) return;
-  const scalar = scalarOf(value, type, budget);
+  const scalar = mode === 'reference' ? NOT_SCALAR : scalarOf(value, type, scalars);
   if (scalar !== NOT_SCALAR) variables.vars[name] = scalar;
-  // Lists also appear as references so that learners can expand their elements.
-  if (scalar !== NOT_SCALAR && !(value instanceof DartList)) return;
-  const node = displayNodeOf(value, budget);
+  if (!references || mode === 'scalar' || (scalar !== NOT_SCALAR && !(value instanceof DartList))) return;
+  const node = displayNodeOf(value, references);
   if (node) variables.referenceVars[name] = node;
 }
 
-function addThis(variables: TraceVariables, self: DartObject, budget: SnapshotBudget): void {
+function* thisRoots(self: DartObject): Iterable<SnapshotRoot> {
   for (const field of allFields(self.cls)) {
     const value = self.fields[field.slot];
-    if (value === UNINITIALIZED) continue;
-    const scalar = scalarOf(value, field.type, budget);
-    if (scalar !== NOT_SCALAR) variables.vars[`this.${field.name}`] = scalar;
+    if (value !== UNINITIALIZED) yield { name: `this.${field.name}`, value, type: field.type, mode: 'scalar' };
   }
-  const node = displayNodeOf(self, budget);
-  if (node) variables.referenceVars.this = node;
+  yield { name: 'this', value: self, type: DYNAMIC, mode: 'reference' };
 }
 
 function* allFields(cls: ClassInfo): Iterable<FieldMember> {
@@ -194,11 +222,12 @@ function isScalarType(type: DartType): boolean {
 
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows Dart's null as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
+const TRUNCATED_NODE: DisplayNode = { kind: 'value', value: '…', verbatim: true };
 
 // code-gauge-allow functionCognitiveComplexity 21 -- One case per kind of value a trace shows.
 // code-gauge-allow functionNcss 41 -- One case per kind of value a trace shows.
 function displayNodeOf(value: Value, budget: SnapshotBudget): DisplayNode | undefined {
-  if (budget.remaining === 0) return undefined;
+  if (budget.remaining === 0) return TRUNCATED_NODE;
   budget.remaining--;
   const seen = budget.path;
   // A late field not yet initialized holds a marker, which shows nothing.
@@ -229,9 +258,9 @@ function displayNodeOf(value: Value, budget: SnapshotBudget): DisplayNode | unde
     if (store && typeof store.positions === 'function') return storeNodeOf(store, budget);
     const entries: Record<string, DisplayNode> = {};
     for (const field of allFields(object.cls)) {
-      if (budget.remaining === 0) break;
       const node = displayNodeOf(object.fields[field.slot], budget);
       if (node) entries[field.name] = node;
+      if (node === TRUNCATED_NODE) break;
     }
     return { kind: 'object', entries };
   } finally {
@@ -246,8 +275,9 @@ function entriesNode(
 ): DisplayNode {
   const entries: Record<string, DisplayNode> = {};
   for (const [name, item] of fields) {
-    if (budget.remaining === 0) break;
-    entries[name] = displayNodeOf(item, budget) ?? NULL_NODE;
+    const node = displayNodeOf(item, budget) ?? NULL_NODE;
+    entries[name] = node;
+    if (node === TRUNCATED_NODE) break;
   }
   return { kind, entries };
 }
@@ -263,14 +293,18 @@ function storeNodeOf(store: HashStore, budget: SnapshotBudget): DisplayNode {
     const entries: Record<string, DisplayNode> = {};
     let position = 0;
     for (const key of store.values()) {
-      if (budget.remaining === 0) break;
-      entries[position++] = displayNodeOf(key, budget) ?? NULL_NODE;
+      const node = displayNodeOf(key, budget) ?? NULL_NODE;
+      entries[position++] = node;
+      if (node === TRUNCATED_NODE) break;
     }
     return { kind: 'array', entries };
   }
   const entries = Object.create(null) as Record<string, DisplayNode>;
   for (const position of store.positions()) {
-    if (budget.remaining === 0) break;
+    if (budget.remaining === 0) {
+      entries['…'] = TRUNCATED_NODE;
+      break;
+    }
     const key = store.keyAt(position);
     const node = displayNodeOf(key, budget);
     const label = node?.kind === 'value' ? String(node.value) : `#${(key as DartObject).identity}`;

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 952 -- The native lists, sets, maps, and their iterators share collection helpers.
+// code-gauge-allow-file fileNcss 956 -- The native lists, sets, maps, and their iterators share collection helpers.
 import type { TopLevelFunction } from '../environment';
 import { stringOf } from '../format';
 import { type HashPolicy, HashStore } from '../hashStore';
@@ -505,6 +505,7 @@ define('List.sublist', (runtime, receiver, [start, end]) => {
   return newList(runtime, elementTypeOf(target), target.elements.slice(from, to));
 });
 // code-gauge-allow functionCognitiveComplexity 17 -- Growable and fixed lists differ for iterable and list sources.
+// code-gauge-allow functionNcss 31 -- Each list kind needs a separate range-copy path.
 define('List.setRange', (runtime, receiver, [start, end, iterable, skip = 0n]) => {
   const target = list(receiver);
   checkElement(runtime, iterable, interfaceType(coreTypes.iterable, [elementTypeOf(target)]), 'iterable');
@@ -516,16 +517,21 @@ define('List.setRange', (runtime, receiver, [start, end, iterable, skip = 0n]) =
     runtime.throwError('RangeError', 'range', [skipCount, 0n, undefined, 'skipCount']);
   const elementType = elementTypeOf(target);
   const write = (position: number, value: Value): void => writeListItem(runtime, target, position, value, elementType);
-  if (runtime.links.isValueOf(runtime, iterable, interfaceType(coreTypes.list, [elementType]))) {
-    if (target.growable) {
-      const sourceLength = runtime.getProperty(iterable, 'length', undefined) as bigint;
-      if (skipCount + BigInt(to - from) > sourceLength) runtime.throwError('StateError', '', ['Too few elements']);
+  const isList = runtime.links.isValueOf(runtime, iterable, interfaceType(coreTypes.list, [elementType]));
+  if (target.growable) {
+    const source = isList ? iterable : materializeRangeSource(runtime, iterable, skipCount);
+    const sourceStart = isList ? skipCount : 0n;
+    const frame = runtime.currentFrame;
+    frame?.temporaries.push(source);
+    try {
+      if (sourceStart + BigInt(to - from) > listLength(runtime, source))
+        runtime.throwError('StateError', '', ['Too few elements']);
+      copyListRange(runtime, source, sourceStart, from, to, write);
+    } finally {
+      frame?.temporaries.pop();
     }
+  } else if (isList) {
     copyListRange(runtime, iterable, skipCount, from, to, write);
-  } else if (target.growable) {
-    const values = iterableValues(runtime, iterable).slice(index(skipCount));
-    if (values.length < to - from) runtime.throwError('StateError', '', ['Too few elements']);
-    for (let position = from; position < to; position++) write(position, values[position - from]);
   } else {
     const skip = skipCount < 0n ? 0n : skipCount;
     let position = from;
@@ -533,6 +539,11 @@ define('List.setRange', (runtime, receiver, [start, end, iterable, skip = 0n]) =
   }
   return;
 });
+
+function materializeRangeSource(runtime: Runtime, source: Value, skipCount: bigint): Value {
+  const skipped = runtime.invoke(source, 'skip', { positional: [skipCount], named: undefined }, [], undefined);
+  return runtime.invoke(skipped, 'toList', { positional: [], named: new Map([['growable', false]]) }, [], undefined);
+}
 
 function writeListItem(
   runtime: Runtime,

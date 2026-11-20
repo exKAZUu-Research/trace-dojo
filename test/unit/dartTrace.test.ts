@@ -214,11 +214,20 @@ test('a cyclic list produces finite snapshots and execution continues', () => {
   for (var i = 0; i < 20; i++) {
     values = [values, values];
   }
-  print('finished');
+  final followed = [7];
+  final marker = 42;
+  print(marker);
 }`;
   const result = traceProgram('dart', shared, shared);
-  expect(result).toMatchObject({ stdout: 'finished\n', uncaughtException: undefined });
+  expect(result).toMatchObject({
+    stdout: '42\n',
+    uncaughtException: undefined,
+    finalVars: { followed: [7], marker: 42 },
+  });
   expect(JSON.stringify(result.finalVars.values).length).toBeLessThan(20_000);
+  const references = result.traceItems.at(-1)?.referenceVars;
+  expect(references?.followed).toMatchObject({ kind: 'array', entries: { 0: { kind: 'value', value: 7 } } });
+  expect(JSON.stringify(references?.values)).toContain('"value":"…"');
 });
 
 test('a synchronous generator records the counted-loop header', () => {
@@ -232,4 +241,31 @@ void main() { print(values().toList()); }
   const actual = traceProgram('dart', program, program);
   expect(actual.stdout).toBe('[0, 1]\n');
   expect(actual.traceItems.filter((item) => item.line === 2).map((item) => item.vars.i)).toEqual([0, 1, 2]);
+});
+
+test('nested grid updates complete with the Java trace length', () => {
+  const dart = `void main() {
+  var grid = List.generate(30, (_) => List.filled(30, 0));
+  for (var row = 0; row < 30; row++) {
+    for (var col = 0; col < 30; col++) {
+      grid[row][col] = row * col;
+    }
+  }
+  print(grid[1][1]);
+}`;
+  const java = `public class Main {
+  public static void main(String[] args) {
+    int[][] grid = new int[30][30];
+    for (int row = 0; row < 30; row++) {
+      for (int col = 0; col < 30; col++) {
+        grid[row][col] = row * col;
+      }
+    }
+    System.out.println(grid[1][1]);
+  }
+}`;
+  const expected = traceProgram('java', java, java);
+  const actual = traceProgram('dart', dart, dart);
+  expect(actual.traceItems).toHaveLength(expected.traceItems.length);
+  expect(actual).toMatchObject({ finalVars: expected.finalVars, stdout: expected.stdout });
 });

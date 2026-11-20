@@ -198,7 +198,7 @@ export abstract class OperatorCompiler extends ExpressionCompiler {
         `${typeName(left.type)} 型の値は null かもしれないので、演算子 ${operator === 'unary-' ? '-' : operator} を直接は使えません。`
       );
     }
-    const resolved = this.lookupMember(left.type, operator, false);
+    const resolved = this.lookupMember(left.type, operator, false, span);
     if (!resolved || resolved.member.kind !== 'method') {
       return this.error(
         span,

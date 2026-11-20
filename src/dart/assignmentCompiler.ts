@@ -483,7 +483,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
       };
     }
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
-    const setter = this.lookupMember(lookupType, name, true);
+    const setter = this.lookupMember(lookupType, name, true, span);
     if (!setter) {
       this.checkUnavailableIoMember(lookupType, name, span);
       const getter = this.lookupMember(lookupType, name, false);
@@ -520,7 +520,7 @@ export abstract class AssignmentCompiler extends ControlCompiler {
     let writeType: DartType = DYNAMIC;
     let readType: DartType | undefined = DYNAMIC;
     if (receiverType.kind !== 'dynamic') {
-      const setter = this.lookupMember(lookupType, '[]=', false);
+      const setter = this.lookupMember(lookupType, '[]=', false, span);
       if (!setter || setter.member.kind !== 'method')
         return this.error(span, `${typeName(nonNullable(receiverType))} 型には演算子 []= がありません。`);
       if (!nullAware && isNullable(receiverType))

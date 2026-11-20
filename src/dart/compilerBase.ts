@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 427 -- Type and diagnostic resolution share the compiler environment.
+// code-gauge-allow-file fileNcss 445 -- Type and diagnostic resolution share the compiler environment.
 import { CompileError } from '../interpreter/diagnostics';
 import type { ClassDeclaration, Span, TypeAliasDeclaration, TypeParameter, TypeSyntax } from './ast';
 import type { ClassInfo, Member } from './classes';
@@ -392,7 +392,7 @@ export abstract class CompilerBase {
   // Members
 
   /** Finds a member through a static type, including Object's members on nullable types and extension members. */
-  lookupMember(receiverType: DartType, name: string, setter: boolean): ResolvedMember | undefined {
+  lookupMember(receiverType: DartType, name: string, setter: boolean, span?: Span): ResolvedMember | undefined {
     const base = resolveBound(receiverType);
     if (isNullable(base)) {
       const objectMember = this.interfaceMember(objectType(), name, setter);
@@ -401,7 +401,7 @@ export abstract class CompilerBase {
     const nonNull = base.kind === 'interface' && base.nullable ? { ...base, nullable: false } : base;
     const direct = this.lookupDirect(nonNull, name, setter);
     if (direct) return direct;
-    return this.lookupExtension(receiverType, name, setter);
+    return this.lookupExtension(receiverType, name, setter, span);
   }
 
   private lookupDirect(base: DartType, name: string, setter: boolean): ResolvedMember | undefined {
@@ -436,10 +436,10 @@ export abstract class CompilerBase {
   }
 
   /** Finds a member for a receiver, honoring an explicit extension application (`E(x).m`). */
-  memberFor(receiver: Compiled, lookupType: DartType, name: string, setter: boolean): ResolvedMember | undefined {
+  memberFor(receiver: Compiled, lookupType: DartType, name: string, span: Span): ResolvedMember | undefined {
     const override = receiver.extensionOverride;
-    if (!override) return this.lookupMember(lookupType, name, setter);
-    const member = (setter ? override.ext.setters : override.ext.members).get(name);
+    if (!override) return this.lookupMember(lookupType, name, false, span);
+    const member = override.ext.members.get(name);
     if (!member) return undefined;
     const map = new Map(override.ext.typeParams.map((param, index) => [param, override.typeArgs[index]]));
     return {
@@ -457,9 +457,14 @@ export abstract class CompilerBase {
   }
 
   /** The extension member that applies to a receiver of a type, choosing the most specific extension. */
-  private lookupExtension(receiverType: DartType, name: string, setter: boolean): ResolvedMember | undefined {
+  private lookupExtension(
+    receiverType: DartType,
+    name: string,
+    setter: boolean,
+    span?: Span
+  ): ResolvedMember | undefined {
     const candidates: { ext: ExtensionInfo; member: Member; typeArgs: DartType[]; onType: DartType }[] = [];
-    for (const ext of this.library.extensionsInScope()) {
+    for (const ext of new Set(this.library.extensionsInScope())) {
       const member = (setter ? ext.setters : ext.members).get(name);
       if (!member) continue;
       const typeArgs = this.matchExtension(ext, receiverType);
@@ -468,8 +473,13 @@ export abstract class CompilerBase {
       candidates.push({ ext, member, typeArgs, onType: substitute(ext.onType, map) });
     }
     if (candidates.length === 0) return undefined;
-    const best = candidates.find((candidate) => candidates.every((other) => isSubtype(candidate.onType, other.onType)));
-    const chosen = best ?? candidates[0];
+    const chosen = candidates.find((candidate) =>
+      candidates.every((other) => candidate === other || extensionMoreSpecific(candidate, other))
+    );
+    if (!chosen) {
+      if (span) this.error(span, `${typeName(receiverType)} 型に使える拡張に ${name} が複数あり、1 つに決まりません。`);
+      return undefined;
+    }
     const map = new Map(chosen.ext.typeParams.map((param, index) => [param, chosen.typeArgs[index]]));
     return {
       member: chosen.member,
@@ -682,6 +692,25 @@ export function captureIndex(fn: FunctionContext, variable: LocalVar): number {
   fn.captures.push(variable);
   fn.info.captures.push({ name: variable.name, type: variable.type });
   return fn.captures.length - 1;
+}
+
+function extensionMoreSpecific(
+  candidate: { ext: ExtensionInfo; onType: DartType },
+  other: { ext: ExtensionInfo; onType: DartType }
+): boolean {
+  const platform = candidate.ext.library.startsWith('dart:');
+  const otherPlatform = other.ext.library.startsWith('dart:');
+  if (platform !== otherPlatform) return otherPlatform;
+  if (!isSubtype(candidate.onType, other.onType)) return false;
+  if (!isSubtype(other.onType, candidate.onType)) return true;
+  const left = extensionTypeAtBounds(candidate.ext);
+  const right = extensionTypeAtBounds(other.ext);
+  return isSubtype(left, right) && !isSubtype(right, left);
+}
+
+function extensionTypeAtBounds(extension: ExtensionInfo): DartType {
+  const args = instantiateToBounds(extension.typeParams);
+  return substitute(extension.onType, new Map(extension.typeParams.map((param, index) => [param, args[index]])));
 }
 
 export function instantiateToBounds(params: readonly TypeParam[]): DartType[] {

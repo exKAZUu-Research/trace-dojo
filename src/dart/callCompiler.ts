@@ -357,7 +357,7 @@ export abstract class CallCompiler extends OperatorCompiler {
       return this.dynamicCall(receiver, name, args, span, nullAware, typeArguments);
     }
     const lookupType = nullAware ? nonNullable(receiverType) : receiverType;
-    const resolved = this.memberFor(receiver, lookupType, name, false);
+    const resolved = this.memberFor(receiver, lookupType, name, span);
     if (!resolved) {
       this.checkUnavailableIoMember(lookupType, name, span);
       return this.error(span, `${typeName(nonNullable(receiverType))} 型には ${name} というメソッドがありません。`);
