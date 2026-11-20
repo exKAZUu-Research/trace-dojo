@@ -4519,4 +4519,43 @@ echo implode(",", $ids);
 `)
     ).toMatchObject({ kind: 'executed', stdout: expected });
   }
+
+  expect(
+    run(`<?php
+class D { function __destruct() { echo "destroyed\n"; } }
+$x = new D;
+set_exception_handler(function($e) { echo "h\n"; exit(2); });
+throw new Exception("first");
+`)
+  ).toMatchObject({ kind: 'executed', stdout: 'h\ndestroyed\n' });
+
+  for (const [pattern, subject, expected] of [
+    ['(?<=([ab]){2})c', 'abc', '[["c",2],["b",1]]'],
+    ['(?<=(?<n>[ab]){2})c', 'bac', '{"0":["c",2],"n":["a",1],"1":["a",1]}'],
+  ]) {
+    expect(
+      run(`<?php preg_match('/${pattern}/', '${subject}', $m, PREG_OFFSET_CAPTURE); echo json_encode($m);`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+
+  for (const [initial, expected] of [
+    ['[]', '[4,9]:1;[]:0;'],
+    ['[1,2]', '[1,2,4,9]:3;{"0":1,"1":2,"3":9}:2;'],
+    ['[0=>1,3=>2]', '{"0":1,"3":2,"4":4,"5":9}:3;{"0":1,"3":2,"5":9}:2;'],
+  ]) {
+    expect(
+      run(`<?php
+error_reporting(0);
+function f() { return 4; }
+$a = ${initial};
+$k = count($a) ? array_key_last($a) + 1 : 0;
+set_error_handler(function() use (&$a, $k) { unset($a[$k]); $a[] = 9; return true; });
+$a[] =& f();
+restore_error_handler();
+echo json_encode($a), ':', count($a), ';';
+unset($a[$k]);
+echo json_encode($a), ':', count($a), ';';
+`)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
 });

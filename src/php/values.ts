@@ -281,11 +281,12 @@ export class PhpArray {
     const targetKey = bucket === undefined ? undefined : order.keyAtBucket(bucket);
     if (targetKey !== undefined) return this.set(targetKey, value);
     if (order.isPacked && typeof key === 'bigint' && typeof order.last?.key === 'bigint' && order.last.key > key)
-      return this.restorePackedSlot(key, value);
+      return this.restorePackedSlot(key, value, true);
     return undefined;
   }
 
-  restorePackedSlot(key: bigint, value: Value): Value {
+  restorePackedSlot(key: bigint, value: Value, preserveCount = false): Value {
+    const previousSize = this.size;
     const entries: [Key, Value | Ref][] = [];
     const positions = new Map<Key, number>();
     let inserted = false;
@@ -303,6 +304,7 @@ export class PhpArray {
       positions.set(key, Number(key));
     }
     this.replaceTable(entries, true, { positions, keepPositions: true, packed: true }, true);
+    if (preserveCount) this.map.removedUndefinedSlots = previousSize - entries.length;
     return value;
   }
 
@@ -611,6 +613,11 @@ export class PhpArray {
     order.delete(key);
     if (trim) {
       while (order.last && this.map.get(order.last.key) === UNDEFINED_RESULT) this.removeUndefinedSlot(order.last.key);
+    }
+    if (this.size <= 0 && this.map.removedUndefinedSlots < 0) {
+      const leftover = this.map.clearOwned();
+      order.replace([], order.isPacked);
+      for (const slot of leftover) dropped(slot);
     }
     if (detached !== undefined) this.setDetachedPointer(Math.min(detached, order.endPosition));
     dropped(old);

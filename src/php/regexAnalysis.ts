@@ -59,8 +59,8 @@ export function analyzeRegex(
     onAssertionLeave(node) {
       if (node.kind !== 'lookbehind') return;
       lookbehinds.pop();
-      if (validateLookbehind(node, lengths, invalidLookbehind) && captureCount !== capturesAtEntry.get(node))
-        needsNative = true;
+      validateLookbehind(node, lengths, invalidLookbehind);
+      if (captureCount !== capturesAtEntry.get(node)) needsNative = true;
     },
     onQuantifierLeave(node) {
       needsNative ||= nullableRepeatNeedsNative(node, lengths);
@@ -145,23 +145,18 @@ function validateLookbehind(
   node: AST.Assertion,
   lengths: Map<AST.Element, Length>,
   invalid: (start: number, reason: string) => never
-): boolean {
-  if (node.kind !== 'lookbehind') return false;
-  let firstLength: number | undefined;
+): void {
+  if (node.kind !== 'lookbehind') return;
   let variable = false;
-  let uneven = false;
   let longest = 0;
   for (const alternative of node.alternatives) {
     const [min, max] = alternativeLength(alternative, lengths, new Set());
     if (!Number.isFinite(max)) invalid(node.start, 'length of lookbehind assertion is not limited');
     if (max > 65_535) invalid(node.start, 'lookbehind assertion is too long');
     variable ||= min !== max;
-    uneven ||= firstLength !== undefined && min !== firstLength;
     longest = Math.max(longest, max);
-    firstLength ??= min;
   }
   if (variable && longest > 255) invalid(node.start, 'branch too long in variable-length lookbehind assertion');
-  return variable || uneven;
 }
 
 function alternativeLength(node: AST.Alternative, cache: Map<AST.Element, Length>, active: Set<AST.Element>): Length {

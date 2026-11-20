@@ -77,15 +77,18 @@ function guard(runtime: Runtime, run: () => void): string | undefined {
 }
 
 // code-gauge-allow functionCognitiveComplexity 24 -- Dispatches uncaught outcomes before runtime shutdown.
-function report(runtime: Runtime, error: unknown): string | undefined {
-  if (error instanceof ExitSignal) return undefined;
+function report(runtime: Runtime, error: unknown, inShutdown = false): string | undefined {
+  if (error instanceof ExitSignal) {
+    if (inShutdown) runtime.shuttingDown = true;
+    return undefined;
+  }
   if (error instanceof UnsupportedFeatureError) {
     restoreStack(runtime);
     return error.message;
   }
   if (error instanceof PhpThrow) {
     restoreStack(runtime);
-    return invokeExceptionHandler(runtime, error.object);
+    return invokeExceptionHandler(runtime, error.object, inShutdown);
   }
   if (error instanceof HostStackExhaustion) {
     const trace = traceText(error.record ? [error.record] : []);
@@ -106,7 +109,7 @@ function report(runtime: Runtime, error: unknown): string | undefined {
   throw error;
 }
 
-function invokeExceptionHandler(runtime: Runtime, object: PhpObject): string | undefined {
+function invokeExceptionHandler(runtime: Runtime, object: PhpObject, inShutdown: boolean): string | undefined {
   const handler = runtime.exceptionHandler;
   if (handler === null || handler === undefined) return printUncaught(runtime, object);
   runtime.replacedExceptionHandlers.push(handler);
@@ -118,11 +121,7 @@ function invokeExceptionHandler(runtime: Runtime, object: PhpObject): string | u
       runtime.exceptionHandler = runtime.replacedExceptionHandlers.pop() ?? null;
     return undefined;
   } catch (error_) {
-    if (error_ instanceof ExitSignal) {
-      runtime.shuttingDown = true;
-      return undefined;
-    }
-    return report(runtime, error_);
+    return report(runtime, error_, inShutdown);
   }
 }
 
@@ -203,11 +202,7 @@ function guardShutdownStep(runtime: Runtime, run: () => void): { stop: boolean; 
     run();
     return { stop: runtime.shuttingDown || runtime.exhausted };
   } catch (error) {
-    if (error instanceof ExitSignal) {
-      runtime.shuttingDown = true;
-      return { stop: true };
-    }
-    const failure = report(runtime, error);
+    const failure = report(runtime, error, true);
     return { stop: failure !== undefined || runtime.shuttingDown || runtime.exhausted, failure };
   }
 }
