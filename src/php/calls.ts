@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 839 -- Keeps call binding, completion and frame cleanup together.
+// code-gauge-allow-file fileNcss 856 -- Keeps call binding, completion and frame cleanup together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import { LIMITS } from '../interpreter/limits';
 import type { FunctionDecl, Stmt } from './ast';
@@ -896,8 +896,38 @@ function releaseFrame(
   pending?: PhpThrow
 ): void {
   if (frame.thisObj) runtime.pendingGcRoots.add(frame.thisObj);
-  const holder = fromNative ? runtime.nativeHeld.at(-1) : undefined;
-  if (returned instanceof PhpObject || returned instanceof PhpArray) (holder ?? caller.temporaries).push(returned);
+  const holders = (fromNative ? runtime.nativeHeld.at(-1) : undefined) ?? caller.temporaries;
+  if (!isComposite(returned)) {
+    releaseFrameValues(runtime, frame, fromNative, pending);
+    return;
+  }
+  holders.push(returned);
+  try {
+    releaseFrameValues(runtime, frame, fromNative, pending);
+  } catch (error) {
+    throw releaseFailedCallResult(runtime, holders, returned, error);
+  }
+}
+
+/** Frees a call's result when its frame cleanup throws, as PHP frees the call's result before choosing a handler. */
+function releaseFailedCallResult(
+  runtime: Runtime,
+  holders: unknown[],
+  returned: PhpObject | PhpArray,
+  error: unknown
+): unknown {
+  if (!isCleanupException(error) || holders.at(-1) !== returned) return error;
+  holders.pop();
+  try {
+    if (error instanceof PhpThrow) withPendingException(runtime, error, () => runtime.release([returned]));
+    else runtime.release([returned]);
+  } catch (releaseError) {
+    return releaseError;
+  }
+  return error;
+}
+
+function releaseFrameValues(runtime: Runtime, frame: Frame, fromNative: boolean, pending?: PhpThrow): void {
   for (const ref of frame.vars.values()) if (!ref.isDefinedBinding) ref.rc--;
   const locals = Array.from(runtime.variableBindings(frame), ([, ref]) => ref);
   const tail = [...frame.argumentHolders, ...frame.temporaries, frame.returning, frame.thisObj, frame.closure];

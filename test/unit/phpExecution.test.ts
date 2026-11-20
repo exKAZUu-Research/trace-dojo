@@ -5215,4 +5215,29 @@ foreach (['a', 'b', 'c'] as $f) {
   echo "\\n";
 }`)
   ).toMatchObject({ kind: 'executed', stdout: 'r;f;outer;f;r\nr;f;caught;outer;ret;\nt;q;fin;t;\n' });
+
+  for (const [exiting, body, expected] of [
+    [
+      'r',
+      'try { try { return new D("r"); } finally { return new D("f"); } } finally { echo "outer;"; }',
+      'r;exit;f;caught:f;end;',
+    ],
+    [
+      'f',
+      'try { try { return new D("r"); } finally { return new D("f"); } } finally { echo "outer;"; }',
+      'r;f;exit;outer;',
+    ],
+    [
+      'r',
+      'try { try { return new D("r"); } finally { return new D("f"); } } catch (Exception $e) { echo "c:", $e->getMessage(), ";"; } finally { echo "outer;"; }',
+      'r;exit;f;c:f;outer;end;',
+    ],
+    ['r', 'try { return g(new D("r")); } finally { echo "outer;"; }', 'r;exit;f;outer;caught:f;end;'],
+  ]) {
+    expect(
+      run(
+        `<?php class D { function __construct(public $n) {} function __destruct() { echo $this->n, ";"; if ($this->n === "${exiting}") exit("exit;"); throw new Exception($this->n); } } function g($x) { return new D("f"); } function f() { ${body} } try { f(); } catch (Throwable $e) { echo "caught:", $e->getMessage(), ";"; } echo "end;";`
+      )
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
 });
