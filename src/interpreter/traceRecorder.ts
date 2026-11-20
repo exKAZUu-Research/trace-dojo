@@ -1,4 +1,4 @@
-import fastDeepEqual from 'fast-deep-equal';
+import { isEqual } from 'es-toolkit/predicate';
 
 import type { TraceItem } from '../problems/trace';
 import { ExecutionLimitError, MAX_TRACE_ITEMS } from './limits';
@@ -48,15 +48,20 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     if (frames.some((frame) => this.frames.isAtomic(frame))) return false;
     if (this.traceItems.length >= MAX_TRACE_ITEMS) throw new ExecutionLimitError('trace');
     this.runtime.collectGarbage();
+    const current = frames.at(-1) as F;
+    const variables = this.frames.variablesOf(current);
     const item: TraceItem = {
       line: row + 1,
       callLines: frames.slice(1).flatMap(({ callRow }) => (callRow === undefined ? [] : [callRow + 1])),
-      ...this.frames.variablesOf(frames.at(-1) as F),
+      ...variables,
       turtles: world.turtleTraces(),
       board: world.boardText(),
     };
     this.traceItems.push(this.frames.recordItem?.(item) ?? item);
-    for (const frame of frames) this.varsAtLastStep.set(frame, this.frames.variablesOf(frame).vars);
+    for (const frame of frames) {
+      const snapshot = frame === current && !this.frames.recordItem ? variables : this.frames.variablesOf(frame);
+      this.varsAtLastStep.set(frame, snapshot.vars);
+    }
     return true;
   }
 
@@ -72,7 +77,7 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
     const shownVars = this.varsAtLastStep.get(frame);
     return (
       last.board === world.boardText() &&
-      fastDeepEqual(last.turtles, world.turtleTraces()) &&
+      isEqual(last.turtles, world.turtleTraces()) &&
       (shownVars === undefined || sameVariables(shownVars, this.frames.variablesOf(frame).vars))
     );
   }
@@ -81,7 +86,6 @@ export class TraceRecorder<F extends TracedFrame> implements StepRecorder {
 function sameVariables(a: TraceItem['vars'], b: TraceItem['vars']): boolean {
   const names = Object.keys(a);
   return (
-    names.length === Object.keys(b).length &&
-    names.every((name) => Object.hasOwn(b, name) && fastDeepEqual(a[name], b[name]))
+    names.length === Object.keys(b).length && names.every((name) => Object.hasOwn(b, name) && isEqual(a[name], b[name]))
   );
 }
