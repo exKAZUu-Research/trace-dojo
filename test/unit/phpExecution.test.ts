@@ -5291,6 +5291,14 @@ test('gc_collect_cycles() defers what destructors of deferred objects attach or 
   }
 });
 
+test('gc_collect_cycles() returns the handles of what collected garbage held before those of the garbage', () => {
+  expect(
+    run(
+      `<?php class N { function __destruct() { echo "dN;"; } } class M { public $o; function __destruct() { echo "dM;"; $o = new stdClass; $o->s = $o; $o->n = [new N, new N]; } } $a = new M; $a->o = $a; unset($a); echo gc_collect_cycles(), ";"; $k = [new stdClass, new stdClass, new stdClass]; echo spl_object_id($k[0]), spl_object_id($k[1]), spl_object_id($k[2]), ";", gc_collect_cycles();`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'dM;dN;dN;3;243;0' });
+});
+
 test('rejecting an unsupported feature ends the run without PHP shutdown replacing the message', () => {
   expect(
     run(

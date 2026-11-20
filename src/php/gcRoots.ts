@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 471 -- Holds GC root buffer simulation, ordering, and post-collection retirement helpers.
+// code-gauge-allow-file fileNcss 495 -- Holds GC root buffer simulation, ordering, and post-collection retirement helpers.
 import { rt, type Runtime } from './runtime';
 import { PhpArray, PhpObject, Ref, type Value } from './values';
 
@@ -67,9 +67,21 @@ export function objectsCreatedSince(
   );
 }
 
-/** Forgets array cycles that a collection freed, as a destructor can leave an array a cycle after PHP counted it. */
-export function forgetCollectedArrayCycles(runtime: Runtime, freed: Iterable<unknown>): void {
-  for (const node of freed) if (node instanceof PhpArray) runtime.arrayCycles.delete(node);
+/**
+ * Runs `finish` with the array cycles a collection freed no longer recorded as cycle roots, before and after it, so the
+ * objects it frees release what only they held and a destructor's array cycle the collection counted does not stay.
+ */
+export function withCollectedArrayCyclesForgotten(
+  runtime: Runtime,
+  freed: Iterable<unknown>,
+  finish: () => void
+): void {
+  const forget = (): void => {
+    for (const node of freed) if (node instanceof PhpArray) runtime.arrayCycles.delete(node);
+  };
+  forget();
+  finish();
+  forget();
 }
 
 /**
@@ -82,6 +94,34 @@ export function survivingRoots<N extends object>(candidates: N[], starts: N[], c
   return candidates.filter(
     (candidate) => !(candidate instanceof PhpArray) || cyclic.includes(candidate) || held.has(candidate)
   );
+}
+
+/** For each collected object, the objects that are not garbage which it holds, directly or through arrays. */
+export function heldByGarbage(
+  runtime: Runtime,
+  objects: PhpObject[],
+  objectChildren: Map<PhpObject, unknown[]>,
+  nodes: (PhpObject | PhpArray)[]
+): Map<PhpObject, unknown[]> {
+  const garbage = new Set<unknown>([...objects, ...nodes]);
+  const seen = new Set<PhpArray>();
+  const result = new Map<PhpObject, unknown[]>();
+  for (const object of objects) runtime.objectCycles.delete(object);
+  for (const object of objects) {
+    const held: unknown[] = [];
+    const pending = [...(objectChildren.get(object) ?? [])].toReversed();
+    while (pending.length > 0) {
+      const item = pending.pop();
+      const value = item instanceof Ref ? item.v : item;
+      if (value instanceof PhpObject && !garbage.has(value)) held.push(value);
+      else if (value instanceof PhpArray && !seen.has(value)) {
+        seen.add(value);
+        pending.push(...[...value.map.ownedSlots()].toReversed());
+      }
+    }
+    result.set(object, held);
+  }
+  return result;
 }
 
 export function recordGcRoot(runtime: Runtime, value: PhpArray | PhpObject, collect: () => number): boolean {

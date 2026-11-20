@@ -6,13 +6,14 @@ import {
   cachedObjectFree,
   collectGarbageNodes,
   deferredHandleOrder,
-  forgetCollectedArrayCycles,
+  heldByGarbage,
   objectFree,
   objectsCreatedSince,
   orderDestructedCollection,
   recordGcRoot,
   retireCollected,
   survivingRoots,
+  withCollectedArrayCyclesForgotten,
   withReachableCached,
 } from './gcRoots';
 import { ExitSignal, type Frame, PhpThrow, type Runtime } from './runtime';
@@ -153,8 +154,9 @@ function collectAfterDestruction(
     count = result.count;
     // A created object whose only holders this run frees goes by reference counting; one its own cycle holds stays.
     for (const object of created) runtime.collectingObjects.delete(object);
-    finishCollectedObjects(runtime, result.ordered, arrayStorage, nodes, result.passTwoNodes);
-    forgetCollectedArrayCycles(runtime, result.freed);
+    withCollectedArrayCyclesForgotten(runtime, result.freed, () =>
+      finishCollectedObjects(runtime, result.ordered, arrayStorage, nodes, result.passTwoNodes)
+    );
     releaseDropped(
       runtime,
       created.filter((object) => runtime.objects.get(object.id) === object),
@@ -248,20 +250,19 @@ function finishCollectedObjects(
 ): void {
   const objectChildren = new Map<PhpObject, unknown[]>();
   const allChildren: unknown[] = [];
-  const garbage = new Set<unknown>([...objects, ...(garbageNodes ?? []), ...(passTwoNodes ?? [])]);
   for (const object of objects) {
     const props: unknown[] = [];
     pushObject(object, props);
     objectChildren.set(object, props);
     allChildren.push(...props);
-    // PHP frees what only this object held, by reference counting, before its own handle returns to the free list.
-    const held = props.filter(
-      (value) => (value instanceof PhpObject || value instanceof PhpArray) && !garbage.has(value)
-    );
-    if (held.length > 0 && garbageNodes !== undefined) {
-      runtime.objectCycles.delete(object);
-      releaseDropped(runtime, held, true);
-    }
+  }
+  // As PHP's destroy loop does for each garbage object, free_obj first frees by reference counting what only the object
+  // held (also through arrays), then the object's own handle returns to the free list.
+  const release =
+    garbageNodes && heldByGarbage(runtime, objects, objectChildren, [...garbageNodes, ...(passTwoNodes ?? [])]);
+  for (const object of objects) {
+    const held = release?.get(object);
+    if (held && held.length > 0) releaseDropped(runtime, held, true);
     runtime.freeObject(object);
   }
   runtime.pendingGcRoots.clear();
