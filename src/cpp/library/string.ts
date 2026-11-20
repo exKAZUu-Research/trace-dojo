@@ -19,7 +19,6 @@ import {
   FLOAT,
   INT,
   isArithmetic,
-  isCharType,
   isConstType,
   LDOUBLE,
   LLONG,
@@ -981,7 +980,7 @@ function stringOperator(
   const textOperand = (expr: Expr): TextOperand | undefined => {
     if (isString(expr)) return { kind: 'string', run: compiler.objectOf(expr) };
     const { type, run } = compiler.rvalue(expr);
-    if (type.kind === 'pointer' && isCharType(type.to)) return { kind: 'pointer', run };
+    if (type.kind === 'pointer' && isPlainChar(type.to)) return { kind: 'pointer', run };
   };
   // Concatenation deduces char from both operands, while assignment converts arithmetic values to char.
   const characterOperand = (expr: Expr, accepts: (type: Type) => boolean): TextOperand | undefined => {

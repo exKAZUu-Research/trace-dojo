@@ -1316,3 +1316,16 @@ int main() { ${body} }`;
     diagnostics: [{ row: 2, message: expect.stringContaining('定数式') }],
   });
 });
+
+test.each([
+  'unsigned char b[] = {120, 0}; s + b;',
+  'signed char b[] = {120, 0}; s + b;',
+  'unsigned char b[] = {104, 0}; s == b;',
+])('rejects a std::string text operand of another character type in %s', (body) => {
+  const program = `#include <string>
+int main() { std::string s = "hi"; ${body} }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: expect.stringContaining('std::string と') }],
+  });
+});
