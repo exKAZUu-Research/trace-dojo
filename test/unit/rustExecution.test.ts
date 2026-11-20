@@ -1931,6 +1931,36 @@ fn main() { println!("{} {}", 1_i32.choose(), bounded(2_i32)); }`;
   expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: '2 2\n' });
 });
 
+test('enforces Rust visibility for updates, constructors and associated constants', () => {
+  const declarations = `mod data {
+    pub struct Record { pub shown: i32, hidden: i32 }
+    pub struct Tuple(i32);
+    pub struct Public(pub i32);
+    impl Record {
+        const HIDDEN: i32 = 7;
+        pub const SHOWN: i32 = Self::HIDDEN;
+    }
+    pub fn record() -> Record { Record { shown: 2, hidden: 3 } }
+    pub mod nested {
+        pub fn access() -> i32 {
+            let tuple = super::Tuple(1);
+            let updated = super::Record { shown: 4, ..super::record() };
+            tuple.0 + updated.shown + super::Record::HIDDEN
+        }
+    }
+}`;
+  for (const body of [
+    'let _ = data::Record { shown: 4, ..data::record() };',
+    'let constructor = data::Tuple; let _ = constructor(1);',
+    'let _ = data::Tuple(1);',
+    'let _ = data::Record::HIDDEN;',
+  ]) {
+    expect(executeProgram('rust', `${declarations}\n${rustMain(body)}`)).toMatchObject({ kind: 'compileError' });
+  }
+  const visible = rustMain('println!("{} {} {}", data::nested::access(), data::Public(5).0, data::Record::SHOWN);');
+  expect(executeProgram('rust', `${declarations}\n${visible}`)).toMatchObject({ kind: 'executed', stdout: '12 5 7\n' });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

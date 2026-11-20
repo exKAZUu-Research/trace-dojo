@@ -157,7 +157,7 @@ function associatedValueRes(c: Checker, t: Type, last: PathAst['segments'][numbe
       return { kind: 'ctor', def: t.def, variant: variant.index, typeArgs };
     }
   }
-  const constant = associatedConst(c, t, last.name);
+  const constant = associatedConst(c, t, last.name, span);
   if (constant) return constant;
   const found = lookupAssociated(c.program, c.solver, t, last.name);
   if (!found) {
@@ -227,7 +227,7 @@ export function checkTraitInScope(c: Checker, fn: FnDef, selfType: Type, span: S
   compileError(span, `${what} はトレイト ${trait.name} のものなので、use でトレイトを取り込んでください。`);
 }
 
-function associatedConst(c: Checker, t: Type, name: string): PathRes | undefined {
+function associatedConst(c: Checker, t: Type, name: string, span: Span): PathRes | undefined {
   if (t.kind === 'int' && ['MAX', 'MIN', 'BITS'].includes(name)) {
     return {
       kind: 'builtinConst',
@@ -247,6 +247,10 @@ function associatedConst(c: Checker, t: Type, name: string): PathRes | undefined
     if (!constant) continue;
     const subst = c.solver.matchImpl(impl, t);
     if (!subst) continue;
+    const module = constant.module as Module;
+    if (constant.ast.vis !== 'pub' && !module.isStd && !module.namedModule.isAncestorOf(c.body.module.namedModule)) {
+      compileError(span, `${name} は非公開です（pub が付いていません）。`);
+    }
     return {
       kind: 'const',
       def: constant,
@@ -262,6 +266,7 @@ function selfCtor(c: Checker, span: Span): PathRes {
   if (self?.kind !== 'adt' || self.def.kind !== 'struct' || self.def.variants[0]?.shape === 'named') {
     compileError(span, 'Self を値として使えるのは、タプル構造体とユニット構造体の impl の中だけです。');
   }
+  checkTupleConstructorVisible(c, self.def, span);
   return { kind: 'ctor', def: self.def, variant: 0, typeArgs: self.args };
 }
 
@@ -318,6 +323,7 @@ function valueBindingRes(
       return { kind: 'fn', fn, typeArgs };
     }
     case 'ctor': {
+      checkTupleConstructorVisible(c, binding.def, span);
       return {
         kind: 'ctor',
         def: binding.def,
@@ -329,6 +335,11 @@ function valueBindingRes(
       return { kind: 'const', def: binding.def, type: binding.def.type, typeArgs: [] };
     }
   }
+}
+
+function checkTupleConstructorVisible(c: Checker, def: AdtDef, span: Span): void {
+  if (def.kind !== 'struct' || def.variants[0]?.shape !== 'tuple') return;
+  for (const field of def.variants[0].fields) checkFieldVisible(c, def, field, span);
 }
 
 // code-gauge-allow functionCognitiveComplexity 17 -- Follows the type checking rules of rustc case by case.
@@ -358,6 +369,7 @@ export function structExpr(c: Checker, expr: Extract<Expr, { kind: 'struct' }>, 
   }
   if (expr.base) {
     if (def.kind === 'enum') compileError(expr.base.span, '列挙子には .. を書けません。');
+    for (const field of variantDef.fields) if (!seen.has(field.name)) checkFieldVisible(c, def, field, expr.base.span);
     c.coerceExpr(expr.base, self);
     return self;
   }
