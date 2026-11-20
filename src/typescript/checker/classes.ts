@@ -457,7 +457,8 @@ export class ClassChecker {
   }
 
   private methodProperty(name: string, entry: MethodEntry, info: ClassInfo): Property {
-    const declarations = entry.signatures.length > 0 || !entry.implementation ? entry.signatures : [entry.implementation];
+    const declarations =
+      entry.signatures.length > 0 || !entry.implementation ? entry.signatures : [entry.implementation];
     const declaration = entry.first;
     let type: Type | undefined;
     let resolving = false;
