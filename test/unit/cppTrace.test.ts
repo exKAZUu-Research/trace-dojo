@@ -479,6 +479,18 @@ int main() {
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: 'Invalid color: 赤' });
 });
 
+test.each([
+  ['int* p = new int[3]; int* q = p + 2; delete[] p;', 'delete で解放したオブジェクトを読み書きしました。'],
+  [
+    'int* p; int* q; { int a[3]; p = a; q = a + 2; }',
+    '有効期間が終わった変数（またはオブジェクト）を読み書きしました。',
+  ],
+])('rejects subtracting dangling pointers after %s', (setup, message) => {
+  const program = `#include <iostream>
+int main() { ${setup} std::cout << q - p; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', stdout: '', uncaughtException: message });
+});
+
 test('charges the storage of the message buffer that what() creates', () => {
   const program = `#include <stdexcept>
 #include <string>

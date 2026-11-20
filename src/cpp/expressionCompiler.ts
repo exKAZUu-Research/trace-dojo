@@ -841,6 +841,8 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
             const p = first as Ptr;
             const q = second as Ptr;
             if (!p.sharesRange(q)) throw new CppRuntimeError('pointerDifference');
+            // Null minus null is 0; other pointers must point into storage that is still alive.
+            if (!p.isNull) p.target();
             return BigInt(p.index - q.index);
           }),
       };
