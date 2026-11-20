@@ -28,115 +28,321 @@ function collator(isInvariant: boolean | undefined, sensitivity: 'variant' | 'ac
 
 /** `string.Compare` with a culture, which gives -1, 0, or 1. */
 export function compareCulture(a: string, b: string, options: CultureComparison = {}): number {
-  const order = options.ignoreCase
-    ? compareIgnoringCase(a, b, options.isInvariant)
-    : collator(options.isInvariant, 'variant').compare(a, b);
-  return Math.sign(order);
+  const { compare, comparable } = comparisonOf(options);
+  return Math.sign(compare(comparable(a), comparable(b)));
 }
 
-/** Characters whose width or kana type .NET's case-insensitive comparison tells apart. */
-const WIDE_OR_KANA = /[　぀-ヿ！-￯]/u;
+interface Comparison {
+  compare: (a: string, b: string) => number;
+  /** The text the collator compares for a string, which carries the rules .NET adds to the culture's own. */
+  comparable: (text: string) => string;
+}
+
+function comparisonOf(options: CultureComparison): Comparison {
+  if (!options.ignoreCase) return { compare: collator(options.isInvariant, 'variant').compare, comparable: same };
+  const keys = tailoringOf(options.isInvariant);
+  return {
+    compare: collator(options.isInvariant, 'accent').compare,
+    comparable: (text) => (hasTailored(text) ? withTailoring(text, keys, options.isInvariant) : text),
+  };
+}
+
+const same = (text: string): string => text;
 
 /**
- * A comparison ignoring case, which .NET makes with ICU's secondary strength and rules that keep width and kana type
- * apart as primary differences: each full-width form sorts right after its half-width one, and each katakana right
- * after its hiragana, with the half-width katakana after the full-width.
+ * .NET compares ignoring case with ICU's secondary strength and rules it adds to the culture's, which keep kana types
+ * and widths apart (`pal_collation.c` in .NET's System.Globalization.Native): each `&X<Y` puts Y on a primary weight
+ * of its own right after X's, before what earlier rules put there, and each `&X=Y` makes Y equal to X.
  */
-function compareIgnoringCase(a: string, b: string, isInvariant: boolean | undefined): number {
-  const accent = collator(isInvariant, 'accent');
-  if (!WIDE_OR_KANA.test(a) && !WIDE_OR_KANA.test(b)) return accent.compare(a, b);
-  const base = collator(isInvariant, 'base');
-  const unitsA = kanaWidthUnits(a);
-  const unitsB = kanaWidthUnits(b);
-  const length = Math.min(unitsA.length, unitsB.length);
-  for (let index = 0; index < length; index++) {
-    const [x, y] = [unitsA[index], unitsB[index]];
-    const primary = base.compare(x.base, y.base);
-    if (primary !== 0) return primary;
-    if (x.rank !== y.rank) return x.rank < y.rank ? -1 : 1;
+function* ignoreCaseRules(): Generator<Rule> {
+  for (const hiragana of HIRAGANA_WITHOUT_VOICED_SOUND_MARK) yield rule(hiragana, '<', hiragana + HIRAGANA_TO_KATAKANA);
+  for (const [index, lower] of HALF_FULL_LOWER.entries()) yield rule(lower, '<', HALF_FULL_HIGHER[index]);
+  // Fullwidth capital letters share the small ones' weight again, which the rules above put apart.
+  for (let capital = 0xff_21; capital <= 0xff_3a; capital++) yield rule(capital + 0x20, '=', capital);
+}
+
+interface Rule {
+  reset: string;
+  relation: '<' | '=';
+  character: string;
+}
+
+function rule(reset: number, relation: Rule['relation'], character: number): Rule {
+  return { reset: String.fromCharCode(reset), relation, character: String.fromCharCode(character) };
+}
+
+const HIRAGANA_TO_KATAKANA = 0x60;
+
+// The tables of .NET's `g_HiraganaWithoutVoicedSoundMarkChars`, `g_HalfFullLowerChars`, and `g_HalfFullHigherChars`.
+const HIRAGANA_WITHOUT_VOICED_SOUND_MARK = codes(
+  [0x30_41, 0x30_4b],
+  0x30_4d,
+  0x30_4f,
+  0x30_51,
+  0x30_53,
+  0x30_55,
+  0x30_57,
+  0x30_59,
+  0x30_5b,
+  0x30_5d,
+  0x30_5f,
+  0x30_61,
+  0x30_63,
+  0x30_64,
+  0x30_66,
+  0x30_68,
+  [0x30_6a, 0x30_6f],
+  0x30_72,
+  0x30_75,
+  0x30_78,
+  0x30_7b,
+  [0x30_7e, 0x30_93],
+  0x30_95,
+  0x30_96,
+  0x30_9d
+);
+const HALF_FULL_LOWER = codes(
+  [0x21, 0x5b],
+  [0x5d, 0x7e],
+  0xa2,
+  0xa3,
+  0xac,
+  0xaf,
+  0xa6,
+  0xa5,
+  0x20_a9,
+  0x30_02,
+  0x30_0c,
+  0x30_0d,
+  0x30_01,
+  0x30_fb,
+  0x30_f2,
+  0x30_a1,
+  0x30_a3,
+  0x30_a5,
+  0x30_a7,
+  0x30_a9,
+  0x30_e3,
+  0x30_e5,
+  0x30_e7,
+  0x30_c3,
+  0x30_a2,
+  0x30_a4,
+  0x30_a6,
+  0x30_a8,
+  0x30_aa,
+  0x30_ab,
+  0x30_ad,
+  0x30_af,
+  0x30_b1,
+  0x30_b3,
+  0x30_b5,
+  0x30_b7,
+  0x30_b9,
+  0x30_bb,
+  0x30_bd,
+  0x30_bf,
+  0x30_c1,
+  0x30_c4,
+  0x30_c6,
+  0x30_c8,
+  0x30_ca,
+  0x30_cb,
+  0x30_cc,
+  0x30_cd,
+  0x30_ce,
+  0x30_cf,
+  0x30_d2,
+  0x30_d5,
+  0x30_d8,
+  0x30_db,
+  0x30_de,
+  0x30_df,
+  0x30_e0,
+  0x30_e1,
+  0x30_e2,
+  0x30_e4,
+  0x30_e6,
+  0x30_e8,
+  0x30_e9,
+  0x30_ea,
+  0x30_eb,
+  0x30_ec,
+  0x30_ed,
+  0x30_ef,
+  0x30_f3,
+  0x31_64,
+  [0x31_31, 0x31_63]
+);
+const HALF_FULL_HIGHER = codes(
+  [0xff_01, 0xff_3b],
+  [0xff_3d, 0xff_5e],
+  [0xff_e0, 0xff_e6],
+  [0xff_61, 0xff_6f],
+  [0xff_71, 0xff_9d],
+  [0xff_a0, 0xff_be],
+  [0xff_c2, 0xff_c7],
+  [0xff_ca, 0xff_cf],
+  [0xff_d2, 0xff_d7],
+  [0xff_da, 0xff_dc]
+);
+
+/** Character codes, of which a pair stands for the codes from the first to the last. */
+function codes(...parts: (number | [number, number])[]): number[] {
+  return parts.flatMap((part) => (typeof part === 'number' ? [part] : range(part[0], part[1])));
+}
+
+function range(first: number, last: number): number[] {
+  return Array.from({ length: last - first + 1 }, (_, index) => first + index);
+}
+
+/** The characters that the rules place, which the comparison replaces with texts that sort where the rules put them. */
+const TAILORED = new Set([...ignoreCaseRules()].map((tailored) => tailored.character));
+
+/** Whether a text has a placed character, of its own or in a precomposed one such as ガ. */
+function hasTailored(text: string): boolean {
+  for (const char of text.normalize('NFD')) if (TAILORED.has(char)) return true;
+  return false;
+}
+
+const tailorings = new Map<boolean, Map<string, string>>();
+
+/**
+ * The text that each placed character sorts as: a character of the weight the rules start from, followed by as many
+ * U+FFFF, which outweighs every character, as the places that the rules put between them.
+ */
+function tailoringOf(isInvariant: boolean | undefined): Map<string, string> {
+  const key = isInvariant === true;
+  let found = tailorings.get(key);
+  if (!found) {
+    found = buildTailoring(collator(isInvariant, 'base'));
+    tailorings.set(key, found);
   }
-  const textA = unitsA.map((unit) => unit.base).join('');
-  const textB = unitsB.map((unit) => unit.base).join('');
-  return accent.compare(textA, textB);
+  return found;
 }
 
-interface KanaWidthUnit {
-  /** The character with its width and kana type undone: a half-width letter or a hiragana. */
-  base: string;
-  /** The order of the width and kana type among the forms of the base. */
-  rank: number;
-}
-
-const KATAKANA_TO_HIRAGANA = 0x60;
-
-// code-gauge-allow functionCognitiveComplexity 17 -- Each branch handles one kind of character that .NET's rules tell apart.
-function kanaWidthUnits(text: string): KanaWidthUnit[] {
-  const units: KanaWidthUnit[] = [];
-  for (let index = 0; index < text.length; index++) {
-    const code = text.charCodeAt(index);
-    if (code >= 0xff_65 && code <= 0xff_9f) {
-      // A half-width katakana takes a following half-width sound mark into one full-width katakana.
-      const next = text.charCodeAt(index + 1);
-      const hasMark = next === 0xff_9e || next === 0xff_9f;
-      const wide = text.slice(index, index + (hasMark ? 2 : 1)).normalize('NFKC');
-      if (hasMark) index++;
-      const katakana = wide.charCodeAt(0);
-      units.push({ base: hiraganaOf(wide), rank: katakanaRank(katakana) + 0.5 });
-    } else if (code >= 0xff_01 && code <= 0xff_5e) {
-      units.push({ base: String.fromCharCode(code - 0xfe_e0), rank: 1 });
-    } else if (code === 0x30_00) {
-      units.push({ base: ' ', rank: 1 });
-    } else if (code >= 0x30_a1 && code <= 0x30_f6) {
-      units.push({ base: hiraganaOf(text[index]), rank: katakanaRank(code) });
-    } else {
-      units.push({ base: text[index], rank: 0 });
+/** Applies the rules in order to the primary weights, as ICU builds a tailoring: each weight a list of characters. */
+function buildTailoring(base: Intl.Collator): Map<string, string> {
+  const rules = [...ignoreCaseRules()];
+  const placed = new Set(rules.map((tailored) => tailored.character));
+  const resets = rules.map((tailored) => tailored.reset).filter((reset) => !placed.has(reset));
+  const weightsOf = untailoredWeights(resets, base);
+  for (const { reset, relation, character } of rules) {
+    const own = weightsOf.get(character);
+    if (own) {
+      const index = own.findIndex((weight) => weight.includes(character));
+      own[index] = own[index].filter((other) => other !== character);
+      if (own[index].length === 0) own.splice(index, 1);
     }
+    const target = weightsOf.get(reset) as string[][];
+    const index = target.findIndex((weight) => weight.includes(reset));
+    if (relation === '<') target.splice(index + 1, 0, [character]);
+    else target[index].push(character);
+    weightsOf.set(character, target);
   }
-  return units;
-}
-
-function hiraganaOf(katakana: string): string {
-  const code = katakana.charCodeAt(0);
-  return code >= 0x30_a1 && code <= 0x30_f6
-    ? String.fromCharCode(code - KATAKANA_TO_HIRAGANA) + katakana.slice(1)
-    : katakana;
+  return new Map(
+    [...placed].map((character) => {
+      const target = weightsOf.get(character) as string[][];
+      const index = target.findIndex((weight) => weight.includes(character));
+      // `ヽ` starts from `ゝ`, which would weigh after a kana before it as `ヽ` does not: a NUL keeps it apart.
+      const start = CONTEXTUAL.has(target[0][0]) ? `\0${target[0][0]}` : target[0][0];
+      return [character, start + '\uFFFF'.repeat(index)];
+    })
+  );
 }
 
 /**
- * The rank of a katakana after its hiragana: .NET adds the rules in code order, each right after its hiragana, so of
- * the katakana that share a hiragana's primary weight, as `ァ` and `ア` do, the later one sorts first.
+ * The primary weights from each one that the rules start from, before the rules put others after it: a list for each
+ * weight, holding the characters that have it.
  */
-function katakanaRank(code: number): number {
-  return 1 + (0x30_f6 - code) / 0x1_00;
+function untailoredWeights(resets: string[], base: Intl.Collator): Map<string, string[][]> {
+  const weightsOf = new Map<string, string[][]>();
+  let previous: string | undefined;
+  let weights: string[][] = [];
+  for (const reset of [...new Set(resets)].toSorted(base.compare)) {
+    if (previous === undefined || base.compare(previous, reset) !== 0) weights = [[]];
+    weights[0].push(reset);
+    weightsOf.set(reset, weights);
+    previous = reset;
+  }
+  return weightsOf;
 }
+
+/** A text with its placed characters replaced, after decomposing it as ICU's canonical closure does. */
+function withTailoring(text: string, keys: Map<string, string>, isInvariant: boolean | undefined): string {
+  let result = '';
+  // The character before with its combining marks, which weighs a following `ー` or iteration mark in ja-JP.
+  let cluster = '';
+  for (const char of text.normalize('NFD')) {
+    const isMark = /\p{M}/u.test(char);
+    const replaced =
+      keys.has(cluster.slice(0, 1)) && !isMark ? contextualWeight(cluster, char, isInvariant) : undefined;
+    result += replaced ?? keys.get(char) ?? char;
+    cluster = isMark ? cluster + char : char;
+  }
+  return result;
+}
+
+/** The characters whose weights ja-JP's rules give after the kana before them: the long vowel and iteration marks. */
+const CONTEXTUAL = new Set(['ー', 'ゝ', 'ゞ', 'ヽ', 'ヾ']);
+
+const contextualWeights = new Map<string, string | undefined>();
+
+/**
+ * A hiragana that weighs as a character does after a placed one, which the replaced text no longer has before it:
+ * ja-JP's rules weigh the `ー` of `カー` as the vowel `あ`, whatever weight .NET's rules give `カ`.
+ */
+function contextualWeight(cluster: string, char: string, isInvariant: boolean | undefined): string | undefined {
+  if (!CONTEXTUAL.has(char)) return undefined;
+  const key = `${isInvariant === true}:${cluster}${char}`;
+  if (contextualWeights.has(key)) return contextualWeights.get(key);
+  const variant = collator(isInvariant, 'variant');
+  const accent = collator(isInvariant, 'accent');
+  const weight =
+    variant.compare(cluster + char, `${cluster}\0${char}`) === 0
+      ? undefined
+      : HIRAGANA.find((hiragana) => accent.compare(cluster + char, cluster + hiragana) === 0);
+  contextualWeights.set(key, weight);
+  return weight;
+}
+
+const HIRAGANA = range(0x30_41, 0x30_96).map((code) => String.fromCharCode(code));
 
 /** Whether two strings are equal under a culture's comparison. */
 export function equalsCulture(a: string, b: string, options: CultureComparison = {}): boolean {
   return a === b || compareCulture(a, b, options) === 0;
 }
 
-/** A key that strings equal under a culture's comparison share, for their hash codes. */
+/**
+ * A key that strings equal under a culture's comparison share, for their hash codes. ja-JP weighs `ー` as the vowel of
+ * the kana before it and an iteration mark as that kana, so the key leaves out the vowels and `ー`, and repeats the
+ * kana for an iteration mark; strings that differ but share a key only share a hash code.
+ */
 export function cultureHashKey(text: string): string {
-  const folded = [...text.normalize('NFKD')]
-    .filter((char) => !/[\p{M}\p{Cf}\p{Cc}]/u.test(char))
-    .map((char) => hiraganaOf(char))
-    .join('');
-  // Strings equal under a comparison fold alike; ones that fold alike but differ only share a hash code.
-  return folded.toLowerCase();
+  let key = '';
+  let previous = '';
+  for (const char of text.normalize('NFKD')) {
+    if (/[\p{M}\p{Cf}\p{Cc}]/u.test(char)) continue;
+    const folded = ITERATION_MARKS.has(char) ? previous : hiraganaOf(char);
+    previous = folded;
+    if (!/[ぁ-おー]/u.test(folded)) key += folded;
+  }
+  return key.toLowerCase();
+}
+
+const ITERATION_MARKS = new Set(['ゝ', 'ヽ']);
+
+function hiraganaOf(char: string): string {
+  const code = char.charCodeAt(0);
+  return code >= 0x30_a1 && code <= 0x30_f6 ? String.fromCharCode(code - HIRAGANA_TO_KATAKANA) : char;
 }
 
 /** Characters whose matches under a culture are the ordinal ones: printable ASCII, which ICU never folds together. */
 const PLAIN = /^[ -~]*$/u;
 
-/** Whether a position of a string starts a character, not a combining mark that belongs to the one before. */
-function isBoundary(text: string, index: number): boolean {
-  if (index <= 0 || index >= text.length) return true;
-  return !/\p{M}/u.test(text[index]) && !(text.charCodeAt(index) >= 0xdc_00 && text.charCodeAt(index) <= 0xdf_ff);
-}
-
 /**
- * The first index from `start`, in the `count` characters from there, where a substring equals the value under a
- * culture, as `IndexOf(string)` searches, or -1.
+ * The first index from `start` where a substring ending by `end` equals the value under a culture, or -1: ICU's
+ * search, which .NET's `IndexOf` calls on the part searched, matches only between the grapheme clusters there.
  */
 export function cultureIndexOf(
   text: string,
@@ -149,14 +355,17 @@ export function cultureIndexOf(
     const found = text.indexOf(value, start);
     return found !== -1 && found + value.length <= end ? found : -1;
   }
-  for (let index = start; index <= end; index++) {
-    if (!isBoundary(text, index)) continue;
-    if (matchLength(text, value, index, end, options) !== undefined) return index;
+  const source = text.slice(start, end);
+  // A value without weights matches where the search starts, as an empty one does.
+  if (isIgnorable(value, options)) return start;
+  const boundaries = searchBoundaries(source);
+  for (let index = 0; index <= source.length; index++) {
+    if (boundaries[index] && matchesAt(source, value, index, boundaries, options)) return start + index;
   }
   return -1;
 }
 
-/** The last index before `end` from where a substring ending by `end` equals the value, as `LastIndexOf` searches. */
+/** The last index from `start` where a substring ending by `end` equals the value, as `LastIndexOf` searches. */
 export function cultureLastIndexOf(
   text: string,
   value: string,
@@ -168,42 +377,156 @@ export function cultureLastIndexOf(
     const found = text.lastIndexOf(value, end - value.length);
     return found >= start ? found : -1;
   }
-  for (let index = end; index >= start; index--) {
-    if (!isBoundary(text, index)) continue;
-    if (matchLength(text, value, index, end, options) !== undefined) return index;
+  const source = text.slice(start, end);
+  if (isIgnorable(value, options)) return end;
+  const boundaries = searchBoundaries(source);
+  for (let index = source.length; index >= 0; index--) {
+    if (boundaries[index] && matchesAt(source, value, index, boundaries, options)) return start + index;
   }
   return -1;
 }
 
+/**
+ * Whether a text starts with a value, as .NET compares their collation elements from the start: the text's next
+ * element after the value's must not be a combining one, which would belong to the last character matched.
+ */
 export function cultureStartsWith(text: string, value: string, options: CultureComparison = {}): boolean {
   if (!options.ignoreCase && PLAIN.test(text) && PLAIN.test(value)) return text.startsWith(value);
-  return matchLength(text, value, 0, text.length, options) !== undefined;
+  const source = affixSource(text, options);
+  const pattern = value.normalize('NFD');
+  const { compare, comparable } = comparisonOf(options);
+  const target = comparable(pattern);
+  for (let stop = 0; stop <= source.length; stop++) {
+    if (isInsideSurrogatePair(source, stop) || startsWithCombining(source, stop, options.isInvariant)) continue;
+    const prefix = comparable(source.slice(0, stop));
+    if (compare(prefix, target) === 0) return true;
+    if (!isPrimaryPrefix(prefix, target, options.isInvariant)) return false;
+  }
+  return false;
 }
 
+/** Whether a text ends with a value, as .NET compares their collation elements from the end. */
 export function cultureEndsWith(text: string, value: string, options: CultureComparison = {}): boolean {
   if (!options.ignoreCase && PLAIN.test(text) && PLAIN.test(value)) return text.endsWith(value);
-  for (let index = text.length; index >= 0; index--) {
-    if (isBoundary(text, index) && equalsCulture(text.slice(index), value, options)) return true;
+  const source = affixSource(text, options);
+  const pattern = value.normalize('NFD');
+  const { compare, comparable } = comparisonOf(options);
+  const target = comparable(pattern);
+  for (let start = source.length; start >= 0; start--) {
+    if (isInsideSurrogatePair(source, start)) continue;
+    // The text's characters weigh after the character before them, and the value's on their own, as in `matchesAt`.
+    let base = Math.max(0, start - 1);
+    while (base > 0 && /\p{M}/u.test(source[base])) base--;
+    const context = startsWithCombining(source, base, options.isInvariant) ? '' : source.slice(base, start);
+    const suffix = comparable(context + source.slice(start));
+    if (compare(suffix, context === '' ? target : comparable(`${context}\0${pattern}`)) === 0) return true;
   }
   return false;
 }
 
 /**
- * The length of the substring from an index, ending on a character boundary by `end`, that equals the value under a
- * culture, trying the shortest first, or undefined.
+ * The text that `StartsWith` and `EndsWith` compare elements of, with each character's elements at a position of their
+ * own: decomposed, and ignoring case, with a character that has the weights of its compatibility decomposition into
+ * more characters, as `ǆ` has those of `dž`, replaced by that, unless .NET's rules place either.
  */
-function matchLength(
-  text: string,
+function affixSource(text: string, options: CultureComparison): string {
+  const source = text.normalize('NFD');
+  if (!options.ignoreCase) return source;
+  let result = '';
+  for (const char of source) result += expansionOf(char, options.isInvariant) ?? char;
+  return result;
+}
+
+const expansions = new Map<string, string | undefined>();
+
+function expansionOf(char: string, isInvariant: boolean | undefined): string | undefined {
+  const key = `${isInvariant === true}:${char}`;
+  if (expansions.has(key)) return expansions.get(key);
+  const decomposed = char.normalize('NFKD');
+  // A decomposition into one character changes nothing that comparing the whole character would not find.
+  const expansion =
+    !/^.$/su.test(decomposed) &&
+    !TAILORED.has(char) &&
+    !hasTailored(decomposed) &&
+    collator(isInvariant, 'accent').compare(char, decomposed) === 0
+      ? decomposed
+      : undefined;
+  expansions.set(key, expansion);
+  return expansion;
+}
+
+/**
+ * Whether a substring from an index, ending between grapheme clusters, equals the value: the shortest first, while
+ * the substring's primary weights begin the value's, since a longer one only adds weights. ICU's search starts a
+ * match at a character with weights, and weighs the text's characters after the ones before them, as ja-JP does `ー`
+ * after a kana, but the value's on their own: a NUL, which has no weights, keeps the value's first character apart.
+ */
+function matchesAt(
+  source: string,
   value: string,
   index: number,
-  end: number,
+  boundaries: boolean[],
   options: CultureComparison
-): number | undefined {
-  // Ignorable characters and combining marks let a match be longer than the value, but not by much.
-  const longest = Math.min(end, index + value.length * 2 + 8);
-  for (let stop = index; stop <= longest; stop++) {
-    if (!isBoundary(text, stop)) continue;
-    if (equalsCulture(text.slice(index, stop), value, options)) return stop - index;
+): boolean {
+  const { compare, comparable } = comparisonOf(options);
+  if (index < source.length && isIgnorable(String.fromCodePoint(source.codePointAt(index) as number), options))
+    return false;
+  // The grapheme cluster before the index, which ends where the substring starts.
+  let previous = Math.max(0, index - 1);
+  while (previous > 0 && !boundaries[previous]) previous--;
+  // A combining mark that starts the part searched has no character before it to weigh what follows.
+  const context = startsWithCombining(source, previous, options.isInvariant) ? '' : source.slice(previous, index);
+  const target = comparable(context === '' ? value : `${context}\0${value}`);
+  for (let stop = index; stop <= source.length; stop++) {
+    if (!boundaries[stop]) continue;
+    const segment = comparable(context + source.slice(index, stop));
+    if (compare(segment, target) === 0) return true;
+    if (!isPrimaryPrefix(segment, target, options.isInvariant)) return false;
   }
-  return undefined;
+  return false;
+}
+
+/** Whether a text has no weights under a comparison, as control and format characters have none. */
+function isIgnorable(text: string, options: CultureComparison): boolean {
+  const { compare, comparable } = comparisonOf(options);
+  return compare(comparable(text), '') === 0;
+}
+
+/**
+ * Whether a text's primary weights begin another's: it sorts no later than the other, and no earlier once followed
+ * by U+FFFF, which outweighs every character in ICU's collations.
+ */
+function isPrimaryPrefix(text: string, other: string, isInvariant: boolean | undefined): boolean {
+  const base = collator(isInvariant, 'base');
+  return base.compare(text, other) <= 0 && base.compare(`${text}\uFFFF`, other) >= 0;
+}
+
+/**
+ * The positions between the grapheme clusters of a text, where ICU's search lets a match start and end: .NET gives it
+ * a break iterator whose rules also break between CR and LF.
+ */
+function searchBoundaries(text: string): boolean[] {
+  const boundaries = Array.from({ length: text.length + 1 }, () => false);
+  boundaries[text.length] = true;
+  for (const { index, segment } of graphemes.segment(text)) {
+    boundaries[index] = true;
+    if (segment === '\r\n') boundaries[index + 1] = true;
+  }
+  return boundaries;
+}
+
+const graphemes = new Intl.Segmenter('ja-JP', { granularity: 'grapheme' });
+
+function isInsideSurrogatePair(text: string, index: number): boolean {
+  const code = text.charCodeAt(index);
+  return index > 0 && index < text.length && code >= 0xdc_00 && code <= 0xdf_ff;
+}
+
+/** Whether the character at a position has a combining collation element: no primary weight but a secondary one. */
+function startsWithCombining(text: string, index: number, isInvariant: boolean | undefined): boolean {
+  if (index >= text.length) return false;
+  const char = String.fromCodePoint(text.codePointAt(index) as number);
+  return (
+    collator(isInvariant, 'base').compare(char, '') === 0 && collator(isInvariant, 'accent').compare(char, '') !== 0
+  );
 }
