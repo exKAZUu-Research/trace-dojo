@@ -58,10 +58,20 @@ export function exceptionClasses(stringType: () => Type): Map<string, ClassInfo>
   };
   const exception = define('exception', undefined, false);
   const what = {
-    ...native('what', [], CONST_CHAR_PTR, (_args, { self }) => (self as CObject).messageLocation(cStringStore), {
-      isConst: true,
-      isVirtual: true,
-    }),
+    ...native(
+      'what',
+      [],
+      CONST_CHAR_PTR,
+      (_args, { self, frame }) =>
+        (self as CObject).messageLocation((text) => {
+          frame.runtime.reserve(text.length + 1);
+          return cStringStore(text);
+        }),
+      {
+        isConst: true,
+        isVirtual: true,
+      }
+    ),
     isNoexcept: true,
   };
   addMethod(exception, what);

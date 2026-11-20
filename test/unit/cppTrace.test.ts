@@ -404,6 +404,26 @@ int main() {
   }
 );
 
+test('charges the storage of the message buffer that what() creates', () => {
+  const program = `#include <stdexcept>
+#include <string>
+int main() {
+  std::string s(512, 'x');
+  std::runtime_error e(s);
+  e.what();
+}`;
+  const previous = LIMITS.maxSlots;
+  LIMITS.maxSlots = 100;
+  try {
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: 'メモリを確保しすぎました。',
+    });
+  } finally {
+    LIMITS.maxSlots = previous;
+  }
+});
+
 test('reads only the required prefix of a C substring search needle', () => {
   const program = `#include <cstring>
 #include <string>
