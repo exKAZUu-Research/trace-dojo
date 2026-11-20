@@ -1,7 +1,7 @@
 import type { DisplayNode } from '../../problems/trace';
 import { CppRuntimeError } from '../errors';
 import type { Frame } from '../runtime';
-import { sizeOf, type Type } from '../types';
+import { isArithmetic, sizeOf, type Type } from '../types';
 import { type ArrayStore, Box, CObject, holdValues, Ptr, Store, UNINIT, type Value } from '../values';
 
 interface IndexedValue {
@@ -684,6 +684,7 @@ export class SequenceValue extends Store {
 
   children(): Iterable<Value> {
     if (this.fixedStorage) return [this.fixedStorage];
+    if (isArithmetic(this.elementType)) return [];
     return this.constructingEnd ? [...this.items, this.constructingEnd.value] : this.items;
   }
 }

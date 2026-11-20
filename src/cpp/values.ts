@@ -8,6 +8,7 @@ import {
   classType,
   fieldSubobjectOffset,
   type FunctionInfo,
+  isArithmetic,
   sizeOf,
   type Type,
 } from './types';
@@ -159,6 +160,8 @@ export class ArrayStore extends Store {
   elementSize?: number;
   /** Whether the array is a string literal, which the program must not write. */
   isLiteral = false;
+  /** Whether the elements are arithmetic values, which reach no other storage. */
+  holdsScalars = false;
 
   constructor(
     readonly values: Value[],
@@ -166,11 +169,15 @@ export class ArrayStore extends Store {
     private enclosingLocation?: Ptr
   ) {
     super();
-    if (element) this.elementSize = sizeOf(element);
+    if (element) {
+      this.elementSize = sizeOf(element);
+      this.holdsScalars = isArithmetic(element);
+    }
   }
 
   bindLocation(element: Type, location: Ptr): void {
     this.elementSize = sizeOf(element);
+    this.holdsScalars = isArithmetic(element);
     this.enclosingLocation = location;
   }
 
@@ -452,7 +459,8 @@ export function childValues(store: Store): Iterable<Value> {
   if (store instanceof MemberStorage) return [store.owner];
   if (store instanceof CObject && store.referenceTemporaries)
     return [...store.values, ...store.referenceTemporaries.map(({ object }) => object)];
-  if (store instanceof ArrayStore || store instanceof CObject) return store.values;
+  if (store instanceof ArrayStore) return store.holdsScalars ? [] : store.values;
+  if (store instanceof CObject) return store.values;
   return (store as Store & { children?: () => Iterable<Value> }).children?.() ?? [];
 }
 
