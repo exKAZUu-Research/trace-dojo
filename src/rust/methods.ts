@@ -11,6 +11,7 @@ import {
   ref,
   shallow,
   substitute,
+  supertraitsOf,
   type TraitDef,
   type TraitRef,
   type Type,
@@ -168,25 +169,50 @@ function probe(
   const target = t.kind === 'ref' ? shallow(t.target) : t;
   const bounds = boundsOf(target);
   if (bounds) {
-    for (const bound of allSupertraits(bounds)) {
+    for (const bound of allSupertraits(bounds, target)) {
       const fn = bound.trait.methods.get(name);
       if (!fn?.selfMode) continue;
       const found = matchTraitSelf(solver, bound, fn, target, receiverType);
       if (found) return found;
     }
   }
-  const candidates = traitCandidates(program, solver, receiverType, name, inScope);
+  return resolveTraitCandidate(
+    solver,
+    receiverType,
+    name,
+    traitCandidates(program, solver, receiverType, name, inScope)
+  );
+}
+
+function resolveTraitCandidate(
+  solver: TraitSolver,
+  receiver: Type,
+  name: string,
+  candidates: TraitCandidate[]
+): Omit<MethodMatch, 'adjust'> | undefined {
   for (const [index, candidate] of candidates.entries()) {
     const found = candidate.attempt();
     if (!found) continue;
-    const other = candidates.slice(index + 1).find((c) => c.trait !== candidate.trait && applies(solver, c.attempt));
-    return other ? { ...found, ambiguousWith: other.trait } : found;
+    const others = candidates.slice(index + 1);
+    const other = others.find((item) => item.trait !== candidate.trait && applies(solver, item.attempt));
+    if (other) return { ...found, ambiguousWith: other.trait };
+    const { trait } = candidate;
+    if (
+      (trait.builtin === 'PartialEq' || trait.builtin === 'PartialOrd') &&
+      others.some((item) => item.concrete && item.trait === trait && applies(solver, item.attempt))
+    ) {
+      const fn = trait.methods.get(name)!;
+      const selfType = selfForMode(fn.selfMode!, receiver)!;
+      return { fn, selfType, typeArgs: [selfType, freshVar(), ...ownParams(fn)] };
+    }
+    return found;
   }
   return undefined;
 }
 
 interface TraitCandidate {
   trait: TraitDef;
+  concrete?: boolean;
   /** Matches the method, binding what it learns, or gives undefined and binds nothing. */
   attempt: () => Omit<MethodMatch, 'adjust'> | undefined;
 }
@@ -209,6 +235,7 @@ function traitCandidates(
     const fn = impl.methods.get(name) ?? declared;
     candidates.push({
       trait,
+      concrete: true,
       attempt: () =>
         fn === declared
           ? matchDefault(solver, impl, declared, receiverType)
@@ -319,7 +346,7 @@ export function boundsOf(type: Type): TraitRef[] | undefined {
   return undefined;
 }
 
-export function allSupertraits(bounds: TraitRef[]): TraitRef[] {
+export function allSupertraits(bounds: TraitRef[], self?: Type): TraitRef[] {
   const result: TraitRef[] = [];
   const seen = new Set<TraitDef>();
   const stack = [...bounds];
@@ -328,7 +355,7 @@ export function allSupertraits(bounds: TraitRef[]): TraitRef[] {
     if (seen.has(bound.trait)) continue;
     seen.add(bound.trait);
     result.push(bound);
-    stack.push(...bound.trait.supertraits);
+    stack.push(...supertraitsOf(bound, self));
   }
   return result;
 }
@@ -368,7 +395,7 @@ function inherentAssociated(program: Program, solver: TraitSolver, t: Type, name
 function boundAssociated(t: Type, name: string): Associated | undefined {
   const bounds = boundsOf(t);
   if (!bounds) return undefined;
-  for (const bound of allSupertraits(bounds)) {
+  for (const bound of allSupertraits(bounds, t)) {
     const fn = bound.trait.methods.get(name);
     if (fn) return { fn, typeArgs: [t, ...bound.args, ...ownParams(fn)] };
   }

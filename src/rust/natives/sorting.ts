@@ -1,4 +1,4 @@
-import { comparePartialValues } from '../ops';
+import { comparePartialValues, testPartialOrder } from '../ops';
 import { type IntName, intType, type Type } from '../types';
 import { ElementPlace, sliceItems, sliceSet, UNIT_VALUE, type Value } from '../values';
 import { sizeOf } from './layout';
@@ -39,7 +39,7 @@ function ordViolation(ctx: NativeContext): never {
 
 /** `a < b` by `PartialOrd`, as `sort` compares its elements. */
 export function lessByPartialOrd(type: Type): (a: Value, b: Value) => boolean {
-  return (a, b) => (comparePartialValues(type, a, b) ?? 0) < 0;
+  return (a, b) => testPartialOrder('lt', type, a, b);
 }
 
 /** `f(a) < f(b)`, as `sort_by_key` compares, computing both keys at each comparison. */
@@ -47,7 +47,7 @@ export function lessByKey(ctx: NativeContext, f: Value): (a: Value, b: Value) =>
   const keyType = ctx.typeArgs[1];
   return (a, b) => {
     const keyA = call(ctx, f, [a]);
-    return (comparePartialValues(keyType, keyA, call(ctx, f, [b])) ?? 0) < 0;
+    return testPartialOrder('lt', keyType, keyA, call(ctx, f, [b]));
   };
 }
 

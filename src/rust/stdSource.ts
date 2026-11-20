@@ -76,12 +76,12 @@ pub mod cmp {
         fn ne(&self, other: &Rhs) -> bool;
     }
     pub trait Eq: PartialEq {}
-    pub trait PartialOrd: PartialEq {
-        fn partial_cmp(&self, other: &Self) -> Option<Ordering>;
-        fn lt(&self, other: &Self) -> bool;
-        fn le(&self, other: &Self) -> bool;
-        fn gt(&self, other: &Self) -> bool;
-        fn ge(&self, other: &Self) -> bool;
+    pub trait PartialOrd<Rhs = Self>: PartialEq<Rhs> {
+        fn partial_cmp(&self, other: &Rhs) -> Option<Ordering>;
+        fn lt(&self, other: &Rhs) -> bool;
+        fn le(&self, other: &Rhs) -> bool;
+        fn gt(&self, other: &Rhs) -> bool;
+        fn ge(&self, other: &Rhs) -> bool;
     }
     pub trait Ord: Eq + PartialOrd {
         fn cmp(&self, other: &Self) -> Ordering;

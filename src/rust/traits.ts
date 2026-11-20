@@ -13,6 +13,7 @@ import {
   type Subst,
   substitute,
   substituteTraitRef,
+  supertraitsOf,
   type TraitDef,
   type TraitRef,
   type Type,
@@ -40,12 +41,12 @@ export class TraitSolver {
     if (t.kind === 'never') return 'yes';
     if (t.kind === 'var') return this.varImplements(t, ref);
     // Type parameters are `Sized` unless they opt out with `?Sized`.
-    if (t.kind === 'param') return trait.builtin === 'Sized' || this.boundsImply(t.param.bounds, ref) ? 'yes' : 'no';
+    if (t.kind === 'param') return trait.builtin === 'Sized' || this.boundsImply(t.param.bounds, ref, t) ? 'yes' : 'no';
     // A pseudo-type that stays is one whose arguments are not known yet.
     if (t.kind === 'adt' && isPseudo(t.def)) return 'unknown';
-    if (t.kind === 'opaque') return this.boundsImply(t.opaque.bounds, ref) ? 'yes' : this.builtinOnly(t, ref);
+    if (t.kind === 'opaque') return this.boundsImply(t.opaque.bounds, ref, t) ? 'yes' : this.builtinOnly(t, ref);
     if (t.kind === 'dyn') {
-      if (this.boundsImply([t.trait], ref)) return 'yes';
+      if (this.boundsImply([t.trait], ref, t)) return 'yes';
       return this.builtinOnly(t, ref);
     }
     if (ref.fnSig) return this.closureImplements(t, ref);
@@ -118,9 +119,12 @@ export class TraitSolver {
 
   /** Whether bounds imply a trait, through supertraits. */
   // code-gauge-allow functionCognitiveComplexity 21 -- One rule per trait or conversion of the standard library.
-  boundsImply(bounds: TraitRef[], ref: TraitRef): boolean {
+  boundsImply(bounds: TraitRef[], ref: TraitRef, self?: Type): boolean {
     const blanket = BLANKET_IMPLS[ref.trait.builtin as string];
-    if (blanket && this.boundsImply(bounds, { trait: this.program.traitDef(blanket), args: [], item: ref.item })) {
+    if (
+      blanket &&
+      this.boundsImply(bounds, { trait: this.program.traitDef(blanket), args: [], item: ref.item }, self)
+    ) {
       return true;
     }
     const seen = new Set<TraitDef>();
@@ -155,7 +159,7 @@ export class TraitSolver {
       }
       if (seen.has(bound.trait)) continue;
       seen.add(bound.trait);
-      stack.push(...bound.trait.supertraits);
+      stack.push(...supertraitsOf(bound, self));
     }
     return false;
   }

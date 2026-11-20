@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 433 -- One native per method of the standard library.
+// code-gauge-allow-file fileNcss 444 -- One native per method of the standard library.
 import {
   insertOwnedElement,
   keepVecCapacity,
@@ -13,7 +13,7 @@ import { sliceRange } from '../compiler';
 import { type DebugPart } from '../debugText';
 import { normalize } from '../infer';
 import { described, fieldsPart, listPart, numberPart } from '../iterDebug';
-import { cloneValue, comparePartialValues, compareValues, copyValue, valuesEqual } from '../ops';
+import { cloneValue, compareValues, copyValue, testPartialOrder, valuesEqual } from '../ops';
 import { RustPanic } from '../runtime';
 import { shallow, type Type } from '../types';
 import {
@@ -200,12 +200,7 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     sortByCachedKey(ctx, deref(self), f);
     return UNIT_VALUE;
   },
-  is_sorted: ([self], ctx) => {
-    const items = sliceItems(deref(self));
-    return items.every(
-      (item, index) => index === 0 || (comparePartialValues(elemType(ctx), items[index - 1], item) ?? 1) <= 0
-    );
-  },
+  is_sorted: ([self], ctx) => sliceIsSorted(sliceItems(deref(self)), elemType(ctx)),
   reverse: ([self]) => {
     const slice = deref(self);
     const items = sliceItems(slice).toReversed();
@@ -390,6 +385,22 @@ function sliceElem(item: Type): Type {
   let t = normalize(shallow(item));
   if (t.kind === 'ref') t = normalize(shallow(t.target));
   return t.kind === 'slice' || t.kind === 'array' ? t.elem : t;
+}
+
+function sliceIsSorted(items: Value[], type: Type): boolean {
+  let index = 0;
+  const pairsPerChunk = 32;
+  while (index + pairsPerChunk + 1 < items.length) {
+    let sorted = true;
+    for (const end = index + pairsPerChunk; index < end; index++) {
+      sorted = testPartialOrder('le', type, items[index], items[index + 1]) && sorted;
+    }
+    if (!sorted) return false;
+  }
+  for (; index + 1 < items.length; index++) {
+    if (!testPartialOrder('le', type, items[index], items[index + 1])) return false;
+  }
+  return true;
 }
 
 function rotate(slice: Value, mid: number): Value {

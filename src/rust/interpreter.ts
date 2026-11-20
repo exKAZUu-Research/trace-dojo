@@ -7,7 +7,7 @@ import { normalize } from './infer';
 import type { Module, Program } from './items';
 import { type NativeContext, NATIVES } from './natives';
 import { toIterator } from './natives/iterators';
-import { cloneValue, compareValues, setUserImpls, valuesEqual } from './ops';
+import { cloneValue, compareValues, type OrderMethod, setUserImpls, valuesEqual } from './ops';
 import { ControlSignal, FmtFailure, Frame, type FunctionInfo, type Runtime, RustPanic } from './runtime';
 import { concreteType, matchConcrete, typeKey } from './runtimeTypes';
 import {
@@ -79,8 +79,8 @@ export class Interpreter implements CallSupport {
         if (!found) return;
         return this.callDispatched(found, type, [a, b]) as boolean;
       },
-      gt: (type, a, b) => this.userIsGreater(type, a, b),
-      cmp: (type, a, b, partial) => this.userCompare(type, a, b, partial),
+      order: (method, type, a, b, rhs) => this.userOrder(method, type, a, b, rhs),
+      cmp: (type, a, b, partial, rhs) => this.userCompare(type, a, b, partial, rhs),
       clone: (type, value) => {
         const found = this.userTraitMethod('Clone', type, 'clone');
         if (!found) return;
@@ -90,14 +90,20 @@ export class Interpreter implements CallSupport {
     });
   }
 
-  private userIsGreater(type: Type, a: Value, b: Value): boolean | undefined {
-    const found = this.userTraitMethod('PartialOrd', type, 'gt');
+  private userOrder(method: OrderMethod, type: Type, a: Value, b: Value, rhs: Type): boolean | undefined {
+    const found = this.userTraitMethod('PartialOrd', type, method, rhs);
     return found ? (this.callDispatched(found, type, [a, b]) as boolean) : undefined;
   }
 
-  private userCompare(type: Type, a: Value, b: Value, partial: boolean): { order: number | undefined } | undefined {
+  private userCompare(
+    type: Type,
+    a: Value,
+    b: Value,
+    partial: boolean,
+    rhs?: Type
+  ): { order: number | undefined } | undefined {
     const compare = partial
-      ? this.userTraitMethod('PartialOrd', type, 'partial_cmp')
+      ? this.userTraitMethod('PartialOrd', type, 'partial_cmp', rhs)
       : this.userTraitMethod('Ord', type, 'cmp');
     if (!compare) return;
     const result = this.callDispatched(compare, type, [a, b]) as EnumValue;
@@ -133,7 +139,7 @@ export class Interpreter implements CallSupport {
       receiverArgs = [unwrapped.receiver, ...args.slice(1)];
     }
     const trait = def.trait as TraitDef;
-    const dispatch = this.dispatch(trait, self, def.name);
+    const dispatch = this.dispatch(trait, self, def.name, trait.params.length > 0 ? typeArgs[1] : undefined);
     if (dispatch) {
       const own = typeArgs.slice(def.parentParamCount);
       const fnArgs = dispatch.implArgs ? [...dispatch.implArgs, ...own] : [self, ...typeArgs.slice(1)];

@@ -4,7 +4,7 @@ import type { Compiler, Eval } from './compiler';
 import { derefAll, evaluateValues, stringish, stripRefs } from './compilerCommon';
 import { normalize } from './infer';
 import { btreeSetOp, type SetOp } from './natives/setOps';
-import { cloneValue, comparePartialValues, floatArith, intArith, overflow, valuesEqual, wrap } from './ops';
+import { cloneValue, floatArith, intArith, overflow, testPartialOrder, valuesEqual, wrap } from './ops';
 import type { Frame } from './runtime';
 import { runtimeType } from './runtimeTypes';
 import { type IntName, resolve, shallow, type Type } from './types';
@@ -71,17 +71,10 @@ function comparison(expr: ExprOf<'binary'>, left: Eval, right: Eval): Eval {
     const rhsType = runtimeType(resolve(expr.right.ty!, true));
     return (frame) => valuesEqual(compareType(frame), left(frame), right(frame), rhsType(frame)) === equal;
   }
-  const tests: Record<string, (order: number) => boolean> = {
-    '<': (o) => o < 0,
-    '<=': (o) => o <= 0,
-    '>': (o) => o > 0,
-    '>=': (o) => o >= 0,
-  };
-  const test = tests[op];
-  return (frame) => {
-    const order = comparePartialValues(compareType(frame), left(frame), right(frame));
-    return order !== undefined && test(order);
-  };
+  const method = { '<': 'lt', '<=': 'le', '>': 'gt', '>=': 'ge' } as const;
+  const relation = method[op as keyof typeof method];
+  const rhs = runtimeType(resolve(expr.right.ty!, true));
+  return (frame) => testPartialOrder(relation, compareType(frame), left(frame), right(frame), rhs(frame));
 }
 
 function arithmetic(expr: ExprOf<'binary'>, left: Eval, right: Eval, rightCoerced: Eval): Eval {

@@ -1029,6 +1029,48 @@ fn main() { check(vec![1]); }`;
   });
 });
 
+test('dispatches Rust ordering methods by relation and right-hand type', () => {
+  const program = `use std::cmp::Ordering;
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Key(i32);
+impl PartialOrd for Key {
+    fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> { print!("P"); Some(self.0.cmp(&rhs.0)) }
+    fn lt(&self, rhs: &Self) -> bool { print!("L"); self.0 < rhs.0 }
+    fn le(&self, rhs: &Self) -> bool { print!("E"); self.0 <= rhs.0 }
+    fn gt(&self, rhs: &Self) -> bool { print!("G"); self.0 > rhs.0 }
+    fn ge(&self, rhs: &Self) -> bool { print!("H"); self.0 >= rhs.0 }
+}
+impl Ord for Key {
+    fn cmp(&self, rhs: &Self) -> Ordering { print!("O"); self.0.cmp(&rhs.0) }
+}
+impl PartialEq<i32> for Key {
+    fn eq(&self, rhs: &i32) -> bool { self.0 == *rhs }
+}
+impl PartialOrd<i32> for Key {
+    fn partial_cmp(&self, rhs: &i32) -> Option<Ordering> { print!("I"); self.0.partial_cmp(rhs) }
+    fn lt(&self, rhs: &i32) -> bool { print!("N"); self.0 < *rhs }
+}
+fn check<T: PartialOrd<T>>(a: T, b: T) -> bool { a <= b }
+fn check_number(a: impl PartialOrd<i32>) -> bool { a < 3 }
+fn main() {
+    println!(" {} {} {} {}", Key(1) < Key(2), Key(1) <= Key(2), Key(1) > Key(2), Key(1) >= Key(2));
+    println!(" {} {}", (Key(1)..Key(3)).contains(&Key(2)), (Key(1)..=Key(3)).is_empty());
+    println!(" {} {}", check(Key(1), Key(2)), check_number(Key(2)));
+    println!(" {:?} {:?}", Key(1).partial_cmp(&2), Key(1).partial_cmp(&Key(2)));
+    let mut values = [Key(2), Key(1)];
+    values.sort();
+    println!(" {:?}", values);
+    let mut empty = 1..=1;
+    println!("{:?} {} {}", empty.next(), empty.contains(&1), empty.is_empty());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'LEGH true true false false\nELE true false\nEN true true\nIP Some(Less) Some(Less)\nL [Key(1), Key(2)]\nSome(1) false true\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

@@ -15,10 +15,10 @@ import { intoIterShape } from '../iterTypes';
 import {
   castValue,
   cloneValue,
-  comparePartialValues,
   compareValues,
   copyValue,
   needsCopy,
+  testPartialOrder,
   valuesEqual,
   wrap,
 } from '../ops';
@@ -1035,9 +1035,9 @@ define({
     if (previous === DONE) return true;
     return (
       each(ctx, iter, (item) => {
-        const order = comparePartialValues(ctx.typeArgs[0], previous as Value, item);
+        const ordered = testPartialOrder('le', ctx.typeArgs[0], previous as Value, item);
         previous = item;
-        return order === undefined || order > 0 ? false : undefined;
+        return ordered ? undefined : false;
       }) ?? true
     );
   },

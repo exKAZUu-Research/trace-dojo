@@ -417,6 +417,12 @@ export function substituteTraitRef(ref: TraitRef, subst: Subst): TraitRef {
   return mapTraitRef(ref, (type) => substitute(type, subst));
 }
 
+export function supertraitsOf(ref: TraitRef, self?: Type): TraitRef[] {
+  const subst = new Map(ref.trait.params.map((param, index) => [param, ref.args[index]]));
+  if (self) subst.set(ref.trait.self, self);
+  return ref.trait.supertraits.map((bound) => substituteTraitRef(bound, subst));
+}
+
 export function hasParams(type: Type): boolean {
   const t = shallow(type);
   if (t.kind === 'param') return true;

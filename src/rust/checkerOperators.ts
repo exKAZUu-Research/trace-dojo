@@ -195,9 +195,10 @@ function checkComparison(c: Checker, expr: Extract<Expr, { kind: 'binary' }>): T
   const isEquality = expr.op === '==' || expr.op === '!=';
   // Strings compare with each other (`String == &str`), and sequences with each other (`Vec == [T; N]`).
   if (isEquality && (stringsCompare(l, r) || sequencesCompare(c, l, r))) return BOOL;
-  // A type of the program compares with another by its `impl PartialEq<Rhs>`.
-  const partialEq = { trait: c.program.traitDef('PartialEq'), args: [rightType] };
-  if (isEquality && l.kind === 'adt' && !l.def.builtin && c.solver.implements(l, partialEq) === 'yes') return BOOL;
+  const trait = { trait: c.program.traitDef(isEquality ? 'PartialEq' : 'PartialOrd'), args: [rightType] };
+  if ((l.kind === 'adt' || l.kind === 'param' || l.kind === 'opaque') && c.solver.implements(l, trait) === 'yes') {
+    return BOOL;
+  }
   if (!c.unifier.tryUnify(leftType, rightType)) {
     const lt = typeToString(resolve(leftType));
     const rt = typeToString(resolve(rightType));
@@ -211,8 +212,7 @@ function checkComparison(c: Checker, expr: Extract<Expr, { kind: 'binary' }>): T
     }
     compileError(expr.opSpan, `${lt} と ${rt} は ${expr.op} で比べられません（型をそろえてください）。`);
   }
-  if (isEquality) c.require(leftType, { trait: c.program.traitDef('PartialEq'), args: [rightType] }, expr.opSpan);
-  else c.requireTrait(leftType, 'PartialOrd', expr.opSpan);
+  c.require(leftType, trait, expr.opSpan);
   return BOOL;
 }
 

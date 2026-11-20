@@ -1,5 +1,5 @@
 import type { Span } from './ast';
-// code-gauge-allow-file fileNcss 483 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
+// code-gauge-allow-file fileNcss 485 -- Keeps type-directed arithmetic, comparison, and copying with their shared runtime hooks.
 import { bigintToF32 } from './floatFormat';
 import { normalize } from './infer';
 import { RustPanic } from './runtime';
@@ -24,8 +24,8 @@ export interface UserImpls {
   allocate(count: number): void;
   spend(count: number): void;
   eq?(type: Type, a: Value, b: Value, rhs: Type): boolean | undefined;
-  gt?(type: Type, a: Value, b: Value): boolean | undefined;
-  cmp?(type: Type, a: Value, b: Value, partial: boolean): { order: number | undefined } | undefined;
+  order?(method: OrderMethod, type: Type, a: Value, b: Value, rhs: Type): boolean | undefined;
+  cmp?(type: Type, a: Value, b: Value, partial: boolean, rhs?: Type): { order: number | undefined } | undefined;
   clone?(type: Type, value: Value): { value: Value } | undefined;
   /** Substitutes a generic type's parameters with its arguments in a field's type. */
   fieldTypes(def: AdtDef, args: Type[], variant: number): Type[];
@@ -346,24 +346,34 @@ function setsEqual(type: Type, left: SetValue, right: SetValue): boolean {
   return items.every((item) => right.entries.has(right.entries.key(type, item)));
 }
 
-export function isGreater(type: Type, a: Value, b: Value): boolean {
+export type OrderMethod = 'lt' | 'le' | 'gt' | 'ge';
+
+const orderTests: Record<OrderMethod, (order: number) => boolean> = {
+  lt: (order) => order < 0,
+  le: (order) => order <= 0,
+  gt: (order) => order > 0,
+  ge: (order) => order >= 0,
+};
+
+export function testPartialOrder(method: OrderMethod, type: Type, a: Value, b: Value, rhs = type): boolean {
   const t = derefType(type);
   if (t.kind === 'adt') {
-    const user = hooks?.gt?.(t, deref(a), deref(b));
+    const user = hooks?.order?.(method, t, deref(a), deref(b), derefType(rhs));
     if (user !== undefined) return user;
   }
-  return (comparePartialValues(t, a, b) ?? 0) > 0;
+  const order = comparePartialValues(t, a, b, rhs);
+  return order !== undefined && orderTests[method](order);
 }
 
 /** Compares two values of a type, as `Ord::cmp` and `PartialOrd::partial_cmp` do; NaN compares as `undefined`. */
-// code-gauge-allow functionCognitiveComplexity 22 -- One case per kind of type.
+// code-gauge-allow functionCognitiveComplexity 24 -- One case per kind of type.
 // code-gauge-allow functionNcss 34 -- One case per kind of type.
-export function compareValues(type: Type, a: Value, b: Value, partial = false): number | undefined {
+export function compareValues(type: Type, a: Value, b: Value, partial = false, rhs = type): number | undefined {
   const t = derefType(type);
   const x = deref(a);
   const y = deref(b);
   if (t.kind === 'adt') {
-    const user = hooks?.cmp?.(t, x, y, partial);
+    const user = hooks?.cmp?.(t, x, y, partial, partial ? derefType(rhs) : undefined);
     if (user) return user.order;
   }
   switch (t.kind) {
@@ -403,8 +413,8 @@ export function compareValues(type: Type, a: Value, b: Value, partial = false): 
   }
 }
 
-export function comparePartialValues(type: Type, a: Value, b: Value): number | undefined {
-  return compareValues(type, a, b, true);
+export function comparePartialValues(type: Type, a: Value, b: Value, rhs = type): number | undefined {
+  return compareValues(type, a, b, true, rhs);
 }
 
 // code-gauge-allow functionCognitiveComplexity 30 -- One case per kind of type.

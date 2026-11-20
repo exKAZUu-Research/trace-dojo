@@ -252,13 +252,13 @@ function dynImplies(solver: TraitSolver, t: Type & { kind: 'dyn' }, trait: strin
 function comparison(goal: Goal): Answer {
   const { solver, t, ref, name, all } = goal;
   // The standard library's types compare with their own type, as the default `Rhs` makes them.
-  if (name === 'PartialEq' && ref.args[0]) {
+  const partial = name === 'PartialEq' || name === 'PartialOrd';
+  if (partial && ref.args[0]) {
     return solver.unifier.tryUnify(t, ref.args[0])
       ? builtinImplements(solver, t, { trait: ref.trait, args: [] })
       : 'no';
   }
-  const exact = name !== 'PartialEq' && name !== 'PartialOrd';
-  if (t.kind === 'float') return exact ? 'no' : 'yes';
+  if (t.kind === 'float') return partial ? 'yes' : 'no';
   if (isPrimitive(t) || t.kind === 'str' || t.kind === 'never') return 'yes';
   if (t.kind === 'ref') return all([t.target]);
   if (t.kind === 'tuple') return all(t.elems);

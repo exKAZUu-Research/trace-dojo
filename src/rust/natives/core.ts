@@ -2,7 +2,7 @@ import { TURTLE_METHOD_NAMES, type TurtleState } from '../../interpreter/turtleW
 import { madeString, sizeTable, StringGrowth } from '../capacity';
 import { DEFAULT_SPEC } from '../fmt';
 import { normalize } from '../infer';
-import { castValue, cloneValue, comparePartialValues, compareValues, valuesEqual } from '../ops';
+import { castValue, cloneValue, comparePartialValues, compareValues, testPartialOrder, valuesEqual } from '../ops';
 import { FmtFailure, ProcessExit, RustPanic } from '../runtime';
 import { intMax, type IntName, shallow, substitute as substituteType, type Type } from '../types';
 import { utf8Bytes } from '../utf8';
@@ -256,25 +256,16 @@ define({
     );
     return ok(ctx, UNIT_VALUE);
   },
-  'PartialEq::eq': ([self, other], ctx) => valuesEqual(selfType(ctx), self, other),
-  'PartialEq::ne': ([self, other], ctx) => !valuesEqual(selfType(ctx), self, other),
+  'PartialEq::eq': ([self, other], ctx) => valuesEqual(selfType(ctx), self, other, ctx.typeArgs[1]),
+  'PartialEq::ne': ([self, other], ctx) => !valuesEqual(selfType(ctx), self, other, ctx.typeArgs[1]),
   'PartialOrd::partial_cmp': ([self, other], ctx) => {
-    const order = comparePartialValues(selfType(ctx), self, other);
+    const order = comparePartialValues(selfType(ctx), self, other, ctx.typeArgs[1]);
     return order === undefined ? none(ctx) : some(ctx, ordering(ctx, order));
   },
-  'PartialOrd::lt': ([self, other], ctx) => (comparePartialValues(selfType(ctx), self, other) ?? 0) < 0,
-  'PartialOrd::le': ([self, other], ctx) => {
-    const order = comparePartialValues(selfType(ctx), self, other);
-    return order !== undefined && order <= 0;
-  },
-  'PartialOrd::gt': ([self, other], ctx) => {
-    const order = comparePartialValues(selfType(ctx), self, other);
-    return order !== undefined && order > 0;
-  },
-  'PartialOrd::ge': ([self, other], ctx) => {
-    const order = comparePartialValues(selfType(ctx), self, other);
-    return order !== undefined && order >= 0;
-  },
+  'PartialOrd::lt': ([self, other], ctx) => testPartialOrder('lt', selfType(ctx), self, other, ctx.typeArgs[1]),
+  'PartialOrd::le': ([self, other], ctx) => testPartialOrder('le', selfType(ctx), self, other, ctx.typeArgs[1]),
+  'PartialOrd::gt': ([self, other], ctx) => testPartialOrder('gt', selfType(ctx), self, other, ctx.typeArgs[1]),
+  'PartialOrd::ge': ([self, other], ctx) => testPartialOrder('ge', selfType(ctx), self, other, ctx.typeArgs[1]),
   'Ord::cmp': ([self, other], ctx) => ordering(ctx, compareValues(selfType(ctx), self, other) ?? 0),
   'Ord::max': ([self, other], ctx) => ((compareValues(selfType(ctx), self, other) ?? 0) > 0 ? self : other),
   'Ord::min': ([self, other], ctx) => ((compareValues(selfType(ctx), self, other) ?? 0) <= 0 ? self : other),
@@ -383,11 +374,11 @@ define({
   'RangeInclusive<_>::contains': ([self, item], ctx) => rangeContains(ctx, deref(self) as RangeValue, item),
   'Range<_>::is_empty': ([self], ctx) => {
     const range = deref(self) as RangeValue;
-    return !((comparePartialValues(ctx.typeArgs[0], range.start, range.end) ?? 1) < 0);
+    return !testPartialOrder('lt', ctx.typeArgs[0], range.start, range.end);
   },
   'RangeInclusive<_>::is_empty': ([self], ctx) => {
     const range = deref(self) as RangeValue;
-    return range.exhausted || !((comparePartialValues(ctx.typeArgs[0], range.start, range.end) ?? 1) <= 0);
+    return range.exhausted || !testPartialOrder('le', ctx.typeArgs[0], range.start, range.end);
   },
 });
 
@@ -415,11 +406,9 @@ function toStringValue(ctx: NativeContext, self: Value): string {
 function rangeContains(ctx: NativeContext, range: RangeValue, item: Value): boolean {
   const type = ctx.typeArgs[0];
   const value = deref(item);
-  if (range.start !== undefined && (comparePartialValues(type, range.start, value) ?? 1) > 0) return false;
-  if (range.end === undefined) return true;
-  const order = comparePartialValues(type, value, range.end);
-  if (order === undefined) return false;
-  return range.inclusive ? order <= 0 : order < 0;
+  if (range.exhausted) return false;
+  if (range.start !== undefined && !testPartialOrder('le', type, range.start, value)) return false;
+  return range.end === undefined || testPartialOrder(range.inclusive ? 'le' : 'lt', type, value, range.end);
 }
 
 /** `T::from(value)` for the conversions of the standard library. */
