@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 405 -- Ports std's searchers and splitters of `str` patterns.
+// code-gauge-allow-file fileNcss 440 -- Ports std's searchers and splitters of `str` patterns.
 import type { DebugPart } from '../debugText';
 import { type DebugValue, described, fieldsPart, listPart, numberPart, tuplePart } from '../iterDebug';
 import { CHAR, REF_STR } from '../types';
@@ -28,7 +28,13 @@ export type PatternKind =
   | { kind: 'char'; char: string }
   | { kind: 'str'; needle: string }
   | { kind: 'chars'; chars: string[]; searcher: 'CharArraySearcher' | 'CharArrayRefSearcher' | 'CharSliceSearcher' }
-  | { kind: 'predicate'; matches: (char: string) => boolean };
+  | PredicatePattern;
+
+interface PredicatePattern {
+  kind: 'predicate';
+  matches: (char: string) => boolean;
+  fork?: () => PredicatePattern;
+}
 
 export function searcherOf(text: string, pattern: PatternKind): Searcher {
   switch (pattern.kind) {
@@ -43,7 +49,7 @@ export function searcherOf(text: string, pattern: PatternKind): Searcher {
       return new MultiCharEqSearcher(text, (char) => chars.includes(char), pattern.searcher, chars);
     }
     case 'predicate': {
-      return new MultiCharEqSearcher(text, pattern.matches, 'CharPredicateSearcher');
+      return new MultiCharEqSearcher(text, pattern.matches, 'CharPredicateSearcher', undefined, pattern.fork);
     }
   }
 }
@@ -126,7 +132,8 @@ class MultiCharEqSearcher implements Searcher {
     readonly text: string,
     private readonly matches: (char: string) => boolean,
     private readonly name: string,
-    private readonly charEq?: string[]
+    private readonly charEq?: string[],
+    private readonly forkPredicate?: () => PredicatePattern
   ) {
     this.bytes = encoder.encode(text);
     let offset = 0;
@@ -136,6 +143,12 @@ class MultiCharEqSearcher implements Searcher {
       offset += size;
     }
     this.back = this.chars.length;
+  }
+
+  fork(): MultiCharEqSearcher {
+    const copy = shallowState(this);
+    const predicate = this.forkPredicate?.();
+    return predicate ? Object.assign(copy, { matches: predicate.matches, forkPredicate: predicate.fork }) : copy;
   }
 
   nextMatch(): [number, number] | undefined {
@@ -449,6 +462,10 @@ class SplitInternal {
     this.end = matcher.bytes.length;
   }
 
+  fork(): SplitInternal {
+    return Object.assign(shallowState(this), { matcher: forkSearcher(this.matcher) });
+  }
+
   private piece(from: number, to: number): string {
     return decodeUtf8(this.matcher.bytes.subarray(from, to));
   }
@@ -501,11 +518,15 @@ export type SplitKind = 'Split' | 'RSplit' | 'SplitTerminator' | 'SplitInclusive
 
 /** `split`, `rsplit`, `split_terminator`, and `split_inclusive` of a text by a pattern. */
 export function splitIter(text: string, pattern: PatternKind, kind: SplitKind): IterValue {
-  const inner = new SplitInternal(searcherOf(text, pattern), kind === 'Split' || kind === 'RSplit');
+  return splitFrom(new SplitInternal(searcherOf(text, pattern), kind === 'Split' || kind === 'RSplit'), kind);
+}
+
+function splitFrom(inner: SplitInternal, kind: SplitKind): IterValue {
   const inclusive = kind === 'SplitInclusive';
   const forward = (): Next => inner.next(inclusive) ?? DONE;
   const backward = (): Next => inner.nextBack(inclusive) ?? DONE;
   const iter = kind === 'RSplit' ? new IterValue(backward, forward) : new IterValue(forward, backward);
+  iter.fork = () => splitFrom(inner.fork(), kind);
   return described(iter, (show) =>
     inclusive ? fieldsPart(kind, [['0', inner.debug(show)]]) : tuplePart(kind, [inner.debug(show)])
   );
@@ -513,13 +534,17 @@ export function splitIter(text: string, pattern: PatternKind, kind: SplitKind): 
 
 /** `splitn` and `rsplitn`: at most `count` pieces, the last of them the rest of the text. */
 export function splitNIter(text: string, pattern: PatternKind, count: number, reverse: boolean): IterValue {
-  const inner = new SplitInternal(searcherOf(text, pattern), true);
+  return splitNFrom(new SplitInternal(searcherOf(text, pattern), true), count, reverse);
+}
+
+function splitNFrom(inner: SplitInternal, count: number, reverse: boolean): IterValue {
   let left = count;
   const iter = new IterValue(() => {
     if (left === 0) return DONE;
     left--;
     return (left === 0 ? inner.getEnd() : reverse ? inner.nextBack() : inner.next()) ?? DONE;
   });
+  iter.fork = () => splitNFrom(inner.fork(), left, reverse);
   return described(iter, (show) =>
     tuplePart(reverse ? 'RSplitN' : 'SplitN', [
       fieldsPart('SplitNInternal', [
@@ -532,11 +557,15 @@ export function splitNIter(text: string, pattern: PatternKind, count: number, re
 
 /** `lines`: the pieces up to and including each `\n`, without it or a `\r\n`. */
 export function linesIter(text: string): IterValue {
-  const inner = new SplitInternal(searcherOf(text, { kind: 'char', char: '\n' }), false);
+  return linesFrom(new SplitInternal(searcherOf(text, { kind: 'char', char: '\n' }), false));
+}
+
+function linesFrom(inner: SplitInternal): IterValue {
   const iter = new IterValue(
     () => lineOf(inner.next(true)),
     () => lineOf(inner.nextBack(true))
   );
+  iter.fork = () => linesFrom(inner.fork());
   return described(iter, (show) =>
     tuplePart('Lines', [fieldsPart('Map', [['iter', fieldsPart('SplitInclusive', [['0', inner.debug(show)]])]])])
   );
@@ -551,7 +580,10 @@ function lineOf(line: string | undefined): Next {
 
 /** `split_whitespace`: the pieces between whitespace that are not empty. */
 export function splitWhitespaceIter(text: string, isWhitespace: (char: string) => boolean): IterValue {
-  const inner = new SplitInternal(searcherOf(text, { kind: 'predicate', matches: isWhitespace }), true);
+  return splitWhitespaceFrom(new SplitInternal(searcherOf(text, { kind: 'predicate', matches: isWhitespace }), true));
+}
+
+function splitWhitespaceFrom(inner: SplitInternal): IterValue {
   const take = (end: 'next' | 'nextBack'): Next => {
     for (;;) {
       const piece = end === 'next' ? inner.next() : inner.nextBack();
@@ -563,6 +595,7 @@ export function splitWhitespaceIter(text: string, isWhitespace: (char: string) =
     () => take('next'),
     () => take('nextBack')
   );
+  iter.fork = () => splitWhitespaceFrom(inner.fork());
   return described(iter, (show) =>
     fieldsPart('SplitWhitespace', [
       ['inner', fieldsPart('Filter', [['iter', tuplePart('Split', [inner.debug(show)])]])],
@@ -576,8 +609,12 @@ function isAsciiSpace(byte: number): boolean {
 
 /** `split_ascii_whitespace`: a byte slice's `Split` at ASCII whitespace, without the empty pieces. */
 export function splitAsciiWhitespaceIter(text: string): IterValue {
-  let v = encoder.encode(text);
-  let finished = false;
+  return splitAsciiWhitespaceFrom(encoder.encode(text), false);
+}
+
+function splitAsciiWhitespaceFrom(bytes: Uint8Array, done: boolean): IterValue {
+  let v = bytes;
+  let finished = done;
   const take = (fromBack: boolean): Next => {
     while (!finished) {
       const piece = cut(fromBack);
@@ -599,6 +636,7 @@ export function splitAsciiWhitespaceIter(text: string): IterValue {
     () => take(false),
     () => take(true)
   );
+  iter.fork = () => splitAsciiWhitespaceFrom(v, finished);
   return described(iter, () => {
     const split = fieldsPart('Split', [
       ['v', () => `[${[...v].join(', ')}]`],
@@ -612,7 +650,10 @@ export function splitAsciiWhitespaceIter(text: string): IterValue {
 
 /** `matches` and `match_indices`: each match, with its byte offset for `match_indices`. */
 export function matchesIter(text: string, pattern: PatternKind, indexed: boolean): IterValue {
-  const searcher = searcherOf(text, pattern);
+  return matchesFrom(searcherOf(text, pattern), indexed);
+}
+
+function matchesFrom(searcher: Searcher, indexed: boolean): IterValue {
   const item = (found: [number, number] | undefined): Next => {
     if (!found) return DONE;
     const piece = decodeUtf8(searcher.bytes.subarray(found[0], found[1]));
@@ -622,6 +663,15 @@ export function matchesIter(text: string, pattern: PatternKind, indexed: boolean
     () => item(searcher.nextMatch()),
     () => item(searcher.nextMatchBack())
   );
+  iter.fork = () => matchesFrom(forkSearcher(searcher), indexed);
   const [outer, inner] = indexed ? ['MatchIndices', 'MatchIndicesInternal'] : ['Matches', 'MatchesInternal'];
   return described(iter, (show) => tuplePart(outer, [tuplePart(inner, [searcher.debug(show)])]));
+}
+
+function forkSearcher(searcher: Searcher): Searcher {
+  return searcher instanceof MultiCharEqSearcher ? searcher.fork() : shallowState(searcher);
+}
+
+function shallowState<T extends object>(state: T): T {
+  return Object.assign(Object.create(Object.getPrototypeOf(state)) as T, state);
 }

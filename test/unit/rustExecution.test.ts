@@ -1895,6 +1895,27 @@ test('accumulates Rust outcomes before pulling the next iterator item', () => {
   expect(executeProgram('rust', early)).toMatchObject({ kind: 'executed', stdout: 'xxSome(None)\n' });
 });
 
+test('clones Rust string iterator search positions and predicate state', () => {
+  const program = `fn main() {
+    let mut split = "one::two::three".split("::");
+    assert_eq!(split.next(), Some("one"));
+    let mut fork = split.clone();
+    println!("{:?} {:?}", split.next(), fork.next());
+    let mut lines = "one\ntwo\nthree".lines();
+    assert_eq!(lines.next_back(), Some("three"));
+    let mut fork = lines.clone();
+    println!("{:?} {:?}", lines.next_back(), fork.next_back());
+    let mut calls = 0;
+    let mut iter = "abcdefg".split(move |_: char| { calls += 1; calls % 3 == 0 });
+    let mut fork = iter.clone();
+    println!("{:?} {:?}", iter.next(), fork.next());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Some("two") Some("two")\nSome("two") Some("two")\nSome("ab") Some("ab")\n',
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

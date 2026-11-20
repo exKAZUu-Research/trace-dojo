@@ -3,6 +3,7 @@ import { normalize } from '../infer';
 import { strSliceBytes } from '../interpreter';
 // code-gauge-allow-file fileNcss 488 -- One native per method of the standard library.
 import { described, fieldsPart, listPart, numberPart, tuplePart } from '../iterDebug';
+import { cloneValue } from '../ops';
 import { RustPanic } from '../runtime';
 import { CHAR, REF_STR, shallow, type Type } from '../types';
 import { decodeUtf8, utf8Bytes, utf8Length as byteLength } from '../utf8';
@@ -115,7 +116,7 @@ function patternMatcher(
 /** The searcher std picks for a pattern, by the pattern's type. */
 function patternOf(ctx: NativeContext, pattern: Value): PatternKind {
   const p = deref(pattern);
-  if (p instanceof FnValue) return { kind: 'predicate', matches: (char) => call(ctx, p, [char]) as boolean };
+  if (p instanceof FnValue) return predicatePattern(ctx, p);
   if (typeof p === 'string') {
     return normalize(shallow(ctx.typeArgs[0])).kind === 'char' ? { kind: 'char', char: p } : { kind: 'str', needle: p };
   }
@@ -124,6 +125,14 @@ function patternOf(ctx: NativeContext, pattern: Value): PatternKind {
   const searcher =
     type.kind !== 'ref' ? 'CharArraySearcher' : target.kind === 'array' ? 'CharArrayRefSearcher' : 'CharSliceSearcher';
   return { kind: 'chars', chars: sliceItems(p) as string[], searcher };
+}
+
+function predicatePattern(ctx: NativeContext, predicate: FnValue): Extract<PatternKind, { kind: 'predicate' }> {
+  return {
+    kind: 'predicate',
+    matches: (char) => call(ctx, predicate, [char]) as boolean,
+    fork: () => predicatePattern(ctx, cloneValue(ctx.typeArgs[0], predicate) as FnValue),
+  };
 }
 
 /** The empty pattern matches at every char boundary up to the end, where `indexOf` would match forever. */
