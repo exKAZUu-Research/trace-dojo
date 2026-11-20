@@ -665,7 +665,6 @@ export class ExpressionChecker {
     this.variableTypes.set(symbol.id, type);
   }
 
-  // code-gauge-allow functionNcss 31 -- Keeps declaration-kind dispatch together; function overload resolution has its own helper.
   private computeValueType(symbol: Sym): Type {
     const declaration = symbol.valueDeclaration;
     if (!declaration) return anyType;

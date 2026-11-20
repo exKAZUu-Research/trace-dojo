@@ -513,7 +513,6 @@ function preservesEmptyObjectIntersection(type: Type): boolean {
   );
 }
 
-// code-gauge-allow functionCognitiveComplexity 28 -- Flattens and reduces members as TypeScript's intersections do.
 export function intersectionOf(types: Type[], c: Checker): Type {
   const { budget } = c;
   budget.spend(types.length);

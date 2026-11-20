@@ -539,7 +539,6 @@ function* splitCaptures(runtime: Runtime, match: JsObject): Generator<Value> {
   for (let index = 1; index < count; index++) yield captures.get(index);
 }
 
-// code-gauge-allow functionCognitiveComplexity 18 -- The branches follow the split algorithm's stopping conditions.
 function splitMatches(
   runtime: Runtime,
   text: string,

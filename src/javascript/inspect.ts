@@ -369,8 +369,6 @@ interface Frame {
   braces: [string, string];
 }
 
-// code-gauge-allow functionCognitiveComplexity 21 -- Ports Node.js's util.inspect, so the two stay comparable.
-// code-gauge-allow functionNcss 37 -- Ports Node.js's util.inspect, so the two stay comparable.
 function formatRaw(ctx: Context, value: JsObject, recurseTimes: number): string {
   const { runtime } = ctx;
   const showsPrototype = ctx.showHidden && recurseTimes <= ctx.depth;

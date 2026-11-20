@@ -342,7 +342,6 @@ export class Flow {
     );
   }
 
-  // code-gauge-allow functionCognitiveComplexity 22 -- Follows TypeScript's narrowing of each kind of type by a `typeof` result.
   /** The part of a type that `typeof value === name` keeps (or, with `assumeTrue` false, that the opposite keeps). */
   narrowByTypeof(type: Type, name: string, assumeTrue: boolean): Type {
     if (isAnyLike(type) || isIntrinsic(type, 'unknown')) {

@@ -91,7 +91,6 @@ export function isOptionalChain(node: Node): boolean {
 }
 
 // code-gauge-allow functionNcss 40 -- One case per kind of expression V8's CallPrinter names.
-// code-gauge-allow functionCognitiveComplexity 16 -- One case per kind of expression V8's CallPrinter names.
 function printedCallee(node: Node): string | undefined {
   switch (node.type) {
     case 'identifier': {

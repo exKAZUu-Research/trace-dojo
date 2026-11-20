@@ -116,7 +116,6 @@ export class LiteralChecker {
 
   constructor(private readonly c: Checker) {}
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Checks array elements and spread positions in their contextual shape.
   arrayLiteral(node: TreeNode, contextual?: Type): Type {
     contextual = this.literalContext(node, contextual);
     const elements = arrayElements(node);

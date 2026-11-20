@@ -182,7 +182,6 @@ export class ProgramConverter extends ExpressionConverter {
     };
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Converts bindings and records operand descriptions for destructuring errors alongside their initializers.
   private declaration(node: Node, recordsStep: boolean): VariableDeclaration {
     const declarationKind = declarationKindOf(node);
     const declarators = namedChildren(node).map((declarator) => {

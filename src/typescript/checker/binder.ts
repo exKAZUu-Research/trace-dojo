@@ -297,7 +297,6 @@ export class Binder {
     }
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Binds ambient variables with their declaration kind and initialized resolution mode, functions with parameter scopes, and other ambient forms recursively.
   private bindAmbient(node: TreeNode, scope: Scope): void {
     for (const child of named(node)) {
       switch (child.type) {

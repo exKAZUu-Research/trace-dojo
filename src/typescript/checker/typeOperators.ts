@@ -722,7 +722,6 @@ export class TypeOperators {
     return this.resolveConditional(conditional, new Map());
   }
 
-  // code-gauge-allow functionCognitiveComplexity 16 -- Each enclosing binding has its own scope rule.
   typeParametersInScope(node: TreeNode): TypeParameter[] {
     const parameters = this.c.signatures.outerTypeParametersOf(node) ?? [];
     const receiver = this.c.classes.thisTypeInScope(node);

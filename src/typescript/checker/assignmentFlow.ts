@@ -326,7 +326,6 @@ class AssignmentFlow {
     return current;
   }
 
-  // code-gauge-allow functionNcss 34 -- Handles the expression forms whose evaluation order changes assignment flow.
   private expression(node: TreeNode, values: Values, chainStops?: Values[]): Values {
     if (!values) return values;
     const receiver = chainObject(node);

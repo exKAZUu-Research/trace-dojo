@@ -520,7 +520,6 @@ export class Calls {
   // Resolution ---------------------------------------------------------------------------------------------------
 
   // code-gauge-allow functionParameterCount 7 -- Tries each overload as TypeScript does, then reports the failure as it does.
-  // code-gauge-allow functionCognitiveComplexity 23 -- Tries overloads before demanding the selected generic call context.
   private resolve(
     node: TreeNode,
     callee: TreeNode,
