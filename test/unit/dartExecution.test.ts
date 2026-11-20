@@ -394,6 +394,14 @@ void main() {
   });
 });
 
+test('dart:math Point allows subclasses and implementations', () => {
+  const program = `import 'dart:math';
+class Location extends Point<int> { Location() : super(1, 2); }
+abstract class Coordinates implements Point<int> {}
+void main() { print(Location()); }`;
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'Point(1, 2)\n' });
+});
+
 test('a parameter can only narrow an override when explicitly covariant', () => {
   const invalid = 'class A<T> { void f(T value) {} } class B extends A<num> { void f(int value) {} } void main() {}';
   expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });

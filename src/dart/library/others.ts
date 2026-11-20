@@ -31,7 +31,7 @@ abstract interface class Random {
   external bool nextBool();
 }
 
-final class Point<T extends num> {
+class Point<T extends num> {
   final T x;
   final T y;
   const Point(T x, T y) : this.x = x, this.y = y;
