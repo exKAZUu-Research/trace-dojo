@@ -3,6 +3,37 @@ import { expect, test } from 'vitest';
 import { executeProgram } from '../../src/interpreter/program';
 
 test.each([
+  ['double value{source};', 'long double'],
+  ['std::vector<double> values{source};', 'long double'],
+  ['float value{3.4028236e38};', 'double'],
+])('diagnoses narrowing in C++ list initialization of %s', (statement, sourceType) => {
+  const program = `#include <vector>
+int main() {
+  long double source = 1.25L;
+  ${statement}
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 3, message: expect.stringContaining(`${sourceType} 型の値`) }],
+  });
+});
+
+test.each(['bool flag{&n};', 'std::vector<bool> flags{&n};', 'bool flag{static_cast<int*>(nullptr)};'])(
+  'diagnoses pointer-to-bool narrowing in C++ list initialization of %s',
+  (statement) => {
+    const program = `#include <vector>
+int main() {
+  int n = 0;
+  ${statement}
+}`;
+    expect(executeProgram('cpp', program)).toMatchObject({
+      kind: 'compileError',
+      diagnostics: [{ row: 3, message: expect.stringContaining('縮小変換') }],
+    });
+  }
+);
+
+test.each([
   ['set', 'set<const int>', '要素を const 型にはできません'],
   ['set', 'multiset<const int>', '要素を const 型にはできません'],
   ['unordered_set', 'unordered_set<const int>', '要素を const 型にはできません'],

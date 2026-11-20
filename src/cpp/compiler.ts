@@ -1849,9 +1849,11 @@ export class Compiler extends StatementCompiler {
   private checkNarrowing(expr: Expr, type: Type, row: number): void {
     const value = this.rvalue(expr);
     const from = value.type;
-    if (!isArithmetic(from) || !isArithmetic(type)) return;
     const to = unqualified(type);
-    const narrowing = isNarrowing(from, to, value.constant);
+    const narrowing =
+      from.kind === 'pointer'
+        ? to.kind === 'int' && to.name === 'bool'
+        : isArithmetic(from) && isArithmetic(to) && isNarrowing(from, to, value.constant);
     if (narrowing) {
       throw new NarrowingConversionError([
         {
@@ -2568,11 +2570,9 @@ function isNarrowing(
   if (from.kind === 'float' && to.kind === 'float') {
     const order = { float: 0, double: 1, ldouble: 2 };
     if (order[to.name] >= order[from.name]) return false;
-    if (to.name === 'double') return false;
-    return (
-      constant === undefined ||
-      (Number.isFinite(Number(constant)) && Math.abs(Number(constant)) > 3.4028234663852886e38)
-    );
+    if (constant === undefined) return true;
+    const value = Number(constant);
+    return to.name === 'float' && Number.isFinite(value) && !Number.isFinite(Math.fround(value));
   }
   if (from.kind === 'int' && to.kind === 'float') {
     if (constant === undefined) return true;
