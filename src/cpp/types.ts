@@ -362,12 +362,12 @@ export function hasVacuousInitialization(type: Type): boolean {
 
 /** Whether destroying an object of a type runs no user-written destructor, as a constant expression requires. */
 export function hasTrivialDestruction(type: Type): boolean {
-  if (type.kind === 'array') return hasTrivialDestruction(type.of);
+  if (type.kind === 'array') return type.length === 0 || hasTrivialDestruction(type.of);
   if (type.kind !== 'class') return true;
   const { cls } = type;
   if (cls.library) {
     const array = cls.library.aggregateArray?.type;
-    return !array || hasTrivialDestruction(array.of);
+    return !array || hasTrivialDestruction(array);
   }
   return (
     !cls.hasUserDestructor &&

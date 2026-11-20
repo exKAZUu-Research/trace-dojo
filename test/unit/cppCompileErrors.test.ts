@@ -1344,3 +1344,14 @@ int main() { constexpr auto n = ${query}; }`;
     });
   }
 );
+
+test.each(['std::array<S, 0>{}.size()', 'std::size(std::array<S, 0>{})', 'std::array<std::array<S, 0>, 1>{}.size()'])(
+  'accepts a constexpr size query on an empty temporary array of a class with a destructor in %s',
+  (query) => {
+    const program = `#include <array>
+#include <iterator>
+struct S { ~S() {} };
+int main() { constexpr auto n = ${query}; int b[n + 1]{}; }`;
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', uncaughtException: undefined });
+  }
+);
