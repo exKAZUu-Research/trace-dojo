@@ -1,6 +1,6 @@
 import type { Eval, Frame, Temporary } from './runtime';
 import type { Syntax } from './syntax';
-import { type ClassInfo, type FieldInfo, type FunctionInfo, hasTrivialDestruction, type Type } from './types';
+import type { ClassInfo, FieldInfo, FunctionInfo, Type } from './types';
 import type { ArrayStore, CObject, Ptr, Value } from './values';
 
 export type ReferenceLifetime = CObject | 'full-expression';
@@ -125,13 +125,9 @@ export function offsetConstantLocation(
   if (index >= 0 && index <= location.length) return { index, length: location.length };
 }
 
-/**
- * Whether a constant expression may evaluate an object expression whose value it does not read: one naming an object, or
- * a temporary made by constant initialization whose destruction runs no user-written destructor.
- */
+/** Whether a constant expression may evaluate an object expression whose value it does not read: one naming an object. */
 export function evaluatesWithoutSideEffects(expr: Expr): boolean {
-  if (expr.constantDesignation === true || expr.staticAddress === true) return true;
-  return expr.constantInitialization === true && hasTrivialDestruction(expr.type);
+  return expr.constantDesignation === true || expr.staticAddress === true;
 }
 
 export function hasConstantObject(location: ConstantLocation | undefined): boolean {

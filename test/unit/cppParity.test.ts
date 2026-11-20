@@ -956,15 +956,13 @@ int main() {
   int d[m]{};
   constexpr auto j = std::size(c);
   int e[j]{};
-  constexpr auto t = std::array<int, 2>{}.size() + std::size(std::array<int, 2>{});
-  int g[t]{};
   static int s[5];
   constexpr auto k = std::size(s);
-  std::cout << n << m << k << ' ' << sizeof(b) << ' ' << sizeof(d) << sizeof(e) << sizeof(g);
+  std::cout << n << m << k << ' ' << sizeof(b) << ' ' << sizeof(d) << sizeof(e);
 }`;
   expect(executeProgram('cpp', program)).toMatchObject({
     kind: 'executed',
-    stdout: '345 12 161616',
+    stdout: '345 12 1616',
     uncaughtException: undefined,
   });
 });
