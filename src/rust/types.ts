@@ -439,6 +439,30 @@ export function supertraitsOf(ref: TraitRef, self?: Type): TraitRef[] {
   return ref.trait.supertraits.map((bound) => substituteTraitRef(bound, subst));
 }
 
+export function allSupertraits(bounds: TraitRef[], self?: Type): TraitRef[] {
+  const queue = bounds.map((bound) => ({ bound, ancestors: [] as TraitDef[] }));
+  const result: TraitRef[] = [];
+  for (const { bound, ancestors } of queue) {
+    if (ancestors.includes(bound.trait) || result.some((other) => sameTraitRef(bound, other))) continue;
+    result.push(bound);
+    const next = [...ancestors, bound.trait];
+    for (const parent of supertraitsOf(bound, self)) queue.push({ bound: parent, ancestors: next });
+  }
+  return result;
+}
+
+function sameTraitRef(a: TraitRef, b: TraitRef): boolean {
+  if (a.trait !== b.trait || !sameTypeList(a.args, b.args)) return false;
+  if (a.fnSig && b.fnSig) {
+    if (!sameTypeList(a.fnSig.params, b.fnSig.params) || !sameType(a.fnSig.ret, b.fnSig.ret)) return false;
+  } else if (a.fnSig || b.fnSig) return false;
+  return a.item && b.item ? sameType(a.item, b.item) : a.item === b.item;
+}
+
+function sameTypeList(a: Type[], b: Type[]): boolean {
+  return a.length === b.length && a.every((type, i) => sameType(type, b[i]));
+}
+
 export function hasParams(type: Type): boolean {
   const t = shallow(type);
   if (t.kind === 'param') return true;
@@ -494,7 +518,7 @@ export function sameType(a: Type, b: Type): boolean {
       return x.closure.id === (y as typeof x).closure.id;
     }
     case 'dyn': {
-      return x.trait.trait === (y as typeof x).trait.trait;
+      return sameTraitRef(x.trait, (y as typeof x).trait);
     }
     case 'opaque': {
       return x.opaque.id === (y as typeof x).opaque.id;

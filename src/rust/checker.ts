@@ -12,7 +12,7 @@ import { isIrrefutable, lowerPattern } from './exhaustiveness';
 import { deepNormalize, isPseudo, normalize, Unifier } from './infer';
 import { compileError, ItemCollector, lowerType, Module, type Program, resolveImports, type TypeScope } from './items';
 import { intoIterItem, intoIterShape } from './iterTypes';
-import { allSupertraits, autoderefSteps, derefOnce } from './methods';
+import { autoderefSteps, derefOnce } from './methods';
 import { TraitSolver } from './traits';
 import {
   type AdtDef,
@@ -1102,7 +1102,7 @@ export class Checker {
   }
 }
 
-export { hasParams, deepNormalize, allSupertraits, derefOnce };
+export { hasParams, deepNormalize, derefOnce };
 
 function* adtArgumentBounds(def: AdtDef, args: Type[]): Iterable<[Type, TraitRef]> {
   const subst = new Map(def.params.map((param, index) => [param, args[index]]));

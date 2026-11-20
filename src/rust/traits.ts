@@ -2,9 +2,11 @@ import { isPseudo, normalize, type Unifier } from './infer';
 import type { Module, Program } from './items';
 import { builtinImplements } from './traitBuiltins';
 import {
+  allSupertraits,
   F32,
   F64,
   freshVar,
+  hasVars,
   type ImplDef,
   INT_NAMES,
   intType,
@@ -12,7 +14,6 @@ import {
   type Subst,
   substitute,
   substituteTraitRef,
-  supertraitsOf,
   type TraitDef,
   type TraitRef,
   type Type,
@@ -41,15 +42,16 @@ export class TraitSolver {
     if (t.kind === 'var') return this.varImplements(t, ref);
     // Type parameters are `Sized` unless they opt out with `?Sized`.
     if (t.kind === 'param') {
-      if (trait.builtin === 'Sized' || this.boundsImply(t.param.bounds, ref, t)) return 'yes';
+      if (trait.builtin === 'Sized') return 'yes';
+      const answer = this.boundAnswer(t.param.bounds, ref, t);
+      if (answer !== 'no') return answer;
       return trait.builtin && PARAMETER_BLANKET_TRAITS.has(trait.builtin) ? this.builtinOnly(t, ref) : 'no';
     }
     // A pseudo-type that stays is one whose arguments are not known yet.
     if (t.kind === 'adt' && isPseudo(t.def)) return 'unknown';
-    if (t.kind === 'opaque') return this.boundsImply(t.opaque.bounds, ref, t) ? 'yes' : this.builtinOnly(t, ref);
-    if (t.kind === 'dyn') {
-      if (this.boundsImply([t.trait], ref, t)) return 'yes';
-      return this.builtinOnly(t, ref);
+    if (t.kind === 'opaque' || t.kind === 'dyn') {
+      const answer = this.boundAnswer(t.kind === 'opaque' ? t.opaque.bounds : [t.trait], ref, t);
+      return answer === 'no' ? this.builtinOnly(t, ref) : answer;
     }
     if (ref.fnSig) return this.closureImplements(t, ref);
     const user = this.userImpl(trait, t, ref.args);
@@ -137,50 +139,43 @@ export class TraitSolver {
   }
 
   /** Whether bounds imply a trait, through supertraits. */
-  // code-gauge-allow functionCognitiveComplexity 21 -- One rule per trait or conversion of the standard library.
   boundsImply(bounds: TraitRef[], ref: TraitRef, self?: Type): boolean {
+    return this.boundAnswer(bounds, ref, self) === 'yes';
+  }
+
+  private boundAnswer(bounds: TraitRef[], ref: TraitRef, self?: Type): Answer {
     const blanket = BLANKET_IMPLS[ref.trait.builtin as string];
     if (
       blanket &&
       this.boundsImply(bounds, { trait: this.program.traitDef(blanket), args: [], item: ref.item }, self)
     ) {
-      return true;
+      return 'yes';
     }
-    const seen = new Set<TraitDef>();
-    const stack = [...bounds];
-    while (stack.length > 0) {
-      const bound = stack.pop() as TraitRef;
-      if (bound.trait === ref.trait) {
-        if (ref.fnSig && bound.fnSig) {
-          return (
-            bound.fnSig.params.length === ref.fnSig.params.length &&
-            this.unifier.tryUnify(
-              { kind: 'tuple', elems: bound.fnSig.params },
-              { kind: 'tuple', elems: ref.fnSig.params }
-            ) &&
-            this.unifier.tryUnify(bound.fnSig.ret, ref.fnSig.ret)
-          );
-        }
-        const argsMatch = bound.args.every(
-          (arg, i) => ref.args[i] === undefined || this.unifier.tryUnify(arg, ref.args[i])
-        );
-        if (argsMatch && this.itemsMatch(bound, ref)) return true;
-      }
-      if (ref.fnSig && bound.fnSig && closureKindAtLeast(bound.trait.name, ref.trait.name)) {
-        return (
-          bound.fnSig.params.length === ref.fnSig.params.length &&
-          this.unifier.tryUnify(
-            { kind: 'tuple', elems: bound.fnSig.params },
-            { kind: 'tuple', elems: ref.fnSig.params }
-          ) &&
-          this.unifier.tryUnify(bound.fnSig.ret, ref.fnSig.ret)
-        );
-      }
-      if (seen.has(bound.trait)) continue;
-      seen.add(bound.trait);
-      stack.push(...supertraitsOf(bound, self));
+    const snapshot = this.unifier.snapshot();
+    const inferArgs = ref.args.some(hasVars);
+    let match: TraitRef | undefined;
+    for (const bound of allSupertraits(bounds, self)) {
+      const matches = this.matchBound(bound, ref);
+      if (matches && !inferArgs) return 'yes';
+      this.unifier.rollback(snapshot);
+      if (!matches) continue;
+      if (match) return 'unknown';
+      match = bound;
     }
-    return false;
+    if (!match) return 'no';
+    this.matchBound(match, ref);
+    return 'yes';
+  }
+
+  private matchBound(bound: TraitRef, ref: TraitRef): boolean {
+    if (ref.fnSig && bound.fnSig && closureKindAtLeast(bound.trait.name, ref.trait.name)) {
+      return this.unifier.unify({ kind: 'fn', ...bound.fnSig }, { kind: 'fn', ...ref.fnSig });
+    }
+    return (
+      bound.trait === ref.trait &&
+      bound.args.every((arg, i) => ref.args[i] === undefined || this.unifier.unify(arg, ref.args[i])) &&
+      this.itemsMatch(bound, ref)
+    );
   }
 
   /** Whether a bound gives the `Item` that a required `Iterator` or `IntoIterator` names, as its own or as `IntoItem`. */

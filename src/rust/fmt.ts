@@ -315,9 +315,6 @@ export class Formatter {
           start + separator + (range.end === undefined ? '' : this.debug(range.end, t.args[0], spec, indent, write))
         );
       }
-      case 'Ordering': {
-        return pad(def.variants[(v as EnumValue).variant].name, spec, '<', write);
-      }
       case 'ParseIntError':
       case 'ParseFloatError':
       case 'ParseCharError':
@@ -390,8 +387,7 @@ export class Formatter {
     const variant = def.variants[variantIndex];
     const fields = v instanceof EnumValue || v instanceof StructValue ? v.fields : [];
     const types = this.hooks.fieldTypes(def, t.args, variantIndex);
-    if (variant.shape === 'unit') return pad(variant.name, spec, '<', write);
-    if (variant.shape === 'tuple' && types.length === 0) return pad(variant.name, spec, '<', write);
+    if (variant.shape === 'unit' || (variant.shape === 'tuple' && types.length === 0)) return emit(variant.name, write);
     const parts = types.map(
       (type, index) => (inner: number | undefined) => this.debug(fields[index], type, spec, inner, write)
     );

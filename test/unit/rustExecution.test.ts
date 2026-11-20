@@ -3228,3 +3228,101 @@ test('enforces Rust ADT trait bounds wherever a generic type is written', () => 
   );
   expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '4\n' });
 });
+
+test('selects the Rust trait bound that agrees with the call signature', () => {
+  const declarations = `trait A<T> { fn get(&self) -> T; fn make(value: T) -> T; }
+    trait Both: A<bool> + A<i32> {}
+    struct S;
+    impl A<bool> for S { fn get(&self) -> bool { true } fn make(value: bool) -> bool { value } }
+    impl A<i32> for S { fn get(&self) -> i32 { 3 } fn make(value: i32) -> i32 { value } }
+    impl Both for S {}`;
+  const valid = rustMain(
+    'println!("{:?}", run(&S));',
+    `${declarations}
+      fn run<X: Both>(x: &X) -> (i32, bool) {
+        let number: i32 = x.get();
+        let flag: bool = X::make(false);
+        (number, flag)
+      }`
+  );
+  expect(executeProgram('rust', valid)).toMatchObject({ kind: 'executed', stdout: '(3, false)\n' });
+  for (const bounds of ['A<i32> + A<bool>', 'A<bool> + A<i32>', 'Both']) {
+    const ambiguous = rustMain('', `${declarations} fn run<X: ${bounds}>(x: &X) { let _ = x.get(); }`);
+    expect(executeProgram('rust', ambiguous).kind).toBe('compileError');
+  }
+});
+
+test('validates Rust String mutation ranges before checking UTF-8 boundaries', () => {
+  const invalidRanges = [
+    ['drain(9..)', 'core/src/slice/index.rs:1020:55', 'range start index 9 out of range for slice of length 6'],
+    ['drain(2..9)', 'core/src/slice/index.rs:1009:51', 'range end index 9 out of range for slice of length 6'],
+    ['drain(3..2)', 'core/src/slice/index.rs:1020:55', 'slice index starts at 3 but ends at 2'],
+    [
+      'replace_range(..=usize::MAX, "a")',
+      'core/src/slice/index.rs:1005:52',
+      'range end index 18446744073709551615 out of range for slice of length 6',
+    ],
+    ['drain(..2)', 'src/main.rs:', 'assertion failed: self.is_char_boundary(end)'],
+    ['replace_range(2.., "a")', 'src/main.rs:', 'start of range should be a character boundary'],
+    ['replace_range(..2, "a")', 'src/main.rs:', 'end of range should be a character boundary'],
+  ];
+  for (const [call, location, message] of invalidRanges) {
+    const result = executeProgram('rust', rustMain(`let mut s = String::from("héllo"); s.${call};`));
+    expect(result).toMatchObject({ kind: 'executed', uncaughtException: expect.stringContaining(location) });
+    expect(result).toMatchObject({ uncaughtException: expect.stringContaining(message) });
+  }
+  const program = rustMain(`let mut s = String::from("aé🐢z");
+    let removed: String = s.drain(1..3).collect();
+    s.replace_range(1..=4, "b");
+    println!("{} {}", removed, s);`);
+  expect(executeProgram('rust', program)).toMatchObject({ kind: 'executed', stdout: 'é abz\n' });
+});
+
+test('uses the Rust panic text for the slice clone implementation and deque index', () => {
+  for (const [body, items, message] of [
+    [
+      '[0, 0].clone_from_slice(&[1]);',
+      '',
+      'copy_from_slice: source slice length (1) does not match destination slice length (2)',
+    ],
+    [
+      '[String::new(), String::new()].clone_from_slice(&[String::new()]);',
+      '',
+      'destination and source slices have different lengths',
+    ],
+    [
+      '[Manual, Manual].clone_from_slice(&[Manual]);',
+      'struct Manual; impl Copy for Manual {} impl Clone for Manual { fn clone(&self) -> Self { *self } }',
+      'destination and source slices have different lengths',
+    ],
+  ]) {
+    expect(executeProgram('rust', rustMain(body, items))).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining(message),
+    });
+  }
+  for (const [args, line, index] of [
+    ['2, 3', 1030, 'i'],
+    ['0, 2', 1031, 'j'],
+  ] as const) {
+    const program = rustMain(`std::collections::VecDeque::from([1, 2]).swap(${args});`);
+    expect(executeProgram('rust', program)).toMatchObject({
+      kind: 'executed',
+      uncaughtException: expect.stringContaining(
+        `alloc/src/collections/vec_deque/mod.rs:${line}:9:\nassertion failed: ${index} < self.len()`
+      ),
+    });
+  }
+});
+
+test('formats fieldless Rust derives independently of Debug width', () => {
+  const program = rustMain(
+    `println!("[{:>6?}] [{:<7?}] [{:>8?}] [{:>8?}] [{:>4?}] [{:>8?}]",
+       Unit, Direction::North, std::cmp::Ordering::Less, None::<i32>, (), vec![Direction::East]);`,
+    '#[derive(Debug)] struct Unit; #[derive(Debug)] enum Direction { North, East }'
+  );
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[Unit] [North] [Less] [None] [  ()] [[East]]\n',
+  });
+});

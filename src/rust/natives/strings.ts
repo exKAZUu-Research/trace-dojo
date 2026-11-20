@@ -22,6 +22,7 @@ import {
 import { checkVecCapacity, withStringCapacity } from './capacityNatives';
 import { arrayIter } from './iterators';
 import { parseFloatText, parseInteger } from './numbers';
+import { checkedRangeBounds } from './ranges';
 import {
   linesIter,
   matchesIter,
@@ -145,10 +146,14 @@ function matchEmpty(text: string, from: number): { index: number; length: number
 /** The text before a byte offset, which `String`'s methods assert is at a character boundary. */
 function headAtBoundary(ctx: NativeContext, text: string, offset: number, name: string): string {
   const bytes = encoder.encode(text);
-  if (offset > bytes.length || (offset < bytes.length && (bytes[offset] & 0xc0) === 0x80)) {
+  if (!isCharBoundary(bytes, offset)) {
     panic(ctx, `assertion failed: self.is_char_boundary(${name})`);
   }
   return decodeUtf8(bytes.subarray(0, offset));
+}
+
+function isCharBoundary(bytes: Uint8Array, offset: number): boolean {
+  return offset === bytes.length || (offset < bytes.length && (bytes[offset] & 0xc0) !== 0x80);
 }
 
 /**
@@ -404,13 +409,7 @@ const strNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   parse: ([s], ctx) => parse(ctx, str(s)),
   to_owned: ([s]) => str(s),
   into_string: ([s]) => str(s),
-  is_char_boundary: ([s, i]) => {
-    const bytes = encoder.encode(str(s));
-    const index = Number(i as bigint);
-    if (index === 0 || index === bytes.length) return true;
-    if (index > bytes.length) return false;
-    return (bytes[index] & 0xc0) !== 0x80;
-  },
+  is_char_boundary: ([s, i]) => isCharBoundary(encoder.encode(str(s)), Number(i as bigint)),
   get: ([s, range], ctx) => {
     const text = str(s);
     const { start, end } = rangeBounds(range, byteLength(text));
@@ -549,12 +548,10 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   drain: ([self, range], ctx) => {
     const place = placeOf(self);
     const text = place.get() as string;
-    const { start, end } = rangeBounds(range, byteLength(text));
-    headAtBoundary(ctx, text, start ?? 0, 'start');
-    headAtBoundary(ctx, text, end ?? byteLength(text), 'end');
-    const removed = strSliceBytes(text, start, end, ctx.span);
-    const head = strSliceBytes(text, 0, start, ctx.span);
-    place.set(head + text.slice(head.length + removed.length));
+    const bytes = encoder.encode(text);
+    const [start, end] = stringRange(ctx, bytes, range, 'drain');
+    const removed = decodeUtf8(bytes.subarray(start, end));
+    place.set(decodeUtf8(bytes.subarray(0, start)) + decodeUtf8(bytes.subarray(end)));
     const iter = strIter(removed, ctx);
     return described(iter, (show) =>
       tuplePart('Drain', [(indent) => show((iter.rest?.() ?? []).join(''), REF_STR, indent)])
@@ -569,11 +566,9 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
   },
   replace_range: ([self, range, with_], ctx) => {
     const place = placeOf(self);
-    const text = place.get() as string;
-    const { start, end } = rangeBounds(range, byteLength(text));
-    const head = strSliceBytes(text, 0, start, ctx.span);
-    const middle = strSliceBytes(text, start, end, ctx.span);
-    place.set(head + str(with_) + text.slice(head.length + middle.length));
+    const bytes = encoder.encode(place.get() as string);
+    const [start, end] = stringRange(ctx, bytes, range, 'replace');
+    place.set(decodeUtf8(bytes.subarray(0, start)) + str(with_) + decodeUtf8(bytes.subarray(end)));
     return UNIT_VALUE;
   },
   extend: ([self, iter], ctx) => {
@@ -590,6 +585,28 @@ const stringNatives: Record<string, (args: Value[], ctx: NativeContext) => Value
     return UNIT_VALUE;
   },
 };
+
+function stringRange(
+  ctx: NativeContext,
+  bytes: Uint8Array,
+  range: Value,
+  method: 'drain' | 'replace'
+): [number, number] {
+  const [start, end] = checkedRangeBounds(ctx, range, bytes.length);
+  for (const [point, offset] of [
+    ['start', start],
+    ['end', end],
+  ] as const) {
+    if (isCharBoundary(bytes, offset)) continue;
+    panic(
+      ctx,
+      method === 'drain'
+        ? `assertion failed: self.is_char_boundary(${point})`
+        : `${point} of range should be a character boundary`
+    );
+  }
+  return [start, end];
+}
 
 /** A string a native builds piece by piece, with a piece added, checked before it is built. */
 function appended(ctx: NativeContext, text: string, piece: string): string {

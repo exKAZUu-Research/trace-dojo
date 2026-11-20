@@ -38,6 +38,7 @@ import { extendRoom, withCapacity } from './capacityNatives';
 import { dequeDrain, dequeIter, dequeSlices, withDequeHead } from './dequeHead';
 import { arrayIter, collectVec, heapPop, heapPush, ownedIter, sliceIter } from './iterators';
 import { layoutOf, sizeOf } from './layout';
+import { checkedRangeBounds } from './ranges';
 import { dedupBy, intoSortedVec, lessByKey, lessByPartialOrd, sortByCachedKey, sortSlice } from './sorting';
 import {
   call,
@@ -92,24 +93,6 @@ function cmpWith(ctx: NativeContext, f: Value): (a: Value, b: Value) => number {
     ctx.runtime.spend();
     return (deref(call(ctx, f, [a, b])) as { variant: number }).variant - 1;
   };
-}
-
-/** The bounds of a `drain`'s range, which panics as slicing does outside the elements. */
-function drainBounds(ctx: NativeContext, items: Value[], range: Value): [number, number] {
-  const r = deref(range) as RangeValue | undefined;
-  const start = r?.sliceStart() ?? 0;
-  const end = r?.sliceEnd() ?? items.length;
-  if (start > end) {
-    libraryPanic(ctx, `slice index starts at ${start} but ends at ${end}`, 'core/src/slice/index.rs:1020:55');
-  }
-  if (end > items.length) {
-    libraryPanic(
-      ctx,
-      `range end index ${end} out of range for slice of length ${items.length}`,
-      'core/src/slice/index.rs:1009:51'
-    );
-  }
-  return [start, end];
 }
 
 /** `get` with a range: the part of the slice it covers, or `None` when it reaches outside. */
@@ -327,9 +310,8 @@ const sliceNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
     }
     return rotate(slice, sliceLength(slice) - Number(k as bigint), ctx);
   },
-  copy_from_slice: ([self, src], ctx) => copyFrom(ctx, deref(self), deref(src), (item) => copyValue(item)),
-  clone_from_slice: ([self, src], ctx) =>
-    copyFrom(ctx, deref(self), deref(src), (item) => cloneValue(elemType(ctx), item)),
+  copy_from_slice: ([self, src], ctx) => copyFrom(ctx, deref(self), deref(src)),
+  clone_from_slice: ([self, src], ctx) => copyFrom(ctx, deref(self), deref(src), elemType(ctx)),
   repeat: ([self, n], ctx) => {
     const items = sliceItems(deref(self));
     const length = items.length * Number(n as bigint);
@@ -456,16 +438,52 @@ function reverseElements(items: Value[], start: number, end: number): void {
   for (let left = start, right = end - 1; left < right; left++, right--) swapOwnedElements(items, left, right);
 }
 
-function copyFrom(ctx: NativeContext, target: Value, source: Value, copy: (item: Value) => Value): Value {
+function copyFrom(ctx: NativeContext, target: Value, source: Value, cloneType?: Type): Value {
   const items = sliceItems(source);
-  if (items.length !== sliceLength(target)) {
+  const length = sliceLength(target);
+  const trivial = !cloneType || isTrivialClone(cloneType);
+  if (items.length !== length) {
     panic(
       ctx,
-      `copy_from_slice: source slice length (${items.length}) does not match destination slice length (${sliceLength(target)})`
+      trivial
+        ? `copy_from_slice: source slice length (${items.length}) does not match destination slice length (${length})`
+        : 'destination and source slices have different lengths'
     );
   }
-  for (const [index, item] of items.entries()) sliceSet(target, index, copy(item));
+  for (const [index, item] of items.entries()) {
+    sliceSet(target, index, trivial ? copyValue(item) : cloneValue(cloneType, item));
+  }
   return UNIT_VALUE;
+}
+
+function isTrivialClone(type: Type): boolean {
+  const t = shallow(type);
+  switch (t.kind) {
+    case 'int':
+    case 'float':
+    case 'bool':
+    case 'char':
+    case 'fn':
+    case 'never': {
+      return true;
+    }
+    case 'ref': {
+      return !t.mutable;
+    }
+    case 'tuple': {
+      return t.elems.every(isTrivialClone);
+    }
+    case 'array': {
+      return isTrivialClone(t.elem);
+    }
+    case 'adt': {
+      if (t.def.builtin === 'Option') return isTrivialClone(t.args[0]);
+      return t.def.params.length === 0 && t.def.derives.has('Copy') && t.def.derives.has('Clone');
+    }
+    default: {
+      return false;
+    }
+  }
 }
 
 /** Clones of a slice's elements, as a new `Vec` holds them. */
@@ -563,7 +581,7 @@ const vecNatives: Record<string, (args: Value[], ctx: NativeContext) => Value> =
   },
   drain: ([self, range], ctx) => {
     const items = vec(self);
-    const [start, end] = drainBounds(ctx, items, range);
+    const [start, end] = checkedRangeBounds(ctx, range, items.length);
     return ownedIter(items.splice(start, end - start));
   },
   retain: ([self, f], ctx) => retainElements(vec(self), (item) => deref(call(ctx, f, [item.get()])) as boolean),
@@ -667,13 +685,22 @@ const dequeNatives: Record<string, (args: Value[], ctx: NativeContext) => Value>
   extend: ([self, iter], ctx) => vecNatives.extend([self, iter], ctx),
   retain: ([self, f], ctx) => vecNatives.retain([self, f], ctx),
   truncate: ([self, len], ctx) => vecNatives.truncate([self, len], ctx),
-  swap: ([self, a, b], ctx) => sliceNatives.swap([self, a, b], ctx),
+  swap: ([self, a, b], ctx) => {
+    const items = vec(self);
+    const i = Number(a as bigint);
+    const j = Number(b as bigint);
+    const location = 'alloc/src/collections/vec_deque/mod.rs';
+    if (i >= items.length) libraryPanic(ctx, 'assertion failed: i < self.len()', `${location}:1030:9`);
+    if (j >= items.length) libraryPanic(ctx, 'assertion failed: j < self.len()', `${location}:1031:9`);
+    swapOwnedElements(items, i, j);
+    return UNIT_VALUE;
+  },
   rotate_left: ([self, n], ctx) => rotateDeque(ctx, vec(self), n as bigint, false),
   rotate_right: ([self, n], ctx) => rotateDeque(ctx, vec(self), n as bigint, true),
   make_contiguous: ([self]) => self,
   drain: ([self, range], ctx) => {
     const items = vec(self);
-    const [start, end] = drainBounds(ctx, items, range);
+    const [start, end] = checkedRangeBounds(ctx, range, items.length);
     return dequeDrain(items, start, end, dequeCapacity(items, ctx));
   },
   into_iter: ([self]) => ownedIter(vec(self)),

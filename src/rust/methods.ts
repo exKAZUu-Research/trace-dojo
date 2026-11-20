@@ -4,6 +4,7 @@ import type { Program } from './items';
 import { intoIterItem, intoIterShape, iterationBound } from './iterTypes';
 import type { TraitSolver } from './traits';
 import {
+  allSupertraits,
   type FnDef,
   freshVar,
   type ImplDef,
@@ -11,7 +12,6 @@ import {
   ref,
   shallow,
   substitute,
-  supertraitsOf,
   type TraitDef,
   type TraitRef,
   type Type,
@@ -201,9 +201,9 @@ function resolveTraitCandidate(
     if (other) return { ...found, ambiguousWith: other.trait };
     const { trait } = candidate;
     if (
-      candidate.concrete &&
       trait.params.length > 0 &&
-      (trait.builtin || others.some((item) => item.concrete && item.trait === trait && applies(solver, item.attempt)))
+      ((candidate.concrete && trait.builtin) ||
+        others.some((item) => item.trait === trait && applies(solver, item.attempt)))
     ) {
       const fn = trait.methods.get(name)!;
       const selfType = selfForMode(fn.selfMode!, receiver)!;
@@ -350,20 +350,6 @@ export function boundsOf(type: Type): TraitRef[] | undefined {
   return undefined;
 }
 
-export function allSupertraits(bounds: TraitRef[], self?: Type): TraitRef[] {
-  const result: TraitRef[] = [];
-  const seen = new Set<TraitDef>();
-  const stack = [...bounds];
-  while (stack.length > 0) {
-    const bound = stack.shift() as TraitRef;
-    if (seen.has(bound.trait)) continue;
-    seen.add(bound.trait);
-    result.push(bound);
-    stack.push(...supertraitsOf(bound, self));
-  }
-  return result;
-}
-
 interface Associated {
   fn: FnDef;
   typeArgs: Type[];
@@ -398,10 +384,13 @@ function inherentAssociated(program: Program, solver: TraitSolver, t: Type, name
 }
 
 function boundAssociated(t: Type, name: string): Associated | undefined {
-  const [first, second] = boundMethods(t, name);
+  const [first, ...others] = boundMethods(t, name);
   if (!first) return undefined;
   const { bound, fn } = first;
-  return { fn, typeArgs: [t, ...bound.args, ...ownParams(fn)], ambiguousWith: second?.bound.trait };
+  const other = others.find((entry) => entry.bound.trait !== bound.trait);
+  if (other) return { fn, typeArgs: [t, ...bound.args, ...ownParams(fn)], ambiguousWith: other.bound.trait };
+  if (bound.trait.params.length > 0 && others.length > 0) return independentTraitMethod(bound.trait, fn, t);
+  return { fn, typeArgs: [t, ...bound.args, ...ownParams(fn)] };
 }
 
 function boundMethods(t: Type, name: string): { bound: TraitRef; fn: FnDef }[] {
