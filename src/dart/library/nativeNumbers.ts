@@ -90,9 +90,10 @@ function toStringAsPrecision(runtime: Runtime, value: number, digits: Value): st
   return Object.is(value, -0) ? `-${text}` : text;
 }
 
-const DOUBLE_PATTERN = /^[+-]?(?:(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?|Infinity|NaN)$/;
+const DOUBLE_PATTERN = /^[+-]?(?:(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|Infinity|NaN)$/;
 
-export function parseDouble(text: string): number | undefined {
+function parseDouble(runtime: Runtime, text: string): number | undefined {
+  runtime.spend(1 + text.length / 64);
   const trimmed = trimDartWhitespace(text);
   if (!DOUBLE_PATTERN.test(trimmed)) return undefined;
   if (trimmed.endsWith('NaN')) return Number.NaN;
@@ -333,20 +334,20 @@ define('int.tryParse', (runtime, _self, [source], namedArgs) =>
 );
 define('double.parse', (runtime, _self, [source]) => {
   const text = stringArg(runtime, source, 'source');
-  const result = parseDouble(text);
+  const result = parseDouble(runtime, text);
   if (result === undefined) throwFormat(runtime, 'Invalid double', text);
   return result;
 });
-define('double.tryParse', (runtime, _self, [source]) => parseDouble(stringArg(runtime, source, 'source')));
+define('double.tryParse', (runtime, _self, [source]) => parseDouble(runtime, stringArg(runtime, source, 'source')));
 define('num.parse', (runtime, _self, [source]) => {
   const text = stringArg(runtime, source, 'input');
-  const result = tryParseInt(runtime, text) ?? parseDouble(text);
+  const result = tryParseInt(runtime, text) ?? parseDouble(runtime, text);
   if (result === undefined) runtime.throwError('FormatException', '', [text]);
   return result;
 });
 define('num.tryParse', (runtime, _self, [source]) => {
   const text = stringArg(runtime, source, 'input');
-  return tryParseInt(runtime, text) ?? parseDouble(text);
+  return tryParseInt(runtime, text) ?? parseDouble(runtime, text);
 });
 
 // bool

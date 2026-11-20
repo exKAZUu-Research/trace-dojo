@@ -1142,14 +1142,20 @@ void main() {
   print(Nullable<String>.new(4, 'tear-off').runtimeType);
   print((Nullable.new)(5, 'tear-off').y);
   print(FixedNullable(5, 'direct').y);
+  print(new FixedNullable.new(5, 'explicit').y);
   print(FixedNullable.new(5, 'selector')?.y);
 }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
     stdout:
-      'new\n2\nnamed\nBox<int, String>\nBox<int, String>\n3\nnullable\nBox<int, String>\ntear-off\ndirect\nselector\n',
+      'new\n2\nnamed\nBox<int, String>\nBox<int, String>\n3\nnullable\nBox<int, String>\ntear-off\ndirect\nexplicit\nselector\n',
   });
-  for (const invocation of ['Nullable(1, 2)', 'Nullable.new(1, 2)', "FixedNullable.named(x: 1, y: '')"]) {
+  for (const invocation of [
+    'Nullable(1, 2)',
+    'Nullable.new(1, 2)',
+    "FixedNullable.new(1, '')",
+    "FixedNullable.named(x: 1, y: '')",
+  ]) {
     expect(executeProgram('dart', `${declarations} void main() { print(${invocation}.y); }`)).toMatchObject({
       kind: 'compileError',
     });
@@ -1275,8 +1281,9 @@ test('numeric parsing applies the SDK whitespace and argument rules', () => {
   print(double.tryParse('\u00851.5'));
   print(num.tryParse('2.5\u0085'));
   print(int.tryParse('\u008542'));
+  print([double.tryParse('9' * 120000 + 'x'), num.tryParse('x' + ' ' * 120000 + 'x')]);
 }`;
-  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '1.5\n2.5\n42\n' });
+  expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: '1.5\n2.5\n42\n[null, null]\n' });
   expect(executeProgram('dart', 'void main() { print(int.parse("42", onError: (s) => 0)); }')).toMatchObject({
     kind: 'compileError',
   });

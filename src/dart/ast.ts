@@ -390,13 +390,14 @@ export type Expression =
   | ({ kind: 'member'; object: Expression; name: string; nullAware: boolean } & Span)
   | ({ kind: 'index'; object: Expression; index: Expression; nullAware: boolean } & Span)
   | ({ kind: 'call'; callee: Expression; typeArguments: TypeSyntax[] | undefined; arguments: Arguments } & Span)
-  /** `new C<T>.name(…)` or `const C<T>.name(…)`, written with the keyword. */
+  /** Construction with a keyword or through a constructor selector. */
   | ({
       kind: 'new';
       type: TypeSyntax;
       constructorName: string | undefined;
       arguments: Arguments;
       isConst: boolean;
+      isSelectorCall: boolean;
     } & Span)
   | ({ kind: 'assign'; target: Expression; operator: string; value: Expression } & Span)
   | ({ kind: 'patternAssign'; pattern: Pattern; value: Expression } & Span)

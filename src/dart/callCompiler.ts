@@ -568,7 +568,7 @@ export abstract class CallCompiler extends OperatorCompiler {
     const writtenTypes = typeSyntax.args.length > 0 ? typeSyntax.args : undefined;
     const target =
       declaration?.kind === 'alias'
-        ? this.aliasConstructor(declaration.alias, writtenTypes, expression)
+        ? this.aliasConstructor(declaration.alias, writtenTypes, expression, expression.isSelectorCall)
         : declaration?.kind === 'class'
           ? { cls: declaration.cls, types: this.classTypeArguments(declaration.cls, writtenTypes, expression) }
           : undefined;

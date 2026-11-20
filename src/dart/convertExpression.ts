@@ -548,6 +548,7 @@ export abstract class ExpressionConverter {
       constructorName: fieldOf(node, 'constructor')?.text,
       arguments: this.convertArguments(requireNode(fieldOf(node, 'arguments'), node)),
       isConst: node.type === 'const_object_expression',
+      isSelectorCall: false,
       ...spanOf(node),
     };
   }
@@ -559,6 +560,7 @@ export abstract class ExpressionConverter {
       constructorName: fieldOf(node, 'constructor')?.text,
       arguments: this.convertArguments(requireNode(fieldOf(node, 'arguments'), node)),
       isConst: false,
+      isSelectorCall: true,
       ...spanOf(node),
     };
   }
@@ -1031,6 +1033,7 @@ export abstract class ExpressionConverter {
         constructorName: parts[1]?.text,
         arguments: this.convertArguments(requireNode(argumentsNode, node)),
         isConst: true,
+        isSelectorCall: false,
         ...span,
       };
     }
