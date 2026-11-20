@@ -1025,6 +1025,26 @@ test('releases an uncaught exception after reporting or handling it, before shut
   });
 });
 
+test.each([
+  ['new D(2);', /^outer;inner;d2;d1;d14;$/],
+  [
+    'set_exception_handler(function ($e) { echo "last;"; }); function g($p) { throw new Exception("z"); } g(new D(2));',
+    /^outer;inner;last;d2;d1;d14;$/,
+  ],
+  ['exit("bye;");', /^outer;inner;bye;d14;d1;$/],
+  ['throw new Exception("z");', /^outer;inner;\nFatal error: Uncaught Exception: z .*d14;d1;$/s],
+])('releases a handled exception after a replacement handler finishes: %s', (body, stdout) => {
+  const handler = `set_exception_handler(function ($e) {
+    echo "outer;";
+    set_exception_handler(function ($e) { echo "inner;"; ${body} });
+    throw new Exception("y");
+  });`;
+  expect(run(uncaughtReleaseProgram(handler))).toMatchObject({
+    kind: 'executed',
+    stdout: expect.stringMatching(stdout),
+  });
+});
+
 test('a first-class callable of a closure is the closure itself', () => {
   expect(
     run(

@@ -81,23 +81,25 @@ function guard(runtime: Runtime, run: () => void): string | undefined {
     run();
     return undefined;
   } catch (error) {
-    return report(runtime, error);
+    return report(runtime, error).failure;
   }
 }
+
+type ReportOutcome = { kind: 'handled' | 'exit'; failure?: never } | { kind: 'failure'; failure: string };
 
 /** The runs that rejected an unsupported feature, wherever it was raised (including in an exception handler). */
 const rejectedRuns = new WeakSet<Runtime>();
 
 // code-gauge-allow functionCognitiveComplexity 24 -- Dispatches uncaught outcomes before runtime shutdown.
-function report(runtime: Runtime, error: unknown, inShutdown = false): string | undefined {
+function report(runtime: Runtime, error: unknown, inShutdown = false): ReportOutcome {
   if (error instanceof ExitSignal) {
     if (inShutdown) runtime.shuttingDown = true;
-    return undefined;
+    return { kind: 'exit' };
   }
   if (error instanceof UnsupportedFeatureError) {
     restoreStack(runtime);
     rejectedRuns.add(runtime);
-    return error.message;
+    return { kind: 'failure', failure: error.message };
   }
   if (error instanceof PhpThrow) {
     restoreStack(runtime);
@@ -108,7 +110,7 @@ function report(runtime: Runtime, error: unknown, inShutdown = false): string | 
     restoreStack(runtime);
     const message = `Fatal error: ${error.message} in ${SCRIPT_PATH} on line ${(error.row ?? 0) + 1}\nStack trace:\n${trace}`;
     runtime.echo(`\n${message}\n`);
-    return dec(message);
+    return { kind: 'failure', failure: dec(message) };
   }
   if (error instanceof FatalError) {
     const records = error.calls as CallRecord[];
@@ -117,44 +119,46 @@ function report(runtime: Runtime, error: unknown, inShutdown = false): string | 
     const file = error.row < 0 ? 'Unknown' : SCRIPT_PATH;
     const message = `Fatal error: ${error.message ? `${error.message} in ${file} on line ${error.row + 1}${error.withTrace ? `\nStack trace:\n${trace}` : ''}` : ''}`;
     if (error.message) runtime.echo(`\n${message}\n`);
-    return dec(message);
+    return { kind: 'failure', failure: dec(message) };
   }
   throw error;
 }
 
-/** Releases an uncaught exception once it is reported or handled, returning whether the release completed. */
-function releaseUncaught(runtime: Runtime, object: PhpObject): { completed: boolean; failure?: string } {
-  if (runtime.thrown === object) runtime.thrown = undefined;
-  try {
-    // A destructor's exception here is a fatal error in PHP, which ends the release; shutdown frees what remains.
-    runtime.withNativeReleaseMode('shutdown', () => runtime.release([object], false, true));
-    return { completed: true };
-  } catch (error) {
-    return { completed: false, failure: report(runtime, error) };
-  }
-}
-
-function invokeExceptionHandler(runtime: Runtime, object: PhpObject, inShutdown: boolean): string | undefined {
+function invokeExceptionHandler(runtime: Runtime, object: PhpObject, inShutdown: boolean): ReportOutcome {
   const handler = runtime.exceptionHandler;
   if (handler === null || handler === undefined) {
-    const message = printUncaught(runtime, object);
-    return releaseUncaught(runtime, object).failure ?? message;
+    const uncaught = printUncaught(runtime, object);
+    const interrupted = releaseUncaught(runtime, object);
+    return interrupted?.kind === 'failure' ? interrupted : uncaught;
   }
   runtime.replacedExceptionHandlers.push(handler);
   runtime.exceptionHandler = undefined;
   try {
     // PHP calls the handler after the program's code has unwound, from no line of it.
     asInternal(() => callValue(handler, [{ v: object }], undefined));
-    // PHP releases the handled exception before restoring the handler, so its destructors' exceptions go uncaught.
-    const { completed, failure } = releaseUncaught(runtime, object);
-    if (completed && runtime.exceptionHandler === undefined)
-      runtime.exceptionHandler = runtime.replacedExceptionHandlers.pop() ?? null;
-    return failure;
-  } catch (error_) {
-    // PHP keeps the handled exception alive until shutdown when the handler throws, and reports and releases the
-    // handler's own exception.
+  } catch (error) {
+    const holdIndex = runtime.held.length;
     runtime.held.push(object);
-    return report(runtime, error_, inShutdown);
+    const nested = report(runtime, error, inShutdown);
+    if (nested.kind !== 'handled') return nested;
+    runtime.held.splice(holdIndex, 1);
+  }
+  // PHP releases the handled exception before restoring the handler.
+  const interrupted = releaseUncaught(runtime, object);
+  if (interrupted) return interrupted;
+  if (runtime.exceptionHandler === undefined)
+    runtime.exceptionHandler = runtime.replacedExceptionHandlers.pop() ?? null;
+  return { kind: 'handled' };
+}
+
+function releaseUncaught(runtime: Runtime, object: PhpObject): ReportOutcome | undefined {
+  if (runtime.thrown === object) runtime.thrown = undefined;
+  try {
+    // A destructor's exception here is a fatal error in PHP, which ends the release; shutdown frees what remains.
+    runtime.withNativeReleaseMode('shutdown', () => runtime.release([object], false, true));
+    return undefined;
+  } catch (error) {
+    return report(runtime, error);
   }
 }
 
@@ -164,13 +168,13 @@ function restoreStack(runtime: Runtime): void {
   resetCallStack();
 }
 
-function printUncaught(runtime: Runtime, object: PhpObject): string | undefined {
+function printUncaught(runtime: Runtime, object: PhpObject): ReportOutcome {
   for (;;) {
     try {
       const text = throwableText(object);
       const message = `Fatal error: Uncaught ${text}\n  thrown in ${throwableLocation(object)}`;
       if ((runtime.errorReporting & E_ERROR) !== 0n) runtime.echo(`\n${message}\n`);
-      return dec(message);
+      return { kind: 'failure', failure: dec(message) };
     } catch (error) {
       if (!(error instanceof PhpThrow)) return report(runtime, error);
       runtime.spend();
@@ -236,7 +240,7 @@ function guardShutdownStep(runtime: Runtime, run: () => void): { stop: boolean; 
     run();
     return { stop: runtime.shuttingDown || runtime.exhausted };
   } catch (error) {
-    const failure = report(runtime, error, true);
+    const { failure } = report(runtime, error, true);
     return { stop: failure !== undefined || runtime.shuttingDown || runtime.exhausted, failure };
   }
 }
