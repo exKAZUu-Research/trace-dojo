@@ -11,16 +11,27 @@ export interface CultureComparison {
   ignoreCase?: boolean;
 }
 
-const LOCALES = { current: 'ja-JP', invariant: 'und' } as const;
+// The root collation, which .NET's invariant culture uses: `en` has no tailoring, and `und` takes the host's locale in Node.
+const LOCALES = { current: 'ja-JP', invariant: 'en' } as const;
 
 const collators = new Map<string, Intl.Collator>();
 
-function collator(isInvariant: boolean | undefined, sensitivity: 'variant' | 'accent' | 'base'): Intl.Collator {
+type Sensitivity = 'variant' | 'accent' | 'base' | 'caseBits';
+
+/**
+ * A collator of a strength; `caseBits` also tells apart the case bits that ICU keeps in each collation element, which
+ * ICU's comparison of strings ignores at the tertiary strength and .NET's search compares, as the halfwidth Hangul
+ * have other bits than the letters they equal.
+ */
+function collator(isInvariant: boolean | undefined, sensitivity: Sensitivity): Intl.Collator {
   const locale = isInvariant ? LOCALES.invariant : LOCALES.current;
   const key = `${locale}/${sensitivity}`;
   let found = collators.get(key);
   if (!found) {
-    found = new Intl.Collator(locale, { sensitivity, usage: 'sort' });
+    found =
+      sensitivity === 'caseBits'
+        ? new Intl.Collator(locale, { sensitivity: 'variant', caseFirst: 'upper', usage: 'sort' })
+        : new Intl.Collator(locale, { sensitivity, usage: 'sort' });
     collators.set(key, found);
   }
   return found;
@@ -38,8 +49,11 @@ interface Comparison {
   comparable: (text: string) => string;
 }
 
-function comparisonOf(options: CultureComparison): Comparison {
-  if (!options.ignoreCase) return { compare: collator(options.isInvariant, 'variant').compare, comparable: same };
+/** The comparison of strings, or, with `isElementwise`, of collation elements, as .NET's search and affixes compare. */
+function comparisonOf(options: CultureComparison, isElementwise = false): Comparison {
+  if (!options.ignoreCase) {
+    return { compare: collator(options.isInvariant, isElementwise ? 'caseBits' : 'variant').compare, comparable: same };
+  }
   const keys = tailoringOf(options.isInvariant);
   return {
     compare: collator(options.isInvariant, 'accent').compare,
@@ -393,11 +407,11 @@ export function cultureLastIndexOf(
 export function cultureStartsWith(text: string, value: string, options: CultureComparison = {}): boolean {
   if (!options.ignoreCase && PLAIN.test(text) && PLAIN.test(value)) return text.startsWith(value);
   const source = affixSource(text, options);
-  const pattern = value.normalize('NFD');
-  const { compare, comparable } = comparisonOf(options);
+  const pattern = affixSource(value, options);
+  const { compare, comparable } = comparisonOf(options, true);
   const target = comparable(pattern);
   for (let stop = 0; stop <= source.length; stop++) {
-    if (isInsideSurrogatePair(source, stop) || startsWithCombining(source, stop, options.isInvariant)) continue;
+    if (isInsideAffixElement(source, stop) || startsWithCombining(source, stop, options.isInvariant)) continue;
     const prefix = comparable(source.slice(0, stop));
     if (compare(prefix, target) === 0) return true;
     if (!isPrimaryPrefix(prefix, target, options.isInvariant)) return false;
@@ -409,11 +423,11 @@ export function cultureStartsWith(text: string, value: string, options: CultureC
 export function cultureEndsWith(text: string, value: string, options: CultureComparison = {}): boolean {
   if (!options.ignoreCase && PLAIN.test(text) && PLAIN.test(value)) return text.endsWith(value);
   const source = affixSource(text, options);
-  const pattern = value.normalize('NFD');
-  const { compare, comparable } = comparisonOf(options);
+  const pattern = affixSource(value, options);
+  const { compare, comparable } = comparisonOf(options, true);
   const target = comparable(pattern);
   for (let start = source.length; start >= 0; start--) {
-    if (isInsideSurrogatePair(source, start)) continue;
+    if (isInsideAffixElement(source, start)) continue;
     // The text's characters weigh after the character before them, and the value's on their own, as in `matchesAt`.
     let base = Math.max(0, start - 1);
     while (base > 0 && /\p{M}/u.test(source[base])) base--;
@@ -426,8 +440,8 @@ export function cultureEndsWith(text: string, value: string, options: CultureCom
 
 /**
  * The text that `StartsWith` and `EndsWith` compare elements of, with each character's elements at a position of their
- * own: decomposed, and ignoring case, with a character that has the weights of its compatibility decomposition into
- * more characters, as `ǆ` has those of `dž`, replaced by that, unless .NET's rules place either.
+ * own: decomposed, and ignoring case, with a character whose elements are those of its compatibility decomposition
+ * into more characters, as `ǆ` has those of `dž`, replaced by a text with the same elements.
  */
 function affixSource(text: string, options: CultureComparison): string {
   const source = text.normalize('NFD');
@@ -439,20 +453,64 @@ function affixSource(text: string, options: CultureComparison): string {
 
 const expansions = new Map<string, string | undefined>();
 
+/**
+ * The text with the elements of a character's compatibility decomposition, which ICU's root collation gives it and
+ * the culture's rules leave as they are: a kana keeps its weight before .NET's rules, which a hiragana has, without
+ * the weight that ja-JP gives `ー` after a kana; ja-JP reorders the kanji, so a kanji there keeps a weight that no
+ * other character has. A character that ja-JP weighs otherwise, as `ゟ`, keeps the part of its decomposition that
+ * begins its weights, and a weight of its own for the rest. A decomposition whose characters ICU weighs together, as
+ * `l·` of `ŀ`, stays one element.
+ */
 function expansionOf(char: string, isInvariant: boolean | undefined): string | undefined {
   const key = `${isInvariant === true}:${char}`;
   if (expansions.has(key)) return expansions.get(key);
   const decomposed = char.normalize('NFKD');
-  // A decomposition into one character changes nothing that comparing the whole character would not find.
-  const expansion =
-    !/^.$/su.test(decomposed) &&
+  const parts = [...decomposed.normalize('NFC')];
+  const isExpansion =
+    parts.length > 1 &&
     !TAILORED.has(char) &&
-    !hasTailored(decomposed) &&
-    collator(isInvariant, 'accent').compare(char, decomposed) === 0
-      ? decomposed
-      : undefined;
+    collator(true, 'accent').compare(char, decomposed) === 0 &&
+    parts.every((part, index) => index === 0 || !isContraction(parts[index - 1], part));
+  const expansion = isExpansion ? cultureExpansion(char, parts, isInvariant).normalize('NFD') : undefined;
   expansions.set(key, expansion);
   return expansion;
+}
+
+function cultureExpansion(char: string, parts: string[], isInvariant: boolean | undefined): string {
+  if (isInvariant) return parts.map((part) => hiraganaOf(part)).join('');
+  const rootParts = parts.map((part) => (CONTEXTUAL.has(part) ? `\0${part}` : part));
+  const hasKanji = parts.some((part) => /\p{Script=Han}/u.test(part));
+  if (hasKanji || collator(false, 'accent').compare(char, rootParts.join('')) === 0) {
+    return rootParts.map((part) => (/\p{Script=Han}/u.test(part) ? weightOfItsOwn(part) : hiraganaOf(part))).join('');
+  }
+  let length = parts.length - 1;
+  while (length > 0 && !isPrimaryPrefix(rootParts.slice(0, length).join(''), char, false)) length--;
+  return (
+    rootParts
+      .slice(0, length)
+      .map((part) => hiraganaOf(part))
+      .join('') + weightOfItsOwn(char)
+  );
+}
+
+/** Whether ICU's root collation weighs two characters together, which a NUL between them keeps apart. */
+function isContraction(first: string, second: string): boolean {
+  return collator(true, 'variant').compare(first + second, `${first}\0${second}`) !== 0;
+}
+
+const ownWeights = new Map<string, string>();
+
+/**
+ * A character with a weight that no other character has, for a part of an expansion whose weight is none of the
+ * culture's: a private-use character, one for each part.
+ */
+function weightOfItsOwn(part: string): string {
+  let found = ownWeights.get(part);
+  if (!found) {
+    found = String.fromCharCode(0xe0_00 + ownWeights.size);
+    ownWeights.set(part, found);
+  }
+  return found;
 }
 
 /**
@@ -468,7 +526,7 @@ function matchesAt(
   boundaries: boolean[],
   options: CultureComparison
 ): boolean {
-  const { compare, comparable } = comparisonOf(options);
+  const { compare, comparable } = comparisonOf(options, true);
   if (index < source.length && isIgnorable(String.fromCodePoint(source.codePointAt(index) as number), options))
     return false;
   // The grapheme cluster before the index, which ends where the substring starts.
@@ -516,6 +574,16 @@ function searchBoundaries(text: string): boolean[] {
 }
 
 const graphemes = new Intl.Segmenter('ja-JP', { granularity: 'grapheme' });
+
+/** Whether a position is inside a character, or between two that ICU's root collation weighs together. */
+function isInsideAffixElement(text: string, index: number): boolean {
+  if (isInsideSurrogatePair(text, index)) return true;
+  if (index <= 0 || index >= text.length) return false;
+  const before = String.fromCodePoint(
+    text.codePointAt(index - (isInsideSurrogatePair(text, index - 1) ? 2 : 1)) as number
+  );
+  return isContraction(before, String.fromCodePoint(text.codePointAt(index) as number));
+}
 
 function isInsideSurrogatePair(text: string, index: number): boolean {
   const code = text.charCodeAt(index);
