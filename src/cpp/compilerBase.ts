@@ -228,6 +228,13 @@ export abstract class CompilerBase {
       if (member) return member;
     }
     if (name === cls.name || name === cls.name.replace(/^std::/, '')) return { kind: 'class', cls };
+    return this.missingMember(cls, name, row);
+  }
+
+  protected missingMember(cls: ClassInfo, name: string, row: number): never {
+    for (let current: ClassInfo | undefined = cls; current; current = current.base) {
+      if (current.library && current.name.startsWith('std::')) this.unsupported(row, `${cls.name}::${name}`);
+    }
     return this.error(row, `${cls.name} に ${name} というメンバはありません。`);
   }
 

@@ -503,7 +503,7 @@ export abstract class ExpressionCompiler extends ObjectCompiler {
         functions: { name, candidates: [], object },
       };
     }
-    return this.error(row, `${cls.name} に ${name} というメンバはありません。`);
+    return this.missingMember(cls, name, row);
   }
 
   private staticMemberExpr(field: StaticFieldInfo, row: number, object?: Expr): Expr {

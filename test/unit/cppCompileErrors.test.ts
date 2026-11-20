@@ -39,6 +39,30 @@ int main() {
   expect(executeProgram('cpp', program)).toMatchObject({ kind: 'compileError', diagnostics: [{ row: 4 }] });
 });
 
+test.each([
+  ['list', 'std::list<int> first{1, 2}, second{3}; first.splice(first.begin(), second);', 'splice'],
+  ['list', 'std::list<int> first{1, 2}, second{3}; first.merge(second);', 'merge'],
+  ['list', 'std::list<int> first{1, 2}; first.remove_if(isOdd);', 'remove_if'],
+  ['vector', 'std::vector<int>::allocator_type allocator;', 'allocator_type'],
+])('reports an unavailable member of the standard <%s> library', (header, body, member) => {
+  const program = `#include <${header}>
+bool isOdd(int value) { return value % 2 != 0; }
+int main() { ${body} }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 2, message: expect.stringContaining(`::${member}は、この採点環境では使えません。`) }],
+  });
+});
+
+test('reports a missing member on a user-defined C++ class', () => {
+  const program = `struct Counter { int length; };
+int main() { Counter value{0}; return value.lenght; }`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'compileError',
+    diagnostics: [{ row: 1, message: 'Counter に lenght というメンバはありません。' }],
+  });
+});
+
 test('a C header does not expose FILE in namespace std', () => {
   const program = `#include <stdio.h>
 int main() { std::FILE* stream = stdout; }`;
