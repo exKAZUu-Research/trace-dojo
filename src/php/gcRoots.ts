@@ -12,6 +12,26 @@ export function separate(array: PhpArray): PhpArray {
   return array.copy();
 }
 
+/**
+ * The arrays some node reachable from `starts` still holds. A buffered array that a destructor released has no such
+ * holder: reference counting already freed it, so PHP's collection does not count it.
+ */
+export function heldArrays<N extends object>(starts: N[], children: (node: N) => N[]): Set<N> {
+  const held = new Set<N>();
+  const seen = new Set(starts);
+  const pending = [...starts];
+  while (pending.length > 0) {
+    for (const child of children(pending.pop() as N)) {
+      if (child instanceof PhpArray) held.add(child);
+      if (!seen.has(child)) {
+        seen.add(child);
+        pending.push(child);
+      }
+    }
+  }
+  return held;
+}
+
 export function recordGcRoot(runtime: Runtime, value: PhpArray | PhpObject, collect: () => number): boolean {
   if (runtime.gcRoots.has(value)) return false;
   let collected = false;

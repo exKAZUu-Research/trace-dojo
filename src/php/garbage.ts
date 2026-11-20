@@ -5,6 +5,7 @@ import {
   cachedObjectFree,
   collectGarbageNodes,
   deferredHandleOrder,
+  heldArrays,
   objectFree,
   orderDestructedCollection,
   recordGcRoot,
@@ -258,8 +259,11 @@ function countAfterDestruction(
   );
   const isObject = (node: CollectionNode): node is PhpObject => node instanceof PhpObject;
   const children = (node: CollectionNode): CollectionNode[] => graph.children(node);
+  const held = buffered ? heldArrays<CollectionNode>([...remaining, ...buffered], children) : undefined;
   const initialRoots: CollectionNode[] = buffered
-    ? buffered.filter((item) => (item instanceof PhpObject ? allowed.has(item) : !afterArrays.has(item)))
+    ? buffered.filter((item) =>
+        item instanceof PhpObject ? allowed.has(item) : !afterArrays.has(item) && held?.has(item) === true
+      )
     : owners.filter((object) => allowed.has(object));
   const result = orderDestructedCollection<CollectionNode, PhpObject>(
     initialRoots,
@@ -282,7 +286,7 @@ function countAfterDestruction(
  * destroyed from the dropped values outward: its destructor runs, then what it holds is released in order, then its
  * handle returns to the free list. Objects on a cycle stay, as reference counting cannot free them.
  */
-// code-gauge-allow functionCognitiveComplexity 21 -- Flushes pending GC root candidates after scoped release.
+// code-gauge-allow functionCognitiveComplexity 22 -- Flushes pending GC root candidates after scoped release.
 export function releaseDropped(
   runtime: Runtime,
   dropped: unknown[],

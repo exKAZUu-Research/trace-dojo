@@ -5232,6 +5232,16 @@ try { range(0.1, null, 1); } catch (ValueError $e) { echo explode("\\n", $e->get
   });
 });
 
+test('gc_collect_cycles() does not count an array a destructor released', () => {
+  for (const release of ['$this->a = [];', 'unset($this->a);']) {
+    expect(
+      run(
+        `<?php class D { public $a; function __destruct() { ${release} } } $o = new D; $a = [$o]; $o->a = $a; unset($o, $a); var_dump(gc_collect_cycles(), gc_collect_cycles());`
+      )
+    ).toMatchObject({ kind: 'executed', stdout: 'int(1)\nint(0)\n' });
+  }
+});
+
 test('a deprecated function reports its deprecation before binding its arguments', () => {
   expect(run('<?php utf8_encode(null);')).toMatchObject({
     kind: 'executed',
