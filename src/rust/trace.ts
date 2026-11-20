@@ -1,3 +1,4 @@
+import { ExecutionBudget } from '../interpreter/limits';
 import type { ProgramRecording } from '../interpreter/program';
 import type { ProgramInput } from '../interpreter/programIo';
 import type { TraceOptions } from '../interpreter/traceAnnotations';
@@ -28,9 +29,11 @@ import {
   type Value,
 } from './values';
 
+// code-gauge-allow duplicateLines 15 -- Uses Rust's own build, runtime, and trace variable formatter.
 export function traceRustProgram(program: string, trace: TraceOptions, input?: ProgramInput): ProgramRecording {
-  const built = buildProgram(program, new Set(trace.atomicAnnotations.keys()));
-  const runtime = new Runtime(input);
+  const budget = new ExecutionBudget();
+  const built = buildProgram(program, new Set(trace.atomicAnnotations.keys()), budget);
+  const runtime = new Runtime(input, budget);
   const recorder = new TraceRecorder(runtime, {
     isAtomic: (frame) => frame.info.isAtomic,
     variablesOf: (frame) => variablesOf(frame),

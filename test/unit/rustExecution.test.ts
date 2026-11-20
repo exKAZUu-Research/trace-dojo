@@ -821,6 +821,17 @@ test.each(['(0..2_000_000).nth(1_000_000)', '(0..2_000_000).take(1).next_back()'
   }
 );
 
+test('nested loops with stable ownership states compile and run within the operation budget', () => {
+  const body = `${'for _ in 0..1 {'.repeat(18)}
+    println!("done");
+    ${'}'.repeat(18)}`;
+  expect(executeProgram('rust', rustMain(body))).toMatchObject({
+    kind: 'executed',
+    stdout: 'done\n',
+    uncaughtException: undefined,
+  });
+});
+
 test('an endless loop stops at the operation limit', () => {
   expect(executeProgram('rust', rustMain('    let mut i: u64 = 0;\n    loop { i = i.wrapping_add(1); }'))).toEqual({
     kind: 'limitExceeded',

@@ -1,3 +1,4 @@
+import type { ExecutionBudget } from '../interpreter/limits';
 import type { Span } from './ast';
 import type { RVar } from './regions';
 
@@ -67,17 +68,22 @@ export class LoanGraph {
   /** `[sup, sub]`: region `sup` contains region `sub`. */
   readonly outlives: [RVar, RVar][] = [];
 
+  constructor(private readonly budget: ExecutionBudget) {}
+
   newVar(name: string): Var {
+    this.budget.spend();
     this.names.push(name);
     this.varRegions.push([]);
     return this.names.length - 1;
   }
 
   newRegion(): RVar {
+    this.budget.spend();
     return this.regionCount++;
   }
 
   newPoint(): number {
+    this.budget.spend();
     this.points.push({ succ: [], uses: [], defs: [], accesses: [], kills: [], gens: [] });
     return this.points.length - 1;
   }
@@ -85,11 +91,13 @@ export class LoanGraph {
   /** Checks every access against the loans in scope where it happens, as rustc's NLL borrow checker does. */
   check(errors: LoanError[]): void {
     const loans = this.points.flatMap((point) => point.gens);
+    if (loans.length === 0) return;
     const reachable = this.reachable();
     const inScope = this.loansInScope(loans, reachable);
     for (const [index, point] of this.points.entries()) {
       if (!reachable[index]) continue;
       for (const access of point.accesses) {
+        this.budget.spend(loans.length);
         const loan = loans.find(
           (candidate, loanIdx) => inScope[index].has(loanIdx) && conflicts(candidate, access, index)
         );
@@ -103,8 +111,9 @@ export class LoanGraph {
    * point and nothing overwrote the borrowed place.
    */
   // code-gauge-allow functionCognitiveComplexity 28 -- The forward dataflow of rustc's `Borrows` analysis.
-  // code-gauge-allow functionNcss 40 -- The forward dataflow of rustc's `Borrows` analysis.
+  // code-gauge-allow functionNcss 42 -- The forward dataflow of rustc's `Borrows` analysis.
   private loansInScope(loans: Loan[], reachable: boolean[]): BitSet[] {
+    this.budget.spend(2 * loans.length * this.points.length);
     const preds = this.points.map((): number[] => []);
     for (const [index, point] of this.points.entries()) for (const succ of point.succ) preds[succ].push(index);
     const regions = this.regions();
@@ -127,6 +136,7 @@ export class LoanGraph {
       changed = false;
       for (const [index, point] of this.points.entries()) {
         if (!reachable[index]) continue;
+        this.budget.spend(Math.ceil(loans.length / 32) * (preds[index].length + 1));
         const state = new BitSet(loans.length);
         for (const pred of preds[index]) state.unionWith(outScope[pred]);
         state.subtract(outOfRegion[index]);
@@ -147,6 +157,7 @@ export class LoanGraph {
     const seen = this.points.map(() => false);
     const stack = this.points.length > 0 ? [0] : [];
     while (stack.length > 0) {
+      this.budget.spend();
       const index = stack.pop() as number;
       if (seen[index]) continue;
       seen[index] = true;
@@ -158,6 +169,8 @@ export class LoanGraph {
   /** The points each region contains: where variables of types with it are live, and what it outlives. */
   private regions(): BitSet[] {
     const liveIn = this.liveness();
+    const words = Math.ceil(this.points.length / 32);
+    this.budget.spend(this.regionCount * words + this.points.length * this.names.length);
     const regions = Array.from({ length: this.regionCount }, () => new BitSet(this.points.length));
     for (const [index, live] of liveIn.entries()) {
       for (const v of live.values()) for (const region of this.varRegions[v]) regions[region].add(index);
@@ -165,6 +178,7 @@ export class LoanGraph {
     for (const region of this.universal) regions[region].fill();
     let changed = true;
     while (changed) {
+      this.budget.spend(this.outlives.length * words);
       changed = false;
       for (const [sup, sub] of this.outlives) if (regions[sup].unionWith(regions[sub])) changed = true;
     }
@@ -173,12 +187,15 @@ export class LoanGraph {
 
   /** The variables live on entry to each point. */
   private liveness(): BitSet[] {
+    const words = Math.ceil(this.names.length / 32);
+    this.budget.spend(this.points.length * words);
     const liveIn = this.points.map(() => new BitSet(this.names.length));
     let changed = true;
     while (changed) {
       changed = false;
       for (let index = this.points.length - 1; index >= 0; index--) {
         const point = this.points[index];
+        this.budget.spend(words * (point.succ.length + 1));
         const live = new BitSet(this.names.length);
         for (const succ of point.succ) live.unionWith(liveIn[succ]);
         for (const v of point.defs) live.delete(v);

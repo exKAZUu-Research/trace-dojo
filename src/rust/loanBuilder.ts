@@ -1,4 +1,5 @@
-// code-gauge-allow-file fileNcss 891 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
+// code-gauge-allow-file fileNcss 895 -- Lowers each kind of expression to the points and regions rustc's MIR gives it.
+import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar, MethodRes } from './annotations';
 import type { Block, Condition, Expr, FormatArgs, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindings } from './astWalk';
@@ -46,8 +47,12 @@ interface ClosureSummary {
 }
 
 /** What the builders of a function and of the closures in it share. */
-interface Shared {
+interface LoanCheck {
+  budget: ExecutionBudget;
   errors: LoanError[];
+}
+
+interface Shared extends LoanCheck {
   summaries: Map<ClosureType, ClosureSummary>;
 }
 
@@ -75,7 +80,7 @@ interface LoopFrame {
  * the types of its variables, and checks it as rustc's NLL borrow checker does.
  */
 export class LoanBuilder {
-  private readonly graph = new LoanGraph();
+  private readonly graph: LoanGraph;
   private readonly layouts: Layout[] = [];
   private current: number | undefined;
   private readonly vars = new Map<LocalVar, Var>();
@@ -92,7 +97,9 @@ export class LoanBuilder {
     private readonly solver: TraitSolver,
     private readonly context: FnContext,
     private readonly shared: Shared
-  ) {}
+  ) {
+    this.graph = new LoanGraph(shared.budget);
+  }
 
   /** Checks a function's body, reporting the conflicts of borrows to `errors`. */
   static checkFn(
@@ -100,9 +107,9 @@ export class LoanBuilder {
     solver: TraitSolver,
     context: FnContext,
     fn: { params: Pattern[]; body: Block; ret: Type; end: Span },
-    errors: LoanError[]
+    check: LoanCheck
   ): void {
-    const builder = new LoanBuilder(annotations, solver, context, { errors, summaries: new Map() });
+    const builder = new LoanBuilder(annotations, solver, context, { ...check, summaries: new Map() });
     const params = fn.params.map((pattern) => ({ pattern, type: pattern.ty }));
     builder.build(params, fn.body, fn.ret, fn.end);
   }

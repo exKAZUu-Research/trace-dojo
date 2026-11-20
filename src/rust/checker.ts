@@ -1,5 +1,6 @@
-// code-gauge-allow-file fileNcss 591 -- The checker core: bodies, obligations, scopes, coercions, and statements.
+// code-gauge-allow-file fileNcss 592 -- The checker core: bodies, obligations, scopes, coercions, and statements.
 import { CompileError } from '../interpreter/diagnostics';
+import type { ExecutionBudget } from '../interpreter/limits';
 import { Annotations, type Coercion, type FnContext, type LocalVar, type PathRes } from './annotations';
 import type { Block, Expr, FnItem, Pattern, Span, Stmt, TypeAst } from './ast';
 import { BorrowChecker } from './borrowck';
@@ -107,7 +108,8 @@ export class Checker {
 
   constructor(
     readonly program: Program,
-    readonly atomicRows: ReadonlySet<number>
+    readonly atomicRows: ReadonlySet<number>,
+    private readonly budget: ExecutionBudget
   ) {
     this.solver = new TraitSolver(program, this.unifier);
   }
@@ -302,7 +304,7 @@ export class Checker {
     this.finishBody(item.span);
     this.requireKnownTypes();
     this.checkBorrows(() =>
-      new BorrowChecker(this.annotations, this.solver).checkFn(item, this.body.fn, this.body.retType)
+      new BorrowChecker(this.annotations, this.solver, this.budget).checkFn(item, this.body.fn, this.body.retType)
     );
     new ConstLint(this.annotations).check(item.body);
   }
@@ -863,6 +865,7 @@ export class Checker {
 
   /** Checks an expression, whose type `expected` may guide (the type of a literal, a closure's parameters). */
   expr(expr: Expr, expected: Type | undefined): Type {
+    this.budget.spend();
     const type = exprInner(this, expr, expected);
     expr.ty = type;
     return type;

@@ -1,3 +1,4 @@
+import { ExecutionBudget } from '../interpreter/limits';
 import type { Item } from './ast';
 import { Checker } from './checker';
 import { Converter } from './convert';
@@ -27,10 +28,15 @@ export interface BuiltProgram {
 }
 
 /** Parses, resolves, and type-checks a program with the standard library, throwing a `CompileError` for errors. */
-export function buildProgram(source: string, atomicRows: ReadonlySet<number> = new Set()): BuiltProgram {
+export function buildProgram(
+  source: string,
+  atomicRows: ReadonlySet<number> = new Set(),
+  budget = new ExecutionBudget()
+): BuiltProgram {
+  budget.spend(Math.ceil(source.length / 64));
   const program = new Program();
   const collector = new ItemCollector(program);
-  collector.collectItems(stdDeclarations(), program.std);
+  collector.collectItems(budget.excludingTime(stdDeclarations), program.std);
   collector.finish();
   setupPrelude(program);
   setPseudoTypes({
@@ -44,8 +50,9 @@ export function buildProgram(source: string, atomicRows: ReadonlySet<number> = n
   collector.collectCrate(crate, program.root);
   collector.finish();
   resolveImports(program.root);
-  const checker = new Checker(program, atomicRows);
+  const checker = new Checker(program, atomicRows, budget);
   checker.checkProgram();
+  budget.spend(0);
   return { program, checker };
 }
 

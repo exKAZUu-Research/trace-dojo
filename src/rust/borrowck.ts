@@ -1,5 +1,6 @@
 // code-gauge-allow-file fileNcss 560 -- Follows the borrow checking rules case by case.
 import { CompileError } from '../interpreter/diagnostics';
+import type { ExecutionBudget } from '../interpreter/limits';
 import type { Annotations, FnContext, LocalVar } from './annotations';
 import type { Block, Condition, Expr, FnItem, FormatArgs, Pattern, Span, Stmt } from './ast';
 import { forEachDirect, patternBindingParts, patternBindings } from './astWalk';
@@ -42,7 +43,8 @@ export class BorrowChecker {
 
   constructor(
     private readonly annotations: Annotations,
-    private readonly solver: TraitSolver
+    private readonly solver: TraitSolver,
+    private readonly budget: ExecutionBudget
   ) {}
 
   checkFn(item: FnItem, context: FnContext, ret: Type): void {
@@ -55,7 +57,7 @@ export class BorrowChecker {
       ret,
       end: { row: item.endRow, col: 0 },
     };
-    LoanBuilder.checkFn(this.annotations, this.solver, context, fn, loanErrors);
+    LoanBuilder.checkFn(this.annotations, this.solver, context, fn, { errors: loanErrors, budget: this.budget });
     // rustc reports the errors in the order of their positions.
     const [first] = loanErrors.toSorted((a, b) => a.span.row - b.span.row || a.span.col - b.span.col);
     if (first && (!moveError || first.span.row < moveError.diagnostics[0].row)) compileError(first.span, first.message);
@@ -91,6 +93,7 @@ export class BorrowChecker {
   }
 
   private stmt(stmt: Stmt, state: State): State {
+    this.budget.spend();
     switch (stmt.kind) {
       case 'let': {
         if (!stmt.init) return state;
@@ -123,8 +126,9 @@ export class BorrowChecker {
    * Checks an expression. `mode` tells what happens to its value when it is a place: moved (or copied), read without
    * moving (borrowed as `&`), or borrowed mutably.
    */
-  // code-gauge-allow functionNcss 57 -- One case per kind of expression.
+  // code-gauge-allow functionNcss 58 -- One case per kind of expression.
   private expr(expr: Expr, state: State, mode: 'move' | 'read' | 'mut'): State {
+    this.budget.spend();
     if (state === BOTTOM) return BOTTOM;
     switch (expr.kind) {
       case 'path': {
@@ -374,7 +378,9 @@ export class BorrowChecker {
       const frame = this.loopStack.at(-1)!;
       frame.breaks = [];
       frame.continues = [];
-      head = joinAll([body(head), ...frame.continues], state);
+      const next = joinAll([body(head), ...frame.continues], state);
+      if (sameState(head, next)) break;
+      head = next;
     }
     const frame = this.loopStack.pop()!;
     return joinAll(frame.breaks, exits ? head : BOTTOM);
@@ -429,7 +435,7 @@ export class BorrowChecker {
 
   /** Checks a closure's body on its own, where its parameters and captured variables hold values. */
   private checkClosureBody(expr: Extract<Expr, { kind: 'closure' }>, context: FnContext): void {
-    const checker = new BorrowChecker(this.annotations, this.solver);
+    const checker = new BorrowChecker(this.annotations, this.solver, this.budget);
     checker.ownedCaptures = context.movedCaptures ?? [];
     const body: Block =
       expr.body.kind === 'block'
@@ -700,6 +706,19 @@ function joinAll(states: State[], initial: State): State {
   let result = initial;
   for (const state of states) result = join(result, state);
   return result;
+}
+
+function sameState(a: State, b: State): boolean {
+  if (a === b) return true;
+  if (a === BOTTOM || b === BOTTOM || a.size !== b.size) return false;
+  for (const [local, left] of a) {
+    const right = b.get(local);
+    if (left.init !== right?.init || left.movedAt !== right.movedAt || left.partial.size !== right.partial.size) {
+      return false;
+    }
+    for (const part of left.partial) if (!right.partial.has(part)) return false;
+  }
+  return true;
 }
 
 /** The state after either of two paths: a variable holds a value only if it does on both. */

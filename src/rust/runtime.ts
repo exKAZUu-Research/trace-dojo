@@ -114,13 +114,15 @@ export class Runtime implements TracedRuntime<Frame> {
   readonly frames: Frame[] = [];
   readonly steps = new StepTracker();
   readonly io: ProgramIO;
-  private readonly budget = new ExecutionBudget();
   private slots = 0;
   /** Values that native code holds while it runs, such as the elements a sort is ordering. */
   readonly nativeRoots: Value[][] = [];
 
-  constructor(input?: ProgramInput) {
-    this.io = new ProgramIO(this.budget, input);
+  constructor(
+    input?: ProgramInput,
+    private readonly budget = new ExecutionBudget()
+  ) {
+    this.io = new ProgramIO(budget, input);
   }
 
   spend(cost = 1): void {
