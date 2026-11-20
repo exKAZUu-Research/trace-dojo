@@ -3126,6 +3126,11 @@ test.each([
   expect(executeProgram('zig', source)).toMatchObject({ kind: 'limitExceeded' });
 });
 
+test.each(['enum{}', 'enum(u8){_}'])('random selection rejects an enum without named values: %s', (type) => {
+  const source = `const std=@import("std");pub fn main()void{var p=std.Random.DefaultPrng.init(1);var run=false;_=&run;if(run){_=p.random().enumValue(${type});}}`;
+  expect(executeProgram('zig', source)).toMatchObject({ kind: 'compileError' });
+});
+
 test.each([
   '_=error.Foo;',
   'const e:anyerror=error.Foo;_=e;',

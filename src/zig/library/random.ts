@@ -510,6 +510,7 @@ addMembers(RANDOM, {
     const type = sema.compileType(typeArg);
     if (type.kind !== 'enum') return sema.error(typeArg, 'enumValue には enum の型を渡してください。');
     const fields = sema.enumFields(type);
+    if (fields.length === 0) return sema.error(typeArg, 'enumValue には名前付きの値を持つ enum が必要です。');
     const state = randomState(sema, call.receiver, call.span);
     const usize = intType(false, 64, 'usize');
     return runtime(
