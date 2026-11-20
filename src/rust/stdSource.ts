@@ -5,7 +5,7 @@
  *
  * Pseudo-traits that rustc does not have stand for groups of types that the natives handle alike: `Integer`,
  * `SignedInteger`, `UnsignedInteger`, `Float`, `Pattern` (what `str::split` and its kin accept), `DoubleEndedPattern` (a `Pattern` but a string), `Borrow` (keys that
- * look up a map), `FromStrTarget`, `StringPart`, `RangeBounds`, `ExtendInto`, `SliceOf` (what borrows as a slice), `JoinSeparator`, and `SliceIndex` (what `<[T]>::get`
+ * look up a map), `StringPart`, `RangeBounds`, `ExtendInto`, `SliceOf` (what borrows as a slice), `JoinSeparator`, and `SliceIndex` (what `<[T]>::get`
  * accepts: a `usize` or a range of them, giving `Indexed<I, T>`, an element or a slice).
  *
  * Every iterator is an `IterImpl<T, S>` of items `T`, whose shape `S` (`CharsShape`, `RevShape<S>`, `MapShape<S, F>`,
@@ -379,7 +379,7 @@ pub mod str {
         pub fn make_ascii_lowercase(&mut self);
         pub fn eq_ignore_ascii_case(&self, other: &str) -> bool;
         pub fn repeat(&self, n: usize) -> String;
-        pub fn parse<F: FromStrTarget>(&self) -> Result<F, ParseError<F>>;
+        pub fn parse<F: FromStr>(&self) -> Result<F, ParseError<F>>;
         pub fn to_owned(&self) -> String;
         pub fn is_char_boundary(&self, index: usize) -> bool;
         pub fn get<R: RangeBounds<usize>>(&self, range: R) -> Option<&str>;
@@ -1445,7 +1445,6 @@ pub mod pseudo {
     pub trait Pattern {}
     pub trait DoubleEndedPattern {}
     pub trait Borrow<Q> {}
-    pub trait FromStrTarget {}
     pub trait StringPart {}
     pub trait RangeBounds<T> {}
     pub trait ExtendInto<T> {}

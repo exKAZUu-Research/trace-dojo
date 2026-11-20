@@ -2046,6 +2046,28 @@ fn main() {
   }
 });
 
+test('applies Rust blanket and parsing traits to generic helper types', () => {
+  const program = `use std::collections::HashMap;
+use std::hash::Hash;
+use std::str::FromStr;
+fn lookup<K: Hash + Eq, V: Copy>(map: &HashMap<K, V>, key: &K) -> Option<V> {
+    map.get(key).copied()
+}
+fn roundtrip<T>(value: T) -> T { T::from(value).into() }
+fn parsed<T: FromStr>(source: &str) -> Option<T> { source.parse().ok() }
+fn extend<T>(target: &mut Vec<T>, items: Vec<T>) { target.extend(items); }
+fn main() {
+    let map = HashMap::from([(1, 2)]);
+    let mut out = vec![roundtrip(String::from("old"))];
+    extend(&mut out, vec![String::from("new")]);
+    println!("{:?} {:?} {:?}", lookup(&map, &1), parsed::<f64>("1.5"), out);
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'Some(2) Some(1.5) ["old", "new"]\n',
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

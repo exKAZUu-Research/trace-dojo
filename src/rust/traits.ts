@@ -40,7 +40,10 @@ export class TraitSolver {
     if (t.kind === 'never') return 'yes';
     if (t.kind === 'var') return this.varImplements(t, ref);
     // Type parameters are `Sized` unless they opt out with `?Sized`.
-    if (t.kind === 'param') return trait.builtin === 'Sized' || this.boundsImply(t.param.bounds, ref, t) ? 'yes' : 'no';
+    if (t.kind === 'param') {
+      if (trait.builtin === 'Sized' || this.boundsImply(t.param.bounds, ref, t)) return 'yes';
+      return trait.builtin && PARAMETER_BLANKET_TRAITS.has(trait.builtin) ? this.builtinOnly(t, ref) : 'no';
+    }
     // A pseudo-type that stays is one whose arguments are not known yet.
     if (t.kind === 'adt' && isPseudo(t.def)) return 'unknown';
     if (t.kind === 'opaque') return this.boundsImply(t.opaque.bounds, ref, t) ? 'yes' : this.builtinOnly(t, ref);
@@ -267,6 +270,7 @@ export class TraitSolver {
 
 /** The std traits with a blanket impl for every type of another trait: `impl<T: Display> ToString for T`. */
 const BLANKET_IMPLS: Record<string, string> = { ToString: 'Display', ToOwned: 'Clone', IntoIterator: 'Iterator' };
+const PARAMETER_BLANKET_TRAITS = new Set(['Borrow', 'From', 'Into', 'TryFrom', 'TryInto', 'ExtendInto']);
 
 export function closureKindAtLeast(have: string, need: string): boolean {
   const order = ['Fn', 'FnMut', 'FnOnce'];

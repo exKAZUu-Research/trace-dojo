@@ -127,7 +127,6 @@ const RULES: Record<string, Rule> = {
   UnsignedInteger: signedness,
   Float: ({ t }) => (t.kind === 'float' ? 'yes' : 'no'),
   FromStr: fromStr,
-  FromStrTarget: fromStr,
   DoubleEndedPattern: doubleEndedPattern,
   Pattern: pattern,
   StringPart: ({ t }) => (isStringPart(t) ? 'yes' : 'no'),
@@ -486,10 +485,11 @@ function fromInto({ solver, t, ref }: Goal): Answer {
 }
 
 /** Integers convert to each other, failing out of range; `char`s from `u32`s, and `u8`s from `char`s. */
-function tryFrom({ t, ref, name }: Goal): Answer {
+function tryFrom({ solver, t, ref, name }: Goal): Answer {
   const other = normalize(shallow(ref.args[0]));
   const [source, target] = name === 'TryFrom' ? [other, t] : [t, other];
   if (source.kind === 'var' || target.kind === 'var') return unresolvedTryFrom(source, target);
+  if (solver.unifier.tryUnify(source, target)) return 'yes';
   if (source.kind === 'int' && target.kind === 'int') return 'yes';
   if (target.kind === 'char' && source.kind === 'int' && source.name === 'u32') return 'yes';
   if (source.kind === 'char' && target.kind === 'int' && target.name === 'u8') return 'yes';
