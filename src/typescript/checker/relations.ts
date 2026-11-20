@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 803 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
+// code-gauge-allow-file fileNcss 816 -- Decides assignability and comparability for every kind of type, as TypeScript's checker does in one place.
 import { minimumArguments } from './callArity';
 import type { Checker } from './checker';
 import { isUnit } from './flow';
@@ -104,7 +104,8 @@ export class Relations {
     state = 0,
     track = EXPANDING_SOURCE | EXPANDING_TARGET
   ): boolean {
-    if (source === target) return true;
+    const simple = this.relatedBeforeNormalization(source, target, relation);
+    if (simple !== undefined) return simple;
     source = referencesForComparison(source);
     target = referencesForComparison(target);
     if (source === target) return true;
@@ -396,6 +397,16 @@ export class Relations {
     return relation === 'comparable'
       ? s.types.some((member) => this.isRelated(member, t, relation, state))
       : s.types.every((member) => this.isRelated(member, t, relation, state));
+  }
+
+  private relatedBeforeNormalization(source: Type, target: Type, relation: Relation): boolean | undefined {
+    if (source === target) return true;
+    if (relation !== 'assignable' || source.kind !== 'object') return undefined;
+    if (target.kind === 'literal' || target === booleanType) return false;
+    if (target.kind === 'intrinsic' && target.name !== 'never')
+      return this.trivialRelation(source, target) ?? this.intrinsicTarget(source, target.name, relation);
+    if (target.kind === 'union' && this.isUnknownLikeUnion(target.types)) return true;
+    return undefined;
   }
 
   /** The relation that holds whatever the types' structures are, if any. */

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 753 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 758 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -901,6 +901,13 @@ export class ClassChecker {
   }
 
   thisTypeAt(node: TreeNode): Type {
+    const receiver = this.thisTypeInScope(node);
+    if (receiver) return receiver;
+    this.reportInvalidThisType(node);
+    return errorType;
+  }
+
+  thisTypeInScope(node: TreeNode): Type | undefined {
     const container = this.thisTypeContainer(node);
     if (container && classTypes.has(container.type)) return this.selfType(this.classInfoOfNode(container));
     if (container?.type === 'interface_declaration') {
@@ -909,8 +916,7 @@ export class ClassChecker {
       const type = symbol ? this.c.typeNodes.declaredTypeOf(symbol) : anyType;
       return type.kind === 'object' ? (type.thisType ?? type) : type;
     }
-    this.reportInvalidThisType(node);
-    return errorType;
+    return undefined;
   }
 
   private thisTypeContainer(node: TreeNode): TreeNode | undefined {

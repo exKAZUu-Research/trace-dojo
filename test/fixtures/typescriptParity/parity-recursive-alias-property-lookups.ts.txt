@@ -19,3 +19,15 @@ interface Container<T extends { value: unknown }> { value: T }
 type Constrained = Container<Constrained>;
 const constrained: Constrained | null = null;
 console.log(constrained);
+type InferredA = Box<InferredB>;
+type InferredB = Box<InferredA>['value'] extends infer X ? X : never;
+type ObjectA = Box<ObjectB>;
+type ObjectB = Box<ObjectA>['value'] extends object ? Box<ObjectA>['value'] : never;
+type PrimitiveA = Box<PrimitiveB>;
+type PrimitiveB = Box<PrimitiveA>['value'] extends string ? never : Box<PrimitiveA>['value'];
+const conditional: InferredA | ObjectA | PrimitiveA | null = null;
+console.log(conditional);
+type BooleanA = Box<BooleanB>;
+type BooleanB = Box<BooleanA>['value'] extends boolean ? never : Box<BooleanA>['value'];
+type UnknownA = Box<UnknownB>;
+type UnknownB = Box<UnknownA>['value'] extends {} | null | undefined ? Box<UnknownA>['value'] : never;

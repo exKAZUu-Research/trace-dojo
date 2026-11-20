@@ -6,3 +6,9 @@ type Reversed = Indirect['value'];
 type Indirect = Box<Reversed>;
 interface NumericValue<T extends { value: number }> { value: T }
 type BadConstraint = NumericValue<BadConstraint>;
+type Nested = Box<NestedLink>;
+type NestedLink = Box<Nested>['value']['value'];
+type Compared = Box<ComparedLink>;
+type ComparedLink = Box<Compared>['value'] extends { value: string } ? never : Box<Compared>['value'];
+type NeverTest = Box<NeverLink>;
+type NeverLink = Box<NeverTest>['value'] extends never ? never : Box<NeverTest>['value'];

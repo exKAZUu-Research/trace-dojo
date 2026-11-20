@@ -9,3 +9,9 @@
 (8,35): error TS2344: Type 'BadConstraint' does not satisfy the constraint '{ value: number; }'.
   Types of property 'value' are incompatible.
     Type 'BadConstraint' is not assignable to type 'number'.
+(9,15): error TS4109: Type arguments for 'Box' circularly reference themselves.
+(10,6): error TS2456: Type alias 'NestedLink' circularly references itself.
+(11,17): error TS4109: Type arguments for 'Box' circularly reference themselves.
+(12,6): error TS2456: Type alias 'ComparedLink' circularly references itself.
+(13,18): error TS4109: Type arguments for 'Box' circularly reference themselves.
+(14,6): error TS2456: Type alias 'NeverLink' circularly references itself.

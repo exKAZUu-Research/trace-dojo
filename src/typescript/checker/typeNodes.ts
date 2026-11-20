@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 632 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 645 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -128,6 +128,7 @@ export class TypeNodes {
   private deferredDepth = 0;
   private resolutionDepth = 0;
   private resolvingReference?: { circular: boolean };
+  private readonly resolvingAliases: { circular: boolean }[] = [];
 
   typeFromNode(node: TreeNode): Type {
     const cached = this.typeNodeCache.get(node.id);
@@ -450,11 +451,13 @@ export class TypeNodes {
   ): ObjectType {
     const reportCircular = (): void =>
       this.c.errorWhileResolving(node, `${target.name} の型引数が自分自身を参照しています。`);
+    let aliasDepth = 0;
     return this.c.deferredReference(
       target,
       () => {
         const previous = this.resolvingReference;
         const resolution = { circular: false };
+        aliasDepth = this.resolvingAliases.length;
         this.resolvingReference = resolution;
         try {
           const arguments_ = this.c.fillTypeArguments(parameters, this.typeArgumentsOf(argumentNodes, false));
@@ -465,8 +468,11 @@ export class TypeNodes {
         }
       },
       {
-        outerTypeParameters: this.c.signatures.outerTypeParametersOf(node),
-        reportCircular,
+        outerTypeParameters: this.c.typeOperators.typeParametersInScope(node),
+        reportCircular: () => {
+          for (const alias of this.resolvingAliases.slice(aliasDepth)) alias.circular = true;
+          reportCircular();
+        },
         checkArguments: (types) => this.checkWrittenTypeArgumentConstraints(node, parameters, types),
       }
     );
@@ -865,7 +871,7 @@ export class TypeNodes {
     // An array or a type argument may refer to the alias it is part of, as `type Json = … | Json[]` does.
     if (this.deferredDepth > 0) return symbol.pendingUnion ?? this.recursiveAliases.pendingTypeOf(symbol);
     if (this.resolvingReference) this.resolvingReference.circular = true;
-    this.c.error(symbol.typeDeclarations[0], `型エイリアス ${symbol.name} が自分自身を参照しています。`);
+    this.reportCircularAlias(symbol);
     return errorType;
   }
 
@@ -881,9 +887,20 @@ export class TypeNodes {
       value?.type === 'union_type' ? { kind: 'union', id: newTypeId(), types: [] } : undefined;
     if (pending) this.c.registerAliasUnion(pending, unionAlias(symbol));
     symbol.pendingUnion = pending;
-    const type = value ? this.typeFromNode(value) : anyType;
-    symbol.resolving = false;
-    symbol.pendingUnion = undefined;
+    const resolution = { circular: false };
+    this.resolvingAliases.push(resolution);
+    let type: Type;
+    try {
+      type = value ? this.typeFromNode(value) : anyType;
+    } finally {
+      this.resolvingAliases.pop();
+      symbol.resolving = false;
+      symbol.pendingUnion = undefined;
+    }
+    if (resolution.circular) {
+      this.reportCircularAlias(symbol);
+      type = errorType;
+    }
     if (pending) pending.types = type.kind === 'union' ? type.types : [type];
     const declared = aliasedDeclaredType(
       type,
@@ -892,6 +909,10 @@ export class TypeNodes {
       symbol.id
     );
     return this.recursiveAliases.complete(symbol, declared);
+  }
+
+  private reportCircularAlias(symbol: Sym): void {
+    this.c.errorWhileResolving(symbol.typeDeclarations[0], `型エイリアス ${symbol.name} が自分自身を参照しています。`);
   }
 
   interfaceType(symbol: Sym): ObjectType {

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 512 -- Resolves related type operators sharing generic parameters and type construction.
+// code-gauge-allow-file fileNcss 516 -- Resolves related type operators sharing generic parameters and type construction.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker, Mapper } from './checker';
@@ -602,26 +602,28 @@ export class TypeOperators {
         return checker.typeNodes.typeFromNode(falseNode);
       },
       inferTypeParameters: [...this.inferParametersOf(node).values()],
-      outerTypeParameters: this.conditionalOuterParameters(node),
+      outerTypeParameters: this.typeParametersInScope(node),
       distributive: checkType.kind === 'typeParameter',
     };
     return this.resolveConditional(conditional, new Map());
   }
 
   // code-gauge-allow functionCognitiveComplexity 16 -- Each enclosing binding has its own scope rule.
-  private conditionalOuterParameters(node: TreeNode): TypeParameter[] {
+  typeParametersInScope(node: TreeNode): TypeParameter[] {
     const parameters = this.c.signatures.outerTypeParametersOf(node) ?? [];
+    const receiver = this.c.classes.thisTypeInScope(node);
+    if (receiver?.kind === 'typeParameter') parameters.push(receiver);
     let child = node;
     for (let ancestor = node.parent; ancestor; ancestor = ancestor.parent) {
-      if (ancestor.type === 'conditional_type' && ancestor.childForFieldName('consequence')?.id === child.id)
+      if (
+        ancestor.type === 'conditional_type' &&
+        ['right', 'consequence'].includes(this.fieldNameOf(ancestor, child) ?? '')
+      )
         for (const parameter of this.inferParametersOf(ancestor).values()) parameters.push(parameter);
       if (ancestor.type === 'index_signature') {
         const clause = named(ancestor).find((member) => member.type === 'mapped_type_clause');
-        const name = clause?.childForFieldName('name')?.text;
-        if (name) {
-          const parameter = this.localParameterAt(ancestor, child, name);
-          if (parameter) parameters.push(parameter);
-        }
+        if (clause?.childForFieldName('name') && child.id !== clause.childForFieldName('type')?.id)
+          parameters.push(this.mappedParameterOf(clause));
       }
       child = ancestor;
     }
