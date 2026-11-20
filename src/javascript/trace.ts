@@ -6,6 +6,7 @@ import { NOT_SCALAR, type Scalar, scalarItems } from '../interpreter/traceScalar
 import type { DisplayNode, TraceItemVariable } from '../problems/trace';
 import type { Program } from './ast';
 import { parseJavaScript } from './parse';
+import type { CollectionState } from './realmCollections';
 import { dateValueOf, inspectDate } from './realmDate';
 import { runProgram } from './run';
 import { Runtime } from './runtime';
@@ -159,6 +160,8 @@ function scalarOf(value: Value, seen: Set<JsArray>): Scalar | typeof NOT_SCALAR 
 // oxlint-disable-next-line unicorn/no-null -- The trace format shows null and undefined as null.
 const NULL_NODE: DisplayNode = { kind: 'value', value: null };
 
+type DisplayEntry = [string, DisplayNode];
+
 function displayNodeOf(value: Value, seen: Set<JsObject>, runtime: Runtime): DisplayNode | undefined {
   if (value === undefined || value === null) return NULL_NODE;
   if (typeof value === 'number' || typeof value === 'string' || typeof value === 'boolean')
@@ -172,23 +175,32 @@ function displayNodeOf(value: Value, seen: Set<JsObject>, runtime: Runtime): Dis
       entries: { x: { kind: 'value', value: value.turtle.x }, y: { kind: 'value', value: value.turtle.y } },
     };
   }
-  const builtin = builtinNodeOf(value, seen, runtime);
+  const builtin = scalarBuiltinNodeOf(value, seen, runtime);
   if (builtin) return builtin;
   seen.add(value);
-  const entries = Object.fromEntries(displayNodesOf(value, seen, runtime));
+  const node = containerNodeOf(value, seen, runtime);
   seen.delete(value);
-  return { kind: value instanceof JsArray ? 'array' : 'object', entries };
+  return node;
 }
 
-function displayNodesOf(value: JsObject, seen: Set<JsObject>, runtime: Runtime): [string | number, DisplayNode][] {
-  if (value instanceof JsArray)
-    return Array.from(value.elements.entries(), ([key, item]) => {
-      const property = value.definedElements?.get(key);
-      const node =
-        property && isAccessor(property) ? accessorNode(property) : displayNodeOf(valueOfElement(item), seen, runtime);
-      return [key, node ?? NULL_NODE];
-    });
-  const entries: [string | number, DisplayNode][] = [];
+function containerNodeOf(value: JsObject, seen: Set<JsObject>, runtime: Runtime): DisplayNode {
+  const fields = displayFieldsOf(value, seen, runtime);
+  if (value instanceof JsArray) return containerNode('array', arrayEntries(value, seen, runtime), fields);
+  if (value.collection && !value.collection.isWeak) return collectionNodeOf(value.collection, fields, seen, runtime);
+  return containerNode('object', [], fields);
+}
+
+function arrayEntries(value: JsArray, seen: Set<JsObject>, runtime: Runtime): DisplayEntry[] {
+  return Array.from(value.elements.entries(), ([key, item]) => {
+    const property = value.definedElements?.get(key);
+    const node =
+      property && isAccessor(property) ? accessorNode(property) : displayNodeOf(valueOfElement(item), seen, runtime);
+    return [String(key), node ?? NULL_NODE];
+  });
+}
+
+function displayFieldsOf(value: JsObject, seen: Set<JsObject>, runtime: Runtime): DisplayEntry[] {
+  const entries: DisplayEntry[] = [];
   for (const [key, property] of displayedProperties(value, runtime)) {
     const node = isAccessor(property) ? accessorNode(property) : displayNodeOf(property.value, seen, runtime);
     if (node) entries.push([key, node]);
@@ -202,51 +214,68 @@ function accessorNode(property: AccessorProperty): DisplayNode {
   return { kind: 'value', value: `[${label}]`, verbatim: true };
 }
 
-/**
- * How a builtin object holding state of its own shows: a boxed primitive as its primitive, a Date or a RegExp as the
- * text console.log prints, a Set as an array of its values, and a Map as an object keyed by its keys' text, or as an
- * array of key-value pairs when keys are objects, integers, or show alike.
- */
-function builtinNodeOf(object: JsObject, seen: Set<JsObject>, runtime: Runtime): DisplayNode | undefined {
+function scalarBuiltinNodeOf(object: JsObject, seen: Set<JsObject>, runtime: Runtime): DisplayNode | undefined {
   if (object.primitive !== undefined) return displayNodeOf(object.primitive, seen, runtime);
   const time = dateValueOf(object);
   if (time !== undefined) return { kind: 'value', value: inspectDate(time), verbatim: true };
   if (object.regexp) return { kind: 'value', value: String(object.regexp), verbatim: true };
-  const { collection } = object;
-  if (!collection || collection.isWeak) return undefined;
-  seen.add(object);
+  return undefined;
+}
+
+function collectionNodeOf(
+  collection: CollectionState,
+  fields: DisplayEntry[],
+  seen: Set<JsObject>,
+  runtime: Runtime
+): DisplayNode {
   const items = collection.entries.filter((entry) => entry !== undefined);
   const node = (value: Value): DisplayNode => displayNodeOf(value, seen, runtime) ?? NULL_NODE;
-  let result: DisplayNode;
-  if (collection.kind === 'Set') {
-    result = { kind: 'array', entries: Object.fromEntries(items.map((entry, index) => [index, node(entry.key)])) };
-  } else {
-    const keys = items.map((entry) => node(entry.key));
-    // An object key, even one shown as a value (a Date or a box), keeps its pair so it is not taken for text.
-    const texts = items.map((entry, index) => {
-      const key = keys[index];
-      return key.kind === 'value' && !(entry.key instanceof JsObject) ? String(key.value) : undefined;
-    });
+  if (collection.kind === 'Set')
+    return containerNode(
+      'array',
+      items.map((entry, index) => [String(index), node(entry.key)]),
+      fields
+    );
+  const keys = items.map((entry) => node(entry.key));
+  const fieldNames = new Set(fields.map(([name]) => name));
+  const texts = items.flatMap((entry, index) => {
+    const key = keys[index];
+    if (key.kind !== 'value' || entry.key instanceof JsObject) return [];
+    const text = String(key.value);
     // Integer-like keys would be listed first in an object, out of the Map's order.
-    result =
-      texts.every((text) => text !== undefined && !/^(?:0|[1-9]\d*)$/.test(text)) &&
-      new Set(texts).size === texts.length
-        ? {
-            kind: 'object',
-            entries: Object.fromEntries(items.map((entry, index) => [texts[index], node(entry.value)])),
-          }
-        : {
-            kind: 'array',
-            entries: Object.fromEntries(
-              items.map((entry, index) => [
-                index,
-                { kind: 'array', entries: { 0: keys[index], 1: node(entry.value) } } satisfies DisplayNode,
-              ])
-            ),
-          };
+    return /^(?:0|[1-9]\d*)$/.test(text) || fieldNames.has(text) ? [] : [text];
+  });
+  if (texts.length === items.length && new Set(texts).size === texts.length) {
+    return containerNode(
+      'object',
+      texts.map((text, index) => [text, node(items[index].value)]),
+      fields
+    );
   }
-  seen.delete(object);
-  return result;
+  const pairs = items.map((entry, index): DisplayEntry => [
+    String(index),
+    { kind: 'array', entries: { 0: keys[index], 1: node(entry.value) } },
+  ]);
+  return containerNode('array', pairs, fields);
+}
+
+function containerNode(kind: 'array' | 'object', contents: DisplayEntry[], fields: DisplayEntry[]): DisplayNode {
+  if (fields.length === 0) return { kind, entries: Object.fromEntries(contents) };
+  const entries = new Map(contents);
+  const reserved = new Set(fields.map(([name]) => name));
+  const suffixes = new Map<string, number>();
+  for (const [name, value] of fields) {
+    let label = name;
+    if (entries.has(label)) {
+      let suffix = suffixes.get(name) ?? 2;
+      do {
+        label = `${name} (${suffix++})`;
+      } while (entries.has(label) || reserved.has(label));
+      suffixes.set(name, suffix);
+    }
+    entries.set(label, value);
+  }
+  return { kind, entries: Object.fromEntries(entries) };
 }
 
 /**

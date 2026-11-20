@@ -3,7 +3,6 @@ import { hasIndexSignature, keyedIndexes } from './indexInfos';
 import {
   booleanType,
   falseType,
-  isIntrinsic,
   type LiteralValue,
   type MappedInfo,
   nullType,
@@ -273,7 +272,6 @@ function printLiteral(value: LiteralValue): string {
 
 /** How a type prints a property name: an identifier as is, a symbol in brackets, and others quoted. */
 export function printedPropertyName(name: string, key: Type): string {
-  if (isIntrinsic(key, 'symbol') && name.startsWith('__@')) return `[Symbol.${name.slice(3)}]`;
   if (key.kind === 'literal' && typeof key.value === 'symbol') {
     const symbolName = uniqueSymbolName(String(key.value));
     if (symbolName !== undefined) return `[${symbolName}]`;

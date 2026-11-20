@@ -1,8 +1,9 @@
-// code-gauge-allow-file fileNcss 550 -- Keeps generic candidate collection, constraint fitting and inference completion together.
+// code-gauge-allow-file fileNcss 590 -- Keeps generic candidate collection, constraint fitting and inference completion together.
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
 import type { Checker, Mapper } from './checker';
 import { childTypes, objectMemberTypes } from './genericTypes';
 import { applicableIndex, hasIndexSignature, isIndexKeyOf, isPropertyKeyOf, keyedIndexes } from './indexInfos';
+import { reverseMappedType } from './reverseMappedInference';
 import {
   anonymousObject,
   anyType,
@@ -13,6 +14,7 @@ import {
   isAnyLike,
   isIntrinsic,
   literalType,
+  type MappedInfo,
   newTypeId,
   type ObjectType,
   type Parameter,
@@ -63,6 +65,7 @@ export interface InferenceRun {
   priority: number;
   contextualSignatures: boolean;
   higherOrder?: { outer: Signature; parameters: TypeParameter[] };
+  reverseMapped?: { source: TypeParameter; key: TypeParameter; value: TypeParameter };
 }
 
 type Recurse = (source: Type, target: Type, covariant?: boolean, priority?: number) => void;
@@ -285,8 +288,9 @@ export class TypeInference {
     const { active } = path;
     this.c.budget.spend();
     if (target.noInfer || !couldContainTypeVariables(target)) return;
-    if (target.kind === 'typeParameter') {
-      this.inferToParameter(run, source, target, covariant, active.size === 0);
+    const variable = inferenceVariable(target, run);
+    if (variable) {
+      this.inferToParameter(run, source, variable, covariant, active.size === 0);
       return;
     }
     const key = `${source.id}/${target.id}/${run.priority}/${covariant}`;
@@ -309,7 +313,7 @@ export class TypeInference {
     if (isAnyLike(source) && path.active.size > 1) {
       // `any` infers `any` for every parameter the target mentions.
       for (const parameter of run.parameters) {
-        if (this.mentions(target, parameter)) recurse(source, parameter);
+        if (this.mentions(target, parameter, run)) recurse(source, parameter);
       }
       return;
     }
@@ -382,9 +386,13 @@ export class TypeInference {
       recurse
     );
     if (sourceMembers.length === 0) return;
-    const naked = targetMembers.filter((member) => member.kind === 'typeParameter' && run.inferences.has(member.id));
+    const naked = targetMembers.filter((member) => {
+      const variable = inferenceVariable(member, run);
+      return variable && run.inferences.has(variable.id);
+    });
     const others = targetMembers.filter((member) => !naked.includes(member));
-    const inferable = (other: Type): boolean => run.parameters.some((parameter) => this.mentions(other, parameter));
+    const inferable = (other: Type): boolean =>
+      run.parameters.some((parameter) => this.mentions(other, parameter, run));
     const remaining = sourceMembers.filter(
       (member) => !others.some((other) => !inferable(other) && this.c.relations.isAssignable(member, other))
     );
@@ -417,7 +425,7 @@ export class TypeInference {
       return;
     }
     if (target.objectKind === 'mapped' && target.mapped) {
-      this.inferToMapped(source, target, recurse);
+      this.inferToMapped(run, source, target.mapped, recurse);
       return;
     }
     if (source.kind === 'object' && this.inferFromElements(run, source, target, recurse)) return;
@@ -434,22 +442,56 @@ export class TypeInference {
     }
   }
 
-  private inferToMapped(source: Type, target: ObjectType, recurse: Recurse): void {
-    const info = target.mapped;
-    if (!info || info.nameType) return;
-    if (info.constraint.kind === 'keyof' && info.template.kind === 'indexedAccess') {
-      recurse(source, info.constraint.type, undefined, InferencePriority.HomomorphicMappedType);
-      return;
-    }
-    const keys = this.c.typeOperators.keyofType(source);
-    recurse(keys, info.constraint, undefined, InferencePriority.MappedTypeConstraint);
+  private inferToMapped(run: InferenceRun, source: Type, info: MappedInfo, recurse: Recurse): void {
+    if (info.nameType) return;
+    if (info.constraint.kind !== 'keyof')
+      recurse(
+        this.c.typeOperators.keyofType(source),
+        info.constraint,
+        undefined,
+        InferencePriority.MappedTypeConstraint
+      );
+    if (this.inferMappedSource(run, source, info, recurse)) return;
     const entries = this.mappedInferenceEntries(source, this.c.baseConstraint(info.constraint));
-    if (!this.mentions(info.template, info.typeParameter)) {
+    if (!this.mentions(info.template, info.typeParameter, run)) {
       if (entries.length > 0) recurse(unionOf(entries.map((entry) => entry.type)), info.template);
       return;
     }
     for (const entry of entries)
       recurse(entry.type, this.c.instantiate(info.template, new Map([[info.typeParameter.id, entry.key]])));
+  }
+
+  private inferMappedSource(run: InferenceRun, source: Type, info: MappedInfo, recurse: Recurse): boolean {
+    const constraint = info.constraint.kind === 'typeParameter' ? info.constraint.constraint?.() : info.constraint;
+    if (constraint?.kind !== 'keyof') return false;
+    const target = constraint.type;
+    const inference = run.inferences.get(target.id);
+    if (target.kind === 'typeParameter' && inference) {
+      if (!inference.fixed) {
+        const reversed = this.inferReverseMapping(source, info, target);
+        if (reversed) recurse(reversed, target, undefined, InferencePriority.HomomorphicMappedType);
+      }
+      return true;
+    }
+    if (info.constraint.kind !== 'keyof' || info.template.kind !== 'indexedAccess') return false;
+    recurse(source, target, undefined, InferencePriority.HomomorphicMappedType);
+    return true;
+  }
+
+  private inferReverseMapping(input: Type, info: MappedInfo, source: TypeParameter): Type | undefined {
+    const cache = new Map<Type, Type>();
+    return reverseMappedType(this.c, input, info, (property) => {
+      const cached = cache.get(property);
+      if (cached) return cached;
+      const value: TypeParameter = { kind: 'typeParameter', id: newTypeId(), name: source.name };
+      const run = newInferenceRun([value]);
+      run.reverseMapped = { source, key: info.typeParameter, value };
+      this.inferTypes(run, property, info.template, true);
+      const inference = run.inferences.get(value.id);
+      const type = inference && hasCandidates(inference) ? this.inferredType(value, inference, false) : unknownType;
+      cache.set(property, type);
+      return type;
+    });
   }
 
   private mappedInferenceEntries(source: Type, allowed: Type): { key: Type; type: Type }[] {
@@ -675,13 +717,13 @@ export class TypeInference {
     );
   }
 
-  mentions(type: Type, parameter: TypeParameter): boolean {
+  mentions(type: Type, parameter: TypeParameter, run?: InferenceRun): boolean {
     const pending = [type];
     const seen = new Set<Type>();
     for (let current = pending.pop(); current; current = pending.pop()) {
       this.c.budget.spend();
       if (current.noInfer || seen.has(current)) continue;
-      if (current.kind === 'typeParameter' && current.id === parameter.id) return true;
+      if (inferenceVariable(current, run)?.id === parameter.id) return true;
       seen.add(current);
       for (const child of childTypes(current)) pending.push(child);
       if (current.kind === 'object' && !current.aliasMapper) {
@@ -800,6 +842,17 @@ export function newInferenceRun(parameters: TypeParameter[], contextualSignature
 
 function hasCandidates(inference: Inference | undefined): boolean {
   return !!inference && (inference.candidates.length > 0 || inference.contravariant.length > 0);
+}
+
+function inferenceVariable(type: Type, run?: InferenceRun): TypeParameter | undefined {
+  if (type.kind === 'typeParameter') return type;
+  const reverse = run?.reverseMapped;
+  return reverse &&
+    type.kind === 'indexedAccess' &&
+    type.objectType.id === reverse.source.id &&
+    type.indexType.id === reverse.key.id
+    ? reverse.value
+    : undefined;
 }
 
 function templateCaptures(value: string, texts: string[]): string[] | undefined {

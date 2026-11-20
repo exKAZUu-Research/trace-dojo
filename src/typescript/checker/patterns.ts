@@ -510,7 +510,7 @@ export class BindingPatterns {
       type.kind === 'templateLiteral'
     )
       return stringType;
-    const iterator = this.c.propertyOf(type, '__@iterator');
+    const iterator = this.c.propertyOf(type, this.c.typeNodes.librarySymbolKey('iterator'));
     if (iterator) {
       const signature = this.c.signaturesOf(iterator.type(), 'call')[0];
       const iteratorType = signature?.returnType();

@@ -214,9 +214,11 @@ export class TypeOperators {
     const keysNode = aliasNode ?? constraintNode;
     if (keysNode) this.reportUnlessAssignable(keysNode, nameType ?? constraint, propertyKeys);
     const checker = this.c;
+    const source = this.homomorphicSource(constraintNode, constraint);
     return this.mappedType({
       typeParameter: this.mappedParameterOf(clause),
-      source: this.homomorphicSource(constraintNode, constraint),
+      source,
+      homomorphic: constraint.kind === 'keyof' && source?.kind === 'typeParameter' ? true : undefined,
       constraint,
       nameType,
       get template() {
@@ -263,11 +265,12 @@ export class TypeOperators {
         resolve: () => emptyStructure(),
       };
     }
-    if (source && source.kind === 'object' && this.c.isArrayOrTuple(source) && !info.nameType) {
+    if (info.homomorphic && source?.kind === 'object' && this.c.isArrayOrTuple(source) && !info.nameType) {
       return mappedArrayOrTuple(this.c, info, source, withSource);
     }
     return anonymousObject(() => this.mappedStructure(info), {
       isResolvedMappedType: true,
+      mappedOptional: info.optionalModifier === '+' ? true : undefined,
       mappedKeys: info.nameType ? undefined : info.constraint,
     });
   }
@@ -392,7 +395,6 @@ export class TypeOperators {
     // keyof lists the public members only.
     for (const property of structure.properties.values()) {
       if (property.isPrivateName || property.visibility !== 'public') continue;
-      if (property.nameType === symbolType && property.declaration && this.c.isLibrary(property.declaration)) continue;
       keys.push(this.propertyKeyType(property));
     }
     return unionOf(keys);

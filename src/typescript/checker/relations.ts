@@ -694,9 +694,8 @@ export class Relations {
   }
 
   private objectRelated(source: Type, target: ObjectType, relation: Relation, state = 0): boolean {
+    if (isOptionalMappedType(target) && source.kind === 'object' && this.hasNoMembers(source)) return true;
     if (target.objectKind === 'mapped') {
-      // Every property of a mapped type that adds `?` is optional, so an object without members holds what it does.
-      if (isOptionalMappedType(target) && source.kind === 'object' && this.hasNoMembers(source)) return true;
       return source.kind === 'object' && this.sameMapped(source, target, relation);
     }
     const byElements = this.elementsRelated(source, target, relation);
@@ -1225,7 +1224,7 @@ function isLeaf(type: Type): boolean {
 }
 
 function isOptionalMappedType(type: Type): boolean {
-  return type.kind === 'object' && type.objectKind === 'mapped' && type.mapped?.optionalModifier === '+';
+  return type.kind === 'object' && (type.mappedOptional === true || type.mapped?.optionalModifier === '+');
 }
 
 /** What instantiations of the same declared type share, as TypeScript's `getRecursionIdentity` returns. */

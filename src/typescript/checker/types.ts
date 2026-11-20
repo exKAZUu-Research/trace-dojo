@@ -172,6 +172,7 @@ export interface ObjectType {
   tuple?: TupleInfo;
   mapped?: MappedInfo;
   isResolvedMappedType?: true;
+  mappedOptional?: true;
   /** For an object a mapped type without `as` resolved to, its constraint, which `keyof` gives instead of its members. */
   mappedKeys?: Type;
   /** For a function or object literal whose type was inferred from an expression. */
@@ -228,6 +229,7 @@ export interface MappedInfo {
   optionalModifier?: '+' | '-';
   /** For a homomorphic mapped type, `{ [K in keyof T]: ... }`, the type `T` whose modifiers it keeps. */
   source?: Type;
+  homomorphic?: true;
 }
 
 export interface TypeParameter {
@@ -344,8 +346,9 @@ export const booleanType: UnionType = { kind: 'union', id: newTypeId(), types: [
  * A unique symbol type, `typeof name`, which a `const` that `Symbol()` initializes has. As a fresh literal, it widens
  * to `symbol` in a mutable location.
  */
-export function uniqueSymbolType(name: string): LiteralType {
-  return freshLiteralType(Symbol(`${name}@${newTypeId()}`));
+export function uniqueSymbolType(name: string, fresh = true): LiteralType {
+  const symbol = Symbol(`${name}@${newTypeId()}`);
+  return fresh ? freshLiteralType(symbol) : literalType(symbol);
 }
 
 /** The name of the declaration of the unique symbol a property name stands for, if it stands for one. */

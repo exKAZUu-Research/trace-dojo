@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 543 -- Resolves every kind of type syntax a program writes, each needing its own rule.
+// code-gauge-allow-file fileNcss 556 -- Resolves every kind of type syntax a program writes, each needing its own rule.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExecutionLimitError, LIMITS } from '../../interpreter/limits';
@@ -28,6 +28,7 @@ import {
   intersectionOf,
   isAnyLike,
   isIntrinsic,
+  type LiteralType,
   literalType,
   mapType,
   neverType,
@@ -49,6 +50,7 @@ import {
   undefinedType,
   unionOf,
   type UnionType,
+  uniqueSymbolType,
   unknownType,
   voidType,
 } from './types';
@@ -81,6 +83,7 @@ export interface TypeArgumentMismatch {
 /** Resolves the types the program writes: annotations, type references, and type declarations. */
 export class TypeNodes {
   private readonly typeNodeCache = new Map<number, Type>();
+  private readonly librarySymbols = new Map<string, LiteralType>();
   private readonly restConstraintsInValidation = new Set<number>();
   /** The type each kind of type syntax denotes; the others are `any`. */
   private readonly typeSyntaxes = new Map<string, (node: TreeNode) => Type>([
@@ -567,7 +570,7 @@ export class TypeNodes {
           const nameNode = member.childForFieldName('name') as TreeNode;
           const name = this.memberName(nameNode);
           const typeNode = member.childForFieldName('type');
-          const type = (): Type => this.annotationType(typeNode) ?? this.implicitAnyMember(member, nameNode);
+          const type = (): Type => this.propertySignatureType(member, nameNode, typeNode);
           if (name === undefined) {
             this.addComputedMemberIndex(structure, member, nameNode, type);
             break;
@@ -647,8 +650,20 @@ export class TypeNodes {
 
   private memberKeyType(nameNode: TreeNode): Type | undefined {
     if (nameNode.type !== 'computed_property_name') return undefined;
-    if (this.librarySymbolName(nameNode) !== undefined) return symbolType;
+    const name = this.librarySymbolName(nameNode);
+    if (name !== undefined) return this.librarySymbolType(name);
     return this.c.flow.probe(() => this.c.silently(() => this.c.expressions.check(named(nameNode)[0])));
+  }
+
+  private propertySignatureType(member: TreeNode, nameNode: TreeNode, annotation: TreeNode | null): Type {
+    if (
+      this.c.isLibrary(member) &&
+      member.parent?.parent?.childForFieldName('name')?.text === 'SymbolConstructor' &&
+      annotation &&
+      named(annotation)[0]?.text === 'unique symbol'
+    )
+      return this.librarySymbolType(nameNode.text);
+    return this.annotationType(annotation) ?? this.implicitAnyMember(member, nameNode);
   }
 
   private computedMethodType(member: TreeNode): Type {
@@ -686,7 +701,7 @@ export class TypeNodes {
     const written = propertyNameText(nameNode);
     if (written !== undefined || nameNode.type !== 'computed_property_name') return written;
     const librarySymbol = this.librarySymbolName(nameNode);
-    if (librarySymbol !== undefined) return `__@${librarySymbol}`;
+    if (librarySymbol !== undefined) return this.librarySymbolKey(librarySymbol);
     const names = this.c.silently(() => this.c.patterns.capturePropertyNames(nameNode));
     return names?.length === 1 ? names[0] : undefined;
   }
@@ -697,6 +712,19 @@ export class TypeNodes {
     if (symbol?.type === 'member_expression' && symbol.childForFieldName('object')?.text === 'Symbol')
       return symbol.childForFieldName('property')?.text;
     return undefined;
+  }
+
+  librarySymbolKey(name: string): string {
+    return String(this.librarySymbolType(name).value);
+  }
+
+  private librarySymbolType(name: string): LiteralType {
+    let type = this.librarySymbols.get(name);
+    if (!type) {
+      type = uniqueSymbolType(`Symbol.${name}`, false);
+      this.librarySymbols.set(name, type);
+    }
+    return type;
   }
 
   private implicitAnyMember(member: TreeNode, nameNode: TreeNode): Type {

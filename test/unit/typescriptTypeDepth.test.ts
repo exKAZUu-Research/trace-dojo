@@ -1,6 +1,21 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 
 import { executeProgram } from '../../src/interpreter/program';
+
+test('charges missing object literal properties before expanding inferred union members', () => {
+  const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
+  try {
+    const objects = Array.from({ length: 1200 }, (_, index) => `{p${index}: 1}`).join(',');
+    expect(executeProgram('typescript', `const values = [${objects}];`)).toEqual({
+      kind: 'limitExceeded',
+      limit: 'operations',
+    });
+    const checked = executeProgram('typescript', 'const values = [{ a: 1 }, { b: 2 }]; console.log(values[0].b);');
+    expect(checked).toMatchObject({ kind: 'executed', stdout: 'undefined\n' });
+  } finally {
+    clock.mockRestore();
+  }
+});
 
 test.each([
   ['aliases', (name: string) => name],

@@ -497,6 +497,7 @@ export class Checker {
       classInfo: type.classInfo,
       isClassStatic: type.isClassStatic,
       isResolvedMappedType: type.isResolvedMappedType,
+      mappedOptional: type.mappedOptional,
       mappedKeys: type.mappedKeys,
       name: type.name,
       aliasName: type.aliasName,
@@ -519,7 +520,7 @@ export class Checker {
     };
     const localMapper = new Map<number, Type>([...mapper, [mapped.typeParameter.id, typeParameter]]);
     const getTemplate = (): Type => this.instantiate(mapped.template, localMapper);
-    const sourceVariable = mapped.source?.kind === 'typeParameter' ? mapped.source : undefined;
+    const sourceVariable = mapped.homomorphic && mapped.source?.kind === 'typeParameter' ? mapped.source : undefined;
     const withSource =
       sourceVariable &&
       ((source: Type): Type => this.instantiate(type, new Map([...mapper, [sourceVariable.id, source]])));
@@ -528,6 +529,7 @@ export class Checker {
         typeParameter,
         readonlyModifier: mapped.readonlyModifier,
         optionalModifier: mapped.optionalModifier,
+        homomorphic: mapped.homomorphic,
         constraint,
         nameType: mapped.nameType && this.instantiate(mapped.nameType, localMapper),
         source: mapped.source && this.instantiate(mapped.source, mapper),

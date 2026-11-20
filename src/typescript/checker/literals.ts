@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 720 -- Types literals and their spreads, members, and widening in the same literal context.
+// code-gauge-allow-file fileNcss 735 -- Types literals and their spreads, members, and widening in the same literal context.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { ExpressionListFlow, tupleArgumentContexts } from './callArity';
@@ -37,6 +37,7 @@ import {
   type ObjectType,
   type Property,
   regularOf,
+  simpleProperty,
   stringType,
   type Structure,
   symbolType,
@@ -262,7 +263,7 @@ export class LiteralChecker {
   private elementContext(contextual: Type): Type | undefined {
     if (contextual.kind !== 'object') return undefined;
     if (this.c.isArrayOrTuple(contextual)) return this.c.elementTypeOf(contextual);
-    if (!this.c.propertyOf(contextual, '__@iterator')) return undefined;
+    if (!this.c.propertyOf(contextual, this.c.typeNodes.librarySymbolKey('iterator'))) return undefined;
     const iterated = this.c.silently(() => this.c.patterns.iteratedType(undefined, contextual));
     return iterated === errorType || isAnyLike(iterated) ? undefined : iterated;
   }
@@ -1185,31 +1186,37 @@ export class LiteralChecker {
   normalizeObjectLiterals(types: Type[]): Type[] {
     const literals = types.filter((type) => isObjectLiteral(type) && !type.isUnionSpread);
     if (literals.length < 2) return types;
-    const names = new Set(literals.flatMap((literal) => [...this.c.structureOf(literal).properties.keys()]));
+    const missingProperties = new Map<string, Property>();
+    const structures = new Map<Type, Structure>();
+    let declaredProperties = 0;
+    for (const literal of literals) {
+      const structure = this.c.structureOf(literal);
+      structures.set(literal, structure);
+      declaredProperties += structure.properties.size;
+      this.c.budget.spend(structure.properties.size);
+      for (const name of structure.properties.keys()) {
+        if (!missingProperties.has(name))
+          missingProperties.set(name, simpleProperty(name, undefinedType, { optional: true }));
+      }
+    }
+    this.c.budget.spend(missingProperties.size * literals.length - declaredProperties);
     return types.map((type) => {
-      if (!isObjectLiteral(type) || type.isUnionSpread) return type;
-      const missing = [...names].filter((name) => !this.c.structureOf(type).properties.has(name));
-      if (missing.length === 0) return type;
-      return anonymousObject(
-        () => {
-          const structure = type.resolve();
-          const properties = new Map(structure.properties);
-          for (const name of missing) {
-            properties.set(name, {
-              name,
-              type: () => undefinedType,
-              optional: true,
-              readonly: false,
-              isMethod: false,
-              visibility: 'public',
-            });
-          }
-          return { ...structure, properties };
-        },
-        { isLiteral: true }
-      );
+      const structure = structures.get(type);
+      if (!structure || structure.properties.size === missingProperties.size) return type;
+      return normalizedLiteral(structure, missingProperties);
     });
   }
+}
+
+function normalizedLiteral(structure: Structure, missing: ReadonlyMap<string, Property>): ObjectType {
+  return anonymousObject(
+    () => {
+      const properties = new Map(structure.properties);
+      for (const [name, property] of missing) if (!properties.has(name)) properties.set(name, property);
+      return { ...structure, properties };
+    },
+    { isLiteral: true }
+  );
 }
 
 /** Whether a spread's member is never truthy, which TypeScript accepts in a spread that adds nothing for it. */

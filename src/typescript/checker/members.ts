@@ -318,7 +318,7 @@ export class MemberChecker {
     const owner = declaration.parent?.parent?.childForFieldName('name')?.text;
     const { name } = property;
     // The well-known symbols replace the protocols of the language, which this interpreter does not support yet.
-    if (owner === 'SymbolConstructor' && unavailableWellKnownSymbols.has(name))
+    if (owner === 'SymbolConstructor' && unavailableWellKnownSymbols.has(name) && !this.isTypeOnlyUse(propertyNode))
       return `Symbol.${name} などの well-known シンボル`;
     // A stack trace names the files and lines of the host, which differ from the program's.
     if (owner === 'Error' && name === 'stack') return 'Error の stack';
@@ -333,12 +333,17 @@ export class MemberChecker {
   private isNeverCalled(property: TreeNode): boolean {
     const read = property.parent;
     if (isOnlyCompared(read)) return true;
-    for (let ancestor = read; ancestor; ancestor = ancestor.parent) {
+    if (this.isTypeOnlyUse(property)) return true;
+    const binding = propertyBinding(property) ?? initializerBinding(read);
+    return !!binding && this.isOnlyComparedBinding(binding);
+  }
+
+  private isTypeOnlyUse(property: TreeNode): boolean {
+    for (let ancestor = property.parent; ancestor; ancestor = ancestor.parent) {
       this.c.budget.spend();
       if (isErasedTypeSyntax(ancestor.type)) return true;
     }
-    const binding = propertyBinding(property) ?? initializerBinding(read);
-    return !!binding && this.isOnlyComparedBinding(binding);
+    return false;
   }
 
   private isOnlyComparedBinding(binding: TreeNode): boolean {

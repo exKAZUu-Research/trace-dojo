@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 
 import { traceProgram } from '../../src/interpreter/program';
-import type { TraceItem } from '../../src/problems/trace';
+import type { DisplayNode, TraceItem } from '../../src/problems/trace';
 
 const javaMain = (body: string, members = ''): string => `public class Main {
   public static void main(String[] args) {
@@ -16,6 +16,8 @@ const withoutLines = (items: TraceItem[]): unknown[] =>
 
 const stepsOf = (language: 'java' | 'javascript' | 'typescript', program: string): unknown[] =>
   withoutLines(traceProgram(language, program, program).traceItems);
+
+const valueNode = (value: string | number): DisplayNode => ({ kind: 'value', value });
 
 test.each([
   {
@@ -117,6 +119,57 @@ console.log(__proto__);`;
     '__proto__',
     { kind: 'object', entries: { value: { kind: 'value', value: 7 } } },
   ]);
+});
+
+test('records array and collection subclass fields alongside their contents', () => {
+  const source = `
+class Stack extends Array<number> {
+  label = "start";
+  #count = 0;
+  advance() { this.#count++; this.label = "done"; }
+}
+class Numbers extends Set<number> { label = "start"; 0 = "field"; }
+class Dictionary extends Map<string, number> { label = "start"; }
+const stack = new Stack(1, 2);
+const numbers = new Numbers([3, 4]);
+const dictionary = new Dictionary([["label", 5]]);
+let reads = 0;
+Object.defineProperty(numbers, "computed", { enumerable: true, get() { return ++reads; } });
+stack.advance();
+numbers.label = "done";
+dictionary.label = "done";
+console.log(reads);
+`;
+  const recording = traceProgram('typescript', source, source);
+  expect(recording.stdout).toBe('0\n');
+  const snapshots = recording.traceItems.map((step) => step.referenceVars);
+  expect(snapshots.map((step) => step.stack)).toContainEqual({
+    kind: 'array',
+    entries: { 0: valueNode(1), 1: valueNode(2), label: valueNode('start'), '#count': valueNode(0) },
+  });
+  expect(snapshots.at(-1)).toEqual({
+    stack: {
+      kind: 'array',
+      entries: { 0: valueNode(1), 1: valueNode(2), label: valueNode('done'), '#count': valueNode(1) },
+    },
+    numbers: {
+      kind: 'array',
+      entries: {
+        0: valueNode(3),
+        1: valueNode(4),
+        label: valueNode('done'),
+        '0 (2)': valueNode('field'),
+        computed: { kind: 'value', value: '[Getter]', verbatim: true },
+      },
+    },
+    dictionary: {
+      kind: 'array',
+      entries: {
+        0: { kind: 'array', entries: { 0: valueNode('label'), 1: valueNode(5) } },
+        label: valueNode('done'),
+      },
+    },
+  });
 });
 
 test('static compile-time constants stay out of the trace as they do in Java', () => {

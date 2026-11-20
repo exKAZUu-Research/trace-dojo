@@ -27,6 +27,7 @@ const forwardedMembers: {
   tuple: true,
   mapped: true,
   isResolvedMappedType: true,
+  mappedOptional: true,
   mappedKeys: true,
   isLiteral: true,
   isUnionSpread: true,
