@@ -826,6 +826,31 @@ int main() {
   });
 });
 
+test('returns the std::istream base from getline', () => {
+  const program = `#include <iostream>
+#include <sstream>
+#include <string>
+void show(std::istream&) { std::cout << "base"; }
+void show(std::istringstream&) { std::cout << "derived"; }
+void show(std::stringstream&) { std::cout << "both"; }
+int main() {
+  std::istringstream input("hello\\nworld;x");
+  std::stringstream both("a,b");
+  std::string line;
+  show(std::getline(input, line));
+  show(std::getline(input, line, ';'));
+  show(std::getline(both, line, ','));
+  show(std::getline(std::istringstream("t"), line));
+  std::istream& r = std::getline(input, line);
+  std::cout << ' ' << (static_cast<void*>(&r) == static_cast<void*>(static_cast<std::istream*>(&input))) << line;
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'basebasebasebase 1x',
+    uncaughtException: undefined,
+  });
+});
+
 test('evaluates a nullptr operand before inserting it', () => {
   const program = `#include <cstddef>
 #include <iostream>

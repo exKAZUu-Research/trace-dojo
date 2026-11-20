@@ -701,8 +701,10 @@ export class Streams {
         const stream = args[0];
         const type = stream?.type;
         if (type?.kind !== 'class' || isConstType(type) || !input.has(type.cls)) return;
-        const parameter = stream.isLvalue ? referenceTo(type) : constRef(type);
-        return native('getline', [parameter, stringRef, CHAR], referenceTo(type), readLine, { optional: 1 });
+        // libc++'s `getline` takes and returns `basic_istream&` (or binds a temporary stream with `&&`).
+        const base = classType(this.istream);
+        const parameter = stream.isLvalue ? referenceTo(base) : constRef(base);
+        return native('getline', [parameter, stringRef, CHAR], referenceTo(base), readLine, { optional: 1 });
       }),
     ];
   }
