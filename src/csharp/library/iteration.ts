@@ -26,9 +26,20 @@ export const collectionModified = (): PendingException =>
 
 /**
  * Enumerates any `IEnumerable`: arrays, strings, and library collections directly, and the program's own enumerables
- * through `GetEnumerator`, `MoveNext`, and `Current`, as `foreach` does.
+ * through `GetEnumerator`, `MoveNext`, and `Current`, as `foreach` does. Every 16 elements cost an operation, since a
+ * library sequence such as `Enumerable.Range` yields its elements without running the program.
  */
 export function* iterate(call: NativeCall, value: Value, parameterName = 'source'): Generator<Value> {
+  let count = 0;
+  for (const element of elementsOf(call, value, parameterName)) {
+    if (++count % ELEMENTS_PER_OPERATION === 0) call.frame.runtime.spend();
+    yield element;
+  }
+}
+
+const ELEMENTS_PER_OPERATION = 16;
+
+function* elementsOf(call: NativeCall, value: Value, parameterName: string): Generator<Value> {
   if (value === undefined) failNull(parameterName);
   if (value instanceof CsArray) {
     yield* value.values;

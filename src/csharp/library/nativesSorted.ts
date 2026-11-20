@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 439 -- The nativesSorted module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 441 -- The nativesSorted module keeps one stage of the C# interpreter together.
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import type { NativeState } from '../runtime';
@@ -14,6 +14,7 @@ import {
   libraryType,
   newArray,
   refOf,
+  stepMeter,
   textOf,
   typeArgument,
 } from './support';
@@ -300,9 +301,12 @@ defineNatives({
     if (state.compare(lower as Value, upper as Value) > 0)
       fail('System.ArgumentException', 'Must be less than or equal to upperValue.', 'lowerValue');
     const view = newSorted(call, undefined, state.keyType, undefined);
-    for (const key of state.keys)
+    const step = stepMeter(call);
+    for (const key of state.keys) {
+      step();
       if (state.compare(key, lower as Value) >= 0 && state.compare(key, upper as Value) <= 0)
         view.insert(key, undefined, false);
+    }
     const object = new CsObject(libraryType(call, 'System.Collections.Generic.SortedSet', [state.keyType]), []);
     object.native = view;
     return object;

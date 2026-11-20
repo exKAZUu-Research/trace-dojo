@@ -115,7 +115,7 @@ defineNatives({
   },
   'System.Object.GetHashCode': (call, receiver) => {
     if (receiver instanceof CsStruct) return structHash(evaluatorOf(call), receiver, call.frame);
-    return primitiveHash(receiver) ?? identityHash(receiver);
+    return primitiveHash(receiver) ?? identityHash(call.frame.runtime, receiver);
   },
   'System.Object.GetType': (call, receiver) => {
     const linqName = receiver instanceof CsObject ? linqDisplayName(receiver.native) : undefined;
@@ -1421,7 +1421,7 @@ defineNatives({
   'System.Delegate.DynamicInvoke': (call, receiver, [args]) =>
     evaluatorOf(call).invokeDelegate(call.frame, receiver, arrayValues(args as Value), undefined),
   'System.Delegate.Equals': (_call, receiver, [other]) => receiver === other,
-  'System.Delegate.GetHashCode': (_call, receiver) => identityHash(receiver),
+  'System.Delegate.GetHashCode': (call, receiver) => identityHash(call.frame.runtime, receiver),
 });
 
 // ---- Turtle ----

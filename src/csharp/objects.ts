@@ -6,7 +6,7 @@ import { formatFloat } from './format';
 import { linqDisplayName } from './library/nativesLinq';
 import type { NativeCall } from './natives';
 import { PendingException } from './numeric';
-import type { ExceptionState, Frame } from './runtime';
+import type { ExceptionState, Frame, Runtime } from './runtime';
 import {
   type FieldSymbol,
   type MethodSymbol,
@@ -353,9 +353,11 @@ export function primitiveHash(boxed: Value): number | undefined {
 }
 
 /** `RuntimeHelpers.GetHashCode`: an identity hash for objects that do not override `GetHashCode`. */
-export function identityHash(value: Value): number {
-  if (value instanceof CsObject || value instanceof CsArray || value instanceof CsDelegate || value instanceof CsBox)
-    return value.identity;
+export function identityHash(runtime: Runtime, value: Value): number {
+  if (value instanceof CsObject || value instanceof CsArray || value instanceof CsDelegate || value instanceof CsBox) {
+    value.hashCode ??= runtime.nextHashCode();
+    return value.hashCode;
+  }
   return 0;
 }
 
@@ -376,12 +378,13 @@ export function compareOrdinal(a: string, b: string): number {
 export function defaultCompare(evaluator: Evaluator, a: Value, b: Value, frame: Frame): number {
   if (a === undefined) return b === undefined ? 0 : -1;
   if (b === undefined) return 1;
-  return comparePrimitives(unboxed(a), unboxed(b)) ?? evaluator.compareThroughInterface(a, b, frame);
+  const spend = (cost: number): void => evaluator.runtime.spend(cost);
+  return comparePrimitives(unboxed(a), unboxed(b), spend) ?? evaluator.compareThroughInterface(a, b, frame);
 }
 
 /** The order of two primitive values of the same kind, or undefined for other values. */
-function comparePrimitives(x: Value, y: Value): number | undefined {
-  if (typeof x === 'string' && typeof y === 'string') return compareCulture(x, y);
+function comparePrimitives(x: Value, y: Value, spend: (cost: number) => void): number | undefined {
+  if (typeof x === 'string' && typeof y === 'string') return compareCulture(x, y, { spend });
   if (typeof x === 'number' && typeof y === 'number') return compareNumbers(x, y);
   if (typeof x === 'bigint' && typeof y === 'bigint') return orderOf(x, y);
   if (x instanceof CsDecimal && y instanceof CsDecimal) return x.compare(y);

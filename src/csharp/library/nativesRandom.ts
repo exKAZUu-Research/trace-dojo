@@ -117,7 +117,8 @@ function nextBytes(source: RandomSource, buffer: Value[]): void {
   for (let index = 0; index < buffer.length; index++) buffer[index] = source.sample() & 0xff;
 }
 
-let shared: CsObject | undefined;
+/** Each run's `Random.Shared`, which lasts as long as the run. */
+const shared = new WeakMap<object, CsObject>();
 
 defineNatives({
   'System.Random..ctor()': (_call, receiver) => {
@@ -129,11 +130,13 @@ defineNatives({
     return;
   },
   'System.Random.get_Shared': (call) => {
-    if (!shared) {
-      shared = new CsObject(libraryType(call, 'System.Random'), []);
-      shared.native = new UnseededSource();
+    let random = shared.get(call.frame.runtime);
+    if (!random) {
+      random = new CsObject(libraryType(call, 'System.Random'), []);
+      random.native = new UnseededSource();
+      shared.set(call.frame.runtime, random);
     }
-    return shared;
+    return random;
   },
   'System.Random.Next()': (_call, receiver) => sourceOf(receiver).sample(),
   'System.Random.Next(int)': (call, receiver, [maxValue]) => {

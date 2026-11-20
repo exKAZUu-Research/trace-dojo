@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 729 -- The evaluator module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 730 -- The evaluator module keeps one stage of the C# interpreter together.
 import type {
   BoundArguments,
   BoundBlock,
@@ -1196,6 +1196,7 @@ export class Evaluator extends StatementExecutor {
       text += this.formatHole(value, frame.resolve(part.value.type), part.format, part.alignment, frame);
     }
     this.runtime.allocateString(text.length);
+    this.runtime.returnInterpolationBuffer();
     return freshString(text);
   }
 

@@ -23,8 +23,6 @@ export type Value =
   | CsArray
   | CsDelegate;
 
-let nextIdentity = 1;
-
 /**
  * A string that the program made at run time, which .NET keeps as an object of its own: `ReferenceEquals` tells two
  * of them with the same text apart. Literals and the strings .NET interns are plain strings, since each text has one.
@@ -59,7 +57,8 @@ export function freshString(text: string): string | CsString {
 
 /** An instance of a class, whose library classes keep their state in `native`. */
 export class CsObject {
-  readonly identity = nextIdentity++;
+  /** The hash code `RuntimeHelpers.GetHashCode` gave it, which .NET gives an object when first asked. */
+  hashCode?: number;
   turtle?: TurtleState;
   /** The state of a library object, such as a list's elements or an exception's message. */
   native?: unknown;
@@ -91,7 +90,8 @@ export class CsStruct {
 
 /** A value type's value converted to a reference type. */
 export class CsBox {
-  readonly identity = nextIdentity++;
+  /** The hash code `RuntimeHelpers.GetHashCode` gave it, which .NET gives an object when first asked. */
+  hashCode?: number;
 
   constructor(
     readonly type: Type,
@@ -100,7 +100,8 @@ export class CsBox {
 }
 
 export class CsArray {
-  readonly identity = nextIdentity++;
+  /** The hash code `RuntimeHelpers.GetHashCode` gave it, which .NET gives an object when first asked. */
+  hashCode?: number;
 
   constructor(
     readonly type: ArrayType,
@@ -125,7 +126,8 @@ export interface DelegateEntry {
 }
 
 export class CsDelegate {
-  readonly identity = nextIdentity++;
+  /** The hash code `RuntimeHelpers.GetHashCode` gave it, which .NET gives an object when first asked. */
+  hashCode?: number;
 
   constructor(
     readonly type: NamedType,

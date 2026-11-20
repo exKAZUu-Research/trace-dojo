@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 786 -- The nativesLinq module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 788 -- The nativesLinq module keeps one stage of the C# interpreter together.
 import { CsDecimal } from '../decimal';
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { arithmetic, PendingException } from '../numeric';
@@ -9,7 +9,7 @@ import { CsArray, CsBox, CsObject, CsStruct, isString, stringText, type Value } 
 import { isEnumerableState, iterate, LibraryEnumerator } from './iteration';
 import { comparisonOf, type Equality, equalityOf, HashState, ListState, newList } from './nativesCollections';
 import { stableSort } from './sort';
-import { evaluatorOf, fail, failNull, failOutOfRange, libraryType, newArray, refOf } from './support';
+import { evaluatorOf, fail, failNull, failOutOfRange, libraryType, newArray, refOf, stepMeter } from './support';
 
 /** The message of LINQ's argument errors, which name no value. */
 const OUT_OF_RANGE = 'Specified argument was out of the range of valid values.';
@@ -526,9 +526,11 @@ function ordered(call: NativeCall, args: Value[], descending: boolean, isThen: b
     () => {
       const items = [...source(call, root)];
       const keyed = keys.map((sortKey) => items.map((item) => sortKey.select(item)));
+      const step = stepMeter(call);
       const indices = stableSort(
         items.map((_item, index) => index),
         (a, b) => {
+          step();
           for (const [level, sortKey] of keys.entries()) {
             const order = sortKey.compare(keyed[level][a], keyed[level][b]);
             if (order !== 0) return sortKey.descending ? -order : order;

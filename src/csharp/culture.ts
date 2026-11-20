@@ -9,6 +9,29 @@
 export interface CultureComparison {
   isInvariant?: boolean;
   ignoreCase?: boolean;
+  /** Charges the run's budget for work proportional to the lengths compared, which a long text makes slow. */
+  spend?: (cost: number) => void;
+}
+
+/** Charges a comparison of texts of a total length, one operation for each 64 characters. */
+function charge(options: CultureComparison, length: number): void {
+  options.spend?.(1 + Math.floor(length / CHARACTERS_PER_OPERATION));
+}
+
+const CHARACTERS_PER_OPERATION = 64;
+
+/**
+ * A charge for a search's many comparisons, which adds up their lengths, each with a little more for the comparison
+ * itself, and charges an operation for each 64 characters.
+ */
+function meterOf(options: CultureComparison): (length: number) => void {
+  let characters = 0;
+  return (length) => {
+    characters += length + 16;
+    if (characters < CHARACTERS_PER_OPERATION) return;
+    options.spend?.(Math.floor(characters / CHARACTERS_PER_OPERATION));
+    characters %= CHARACTERS_PER_OPERATION;
+  };
 }
 
 // The root collation, which .NET's invariant culture uses: `en` has no tailoring, and `und` takes the host's locale in Node.
@@ -39,6 +62,7 @@ function collator(isInvariant: boolean | undefined, sensitivity: Sensitivity): I
 
 /** `string.Compare` with a culture, which gives -1, 0, or 1. */
 export function compareCulture(a: string, b: string, options: CultureComparison = {}): number {
+  charge(options, a.length + b.length);
   const { compare, comparable } = comparisonOf(options);
   return Math.sign(compare(comparable(a), comparable(b)));
 }
@@ -316,7 +340,8 @@ function contextualWeight(cluster: string, char: string, isInvariant: boolean | 
     variant.compare(cluster + char, `${cluster}\0${char}`) === 0
       ? undefined
       : HIRAGANA.find((hiragana) => accent.compare(cluster + char, cluster + hiragana) === 0);
-  contextualWeights.set(key, weight);
+  // A character with many combining marks before is rare, and keeping each would let a program grow the cache.
+  if (cluster.length <= 2) contextualWeights.set(key, weight);
   return weight;
 }
 
@@ -373,8 +398,9 @@ export function cultureIndexOf(
   // A value without weights matches where the search starts, as an empty one does.
   if (isIgnorable(value, options)) return start;
   const boundaries = searchBoundaries(source);
+  const meter = meterOf(options);
   for (let index = 0; index <= source.length; index++) {
-    if (boundaries[index] && matchesAt(source, value, index, boundaries, options)) return start + index;
+    if (boundaries[index] && matchesAt(source, value, index, boundaries, options, meter)) return start + index;
   }
   return -1;
 }
@@ -394,8 +420,9 @@ export function cultureLastIndexOf(
   const source = text.slice(start, end);
   if (isIgnorable(value, options)) return end;
   const boundaries = searchBoundaries(source);
+  const meter = meterOf(options);
   for (let index = source.length; index >= 0; index--) {
-    if (boundaries[index] && matchesAt(source, value, index, boundaries, options)) return start + index;
+    if (boundaries[index] && matchesAt(source, value, index, boundaries, options, meter)) return start + index;
   }
   return -1;
 }
@@ -407,16 +434,45 @@ export function cultureLastIndexOf(
 export function cultureStartsWith(text: string, value: string, options: CultureComparison = {}): boolean {
   if (!options.ignoreCase && PLAIN.test(text) && PLAIN.test(value)) return text.startsWith(value);
   const source = affixSource(text, options);
-  const pattern = affixSource(value, options);
   const { compare, comparable } = comparisonOf(options, true);
-  const target = comparable(pattern);
+  const target = comparable(affixSource(value, options));
+  const meter = meterOf(options);
+  const stops: number[] = [];
   for (let stop = 0; stop <= source.length; stop++) {
-    if (isInsideAffixElement(source, stop) || startsWithCombining(source, stop, options.isInvariant)) continue;
-    const prefix = comparable(source.slice(0, stop));
+    if (!isInsideAffixElement(source, stop) && !startsWithCombining(source, stop, options.isInvariant))
+      stops.push(stop);
+  }
+  const prefixAt = (index: number): string => {
+    meter(stops[index] + target.length);
+    return comparable(source.slice(0, stops[index]));
+  };
+  const base = collator(options.isInvariant, 'base');
+  for (let index = firstNotBelow(stops.length, prefixAt, target, base); index < stops.length; index++) {
+    const prefix = prefixAt(index);
+    if (base.compare(prefix, target) !== 0) return false;
     if (compare(prefix, target) === 0) return true;
-    if (!isPrimaryPrefix(prefix, target, options.isInvariant)) return false;
   }
   return false;
+}
+
+/**
+ * The first of growing prefixes that does not sort below the value at the primary strength: a prefix sorts below
+ * while its primary weights begin the value's, and its order stays once they differ, so equal prefixes start there.
+ */
+function firstNotBelow(
+  count: number,
+  prefixAt: (index: number) => string,
+  target: string,
+  base: Intl.Collator
+): number {
+  let low = 0;
+  let high = count;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (base.compare(prefixAt(middle), target) < 0) low = middle + 1;
+    else high = middle;
+  }
+  return low;
 }
 
 /** Whether a text ends with a value, as .NET compares their collation elements from the end. */
@@ -426,16 +482,36 @@ export function cultureEndsWith(text: string, value: string, options: CultureCom
   const pattern = affixSource(value, options);
   const { compare, comparable } = comparisonOf(options, true);
   const target = comparable(pattern);
-  for (let start = source.length; start >= 0; start--) {
-    if (isInsideAffixElement(source, start)) continue;
+  const meter = meterOf(options);
+  for (const start of suffixStarts(source, pattern, options)) {
     // The text's characters weigh after the character before them, and the value's on their own, as in `matchesAt`.
-    let base = Math.max(0, start - 1);
-    while (base > 0 && /\p{M}/u.test(source[base])) base--;
-    const context = startsWithCombining(source, base, options.isInvariant) ? '' : source.slice(base, start);
+    const context = contextBefore(source, start, options.isInvariant);
+    meter(source.length - start + pattern.length);
     const suffix = comparable(context + source.slice(start));
     if (compare(suffix, context === '' ? target : comparable(`${context}\0${pattern}`)) === 0) return true;
   }
   return false;
+}
+
+/**
+ * The positions from the end where a suffix equal to the value can start: an equal suffix has as many collation
+ * elements as the value, of which a character has at most 18 and a contraction takes at most a few characters, so a
+ * longer suffix with weights cannot be equal.
+ */
+function* suffixStarts(source: string, pattern: string, options: CultureComparison): Generator<number> {
+  const longest = MAX_CHARACTERS_PER_ELEMENT * MAX_ELEMENTS_PER_CHARACTER * ([...pattern].length + 1);
+  let weighted = 0;
+  for (let start = source.length; start >= 0 && weighted <= longest; start--) {
+    if (start < source.length && !isIgnorable(source[start], options)) weighted++;
+    if (!isInsideAffixElement(source, start)) yield start;
+  }
+}
+
+/** The character before a position with its combining marks, unless a combining mark starts the text. */
+function contextBefore(source: string, start: number, isInvariant: boolean | undefined): string {
+  let base = Math.max(0, start - 1);
+  while (base > 0 && /\p{M}/u.test(source[base])) base--;
+  return startsWithCombining(source, base, isInvariant) ? '' : source.slice(base, start);
 }
 
 /**
@@ -524,7 +600,8 @@ function matchesAt(
   value: string,
   index: number,
   boundaries: boolean[],
-  options: CultureComparison
+  options: CultureComparison,
+  meter: (length: number) => void
 ): boolean {
   const { compare, comparable } = comparisonOf(options, true);
   if (index < source.length && isIgnorable(String.fromCodePoint(source.codePointAt(index) as number), options))
@@ -537,12 +614,16 @@ function matchesAt(
   const target = comparable(context === '' ? value : `${context}\0${value}`);
   for (let stop = index; stop <= source.length; stop++) {
     if (!boundaries[stop]) continue;
+    meter(stop - index + target.length);
     const segment = comparable(context + source.slice(index, stop));
     if (compare(segment, target) === 0) return true;
     if (!isPrimaryPrefix(segment, target, options.isInvariant)) return false;
   }
   return false;
 }
+
+const MAX_ELEMENTS_PER_CHARACTER = 18;
+const MAX_CHARACTERS_PER_ELEMENT = 4;
 
 /** Whether a text has no weights under a comparison, as control and format characters have none. */
 function isIgnorable(text: string, options: CultureComparison): boolean {

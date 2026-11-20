@@ -160,6 +160,29 @@ test.each([
   expect(executeProgram('csharp', program)).toEqual({ kind: 'compileError', diagnostics: [expected] });
 });
 
+// Learners' programs run in the server's process: work that the host cannot interrupt (a backtracking regex, a lazy
+// sequence, a culture search) must count against the budget, and a run must not see what an earlier run did.
+test('hostile programs stop within the limits, and runs share no state', () => {
+  for (const program of [
+    'Console.WriteLine(System.Text.RegularExpressions.Regex.IsMatch(new string(\'a\', 40) + "!", "^(a+)+$"));',
+    'Console.WriteLine(Enumerable.Range(0, int.MaxValue).Count());',
+    'var s = new string(\'あ\', 999999); Console.WriteLine(s.IndexOf(s + "い"));',
+  ]) {
+    expect(executeProgram('csharp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  }
+  expect(
+    executeProgram(
+      'csharp',
+      'var s = new string(\'あ\', 999999); Console.WriteLine($"{s.EndsWith("い")} {s.StartsWith(s + "い")}");'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'False False\n' });
+  // .NET 10 gives these hash codes to the first objects of every run; an interpolated string's buffer takes one.
+  const hashCodes =
+    'Console.WriteLine($"{new object().GetHashCode()} {new object().GetHashCode()}"); Console.WriteLine(new object().GetHashCode());';
+  for (let run = 0; run < 2; run++)
+    expect(executeProgram('csharp', hashCodes)).toMatchObject({ stdout: '58225482 54267293\n33574638\n' });
+});
+
 test('syntax and library members beyond the grader are rejected as unavailable', () => {
   expect(executeProgram('csharp', 'int[] a = { 1, 2 };\nConsole.WriteLine(a[^1]);\n')).toEqual({
     kind: 'compileError',

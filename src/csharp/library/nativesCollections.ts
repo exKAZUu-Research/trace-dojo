@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 916 -- The nativesCollections module keeps one stage of the C# interpreter together.
+// code-gauge-allow-file fileNcss 918 -- The nativesCollections module keeps one stage of the C# interpreter together.
 import { defineNatives, type NativeCall, type NativeMethod } from '../natives';
 import { PendingException } from '../numeric';
 import { defaultCompare, environmentOf, hashOf, stringOf, valuesEqual } from '../objects';
@@ -26,6 +26,7 @@ import {
   libraryType,
   newArray,
   refOf,
+  stepMeter,
   textOf,
   typeArgument,
 } from './support';
@@ -62,7 +63,9 @@ export function comparisonOf(call: NativeCall, comparer: Value): Comparison {
 
 /** Runs a sort's comparisons, wrapping what they throw as .NET's sorting does. */
 function guardedComparison(call: NativeCall, compare: Comparison): Comparison {
+  const step = stepMeter(call);
   return (a, b) => {
+    step();
     try {
       return compare(a, b);
     } catch (error) {

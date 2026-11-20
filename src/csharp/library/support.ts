@@ -50,6 +50,19 @@ export function refOf(arg: Value | VariableReference): VariableReference {
   return arg as VariableReference;
 }
 
+/**
+ * A charge for a native's steps, one operation for each 16, for a native that repeats work on its own, such as the
+ * comparisons of a sort, which no operation of the program pays for.
+ */
+export function stepMeter(call: NativeCall): () => void {
+  let steps = 0;
+  return () => {
+    if (++steps % STEPS_PER_OPERATION === 0) call.frame.runtime.spend();
+  };
+}
+
+const STEPS_PER_OPERATION = 16;
+
 /** Throws a library exception that the evaluator turns into a C# exception where the program can see it. */
 export function fail(typeName: string, message?: string, paramName?: string): never {
   throw new PendingException(typeName, message, paramName);

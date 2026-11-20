@@ -48,31 +48,42 @@ const STRING = 'System.String';
  * `StringComparison`'s values: 0 and 1 the current culture, 2 and 3 the invariant one, 4 and 5 ordinal, of which the
  * odd ones ignore case.
  */
-function compareWith(a: string, b: string, comparison: number): number {
+function compareWith(call: NativeCall, a: string, b: string, comparison: number): number {
   const ignoreCase = comparison % 2 === 1;
   // An ordinal comparison gives the difference of the first differing characters, as .NET's does.
   if (comparison >= 4) return ordinalDifference(ignoreCase ? ordinalUpper(a) : a, ignoreCase ? ordinalUpper(b) : b);
-  return compareCulture(a, b, cultureOf(comparison));
+  return compareCulture(a, b, cultureOf(call, comparison));
 }
 
-function equalsWith(a: string, b: string, comparison: number): boolean {
+function equalsWith(call: NativeCall, a: string, b: string, comparison: number): boolean {
   if (comparison === 4) return a === b;
   if (comparison === 5) return ordinalUpper(a) === ordinalUpper(b);
-  return equalsCulture(a, b, cultureOf(comparison));
+  return equalsCulture(a, b, cultureOf(call, comparison));
 }
 
-function cultureOf(comparison: number): CultureComparison {
-  return { isInvariant: comparison >= 2, ignoreCase: comparison % 2 === 1 };
+/** A culture comparison of a `StringComparison`, whose work counts against the run's budget. */
+function cultureOf(call: NativeCall, comparison: number): CultureComparison {
+  return {
+    isInvariant: comparison >= 2,
+    ignoreCase: comparison % 2 === 1,
+    spend: (cost) => call.frame.runtime.spend(cost),
+  };
 }
 
 /** Whether a string contains, starts with, or ends with another under a `StringComparison`. */
-function searchWith(text: string, value: string, comparison: number, how: 'contains' | 'starts' | 'ends'): boolean {
+function searchWith(
+  call: NativeCall,
+  text: string,
+  value: string,
+  comparison: number,
+  how: 'contains' | 'starts' | 'ends'
+): boolean {
   if (comparison >= 4) {
     const [haystack, needle] = comparison === 5 ? [ordinalUpper(text), ordinalUpper(value)] : [text, value];
     if (how === 'starts') return haystack.startsWith(needle);
     return how === 'ends' ? haystack.endsWith(needle) : haystack.includes(needle);
   }
-  const culture = cultureOf(comparison);
+  const culture = cultureOf(call, comparison);
   if (how === 'starts') return cultureStartsWith(text, value, culture);
   if (how === 'ends') return cultureEndsWith(text, value, culture);
   return cultureIndexOf(text, value, 0, text.length, culture) !== -1;
@@ -253,47 +264,49 @@ const stringNatives: Record<string, NativeMethod> = {
     return text.charCodeAt(position);
   },
   [`${STRING}.Clone`]: (_call, receiver) => receiver,
-  [`${STRING}.CompareTo`]: (_call, receiver, [other]) =>
-    other === undefined ? 1 : compareCulture(receiverText(receiver), unboxed(other as Value) as string),
+  [`${STRING}.CompareTo`]: (call, receiver, [other]) =>
+    other === undefined
+      ? 1
+      : compareCulture(receiverText(receiver), unboxed(other as Value) as string, cultureOf(call, 0)),
   [`${STRING}.Contains(string)`]: (_call, receiver, [value]) => {
     if (value === undefined) failNull('value');
     return receiverText(receiver).includes(value as string);
   },
   [`${STRING}.Contains(char)`]: (_call, receiver, [value]) =>
     receiverText(receiver).includes(String.fromCodePoint(value as number)),
-  [`${STRING}.Contains(string, StringComparison)`]: (_call, receiver, [value, comparison]) => {
+  [`${STRING}.Contains(string, StringComparison)`]: (call, receiver, [value, comparison]) => {
     if (value === undefined) failNull('value');
-    return searchWith(receiverText(receiver), value as string, comparison as number, 'contains');
+    return searchWith(call, receiverText(receiver), value as string, comparison as number, 'contains');
   },
-  [`${STRING}.Contains(char, StringComparison)`]: (_call, receiver, [value, comparison]) =>
-    searchWith(receiverText(receiver), String.fromCodePoint(value as number), comparison as number, 'contains'),
-  [`${STRING}.StartsWith(string)`]: (_call, receiver, [value]) => {
+  [`${STRING}.Contains(char, StringComparison)`]: (call, receiver, [value, comparison]) =>
+    searchWith(call, receiverText(receiver), String.fromCodePoint(value as number), comparison as number, 'contains'),
+  [`${STRING}.StartsWith(string)`]: (call, receiver, [value]) => {
     if (value === undefined) failNull('value');
-    return cultureStartsWith(receiverText(receiver), value as string);
+    return cultureStartsWith(receiverText(receiver), value as string, cultureOf(call, 0));
   },
   [`${STRING}.StartsWith(char)`]: (_call, receiver, [value]) =>
     receiverText(receiver).startsWith(String.fromCodePoint(value as number)),
-  [`${STRING}.StartsWith(string, StringComparison)`]: (_call, receiver, [value, comparison]) => {
+  [`${STRING}.StartsWith(string, StringComparison)`]: (call, receiver, [value, comparison]) => {
     if (value === undefined) failNull('value');
-    return searchWith(receiverText(receiver), value as string, comparison as number, 'starts');
+    return searchWith(call, receiverText(receiver), value as string, comparison as number, 'starts');
   },
-  [`${STRING}.EndsWith(string)`]: (_call, receiver, [value]) => {
+  [`${STRING}.EndsWith(string)`]: (call, receiver, [value]) => {
     if (value === undefined) failNull('value');
-    return cultureEndsWith(receiverText(receiver), value as string);
+    return cultureEndsWith(receiverText(receiver), value as string, cultureOf(call, 0));
   },
   [`${STRING}.EndsWith(char)`]: (_call, receiver, [value]) =>
     receiverText(receiver).endsWith(String.fromCodePoint(value as number)),
-  [`${STRING}.EndsWith(string, StringComparison)`]: (_call, receiver, [value, comparison]) => {
+  [`${STRING}.EndsWith(string, StringComparison)`]: (call, receiver, [value, comparison]) => {
     if (value === undefined) failNull('value');
-    return searchWith(receiverText(receiver), value as string, comparison as number, 'ends');
+    return searchWith(call, receiverText(receiver), value as string, comparison as number, 'ends');
   },
   [`${STRING}.Equals(object?)`]: (_call, receiver, [other]) => receiver === plainString(other as Value),
   [`${STRING}.Equals(string?)`]: (_call, receiver, [other]) => receiver === other,
-  [`${STRING}.Equals(string?, StringComparison)`]: (_call, receiver, [other, comparison]) =>
-    other !== undefined && equalsWith(receiverText(receiver), other as string, comparison as number),
+  [`${STRING}.Equals(string?, StringComparison)`]: (call, receiver, [other, comparison]) =>
+    other !== undefined && equalsWith(call, receiverText(receiver), other as string, comparison as number),
   [`${STRING}.Equals(string?, string?)`]: (_call, _receiver, [a, b]) => a === b,
-  [`${STRING}.Equals(string?, string?, StringComparison)`]: (_call, _receiver, [a, b, comparison]) =>
-    a === undefined || b === undefined ? a === b : equalsWith(a as string, b as string, comparison as number),
+  [`${STRING}.Equals(string?, string?, StringComparison)`]: (call, _receiver, [a, b, comparison]) =>
+    a === undefined || b === undefined ? a === b : equalsWith(call, a as string, b as string, comparison as number),
   [`${STRING}.GetHashCode`]: (_call, receiver) => primitiveHash(receiver as string) ?? 0,
   [`${STRING}.GetEnumerator`]: (call, receiver) => {
     const enumerator = new CsObject(libraryType(call, 'System.CharEnumerator'), []);
@@ -419,20 +432,24 @@ const stringNatives: Record<string, NativeMethod> = {
   [`${STRING}.TrimEnd()`]: (_call, receiver) => trimWith(receiverText(receiver), undefined, false, true),
   [`${STRING}.TrimEnd(char)`]: (_call, receiver, [char]) =>
     trimWith(receiverText(receiver), charsOf(char as Value), false, true),
-  [`${STRING}.TrimEnd(char[]?)`]: (_call, receiver, [chars]) =>
+  [`${STRING}.TrimEnd(char[]?)`]: (call, receiver, [chars]) =>
     trimWith(receiverText(receiver), charsOf(chars as Value), false, true),
-  [`${STRING}.IsNormalized`]: (_call, receiver) => receiverText(receiver) === receiverText(receiver).normalize(),
-  [`${STRING}.Compare`]: (_call, _receiver, args) => {
+  [`${STRING}.IsNormalized`]: (call, receiver) => receiverText(receiver) === receiverText(receiver).normalize(),
+  [`${STRING}.Compare`]: (call, _receiver, args) => {
     const [a, b] = args as (string | undefined)[];
     if (args.length === 5) {
       const [strA, indexA, strB, indexB, length] = args as [string, number, string, number, number];
-      return compareCulture(strA.slice(indexA, indexA + length), strB.slice(indexB, indexB + length));
+      return compareCulture(
+        strA.slice(indexA, indexA + length),
+        strB.slice(indexB, indexB + length),
+        cultureOf(call, 0)
+      );
     }
     if (a === undefined) return b === undefined ? 0 : -1;
     if (b === undefined) return 1;
-    if (typeof args[2] === 'boolean') return compareCulture(a, b, { ignoreCase: args[2] });
-    if (typeof args[2] === 'number') return compareWith(a, b, args[2]);
-    return compareCulture(a, b);
+    if (typeof args[2] === 'boolean') return compareCulture(a, b, cultureOf(call, args[2] ? 1 : 0));
+    if (typeof args[2] === 'number') return compareWith(call, a, b, args[2]);
+    return compareCulture(a, b, cultureOf(call, 0));
   },
   [`${STRING}.CompareOrdinal(string?, string?)`]: (_call, _receiver, [a, b]) => {
     if (a === undefined) return b === undefined ? 0 : -1;
@@ -595,7 +612,7 @@ function indexOf(call: NativeCall, text: string, args: Value[]): number {
       'Count must be positive and count must refer to a location within the string/array/collection.'
     );
   const end = count === undefined ? text.length : start + count;
-  if (comparison < 4 && needle !== '') return cultureIndexOf(text, needle, start, end, cultureOf(comparison));
+  if (comparison < 4 && needle !== '') return cultureIndexOf(text, needle, start, end, cultureOf(call, comparison));
   const [haystack, target] = ordinalForms(text, needle, comparison);
   const found = haystack.indexOf(target, start);
   if (found === -1 || found + target.length > end) return -1;
@@ -672,7 +689,7 @@ function lastStringIndex(
   if (first < 0 || count < 0 || first + count > text.length) failLastCount(call);
   // An empty value occurs at the end of the part searched.
   if (needle === '') return first + count;
-  if (comparison < 4) return cultureLastIndexOf(text, needle, first, first + count, cultureOf(comparison));
+  if (comparison < 4) return cultureLastIndexOf(text, needle, first, first + count, cultureOf(call, comparison));
   const [haystack, target] = ordinalForms(text.slice(first, first + count), needle, comparison);
   const found = haystack.lastIndexOf(target);
   return found === -1 ? -1 : first + found;
@@ -957,14 +974,14 @@ defineNatives({
   [`${STRING_COMPARER}.get_InvariantCultureIgnoreCase`]: (call) => stringComparer(call, 3),
   [`${STRING_COMPARER}.get_Ordinal`]: (call) => stringComparer(call, 4),
   [`${STRING_COMPARER}.get_OrdinalIgnoreCase`]: (call) => stringComparer(call, 5),
-  [`${STRING_COMPARER}.Compare`]: (_call, receiver, [a, b]) => {
+  [`${STRING_COMPARER}.Compare`]: (call, receiver, [a, b]) => {
     if (a === undefined) return b === undefined ? 0 : -1;
     if (b === undefined) return 1;
-    return compareWith(a as string, b as string, comparisonOfComparer(receiver));
+    return compareWith(call, a as string, b as string, comparisonOfComparer(receiver));
   },
-  [`${STRING_COMPARER}.Equals`]: (_call, receiver, [a, b]) => {
+  [`${STRING_COMPARER}.Equals`]: (call, receiver, [a, b]) => {
     if (a === undefined || b === undefined) return a === b;
-    return equalsWith(a as string, b as string, comparisonOfComparer(receiver));
+    return equalsWith(call, a as string, b as string, comparisonOfComparer(receiver));
   },
   [`${STRING_COMPARER}.GetHashCode`]: (_call, receiver, [text]) => {
     if (text === undefined) failNull('obj');

@@ -115,8 +115,11 @@ export class Runtime {
   private readonly dispatchCache = new Map<MethodSymbol, Map<string, MethodSymbol>>();
   /** The strings .NET makes once and returns again, such as a small number's text, by what they are the text of. */
   private readonly sharedStrings = new Map<string, CsString>();
-  /** The texts that `string.Intern` added to the program's literals, which are interned already. */
-  readonly interned = new Set<string>();
+  /**
+   * The state of CoreCLR's hash codes for the main thread, the second thread the runtime makes: each new hash code
+   * steps `seed * (4 * threadId + 5) + 1` with thread id 1 and keeps the top 26 bits, never 0.
+   */
+  private hashCodeSeed = (Math.imul(123_456_789, 1_566_083_941) + 1) >>> 0;
   private allocatedSlots = 0;
 
   constructor(
@@ -156,6 +159,28 @@ export class Runtime {
     if (/^-?\d+$/.test(text)) return this.numberString(text);
     const isMember = type.symbol.fields.some((field) => field.isConst && field.name === text);
     return isMember ? this.sharedString(`enum:${typeKey(type)}:${text}`, text) : freshString(text);
+  }
+
+  private hasInterpolationHandler = false;
+
+  /**
+   * The first interpolated string handler takes a hash code when it returns its buffer to `ArrayPool<char>.Shared`,
+   * whose set-up gives an object one, as .NET 10 shows in the hash codes of the program's objects around it.
+   */
+  returnInterpolationBuffer(): void {
+    if (this.hasInterpolationHandler) return;
+    this.hasInterpolationHandler = true;
+    this.nextHashCode();
+  }
+
+  /** The next hash code that `RuntimeHelpers.GetHashCode` gives an object. */
+  nextHashCode(): number {
+    let hashCode = 0;
+    while (hashCode === 0) {
+      this.hashCodeSeed = (Math.imul(this.hashCodeSeed, 9) + 1) >>> 0;
+      hashCode = this.hashCodeSeed >>> 6;
+    }
+    return hashCode;
   }
 
   /** A string that .NET makes once for a key, such as the name of a type, and returns again. */
