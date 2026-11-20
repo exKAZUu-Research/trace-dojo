@@ -819,10 +819,10 @@ function mapMultipleArrays(callback: Value, first: PhpArray, rest: Value[]): Php
       throwError('TypeError', `array_map(): Argument #${index + 3} must be of type array, ${valueName(value)} given`);
     }
   }
-  const lists = [first, ...rest].map((value) =>
-    (value as PhpArray).size === 0 ? [] : [...(value as PhpArray).map.values()]
-  );
-  const length = Math.max(...lists.map((list) => list.length));
+  const arrays = [first, ...rest] as PhpArray[];
+  const length = Math.max(...arrays.map((value) => value.size));
+  if (length === 0) return new PhpArray();
+  const lists = arrays.map((value) => [...value.map.values()]);
   const result = new PhpArray();
   for (let index = 0; index < length; index++) {
     const items = lists.map((list) => (index < list.length ? list[index] : null));

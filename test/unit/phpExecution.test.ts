@@ -4836,12 +4836,12 @@ $a = [...new I]; $a[] = 8; echo json_encode($a);`)
       'Cannot access private property A::$p;Cannot access protected property A::$q;Access to undeclared static property A::$r;Cannot access private property B::$p;Cannot access protected property B::$q;Cannot access private property C::$p;Cannot access private property C::$bp;Cannot access protected property C::$q;',
   });
 
-  // r1480: array_map(null, $a) preserves single-array identity on retained-empty arrays
+  // r1480 & r1485: array_map preserves single-array identity and physical column values on retained-empty arrays
   expect(
     run(
-      '<?php error_reporting(0); function f() { return 4; } $a = []; set_error_handler(function() use (&$a) { unset($a[0]); $a[] = 9; return true; }); $a[] = &f(); restore_error_handler(); unset($a[0]); $b = array_map(null, $a); $c = array_map(null, $a); $c[] = 8; echo count($b), ":", json_encode($b), ":", $b[1] ?? "missing", "|", json_encode($c);'
+      '<?php error_reporting(0); function f() { return 4; } $a = []; set_error_handler(function() use (&$a) { unset($a[0]); $a[] = 9; return true; }); $a[] = &f(); restore_error_handler(); unset($a[0]); $b = array_map(null, $a); $c = array_map(null, $a); $c[] = 8; echo count($b), ":", json_encode($b), ":", $b[1] ?? "missing", "|", json_encode($c), "|", json_encode(array_map(null, $a, [1])), "|", json_encode(array_map(null, $a, []));'
     )
-  ).toMatchObject({ kind: 'executed', stdout: '0:[]:9|{"2":8}' });
+  ).toMatchObject({ kind: 'executed', stdout: '0:[]:9|{"2":8}|[[9,1]]|[]' });
 
   // r1475 & r1479: helper method called from property hook invokes hook normally while direct hook writes access backing storage
   expect(
@@ -4883,6 +4883,24 @@ class D { function __destruct() { echo "drop;"; throw new Exception("destructor"
 function f() { return ${expression}; }
 try { f(); } catch (Throwable $e) { while ($e) { echo $e->getMessage(), ";"; $e = $e->getPrevious(); } }
 `)
+    ).toMatchObject({ kind: 'executed', stdout: expected });
+  }
+
+  for (const [context, expected] of [
+    [
+      'try { return [new D, exit("exit;")]; } catch (Throwable $e) { echo "inner;" . $e->getMessage(); }',
+      'exit;drop;inner;destructor',
+    ],
+    [
+      'foreach ([1] as $x) { try { return [new D, exit("exit;")]; } catch (Throwable $e) { echo "inner;" . $e->getMessage(); } }',
+      'exit;drop;inner;destructor',
+    ],
+    ['try { return [new D, exit("exit;")]; } finally { echo "finally;"; }', 'exit;drop;outer;destructor'],
+  ]) {
+    expect(
+      run(
+        `<?php class D { function __destruct() { echo "drop;"; throw new Exception("destructor"); } } function f() { ${context} } try { f(); } catch (Throwable $e) { echo "outer;" . $e->getMessage(); }`
+      )
     ).toMatchObject({ kind: 'executed', stdout: expected });
   }
 
