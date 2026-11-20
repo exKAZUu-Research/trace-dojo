@@ -1259,6 +1259,26 @@ fn main() {
   });
 });
 
+test('captures values consumed by Rust macros in FnOnce closures', () => {
+  const program = `fn main() {
+    let text = String::from("hi");
+    let debug = || { dbg!(text); };
+    debug();
+    let text = String::from("vector");
+    let vector = || { let values = vec![text; 1]; println!("{:?}", values); };
+    vector();
+    let input = Some(String::from("value"));
+    let matches = || matches!(input, Some(_value));
+    println!("{}", matches());
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '["vector"]\ntrue\n',
+    uncaughtException: undefined,
+    stderr: expect.stringContaining('text = "hi"'),
+  });
+});
+
 test('numbers, escapes, and error values print as rustc prints them', () => {
   const program = `use std::num::IntErrorKind;
 fn main() {

@@ -1,5 +1,5 @@
 import { type Annotations, type FnContext, type LocalVar } from './annotations';
-import type { Expr, Pattern, Span } from './ast';
+import type { Expr, MacroCall, Pattern, Span } from './ast';
 import { forEachDirect, patternBindingParts } from './astWalk';
 import type { Checker } from './checker';
 import { checkPattern } from './checkerPatterns';
@@ -214,7 +214,7 @@ function consumedChildren(
       return () => false;
     }
     case 'macro': {
-      return () => expr.macro.kind === 'vec';
+      return consumedMacroChildren(expr.macro, movesByPattern);
     }
     case 'match': {
       // A scrutinee moves when a pattern takes a part of it by value.
@@ -254,6 +254,27 @@ function consumedChildren(
     }
     default: {
       return () => true;
+    }
+  }
+}
+
+function consumedMacroChildren(
+  macro: MacroCall,
+  movesByPattern: (pattern: Pattern) => boolean
+): (child: Expr) => boolean {
+  switch (macro.kind) {
+    case 'vec':
+    case 'dbg': {
+      return () => true;
+    }
+    case 'vecRepeat': {
+      return (child) => child === macro.value;
+    }
+    case 'matches': {
+      return () => movesByPattern(macro.pattern);
+    }
+    default: {
+      return () => false;
     }
   }
 }

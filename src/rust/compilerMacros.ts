@@ -2,6 +2,7 @@ import type { Expr, FormatArgs, FormatPiece, MacroCall, Span } from './ast';
 import { claimStrings, stringCapacity, StringGrowth } from './capacity';
 import type { Compiler, Eval } from './compiler';
 import { evaluateValues, stringish } from './compilerCommon';
+import { compilePatternInput, takesWhole } from './compilerPatterns';
 import type { WriteChunk } from './debugText';
 import type { Spec } from './fmt';
 import { normalize } from './infer';
@@ -36,16 +37,31 @@ const MACROS: { [K in MacroCall['kind']]: (c: Compiler, macro: Macro<K>, span: S
   assertEq: assertEqMacro,
   vec: vecMacro,
   vecRepeat: vecRepeatMacro,
-  matches: (c, macro) => {
-    const value = c.read(macro.value);
-    const matcher = c.compileMatcher(macro.pattern);
-    return (frame) => matcher(frame, value(frame), undefined);
-  },
+  matches: matchesMacro,
   dbg: dbgMacro,
 };
 
 export function compileMacro(c: Compiler, expr: Expr, macro: MacroCall): Eval {
   return (MACROS[macro.kind] as (c: Compiler, macro: MacroCall, span: Span) => Eval)(c, macro, expr.span);
+}
+
+function matchesMacro(c: Compiler, macro: Macro<'matches'>): Eval {
+  const input = compilePatternInput(c, macro.value);
+  const matcher = c.compileMatcher(macro.pattern);
+  const slots = c.patternSlots(macro.pattern);
+  const takeAll = takesWhole(c, macro.value, macro.pattern);
+  return (frame) => {
+    const { value, place } = input(frame);
+    return frame.runtime.withRoots([place], () => {
+      try {
+        const matched = matcher(frame, value, () => place);
+        if (matched) takeAll?.(frame);
+        return matched;
+      } finally {
+        frame.endScope(slots);
+      }
+    });
+  };
 }
 
 function formatMacro(c: Compiler, macro: Macro<'format'>): Eval {
