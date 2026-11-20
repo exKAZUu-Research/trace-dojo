@@ -3,6 +3,7 @@ import { RegExpSyntaxError } from '@eslint-community/regexpp';
 import type { Runtime } from '../runtime';
 import { coreTypes, interfaceType, makeNullable } from '../types';
 import { DartList, DartObject, type Value } from '../values';
+import { BoundedStringParts } from './boundedStringParts';
 import {
   define,
   defineConstructor,
@@ -156,9 +157,11 @@ function matchState(value: Value): MatchState {
   return (value as DartObject).native as unknown as MatchState;
 }
 
-define('RegExp.escape', (runtime, _receiver, [text]) =>
-  stringArg(runtime, text, 'text').replaceAll(/[$()*+./?[\\\]^{|}-]/g, String.raw`\$&`)
-);
+define('RegExp.escape', (runtime, _receiver, [text]) => {
+  const result = new BoundedStringParts(runtime);
+  result.appendEscaped(stringArg(runtime, text, 'text'), /[$()*+./?[\\\]^{|}-]/g, (character) => '\\' + character);
+  return result.text();
+});
 define('RegExp.firstMatch', (runtime, receiver, [input]) => {
   const match = execAt(runtime, stateOf(receiver), stringArg(runtime, input, 'input'), 0, false);
   if (!match) return;

@@ -15,6 +15,13 @@ export class BoundedStringParts {
     this.parts.push(part);
   }
 
+  appendEscaped(text: string, asciiCharacters: RegExp, escape: (character: string) => string): void {
+    for (let start = 0; start < text.length; start += 1024) {
+      this.runtime.spend();
+      this.append(text.slice(start, start + 1024).replaceAll(asciiCharacters, escape));
+    }
+  }
+
   text(): string {
     return this.parts.join('');
   }

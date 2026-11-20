@@ -1048,13 +1048,10 @@ export class Compiler extends MemberCompiler {
     const typeParams = this.declareTypeParams(declaration.typeParameters);
     const isExtension = !(owner instanceof ClassInfo);
     const { type, positionalTypes, namedTypes } = this.withTypeParams(typeParams, () =>
-      this.signatureOf(
-        declaration.parameters,
-        declaration.returnType,
-        typeParams,
-        isExtension ? undefined : cls,
-        declaration
-      )
+      this.signatureOf(declaration.parameters, declaration.returnType, typeParams, {
+        cls: isExtension ? undefined : cls,
+        declaration,
+      })
     );
     const { name, methodKind } = declaration;
     const isAbstract = !declaration.body && !declaration.isExternal;

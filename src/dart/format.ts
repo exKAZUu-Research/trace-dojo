@@ -66,12 +66,8 @@ export function instanceName(runtime: Runtime, value: Value): string {
 function quoteForError(runtime: Runtime, text: string): string {
   const result = new BoundedStringParts(runtime);
   result.append('"');
-  for (let start = 0; start < text.length; start += 1024) {
-    runtime.spend();
-    const chunk = text.slice(start, start + 1024);
-    // oxlint-disable-next-line eslint/no-control-regex -- Error strings escape control characters.
-    result.append(chunk.replaceAll(/[\u0000-\u001F"\\]/g, (character) => JSON.stringify(character).slice(1, -1)));
-  }
+  // oxlint-disable-next-line eslint/no-control-regex -- Error strings escape control characters.
+  result.appendEscaped(text, /[\u0000-\u001F"\\]/g, (character) => JSON.stringify(character).slice(1, -1));
   result.append('"');
   return result.text();
 }

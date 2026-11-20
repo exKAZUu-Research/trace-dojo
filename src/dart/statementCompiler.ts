@@ -607,7 +607,7 @@ export abstract class StatementCompiler extends PatternCompiler {
     this.checkTypeParameterAnnotations(declaration.typeParameters);
     const typeParams = this.declareTypeParams(declaration.typeParameters);
     const { type, positionalTypes, namedTypes } = this.withTypeParams(typeParams, () =>
-      this.signatureOf(declaration.parameters, declaration.returnType, typeParams)
+      this.signatureOf(declaration.parameters, declaration.returnType, typeParams, { local: true })
     );
     const variable = this.declareLocal(declaration, declaration.name, type, {
       isFinal: true,
@@ -655,7 +655,8 @@ export abstract class StatementCompiler extends PatternCompiler {
   protected abstract signatureOf(
     parameters: FormalParameters,
     returnType: TypeSyntax | undefined,
-    typeParams: TypeParam[]
+    typeParams: TypeParam[],
+    options: { local: true }
   ): { type: FunctionType; positionalTypes: DartType[]; namedTypes: Map<string, DartType> };
 
   // Control flow

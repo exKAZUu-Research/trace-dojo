@@ -2689,7 +2689,7 @@ test('malformed regular expressions report the first SDK diagnostic', () => {
   });
 });
 
-test('escaped error text respects the string limit and includes its delimiters', () => {
+test('escaped error text and regular expressions respect the string limit', () => {
   const program = String.raw`void main() {
     print(Error.safeToString('\u0001\n😀'));
     print(Error.safeToString('a' * 999998).length);
@@ -2697,10 +2697,17 @@ test('escaped error text respects the string limit and includes its delimiters',
       try { print(Error.safeToString(text).length); }
       catch (error) { print(error.runtimeType); }
     }
+    print(RegExp.escape('a.*😀'));
+    print(RegExp.escape('*' * 500000).length);
+    for (final text in ['*' * 600000, '.' * 600000]) {
+      try { print(RegExp.escape(text).length); }
+      catch (error) { print(error.runtimeType); }
+    }
   }`;
   expect(executeProgram('dart', program)).toMatchObject({
     kind: 'executed',
-    stdout: '"\\u0001\\n😀"\n1000000\nOutOfMemoryError\nOutOfMemoryError\nOutOfMemoryError\n',
+    stdout:
+      '"\\u0001\\n😀"\n1000000\nOutOfMemoryError\nOutOfMemoryError\nOutOfMemoryError\na\\.\\*😀\n1000000\nOutOfMemoryError\nOutOfMemoryError\n',
   });
 });
 
@@ -2804,19 +2811,58 @@ test('super dispatch can call concrete noSuchMethod forwarders', () => {
 
 test('generic function type metadata resolves in checked declaration scopes', () => {
   const program = `typedef Callback = void Function<@Unknown() T>();
+void Function<@Unknown() T>()? ignoredTopLevelReturn() => null;
 void accept(void Function<@label T>()? f) { print(f); }
 const label = 1;
 void main() {
   const local = 1;
   List<void Function<@local T>()?> callbacks = [null];
-  Callback? callback = callbacks.first;
+  List<void Function<@local T>()?> readCallbacks() => callbacks;
+  Callback? callback = readCallbacks().first;
   accept(callback);
 }`;
   expect(executeProgram('dart', program)).toMatchObject({ kind: 'executed', stdout: 'null\n' });
-  for (const validAnnotation of ['@label', '@local']) {
-    const invalid = program.replace(validAnnotation, '@Unknown()');
+  for (const invalid of [
+    program.replace('@label', '@Unknown()'),
+    program.replace('@local', '@Unknown()'),
+    program.replace('@local T>()?> readCallbacks', '@Unknown() T>()?> readCallbacks'),
+    program.replace('const local =', 'final local =').replace('@local T>()?> callbacks', 'T>()?> callbacks'),
+  ]) {
     expect(executeProgram('dart', invalid)).toMatchObject({ kind: 'compileError' });
   }
+});
+
+test('a subclass retains inherited noSuchMethod defaults through abstract redeclarations', () => {
+  const program = `abstract class Contract {
+  void method([int n = 1]);
+  void named({int n = 1});
+}
+class Parent implements Contract {
+  dynamic noSuchMethod(Invocation invocation) {
+    print([invocation.positionalArguments, invocation.namedArguments]);
+  }
+}
+abstract class Middle extends Parent {
+  void method([int n = 2]);
+  void named({int n = 2});
+}
+class Child extends Middle {
+  void fromSuper() { super.method(); super.named(); }
+}
+void main() {
+  final child = Child();
+  child.method();
+  child.named();
+  final method = child.method;
+  final named = child.named;
+  method();
+  named();
+  child.fromSuper();
+}`;
+  expect(executeProgram('dart', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '[[1], {}]\n[[], {Symbol("n"): 1}]\n[[1], {}]\n[[], {Symbol("n"): 1}]\n[[1], {}]\n[[], {Symbol("n"): 1}]\n',
+  });
 });
 
 test('a static member only sees its own type parameters and local variables', () => {

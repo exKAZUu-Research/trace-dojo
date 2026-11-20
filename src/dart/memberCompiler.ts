@@ -39,15 +39,13 @@ export abstract class MemberCompiler extends MetadataCompiler {
   }
 
   /** The function type of a signature, inferring omitted types from the member it overrides. */
-  // code-gauge-allow functionCognitiveComplexity 22 -- Each branch is one of the cases Dart distinguishes for this construct.
-  // code-gauge-allow functionNcss 36 -- One case per form of the construct, which reads best together.
   signatureOf(
     parameters: FormalParameters,
     returnTypeSyntax: TypeSyntax | undefined,
     typeParams: TypeParam[],
-    cls?: ClassInfo,
-    declaration?: MethodDeclaration
+    options: { cls?: ClassInfo; declaration?: MethodDeclaration; local?: boolean } = {}
   ): { type: FunctionType; positionalTypes: DartType[]; namedTypes: Map<string, DartType> } {
+    const { cls, declaration, local } = options;
     const overridden =
       cls && declaration && !declaration.isStatic ? this.overriddenSignature(cls, declaration) : undefined;
     const positionalTypes = parameters.positional.map((parameter, index) => {
@@ -66,13 +64,7 @@ export abstract class MemberCompiler extends MetadataCompiler {
         return [parameter.name, inherited ?? DYNAMIC];
       })
     );
-    let returnType: DartType;
-    if (returnTypeSyntax) returnType = this.resolveTypeWithoutAnnotations(returnTypeSyntax);
-    else if (declaration?.methodKind === 'setter') returnType = VOID;
-    else if (overridden?.kind === 'function') returnType = overridden.returnType;
-    else if (overridden && declaration?.methodKind === 'getter') returnType = overridden;
-    else if (declaration?.methodKind === 'operator' && declaration.name === '[]=') returnType = VOID;
-    else returnType = DYNAMIC;
+    const returnType = this.signatureReturnType(returnTypeSyntax, local, declaration, overridden);
     const type = functionType(positionalTypes, returnType, {
       requiredCount: parameters.requiredCount,
       named: parameters.named.map((parameter) => ({
@@ -84,6 +76,20 @@ export abstract class MemberCompiler extends MetadataCompiler {
     });
     if (parameters.named.length > 1) type.namedOrder = parameters.named.map((parameter) => parameter.name);
     return { type, positionalTypes, namedTypes };
+  }
+
+  private signatureReturnType(
+    syntax: TypeSyntax | undefined,
+    local: boolean | undefined,
+    declaration: MethodDeclaration | undefined,
+    overridden: DartType | undefined
+  ): DartType {
+    if (syntax) return local ? this.resolveType(syntax) : this.resolveTypeWithoutAnnotations(syntax);
+    if (declaration?.methodKind === 'setter') return VOID;
+    if (overridden?.kind === 'function') return overridden.returnType;
+    if (overridden && declaration?.methodKind === 'getter') return overridden;
+    if (declaration?.methodKind === 'operator' && declaration.name === '[]=') return VOID;
+    return DYNAMIC;
   }
 
   private overriddenSignature(cls: ClassInfo, declaration: MethodDeclaration): DartType | undefined {

@@ -261,14 +261,15 @@ export class ClassInfo {
   }
 
   forwardingDeclaration(name: string, setter: boolean): Member | undefined {
+    let forwarded: Member | undefined;
     for (const cls of this.superclassChain()) {
       if (cls.isAbstract) continue;
       const handler = cls.implementation('noSuchMethod');
       if (handler?.kind !== 'method' || handler.owner === coreTypes.object) continue;
       const member = cls.interfaceMember(name, setter);
-      if (member && !member.isStatic) return member;
+      if (member && !member.isStatic) forwarded = member;
     }
-    return undefined;
+    return forwarded;
   }
 
   /** This class and its superclasses, nearest first. */
