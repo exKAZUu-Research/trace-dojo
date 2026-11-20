@@ -24,7 +24,6 @@ import {
   emptyStructure,
   errorType,
   falseType,
-  functionType,
   type IndexInfo,
   intersectionOf,
   isAnyLike,
@@ -226,10 +225,10 @@ export class TypeNodes {
   }
 
   private functionTypeFromNode(node: TreeNode): Type {
-    const signature = this.c.signatures.signatureOf(node);
+    const signature = this.eagerConstraints.prepareDeferred(() => this.c.signatures.signatureOf(node));
     const nonGeneric = isOutsideGenericDeclarations(node);
-    if (node.type === 'function_type') return { ...functionType(signature), nonGeneric };
-    return anonymousObject(() => ({ ...emptyStructure(), constructSignatures: [signature] }), {
+    const member = node.type === 'function_type' ? 'callSignatures' : 'constructSignatures';
+    return anonymousObject(() => ({ ...emptyStructure(), [member]: [signature()] }), {
       isFunction: true,
       nonGeneric,
     });

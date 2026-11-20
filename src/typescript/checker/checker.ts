@@ -568,7 +568,7 @@ export class Checker {
         );
       }
       case 'mapped': {
-        return this.instantiateMapped(type, mapper);
+        return this.typeNodes.eagerConstraints.withinDeferredType(() => this.instantiateMapped(type, mapper));
       }
       case 'interface': {
         // A generic interface or class stands for itself applied to its own type parameters.
