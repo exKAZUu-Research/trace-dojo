@@ -12,7 +12,7 @@ import { applicableIndex } from './indexInfos';
 import { nonNullableType, nullishConstraint } from './nullishConstraints';
 import { printedPropertyName } from './print';
 import { spellingSuggestion } from './spelling';
-import { chainObject, isOptionalChain, skipParentheses } from './syntax';
+import { assignmentKind, chainObject, isOptionalChain, skipParentheses } from './syntax';
 import { tupleElementBeyond } from './tupleIndexes';
 import {
   anyType,
@@ -47,6 +47,11 @@ interface CheckedAccess {
   receiver?: Type;
   index?: Type;
   continued?: Type;
+}
+
+interface PropertyAccessOptions {
+  write?: boolean;
+  receiver?: Type;
 }
 
 /** Checks property and element accesses. */
@@ -241,8 +246,9 @@ export class MemberChecker {
     propertyNode: TreeNode,
     objectType: Type,
     name: string,
-    isWrite = false
+    options: PropertyAccessOptions = {}
   ): Type {
+    const receiver = options.receiver ?? objectType;
     objectType = this.c.reducedTypes.of(objectType);
     if (isAnyLike(objectType)) return objectType;
     const isPrivate = propertyNode.type === 'private_property_identifier';
@@ -257,7 +263,9 @@ export class MemberChecker {
         return errorType;
       }
       return unionOf(
-        objectType.types.map((member) => this.propertyAccess(node, objectNode, propertyNode, member, name, isWrite)),
+        objectType.types.map((member) =>
+          this.propertyAccess(node, objectNode, propertyNode, member, name, { ...options, receiver })
+        ),
         true
       );
     }
@@ -272,7 +280,7 @@ export class MemberChecker {
       this.reportMissingProperty(propertyNode, name, objectType);
       return errorType;
     }
-    return this.checkPropertyUse(node, objectNode, propertyNode, objectType, property, isWrite)
+    return this.checkPropertyUse(node, objectNode, propertyNode, receiver, property, options.write)
       ? propertyAccessType(property)
       : errorType;
   }
@@ -285,8 +293,16 @@ export class MemberChecker {
     property: Property,
     isWrite = false
   ): boolean {
-    this.c.classes.checkPropertyAccessibility(node, propertyNode, objectNode, property, isWrite);
+    this.c.classes.checkPropertyAccessibility(
+      node,
+      propertyNode,
+      { node: objectNode, type: objectType },
+      property,
+      isWrite
+    );
     this.c.classes.checkInitializedBefore(node, objectNode, property);
+    if (!isWrite || assignmentKind(node) === 'compound')
+      this.c.classDeclarations.checkFieldRead(node, objectNode, propertyNode, property);
     this.c.expressions.expandos.checkAssignedBefore(node, propertyNode, property);
     return this.checkPropertyAvailability(propertyNode, objectType, property);
   }
@@ -454,8 +470,20 @@ export class MemberChecker {
     return index !== undefined && index !== structure.numberIndex;
   }
 
-  indexedType(node: TreeNode, objectNode: TreeNode, indexNode: TreeNode, objectType: Type, indexType: Type): Type {
-    return this.indexedTypeAt({ node, objectNode, indexNode }, objectType, indexType);
+  indexedType(
+    node: TreeNode,
+    objectNode: TreeNode,
+    indexNode: TreeNode,
+    objectType: Type,
+    indexType: Type,
+    readsField = true
+  ): Type {
+    const type = this.indexedTypeAt({ node, objectNode, indexNode }, objectType, indexType);
+    if (readsField && objectNode.type === 'this' && isPropertyKeyLiteral(indexType)) {
+      const property = this.c.propertyOf(objectType, String(indexType.value));
+      if (property) this.c.classDeclarations.checkFieldRead(node, objectNode, indexNode, property);
+    }
+    return type;
   }
 
   private indexedTypeAt(access: IndexAccess, objectType: Type, indexType: Type): Type {

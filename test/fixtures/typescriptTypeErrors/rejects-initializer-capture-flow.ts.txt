@@ -20,3 +20,13 @@ function conditional(first: number | undefined, fallback = (first ??= 1), last =
   return last;
 }
 const result: number = conditional(undefined);
+
+const untypedThis = {
+  x: 1,
+  inferred(value = this.x) { return value; },
+  annotated(value: number = this.x) { return value; },
+};
+
+class CircularDefault {
+  read(value = this.read()) { return String(value); }
+}

@@ -127,11 +127,11 @@ export class AssignmentChecker {
   }
 
   /** Narrows an assigned reference to the assigned type. */
-  assignReference(target: TreeNode, declared: Type, assigned: Type): void {
+  assignReference(target: TreeNode, declared: Type, assigned: Type, initializesField = true): void {
     const key = this.c.flow.referenceKey(target);
     if (!key) return;
     this.c.flow.invalidate(key);
-    if (/^this\d+\.[^.]*$/.test(key)) this.c.flow.current?.assignedFields.add(key);
+    if (initializesField && /^this\d+\.[^.]*$/.test(key)) this.c.flow.current?.assignedFields.add(key);
     if (declared === errorType) return;
     const accessor = this.assignedAccessorType(target);
     if (accessor) {
@@ -332,7 +332,7 @@ export class AssignmentChecker {
       if (targetType !== errorType) this.c.expressions.checkAssignable(skipParentheses(left), valueType, declared);
       const result = this.logicalAssignmentType(operator, targetType, valueType);
       // The target holds what it kept or what was assigned, as `s ||= "x"` leaves a truthy `s` or `"x"`.
-      if (targetType !== errorType) this.assignReference(skipParentheses(left), declared, result);
+      if (targetType !== errorType) this.assignReference(skipParentheses(left), declared, result, operator !== '&&=');
       return result;
     }
     const valueType = this.c.expressions.check(right);
@@ -350,7 +350,7 @@ export class AssignmentChecker {
       (operator === '+=' || this.c.operators.hasNumericOperands(left, right, targetType, valueType))
     )
       this.c.expressions.checkAssignable(skipParentheses(left), resultType, declared);
-    this.assignReference(skipParentheses(left), declared, resultType);
+    this.assignReference(skipParentheses(left), declared, resultType, false);
     return resultType;
   }
 
@@ -389,7 +389,7 @@ export class AssignmentChecker {
       return numberType;
     }
     const result = this.c.operators.isBigintLike(operand) ? bigintType : numberType;
-    this.assignReference(skipParentheses(argument), declared, result);
+    this.assignReference(skipParentheses(argument), declared, result, false);
     return result;
   }
 
@@ -497,14 +497,9 @@ export class AssignmentChecker {
       this.c.error(propertyNode, `プロパティ '${propertyNode.text}' は型 '${this.c.print(objectType)}' にありません。`);
       return errorType;
     }
-    const type = this.c.members.propertyAccess(
-      expression,
-      objectNode,
-      propertyNode,
-      objectType,
-      propertyNode.text,
-      true
-    );
+    const type = this.c.members.propertyAccess(expression, objectNode, propertyNode, objectType, propertyNode.text, {
+      write: true,
+    });
     if (compound) return this.narrowedType(expression) ?? type;
     return unionOf(
       (objectType.kind === 'union' ? objectType.types : [objectType]).map((member) => this.namedWriteType(member, key))
@@ -535,7 +530,7 @@ export class AssignmentChecker {
       );
       return errorType;
     }
-    const readType = this.c.members.indexedType(expression, objectNode, indexNode, objectType, indexType);
+    const readType = this.c.members.indexedType(expression, objectNode, indexNode, objectType, indexType, compound);
     if (readType !== errorType && this.c.members.isReadonlyMappedWrite(objectType, indexType))
       return this.reportReadonlyIndex(expression, objectType);
     const narrowed = compound ? this.narrowedType(expression) : undefined;

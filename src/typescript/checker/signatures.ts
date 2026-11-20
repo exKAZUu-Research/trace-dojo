@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 435 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
+// code-gauge-allow-file fileNcss 454 -- Keeps signature resolution and the TypeScript grammar of parameters and accessors together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { erasedStatementTypes } from '../erasedSyntax';
@@ -47,6 +47,7 @@ export class Signatures {
   /** The default nodes being resolved, and those found to refer to themselves while they resolve, by node. */
   private readonly resolvingDefaults = new Set<number>();
   private readonly circularDefaults = new Set<number>();
+  private readonly inferringParameterDefaults = new Set<number>();
 
   constructor(private readonly c: Checker) {}
 
@@ -80,6 +81,40 @@ export class Signatures {
       this.c.functions.addInferredPredicate(node, signature);
     if (!contextual && inferPredicate && this.c.silent === 0) this.signatureCache.set(node.id, signature);
     return signature;
+  }
+
+  methodSignatureWhileResolving(node: TreeNode): Signature {
+    const parameters = argumentParameters(parameterNodes(node)).map((parameter, index): Parameter => {
+      const pattern = patternOf(parameter);
+      return {
+        name: pattern.type === 'identifier' ? pattern.text : `__${index}`,
+        type: this.c.typeNodes.annotationType(parameter.childForFieldName('type')) ?? anyType,
+        optional: parameter.type === 'optional_parameter' || parameter.childForFieldName('value') !== null,
+        rest: pattern.type === 'rest_pattern',
+      };
+    });
+    const signature: Signature = {
+      declaration: node,
+      typeParameters: this.typeParametersOf(node),
+      parameters: this.expandRestTuple(withRequiredPrefix(parameters)),
+      isMethod: true,
+      returnType: () =>
+        this.c.functions.declaredReturnType(node) ??
+        this.c.flow.probe(() =>
+          this.c.silently(() => this.c.functions.checkFunctionBody(node, signature, undefined, true))
+        ),
+    };
+    return signature;
+  }
+
+  checkReadOfInferringParameter(parameter: TreeNode | undefined, name: string): void {
+    if (!parameter || !this.inferringParameterDefaults.has(parameter.id) || !this.c.functions.contexts.at(-1)?.inReturn)
+      return;
+    this.c.functions.markCircularReturn();
+    this.c.errorWhileResolving(
+      patternOf(parameter),
+      `${name} の型が、自分自身を参照しているため暗黙に any になります。`
+    );
   }
 
   /**
@@ -222,7 +257,13 @@ export class Signatures {
     );
     const collect = (): void => {
       for (const [index, parameterNode] of argumentNodes.entries()) {
-        const { parameter, initializer } = this.declaredParameter(node, parameterNode, contextual, index);
+        const { parameter, initializer } = this.declaredParameter(
+          node,
+          parameterNode,
+          contextual,
+          index,
+          index < lastDefault
+        );
         parameters.push(parameter);
         if (index >= lastDefault) continue;
         const possibleOmission = parameter.optional && !parameterNode.childForFieldName('value');
@@ -242,7 +283,8 @@ export class Signatures {
     node: TreeNode,
     parameterNode: TreeNode,
     contextual: Signature | undefined,
-    index: number
+    index: number,
+    readsLaterDefault: boolean
   ): { parameter: Parameter; initializer?: Type } {
     const pattern = parameterNode.childForFieldName('pattern') ?? parameterNode;
     const annotation = this.c.typeNodes.annotationType(parameterNode.childForFieldName('type'));
@@ -253,11 +295,10 @@ export class Signatures {
     const immediateArgumentCount = contextual?.immediateArgumentCount;
     const omitted = immediateArgumentCount !== undefined && index >= immediateArgumentCount;
     const expected = annotation ?? contextualParameter;
-    const initializer = value
-      ? this.c.silently(() =>
-          this.c.functions.parameterInitializerType(value, expected ?? this.c.patterns.impliedType(pattern))
-        )
-      : undefined;
+    const initializer =
+      value && (!expected || readsLaterDefault)
+        ? this.parameterDefaultType(parameterNode, pattern, value, expected)
+        : undefined;
     const type =
       expected ??
       (immediateArgumentCount !== undefined && !value ? undefinedType : undefined) ??
@@ -278,6 +319,23 @@ export class Signatures {
         rest,
       },
     };
+  }
+
+  private parameterDefaultType(
+    parameter: TreeNode,
+    pattern: TreeNode,
+    value: TreeNode,
+    expected: Type | undefined
+  ): Type {
+    if (expected) return this.c.silently(() => this.c.functions.parameterInitializerType(value, expected));
+    this.inferringParameterDefaults.add(parameter.id);
+    try {
+      return this.c.silently(() =>
+        this.c.functions.parameterInitializerType(value, this.c.patterns.impliedType(pattern))
+      );
+    } finally {
+      this.inferringParameterDefaults.delete(parameter.id);
+    }
   }
 
   /** Reports a rest parameter bound to a name whose annotated type is not an array; a binding pattern reports its own error. */

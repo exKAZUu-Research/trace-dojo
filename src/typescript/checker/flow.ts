@@ -570,10 +570,8 @@ export class Flow {
     if (constraint !== source) return this.isDerivedFrom(constraint, target);
     const targetClass = target.kind === 'object' && !target.isClassStatic ? target.classInfo : undefined;
     if (!targetClass) return this.c.relations.isAssignable(source, target);
-    let info = source.kind === 'object' && !source.isClassStatic ? source.classInfo : undefined;
-    for (; info; info = this.c.classes.baseClassInfo(info))
-      if (info.declaration.id === targetClass.declaration.id) return true;
-    return false;
+    const info = source.kind === 'object' && !source.isClassStatic ? source.classInfo : undefined;
+    return info !== undefined && this.c.classes.derivesFrom(info, targetClass);
   }
 
   /** The part of a type that `name in value` keeps, as TypeScript's `narrowTypeByInKeyword` decides. */

@@ -304,23 +304,25 @@ export function checkDuplicateMembers(c: Checker, body: TreeNode): void {
     c,
     named(body).filter((member) => !hasToken(member, 'static'))
   );
-  const groups = new Map<string, TreeNode[]>();
+  const groups = classMemberGroups();
   for (const member of named(body)) {
-    addParameterPropertyDuplicates(member, groups);
-    const key = duplicateKeyOf(c, member);
-    if (key === undefined) continue;
-    const group = groups.get(key) ?? [];
-    group.push(member);
-    groups.set(key, group);
+    addParameterPropertyDuplicates(member, groups.instance);
+    const name = duplicateNameOf(c, member);
+    if (name !== undefined) addClassMember(groups, member, name);
   }
-  for (const [key, members] of groups) {
+  reportDuplicateGroups(c, groups.instance, false);
+  reportDuplicateGroups(c, groups.static, true);
+}
+
+function reportDuplicateGroups(c: Checker, groups: Map<string, TreeNode[]>, isStatic: boolean): void {
+  for (const [name, members] of groups) {
     if (members.length < 2) continue;
     const accessorPair =
       members.length === 2 &&
       members.every((member) => member.type === 'method_definition') &&
       members.some((member) => hasToken(member, 'get')) &&
       members.some((member) => hasToken(member, 'set'));
-    if (!accessorPair) reportDuplicateMembers(c, key, members);
+    if (!accessorPair) reportDuplicateMembers(c, name, members, isStatic);
   }
 }
 
@@ -337,19 +339,15 @@ function addParameterPropertyDuplicates(member: TreeNode, groups: Map<string, Tr
   }
 }
 
-/** The key under which a class member conflicts with others, or `undefined` if it cannot conflict. */
-function duplicateKeyOf(c: Checker, member: TreeNode): string | undefined {
+function duplicateNameOf(c: Checker, member: TreeNode): string | undefined {
   if (!['field_definition', 'method_definition'].includes(member.type)) return undefined;
-  const name = memberName(c, member);
-  if (name === undefined) return undefined;
   // A method without a body is an overload signature, and a getter pairs with a setter.
   if (member.type === 'method_definition' && !member.childForFieldName('body')) return undefined;
-  return `${hasToken(member, 'static') ? 'static ' : ''}${name}`;
+  return memberName(c, member);
 }
 
-function reportDuplicateMembers(c: Checker, key: string, members: TreeNode[]): void {
-  const name = key.replace(/^static /, '');
-  const isConstructor = name === 'constructor' && !key.startsWith('static ');
+function reportDuplicateMembers(c: Checker, name: string, members: TreeNode[], isStatic: boolean): void {
+  const isConstructor = name === 'constructor' && !isStatic;
   for (const member of members) {
     const nameNode = member.childForFieldName('name') ?? member.childForFieldName('pattern') ?? member;
     if (isConstructor) c.error(nameNode, 'コンストラクタの実装は1つしか書けません。');
@@ -383,15 +381,14 @@ export function checkTypeMemberDuplicates(c: Checker, body: TreeNode): void {
  * the implementation, or from the first declaration when there is none.
  */
 export function checkOverloadOptionality(c: Checker, body: TreeNode): void {
-  const byKey = new Map<string, TreeNode[]>();
+  const groups = classMemberGroups();
   for (const member of named(body)) {
     if (!overloadableMethodTypes.has(member.type) || isAccessor(member)) continue;
     const name = memberName(c, member);
     if (name === undefined) continue;
-    const key = `${hasToken(member, 'static') ? 'static ' : ''}${name}`;
-    byKey.set(key, [...(byKey.get(key) ?? []), member]);
+    addClassMember(groups, member, name);
   }
-  for (const declarations of byKey.values()) {
+  for (const declarations of [...groups.instance.values(), ...groups.static.values()]) {
     const canonical = declarations.find((declaration) => declaration.childForFieldName('body')) ?? declarations[0];
     for (const declaration of declarations) {
       if (hasToken(declaration, '?') !== hasToken(canonical, '?'))
@@ -401,6 +398,17 @@ export function checkOverloadOptionality(c: Checker, body: TreeNode): void {
         );
     }
   }
+}
+
+function classMemberGroups(): { instance: Map<string, TreeNode[]>; static: Map<string, TreeNode[]> } {
+  return { instance: new Map(), static: new Map() };
+}
+
+function addClassMember(groups: ReturnType<typeof classMemberGroups>, member: TreeNode, name: string): void {
+  const byName = hasToken(member, 'static') ? groups.static : groups.instance;
+  const group = byName.get(name) ?? [];
+  group.push(member);
+  byName.set(name, group);
 }
 
 function isAccessor(member: TreeNode): boolean {

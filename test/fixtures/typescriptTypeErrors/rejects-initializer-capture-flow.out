@@ -10,3 +10,7 @@
   Property 'toUpperCase' does not exist on type 'number'.
 (22,7): error TS2322: Type 'number | undefined' is not assignable to type 'number'.
   Type 'undefined' is not assignable to type 'number'.
+(26,20): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+(27,29): error TS2683: 'this' implicitly has type 'any' because it does not have a type annotation.
+(31,3): error TS7023: 'read' implicitly has return type 'any' because it does not have a return type annotation and is referenced directly or indirectly in one of its return expressions.
+(31,8): error TS7022: 'value' implicitly has type 'any' because it does not have a type annotation and is referenced directly or indirectly in its own initializer.

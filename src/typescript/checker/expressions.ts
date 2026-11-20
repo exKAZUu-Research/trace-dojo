@@ -286,6 +286,8 @@ export class ExpressionChecker {
   }
 
   private variableReferenceType(node: TreeNode, symbol: Sym, contextual?: Type, typeQuery = false): Type {
+    if (symbol.valueKind === 'parameter')
+      this.c.signatures.checkReadOfInferringParameter(symbol.valueDeclaration, symbol.name);
     const declared = this.valueTypeOf(symbol);
     const key = `s${symbol.id}`;
     this.c.flow.declaredTypes.set(key, declared);

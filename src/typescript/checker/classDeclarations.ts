@@ -5,7 +5,7 @@ import { checkDuplicateMembers, checkOverloadOptionality, memberName } from './d
 import { FlowState, propertyReferenceKey, type State } from './flow';
 import { checkIndexConformance } from './indexConformance';
 import { isBaseTypeVariable, isMixinConstructor } from './mixinConstructors';
-import { hasToken, isClassConstructor, isWithin, named } from './syntax';
+import { assignmentKind, hasToken, isClassConstructor, isWithin, named } from './syntax';
 import {
   anyType,
   type ClassInfo,
@@ -467,6 +467,20 @@ export class ClassDeclarationChecker {
     if (property.optional && !baseProperty.optional) return 'は基底クラスで必須です';
   }
 
+  checkFieldRead(node: TreeNode, object: TreeNode, at: TreeNode, property: Property): void {
+    if (object.type !== 'this' || assignmentKind(node) === 'definite') return;
+    const state = this.c.flow.current;
+    const owner = this.c.functions.flowOwner();
+    const declaration = property.declaration;
+    if (!state || state.dead || !owner || !isClassConstructor(owner) || !declaration) return;
+    if (owner.parent?.id !== declaration.parent?.id || this.c.classes.thisOwnerId(object) !== owner.id) return;
+    const name = this.uninitializedFieldName(declaration);
+    if (!name) return;
+    const key = propertyReferenceKey(`this${owner.id}`, this.c.classes.propertyKey(name, name));
+    if (!state.assignedFields.has(key))
+      this.c.error(at, `プロパティ '${property.name}' は、割り当てられる前に使われています。`);
+  }
+
   /** Reports the fields a constructor leaves unassigned, which strict property initialization requires. */
   checkPropertyInitialization(
     classNode: TreeNode,
@@ -512,7 +526,8 @@ export class ClassDeclarationChecker {
     const nameNode = member.childForFieldName('name');
     if (!typeNode || !nameNode) return undefined;
     const type = this.c.typeNodes.annotationType(typeNode) ?? anyType;
-    if (isAnyLike(type) || isIntrinsic(type, 'unknown') || this.c.relations.isAssignable(undefinedType, type))
+    const types = type.kind === 'union' ? type.types : [type];
+    if (isAnyLike(type) || isIntrinsic(type, 'unknown') || types.some((member) => isIntrinsic(member, 'undefined')))
       return undefined;
     return nameNode;
   }

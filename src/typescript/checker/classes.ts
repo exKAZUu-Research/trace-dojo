@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 642 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
+// code-gauge-allow-file fileNcss 675 -- Holds the types of classes with `this`, `super`, and accessibility, which all read the class information.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { typesAtConstructorExit } from './assignmentFlow';
@@ -50,7 +50,7 @@ interface RestrictedConstructor {
 }
 
 interface MethodEntry {
-  signatures: Signature[];
+  signatures: TreeNode[];
   implementation?: TreeNode;
   abstract: boolean;
   first: TreeNode;
@@ -186,14 +186,20 @@ export class ClassChecker {
         structure = emptyStructure();
         const own = this.membersOf(node, info, true);
         own.properties.set('prototype', simpleProperty('prototype', info.instanceType, { readonly: true }));
-        own.constructSignatures.push(...this.constructSignatures(node, info));
         const baseStatic = this.baseStaticType(node);
         if (baseStatic) {
           for (const [memberName, property] of this.c.structureOf(baseStatic).properties) {
             if (!own.properties.has(memberName)) own.properties.set(memberName, property);
           }
         }
-        structure = own;
+        const resolveConstructors = (): Signature[] => this.constructSignatures(node, info);
+        let constructors: Signature[] | undefined;
+        structure = {
+          ...own,
+          get constructSignatures() {
+            return (constructors ??= resolveConstructors());
+          },
+        };
         return structure;
       },
     };
@@ -287,11 +293,6 @@ export class ClassChecker {
           target.typeParameters.map(() => anyType)
         )
       : returned;
-  }
-
-  baseClassInfo(info: ClassInfo): ClassInfo | undefined {
-    const base = this.baseStaticType(info.declaration);
-    return base?.kind === 'object' ? base.classInfo : undefined;
   }
 
   constructorNode(node: TreeNode): TreeNode | undefined {
@@ -450,22 +451,31 @@ export class ClassChecker {
     }
     const entry = members.methods.get(name) ?? { signatures: [], abstract: false, first: member };
     if (member.type === 'method_definition' && member.childForFieldName('body')) entry.implementation = member;
-    else entry.signatures.push(this.methodSignature(member));
+    else entry.signatures.push(member);
     if (member.type === 'abstract_method_signature' || hasToken(member, 'abstract')) entry.abstract = true;
     members.methods.set(name, entry);
   }
 
   private methodProperty(name: string, entry: MethodEntry, info: ClassInfo): Property {
-    const signatures =
-      entry.signatures.length > 0 && entry.implementation
-        ? entry.signatures
-        : entry.implementation
-          ? [this.methodSignature(entry.implementation)]
-          : entry.signatures;
+    const declarations = entry.signatures.length > 0 || !entry.implementation ? entry.signatures : [entry.implementation];
     const declaration = entry.first;
+    let type: Type | undefined;
+    let resolving = false;
     return {
       name,
-      type: () => this.c.overloadedFunction(signatures),
+      type: () => {
+        if (type) return type;
+        if (resolving)
+          return this.c.overloadedFunction(
+            declarations.map((member) => this.c.signatures.methodSignatureWhileResolving(member))
+          );
+        resolving = true;
+        try {
+          return (type = this.c.overloadedFunction(declarations.map((member) => this.methodSignature(member))));
+        } finally {
+          resolving = false;
+        }
+      },
       optional: hasToken(declaration, '?'),
       readonly: false,
       isMethod: true,
@@ -519,18 +529,17 @@ export class ClassChecker {
   private addParameterProperties(ctor: TreeNode, info: ClassInfo, structure: Structure): void {
     const parameters = ctor.childForFieldName('parameters');
     if (!parameters) return;
-    const signature = this.c.signatures.signatureOf(ctor);
-    let index = 0;
-    for (const parameter of argumentParameters(named(parameters))) {
+    for (const [index, parameter] of argumentParameters(named(parameters)).entries()) {
       const pattern = parameter.childForFieldName('pattern');
       const modifier = parameter.namedChildren.find((child) => child?.type === 'accessibility_modifier');
       const isReadonly = hasToken(parameter, 'readonly');
       if ((modifier || isReadonly) && pattern?.type === 'identifier') {
-        const parameterType = signature.parameters[index]?.type ?? anyType;
         structure.properties.set(pattern.text, {
           name: pattern.text,
-          type: () =>
-            parameter.type === 'optional_parameter' ? unionOf([parameterType, undefinedType]) : parameterType,
+          type: () => {
+            const type = this.c.signatures.signatureOf(ctor).parameters[index]?.type ?? anyType;
+            return parameter.type === 'optional_parameter' ? unionOf([type, undefinedType]) : type;
+          },
           optional: parameter.type === 'optional_parameter',
           readonly: isReadonly,
           isMethod: false,
@@ -539,7 +548,6 @@ export class ClassChecker {
           declaration: parameter,
         });
       }
-      index++;
     }
   }
 
@@ -733,16 +741,18 @@ export class ClassChecker {
     return this.thisOwner(node)?.id ?? 0;
   }
 
+  // code-gauge-allow functionCognitiveComplexity 16 -- Checks explicit, contextual, class, and script receivers in their source scopes.
   thisTypeOfExpression(node: TreeNode): Type {
     const owner = this.thisOwner(node);
     if (!owner) return this.globalThisType(node);
-    const thisParameter = this.thisParameterType(owner) ?? this.contextualThisByFunction.get(owner.id);
+    const thisParameter = this.thisParameterType(owner);
     if (thisParameter) return thisParameter;
     const parent = owner.parent;
-    const objectThis = this.objectThisByMethod.get(owner.id);
-    if (objectThis) return objectThis;
-    if (owner.type === 'method_definition' && parent?.type === 'object') {
-      return this.objectThis.at(-1) ?? anyType;
+    const objectMethod = owner.type === 'method_definition' && parent?.type === 'object';
+    if (!isInParameterInitializer(node, owner)) {
+      const inferred = this.contextualThisByFunction.get(owner.id) ?? this.objectThisByMethod.get(owner.id);
+      if (inferred) return inferred;
+      if (objectMethod) return this.objectThis.at(-1) ?? anyType;
     }
     if (
       (owner.type === 'method_definition' ||
@@ -756,7 +766,7 @@ export class ClassChecker {
       this.checkThisBeforeSuper(node, owner, classNode);
       return isStatic ? info.staticType : this.selfType(info);
     }
-    if (owner.type === 'function_declaration' || owner.type === 'function_expression') {
+    if (objectMethod || owner.type === 'function_declaration' || owner.type === 'function_expression') {
       this.c.error(node, "'this' の型が暗黙に any になります。型の注釈がないためです。");
       return anyType;
     }
@@ -942,10 +952,11 @@ export class ClassChecker {
   checkPropertyAccessibility(
     node: TreeNode,
     propertyNode: TreeNode,
-    objectNode: TreeNode,
+    receiver: { node: TreeNode; type: Type },
     property: Property,
     isWrite: boolean
   ): void {
+    const objectNode = receiver.node;
     if (!property.declaringClass || (objectNode.type === 'super' && this.reportSuperAccess(propertyNode, property)))
       return;
     const visibility = (isWrite ? property.writeVisibility : undefined) ?? property.visibility;
@@ -977,8 +988,7 @@ export class ClassChecker {
       (property.declaration && hasToken(property.declaration, 'static'))
     )
       return;
-    const receiver = this.c.silently(() => this.c.relations.removeNullish(this.c.expressions.check(objectNode)));
-    if (!this.isReceiverDerivedFrom(receiver, enclosingInfo)) {
+    if (!this.isReceiverDerivedFrom(receiver.type, enclosingInfo)) {
       this.c.error(
         propertyNode,
         `プロパティ '${property.name}' は protected なので、クラス '${enclosingInfo.name}' のインスタンスからしか使えません。`
@@ -1027,10 +1037,25 @@ export class ClassChecker {
   }
 
   derivesFrom(info: ClassInfo, base: ClassInfo): boolean {
-    for (let current: ClassInfo | undefined = info; current; current = this.baseClassInfo(current)) {
+    const pending = [info];
+    const visited = new Set<number>();
+    for (let current = pending.pop(); current; current = pending.pop()) {
       if (current.declaration.id === base.declaration.id) return true;
+      if (visited.has(current.declaration.id)) continue;
+      visited.add(current.declaration.id);
+      this.c.budget.spend();
+      const declaration = current.declaration;
+      const inherited = this.c.flow.probe(() => this.baseStaticType(declaration));
+      if (inherited) pending.push(...this.baseClassConstituents(inherited));
     }
     return false;
+  }
+
+  private baseClassConstituents(type: Type): ClassInfo[] {
+    const apparent = this.c.apparentType(type);
+    if (apparent.kind === 'intersection') return apparent.types.flatMap((member) => this.baseClassConstituents(member));
+    const info = this.classInfoOfType(apparent);
+    return info ? [info] : [];
   }
 
   /**
@@ -1127,6 +1152,14 @@ export class ClassChecker {
 }
 
 export { anonymousObject };
+
+function isInParameterInitializer(node: TreeNode, owner: TreeNode): boolean {
+  for (let parent = node.parent; parent && parent.id !== owner.id; parent = parent.parent) {
+    if (parent.type === 'arrow_function') return false;
+    if (parent.type === 'required_parameter' || parent.type === 'optional_parameter') return true;
+  }
+  return false;
+}
 
 /** The part of a field's type for which `&&=`, `||=`, or `??=` skips assigning it, or undefined for none. */
 function skippedType(c: Checker, operator: string, type: Type): Type | undefined {

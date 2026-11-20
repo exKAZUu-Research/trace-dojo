@@ -1,7 +1,7 @@
-// code-gauge-allow-file fileNcss 611 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
+// code-gauge-allow-file fileNcss 630 -- Types array and object literals with their spreads, members, and widening, which share one literal state.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
-import { spreadLength, tupleArgumentContexts } from './callArity';
+import { ExpressionListFlow, tupleArgumentContexts } from './callArity';
 import type { Checker } from './checker';
 import { applicableIndex, isSamePattern } from './indexInfos';
 import {
@@ -12,6 +12,7 @@ import {
   isNumericName,
   named,
   propertyNameText,
+  skipParentheses,
 } from './syntax';
 import {
   anonymousObject,
@@ -109,7 +110,7 @@ export class LiteralChecker {
     this.literalContexts.set(node.id, contextual);
     const elements = arrayElements(node);
     const isConstContext = this.isConstContext(node, contextual);
-    const lengths = elements.map((element) => (element ? spreadLength(this.c, element) : 1));
+    const lengths = contextual ? this.arrayElementLengths(elements) : [];
     const types: { type: Type; spread: boolean }[] = elements.map((element, index) => {
       // A hole, as in `[, 1]`, reads as `undefined`.
       if (!element) return { type: undefinedType, spread: false };
@@ -141,6 +142,14 @@ export class LiteralChecker {
     };
     this.arrayLiterals.add(array.id);
     return array;
+  }
+
+  private arrayElementLengths(elements: (TreeNode | undefined)[]): (number | undefined)[] {
+    const sequence = new ExpressionListFlow(
+      this.c,
+      elements.filter((element) => element !== undefined)
+    );
+    return elements.map((element) => (element ? sequence.length(element) : 1));
   }
 
   private hasMutableArrayContext(contextual: Type | undefined): boolean {
@@ -317,8 +326,9 @@ export class LiteralChecker {
         { isLiteral: true }
       ),
     };
-    for (const member of named(node)) this.declareObjectMember(literal, member);
-    for (const member of named(node)) this.objectMember(literal, member);
+    const members = named(node);
+    this.prepareObjectReceiver(literal, members);
+    for (const member of members) this.objectMember(literal, member);
     if (literal.spreadIndexes && literal.hasPendingMembers) this.spreadWrittenIndexes(literal);
     if (contextual) this.addPatternDefaults(properties, contextual);
     const { object, genericSpreads, alternatives } = literal;
@@ -399,38 +409,55 @@ export class LiteralChecker {
     }
   }
 
+  private prepareObjectReceiver(literal: ObjectLiteral, members: TreeNode[]): void {
+    if (
+      !members.some((member) => {
+        const value = member.childForFieldName('value');
+        return member.type === 'method_definition' || (value && skipParentheses(value).type === 'function_expression');
+      })
+    )
+      return;
+    this.c.flow.probe(() =>
+      this.c.silently(() => {
+        for (const member of members) this.declareObjectMember(literal, member);
+      })
+    );
+  }
+
   // code-gauge-allow functionCognitiveComplexity 19 -- Builds the complete receiver shape from named members, accessor pairs, and spreads before checking their bodies.
   private declareObjectMember(literal: ObjectLiteral, member: TreeNode): void {
     if (member.type === 'spread_element') {
-      this.c.flow.from(this.c.flow.current, () =>
-        this.c.silently(() => {
-          for (const [name, property] of this.spreadProperties(this.spreadOperand(member, literal.contextual)))
-            literal.declarations.set(name, property);
-        })
-      );
+      for (const [name, property] of this.spreadProperties(this.spreadOperand(member, literal.contextual)))
+        literal.declarations.set(name, property);
       return;
     }
     const key = member.childForFieldName('name') ?? member.childForFieldName('key');
-    const name = key
-      ? this.declaredMemberName(key)
-      : member.type === 'shorthand_property_identifier'
-        ? member.text
-        : undefined;
+    const isMethod = member.type === 'method_definition';
+    const value = member.childForFieldName('value');
+    const name = key ? this.memberName(key) : member.type === 'shorthand_property_identifier' ? member.text : undefined;
+    const receiverOwner = isMethod ? member : value && skipParentheses(value);
+    if (receiverOwner && (isMethod || receiverOwner.type === 'function_expression'))
+      this.c.classes.registerObjectThis(receiverOwner, literal.receiver);
+    if (!isMethod) {
+      this.declareObjectValue(literal, member, name, value);
+      return;
+    }
     if (name === undefined) return;
-    const value = member.type === 'method_definition' ? member : member.childForFieldName('value');
-    if (value && ['method_definition', 'function_expression'].includes(value.type))
-      this.c.classes.registerObjectThis(value, literal.receiver);
-    const getter = member.type === 'method_definition' && hasToken(member, 'get');
-    const setter = member.type === 'method_definition' && hasToken(member, 'set');
+    const getter = hasToken(member, 'get');
+    const setter = hasToken(member, 'set');
     const previous = literal.declarations.get(name);
+    const before = this.c.flow.current?.clone();
     let resolved: Type | undefined;
     const resolveType = (): Type => {
-      resolved ??= this.c.silently(() => this.declaredMemberType(literal, member, name, value));
+      resolved ??= this.c.flow.probe(
+        () => this.c.silently(() => this.declaredObjectMethod(literal, member, name)),
+        before
+      );
       return resolved;
     };
     literal.declarations.set(name, {
       ...this.literalProperty(name, anyType, literal.isConstContext, member),
-      isMethod: member.type === 'method_definition' && !hasToken(member, 'get') && !hasToken(member, 'set'),
+      isMethod: !getter && !setter,
       type: setter ? (previous?.type ?? resolveType) : resolveType,
       writeType: setter ? resolveType : previous?.writeType,
       readonly: getter ? !previous?.writeType : false,
@@ -438,9 +465,22 @@ export class LiteralChecker {
     });
   }
 
-  private declaredMemberType(literal: ObjectLiteral, member: TreeNode, name: string, value: TreeNode | null): Type {
-    if (member.type !== 'method_definition')
-      return value ? this.c.expressions.checkWidened(value) : this.c.expressions.identifier(member);
+  private declareObjectValue(
+    literal: ObjectLiteral,
+    member: TreeNode,
+    name: string | undefined,
+    value: TreeNode | null
+  ): void {
+    if (name === undefined) {
+      if (value) this.c.expressions.check(value);
+      return;
+    }
+    const context = this.memberContext(literal, name);
+    const type = value ? this.memberValue(literal, value, context) : this.shorthandType(literal, member, context);
+    literal.declarations.set(name, this.literalProperty(name, type, literal.isConstContext, member));
+  }
+
+  private declaredObjectMethod(literal: ObjectLiteral, member: TreeNode, name: string): Type {
     const method = this.c.classes.withObjectThis(
       literal.receiver,
       () => this.c.functions.functionExpression(member, this.memberContext(literal, name)),
@@ -583,11 +623,13 @@ export class LiteralChecker {
   private shorthandMember(literal: ObjectLiteral, member: TreeNode): void {
     const name = member.text;
     this.checkDuplicateKey(literal, member, name);
-    const type = this.c.expressions.identifier(member);
-    const valueType = literal.isConstContext
-      ? type
-      : this.widenForMutableLocation(type, this.memberContext(literal, name));
+    const valueType = this.shorthandType(literal, member, this.memberContext(literal, name));
     this.setWritten(literal, name, this.literalProperty(name, valueType, literal.isConstContext, member));
+  }
+
+  private shorthandType(literal: ObjectLiteral, member: TreeNode, context: Type | undefined): Type {
+    const type = this.c.expressions.identifier(member);
+    return literal.isConstContext ? type : this.widenForMutableLocation(type, context);
   }
 
   private methodMember(literal: ObjectLiteral, member: TreeNode): void {
@@ -624,15 +666,6 @@ export class LiteralChecker {
     if (hasToken(member, 'get')) return signature?.returnType() ?? anyType;
     if (hasToken(member, 'set')) return signature?.parameters[0]?.type ?? anyType;
     return methodType;
-  }
-
-  /** The name of a member, read ahead of the check of the member itself without reporting or narrowing anything. */
-  private declaredMemberName(key: TreeNode): string | undefined {
-    let name: string | undefined;
-    this.c.flow.from(this.c.flow.current, () => {
-      name = this.c.silently(() => this.memberName(key));
-    });
-    return name;
   }
 
   /** The name of a member, which a computed key gives by its literal type. */

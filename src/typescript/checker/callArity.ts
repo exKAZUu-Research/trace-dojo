@@ -10,8 +10,8 @@ interface ArgumentPosition {
   spread?: Type;
 }
 
-/** Flow at each argument's source position, shared by arity and overload-inference passes. */
-export class ArgumentFlow {
+/** Flow at each expression's source position in an argument list or array literal. */
+export class ExpressionListFlow {
   private positions?: Map<number, ArgumentPosition>;
 
   constructor(
@@ -58,7 +58,7 @@ export class CallArity {
    * instance again only for a rest parameter that is no array, as `...args: A`; otherwise the declared parameters
    * decide, where `x: T | void` stays omittable even when `T` is inferred as `unknown`.
    */
-  instanceArityMatches(instance: Signature, declaration: Signature, args: ArgumentFlow): boolean {
+  instanceArityMatches(instance: Signature, declaration: Signature, args: ExpressionListFlow): boolean {
     const hasNonArrayRest = declaration.parameters.some(
       ({ rest, type }) => rest && !isAnyLike(type) && !this.c.isArrayType(type) && !this.c.isReadonlyArrayType(type)
     );
@@ -78,7 +78,7 @@ export class CallArity {
     return restIndex === -1 ? 0 : restIndex;
   }
 
-  arityMatches(signature: Signature, args: ArgumentFlow): boolean {
+  arityMatches(signature: Signature, args: ExpressionListFlow): boolean {
     let count = 0;
     for (const arg of args.nodes) {
       const length = args.length(arg);
@@ -95,7 +95,7 @@ export class CallArity {
     return count >= minimumArguments(signature) && count <= this.maximumArguments(signature);
   }
 
-  reportArity(node: TreeNode, callee: TreeNode, signature: Signature, args: ArgumentFlow): void {
+  reportArity(node: TreeNode, callee: TreeNode, signature: Signature, args: ExpressionListFlow): void {
     const minimum = minimumArguments(signature);
     const maximum = this.maximumArguments(signature);
     const spread = args.nodes.find((arg) => args.length(arg) === undefined);

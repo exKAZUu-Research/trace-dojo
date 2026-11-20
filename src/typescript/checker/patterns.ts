@@ -393,7 +393,7 @@ export class BindingPatterns {
     if (types.includes(errorType)) return undefined;
     for (const member of type.types) {
       const property = this.c.propertyOf(member, name);
-      if (property) this.c.members.checkPropertyUse(node, node, node, member, property);
+      if (property) this.c.members.checkPropertyUse(node, node, node, type, property);
     }
     return unionOf(types);
   }

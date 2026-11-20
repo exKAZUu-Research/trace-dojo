@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 420 -- Keeps function signatures, body checking, and parameter flow together.
+// code-gauge-allow-file fileNcss 422 -- Keeps function signatures, body checking, and parameter flow together.
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import type { Checker } from './checker';
@@ -48,6 +48,7 @@ export interface FunctionContext {
   inReturn?: boolean;
   /** Whether its body continues the enclosing flow, as that of a function called where it is written does. */
   inlined?: boolean;
+  initializer?: boolean;
 }
 
 /** Checks function expressions and bodies, inferring the types they return. */
@@ -385,7 +386,7 @@ export class FunctionChecker {
   }
 
   private reentersBody(node: TreeNode): boolean {
-    const activeIndex = this.contexts.findIndex((context) => context.node.id === node.id);
+    const activeIndex = this.contexts.findIndex((context) => !context.initializer && context.node.id === node.id);
     if (activeIndex === -1) return false;
     const recursive = this.contexts.slice(activeIndex);
     if (recursive.some((context) => context.inReturn))
@@ -543,6 +544,7 @@ export class FunctionChecker {
 
   withInitializerFlow<T>(node: TreeNode, kind: 'field' | 'parameters', run: () => T): T {
     const context = this.newContext(node);
+    context.initializer = true;
     context.inlined = kind === 'parameters' && isInlinedInvocation(node);
     this.contexts.push(context);
     this.capturedTypes.push(kind === 'parameters' ? this.capture() : new Map());

@@ -2,7 +2,7 @@
 import type { Node as TreeNode } from '@willbooster/web-tree-sitter';
 
 import { unsupportedMessage } from '../unsupported';
-import { ArgumentFlow, CallArity, minimumArguments, tupleArgumentContexts, tupleTypeAt } from './callArity';
+import { CallArity, ExpressionListFlow, minimumArguments, tupleArgumentContexts, tupleTypeAt } from './callArity';
 import type { Checker, Mapper } from './checker';
 import { contextualSignatureOf } from './contextualSignatures';
 import type { State } from './flow';
@@ -460,7 +460,7 @@ export class Calls {
       this.c.error(node, `型引数は ${counts.join(' か ')} 個必要ですが、${typeArguments.length} 個渡されています。`);
       return undefined;
     }
-    const argumentFlow = new ArgumentFlow(this.c, args);
+    const argumentFlow = new ExpressionListFlow(this.c, args);
     const instantiate = (candidate: Signature): Signature =>
       this.c.flow.probe(() => this.instantiateFor(candidate, argumentFlow, typeArguments, contextual, receiver));
     const callbacks = candidates.length > 1 ? this.c.overloadContexts.callbacksOf(args) : undefined;
@@ -482,7 +482,7 @@ export class Calls {
   private finishOverload(
     node: TreeNode,
     candidate: Signature,
-    args: ArgumentFlow,
+    args: ExpressionListFlow,
     { typeArguments, contextual, receiver }: { typeArguments?: Type[]; contextual?: Type; receiver?: Type }
   ): Resolution {
     const deferred =
@@ -509,11 +509,11 @@ export class Calls {
     if (callee && skipParentheses(callee).id === signature.declaration?.id) signature.checkImmediateBody();
   }
 
-  private previewArguments(signature: Signature, args: ArgumentFlow): boolean {
+  private previewArguments(signature: Signature, args: ExpressionListFlow): boolean {
     return this.c.flow.probe(() => this.c.silently(() => this.checkExpandedArguments(signature, args)));
   }
 
-  private checkExpandedArguments(signature: Signature, args: ArgumentFlow): boolean {
+  private checkExpandedArguments(signature: Signature, args: ExpressionListFlow): boolean {
     const expanded = this.expandedArguments(args);
     const parameterTypes = this.argumentParameterTypes(signature, expanded);
     return expanded.every(({ node, before, spread }, index) => {
@@ -528,7 +528,7 @@ export class Calls {
     node: TreeNode,
     callee: TreeNode,
     candidates: Signature[],
-    args: ArgumentFlow,
+    args: ExpressionListFlow,
     instantiate: (candidate: Signature) => Signature
   ): Resolution {
     const byArity = candidates.filter((candidate) => this.arity.arityMatches(candidate, args));
@@ -571,7 +571,7 @@ export class Calls {
     node: TreeNode,
     callee: TreeNode,
     candidates: Signature[],
-    args: ArgumentFlow,
+    args: ExpressionListFlow,
     instantiate: (candidate: Signature) => Signature
   ): { row: number; index: number } | undefined {
     if (this.c.silent > 0) return undefined;
@@ -586,7 +586,7 @@ export class Calls {
     node: TreeNode,
     callee: TreeNode,
     candidate: Signature,
-    args: ArgumentFlow,
+    args: ExpressionListFlow,
     instantiate: (candidate: Signature) => Signature
   ): Resolution {
     const instantiated = this.arity.arityMatches(candidate, args) ? instantiate(candidate) : undefined;
@@ -700,7 +700,7 @@ export class Calls {
     report: boolean,
     at: TreeNode | undefined
   ): boolean {
-    const argumentFlow = new ArgumentFlow(this.c, args);
+    const argumentFlow = new ExpressionListFlow(this.c, args);
     const contexts = restTupleContexts(this.c, restType, argumentFlow);
     const tuple =
       args.length === 1 && args[0].type === 'spread_element'
@@ -745,7 +745,7 @@ export class Calls {
   // code-gauge-allow functionCognitiveComplexity 20 -- Follows TypeScript's inference passes: the contextual return, context-insensitive arguments, then callbacks.
   private instantiateFor(
     signature: Signature,
-    args: ArgumentFlow,
+    args: ExpressionListFlow,
     typeArguments: Type[] | undefined,
     contextual: Type | undefined,
     receiver: Type | undefined
@@ -847,7 +847,7 @@ export class Calls {
     if (inference) inference.impliedArity = rest.length;
   }
 
-  private expandedArguments(args: ArgumentFlow): ExpandedArgument[] {
+  private expandedArguments(args: ExpressionListFlow): ExpandedArgument[] {
     return args.nodes.flatMap((node): ExpandedArgument[] => {
       const before = args.before(node);
       const type = args.spreadType(node);
@@ -1004,7 +1004,7 @@ function isTrailingRestTuple(signature: Signature): boolean {
  * position, its trailing ones from the last argument back, and the rest's elements between. A spread of known length,
  * as a tuple's, keeps the positions after it; one of unknown length keeps only those counted from the other end.
  */
-function restTupleContexts(c: Checker, restType: Type, args: ArgumentFlow): (Type | undefined)[] {
+function restTupleContexts(c: Checker, restType: Type, args: ExpressionListFlow): (Type | undefined)[] {
   const contexts = tupleArgumentContexts(
     c,
     restType,
