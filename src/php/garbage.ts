@@ -1,14 +1,7 @@
 // code-gauge-allow-file fileNcss 999 -- Holds object ownership, reachability and release with their shared helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type CleanupException, withCleanupExceptions, withPendingException } from './errors';
-import {
-  cachedObjectFree,
-  countAfterDestructionPass,
-  deferredHandleOrder,
-  objectFree,
-  orderDestructedCollection,
-  recordGcRoot,
-} from './gcRoots';
+import { cachedObjectFree, deferredHandleOrder, objectFree, orderDestructedCollection, recordGcRoot } from './gcRoots';
 import { ExitSignal, type Frame, PhpThrow, type Runtime } from './runtime';
 import {
   arrayHolderCount,
@@ -109,11 +102,7 @@ function collectGarbageNow(runtime: Runtime, cycles: boolean, stopOnException: b
     finishCollectedObjects(runtime, ordered, arrayStorage);
     return collected;
   }
-  return collectAfterDestruction(
-    runtime,
-    { owners, handles, destructible, arrayCandidates, arrayStorage, buffered },
-    stopOnException
-  );
+  return collectAfterDestruction(runtime, { owners, handles, destructible, arrayStorage, buffered }, stopOnException);
 }
 
 function collectAfterDestruction(
@@ -122,19 +111,16 @@ function collectAfterDestruction(
     owners: PhpObject[];
     handles: PhpObject[];
     destructible: PhpObject[];
-    arrayCandidates: PhpArray[];
     arrayStorage: Set<PhpArray>;
     buffered?: (PhpObject | PhpArray)[];
   },
   stopOnException: boolean
 ): number {
-  const { owners, handles, destructible, arrayCandidates, arrayStorage, buffered } = batch;
+  const { owners, handles, destructible, arrayStorage, buffered } = batch;
   let count = 0;
-  const destructedInBuffer = new Set<PhpObject>();
   withCleanupExceptions(runtime, (capture) => {
     for (const object of owners) {
       if (object.destructed || !object.cls.findMethod('__destruct')) continue;
-      destructedInBuffer.add(object);
       object.destructed = true;
       runtime.destructibles--;
       try {
@@ -157,8 +143,6 @@ function collectAfterDestruction(
       owners,
       remaining,
       destructible,
-      destructedInBuffer,
-      arrayCandidates,
       afterArrays,
       buffered,
     });
@@ -222,43 +206,30 @@ function countAfterDestruction(
     owners: PhpObject[];
     remaining: PhpObject[];
     destructible: PhpObject[];
-    destructedInBuffer: Set<PhpObject>;
-    arrayCandidates: PhpArray[];
     afterArrays: Set<PhpArray>;
     buffered?: (PhpObject | PhpArray)[];
   }
 ): { count: number; ordered: PhpObject[] } {
-  const { owners, remaining, destructible, destructedInBuffer, arrayCandidates, afterArrays, buffered } = state;
+  const { owners, remaining, destructible, afterArrays, buffered } = state;
   const allowed = new Set(remaining);
   const graph = new CollectionGraph(
     remaining,
     runtime,
     (value) => !(value instanceof PhpArray && afterArrays.has(value))
   );
-  const cyclicArrays = new Set<PhpArray>(arrayCandidates);
-  const cyclic = cyclicObjects(graph, remaining, cyclicArrays);
-  const referenced = referencedGarbage(graph, [...remaining, ...arrayCandidates]);
-  // Zend drops the last temporary reference to the current destructor's receiver without freeing it.
-  for (const object of destructedInBuffer) if (allowed.has(object) && !referenced.has(object)) cyclic.add(object);
-  const deferredRoots = destructible.filter((object) => cyclic.has(object));
-  const protectedObjects = collectibleGraph(deferredRoots, afterArrays, new Set(), allowed).objects;
-  const excluded = new Set(destructible.filter((object) => !protectedObjects.has(object)));
-  const { count } = countAfterDestructionPass(cyclic, cyclicArrays, excluded, (roots, skip) =>
-    collectibleGraph(roots, afterArrays, skip, allowed)
-  );
   const isObject = (node: CollectionNode): node is PhpObject => node instanceof PhpObject;
   const children = (node: CollectionNode): CollectionNode[] => graph.children(node);
   const initialRoots: CollectionNode[] = buffered
     ? buffered.filter((item) => (item instanceof PhpObject ? allowed.has(item) : !afterArrays.has(item)))
     : owners.filter((object) => allowed.has(object));
-  const ordered = orderDestructedCollection<CollectionNode, PhpObject>(
+  return orderDestructedCollection<CollectionNode, PhpObject>(
     initialRoots,
     new Set(destructible.filter((object) => allowed.has(object))),
     allowed,
     isObject,
-    children
+    children,
+    (node) => !(node instanceof Ref)
   );
-  return { count, ordered };
 }
 
 /**

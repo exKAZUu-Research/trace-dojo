@@ -4198,6 +4198,22 @@ echo "ok";
       '$p = new Plain; $p->next = $p; $n = new Node(1); $a = new Plain; $a->next = $a; $b = new Plain; $b->next = $b; $n->o = $a; $n->p = $b; $m = new Node(2); $c = new Plain; $c->next = $c; $m->o = $c; $p->o = $n; $p->p = $m; unset($p, $n, $a, $b, $m, $c);',
       '~1 ~2 4 4,3,6,1,5,2',
     ],
+    [
+      '$z = new Node(0); $p = new Plain; $q = new Plain; $p->q = $q; $q->q = $p; $a = new Node(3); $a->o = $a; $b = new Node(4); $b->q = $b; unset($b, $a, $p, $q, $z);',
+      '~0 ~3 ~4 4 4,5,3,2,1,6',
+    ],
+    [
+      '$v1 = new Plain; $v2 = new Plain; $v4 = new Node(4); $v5 = new Plain; $v1->o = $v4; $v4->q = $v2; $v5->o = $v5; $v5->p = $v1; $v5->q = [$v2, $v2]; unset($v5, $v2, $v1, $v4);',
+      '~4 3 4,2,1,3,5,6',
+    ],
+    [
+      '$v1 = new Plain; $v2 = new Plain; $v4 = new Node(4); $v5 = new Plain; $v1->o = $v4; $v4->q = $v2; $v5->o = $v5; $v5->p = $v1; $v5->q = $v2; unset($v5, $v2, $v1, $v4);',
+      '~4 2 4,2,1,3,5,6',
+    ],
+    [
+      '$v0 = new Node(0); $v1 = new Node(1); $v2 = new Node(2); $v3 = new Plain; $v4 = new Node(4); $v5 = new Plain; $v6 = new Plain; $v0->o = $v1; $v0->p = $v5; $v0->q = $v6; $v1->o = [$v3, $v5]; $v2->p = $v5; $v2->q = $v0; $v3->o = $v5; $v3->p = [$v2, $v1]; $v4->p = $v6; $v5->o = [$v4, $v5]; $v6->o = [$v4, $v0]; $v6->p = [$v6, $v0]; $v6->q = $v3; unset($v4, $v3, $v1, $v6, $v5, $v2, $v0);',
+      '~0 ~1 ~2 ~4 12 6,7,4,5,3,2',
+    ],
   ]) {
     expect(
       run(`<?php

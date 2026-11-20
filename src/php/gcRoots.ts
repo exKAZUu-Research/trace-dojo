@@ -69,11 +69,12 @@ export function orderDestructedCollection<N extends object, O extends N>(
   destructible: Set<O>,
   remainingObjects: Set<O>,
   isObject: (node: N) => node is O,
-  children: (node: N) => N[]
-): O[] {
-  const buffer = buildSimulationBuffer(bufferedRoots, remainingObjects, isObject, children);
+  children: (node: N) => N[],
+  countable: (node: N) => boolean = () => true
+): { count: number; ordered: O[] } {
+  const buffer = buildSimulationBuffer(bufferedRoots, remainingObjects, isObject, children, countable);
   const end = buffer.length;
-  removeDestructibleNested(buffer, end, destructible, isObject, children);
+  removeDestructibleNested(buffer, end, destructible, isObject, children, countable);
   const state: DeferredState<N, O> = {
     protectedObjects: remainingObjects,
     inDegree: countInDegrees(bufferedRoots, remainingObjects, isObject, children),
@@ -82,30 +83,52 @@ export function orderDestructedCollection<N extends object, O extends N>(
     isObject,
     children,
   };
-  runFirstDestructionPass(buffer, end, state, destructible);
+  const runOneCount = runFirstDestructionPass(buffer, end, state, destructible, countable);
+  const freedAfterPassOne = countNodes(state.freed, countable);
   buffer.compact();
-  drainRunTwoBuffer(buffer, state, remainingObjects);
-  return state.order;
+  drainRunTwoBuffer(buffer, state, remainingObjects, countable);
+  return { count: runOneCount + (countNodes(state.freed, countable) - freedAfterPassOne), ordered: state.order };
+}
+
+function countNodes<N extends object>(nodes: Iterable<N>, predicate: (node: N) => boolean): number {
+  let count = 0;
+  for (const node of nodes) if (predicate(node)) count++;
+  return count;
 }
 
 function buildSimulationBuffer<N extends object, O extends N>(
   bufferedRoots: N[],
   remainingObjects: Set<O>,
   isObject: (node: N) => node is O,
-  children: (node: N) => N[]
+  children: (node: N) => N[],
+  countable: (node: N) => boolean
 ): SimulationBuffer<N> {
   const buffer = new SimulationBuffer<N>();
-  for (const root of bufferedRoots) buffer.add(root);
+  for (const root of bufferedRoots) if (countable(root)) buffer.add(root);
   buffer.compact();
+  collectWhiteIntoBuffer(buffer, new Set(), remainingObjects, isObject, children, countable);
+  return buffer;
+}
+
+function collectWhiteIntoBuffer<N extends object, O extends N>(
+  buffer: SimulationBuffer<N>,
+  freed: Set<N>,
+  remainingObjects: Set<O>,
+  isObject: (node: N) => node is O,
+  children: (node: N) => N[],
+  countable: (node: N) => boolean
+): void {
   const initialEnd = buffer.length;
+  const seen = new Set<N>();
   for (let index = 0; index < initialEnd; index++) {
     const start = buffer.at(index);
-    if (start !== undefined)
-      walkZendStack(start, children, (node) => {
-        if (node !== start && (!isObject(node) || remainingObjects.has(node))) buffer.add(node);
-      });
+    if (start === undefined || freed.has(start) || seen.has(start)) continue;
+    walkZendStack(start, seen, children, (node) => {
+      if (freed.has(node) || (isObject(node) && !remainingObjects.has(node))) return false;
+      if (countable(node)) buffer.add(node);
+      return true;
+    });
   }
-  return buffer;
 }
 
 function removeDestructibleNested<N extends object, O extends N>(
@@ -113,12 +136,13 @@ function removeDestructibleNested<N extends object, O extends N>(
   end: number,
   destructible: Set<O>,
   isObject: (node: N) => node is O,
-  children: (node: N) => N[]
+  children: (node: N) => N[],
+  countable: (node: N) => boolean
 ): void {
   for (let index = 0; index < end; index++) {
     const start = buffer.at(index);
     if (start !== undefined && isObject(start) && destructible.has(start))
-      removeNestedFromBuffer(start, buffer, destructible, isObject, children);
+      removeNestedFromBuffer(start, buffer, destructible, isObject, children, countable);
   }
 }
 
@@ -126,28 +150,29 @@ function runFirstDestructionPass<N extends object, O extends N>(
   buffer: SimulationBuffer<N>,
   end: number,
   state: DeferredState<N, O>,
-  destructible: Set<O>
-): void {
+  destructible: Set<O>,
+  countable: (node: N) => boolean
+): number {
   const runOneGarbage = new Set<N>();
   for (let index = 0; index < end; index++) {
     const item = buffer.at(index);
     if (item !== undefined && !(state.isObject(item) && destructible.has(item))) runOneGarbage.add(item);
   }
-  const runOneFreed: N[] = [];
   for (let index = 0; index < end; index++) {
     const start = buffer.at(index);
     if (start === undefined || !runOneGarbage.has(start) || state.freed.has(start)) continue;
-    runOneFreed.push(start);
-    releaseWithBuffer(start, state, buffer, destructible);
+    releaseWithBuffer(start, state, buffer, countable);
   }
-  for (const node of runOneFreed) buffer.remove(node);
+  return runOneGarbage.size;
 }
 
 function drainRunTwoBuffer<N extends object, O extends N>(
   buffer: SimulationBuffer<N>,
   state: DeferredState<N, O>,
-  remainingObjects: Set<O>
+  remainingObjects: Set<O>,
+  countable: (node: N) => boolean
 ): void {
+  collectWhiteIntoBuffer(buffer, state.freed, remainingObjects, state.isObject, state.children, countable);
   const runTwoQueue: N[] = [];
   for (let index = 0; index < buffer.length; index++) {
     const node = buffer.at(index);
@@ -217,23 +242,31 @@ class SimulationBuffer<N extends object> {
   }
 }
 
-function walkZendStack<N extends object>(start: N, children: (node: N) => N[], visit: (node: N) => void): void {
-  const seen = new Set<N>();
+function walkZendStack<N extends object>(
+  start: N,
+  seen: Set<N>,
+  children: (node: N) => N[],
+  visit: (node: N) => boolean
+): void {
+  if (seen.has(start)) return;
+  seen.add(start);
   const stack: N[] = [];
   let current: N | undefined = start;
   while (current !== undefined) {
-    if (!seen.has(current)) {
-      seen.add(current);
-      visit(current);
-      const next = children(current);
-      if (next.length > 0) {
-        for (let index = 1; index < next.length; index++) stack.push(next[index]);
-        current = next[0];
-        continue;
-      }
-    }
-    current = stack.pop();
+    const tail: N | undefined = visit(current) ? pushUnseenTail(children(current), seen, stack) : undefined;
+    current = tail ?? stack.pop();
   }
+}
+
+function pushUnseenTail<N extends object>(next: N[], seen: Set<N>, stack: N[]): N | undefined {
+  let tail: N | undefined;
+  for (const child of next) {
+    if (seen.has(child)) continue;
+    seen.add(child);
+    if (tail === undefined) tail = child;
+    else stack.push(child);
+  }
+  return tail;
 }
 
 function removeNestedFromBuffer<N extends object, O extends N>(
@@ -241,13 +274,15 @@ function removeNestedFromBuffer<N extends object, O extends N>(
   buffer: SimulationBuffer<N>,
   destructible: Set<O>,
   isObject: (node: N) => node is O,
-  children: (node: N) => N[]
+  children: (node: N) => N[],
+  countable: (node: N) => boolean
 ): void {
   const stack: N[] = [];
   let current: N | undefined = pushZendTail(children(root), stack);
   while (current !== undefined) {
-    if (buffer.has(current) && !(isObject(current) && destructible.has(current))) {
-      buffer.remove(current);
+    const transparent = !countable(current);
+    if (transparent || (buffer.has(current) && !(isObject(current) && destructible.has(current)))) {
+      if (!transparent) buffer.remove(current);
       const tail = pushZendTail(children(current), stack);
       if (tail !== undefined) {
         current = tail;
@@ -268,7 +303,31 @@ function releaseWithBuffer<N extends object, O extends N>(
   start: N,
   state: DeferredState<N, O>,
   buffer: SimulationBuffer<N>,
-  destructible: Set<O>
+  countable: (node: N) => boolean
+): void {
+  releaseDeferredRoot(
+    start,
+    state,
+    (item) => {
+      if (countable(item)) buffer.add(item);
+      else for (const target of state.children(item)) if (countable(target)) buffer.add(target);
+    },
+    (node) => buffer.remove(node)
+  );
+}
+
+function drainDeferredQueue<N extends object, O extends N>(queue: N[], state: DeferredState<N, O>, from: number): void {
+  for (let head = from; head < queue.length; head++) {
+    const start = queue[head];
+    if (!state.freed.has(start)) releaseDeferredRoot(start, state, (item) => queue.push(item));
+  }
+}
+
+function releaseDeferredRoot<N extends object, O extends N>(
+  start: N,
+  state: DeferredState<N, O>,
+  onNested: (item: N) => void,
+  onFinish?: (node: N) => void
 ): void {
   state.freed.add(start);
   const stack: { node: N; children: N[]; index: number }[] = [
@@ -276,38 +335,7 @@ function releaseWithBuffer<N extends object, O extends N>(
   ];
   while (stack.length > 0) {
     const frame = stack.at(-1) as { node: N; children: N[]; index: number };
-    const nested: N[] = [];
-    const child = nextDeferredChild(frame, state, nested);
-    for (const item of nested) buffer.add(item);
-    if (child !== undefined) {
-      state.freed.add(child);
-      stack.push({ node: child, children: state.children(child), index: 0 });
-      continue;
-    }
-    stack.pop();
-    if (state.isObject(frame.node)) {
-      state.order.push(frame.node);
-      if (destructible.has(frame.node)) buffer.remove(frame.node);
-    }
-  }
-}
-
-function drainDeferredQueue<N extends object, O extends N>(queue: N[], state: DeferredState<N, O>, from: number): void {
-  for (let head = from; head < queue.length; head++) {
-    const start = queue[head];
-    if (!state.freed.has(start)) queue.push(...releaseDeferredRoot(start, state));
-  }
-}
-
-function releaseDeferredRoot<N extends object, O extends N>(start: N, state: DeferredState<N, O>): N[] {
-  const nested: N[] = [];
-  state.freed.add(start);
-  const stack: { node: N; children: N[]; index: number }[] = [
-    { node: start, children: state.children(start), index: 0 },
-  ];
-  while (stack.length > 0) {
-    const frame = stack.at(-1) as { node: N; children: N[]; index: number };
-    const child = nextDeferredChild(frame, state, nested);
+    const child = nextDeferredChild(frame, state, onNested);
     if (child !== undefined) {
       state.freed.add(child);
       stack.push({ node: child, children: state.children(child), index: 0 });
@@ -315,14 +343,14 @@ function releaseDeferredRoot<N extends object, O extends N>(start: N, state: Def
     }
     stack.pop();
     if (state.isObject(frame.node)) state.order.push(frame.node);
+    onFinish?.(frame.node);
   }
-  return nested;
 }
 
 function nextDeferredChild<N extends object, O extends N>(
   frame: { node: N; children: N[]; index: number },
   state: DeferredState<N, O>,
-  nested: N[]
+  onNested: (item: N) => void
 ): N | undefined {
   while (frame.index < frame.children.length) {
     const child = frame.children[frame.index++];
@@ -330,7 +358,7 @@ function nextDeferredChild<N extends object, O extends N>(
     const remaining = (state.inDegree.get(child) ?? 1) - 1;
     state.inDegree.set(child, remaining);
     if (remaining <= 0) return child;
-    nested.push(child);
+    onNested(child);
   }
   return undefined;
 }
@@ -355,32 +383,6 @@ function countInDegrees<N extends object, O extends N>(
     }
   }
   return inDegree;
-}
-
-export function countAfterDestructionPass<O extends object, A extends object>(
-  cyclic: Set<O>,
-  cyclicArrays: Set<A>,
-  excluded: Set<O>,
-  collect: (roots: (O | A)[], skip: Set<O>) => { arrays: Set<A>; objects: Set<O> }
-): { count: number; runTwoObjects: Set<O> } {
-  const counted = collect([...cyclic, ...cyclicArrays], excluded);
-  const runTwoObjects = new Set<O>();
-  if (excluded.size > 0) {
-    const beneathExcluded = collect([...excluded], new Set());
-    const runTwoRoots: (O | A)[] = [
-      ...[...cyclic].filter((object) => beneathExcluded.objects.has(object)),
-      ...[...cyclicArrays].filter((array) => beneathExcluded.arrays.has(array)),
-    ];
-    if (runTwoRoots.length > 0) {
-      const runTwo = collect(runTwoRoots, new Set());
-      for (const object of runTwo.objects) {
-        counted.objects.add(object);
-        runTwoObjects.add(object);
-      }
-      for (const array of runTwo.arrays) counted.arrays.add(array);
-    }
-  }
-  return { count: counted.objects.size + counted.arrays.size, runTwoObjects };
 }
 
 const objectFreeArrays = new WeakMap<PhpArray, { version: number; free: boolean }>();
