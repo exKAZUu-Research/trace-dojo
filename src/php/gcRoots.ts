@@ -128,6 +128,28 @@ function countInDegrees<N extends object, O extends N>(
   return inDegree;
 }
 
+export function countAfterDestructionPass<O extends object, A extends object>(
+  cyclic: Set<O>,
+  cyclicArrays: Set<A>,
+  excluded: Set<O>,
+  collect: (roots: (O | A)[], skip: Set<O>) => { arrays: Set<A>; objects: Set<O> }
+): number {
+  const counted = collect([...cyclic, ...cyclicArrays], excluded);
+  if (excluded.size > 0) {
+    const beneathExcluded = collect([...excluded], new Set());
+    const runTwoRoots: (O | A)[] = [
+      ...[...cyclic].filter((object) => beneathExcluded.objects.has(object)),
+      ...[...cyclicArrays].filter((array) => beneathExcluded.arrays.has(array)),
+    ];
+    if (runTwoRoots.length > 0) {
+      const runTwo = collect(runTwoRoots, new Set());
+      for (const object of runTwo.objects) counted.objects.add(object);
+      for (const array of runTwo.arrays) counted.arrays.add(array);
+    }
+  }
+  return counted.objects.size + counted.arrays.size;
+}
+
 const objectFreeArrays = new WeakMap<PhpArray, { version: number; free: boolean }>();
 
 export function cachedObjectFree(array: PhpArray): boolean | undefined {

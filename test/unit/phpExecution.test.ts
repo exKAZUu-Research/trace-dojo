@@ -4178,6 +4178,10 @@ echo "ok";
       '$p = new Plain; $p->next = $p; $n = new Node(1); $n->o = new Plain; $n->o->next = $n->o; $p->o = $n; unset($p, $n);',
       '~1 2 3,1,2,4,5,6',
     ],
+    [
+      '$p = new Plain; $p->next = $p; $n = new Node(1); $c = new Plain; $c->next = $c; $c->o = new Node(2); $n->o = $c; $p->o = $n; unset($p, $n, $c);',
+      '~1 ~2 3 3,4,1,2,5,6',
+    ],
   ]) {
     expect(
       run(`<?php

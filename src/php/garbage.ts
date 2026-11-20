@@ -1,7 +1,7 @@
 // code-gauge-allow-file fileNcss 999 -- Holds object ownership, reachability and release with their shared helpers.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type CleanupException, withCleanupExceptions, withPendingException } from './errors';
-import { cachedObjectFree, deferredHandleOrder, objectFree, recordGcRoot } from './gcRoots';
+import { cachedObjectFree, countAfterDestructionPass, deferredHandleOrder, objectFree, recordGcRoot } from './gcRoots';
 import { ExitSignal, type Frame, PhpThrow, type Runtime } from './runtime';
 import {
   arrayHolderCount,
@@ -238,7 +238,9 @@ function countAfterDestruction(
   const deferredRoots = destructible.filter((object) => cyclic.has(object));
   const protectedObjects = collectibleGraph(deferredRoots, afterArrays, new Set(), allowed).objects;
   const excluded = new Set(destructible.filter((object) => !protectedObjects.has(object)));
-  const counted = collectibleGraph([...cyclic, ...cyclicArrays], afterArrays, excluded, allowed);
+  const count = countAfterDestructionPass(cyclic, cyclicArrays, excluded, (roots, skip) =>
+    collectibleGraph(roots, afterArrays, skip, allowed)
+  );
   const nonProtected = new Set(remaining.filter((object) => !protectedObjects.has(object)));
   const passOneRoots = owners.filter((object) => cyclic.has(object) && nonProtected.has(object));
   const isObject = (node: CollectionNode): node is PhpObject => node instanceof PhpObject;
@@ -247,7 +249,7 @@ function countAfterDestruction(
     ...deferredHandleOrder<CollectionNode, PhpObject>(passOneRoots, nonProtected, isObject, children),
     ...deferredHandleOrder<CollectionNode, PhpObject>(deferredRoots, protectedObjects, isObject, children),
   ];
-  return { count: counted.objects.size + counted.arrays.size, ordered };
+  return { count, ordered };
 }
 
 /**
