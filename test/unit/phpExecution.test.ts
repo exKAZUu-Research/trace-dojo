@@ -5349,6 +5349,21 @@ echo implode(",", $ids);
   }
 });
 
+test.each([
+  ['sort($items);', 10_000],
+  ['shuffle($items);', 10_000],
+  ['usort($items, fn($left, $right) => 0);', 7000],
+])('rebuilds a large object array within the execution budget after %s', (operation, size) => {
+  vi.restoreAllMocks();
+  const program = `<?php
+    class Item { function __construct(public $id) {} }
+    $items = [];
+    for ($index = 0; $index < ${size}; $index++) $items[] = new Item($index);
+    ${operation}
+    echo count($items);`;
+  expect(run(program)).toMatchObject({ kind: 'executed', stdout: String(size) });
+});
+
 test('normalizes retained undefined-slot storage across array_multisort, copy, and insertion', () => {
   for (const op of ['array_multisort($a);', '$b = range(1, count($a)); array_multisort($a, $b);']) {
     expect(

@@ -1,4 +1,4 @@
-// code-gauge-allow-file fileNcss 1000 -- Keeps class defaults with PHP value storage and ownership helpers.
+// code-gauge-allow-file fileNcss 1013 -- Keeps class defaults with PHP value storage and ownership helpers.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 import type { TurtleState } from '../interpreter/turtleWorld';
 import { type ArrayCursor, ArrayOrder, type ArrayRebuild } from './arrayOrder';
@@ -6,10 +6,10 @@ import { ArrayTable, detachArrayTable } from './arrayTable';
 import type { ClassDecl, Expr, FunctionDecl, PropertyDeclAst } from './ast';
 import { lower } from './bytes';
 import {
+  hasProofParent,
   invalidateOwner,
   OwnerLinks,
   ownershipProof,
-  proofChildrenOf,
   proofRoot,
   rememberOwnership,
 } from './ownerLinks';
@@ -104,7 +104,7 @@ export class Ref {
     const old = this.value;
     replaceWatchedSlot(this, '');
     this.value = assigned;
-    trackOwner(assigned, this);
+    trackOwner(assigned, this, undefined, old);
     dropped(old);
     return assigned;
   }
@@ -127,6 +127,12 @@ let allocationHandler: (count: number, size: number) => void = () => {};
 
 export function setAllocationHandler(handler: (count: number, size: number) => void): void {
   allocationHandler = handler;
+}
+
+let arrayRebuildHandler: (size: number) => void = () => {};
+
+export function setArrayRebuildHandler(handler: typeof arrayRebuildHandler): void {
+  arrayRebuildHandler = handler;
 }
 
 let shutdownHoldHandler: (value: unknown) => void = () => {};
@@ -405,10 +411,13 @@ export class PhpArray {
     keepAppendKey = false
   ): void {
     const previousSize = this.map.size;
-    this.map = this.table(entries);
+    const table = this.table(entries);
+    arrayRebuildHandler(table.size);
+    allocationHandler(Math.max(0, table.size - previousSize), table.size);
+    this.invalidate();
+    this.map = table;
     this.capacityHint =
       typeof rebuild === 'object' && 'start' in rebuild ? this.size : Math.max(this.capacityHint, previousSize);
-    allocationHandler(Math.max(0, this.size - previousSize), this.size);
     (rebuild ? this.ordered() : this.order)?.replace(this.map.physicalKeys(), packed, rebuild);
     this.orderPacked = packed;
     this.composite = false;
@@ -418,7 +427,6 @@ export class PhpArray {
       if (!keepAppendKey) this.advanceAppendKey(key);
       if (slot !== null && typeof slot === 'object') this.composite = true;
     }
-    this.invalidate();
   }
 
   resetAfterMultisort(): void {
@@ -437,6 +445,7 @@ export class PhpArray {
     if (!removed) return;
     const result = PhpArray.copySlots(removed);
     allocationHandler(Math.max(0, replacement.length - count), this.size);
+    this.invalidate();
     for (const slot of removed) if (slot instanceof Ref) slot.rc--;
     for (let index = 0; index < replacement.length; index++) this.trackSlot(BigInt(start + index), replacement[index]);
     this.composite ||= replacement.some((slot) => slot !== null && typeof slot === 'object');
@@ -445,7 +454,6 @@ export class PhpArray {
     this.orderPacked = true;
     this.nextFree = BigInt(this.size);
     this.pointer = null;
-    this.invalidate();
     for (const slot of removed) dropped(slot);
     return result;
   }
@@ -547,12 +555,12 @@ export class PhpArray {
   prependList(values: Value[]): boolean {
     if (!this.map.prependList(values)) return false;
     allocationHandler(values.length, this.size);
+    this.invalidate();
     for (let index = 0; index < values.length; index++) this.trackSlot(BigInt(index), values[index]);
     if (values.some((value) => value !== null && typeof value === 'object')) this.composite = true;
     this.order?.prependList(values.length);
     this.nextFree = BigInt(this.size);
     this.pointer = null;
-    this.invalidate();
     return true;
   }
 
@@ -1191,9 +1199,12 @@ export function ownershipEdgeExists(change: Extract<OwnershipChange, { kind: 'ed
 }
 const owners = new WeakMap<object, OwnerLinks<Owner, Key | undefined>>();
 
-function trackOwner(value: unknown, parent: Owner, key?: Key): void {
-  rewireOwnership(parent, key, value);
-  if (!(value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject)) return;
+function trackOwner(value: unknown, parent: Owner, key?: Key, previous?: unknown): void {
+  const trackable = value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject;
+  const root = proofRoot(parent);
+  if (root && trackable && value !== parent) rememberOwnership([parent, value], root);
+  if (previous !== value) forgetOwner(previous, parent, key);
+  if (!trackable) return;
   let parents = owners.get(value);
   if (!parents) {
     parents = new OwnerLinks();
@@ -1201,6 +1212,15 @@ function trackOwner(value: unknown, parent: Owner, key?: Key): void {
   }
   parents.add(parent, key);
   for (const observer of ownershipObservers) observer({ kind: 'edge', value, owner: parent, key });
+}
+
+function forgetOwner(value: unknown, owner: Owner, key: Key | undefined): void {
+  if (!(value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject)) return;
+  const links = owners.get(value);
+  const keys = links?.get(owner);
+  keys?.delete(key);
+  if (keys?.size === 0) links?.delete(owner);
+  if (hasProofParent(value, owner) && !retainsChild(owner, value)) invalidateOwner(value);
 }
 
 export function arrayHolderCount(value: PhpArray): number {
@@ -1256,7 +1276,7 @@ class PropertyMap extends Map<string, Slot> {
     replaceWatchedSlot(this, key);
     super.set(key, value);
     if (value !== UNINIT) this.owner.unsetProperties?.delete(key);
-    trackOwner(value, this.owner, key);
+    trackOwner(value, this.owner, key, old);
     if (!movedIntoReference(old, value)) dropped(old);
     return this;
   }
@@ -1271,9 +1291,11 @@ class PropertyMap extends Map<string, Slot> {
     replaceWatchedSlot(this, key);
     const old = this.get(key);
     this.advancePointerOnRemoval(key);
-    invalidateOwner(this.owner);
     const removed = super.delete(key);
-    if (removed) dropped(old);
+    if (removed) {
+      forgetOwner(old, this.owner, key);
+      dropped(old);
+    }
     return removed;
   }
 
@@ -1287,21 +1309,10 @@ class PropertyMap extends Map<string, Slot> {
 
 export { ownershipProof, rememberOwnership };
 
-function rewireOwnership(owner: Owner, key: Key | undefined, value: unknown): void {
-  const root = proofRoot(owner);
-  if (root && value !== owner && (value instanceof Ref || value instanceof PhpArray || value instanceof PhpObject))
-    rememberOwnership([owner, value], root);
-  for (const child of proofChildrenOf(owner) ?? []) {
-    if (child === value || retainsChild(owner, key, child)) continue;
-    invalidateOwner(child);
-  }
-}
-
-function retainsChild(owner: Owner, replacedKey: Key | undefined, child: object): boolean {
+function retainsChild(owner: Owner, child: object): boolean {
   if (owner instanceof Ref) return false;
   if (owner instanceof PhpObject && nativeOwners.get(child)?.has(owner)) return true;
   for (const key of owners.get(child)?.get(owner) ?? []) {
-    if (key === replacedKey) continue;
     const actual = owner instanceof PhpArray ? owner.map.ownedSlot(key as Key) : owner.props.get(key as string);
     if (actual === child) return true;
   }

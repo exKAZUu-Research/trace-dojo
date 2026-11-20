@@ -1,3 +1,4 @@
+// code-gauge-allow-file fileNcss 413 -- Keeps the execution budget, frame state, and runtime ownership hooks together.
 // oxlint-disable unicorn/no-null -- PHP's null is a value of the language, which JavaScript's null represents.
 // oxlint-disable unicorn/prefer-code-point -- PHP strings hold bytes as code units 0–255, which charCodeAt and fromCharCode read and write as they are.
 import { ExecutionBudget, LIMITS } from '../interpreter/limits';
@@ -23,6 +24,7 @@ import {
   PhpObject,
   Ref,
   setAllocationHandler,
+  setArrayRebuildHandler,
   setDropHandler,
   setReferenceDropObserver,
   setShutdownHoldHandler,
@@ -606,6 +608,7 @@ setReferenceDropObserver((value) => current?.pendingGcRoots.add(value));
 setDropHandler((values) => current?.release(values, true));
 setShutdownHoldHandler((value) => current?.holdForShutdown(value));
 setAllocationHandler((count, size) => current?.allocate(count, size));
+setArrayRebuildHandler((size) => current?.spend(1 + Math.ceil(size / 64)));
 export function withRuntime<T>(runtime: Runtime, run: () => T): T {
   const outer = current;
   current = runtime;

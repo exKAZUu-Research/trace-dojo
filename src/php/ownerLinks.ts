@@ -61,8 +61,8 @@ export function proofRoot(owner: object): object | undefined {
   return reachProofs.get(owner);
 }
 
-export function proofChildrenOf(owner: object): Set<object> | undefined {
-  return proofChildren.get(owner);
+export function hasProofParent(child: object, owner: object): boolean {
+  return proofParents.get(child) === owner;
 }
 
 export function invalidateOwner(owner: object): void {
