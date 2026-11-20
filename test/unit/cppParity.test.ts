@@ -75,6 +75,39 @@ int main() {
   });
 });
 
+test.each([
+  ['x++ + bytes[1]', 'int x = 0;', '&x'],
+  ['x + (bytes[2] = 1)', 'int x = 0;', '&x'],
+  ['bytes[1] + a[0]++', 'int a[] = {0, 9};', 'a'],
+  ['bytes[1]++ + a[0]++', 'int a[] = {0, 9};', 'a'],
+])('rejects overlapping unsequenced scalar and byte accesses in %s', (expression, declaration, address) => {
+  const program = `#include <iostream>
+int main() {
+  ${declaration}
+  unsigned char* bytes = static_cast<unsigned char*>(static_cast<void*>(${address}));
+  std::cout << (${expression});
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '',
+    uncaughtException: expect.stringContaining('実行順序が決まっていない式'),
+  });
+});
+
+test('allows unsequenced accesses to separate elements through a C++ byte view', () => {
+  const program = `#include <iostream>
+int main() {
+  int a[] = {1, 9};
+  unsigned char* bytes = static_cast<unsigned char*>(static_cast<void*>(a));
+  std::cout << (a[0]++ + bytes[sizeof(int)]);
+}`;
+  expect(executeProgram('cpp', program)).toMatchObject({
+    kind: 'executed',
+    stdout: '10',
+    uncaughtException: undefined,
+  });
+});
+
 // Each `.out` file holds what a program built with Apple clang++ 21 (`-std=c++20`, libc++) printed, followed by the
 // line libc++abi wrote when an uncaught exception ended it, if one did.
 test.each(fs.readdirSync(FIXTURE_DIR).filter((name) => name.endsWith('.cpp')))(

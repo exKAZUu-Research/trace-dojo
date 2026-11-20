@@ -122,7 +122,7 @@ export class Frame implements TracedFrame {
     if (!store) return;
     for (let scope: OperandAccesses | undefined = this.operandAccesses; scope; scope = scope.parent) {
       this.runtime.spend();
-      scope.access(store, index, write);
+      scope.access(store, index, size, write);
     }
   }
 }
@@ -153,16 +153,22 @@ class OperandAccesses {
 
   constructor(readonly parent: OperandAccesses | undefined) {}
 
-  access(store: Store, index: number, write: boolean): void {
-    const locations = this.first.get(store);
-    const earlier = locations?.get(index);
+  access(store: Store, start: number, size: number, write: boolean): void {
+    const end = start + size;
+    let locations = this.first.get(store);
     if (this.inSecondOperand) {
-      if (earlier !== undefined && (earlier || write)) throw new CppRuntimeError('unsequencedAccess');
-    } else if (locations) {
-      if (write || earlier === undefined) locations.set(index, write);
-    } else {
-      this.first.set(store, new Map([[index, write]]));
+      if (!locations) return;
+      for (let byte = start; byte < end; byte++) {
+        const earlier = locations.get(byte);
+        if (earlier !== undefined && (earlier || write)) throw new CppRuntimeError('unsequencedAccess');
+      }
+      return;
     }
+    if (!locations) {
+      locations = new Map();
+      this.first.set(store, locations);
+    }
+    for (let byte = start; byte < end; byte++) if (write || !locations.has(byte)) locations.set(byte, write);
   }
 }
 
