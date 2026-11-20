@@ -18,6 +18,7 @@ import {
   resolve,
   shallow,
   substitute,
+  substituteTraitRef,
   type TraitDef,
   type Type,
   type TypeParam,
@@ -139,7 +140,7 @@ export class Interpreter implements CallSupport {
       receiverArgs = [unwrapped.receiver, ...args.slice(1)];
     }
     const trait = def.trait as TraitDef;
-    const dispatch = this.dispatch(trait, self, def.name, trait.params.length > 0 ? typeArgs[1] : undefined);
+    const dispatch = this.dispatch(trait, self, def.name, typeArgs.slice(1, 1 + trait.params.length));
     if (dispatch) {
       const own = typeArgs.slice(def.parentParamCount);
       const fnArgs = dispatch.implArgs ? [...dispatch.implArgs, ...own] : [self, ...typeArgs.slice(1)];
@@ -151,8 +152,8 @@ export class Interpreter implements CallSupport {
   }
 
   /** The impl method that a trait method runs for a concrete type, or the trait's default method. */
-  private dispatch(trait: TraitDef, self: Type, name: string, traitArg?: Type): Dispatch | undefined {
-    const argKey = traitArg ? typeKey(traitArg) : '';
+  private dispatch(trait: TraitDef, self: Type, name: string, traitArgs: Type[] = []): Dispatch | undefined {
+    const argKey = traitArgs.map(typeKey).join(',');
     const key = `${trait.path}#${(trait as { id?: number }).id ?? ''}|${typeKey(self)}|${name}|${argKey}`;
     if (this.dispatchCache.has(key)) return this.dispatchCache.get(key);
     let result: Dispatch | undefined;
@@ -161,8 +162,8 @@ export class Interpreter implements CallSupport {
       const subst = new Map<TypeParam, Type>();
       const params = new Set(impl.params);
       if (!matchConcrete(impl.selfType, self, params, subst)) continue;
-      const implArg = impl.trait.args[0];
-      if (traitArg && implArg && !matchConcrete(implArg, traitArg, params, subst)) continue;
+      if (!traitArgs.every((arg, index) => matchConcrete(impl.trait!.args[index], arg, params, subst))) continue;
+      if (!this.satisfiesImplBounds(subst)) continue;
       const fn = impl.methods.get(name);
       if (fn) result = { fn, implArgs: impl.params.map((param) => subst.get(param) as Type) };
       break;
@@ -171,12 +172,24 @@ export class Interpreter implements CallSupport {
     return result;
   }
 
+  private satisfiesImplBounds(subst: Map<TypeParam, Type>): boolean {
+    const { solver, unifier } = this.checker;
+    const snapshot = unifier.snapshot();
+    try {
+      return [...subst].every(([param, type]) =>
+        param.bounds.every((bound) => solver.implements(type, substituteTraitRef(bound, subst)) === 'yes')
+      );
+    } finally {
+      unifier.rollback(snapshot);
+    }
+  }
+
   /** A program's own impl method of a standard trait for a type, for the type-directed operations. */
   private userTraitMethod(traitName: string, type: Type, method: string, traitArg?: Type): Dispatch | undefined {
     const trait = this.program.builtinTraits.get(traitName);
     if (!trait) return undefined;
     const t = normalize(shallow(type));
-    const candidate = this.dispatch(trait, t, method, traitArg);
+    const candidate = this.dispatch(trait, t, method, traitArg ? [traitArg] : []);
     return candidate && !(candidate.fn.module as Module).isStd ? candidate : undefined;
   }
 
@@ -344,29 +357,14 @@ export class Interpreter implements CallSupport {
 
   /** `From::from`: the program's impl, or the standard library's conversion. */
   convertFrom(value: Value, from: Type, to: Type, frame: Frame): Value {
-    const trait = this.program.traitDef('From');
-    const target = normalize(shallow(to));
-    for (const impl of this.program.impls) {
-      if (impl.trait?.trait !== trait) continue;
-      const subst = new Map<TypeParam, Type>();
-      if (!matchConcrete(impl.selfType, target, new Set(impl.params), subst)) continue;
-      if (!matchConcrete(impl.trait.args[0], from, new Set(impl.params), subst)) continue;
-      const fn = impl.methods.get('from');
-      if (fn)
-        return this.callFn(
-          fn,
-          impl.params.map((param) => subst.get(param) as Type),
-          [value],
-          undefined,
-          { row: 0, col: 0 },
-          frame
-        );
-    }
+    const dispatch = this.dispatch(this.program.traitDef('From'), normalize(shallow(to)), 'from', [from]);
+    const span = { row: 0, col: 0 };
+    if (dispatch) return this.callFn(dispatch.fn, dispatch.implArgs ?? [], [value], undefined, span, frame);
     return NATIVES['From::from']([value], {
       interp: this,
       runtime: this.runtime,
       frame,
-      span: { row: 0, col: 0 },
+      span,
       typeArgs: [to, from],
     });
   }

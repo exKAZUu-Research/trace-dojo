@@ -171,7 +171,7 @@ export class Checker {
       if (!traitRef || (impl.module as Module).isStd) continue;
       const span = impl.span as Span;
       const previous = impls.get(traitRef.trait) ?? [];
-      if (previous.some((other) => this.implsOverlap(impl, other))) {
+      if (previous.some((other) => this.implsOverlap(impl, other)) || this.overlapsImplicitImpl(impl, traitRef.trait)) {
         compileError(
           span,
           `トレイト ${traitRef.trait.name} は、型 ${typeToString(impl.selfType)} に2回実装されています。`
@@ -188,7 +188,35 @@ export class Checker {
     }
   }
 
-  private implsOverlap(a: ImplDef, b: ImplDef): boolean {
+  private overlapsImplicitImpl(impl: ImplDef, trait: TraitDef): boolean {
+    const self = normalize(shallow(impl.selfType));
+    if (self.kind === 'adt' && trait.builtin && self.def.derives.has(trait.builtin)) {
+      const subst = this.derivedBounds(self.def, trait);
+      const args = [...subst.values()];
+      const derivedSelf: Type = { kind: 'adt', def: self.def, args };
+      if (
+        this.implsOverlap(impl, {
+          selfType: derivedSelf,
+          params: args.map((arg) => arg.param),
+          trait: { trait, args: defaultTraitArguments(trait, [], derivedSelf) },
+        })
+      )
+        return true;
+    }
+    if (trait.builtin !== 'From') return false;
+    const param = newTypeParam('T');
+    const source: Type = { kind: 'param', param };
+    const targets = [source, this.program.builtinType('Option', [source]), this.program.builtinType('Box', [source])];
+    return targets.some((selfType) =>
+      this.implsOverlap(impl, {
+        params: [param],
+        selfType,
+        trait: { trait, args: [source] },
+      })
+    );
+  }
+
+  private implsOverlap(a: ImplDef, b: Pick<ImplDef, 'params' | 'selfType' | 'trait'>): boolean {
     this.budget.spend();
     const aSubst: Subst = new Map(a.params.map((param) => [param, freshVar()]));
     const bSubst: Subst = new Map(b.params.map((param) => [param, freshVar()]));
@@ -302,8 +330,8 @@ export class Checker {
     }
   }
 
-  private derivedBounds(def: AdtDef, trait: TraitDef): Subst {
-    const subst: Subst = new Map();
+  private derivedBounds(def: AdtDef, trait: TraitDef): Map<TypeParam, Type & { kind: 'param' }> {
+    const subst = new Map<TypeParam, Type & { kind: 'param' }>();
     const args = def.params.map((original) => {
       const param = newTypeParam(original.name);
       const type = { kind: 'param', param } as const;

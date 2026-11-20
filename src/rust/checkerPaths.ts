@@ -167,6 +167,12 @@ function associatedValueRes(c: Checker, t: Type, last: PathAst['segments'][numbe
     }
     compileError(span, `${typeToString(t)} に関連関数 ${last.name} がありません。`);
   }
+  if (found.ambiguousWith) {
+    compileError(
+      span,
+      `関連関数 ${last.name} は、トレイト ${found.fn.trait!.name} と ${found.ambiguousWith.name} の両方にあります。`
+    );
+  }
   checkMethodVisible(c, found.fn, span);
   checkTraitInScope(c, found.fn, t, span, `関連関数 ${last.name}`);
   if (last.args) {

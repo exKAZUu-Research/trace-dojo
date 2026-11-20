@@ -167,15 +167,18 @@ function probe(
   // Methods of the bounds of type parameters, trait objects, and opaque types.
   const t = shallow(receiverType);
   const target = t.kind === 'ref' ? shallow(t.target) : t;
-  const bounds = boundsOf(target);
-  if (bounds) {
-    for (const bound of allSupertraits(bounds, target)) {
-      const fn = bound.trait.methods.get(name);
-      if (!fn?.selfMode) continue;
-      const found = matchTraitSelf(solver, bound, fn, target, receiverType);
-      if (found) return found;
-    }
-  }
+  const boundCandidates = boundMethods(target, name).flatMap(({ bound, fn }) =>
+    fn.selfMode
+      ? [
+          {
+            trait: bound.trait,
+            attempt: () => matchTraitSelf(solver, bound, fn, target, receiverType),
+          },
+        ]
+      : []
+  );
+  const match = resolveTraitCandidate(solver, receiverType, name, boundCandidates);
+  if (match) return match;
   return resolveTraitCandidate(
     solver,
     receiverType,
@@ -198,12 +201,13 @@ function resolveTraitCandidate(
     if (other) return { ...found, ambiguousWith: other.trait };
     const { trait } = candidate;
     if (
-      (trait.builtin === 'PartialEq' || trait.builtin === 'PartialOrd') &&
-      others.some((item) => item.concrete && item.trait === trait && applies(solver, item.attempt))
+      candidate.concrete &&
+      trait.params.length > 0 &&
+      (trait.builtin || others.some((item) => item.concrete && item.trait === trait && applies(solver, item.attempt)))
     ) {
       const fn = trait.methods.get(name)!;
       const selfType = selfForMode(fn.selfMode!, receiver)!;
-      return { fn, selfType, typeArgs: [selfType, freshVar(), ...ownParams(fn)] };
+      return { ...independentTraitMethod(trait, fn, selfType), selfType };
     }
     return found;
   }
@@ -265,7 +269,7 @@ function traitCandidates(
   return candidates;
 }
 
-function applies(solver: TraitSolver, attempt: TraitCandidate['attempt']): boolean {
+function applies(solver: TraitSolver, attempt: () => unknown): boolean {
   const snapshot = solver.unifier.snapshot();
   const found = attempt();
   solver.unifier.rollback(snapshot);
@@ -363,6 +367,7 @@ export function allSupertraits(bounds: TraitRef[], self?: Type): TraitRef[] {
 interface Associated {
   fn: FnDef;
   typeArgs: Type[];
+  ambiguousWith?: TraitDef;
 }
 
 /** Finds an associated function or method by a path such as `Type::name`, for calls like `String::from` or `Point::new`. */
@@ -393,20 +398,31 @@ function inherentAssociated(program: Program, solver: TraitSolver, t: Type, name
 }
 
 function boundAssociated(t: Type, name: string): Associated | undefined {
+  const [first, second] = boundMethods(t, name);
+  if (!first) return undefined;
+  const { bound, fn } = first;
+  return { fn, typeArgs: [t, ...bound.args, ...ownParams(fn)], ambiguousWith: second?.bound.trait };
+}
+
+function boundMethods(t: Type, name: string): { bound: TraitRef; fn: FnDef }[] {
   const bounds = boundsOf(t);
-  if (!bounds) return undefined;
-  for (const bound of allSupertraits(bounds, t)) {
+  if (!bounds) return [];
+  return allSupertraits(bounds, t).flatMap((bound) => {
     const fn = bound.trait.methods.get(name);
-    if (fn) return { fn, typeArgs: [t, ...bound.args, ...ownParams(fn)] };
-  }
-  return undefined;
+    return fn ? [{ bound, fn }] : [];
+  });
 }
 
 function traitImplAssociated(program: Program, solver: TraitSolver, t: Type, name: string): Associated | undefined {
   for (const impl of program.impls) {
     if (!impl.trait) continue;
-    const declared = impl.trait.trait.methods.get(name);
+    const { trait } = impl.trait;
+    const declared = trait.methods.get(name);
     if (!declared) continue;
+    if (trait.params.length > 0) {
+      if (applies(solver, () => solver.matchImpl(impl, t))) return independentTraitMethod(trait, declared, t);
+      continue;
+    }
     const subst = solver.matchImpl(impl, t);
     if (!subst) continue;
     const fn = impl.methods.get(name);
@@ -417,6 +433,10 @@ function traitImplAssociated(program: Program, solver: TraitSolver, t: Type, nam
     };
   }
   return undefined;
+}
+
+function independentTraitMethod(trait: TraitDef, fn: FnDef, self: Type): Associated {
+  return { fn, typeArgs: [self, ...trait.params.map(() => freshVar()), ...ownParams(fn)] };
 }
 
 function builtinTraitAssociated(program: Program, solver: TraitSolver, t: Type, name: string): Associated | undefined {

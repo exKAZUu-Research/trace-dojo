@@ -2886,3 +2886,44 @@ fn main() { show(); }`;
   const reexport = program.replace('pub fn show() { println!("b"); }', 'pub use super::a::show;');
   expect(executeProgram('rust', reexport)).toMatchObject({ kind: 'executed', stdout: 'a\n' });
 });
+
+test('resolves Rust trait calls through argument types and impl bounds', () => {
+  const program = `struct Name(String);
+impl From<Name> for String { fn from(n: Name) -> String { n.0 } }
+impl PartialEq<Name> for i32 {
+    fn eq(&self, n: &Name) -> bool { *self == n.0.len() as i32 }
+}
+trait Mark {}
+trait Mode { fn value(&self) -> i32; }
+struct Tagged;
+impl Mark for Tagged {}
+struct Wrapped<T>(T);
+impl<T: Mark> Mode for Wrapped<T> { fn value(&self) -> i32 { 1 } }
+impl Mode for Wrapped<i32> { fn value(&self) -> i32 { 2 } }
+fn inspect<T: Mode>(value: T) -> i32 { value.value() }
+fn main() {
+    let n = Name(String::from("Ann"));
+    println!("{} {} {}", 3i32.eq(&n), 3i32.eq(&3), String::from(n));
+    println!("{} {}", inspect(Wrapped(42)), inspect(Wrapped(Tagged)));
+}`;
+  expect(executeProgram('rust', program)).toMatchObject({
+    kind: 'executed',
+    stdout: 'true true Ann\n2 1\n',
+  });
+});
+
+test('rejects Rust trait overlap with implicit impls and ambiguity among bounds', () => {
+  const conflicts = [
+    '#[derive(Clone)] struct S; impl Clone for S { fn clone(&self) -> S { S } } fn main() {}',
+    'struct S; impl<T> From<T> for S { fn from(_: T) -> S { S } } fn main() {}',
+    `trait A { fn show(&self); }
+trait B { fn show(&self); }
+fn show<T: A + B>(value: &T) { value.show(); }
+fn main() {}`,
+    `trait A { fn show(&self); }
+trait B { fn show(&self); }
+fn show<T: A + B>(value: &T) { T::show(value); }
+fn main() {}`,
+  ];
+  for (const program of conflicts) expect(executeProgram('rust', program)).toMatchObject({ kind: 'compileError' });
+});
