@@ -565,7 +565,6 @@ function totalOrderKey(value: number): bigint {
   return bits;
 }
 
-/** `powi`, which multiplies repeatedly as LLVM's `powi` does, so that results match in the last bits. */
 /** `powi` as compiler-rt's `__powidf2` and `__powisf2` compute it, rounding each step to the type (`round`). */
 function powi(base: number, exponent: number, round: (value: number) => number): number {
   if (exponent === 0) return 1;
@@ -574,7 +573,7 @@ function powi(base: number, exponent: number, round: (value: number) => number):
   let n = Math.abs(exponent);
   while (n > 0) {
     if (n & 1) result = round(result * factor);
-    n >>= 1;
+    n >>>= 1;
     if (n > 0) factor = round(factor * factor);
   }
   return exponent < 0 ? round(1 / result) : result;
