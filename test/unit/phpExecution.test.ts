@@ -5341,6 +5341,11 @@ test('a returned local becomes a GC root before the other locals are freed', () 
   ).toMatchObject({ kind: 'executed', stdout: 'd3;d2;d1;3' });
   expect(
     run(
+      '<?php class A { public $s; function __destruct() { echo "dA", spl_object_id($this), ";"; } } class Q { public $s; } function f() { $o0 = new Q; $o1 = new A; $o3 = new A; $o3->s = $o3; $o0->s = $o3; $o4 = new A; $o4->s = $o4; return $o1; } $v = f(); unset($v); echo gc_collect_cycles();'
+    )
+  ).toMatchObject({ kind: 'executed', stdout: 'dA2;dA4;dA3;2' });
+  expect(
+    run(
       '<?php class D { function __destruct() { throw new Exception("x"); } } class K { public $s; function __destruct() { echo "k", spl_object_id($this), ";"; } function m() { $d = new D; } } $a = new K; $a->s = $a; $b = new K; $b->s = $b; try { $a->m(); } catch (Exception $e) {} unset($b); unset($a); echo gc_collect_cycles();'
     )
   ).toMatchObject({ kind: 'executed', stdout: 'k2;k1;2' });
