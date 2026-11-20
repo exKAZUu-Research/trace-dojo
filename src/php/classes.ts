@@ -839,7 +839,7 @@ function missingPropertyHooks(cls: PhpClass, ancestors: PhpClass[], row: number)
     const property = cls.propByName.get(contract.name);
     if (property && property !== contract) {
       checkPropertyModifiers(cls, contract, property, row);
-      if (cls.kind === 'interface') checkHookSignatures(contract, property, property.cls, row);
+      checkHookSignatures(contract, property, property.cls, row);
       if (!propertyTypeCompatible(contract, property, property.cls))
         propertyTypeError(contract, cls, property.name, row);
     }

@@ -2337,6 +2337,32 @@ test.each([
 
 test.each([
   [
+    'get;',
+    'string $x { get => "a"; }',
+    'Declaration of C::$x::get(): string must be compatible with I::$x::get(): int',
+  ],
+  [
+    'set;',
+    'string $x { set { echo $value; } }',
+    'Declaration of C::$x::set(string $value): void must be compatible with I::$x::set(int $value): void',
+  ],
+  [
+    'get; set;',
+    '?int $x { get => 1; set { echo $value; } }',
+    'Declaration of C::$x::get(): ?int must be compatible with I::$x::get(): int',
+  ],
+  ['get;', 'string $x;', 'Type of C::$x must be subtype of int (as in class I)'],
+])('checks interface hook signatures before the property type: %s', (hooks, property, message) => {
+  expect(
+    run(`<?php\ninterface I { public int $x { ${hooks} } } class C implements I { public ${property} }`)
+  ).toMatchObject({
+    kind: 'executed',
+    stdout: `\nFatal error: ${message} in /main.php on line 2\nStack trace:\n#0 {main}\n`,
+  });
+});
+
+test.each([
+  [
     'public function m() {}',
     'abstract protected function M(int $x);',
     'Cannot make non abstract method A::M() abstract in class B',
