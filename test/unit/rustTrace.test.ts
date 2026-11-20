@@ -219,6 +219,24 @@ test('a for loop records a step at each binding of its variable, and none after 
   ]);
 });
 
+test('a stale Rust reference disappears from the trace when its referent moves', () => {
+  const program = `fn main() {
+    let mut values = vec![String::from("a")];
+    let borrowed = &mut values;
+    borrowed.push(String::from("b"));
+    let shared = &values;
+    println!("{}", shared.len());
+    let moved = values;
+    println!("{}", moved.len());
+}`;
+  const { traceItems, finalVars, stdout } = traceProgram('rust', program, program);
+  expect(stdout).toBe('2\n2\n');
+  expect(traceItems.some(({ vars }) => Array.isArray(vars.borrowed))).toBe(true);
+  expect(traceItems.at(-1)?.referenceVars).not.toHaveProperty('borrowed');
+  expect(traceItems.at(-1)?.referenceVars).not.toHaveProperty('shared');
+  expect(finalVars).toEqual({ moved: ['a', 'b'] });
+});
+
 test('ordered collections compare keys during mutation and lookup while trace inspection uses stored order', () => {
   const program = `use std::collections::{BTreeMap, BTreeSet};
 use std::cmp::Ordering;
