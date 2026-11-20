@@ -284,16 +284,34 @@ int main() {
   });
 });
 
-test.each(['Turtle t(3, 5);', 'Turtle* t = new Turtle(3, 5);'])(
-  'keeps a helper turtle %s on the board when an exception escapes it uncaught',
-  (declaration) => {
-    const program = `void f() { ${declaration} throw 1; }
-int main() { f(); }`;
-    const turtle = { x: 3, y: 5, color: '#', dir: 'N' };
-    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', finalTurtles: [turtle] });
-    expect(traceProgram('cpp', program, program)).toMatchObject({ finalTurtles: [turtle] });
+test.each([
+  ['Turtle t(3, 5);', 'int main() { f(); }'],
+  ['Turtle* t = new Turtle(3, 5);', 'int main() { f(); }'],
+  ['Turtle t(3, 5);', 'int x = f();\nint main() {}'],
+  ['Turtle* t = new Turtle(3, 5);', 'int x = f();\nint main() {}'],
+])('keeps a helper turtle %s on the board when an exception escapes it uncaught from %s', (declaration, caller) => {
+  const program = `int f() { ${declaration} throw 1; }
+${caller}`;
+  const turtle = { x: 3, y: 5, color: '#', dir: 'N' };
+  expect(executeProgram('cpp', program)).toMatchObject({ kind: 'executed', finalTurtles: [turtle] });
+  expect(traceProgram('cpp', program, program)).toMatchObject({ finalTurtles: [turtle] });
+});
+
+test.each(['a = b;', 'a.inner = b.inner;'])('meters the elements copied by the implicit assignment %s', (statement) => {
+  const program = `struct Inner { int data[512]; };
+struct Outer { Inner inner; };
+int main() {
+  Outer a{}, b{};
+  for (int i = 0; i < 8; ++i) ${statement}
+}`;
+  const previous = LIMITS.maxOperations;
+  LIMITS.maxOperations = 3000;
+  try {
+    expect(executeProgram('cpp', program)).toMatchObject({ kind: 'limitExceeded', limit: 'operations' });
+  } finally {
+    LIMITS.maxOperations = previous;
   }
-);
+});
 
 test('reads only the required prefix of a C substring search needle', () => {
   const program = `#include <cstring>

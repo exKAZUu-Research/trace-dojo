@@ -61,15 +61,7 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
     finalTurtles = runtime.world.turtleTraces();
   };
   try {
-    runtime.globals = program.createGlobals(runtime);
-    const startup = runtime.pushFrame(undefined, undefined, undefined, undefined);
-    try {
-      program.initializeGlobals(startup);
-      const args = program.mainTakesArguments ? mainArguments() : [];
-      invoke(startup, program.main, args, undefined, undefined as unknown as number);
-    } finally {
-      runtime.popFrame();
-    }
+    runStartup(runtime, program);
     runtime.destroyStaticObjects();
   } catch (error) {
     uncaughtException = describeFailure(error);
@@ -82,6 +74,22 @@ export function runProgram(runtime: Runtime, program: CompiledProgram, onEnd?: (
     finalTurtles = runtime.world.turtleTraces();
   }
   return { finalBoard: runtime.world.boardText(), finalTurtles, uncaughtException, ...runtime.io.output() };
+}
+
+/** Initializes the globals and runs main in the startup frame. */
+function runStartup(runtime: Runtime, program: CompiledProgram): void {
+  runtime.globals = program.createGlobals(runtime);
+  const startup = runtime.pushFrame(undefined, undefined, undefined, undefined);
+  try {
+    program.initializeGlobals(startup);
+    const args = program.mainTakesArguments ? mainArguments() : [];
+    invoke(startup, program.main, args, undefined, undefined as unknown as number);
+  } catch (error) {
+    // An uncaught exception ends the program without unwinding, so its final state still holds the active calls.
+    if (!(error instanceof ProgramAbort)) runtime.popFrame();
+    throw error;
+  }
+  runtime.popFrame();
 }
 
 function mainArguments(): unknown[] {
