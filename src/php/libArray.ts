@@ -220,6 +220,7 @@ defineFunction('array_shift(array &$array): mixed', (ctx) => {
 });
 
 function remainingSequentialIntKey(array: PhpArray): bigint | undefined {
+  if (!array.map.hasIntegerKeys()) return 0n;
   const iter = array.map.keys();
   if (iter.next().done) return undefined;
   let nextInt = 0n;

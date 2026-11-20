@@ -5084,6 +5084,12 @@ $a = array_map('f', [1, 2]); echo 'after:', json_encode($a), ';';`
     )
   ).toMatchObject({ kind: 'executed', stdout: '[[1,2,1,1,2,1,0,1,1,1],986229477]' });
 
+  expect(
+    run(
+      `<?php $a = []; for ($i = 0; $i < 20000; $i++) $a['task' . $i] = $i; $sum = 0; while ($a) $sum += array_shift($a); echo $sum;`
+    )
+  ).toMatchObject({ kind: 'executed', stdout: '199990000' });
+
   expect(run('<?php echo 2; ?>\n\n')).toMatchObject({ kind: 'executed', stdout: '2\n' });
   expect(run('<?= 2 ?>\n \n')).toMatchObject({ kind: 'executed', stdout: '2 \n' });
 
