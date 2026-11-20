@@ -7,22 +7,29 @@ import {
   anyType,
   bigintType,
   booleanType,
+  emptyObjectType,
   errorType,
   freshLiteralType,
   isAnyLike,
   isIntrinsic,
   literalType,
   mapType,
+  narrowedUnknownObjectType,
   neverType,
+  nonPrimitiveType,
   numberType,
   primitiveOfLiteral,
   type Property,
   regularOf,
   stringType,
+  symbolType,
   type Type,
+  typeMembers,
   undefinedType,
   unionOf,
 } from './types';
+
+const inKeyType = unionOf([stringType, numberType, symbolType]);
 
 const typeofResult = unionOf(
   ['string', 'number', 'bigint', 'boolean', 'symbol', 'undefined', 'object', 'function'].map((name) =>
@@ -451,41 +458,28 @@ export class OperatorChecker {
     return booleanType;
   }
 
-  // code-gauge-allow functionCognitiveComplexity 17 -- Follows TypeScript's checks of both operands of `in`.
   private inExpression(left: TreeNode, right: TreeNode, leftType: Type, rightType: Type): Type {
-    if (
-      !isAnyLike(leftType) &&
-      !this.c.relations.isAssignable(leftType, unionOf([stringType, numberType, this.c.globalType('Symbol')])) &&
-      !isIntrinsic(regularOf(leftType), 'symbol')
-    ) {
-      this.c.error(left, "in の左辺は、'string'、'number'、'symbol'、'any' のいずれかの型でなければいけません。");
+    if (left.type !== 'private_property_identifier') {
+      const key = this.c.members.checkNonNullable(left, leftType);
+      if (key === leftType && !this.inAssignable(key, inKeyType))
+        this.c.error(left, "in の左辺は、'string'、'number'、'symbol'、'any' のいずれかの型でなければいけません。");
     }
-    const r = regularOf(rightType);
-    if (
-      !isAnyLike(r) &&
-      (r.kind === 'literal' ||
-        (r.kind === 'intrinsic' && r.name !== 'object' && r.name !== 'unknown') ||
-        (r.kind === 'union' &&
-          r.types.some(
-            (member) => member.kind === 'literal' || (member.kind === 'intrinsic' && member.name !== 'object')
-          )))
-    ) {
-      if (
-        this.c.relations.isNullable(r) &&
-        !isIntrinsic(this.c.relations.removeNullish(r), 'never') &&
-        !this.c.relations.removeNullish(r).kind.startsWith('lit')
-      )
-        this.c.members.checkNonNullable(right, r);
-      else this.c.error(right, 'in の右辺は、プリミティブ型であってはいけません。');
-    } else if (isIntrinsic(r, 'unknown')) {
-      this.c.error(
-        right,
-        this.c.members.isEntityName(right)
-          ? `'${right.text}' の型は 'unknown' です。`
-          : "オブジェクトの型は 'unknown' です。"
-      );
-    }
+    const object = this.c.members.checkNonNullable(right, rightType);
+    if (object === rightType && typeMembers(object).some((member) => !this.isInObject(member)))
+      this.c.error(right, 'in の右辺は、プリミティブ型であってはいけません。');
     return booleanType;
+  }
+
+  private isInObject(type: Type): boolean {
+    if (type === narrowedUnknownObjectType) return false;
+    if (type.kind === 'intersection' && nullishConstraint(this.c, type) === emptyObjectType) return false;
+    return this.inAssignable(type, nonPrimitiveType);
+  }
+
+  private inAssignable(type: Type, expected: Type): boolean {
+    if (isAnyLike(type)) return true;
+    if (type.kind === 'typeParameter' && isAnyLike(nullishConstraint(this.c, type))) return false;
+    return this.c.relations.isAssignable(type, expected);
   }
 
   ternary(node: TreeNode, contextual?: Type): Type {

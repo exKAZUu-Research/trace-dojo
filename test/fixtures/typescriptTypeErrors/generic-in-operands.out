@@ -1,0 +1,13 @@
+(1,54): error TS2322: Type 'T' is not assignable to type 'object'.
+(2,61): error TS2322: Type 'T' is not assignable to type 'object'.
+(3,71): error TS18047: 'value' is possibly 'null'.
+(4,74): error TS2322: Type 'T' is not assignable to type 'object'.
+  Type 'number | object' is not assignable to type 'object'.
+    Type 'number' is not assignable to type 'object'.
+(5,82): error TS2322: Type 'T' is not assignable to type 'object'.
+  Type '`prefix-${string}`' is not assignable to type 'object'.
+(6,68): error TS2638: Type '{}' may represent a primitive value, which is not permitted as the right operand of the 'in' operator.
+(7,77): error TS2638: Type '{}' may represent a primitive value, which is not permitted as the right operand of the 'in' operator.
+(8,65): error TS2638: Type 'NonNullable<T>' may represent a primitive value, which is not permitted as the right operand of the 'in' operator.
+(9,66): error TS2322: Type 'T' is not assignable to type 'string | number | symbol'.
+(10,80): error TS18047: 'name' is possibly 'null'.

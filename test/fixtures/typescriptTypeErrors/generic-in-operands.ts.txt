@@ -1,0 +1,10 @@
+function unconstrained<T>(value: T) { return "id" in value; }
+function anyBound<T extends any>(value: T) { return "id" in value; }
+function nullable<T extends object | null>(value: T) { return "id" in value; }
+function primitive<T extends number | object>(value: T) { return "id" in value; }
+function primitiveBound<T extends `prefix-${string}`>(value: T) { return "id" in value; }
+function unknownTruthy(value: unknown) { if (value) return "id" in value; }
+function unknownNonNull(value: unknown) { if (value != null) return "id" in value; }
+function genericTruthy<T>(value: T) { if (value) return "id" in value; }
+function weakKey<T extends any>(name: T, value: object) { return name in value; }
+function nullableKey<T extends string | null>(name: T, value: object) { return name in value; }

@@ -12,7 +12,6 @@ import {
   anonymousObject,
   bigintType,
   booleanType,
-  emptyObjectType,
   emptyStructure,
   falseType,
   filterType,
@@ -23,6 +22,7 @@ import {
   isPropertyKeyLiteral,
   type LiteralType,
   mapType,
+  narrowedUnknownObjectType,
   neverType,
   nonPrimitiveType,
   nullType,
@@ -460,7 +460,7 @@ export class Flow {
   /** The part of a type that a truthy (or falsy) value has. */
   narrowByTruthiness(type: Type, assumeTrue: boolean): Type {
     if (assumeTrue) {
-      if (isIntrinsic(type, 'unknown')) return emptyObjectType;
+      if (isIntrinsic(type, 'unknown')) return narrowedUnknownObjectType;
       return nonNullableType(
         this.c,
         filterType(type, (member) => member.kind !== 'literal' || Boolean(member.value))
@@ -531,8 +531,8 @@ export class Flow {
     if (!isUnit(other)) return type;
     // `unknown` that is not `null` is `{} | undefined`, and not either is `{}`.
     if (isIntrinsic(type, 'unknown') && nullish) {
-      if (loose) return emptyObjectType;
-      return unionOf([emptyObjectType, isIntrinsic(other, 'null') ? undefinedType : nullType]);
+      if (loose) return narrowedUnknownObjectType;
+      return unionOf([narrowedUnknownObjectType, isIntrinsic(other, 'null') ? undefinedType : nullType]);
     }
     if (loose && nullish) return nonNullableType(this.c, type);
     // An intersection with a unit, as `T & null`, is that unit or nothing.

@@ -1,0 +1,11 @@
+function has<T extends object>(value: T) { return "id" in value; }
+function chain<T extends U, U extends { id?: number }>(value: T, base: U) { return "id" in value; }
+function nullable<T extends object | null>(value: T) {
+  return value === null ? false : "id" in value;
+}
+function key<K extends string | symbol>(name: K, value: object) { return name in value; }
+function flexible(value: any) { return "id" in value; }
+function emptyBound<T extends {}>(value: T) { return "id" in value; }
+function checked(value: unknown) { return typeof value === "object" && value !== null && "id" in value; }
+console.log(has({ id: 1 }), chain({ id: 2 }, {}), nullable(null), nullable({}), key(Symbol(), {}));
+console.log(flexible({ id: 3 }), emptyBound({ id: 4 }), checked({ id: 5 }), checked(5));
