@@ -1447,23 +1447,28 @@ export class Converter extends DeclarationConverter {
         : compiledBuiltinResult(functionName, call.args, this.fn.name !== undefined);
     if (result === 'constant' || (functionName === 'defined' && result === 'temporary'))
       return recordOperandRows(call, call.row, entryRow);
-    const lastRow = compiledOperandRow(last.e);
-    if (last.e.k === 'var' && last.e.name !== 'GLOBALS' && !last.spread && result === undefined) {
-      const first = argumentsNode.namedChildren.find((child) => child.type === 'argument');
-      const row = first?.childForFieldName('name')?.startPosition.row ?? argumentListRow(call.args[0].e);
-      if (row !== lastRow && this.usesArgumentListRow(call, last, functionName))
-        return recordOperandRows(call, call.row, row);
-    }
-    return recordOperandRows(call, call.row, lastRow);
+    if (result === undefined && argumentsNode.startPosition.row !== argumentsNode.endPosition.row)
+      this.recordArgumentSendRows(call, argumentsNode, functionName);
+    return recordOperandRows(call, call.row, last.sendRow ?? compiledOperandRow(last.e));
   }
 
-  private usesArgumentListRow(call: Extract<Expr, { args: Arg[] }>, last: Arg, functionName?: string): boolean {
-    if (call.args.some((arg) => arg.spread)) return true;
-    const parameters = this.compileCallParameters(call, functionName);
-    return (
-      !parameters ||
-      (last.name !== undefined && !parameters.some((param) => !param.variadic && param.name === last.name))
-    );
+  private recordArgumentSendRows(
+    call: Extract<Expr, { args: Arg[] }>,
+    argumentsNode: Node,
+    functionName?: string
+  ): void {
+    const first = argumentsNode.namedChildren.find((child) => child.type === 'argument');
+    const row = first?.childForFieldName('name')?.startPosition.row ?? argumentListRow(call.args[0].e);
+    let parameters = this.compileCallParameters(call, functionName);
+    for (const arg of call.args) {
+      if (arg.spread) {
+        parameters = undefined;
+      } else if (arg.e.k === 'var' && arg.e.name !== 'GLOBALS' && arg.e.row !== row) {
+        const known =
+          parameters && (arg.name === undefined || parameters.some((p) => !p.variadic && p.name === arg.name));
+        if (!known) arg.sendRow = row;
+      }
+    }
   }
 
   private compileCallParameters(
@@ -2294,8 +2299,29 @@ function listAssignmentRow(target: Extract<Expr, { k: 'list' }>, row: number): n
 }
 
 function argumentListRow(first: Expr): number {
-  while (first.k === 'cast' || first.k === 'unary' || first.k === 'silence') first = first.e;
-  return operandAstRow(first);
+  while (true) {
+    switch (first.k) {
+      case 'cast':
+      case 'unary':
+      case 'silence': {
+        first = first.e;
+        break;
+      }
+      case 'array': {
+        const value = first.items[0]?.value;
+        if (!value) return compiledOperandRow(first);
+        first = value;
+        break;
+      }
+      case 'match': {
+        first = first.subject;
+        break;
+      }
+      default: {
+        return operandAstRow(first);
+      }
+    }
+  }
 }
 
 export function castType(node: Node): { spelling: string; type: string } {

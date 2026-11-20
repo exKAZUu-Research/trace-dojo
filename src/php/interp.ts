@@ -595,7 +595,7 @@ function stringifyInterpolated(part: Expr): string {
   return toStr(value);
 }
 
-function readVar(name: string, row: number): Value {
+export function readVar(name: string, row: number): Value {
   const runtime = rt();
   const frame = runtime.frame;
   if (name === 'this') {

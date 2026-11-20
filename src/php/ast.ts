@@ -20,6 +20,7 @@ export interface Arg {
   e: Expr;
   spread: boolean;
   name?: string;
+  sendRow?: number;
 }
 
 export interface ArrayItem {

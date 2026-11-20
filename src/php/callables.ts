@@ -39,6 +39,7 @@ import {
   isCompiledVariable,
   iterate,
   prepareOperand,
+  readVar,
   resolveStaticClass,
   SHORT,
 } from './interp';
@@ -182,7 +183,8 @@ export function evalArgs(
         const paramLabel = param?.variadic ? '' : ` ($${param?.name ?? ''})`;
         throwError('Error', `${label}(): Argument #${paramIndex + 1}${paramLabel} could not be passed by reference`);
       }
-      const value = share(ev(arg.e));
+      const evaluated = arg.e.k === 'var' && arg.sendRow !== undefined ? readVar(arg.e.name, arg.sendRow) : ev(arg.e);
+      const value = share(evaluated);
       frame.temporaries.push(value);
       add({ v: value, name: arg.name });
     } finally {

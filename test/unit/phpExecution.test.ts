@@ -3064,6 +3064,32 @@ try { throw
   });
 });
 
+test('warns at the compiled send row when argument binding is deferred', () => {
+  const program = `<?php
+    set_error_handler(function ($level, $message, $file, $line) { echo $message, ':', $line, "\\n"; });
+    function known($a, $b = 0, $c = 0) {}
+    later(1,
+      $first,
+      $second);
+    known(1,
+      $known);
+    function later($a, $b = 0, $c = 0) {}
+    $callable = 'later';
+    $callable(a:
+      $named,
+      b: $next);
+    known(...[
+      1],
+      b:
+      $unpacked);`;
+  expect(run(program)).toMatchObject({
+    kind: 'executed',
+    stdout:
+      'Undefined variable $first:4\nUndefined variable $second:4\nUndefined variable $known:8\n' +
+      'Undefined variable $named:11\nUndefined variable $next:11\nUndefined variable $unpacked:15\n',
+  });
+});
+
 test.each([
   ['zero(\n  b: 5,\n  a: 5\n)', '6'],
   ['[\n  1,\n  2\n]', '5'],
